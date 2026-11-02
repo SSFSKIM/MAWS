@@ -772,6 +772,69 @@ describe('the document stream', () => {
     expect(closeOf(a, slow.id)).toBe('behind');
   });
 
+  it('holds a link’s retained document bytes within 64 MiB: a stream whose next frame finds the rest of the link past it closes `behind`, outbound or inbound, and a closed stream gives its bytes back', async () => {
+    const { f, docs } = await startDocuments();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const nine = randomBytes(9 * 1024 * 1024);
+    nine[0] = 0;
+    // Ten streams whose device takes nothing, each sent a 9 MiB first sync at once.
+    const opened: Array<{ id: string; channel: number }> = [];
+    for (let i = 0; i < 10; i++) {
+      const { id } = await openDoc(a, { artifactId: x, mode: 'edit' }, 1024);
+      opened.push({ id, channel: docs.last().channel });
+    }
+    for (const { channel } of opened) docs.send(channel, nine);
+    await until(() => opened.filter(({ id }) => closeOf(a, id) !== undefined).length === 2 || undefined, 'the two past the budget');
+    await sleep(30);
+    expect(opened.map(({ id }) => closeOf(a, id) ?? 'open')).toEqual([...Array(8).fill('open'), 'behind', 'behind']);
+    // Inbound counts too: a stream that holds nothing, whose device begins a 1 MiB frame, finds the link past the budget.
+    const inbound = await openDoc(a, { artifactId: x, mode: 'edit' });
+    const begun = Buffer.concat([Buffer.from([0, 0x10, 0, 0]), randomBytes(64 * 1024)]);
+    await write(a, inbound.id, begun);
+    await until(() => closeOf(a, inbound.id), 'the inbound close');
+    expect(closeOf(a, inbound.id)).toBe('behind');
+    // A stream closed gives its bytes back: the next one's first sync is taken.
+    await a.channel.send({ t: 'streamClose', id: opened[0].id, reason: 'closed' });
+    await sleep(30);
+    const next = await openDoc(a, { artifactId: x, mode: 'edit' }, 1024);
+    docs.send(docs.last().channel, nine);
+    await sleep(60);
+    expect(closeOf(a, next.id)).toBeUndefined();
+  });
+
+  it('opens a 60 MiB document on a link that is otherwise busy (other streams holding 27 MiB): its first sync and the frames after it go, never looping `behind`', async () => {
+    const { f, docs } = await startDocuments();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const nine = randomBytes(9 * 1024 * 1024);
+    nine[0] = 0;
+    const busy: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const { id } = await openDoc(a, { artifactId: x, mode: 'edit' }, 1024);
+      busy.push(id);
+      docs.send(docs.last().channel, nine);
+    }
+    const { id } = await openDoc(a, { artifactId: x, mode: 'edit' }, 4 * 1024 * 1024);
+    const big = randomBytes(60 * 1024 * 1024);
+    big[0] = 0;
+    const channel = docs.last().channel;
+    docs.send(channel, big);
+    const ack = encodeFrame({ type: 'ack', frames: 1, revision: 3 });
+    docs.send(channel, ack);
+    const got = () => ofStream(a, id).filter((m) => m.t === 'streamData').reduce((n, m) => n + Buffer.from(m.data as string, 'base64url').byteLength, 0);
+    await until(() => got() === 4 * 1024 * 1024 || closeOf(a, id) !== undefined || undefined, 'the first credit’s worth');
+    for (let more = 0; more < 4 && closeOf(a, id) === undefined; more++) {
+      await a.channel.send({ t: 'streamCredit', id, bytes: 4 * 1024 * 1024 });
+      await until(() => got() === (more + 2) * 4 * 1024 * 1024 || closeOf(a, id) !== undefined || undefined, 'more of it', 10_000);
+      docs.send(channel, awareness);
+    }
+    expect(closeOf(a, id)).toBeUndefined();
+    expect(busy.map((other) => closeOf(a, other) ?? 'open')).toEqual(['open', 'open', 'open']);
+  });
+
   it('answers a malformed length prefix or frame from the device `malformed`, the channel closed and the device’s channel kept', async () => {
     const { f, docs } = await startDocuments();
     const x = randomUUID();

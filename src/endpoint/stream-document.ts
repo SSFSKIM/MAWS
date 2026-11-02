@@ -35,6 +35,7 @@ import { isDocKind, type ArtifactKind } from '@shared/artifacts/entity';
 import { DOC_HIGH_WATER } from '@shared/host/doc-channels';
 import { WITHHELD_SESSION, type StreamDataMessage, type StreamDocumentOpen } from 'org-protocol';
 import { dispatchAs, type EndpointServices } from './services';
+import type { RemoteChannel } from './channels';
 import { Stream, type ReadAccess, type ReadOpening, type ReadPlane } from './stream-base';
 
 /** The endpoint's document channels: numbers from 2^31 (EndpointServices.documents; main's are below). */
@@ -47,6 +48,16 @@ const CHANNEL_SPAN = 2 ** 31;
  * (frame-stream.ts) goes, and the frames after it are measured against what waits behind it, never against it.
  */
 export const DOCUMENT_BACKLOG_BYTES = DOC_HIGH_WATER;
+/**
+ * The document bytes one link (a device's channel) retains, at most: every document stream's frames queued for the device
+ * (their 4-byte prefixes counted) and the frame it is assembling from the device (its storage). Checked as the host checks
+ * its socket's queue (doc-channels.ts), before a stream's next frame is admitted and never against the frame in flight:
+ * a host frame, or a device chunk, that finds the rest of the link holding more closes its stream `behind`, its bytes
+ * given back. "The rest" leaves out the stream's own frame being sent and its own frame being assembled, so a single
+ * frame of up to DOCUMENT_FRAME_MAX always goes on a stream that holds nothing else, however busy the link: a link holds
+ * at most this, plus the frame each admission lets through past it.
+ */
+export const DOCUMENT_LINK_BUDGET = 64 * 1024 * 1024;
 /** A `view` open's device frames dropped, at most: past it the stream closes `read-only`. */
 export const VIEW_DROPPED_MAX = 64 * 1024;
 
@@ -66,6 +77,8 @@ const viewOnly = (access: ReadAccess): boolean => (access.input as StreamDocumen
 
 export function documentPlane(ctx: { documents: DocumentChannels; dispatch: EndpointServices['dispatch']; log(line: string): void }): DocumentPlane {
   const streams = new Map<number, DocumentStream>();
+  /** Each link's document streams, whose retained bytes share DOCUMENT_LINK_BUDGET. */
+  const links = new Map<RemoteChannel, Set<DocumentStream>>();
   let next = 0;
   /** A number of the range no stream holds. */
   const allocate = (): number => {
@@ -93,10 +106,20 @@ export function documentPlane(ctx: { documents: DocumentChannels; dispatch: Endp
     const decided = await opening.decide((access) => {
       if (opening.cancelled()) return 'gone' as const;
       const channel = allocate();
-      const stream = new DocumentStream(opening, access, channel, ctx.documents, () => streams.delete(channel));
+      let link = links.get(opening.channel);
+      if (link === undefined) links.set(opening.channel, (link = new Set()));
+      const peers = link;
+      const stream = new DocumentStream(opening, access, channel, ctx.documents, peers, () => {
+        streams.delete(channel);
+        peers.delete(stream);
+        if (peers.size === 0 && links.get(opening.channel) === peers) links.delete(opening.channel);
+      });
       streams.set(channel, stream);
+      peers.add(stream);
       if (!ctx.documents.open({ t: 'documents.open', channel, artifactId, actor: { kind: 'human' }, ...(doc === undefined ? {} : { doc }) })) {
         streams.delete(channel);
+        peers.delete(stream);
+        if (peers.size === 0 && links.get(opening.channel) === peers) links.delete(opening.channel);
         return 'unavailable' as const;
       }
       opening.install(stream);
@@ -139,6 +162,8 @@ class DocumentStream extends Stream {
     access: ReadAccess,
     readonly docChannel: number,
     private readonly documents: DocumentChannels,
+    /** The document streams of its link (itself among them), which share DOCUMENT_LINK_BUDGET. */
+    private readonly peers: ReadonlySet<DocumentStream>,
     private readonly released: () => void,
   ) {
     super(opening.id, opening.channel, opening.act, opening.binding, opening.credit, opening.window, opening.over);
@@ -151,11 +176,24 @@ class DocumentStream extends Stream {
     if (this.ended || !this.#upstream) return;
     const frame = withheld(bytes);
     if (frame === null) return this.#log(`endpoint: a document's provisional frame was not read, and not sent (${bytes.byteLength} bytes)`);
-    if (this.#queuedBehindHead() > DOCUMENT_BACKLOG_BYTES) return this.end('behind');
+    if (this.#queuedBehindHead() > DOCUMENT_BACKLOG_BYTES || this.#restOfLink() > DOCUMENT_LINK_BUDGET) return this.end('behind');
     const out = lengthPrefixed(frame);
     this.push(this.#out, out);
     this.#out += out.byteLength;
     this.#ends.push(this.#out);
+  }
+
+  /** What this stream retains: its frames queued for the device and the frame it is assembling. */
+  get retained(): number {
+    return this.backlog + this.#frames.held;
+  }
+
+  /** What its link retains but for this stream's own frames in flight (the one being sent, the one being assembled). */
+  #restOfLink(): number {
+    let rest = 0;
+    for (const peer of this.peers) rest += peer.retained;
+    const sending = this.backlog - this.#queuedBehindHead();
+    return rest - sending - this.#frames.held;
   }
 
   /** The bytes queued behind the frame being sent (none when it is the only one, or nothing is queued). */
@@ -214,6 +252,7 @@ class DocumentStream extends Stream {
     if (this.#inbox.length === 0 || this.ended || this.held || !this.stands()) return;
     while (this.#inbox.length > 0 && !this.ended) {
       const chunk = this.#inbox.shift()!;
+      if (this.#restOfLink() > DOCUMENT_LINK_BUDGET) return this.end('behind');
       const frames = this.#frames.push(chunk);
       if (frames === null) return this.end('malformed');
       for (const frame of frames) {
