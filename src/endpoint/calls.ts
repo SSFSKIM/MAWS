@@ -43,6 +43,8 @@
 //     whose artifact the member holds `view` on by the `artifact` rule's predicate, decided as the answer goes against the
 //     placements the channel's cache holds then (a placement dropped meanwhile withholds its rows). `client.windowShown`
 //     is the endpoint's own: the device's window report, `connectors.windowShown` under the channel's ref.
+//   - P5 O7 M5c round 3: `artifacts.holdAssets` and `artifacts.releaseAssets` are the endpoint's own too: a remote
+//     dashboard's snapshot holds, taken on the engine host and kept per channel (asset-holds.ts).
 // Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
 // `too-large`. For a device that listed `rl2.bytes` (P5 O7 M5a), the input came decoded (gate.ts) and the output goes in the
 // bytes codec's tagged form (bytes.ts), measured so.
@@ -55,6 +57,7 @@ import { holdsToSchema, type SessionRanks } from './authorize';
 import { writeBytes } from './bytes';
 import type { RemoteChannel } from './channels';
 import { isSessionRank, rankAtLeast, sessionRank } from './grades';
+import type { AssetHolds } from './asset-holds';
 import type { Leases } from './leases';
 import type { SessionReport } from './listings';
 import { OFFERS, type Offers } from './offers';
@@ -84,6 +87,8 @@ export type CallsContext = {
   /** P5 O7 M5c: the leases each channel holds (leases.ts), and the `artifact` rule's placements (`delivery.receipts`' cut). */
   leases: Leases;
   artifacts: ArtifactRanks;
+  /** P5 O7 M5c round 3: each channel's snapshot holds (asset-holds.ts). */
+  assetHolds: Pick<AssetHolds, 'hold' | 'release'>;
   offers?: Offers;
   log(line: string): void;
 };
@@ -246,6 +251,8 @@ export class Calls {
     else if (m.name === 'connectors.close' && row?.executor === 'machine') run = this.#close(dispatch, channel, m);
     else if (m.name === 'delivery.receipts' && row?.executor === 'machine') run = this.#receipts(dispatch, channel, m);
     else if (m.name === 'client.windowShown' && row?.executor === 'endpoint') run = this.#windowShown(dispatch, m);
+    else if (m.name === 'artifacts.holdAssets' && row?.executor === 'endpoint') run = this.ctx.assetHolds.hold(channel, m.input);
+    else if (m.name === 'artifacts.releaseAssets' && row?.executor === 'endpoint') run = this.ctx.assetHolds.release(channel, m.input);
     else if ((row?.executor === 'engine-host' || row?.executor === 'machine') && row.target === 'artifact' && SESSION_NAMING.has(m.name)) run = this.#sessionSafe(dispatch, row.executor, channel.member, m);
     else if (row?.executor === 'engine-host' || (row?.executor === 'machine' && m.name !== 'daemon.status')) run = this.#forward(dispatch, row.executor, m);
     else if (row?.executor === 'sminos' && Object.hasOwn(LANE_A, m.name)) run = Promise.resolve(this.#laneA(channel, m));

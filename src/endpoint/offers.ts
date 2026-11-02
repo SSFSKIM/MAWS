@@ -295,6 +295,12 @@ export const OFFERS: Offers = {
     // The device's window report, the endpoint's own call (no registry name: `connectors.windowShown` is main-only),
     // answered under the channel's ref (calls.ts).
     'client.windowShown': { kind: 'call', executor: 'endpoint', target: 'machine', grade: 'list', accepts: isWindowShown },
+    // M5c round 3 (`rl2.asset-holds`): a remote dashboard's snapshot holds, the engine host's main-only E3 commands asked
+    // by the device's main (never a window: `holdDatasets` and `releaseDatasets` are not offered), kept per channel by
+    // the endpoint (asset-holds.ts). A hold at `view` on its artifact, decided again while it lives; a release at `list`,
+    // which names only a hold of the asking channel's own (any other id releases nothing).
+    'artifacts.holdAssets': { kind: 'call', executor: 'endpoint', target: 'artifact', grade: 'view' },
+    'artifacts.releaseAssets': { kind: 'call', executor: 'endpoint', target: 'machine', grade: 'list' },
   },
   subscriptions: ['A', 'B'],
   // P5 O7 M5a: the machine's `artifacts` feed (artifacts-feed.ts).

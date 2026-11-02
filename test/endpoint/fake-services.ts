@@ -163,28 +163,43 @@ export function fakeDocuments(services: FakeServices): {
  * P5 O7 M5b: the engine host's E3 asset holds as the endpoint reaches them (`artifacts.holdAssets`, `artifacts.releaseAssets`
  * through `dispatch`), in front of whatever answers the rest. `held(artifactId, ref)` says whether a hold names it now;
  * `refuse` answers a hold as an older host would (no such command). Installed after the endpoint starts (its dispatch is
- * read at each call).
+ * read at each call). P5 O7 M5c: `until`, while set, holds each hold's answer until it settles; `asked` counts the holds
+ * asked, `releaseAsked` the releases.
  */
-export function fakeAssetHolds(services: FakeServices): { held(artifactId: string, ref: string): boolean; taken: () => number; released: () => number; refuse: boolean } {
+export function fakeAssetHolds(services: FakeServices): {
+  held(artifactId: string, ref: string): boolean;
+  taken: () => number;
+  released: () => number;
+  asked: () => number;
+  releaseAsked: () => number;
+  refuse: boolean;
+  until: Promise<void> | null;
+} {
   const holds = new Map<string, { artifactId: string; refs: string[] }>();
-  let [taken, released] = [0, 0];
+  let [taken, released, asked, releaseAsked] = [0, 0, 0, 0];
   const others = services.dispatch;
   const fake = {
     refuse: false,
+    until: null as Promise<void> | null,
     held: (artifactId: string, ref: string) => [...holds.values()].some((hold) => hold.artifactId === artifactId && hold.refs.includes(ref)),
     taken: () => taken,
     released: () => released,
+    asked: () => asked,
+    releaseAsked: () => releaseAsked,
   };
   services.dispatch = async (owner, name, input, client) => {
     if (owner !== 'engine-host' || (name !== 'artifacts.holdAssets' && name !== 'artifacts.releaseAssets')) return others(owner, name, input, client);
     if (fake.refuse) return { t: 'res', id: '0', ok: false, error: { code: 'unknown_command', message: `${name} is not a command of this host` } };
     if (name === 'artifacts.holdAssets') {
+      asked++;
+      if (fake.until !== null) await fake.until;
       const { artifactId, refs } = input as { artifactId: string; refs: string[] };
       const assetHoldId = randomUUID();
       holds.set(assetHoldId, { artifactId, refs });
       taken++;
       return { t: 'res', id: '0', ok: true, value: { assetHoldId } };
     }
+    releaseAsked++;
     const released_ = holds.delete((input as { assetHoldId: string }).assetHoldId);
     if (released_) released++;
     return { t: 'res', id: '0', ok: true, value: { released: released_ } };

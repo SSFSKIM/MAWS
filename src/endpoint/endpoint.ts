@@ -59,6 +59,7 @@ import { ArtifactRanks } from './artifacts';
 import { Authorizer, type AuthorizeContext } from './authorize';
 import { Calls } from './calls';
 import { ClientPorts } from './client-port';
+import { AssetHolds } from './asset-holds';
 import { Leases } from './leases';
 import { ENDPOINT_CAPABILITIES } from './capabilities';
 import { Channels } from './channels';
@@ -176,6 +177,8 @@ export class Endpoint implements EndpointModule {
   readonly clientPorts: ClientPorts;
   /** P5 O7 M5c: each channel's connector leases and Send to runs, re-authorized while they live (leases.ts). */
   readonly leases: Leases;
+  /** P5 O7 M5c round 3: each channel's snapshot holds of a remote dashboard, re-authorized while they live (asset-holds.ts). */
+  readonly assetHolds: AssetHolds;
   /** What `start` subscribed to on mawsd's seam, let go at `stop`. */
   readonly #unseam: Array<() => void> = [];
   readonly #options: EndpointOptions;
@@ -369,6 +372,14 @@ export class Endpoint implements EndpointModule {
       log,
       recheckRetryMs: options.subscriptions?.recheckRetryMs,
     });
+    this.assetHolds = new AssetHolds({
+      authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
+      dispatch,
+      artifacts: this.artifactRanks,
+      now: this.deps.now,
+      log,
+      recheckRetryMs: options.subscriptions?.recheckRetryMs,
+    });
     this.own = new EndpointActions({
       stateDir: () => {
         if (this.#services === null) throw new Error('the endpoint has not started');
@@ -499,6 +510,7 @@ export class Endpoint implements EndpointModule {
       sessionSafe,
       leases: this.leases, // P5 O7 M5c
       artifacts: this.artifactRanks,
+      assetHolds: this.assetHolds, // P5 O7 M5c round 3
       offers: authorization.offers,
       log,
     });
@@ -557,7 +569,8 @@ export class Endpoint implements EndpointModule {
       services.documents.onClosed((channel, reason) => this.streams.documentClosed(channel, reason)),
       services.onAttachment((attached) => this.planeB.attachment(attached)),
       services.onUpstream((link) => {
-        if (!link.connected) return;
+        if (!link.connected) return this.assetHolds.upstreamLost(); // P5 O7 M5c round 3: the host released its connection's holds
+
         this.laneB.restate();
         this.planeB.relinked(); // P5 O3-D D41: each streaming of the link, every subscription catches up from its cursor
       }),
@@ -601,6 +614,7 @@ export class Endpoint implements EndpointModule {
     this.streams.stop();
     this.forwards.stop();
     this.leases.stop(); // P5 O7 M5c
+    this.assetHolds.stop(); // P5 O7 M5c round 3: every snapshot hold released on the engine host
     for (const off of this.#unseam.splice(0)) off();
     // Each channel's sealed `restart` goes out before the carriers end: the hub link and the listener close after.
     await this.channels.closeAll('restart');
