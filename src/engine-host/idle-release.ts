@@ -150,6 +150,7 @@ export class IdleRelease {
 
   // P5 O17 M7 landing fix wave: whether the session's row waits on its hold now (browser work's kept notice is sent only then)
   browserWaiting(appSessionId: AppSessionId): boolean {
+    if (this.closed) return false; // a handover's freeze, the exit order: a frozen host asks nothing (D20)
     for (const session of this.waits?.keys() ?? []) if (this.rows.get(session)?.appSessionId === appSessionId) return true;
     return false;
   }

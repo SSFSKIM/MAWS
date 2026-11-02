@@ -15,8 +15,11 @@ export function takeSpawnedByMawsd(env: NodeJS.ProcessEnv): boolean {
 
 // The landing fix wave: in a host `mawsd` spawned, its parent while that `mawsd` lives, as browser work's first producer
 // (pid and start, '' for a start ps cannot read), read once at start; a later declaring hello replaces it. None in a host
-// main spawned (main produces nothing), or once reparented to launchd (ppid 1: that `mawsd` is already gone).
+// main spawned (main produces nothing). One already reparented to launchd (ppid 1) was spawned by a `mawsd` that is gone,
+// its render host with it: its producer is one that reads dead (pid 0 names no process), so its lost holds settle.
+const GONE: { pid: number; procStart: string } = { pid: 0, procStart: '' };
 export function spawnerProcess(spawnedByMawsd: boolean, ppid: number, procStartOf: (pid: number) => string | null): { pid: number; procStart: string } | null {
-  if (!spawnedByMawsd || ppid === 1) return null;
+  if (!spawnedByMawsd) return null;
+  if (ppid === 1) return GONE;
   return { pid: ppid, procStart: procStartOf(ppid) ?? '' };
 }

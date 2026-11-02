@@ -13,6 +13,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import { createHostRuntime, type HostPort, type HostRuntime } from '@shared/host/runtime';
 import { ATTACHMENT_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, PTY_FRAMES_CAPABILITY } from '@shared/host/socket-protocol';
 import { e2eHoldFor, registerBrowserWork } from './browser-work';
+import { spawnerProcess } from './spawner';
 import { autoResponder, scriptedTransport, type ScriptedTransport } from './conformance/scripted-transport';
 import { handshakeResponder, launchSpec, scriptedSession } from './conformance/session-harness';
 import { JournalWriter } from './journal';
@@ -635,6 +636,22 @@ describe('an adopted session and the link\'s snapshot, in both arrival orders (P
     await row.end();
   });
 
+  it('in a host mawsd spawned whose mawsd was already gone at its start (ppid 1), the adopted lost row settles once main falls back and is released at its due time', async () => {
+    const h = host({ spawnedByMawsd: true, spawner: spawnerProcess(true, 1, () => 'never read') }); // the real isAlive and procStartOf
+    const row = await adopting(h);
+    expect(row.session.browserEntry()).toBe('unknown:lost');
+    h.link(MAIN);
+    row.transport.push(STOP);
+    await vi.waitFor(() => expect(row.session.status().work?.unknown).toBeNull());
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    h.table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(row.session.browserEntry()).toBeNull();
+    expect(row.transport.requestsOf('end_session')).toHaveLength(1);
+    vi.useRealTimers();
+    await row.end();
+  });
+
   it('in a host mawsd spawned, an adoption reserved while main\'s link already serves is the lost link\'s too', async () => {
     const h = host({ spawnedByMawsd: true });
     h.link(MAIN);
@@ -839,6 +856,16 @@ describe('host.browserIdle between a fresh link\'s first snapshot and its ready 
     await vi.advanceTimersByTimeAsync(0);
     expect(second.events('host.browserIdle')).toEqual([]);
     expect(third.events('host.browserIdle')).toEqual([{ appSessionId: 'a' }]);
+  });
+
+  it('a kept notice is not sent once a handover froze the table before the ready (D20: a frozen host asks nothing)', async () => {
+    const { h } = await waiting();
+    const second = h.served();
+    await second.request('host.browserWork', { held: ['a'] });
+    await vi.advanceTimersByTimeAsync(0); // the notice kept for the ready
+    h.table.freezeForHandover();
+    h.runtime.setReady();
+    expect(second.events('host.browserIdle')).toEqual([]);
   });
 
   it('a kept notice whose wait ended before the ready is not sent', async () => {
