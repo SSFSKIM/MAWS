@@ -31,18 +31,22 @@ async function awake(daemon: RunningDaemon, count: number) {
   return scene.lastEngine();
 }
 
+// P5 O16's transport asks a fresh port's `host.supervisorStatus` before it reports the link (detached-transport.ts,
+// probeStatus: a drain armed or not), so mawsd's own commands on the link are the rest, the snapshot first among them
+const mawsdCalls = (engine: { calls: { name: string; input: unknown }[] }) => engine.calls.filter((call) => call.name !== 'host.supervisorStatus');
+
 describe('browser work on the engine-host link', () => {
   it('sends the snapshot first on each fresh link, ahead of the interest, the successor’s included', async () => {
     const daemon = await scene.start({ permanentClient: true });
     const first = await awake(daemon, 1);
     await until(() => first.named('host.interest').length > 0, 3_000, 'the interest');
-    expect(first.calls[0]).toEqual({ name: 'host.browserWork', input: { held: [] } });
-    expect(first.calls.findIndex((call) => call.name === 'host.interest')).toBeGreaterThan(0);
+    expect(mawsdCalls(first)[0]).toEqual({ name: 'host.browserWork', input: { held: [] } });
+    expect(mawsdCalls(first).findIndex((call) => call.name === 'host.interest')).toBeGreaterThan(0);
 
     await first.supervisor.die(); // an engine-host restart: the successor is a fresh link
     const successor = await awake(daemon, 2);
-    await until(() => successor.calls.length > 0, 3_000, 'the successor’s first command');
-    expect(successor.calls[0]).toEqual({ name: 'host.browserWork', input: { held: [] } });
+    await until(() => mawsdCalls(successor).length > 0, 3_000, 'the successor’s first command');
+    expect(mawsdCalls(successor)[0]).toEqual({ name: 'host.browserWork', input: { held: [] } });
   });
 
   it('sends nothing to an engine host whose welcome lists no host.browserWork (the old-host cell)', async () => {

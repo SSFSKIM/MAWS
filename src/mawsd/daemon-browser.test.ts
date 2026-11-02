@@ -626,7 +626,8 @@ describe('the engine’s exit and the engine host’s restart (acceptance 4, 5)'
     await until(() => scene.engines.length === 2 && t.daemon.hosts.snapshot('engine-host').state === 'ready', 5_000, 'the successor');
     const successor = scene.lastEngine();
     await until(() => successor.named('host.browserWork').length > 0, 3_000, 'the successor’s first snapshot');
-    expect(successor.calls[0]).toEqual({ name: 'host.browserWork', input: { held: [S] } });
+    // the transport's own status ask on the fresh port (P5 O16, detached-transport.ts probeStatus) aside, mawsd's first command
+    expect(successor.calls.filter((call) => call.name !== 'host.supervisorStatus')[0]).toEqual({ name: 'host.browserWork', input: { held: [S] } });
     await until(() => successor.emitRaw('session.status', { appSessionId: S, status: { appSessionId: S, process: 'ready', pid: null } }), 3_000, 'the adoption’s first reading');
     successor.emitRaw('session.status', { appSessionId: S, status: { appSessionId: S, process: 'ready', pid: ENGINE } });
     await sleep(200);
