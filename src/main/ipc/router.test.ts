@@ -229,6 +229,18 @@ describe('main ipc router', () => {
       expect(remote).not.toHaveBeenCalled();
     });
 
+    // P5 O7 M5c round 3: a dashboard's snapshot hold of another machine's artifact (the renderer's client sends every
+    // artifact-keyed invoke to the artifact's machine) is main's, which holds it on that machine over its link.
+    it('answers artifacts.holdDatasets for another machine here with that machine as ctx.target', async () => {
+      const remote = vi.fn<RemoteDispatch>(async () => ({ ok: true, value: undefined }));
+      await load(DEV_URL, undefined, remote);
+      const targets: string[] = [];
+      router.registerMainHandler('artifacts.holdDatasets', (_input, context) => (targets.push(context.target), { holdId: '22222222-2222-4222-8222-222222222222' }));
+      await expect(invoke(appWindow(), 'artifacts.holdDatasets', { artifactId: '11111111-1111-4111-8111-111111111111', refs: ['assets/query-1.json'] }, OTHER)).resolves.toEqual({ ok: true, value: { holdId: '22222222-2222-4222-8222-222222222222' } });
+      expect(targets).toEqual([OTHER]);
+      expect(remote).not.toHaveBeenCalled();
+    });
+
   // P5 O6 M3: the local link's entry (src/main/machines/local-link.ts): the route minus the sender check
   describe('dispatchLocal', () => {
     const remoteClient = { id: 'remote:1/page:3.1', onGone: () => () => {} } as unknown as MainContext['client'];

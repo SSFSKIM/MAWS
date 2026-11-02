@@ -10,8 +10,9 @@
 // answers that its handle was released.
 //
 // P5 O7 M5c round 3 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5 "O4's surfaces"): an artifact on
-// another machine (`machineOf`, ArtifactMachines) is held on that machine, over its link (`callMainOverLink`, main's own
-// allow-list): the endpoint keeps the hold for the channel it was asked on and releases every one at that channel's end
+// another machine is held on that machine, over its link (`callMainOverLink`, main's own allow-list of main-only names).
+// The machine is the router's `ctx.target` (the renderer's client sends every artifact-keyed invoke to the artifact's
+// machine, and the router answers `holdDatasets` here for any machine); the endpoint keeps the hold for the channel it was asked on and releases every one at that channel's end
 // (src/endpoint/asset-holds.ts). So each remote hold is the channel's current when asked (the peer's list, one per
 // channel), and only that channel is asked to release it: once it ended, the endpoint released the hold, and main asks
 // nothing. The window learns it through the machine's `artifacts.resync` at the next channel's feed (the renderer's
@@ -33,9 +34,7 @@ const ASSET_HOLDS = 'rl2.asset-holds';
 export interface DatasetHoldsDeps {
   call<N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandResult<N>>; // the engine host's commands
   log?: (line: string) => void;
-  /** P5 O7 M5c: the RL2 machine an artifact is on, null for this Mac's (src/main/artifacts/machines.ts). */
-  machineOf?(artifactId: string): MachineRef | null;
-  /** P5 O7 M5c: the link to that machine, null while the org lists none. */
+  /** P5 O7 M5c: the link to another machine, null while the org lists none. */
   remote?(machine: MachineRef): Pick<RemoteLink, 'name' | 'peerCapabilities' | 'call'> | null;
 }
 
@@ -59,7 +58,7 @@ export async function holdAsset(call: DatasetHoldsDeps['call'], artifactId: stri
   };
 }
 
-export function createDatasetHolds({ call, log = (line) => console.warn(`[dashboard] ${line}`), machineOf = () => null, remote = () => null }: DatasetHoldsDeps) {
+export function createDatasetHolds({ call, log = (line) => console.warn(`[dashboard] ${line}`), remote = () => null }: DatasetHoldsDeps) {
   const holds = new Map<string, Entry>(); // by the window's handle
   const owners = new Map<ClientId, Set<string>>(); // each live client's handles, from its first hold until it ends
   const unheld = new Set<MachineRef>(); // the machines said to draw unheld
@@ -151,9 +150,9 @@ export function createDatasetHolds({ call, log = (line) => console.warn(`[dashbo
   }
 
   return {
-    async hold({ artifactId, refs }: CommandInput<'artifacts.holdDatasets'>, client: ClientRef): Promise<CommandOutput<'artifacts.holdDatasets'>> {
+    /** `machine`: the artifact's, when it is another machine's (the router's `ctx.target`); null for this Mac's. */
+    async hold({ artifactId, refs }: CommandInput<'artifacts.holdDatasets'>, client: ClientRef, machine: MachineRef | null = null): Promise<CommandOutput<'artifacts.holdDatasets'>> {
       const id = follow(client);
-      const machine = machineOf(artifactId);
       return machine === null ? holdHere(id, artifactId, refs) : holdThere(id, machine, artifactId, refs);
     },
     async release({ holdId }: CommandInput<'artifacts.releaseDatasets'>, client: ClientRef): Promise<CommandOutput<'artifacts.releaseDatasets'>> {
@@ -173,9 +172,9 @@ export function createDatasetHolds({ call, log = (line) => console.warn(`[dashbo
   };
 }
 
-export function registerDatasetHolds(register: typeof registerMainHandler, deps: DatasetHoldsDeps & { onHostLost(listener: () => void): () => void }): () => void {
+export function registerDatasetHolds(register: typeof registerMainHandler, deps: DatasetHoldsDeps & { local: MachineRef; onHostLost(listener: () => void): () => void }): () => void {
   const holds = createDatasetHolds(deps);
-  register('artifacts.holdDatasets', (input, { client }) => holds.hold(input, client));
+  register('artifacts.holdDatasets', (input, { client, target }) => holds.hold(input, client, target === deps.local ? null : target));
   register('artifacts.releaseDatasets', (input, { client }) => holds.release(input, client));
   return deps.onHostLost(() => holds.hostLost());
 }

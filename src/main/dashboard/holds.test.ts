@@ -180,7 +180,6 @@ describe('another machine’s dashboard’s holds (P5 O7 M5c)', () => {
     const holds = createDatasetHolds({
       call: h.call as never,
       log: (line) => log.push(line),
-      machineOf: (artifactId) => (artifactId === REMOTE_ID ? MINI : null),
       remote: (machine) => (machine === MINI ? (m.link as never) : null),
     });
     return { h, m, log, holds };
@@ -189,7 +188,7 @@ describe('another machine’s dashboard’s holds (P5 O7 M5c)', () => {
   it('takes a remote artifact’s hold on its machine, on the channel current, and a local one on this Mac’s host', async () => {
     const { h, m, holds } = setup();
     const window = new Window(20);
-    const remote = await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(window));
+    const remote = await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(window), MINI);
     expect(m.asked).toEqual([{ name: 'artifacts.holdAssets', input: { artifactId: REMOTE_ID, refs: ['assets/a.json'] }, options: { oneChannel: true } }]);
     expect(h.call).not.toHaveBeenCalled();
     expect(m.held.size).toBe(1);
@@ -207,7 +206,7 @@ describe('another machine’s dashboard’s holds (P5 O7 M5c)', () => {
   it('releases a closed window’s remote holds on their machine', async () => {
     const { m, holds } = setup();
     const window = new Window(21);
-    await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(window));
+    await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(window), MINI);
     expect(m.held.size).toBe(1);
     window.destroy();
     await vi.waitFor(() => expect(m.held.size).toBe(0));
@@ -216,14 +215,14 @@ describe('another machine’s dashboard’s holds (P5 O7 M5c)', () => {
   it('asks nothing of a channel that ended: the endpoint released its holds, and a hold answered after it is refused', async () => {
     const { m, holds } = setup();
     const window = new Window(22);
-    const { holdId } = await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(window));
+    const { holdId } = await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(window), MINI);
     m.relink();
     m.link.call.mockClear();
     expect(await holds.release({ holdId }, owner(window))).toEqual({ released: true });
     expect(m.link.call).not.toHaveBeenCalled();
     let open!: () => void;
     m.hold(new Promise<void>((resolve) => (open = resolve)));
-    const late = holds.hold({ artifactId: REMOTE_ID, refs: ['assets/b.json'] }, owner(window));
+    const late = holds.hold({ artifactId: REMOTE_ID, refs: ['assets/b.json'] }, owner(window), MINI);
     await vi.waitFor(() => expect(m.link.call).toHaveBeenCalledTimes(1));
     m.relink();
     open();
@@ -234,7 +233,7 @@ describe('another machine’s dashboard’s holds (P5 O7 M5c)', () => {
   it('keeps remote holds when this Mac’s engine host goes (it held none of them)', async () => {
     const { m, holds } = setup();
     const window = new Window(23);
-    const { holdId } = await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(window));
+    const { holdId } = await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(window), MINI);
     expect(m.held.size).toBe(1);
     holds.hostLost();
     expect(await holds.release({ holdId }, owner(window))).toEqual({ released: true });
@@ -244,8 +243,8 @@ describe('another machine’s dashboard’s holds (P5 O7 M5c)', () => {
   it('draws unheld on a machine whose endpoint holds nothing for a device (no `rl2.asset-holds`), saying so once for the machine', async () => {
     const { h, m, log, holds } = setup(['rl2.artifacts']);
     const window = new Window(24);
-    const one = await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(window));
-    await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/b.json'] }, owner(window));
+    const one = await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(window), MINI);
+    await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/b.json'] }, owner(window), MINI);
     expect(m.link.call).not.toHaveBeenCalled();
     expect(h.call).not.toHaveBeenCalled();
     expect(log.filter((line) => line.includes('mini'))).toHaveLength(1);
@@ -256,8 +255,8 @@ describe('another machine’s dashboard’s holds (P5 O7 M5c)', () => {
 
   it('refuses a remote artifact’s hold while no link or no channel reaches its machine', async () => {
     const h = host();
-    const holds = createDatasetHolds({ call: h.call as never, machineOf: () => MINI, remote: () => null });
-    const refused = await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(new Window(25))).catch((error: unknown) => error);
+    const holds = createDatasetHolds({ call: h.call as never, remote: () => null });
+    const refused = await holds.hold({ artifactId: REMOTE_ID, refs: ['assets/a.json'] }, owner(new Window(25)), MINI).catch((error: unknown) => error);
     expect(refused).toBeInstanceOf(CommandFailure);
     expect((refused as CommandFailure).error.code).toBe('host_unavailable');
     expect(h.call).not.toHaveBeenCalled();

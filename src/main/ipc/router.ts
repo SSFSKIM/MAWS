@@ -172,7 +172,10 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
   // the renderer made there, or the stored file) and an open copy (`remote.openCopy`, invoked on the machine a checkout
   // file's address names). P5 O7 M5b ("The `http` stream"): a dashboard's Download of another machine's asset, fetched
   // through the scheme's remote responder over that machine's link.
-  const SAVED_HERE_FOR_ANY_MACHINE: ReadonlySet<string> = new Set(['library.saveAs', 'remote.openCopy', 'artifacts.downloadAsset']);
+  // P5 O7 M5c round 3: a dashboard's snapshot hold of another machine's artifact, by main's handler with that machine as
+  // `ctx.target`, which holds it on that machine over its link (src/main/dashboard/holds.ts); its release names a hold
+  // alone and comes here already.
+  const SAVED_HERE_FOR_ANY_MACHINE: ReadonlySet<string> = new Set(['library.saveAs', 'remote.openCopy', 'artifacts.downloadAsset', 'artifacts.holdDatasets']);
   const mainOnlyRefusal = (name: string): CommandResult<CommandName> => ({ ok: false, error: ipcError('forbidden_sender', `${name} may only be invoked by main`) });
 
   async function route(event: IpcMainInvokeEvent, name: string, rawInput: unknown, rawMachine: unknown, options: RouterOptions): Promise<CommandResult<CommandName>> {

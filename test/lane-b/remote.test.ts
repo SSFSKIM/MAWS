@@ -2509,14 +2509,14 @@ describe('a remote dashboard’s snapshot holds (P5 O7 M5c)', { timeout: 30_000 
     l.host.artifact(BOARD, ['app-1'], { kind: 'dashboard' });
     const machine = l.f.ref as MachineRef;
     const host = fakeAssetHolds(l.f.services);
-    const holds = createDatasetHolds({ call: () => Promise.reject(new Error('this Mac’s host holds nothing of the machine')), machineOf: (id) => (id === BOARD ? machine : null), remote: (ref) => (ref === machine ? l.a.link : null) });
+    const holds = createDatasetHolds({ call: () => Promise.reject(new Error('this Mac’s host holds nothing of the machine')), remote: (ref) => (ref === machine ? l.a.link : null) });
     const { client } = l.a.page('page-board');
-    const first = await holds.hold({ artifactId: BOARD, refs: ['assets/query-1.json'] }, client);
+    const first = await holds.hold({ artifactId: BOARD, refs: ['assets/query-1.json'] }, client, machine);
     expect(host.held(BOARD, 'assets/query-1.json')).toBe(true);
     expect(await holds.release(first, client)).toEqual({ released: true });
     expect(host.released()).toBe(1);
 
-    const second = await holds.hold({ artifactId: BOARD, refs: ['assets/query-2.json'] }, client);
+    const second = await holds.hold({ artifactId: BOARD, refs: ['assets/query-2.json'] }, client, machine);
     const was = l.a.link.peerCapabilities();
     l.a.carriers.at(-1)!.carrier.close('dropped');
     await until(() => host.released() === 2, 'the endpoint’s release of the dropped channel’s hold');
@@ -2525,7 +2525,7 @@ describe('a remote dashboard’s snapshot holds (P5 O7 M5c)', { timeout: 30_000 
     expect(await holds.release(second, client)).toEqual({ released: true });
     expect(host.releaseAsked()).toBe(asked); // the hold was the ended channel's: nothing asked of the next
 
-    await holds.hold({ artifactId: BOARD, refs: ['assets/query-3.json'] }, client); // on the next channel
+    await holds.hold({ artifactId: BOARD, refs: ['assets/query-3.json'] }, client, machine); // on the next channel
     client.end();
     await until(() => host.released() === 3, 'the window’s end released its hold on the machine');
   });
