@@ -321,7 +321,7 @@ interface Host {
   drainStopped: MainPort | null; // P5 O16 M3c fix wave 3: the draining link a stop-all was written to (its close is planned)
   drainHears: boolean; // fix wave 3: the draining link carried the host's events (a ready line was said on it)
   relayed: boolean; // fix wave 3: reached through a relay (main's daemon shape), whose handovers are the relay's to ask
-  drainMet: number | null; // fix wave 3b: the last process met with its drain armed already (its lines logged once)
+  drainMet: StartedAtKey | null; // fix wave 3b: the last process met with its drain armed already (its lines logged once); its incarnation, not its pid (the panel fix's merge)
   handoverListeners: Set<(state: EngineHandoverState | null) => void>;
 }
 
@@ -756,7 +756,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         if (facts?.draining && host.transport) {
           host.settleFirstLaunch();
           settle(host); // a recycle reached it
-          takeBack(host, welcome.pid, facts.draining);
+          takeBack(host, incarnation, facts.draining);
           return opened(host, link, incarnation);
         }
         opened(host, link, incarnation);
@@ -887,7 +887,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
     const tool = status.holder?.tool;
     if (host.handover?.state === 'draining' && from === host.draining && inFlight !== undefined) return setHandover(host, { state: 'draining', inFlight, ...(tool !== undefined && { tool }) });
     if (from !== host.port || status.pid !== host.state.pid) return;
-    if (status.holder?.handover === 'draining' && !host.relayed && host.transport) return takeBack(host, status.pid, { inFlight: inFlight ?? 0, ...(tool !== undefined && { tool }) });
+    if (status.holder?.handover === 'draining' && !host.relayed && host.transport) return takeBack(host, startedAtKey(status.pid, status.startedAt), { inFlight: inFlight ?? 0, ...(tool !== undefined && { tool }) });
     if (!host.updatePending) return;
     if (inFlight !== undefined && inFlight > 0) {
       if (host.handover === null) console.log(`[hosts] ${host.owner} pid ${status.pid}, of another build, hands over once its ${inFlight} calls in flight${tool ? ` (${tool})` : ''} finish; serving it meanwhile`);
@@ -902,9 +902,11 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
 
   // Fix wave 3 (P2), 3b: a served host met with its drain armed already, asked again (its drain is armed once) with grace
   // 0. A host that never answers cycles (the ask fails, the link recycles, it is met again): logged once per process.
-  function takeBack(host: Host, pid: number, armed: { inFlight: number; tool?: string }): void {
-    const first = host.drainMet !== pid;
-    host.drainMet = pid;
+  // The panel fix's merge: the mark is the process's incarnation, so a later process that reuses its pid is announced.
+  function takeBack(host: Host, incarnation: StartedAtKey, armed: { inFlight: number; tool?: string }): void {
+    const first = host.drainMet !== incarnation;
+    host.drainMet = incarnation;
+    const pid = pidOfStartedAtKey(incarnation);
     if (first) console.log(`[hosts] ${host.owner} pid ${pid} is already handing its sessions over; taking it back into the handover`);
     void drain(host, host.transport!, 0, armed).then((answer) => {
       if (!answer.ok && first) console.error(`[hosts] ${host.owner} pid ${pid} did not hand over: ${answer.error.message}; asked again each time it is met`);

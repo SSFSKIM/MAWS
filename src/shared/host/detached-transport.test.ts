@@ -746,6 +746,27 @@ describe('the detached transport: a reused pid is another process', () => {
     expect(supervisor.facts('engine-host').lastExit).not.toBeNull();
     expect(errors.mock.calls.flat().join(' ')).toContain('unexpectedly');
   });
+  // The merge of panel fix wave 1 (group D's residue): a process met with its drain armed is announced once, its
+  // take-back's mark its incarnation, so a later process that reuses its pid and is met draining too is its own
+  it('a process that reuses the pid of one taken back into its handover, met draining too, is taken back as its own', async () => {
+    const said = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const asked: number[] = [];
+    const draining = (pid: () => number): FakeSupervisorOptions['register'] => (on) => {
+      on('host.supervisorStatus', async () => ({ ...supervisorStatus(pid()), holder: { hosts: 1, adopted: 0, failed: 0, gate: null, handover: 'draining', inFlight: 1 } }) as never);
+      on('host.handover', async () => (asked.push(pid()), { state: 'deferred' as const, inFlight: 1 }));
+    };
+    const takenBack = () => said.mock.calls.flat().filter((line) => String(line).includes('is already handing its sessions over'));
+    const old: FakeSupervisor = await startFake({ counts: { liveSessions: 1, rows: 1 }, register: draining(() => old.pid) });
+    await supervisor.start();
+    await until(() => asked.length === 1);
+    expect(takenBack()).toHaveLength(1);
+    spawnReusing(old.pid, draining(() => old.pid));
+    await old.die(); // its drain settled: it exits, and its successor reuses its pid, its own drain armed already
+    await until(() => fakes.length === 2 && asked.length === 2);
+    expect(fakes[1]!.pid).toBe(old.pid);
+    expect(takenBack(), 'the reused pid is another process: its take-back announced as its own').toHaveLength(2);
+    said.mockRestore();
+  });
 });
 
 describe('the detached transport: the build and wire handshake (§Design 6’s table; P5 O1 M6: a wire refusal is the protocol-2 window’s)', () => {
