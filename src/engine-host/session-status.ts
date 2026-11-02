@@ -206,9 +206,8 @@ export class SessionStatusTracker {
 
   // P5 O17 M7 (Interfaces §E): the session's headless-tab hold as `mawsd` last told it (null: none); true when it changed
   browserHold(hold: BrowserHold | null): boolean {
-    if ((this.work.holds.browser ?? null) === hold) return false;
-    if (hold === null) delete this.work.holds.browser;
-    else this.work.holds.browser = hold;
+    if ((this.work.holds?.browser ?? null) === hold) return false;
+    this.work.holds = hold === null ? undefined : { browser: hold }; // nothing kept for a session no snapshot names
     return true;
   }
 

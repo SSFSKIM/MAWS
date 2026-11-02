@@ -110,6 +110,23 @@ describe('host.browserWork (P5 O17 M7)', () => {
     expect(browser(a)).toBeNull();
   });
 
+  it('an exited row holds nothing: the next snapshot clears its entry, whether or not it still names it', async () => {
+    const h = host();
+    const a = await launch(h.table, 'a');
+    const mawsd = h.link();
+    await mawsd.request('host.browserWork', { held: ['a'] });
+    a.transport.exit(0); // the engine exits holding a tab
+    await a.session.exited;
+    expect(browser(a)).toBe('held'); // until mawsd's next snapshot
+    await mawsd.request('host.browserWork', { held: [] });
+    expect(browser(a)).toBeNull();
+    const b = await launch(h.table, 'b', 902);
+    b.transport.exit(0);
+    await b.session.exited;
+    await mawsd.request('host.browserWork', { held: ['b'] });
+    expect(browser(b)).toBeNull();
+  });
+
   it.each([
     ['its connection detached', (h: ReturnType<typeof host>) => h.runtime.detach()],
     ['another client served in its place', (h: ReturnType<typeof host>) => void h.link(MAIN)],

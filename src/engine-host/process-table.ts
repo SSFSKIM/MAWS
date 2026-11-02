@@ -188,10 +188,19 @@ export class ProcessTable {
     }); // P5 O2 M2
   }
 
-  // P5 O17 M7 start (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E; D20): the idle release's bridge to
-  // browser work (browser-work.ts). Outward, a due row held by its headless tab alone, told once per wait (which becomes
-  // `host.browserIdle`); inward, a fresh `mawsd` link applied its first snapshot, so every row still waiting asks again.
+  // P5 O17 M7 start (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E; D20): the table's bridge to
+  // browser work (browser-work.ts). Outward, a due row held by its headless tab alone, told once per wait by the idle
+  // release (which becomes `host.browserIdle`), and each row at its reservation; inward, a fresh `mawsd` link applied its
+  // first snapshot, so every row still waiting asks again.
   private readonly browserIdleListeners = new Set<(appSessionId: AppSessionId) => void>();
+  private readonly reservedListeners = new Set<(session: EngineSession) => void>();
+
+  // Each row at its reservation (a launch's or an adoption's), before its start, so its first status carries what the
+  // listener set on it: browser work gives it the link's verdict, keeping nothing per row
+  onReserved(listener: (session: EngineSession) => void): () => void {
+    this.reservedListeners.add(listener);
+    return () => this.reservedListeners.delete(listener);
+  }
 
   onBrowserIdleDue(listener: (appSessionId: AppSessionId) => void): () => void {
     this.browserIdleListeners.add(listener);
@@ -232,6 +241,7 @@ export class ProcessTable {
     this.adopting.delete(appSessionId); // P5 O16 M3: the hold becomes the row
     this.wakeAdoptionReads(appSessionId); // P5 O16 M4: its reads read the row
     this.attachReap(session); // O16 M5
+    for (const listener of this.reservedListeners) this.safely('reserved', () => listener(session)); // P5 O17 M7: before its start
     session.on('status', (status) => {
       if (status.process === 'exited') this.exitedRow(session, status); // C12
       if (status.process === 'exited') this.detachReap(session); // O16 M5

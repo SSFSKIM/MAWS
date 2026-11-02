@@ -346,16 +346,17 @@ describe('the browser hold (P5 O17 M7)', () => {
   it('is in the snapshot only while set, whatever else happens', () => {
     const work = state('adopted');
     expect(work.snapshot()).not.toHaveProperty('holds');
-    work.holds.browser = 'unknown';
+    work.holds = { browser: 'unknown' };
     expect(work.snapshot()).toMatchObject({ holds: { browser: 'unknown' } });
     turn(work, (w) => w.stopped([], []));
     work.tasksChanged();
     work.gap();
     expect(work.snapshot().holds).toEqual({ browser: 'unknown' });
-    work.holds.browser = 'held';
+    work.holds = { browser: 'held' };
     const taken = work.snapshot();
-    work.holds.browser = undefined;
+    work.holds.browser = 'unknown';
     expect(taken.holds).toEqual({ browser: 'held' }); // a copy
+    work.holds = undefined;
     expect(work.snapshot()).not.toHaveProperty('holds');
   });
 });

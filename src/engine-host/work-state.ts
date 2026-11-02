@@ -47,7 +47,7 @@ export class WorkState {
   private observerUnhealthy = false;
   private reapTermIgnored = false;
   private descendantsUnreadable = false;
-  readonly holds: Holds = {}; // P5 O17 M7: a headless tab's (`browser`), set by the session for `mawsd`'s snapshot
+  holds: Holds | undefined = undefined; // P5 O17 M7: a headless tab's (`browser`), set by the session for `mawsd`'s snapshot; nothing while none is
 
   constructor(kind: LaunchKind) {
     this.crons = kind === 'fresh' || kind === 'resumed_after_release' ? { state: 'known', list: [] } : { state: 'unknown', why: kind, list: [] };
@@ -131,7 +131,7 @@ export class WorkState {
       : this.durable === 'unreadable' ? 'durable_unreadable'
       : this.tasksUnknown
         ?? (this.observerUnhealthy ? 'observer_unhealthy' : this.reapTermIgnored ? 'reap_term_ignored' : this.descendantsUnreadable ? 'descendants_unreadable' : null); // O16 M5
-    return { crons, unknown, ...(this.holds.browser !== undefined && { holds: { browser: this.holds.browser } }) }; // P5 O17 M7
+    return { crons, unknown, ...(this.holds?.browser !== undefined && { holds: { ...this.holds } }) }; // P5 O17 M7
   }
 }
 

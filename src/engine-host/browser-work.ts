@@ -4,8 +4,8 @@
 // attachment.ts: taken only from the served client whose hello listed `host.attachment` (`mawsd`'s permanent link), for
 // itself and not forwarded for another client; anything else is answered `internal` with nothing changed.
 //
-// A snapshot is applied to every live row before it is answered: a row it names is `held`, every other row's entry is
-// cleared, each set on its session and published as its status. The set is kept for the link's life and gives its
+// A snapshot is applied to every row before it is answered: a live row it names is `held`, every other row's entry is
+// cleared (an exited row's included), each set on its session and published as its status. The set is kept for the link's life and gives its
 // verdict to every row created after it (a launch, or an adoption that finishes later). With no snapshot applied on the
 // current link, an adopted row reads `unknown` from its reservation: the kept set is per engine-host process, so a
 // successor's adoptions all read `unknown` until `mawsd`'s first snapshot to it. The link's end voids the set and turns
@@ -21,15 +21,12 @@ import { HostCommandError, type HostClientHooks, type HostEmit, type HostOn } fr
 import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { ProcessTable } from './process-table';
-import type { EngineSession } from './session';
 
-export type BrowserWorkSessions = Pick<ProcessTable, 'list' | 'onRowsChanged' | 'onBrowserIdleDue' | 'browserSnapshotApplied'>;
+export type BrowserWorkSessions = Pick<ProcessTable, 'list' | 'onReserved' | 'onBrowserIdleDue' | 'browserSnapshotApplied'>;
 
 export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<HostClientHooks, 'declaresAttachment' | 'onClientGone'>, sessions: BrowserWorkSessions): void {
   // The current link's kept set, with the connection that applied it; null while the link has applied none
   let link: { connection: ClientRef; held: ReadonlySet<AppSessionId> } | null = null;
-  const given = new WeakSet<EngineSession>(); // the rows that had their verdict at their creation
-  for (const session of sessions.list()) given.add(session);
   const live = () => sessions.list().filter((session) => session.lifecycle !== 'exited');
 
   const linkEnded = (connection?: ClientRef) => {
@@ -39,16 +36,12 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
   };
   client.onClientGone(() => linkEnded());
 
-  // A row created after the registration: the kept set's verdict, or, with none, `unknown` for an adopted row. Told at
-  // its reservation, before its start, so its first status carries it.
-  sessions.onRowsChanged(() => {
-    for (const session of sessions.list()) {
-      if (given.has(session)) continue;
-      given.add(session);
-      const status = session.status();
-      const hold = link !== null ? (link.held.has(status.appSessionId) ? 'held' : null) : status.holder?.adopted === true ? 'unknown' : null;
-      if (hold !== null) session.setBrowserHold(hold, false);
-    }
+  // A row created later: the kept set's verdict, or, with none, `unknown` for an adopted row. Told at its reservation,
+  // before its start, so its first status carries it; nothing is kept per row.
+  sessions.onReserved((session) => {
+    const status = session.status();
+    const hold = link !== null ? (link.held.has(status.appSessionId) ? 'held' : null) : status.holder?.adopted === true ? 'unknown' : null;
+    if (hold !== null) session.setBrowserHold(hold, false);
   });
 
   on('host.browserWork', async ({ held }, ctx) => {
@@ -56,7 +49,10 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
     const fresh = link?.connection !== ctx.client;
     link = { connection: ctx.client, held: new Set(held as AppSessionId[]) };
     const kept = link.held;
-    for (const session of live()) session.setBrowserHold(kept.has(session.status().appSessionId) ? 'held' : null);
+    for (const session of sessions.list()) {
+      if (session.lifecycle === 'exited') session.setBrowserHold(null); // an exited row holds nothing; its entry is cleared
+      else session.setBrowserHold(kept.has(session.status().appSessionId) ? 'held' : null);
+    }
     if (!fresh) return;
     const connection = ctx.client;
     connection.onGone(() => linkEnded(connection)); // its end, ready or not (a link lost before its ready line too)
