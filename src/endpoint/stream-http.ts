@@ -12,28 +12,44 @@
 // bridged `html` page is one buffer, up to the tool's 16 MiB) waits here, and it is never `behind`.
 // The device sends no data and no control on it (`malformed`). A body that fails mid-way closes the stream `unavailable`;
 // the device holds the length the headers said. A re-check that refuses it ends it `removed`, the body let go.
+//
+// A dashboard's query snapshot (an asset of the namespace E3's retention collects, src/engine-host/documents/retention.ts)
+// is held for the read (`artifacts.holdAssets`, main's Download's hold, src/main/dashboard/holds.ts): the machine's
+// `artifacts.fetch` looks its path up, then opens the file, and a sweep between the two would turn the read into a 404.
+// The hold is taken before the request and released once, when the body has been read or the stream ends, or when the
+// open is not published. A hold the host can't give (an older host, a bound) is logged and the read goes on without it.
+import { parseArtifactUrl } from '@shared/artifacts/scheme';
 import { STREAM_CHUNK_BYTES, type StreamHttpOpen } from 'org-protocol';
-import type { EndpointServices } from './services';
+import { dispatchAs, type EndpointServices } from './services';
 import { Stream, type ReadAccess, type ReadOpening, type ReadPlane } from './stream-base';
 
 /** The statuses whose answer is its status and headers alone: closed right after `streamOpened`. */
 const HEADERS_ONLY: ReadonlySet<number> = new Set([304, 404, 416]);
 
-/** The plane over the machine's artifact endpoint (`fetch`). */
-export function httpPlane(fetch: EndpointServices['artifacts']['fetch']): ReadPlane {
+/** A query snapshot's path (retention.ts' namespace, `assets/query-<uuid>.json`): the only asset retention collects. */
+const QUERY_SNAPSHOT = /^assets\/query-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/i;
+
+/** A hold over what a read needs kept; `release` is idempotent. */
+type AssetHold = { release(): void };
+const NO_HOLD: AssetHold = { release: () => {} };
+
+/** The plane over the machine's artifact endpoint (`fetch`), the engine host's holds through `dispatch`. */
+export function httpPlane(fetch: EndpointServices['artifacts']['fetch'], dispatch: EndpointServices['dispatch']): ReadPlane {
   return async (opening) => {
     const { url, method, range } = opening.input as StreamHttpOpen;
+    const hold = await holdSnapshot(dispatchAs(dispatch, opening.channel.client), url, opening.log);
     let answer: Awaited<ReturnType<typeof fetch>>;
     try {
       answer = await fetch({ url, method, ...(range === undefined ? {} : { range }) });
     } catch (error) {
+      hold.release();
       opening.log(`endpoint: an artifact page could not be fetched: ${(error as Error).message}`);
       return opening.refuse('unavailable');
     }
     const body = answer.body;
     const decided = await opening.decide((access) => {
       if (opening.cancelled()) return false;
-      const stream = new HttpStream(opening, access, body);
+      const stream = new HttpStream(opening, access, body, hold);
       opening.install(stream);
       stream.open({ http: { status: answer.status, headers: answer.headers } });
       if (method === 'HEAD' || HEADERS_ONLY.has(answer.status) || body === null) stream.closeAfter('closed');
@@ -41,6 +57,7 @@ export function httpPlane(fetch: EndpointServices['artifacts']['fetch']): ReadPl
       return true;
     });
     if (decided.ok && decided.value) return;
+    hold.release();
     void body?.cancel().catch(() => {});
     if (!decided.ok) opening.refuse(decided.reason);
   };
@@ -53,11 +70,19 @@ class HttpStream extends Stream {
   /** What the last read brought and is not queued yet. */
   #pending: Uint8Array | null = null;
   #reading = false;
+  /** The read's hold over a query snapshot (or none), released once its bytes are read or the stream ends. */
+  readonly #assets: AssetHold;
   readonly #log: (line: string) => void;
 
-  constructor(opening: ReadOpening, access: ReadAccess, body: ReadableStream<Uint8Array> | null) {
+  constructor(
+    opening: ReadOpening,
+    access: ReadAccess,
+    body: ReadableStream<Uint8Array> | null,
+    assets: AssetHold,
+  ) {
     super(opening.id, opening.channel, opening.act, opening.binding, opening.credit, opening.window, opening.over);
     this.read = access;
+    this.#assets = assets;
     this.#reader = body?.getReader() ?? null;
     this.#log = opening.log;
   }
@@ -84,6 +109,7 @@ class HttpStream extends Stream {
         if (this.ended) return;
         if (next.done) {
           this.#reader = null;
+          this.#assets.release(); // every byte read: nothing left for the hold to keep
           return this.closeAfter('closed');
         }
         if (next.value.byteLength > 0) this.#pending = next.value;
@@ -118,6 +144,7 @@ class HttpStream extends Stream {
     const reader = this.#reader;
     this.#reader = null;
     this.#pending = null;
+    this.#assets.release();
     void reader?.cancel().catch(() => {});
   }
 
@@ -133,4 +160,37 @@ class HttpStream extends Stream {
   closedByDevice(): void {
     this.end(null);
   }
+}
+
+/**
+ * The read's hold over the query snapshot `url` names, or none for any other path. A hold the host doesn't give is logged
+ * and none is kept: the read goes on as it would have without one.
+ */
+async function holdSnapshot(dispatch: EndpointServices['dispatch'], url: string, log: (line: string) => void): Promise<AssetHold> {
+  const target = parseArtifactUrl(url);
+  if (target === null || !QUERY_SNAPSHOT.test(target.path)) return NO_HOLD;
+  const failed = (why: string) => {
+    log(`endpoint: a dashboard's query snapshot was not held for its read (${why}); read without a hold`);
+    return NO_HOLD;
+  };
+  let held: Awaited<ReturnType<typeof dispatch>>;
+  try {
+    held = await dispatch('engine-host', 'artifacts.holdAssets', { artifactId: target.artifactId, refs: [target.path] });
+  } catch (error) {
+    return failed((error as Error).message);
+  }
+  if (!held.ok) return failed(held.error.code);
+  const assetHoldId = typeof held.value === 'object' && held.value !== null ? (held.value as { assetHoldId?: unknown }).assetHoldId : undefined;
+  if (typeof assetHoldId !== 'string') return failed('no hold id');
+  let released = false;
+  return {
+    release() {
+      if (released) return;
+      released = true;
+      dispatch('engine-host', 'artifacts.releaseAssets', { assetHoldId }).then(
+        (answer) => void (answer.ok || log(`endpoint: a query snapshot's hold was not released: ${answer.error.code}`)),
+        (error: unknown) => log(`endpoint: a query snapshot's hold was not released: ${(error as Error).message}`),
+      );
+    },
+  };
 }

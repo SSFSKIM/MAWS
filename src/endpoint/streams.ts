@@ -357,7 +357,7 @@ export class Streams {
   constructor(ctx: StreamsContext) {
     this.#ctx = ctx;
     this.#documents = documentPlane({ documents: ctx.documents, dispatch: ctx.dispatch, log: ctx.log });
-    this.#planes = { http: httpPlane((request) => ctx.artifacts.fetch(request)), document: this.#documents.open };
+    this.#planes = { http: httpPlane((request) => ctx.artifacts.fetch(request), ctx.dispatch), document: this.#documents.open };
     // A forward removed (its member lost `shell`) or forgotten takes its connections with it.
     this.#offRemoved = ctx.forwards.onRemoved((forward) => {
       for (const streams of this.#channels.values())

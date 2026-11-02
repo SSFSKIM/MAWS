@@ -17,7 +17,7 @@ import type { RemoteChannel } from '../../src/endpoint/channels';
 import { STREAM_INPUT_CREDIT, type ReadOpening, type Stream } from '../../src/endpoint/stream-base';
 import { httpPlane } from '../../src/endpoint/stream-http';
 import type { StreamWindow } from '../../src/endpoint/stream-window';
-import { fakeDocuments, fakeServices, mintRef, scratchArtifacts } from './fake-services';
+import { fakeAssetHolds, fakeDocuments, fakeServices, mintRef, scratchArtifacts } from './fake-services';
 import { FakePtyHost } from './fake-pty-host';
 import { act, done, makeOrg, openRemote, ORG, sleep, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
@@ -292,7 +292,7 @@ describe('the http read open', () => {
         refuse: () => {},
         log: () => {},
       };
-      await httpPlane((request) => services.artifacts.fetch(request))(opening);
+      await httpPlane((request) => services.artifacts.fetch(request), services.dispatch)(opening);
       await sleep(40);
       const opened = stream as unknown as Stream;
       expect(sent[0]).toMatchObject({ t: 'streamOpened', http: { status: 200 } });
@@ -326,6 +326,84 @@ describe('the http read open', () => {
     await until(() => closeOf(a, id), 'the close');
     expect(closeOf(a, id)).toBe('malformed');
     expect(a.channel.closed).toBe(false);
+  });
+});
+
+describe('an http read of a dashboard’s query snapshot (E3’s asset hold)', () => {
+  const snapshot = () => `assets/query-${randomUUID()}.json`;
+  /** A store whose retention sweeps every unheld query snapshot between the lookup and the open, and the host's holds. */
+  async function startHeld() {
+    const services = fakeServices();
+    const f = await startEndpoint(org, started, { services });
+    const holds = fakeAssetHolds(f.services);
+    const store = scratchArtifacts(f.services, { sweep: (artifactId, path) => /^assets\/query-/.test(path) && !holds.held(artifactId, path) });
+    return { f, holds, store };
+  }
+
+  it('holds the snapshot across the read, so a sweep inside the window still serves its bytes, and releases the hold once the body is done', async () => {
+    const { f, holds, store } = await startHeld();
+    const x = randomUUID();
+    f.host.artifact(x);
+    const ref = snapshot();
+    store.put(x, ref, '{"rows":[[1,2]]}');
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const { id, answer } = await openHttp(a, { url: url(x, ref) });
+    expect(answer).toMatchObject({ t: 'streamOpened', http: { status: 200 } });
+    await until(() => closeOf(a, id), 'the close');
+    expect(body(a, id).toString()).toBe('{"rows":[[1,2]]}');
+    await until(() => holds.released() === 1 || undefined, 'the release');
+    expect([holds.taken(), holds.released()]).toEqual([1, 1]);
+  });
+
+  it('releases the hold once on a close mid-body, and on a refusal at the publication', async () => {
+    const { f, holds, store } = await startHeld();
+    const engine = session(f, 'app-1', ['@machine'], shared(org.B));
+    const x = randomUUID();
+    f.host.artifact(x, ['app-1']);
+    const big = snapshot();
+    store.put(x, big, randomBytes(200 * 1024));
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    const mid = await openHttp(a, { url: url(x, big) }, 1024);
+    await until(() => body(a, mid.id).byteLength === 1024 || undefined, 'the first chunk');
+    expect(holds.taken() - holds.released()).toBe(1);
+    await a.channel.send({ t: 'streamClose', id: mid.id, reason: 'closed' });
+    await until(() => holds.released() === 1 || undefined, 'the release at the close');
+
+    const small = snapshot();
+    store.put(x, small, '{}');
+    const fetch = f.services.artifacts.fetch;
+    f.services.artifacts.fetch = async (request) => {
+      const answer = await fetch(request);
+      f.records.set({ lane: 'B', session: engine, owners: ['@machine'], access: 'private' }, 'app-1');
+      return answer;
+    };
+    const b = await openRemote(f, org.b1, org.B, { capabilities: READ });
+    expect((await openHttp(b, { url: url(x, small) })).answer).toMatchObject({ t: 'streamRefused', reason: 'grade' });
+    await until(() => holds.released() === 2 || undefined, 'the release at the refusal');
+    await sleep(30);
+    expect([holds.taken(), holds.released()]).toEqual([2, 2]);
+  });
+
+  it('reads on without a hold the host can’t take, and logs it; anything but a query snapshot is read with none', async () => {
+    const services = fakeServices();
+    const f = await startEndpoint(org, started, { services });
+    const holds = fakeAssetHolds(f.services);
+    const store = scratchArtifacts(f.services);
+    const x = randomUUID();
+    f.host.artifact(x);
+    const ref = snapshot();
+    store.put(x, ref, '{}');
+    store.put(x, 'index.html', PAGE);
+    store.put(x, 'assets/logo.png', randomBytes(64));
+    const a = await openRemote(f, org.a1, org.A, { capabilities: READ });
+    for (const path of ['index.html', 'assets/logo.png']) expect((await openHttp(a, { url: url(x, path) })).answer).toMatchObject({ http: { status: 200 } });
+    expect(holds.taken()).toBe(0);
+    holds.refuse = true;
+    const { id, answer } = await openHttp(a, { url: url(x, ref) });
+    expect(answer).toMatchObject({ http: { status: 200 } });
+    await until(() => closeOf(a, id), 'the close');
+    expect(body(a, id).toString()).toBe('{}');
+    expect(f.services.lines.some((line) => line.includes('held'))).toBe(true);
   });
 });
 

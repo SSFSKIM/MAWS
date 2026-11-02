@@ -1,7 +1,7 @@
 // `EndpointServices` as `mawsd` will give them (O2's seam), for the endpoint's suites before O2 lands: a scratch profile
 // with its state directory (0700), the machine's ref, and a log the suite reads. Nothing here touches the owner's
 // profile: every directory is a fresh temporary one.
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -53,12 +53,25 @@ export function fakeServices(options: { ref?: MachineRef; kind?: 'unit' | 'priva
  * `artifacts.content` that answers the files `put` here, under the profile. A path never put, or a revision but 1 or
  * `live`, is the store's not-found. `fetches` counts the requests the handler answered.
  */
-export function scratchArtifacts(services: FakeServices): { put(artifactId: string, path: string, content: string | Uint8Array, kind?: ArtifactKind): void; fetches: () => number } {
+export function scratchArtifacts(
+  services: FakeServices,
+  options: {
+    /**
+     * P5 O7 M5b: a retention sweep landing between a lookup's answer and the handler's open of the file (the window E3's
+     * holds close): asked of each file the lookup answers, true collects it, so the open finds nothing (the store's 404).
+     */
+    sweep?: (artifactId: string, path: string) => boolean;
+  } = {},
+): { put(artifactId: string, path: string, content: string | Uint8Array, kind?: ArtifactKind): void; fetches: () => number } {
   const root = join(services.machine.profileDir, 'scratch-artifacts');
   const files = new Map<string, { disk: string; kind: ArtifactKind; size: number; sha256: string }>();
   const content: ContentLookup = async ({ artifactId, revision, path }) => {
     const file = files.get(`${artifactId}\n${path ?? ''}`);
     if (file === undefined || (revision !== undefined && revision !== 1)) return { ok: false, error: { code: 'internal', message: 'not found' } };
+    if (options.sweep?.(artifactId, path!)) {
+      fs.rmSync(file.disk, { force: true });
+      files.delete(`${artifactId}\n${path ?? ''}`);
+    }
     return { ok: true, value: { revision: 1, kind: file.kind, name: basename(path!), size: file.size, sha256: file.sha256, path: file.disk } };
   };
   let fetches = 0;
@@ -140,6 +153,39 @@ export function fakeDocuments(services: FakeServices): {
       return true;
     },
     onClosed: (listener) => (closed.add(listener), () => void closed.delete(listener)),
+  };
+  return fake;
+}
+
+/**
+ * P5 O7 M5b: the engine host's E3 asset holds as the endpoint reaches them (`artifacts.holdAssets`, `artifacts.releaseAssets`
+ * through `dispatch`), in front of whatever answers the rest. `held(artifactId, ref)` says whether a hold names it now;
+ * `refuse` answers a hold as an older host would (no such command). Installed after the endpoint starts (its dispatch is
+ * read at each call).
+ */
+export function fakeAssetHolds(services: FakeServices): { held(artifactId: string, ref: string): boolean; taken: () => number; released: () => number; refuse: boolean } {
+  const holds = new Map<string, { artifactId: string; refs: string[] }>();
+  let [taken, released] = [0, 0];
+  const others = services.dispatch;
+  const fake = {
+    refuse: false,
+    held: (artifactId: string, ref: string) => [...holds.values()].some((hold) => hold.artifactId === artifactId && hold.refs.includes(ref)),
+    taken: () => taken,
+    released: () => released,
+  };
+  services.dispatch = async (owner, name, input, client) => {
+    if (owner !== 'engine-host' || (name !== 'artifacts.holdAssets' && name !== 'artifacts.releaseAssets')) return others(owner, name, input, client);
+    if (fake.refuse) return { t: 'res', id: '0', ok: false, error: { code: 'unknown_command', message: `${name} is not a command of this host` } };
+    if (name === 'artifacts.holdAssets') {
+      const { artifactId, refs } = input as { artifactId: string; refs: string[] };
+      const assetHoldId = randomUUID();
+      holds.set(assetHoldId, { artifactId, refs });
+      taken++;
+      return { t: 'res', id: '0', ok: true, value: { assetHoldId } };
+    }
+    const released_ = holds.delete((input as { assetHoldId: string }).assetHoldId);
+    if (released_) released++;
+    return { t: 'res', id: '0', ok: true, value: { released: released_ } };
   };
   return fake;
 }
