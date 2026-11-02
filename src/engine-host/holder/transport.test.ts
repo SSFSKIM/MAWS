@@ -230,7 +230,10 @@ describe.skipIf(!existsSync(BINARY))('the host transport', () => {
     // the session ends as a failed spawn, or as a lost host when the bound passed inside the reconnect's own connect
     expect((await items).map((i) => i.error?.kind)).toEqual([expect.stringMatching(/^(spawn_error|host_lost)$/)]);
     expect(t.pid).toBeNull();
-    await expectGone(host.pid, 10_000); // SIGTERM: the host waited for its fork (1.5 s), then ended the child's group
+    // O16 panel wave 1 (scalpel-4#1, the controller's follow-up): the engine's pid was never known, so `exited` waits for
+    // the host, whose own shutdown ends the fork's group: no relaunch beside a fork still under way
+    expect(await within(t.exited, 10_000)).not.toBe('pending');
+    expect(isAliveNow(host.pid)).toBe(false); // SIGTERM: the host waited for its fork (1.5 s), then ended the child's group
     // the fork completed after the SIGTERM (the host waited for it), and its child was ended with the host
     const spawned = /spawned (\d+)/.exec(readFileSync(host.paths.log, 'utf8'));
     expect(spawned).not.toBeNull();
@@ -389,6 +392,44 @@ describe.skipIf(!existsSync(BINARY))('the host transport', () => {
     first!.close();
     t.kill('SIGTERM');
     expect(await within(t.exited, 5_000)).toEqual({ code: null, signal: 'SIGTERM' });
+  });
+
+  // O16 panel wave 1 (scalpel-4#1, the controller's follow-up): a host lost while its spawn is unresolved is ended
+  // through its own shutdown, and the session reads exited only once that host is gone
+  it('a host lost while its spawn is under way reads exited only once the host is gone', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    let first: HostConnection | null = null;
+    const host = await start({ ...deps, startMs: 1_500, hostArgs: ['--spawn-delay-ms', '3000'], onConnection: (c) => (first ??= c) });
+    const t = host.transport(plan(['/bin/sleep', '600']), { appSessionId: 'app-1', maxLineChars: 1024 });
+    const frames = reader(t.frames);
+    await sleep(200); // committed: the fork is held open
+    renameSync(host.paths.socket, `${host.paths.socket}.moved`); // the reconnect finds no socket: the host is lost
+    first!.close();
+    expect((await frames.next(5_000)).error?.kind).toBe('host_lost');
+    expect(await within(t.exited, 300)).toBe('pending'); // the host still holds its fork
+    expect(isAliveNow(host.pid)).toBe(true);
+    expect(await within(t.exited, 10_000)).toEqual({ code: null, signal: 'SIGKILL' });
+    expect(isAliveNow(host.pid)).toBe(false);
+  });
+
+  // O16 panel wave 1 (scalpel-5#2, the controller's follow-up): a signal asked between `commit` and `spawned` is owed
+  // until the spawn is known, and dropped with a log line if the spawn fails
+  it('a signal asked before the spawn is known is sent once it is', { timeout: LONG }, async () => {
+    const { deps } = profile();
+    const host = await start({ ...deps, hostArgs: ['--spawn-delay-ms', '500'] });
+    const t = host.transport(plan(['/bin/cat']), { appSessionId: 'app-1', maxLineChars: 1024 });
+    t.kill('SIGTERM');
+    expect(await within(t.exited, 5_000)).toEqual({ code: null, signal: 'SIGTERM' });
+  });
+
+  it('a signal asked before a spawn that fails is dropped with a log line', { timeout: LONG }, async () => {
+    const { deps, logs } = profile();
+    const host = await start({ ...deps, hostArgs: ['--spawn-delay-ms', '300'] });
+    const t = host.transport(plan([join(deps.hostsDir, 'no-such-engine')]), { appSessionId: 'app-1', maxLineChars: 1024 });
+    t.kill('SIGTERM');
+    const items = await within(drain(t.frames), 5_000);
+    expect(items === 'pending' ? items : items.map((i) => i.error?.kind)).toEqual(['spawn_error']);
+    expect(logs.filter((line) => line.includes('SIGTERM') && line.includes('not sent'))).toHaveLength(1);
   });
 
   // O16 panel wave 1 (scalpel-4#1): `exited` is what frees the row's reservation, so it waits for the engine's end

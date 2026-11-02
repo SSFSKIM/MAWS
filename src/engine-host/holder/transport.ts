@@ -216,9 +216,11 @@ class HostedTransport {
   private released = false;
   private endSent = false;
   private reconnecting = false;
-  // O16 panel wave 1 (scalpel-5#2): termination asked while no connection carries it (a reconnect under way), sent by
-  // the reconnect once it holds the writer: the signals in order, then `end` after any record it resends
+  // O16 panel wave 1 (scalpel-5#2): termination asked while no connection carries it (a reconnect under way) or before
+  // the spawn is known (`commit` sent, `spawned` not in), sent once both are there: the signals in order; `end` after
+  // any record the reconnect resends. A spawn that fails drops the signals with a log line.
   private readonly owedSignals: ('SIGTERM' | 'SIGKILL')[] = [];
+  private hostEnding: Promise<void> | null = null; // scalpel-4#1: a host ended here with its spawn unresolved, until it is gone
   private endOwed = false;
   private replaying = false; // O16 panel wave 1 (scalpel-5#1): a `read` sent, its `caughtUp` not yet in
   private resolveExited!: (exit: Exit) => void;
@@ -319,11 +321,13 @@ class HostedTransport {
       case 'spawned':
         this.child = { pid: message.pid, procStart: message.procStart };
         this.settleSpawn(null);
+        this.sendOwedSignals();
         return;
       case 'spawnFailed':
         this.frames.push({ frame: null, raw: '', error: { kind: 'spawn_error', message: message.message, length: 0, typeGuess: null } });
         this.settleSpawn(new TransportClosed(`the engine did not start: ${message.message}`));
-        this.finish({ code: null, signal: null });
+        if (this.owedSignals.length > 0) this.o.deps.log(`session host ${this.o.holderId}: ${this.owedSignals.splice(0).join(', ')} not sent: the engine did not start`);
+        this.finish({ code: null, signal: null }, this.hostEnding); // a host ended mid-spawn: exited once it is gone
         this.exitRecorded = true;
         this.maybeRelease();
         return;
@@ -514,9 +518,14 @@ class HostedTransport {
   }
 
   private kill(name: 'SIGTERM' | 'SIGKILL'): void {
-    if (this.ended || this.child === null) return;
-    if (this.connection) this.connection.send({ t: 'signal', name, group: name === 'SIGKILL' });
-    else this.owedSignals.push(name); // reconnecting: the reconnect sends it
+    if (this.ended) return;
+    this.owedSignals.push(name);
+    this.sendOwedSignals(); // or the reconnect, or the spawn's answer, sends it
+  }
+
+  private sendOwedSignals(): void {
+    if (this.connection === null || this.child === null) return;
+    for (const name of this.owedSignals.splice(0)) this.connection.send({ t: 'signal', name, group: name === 'SIGKILL' });
   }
 
   // P5 O16 M3a fix wave 1: an adoption given up: the connection closed without `release` (the host keeps its engine and
@@ -598,7 +607,7 @@ class HostedTransport {
     this.connection = connection;
     if (this.frontier.value > 0) connection.send({ t: 'ack', seq: this.frontier.value }); // an ack the closed connection may have dropped
     if (hello.exit) this.pendingExit = { code: hello.exit.code, signal: hello.exit.signal as NodeJS.Signals | null };
-    for (const name of this.owedSignals.splice(0)) connection.send({ t: 'signal', name, group: name === 'SIGKILL' });
+    this.sendOwedSignals();
     this.replaying = true; // before the listener: an exit kept since the hello waits for the replay
     this.attachListeners(connection);
     connection.send({ t: 'read', fromSeq: this.lastDelivered + 1 });
@@ -634,6 +643,7 @@ class HostedTransport {
       if (hello.child !== null) {
         this.child = { pid: hello.child.pid, procStart: hello.child.procStart };
         this.settleSpawn(null);
+        this.sendOwedSignals();
         return;
       }
       if (hello.state === 'ready' && this.o.plan !== null) {
@@ -658,9 +668,9 @@ class HostedTransport {
     this.o.deps.log(`session host ${this.o.holderId} (pid ${this.o.hostPid}) is lost: ${why}`);
     if (!this.spawnSettled) this.endHost(); // a live host may still be forking the child this writer never learned of
     this.frames.push({ frame: null, raw: '', error: { kind: 'host_lost', message: `The session host (pid ${this.o.hostPid}) stopped: ${why}.`, length: 0, typeGuess: null } });
-    // O16 panel wave 1 (scalpel-4#1): `exited` waits for the engine's end, so the row keeps its reservation and no
-    // relaunch runs a second engine beside it through its SIGTERM grace
-    this.finish({ code: null, signal: 'SIGKILL' }, this.endChild());
+    // O16 panel wave 1 (scalpel-4#1): `exited` waits for the engine's end (or, its pid never known, the host's, whose
+    // shutdown ends the fork's group), so the row keeps its reservation and no relaunch runs a second engine beside it
+    this.finish({ code: null, signal: 'SIGKILL' }, Promise.all([this.endChild(), this.hostEnding]).then(() => {}));
   }
 
   // A host this writer gives up on while its committed spawn is unresolved (the recovery's bound passed, or the
@@ -676,6 +686,11 @@ class HostedTransport {
     } catch (error) {
       this.o.deps.log(`session host ${this.o.holderId} (pid ${pid}) could not be signalled: ${(error as Error).message}`);
     }
+    // scalpel-4#1: the engine's pid is unknown here, and the host's shutdown ends its fork's group before the host
+    // exits, so the host's end bounds the engine's: `exited` waits for it, by pid and the start time `hello` gave
+    this.hostEnding ??= (async () => {
+      while (isAlive(pid) && procStartOf(pid) === this.o.hostProcStart) await new Promise((resolve) => setTimeout(resolve, 100));
+    })();
   }
 
   // Settles once the engine is gone (or was never known): SIGTERM, the sweep's grace, SIGKILL to its group, then a wait

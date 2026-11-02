@@ -65,7 +65,7 @@ function spec(appSessionId: string): LaunchSpec {
 }
 
 // The engine host's handlers over the stub engine, every live launch under a session host of the committed binary.
-function engineHost(stub: string, over: { binary?: string; child?: SessionHostDeps['child'] } = {}) {
+function engineHost(stub: string, over: { binary?: string; child?: SessionHostDeps['child'] } & Pick<SessionHostDeps, 'startMs' | 'hostArgs' | 'onConnection'> = {}) {
   const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
   const emitted: { name: EventName; payload: unknown }[] = [];
   const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
@@ -78,7 +78,7 @@ function engineHost(stub: string, over: { binary?: string; child?: SessionHostDe
   const holder: EngineIpcDeps['holder'] = {
     gateSocket: join(userData, 'supervisor', 'gate.sock'),
     start: async (launchId) => {
-      const host = await startSessionHost(launchId, { hostsDir: hostsDirOf(join(userData, 'supervisor')), binary: over.binary ?? BINARY, userData, tmpdir: tmpdir(), log: () => {}, child: over.child ?? { isAlive, procStartOf, signal: signalOrphan, graceMs: 1_000 } });
+      const host = await startSessionHost(launchId, { hostsDir: hostsDirOf(join(userData, 'supervisor')), binary: over.binary ?? BINARY, userData, tmpdir: tmpdir(), log: () => {}, child: over.child ?? { isAlive, procStartOf, signal: signalOrphan, graceMs: 1_000 }, startMs: over.startMs, hostArgs: over.hostArgs, onConnection: over.onConnection });
       hosts.push(host);
       return host;
     },
@@ -221,5 +221,26 @@ describe.skipIf(!existsSync(BINARY))('a live launch under a session host', () =>
     await until(() => host.events(id).some((e) => e.kind === 'process.exited'), 'process.exited', 10_000);
     expect(signals).toEqual(['SIGTERM', 'SIGKILL']);
     expect(isAliveNow(engine)).toBe(false);
+  });
+
+  // O16 panel wave 1 (scalpel-4#1, the controller's follow-up): a host given up on mid-spawn may still fork the engine;
+  // its own shutdown ends that fork's group, so the session stays reserved until the host is gone
+  it('a session whose host was given up on mid-spawn keeps its reservation until the host is gone: a relaunch meanwhile is refused', { timeout: LONG }, async () => {
+    const stub = writeStubEngine(join(scratch, 'claude-mid-spawn'), bundle, { fixture: PERMISSION });
+    let first: HostConnection | null = null;
+    const host = engineHost(stub, { startMs: 2_000, hostArgs: ['--spawn-delay-ms', '5000'], onConnection: (c) => (first ??= c) });
+    const id = 'app-mid-spawn';
+    await host.call('session.launch', { spec: spec(id) });
+    const roster = () => (existsSync(hosts[0]?.paths.roster ?? '') ? (JSON.parse(readFileSync(hosts[0]!.paths.roster, 'utf8')) as { state: string }).state : null);
+    await until(() => roster() === 'committed', 'the commit, its fork held open');
+    first!.close(); // the spawn's answer is lost with the connection; the reconnect's bound passes before the fork
+    const hostPid = hosts[0]!.pid;
+    await sleep(3_000); // the reconnect's 2 s bound has passed and the spawn is given up; the fork is still held (5 s)
+    expect(isAliveNow(hostPid)).toBe(true);
+    expect(host.status(id).process).not.toBe('exited');
+    expect(await host.call('session.launch', { spec: spec(id) })).toMatchObject({ status: 'refused', reason: 'already_live' });
+    expect(hosts).toHaveLength(1);
+    await until(() => host.status(id).process === 'exited', 'exited', 20_000);
+    expect(isAliveNow(hostPid)).toBe(false);
   });
 });
