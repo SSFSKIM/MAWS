@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -27,6 +28,9 @@ import (
 )
 
 func main() {
+	// Two Ps: the host is a relay of a few goroutines blocked on I/O, and every P beyond what it uses costs idle footprint
+	// (its mcache's partly used spans, the threads it wakes), more on a machine with more cores (D18's bound).
+	runtime.GOMAXPROCS(2)
 	os.Exit(run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
