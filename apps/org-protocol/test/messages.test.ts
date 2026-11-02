@@ -142,9 +142,10 @@ describe('streams', () => {
 // the pong's send (`sent`), each in milliseconds, for the remote bench's clock offset; a pong without them reads as before.
 describe('the pong clock', () => {
   it('reads a pong with or without the endpoint’s two stamps, either way', () => {
-    for (const side of ['device', 'endpoint'] as const) {
-      expect(readMessage(side, { t: 'pong', at: 42 })).toEqual({ kind: 'message', message: { t: 'pong', at: 42 } });
-      expect(readMessage(side, { t: 'pong', at: 42, received: 1_799_000_000_001, sent: 1_799_000_000_002 })).toEqual({ kind: 'message', message: { t: 'pong', at: 42, received: 1_799_000_000_001, sent: 1_799_000_000_002 } });
+    const stamped = { t: 'pong', at: 42, received: 1_799_000_000_001, sent: 1_799_000_000_002 };
+    for (const read of [(v: unknown) => readMessage('device', v), (v: unknown) => readMessage('endpoint', v)]) {
+      expect(read({ t: 'pong', at: 42 })).toEqual({ kind: 'message', message: { t: 'pong', at: 42 } });
+      expect(read(stamped)).toEqual({ kind: 'message', message: stamped });
     }
   });
 

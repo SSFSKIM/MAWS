@@ -227,7 +227,7 @@ describe('the loop', () => {
     const channel = await dev.open(dialDirect(h), REF);
     expect(ENDPOINT_CAPABILITIES).toContain('rl2.pong-clock');
     const before = Date.now();
-    const pong = (await dev.request(channel, { t: 'ping', at: 7 }, (m): m is ChannelMessage => m.t === 'pong')) as { at: number; received: number; sent: number };
+    const pong = (await dev.request(channel, { t: 'ping', at: 7 }, (m): m is ChannelMessage => m.t === 'pong')) as unknown as { at: number; received: number; sent: number };
     const after = Date.now();
     expect(pong.at).toBe(7);
     expect(pong.received).toBeGreaterThanOrEqual(before);
