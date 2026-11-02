@@ -6,10 +6,12 @@
 // published (`decide`). `streamOpened {http: {status, headers}}` carries the answer's status and headers as received, then
 // the body as `streamData` from offset 0, then `streamClose closed`; a HEAD, a 304, a 404 and a 416, and an answer with no
 // body, close right after `streamOpened`. The body is read from its `ReadableStream` only while the device's credit
-// allows and nothing read waits to be sent, so the stream holds at most one read past the credit and is never `behind`.
+// allows and nothing read waits to be sent, and what a read brings is queued for the device a piece at a time, each at
+// most what the credit allows (and a chunk): the stream's queue never holds more than the credit, the rest of the read
+// (one source chunk: a bridged `html` page is one buffer, up to the tool's 16 MiB) waits here, and it is never `behind`.
 // The device sends no data and no control on it (`malformed`). A body that fails mid-way closes the stream `unavailable`;
 // the device holds the length the headers said. A re-check that refuses it ends it `removed`, the body let go.
-import type { StreamHttpOpen } from 'org-protocol';
+import { STREAM_CHUNK_BYTES, type StreamHttpOpen } from 'org-protocol';
 import type { EndpointServices } from './services';
 import { Stream, type ReadAccess, type ReadOpening, type ReadPlane } from './stream-base';
 
@@ -45,8 +47,10 @@ export function httpPlane(fetch: EndpointServices['artifacts']['fetch']): ReadPl
 
 class HttpStream extends Stream {
   #reader: ReadableStreamDefaultReader<Uint8Array> | null;
-  /** The body's bytes read so far: the next chunk's offset. */
-  #read = 0;
+  /** The body's bytes queued so far: the next piece's offset. */
+  #queued = 0;
+  /** What the last read brought and is not queued yet. */
+  #pending: Uint8Array | null = null;
   #reading = false;
   readonly #log: (line: string) => void;
 
@@ -57,10 +61,22 @@ class HttpStream extends Stream {
     this.#log = opening.log;
   }
 
-  /** The body's next chunk, read only while the device's credit allows and nothing read waits to be sent. */
+  /**
+   * The body's next piece queued, while the device's credit allows and nothing queued waits to be sent: what the last read
+   * left, or the next read's.
+   */
   pull(): void {
+    if (this.ended || this.held || this.backlog > 0 || this.creditLeft <= 0) return;
+    const pending = this.#pending;
+    if (pending !== null) {
+      const n = Math.min(pending.byteLength, this.creditLeft, STREAM_CHUNK_BYTES);
+      this.#pending = n === pending.byteLength ? null : pending.subarray(n);
+      this.push(this.#queued, pending.subarray(0, n));
+      this.#queued += n;
+      return;
+    }
     const reader = this.#reader;
-    if (reader === null || this.#reading || this.ended || this.held || this.backlog > 0 || this.creditLeft <= 0) return;
+    if (reader === null || this.#reading) return;
     this.#reading = true;
     reader.read().then(
       (next) => {
@@ -70,13 +86,12 @@ class HttpStream extends Stream {
           this.#reader = null;
           return this.closeAfter('closed');
         }
-        this.push(this.#read, next.value);
-        this.#read += next.value.byteLength;
+        if (next.value.byteLength > 0) this.#pending = next.value;
         this.pull();
       },
       (error: unknown) => {
         this.#reading = false;
-        this.#log(`endpoint: an artifact page's body failed after ${this.#read} bytes: ${(error as Error).message}`);
+        this.#log(`endpoint: an artifact page's body failed after ${this.#queued} bytes: ${(error as Error).message}`);
         this.end('unavailable');
       },
     );
@@ -94,10 +109,11 @@ class HttpStream extends Stream {
     return true;
   }
 
-  /** The body let go: what it still holds is never read. */
+  /** The body let go: what it still holds is never read, and what was read and not queued is dropped. */
   protected closed(): void {
     const reader = this.#reader;
     this.#reader = null;
+    this.#pending = null;
     void reader?.cancel().catch(() => {});
   }
 

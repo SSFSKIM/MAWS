@@ -13,7 +13,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { decodeFrame, encodeFrame } from '../../src/artifacts/provider/frames';
 import type { SessionRecord } from '../../src/endpoint/sources';
 import { OFFERS, READ_OPENS } from '../../src/endpoint/offers';
-import { STREAM_INPUT_CREDIT } from '../../src/endpoint/stream-base';
+import type { RemoteChannel } from '../../src/endpoint/channels';
+import { STREAM_INPUT_CREDIT, type ReadOpening, type Stream } from '../../src/endpoint/stream-base';
+import { httpPlane } from '../../src/endpoint/stream-http';
+import type { StreamWindow } from '../../src/endpoint/stream-window';
 import { fakeDocuments, fakeServices, mintRef, scratchArtifacts } from './fake-services';
 import { FakePtyHost } from './fake-pty-host';
 import { act, done, makeOrg, openRemote, ORG, sleep, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
@@ -234,6 +237,55 @@ describe('the http read open', () => {
     await until(() => closeOf(a, id), 'the close');
     expect(ofStream(a, id).map((m) => m.t)).toEqual(['streamOpened', 'streamClose']);
     expect(closeOf(a, id)).toBe('closed');
+  });
+
+  it('queues no more of a buffer-backed html page than the device’s credit (one 2 MiB source chunk, 1 KiB of credit), the rest read on as credit comes', async () => {
+    const services = fakeServices();
+    try {
+      const store = scratchArtifacts(services);
+      const x = randomUUID();
+      const page = `<!doctype html><html><head><title>t</title></head><body>${'x'.repeat(2 * 1024 * 1024)}</body></html>`;
+      store.put(x, 'index.html', page);
+      // The plane alone, over the scheme's own handler: its stream's queue is what the window would send next.
+      const sent: Msg[] = [];
+      let stream: Stream | null = null;
+      const input = { url: url(x), method: 'GET' };
+      const opening: ReadOpening = {
+        channel: { closed: false, send: (m: Msg) => void sent.push(m) } as unknown as RemoteChannel,
+        id: 'h1',
+        credit: 1024,
+        act: 'artifacts.fetch',
+        input,
+        binding: { member: 'm', device: 'd' },
+        window: { ready: () => {} } as unknown as StreamWindow,
+        over: () => {},
+        cancelled: () => false,
+        decide: async (publish) => ({ ok: true, value: publish({ input, stands: () => true }) }),
+        install: (s) => void (stream = s),
+        refuse: () => {},
+        log: () => {},
+      };
+      await httpPlane((request) => services.artifacts.fetch(request))(opening);
+      await sleep(40);
+      const opened = stream as unknown as Stream;
+      expect(sent[0]).toMatchObject({ t: 'streamOpened', http: { status: 200 } });
+      expect(opened.backlog).toBeLessThanOrEqual(1024);
+      // What the window sends, credit given a chunk at a time: the page whole, each queue within the credit.
+      const bytes: Buffer[] = [];
+      for (let guard = 0; guard < 200 && !sent.some((m) => m.t === 'streamClose'); guard++) {
+        for (let next = opened.next(); next !== null; next = opened.next()) {
+          sent.push(next.message as Msg);
+          if (next.message.t === 'streamData') bytes.push(Buffer.from(next.message.data, 'base64url'));
+        }
+        opened.credit(64 * 1024);
+        await sleep(1);
+        expect(opened.backlog).toBeLessThanOrEqual(64 * 1024);
+      }
+      expect(Buffer.concat(bytes).toString()).toContain(page.slice(-64));
+      expect(sent.at(-1)).toMatchObject({ t: 'streamClose', reason: 'closed' });
+    } finally {
+      services.cleanup();
+    }
   });
 
   it('closes the stream `malformed` on the device’s data, and keeps the channel', async () => {
