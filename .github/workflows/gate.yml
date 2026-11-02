@@ -187,7 +187,10 @@ env:
   # them and its scenes about 3 more, which its two settle guards' 15-minute bounds and its build would outgrow in 60.
   # p1-live runs every sitting in one invocation (S3, S6's twenty resumes, A-47, S2's three cases): about 5 minutes at
   # E11's pace, but its waits run to minutes each (a turn's 5, a terminal's 3), which a slow engine stretches past 30.
-  E2E_MINUTES: daemon-idle-aba=90 p1-live=45
+  # daemon-idle-render (P5 O17 M7) runs three cases once M7's engine host lists host.browserWork: the render seam's, the
+  # browser warm to idle and the four kept sessions, each a scene, a 120 s settle and a 600 s window (about 13 minutes,
+  # the spec's 20-minute case bound), so about 40 with its scenes, which its build and two settle guards outgrow in 60.
+  E2E_MINUTES: daemon-idle-aba=90 daemon-idle-render=90 p1-live=45
   # The Mac jobs that may run beside another: e2e groups, and `unit:darwin`, that ask for ci-kit's shared instances
   # ([ci-kit-mac-shared], their only label), which run two jobs at a time on the mini's one desktop (ci-kit's mac-lane
   # concurrency spec, SSFSKIM/ci-kit docs/doperpowers/specs/2026-10-21-mac-lane-concurrency-design.md). Every other Mac
