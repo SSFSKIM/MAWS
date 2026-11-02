@@ -135,6 +135,8 @@ export type PongStamps = { at: number; received: number | null; sent: number | n
 /** How many pongs' stamps a link keeps (the bench reads at most a few hundred per run). */
 export const PONG_STAMPS_KEPT = 512;
 const PING_ANSWER_MS = 5_000;
+/** The most `ping()` exchanges pending at once; one past it answers null and sends nothing. */
+export const PINGS_PENDING_MAX = 16;
 
 export type CallResult = ({ ok: true; output: unknown } | { ok: false; error: { code: string; message?: string } }) & { fellBack?: true };
 export type CallOptions = { timeoutMs?: number; session?: SessionRef; lacking?: { capability: string; input: unknown } };
@@ -263,7 +265,25 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   const ended = (): 'removed' | 'closed' | null => (state === 'closed' ? 'closed' : state === 'refused' ? 'removed' : null);
   // P5 O7 M7: the pongs heard, and the pings `ping()` waits on, each on the channel it was sent on (`serial`)
   const pongStamps: PongStamps[] = [];
-  const pingWaiters = new Set<{ at: number; serial: number; settle(stamps: PongStamps | null): void }>();
+  // Keyed by `<serial>:<at>`: one exchange per channel and millisecond, which a second `ping()` in that millisecond joins.
+  // The link's own pings (a probe's, a silence period's) never share a pending exchange's `at` on its channel: one sent
+  // while an exchange of that millisecond is pending is left out (the exchange's pong answers it, as any message does),
+  // and `ping()` in the millisecond of one of theirs waits for the next, so each pong settles only the ping it answers.
+  const pingWaiters = new Map<string, { promise: Promise<PongStamps | null>; serial: number; settle(stamps: PongStamps | null): void }>();
+  const pingKey = (on: number, at: number) => `${on}:${at}`;
+  let ownPing: { serial: number; at: number } | null = null;
+  /** The link's own ping (a probe's, a silence period's) on the current channel. */
+  const sendOwnPing = (): void => {
+    if (current === null) return;
+    const at = now();
+    if (pingWaiters.has(pingKey(current.serial, at))) return;
+    ownPing = { serial: current.serial, at };
+    send({ t: 'ping', at });
+  };
+  /** Settles with null every pending `ping()` (of channel `on` only, when given). */
+  const settlePings = (on?: number): void => {
+    for (const waiter of [...pingWaiters.values()]) if (on === undefined || waiter.serial === on) waiter.settle(null);
+  };
 
   const peerCapabilities = (): readonly string[] | null => current?.channel.peer.capabilities ?? null;
   const acts = new ActTable({ machine: ref, signedIn: () => deps.session.current(), send, current: () => current !== null, peerCapabilities, timing, now, log });
@@ -528,34 +548,41 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     const stamps: PongStamps = { at: message.at, received: clock ? (message.received ?? null) : null, sent: clock ? (message.sent ?? null) : null, arrived: now(), carrier: current.carrier };
     pongStamps.push(stamps);
     if (pongStamps.length > PONG_STAMPS_KEPT) pongStamps.splice(0, pongStamps.length - PONG_STAMPS_KEPT);
-    for (const waiter of pingWaiters) if (waiter.at === message.at && waiter.serial === current.serial) waiter.settle(stamps);
+    pingWaiters.get(pingKey(current.serial, message.at))?.settle(stamps);
   }
 
-  function ping(options: { timeoutMs?: number } = {}): Promise<PongStamps | null> {
-    if (!isCurrent()) return Promise.resolve(null);
+  async function ping(options: { timeoutMs?: number } = {}): Promise<PongStamps | null> {
+    if (!isCurrent()) return null;
+    // not in the millisecond of the link's own ping on this channel, whose pong would answer this one's `at` too
+    while (ownPing !== null && ownPing.serial === current!.serial && ownPing.at === now()) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      if (!isCurrent()) return null;
+    }
     const at = now();
     const on = current!.serial;
-    return new Promise((resolve) => {
-      const waiter = {
-        at,
-        serial: on,
-        settle(stamps: PongStamps | null) {
-          clearTimeout(timer);
-          pingWaiters.delete(waiter);
-          resolve(stamps);
-        },
+    const key = pingKey(on, at);
+    const joined = pingWaiters.get(key);
+    if (joined !== undefined) return joined.promise;
+    if (pingWaiters.size >= PINGS_PENDING_MAX) return null;
+    let settle!: (stamps: PongStamps | null) => void;
+    const promise = new Promise<PongStamps | null>((resolve) => {
+      const timer = setTimeout(() => settle(null), options.timeoutMs ?? PING_ANSWER_MS);
+      settle = (stamps) => {
+        clearTimeout(timer);
+        pingWaiters.delete(key);
+        resolve(stamps);
       };
-      const timer = setTimeout(() => waiter.settle(null), options.timeoutMs ?? PING_ANSWER_MS);
-      pingWaiters.add(waiter);
-      send({ t: 'ping', at });
     });
+    pingWaiters.set(key, { promise, serial: on, settle });
+    send({ t: 'ping', at });
+    return promise;
   }
 
   /** The current channel ended. A sealed `removed` refuses the link; anything else is a loss, retried at once. */
   function lost(reason: string): void {
     const was = current;
     current = null;
-    for (const waiter of [...pingWaiters]) waiter.settle(null);
+    settlePings();
     silenceTimer = clear(silenceTimer);
     probeTimer = clear(probeTimer);
     recheckTimer = clear(recheckTimer);
@@ -626,7 +653,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
           return void current.channel.close('timeout');
         } else {
           unanswered += 1;
-          send({ t: 'ping', at: now() });
+          sendOwnPing();
         }
         armSilence();
       },
@@ -677,6 +704,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
         // The swap is the linearization point: sends go to the new channel only, and the old one's messages are dropped.
         const old = current;
         current = null;
+        settlePings(old.serial); // the old channel's close is not a loss: its pings are answered nowhere now
         acts.onLost();
         streams.onLost(); // a stream is its channel's: the old channel's end at the endpoint ends them there too
         log('the direct carrier answers again: switching from the relay');
@@ -694,7 +722,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     if (state === 'up' && current !== null) {
       const mine = current;
       const before = received;
-      send({ t: 'ping', at: now() });
+      sendOwnPing();
       probeTimer = clear(probeTimer);
       probeTimer = setTimeout(() => {
         probeTimer = null;
@@ -872,7 +900,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       streams.close('closed');
       acts.close('closed');
       failCalls('closed');
-      for (const waiter of [...pingWaiters]) waiter.settle(null);
+      settlePings();
       was?.channel.close('closed');
       closeRelay();
       notify();

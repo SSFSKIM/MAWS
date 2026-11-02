@@ -9,7 +9,7 @@ import { genesis, memberId, newDevice, successor, type TestDevice } from '../../
 import { heldOrgSession, watchedView, type SignedIn } from '../../org/session';
 import type { RelaySocket } from './carriers';
 import type { EndpointRecords } from './endpoint-records';
-import { createRemoteLink, PONG_STAMPS_KEPT, type RemoteLinkDeps } from './link';
+import { createRemoteLink, PINGS_PENDING_MAX, PONG_STAMPS_KEPT, type RemoteLinkDeps } from './link';
 import type { SubscriptionSink } from './subs';
 
 // An attempt computes key ids (`trustOf`), which WebCrypto's digest runs on libuv's thread pool. Under a loaded runner
@@ -552,6 +552,71 @@ describe('the pong clock', () => {
     const lost = h.link.ping();
     h.last().end('carrier');
     expect(await lost).toBeNull();
+  });
+
+  it('joins a second ping in the same millisecond to the first exchange, sending one ping for both', async () => {
+    const h = await harness();
+    h.peer.capabilities = ['rl2.pong-clock'];
+    await settle();
+    const at = Date.now();
+    const [one, two] = [h.link.ping(), h.link.ping()];
+    expect(h.last().of('ping')).toEqual([{ t: 'ping', at }]);
+    h.last().deliver({ t: 'pong', at, received: T0 + 1, sent: T0 + 2 });
+    expect(await one).toEqual(await two);
+    expect(h.link.pongs()).toHaveLength(1);
+  });
+
+  it('never lets the link’s own ping share a pending exchange’s millisecond: a probe then leaves its ping out, and a ping after a probe waits for the next', async () => {
+    const h = await harness();
+    h.peer.capabilities = ['rl2.pong-clock'];
+    await settle();
+    const channel = h.last();
+    const at = Date.now();
+    const benched = h.link.ping();
+    h.link.probe('focus'); // the same millisecond: the exchange's pong answers the probe
+    expect(channel.of('ping')).toEqual([{ t: 'ping', at }]);
+    channel.deliver({ t: 'pong', at, received: T0 + 1, sent: T0 + 1 });
+    expect(await benched).toMatchObject({ at, received: T0 + 1 });
+    await advance(3_000);
+    expect(channel.closed).toBe(false); // the probe was answered
+
+    await vi.advanceTimersByTimeAsync(10);
+    const probeAt = Date.now();
+    h.link.probe('focus');
+    const after = h.link.ping(); // in the probe's millisecond: it waits for the next
+    expect(channel.of('ping').at(-1)).toEqual({ t: 'ping', at: probeAt });
+    channel.deliver({ t: 'pong', at: probeAt, received: T0 + 5, sent: T0 + 5 }); // the probe's answer settles nothing
+    await vi.advanceTimersByTimeAsync(1);
+    expect(channel.of('ping').at(-1)).toEqual({ t: 'ping', at: probeAt + 1 });
+    channel.deliver({ t: 'pong', at: probeAt + 1, received: T0 + 6, sent: T0 + 6 });
+    expect(await after).toMatchObject({ at: probeAt + 1, received: T0 + 6 });
+  });
+
+  it('settles a relay ping at once when a direct recheck takes the channel over', async () => {
+    const h = await harness({ timing: { PING_SILENCE_MS: [100_000, 100_000] } });
+    h.net.direct = false;
+    await settle();
+    expect(h.link.carrier()).toBe('relay');
+    let answer: unknown = 'pending';
+    void h.link.ping({ timeoutMs: 60_000 }).then((stamps) => (answer = stamps));
+    h.net.direct = true;
+    h.link.probe('wake');
+    await settle();
+    expect(h.link.carrier()).toBe('direct');
+    expect(answer).toBeNull();
+  });
+
+  it('answers null without sending past PINGS_PENDING_MAX pending exchanges', async () => {
+    const h = await harness({ timing: { PING_SILENCE_MS: [100_000, 100_000] } });
+    await settle();
+    const pending = [];
+    for (let i = 0; i < PINGS_PENDING_MAX; i += 1) {
+      pending.push(h.link.ping({ timeoutMs: 60_000 }));
+      await vi.advanceTimersByTimeAsync(1);
+    }
+    expect(h.last().of('ping')).toHaveLength(PINGS_PENDING_MAX);
+    expect(await h.link.ping()).toBeNull();
+    expect(h.last().of('ping')).toHaveLength(PINGS_PENDING_MAX);
   });
 
   it('keeps the newest PONG_STAMPS_KEPT pongs', async () => {
