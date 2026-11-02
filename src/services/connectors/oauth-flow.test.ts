@@ -717,8 +717,8 @@ describe('connect through the relayed receiver (P5 O7 M5c)', () => {
     expect(h.openedFor).toEqual([device]);
     expect(h.events).not.toContain('listen'); // this machine's loopback is never bound for a remote asker
 
-    // an answered request does not end the wait: the handler's own 404 for another path, then the real callback
-    expect(relay(relayed, '/favicon.ico')).toMatchObject({ status: 404, body: 'Not found.' });
+    // an answered request does not end the wait: a request without this flow's state (another path), then the real one
+    expect(relay(relayed, '/favicon.ico')).toEqual({ status: 404, body: '' });
     const answers = [relay(relayed, '/callback?code=code-1&state=state-abc')];
     expect(answers[0]).toMatchObject({ status: 200, body: 'MAWS is connected. You can close this window.' });
     const grant = await pending;
@@ -730,15 +730,15 @@ describe('connect through the relayed receiver (P5 O7 M5c)', () => {
     expect(relay(relayed, '/callback?code=code-1&state=state-abc')).toEqual({ status: 404, body: '' });
   });
 
-  // Each refusal the local handler makes, made over the relay with the same status and body, and nothing exchanged
-  it.each<[string, string[], string | null, object?]>([
-    ['a denied consent', ['/callback?error=access_denied&state=state-abc'], 'denied'],
-    ['a duplicate state', ['/callback?code=c&state=state-abc&state=state-abc'], 'state'],
-    ['a wrong issuer', [`/callback?code=c&state=state-abc&iss=${encodeURIComponent('https://evil.example.com')}`], 'state', { ...METADATA, authorization_response_iss_parameter_supported: true }],
-    ['a replayed callback', ['/callback?code=c&state=wrong', '/callback?code=c&state=state-abc'], 'state'],
-    ['a POST', ['/callback?code=c&state=state-abc'], null],
-  ])('answers %s as the local handler answers it', async (_what, paths, code, metadata) => {
-    const method = _what === 'a POST' ? 'POST' : 'GET';
+  // Each refusal the local handler makes of a request carrying this flow's state, made over the relay with the same
+  // status and body, and nothing exchanged
+  it.each<[string, string, string | null, object?]>([
+    ['a denied consent', '/callback?error=access_denied&state=state-abc', 'denied'],
+    ['a duplicate state', '/callback?code=c&state=state-abc&state=state-abc', 'state'],
+    ['a wrong issuer', `/callback?code=c&state=state-abc&iss=${encodeURIComponent('https://evil.example.com')}`, 'state', { ...METADATA, authorization_response_iss_parameter_supported: true }],
+    ['a POST', '/callback?code=c&state=state-abc', null],
+  ])('answers %s as the local handler answers it', async (what, path, code, metadata) => {
+    const method = what === 'a POST' ? 'POST' : 'GET';
     const local = new Harness();
     const remote = new Harness();
     if (metadata) local.script.metadata = remote.script.metadata = metadata;
@@ -746,11 +746,9 @@ describe('connect through the relayed receiver (P5 O7 M5c)', () => {
     const localPending = connect(local);
     const remotePending = relayedConnect(remote, relayed);
     await Promise.all([local.browserOpened(), remote.browserOpened()]);
-    for (const path of paths) {
-      const here = local.deliver(path, method);
-      const there = relay(relayed, path, method);
-      expect({ status: there.status, body: there.body }).toEqual(here);
-    }
+    const here = local.deliver(path, method);
+    const there = relay(relayed, path, method);
+    expect({ status: there.status, body: there.body }).toEqual(here);
     if (code === null) {
       expect(relayed.armed()).toBe(1); // a POST settles nothing: the flow still waits
       return;
@@ -759,6 +757,37 @@ describe('connect through the relayed receiver (P5 O7 M5c)', () => {
     expect(await failureOf(localPending)).toMatchObject({ code });
     expect(remote.posts('/token')).toHaveLength(0); // nothing exchanged, so nothing sealed
     expect(relayed.armed()).toBe(0);
+  });
+
+  it('answers a replayed callback as the local handler does, exchanging its code once', async () => {
+    const local = new Harness();
+    const remote = new Harness();
+    const relayed = createRelayedCallbacks();
+    const localPending = connect(local);
+    const remotePending = relayedConnect(remote, relayed);
+    await Promise.all([local.browserOpened(), remote.browserOpened()]);
+    const path = '/callback?code=c&state=state-abc';
+    expect(relay(relayed, path)).toMatchObject(local.deliver(path));
+    expect(relay(relayed, path)).toMatchObject(local.deliver(path)); // the second: "not waiting", while the exchange runs
+    await Promise.all([localPending, remotePending]);
+    expect(remote.posts('/token')).toHaveLength(1);
+  });
+
+  // A request whose state is not this flow's (a predecessor's on the same port, an old tab's denial, none at all) is
+  // another generation's: answered as an unarmed pair, the flow untouched and still pending. Locally the handler would
+  // refuse it and fail the flow; over the relay a port number reused by the device's OS must not end a later consent.
+  it('leaves a flow pending through requests carrying another flow’s state or none, then completes with its own', async () => {
+    const h = new Harness();
+    const relayed = createRelayedCallbacks();
+    const pending = relayedConnect(h, relayed);
+    await h.browserOpened();
+    for (const path of ['/callback?code=old&state=a-predecessor', '/callback?error=access_denied&state=a-predecessor', '/callback?code=c', '/callback?code=c&state=']) {
+      expect(relay(relayed, path), path).toEqual({ status: 404, body: '' });
+    }
+    expect(h.posts('/token')).toHaveLength(0);
+    expect(relayed.armed()).toBe(1);
+    expect(relay(relayed, '/callback?code=code-1&state=state-abc')).toMatchObject({ status: 200 });
+    expect(await pending).toMatchObject({ redirectUri: `http://127.0.0.1:${PORT}/callback` });
   });
 
   it('fails as a listener that could not bind when its arming was released before the flow listened', async () => {

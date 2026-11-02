@@ -7,8 +7,8 @@
 //
 // What it proves: the connect acknowledges before any callback and completes on a relayed request arriving later,
 // sealing the grant; a second Connect or Reconnect naming a port this client has armed is `busy`, and the first's late
-// callback reaches only the first; two channels arming one port number each complete by their own callback alone, the
-// other's answering 404 and settling nothing; an asker's end before its callback ends the flow, freeing the row.
+// callback reaches only the first, and after it ended never its successor on the same port; two channels arming one port
+// number each complete by their own callback alone, the other's answering 404 and settling nothing; an asker's end before its callback ends the flow, freeing the row.
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -173,12 +173,20 @@ describe('a remote asker’s Connect through the relayed callback', () => {
     expect(rows.docs.last).toBeUndefined();
     expect(opened).toHaveLength(1);
 
-    // once the first ended, the port is the device's to name again; the first's late callback settles nothing of the second
+    // once the first ended, the port is the device's to name again (its OS may hand the same port to a later listener):
+    // the first's late redirect, an old tab's success or its denial, never reaches the second, which stays pending and
+    // completes with its own
     expect(owner.connect(ART, docs.handle, device, { port: DEVICE_PORT })).toEqual({ accepted: true });
     await until(() => opened.length === 2);
-    expect(relay(device, callbackFor(0))).toMatchObject({ status: 400, body: 'MAWS did not start this sign-in.' }); // the second's own handler refuses it
+    expect(relay(device, callbackFor(0))).toEqual({ status: 404, body: '' });
+    const { searchParams: old } = opened[0]!.url;
+    expect(relay(device, `/callback?error=access_denied&state=${old.get('state')}`)).toEqual({ status: 404, body: '' });
+    expect(relay(device, '/callback?code=c')).toEqual({ status: 404, body: '' }); // no state at all
+    await turn();
+    expect((await rowsOf(device)).docs).toMatchObject({ action: 'connecting' });
+    expect(relay(device, callbackFor(1))).toMatchObject({ status: 200 });
     await Promise.all(actions);
-    expect((await rowsOf(device)).docs).toMatchObject({ last: { action: 'connect', ok: false, why: 'state' } });
+    expect((await rowsOf(device)).docs).toMatchObject({ connection: { state: 'connected' }, last: { action: 'connect', ok: true } });
   });
 
   it('keeps two channels that arm one port number apart: each completes by its own callback alone', async () => {
@@ -192,13 +200,13 @@ describe('a remote asker’s Connect through the relayed callback', () => {
     // a guessed port from another channel reaches nothing: its own flow is a different one
     const forA = callbackFor(at(a));
     expect(relay(endableClientRef('remote:c'), forA)).toEqual({ status: 404, body: '' });
-    expect(relay(b, forA)).toMatchObject({ status: 400 }); // b's flow refuses a's answer: it never reaches a's
-    await Promise.all(actions.slice(1));
+    expect(relay(b, forA)).toEqual({ status: 404, body: '' }); // a's answer on b's channel: not b's flow's, which stays pending
     expect(relay(a, forA)).toMatchObject({ status: 200 });
+    expect(relay(b, callbackFor(at(b)))).toMatchObject({ status: 200 });
     await Promise.all(actions);
     const after = await rowsOf(a);
     expect(after.notes).toMatchObject({ connection: { state: 'connected' } });
-    expect(after.docs).toMatchObject({ last: { action: 'connect', ok: false, why: 'state' } });
+    expect(after.docs).toMatchObject({ connection: { state: 'connected' } });
   });
 
   it('ends a flow whose asker’s channel ended before its callback, freeing the row and its port', async () => {

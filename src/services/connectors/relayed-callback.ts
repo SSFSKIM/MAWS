@@ -8,7 +8,11 @@
 // - A receiver is keyed by the asking `ClientRef` and the port: a port is unique on one device, not across the
 //   machine's clients, and `connectors.callback` is dispatched under the asking channel's own ref, so a callback reaches
 //   only a flow its own channel armed and two devices arming one port number never meet (routing, not `state`, is the
-//   isolation: the shipped handler marks a flow settled before it rejects a wrong `state`).
+//   isolation: the shipped handler marks a flow settled before it rejects a wrong `state`). Within one pair the flow's
+//   own state separates generations: the device's OS may hand a released port to a later listener, so the flow is
+//   handed only a request carrying the state it armed (`ListenOptions.state`); any other (an earlier flow's redirect or
+//   denial from an old tab, none at all, or one before the flow armed its state) is answered as an unarmed pair and
+//   leaves the flow untouched and pending.
 // - `arm` is the reservation, decided and made in one synchronous step at the command: a `(client, port)` this client
 //   already has armed is refused (null: the command answers `busy`), and nothing else changes.
 // - Each arming has its own registration; `release` (and the listener's `close`, the flow's cleanup) removes that
@@ -20,7 +24,7 @@
 //   state and the code stay in the flow, which only answers what it would have written to the browser.
 import type { ClientRef } from '@shared/ipc/client';
 import type { ConnectorCallbackAnswer, ConnectorCallbackRequest } from '@shared/ipc/schema/connectors';
-import type { ListenLoopback, LoopbackReply, LoopbackRequest } from './oauth-callback';
+import { OAUTH_CALLBACK_HOST, type ListenLoopback, type LoopbackReply, type LoopbackRequest } from './oauth-callback';
 
 // The local listener's own headers (./oauth-callback.ts), which the device's listener writes to the browser
 const HEADERS: Readonly<Record<string, string>> = { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' };
@@ -45,8 +49,20 @@ export interface RelayedCallbacks {
 
 interface Registration {
   handle: ((request: LoopbackRequest) => LoopbackReply) | null;
+  state: () => string | null; // the flow's armed state; none given: nothing is ever handed to it
   answered: boolean; // a request under it was answered 2xx: the flow is past its callback
   offGone(): void;
+}
+
+// Whether the request's `state` parameter names the flow's armed state (any of its values: duplicates of this flow's own
+// state are its handler's to refuse)
+function carries(url: string, state: string | null): boolean {
+  if (state === null || state === '') return false;
+  try {
+    return new URL(url, `http://${OAUTH_CALLBACK_HOST}`).searchParams.getAll('state').includes(state);
+  } catch {
+    return false;
+  }
 }
 
 export function createRelayedCallbacks(): RelayedCallbacks {
@@ -57,7 +73,7 @@ export function createRelayedCallbacks(): RelayedCallbacks {
     arm(client, port, orphaned) {
       const key = keyOf(client, port);
       if (registrations.has(key)) return null;
-      const own: Registration = { handle: null, answered: false, offGone: () => {} };
+      const own: Registration = { handle: null, state: () => null, answered: false, offGone: () => {} };
       registrations.set(key, own);
       const release = () => {
         own.offGone();
@@ -72,17 +88,18 @@ export function createRelayedCallbacks(): RelayedCallbacks {
       return {
         port,
         release,
-        listen: (handle) => {
+        listen: (handle, options) => {
           if (registrations.get(key) !== own) return Promise.reject(new Error('the relayed callback was released before the flow listened'));
           if (own.handle !== null) return Promise.reject(new Error('the relayed callback is listened on already'));
           own.handle = handle;
+          if (options) own.state = () => options.state();
           return Promise.resolve({ port, close: async () => release() });
         },
       };
     },
     answer(client, { port, method, url }) {
       const own = registrations.get(keyOf(client, port));
-      if (!own?.handle) return NOT_ARMED;
+      if (!own?.handle || !carries(url, own.state())) return NOT_ARMED;
       let reply: LoopbackReply;
       try {
         reply = own.handle({ method, url });

@@ -603,6 +603,22 @@ describe('delivery.send on the machine (P5 O7 M5c)', () => {
     expect(await call('delivery.cancel', { runId })).toEqual({ cancelled: false }); // ended: no tombstone
   });
 
+  // The cancel lands after the target's preparation last read the run's signal (inside its last step, the located
+  // source's read) and before the export: the export, which takes no signal, is never started
+  it('starts no export for a cancel accepted after the target was prepared, and ends the run cancelled at once', async () => {
+    const runId = RUN();
+    let cancelled: Promise<unknown> | null = null;
+    connectors.find.mockResolvedValueOnce({
+      sources: [{ get source() { cancelled ??= call('delivery.cancel', { runId }); return source; }, connection: 'connected' }],
+      live: 1,
+    });
+    expect(await send('notion', 'md', { runId })).toEqual({ ok: false, why: 'cancelled' });
+    expect(await cancelled).toEqual({ cancelled: true });
+    expect(exported).toEqual([]);
+    expect(connectors.send).not.toHaveBeenCalled();
+    expect(planted).toEqual([]);
+  });
+
   it('holds one run per artifact and target, and answers a cancel ahead of its run as the run’s start', async () => {
     let finish!: () => void;
     exportGate = new Promise<void>((resolve) => (finish = resolve));

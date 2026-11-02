@@ -607,7 +607,7 @@ describe('a remote asker’s sign-in through the relayed callback (P5 O7 M5c)', 
     await t.until(() => t.last(opId)?.state === 'waiting_callback', 'waiting_callback');
     expect(t.host.asked.find((a) => a.name === 'session.mcpAuthenticate')!.input).toMatchObject({ redirectUri: REDIRECT });
     expect(t.asked).toEqual([t.device]);
-    expect(t.relay('/callback?code=x&state=someone-else')).toMatchObject({ status: 400, body: 'This is not the sign-in MAWS is waiting for.' });
+    expect(t.relay('/callback?code=x&state=someone-else')).toEqual({ status: 404, body: '' }); // another flow's: never handed to this one
     expect(t.last(opId).state).toBe('waiting_callback');
     expect(t.relay('/callback?code=the-code&state=engine-state')).toMatchObject({ status: 200, body: 'MAWS received the sign-in. You can close this tab and return to MAWS.' });
     await t.ended(opId);

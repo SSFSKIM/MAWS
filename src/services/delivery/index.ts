@@ -402,6 +402,7 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
       if (target === 'notion' && format !== 'md') return failure('invalid');
       const prepared = await prepare(request, signal);
       if ('ok' in prepared) return prepared;
+      if (signal.aborted) return failure('cancelled'); // a cancel after the preparation's last read: nothing begins
       return await sending(run, signal, got.value.artifact.title, prepared);
     } catch (error) {
       if (signal.aborted && !run.written) return failure('cancelled'); // a read the cancel ended (gws's state)
@@ -470,10 +471,13 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
     try {
       return await underRun(input, async (run, signal, title, prepared) => {
         const { runId, target, artifactId, format, versionId, board } = input;
+        const asked = { artifactId, format, ownFile: true as const, ...(versionId !== undefined && { versionId }), ...(board !== undefined && { board }), ...(target === 'notion' && { dialect: 'notion' as const }) };
+        // the run's last read of its signal before the export and the export's start, one synchronous step: the export
+        // takes no signal, so a cancel answered before it never starts one
+        if (signal.aborted) return failure('cancelled');
         run.exporting = true;
         let exported: CommandResult<'artifacts.export'>;
         try {
-          const asked = { artifactId, format, ownFile: true as const, ...(versionId !== undefined && { versionId }), ...(board !== undefined && { board }), ...(target === 'notion' && { dialect: 'notion' as const }) };
           exported = await exportArtifact(asked, context).catch((error: unknown): CommandResult<'artifacts.export'> => ({ ok: false, error: ipcError('internal', words(error)) }));
         } finally {
           run.exporting = false;

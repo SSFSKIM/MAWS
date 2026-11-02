@@ -195,10 +195,10 @@ describe('MAWS’s own OAuth beside route D', () => {
     const relayed = createRelayedCallbacks();
     start({ relayed });
     const rows = (await invoke('connectors.servers', { artifactId: ART, tools: [{ server: 'notes', tool: 'search' }] })) as { servers: { handle: string }[] };
-    let listen: ((handle: (request: { method: string; url: string }) => { status: number; body: string }) => Promise<unknown>) | undefined;
+    let listen: ((handle: (request: { method: string; url: string }) => { status: number; body: string }, options: { state(): string | null }) => Promise<unknown>) | undefined;
     (provider.connect as ReturnType<typeof vi.fn>).mockImplementation(async (_source: unknown, _signal: unknown, _client: unknown, given: typeof listen) => {
       listen = given;
-      await given!((request) => ({ status: 200, body: `flow ${request.url}` }));
+      await given!((request) => ({ status: 200, body: `flow ${request.url}` }), { state: () => 'st' }); // the flow's armed state
       return new Promise(() => {}); // the consent is still open
     });
     (provider.state as ReturnType<typeof vi.fn>).mockResolvedValue({ state: 'needsConnect' });
@@ -207,9 +207,9 @@ describe('MAWS’s own OAuth beside route D', () => {
     expect(relayed.armed()).toBe(1);
     expect(provider.connect).toHaveBeenCalledWith(expect.objectContaining({ server: 'notes' }), expect.any(AbortSignal), me, expect.any(Function));
     await vi.advanceTimersByTimeAsync(0);
-    const asked = await bus.main('connectors.callback', { port: 61_234, method: 'GET', url: '/callback?code=c' }, me);
-    expect(asked).toEqual({ ok: true, value: { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }, body: 'flow /callback?code=c' } });
-    expect(await bus.main('connectors.callback', { port: 61_234, method: 'GET', url: '/callback?code=c' }, endableClientRef('remote:other'))).toEqual({ ok: true, value: { status: 404, body: '' } });
+    const asked = await bus.main('connectors.callback', { port: 61_234, method: 'GET', url: '/callback?code=c&state=st' }, me);
+    expect(asked).toEqual({ ok: true, value: { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }, body: 'flow /callback?code=c&state=st' } });
+    expect(await bus.main('connectors.callback', { port: 61_234, method: 'GET', url: '/callback?code=c&state=st' }, endableClientRef('remote:other'))).toEqual({ ok: true, value: { status: 404, body: '' } });
     expect(await bus.invoke('connectors.callback', { port: 61_234, method: 'GET', url: '/callback' }, me)).toMatchObject({ ok: false }); // main's alone
   });
 

@@ -17,7 +17,7 @@
 // P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Consent and the client port"): a remote asker's
 // Connect is given the relayed receiver for the port its device named (./relayed-callback.ts) in place of the loopback
 // listener: nothing binds here, the device's loopback is registered, and this handler runs over the requests the device
-// relays, its answer written by the device's listener.
+// relays that carry this flow's state, its answer written by the device's listener.
 //
 // SDK 1.32.1 parses an OpenID discovery document (its fallback when RFC 8414 metadata is absent) with a schema that
 // drops members it does not declare, among them `authorization_response_iss_parameter_supported` and the revocation
@@ -37,7 +37,7 @@ import type { AuthorizationServerMetadata, OAuthClientInformationFull, OAuthToke
 import { checkResourceAllowed, resourceUrlFromServerUrl } from '@modelcontextprotocol/sdk/shared/auth-utils.js';
 import type { ClientRef } from '@shared/ipc/client';
 import * as z from 'zod';
-import { OAUTH_CALLBACK_HOST, type ListenLoopback, type LoopbackReply, type LoopbackRequest } from './oauth-callback';
+import { OAUTH_CALLBACK_HOST, type ListenLoopback, type ListenOptions, type LoopbackReply, type LoopbackRequest } from './oauth-callback';
 import { boundedOAuthFetch, isPermittedOAuthUrl, OAuthTransportError, type OAuthFetch } from './oauth-http';
 import type { ConnectorOAuthGrant, ConnectorOAuthTokens } from '@shared/connectors/oauth-types';
 
@@ -196,6 +196,7 @@ function callbackWaiter(issuer: string, issRequired: boolean) {
   };
   return {
     handle,
+    expected: (): string | null => expectedState, // P5 O7 M5c: what the relayed receiver routes on
     arm(state: string) { expectedState = state; },
     wait(signal: AbortSignal): Promise<string> {
       return untilEnded(() => result, signal);
@@ -263,9 +264,9 @@ export function createConnectorOAuthFlow(deps: ConnectorOAuthFlowDeps): Connecto
 
   // The listener, owned by the caller once this resolves. A binding that completes only after the flow ended is
   // closed here, since no caller will.
-  async function bind(listen: ListenLoopback, handle: (request: LoopbackRequest) => LoopbackReply, signal: AbortSignal) {
+  async function bind(listen: ListenLoopback, handle: (request: LoopbackRequest) => LoopbackReply, options: ListenOptions, signal: AbortSignal) {
     if (signal.aborted) throw ended(signal);
-    const binding = Promise.resolve().then(() => listen(handle));
+    const binding = Promise.resolve().then(() => listen(handle, options));
     try {
       return await untilEnded(() => binding, signal);
     } catch (error) {
@@ -325,7 +326,7 @@ export function createConnectorOAuthFlow(deps: ConnectorOAuthFlowDeps): Connecto
       const flow = bound.signal;
       const flowFetch = boundedOAuthFetch(deps.fetch, flow);
       try {
-        const listener = await bind(listen, callback.handle, flow);
+        const listener = await bind(listen, callback.handle, { state: callback.expected }, flow);
         try {
           if (flow.aborted) throw ended(flow);
           const redirectUri = `http://${OAUTH_CALLBACK_HOST}:${listener.port}${OAUTH_CALLBACK_PATH}`;

@@ -268,7 +268,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
       return { status: 200, body: declined ? PAGE.declined : PAGE.signedIn };
     };
     try {
-      op.listener = await (op.receiver?.listen ?? deps.listen)(handle); // P5 O7 M5c: binds nothing for a remote asker
+      op.listener = await (op.receiver?.listen ?? deps.listen)(handle, { state: () => expected }); // P5 O7 M5c: binds nothing for a remote asker, and routes on the engine's state
     } catch (error) {
       return fail(op, 'engine', `MAWS could not listen for the sign-in's return: ${error instanceof Error ? error.message : String(error)}`);
     }
