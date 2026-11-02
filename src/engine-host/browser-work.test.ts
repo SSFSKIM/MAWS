@@ -556,6 +556,40 @@ describe('an adopted session and the link\'s snapshot, in both arrival orders (P
     await row.end();
   });
 
+  // P5 O17 M7 fix 4: the reversed order, main ready before the adoption reserves
+  it('an adoption reserved while main\'s link serves, after a capable link this process had, is the lost link\'s: not released past its idle time; a declaring client that tells none still clears', async () => {
+    const h = host();
+    const mawsd = h.link();
+    await mawsd.request('host.browserWork', { held: [ID] }); // names the session before its adoption reserves
+    h.runtime.detach(); // mawsd's link lost, its tab still alive
+    h.link(MAIN);
+    const row = await adopting(h);
+    expect(row.reserved).toBe('unknown');
+    expect(row.session.browserEntry()).toBe('unknown:lost');
+    row.transport.push(STOP);
+    await vi.waitFor(() => expect(row.session.status().work?.unknown).toBeNull());
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    h.table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(2 * IDLE_MS);
+    expect(row.transport.requestsOf('end_session')).toEqual([]);
+    h.link(OLDER_MAWSD); // the rollback: cleared, then released
+    expect(row.session.status().work?.holds).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(row.transport.requestsOf('end_session')).toHaveLength(1);
+    vi.useRealTimers();
+    await row.end();
+  });
+
+  it('an adoption reserved under a declaring client that tells none, after a capable link, starts clear (the rollback)', async () => {
+    const h = host();
+    await h.link().request('host.browserWork', { held: [ID] });
+    h.runtime.detach();
+    h.link(OLDER_MAWSD);
+    const row = await adopting(h);
+    expect(row.reserved).toBeNull();
+    await row.end();
+  });
+
   // P5 O17 M7 fix 3: the adoption's cause
   it('the embedded shape: an adoption before any capable client is the adoption\'s unknown; main\'s link clears it, and the row is released when idle', async () => {
     const h = host();

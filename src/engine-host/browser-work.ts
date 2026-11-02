@@ -94,14 +94,17 @@ export function registerBrowserWork(on: HostOn, emit: HostEmit, client: Pick<Hos
   });
 
   // A row created later: the kept set's verdict; with none applied on the current link, a lost link's `unknown` while a
-  // client that tells browser work is served (its first snapshot settles it), and for an adopted row while no client is:
-  // an adoption's while this host has had no client that tells, a lost link's after one. Clear otherwise. Told at its
-  // reservation, before its start, so its first status carries it.
+  // client that tells browser work is served (its first snapshot settles it). An adopted row, once this host has had a
+  // client that tells, is a lost link's under any client but a declaring one (fix 4: main's link ready before the
+  // adoption reserves says nothing of `mawsd`'s tabs, as at its connection); before one, an adoption's while no client is
+  // served. Clear otherwise. Told at its reservation, before its start, so its first status carries it.
   sessions.onReserved((session) => {
     const status = session.status();
+    const adopted = status.holder?.adopted === true;
     const entry = applied !== null ? (kept.has(status.appSessionId) ? 'held' : null)
       : tells() ? 'unknown:lost'
-      : status.holder?.adopted === true && !client.hasClient() ? (capableSeen ? 'unknown:lost' : 'unknown:adopted')
+      : adopted && capableSeen && !client.declaresAttachment() ? 'unknown:lost'
+      : adopted && !client.hasClient() ? 'unknown:adopted'
       : null;
     if (entry !== null) session.setBrowserHold(entry, false);
   });
