@@ -132,7 +132,7 @@ import { createArtifactsEndpoint, loadEndpointChunk } from './artifacts-endpoint
 import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
 import { createServicesFront, spineTakes } from './front';
 import { tellEngineHandover } from './engine-handover-event'; // P5 O16 M3c fix wave 2
-import { runE2eRender, runE2eSeam } from './e2e-seam'; // M5b fix round 2; P5 O5 M4
+import { runE2eBrowserView, runE2eRender, runE2eSeam } from './e2e-seam'; // M5b fix round 2; P5 O5 M4
 import { createRenderHandle, loadRenderChunk, type RenderChunk } from './render-handle'; // P5 O5 M4
 import { readRenderRuntime, renderCacheRoot, watchRenderCache } from './render-runtime'; // P5 O5 M6: the Linux render runtime, read at each check
 import type { RenderChild, RenderRuntime, RenderService } from './render-seam'; // types alone: the chunk loads at the first request
@@ -980,6 +980,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         return runE2eSeam(input as CommandInput<'daemon.e2eSeam'>, e2eSeamsAllowed); // M5b fix round 2: the e2e's seams with the spine
       case 'daemon.e2eRender':
         return runE2eRender(input as CommandInput<'daemon.e2eRender'>, e2eSeamsAllowed, (request) => render.captureForE2e(request)); // P5 O5 M4
+      case 'daemon.e2eBrowserView':
+        return runE2eBrowserView(input as CommandInput<'daemon.e2eBrowserView'>, e2eSeamsAllowed, browserFeed); // P5 O17 M9b
       case 'daemon.endpoint': {
         const { command, args, secret } = input as { command: string; args: string[]; secret?: string };
         if (!endpoint) return { code: 2, out: NO_ENDPOINT_MODULE };

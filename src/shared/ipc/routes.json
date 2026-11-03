@@ -412,6 +412,7 @@
   "connectors.visibility",
   "connectors.watch",
   "connectors.windowShown",
+  "daemon.e2eBrowserView",
   "daemon.e2eRender",
   "daemon.e2eSeam",
   "daemon.endpoint",

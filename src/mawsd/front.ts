@@ -105,7 +105,7 @@ import type { EngineIntercept } from './spine-hosts';
 // The front's own `machine` names, answered without the spine: the daemon's, the identity, and a client's own.
 // P5 O5 M4: the render seam's (artifacts.export, render.answer) and its e2e capture (daemon.e2eRender).
 // P5 O5 M5: a session's capabilities (session.capabilities). P5 O17 M3: a tab engine's browser work (browserEngine.work).
-export const FRONT_COMMANDS = ['artifacts.export', 'browserEngine.answer', 'browserEngine.ended', 'browserEngine.frame', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'daemon.e2eRender', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.restartEngineHost' /* P5 O16 M3b */, 'daemon.status', 'machine.client', 'machine.identity', 'render.answer', 'session.capabilities', 'session.follow'] as const;
+export const FRONT_COMMANDS = ['artifacts.export', 'browserEngine.answer', 'browserEngine.ended', 'browserEngine.frame', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'daemon.e2eBrowserView' /* P5 O17 M9b */, 'daemon.e2eRender', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.restartEngineHost' /* P5 O16 M3b */, 'daemon.status', 'machine.client', 'machine.identity', 'render.answer', 'session.capabilities', 'session.follow'] as const;
 // The names a machine.sock client asks of the front for itself, never the endpoint.
 const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['browserEngine.answer', 'browserEngine.ended', 'browserEngine.frame', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'machine.client', 'render.answer', 'session.follow']);
 // P5 O5 M4: the engine host's render requests, which the render seam answers and no client hears; P5 O17 M3: and its
@@ -327,6 +327,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       if (!(browser.ended?.(from!, input as CommandInput<'browserEngine.ended'>) ?? false)) throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.ended for ${subscriptionId}, which is no open subscription of this connection`));
     },
     'clientPort.answer': (input, _context, from) => clientPort.answer(from!, input as CommandInput<'clientPort.answer'>),
+    'daemon.e2eBrowserView': (input) => options.daemon('daemon.e2eBrowserView', input), // P5 O17 M9b
     'daemon.e2eRender': async (input) => void (await options.daemon('daemon.e2eRender', input)), // P5 O5 M4
     // P5 O5 M4: the render host's answer, from a render client alone
     'render.answer': (input, _context, from) => {

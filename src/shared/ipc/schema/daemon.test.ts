@@ -38,9 +38,9 @@ function fieldsOf(schema: z.ZodType, path: string[] = []): { path: string; name:
 describe('the daemon namespace', () => {
   it('is machine-owned and main-only, bridging nothing', () => {
     const daemon = Object.entries(commands).filter(([name]) => name.startsWith('daemon.'));
-    expect(Object.fromEntries(daemon.map(([name, spec]) => [name, spec.owner]))).toEqual({ 'daemon.status': 'machine', 'daemon.restart': 'machine', 'daemon.restartEngineHost': 'machine' /* P5 O16 M3b */, 'daemon.endpoint': 'machine', 'daemon.e2eSeam': 'machine', 'daemon.e2eRender': 'machine' /* P5 O5 M4 */ });
+    expect(Object.fromEntries(daemon.map(([name, spec]) => [name, spec.owner]))).toEqual({ 'daemon.status': 'machine', 'daemon.restart': 'machine', 'daemon.restartEngineHost': 'machine' /* P5 O16 M3b */, 'daemon.endpoint': 'machine', 'daemon.e2eSeam': 'machine', 'daemon.e2eRender': 'machine' /* P5 O5 M4 */, 'daemon.e2eBrowserView': 'machine' /* P5 O17 M9b */ });
     expect(NAMES.daemon.commands).toEqual([]);
-    expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['daemon.status', 'daemon.restart', 'daemon.restartEngineHost', 'daemon.endpoint', 'daemon.e2eSeam', 'daemon.e2eRender']));
+    expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['daemon.status', 'daemon.restart', 'daemon.restartEngineHost', 'daemon.endpoint', 'daemon.e2eSeam', 'daemon.e2eRender', 'daemon.e2eBrowserView']));
   });
 
   it('carries the enrollment secret only as an optional field of daemon.endpoint, never in args', () => {

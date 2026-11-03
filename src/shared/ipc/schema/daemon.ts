@@ -8,6 +8,7 @@
 // local answer carries them, and `remoteDaemonStatus` drops every marked field by walking the schema, so the endpoint
 // redacts O2's fields without knowing them, and the redacted answer still validates against this one schema.
 import * as z from 'zod';
+import { AppSessionIdSchema } from '../../graph/ids'; // P5 O17 M9b: daemon.e2eBrowserView's session
 import { MachineRefSchema } from '../../machine/ref';
 import type { CommandSpec } from './common';
 import { AbsolutePathSchema } from './settings'; // P5 O5 M4: daemon.e2eRender's `to`
@@ -139,6 +140,18 @@ export const commands = {
   'daemon.e2eRender': machine(
     z.strictObject({ artifactId: z.uuid(), revision: z.number().int().min(0), width: z.number().int().min(16).max(4096), height: z.number().int().min(16).max(4096), to: AbsolutePathSchema }),
     z.void(),
+  ),
+  // P5 O17 M9b fix wave: a viewer of `mawsd`'s own feed of a session's agent browser (DaemonServices.browser, as the
+  // endpoint's viewers read it; src/mawsd/e2e-seam.ts): the first ready inventory listing a tab, that tab opened
+  // read-only, `frames` frames read ack by ack, what it saw answered; within E2E_BROWSER_VIEW_MS, refused unless `mawsd`
+  // runs under MAWS_E2E=1. A command of its own, as daemon.e2eRender.
+  'daemon.e2eBrowserView': machine(
+    z.strictObject({ appSessionId: AppSessionIdSchema, frames: z.number().int().min(1).max(10) }),
+    z.strictObject({
+      tabs: z.array(z.string()),
+      tabId: z.string(),
+      frames: z.array(z.strictObject({ seq: z.number().int().min(1), width: z.number().int().min(1), height: z.number().int().min(1), bytes: z.number().int().min(1) })),
+    }),
   ),
 } as const satisfies Record<`daemon.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 

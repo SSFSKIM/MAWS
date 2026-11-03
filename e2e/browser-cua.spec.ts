@@ -782,6 +782,40 @@ test('a session launched with no app reads O17’s no-app capability until the a
   }
 });
 
+// P5 O17 M9b fix wave (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M9): the app as the tab engine on the daemon
+// shape, end to end. With the app attached `mawsd` reads the session `relay` and selects the app; its own feed (the
+// viewers' DaemonServices.browser, through `daemon.e2eBrowserView` from a bare machine.sock client) asks the app for the
+// session's inventory and opens its agent tab. The way there is production's: `browserEngine.request` posted to the app's
+// machine.sock link, relayed by main's supervisor to the app's engine alone (hosts/window-events.ts), answered through
+// `hosts.dispatch('machine', 'browserEngine.*')`, its frames read by mawsd's feed.
+test('on the daemon shape mawsd’s own feed views the app’s agent tab: the inventory asked of the app in relay, its tab opened, a frame through the machine link', async () => {
+  test.setTimeout(180_000);
+  const live = liveRoot([], { retry: true, lease: true });
+  let seeded = '';
+  const daemon = await startProfileDaemon({ userData: live.userData, env: { MAWS_E2E_ENGINE_BIN: live.bin }, prepare: ({ claudeConfigDir }) => void ([seeded] = seedTranscripts(claudeConfigDir, live.repo, ['the cua engine stub, viewed by mawsd'])) });
+  let maws: MawsLaunch | null = null;
+  try {
+    const id = await sessionOf(() => daemon.request<Listed>('session.list', {}), seeded);
+    maws = await launchMaws({ userData: live.userData, keepConfigHome: true, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', MAWS_E2E_ENGINE_BIN: live.bin } });
+    const app = seam(maws);
+    expect(await daemon.request('session.launch', { spec: launchSpec(id, live.repo, daemonSocketOf(live.userData, id)) })).toMatchObject({ status: 'launching' });
+    await expect.poll(async () => (await app.inspect())[id]?.leased.length ?? 0, { timeout: 30_000, message: 'the lease taken through mawsd’s relay' }).toBe(1);
+    const [leased] = (await app.inspect())[id]!.leased;
+    type Viewed = { tabs: string[]; tabId: string; frames: { seq: number; width: number; height: number; bytes: number }[] };
+    let viewed: Viewed | null = null;
+    await expect(async () => void (viewed = await daemon.request<Viewed>('daemon.e2eBrowserView', { appSessionId: id, frames: 1 }))).toPass({ timeout: 30_000 });
+    expect(viewed, 'mawsd’s feed read the app’s agent tab, the only one listed').toMatchObject({ tabs: [leased], tabId: leased, frames: [{ seq: 1 }] });
+    expect(viewed!.frames[0]!.width).toBeGreaterThan(0);
+    expect(viewed!.frames[0]!.bytes).toBeGreaterThan(0);
+    type Inspected = { __maws_browser: { engine: { inspect(): { sessions: number } } } };
+    expect((await maws.app.evaluate(() => (globalThis as unknown as Inspected).__maws_browser.engine.inspect())).sessions, 'the app’s engine was asked about the session on this link').toBe(1);
+  } finally {
+    await maws?.cleanup().catch((error: unknown) => console.error(error));
+    await daemon.stop().catch((error: unknown) => console.error(error));
+    rmSync(live.root, { recursive: true, force: true });
+  }
+});
+
 test('one session\'s engine cannot reach another session\'s tab engine directly: its connector at B\'s app socket is refused, while B\'s own reaches it through mawsd\'s relay', async () => {
   const live = liveRoot(['session B of two'], { retry: false });
   const repoA = join(live.root, 'repo-a');
