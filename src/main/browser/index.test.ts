@@ -384,13 +384,49 @@ describe("startBrowser: the agent's presence (E4c's, re-homed when the browser t
     };
   };
 
-  it("listens to the engine host's session status only (no browser request any more), and stops at stop", () => {
+  it("listens to the engine host's session status (no browser request of the engine host's any more), and stops at stop", () => {
     start(fakeIndex([A]).index).stop(); // E4a alone: nothing to subscribe to
     const { hosts, events } = fakeHosts();
     const browser = start(fakeIndex([A]).index, { hosts: hosts as never });
     expect([...events.keys()]).toEqual(['session.status']); // E13's status hook
     browser.stop();
     expect(events.size).toBe(0);
+  });
+
+  // P5 O17 M9b fix wave: the app is a tab engine only where a machine host runs (the daemon shape); the embedded shapes'
+  // supervisor runs engine-host and pty-host alone, and its onState and dispatch throw for an owner it does not run
+  const embeddedHosts = () => {
+    const { hosts, events } = fakeHosts();
+    const notRun = (owner: string) => {
+      if (owner !== 'engine-host' && owner !== 'pty-host') throw new Error(`no ${owner} host runs in this process`);
+    };
+    const states = new Map<string, unknown>();
+    const onState = vi.fn((owner: string, listener: unknown) => {
+      notRun(owner);
+      states.set(owner, listener);
+      return () => void states.delete(owner);
+    });
+    return { hosts: { ...hosts, onState }, events, states };
+  };
+
+  it('on an embedded shape (no machine host) starts no tab engine and touches no machine host', () => {
+    const { hosts, events, states } = embeddedHosts();
+    const browser = start(fakeIndex([A]).index, { hosts: hosts as never });
+    expect([...events.keys()]).toEqual(['session.status']);
+    expect(states.size).toBe(0);
+    browser.stop();
+  });
+
+  it("on the daemon shape answers mawsd's browserEngine.request and follows the machine host's state, both stopped at stop", () => {
+    const { hosts, events } = fakeHosts();
+    const states = new Map<string, unknown>();
+    const onState = vi.fn((owner: string, listener: unknown) => (states.set(owner, listener), () => void states.delete(owner)));
+    const browser = start(fakeIndex([A]).index, { hosts: { ...hosts, onState } as never, machineHost: true });
+    expect([...events.keys()]).toEqual(['session.status', 'browserEngine.request']); // P5 O17 M9b: the app as a tab engine
+    expect([...states.keys()]).toEqual(['machine']);
+    browser.stop();
+    expect(events.size).toBe(0);
+    expect(states.size).toBe(0);
   });
 
   it('under MAWS_E2E=1 mints deterministic tab ids and adds the agent to the seam', () => {

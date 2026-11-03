@@ -29,7 +29,7 @@ import { builtAtLabel } from '@shared/app/build-time'; // E11 §2.7
 import { registerPtyOpenLink } from './pty-links'; // C9
 import { appUrl, createWindow, installContentSecurityPolicy, prepareHarness } from './window'; // C9: prepareHarness
 // C3 start (the attention service is the spine's: src/services/spine-root.ts)
-import { emit, emitFrom } from './ipc/events'; // P5 O9 M9: emitFrom, remote lane A's events
+import { emit, emitFrom, emitTo } from './ipc/events'; // P5 O9 M9: emitFrom, remote lane A's events; P5 O17 M9b: emitTo, the remote view's
 import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P5 O6 M1: registerMachineHandler
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager (P5 O3-D M6: the stand-in gone)
@@ -109,6 +109,7 @@ import { MACHINE_DELIVERY_CAPABILITY, MACHINE_RENDER_CAPABILITY } from '@shared/
 // E11 end
 // E4a start
 import { startBrowser, type Browser } from './browser';
+import { createRemoteViews } from './browser/remote-view'; // P5 O17 M9b
 // E4a end
 // P5 O3-A start: the browser's own database, out of the index
 import { BROWSER_DATA_PATH } from '@shared/browser/data-schema';
@@ -475,6 +476,26 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // P4 W2-B: the hosts' stop is a drain, run before the rest, which stop once it has settled
   const shutdown = shutdownSteps(app, CLOSE_GRACE_MS);
   shutdown.add('remote lane B', () => remoteLaneB.stop()); // P5 O7 M2: its subscriptions closed before the links
+  // P5 O17 M9b (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §K, "The app's bridge"): a window's own
+  // viewers of the agent's tabs on another machine's session, over its RL2 link (src/main/browser/remote-view.ts); the
+  // router answers them here for any machine. Its feeds and streams close before the links
+  const remoteViews = createRemoteViews({
+    local,
+    remote: (ref) => machines.remote(ref),
+    emit: (client, name, payload) => {
+      const page = pageOf(client);
+      if (page) emitTo(page, name, payload);
+    },
+    log: (line) => console.log(line),
+  });
+  registerMainHandler('browser.remote.open', (input, context) => remoteViews.open(input, context));
+  registerMainHandler('browser.remote.select', (input, context) => remoteViews.select(input, context));
+  registerMainHandler('browser.remote.takeControl', (input, context) => remoteViews.takeControl(input, context));
+  registerMainHandler('browser.remote.releaseControl', (input, context) => remoteViews.releaseControl(input, context));
+  registerMainHandler('browser.remote.input', (input, context) => remoteViews.input(input, context));
+  registerMainHandler('browser.remote.ack', (input, context) => remoteViews.ack(input, context));
+  registerMainHandler('browser.remote.close', (input, context) => remoteViews.close(input, context));
+  shutdown.add('remote views', () => remoteViews.stop());
   shutdown.add('remote lane A', () => remoteLaneA.stop()); // P5 O9 M9: its subscriptions closed before the links
   // C3 start: the engine host's userData travels in the environment it is forked with (the host protocol's hello carries
   // no fields).
@@ -682,6 +703,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     // E4c start: the browser tools answer the engine host's requests (E4c Design §4; Decision Log 36)
     hosts,
     // E4c end
+    machineHost: launch.mode === 'daemon', // P5 O17 M9b: the app a tab engine to mawsd only where its machine host runs
     // P5 O7 M3: a remote session's tabs are this Mac's, said from its machine; a forwarded port's tab opens its forward
     // again at its first load past a relaunch (src/main/browser/machines.ts, forwarded.ts)
     remote: {

@@ -102,7 +102,7 @@ export class Scratch {
   private readonly sockets = new Set<string>();
 
   // P5 O17 M7 fix 1: `shortRoot`, a root under /tmp with a short prefix, for a case whose sockets live under the
-  // profile: the daemon's cua sockets (`<profile>/mawsd/cua/<id>.sock`, else a fallback under TMPDIR), the app's
+  // profile: the daemon's cua sockets (`<profile>/mawsd/cua/<digest>.sock`, else a fallback under TMPDIR), the app's
   // (`<profile>/browser/cua/<id>.sock`, no fallback) and a connector's control socket in the repository fit 103 bytes
   // only there, as e2e/support/headless-browser.ts's scene makes its own
   constructor(name: string, opts: ScratchOptions = {}) {

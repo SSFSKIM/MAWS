@@ -21,12 +21,16 @@
 //   under an act: an artifact page's request (`http`, its answer's status and headers in `streamOpened.http`, the body
 //   after) or its document (`document`). It goes only to a peer that listed `rl2.read-open` as well, judged on the
 //   channel it goes out on, and closes `not-offered` otherwise: an older endpoint reads a missing `op` as `malformed`.
+// - P5 O17 M9a (O17's Interfaces §K): the read open's `browser.screencast`, one viewer of an agent tab on the machine
+//   (`browser`; browser-stream.ts reads its frames and sends its controls), goes only to a peer that listed
+//   `rl2.browser-screencast` as well, and closes `not-offered` otherwise; its answer's `browser` reaches the consumer.
 import {
   STREAM_CHUNK_BYTES,
   STREAM_CREDIT_MAX,
   base64urlEncode,
   type DeviceMessage,
   type EndpointMessage,
+  type StreamBrowserOpen,
   type StreamDocumentOpen,
   type StreamHttpOpen,
   type StreamKind,
@@ -49,10 +53,12 @@ export interface StreamRequest {
   http?: StreamHttpOpen;
   /** P5 O7 M5b: an artifact's document, to edit or to view. */
   document?: StreamDocumentOpen;
+  /** P5 O17 M9a: one agent tab of a session, read-only or under a done `machine.browserControl` act (`control.op`). */
+  browser?: StreamBrowserOpen;
 }
 /**
  * `streamOpened` without its kind and id: a pty's `{info, ringStart, nextOffset}`, (P5 O7 M5b) an `http` answer's
- * `{status, headers}`, and the endpoint's credit for this side's bytes.
+ * `{status, headers}`, (P5 O17 M9a) a screencast's `{epoch, tabId, control}`, and the endpoint's credit for this side's bytes.
  */
 export type StreamOpened = Omit<StreamOpenedMessage, 't' | 'id'>;
 export interface StreamSink {
@@ -184,7 +190,8 @@ export class StreamTable {
         if (entry.state !== 'sent') return;
         entry.state = 'opened';
         entry.credit = message.credit;
-        entry.sink.opened({ ...(message.pty === undefined ? {} : { pty: message.pty }), ...(message.http === undefined ? {} : { http: message.http }), credit: message.credit });
+        const { pty, http, browser } = message;
+        entry.sink.opened({ ...(pty === undefined ? {} : { pty }), ...(http === undefined ? {} : { http }), ...(browser === undefined ? {} : { browser }), credit: message.credit });
         if (this.#entries.get(entry.id) !== entry) return;
         for (const control of entry.controls.splice(0)) this.#deps.send({ t: 'streamControl', id: entry.id, control });
         if (entry.refund > 0) this.#refund(entry, entry.refund);
@@ -221,14 +228,15 @@ export class StreamTable {
 
   #open(entry: Entry): void {
     // What the peer could not read never goes: the stream ends here, as the peer would end the channel.
-    const { kind, op, pty, tcp, http, document } = entry.request;
-    if (!peerLists(this.#deps, 'rl2.streams') || (op === undefined && !peerLists(this.#deps, 'rl2.read-open'))) {
+    const { kind, op, pty, tcp, http, document, browser } = entry.request;
+    const unread = !peerLists(this.#deps, 'rl2.streams') || (op === undefined && !peerLists(this.#deps, 'rl2.read-open')) || (kind === 'browser.screencast' && !peerLists(this.#deps, 'rl2.browser-screencast'));
+    if (unread) {
       this.#entries.delete(entry.id);
       return void queueMicrotask(() => entry.sink.closed('not-offered'));
     }
     const credit = Math.min(Math.max(1, entry.request.credit ?? STREAM_OPEN_CREDIT), STREAM_CREDIT_MAX);
     entry.inbound = credit;
-    const fields = { ...(op === undefined ? {} : { op }), ...(pty === undefined ? {} : { pty }), ...(tcp === undefined ? {} : { tcp }), ...(http === undefined ? {} : { http }), ...(document === undefined ? {} : { document }) };
+    const fields = { ...(op === undefined ? {} : { op }), ...(pty === undefined ? {} : { pty }), ...(tcp === undefined ? {} : { tcp }), ...(http === undefined ? {} : { http }), ...(document === undefined ? {} : { document }), ...(browser === undefined ? {} : { browser }) };
     if (this.#deps.send({ t: 'streamOpen', id: entry.id, kind, credit, ...fields })) entry.state = 'sent';
   }
 

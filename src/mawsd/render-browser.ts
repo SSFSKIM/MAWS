@@ -3,7 +3,8 @@
 //
 // `ensure` is RenderHandle.ensureBrowser's work once the seam took the demand: the session's lineage read (`parentOf`,
 // bounded by the demand's deadline, in parallel with the render host's start), then, on the ready host's connection,
-// `prepare` naming the parent, resolved at its answer with the socket `mawsd` computed. A session the ready host serves
+// `prepare` naming the parent and the socket `mawsd` computed (where the render host listens: P5 O17, the session
+// sockets' names), resolved at its answer with that socket. A session the ready host serves
 // resolves at once; one it is preparing joins that prepare. A demand ends at its deadline or its signal; one that ends
 // after its prepare was sent, with no other demand waiting on that prepare, is undone with `drop` (the render host's drop
 // cancels a running prepare), so a promotion that expires leaves no prepared session behind. A demand is its connection's
@@ -183,7 +184,7 @@ export function createRenderBrowser(options: RenderBrowserOptions): RenderBrowse
         options.changed();
       },
     });
-    const request: BrowserEngineRequest = { id, appSessionId, operation: { op: 'prepare', ...(parent !== null && { parent }) } };
+    const request: BrowserEngineRequest = { id, appSessionId, operation: { op: 'prepare', ...(parent !== null && { parent }), socketPath } };
     if (!options.post(on, request)) {
       pending.delete(id);
       sessions.delete(appSessionId);

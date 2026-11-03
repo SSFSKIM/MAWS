@@ -1,7 +1,7 @@
 // The services front's core (P5 O3-D M2; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §B): a
 // machine.sock client's runtime over a stand-in seam and hosts. The front over the real spine is daemon-spine.test.ts's.
 import { describe, expect, it, vi } from 'vitest';
-import { MACHINE_SPINE_CAPABILITY, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
+import { BROWSER_ENGINE_CAPABILITY, MACHINE_SPINE_CAPABILITY, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { HostResponse } from '@shared/ipc/host-protocol';
@@ -433,9 +433,9 @@ describe('browser work through the front', () => {
     let selected: { engine: EngineConnection; period: string } | null = null;
     const served = front({ browser: { work, selected: () => selected } });
     // a render host's connection: its runtime is the engine connection the route selects
-    const engine = () => {
+    const engine = (capabilities: string[] = [RENDER_CLIENT_CAPABILITY]) => {
       const end = connection();
-      const runtime = served.served.runtimeFor({ appPid: 1, capabilities: [RENDER_CLIENT_CAPABILITY] });
+      const runtime = served.served.runtimeFor({ appPid: 1, capabilities });
       runtime.serve(end.port);
       end.ready();
       return { end, runtime };
@@ -443,6 +443,17 @@ describe('browser work through the front', () => {
     const select = (connection: EngineConnection | null, period = 'p1') => void (selected = connection === null ? null : { engine: connection, period });
     return { work, snapshots, acks, served, engine, select };
   }
+
+  // P5 O17 M9b fix wave: in `relay` the app is the session's selected connection, but the fence (R5, §E) is the render
+  // host's alone: the app makes its agent's tabs itself and holds no render host awake
+  it('refuses browserEngine.work from a connection that is no render client, even the selected one', async () => {
+    const { work, engine, select } = withWork();
+    const app = engine([BROWSER_ENGINE_CAPABILITY]);
+    select(app.runtime);
+    expect(await app.end.request('browserEngine.work', { appSessionId: S, held: true })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    expect(await app.end.request('browserEngine.work', { appSessionId: S, held: false })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    expect(work.held()).toEqual([]);
+  });
 
   it('takes held: true from the selected connection alone, answered only once the snapshot naming the session is acknowledged', async () => {
     const { work, snapshots, acks, engine, select } = withWork(true, true);

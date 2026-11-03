@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'v
 import { PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 import type { AppSessionId } from '@shared/graph/ids';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
+import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
 import { cuaSocketDir } from '@shared/daemon/files';
 import { buildIdOf, procStartOf } from '../engine-host/supervisor-files';
 import { SPINE_LOCK, takeSpineLock } from '../services/settings/spine-lock';
@@ -339,7 +340,7 @@ describe('the spine’s bindings (§A)', () => {
   });
 
   // P5 O3-D M5b gave a launch the attached app's own cua socket; P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md,
-  // Interfaces §H) gives it mawsd's: `<cuaSocketDir>/<appSessionId>.sock`, the same path whether or not an app is attached,
+  // Interfaces §H) gives it mawsd's: `<cuaSocketDir>/<digest>.sock` (P5 O17, the session sockets' names), the same path whether or not an app is attached,
   // so an engine launched before any app, or outliving one, keeps a socket that serves it again at the next attachment
   it('browserSocket: the daemon’s own socket for the session, the same before, during and after an app’s attachment', async () => {
     const chunk = standInChunk();
@@ -349,7 +350,7 @@ describe('the spine’s bindings (§A)', () => {
     const other = await scene.app('machine', { appPid: 1 }); // a CLI, a second client
     expect(await machine.request('session.launchMode')).toMatchObject({ ok: true });
     const id = 'app-1' as AppSessionId;
-    const own = join(cuaSocketDir(scene.root), 'app-1.sock');
+    const own = daemonCuaSocketPath(cuaSocketDir(scene.root), id);
     expect(chunk.deps[0]!.browserSocket(id)).toBe(own);
     expect(await other.request('machine.client', { browserSocket: '/tmp/not-the-app' })).toMatchObject({ ok: true });
     expect(await machine.request('machine.client', { browserSocket: '/tmp/cua' })).toMatchObject({ ok: true });

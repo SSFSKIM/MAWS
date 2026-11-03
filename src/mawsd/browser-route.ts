@@ -19,10 +19,18 @@
 // The inventory cache (§G): what the selected engine connection last pushed (`browserEngine.state`), stamped with the
 // epoch, reset at each; its watchers hear the current reading at once and each change (M6's feed reads it, never loading
 // a chunk for it). `periodEnds` tells the subscriptions' owner (M6) why a period ended.
+//
+// P5 O17 M9b (M9's Decisions; the refresh pass's correction 1): in `relay` the attached app is the session's selected
+// engine when its hello lists `browser.engine` (`appEngine`), as the render host is in `headless`: its `state` feeds the
+// cache, and its inventory is asked (`browserEngine.request {inventory}`, answered through `answer`) once per period, at
+// the period's first inventory read or watch, or at the move into `relay` when the session has watchers; an ask the app
+// could not be sent is tried again at the next read. Until it answers, the reading is ready with no tabs, as `cold`'s.
+// An app whose hello does not list it (a local-stage build or older) reads unavailable: it is too old to share the
+// agent's tabs.
 import { randomBytes } from 'node:crypto';
 import type { BrowserInventory } from '@shared/browser/screencast';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { EngineInventory } from '@shared/ipc/schema/browser-engine';
+import type { BrowserEngineRequest, BrowserEngineResult, EngineInventory } from '@shared/ipc/schema/browser-engine';
 import type { EngineConnection } from './browser-work';
 import type { BrowserDemand, BrowserRouteReading, BrowserRouteState, BrowserTarget } from './cua-broker'; // types alone: the broker is a deferred chunk
 import type { FrontSelection } from './front';
@@ -37,6 +45,8 @@ export interface BrowserRouteOptions {
   dropBrowser(appSessionId: AppSessionId): Promise<void>; // RenderHandle.dropBrowser: the session's service there ended, its tabs closed
   engineOf(appSessionId: AppSessionId): EngineConnection | null; // the connection the render host prepares or serves the session on
   socketPath(appSessionId: AppSessionId): string | null; // the render host's socket for the session (§D), computed by mawsd
+  appEngine(): EngineConnection | null; // P5 O17 M9b: the attached app's connection when its hello lists browser.engine
+  post(engine: EngineConnection, request: BrowserEngineRequest): boolean; // P5 O17 M9b: to that connection alone; false when it is going
   routeChanged(appSessionId: AppSessionId): void; // the cua sockets: an older epoch's connections end, listening follows
   log(line: string): void;
 }
@@ -57,6 +67,8 @@ export interface BrowserRoute {
   watchInventory(appSessionId: AppSessionId, changed: (inventory: BrowserInventory) => void): () => void;
   periodEnds(listener: (appSessionId: AppSessionId, reason: PeriodEnd) => void): () => void;
   counts(): { browserSessions: number; browserTabs: number };
+  answer(engine: EngineConnection, input: { id: string; result: BrowserEngineResult }): boolean; // P5 O17 M9b: false: no ask of the route's pending on it
+  engineGone(engine: EngineConnection): void; // P5 O17 M9b: its asks will not be answered
 }
 
 interface Entry {
@@ -67,11 +79,13 @@ interface Entry {
   reason: string | null; // `none`'s reason as published: a reason that changes with the state unchanged is told, no epoch minted
   inventory: EngineInventory | null; // the selected engine's last push in this epoch
   attempt: number; // the latest demand's start: only its completion moves `starting` on (an older one was aborted or superseded)
+  asked: boolean; // P5 O17 M9b: in `relay`, the app was asked this period's inventory
 }
 
 type Watcher = (inventory: BrowserInventory) => void;
 
 const HEADLESS_STATES: ReadonlySet<BrowserRouteState> = new Set(['starting', 'headless']);
+const SELECTED_STATES: ReadonlySet<BrowserRouteState> = new Set(['starting', 'headless', 'relay']); // P5 O17 M9b: an engine selected
 
 export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
   const { machine, log } = options;
@@ -91,7 +105,7 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
       const app = options.app();
       const headless = options.headless();
       const state = base(app, headless);
-      entries.set(appSessionId, (found = { state, epoch: mint(), live: false, pid: null, reason: state === 'none' ? headless : null, inventory: null, attempt: 0 }));
+      entries.set(appSessionId, (found = { state, epoch: mint(), live: false, pid: null, reason: state === 'none' ? headless : null, inventory: null, attempt: 0, asked: false }));
       told(appSessionId, found); // a replaced entry's watchers hear its new epoch
     }
     return found;
@@ -99,9 +113,9 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
 
   const inventoryOf = (current: Entry): BrowserInventory => {
     const unavailable = (reason: string): BrowserInventory => ({ epoch: current.epoch, tabs: [], selected: null, state: 'unavailable', reason });
-    if (current.state === 'relay') return unavailable(`the agent's browser is in the MAWS app on ${machine}`);
+    if (current.state === 'relay' && options.appEngine() === null) return unavailable(`the MAWS app on ${machine} is too old to share the agent's tabs`);
     if (current.state === 'none') return unavailable(current.reason ?? `the agent's browser is unavailable on ${machine}`);
-    if (HEADLESS_STATES.has(current.state) && current.inventory) return { epoch: current.epoch, ...current.inventory };
+    if (SELECTED_STATES.has(current.state) && current.inventory) return { epoch: current.epoch, ...current.inventory };
     return { epoch: current.epoch, tabs: [], selected: null, state: 'ready' };
   };
   function told(appSessionId: AppSessionId, current: Entry): void {
@@ -121,6 +135,7 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
     current.state = to;
     current.epoch = mint();
     current.inventory = null;
+    current.asked = false;
     current.reason = to === 'none' ? reason : null;
   };
   // The old period's teardown, after the mint: its subscriptions ended, its render-host service dropped when it had one,
@@ -141,9 +156,22 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
 
   const selection = (appSessionId: AppSessionId): FrontSelection | null => {
     const current = entries.get(appSessionId);
-    if (!current || !HEADLESS_STATES.has(current.state)) return null;
-    const engine = options.engineOf(appSessionId);
+    if (!current || !SELECTED_STATES.has(current.state)) return null;
+    const engine = current.state === 'relay' ? options.appEngine() : options.engineOf(appSessionId);
     return engine === null ? null : { engine, period: current.epoch };
+  };
+
+  // P5 O17 M9b: the app's inventory asked once a period, its answer taken only for the period it was asked in
+  const asks = new Map<string, { engine: EngineConnection; appSessionId: AppSessionId; current: Entry; epoch: string }>();
+  let askedTimes = 0;
+  const ask = (appSessionId: AppSessionId, current: Entry) => {
+    if (current.state !== 'relay' || current.asked) return;
+    const engine = options.appEngine();
+    if (engine === null) return;
+    const id = `route-${++askedTimes}`;
+    if (!options.post(engine, { id, appSessionId, operation: { op: 'inventory' } })) return; // tried again at the next read
+    current.asked = true;
+    asks.set(id, { engine, appSessionId, current, epoch: current.epoch });
   };
 
   return {
@@ -196,6 +224,7 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
       for (const { appSessionId, current, from } of moved) {
         log(`[browser] ${appSessionId}: ${from} → ${current.state}${current.state === 'none' ? ` (${headless})` : ''}`);
         teardown(appSessionId, current, from, 'engine_changed');
+        if (watchers.get(appSessionId)?.size) ask(appSessionId, current); // P5 O17 M9b
       }
     },
     statusSeen(appSessionId, { process, pid, replaced = false }) {
@@ -239,9 +268,14 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
       told(appSessionId, current);
       return true;
     },
-    inventory: (appSessionId) => inventoryOf(entry(appSessionId)),
+    inventory(appSessionId) {
+      const current = entry(appSessionId);
+      ask(appSessionId, current); // P5 O17 M9b
+      return inventoryOf(current);
+    },
     watchInventory(appSessionId, changed) {
       const current = entry(appSessionId);
+      ask(appSessionId, current); // P5 O17 M9b
       let watching = watchers.get(appSessionId);
       if (!watching) watchers.set(appSessionId, (watching = new Set()));
       watching.add(changed);
@@ -254,6 +288,28 @@ export function createBrowserRoute(options: BrowserRouteOptions): BrowserRoute {
     periodEnds(listener) {
       ends.add(listener);
       return () => void ends.delete(listener);
+    },
+    answer(engine, { id, result }) {
+      const asked = asks.get(id);
+      if (!asked || asked.engine !== engine) return false;
+      asks.delete(id);
+      const { appSessionId, current, epoch } = asked;
+      if (entries.get(appSessionId) !== current || current.epoch !== epoch || selection(appSessionId)?.engine !== engine) return true; // a period gone: taken, ignored
+      if (!result.ok || result.value === null) {
+        current.asked = false; // asked again at the next read
+        log(`[browser] ${appSessionId}: the app did not give its inventory${result.ok ? '' : `: ${result.error}`}`);
+        return true;
+      }
+      current.inventory = result.value;
+      told(appSessionId, current);
+      return true;
+    },
+    engineGone(engine) {
+      for (const [id, asked] of [...asks]) {
+        if (asked.engine !== engine) continue;
+        asks.delete(id);
+        asked.current.asked = false;
+      }
     },
     counts() {
       const serving = [...entries.values()].filter((current) => current.state === 'headless');

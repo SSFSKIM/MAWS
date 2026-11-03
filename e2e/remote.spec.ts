@@ -84,7 +84,9 @@ import { DATASET_STATES } from '../src/artifacts/dashboard/states';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-scene';
-import { mainTabById, openSurface, surface } from './support/shell';
+import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
+import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M10
+import { closeSurface, mainTabById, openSurface, surface } from './support/shell';
 import { SideJournal } from './support/side-replay';
 import { newChatIn, showProjectList, sidebarOf } from './support/sidebar';
 
@@ -504,6 +506,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       scratch: join(root, 'scene'),
       aUserData,
       b: {
+        root: '/tmp', // P5 O17 M10: the session's cua socket within a Unix socket's bound (the runner's tmpdir is long)
         env: {
           MAWS_ENGINE_REPLAY: '1',
           MAWS_E2E_REPLAY_FIXTURES: [fixture, 'live', spawnedFixture, worktreeFixture, waitingFixture].join(','), // M5c: the observer is B's second launch
@@ -972,15 +975,21 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect(external.getByRole('alert'), 'nothing refused').toHaveCount(0);
       rmSync(dirname(copy!), { recursive: true, force: true });
 
-      // The Browser tool's notice is B's reason the session's agent has no browser there, as B's own front answers it
+      // The session's agent has a browser on B, seen from here by screencast (P5 O17's local stage, §I): B's own front reads
+      // it, A's main answers it for B's session over the link (M5a's capability read), and A's Browser tool shows the
+      // agent's group on B with no tab, since this session's replayed engine opens none (P5 O17 M10), never the notice
       await sessionTab.click();
-      type Capabilities = { browser?: { available: boolean; reason?: string } };
+      type Capabilities = { browser?: { available: boolean; reason?: string; viewed?: string } };
+      const SCREENCAST = { available: true, viewed: 'screencast' };
       const browserOnB = (await b.request<Capabilities>('session.capabilities', { appSessionId: app })).browser;
-      expect(browserOnB?.available, `B's session has no browser on B: ${JSON.stringify(browserOnB)}`).toBe(false);
-      expect(browserOnB?.reason, 'B’s reason names B').toContain(B_NAME);
+      expect(browserOnB, 'B’s session’s agent has a browser on B, seen by screencast').toEqual(SCREENCAST);
+      await expect.poll(async () => (await invoke<Capabilities>(again, 'session.capabilities', { appSessionId: app }, b.ref)).browser, { timeout: 30_000, message: 'A’s main reads B’s answer' }).toEqual(SCREENCAST);
       await openSurface(again, 'Browser');
-      await expect(surface(again, 'browser').locator('[data-browser-agent-unavailable]')).toHaveText(`The agent has no browser here: ${browserOnB!.reason}`, { timeout: 30_000 });
-      console.log(`[e2e:remote] M5a: the Browser tool reads B's reason: ${browserOnB!.reason}`);
+      const browserTool = surface(again, 'browser');
+      await expect(browserTool.locator('[data-browser-agent-group]'), `the agent’s group on B\n${mainSaid(again)}`).toContainText(`Agent on ${B_NAME}`, { timeout: 30_000 });
+      await expect(browserTool.locator('[data-browser-agent-status]'), 'no agent tab yet').toHaveText('No agent browser tabs', { timeout: 30_000 });
+      await expect(browserTool.locator('[data-browser-agent-unavailable]')).toHaveCount(0);
+      console.log('[e2e:remote] M5a: the Browser tool shows the agent’s browser on B, no tab yet');
     });
 
     await test.step('M5b: B’s page renders in A’s frame with what B’s store holds, and a document B’s session starts, typed in A’s editor, reads back from B’s store', async () => {
@@ -1440,6 +1449,256 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     await a?.cleanup();
     await scene?.stop();
     await oauth?.close(); // M5c
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// P5 O17 M10 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M10's Proves): the agent's browser on B, seen and
+// driven from A's Browser tool. B runs no app: its sessions' engine is the cua engine stub coming ready
+// (test/support/cua-engine.ts), started through the ordinary start path, whose connector plays cua's host and drives
+// cua's creation sequence against a page B serves on its loopback (e2e/support/headless-browser.ts's `/remote`), so the
+// tab is a headless one in B's render host. A opens B's session from its listed row and the Browser tool shows the
+// agent's group on B; then, in order:
+//   - A sees the tab and its pixels under `view` (it owns the session), and only this session's: B's second session holds
+//     the identical page, which A's view does not list, and a select naming that tab is refused (`unknown`) with no frame
+//     of it reaching A's window, A's own stream going on;
+//   - after Take control, A's click on the page's button changes B's page and the next frame shows it, and what A types
+//     reaches B's field once; A's Enter submits a form and breaks a text area's line (the producer's character event);
+//     given back, A's clicks and keys reach nothing;
+//   - the Browser tool hidden closes its view (its feed and stream), not B's tab, and shown again opens a new one;
+//   - B's app arriving mid-lease (the connector holds its tab's debugger) closes A's stream `engine-changed`; the agent's
+//     next tab is the app's, and A then views it.
+// Held below e2e level, by the architect's two rulings in the Decision Log: a `view`-only member, a non-owner's step-up
+// and a revocation ("the remote Browser view's shape": the fake sminos has one member; endpoint and lane-B units over the
+// real authorizer); a slow carrier's one frame plus 4 KiB (M9a's endpoint backlog test) and a peer without
+// `rl2.browser-screencast` (M9a's device `not-offered` test and the view's unsupported words,
+// src/renderer/src/tools/browser/remote/View.test.tsx), the entry of 2026-11-03: the scene has no carrier throttling and
+// `e2e:remote` pairs no builds.
+const BROWSER_PROJECTS = ['e2e-remote-browser', 'e2e-remote-browser-other'];
+const BLANK_AT = { x: 900, y: 600 }; // a point of `/remote` nothing is drawn at, in the viewport's DIP
+// a form of one field and a text area the agent adds to B's `/remote` (step 3), in the viewport's DIP
+const FORM_FIELD = { x: 40, y: 220, width: 200, height: 30 } as const;
+const AREA = { x: 40, y: 270, width: 200, height: 60 } as const;
+const centre = (box: { x: number; y: number; width: number; height: number }) => ({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
+
+// A viewport point of the agent's tab A shows, as client coordinates through its canvas's fitted image
+function remotePoint(page: Page, at: { x: number; y: number }): Promise<{ x: number; y: number }> {
+  return page.evaluate(([x, y]) => {
+    const box = document.querySelector<HTMLElement>('[data-browser-view="panel"] [data-remote-browser]')!;
+    const canvas = box.querySelector('canvas')!;
+    const [vw, vh] = box.dataset.remoteViewport!.split('x').map(Number) as [number, number];
+    const r = canvas.getBoundingClientRect();
+    const scale = Math.min(r.width / canvas.width, r.height / canvas.height);
+    const left = r.left + (r.width - canvas.width * scale) / 2;
+    const top = r.top + (r.height - canvas.height * scale) / 2;
+    return { x: left + (x / vw) * canvas.width * scale, y: top + (y / vh) * canvas.height * scale };
+  }, [at.x, at.y] as const);
+}
+
+// The colour A's canvas holds at a viewport point of the shown tab, or null before a frame
+function remotePixel(page: Page, at: { x: number; y: number }): Promise<number[] | null> {
+  return page.evaluate(([x, y]) => {
+    const box = document.querySelector<HTMLElement>('[data-browser-view="panel"] [data-remote-browser]');
+    const canvas = box?.querySelector('canvas');
+    if (!box?.dataset.remoteViewport || !canvas || canvas.width === 0) return null;
+    const [vw, vh] = box.dataset.remoteViewport.split('x').map(Number) as [number, number];
+    const data = canvas.getContext('2d')!.getImageData(Math.floor((x / vw) * canvas.width), Math.floor((y / vh) * canvas.height), 1, 1).data;
+    return [data[0]!, data[1]!, data[2]!];
+  }, [at.x, at.y] as const);
+}
+const isWhite = (rgb: number[] | null) => rgb !== null && rgb.every((c) => c > 200);
+const isClicked = (rgb: number[] | null) => rgb !== null && rgb[0]! > 150 && rgb[1]! < 100 && rgb[2]! < 100; // CLICKED_RGB through JPEG
+
+test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A’s Browser tool; another session’s tab unreachable; a hidden tool closes its view, not the tab; B’s app arriving mid-lease moves A to the app’s tab', async () => {
+  test.setTimeout(600_000);
+  const root = realpathSync(mkdtempSync('/tmp/mrv-')); // short: the connectors' control sockets are in the sessions' directories
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-'));
+  const repos = [join(root, 'r0'), join(root, 'r1')];
+  for (const repo of repos) mkdirSync(repo);
+  const bin = writeCuaEngine(join(root, 'cua-engine'), { ready: true, retry: true, control: true, lifeMs: 600_000 });
+  const pages = await startPages();
+  let scene: RemoteScene | null = null;
+  let a: MawsLaunch | null = null;
+  const bApp: { launch: MawsLaunch | null } = { launch: null }; // set inside a step, so held where the finally sees it
+  try {
+    scene = await startRemoteScene({
+      scratch: join(root, 'scene'),
+      aUserData,
+      b: {
+        root: '/tmp', // B's app (the last step) keeps its cua sockets under B's profile
+        env: { MAWS_E2E_ENGINE_BIN: bin },
+        prepare: ({ claudeConfigDir }) => {
+          writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, projects: Object.fromEntries(repos.map((repo) => [repo, { hasTrustDialogAccepted: true }])) }));
+          writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
+        },
+      },
+    });
+    const { b } = scene;
+    const listed = scene;
+    await b.request('machineSettings.set', { patch: { gateway: { defaultRoute: 'direct' } } });
+    // B's sessions, through the ordinary start path, each listed through sminos in a project of its own
+    type Status = { process: string; turn: unknown; pid: number | null; engineSessionId: string | null };
+    const startOnB = async (repo: string, project: string, title: string): Promise<string> => {
+      const added = await b.request<{ id: string }>('session.projects.add', { directory: repo });
+      const { appSessionId } = await b.request<{ appSessionId: string }>('session.create', { projectId: added.id, location: { kind: 'directory', path: repo } });
+      const started = await b.request<{ status: string }>('session.start', { appSessionId, message: { content: 'o17 m10', display: 'o17 m10' }, options: { gateway: 'direct' } });
+      expect(started.status, `B's session starts (${JSON.stringify(started)})`).toBe('starting');
+      let engine: string | null = null;
+      await expect
+        .poll(async () => {
+          const st = await b.request<Status>('session.status', { appSessionId }).catch(() => null);
+          engine = st?.engineSessionId ?? null;
+          return st !== null && st.process === 'ready' && st.turn === null && st.pid !== null && engine !== null;
+        }, { timeout: 60_000, message: `${appSessionId}'s engine ready on B, its first turn ended\n${b.log().slice(-3000)}` })
+        .toBe(true);
+      await listed.sminos.list({ engine: engine!, app: appSessionId, owners: [listed.member], project, title, cwd: repo });
+      return appSessionId;
+    };
+    const connectorIn = async (repo: string): Promise<ConnectorControl> => {
+      let control: ConnectorControl | null = null;
+      await expect.poll(async () => (control = await connectorControl(repo).catch(() => null)) !== null, { timeout: 30_000, message: `the connector in ${repo} listens on its control socket` }).toBe(true);
+      return control!;
+    };
+    const app = await startOnB(repos[0]!, BROWSER_PROJECTS[0]!, 'B’s browsing session');
+    const other = await startOnB(repos[1]!, BROWSER_PROJECTS[1]!, 'B’s other session');
+    const address = addressOf(b.ref, app);
+    // the agent's tab in each, against B's loopback; the first session's connector keeps its lease (its debugger attached)
+    const cua = await connectorIn(repos[0]!);
+    const cuaOther = await connectorIn(repos[1]!);
+    const created = await answered('the agent’s creation sequence on B', cua.sequence(pages.url('/remote')));
+    await answered('the other session’s, of the same page', cuaOther.sequence(pages.url('/remote')));
+    type Render = { render?: { browserSessions?: number; browserTabs?: number } };
+    expect((await b.request<Render>('daemon.status')).render, 'B’s render host holds both sessions’ tabs').toMatchObject({ browserSessions: 2, browserTabs: 2 });
+    const onB = async (expression: string): Promise<unknown> => {
+      const answer = await cua.call<{ result: { value: unknown } }>('debugger.sendCommand', { debuggee: { tabId: created.tabId }, method: 'Runtime.evaluate', params: { expression, returnByValue: true }, timeoutMs: 3_000 });
+      if (!answer.ok) throw new Error(answer.error);
+      return answer.result.result.value;
+    };
+
+    a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(true), MAWS_MACHINE_NAME: 'A', MAWS_E2E_STEP_UP: 'accept' } });
+    keepMainLines(a);
+    const page = a.page;
+    await expect
+      .poll(async () => (await machineOf(page, b.ref))?.state ?? null, { timeout: 60_000, message: `A's link to B comes up\n${mainSaid(page)}` })
+      .toBe('up');
+    await expect.poll(async () => (await rowsOf(page)).some((row) => row.machine === b.ref && row.session === app), { timeout: 60_000, message: `B's browsing session is a row of A's\n${mainSaid(page)}` }).toBe(true);
+    await expandMachine(page, b.ref);
+    const row = sessionRow(page, address);
+    await expect(row, `B's row in A's sidebar\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
+    await row.click();
+    await expect(mainTabById(page, `session:${address}`)).toBeVisible({ timeout: 30_000 });
+    await openSurface(page, 'Browser');
+    const tool = surface(page, 'browser');
+    const group = tool.locator('[data-browser-agent-group]');
+    const canvas = tool.locator('[data-remote-browser]');
+    const toolSaid = async () => `the tool: ${(await tool.innerText().catch(() => '')).replace(/\s+/g, ' ')}\nthe canvas: ${JSON.stringify(await canvas.evaluate((el) => ({ ...(el as HTMLElement).dataset })).catch(() => null))}\n${mainSaid(page)}\nB's log:\n${b.log().slice(-3000)}`;
+
+    await test.step('A sees the tab B’s agent made against B’s loopback, its title, address and pixels, under view', async () => {
+      await quoting(expect(group, 'the agent’s group on B').toContainText(`Agent on ${B_NAME}`, { timeout: 60_000 }), toolSaid);
+      await quoting(expect(canvas, 'the agent’s tab shown of itself, live').toHaveAttribute('data-remote-stream', 'live', { timeout: 60_000 }), toolSaid);
+      // the chips (or, in a narrow panel, the picker they collapse to) list one tab: this session's, not the other's
+      const chips = group.locator('[data-browser-agent-chip]');
+      await expect(chips, 'one tab: this session’s, not the other session’s identical one').toHaveCount(1);
+      await expect(chips).toHaveAttribute('aria-selected', 'true');
+      await expect(chips).toContainText('remote');
+      await expect(tool.locator('[data-browser-remote-url]')).toHaveText(pages.url('/remote'));
+      await expect(tool.locator('[data-remote-control-state="view"]')).toHaveText('View only');
+      await expect.poll(async () => isWhite(await remotePixel(page, BLANK_AT)), { timeout: 30_000, message: 'the page’s white, drawn' }).toBe(true);
+      console.log(`[e2e:remote] M10: A shows B's agent tab ${await canvas.getAttribute('data-remote-tab')}, frame ${await canvas.getAttribute('data-remote-seq')}, ${await canvas.getAttribute('data-remote-viewport')}`);
+    });
+
+    await test.step('another session’s identical tab is unreachable from this view: a select naming it is refused and A’s own stream goes on', async () => {
+      const foreign = (await b.request<{ tabId: string }>('daemon.e2eBrowserView', { appSessionId: other, frames: 1 })).tabId;
+      const own = (await canvas.getAttribute('data-remote-tab'))!;
+      expect(foreign, 'a tab of its own').not.toBe(own);
+      await page.evaluate(() => {
+        type Listen = <P>(name: string, listener: (payload: P) => void) => () => void;
+        const w = window as unknown as { __remoteClosed: string[]; __remoteFrames: string[]; maws: { on: Listen } };
+        w.__remoteClosed = [];
+        w.__remoteFrames = [];
+        w.maws.on<{ reason: string }>('browser.remote.closed', (payload) => w.__remoteClosed.push(payload.reason));
+        w.maws.on<{ frame: { tabId: string } }>('browser.remote.frame', (payload) => w.__remoteFrames.push(payload.frame.tabId));
+      });
+      const viewId = (await canvas.getAttribute('data-remote-view'))!;
+      const epoch = (await canvas.getAttribute('data-remote-epoch'))!;
+      await invoke(page, 'browser.remote.select', { viewId, epoch, tabId: foreign });
+      const closed = () => page.evaluate(() => (window as unknown as { __remoteClosed: string[] }).__remoteClosed);
+      await expect.poll(closed, { timeout: 30_000, message: 'the stream for the other session’s tab is refused' }).toHaveLength(1);
+      expect((await closed())[0], 'refused as a tab this session does not hold').toBe('unknown');
+      await quoting(expect(canvas, 'A’s own tab again').toHaveAttribute('data-remote-tab', own, { timeout: 30_000 }), toolSaid);
+      await expect(canvas).toHaveAttribute('data-remote-stream', 'live', { timeout: 30_000 });
+      const frames = await page.evaluate(() => (window as unknown as { __remoteFrames: string[] }).__remoteFrames);
+      expect(frames, 'frames of A’s own tab reached the window').toContain(own);
+      expect(frames, 'no frame of the other session’s tab reached the window').not.toContain(foreign);
+    });
+
+    await test.step('after Take control, A’s click changes B’s page and the next frame shows it; what A types reaches B’s field once; given back, nothing reaches it', async () => {
+      await tool.getByRole('button', { name: 'Take control', exact: true }).click();
+      await quoting(expect(tool.locator('[data-remote-control-state="held"]'), 'A has control').toHaveText('You have control', { timeout: 60_000 }), toolSaid);
+      const button = await remotePoint(page, { x: BUTTON.x + BUTTON.width / 2, y: BUTTON.y + BUTTON.height / 2 });
+      await page.mouse.click(button.x, button.y);
+      await quoting(expect.poll(async () => isClicked(await remotePixel(page, BLANK_AT)), { timeout: 30_000, message: 'the next frame shows the click' }).toBe(true), toolSaid);
+      const field = await remotePoint(page, { x: FIELD.x + FIELD.width / 2, y: FIELD.y + FIELD.height / 2 });
+      await page.mouse.click(field.x, field.y);
+      await page.keyboard.type('hi');
+      // the agent's commands wait out the person's input (3 s after the last), then read B's page
+      await expect(async () => expect(await onB(`[document.querySelector('#state').textContent, document.querySelector('#field').value, document.activeElement?.id ?? null]`)).toEqual(['clicked', 'hi', 'field'])).toPass({ timeout: 30_000 });
+      // Enter acts at its keypress: a form of one field submits, and a text area breaks its line
+      const place = (id: string, box: { x: number; y: number; width: number; height: number }) => `#${id}{position:absolute;left:${box.x}px;top:${box.y}px;width:${box.width}px;height:${box.height}px;box-sizing:border-box}`;
+      await onB(
+        `(() => { window.__submitted = 0; const style = document.createElement('style'); style.textContent = ${JSON.stringify(place('submit-field', FORM_FIELD) + place('area', AREA))}; ` +
+          `const form = document.createElement('form'); form.addEventListener('submit', (e) => { e.preventDefault(); window.__submitted += 1; }); form.innerHTML = '<input id="submit-field">'; ` +
+          `const area = document.createElement('textarea'); area.id = 'area'; document.head.append(style); document.body.append(form, area); return true; })()`,
+      );
+      const formField = await remotePoint(page, centre(FORM_FIELD));
+      await page.mouse.click(formField.x, formField.y);
+      await page.keyboard.press('Enter');
+      const area = await remotePoint(page, centre(AREA));
+      await page.mouse.click(area.x, area.y);
+      await page.keyboard.type('a');
+      await page.keyboard.press('Enter');
+      await page.keyboard.type('b');
+      await expect(async () => expect(await onB(`[window.__submitted, document.querySelector('#area').value]`), 'the form submitted once; the text area has two lines').toEqual([1, 'a\nb'])).toPass({ timeout: 30_000 });
+      await tool.getByRole('button', { name: 'Give back', exact: true }).click();
+      await expect(tool.locator('[data-remote-control-state="view"]')).toHaveText('View only', { timeout: 30_000 });
+      await page.mouse.click(field.x, field.y);
+      await page.keyboard.type('x');
+      await new Promise((resolve) => setTimeout(resolve, 4_000)); // past the person's grace, had anything been sent
+      expect(await onB(`document.querySelector('#field').value`), 'view only: nothing typed reached B').toBe('hi');
+      console.log('[e2e:remote] M10: A took control, clicked and typed into B’s page, and gave it back');
+    });
+
+    await test.step('the Browser tool hidden closes its view, not B’s tab; shown again it opens a new view of the tab', async () => {
+      const before = (await canvas.getAttribute('data-remote-view'))!;
+      await closeSurface(page, 'Browser'); // the panel's surfaces sit side by side: another opened beside it hides nothing
+      await expect(canvas).toHaveCount(0);
+      expect((await b.request<Render>('daemon.status')).render?.browserTabs, 'B’s tab goes on').toBe(2);
+      const tabs = await cua.call<{ id: number }[]>('tabs.query');
+      expect(tabs.ok && tabs.result.some((t) => t.id === created.tabId), 'the agent still holds it').toBe(true);
+      await openSurface(page, 'Browser');
+      await quoting(expect(canvas, 'live again').toHaveAttribute('data-remote-stream', 'live', { timeout: 60_000 }), toolSaid);
+      expect(await canvas.getAttribute('data-remote-view'), 'a new view').not.toBe(before);
+    });
+
+    await test.step('B’s app arriving mid-lease closes A’s stream engine-changed; the agent’s next tab is the app’s, and A views it', async () => {
+      const headlessTab = (await canvas.getAttribute('data-remote-tab'))!;
+      await page.evaluate(() => void ((window as unknown as { __remoteClosed: string[] }).__remoteClosed.length = 0));
+      bApp.launch = await launchMaws({ userData: b.userData, keepConfigHome: true, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', MAWS_E2E_ENGINE_BIN: bin, MAWS_MACHINE_NAME: B_NAME } });
+      await expect.poll(() => page.evaluate(() => (window as unknown as { __remoteClosed: string[] }).__remoteClosed), { timeout: 60_000, message: `A's stream closed as B's app took the agent's browser\n${await toolSaid()}` }).toContain('engine-changed');
+      // cua's host lost its backend and is served by the app within its retry; the agent's next tab is the app's
+      await expect(async () => void (await answered('the agent’s creation sequence in B’s app', cua.sequence(pages.url('/remote'))))).toPass({ timeout: 60_000 });
+      await quoting(expect(group.locator('[data-browser-agent-chip]').filter({ hasText: 'remote' }), 'the app’s agent tab listed').toHaveCount(1, { timeout: 60_000 }), toolSaid);
+      await quoting(expect(canvas, 'A views the app’s tab').not.toHaveAttribute('data-remote-tab', headlessTab, { timeout: 60_000 }), toolSaid);
+      await quoting(expect(canvas, 'live').toHaveAttribute('data-remote-stream', 'live', { timeout: 60_000 }), toolSaid);
+      await expect.poll(async () => isWhite(await remotePixel(page, BLANK_AT)), { timeout: 30_000, message: 'the app’s tab, white' }).toBe(true);
+      console.log(`[e2e:remote] M10: B's app took over; A views its agent tab ${await canvas.getAttribute('data-remote-tab')}`);
+    });
+  } finally {
+    await bApp.launch?.cleanup().catch((error: unknown) => console.error(error));
+    await a?.cleanup();
+    await scene?.stop();
+    await pages.close();
     rmSync(aUserData, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }

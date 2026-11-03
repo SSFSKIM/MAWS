@@ -67,6 +67,9 @@
 // subscription of the connection they arrive on (`browser.frame`, `.ended`: the feed's, browser-feed.ts, once loaded;
 // else none is open and each is refused), and a connection's end ends its subscriptions (`browser.gone`).
 //
+// P5 O17 M9b: the attached app is a tab engine too when its hello lists `browser.engine` (`appEngine`): the route selects
+// its connection in `relay`, so its `state`, `frame`, `ended` and answers are taken by the same rules as the render host's.
+//
 // P5 O3-D M5 (D44(3)): the engine host's names the spine intercepts (SPINE_ENGINE_INTERCEPTS: the stale answer's check,
 // the rewind's note and the acts that clear it) load a cold spine first, so the intercept applies whatever path the
 // request came by: a client here, the endpoint's `machine` route, and (`intercepted`, daemon.ts) a post-D app's relay
@@ -75,7 +78,7 @@
 // moved here: the note is then the lock holder's to keep. Any other failure to load answers it host_unavailable.
 import { HostCommandError, thrownError, type DocPortEnd, type HostPort } from '@shared/host/runtime';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
-import { MACHINE_SPINE_CAPABILITY, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
+import { BROWSER_ENGINE_CAPABILITY, MACHINE_SPINE_CAPABILITY, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
 import { remoteClients, type RemoteClients } from '@shared/host/client-refs';
 import { eventPosition } from '@shared/host/stream-catchup';
 import type { SessionEvent } from '@shared/graph/events';
@@ -102,7 +105,7 @@ import type { EngineIntercept } from './spine-hosts';
 // The front's own `machine` names, answered without the spine: the daemon's, the identity, and a client's own.
 // P5 O5 M4: the render seam's (artifacts.export, render.answer) and its e2e capture (daemon.e2eRender).
 // P5 O5 M5: a session's capabilities (session.capabilities). P5 O17 M3: a tab engine's browser work (browserEngine.work).
-export const FRONT_COMMANDS = ['artifacts.export', 'browserEngine.answer', 'browserEngine.ended', 'browserEngine.frame', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'daemon.e2eRender', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.restartEngineHost' /* P5 O16 M3b */, 'daemon.status', 'machine.client', 'machine.identity', 'render.answer', 'session.capabilities', 'session.follow'] as const;
+export const FRONT_COMMANDS = ['artifacts.export', 'browserEngine.answer', 'browserEngine.ended', 'browserEngine.frame', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'daemon.e2eBrowserView' /* P5 O17 M9b */, 'daemon.e2eRender', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.restartEngineHost' /* P5 O16 M3b */, 'daemon.status', 'machine.client', 'machine.identity', 'render.answer', 'session.capabilities', 'session.follow'] as const;
 // The names a machine.sock client asks of the front for itself, never the endpoint.
 const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['browserEngine.answer', 'browserEngine.ended', 'browserEngine.frame', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'machine.client', 'render.answer', 'session.follow']);
 // P5 O5 M4: the engine host's render requests, which the render seam answers and no client hears; P5 O17 M3: and its
@@ -205,6 +208,7 @@ export interface ServicesFront {
   intercepts(): CommandName[]; // the names the loaded spine intercepts now
   events(listener: (name: string, payload: unknown) => void): () => void; // every event `bus.emit` sent (the endpoint's owner `machine`)
   browserSocket(): string | null; // the attached app's cua socket directory, from its machine.client; null with no app
+  appEngine(): EngineConnection | null; // P5 O17 M9b: the attached app's connection, when its hello listed browser.engine
   // P5 O3-D fix wave (scalpel-4#1): the attached app's connection here said ready with machine.spine in its hello, so the
   // engine host's app-bound events reach it (the daemon's app presence for such an app, D40)
   appReady(): boolean;
@@ -275,6 +279,9 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       const client = from!;
       const { held } = input as CommandInput<'browserEngine.work'>;
       const appSessionId = (input as CommandInput<'browserEngine.work'>).appSessionId as AppSessionId;
+      // P5 O17 M9b: the fence (R5, §E) is the render host's alone; the app, selected in `relay`, makes its agent's tabs
+      // itself and holds no render host awake
+      if (!client.renders) throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.work for ${appSessionId} from a client whose hello did not list render.client`));
       const selection = browser.selected(appSessionId);
       if (held) {
         if (selection?.engine !== client) throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.work {held: true} for ${appSessionId} from a connection not selected for that session`));
@@ -320,6 +327,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       if (!(browser.ended?.(from!, input as CommandInput<'browserEngine.ended'>) ?? false)) throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.ended for ${subscriptionId}, which is no open subscription of this connection`));
     },
     'clientPort.answer': (input, _context, from) => clientPort.answer(from!, input as CommandInput<'clientPort.answer'>),
+    'daemon.e2eBrowserView': (input) => options.daemon('daemon.e2eBrowserView', input), // P5 O17 M9b
     'daemon.e2eRender': async (input) => void (await options.daemon('daemon.e2eRender', input)), // P5 O5 M4
     // P5 O5 M4: the render host's answer, from a render client alone
     'render.answer': (input, _context, from) => {
@@ -615,6 +623,10 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       return () => void emitted.delete(listener);
     },
     browserSocket: () => [...clients].find((client) => options.isApp(client.facts.appPid))?.browserSocket ?? null,
+    appEngine() {
+      const app = [...clients].find((client) => options.isApp(client.facts.appPid));
+      return app && app.browserSocket !== null && app.facts.capabilities.includes(BROWSER_ENGINE_CAPABILITY) ? app : null;
+    },
     appReady: () => [...clients].some((client) => client.readsAppEvents() && options.isApp(client.facts.appPid)),
     clients: () => clients.size,
     renderClients: () => [...clients].filter((client) => client.renders).length,

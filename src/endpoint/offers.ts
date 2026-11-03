@@ -73,7 +73,7 @@ const pty: OfferRow = { kind: 'act', executor: 'pty-host', target: 'machine' };
  * P5 O7 M5b: the read open's name for each of its kinds, the stream row that admits it (an endpoint name, not a
  * registry command: its `accepts` reads the open's kind fields).
  */
-export const READ_OPENS: Readonly<Record<ReadStreamKind, string>> = { http: 'artifacts.fetch', document: 'documents.open' };
+export const READ_OPENS: Readonly<Record<ReadStreamKind, string>> = { http: 'artifacts.fetch', document: 'documents.open', 'browser.screencast': 'browser.screencast' };
 const isFields = (input: unknown, keys: readonly string[]): input is Readonly<Record<string, unknown>> =>
   typeof input === 'object' && input !== null && !Array.isArray(input) && Object.keys(input).every((key) => keys.includes(key));
 /** An `http` open's fields: a URL exactly of the artifact scheme's shape (scheme.ts; anything else `malformed`), a GET or a HEAD, a range header. */
@@ -87,6 +87,22 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** A `document` open's fields: the artifact (a UUID, as the store's document channel takes it), the mode, the suggestions' document. */
 const isDocumentOpen = (input: unknown): boolean =>
   isFields(input, ['artifactId', 'mode', 'doc']) && typeof input.artifactId === 'string' && UUID.test(input.artifactId) && (input.mode === 'edit' || input.mode === 'view') && (input.doc === undefined || input.doc === 'suggestions');
+/**
+ * P5 O17 M9a: a `browser.screencast` open's fields: the session (an appSessionId, which the `appSessionId` rule places),
+ * the epoch and the tab (the feed seam's to read: a tab it doesn't hold, or another epoch, is its refusal), and a
+ * controlling open's act; nothing else.
+ */
+const isBrowserOpen = (input: unknown): boolean =>
+  isFields(input, ['appSessionId', 'epoch', 'tabId', 'control']) &&
+  typeof input.appSessionId === 'string' &&
+  typeof input.epoch === 'string' &&
+  input.epoch !== '' &&
+  typeof input.tabId === 'string' &&
+  input.tabId !== '' &&
+  (input.control === undefined || (isFields(input.control, ['op']) && typeof input.control.op === 'string'));
+/** P5 O17 M9a: `machine.browserControl`'s args: exactly the session and the epoch the grant is bound to. */
+const isBrowserControlArgs = (input: unknown): boolean =>
+  isFields(input, ['appSessionId', 'epoch']) && typeof input.appSessionId === 'string' && typeof input.epoch === 'string' && input.epoch !== '' && input.epoch.length <= 256;
 /** P5 O7 M5c: `client.windowShown`'s input: exactly whether the device shows a page holding a lease on this machine. */
 const isWindowShown = (input: unknown): boolean => isFields(input, ['shown']) && typeof input.shown === 'boolean';
 /** P5 O7 M5c: the owner's connector and grant management on the machine (`machine-admin`, a step-up each), under `machine.op`. */
@@ -301,8 +317,16 @@ export const OFFERS: Offers = {
     // which names only a hold of the asking channel's own (any other id releases nothing).
     'artifacts.holdAssets': { kind: 'call', executor: 'endpoint', target: 'artifact', grade: 'view' },
     'artifacts.releaseAssets': { kind: 'call', executor: 'endpoint', target: 'machine', grade: 'list' },
+    // P5 O17 M9a (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §K; R2, accepted by O10): the agent's
+    // browser on a lane B session. A viewer's stream of one tab, the read open's third kind, `view` by effect (a
+    // controlling open, naming its grant, takes `approve`: by-effect.ts), so every re-check reads the standing it needs;
+    // and the grant itself, the endpoint's own act bound to the session and the epoch, `approve` on the session (a step-up
+    // for a member who doesn't own it), its result `{appSessionId, epoch}`, which a controlling open names by its opId.
+    // The session's tabs as they change ride its `browser.inventory` feed (plane-feeds.ts), at `view`.
+    'browser.screencast': { kind: 'stream', stream: 'browser.screencast', executor: 'endpoint', target: 'appSessionId', grade: { floor: 'view', byEffect: true }, accepts: isBrowserOpen },
+    'machine.browserControl': { kind: 'act', executor: 'endpoint', target: 'appSessionId', grade: 'approve', accepts: isBrowserControlArgs },
   },
   subscriptions: ['A', 'B'],
-  // P5 O7 M5a: the machine's `artifacts` feed (artifacts-feed.ts).
-  feeds: ['checkout', 'attention', 'artifacts'],
+  // P5 O7 M5a: the machine's `artifacts` feed (artifacts-feed.ts). P5 O17 M9a: a session's `browser.inventory`.
+  feeds: ['checkout', 'attention', 'artifacts', 'browser.inventory'],
 };

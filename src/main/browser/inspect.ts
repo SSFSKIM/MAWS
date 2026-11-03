@@ -5,6 +5,8 @@
 // records of the window holding the view and the pane placing it; `showPane` hands the windows a `maws.pane.show` as
 // the engine host would for `show_pane` (the e2e runs no engine; it answers whether the event was sent); `metrics` says
 // how many tabs are loaded and measured.
+import type { BrowserEngineRequest } from '@shared/ipc/schema/browser-engine'; // P5 O17 M9b
+import type { AppEngineInspection } from './engine'; // P5 O17 M9b
 import type { CuaBackend } from './cua';
 import type { NativeMenuSeam } from './bookmarks/menu';
 import type { ExtensionsInspector } from './extensions';
@@ -28,6 +30,9 @@ export interface BrowserInspector {
   cua?: Pick<CuaBackend, 'socketPathFor' | 'inspect' | 'holds'> & { trustRoot(pid: number): boolean };
   menu?: NativeMenuSeam & { openAllAsked(): number[] }; // cua #90: the last native menu, chosen from by id path; "Open all"'s questions
   extensions?: ExtensionsInspector; // cua #90: the open extension popup, and its page's answers
+  // P5 O17 M9b: the app as a tab engine (engine.ts), driven as `mawsd` drives it: `record` sends what it would send
+  // `mawsd` to `calls` instead, each answered as taken, so a scene with no daemon views an agent tab's real frames
+  engine?: { record(): void; request(request: BrowserEngineRequest): void; calls(): { name: string; input: unknown }[]; inspect(): AppEngineInspection };
 }
 
 declare global {

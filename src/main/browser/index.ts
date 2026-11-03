@@ -43,6 +43,8 @@ import { startCommentMode } from './comment';
 // E4c start
 import type { HostSupervisor } from '../hosts/supervisor';
 import { e2eTabIds, reachableSessions, startAgentPresence } from './agent';
+import { PARKED_BOUNDS } from './agent/visible'; // P5 O17 M9b
+import { startAppEngine, type AppEngine, type EngineCallName } from './engine'; // P5 O17 M9b
 // E4c end
 // E13 start: cua's primitive server (the in-app browser spec of 2026-10-08, M2; P1 A-51, A-52), and the control and
 // cursor it drives (M3); the browser tools it replaced left on 2026-10-08 (M4, P1 A-54)
@@ -75,8 +77,12 @@ export interface BrowserDeps {
   profiles?(): BrowserProfile[];
   // E4c start: the engine host's events and commands, for the agent's presence (who drives each tab, the cursor, the
   // dialogs' and parking's agent rules) and an agent download's deliverable; without them (E4a's own tests) none starts
-  hosts?: Pick<HostSupervisor, 'onEvent' | 'dispatch'>;
+  // P5 O17 M9b: and the machine link's state (`onState`), whose every change starts the app's tab engine over (engine.ts)
+  hosts?: Pick<HostSupervisor, 'onEvent' | 'dispatch'> & Partial<Pick<HostSupervisor, 'onState'>>;
   // E4c end
+  // P5 O17 M9b: the launch runs a machine host (the daemon shape), so the app is a tab engine to `mawsd`; the embedded
+  // shapes' supervisor runs engine-host and pty-host alone, and refuses an owner it does not run
+  machineHost?: boolean;
   // P5 O7 M3: a session of another machine's tabs (machines.ts: this machine, and its events said from theirs) and the
   // forwarded ports their loopback links load from (forwarded.ts); without them (E4a's own tests) every session is local
   remote?: { local: MachineRef; emitFrom: EmitFrom; forwards: BrowserForwards };
@@ -94,7 +100,7 @@ export interface Browser {
   extensions: Pick<ExtensionUi, 'removing'>; // cua #90: the action bar's popups and options tabs, for a profile's removal
 }
 
-export function startBrowser({ userData, settings, view, data, register, emit: emitHere, env, profiles: listProfiles, /* E4c */ hosts, remote }: BrowserDeps): Browser {
+export function startBrowser({ userData, settings, view, data, register, emit: emitHere, env, profiles: listProfiles, /* E4c */ hosts, machineHost = false, remote }: BrowserDeps): Browser {
   const dir = join(userData, 'browser');
   mkdirSync(dir, { recursive: true });
   const tabsFile = join(dir, 'tabs.json');
@@ -285,6 +291,31 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
   const presence = controls && cursor ? startAgentPresence({ store, emit, views, controls, cursor, cua }) : null;
   if (inspector && presence) inspector.agent = presence.seam;
   // E4c end
+  // P5 O17 M9b: the app as a tab engine (engine.ts): `mawsd`'s requests for its sessions' agent tabs, answered over the
+  // machine link, which a change of starts over; only where a machine host runs. Under MAWS_E2E=1 the seam can record what would go to `mawsd` instead
+  // (`engine.record`), so a scene with no daemon drives it and reads the real frames of a hidden agent tab.
+  let recorded: { name: string; input: unknown }[] | null = null;
+  const engine: AppEngine | null = hosts && machineHost
+    ? startAppEngine({
+        store,
+        agents: cua,
+        call: (name: EngineCallName, input: unknown) => {
+          if (recorded) return Promise.resolve((recorded.push({ name, input }), { ok: true }));
+          return hosts.dispatch('machine', name, input).then((result) => (result.ok ? { ok: true } : { ok: false, error: result.error }));
+        },
+        size: (entry) => views.park(entry, PARKED_BOUNDS),
+        log: (line) => console.warn(line),
+      })
+    : null;
+  const stopEngine = engine && hosts ? [hosts.onEvent('browserEngine.request', (request) => engine.request(request)), hosts.onState?.('machine', () => engine.linkChanged())] : [];
+  if (inspector && engine) {
+    inspector.engine = {
+      record: () => void (recorded ??= []),
+      request: (request) => engine.request(request),
+      calls: () => [...(recorded ?? [])],
+      inspect: () => engine.inspect(),
+    };
+  }
 
   return {
     store,
@@ -299,6 +330,8 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
       extensionUi.stop(); // cua #90: every popup closed
       if (inspector && globalThis.__maws_browser === inspector) delete globalThis.__maws_browser;
       presence?.dispose(); // E4c
+      for (const stop of stopEngine) stop?.(); // P5 O17 M9b
+      engine?.dispose();
       stopCuaStatus?.(); // E13
       cua.dispose(); // E13: every socket closed and unlinked; each connection's leases let go
       cursor?.dispose(); // E13

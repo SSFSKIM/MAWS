@@ -27,6 +27,7 @@ import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
 import { daemonHostSpecs, daemonStart, resolveLaunch, unitRunsThisApp, watchDaemon, type LaunchShape } from './daemon';
 import { watchEngineHandover } from './engine-handover'; // P5 O16 M3c fix wave 2
+import { hostEventToWindows } from './window-events'; // P5 O17 M9b
 import { testLaunchRefusal } from './mode'; // P5 O2 landing
 import { startHostStatus, type HostStatusService } from './status';
 import { createHostSupervisor, type HostSupervisor } from './supervisor';
@@ -114,7 +115,7 @@ export function createHosts(
           'engine-host': { modulePath: engineHostPath, serviceName: 'maws-engine-host', transport: mode, requestBudgetsMs: ENGINE_HOST_BUDGETS_MS }, // the spine runs here
           'pty-host': { modulePath: ptyHostPath, serviceName: 'maws-pty-host' },
         },
-    emit,
+    emit: hostEventToWindows(emit), // P5 O17 M9b: but what is main's alone
     detached: { identity },
   });
   engineHandover?.bind(supervisor); // for the launch's life

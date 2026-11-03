@@ -37,14 +37,14 @@
 // `dialogs` the `-run-dialog` wrap's held route for a leased tab (dialogs.ts).
 //
 // P5 O17 M4 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M4, Interfaces §D, §H): the render host composes the same
-// server as a tab engine through three options the app leaves at its defaults: `socketDir` (its sockets under
-// `mawsd`'s render-cua directory, not the app's userData), `orphans: 'session'` (a closed connection's tabs wait for a
-// connection of their own session, claims.ts) and `creations` (the headless caps and the fence before a tab opens). It
+// server as a tab engine through three options the app leaves at its defaults: `socketDir` (null since the session
+// sockets' names: each session's socket at the path `mawsd` names, never under the app's userData), `orphans: 'session'`
+// (a closed connection's tabs wait for a connection of their own session, claims.ts) and `creations` (the headless caps and the fence before a tab opens). It
 // waits on `listening` and `relay`'s answer before it tells `mawsd` a session is prepared, and on `closeSession`'s before
 // it tells it a session is dropped.
 import { chmodSync, lstatSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { createServer, type Server, type Socket } from 'node:net';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { BrowserAgentActivity } from '@shared/browser/activity';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { BrowserActivityStore } from '../data/activity';
@@ -52,7 +52,7 @@ import type { MawsDownloadRecorded } from '@shared/ipc/schema/maws';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { LeaseHolds } from '../agent/visible';
 import type { RunDialogCallback, RunDialogInfo } from '../agent/dialogs';
-import { CUA_SOCKET_DIR, cuaSocketPath } from '@shared/browser/cua-socket';
+import { CUA_SOCKET_DIR, MAX_SOCKET_PATH_BYTES } from '@shared/browser/cua-socket';
 import { assertPrivateDirectory } from '@shared/host/private-path';
 import { ActivityFeed } from './activity';
 import { TabClaims, type OrphanPolicy } from './claims';
@@ -81,8 +81,10 @@ export interface CuaBackendDeps {
   // (this process's when absent) chooses the policy: darwin's process tree, else the uid boundary; `uid` is this process's
   // user (a test stands in another to see a directory another user owns).
   peer?: { addon: PeerAddon | null; trustedRoots?: Set<ProcessRoot>; platform?: NodeJS.Platform; uid?: number };
-  // P5 O17 M4: the render host's (absent: the app's own, `<userData>/browser/cua`, 'person', no gate)
-  socketDir?: string;
+  // P5 O17 M4: the render host's (absent: the app's own, `<userData>/browser/cua`, 'person', no gate). P5 O17 (the
+  // session sockets' names): null, no directory of its own: each session's path is given to `socketPathFor` (the render
+  // host's, as `mawsd` names it in `prepare`)
+  socketDir?: string | null;
   orphans?: OrphanPolicy;
   creations?: CuaCreations;
 }
@@ -96,8 +98,10 @@ export interface CuaSessionInspection {
 }
 
 export interface CuaBackend extends LeaseHolds {
-  // The session's socket path, listening from now on; null when the path is too long for a Unix socket (logged).
-  socketPathFor(appSessionId: AppSessionId): string | null;
+  // The session's socket path, listening from now on; null when the path is too long for a Unix socket (logged). P5 O17
+  // (the session sockets' names): `at`, the path to listen at, given by whoever computes it (`mawsd`, for the render
+  // host), else `<socketDir>/<appSessionId>.sock`; its directory is made private, or refused, at its first use.
+  socketPathFor(appSessionId: AppSessionId, at?: string): string | null;
   // The session was removed: its socket closes and every connection on it ends. P5 O17 M4: resolves once every one of
   // its connections has closed (each lease let go).
   closeSession(appSessionId: AppSessionId): Promise<void>;
@@ -124,6 +128,10 @@ export interface CuaBackend extends LeaseHolds {
   // P5 O17 M8: work on the tab that the next lease, any connection's, waits for (TabClaims `beforeNextLease`): the render
   // host's sizing of an adopted popup's page. `done` settles by itself and never rejects.
   beforeNextLease(tabId: string, done: Promise<void>): void;
+  // P5 O17 M9b: whether a live connection reserves or leases the tab (an agent's tab, which the app's producer serves a
+  // remote viewer), and each change of that, tab by tab (TabClaims `onAgentTabs`)
+  agentTab(tabId: string): boolean;
+  onAgentTabs(listener: (tabId: string) => void): () => void;
   dispose(): void;
 }
 
@@ -176,10 +184,20 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   // P5 O17 M2: the uid boundary where the platform has no addon; with no peer option at all, darwin's (fail closed)
   const platform = deps.peer ? (deps.peer.platform ?? process.platform) : 'darwin';
   const uidBoundary = platform !== 'darwin';
-  const dir = deps.socketDir ?? join(deps.userData, ...CUA_SOCKET_DIR);
-  const dirRefused = privateDirectory(dir, uid);
-  if (dirRefused !== null) log(`the cua socket directory ${dir} is refused (${dirRefused}): no session's browser is reachable`);
-  else for (const name of readdirSync(dir)) if (name.endsWith('.sock')) rmSync(join(dir, name), { force: true }); // nothing listens at start
+  const dir = deps.socketDir === undefined ? join(deps.userData, ...CUA_SOCKET_DIR) : deps.socketDir;
+  // Each socket directory's verdict, taken at its first use (the backend's own at start): made 0700, or refused and
+  // logged once; one let in is swept of an earlier run's sockets, since nothing of this backend listens there yet
+  const directories = new Map<string, string | null>();
+  const directoryRefused = (at: string): string | null => {
+    let refused = directories.get(at);
+    if (refused !== undefined) return refused;
+    refused = privateDirectory(at, uid);
+    directories.set(at, refused);
+    if (refused !== null) log(`the cua socket directory ${at} is refused (${refused}): no session's browser is reachable`);
+    else for (const name of readdirSync(at)) if (name.endsWith('.sock')) rmSync(join(at, name), { force: true });
+    return refused;
+  };
+  if (dir !== null) directoryRefused(dir); // nothing listens at start
 
   const claims = new TabClaims<CuaConnection>(deps.orphans);
   const sessions = new Map<AppSessionId, Listening>();
@@ -383,18 +401,22 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
   const held = new HeldDialogs({ activity: (entry, activity) => claims.leasedTo(entry.tab.tabId)?.tell(entry, activity), log });
 
   return {
-    socketPathFor(appSessionId) {
+    socketPathFor(appSessionId, at) {
       const existing = sessions.get(appSessionId);
       if (existing) return existing.path;
-      if (dirRefused !== null) return null; // logged at start
-      const path = cuaSocketPath(dir, appSessionId);
-      if (path === null) {
-        if (!tooLong.has(appSessionId)) log(`the cua socket path of ${appSessionId} is longer than a Unix socket allows (${Buffer.byteLength(join(dir, `${appSessionId}.sock`))} bytes): cua cannot reach this session's browser`);
+      const wanted = at ?? (dir === null ? null : join(dir, `${appSessionId}.sock`));
+      if (wanted === null) {
+        log(`the cua socket of ${appSessionId} was not given a path: cua cannot reach this session's browser`);
+        return null;
+      }
+      if (Buffer.byteLength(wanted) > MAX_SOCKET_PATH_BYTES) {
+        if (!tooLong.has(appSessionId)) log(`the cua socket path of ${appSessionId} is longer than a Unix socket allows (${Buffer.byteLength(wanted)} bytes): cua cannot reach this session's browser`);
         tooLong.add(appSessionId);
         return null;
       }
-      sessions.set(appSessionId, listen(appSessionId, path));
-      return path;
+      if (directoryRefused(dirname(wanted)) !== null) return null; // logged at its first use
+      sessions.set(appSessionId, listen(appSessionId, wanted));
+      return wanted;
     },
     engineProcess(appSessionId, pid) {
       const root = pid === null || !addon ? null : rootOf(pid, addon);
@@ -460,6 +482,8 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     dialogs: { holds: (tabId) => claims.leasedTo(tabId) !== undefined, hold: (entry, info, callback) => held.hold(entry, info, callback) },
     activities: (appSessionId) => feed?.list(appSessionId) ?? [],
     beforeNextLease: (tabId, done) => claims.beforeNextLease(tabId, done),
+    agentTab: (tabId) => claims.agentTab(tabId), // P5 O17 M9b
+    onAgentTabs: (listener) => claims.onAgentTabs(listener),
     inspect: () => ({
       peerModule: addon ? 'loaded' : 'unavailable',
       sessions: Object.fromEntries(

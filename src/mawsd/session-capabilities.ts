@@ -60,12 +60,15 @@ export function headlessReason({ machine, platform, addon, engineHost, runtime, 
 
 // `path`: the daemon's socket for the session (none past sun_path); `tabEngine`: the attached tab engine's cua directory,
 // null while none is attached. The relay connects to the tab engine's own socket for the session, so a path that does
-// not fit on either side is no browser. P5 O17 M5: `headless`, `headlessReason`'s reading (§I).
-export function browserCapability({ machine, appSessionId, path, tabEngine, headless }: { machine: string; appSessionId: AppSessionId; path: string | null; tabEngine: string | null; headless: string | null }): SessionCapability {
-  const tooLong = path === null || (tabEngine !== null && cuaSocketPath(tabEngine, appSessionId) === null);
-  if (tooLong) return { available: false, reason: `the browser socket of this session is longer than a Unix socket allows on ${machine}` };
-  if (tabEngine !== null) return { available: true, viewed: 'local' };
-  return headless === null ? { available: true, viewed: 'screencast' } : { available: false, reason: headless };
+// not fit on either side is no browser. P5 O17 M5: `headless`, `headlessReason`'s reading (§I). P5 O17 (the session
+// sockets' names, 2026-11-03): `renderPath`, the render host's socket for the session as mawsd names it in `prepare`
+// (none past sun_path), the headless browser's other side: one that cannot fit is named here, before any use.
+export function browserCapability({ machine, appSessionId, path, renderPath, tabEngine, headless }: { machine: string; appSessionId: AppSessionId; path: string | null; renderPath: string | null; tabEngine: string | null; headless: string | null }): SessionCapability {
+  const tooLong: SessionCapability = { available: false, reason: `the browser socket of this session is longer than a Unix socket allows on ${machine}` };
+  if (path === null) return tooLong;
+  if (tabEngine !== null) return cuaSocketPath(tabEngine, appSessionId) === null ? tooLong : { available: true, viewed: 'local' };
+  if (headless !== null) return { available: false, reason: headless };
+  return renderPath === null ? tooLong : { available: true, viewed: 'screencast' };
 }
 
 export interface SessionCapabilitiesOptions {

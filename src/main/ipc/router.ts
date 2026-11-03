@@ -167,6 +167,10 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
   // control of a page above all: a remote session's agent never drives this Mac's browser) stays refused for another
   // machine until it is listed on purpose.
   const BROWSER_TOOL_HERE_FOR_ANY_MACHINE: ReadonlySet<string> = new Set(['browser.tabs.list', 'browser.tabs.open', 'browser.tabs.select']);
+  // P5 O17 M9b (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §K, "The app's bridge"): the remote view of
+  // the agent's tabs on another machine is this app's own bridge to that machine's link (src/main/browser/remote-view.ts),
+  // answered here with the session's machine as `ctx.target`; never offered remotely
+  const BROWSER_REMOTE_VIEW: ReadonlySet<string> = new Set(['browser.remote.open', 'browser.remote.select', 'browser.remote.takeControl', 'browser.remote.releaseControl', 'browser.remote.input', 'browser.remote.ack', 'browser.remote.close']);
   // P5 O7 M5a ("Open a copy, and Save As of a remote artifact"): a file of another machine lands on this Mac, by main's
   // handlers with that machine as `ctx.target`, which read it over the machine's link: Save As of its artifact (an export
   // the renderer made there, or the stored file) and an open copy (`remote.openCopy`, invoked on the machine a checkout
@@ -207,7 +211,7 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     const { target } = context;
     const input = codec.validateCommandInput(name, rawInput);
     if (!input.ok) return input;
-    if (target !== local && !OPENED_HERE_FOR_ANY_MACHINE.has(name) && !BROWSER_TOOL_HERE_FOR_ANY_MACHINE.has(name) && !SAVED_HERE_FOR_ANY_MACHINE.has(name)) {
+    if (target !== local && !OPENED_HERE_FOR_ANY_MACHINE.has(name) && !BROWSER_TOOL_HERE_FOR_ANY_MACHINE.has(name) && !BROWSER_REMOTE_VIEW.has(name) && !SAVED_HERE_FOR_ANY_MACHINE.has(name)) {
       if (gradeOf(name) === 'client' && !ANSWERED_BY_ITS_LINK.has(name)) {
         if (name === 'attention.viewing') return { ok: true, value: undefined as CommandOutput<CommandName> };
         return { ok: false, error: ipcError('host_unavailable', `${name}: not available for a session on another machine yet`) };

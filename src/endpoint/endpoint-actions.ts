@@ -18,6 +18,17 @@
 // act under its id stays `in-progress`, never run again; a device that wants the effect seals a new operation.
 // `forward.open`'s forwards live in this process's memory, so one its last process left unfinished is gone with it: an
 // orphan answered `expired` leaves the device to open a fresh forward, as a forward past its window does (P5 O7 M3).
+//
+// P5 O17 M9a (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §K; R2): `machine.browserControl
+// {appSessionId, epoch}`, graded `approve` on the session (the offer table's row; authorization asked a non-owner's step-up
+// and held its args to the two fields), grants control of the session's agent tabs for that epoch: its effect reads the
+// session's inventory from `mawsd`'s route (`EndpointServices.browser`) and answers `{appSessionId, epoch}` while the epoch
+// is the session's now, else `engine-changed` (a handover minted another). The grant is its done op: a controlling
+// `browser.screencast` open names it (streams.ts reads it back through `query`), so it is idempotent (the same binding
+// gives the same grant, and nothing is held), and it dies with its epoch, a restarted `mawsd` minting new ones: a done op
+// still held after a restart validates nothing then. An orphan answers `expired`, as every act here does.
+// Its claim's target is null, as the other acts': a query by the same member reads it whatever their standing on the
+// session, which tells them only of their own act.
 import type { Action } from 'org-protocol';
 import { OpLedger, type OpAnswer, type OpQueryAnswer } from '@shared/host/op-ledger';
 import type { RemoteChannel } from './channels';
@@ -36,11 +47,13 @@ export type EndpointActionsContext = {
   openForward(who: { member: string; device: string }, port: number): Promise<EffectResult>;
   /** The device's forward `forward`, held by `channel` while it is kept (an answered reseal's channel too). */
   holdForward(device: string, forward: string, channel: RemoteChannel): void;
+  /** P5 O17 M9a: the session's agent-browser inventory now (`EndpointServices.browser.inventory`), its epoch the grant's test. */
+  browserInventory(appSessionId: string): { epoch: string; state: 'ready' | 'unavailable' };
   now(): number;
   log(line: string): void;
 };
 
-export const OWN_ACTIONS: ReadonlySet<string> = new Set(['endpoint.grant', 'endpoint.state', 'forward.open']);
+export const OWN_ACTIONS: ReadonlySet<string> = new Set(['endpoint.grant', 'endpoint.state', 'forward.open', 'machine.browserControl']);
 
 export class EndpointActions {
   #ledger: OpLedger | null = null;
@@ -91,11 +104,29 @@ export class EndpointActions {
     try {
       if (action.action === 'endpoint.grant') return await this.ctx.grant(action.args.grant);
       if (action.action === 'forward.open') return await this.ctx.openForward(who, action.args.port as number);
+      if (action.action === 'machine.browserControl') return this.#browserControl(action.args.appSessionId as string, action.args.epoch as string);
       return await this.ctx.deliver(action.args.states, action.args.transitions);
     } catch (error) {
       return { ok: false, error: { code: 'internal', message: (error as Error).message } };
     }
   }
+
+  /** P5 O17 M9a: control of the session's agent tabs for `epoch`, granted while it is the session's epoch now. */
+  #browserControl(appSessionId: string, epoch: string): EffectResult {
+    const inventory = this.ctx.browserInventory(appSessionId);
+    if (inventory.epoch !== epoch) return { ok: false, error: { code: 'engine-changed', message: "the session's tab engine changed: read its inventory again" } };
+    if (inventory.state !== 'ready') return { ok: false, error: { code: 'unavailable', message: "the session's agent browser is unavailable" } };
+    return { ok: true, value: { appSessionId, epoch } };
+  }
+}
+
+/** P5 O17 M9a: the session and epoch a kept `machine.browserControl` result grants control of, or null (a failed one). */
+export function browserGrantOf(result: unknown): { appSessionId: string; epoch: string } | null {
+  if (typeof result !== 'object' || result === null || (result as { ok?: unknown }).ok !== true) return null;
+  const value = (result as { value?: unknown }).value;
+  if (typeof value !== 'object' || value === null) return null;
+  const { appSessionId, epoch } = value as { appSessionId?: unknown; epoch?: unknown };
+  return typeof appSessionId === 'string' && typeof epoch === 'string' ? { appSessionId, epoch } : null;
 }
 
 /** The forward a kept `forward.open` result names, or null (a failed one). */

@@ -4,7 +4,10 @@
 // Chips shrink to a minimum and the strip then scrolls sideways; a suspended tab's chip is muted, a loading one's title
 // shimmers. Closing a chip closes the browser tab. P3-G (M2): `trailing` sits at the row's right end (the floating
 // card's pill while the card is closed over this page in the panel). P5 O7 M3: a tab whose page is on a forward's local
-// listener carries "forwarded from <machine>" after its title.
+// listener carries "forwarded from <machine>" after its title. P5 O17 M10: on another machine's session, the agent's tabs
+// there follow the person's as their own group (`agent`, remote/View.tsx's AgentGroup); a chip of the person's or "+"
+// tells the surface the person's own tabs are shown again (`onLocal`), and while an agent tab is shown no chip of the
+// person's reads selected; their first chip is then the strip's tab stop, so each group keeps one.
 import type { KeyboardEvent, ReactNode } from 'react';
 import type { BrowserTab, BrowserTabForward } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -24,34 +27,31 @@ export interface TabStripProps {
   tabs: BrowserTab[];
   shownId: string | null; // the tab the surface shows
   trailing?: ReactNode;
+  agent?: ReactNode; // P5 O17 M10: the agent's tabs on the session's machine, after the person's
+  onLocal?(): void; // P5 O17 M10: the person's own tabs are shown again
 }
 
-export function TabStrip({ appSessionId, surface, tabs, shownId, trailing }: TabStripProps) {
+export function TabStrip({ appSessionId, surface, tabs, shownId, trailing, agent, onLocal }: TabStripProps) {
   const show = (tabId: string) => {
+    onLocal?.();
     if (tabId === shownId) return;
     if (surface === 'panel') selectTab(appSessionId, tabId);
     else openMainTab(appSessionId, tabId);
   };
   // "+": an empty tab, selected in the session; a main tab moves to the new tab's own main tab.
-  const add = () =>
+  const add = () => {
+    onLocal?.();
     void openTab(appSessionId, null).then((tab) => {
       if (tab && surface === 'main') openMainTab(appSessionId, tab.tabId);
     });
-  // Arrow keys move focus along the chips (the WAI-ARIA tabs pattern, manual activation), as the panel's strip does.
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
-    const chips = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
-    const at = chips.indexOf(document.activeElement as HTMLButtonElement);
-    if (at === -1) return;
-    event.preventDefault();
-    chips[(at + (event.key === 'ArrowRight' ? 1 : chips.length - 1)) % chips.length]!.focus();
   };
+  const stop = tabStop(tabs.map((tab) => tab.tabId), shownId);
 
   return (
     <div className="flex h-(--row-h) shrink-0 items-center gap-0.5 px-1">
-      <div role="tablist" aria-label={BROWSER_COPY.tabs} onKeyDown={onKeyDown} className="flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
+      <div role="tablist" aria-label={BROWSER_COPY.tabs} onKeyDown={moveAlongTabs} className="flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
         {tabs.map((tab) => (
-          <Chip key={tab.tabId} tab={tab} selected={tab.tabId === shownId} onSelect={() => show(tab.tabId)} />
+          <Chip key={tab.tabId} tab={tab} selected={tab.tabId === shownId} tabbable={tab.tabId === stop} onSelect={() => show(tab.tabId)} />
         ))}
       </div>
       <button
@@ -63,12 +63,26 @@ export function TabStrip({ appSessionId, surface, tabs, shownId, trailing }: Tab
       >
         <PlusIcon className="size-3.5" />
       </button>
+      {agent /* P5 O17 M10 */}
       {trailing && <div className="ml-auto flex shrink-0 items-center pl-1">{trailing}</div>}
     </div>
   );
 }
 
-function Chip({ tab, selected, onSelect }: { tab: BrowserTab; selected: boolean; onSelect(): void }) {
+// Arrow keys move focus along a tablist's chips (the WAI-ARIA tabs pattern, manual activation), as the panel's strip does.
+export function moveAlongTabs(event: KeyboardEvent<HTMLElement>): void {
+  if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+  const chips = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+  const at = chips.indexOf(document.activeElement as HTMLButtonElement);
+  if (at === -1) return;
+  event.preventDefault();
+  chips[(at + (event.key === 'ArrowRight' ? 1 : chips.length - 1)) % chips.length]!.focus();
+}
+
+/** A tablist's one tab stop: its shown chip, else its first (P5 O17 M10: a group with nothing shown stays in reach). */
+export const tabStop = (tabIds: string[], shownId: string | null): string | null => (shownId !== null && tabIds.includes(shownId) ? shownId : (tabIds[0] ?? null));
+
+function Chip({ tab, selected, tabbable, onSelect }: { tab: BrowserTab; selected: boolean; tabbable: boolean; onSelect(): void }) {
   const title = tabTitle(tab) || BROWSER_COPY.newTab;
   const tone = selected ? 'bg-bg text-fg' : tab.suspended ? 'text-fg-muted hover:bg-bg-hover' : 'text-fg-muted hover:bg-bg-hover hover:text-fg';
   const revealed = selected ? '' : 'invisible group-hover:visible group-focus-within:visible';
@@ -78,7 +92,7 @@ function Chip({ tab, selected, onSelect }: { tab: BrowserTab; selected: boolean;
         type="button"
         role="tab"
         aria-selected={selected}
-        tabIndex={selected ? 0 : -1}
+        tabIndex={tabbable ? 0 : -1}
         title={tab.url === '' ? title : `${title}\n${tab.url}`}
         onClick={onSelect}
         className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-sm pr-0.5 pl-2 text-ui-sm outline-accent focus-visible:outline-2"

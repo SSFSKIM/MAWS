@@ -14,15 +14,15 @@
 // its exports are written under the profile's store, `<profile>/artifacts`, as the app writes them.
 //
 // P5 O17 M4 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M4): the tab engine (tab-engine.ts), composed at the
-// first `browserEngine.request`: offscreen views (offscreen-views.ts) in Electron's partitions, the per-session sockets in
-// `renderCuaSocketDir`, the peer check's addon as the app loads it (the packaged app's Resources, else the development app
-// root this binary was started on), named for its machine as `mawsd` names it. No trusted root and no stand-in addon: only
-// `mawsd`'s relay is admitted, on darwin; elsewhere the uid is the boundary.
+// first `browserEngine.request`: offscreen views (offscreen-views.ts) in Electron's partitions, the per-session sockets at
+// the paths `mawsd` names in each `prepare` (under its `renderCuaSocketDir`), the peer check's addon as the app loads it
+// (the packaged app's Resources, else the development app root this binary was started on), named for its machine as
+// `mawsd` names it. No trusted root and no stand-in addon: only `mawsd`'s relay is admitted, on darwin; elsewhere the
+// uid is the boundary.
 import { writeSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { app, session } from 'electron';
-import { renderCuaSocketDir } from '@shared/daemon/files';
 import { machineName } from '@shared/machine/identity';
 import { loadPeerAddon, peerAddonPath } from '../main/browser/cua/peer';
 import { buildIdOf } from '../engine-host/supervisor-files';
@@ -78,7 +78,6 @@ export function runRenderHost(entryDir: string): Promise<void> {
         ...link,
         views: (partitions) => new OffscreenViews(partitions),
         fromPartition: (partition) => session.fromPartition(partition),
-        socketDir: renderCuaSocketDir(paths.profileDir),
         userData: join(paths.dir, RENDER_HOST_DIR),
         peer: { addon: loadPeerAddon(peerAddonPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, appRoot: app.getAppPath() })) },
         machine: machineName(process.env, hostname()),

@@ -593,7 +593,7 @@ describe('the headless browser through the seam (P5 O17 M5)', () => {
     const s = scene({
       browser: {
         post: (engine, request) => engine === ENGINE && (posts.push(request), true),
-        socketPath: (id) => `/p/mawsd/render-cua/${id}.sock`,
+        socketPath: (id) => `/p/mawsd/rcua/${id}.sock`,
         parentOf: (id) => parents.get(id) ?? Promise.resolve(null),
         held: () => held.value,
         ended: (id) => void ended.push(id),
@@ -606,7 +606,8 @@ describe('the headless browser through the seam (P5 O17 M5)', () => {
   }
   const demand = (appSessionId = 'S', extra: Partial<BrowserDemand> = {}): BrowserDemand => ({ appSessionId: appSessionId as AppSessionId, epoch: 'e1', deadline: performance.now() + 4_000, signal: new AbortController().signal, ...extra });
 
-  it('starts the render host for a demand, prepares the session on its connection naming the parent, and resolves at the answer', async () => {
+  // P5 O17 (the session sockets' names): the prepare names the socket mawsd computed, where the render host listens (§D)
+  it('starts the render host for a demand, prepares the session on its connection naming the parent and the socket, and resolves at the answer', async () => {
     const s = browserScene();
     let lineage!: (parent: AppSessionId | null) => void;
     s.parents.set('S', new Promise((resolve) => (lineage = resolve)));
@@ -617,13 +618,13 @@ describe('the headless browser through the seam (P5 O17 M5)', () => {
     expect(s.posts, 'the lineage read first').toEqual([]);
     lineage('P' as AppSessionId);
     await flush();
-    expect(s.posts).toEqual([{ id: expect.any(String), appSessionId: 'S', operation: { op: 'prepare', parent: 'P' } }]);
+    expect(s.posts).toEqual([{ id: expect.any(String), appSessionId: 'S', operation: { op: 'prepare', parent: 'P', socketPath: '/p/mawsd/rcua/S.sock' } }]);
     expect(s.seam.browserEngine('S' as AppSessionId), 'selected from the prepare on').toBe(ENGINE);
     expect(s.seam.browserAnswer(OTHER, { id: s.posts[0]!.id, result: { ok: true, value: null } }), 'from another connection').toBe(false);
     expect(s.answer(0)).toBe(true);
-    expect(await ensured).toEqual({ epoch: 'e1', socketPath: '/p/mawsd/render-cua/S.sock' });
+    expect(await ensured).toEqual({ epoch: 'e1', socketPath: '/p/mawsd/rcua/S.sock' });
     expect(s.answer(0), 'answered once').toBe(false);
-    expect(await s.seam.ensureBrowser(demand('S', { epoch: 'e2' })), 'a session it serves resolves at once').toEqual({ epoch: 'e2', socketPath: '/p/mawsd/render-cua/S.sock' });
+    expect(await s.seam.ensureBrowser(demand('S', { epoch: 'e2' })), 'a session it serves resolves at once').toEqual({ epoch: 'e2', socketPath: '/p/mawsd/rcua/S.sock' });
     expect(s.posts).toHaveLength(1);
   });
 
@@ -687,7 +688,7 @@ describe('the headless browser through the seam (P5 O17 M5)', () => {
     await flush();
     expect(s.ops()).toEqual(['prepare S', 'drop S', 'prepare S']);
     s.answer(2);
-    expect(await again).toEqual({ epoch: 'e2', socketPath: '/p/mawsd/render-cua/S.sock' });
+    expect(await again).toEqual({ epoch: 'e2', socketPath: '/p/mawsd/rcua/S.sock' });
   });
 
   it('the host’s connection ending ends its sessions’ service, resolves its drops and fails what it was preparing', async () => {
@@ -758,8 +759,8 @@ describe('the headless browser through the seam (P5 O17 M5)', () => {
     expect(s.ops()).toEqual(['prepare T', 'prepare S']);
     s.answer(1);
     expect(await Promise.all([first, second])).toEqual([
-      { epoch: 'e1', socketPath: '/p/mawsd/render-cua/S.sock' },
-      { epoch: 'e1', socketPath: '/p/mawsd/render-cua/S.sock' },
+      { epoch: 'e1', socketPath: '/p/mawsd/rcua/S.sock' },
+      { epoch: 'e1', socketPath: '/p/mawsd/rcua/S.sock' },
     ]);
   });
 
@@ -794,7 +795,7 @@ describe('the headless browser through the seam (P5 O17 M5)', () => {
     await flush();
     expect(s.ops()).toEqual(['prepare S', 'prepare T']);
     s.answer(1);
-    expect(await next).toMatchObject({ socketPath: '/p/mawsd/render-cua/T.sock' });
+    expect(await next).toMatchObject({ socketPath: '/p/mawsd/rcua/T.sock' });
   });
 
   it('refuses a demand while unavailable or stopped, and fails the waiting ones when the seam becomes unavailable', async () => {

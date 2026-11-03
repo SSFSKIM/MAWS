@@ -10,7 +10,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect } from '@playwright/test';
-import { cuaSocketPath, daemonCuaSocketPath } from '@shared/browser/cua-socket';
+import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
 import { cuaSocketDir, renderCuaSocketDir } from '@shared/daemon/files';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -38,11 +38,16 @@ export const linuxReason = (machine: string) => `cua's host cannot check its pee
 
 export const PAGE_MARKER = 'o17-headless-marker-5c1';
 export const BUTTON = { x: 40, y: 60, width: 120, height: 40 } as const; // the input page's button, in the viewport's DIP
+// P5 O17 M10: the remote view's page's field (`/remote`), in the viewport's DIP; its button is BUTTON
+export const FIELD = { x: 40, y: 160, width: 200, height: 30 } as const;
+export const CLICKED_RGB = [220, 30, 30] as const; // `/remote`'s background once its button is clicked
 
 // `/` a marker and a button; `/still` one colour, painting nothing more; `/input` a tall page that keeps what a person's
 // input did (its button's click, keys, wheel, and a text field that has focus); `/anim` a page that repaints at every
 // animation frame and counts them; `/popup` and `/child`, an opener (its button at BUTTON opens the child; it keeps what is
 // posted to it) and the page it opens, which posts to its opener as it loads, as a sign-in popup posts its result back.
+// P5 O17 M10: `/remote`, white until its button is clicked, then CLICKED_RGB (so a viewer's next frame shows the click),
+// with a field at FIELD that keeps what is typed and the keys the page heard.
 export interface Pages {
   origin: string;
   url(path: string): string;
@@ -63,6 +68,11 @@ export function startPages(): Promise<Pages> {
     // after an attributed press in the page, src/main/browser/window-open.ts)
     '/popup': html(`<title>opener</title><p>opener</p><button id="open" style="position:absolute;left:${BUTTON.x}px;top:${BUTTON.y}px;width:${BUTTON.width}px;height:${BUTTON.height}px" onclick="window.open('/child', '_blank')">Open</button><script>window.__messages=[];addEventListener('message',(e)=>__messages.push(e.data));</script>`),
     '/child': html(`<title>child</title><p>child</p><script>window.opener?.postMessage('from the child', location.origin);</script>`),
+    '/remote': html(
+      `<title>remote</title><body style="margin:0;background:#ffffff"><button id="go" style="position:absolute;left:${BUTTON.x}px;top:${BUTTON.y}px;width:${BUTTON.width}px;height:${BUTTON.height}px" onclick="document.body.style.background='rgb(${CLICKED_RGB.join(',')})';document.querySelector('#state').textContent='clicked'">Go</button>` +
+        `<p id="state" style="position:absolute;left:${BUTTON.x}px;top:110px;margin:0">idle</p><input id="field" style="position:absolute;left:${FIELD.x}px;top:${FIELD.y}px;width:${FIELD.width}px;height:${FIELD.height}px;box-sizing:border-box">` +
+        `<script>window.__keys=[];addEventListener('keydown',(e)=>__keys.push(e.key));</script></body>`,
+    ),
   };
   const server: Server = createServer((req, res) => {
     const body = routes[(req.url ?? '/').split('?')[0]!];
@@ -109,7 +119,7 @@ export interface HeadlessSceneOptions {
 }
 
 // A scratch root short enough for every socket under it (`/tmp/mh-XXXXXX`; the render host's per-session socket is the
-// longest, `<profile>/mawsd/render-cua/<uuid>.sock`), each repository trusted and the user's default mode `default` in
+// longest, `<profile>/mawsd/rcua/<digest>.sock`), each repository trusted and the user's default mode `default` in
 // the daemon's engine store, so a start runs no trust bootstrap and no auto-mode fallback (the stub's prelude is
 // Session's minimal one, as e2e/local-latency.spec.ts's)
 export async function startHeadlessScene(o: HeadlessSceneOptions = {}): Promise<HeadlessScene> {
@@ -167,7 +177,7 @@ export async function startHeadlessScene(o: HeadlessSceneOptions = {}): Promise<
     },
     report: (repo) => connectorReport(repo),
     daemonSocket: (appSessionId) => daemonCuaSocketPath(cuaSocketDir(userData), appSessionId)!,
-    renderSocket: (appSessionId) => cuaSocketPath(renderCuaSocketDir(userData, tmpdir()), appSessionId),
+    renderSocket: (appSessionId) => daemonCuaSocketPath(renderCuaSocketDir(userData, tmpdir()), appSessionId),
     mawsdLog: () => (existsSync(join(userData, 'mawsd', 'mawsd.log')) ? readFileSync(join(userData, 'mawsd', 'mawsd.log'), 'utf8') : ''),
     async stop() {
       await daemon.stop().catch((error: unknown) => console.error(error));

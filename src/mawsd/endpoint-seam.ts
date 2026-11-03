@@ -61,7 +61,7 @@ export interface DaemonServices {
   // P5 O17 M6 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §G): the agent's tabs on this machine, for
   // a viewer: the inventory and its changes from the route's cache (loading nothing), and a subscription to a tab's frames
   // and, under control, its input (its chunk loaded at the first open). The remote stage hands the same object to the
-  // endpoint as EndpointServices.browser (O17 M9, R1); until then DaemonServices leads EndpointServices by this member.
+  // endpoint as EndpointServices.browser (O17 M9a, R1), the two types equal again.
   browser: BrowserFeed;
   // P5 O7 M5c (O7's §T): the client port's remote targets: the endpoint registers one per channel's ref at admission, which
   // the services front's `route` consults after its own connections; the handle answers and closes it (client-port.ts)

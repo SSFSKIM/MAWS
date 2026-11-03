@@ -43,7 +43,7 @@ import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { launchEnvironment } from './support/scratch-env';
 // P5 O17 M8: pass 3
 import type { AppSessionId } from '@shared/graph/ids';
-import { cuaSocketPath } from '@shared/browser/cua-socket';
+import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
 import { renderCuaSocketDir } from '@shared/daemon/files';
 import { machineName } from '@shared/machine/identity';
 import type { BrowserEngineRequest, BrowserEngineResult, EngineInventory } from '@shared/ipc/schema/browser-engine';
@@ -511,8 +511,9 @@ test('pass 3: the render host as the agent’s tab engine against a fake mawsd: 
   const lines: string[] = [];
   try {
     await test.step('prepare: the session’s socket listens and admits mawsd’s relay; cua’s creation sequence makes an offscreen tab behind the fence', async () => {
-      await ok({ op: 'prepare' });
-      const path = cuaSocketPath(renderCuaSocketDir(profile, tmpdir()), P3)!;
+      // the socket mawsd would compute for the session, named in the prepare (P5 O17, the session sockets' names)
+      const path = daemonCuaSocketPath(renderCuaSocketDir(profile, tmpdir()), P3)!;
+      await ok({ op: 'prepare', socketPath: path });
       host = await connectFakeHost(path);
       expect(host.hello).toMatchObject({ extensionId: 'maws', extensionInstanceId: `maws:${P3}`, protocolVersion: 1, profileName: 'MAWS' });
       expect(await host.request('tabs.query')).toEqual([]);

@@ -237,3 +237,21 @@ describe('feeds', () => {
     expect(h.heard.at(-1)).toEqual(['ended', 'not-offered']);
   });
 });
+
+// P5 O17 M9a (O17's Interfaces §K): a session's `browser.inventory` feed, sent with its session only to an endpoint that
+// listed `rl2.browser-screencast` beside `rl2.feeds`; for any other it ends `not-offered`, never sent.
+describe('the browser inventory feed', () => {
+  it('sends the feed with its session and no cursor to an endpoint that listed the capability, and ends it `not-offered` for one that did not', async () => {
+    const h = harness();
+    h.channel.peer = ['rl2.feeds', 'rl2.browser-screencast'];
+    const s = h.table.subscribe({ session: { lane: 'B', id: 'app-1' }, feed: 'browser.inventory' }, h.sink, null);
+    expect(h.subs()).toEqual([{ t: 'sub', sub: s.id, session: { lane: 'B', id: 'app-1' }, feed: 'browser.inventory', cursor: null, credit: 1024 * 1024 }]);
+    const older = harness();
+    older.channel.peer = ['rl2.feeds'];
+    older.table.subscribe({ session: { lane: 'B', id: 'app-1' }, feed: 'browser.inventory' }, older.sink, null);
+    await vi.runAllTimersAsync();
+    expect(older.subs()).toEqual([]);
+    expect(older.heard).toEqual([['ended', 'not-offered']]);
+  });
+});
+

@@ -14,8 +14,9 @@
 import { existsSync, mkdirSync, rmSync, watch } from 'node:fs';
 import { createServer, connect, type Server, type Socket } from 'node:net';
 import { hostname } from 'node:os';
-import { join } from 'node:path';
+import { dirname } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
+import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
 import { cuaSocketDir, renderCuaSocketDir } from '@shared/daemon/files';
 import { BROWSER_ENGINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
 import type { BrowserEngineRequest } from '@shared/ipc/schema/browser-engine';
@@ -103,7 +104,7 @@ class Connector {
     socket.on('close', () => void (this.closed = true));
   }
   static open(): Connector {
-    const connector = new Connector(connect(join(cuaSocketDir(scene.root, TMP), `${S}.sock`)));
+    const connector = new Connector(connect(daemonCuaSocketPath(cuaSocketDir(scene.root, TMP), S)!));
     closers.push(() => connector.socket.destroy());
     return connector;
   }
@@ -201,10 +202,11 @@ class RenderHost {
   async handle(request: BrowserEngineRequest): Promise<void> {
     const { id, appSessionId, operation } = request;
     if (operation.op === 'prepare') {
-      const dir = renderCuaSocketDir(scene.root, TMP);
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      // P5 O17 (the session sockets' names): it listens where mawsd's prepare names, as the render host does
+      const path = operation.socketPath!;
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
       const server = createServer((socket) => this.serve(appSessionId, socket));
-      await new Promise<void>((resolve) => server.listen(join(dir, `${appSessionId}.sock`), resolve));
+      await new Promise<void>((resolve) => server.listen(path, resolve));
       this.servers.set(appSessionId, server);
       await this.answer(id);
       await this.state(appSessionId);
@@ -346,16 +348,18 @@ async function firstTab(): Promise<Connector> {
   return cua;
 }
 
-// The app: attached on engine-host.sock and machine.sock, its own cua directory named
-async function attachApp(): Promise<{ leave(): void }> {
+// The app: attached on engine-host.sock and machine.sock, its own cua directory named. P5 O17 M9b: `engine`, its hello
+// lists browser.engine (this build's app, a tab engine of its agent tabs); else an app of the local stage or older
+async function attachApp(options: { engine?: boolean } = {}): Promise<{ leave(): void; machine: RawApp }> {
   const dir = `/tmp/mbapp-${process.pid}-${Date.now()}`;
   mkdirSync(dir, { mode: 0o700 });
   closers.push(() => rmSync(dir, { recursive: true, force: true }));
   const engine = await scene.app('engine-host', { capabilities: [MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY] });
-  const machine = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY] });
+  const machine = await scene.app('machine', { capabilities: [MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, ...(options.engine ? [BROWSER_ENGINE_CAPABILITY] : [])] });
   machine.ready();
   expect(await machine.request('machine.client', { browserSocket: dir })).toMatchObject({ ok: true });
   return {
+    machine,
     leave() {
       machine.leave();
       engine.leave();
@@ -364,7 +368,7 @@ async function attachApp(): Promise<{ leave(): void }> {
 }
 
 const renderStatus = async (daemon: RunningDaemon) => (await daemon.status()).render!;
-const listening = () => until(() => existsSync(join(cuaSocketDir(scene.root, TMP), `${S}.sock`)), 3_000, 'the session’s socket listening');
+const listening = () => until(() => existsSync(daemonCuaSocketPath(cuaSocketDir(scene.root, TMP), S)!), 3_000, 'the session’s socket listening');
 
 describe('the first browser with no app (acceptance 1)', () => {
   it('reads the screencast before Chromium starts, answers cua cold, starts the render host at its first tab, and ends it after the quiet period while cua reconnects cold', async () => {
@@ -413,7 +417,9 @@ describe('the first browser with no app (acceptance 1)', () => {
   it('names a side thread’s parent in its prepare, read from mawsd’s own index (M4’s question): the render host reads no lineage', async () => {
     const t = await stand();
     await firstTab();
-    expect(t.host().requests[0]!.operation).toEqual({ op: 'prepare' }); // no spine with a record of S: a root session
+    // no spine with a record of S: a root session; the socket mawsd computed, where the render host listens (P5 O17, the
+    // session sockets' names)
+    expect(t.host().requests[0]!.operation).toEqual({ op: 'prepare', socketPath: daemonCuaSocketPath(renderCuaSocketDir(scene.root, TMP), S) });
     expect(scene.logs.some((line) => line.includes('was not read in time'))).toBe(false);
   });
 });
@@ -708,13 +714,56 @@ describe('a viewer on DaemonServices.browser (acceptance 6)', () => {
     await expect(t.daemon.services.browser.open({ appSessionId: S as AppSessionId, epoch: inventory.epoch, tabId: 'b_000000000000', control: false }, { frame: () => {}, closed: () => {} })).rejects.toMatchObject({ reason: 'engine_changed' });
   });
 
-  it('reads the app’s relay as unavailable, with its reason, and refuses an open there with it', async () => {
+  it('reads the relay of an app too old to be a tab engine as unavailable, with its reason, and refuses an open there with it', async () => {
     const t = await stand();
     await attachApp();
     await until(() => t.daemon.services.browser.inventory(S as AppSessionId).state === 'unavailable', 3_000, 'relay');
     const inventory = t.daemon.services.browser.inventory(S as AppSessionId);
-    expect(inventory).toMatchObject({ tabs: [], reason: `the agent's browser is in the MAWS app on ${MACHINE}` });
+    expect(inventory).toMatchObject({ tabs: [], reason: `the MAWS app on ${MACHINE} is too old to share the agent's tabs` }); // P5 O17 M9b
     await expect(t.daemon.services.browser.open({ appSessionId: S as AppSessionId, epoch: inventory.epoch, tabId: 'b_000000000000', control: false }, { frame: () => {}, closed: () => {} })).rejects.toMatchObject({ reason: 'unavailable', message: inventory.reason });
+  });
+
+  // P5 O17 M9b: an app whose hello lists browser.engine is the relay's engine: its inventory asked at the first read, its
+  // answer and pushes the cache, a viewer's open, frames and end through its connection as through the render host's
+  it('takes the app listing browser.engine as the relay’s engine: its inventory asked and answered, a viewer served by it', async () => {
+    const t = await stand();
+    const app = await attachApp({ engine: true });
+    const browser = t.daemon.services.browser;
+    await until(() => browser.inventory(S as AppSessionId).state === 'ready', 3_000, 'relay, the app an engine');
+    const requests = () => app.machine.messages.filter((message) => message.t === 'evt' && message.name === 'browserEngine.request').map((message) => message.payload as BrowserEngineRequest);
+    await until(() => requests().length === 1, 3_000, 'the inventory asked of the app');
+    const [asked] = requests();
+    expect(asked).toMatchObject({ appSessionId: S, operation: { op: 'inventory' } });
+    const heard: BrowserInventory[] = [];
+    closers.push(browser.watchInventory(S as AppSessionId, (inventory) => void heard.push(inventory)));
+    const tab = { tabId: 'b_00000000000a', title: 'dev', url: 'http://127.0.0.1:5173/', control: 'agent' };
+    expect(await app.machine.request('browserEngine.answer', { id: asked!.id, result: { ok: true, value: { tabs: [tab], selected: null, state: 'ready' } } })).toMatchObject({ ok: true });
+    await until(() => heard.at(-1)?.tabs.length === 1, 3_000, 'the app’s answer in the cache');
+    const { epoch } = heard.at(-1)!;
+    expect(requests(), 'asked once in the period').toHaveLength(1);
+    const frames: BrowserFrame[] = [];
+    const closed: string[] = [];
+    const opening = browser.open({ appSessionId: S as AppSessionId, epoch, tabId: tab.tabId, control: false }, { frame: (frame) => void frames.push(frame), closed: (reason) => void closed.push(reason) });
+    await until(() => requests().length === 2, 3_000, 'the open sent to the app');
+    const open = requests()[1]!;
+    const subscriptionId = (open.operation as { subscriptionId: string }).subscriptionId;
+    expect(open.operation).toEqual({ op: 'open', subscriptionId, tabId: tab.tabId, control: false });
+    await app.machine.request('browserEngine.answer', { id: open.id, result: { ok: true, value: null } });
+    await opening;
+    expect(await app.machine.request('browserEngine.frame', { subscriptionId, frame: { tabId: tab.tabId, seq: 1, capturedAt: 1, width: 640, height: 400, viewport: { width: 1280, height: 800 }, jpegBase64: Buffer.from([0xff, 0xd8, 9]).toString('base64') } })).toMatchObject({ ok: true });
+    await until(() => frames.length === 1, 3_000, 'the app’s frame');
+    expect(frames[0]).toMatchObject({ epoch, tabId: tab.tabId, seq: 1, jpeg: new Uint8Array([0xff, 0xd8, 9]) });
+    expect(await app.machine.request('browserEngine.state', { appSessionId: S, inventory: { tabs: [], selected: null, state: 'ready' } })).toMatchObject({ ok: true });
+    await until(() => heard.at(-1)?.tabs.length === 0, 3_000, 'the app’s push');
+    expect(await app.machine.request('browserEngine.ended', { subscriptionId, reason: 'tab_closed' })).toMatchObject({ ok: true });
+    await until(() => closed.length === 1, 3_000, 'the end');
+    expect(closed).toEqual(['tab_closed']);
+    // the render host's connection is never this session's engine while the app is: a state from elsewhere is refused
+    const observer = await scene.app('machine', { capabilities: [RENDER_CLIENT_CAPABILITY, BROWSER_ENGINE_CAPABILITY], appPid: 77 });
+    observer.ready();
+    expect(await observer.request('browserEngine.state', { appSessionId: S, inventory: { tabs: [tab], selected: null, state: 'ready' } })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    app.leave();
+    await until(() => browser.inventory(S as AppSessionId).epoch !== epoch, 3_000, 'the app’s departure');
   });
 });
 

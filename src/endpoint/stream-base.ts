@@ -3,7 +3,7 @@
 // output queued under the device's credit and sent through the channel's stream window, its input under the endpoint's
 // credit, the hold a re-check puts on both, and its end. A plane says what it does at each of those (`queued`,
 // `drained`, `closed`, `input`, `control`); streams.ts admits, routes and re-checks.
-import { STREAM_CHUNK_BYTES, STREAM_CREDIT_MAX, type EndpointMessage, type StreamControlMessage, type StreamDataMessage, type StreamRefusal } from 'org-protocol';
+import { STREAM_CHUNK_BYTES, STREAM_CREDIT_MAX, type EndpointMessage, type StreamBrowserOpened, type StreamControlMessage, type StreamDataMessage, type StreamRefusal } from 'org-protocol';
 import type { StreamBinding } from './authorize';
 import type { RemoteChannel } from './channels';
 import type { StreamSource, StreamWindow } from './stream-window';
@@ -14,9 +14,11 @@ export const STREAM_INPUT_CREDIT = 256 * 1024;
 /**
  * P5 O7 M5b: what a read open (a stream row's, no act) is authorized on again at each re-check: the open's kind fields as
  * its input, and whether the decision that admitted it, or the latest re-check's, still stands (authorize.ts' `stands`:
- * no record, placement, head, policy or grant it read has moved).
+ * no record, placement, head, policy or grant it read has moved). P5 O17 M9a: `lesser`, what the stream is decided as
+ * once a re-check refuses its input (a controlling screencast's, read-only), and the word it then closes with
+ * (`control-revoked`): the stream ends with that word when only the lesser input stands, `removed` when nothing does.
  */
-export type ReadAccess = { input: unknown; stands: () => boolean };
+export type ReadAccess = { input: unknown; stands: () => boolean; lesser?: { input: unknown; reason: string } };
 
 /**
  * P5 O7 M5b: a read open admitted, as its kind's plane takes it (streams.ts runs the admission; a plane is the seam each
@@ -45,6 +47,13 @@ export type ReadOpening = {
 };
 /** A read open's kind's plane (P5 O7 M5b). */
 export type ReadPlane = (opening: ReadOpening) => Promise<void>;
+
+/**
+ * An act's ledger answer, as a stream's admission reads it: done, with the binding, name and result the ledger kept; or
+ * the refusal the device reads (`unknown` for an op it holds nothing of, `unavailable` when it can't say now). An act
+ * open's (streams.ts) and, P5 O17 M9a, a controlling screencast's grant (stream-browser.ts).
+ */
+export type LedgerRead = { kind: 'done'; member: string; device: string; name: string; outcome: unknown } | { kind: 'refused'; reason: StreamRefusal };
 
 type Queued = { offset: number; bytes: Uint8Array } | { close: string };
 
@@ -100,8 +109,11 @@ export abstract class Stream implements StreamSource {
     return this.#held;
   }
 
-  /** The stream's answer: `streamOpened`, the device's input credit given; P5 O7 M5b: an `http` answer's status and headers. */
-  open(fields: { pty?: Record<string, unknown>; http?: { status: number; headers: Record<string, string> } }): void {
+  /**
+   * The stream's answer: `streamOpened`, the device's input credit given; P5 O7 M5b: an `http` answer's status and
+   * headers; P5 O17 M9a: what a `browser.screencast` views.
+   */
+  open(fields: { pty?: Record<string, unknown>; http?: { status: number; headers: Record<string, string> }; browser?: StreamBrowserOpened }): void {
     this.opened = true;
     this.#inputCredit = STREAM_INPUT_CREDIT;
     this.channel.send({ t: 'streamOpened', id: this.id, ...fields, credit: STREAM_INPUT_CREDIT } as EndpointMessage);

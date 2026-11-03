@@ -1,5 +1,5 @@
 // The daemon's per-session cua sockets (P5 O5 M5; docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §H;
-// P5 §6, survey §7.5): every lane B launch is told `mawsd`'s own socket for its session, `<cua dir>/<appSessionId>.sock`
+// P5 §6, survey §7.5): every lane B launch is told `mawsd`'s own socket for its session, `<cua dir>/<digest>.sock`
 // (@shared/daemon/files' cuaSocketDir, @shared/browser/cua-socket's daemonCuaSocketPath), stable for the session's life,
 // so an engine launched with no app, or one whose app quit and came back (D-16), keeps the path it was told.
 //
@@ -30,7 +30,7 @@
 import { chmodSync, readdirSync, rmSync } from 'node:fs';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { dirname, join } from 'node:path';
-import { cuaSocketPath, daemonCuaSocketPath } from '@shared/browser/cua-socket';
+import { cuaSocketPath, daemonCuaSocketPath, daemonSessionSocketName } from '@shared/browser/cua-socket';
 import type { AppSessionId } from '@shared/graph/ids';
 import { clearSocketPath, makePrivateDirectory } from '@shared/host/private-listen';
 import { assertPrivateSocket } from '@shared/host/private-path';
@@ -406,7 +406,7 @@ export function createCuaSockets(options: CuaSocketsOptions): CuaSockets {
       if (existing) return existing.path;
       const path = daemonCuaSocketPath(dir, appSessionId);
       if (path === null) {
-        if (!tooLong.has(appSessionId)) log(`the cua socket path of ${appSessionId} is longer than a Unix socket allows (${Buffer.byteLength(join(dir, `${appSessionId}.sock`))} bytes): cua cannot reach this session's browser`);
+        if (!tooLong.has(appSessionId)) log(`the cua socket path of ${appSessionId} is longer than a Unix socket allows (${Buffer.byteLength(join(dir, daemonSessionSocketName(appSessionId)))} bytes): cua cannot reach this session's browser`);
         tooLong.add(appSessionId);
         return null;
       }

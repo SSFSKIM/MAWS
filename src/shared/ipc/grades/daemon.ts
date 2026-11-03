@@ -13,4 +13,5 @@ export const grades = {
   'daemon.endpoint': 'internal',
   'daemon.e2eSeam': 'internal', // M5b fix round 2: the e2e's seams, never a remote caller's
   'daemon.e2eRender': 'internal', // P5 O5 M4: the render seam's e2e capture, likewise
+  'daemon.e2eBrowserView': 'internal', // P5 O17 M9b: a viewer of mawsd's browser feed for the e2e, likewise
 } as const satisfies CommandGrades<'daemon'>;

@@ -102,6 +102,7 @@ vi.mock('electron', () => ({
 import type { HostDispatch } from '../ipc/router';
 import { engineHostSettled } from '../../services/sessions/service-register';
 import { createHostSupervisor, RESYNC_BOUND_MS, type HostSupervisor } from './supervisor';
+import { hostEventToWindows } from './window-events'; // P5 O17 M9b
 
 const HOSTS = {
   'engine-host': { modulePath: '/out/main/engine-host.js', serviceName: 'maws-engine-host' },
@@ -563,6 +564,26 @@ describe('host supervisor', () => {
     expect(seen).toHaveLength(1);
   });
   // C3 end
+
+  // P5 O17 M9b fix wave: main's relay keeps mawsd's request to the app's tab engine off the windows (it carries a remote
+  // person's keys and text), while main's listeners still hear it; any other event goes to the windows as before
+  it('relays through hostEventToWindows: browserEngine.request to main alone, another event to the windows and main', async () => {
+    supervisor.stop();
+    supervisor = createHostSupervisor({ hosts: HOSTS, emit: hostEventToWindows(emit as never) });
+    const { engine } = await startReady();
+    const requests: unknown[] = [];
+    supervisor.onEvent('browserEngine.request', (payload) => requests.push(payload));
+    const request = { id: 'q1', appSessionId: 'app-1', operation: { op: 'inventory' } };
+    fromHost(engine, { t: 'evt', name: 'browserEngine.request', payload: request });
+    await flush();
+    expect(requests).toEqual([request]);
+    expect(emit.mock.calls.map(([name]) => name)).not.toContain('browserEngine.request');
+    // any other event: to the windows, their answer the relay's
+    const exit = { ptyId: 'p1', exitCode: 0, signal: null };
+    emit.mockReturnValueOnce(false);
+    expect(hostEventToWindows(emit as never)('pty.exit', exit as never)).toBe(false);
+    expect(emit).toHaveBeenLastCalledWith('pty.exit', exit);
+  });
 
   it('on a crash fails pending requests with host_unavailable, reports crashed, then restarts after 0.5 s', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});

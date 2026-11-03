@@ -137,6 +137,59 @@ export const BROWSER_COPY = {
   },
   // E4c end
 
+  // P5 O17 M10 start: the agent's tabs on another machine's session, seen by screencast (remote/View.tsx). Each state is
+  // worded from main's view kind (and its end), never from prose; the machine's own reason shows only when it is the
+  // machine's reading (`unavailable`).
+  remote: {
+    group: (machine: string) => `Agent on ${machine}`,
+    pick: (machine: string) => `Agent tab on ${machine}`,
+    noTabs: 'No agent browser tabs',
+    connecting: (machine: string) => `Connecting to ${machine}`,
+    lost: 'Connection lost',
+    unavailable: (reason: string | null) => (reason === null || reason === '' ? 'The agent has no browser' : `The agent has no browser: ${reason}`),
+    unsupported: (machine: string) => `${machine} runs a version of MAWS that can’t show the agent’s browser here`,
+    ended: {
+      removed: 'You can no longer view this session’s browser',
+      class: 'This device can’t view the agent’s browser',
+      closed: (machine: string) => `The connection to ${machine} closed`,
+      noLink: (machine: string) => `${machine} isn’t reachable from this Mac`,
+      window: 'The view was closed',
+      failed: (machine: string) => `The agent’s browser on ${machine} stopped`,
+    },
+    reconnect: 'Reconnect',
+    loading: 'Waiting for the agent’s page…',
+    waiting: 'The agent’s tab isn’t available right now', // its stream closed with the tab or the engine; the next listing or Retry
+    stopped: 'The picture stopped',
+    retry: 'Retry',
+    page: (title: string, machine: string) => `The agent’s page on ${machine}: ${title}`,
+    viewOnly: 'View only',
+    viewOnlyHint: 'View only; take control to use the page',
+    youControl: 'You have control',
+    youControlHint: 'You have control; Escape gives the keyboard back to this window',
+    takeControl: 'Take control',
+    taking: 'Taking control…',
+    giveBack: 'Give back',
+    // why control was not taken: a machine's or the link's word, named (remote/View.tsx's `controlRefusedWords`); main's own
+    // sentence as it says it
+    controlRefused: {
+      plain: 'Couldn’t take control',
+      said: (reason: string) => `Couldn’t take control: ${reason}`,
+      busy: 'Couldn’t take control: someone else is using this tab',
+      noRight: (machine: string) => `Couldn’t take control: you don’t have the right to use the agent’s browser on ${machine}`,
+      viewOnly: (machine: string) => `Couldn’t take control: you can only view on ${machine}`,
+      tabGone: 'Couldn’t take control: the tab is no longer open',
+      changed: 'Couldn’t take control: the agent’s browser changed, so try again',
+      cancelled: 'Couldn’t take control: the confirmation was cancelled',
+      expired: 'Couldn’t take control: the request expired',
+      notOffered: (machine: string) => `Couldn’t take control: ${machine} doesn’t offer it`,
+      unreachable: (machine: string) => `Couldn’t take control: ${machine} isn’t reachable`,
+      unavailable: (machine: string) => `Couldn’t take control: the agent’s browser on ${machine} is unavailable`,
+    },
+    controlRevoked: 'Control was taken back',
+    pasteTooLong: (kb: number) => `That paste is too long to send to the agent’s page (at most ${kb} KB)`,
+  },
+  // P5 O17 M10 end
+
   // cua #90 start: the bookmarks bar (Chrome's words) and the address field's bookmark rows
   bookmarks: {
     bar: 'Bookmarks bar',

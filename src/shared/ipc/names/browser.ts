@@ -17,6 +17,9 @@ export const commands = [
   'browser.extensions.actions', 'browser.extensions.action.click', 'browser.extensions.action.options', 'browser.extensions.action.menu', 'browser.extensions.puzzle',
   // cua #90 end
   'browser.view.capture', // P3-G
+  // P5 O17 M9b start
+  'browser.remote.open', 'browser.remote.select', 'browser.remote.takeControl', 'browser.remote.releaseControl', 'browser.remote.input', 'browser.remote.ack', 'browser.remote.close',
+  // P5 O17 M9b end
 ] as const;
 
 export const events = [
@@ -32,4 +35,5 @@ export const events = [
   // cua #90 start
   'browser.bookmarks.changed', 'browser.extensions.actions.changed', 'browser.extensions.popup', 'browser.extensions.reveal',
   // cua #90 end
+  'browser.remote.inventory', 'browser.remote.frame', 'browser.remote.closed', // P5 O17 M9b
 ] as const;

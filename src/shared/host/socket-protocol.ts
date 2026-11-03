@@ -203,7 +203,7 @@ export const HOST_RENDER_CAPABILITY = 'host.render';
 export const HOST_BROWSER_WORK_CAPABILITY = 'host.browserWork';
 // P5 O17 M4 (Interfaces §A, §F): a `machine.sock` client's hello lists it when the client is a tab engine: it serves
 // `browserEngine.request` for the sessions `mawsd` prepares on it and pushes `browserEngine.state` (the render host; the
-// app from the remote stage, M9).
+// app from the remote stage, M9b: its agent tabs, for `mawsd`'s viewers while it is attached, src/main/browser/engine.ts).
 export const BROWSER_ENGINE_CAPABILITY = 'browser.engine';
 // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C, §D; D10, D11): one more per direction.
 // `host.connectors` on the engine host's welcome says it keys connector operations and dataset refreshes on a client
@@ -235,7 +235,7 @@ export const HOLDER_CAPABILITY = 'host.holder';
 export const PEER_CAPABILITIES = {
   engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment; P5 O5 M4: host.render; P5 O4 M2: it keys the connectors on a declaring client; P5 O16 M3b: it hands over; P5 O17 M7: host.browserWork)
   ptyHost: [PTY_FRAMES_CAPABILITY], // the pty host's welcome
-  app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host (P5 O3-D M5b: machine.spine; P5 O4 M2: machine.connectors; P5 O16 M3b: host.holder)
+  app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, BROWSER_ENGINE_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host (P5 O3-D M5b: machine.spine; P5 O4 M2: machine.connectors; P5 O16 M3b: host.holder; P5 O17 M9b: browser.engine, the app a tab engine of its agent tabs on machine.sock)
   daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3, O4 M2: both under its permanent-client option; P5 O16 M3b: host.holder, whatever the option; P5 O17 M7 fix 2: host.browserWork, it tells browser work, under the option too)
   daemonToPtyHost: [PTY_FRAMES_CAPABILITY], // `mawsd`'s hello to the pty host
   daemon: [PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_DELIVERY_CAPABILITY], // `mawsd`'s welcome on machine.sock, and what its relays add (P5 O5 M2: machine.artifacts; M4: machine.render; P5 O7 M5c: machine.delivery, its spine serving delivery.send)

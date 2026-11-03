@@ -42,15 +42,22 @@ export type QueryMessage = { t: 'query'; opId: string; opCreated: string; execut
  * channel on an `attention` one. P5 O7 M5a: `artifacts`, the machine's artifact and library changes, names none either,
  * and goes only to an endpoint that listed `rl2.artifacts` (an older one reads the value `malformed` and closes).
  */
-export type Feed = 'checkout' | MachineFeed;
+export type Feed = SessionFeed | MachineFeed;
+/**
+ * The feeds that name their session: M4's `checkout`, and (P5 O17 M9a, behind `rl2.browser-screencast`; O17's Interfaces
+ * §K) `browser.inventory`, the agent's tabs on the session as the machine's tab engine holds them, a snapshot at each
+ * change. A device sends the latter only to an endpoint that listed the capability: an older one reads it `malformed`.
+ */
+export type SessionFeed = 'checkout' | 'browser.inventory';
 /** The feeds that name no session: the machine's own (M6's `attention`, M5a's `artifacts`). */
 export type MachineFeed = 'attention' | 'artifacts';
 const MACHINE_FEEDS: readonly string[] = ['attention', 'artifacts'] satisfies readonly MachineFeed[];
-const FEEDS: readonly string[] = ['checkout', ...MACHINE_FEEDS];
+const SESSION_FEEDS: readonly string[] = ['checkout', 'browser.inventory'] satisfies readonly SessionFeed[];
+const FEEDS: readonly string[] = [...SESSION_FEEDS, ...MACHINE_FEEDS];
 /** Whether `feed` is one of the machine's own feeds, which name no session. */
 export const isMachineFeed = (feed: unknown): feed is MachineFeed => MACHINE_FEEDS.includes(feed as string);
-/** A session's stream (no `feed`), or its `checkout` feed. */
-export type SessionSubMessage = { t: 'sub'; sub: string; session: SessionRef; view?: 'full' | 'cards'; feed?: 'checkout'; cursor: Cursor | null; credit: number };
+/** A session's stream (no `feed`), or one of its feeds (`checkout`; P5 O17 M9a: `browser.inventory`). */
+export type SessionSubMessage = { t: 'sub'; sub: string; session: SessionRef; view?: 'full' | 'cards'; feed?: SessionFeed; cursor: Cursor | null; credit: number };
 /** One of the machine's own feeds (M6's `attention`, M5a's `artifacts`), which name no session. */
 export type MachineFeedSubMessage = { t: 'sub'; sub: string; feed: MachineFeed; cursor: Cursor | null; credit: number };
 export type SubMessage = SessionSubMessage | MachineFeedSubMessage;
@@ -88,24 +95,32 @@ export type EndedMessage = { t: 'ended'; sub: string; reason: string };
  * stream row of the endpoint's offer table at the row's grade: `http` (one request to the machine's artifact endpoint) and
  * `document` (one endpoint document channel). A device sends one only to an endpoint that listed the capability: an
  * older endpoint reads a missing `op`, or these kinds, as `malformed` and closes the channel. A `pty` or `tcp` open (the act
- * open) still names its act. Reserved for O17 M9 and admitted by no validator until then: the kind `browser.screencast`
- * and the capability `rl2.browser-screencast` (O7's Interfaces §M and §N), so an open of that kind is `malformed` here.
+ * open) still names its act.
+ *
+ * P5 O17 M9a (behind `rl2.browser-screencast`; RL2_PROTOCOL 1.8; docs/doperpowers/plans/2026-11-01-p5-o17-browser.md,
+ * Interfaces §K): the read open's third kind, `browser.screencast`, one viewer of one agent tab on a session (`browser`),
+ * its frames in screencast.ts' envelope, its controls (`ack`, `input`) on `streamControl`. A controlling open names its
+ * done `machine.browserControl` act in `browser.control.op`, never as the stream's `op`: the stream row admits it, and
+ * the act is the grant it carries. A device opens one only on a channel whose endpoint listed the capability, and only
+ * such an endpoint answers `streamOpened.browser` or the refusals `engine-changed` and `control-busy`.
  */
 export type StreamKind = ActStreamKind | ReadStreamKind;
 /** The kinds opened under an act (`op`). */
 export type ActStreamKind = 'pty' | 'tcp';
 /** The kinds of the read open (no `op`; P5 O7 M5b). */
-export type ReadStreamKind = 'http' | 'document';
+export type ReadStreamKind = 'http' | 'document' | 'browser.screencast';
 const ACT_STREAM_KINDS: readonly string[] = ['pty', 'tcp'] satisfies readonly ActStreamKind[];
-const READ_STREAM_KINDS: readonly string[] = ['http', 'document'] satisfies readonly ReadStreamKind[];
+const READ_STREAM_KINDS: readonly string[] = ['http', 'document', 'browser.screencast'] satisfies readonly ReadStreamKind[];
 /** Whether `kind` is a read open's (no `op`). */
 export const isReadStreamKind = (kind: unknown): kind is ReadStreamKind => READ_STREAM_KINDS.includes(kind as string);
 /** Why an open is refused: the act doesn't authorize it (`grade`), names nothing the machine still holds (`unknown`: a
  * fresh act may), the port answers no connection (`unreachable`), the channel holds MAX_STREAMS (`busy`), the open is out
  * of shape (`malformed`), or the machine can't say now (`unavailable`: ask again). P5 O7 M5b: `read-only`, an edit open
  * the machine's policy refuses, sent only in answer to a read open, which only a device that listed `rl2.read-open` makes
- * (an older validator would close the channel on it). */
-export const STREAM_REFUSALS = ['grade', 'unknown', 'unreachable', 'busy', 'malformed', 'unavailable', 'read-only'] as const;
+ * (an older validator would close the channel on it). P5 O17 M9a: `engine-changed` (the open names an epoch the session's
+ * tab engine has left) and `control-busy` (another viewer controls the tab), each only in answer to a `browser.screencast`
+ * open, which only a device that listed `rl2.browser-screencast` makes. */
+export const STREAM_REFUSALS = ['grade', 'unknown', 'unreachable', 'busy', 'malformed', 'unavailable', 'read-only', 'engine-changed', 'control-busy'] as const;
 export type StreamRefusal = (typeof STREAM_REFUSALS)[number];
 /** The most a `streamData` carries, decoded. */
 export const STREAM_CHUNK_BYTES = 64 * 1024;
@@ -124,12 +139,21 @@ export type StreamPtyOpen = { ptyId: string; from: number; inputEpoch: string; i
 export type StreamHttpOpen = { url: string; method: 'GET' | 'HEAD'; range?: string };
 /** A `document` read open (P5 O7 M5b): one endpoint document channel on the artifact, to edit or to view. */
 export type StreamDocumentOpen = { artifactId: string; mode: 'edit' | 'view'; doc?: 'suggestions' };
-/** `op`: the authorizing act's opId, for the act open (`pty`, `tcp`); absent for the read open (`http`, `document`). */
-export type StreamOpenMessage = { t: 'streamOpen'; id: string; kind: StreamKind; op?: string; credit: number; pty?: StreamPtyOpen; tcp?: { forward: string }; http?: StreamHttpOpen; document?: StreamDocumentOpen };
+/**
+ * A `browser.screencast` read open (P5 O17 M9a): one tab of the session's agent browser, under the epoch the viewer read
+ * it in (`mawsd`'s, opaque); `control.op`, a done `machine.browserControl` act of this channel's member and device on the
+ * same session and epoch, for a controlling open (none: read-only).
+ */
+export type StreamBrowserOpen = { appSessionId: string; epoch: string; tabId: string; control?: { op: string } };
+/** A `browser.screencast` answer (P5 O17 M9a): the epoch and tab it views, and whether it takes input. */
+export type StreamBrowserOpened = { epoch: string; tabId: string; control: boolean };
+/** `op`: the authorizing act's opId, for the act open (`pty`, `tcp`); absent for the read open (`http`, `document`, `browser.screencast`). */
+export type StreamOpenMessage = { t: 'streamOpen'; id: string; kind: StreamKind; op?: string; credit: number; pty?: StreamPtyOpen; tcp?: { forward: string }; http?: StreamHttpOpen; document?: StreamDocumentOpen; browser?: StreamBrowserOpen };
 /** `pty.ringStart`: where the output this opening delivers starts, max(from, the ring's start); a value past `from` says
  * the ring moved past it. `credit`: the endpoint's, for the device's bytes. `http` (P5 O7 M5b): the artifact endpoint's
- * status and headers; the body follows as `streamData` from offset 0, then `streamClose 'closed'`. */
-export type StreamOpenedMessage = { t: 'streamOpened'; id: string; pty?: { info: Record<string, unknown>; ringStart: number; nextOffset: number }; http?: { status: number; headers: Record<string, string> }; credit: number };
+ * status and headers; the body follows as `streamData` from offset 0, then `streamClose 'closed'`. `browser` (P5 O17
+ * M9a): what a `browser.screencast` open views; its frames follow as `streamData` from offset 0. */
+export type StreamOpenedMessage = { t: 'streamOpened'; id: string; pty?: { info: Record<string, unknown>; ringStart: number; nextOffset: number }; http?: { status: number; headers: Record<string, string> }; browser?: StreamBrowserOpened; credit: number };
 export type StreamRefusedMessage = { t: 'streamRefused'; id: string; reason: StreamRefusal };
 /** `offset`: the sender's byte count on this stream (a pty's output: the pty host's; its input: the device's, per epoch) before this chunk. */
 export type StreamDataMessage = { t: 'streamData'; id: string; offset: number; data: string };
@@ -211,8 +235,16 @@ const isTcpOpen = (v: unknown) => isObject(v) && isText(v.forward, 128);
 // The read open's fields (P5 O7 M5b): the URL's own shape is the endpoint's to read (`malformed` there, as a refusal).
 const isHttpOpen = (v: unknown) => isObject(v) && isText(v.url, 4096) && (v.method === 'GET' || v.method === 'HEAD') && optional(v.range, (r) => isText(r, 256));
 const isDocumentOpen = (v: unknown) => isObject(v) && isText(v.artifactId, 128) && (v.mode === 'edit' || v.mode === 'view') && optional(v.doc, (d) => d === 'suggestions');
+// P5 O17 M9a: a screencast open's session, epoch and tab (their own shapes the endpoint's to read), and its act's opId.
+const isBrowserOpen = (v: unknown) => isObject(v) && isText(v.appSessionId, 512) && isText(v.epoch) && isText(v.tabId) && optional(v.control, (c) => isObject(c) && isOpId(c.op));
 /** Each kind's own field and its check; an open carries its kind's and no other's. */
-const STREAM_OPEN_FIELDS: Readonly<Record<StreamKind, readonly [string, (v: unknown) => boolean]>> = { pty: ['pty', isPtyOpen], tcp: ['tcp', isTcpOpen], http: ['http', isHttpOpen], document: ['document', isDocumentOpen] };
+const STREAM_OPEN_FIELDS: Readonly<Record<StreamKind, readonly [string, (v: unknown) => boolean]>> = {
+  pty: ['pty', isPtyOpen],
+  tcp: ['tcp', isTcpOpen],
+  http: ['http', isHttpOpen],
+  document: ['document', isDocumentOpen],
+  'browser.screencast': ['browser', isBrowserOpen],
+};
 const streamOpen = (m: Fields) => {
   if (!isStreamId(m.id) || !isPositive(m.credit, STREAM_CREDIT_MAX)) return false;
   // The act open names its act; the read open names none.
@@ -282,7 +314,8 @@ const FROM_ENDPOINT: Record<string, (m: Fields) => boolean> = {
     isStreamId(m.id) &&
     isPositive(m.credit, STREAM_CREDIT_MAX) &&
     optional(m.pty, (v) => isObject(v) && isObject(v.info) && isCount(v.ringStart) && isCount(v.nextOffset)) &&
-    optional(m.http, isHttpAnswer),
+    optional(m.http, isHttpAnswer) &&
+    optional(m.browser, (v) => isObject(v) && isText(v.epoch) && isText(v.tabId) && typeof v.control === 'boolean'),
   streamRefused: (m) => isStreamId(m.id) && (STREAM_REFUSALS as readonly string[]).includes(m.reason as string),
   client: (m) => isText(m.id, 128) && isText(m.kind, 64) && 'request' in m, // P5 O7 M5c
 };

@@ -24,7 +24,7 @@
 //
 // The scene changes nothing the machine checks: the device keys, the handshakes, the endpoint's authorization and the
 // listings are all production's. Nothing reaches beyond 127.0.0.1.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { connect, createServer, type AddressInfo, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -166,7 +166,7 @@ net.Server.prototype.listen = function (...args) {
  * The org, B enrolled and served, sminos on B's RL10 socket and A's device listed. `b.env` and `b.prepare` are B's
  * own (its replay fixtures, its trusted folders), as profile-daemon.ts takes them.
  */
-export async function startRemoteScene(opts: { scratch: string; aUserData: string; b?: { env?: Record<string, string>; prepare?: (paths: { claudeConfigDir: string }) => void }; directPipe?: boolean }): Promise<RemoteScene> {
+export async function startRemoteScene(opts: { scratch: string; aUserData: string; b?: { env?: Record<string, string>; prepare?: (paths: { claudeConfigDir: string }) => void; root?: string }; directPipe?: boolean }): Promise<RemoteScene> {
   const { scratch, aUserData } = opts;
   mkdirSync(scratch, { recursive: true });
   const undo: (() => Promise<void> | void)[] = [];
@@ -184,11 +184,20 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
     const directPort = await freePort();
     let deadPort = await freePort();
     while (deadPort === directPort) deadPort = await freePort();
-    const bUserData = mkdtempSync(join(tmpdir(), 'maws-rb-')); // short: B's sockets stay under it
-    undo.push(() => rmSync(bUserData, { recursive: true, force: true }));
+    // short: B's sockets stay under it (P5 O17 M10: under `b.root`, shorter still, a scene root of its own, `/tmp/mrb-…`,
+    // so a session's cua socket and an app of B's own, whose cua socket is `<profile>/browser/cua/<session>.sock`, fit a
+    // Unix socket's bound; realpathed, as the headless scene's `/tmp/mh-` is, so nothing of B's reads its profile through
+    // the `/tmp` symlink)
+    const bRoot = opts.b?.root === undefined ? null : realpathSync(mkdtempSync(join(opts.b.root, 'mrb-')));
+    const bUserData = bRoot === null ? mkdtempSync(join(tmpdir(), 'maws-rb-')) : join(bRoot, 'p');
+    if (bRoot !== null) mkdirSync(bUserData);
+    undo.push(() => rmSync(bRoot ?? bUserData, { recursive: true, force: true }));
     const daemon = await startProfileDaemon({
       userData: bUserData,
-      env: { MAWS_MACHINE_NAME: B_NAME, MAWS_ENDPOINT_DIRECT: '1', MAWS_ENDPOINT_PORT: String(directPort), ...opts.b?.env },
+      // under `b.root`, B's tmpdir is the scene's root too: a replay seeds its transcripts only where the config home is
+      // under the process's tmpdir (src/engine-host/replay-transcript.ts), and the sockets' short fallbacks are made there;
+      // whatever B leaves in it goes with the scene
+      env: { MAWS_MACHINE_NAME: B_NAME, MAWS_ENDPOINT_DIRECT: '1', MAWS_ENDPOINT_PORT: String(directPort), ...(bRoot !== null && { TMPDIR: bRoot }), ...opts.b?.env },
       ...(opts.b?.prepare === undefined ? {} : { prepare: opts.b.prepare }),
       nodeArgs: ['--require', preload],
     });

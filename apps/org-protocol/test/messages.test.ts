@@ -60,6 +60,13 @@ describe('call.session and sub.feed', () => {
     expect(readMessage('device', sub({ feed: 'artifacts', view: 'full' })).kind).toBe('malformed');
   });
 
+  // P5 O17 M9a (`rl2.browser-screencast`, RL2 1.8): a session's `browser.inventory` feed names its session, as `checkout`
+  it('reads a browser inventory feed with its session, and refuses one with none or with a view', () => {
+    expect(readMessage('device', sub({ feed: 'browser.inventory', session: B })).kind).toBe('message');
+    expect(readMessage('device', sub({ feed: 'browser.inventory' })).kind).toBe('malformed');
+    expect(readMessage('device', sub({ feed: 'browser.inventory', session: B, view: 'full' })).kind).toBe('malformed');
+  });
+
   it('refuses a feed it does not name, a checkout feed with no session, an attention feed with one, a feed with a view or an idx', () => {
     expect(readMessage('device', sub({ feed: 'git', session: B })).kind).toBe('malformed');
     expect(readMessage('device', sub({ feed: 'checkout' })).kind).toBe('malformed');
@@ -156,13 +163,13 @@ describe('the pong clock', () => {
     }
   });
 
-  it('is at minor 7 of major 1 (P5 O7 M5c: `rl2.client-port`, `rl2.asset-holds`, after M7’s `rl2.pong-clock` at 6)', () => {
-    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 7 });
+  it('is at minor 8 of major 1 (P5 O17 M9a: `rl2.browser-screencast`, after O7 M5c’s `rl2.client-port` and `rl2.asset-holds` at 7)', () => {
+    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 8 });
   });
 });
 
 // P5 O7 M5b (`rl2.read-open`; RL2 1.5): the read open, a `streamOpen` with no `op` of the kinds `http` and `document`, its
-// answer's `http`, and the refusal `read-only`; `browser.screencast` is a reserved name no validator admits.
+// answer's `http`, and the refusal `read-only`. P5 O17 M9a builds the reserved `browser.screencast` kind on it.
 describe('the read open', () => {
   const ID = 'AAAAAAAAAAAAAAAAAAAAAA';
   const URL = 'maws-artifact://11111111-1111-4111-8111-111111111111/live/index.html';
@@ -205,10 +212,32 @@ describe('the read open', () => {
     expect(read('device', open({ kind: 'pty', op: OP, pty }))).toBe('message');
   });
 
-  it('admits no `browser.screencast` open, with or without an `op` (reserved for O17 M9)', () => {
+  // P5 O17 M9a (`rl2.browser-screencast`; RL2 1.8; O17's Interfaces §K): the kind on the read open, its `browser` field,
+  // a controlling open naming its done `machine.browserControl` act inside it, never as the stream's `op`.
+  it('reads a `browser.screencast` open, read-only or naming its control act, and refuses one with an `op`, another kind’s fields, or its own out of shape', () => {
     const browser = { appSessionId: 'app-1', epoch: 'e1', tabId: 't1' };
-    expect(read('device', open({ kind: 'browser.screencast', browser }))).toBe('malformed');
-    expect(read('device', open({ kind: 'browser.screencast', op: OP, browser }))).toBe('malformed');
+    expect(read('device', open({ kind: 'browser.screencast', browser }))).toBe('message');
+    expect(read('device', open({ kind: 'browser.screencast', browser: { ...browser, control: { op: OP } } }))).toBe('message');
+    for (const bad of [
+      open({ kind: 'browser.screencast', op: OP, browser }),
+      open({ kind: 'browser.screencast' }),
+      open({ kind: 'browser.screencast', browser, http }),
+      open({ kind: 'http', http, browser }),
+      open({ kind: 'browser.screencast', browser: { ...browser, appSessionId: '' } }),
+      open({ kind: 'browser.screencast', browser: { ...browser, epoch: 7 } }),
+      open({ kind: 'browser.screencast', browser: { appSessionId: 'app-1', epoch: 'e1' } }),
+      open({ kind: 'browser.screencast', browser: { ...browser, control: true } }),
+      open({ kind: 'browser.screencast', browser: { ...browser, control: { op: 'short' } } }),
+    ])
+      expect([bad, read('device', bad)]).toEqual([bad, 'malformed']);
+  });
+
+  it('reads a `browser.screencast` answer naming its epoch, tab and whether it controls, and the refusals `engine-changed` and `control-busy`', () => {
+    expect(read('endpoint', { t: 'streamOpened', id: ID, credit: 1024, browser: { epoch: 'e1', tabId: 't1', control: false } })).toBe('message');
+    for (const bad of [{ epoch: 'e1', tabId: 't1' }, { epoch: '', tabId: 't1', control: true }, { epoch: 'e1', tabId: 't1', control: 'yes' }, []])
+      expect(read('endpoint', { t: 'streamOpened', id: ID, credit: 1024, browser: bad })).toBe('malformed');
+    for (const reason of ['engine-changed', 'control-busy']) expect(read('endpoint', { t: 'streamRefused', id: ID, reason })).toBe('message');
+    for (const reason of ['engine_changed', 'control_busy', 'tab-closed']) expect(read('endpoint', { t: 'streamRefused', id: ID, reason })).toBe('malformed');
   });
 
   it('reads an answer’s `http` status and headers, and refuses them out of shape', () => {

@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { cuaSocketDir, daemonHostFiles, daemonPaths, renderCuaSocketDir, socketFallbackDir } from './files';
+import { DAEMON_CUA_DIR, daemonCuaSocketPath, daemonSessionSocketName } from '../browser/cua-socket';
+import { cuaSocketDir, daemonHostFiles, daemonPaths, RENDER_CUA_DIR, renderCuaSocketDir, socketFallbackDir } from './files';
 import { defaultProfileDir } from './profile';
 
 describe('defaultProfileDir', () => {
@@ -46,18 +47,20 @@ describe('daemonPaths', () => {
   });
 });
 
-// P5 O5 M5 (Interfaces §H): the daemon's per-session cua sockets, `<dir>/cua/<appSessionId>.sock`, in the daemon's
-// directory when such a path fits sun_path and in the fallback directory otherwise, chosen by the cua path's own length
-// (about 45 bytes longer than the daemon's own sockets)
+// P5 O5 M5 (Interfaces §H): the daemon's per-session cua sockets, `<dir>/cua/<name>.sock`, in the daemon's directory when
+// such a path fits sun_path and in the fallback directory otherwise, chosen by the cua path's own length. P5 O17 (the
+// session sockets' names, 2026-11-03): a mawsd-owned socket is named by a 16-hex digest of the session id (21 bytes with
+// `.sock`), not by the uuid (41), so the length a directory is chosen by is the digest name's.
 describe('cuaSocketDir', () => {
   const UUID = '0b6f3c1e-7d2a-4c59-9e41-2f8a6b0d5c73';
-  it('is <profile>/mawsd/cua when <dir>/cua/<uuid>.sock fits', () => {
+  it('is <profile>/mawsd/cua when <dir>/cua/<digest>.sock fits', () => {
     expect(cuaSocketDir('/tmp/p', '/var/tmp')).toBe('/tmp/p/mawsd/cua');
   });
 
   it('falls back by its own length: a profile whose daemon sockets fit but whose cua paths would not', () => {
-    const fits = `/p/${'x'.repeat(103 - '/p/'.length - `/mawsd/cua/${UUID}.sock`.length)}`;
-    expect(Buffer.byteLength(join(fits, 'mawsd', 'cua', `${UUID}.sock`))).toBe(103);
+    const name = daemonSessionSocketName(UUID);
+    const fits = `/p/${'x'.repeat(103 - '/p/'.length - `/mawsd/cua/${name}`.length)}`;
+    expect(Buffer.byteLength(join(fits, 'mawsd', 'cua', name))).toBe(103);
     expect(cuaSocketDir(fits, '/var/tmp')).toBe(join(fits, 'mawsd', 'cua'));
     const longer = `${fits}y`;
     expect(daemonPaths(longer, '/var/tmp').socketDir).toBe(join(longer, 'mawsd')); // the daemon's own sockets still fit
@@ -66,19 +69,60 @@ describe('cuaSocketDir', () => {
 });
 
 // P5 O17 M4 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §D): the render host's per-session cua
-// sockets, beside mawsd's own and chosen the same way, by their own length
+// sockets, beside mawsd's own and chosen the same way, by their own length; `rcua` since the session sockets' names
 describe('renderCuaSocketDir', () => {
   const UUID = '0b6f3c1e-7d2a-4c59-9e41-2f8a6b0d5c73';
-  it('is <profile>/mawsd/render-cua when <dir>/render-cua/<uuid>.sock fits', () => {
-    expect(renderCuaSocketDir('/tmp/p', '/var/tmp')).toBe('/tmp/p/mawsd/render-cua');
+  it('is <profile>/mawsd/rcua when <dir>/rcua/<digest>.sock fits', () => {
+    expect(renderCuaSocketDir('/tmp/p', '/var/tmp')).toBe('/tmp/p/mawsd/rcua');
   });
 
-  it('falls back by its own length, to render-cua in the profile’s fallback directory', () => {
-    const fits = `/p/${'x'.repeat(103 - '/p/'.length - `/mawsd/render-cua/${UUID}.sock`.length)}`;
-    expect(Buffer.byteLength(join(fits, 'mawsd', 'render-cua', `${UUID}.sock`))).toBe(103);
-    expect(renderCuaSocketDir(fits, '/var/tmp')).toBe(join(fits, 'mawsd', 'render-cua'));
+  it('falls back by its own length, to rcua in the profile’s fallback directory', () => {
+    const name = daemonSessionSocketName(UUID);
+    const fits = `/p/${'x'.repeat(103 - '/p/'.length - `/mawsd/rcua/${name}`.length)}`;
+    expect(Buffer.byteLength(join(fits, 'mawsd', 'rcua', name))).toBe(103);
+    expect(renderCuaSocketDir(fits, '/var/tmp')).toBe(join(fits, 'mawsd', 'rcua'));
     const longer = `${fits}y`;
     expect(cuaSocketDir(longer, '/var/tmp')).toBe(join(longer, 'mawsd', 'cua')); // mawsd's own still fit
-    expect(renderCuaSocketDir(longer, '/var/tmp')).toBe(join(socketFallbackDir(longer, '/var/tmp'), 'render-cua'));
+    expect(renderCuaSocketDir(longer, '/var/tmp')).toBe(join(socketFallbackDir(longer, '/var/tmp'), RENDER_CUA_DIR));
   });
+});
+
+// P5 O17 (the session sockets' names, 2026-11-03; Surprises, "the session sockets' sun_path overflow"): on a Mac the
+// default profile is `/Users/<u>/Library/Application Support/MAWS` and the per-user TMPDIR is always 48 bytes, so with
+// the uuid's name the render host's socket failed from a 5-character user name and the fallback never rescued either.
+// Each mawsd-owned socket kind, for a 36-character session id under a 24-character user's profile, in the profile and
+// in the fallback under that TMPDIR: every path fits sun_path.
+describe('the session sockets on a Mac’s default profile', () => {
+  const UUID = '0b6f3c1e-7d2a-4c59-9e41-2f8a6b0d5c73';
+  const TMP = `/var/folders/c1/${'t'.repeat(30)}/T`; // os.tmpdir()'s form of the per-user TMPDIR
+  const profile = defaultProfileDir('darwin', {}, `/Users/${'u'.repeat(24)}`);
+  const kinds = [
+    { kind: 'mawsd’s cua socket', dirOf: cuaSocketDir, name: DAEMON_CUA_DIR, inProfile: 72 + 24, fallback: 98 },
+    { kind: 'the render host’s socket', dirOf: renderCuaSocketDir, name: RENDER_CUA_DIR, inProfile: 73 + 24, fallback: 99 },
+  ];
+
+  it('reads a 48-byte TMPDIR and a 36-character session id', () => {
+    expect(Buffer.byteLength(TMP)).toBe(48);
+    expect(UUID).toHaveLength(36);
+  });
+
+  for (const { kind, dirOf, name, inProfile, fallback } of kinds) {
+    it(`${kind}: fits in a 24-character user’s profile (${inProfile} bytes) and in the TMPDIR fallback (${fallback})`, () => {
+      const dir = dirOf(profile, TMP);
+      expect(dir).toBe(join(profile, 'mawsd', name));
+      const path = daemonCuaSocketPath(dir, UUID);
+      expect(path).toBe(join(dir, daemonSessionSocketName(UUID)));
+      expect(Buffer.byteLength(path!)).toBe(inProfile);
+      const fellBack = daemonCuaSocketPath(join(socketFallbackDir(profile, TMP), name), UUID);
+      expect(fellBack).not.toBeNull();
+      expect(Buffer.byteLength(fellBack!)).toBe(fallback);
+    });
+
+    it(`${kind}: falls back under the 48-byte TMPDIR when the user name is too long for the profile, and fits there`, () => {
+      const long = defaultProfileDir('darwin', {}, `/Users/${'u'.repeat(40)}`);
+      const dir = dirOf(long, TMP);
+      expect(dir).toBe(join(socketFallbackDir(long, TMP), name));
+      expect(Buffer.byteLength(daemonCuaSocketPath(dir, UUID)!)).toBe(fallback);
+    });
+  }
 });

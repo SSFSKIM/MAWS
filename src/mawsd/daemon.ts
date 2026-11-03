@@ -97,7 +97,7 @@ import { supervisorEnv, type DetachedTransportOptions } from '@shared/host/detac
 import type { RelayPort } from '@shared/host/doc-relay';
 import { appIdentity } from '@shared/host/identity';
 import { cuaSocketDir, renderCuaSocketDir } from '@shared/daemon/files'; // P5 O5 M5; P5 O17 M5: the render host's sockets
-import { cuaSocketPath, daemonCuaSocketPath } from '@shared/browser/cua-socket';
+import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
 import { BrowserRefused, type BrowserFeed } from '@shared/browser/screencast'; // P5 O17 M6
 import { idleCollector, type Collect } from '@shared/host/idle-collect';
 import { makePrivateDirectory, clearSocketPath } from '@shared/host/private-listen';
@@ -132,7 +132,7 @@ import { createArtifactsEndpoint, loadEndpointChunk } from './artifacts-endpoint
 import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
 import { createServicesFront, spineTakes } from './front';
 import { tellEngineHandover } from './engine-handover-event'; // P5 O16 M3c fix wave 2
-import { runE2eRender, runE2eSeam } from './e2e-seam'; // M5b fix round 2; P5 O5 M4
+import { runE2eBrowserView, runE2eRender, runE2eSeam } from './e2e-seam'; // M5b fix round 2; P5 O5 M4
 import { createRenderHandle, loadRenderChunk, type RenderChunk } from './render-handle'; // P5 O5 M4
 import { readRenderRuntime, renderCacheRoot, watchRenderCache } from './render-runtime'; // P5 O5 M6: the Linux render runtime, read at each check
 import type { RenderChild, RenderRuntime, RenderService } from './render-seam'; // types alone: the chunk loads at the first request
@@ -980,6 +980,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         return runE2eSeam(input as CommandInput<'daemon.e2eSeam'>, e2eSeamsAllowed); // M5b fix round 2: the e2e's seams with the spine
       case 'daemon.e2eRender':
         return runE2eRender(input as CommandInput<'daemon.e2eRender'>, e2eSeamsAllowed, (request) => render.captureForE2e(request)); // P5 O5 M4
+      case 'daemon.e2eBrowserView':
+        return runE2eBrowserView(input as CommandInput<'daemon.e2eBrowserView'>, e2eSeamsAllowed, browserFeed); // P5 O17 M9b
       case 'daemon.endpoint': {
         const { command, args, secret } = input as { command: string; args: string[]; secret?: string };
         if (!endpoint) return { code: 2, out: NO_ENDPOINT_MODULE };
@@ -1102,7 +1104,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   if (e2eLinuxHeadless) log('[cua] MAWS_E2E_LINUX_HEADLESS=1: the headless browser is usable on Linux for the e2e\'s fixture connector');
   const browserHeadless = (): string | null => headlessReason({ machine, platform, addon: peerAddonLoad, engineHost: engineHostBrowserWork(), runtime: renderRuntime(), failure: render.unavailable(), e2eLinuxHeadless });
   const renderCuaDir = renderCuaSocketDir(profileDir, options.tmp ?? tmpdir());
-  const renderSocketOf = (appSessionId: AppSessionId) => cuaSocketPath(renderCuaDir, appSessionId);
+  // P5 O17 (the session sockets' names): mawsd names the render host's socket for a session, in `prepare` (§D)
+  const renderSocketOf = (appSessionId: AppSessionId) => daemonCuaSocketPath(renderCuaDir, appSessionId);
   // A side thread's parent, whose tabs it reaches in the render host, from the spine's index: read at once when the
   // spine is loaded, else loaded for it within the demand's deadline less PREPARE_MARGIN_MS (the prepare's own time),
   // never waited for past it: the session then reaches its own tabs alone (M4's open question, settled at M5)
@@ -1143,6 +1146,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     dropBrowser: (appSessionId) => render.dropBrowser(appSessionId),
     engineOf: (appSessionId) => render.browserEngine(appSessionId),
     socketPath: renderSocketOf,
+    appEngine: () => front.appEngine(), // P5 O17 M9b: the attached app, a tab engine of its agent tabs
+    post: (engine, request) => front.postEngine(engine, 'browserEngine.request', request),
     routeChanged: (appSessionId) => cua?.routeChanged(appSessionId),
     log,
   });
@@ -1181,7 +1186,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   };
   const sessionCapabilities = createSessionCapabilities({
     render: () => render.capabilities(),
-    browser: (appSessionId) => browserCapability({ machine, appSessionId, path: daemonCuaSocketPath(cuaDir, appSessionId), tabEngine: cua?.tabEngine() ?? null, headless: browserHeadless() }),
+    browser: (appSessionId) => browserCapability({ machine, appSessionId, path: daemonCuaSocketPath(cuaDir, appSessionId), renderPath: renderSocketOf(appSessionId), tabEngine: cua?.tabEngine() ?? null, headless: browserHeadless() }),
     emit: (appSessionId, capabilities) => void front.bus.emit('session.capabilitiesChanged', { appSessionId, capabilities }),
     tracking: (any) => ((tracked = any), syncCacheWatch()),
   });
@@ -1288,12 +1293,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     browser: {
       work: browserWork,
       selected: (appSessionId) => route.selection(appSessionId),
-      answer: (engine, input) => (feed?.answer(engine, input) ?? false) || render.browserAnswer(engine, input), // P5 O17 M6: the feed's requests first
+      answer: (engine, input) => (feed?.answer(engine, input) ?? false) || route.answer(engine, input) || render.browserAnswer(engine, input), // P5 O17 M6: the feed's requests first; M9b: then the route's asks of the app
       state: (engine, input) => route.state(engine, input),
       workChanged: () => render.browserWorkChanged(),
       frame: (engine, input) => feed?.frame(engine, input) ?? false, // P5 O17 M6
       ended: (engine, input) => feed?.ended(engine, input) ?? false,
-      gone: (engine) => feed?.gone(engine),
+      gone: (engine) => (feed?.gone(engine), route.engineGone(engine)), // P5 O17 M9b: the route's asks too
     },
     log,
   });

@@ -21,6 +21,10 @@ import { BROWSER_DIALOG_EXCERPT_MAX_CHARS } from '../../browser/dialog';
 import { BROWSER_ACTIVITIES_KEPT, BrowserAgentActivitySchema } from '../../browser/activity';
 // E13 end
 import type { CommandSpec } from './common';
+// P5 O17 M9b start
+import { BROWSER_LIMITS, BrowserFrameMetaSchema, BrowserInputSchema, BrowserSeqSchema } from '../../browser/screencast';
+import { EngineInventorySchema } from './browser-engine';
+// P5 O17 M9b end
 import { CaptureAnswerSchema } from '../../markup/image'; // P3-G
 // E4d start
 import { AnchorSchema } from '../../anchor/anchor';
@@ -131,6 +135,32 @@ export const BrowserImportInspectionSchema = z.strictObject({
 });
 export type BrowserImportInspection = z.infer<typeof BrowserImportInspectionSchema>;
 // E4b end
+
+// P5 O17 M9b: the remote view's (Interfaces §K): a view main mints, `mawsd`'s epoch, the inventory and frame as §G's
+const RemoteViewIdSchema = z.string().min(1).max(64);
+const BrowserEpochSchema = z.string().min(1).max(128);
+export const BrowserInventorySchema = EngineInventorySchema.extend({ epoch: BrowserEpochSchema });
+// What the window's view is, beside §G's inventory (which stays as the machine wrote it), so the window words it (M10's
+// copy) by kind and never reads prose:
+// - `live`: the machine's inventory, ready.
+// - `connecting`: no channel to the machine is current yet, or it has not answered the open by its bound; the feed goes on.
+// - `lost`: the connection went down past its grace; the feed resumes with it.
+// - `unsupported`: the machine's endpoint offers no `browser.inventory` feed (an older MAWS there).
+// - `ended`: the view will not go on (open it again), `end` saying why: `removed` (this device may no longer view the
+//   session), `class` (this device's class cannot), `closed` (the link closed for good), `no-link` (no link reaches the
+//   machine from here), `window` (the window closed during the open), `failed` (the feed ended with another word).
+// - `unavailable`: the machine's own unavailable reading, its `inventory.reason` the machine's.
+// The inventory's `reason` for the other unavailable kinds is main's English, for logs; the window does not show it.
+export const RemoteViewStateSchema = z.union([
+  z.strictObject({ kind: z.enum(['live', 'connecting', 'lost', 'unsupported', 'unavailable']) }),
+  z.strictObject({ kind: z.literal('ended'), end: z.enum(['removed', 'class', 'closed', 'no-link', 'window', 'failed']) }),
+]);
+export type RemoteViewState = z.infer<typeof RemoteViewStateSchema>;
+export const BrowserRemoteFrameSchema = BrowserFrameMetaSchema.extend({
+  epoch: BrowserEpochSchema,
+  // realm-local, as pty.data's; any buffer's view (§G's BrowserFrame.jpeg is a Uint8Array over whichever buffer)
+  jpeg: z.custom<Uint8Array>((jpeg) => jpeg instanceof Uint8Array && jpeg.byteLength >= 1 && jpeg.byteLength <= BROWSER_LIMITS.frameBytes, `a JPEG of 1 to ${BROWSER_LIMITS.frameBytes} bytes`),
+});
 
 export const commands = {
   // Every tab, or one session's, with each session's selected tab.
@@ -324,6 +354,19 @@ export const commands = {
   // crop's caps); refused for a tab not placed in the sender's window, `image: null` when no picture could be taken.
   'browser.view.capture': { input: TabOnly, output: CaptureAnswerSchema, owner: 'main' },
   // P3-G end
+  // P5 O17 M9b start: the remote view's bridge (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §K, "The
+  // app's bridge"; src/main/browser/remote-view.ts): a window's own viewers of the agent's tabs on another machine's
+  // session, over that machine's RL2 link. `open` names the session by its address (the router lowers it, the machine
+  // the handler's target) and answers the view and whether it is possible (its `view` kind, RemoteViewStateSchema); the rest
+  // name the view, which only the window that opened it can.
+  'browser.remote.open': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ viewId: RemoteViewIdSchema, inventory: BrowserInventorySchema, view: RemoteViewStateSchema }), owner: 'main' },
+  'browser.remote.select': { input: z.strictObject({ viewId: RemoteViewIdSchema, epoch: BrowserEpochSchema, tabId: BrowserTabIdSchema }), output: z.void(), owner: 'main' },
+  'browser.remote.takeControl': { input: z.strictObject({ viewId: RemoteViewIdSchema }), output: z.strictObject({ control: z.boolean(), reason: z.string().max(1_024).optional() }), owner: 'main' },
+  'browser.remote.releaseControl': { input: z.strictObject({ viewId: RemoteViewIdSchema }), output: z.void(), owner: 'main' },
+  'browser.remote.input': { input: z.strictObject({ viewId: RemoteViewIdSchema, seq: BrowserSeqSchema, event: BrowserInputSchema }), output: z.void(), owner: 'main' },
+  'browser.remote.ack': { input: z.strictObject({ viewId: RemoteViewIdSchema, seq: BrowserSeqSchema }), output: z.void(), owner: 'main' },
+  'browser.remote.close': { input: z.strictObject({ viewId: RemoteViewIdSchema }), output: z.void(), owner: 'main' },
+  // P5 O17 M9b end
 } as const satisfies Record<`browser.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -374,6 +417,14 @@ export const events = {
     ]),
   }),
   // cua #90 end
+  // P5 O17 M9b start: to the window that opened the view only (remote-view.ts): its inventory at each change, each frame
+  // (the next only after its `ack`), and the end of its stream with the endpoint's word (`tab-closed`, `engine-changed`,
+  // `control-revoked`, `carrier`, `producer-failed`, …); the view itself goes on until `close`, or its feed's end, told
+  // as an inventory whose `view` is `ended`
+  'browser.remote.inventory': z.strictObject({ viewId: RemoteViewIdSchema, inventory: BrowserInventorySchema, view: RemoteViewStateSchema }),
+  'browser.remote.frame': z.strictObject({ viewId: RemoteViewIdSchema, frame: BrowserRemoteFrameSchema }),
+  'browser.remote.closed': z.strictObject({ viewId: RemoteViewIdSchema, reason: z.string().min(1).max(64) }),
+  // P5 O17 M9b end
 } as const satisfies Record<`browser.${string}`, z.ZodType>;
 
 // P2-E2 start (2026-10-09): the comment card's pin on `browser.comment.picked` (P2 spec §4.7, X21; P2 interface ledger §1),

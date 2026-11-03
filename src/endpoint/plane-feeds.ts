@@ -25,11 +25,14 @@
 // P5 O7 M5a: so is the machine's `artifacts` feed, run by artifacts-feed.ts (artifact and library changes, cut by the
 // `artifact` rule), and a session's `checkout` feed carries its `session.capabilitiesChanged` (O5's tools on it), as it
 // carries `session.changed`. P5 O7 M5c: the `artifacts` feed carries O4's surfaces' events (artifacts-feed.ts).
+//
+// P5 O17 M9a: so is a session's `browser.inventory` feed, run by inventory-feed.ts (the agent's tabs on the session).
 import { randomBytes } from 'node:crypto';
 import { BACKLOG_BYTES } from '@shared/host/stream-catchup';
 import type { ArtifactRanks } from './artifacts';
 import { ArtifactsFeeds, type ArtifactsFeedsContext } from './artifacts-feed';
 import { AttentionFeeds, type AttentionFeedsContext } from './attention-feed';
+import { InventoryFeeds, type InventoryFeedsContext } from './inventory-feed';
 import { dispatchAs, type EndpointServices } from './services';
 import { namesSession, type Plane, type SessionSubscription, type Subscription } from './subscriptions';
 import { withinBounds, type CheckoutBounds } from './targets';
@@ -43,6 +46,8 @@ export type PlaneFeedsContext = {
   artifacts: ArtifactRanks;
   /** P5 O7 M5c: the leases each channel holds (the `artifacts` feed's watch updates). */
   leases: ArtifactsFeedsContext['leases'];
+  /** P5 O17 M9a: the machine's agent browser (the `browser.inventory` feed's inventories), null before the endpoint starts. */
+  browser: InventoryFeedsContext['browser'];
   log(line: string): void;
   /** The most a feed's unread stream may hold before it ends `behind`. */
   backlogBytes?: number;
@@ -71,15 +76,18 @@ export class PlaneFeeds implements Plane {
   readonly #open = new Map<Subscription, Open>();
   readonly #attention: AttentionFeeds;
   readonly #artifacts: ArtifactsFeeds;
+  readonly #inventory: InventoryFeeds;
 
   constructor(ctx: PlaneFeedsContext) {
     this.#ctx = ctx;
     this.#attention = new AttentionFeeds({ dispatch: ctx.dispatch, ranks: ctx.ranks, log: ctx.log, backlogBytes: ctx.backlogBytes });
     this.#artifacts = new ArtifactsFeeds({ dispatch: ctx.dispatch, ranks: ctx.ranks, artifacts: ctx.artifacts, leases: ctx.leases, log: ctx.log, backlogBytes: ctx.backlogBytes });
+    this.#inventory = new InventoryFeeds({ browser: ctx.browser, backlogBytes: ctx.backlogBytes });
   }
 
   open(sub: Subscription): void {
     if (sub.message.feed === 'artifacts') return this.#artifacts.open(sub);
+    if (sub.message.feed === 'browser.inventory' && namesSession(sub)) return this.#inventory.open(sub);
     if (sub.message.feed === 'attention' || !namesSession(sub)) return this.#attention.open(sub);
     const open: Open = { sub, seq: 0, bounds: null, held: new Map(), reads: 0 };
     this.#open.set(sub, open);
@@ -91,12 +99,14 @@ export class PlaneFeeds implements Plane {
     this.#open.delete(sub);
     this.#attention.close(sub);
     this.#artifacts.close(sub);
+    this.#inventory.close(sub);
   }
 
   stop(): void {
     this.#open.clear();
     this.#attention.stop();
     this.#artifacts.stop();
+    this.#inventory.stop();
   }
 
   /** P5 O7 M5c: the members' rights were read again (a `caps` refresh): the `artifacts` feeds' ranks read again. */

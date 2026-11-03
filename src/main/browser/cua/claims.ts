@@ -10,6 +10,11 @@
 // closed connection's tabs become so). The render host's `'session'`: no person is there to take it, so it is an
 // *orphan* until a connection of its own session adopts it at its first lease or close (connection.ts), which is how a
 // tab whose cua connection died can still be closed; a popup no connection's lease adopted is one too.
+//
+// P5 O17 M9b (M9's Decisions): an *agent tab* is one a live connection reserves or leases; the app's producer serves only
+// those to a remote viewer (src/main/browser/engine.ts), so `onAgentTabs` tells each change of that set, tab by tab: a
+// reservation made or adopted, a lease taken or let go, a closed connection's reservations dropped, a tab forgotten.
+// `onChange` stays the leases' alone, as parking reads it.
 
 export type OrphanPolicy = 'person' | 'session';
 
@@ -18,11 +23,19 @@ export class TabClaims<Holder> {
   private readonly leased = new Map<string, Holder>();
   private readonly awaited = new Map<string, Promise<void>>(); // what each tab's next lease waits for
   private readonly listeners = new Set<(tabId: string) => void>();
+  private readonly agentListeners = new Set<(tabId: string) => void>(); // P5 O17 M9b
 
   constructor(private readonly orphans: OrphanPolicy = 'person') {}
 
   reserve(tabId: string, holder: Holder): void {
+    const was = this.agentTab(tabId);
     this.reserved.set(tabId, holder);
+    if (!was) this.agentsChanged(tabId);
+  }
+
+  // P5 O17 M9b: a live connection reserves or leases the tab
+  agentTab(tabId: string): boolean {
+    return this.reserved.has(tabId) || this.leased.has(tabId);
   }
 
   // P5 O17 M4: under 'session', no live connection reserves the tab (never under 'person')
@@ -54,14 +67,17 @@ export class TabClaims<Holder> {
   }
 
   lease(tabId: string, holder: Holder): void {
+    const was = this.agentTab(tabId);
     this.leased.set(tabId, holder);
     this.changed(tabId);
+    if (!was) this.agentsChanged(tabId);
   }
 
   unlease(tabId: string, holder: Holder): void {
     if (this.leased.get(tabId) !== holder) return;
     this.leased.delete(tabId);
     this.changed(tabId);
+    if (!this.agentTab(tabId)) this.agentsChanged(tabId);
   }
 
   // Work under way on the tab that a new lease, any holder's, must not overtake: the undo of a let-go lease's agent state
@@ -82,20 +98,42 @@ export class TabClaims<Holder> {
 
   // The tab is gone: neither reserved nor leased, nor anything to wait for.
   forget(tabId: string): void {
+    const was = this.agentTab(tabId);
     this.reserved.delete(tabId);
     this.awaited.delete(tabId);
     if (this.leased.delete(tabId)) this.changed(tabId);
+    if (was) this.agentsChanged(tabId);
   }
 
   // The holder's connection closed: its reservations end (its tabs become the person's, or under 'session' orphans); its
   // leases are released by it.
   dropReservations(holder: Holder): void {
-    for (const [tabId, reservedTo] of [...this.reserved]) if (reservedTo === holder) this.reserved.delete(tabId);
+    for (const [tabId, reservedTo] of [...this.reserved]) {
+      if (reservedTo !== holder) continue;
+      this.reserved.delete(tabId);
+      if (!this.leased.has(tabId)) this.agentsChanged(tabId);
+    }
   }
 
   onChange(listener: (tabId: string) => void): () => void {
     this.listeners.add(listener);
     return () => void this.listeners.delete(listener);
+  }
+
+  // P5 O17 M9b: told each tab whose agent-tab standing (`agentTab`) changed
+  onAgentTabs(listener: (tabId: string) => void): () => void {
+    this.agentListeners.add(listener);
+    return () => void this.agentListeners.delete(listener);
+  }
+
+  private agentsChanged(tabId: string): void {
+    for (const listener of [...this.agentListeners]) {
+      try {
+        listener(tabId);
+      } catch (error) {
+        console.error('[browser] an agent-tab listener failed:', error);
+      }
+    }
   }
 
   private changed(tabId: string): void {

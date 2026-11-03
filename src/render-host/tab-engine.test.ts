@@ -3,10 +3,11 @@
 // sockets with the cua stand's fake host on the other end. The darwin policy throughout, with a stand-in addon that reads
 // every peer as `mawsd` (the relay): production's admission, by the daemon this link reaches, confirmed by
 // machine.identity on the link. `mawsd`'s side is a recording `call`.
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import type { Session } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { daemonSessionSocketName } from '@shared/browser/cua-socket';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandResult } from '@shared/ipc/schema';
@@ -120,7 +121,6 @@ function stand(
       sessions.set(partition, session);
       return session as unknown as Session;
     },
-    socketDir: join(root, 'render-cua'),
     userData: join(root, 'render-host'),
     peer: { addon, platform: 'darwin' },
     machine: 'mini',
@@ -132,15 +132,18 @@ function stand(
   cleanups.push(() => engine.dispose());
   let next = 0;
   const answers = () => calls.filter((c) => c.name === 'browserEngine.answer').map((c) => c.input as { id: string; result: { ok: boolean; value?: unknown; error?: string } });
+  // P5 O17 (the session sockets' names): the session's socket as mawsd names it in prepare, which the engine computes none
+  // of: a path of the test's own choosing, in a directory the engine makes private at its first use
+  const socketOf = (appSessionId: AppSessionId) => join(root, 'named', daemonSessionSocketName(appSessionId));
+  const prepareOf = (appSessionId: AppSessionId): BrowserEngineRequest['operation'] => ({ op: 'prepare', socketPath: socketOf(appSessionId) });
   // A request as mawsd sends it, and its answer
   const ask = async (appSessionId: AppSessionId, op: BrowserEngineRequest['operation']['op']) => {
     const id = `q${++next}`;
     const parent = op === 'prepare' ? options.lineage?.[appSessionId] : undefined;
-    engine.request({ id, appSessionId, operation: { op, ...(parent && { parent }) } } as BrowserEngineRequest);
+    engine.request({ id, appSessionId, operation: { op, ...(parent && { parent }), ...(op === 'prepare' && { socketPath: socketOf(appSessionId) }) } } as BrowserEngineRequest);
     await expect.poll(() => answers().find((a) => a.id === id), { timeout: 3000 }).toBeDefined();
     return answers().find((a) => a.id === id)!.result;
   };
-  const socketOf = (appSessionId: AppSessionId) => join(root, 'render-cua', `${appSessionId}.sock`);
   const host = async (appSessionId: AppSessionId) => {
     const connected = await connectFakeHost(socketOf(appSessionId));
     cleanups.push(() => connected.close());
@@ -148,7 +151,7 @@ function stand(
   };
   const states = (appSessionId: AppSessionId) => calls.filter((c) => c.name === 'browserEngine.state' && c.input.appSessionId === appSessionId).map((c) => c.input.inventory as EngineInventory);
   const works = () => calls.filter((c) => c.name === 'browserEngine.work').map((c) => `${String(c.input.appSessionId)} ${c.input.held ? 'held' : 'zero'}`);
-  return { engine, calls, ask, host, socketOf, states, works, sessions, logs, native, frames };
+  return { engine, calls, ask, host, socketOf, prepareOf, root, states, works, sessions, logs, native, frames };
 }
 
 // M6: a tab's frame source as the producer subscribes it (the real frame subscription is M8's pass 3): each paint a
@@ -287,7 +290,7 @@ describe('the tab engine’s sessions', () => {
   it('answers prepare once the socket listens and mawsd’s relay is confirmed on the link, then pushes the session ready', async () => {
     const identity = deferred<boolean>();
     const t = stand({ identity: () => identity.promise });
-    t.engine.request({ id: 'p1', appSessionId: A, operation: { op: 'prepare' } });
+    t.engine.request({ id: 'p1', appSessionId: A, operation: t.prepareOf(A) });
     await expect.poll(() => existsSync(t.socketOf(A))).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(t.calls.filter((c) => c.name === 'browserEngine.answer'), 'not before the relay is confirmed').toEqual([]);
@@ -304,6 +307,65 @@ describe('the tab engine’s sessions', () => {
     expect(await t.ask(A, 'prepare')).toEqual({ ok: false, error: "the headless browser on mini could not confirm mawsd's relay" });
     await expect.poll(() => existsSync(t.socketOf(A))).toBe(false);
     expect(await t.ask(A, 'inventory')).toEqual({ ok: true, value: { tabs: [], selected: null, state: 'unavailable', reason: 'the headless browser on mini does not serve this session' } });
+  });
+
+  // P5 O17 (the session sockets' names, 2026-11-03; §D): mawsd computes the session's socket and names it in prepare;
+  // the engine listens there, only there, and computes none of its own
+  it('listens at the socket path mawsd names in prepare, where the relay reaches the session, and there only', async () => {
+    const t = stand();
+    mkdirSync(dirname(t.socketOf(A)), { mode: 0o700 });
+    const stale = join(dirname(t.socketOf(A)), daemonSessionSocketName('an earlier run'));
+    writeFileSync(stale, '');
+    expect(await t.ask(A, 'prepare')).toEqual({ ok: true, value: null });
+    expect(existsSync(stale), 'an earlier run’s socket swept at the directory’s first use').toBe(false);
+    expect(existsSync(t.socketOf(A)), 'the named path listens').toBe(true);
+    expect(statSync(t.socketOf(A)).mode & 0o777).toBe(0o600);
+    expect(statSync(dirname(t.socketOf(A))).mode & 0o777, 'its directory made private at its first use').toBe(0o700);
+    expect(readdirSync(dirname(t.socketOf(A)))).toEqual([basename(t.socketOf(A))]);
+    const host = await t.host(A);
+    expect(host.hello).toMatchObject({ extensionInstanceId: 'maws:A' });
+    expect(await t.ask(A, 'drop')).toEqual({ ok: true, value: null });
+    expect(existsSync(t.socketOf(A)), 'gone at the drop').toBe(false);
+  });
+
+  it('refuses by name a prepare that names no socket (an older sender), and listens nowhere for it', async () => {
+    const t = stand();
+    t.engine.request({ id: 'p1', appSessionId: A, operation: { op: 'prepare' } });
+    await expect.poll(() => t.calls.find((c) => c.name === 'browserEngine.answer')?.input.result).toEqual({ ok: false, error: "the headless browser on mini was not told this session's socket: mawsd predates the session sockets' names" });
+    expect(existsSync(join(t.root, 'named')), 'nothing made').toBe(false);
+    expect(await t.ask(A, 'inventory')).toMatchObject({ ok: true, value: { state: 'unavailable' } });
+  });
+
+  it('refuses a named socket past sun_path, or in a directory that is a symlink, and makes nothing through it', async () => {
+    const t = stand();
+    const long = join(t.root, 'x'.repeat(104), daemonSessionSocketName(A));
+    t.engine.request({ id: 'p1', appSessionId: A, operation: { op: 'prepare', socketPath: long } });
+    await expect.poll(() => t.calls.find((c) => c.name === 'browserEngine.answer' && c.input.id === 'p1')?.input.result).toEqual({ ok: false, error: 'the headless browser on mini has no socket for this session' });
+    expect(existsSync(dirname(long)), 'no directory made for a path past sun_path').toBe(false);
+    const elsewhere = join(t.root, 'elsewhere');
+    mkdirSync(elsewhere, { mode: 0o700 });
+    symlinkSync(elsewhere, join(t.root, 'linked'));
+    t.engine.request({ id: 'p2', appSessionId: B, operation: { op: 'prepare', socketPath: join(t.root, 'linked', daemonSessionSocketName(B)) } });
+    await expect.poll(() => t.calls.find((c) => c.name === 'browserEngine.answer' && c.input.id === 'p2')?.input.result).toEqual({ ok: false, error: 'the headless browser on mini has no socket for this session' });
+    expect(readdirSync(elsewhere), 'nothing made through the link').toEqual([]);
+  });
+
+  // Defence in depth: the engine sweeps, unlinks, makes and narrows what the path names, so it takes only a path of the
+  // shape mawsd computes: absolute, its name a session digest (@shared/browser/cua-socket's daemonSessionSocketName)
+  it('refuses by name a named socket that is not absolute or not a session digest’s name, and touches nothing there', async () => {
+    const t = stand();
+    const refusal = "the headless browser on mini refuses the socket path it was told for this session: not an absolute path to a session digest's socket";
+    const victim = join(t.root, 'victim');
+    mkdirSync(victim, { mode: 0o755 });
+    writeFileSync(join(victim, 'keep.sock'), '');
+    const paths = [join(victim, 'A.sock'), join(victim, `${daemonSessionSocketName(A)}x`), join(victim, daemonSessionSocketName(A).toUpperCase()), `named/${daemonSessionSocketName(A)}`];
+    for (const [n, socketPath] of paths.entries()) {
+      t.engine.request({ id: `p${n}`, appSessionId: A, operation: { op: 'prepare', socketPath } });
+      await expect.poll(() => t.calls.find((c) => c.name === 'browserEngine.answer' && c.input.id === `p${n}`)?.input.result).toEqual({ ok: false, error: refusal });
+    }
+    expect(readdirSync(victim), 'nothing swept, unlinked or made').toEqual(['keep.sock']);
+    expect(statSync(victim).mode & 0o777, 'nor narrowed').toBe(0o755);
+    expect(existsSync(join(process.cwd(), 'named')), 'a relative path made nothing').toBe(false);
   });
 
   it('gives each session its own partition and inventory; an unrelated session reaches nothing of another’s', async () => {
@@ -365,7 +427,7 @@ describe('the tab engine’s sessions', () => {
     await host.request('tabs.create', { url: 'http://127.0.0.1:4000/a' });
     t.engine.request({ id: 'd1', appSessionId: A, operation: { op: 'drop' } });
     await expect.poll(() => t.calls.filter((c) => c.name.startsWith('clear')).length).toBe(2);
-    t.engine.request({ id: 'p2', appSessionId: A, operation: { op: 'prepare' } });
+    t.engine.request({ id: 'p2', appSessionId: A, operation: t.prepareOf(A) });
     await new Promise((resolve) => setTimeout(resolve, 20));
     const pending = () => t.calls.filter((c) => c.name === 'browserEngine.answer' && ['d1', 'p2'].includes(c.input.id as string)).map((c) => c.input.id);
     expect(pending(), 'neither answered while the storage is being cleared').toEqual([]);
@@ -398,7 +460,7 @@ describe('the drop’s cleanup', () => {
     const host = await t.host(A);
     await host.request('tabs.create', { url: 'http://127.0.0.1:4000/' });
     const answered = (id: string) => t.calls.find((c) => c.name === 'browserEngine.answer' && c.input.id === id)?.input.result as { ok: boolean; error?: string } | undefined;
-    const send = (id: string, op: 'prepare' | 'drop') => t.engine.request({ id, appSessionId: A, operation: { op } });
+    const send = (id: string, op: 'prepare' | 'drop') => t.engine.request({ id, appSessionId: A, operation: op === 'prepare' ? t.prepareOf(A) : { op } });
     return { ...t, answered, send };
   }
 
@@ -465,7 +527,7 @@ describe('the drop’s cleanup', () => {
   it('cancels a prepare stuck on a live link’s missing answer at a drop, which answers without it, the socket closed', async () => {
     let confirm!: (ok: boolean) => void;
     const t = stand({ identity: () => new Promise<boolean>((resolve) => (confirm = resolve)) });
-    t.engine.request({ id: 'p1', appSessionId: A, operation: { op: 'prepare' } });
+    t.engine.request({ id: 'p1', appSessionId: A, operation: t.prepareOf(A) });
     await expect.poll(() => existsSync(t.socketOf(A))).toBe(true);
     t.engine.request({ id: 'd1', appSessionId: A, operation: { op: 'drop' } });
     const answered = (id: string) => t.calls.find((c) => c.name === 'browserEngine.answer' && c.input.id === id)?.input.result;
@@ -497,7 +559,7 @@ describe('the drop’s cleanup', () => {
 
   it('cancels a running prepare at dispose', async () => {
     const t = stand({ identity: () => new Promise<boolean>(() => {}) });
-    t.engine.request({ id: 'p1', appSessionId: A, operation: { op: 'prepare' } });
+    t.engine.request({ id: 'p1', appSessionId: A, operation: t.prepareOf(A) });
     await expect.poll(() => existsSync(t.socketOf(A))).toBe(true);
     t.engine.dispose();
     await expect.poll(() => t.calls.find((c) => c.name === 'browserEngine.answer')?.input.result).toEqual({ ok: false, error: 'the headless browser on mini is ending' });
@@ -842,7 +904,7 @@ describe('a viewer’s subscription', () => {
     // the drop-cancels-prepare guarantee holds with an open on the chain: the prepare stuck on the relay's confirmation
     // is cancelled by the next drop, the open behind it refused, the drop answered
     const stuck = stand({ identity: () => identity.promise });
-    stuck.engine.request({ id: 'p1', appSessionId: A, operation: { op: 'prepare' } });
+    stuck.engine.request({ id: 'p1', appSessionId: A, operation: stuck.prepareOf(A) });
     stuck.engine.request({ id: 'o1', appSessionId: A, operation: { op: 'open', subscriptionId: 'v9', tabId: t.tabId, control: false } });
     stuck.engine.request({ id: 'd1', appSessionId: A, operation: { op: 'drop' } });
     const answered = () => stuck.calls.filter((c) => c.name === 'browserEngine.answer').map((c) => `${String(c.input.id)} ${(c.input.result as { ok: boolean }).ok}`);
