@@ -142,7 +142,8 @@ const BrowserEpochSchema = z.string().min(1).max(128);
 export const BrowserInventorySchema = EngineInventorySchema.extend({ epoch: BrowserEpochSchema });
 export const BrowserRemoteFrameSchema = BrowserFrameMetaSchema.extend({
   epoch: BrowserEpochSchema,
-  jpeg: z.instanceof(Uint8Array).refine((jpeg) => jpeg.byteLength >= 1 && jpeg.byteLength <= BROWSER_LIMITS.frameBytes, `1 to ${BROWSER_LIMITS.frameBytes} bytes`), // realm-local, as pty.data's
+  // realm-local, as pty.data's; any buffer's view (§G's BrowserFrame.jpeg is a Uint8Array over whichever buffer)
+  jpeg: z.custom<Uint8Array>((jpeg) => jpeg instanceof Uint8Array && jpeg.byteLength >= 1 && jpeg.byteLength <= BROWSER_LIMITS.frameBytes, `a JPEG of 1 to ${BROWSER_LIMITS.frameBytes} bytes`),
 });
 
 export const commands = {
