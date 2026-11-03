@@ -1511,7 +1511,7 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
   const pages = await startPages();
   let scene: RemoteScene | null = null;
   let a: MawsLaunch | null = null;
-  let bApp: MawsLaunch | null = null;
+  const bApp: { launch: MawsLaunch | null } = { launch: null }; // set inside a step, so held where the finally sees it
   try {
     scene = await startRemoteScene({
       scratch: join(root, 'scene'),
@@ -1653,7 +1653,7 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
     await test.step('B’s app arriving mid-lease closes A’s stream engine-changed; the agent’s next tab is the app’s, and A views it', async () => {
       const headlessTab = (await canvas.getAttribute('data-remote-tab'))!;
       await page.evaluate(() => void ((window as unknown as { __remoteClosed: string[] }).__remoteClosed.length = 0));
-      bApp = await launchMaws({ userData: b.userData, keepConfigHome: true, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', MAWS_E2E_ENGINE_BIN: bin, MAWS_MACHINE_NAME: B_NAME } });
+      bApp.launch = await launchMaws({ userData: b.userData, keepConfigHome: true, env: { MAWS_HARNESS: '0', MAWS_E2E_QUIET: '1', MAWS_E2E_ENGINE_BIN: bin, MAWS_MACHINE_NAME: B_NAME } });
       await expect.poll(() => page.evaluate(() => (window as unknown as { __remoteClosed: string[] }).__remoteClosed), { timeout: 60_000, message: `A's stream closed as B's app took the agent's browser\n${await toolSaid()}` }).toContain('engine-changed');
       // cua's host lost its backend and is served by the app within its retry; the agent's next tab is the app's
       await expect(async () => void (await answered('the agent’s creation sequence in B’s app', cua.sequence(pages.url('/remote'))))).toPass({ timeout: 60_000 });
@@ -1664,7 +1664,7 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
       console.log(`[e2e:remote] M10: B's app took over; A views its agent tab ${await canvas.getAttribute('data-remote-tab')}`);
     });
   } finally {
-    await bApp?.cleanup().catch((error: unknown) => console.error(error));
+    await bApp.launch?.cleanup().catch((error: unknown) => console.error(error));
     await a?.cleanup();
     await scene?.stop();
     await pages.close();
