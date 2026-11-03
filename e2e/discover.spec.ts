@@ -34,6 +34,7 @@ import { cpSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'n
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { invoke, value } from './support/c7-replay';
+import { firstRead } from './support/discover-read';
 import { TEST_MARKETPLACE } from './support/discover-scratch';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { startModelStub, type ModelRequest } from './support/model-stub';
@@ -66,11 +67,15 @@ const resultCards = (page: Page) => results(page).locator('[data-catalog-grid] [
 const byName = (scope: Locator, installName: string) => scope.locator(`[data-catalog-card][data-install-name="${installName}"]`);
 const sheet = (page: Page) => page.locator('[data-plugins-sheet="install"]');
 
+// Discover on a tab, once its catalog is shown: a cwd's first read runs the engine's CLI (support/discover-read.ts).
 async function openDiscover(page: Page, tab: 'Plugins' | 'Skills' = 'Plugins'): Promise<void> {
+  const read = await firstRead(page);
   await openAppDestination(page, 'Customize');
   await page.getByRole('tab', { name: tab, exact: true }).click();
   await page.getByRole('tabpanel', { name: tab }).getByRole('radio', { name: 'Discover' }).click();
-  await expect(page.locator(`[data-discover="${tab.toLowerCase()}"]`)).toBeVisible();
+  const shown = page.locator(`[data-discover="${tab.toLowerCase()}"]`);
+  await expect(shown).toBeVisible();
+  await read(shown, tab.toLowerCase());
 }
 
 async function search(page: Page, text: string): Promise<void> {
@@ -201,10 +206,12 @@ async function contentSize(launch: MawsLaunch, width: number, height: number): P
 }
 
 async function chooseProject(page: Page, name: string): Promise<void> {
+  const read = await firstRead(page); // the project's catalog: its own first read
   const select = page.getByRole('combobox', { name: 'Project', exact: true });
   await select.selectOption((await select.locator('option', { hasText: name }).getAttribute('value'))!);
   await library(page).getByRole('radio', { name: 'Discover' }).click(); // the page's library is the project's own
   await expect(pane(page)).toBeVisible();
+  await read(pane(page), `plugins in ${name}`);
 }
 
 test('home: Featured, the shelves, All under Installs; the two desktop sizes; See all; sorting across the page boundary', async () => {
