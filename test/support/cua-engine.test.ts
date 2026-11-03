@@ -179,7 +179,7 @@ describe('the cua engine stub (P5 O17 M8)', () => {
       // P5 O17 M7 (O16 M5's descendant veto, on the tree the guarded scenes run on): the connector is the engine's one child,
       // and the engine's mcp_status names it as a stdio server, as the engine names `cua serve`, so a resting session holds
       // no work under its engine and its idle clock can run (scene 9); the engine answers the read and stays ready
-      await session.readMcpCommands();
+      expect(await session.stdioServers(), 'the engine answered mcp_status').not.toBeNull(); // O16 D69: the ask that reads the commands
       expect(session.lifecycle).toBe('ready');
       expect(session.mcpCommands()).toHaveLength(1);
       expect(countWork(parseTree(readTreeSync()), enginePid, { pids: new Set(), mcpCommands: session.mcpCommands()! }), 'no work under the engine').toBe(0);
