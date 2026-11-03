@@ -70,8 +70,9 @@ export const REMOTE_TIMING: RemoteTiming = {
 export const timingOf = (overrides: Partial<RemoteTiming> = {}): RemoteTiming => ({ ...REMOTE_TIMING, ...overrides });
 
 /**
- * A token bucket: `burst` tokens, refilling at `perMinute`. The link takes one for each direct handshake, so its attempts
- * stay inside the listener's per-source limit and never spend the token the next probe needs.
+ * A token bucket: `burst` tokens, refilling at `perMinute`. The listener takes one for each upgrade it accepts, so the
+ * link takes one for each direct socket that opened: its attempts stay inside the listener's per-source limit, and a
+ * dial that never reached the listener spends nothing the network's return would need.
  */
 export class TokenBucket {
   #tokens: number;
@@ -84,12 +85,21 @@ export class TokenBucket {
     this.#at = now();
   }
 
+  /** Whether a whole token is there, taking none. */
+  holds(): boolean {
+    this.#refill();
+    return this.#tokens >= 1;
+  }
+
   take(): boolean {
+    if (!this.holds()) return false;
+    this.#tokens -= 1;
+    return true;
+  }
+
+  #refill(): void {
     const at = this.now();
     this.#tokens = Math.min(this.limit.burst, this.#tokens + ((at - this.#at) * this.limit.perMinute) / 60_000);
     this.#at = at;
-    if (this.#tokens < 1) return false;
-    this.#tokens -= 1;
-    return true;
   }
 }

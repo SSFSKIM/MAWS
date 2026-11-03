@@ -28,4 +28,17 @@ describe('the link’s timing', () => {
     now += 10 * 60_000;
     expect([bucket.take(), bucket.take(), bucket.take(), bucket.take()]).toEqual([true, true, true, false]);
   });
+
+  it('says whether a whole token is there, refilled, without taking it', () => {
+    let now = 0;
+    const bucket = new TokenBucket(REMOTE_TIMING.DIRECT_BUCKET, () => now);
+    expect([bucket.holds(), bucket.holds(), bucket.holds(), bucket.holds()]).toEqual([true, true, true, true]);
+    expect([bucket.take(), bucket.take(), bucket.take()]).toEqual([true, true, true]);
+    expect(bucket.holds()).toBe(false);
+    now += 11_999;
+    expect(bucket.holds()).toBe(false);
+    now += 1;
+    expect([bucket.holds(), bucket.holds()]).toEqual([true, true]);
+    expect([bucket.take(), bucket.holds(), bucket.take()]).toEqual([true, false, false]);
+  });
 });
