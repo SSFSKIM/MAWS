@@ -58,13 +58,24 @@ The architect's rulings over the stage, each recorded in the Decision Log:
 
 ## The landing
 
-- The landing gate is `--gates all --class1a pool --runner macos --label o17-l2`, run on the panel's head. Its run id goes in the PR.
-- The whole-branch review is the architect's xhigh panel. Its lanes run on fable because sol is out. The range is `8db3d9afd`..the head.
-- The measured confirmation set runs through the architect and CI-opt on the landing tree.
-- At the landing, RL2 is re-taken as master's minor plus one, and so is `WIRE_MINOR`, with the manifest regenerated from master's.
+- **The landing gate**, `--gates all --class1a pool --runner macos --label o17-l2`, ran as run 41670695707 on `3612b8fb2` (tree `0a99694f2`).
+  - **Attempt 1:** every job was green except two.
+    - `packaged 2/2` failed `e2e/smoke.spec.ts:111` (job 126038217695). This is a race in master's test, explained in the spec's Surprises; the findings are at `~/.local/share/maws-ci-o17/smoke-window-findings.md`. In the same run, `e2e:default` passed the same test on this branch's daemon-shape build (job 126067610501, 62 passed).
+    - `e2e:browser-comment` was cancelled by a `download-artifact` hang on the mini's VM guest.
+  - **Attempt 2**, the architect's rerun of the two jobs:
+    - `packaged 2/2` was green (job 126067519886, 120 passed, smoke:27 with no retry).
+    - `e2e:browser-comment` was cancelled again by the same hang (job 126067521015). Its gate follows on the PR's head once CI-opt clears the guest.
+- **The whole-branch review** was the architect's xhigh panel, `wf_67e76ba4-e20`, on fable lanes (sol was out), over `14298d09d..3612b8fb2`.
+  - Verdict: "incorrect", with two P3 findings and nothing above. Both are debt, listed below.
+  - The control-grant chain, the agent-tab privacy boundary and frame credit across the path came back clean, so the loop stops there.
+- **The measured confirmation set** runs through the architect and CI-opt on the landing tree.
+- **Versions:** RL2 1.8 and `WIRE_MINOR` 24 on the branch. Both are re-taken at the merge as master's minor plus one.
 
 ## Unresolved review findings (for the PR; the architect makes each a tracker row)
 
+- **Panel P3 scalpel-2#1: the app engine pushes no inventory on a selection-only change.** `setSelected` only calls `markSession`, and the engine listens to `onUpdated` and agent-tab changes, not `browser.tabs.changed`. As a result `inventory.selected` goes stale, and the two engines disagree on it. The only effect is the default-pick hint after the shown tab closes (`src/main/browser/engine.ts`).
+- **Panel P3 scalpel-4#1: the renderer acknowledges a replaced stream's frame.** `#draw().finally` acks on generation alone, and `#select` does not bump the generation. A frame drawn mid-switch can therefore ack frame 1 of the new stream, giving one extra frame of credit that heals at the next ack. It belongs to the same family as main's stale-ack item below. The fix is to capture the shown `{tabId, epoch}` in `#draw` (`src/renderer/src/tools/browser/remote/client.ts`).
+- **`e2e/smoke.spec.ts:111`'s flaky pass on hosted `packaged 2/2`.** This is master's test race; its fix is the architect's own master PR.
 - **A web-cards browser stream open reads `grade` on the wire.** The authorizer says `class`, but `STREAM_REFUSALS` has no `class` word. Add one when a web-cards client gets a browser view (`src/endpoint/stream-browser.ts`, `apps/org-protocol/src/messages.ts`).
 - **`machine.browserControl`'s ledger row has a null `target`** (`src/endpoint/endpoint-actions.ts`). A same-member `opQuery` therefore sees `{appSessionId, epoch}`. Only the same member can see it.
 - **A stale ack can refund a replaced stream's frame** (`src/main/browser/remote-view.ts`). An ack carrying a replaced stream's seq refunds the new stream's outstanding frame, one extra frame at most. Fixing it needs a stream id in `browser.remote.ack`, which is §K's shape.
