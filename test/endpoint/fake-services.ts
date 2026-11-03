@@ -6,6 +6,7 @@ import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { ArtifactKind } from '@shared/artifacts/entity';
+import { BrowserRefused, type BrowserFeed, type BrowserFrame, type BrowserInput, type BrowserInventory, type BrowserSubscription } from '@shared/browser/screencast';
 import type { DocumentsOpen } from '@shared/host/socket-protocol';
 import type { MachineRef } from '@shared/machine/ref';
 import { endpointLibrary, type ContentLookup } from '../../src/services/artifacts/scheme/endpoint-library';
@@ -42,6 +43,12 @@ export function fakeServices(options: { ref?: MachineRef; kind?: 'unit' | 'priva
     artifacts: { fetch: async () => ({ status: 404, headers: {}, body: null }) }, // P5 O5 M2
     // P5 O7 M5c: a port that asks no device (client-port.test.ts serves the real front's instead)
     clientPort: { serve: () => ({ answer: () => {}, close: () => {} }) },
+    // P5 O17 M9a: no agent browser on this machine (fakeBrowser installs one a suite drives)
+    browser: {
+      inventory: () => ({ epoch: 'none', tabs: [], selected: null, state: 'unavailable', reason: 'no browser here' }),
+      watchInventory: (_appSessionId, changed) => (changed({ epoch: 'none', tabs: [], selected: null, state: 'unavailable', reason: 'no browser here' }), () => {}),
+      open: () => Promise.reject(new BrowserRefused('unavailable', 'no browser here')),
+    },
     log: (line) => void lines.push(line),
     lines,
     holds,
@@ -204,5 +211,106 @@ export function fakeAssetHolds(services: FakeServices): {
     if (released_) released++;
     return { t: 'res', id: '0', ok: true, value: { released: released_ } };
   };
+  return fake;
+}
+
+/** P5 O17 M9a: one viewer's subscription the fake browser opened, which a suite drives as the producer would. */
+export type FakeView = {
+  input: { appSessionId: string; epoch: string; tabId: string; control: boolean };
+  acks: number[];
+  inputs: Array<[number, BrowserInput]>;
+  /** Closed by its viewer (the endpoint), or ended by the producer. */
+  closed: boolean;
+  /** A frame of the tab to the viewer: `seq`, a JPEG of `jpegBytes`. */
+  frame(seq: number, jpegBytes?: number): BrowserFrame;
+  /** The producer ends the subscription with its own word (`browserEngine.ended`'s, a route's period end's). */
+  end(reason: string): void;
+};
+
+/**
+ * P5 O17 M9a: `EndpointServices.browser` as `mawsd`'s feed seam gives it (§G), over inventories the suite sets per session:
+ * `open` refuses as the real feed does (another epoch `engine_changed`, an unavailable reading `unavailable`, a tab the
+ * inventory doesn't hold `tab_closed`, a second controlling viewer of a tab `control_busy`); `refuse` refuses the next
+ * open with its word; `opening`, while set, holds each open's answer until it settles; `framed`, a frame sent in the step
+ * an open is answered, before the opener has run (the producer's first paint). Installed before or after the endpoint
+ * starts (its services are read at each use).
+ */
+export function fakeBrowser(services: FakeServices): {
+  set(appSessionId: string, inventory: Partial<BrowserInventory>): BrowserInventory;
+  inventory(appSessionId: string): BrowserInventory;
+  views: FakeView[];
+  watchers(appSessionId: string): number;
+  refuse: string | null;
+  opening: Promise<void> | null;
+  framed: boolean;
+} {
+  const inventories = new Map<string, BrowserInventory>();
+  const watching = new Map<string, Set<(inventory: BrowserInventory) => void>>();
+  const blank = (): BrowserInventory => ({ epoch: 'none', tabs: [], selected: null, state: 'unavailable', reason: 'no browser on this session' });
+  const fake = {
+    views: [] as FakeView[],
+    refuse: null as string | null,
+    opening: null as Promise<void> | null,
+    framed: false,
+    inventory: (appSessionId: string) => inventories.get(appSessionId) ?? blank(),
+    set(appSessionId: string, fields: Partial<BrowserInventory>): BrowserInventory {
+      const next: BrowserInventory = { ...fake.inventory(appSessionId), state: 'ready', ...fields };
+      if (next.state === 'ready') delete next.reason;
+      inventories.set(appSessionId, next);
+      for (const changed of [...(watching.get(appSessionId) ?? [])]) changed(next);
+      return next;
+    },
+    watchers: (appSessionId: string) => watching.get(appSessionId)?.size ?? 0,
+  };
+  const feed: BrowserFeed = {
+    inventory: (appSessionId) => fake.inventory(appSessionId),
+    watchInventory(appSessionId, changed) {
+      let set = watching.get(appSessionId);
+      if (set === undefined) watching.set(appSessionId, (set = new Set()));
+      set.add(changed);
+      changed(fake.inventory(appSessionId));
+      return () => void set.delete(changed);
+    },
+    async open(input, sink) {
+      if (fake.opening !== null) await fake.opening;
+      const refused = fake.refuse;
+      fake.refuse = null;
+      if (refused !== null) throw new BrowserRefused(refused);
+      const inventory = fake.inventory(input.appSessionId);
+      if (inventory.epoch !== input.epoch) throw new BrowserRefused('engine_changed');
+      if (inventory.state !== 'ready') throw new BrowserRefused('unavailable', inventory.reason);
+      if (!inventory.tabs.some((tab) => tab.tabId === input.tabId)) throw new BrowserRefused('tab_closed');
+      if (input.control && fake.views.some((v) => !v.closed && v.input.control && v.input.appSessionId === input.appSessionId && v.input.tabId === input.tabId)) throw new BrowserRefused('control_busy');
+      const view: FakeView = {
+        input: { ...input },
+        acks: [],
+        inputs: [],
+        closed: false,
+        frame(seq, jpegBytes = 64) {
+          const frame: BrowserFrame = { epoch: input.epoch, tabId: input.tabId, seq, capturedAt: seq * 100, width: 640, height: 400, viewport: { width: 1280, height: 800 }, jpeg: Uint8Array.from({ length: jpegBytes }, (_, i) => (i + seq) & 0xff) };
+          if (!view.closed) sink.frame(frame);
+          return frame;
+        },
+        end(reason) {
+          if (view.closed) return;
+          view.closed = true;
+          sink.closed(reason);
+        },
+      };
+      fake.views.push(view);
+      const subscription: BrowserSubscription = {
+        ack: (seq) => void (view.closed || view.acks.push(seq)),
+        input: async (seq, event) => {
+          if (view.closed) throw new BrowserRefused('closed');
+          if (!view.input.control) throw new BrowserRefused('read_only');
+          view.inputs.push([seq, event]);
+        },
+        close: () => void (view.closed = true),
+      };
+      if (fake.framed) queueMicrotask(() => view.frame(1));
+      return subscription;
+    },
+  };
+  services.browser = feed;
   return fake;
 }

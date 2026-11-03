@@ -90,10 +90,9 @@ function loader() {
 }
 
 describe('the endpoint seam', () => {
-  // P5 O17 M6: DaemonServices leads EndpointServices by `browser` (the agent's tabs' feed seam) until O17 M9 adds
-  // EndpointServices.browser in the remote stage (R1), which makes the two equal again
+  // P5 O17 M9a: EndpointServices.browser is DaemonServices.browser (R1), so the two are equal again, member for member
   it('DaemonServices is O10’s EndpointServices, and the two EndpointModule shapes are one', () => {
-    expectTypeOf<Omit<DaemonServices, 'browser'>>().toEqualTypeOf<EndpointServices>();
+    expectTypeOf<DaemonServices>().toEqualTypeOf<EndpointServices>();
     expectTypeOf<DaemonServices>().toExtend<EndpointServices>();
     expectTypeOf<Omit<EndpointModule, 'start'>>().toEqualTypeOf<Omit<O10Module, 'start'>>();
     expectTypeOf<Parameters<EndpointModule['start']>[0]>().toExtend<Parameters<O10Module['start']>[0]>();

@@ -1,6 +1,7 @@
 // The endpoint's seam with `mawsd` (docs/doperpowers/plans/2026-10-27-p5-o10-endpoint.md, Interfaces §F; O2's Interfaces,
 // "The endpoint seam"). `EndpointServices` is O2's `DaemonServices` field for field, so the module builds and is tested
 // before `mawsd` exists (test/endpoint/fake-services.ts); M10 binds it to O2's seam and proves the two types equal.
+import type { BrowserFeed } from '@shared/browser/screencast';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { DocumentsOpen } from '@shared/host/socket-protocol';
 import type { ClientRef } from '@shared/ipc/client';
@@ -59,6 +60,14 @@ export interface EndpointServices {
    * and the handle's `answer` settles through the port's own `answer` with the target as `from`, `close` at the channel's end.
    */
   clientPort: { serve(ref: ClientRef, target: PortTarget): RemotePortHandle };
+  /**
+   * P5 O17 M9a (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §G, §K; R1): the agent's tabs on this
+   * machine, `mawsd`'s feed seam (`DaemonServices.browser`, the same object): a session's inventory and its changes, read
+   * from the route's cache, and a viewer's subscription to one tab, opened only on a tab the session's tab engine holds.
+   * The endpoint opens a subscription under a decision that stands (`view`, or `approve` with a done grant for `control`),
+   * never on a remote boolean, and maps its words to RL2's (browser-words.ts).
+   */
+  browser: BrowserFeed;
   log(line: string): void;
 }
 

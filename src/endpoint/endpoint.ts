@@ -55,6 +55,7 @@
 // each engine-host link `mawsd` reports.
 import { homedir, networkInterfaces } from 'node:os';
 import { importSigningKey, isListingGone, stateHash, type MachineIdentity, type OrgState, type Right, type Rl1Refusal, type SignedOrgState, type SigningKey } from 'org-protocol';
+import type { AppSessionId } from '@shared/graph/ids';
 import { ArtifactRanks } from './artifacts';
 import { Authorizer, type AuthorizeContext } from './authorize';
 import { Calls } from './calls';
@@ -398,6 +399,8 @@ export class Endpoint implements EndpointModule {
         return { ok: true, value: { forward: made.value.id, port } };
       },
       holdForward: (device, forward, channel) => void this.forwards.hold(device, forward, channel),
+      // P5 O17 M9a: `machine.browserControl`'s epoch, read from `mawsd`'s route as the act runs (none before the start)
+      browserInventory: (appSessionId) => this.#services?.browser.inventory(appSessionId as AppSessionId) ?? { epoch: '', state: 'unavailable' },
       now: this.deps.now,
       log: (line) => log(line),
     });
@@ -443,6 +446,10 @@ export class Endpoint implements EndpointModule {
         close: (channel) => this.#services?.documents.close(channel),
         frame: (channel, bytes) => this.#services?.documents.frame(channel, bytes) ?? false,
       },
+      // P5 O17 M9a: a `browser.screencast` read open's subscription, to `mawsd`'s feed seam (read when asked, as above).
+      browser: {
+        open: (input, sink) => (this.#services === null ? Promise.reject(new Error('the endpoint has not started')) : this.#services.browser.open(input, sink)),
+      },
       own: this.own,
       forwards: this.forwards,
       now: this.deps.now,
@@ -474,7 +481,16 @@ export class Endpoint implements EndpointModule {
       resumeMs: seams.resumeMs,
     });
     this.planeB = new PlaneB({ dispatch, log, backlogBytes: seams.backlogBytes });
-    this.planeFeeds = new PlaneFeeds({ dispatch, bounds: this.checkoutBounds, ranks: (member) => this.authorizer.ranks(member, this.deps.now()), artifacts: this.artifactRanks, leases: this.leases, log, backlogBytes: seams.backlogBytes });
+    this.planeFeeds = new PlaneFeeds({
+      dispatch,
+      bounds: this.checkoutBounds,
+      ranks: (member) => this.authorizer.ranks(member, this.deps.now()),
+      artifacts: this.artifactRanks,
+      leases: this.leases,
+      browser: () => this.#services?.browser ?? null, // P5 O17 M9a: a session's `browser.inventory` feed
+      log,
+      backlogBytes: seams.backlogBytes,
+    });
     this.rl10.onSession((message) => this.planeA.message(message));
     this.rl10.onPending((project, raised) => this.planeA.pendingSet(project, raised));
     this.rl10.onLink((connected) => connected || this.planeA.linkLost());

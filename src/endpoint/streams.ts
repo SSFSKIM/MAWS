@@ -62,6 +62,13 @@
 // is, and at every change that can move its decision (`accessMoved`: a record change, a relink, a linked session's new
 // placement, after the artifact cache dropped its entry), each stream whose decision no longer stands decided again and
 // ended `removed` once refused, what it holds dropped.
+//
+// P5 O17 M9a (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §K): the read open's third kind,
+// `browser.screencast`, one viewer of an agent tab (stream-browser.ts), from a device that listed `rl2.browser-screencast`
+// as well (from any other, `malformed`); a controlling one names its grant, read from the endpoint's own ledger. A read
+// stream may say what it is decided as once its own input is refused (`ReadAccess.lesser`: a controlling screencast's
+// read-only open): a re-check that refuses it asks that, and the stream ends with the lesser's word when it stands
+// (`control-revoked`), `removed` when it doesn't.
 import { createConnection, type Socket } from 'node:net';
 import { TextDecoder } from 'node:util';
 import {
@@ -78,6 +85,7 @@ import {
   type StreamOpenMessage,
   type StreamRefusal,
 } from 'org-protocol';
+import type { BrowserFeed } from '@shared/browser/screencast';
 import type { AuthorizeRequest, Decision, StreamBinding, Who } from './authorize';
 import type { RemoteChannel } from './channels';
 import type { EndpointActions } from './endpoint-actions';
@@ -87,7 +95,8 @@ import { RESUME_MS } from './interest';
 import { READ_OPENS } from './offers';
 import { dispatchAs, type EndpointServices } from './services';
 import { RECHECK_RETRY_MS, TRANSMIT_DEADLINE_MS } from './subscriptions';
-import { Stream, type ReadAccess, type ReadOpening, type ReadPlane } from './stream-base';
+import { Stream, type LedgerRead, type ReadAccess, type ReadOpening, type ReadPlane } from './stream-base';
+import { browserPlane } from './stream-browser';
 import { documentPlane, type DocumentChannels, type DocumentPlane } from './stream-document';
 import { httpPlane } from './stream-http';
 import { StreamWindow } from './stream-window';
@@ -106,6 +115,8 @@ export type StreamsContext = {
   artifacts: EndpointServices['artifacts'];
   /** P5 O7 M5b: the engine host's document channels in the endpoint's range, which a `document` read open opens. */
   documents: DocumentChannels;
+  /** P5 O17 M9a: the agent's browser on the machine, which a `browser.screencast` read open subscribes to a tab of. */
+  browser: Pick<BrowserFeed, 'open'>;
   own: Pick<EndpointActions, 'query'>;
   forwards: Forwards;
   now(): number;
@@ -119,8 +130,10 @@ export type StreamsContext = {
 
 /** An act open (`pty`, `tcp`): it names its act. */
 type ActOpen = StreamOpenMessage & { kind: ActStreamKind; op: string };
-/** A read open (P5 O7 M5b: `http`, `document`): it names none. */
+/** A read open (P5 O7 M5b: `http`, `document`; P5 O17 M9a: `browser.screencast`): it names none. */
 type ReadOpen = StreamOpenMessage & { kind: ReadStreamKind };
+/** Each read kind's own field of the open: its row's input. */
+const READ_FIELDS: Readonly<Record<ReadStreamKind, 'http' | 'document' | 'browser'>> = { http: 'http', document: 'document', 'browser.screencast': 'browser' };
 
 /** An open past its ledger read: what it opens and on whose behalf, its placeholder in the table, and how it takes its place. */
 type Opening = { channel: RemoteChannel; m: ActOpen; act: string; binding: StreamBinding; who: Who; placeholder: Stream; install(stream: Stream): void };
@@ -129,7 +142,7 @@ type Opening = { channel: RemoteChannel; m: ActOpen; act: string; binding: Strea
 type Taken = { placeholder: Stream; refuse(reason: StreamRefusal): void; install(stream: Stream): void; release(): void };
 
 /** An act's ledger answer, as a stream's admission reads it. */
-type Ledgered = { kind: 'done'; member: string; device: string; name: string; outcome: unknown } | { kind: 'refused'; reason: StreamRefusal };
+type Ledgered = LedgerRead;
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isText = (value: unknown): value is string => typeof value === 'string' && value !== '';
@@ -357,7 +370,11 @@ export class Streams {
   constructor(ctx: StreamsContext) {
     this.#ctx = ctx;
     this.#documents = documentPlane({ documents: ctx.documents, dispatch: ctx.dispatch, log: ctx.log });
-    this.#planes = { http: httpPlane((request) => ctx.artifacts.fetch(request), ctx.dispatch), document: this.#documents.open };
+    this.#planes = {
+      http: httpPlane((request) => ctx.artifacts.fetch(request), ctx.dispatch),
+      document: this.#documents.open,
+      'browser.screencast': browserPlane({ browser: ctx.browser, ledger: (op) => this.#ownLedger(op) }),
+    };
     // A forward removed (its member lost `shell`) or forgotten takes its connections with it.
     this.#offRemoved = ctx.forwards.onRemoved((forward) => {
       for (const streams of this.#channels.values())
@@ -483,12 +500,18 @@ export class Streams {
         if (decision !== undefined && decision.ok && decision.stands !== undefined && !decision.stands()) return this.#recheckStream(stream);
         if (read !== null) {
           const stands = decision !== undefined && decision.ok ? decision.stands : undefined;
-          stream.read = { input: read.input, stands: stands ?? (() => true) };
+          stream.read = { ...read, stands: stands ?? (() => true) };
           if (!stream.read.stands()) return this.#recheckStream(stream);
         }
         return stream.unhold();
       }
       if (stream instanceof TcpStream && verdict === 'refused') this.#ctx.forwards.remove(stream.forward.device, stream.forward.id);
+      // P5 O17 M9a: refused what it holds, a stream with a lesser access ends with the lesser's word if that stands.
+      const lesser = read?.lesser;
+      if (verdict === 'refused' && lesser !== undefined) {
+        const lesserRequest: AuthorizeRequest = { kind: 'stream', name: stream.act, input: lesser.input };
+        return this.#check(stream, lesserRequest, this.#who(stream.channel), (kept) => stream.end(kept === 'granted' ? lesser.reason : kept === 'refused' ? 'removed' : 'unavailable'));
+      }
       stream.end(verdict === 'refused' ? 'removed' : 'unavailable');
     });
   }
@@ -576,9 +599,9 @@ export class Streams {
     if (taken === null) return;
     const { placeholder, refuse, install, release } = taken;
     try {
-      if (!channel.capabilities.includes(READ_OPEN)) return refuse('malformed');
+      if (!channel.capabilities.includes(READ_OPEN) || (m.kind === 'browser.screencast' && !channel.capabilities.includes(BROWSER_SCREENCAST))) return refuse('malformed');
       const who = this.#who(channel);
-      const request: AuthorizeRequest = { kind: 'stream', name: READ_OPENS[m.kind], input: m.kind === 'http' ? m.http : m.document };
+      const request: AuthorizeRequest = { kind: 'stream', name: READ_OPENS[m.kind], input: m[READ_FIELDS[m.kind]] };
       const since = this.#epoch;
       const decision = await this.#ctx.authorize(request, who, this.#ctx.now());
       if (placeholder.ended || channel.closed) return;
@@ -867,6 +890,8 @@ class Cancelled extends Stream {
 
 /** P5 O7 M5b: the capability a device lists to make a read open. */
 const READ_OPEN = 'rl2.read-open';
+/** P5 O17 M9a: the capability a device lists to open a `browser.screencast` (its refusals and answer are past an older device's). */
+const BROWSER_SCREENCAST = 'rl2.browser-screencast';
 
 /**
  * P5 O7 M5b: a read open's refusal as the device reads it: its fields out of shape (a URL not the scheme's) `malformed`,

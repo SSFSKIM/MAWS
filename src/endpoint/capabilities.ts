@@ -25,7 +25,6 @@ export const ENDPOINT_CAPABILITIES = [
   // M5b: the read open (§N): a `streamOpen` with no `op` of the kinds `http` (an artifact page's request) and `document`
   // (an artifact's document channel), admitted by a stream row of the offer table; `streamOpened.http`; the refusal
   // `read-only`, sent only in answer to a read open. A read open from a device that listed none of it is `malformed`.
-  // Not `rl2.browser-screencast`: reserved for O17 M9, listed by neither side until it builds the kind.
   'rl2.read-open',
   // M7: `pong` carries this machine's clock at the ping's arrival (`received`) and the pong's send (`sent`), which the
   // remote bench reads to place the machine's clock against the device's. Optional fields an older device passes by.
@@ -36,4 +35,9 @@ export const ENDPOINT_CAPABILITIES = [
   // M5c (round 3): a remote dashboard's snapshot holds, main's link's calls `artifacts.holdAssets` and `releaseAssets`,
   // which this endpoint keeps per channel (asset-holds.ts); a device asks them only of an endpoint that listed it.
   'rl2.asset-holds',
+  // P5 O17 M9a (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §K): the agent's browser on a session.
+  // The read open's `browser.screencast` kind (its `browser` fields, `streamOpened.browser`, the frame envelope, the
+  // controls `ack` and `input`, the refusals `engine-changed` and `control-busy`), the act `machine.browserControl` and a
+  // session's `browser.inventory` feed. A screencast open from a device that listed none of it is `malformed`.
+  'rl2.browser-screencast',
 ] as const;

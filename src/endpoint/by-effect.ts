@@ -126,4 +126,7 @@ export const BY_EFFECT: Readonly<Record<string, EffectRule | typeof NO_RULE>> = 
   // P5 O7 M5b: a document read open (the endpoint's stream row, offers.ts): an `edit` writes the artifact, `manage`; a
   // `view` reads it and shows presence, at the floor.
   'documents.open': (input) => (input.mode === 'edit' ? 'manage' : 'view'),
+  // P5 O17 M9a: a screencast read open (the endpoint's stream row): one that controls the tab (naming its grant) acts on
+  // the page as a person, `approve` (R2); one that only views it, at the floor.
+  'browser.screencast': (input) => (input.control === undefined ? 'view' : 'approve'),
 };

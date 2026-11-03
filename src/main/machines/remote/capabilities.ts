@@ -34,6 +34,9 @@ export const DEVICE_CAPABILITIES = [
   // M5c (round 3): a remote dashboard's snapshot holds (`artifacts.holdAssets`, `releaseAssets`), asked by main alone and
   // only of an endpoint that listed it; without it the dashboard draws unheld (src/main/dashboard/holds.ts).
   'rl2.asset-holds',
+  // P5 O17 M9a: the agent's browser on a session (O17's Interfaces §K): a `browser.screencast` stream (its frames, its
+  // controls), opened only on an endpoint that listed it, and a session's `browser.inventory` feed; else `not-offered`.
+  'rl2.browser-screencast',
 ] as const;
 export type Capability = (typeof DEVICE_CAPABILITIES)[number];
 

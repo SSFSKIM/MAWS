@@ -5,8 +5,8 @@
 // ranges, its not-found), the body pulled within the device's credit; the `document` opens' grades and `read-only`, and
 // their plane over a fake host port (the endpoint's document channel, its frames relayed both ways length-prefixed under
 // each side's credit, a `view` open's writes dropped, the channel's end and the stream's); a read stream authorized again
-// at the record change and the relink that withdraw it; and the act open beside it, unchanged, with `browser.screencast`
-// reserved.
+// at the record change and the relink that withdraw it; and the act open beside it, unchanged (P5 O17 M9a's
+// `browser.screencast` read open has its own suite, test/endpoint/browser-screencast.test.ts).
 import { randomBytes, randomUUID } from 'node:crypto';
 import { generateSigningKey, signRecord, SIGNING_DOMAINS, WITHHELD_SESSION } from 'org-protocol';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -1109,7 +1109,7 @@ describe('a stream’s re-checks', () => {
 });
 
 describe('the act open beside it', () => {
-  it('still opens a pty stream under its act (`op`), and the validator refuses a pty open naming none and any `browser.screencast` open, closing the channel `malformed`', async () => {
+  it('still opens a pty stream under its act (`op`), and the validator refuses a pty open naming none and a `browser.screencast` open naming one, closing the channel `malformed`', async () => {
     const pty = new FakePtyHost();
     const { f } = await start({ pty });
     const ptyId = pty.spawn('app-1');
@@ -1124,7 +1124,8 @@ describe('the act open beside it', () => {
 
     for (const open of [
       { t: 'streamOpen', id: id16(), kind: 'pty', credit: 1024, pty: { ptyId, from: 0, inputEpoch: id16(), inputFrom: 0 } },
-      { t: 'streamOpen', id: id16(), kind: 'browser.screencast', credit: 1024, browser: { appSessionId: 'app-1', epoch: 'e1', tabId: 't1' } },
+      // P5 O17 M9a admits the kind as a read open (test/endpoint/browser-screencast.test.ts): never under an `op`
+      { t: 'streamOpen', id: id16(), kind: 'browser.screencast', op: attach.opId, credit: 1024, browser: { appSessionId: 'app-1', epoch: 'e1', tabId: 't1' } },
     ]) {
       const r = await openRemote(f, org.a1, org.A, { capabilities: READ });
       const closed = closedChannel(r);
