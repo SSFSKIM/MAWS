@@ -167,11 +167,19 @@ function ServersSection({ tab }: { tab: ConnectorsTab }) {
   const greyed = useRemoteGreyed(tab.artifactId, SERVER_NEEDS);
   const elsewhere = useRemoteMachineName(tab.artifactId);
   const asked = useStore(tab.view, (s) => s.serversAsked);
+  const stale = useStore(tab.view, (s) => s.serversStale); // P5 O7 M5c review 1
   const wasGreyed = useRef(greyed);
   useEffect(() => {
-    if (wasGreyed.current !== null && greyed === null) void tab.readServers();
+    if (wasGreyed.current !== null && greyed === null) void tab.serversMoved();
     wasGreyed.current = greyed;
   }, [tab, greyed]);
+  // P5 O7 M5c review 1: another machine's rows read again only on the owner's word, a confirmation there of its own
+  const refresh =
+    elsewhere !== null && stale ? (
+      <button type="button" aria-label={REMOTE_SURFACE_WORDS.refreshConnectorsLabel(elsewhere)} className={SECONDARY} onClick={() => void tab.askServers()}>
+        {REMOTE_SURFACE_WORDS.refreshConnectors}
+      </button>
+    ) : null;
   return (
     <section data-connectors-servers="" aria-labelledby={heading} className="mt-4">
       <h3 id={heading} className="m-0 text-ui font-medium text-fg">
@@ -193,11 +201,22 @@ function ServersSection({ tab }: { tab: ConnectorsTab }) {
           </button>
         </div>
       ) : rows === null ? (
-        <p role="status" className="m-0 text-ui-sm text-fg-muted">
-          {failed ? S.readFailed : S.reading}
-        </p>
+        <div className="flex flex-wrap items-baseline gap-2">
+          <p role="status" className="m-0 text-ui-sm text-fg-muted">
+            {failed ? S.readFailed : S.reading}
+          </p>
+          {refresh}
+        </div>
       ) : (
         <>
+          {refresh !== null && elsewhere !== null && (
+            <div className="mb-2 flex flex-wrap items-baseline gap-2">
+              <p data-connectors-servers-stale="" className="m-0 text-ui-sm text-fg-muted">
+                {REMOTE_SURFACE_WORDS.connectorsMayBeStale(elsewhere)}
+              </p>
+              {refresh}
+            </div>
+          )}
           {rows.length > 0 && (
             <ul className="m-0 flex list-none flex-col divide-y divide-border border-y border-border p-0">
               {rows.map((row) => (

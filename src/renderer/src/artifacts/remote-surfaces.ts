@@ -31,6 +31,9 @@ export const REMOTE_SURFACE_WORDS = {
   connectorsOn: (machine: string) => `Connectors on ${machine}`, // its rows, before the owner asks for them
   showConnectors: 'Show',
   showConnectorsLabel: (machine: string) => `Show the connectors on ${machine}`,
+  connectorsMayBeStale: (machine: string) => `Connectors on ${machine} may be out of date`, // shown, and changed since: a read there is the owner's
+  refreshConnectors: 'Refresh',
+  refreshConnectorsLabel: (machine: string) => `Refresh the connectors on ${machine}`,
   notOffered: (machine: string) => `${machine} doesn’t offer this`,
   needsAdmin: (machine: string) => `Only an admin of ${machine} can change its connectors`,
   noRight: (machine: string) => `You don’t have the right to do this on ${machine}`,

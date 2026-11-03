@@ -149,6 +149,63 @@ describe('another machine’s rows, read on the owner’s action', () => {
     expect(owner.servers).toHaveBeenCalledOnce(); // a new opening asks again
     expect(text('[data-connectors-servers-ask]')).toBe('Connectors on mini');
   });
+
+  // P5 O7 M5c review 1: each read there is `machine-admin`, a Touch ID of its own, so after Show nothing reads them
+  // unasked: what would read them again marks them stale, and the owner's Refresh reads them, once each
+  it('after Show, marks the rows stale at every change instead of reading them, and reads them again only at Refresh', async () => {
+    linkSays(['machine-admin']);
+    const { tab, owner, port } = setup();
+    let serversChanged: ((artifactId: string) => void) | null = null;
+    vi.mocked(owner.onServersChanged).mockImplementation((listener) => ((serversChanged = listener), () => {}));
+    await open(tab);
+    await showServers();
+    expect(owner.servers).toHaveBeenCalledOnce();
+    expect(text('[data-connectors-servers-stale]')).toBeNull();
+    expect(screen.queryByRole('button', { name: W.refreshConnectorsLabel('mini') })).toBeNull();
+    // main's word, the page's tools, the grants read again, the rights heard again, an owner action: none reads there
+    act(() => serversChanged!(ARTIFACT));
+    port.send({ id: 2, op: 'declare', tools: [{ server: 'wiki', tool: 'other' }] });
+    await act(() => tab.readGrants());
+    linkSays([]);
+    await flush();
+    linkSays(['machine-admin']);
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect MAWS to wiki' }));
+    await flush();
+    expect(owner.connect).toHaveBeenCalledOnce();
+    expect(owner.servers).toHaveBeenCalledOnce();
+    expect(text('[data-connectors-servers-stale]')).toBe(W.connectorsMayBeStale('mini'));
+    expect(screen.getByRole('button', { name: 'Connect MAWS to wiki' })).toBeTruthy(); // the rows still shown
+    const refresh = screen.getByRole('button', { name: W.refreshConnectorsLabel('mini') });
+    expect(refresh.textContent).toBe(W.refreshConnectors);
+    fireEvent.click(refresh);
+    await flush();
+    expect(owner.servers).toHaveBeenCalledTimes(2);
+    expect(text('[data-connectors-servers-stale]')).toBeNull();
+    expect(screen.queryByRole('button', { name: W.refreshConnectorsLabel('mini') })).toBeNull();
+    // the next opening asks again, with nothing stale
+    act(() => tab.closeSheet());
+    act(() => tab.openSheet());
+    await flush();
+    expect(tab.view.getState().serversStale).toBe(false);
+    expect(owner.servers).toHaveBeenCalledTimes(2);
+  });
+
+  it('offers Refresh when the owner’s read there failed, and reads nothing until it is pressed', async () => {
+    linkSays(['machine-admin']);
+    const { tab, owner, port } = setup();
+    vi.mocked(owner.servers).mockRejectedValueOnce(new ArtifactCommandError({ code: 'host_unavailable', message: 'connectors.servers: machine mini is not reachable' }));
+    await open(tab);
+    await showServers();
+    port.send({ id: 2, op: 'declare', tools: [{ server: 'wiki', tool: 'other' }] });
+    await flush();
+    expect(owner.servers).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: W.refreshConnectorsLabel('mini') }));
+    await flush();
+    expect(owner.servers).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('button', { name: 'Connect MAWS to wiki' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: W.refreshConnectorsLabel('mini') })).toBeNull();
+  });
 });
 
 describe('greyed by the machine’s offer', () => {

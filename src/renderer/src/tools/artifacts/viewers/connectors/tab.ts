@@ -24,7 +24,10 @@
 //   changed row. A declaration the page made that found no lease is kept (`leaseRefused`), so the header can show why
 //   when the machine offers no leases. The rows there are read only once the owner asks for them in this opening of the
 //   sheet (`askServers`; the architect's ruling): reading them is `machine-admin`, which asks for Touch ID, and a
-//   confirmation belongs to a deliberate act, never to opening a sheet.
+//   confirmation belongs to a deliberate act, never to opening a sheet. Once shown, nothing reads them again unasked
+//   (M5c review 1): what would read this Mac's rows again (main's word, the page's tools, the grants, an owner action, the
+//   rights heard again) marks another machine's rows stale (`serversMoved`), and the owner's Refresh reads them, each
+//   Refresh a confirmation of its own.
 import { createStore } from 'zustand/vanilla';
 import type { ArtifactHost, ConnectorSurface } from '@artifacts/host';
 import { connectorToolKey, type ConnectorCallOutcome, type ConnectorGrant, type ConnectorGrantMode, type ConnectorRefusal, type ConnectorToolRef } from '@shared/artifacts/connectors';
@@ -67,6 +70,7 @@ export interface ConnectorsView {
   serverBusy: string | null; // P3-HD M3c2: the row an owner action is being acknowledged for
   leaseRefused: boolean; // P5 O7 M5c: the current load declared a tool and found no lease
   serversAsked: boolean; // P5 O7 M5c: the owner asked for another machine's rows in this opening of the sheet
+  serversStale: boolean; // P5 O7 M5c review 1: another machine's rows may have changed since the owner's last read
   refusalWords: Readonly<Record<string, string>>; // P5 O7 M5c: by tool, another machine's refusal of the owner's last gesture, in its words
 }
 
@@ -80,7 +84,7 @@ export interface ConnectorsTabDeps {
 const initialView = (): ConnectorsView => ({
   declared: [], last: {}, grants: null, refusals: {}, busy: null, needsSession: false, sheet: false, start: { phase: 'idle' },
   servers: { rows: null, saved: 'ok', withdrawnUnattributed: false, failed: false, refused: null }, serverBusy: null, // P3-HD M3c2
-  leaseRefused: false, serversAsked: false, refusalWords: {}, // P5 O7 M5c
+  leaseRefused: false, serversAsked: false, serversStale: false, refusalWords: {}, // P5 O7 M5c
 });
 
 // The sheet's tools: the page load's declared ones first, then the ones the artifact holds a grant for.
@@ -118,7 +122,7 @@ export class ConnectorsTab {
       declared: (declared) => {
         if (this.page?.relay !== relay) return;
         this.update({ declared });
-        if (this.view.getState().sheet) void this.readServers(); // P3-HD M3c2: its tools changed
+        if (this.view.getState().sheet) void this.serversMoved(); // P3-HD M3c2: its tools changed
       },
       outcome: (tool, outcome) => this.page?.relay === relay && this.update({ last: { ...this.view.getState().last, [connectorToolKey(tool)]: outcome } }),
       declareRefused: (outcome) => this.page?.relay === relay && outcome.reason === 'lease' && this.update({ leaseRefused: true }), // P5 O7 M5c
@@ -148,7 +152,7 @@ export class ConnectorsTab {
       const grants = await this.deps.host.connectorGrants(this.artifactId);
       if (this.disposed) return;
       this.update({ grants });
-      if (this.view.getState().sheet) void this.readServers(); // P3-HD M3c2: its tools may have changed
+      if (this.view.getState().sheet) void this.serversMoved(); // P3-HD M3c2: its tools may have changed
     } catch (error) {
       this.deps.log?.(`the connector grants of ${this.artifactId} could not be read: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -202,9 +206,9 @@ export class ConnectorsTab {
     const { owner } = this.deps;
     if (!owner || this.disposed) return;
     this.unlistenServers ??= owner.onServersChanged((artifactId) => {
-      if (artifactId === this.artifactId && this.view.getState().sheet) void this.readServers();
+      if (artifactId === this.artifactId && this.view.getState().sheet) void this.serversMoved();
     });
-    void this.readServers();
+    void this.serversMoved();
   }
 
   // P3-HD M3c2 start: the owner's per-server rows and actions
@@ -212,10 +216,20 @@ export class ConnectorsTab {
     return this.deps.owner !== undefined;
   }
 
-  async readServers(): Promise<void> {
+  /**
+   * The rows may have changed (the sheet opened, main's word, the page's tools or the grants, an owner action, the sheet
+   * no longer greyed): this Mac's are read again; another machine's are read only on the owner's word (`askServers`), so
+   * once shown they are marked stale instead (P5 O7 M5c review 1).
+   */
+  serversMoved(): Promise<void> {
+    if (artifactMachineOf(this.artifactId) === null) return this.readServers();
+    if (this.view.getState().serversAsked && !this.disposed) this.update({ serversStale: true });
+    return Promise.resolve();
+  }
+
+  private async readServers(): Promise<void> {
     const { owner } = this.deps;
     if (!owner || this.disposed || remoteGreyedOf(this.artifactId, SERVER_NEEDS) !== null) return; // P5 O7 M5c: the sheet says why
-    if (artifactMachineOf(this.artifactId) !== null && !this.view.getState().serversAsked) return; // P5 O7 M5c: on the owner's word
     const serial = ++this.serverReads;
     const current = () => !this.disposed && serial === this.serverReads;
     try {
@@ -225,13 +239,17 @@ export class ConnectorsTab {
     } catch (error) {
       if (!current()) return;
       this.deps.log?.(`the connector servers of ${this.artifactId} could not be read: ${error instanceof Error ? error.message : String(error)}`);
-      this.update({ servers: { ...this.view.getState().servers, failed: true } });
+      // P5 O7 M5c review 1: another machine's read failed, so its rows (if any) are older, and only Refresh reads again
+      this.update({ servers: { ...this.view.getState().servers, failed: true }, ...(artifactMachineOf(this.artifactId) === null ? {} : { serversStale: true }) });
     }
   }
 
-  /** P5 O7 M5c: the owner's explicit read of another machine's rows, for this opening of the sheet. */
+  /**
+   * P5 O7 M5c: the owner's explicit read of another machine's rows, for this opening of the sheet: its Show, then each
+   * Refresh (review 1). A change heard while it is out leaves them stale.
+   */
   askServers(): Promise<void> {
-    this.update({ serversAsked: true });
+    this.update({ serversAsked: true, serversStale: false });
     return this.readServers();
   }
 
@@ -263,12 +281,12 @@ export class ConnectorsTab {
     }
     if (this.disposed) return;
     this.update({ serverBusy: null, servers: { ...this.view.getState().servers, refused } });
-    await this.readServers();
+    await this.serversMoved();
   }
   // P3-HD M3c2 end
 
   closeSheet(): void {
-    this.update({ sheet: false, serversAsked: false }); // P5 O7 M5c: the next opening asks again
+    this.update({ sheet: false, serversAsked: false, serversStale: false }); // P5 O7 M5c: the next opening asks again
   }
 
   // The tab went: its page's relay and any wait for a session end.
