@@ -10,7 +10,7 @@ import { actionFingerprint, ScreencastFrameReader, type Action, type ScreencastF
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { OpLedger } from '@shared/host/op-ledger';
 import { BROWSER_WORDS, closeWord, refusalWord } from '../../src/endpoint/browser-words';
-import { BY_EFFECT } from '../../src/endpoint/by-effect';
+import { BY_EFFECT, type EffectReads, type EffectRule } from '../../src/endpoint/by-effect';
 import { OWN_ACTIONS } from '../../src/endpoint/endpoint-actions';
 import { OFFERS, READ_OPENS } from '../../src/endpoint/offers';
 import type { SessionRecord, SessionTarget, RecordSource } from '../../src/endpoint/sources';
@@ -102,9 +102,10 @@ describe('the rows and the words (§K)', () => {
     expect(OWN_ACTIONS.has('machine.browserControl')).toBe(true);
     expect(OFFERS.feeds).toContain('browser.inventory');
     expect(ENDPOINT_CAPABILITIES).toContain('rl2.browser-screencast');
-    const rule = BY_EFFECT['browser.screencast'] as (input: Record<string, unknown>) => unknown;
-    expect(rule({ appSessionId: 'a', epoch: 'e', tabId: TAB })).toBe('view');
-    expect(rule({ appSessionId: 'a', epoch: 'e', tabId: TAB, control: { op: 'op-0000000000000001' } })).toBe('approve');
+    const rule = BY_EFFECT['browser.screencast'] as EffectRule;
+    const reads = {} as EffectReads; // the rule reads nothing beyond its input
+    expect(rule({ appSessionId: 'a', epoch: 'e', tabId: TAB }, reads)).toBe('view');
+    expect(rule({ appSessionId: 'a', epoch: 'e', tabId: TAB, control: { op: 'op-0000000000000001' } }, reads)).toBe('approve');
   });
 
   it('maps every word of `mawsd`’s to a hyphenated one of RL2’s, an unknown one to `producer-failed` and `unavailable`', () => {

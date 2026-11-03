@@ -52,7 +52,8 @@ export type SessionFeed = 'checkout' | 'browser.inventory';
 /** The feeds that name no session: the machine's own (M6's `attention`, M5a's `artifacts`). */
 export type MachineFeed = 'attention' | 'artifacts';
 const MACHINE_FEEDS: readonly string[] = ['attention', 'artifacts'] satisfies readonly MachineFeed[];
-const FEEDS: readonly string[] = ['checkout', 'browser.inventory', ...MACHINE_FEEDS] satisfies readonly Feed[];
+const SESSION_FEEDS: readonly string[] = ['checkout', 'browser.inventory'] satisfies readonly SessionFeed[];
+const FEEDS: readonly string[] = [...SESSION_FEEDS, ...MACHINE_FEEDS];
 /** Whether `feed` is one of the machine's own feeds, which name no session. */
 export const isMachineFeed = (feed: unknown): feed is MachineFeed => MACHINE_FEEDS.includes(feed as string);
 /** A session's stream (no `feed`), or one of its feeds (`checkout`; P5 O17 M9a: `browser.inventory`). */

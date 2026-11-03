@@ -277,3 +277,33 @@ describe('ends', () => {
     expect(h.table.size).toBe(0);
   });
 });
+
+// P5 O17 M9a (O17's Interfaces §K): the `browser.screencast` read open, sent only to an endpoint that listed
+// `rl2.browser-screencast` beside `rl2.streams` and `rl2.read-open`; its answer's `browser` reaches the consumer.
+describe('the browser screencast', () => {
+  const BROWSER = { appSessionId: 'app-1', epoch: 'e1', tabId: 'b_000000000001', control: { op: 'op-0000000000000001' } };
+  const ALL = ['rl2.streams', 'rl2.read-open', 'rl2.browser-screencast'];
+
+  it('sends its open with its `browser` fields and no `op`, and hands the consumer the answer’s `browser`', () => {
+    const h = harness(ALL);
+    const s = h.table.open({ kind: 'browser.screencast', browser: BROWSER }, h.sink, null);
+    expect(h.of('streamOpen')).toEqual([{ t: 'streamOpen', id: s.id, kind: 'browser.screencast', credit: STREAM_OPEN_CREDIT, browser: BROWSER }]);
+    h.table.receive({ t: 'streamOpened', id: s.id, credit: 1024, browser: { epoch: 'e1', tabId: 'b_000000000001', control: true } });
+    expect(h.heard).toEqual([['opened', { browser: { epoch: 'e1', tabId: 'b_000000000001', control: true }, credit: 1024 }]]);
+  });
+
+  it('closes it `not-offered` at once, sending nothing, when the endpoint lists the read open but not `rl2.browser-screencast`, judged on the channel it goes out on', async () => {
+    const h = harness(['rl2.streams', 'rl2.read-open']);
+    h.table.open({ kind: 'browser.screencast', browser: BROWSER }, h.sink, null);
+    await tick();
+    expect(h.heard).toEqual([['closed', 'not-offered']]);
+    h.channel.current = false;
+    h.heard.length = 0;
+    h.table.open({ kind: 'browser.screencast', browser: BROWSER }, h.sink, null);
+    h.channel.current = true;
+    h.channel.peer = ALL;
+    h.table.onCurrent();
+    expect(h.of('streamOpen')).toHaveLength(1);
+    expect(h.heard).toEqual([]);
+  });
+});

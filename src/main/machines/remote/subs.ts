@@ -12,7 +12,7 @@
 // or of another position, discards the assembly (the endpoint sends replace-whole state again on every resume). Each
 // delivered `ev` and `snap` costs its message's UTF-8 JSON length, as the endpoint charges it, and goes back as `credit`
 // in batches: the sink is in-process, so delivery is consumption.
-import { base64urlEncode, SUB_CREDIT_MAX, type Cursor, type DeviceMessage, type EndpointMessage, type SessionRef } from '../../../../apps/org-protocol/src/index.ts';
+import { base64urlEncode, SUB_CREDIT_MAX, type Cursor, type DeviceMessage, type EndpointMessage, type SessionFeed, type SessionRef } from '../../../../apps/org-protocol/src/index.ts';
 import { MAX_SUBS, type RemoteTiming } from './timing';
 
 /**
@@ -26,8 +26,12 @@ export interface SessionSubscribeRequest {
   session: SessionRef;
   view?: 'full' | 'cards';
   cursor?: Cursor | null;
-  /** P5 O7 M4: the session's `checkout` feed rather than its stream. */
-  feed?: 'checkout';
+  /**
+   * P5 O7 M4: the session's `checkout` feed rather than its stream. P5 O17 M9a: its `browser.inventory` feed (behind
+   * `rl2.browser-screencast`): the agent's tabs on it, a BrowserInventory as the `snapshot` at each opening and as each
+   * later `event`, every one complete, stamped with the epoch a screencast open names.
+   */
+  feed?: SessionFeed;
 }
 /** P5 O7 M6: the machine's `attention` feed, which names no session; M5a's `artifacts` feed (behind `rl2.artifacts`) the same. */
 export interface MachineFeedRequest {
@@ -210,7 +214,8 @@ export class SubTable {
     if (request.feed === undefined) return void this.#deps.send({ t: 'sub', sub: entry.id, session: request.session, ...(request.view === undefined ? {} : { view: request.view }), cursor: entry.cursor, credit });
     // What the peer could not read never goes: the feed ends here, as the endpoint would end a name it does not offer.
     const peers = this.#deps.peerCapabilities();
-    if (peers?.includes('rl2.feeds') !== true || (request.feed === 'artifacts' && !peers.includes('rl2.artifacts'))) {
+    const gated = request.feed === 'artifacts' ? 'rl2.artifacts' : request.feed === 'browser.inventory' ? 'rl2.browser-screencast' : null;
+    if (peers?.includes('rl2.feeds') !== true || (gated !== null && !peers.includes(gated))) {
       this.#remove(entry);
       return void queueMicrotask(() => entry.sink.ended('not-offered'));
     }
