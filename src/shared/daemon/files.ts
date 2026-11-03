@@ -7,14 +7,15 @@
 // they never split between two directories. P5 O5 M2: the sockets are the three a host's transport reaches (`sockets`)
 // and the artifact endpoint's `artifacts.sock` (`artifactsSocket`, HTTP: docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md,
 // Interfaces §C), which no transport reaches. P5 O5 M5 (Interfaces §H): the per-session cua sockets in `cuaSocketDir`,
-// chosen by their own length rather than with the others, since a cua path is about 45 bytes longer. P5 O17 M4: the render
-// host's in `renderCuaSocketDir`, chosen the same way.
+// chosen by their own length rather than with the others, since a cua path is longer. P5 O17 M4: the render host's in
+// `renderCuaSocketDir`, chosen the same way. P5 O17 (the session sockets' names): both named by a digest of the session
+// id (@shared/browser/cua-socket's daemonSessionSocketName), so they fit a Mac's default profile and its TMPDIR fallback.
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HostFiles } from '../host/detached-transport';
 import { SOCKET_PATH_MAX_BYTES } from '../../engine-host/supervisor-files';
-import { DAEMON_CUA_DIR } from '../browser/cua-socket';
+import { DAEMON_CUA_DIR, daemonSessionSocketName } from '../browser/cua-socket';
 
 export const DAEMON_FILES = {
   dir: 'mawsd', lock: 'mawsd.lock', token: 'mawsd.token', log: 'mawsd.log', out: 'mawsd.out', // the identity file is the profile's (identity-file.ts)
@@ -49,18 +50,18 @@ export function daemonPaths(profileDir: string, tmp: string = tmpdir()): DaemonP
 }
 
 // P5 O5 M5: the directory of `mawsd`'s per-session cua sockets: `<profile>/mawsd/cua` when a session's socket there
-// (`<uuid>.sock`) fits sun_path, else `cua` in the fallback directory (which may still be too long: a session's path is
-// then none, @shared/browser/cua-socket's daemonCuaSocketPath).
-const CUA_SOCKET_NAME = `${'0'.repeat(36)}.sock`; // an app session id, a uuid
+// (`<digest>.sock`, P5 O17) fits sun_path, else `cua` in the fallback directory (which may still be too long: a session's
+// path is then none, @shared/browser/cua-socket's daemonCuaSocketPath).
+const CUA_SOCKET_NAME = daemonSessionSocketName(''); // every session's name has this length
 export function cuaSocketDir(profileDir: string, tmp: string = tmpdir()): string {
   const inDaemon = join(profileDir, DAEMON_FILES.dir, DAEMON_CUA_DIR);
   return Buffer.byteLength(join(inDaemon, CUA_SOCKET_NAME), 'utf8') <= SOCKET_PATH_MAX_BYTES ? inDaemon : join(socketFallbackDir(profileDir, tmp), DAEMON_CUA_DIR);
 }
 
 // P5 O17 M4 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §D): the render host's per-session cua
-// sockets (`<dir>/<appSessionId>.sock`, its backend's, which only mawsd's relay reaches): `<profile>/mawsd/render-cua`, or
-// `render-cua` in the fallback directory, chosen by its own length as cuaSocketDir is.
-const RENDER_CUA_DIR = 'render-cua';
+// sockets (`<dir>/<digest>.sock`, its backend's, which only mawsd's relay reaches; mawsd names each in `prepare`):
+// `<profile>/mawsd/rcua`, or `rcua` in the fallback directory, chosen by its own length as cuaSocketDir is.
+export const RENDER_CUA_DIR = 'rcua';
 export function renderCuaSocketDir(profileDir: string, tmp: string = tmpdir()): string {
   const inDaemon = join(profileDir, DAEMON_FILES.dir, RENDER_CUA_DIR);
   return Buffer.byteLength(join(inDaemon, CUA_SOCKET_NAME), 'utf8') <= SOCKET_PATH_MAX_BYTES ? inDaemon : join(socketFallbackDir(profileDir, tmp), RENDER_CUA_DIR);

@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
+import { cuaSocketDir, renderCuaSocketDir, socketFallbackDir } from '@shared/daemon/files';
+import { defaultProfileDir } from '@shared/daemon/profile';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionCapability } from '@shared/ipc/schema/session-capabilities';
 import { oldHostReason } from './browser-work';
@@ -32,7 +35,7 @@ describe('the browser entry (P5 O17 M5, Interfaces §I)', () => {
   const TOO_LONG = { available: false, reason: 'the browser socket of this session is longer than a Unix socket allows on mini' };
   const local = { available: true, viewed: 'local' };
   const screencast = { available: true, viewed: 'screencast' };
-  const at = { machine: 'mini', appSessionId: A, path: '/p/mawsd/cua/A.sock' };
+  const at = { machine: 'mini', appSessionId: A, path: '/p/mawsd/cua/A.sock', renderPath: '/p/mawsd/rcua/A.sock' };
 
   it('reads the app’s pane while an app is attached, the screencast while the headless browser is usable, else its reason', () => {
     expect(browserCapability({ ...at, tabEngine: '/u/browser/cua', headless: 'whatever' })).toEqual(local); // an app first
@@ -40,6 +43,14 @@ describe('the browser entry (P5 O17 M5, Interfaces §I)', () => {
     expect(browserCapability({ ...at, tabEngine: null, headless: 'the reason' })).toEqual({ available: false, reason: 'the reason' });
     expect(browserCapability({ ...at, path: null, tabEngine: '/u/browser/cua', headless: null })).toEqual(TOO_LONG);
     expect(browserCapability({ ...at, path: null, tabEngine: null, headless: null })).toEqual(TOO_LONG);
+  });
+
+  // P5 O17 (the session sockets' names, 2026-11-03): the render host's socket for the session is the headless browser's,
+  // so one that cannot fit is named before any use, never `available: true` with a path the first browser call fails on
+  it('says the path does not fit when the render host\'s socket for the session does not, though the daemon\'s does', () => {
+    expect(browserCapability({ ...at, renderPath: null, tabEngine: null, headless: null })).toEqual(TOO_LONG);
+    expect(browserCapability({ ...at, renderPath: null, tabEngine: null, headless: 'the reason' })).toEqual({ available: false, reason: 'the reason' }); // the machine's reason first
+    expect(browserCapability({ ...at, renderPath: null, tabEngine: '/u/browser/cua', headless: null })).toEqual(local); // an app's tabs need none
   });
 
   // the relay connects to the tab engine's own socket for the session: a daemon socket that fits (102 bytes) is no browser
@@ -50,8 +61,51 @@ describe('the browser entry (P5 O17 M5, Interfaces §I)', () => {
     const appDir = `/${'a'.repeat(61)}`; // 104 bytes
     expect(Buffer.byteLength(`${daemonDir}/${id}.sock`)).toBe(102);
     expect(Buffer.byteLength(`${appDir}/${id}.sock`)).toBe(104);
-    expect(browserCapability({ machine: 'mini', appSessionId: id, path: `${daemonDir}/${id}.sock`, tabEngine: appDir, headless: null })).toEqual(TOO_LONG);
-    expect(browserCapability({ machine: 'mini', appSessionId: id, path: `${daemonDir}/${id}.sock`, tabEngine: daemonDir, headless: null })).toEqual(local);
+    expect(browserCapability({ machine: 'mini', appSessionId: id, path: `${daemonDir}/${id}.sock`, renderPath: null, tabEngine: appDir, headless: null })).toEqual(TOO_LONG);
+    expect(browserCapability({ machine: 'mini', appSessionId: id, path: `${daemonDir}/${id}.sock`, renderPath: null, tabEngine: daemonDir, headless: null })).toEqual(local);
+  });
+
+  // P5 O17 (the session sockets' names, 2026-11-03; Surprises, "the session sockets' sun_path overflow"): the reading
+  // over the paths mawsd computes for each socket kind, as daemon.ts reads it, on a Mac's default profile (a
+  // 24-character user name, a 36-character session id) in the profile and in the fallback under the 48-byte TMPDIR:
+  // each fits, so the headless browser reads usable; and where one cannot fit the reading names it, never usable
+  describe('on a Mac’s default profile, over the paths mawsd computes', () => {
+    const UUID = '0b6f3c1e-7d2a-4c59-9e41-2f8a6b0d5c73' as AppSessionId;
+    const TMP = `/var/folders/c1/${'t'.repeat(30)}/T`; // 48 bytes, os.tmpdir()'s form of the per-user TMPDIR
+    const reading = (profile: string, tmp: string) => {
+      const path = daemonCuaSocketPath(cuaSocketDir(profile, tmp), UUID);
+      const renderPath = daemonCuaSocketPath(renderCuaSocketDir(profile, tmp), UUID);
+      const capability = browserCapability({ machine: 'mini', appSessionId: UUID, path, renderPath, tabEngine: null, headless: null });
+      if (capability.available) for (const fits of [path, renderPath]) expect(Buffer.byteLength(fits ?? 'x'.repeat(104)), 'never usable with a path past sun_path').toBeLessThanOrEqual(103);
+      return { path, renderPath, capability };
+    };
+
+    it('a 24-character user’s profile: mawsd’s cua socket and the render host’s fit there (96 and 97 bytes), and the headless browser reads usable', () => {
+      expect(Buffer.byteLength(TMP)).toBe(48);
+      const profile = defaultProfileDir('darwin', {}, `/Users/${'u'.repeat(24)}`);
+      const { path, renderPath, capability } = reading(profile, TMP);
+      expect(path!.startsWith(`${profile}/mawsd/cua/`) && Buffer.byteLength(path!)).toBe(96);
+      expect(renderPath!.startsWith(`${profile}/mawsd/rcua/`) && Buffer.byteLength(renderPath!)).toBe(97);
+      expect(capability).toEqual(screencast);
+    });
+
+    it('the 48-byte TMPDIR fallback: both fit there (98 and 99 bytes, whatever the profile), and the headless browser reads usable', () => {
+      const profile = defaultProfileDir('darwin', {}, `/Users/${'u'.repeat(40)}`); // too long for either in the profile
+      const { path, renderPath, capability } = reading(profile, TMP);
+      expect(path!.startsWith(`${socketFallbackDir(profile, TMP)}/cua/`) && Buffer.byteLength(path!)).toBe(98);
+      expect(renderPath!.startsWith(`${socketFallbackDir(profile, TMP)}/rcua/`) && Buffer.byteLength(renderPath!)).toBe(99);
+      expect(capability).toEqual(screencast);
+    });
+
+    it('a render host’s socket that fits nowhere while mawsd’s does is named before any use', () => {
+      // mawsd's cua socket at exactly 103 bytes in the profile, the render host's one byte over, and a fallback too long
+      const name = `/mawsd/cua/${'0'.repeat(16)}.sock`;
+      const profile = `/Users/${'u'.repeat(103 - '/Users/'.length - name.length)}`;
+      const { path, renderPath, capability } = reading(profile, `/${'t'.repeat(60)}`);
+      expect(Buffer.byteLength(path!)).toBe(103);
+      expect(renderPath).toBeNull();
+      expect(capability).toEqual(TOO_LONG);
+    });
   });
 });
 
@@ -67,7 +121,7 @@ describe('whether the headless browser is usable, and why not (P5 O17 M5, Interf
   // fence's acquire meanwhile answers that the engine host is reconnecting (browser-work.test.ts), so the two never disagree
   it('reads this build’s with no engine host connected (reconnecting), never the old-host reason', () => {
     expect(headlessReason({ ...usable, engineHost: 'none' })).toBeNull();
-    expect(browserCapability({ machine: 'mini', appSessionId: A, path: '/p/mawsd/cua/A.sock', tabEngine: null, headless: headlessReason({ ...usable, engineHost: 'none' }) })).toEqual({ available: true, viewed: 'screencast' });
+    expect(browserCapability({ machine: 'mini', appSessionId: A, path: '/p/mawsd/cua/A.sock', renderPath: '/p/mawsd/rcua/A.sock', tabEngine: null, headless: headlessReason({ ...usable, engineHost: 'none' }) })).toEqual({ available: true, viewed: 'screencast' });
   });
 
   it('says why in §I’s order: Linux, the addon, an engine host that predates browser work, the render service', () => {

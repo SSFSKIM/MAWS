@@ -97,7 +97,7 @@ import { supervisorEnv, type DetachedTransportOptions } from '@shared/host/detac
 import type { RelayPort } from '@shared/host/doc-relay';
 import { appIdentity } from '@shared/host/identity';
 import { cuaSocketDir, renderCuaSocketDir } from '@shared/daemon/files'; // P5 O5 M5; P5 O17 M5: the render host's sockets
-import { cuaSocketPath, daemonCuaSocketPath } from '@shared/browser/cua-socket';
+import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
 import { BrowserRefused, type BrowserFeed } from '@shared/browser/screencast'; // P5 O17 M6
 import { idleCollector, type Collect } from '@shared/host/idle-collect';
 import { makePrivateDirectory, clearSocketPath } from '@shared/host/private-listen';
@@ -1104,7 +1104,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   if (e2eLinuxHeadless) log('[cua] MAWS_E2E_LINUX_HEADLESS=1: the headless browser is usable on Linux for the e2e\'s fixture connector');
   const browserHeadless = (): string | null => headlessReason({ machine, platform, addon: peerAddonLoad, engineHost: engineHostBrowserWork(), runtime: renderRuntime(), failure: render.unavailable(), e2eLinuxHeadless });
   const renderCuaDir = renderCuaSocketDir(profileDir, options.tmp ?? tmpdir());
-  const renderSocketOf = (appSessionId: AppSessionId) => cuaSocketPath(renderCuaDir, appSessionId);
+  // P5 O17 (the session sockets' names): mawsd names the render host's socket for a session, in `prepare` (§D)
+  const renderSocketOf = (appSessionId: AppSessionId) => daemonCuaSocketPath(renderCuaDir, appSessionId);
   // A side thread's parent, whose tabs it reaches in the render host, from the spine's index: read at once when the
   // spine is loaded, else loaded for it within the demand's deadline less PREPARE_MARGIN_MS (the prepare's own time),
   // never waited for past it: the session then reaches its own tabs alone (M4's open question, settled at M5)
@@ -1185,7 +1186,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   };
   const sessionCapabilities = createSessionCapabilities({
     render: () => render.capabilities(),
-    browser: (appSessionId) => browserCapability({ machine, appSessionId, path: daemonCuaSocketPath(cuaDir, appSessionId), tabEngine: cua?.tabEngine() ?? null, headless: browserHeadless() }),
+    browser: (appSessionId) => browserCapability({ machine, appSessionId, path: daemonCuaSocketPath(cuaDir, appSessionId), renderPath: renderSocketOf(appSessionId), tabEngine: cua?.tabEngine() ?? null, headless: browserHeadless() }),
     emit: (appSessionId, capabilities) => void front.bus.emit('session.capabilitiesChanged', { appSessionId, capabilities }),
     tracking: (any) => ((tracked = any), syncCacheWatch()),
   });

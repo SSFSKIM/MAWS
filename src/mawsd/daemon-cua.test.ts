@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { CONNECTORS_CLIENT_CAPABILITY, MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
 import { machineName } from '@shared/machine/identity';
+import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
 import { cuaSocketDir } from '@shared/daemon/files';
 import { takeSpineLock } from '../services/settings/spine-lock';
 import type { SpineDeps } from '../services/spine-root';
@@ -90,7 +91,7 @@ function engineSide(path: string) {
 // The scene's profile is under the OS temp directory, too long for a session's socket there: the cua directory falls back
 // to the short `tmp` the daemon is given
 const TMP = '/tmp';
-const socketOf = () => join(cuaSocketDir(scene.root, TMP), `${S}.sock`);
+const socketOf = () => daemonCuaSocketPath(cuaSocketDir(scene.root, TMP), S)!;
 
 const running = (pid: number) => ({ appSessionId: S, status: { appSessionId: S, process: 'running', pid } });
 

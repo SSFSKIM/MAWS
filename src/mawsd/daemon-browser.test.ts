@@ -14,8 +14,9 @@
 import { existsSync, mkdirSync, rmSync, watch } from 'node:fs';
 import { createServer, connect, type Server, type Socket } from 'node:net';
 import { hostname } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
+import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
 import { cuaSocketDir, renderCuaSocketDir } from '@shared/daemon/files';
 import { BROWSER_ENGINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
 import type { BrowserEngineRequest } from '@shared/ipc/schema/browser-engine';
@@ -103,7 +104,7 @@ class Connector {
     socket.on('close', () => void (this.closed = true));
   }
   static open(): Connector {
-    const connector = new Connector(connect(join(cuaSocketDir(scene.root, TMP), `${S}.sock`)));
+    const connector = new Connector(connect(daemonCuaSocketPath(cuaSocketDir(scene.root, TMP), S)!));
     closers.push(() => connector.socket.destroy());
     return connector;
   }
@@ -201,10 +202,11 @@ class RenderHost {
   async handle(request: BrowserEngineRequest): Promise<void> {
     const { id, appSessionId, operation } = request;
     if (operation.op === 'prepare') {
-      const dir = renderCuaSocketDir(scene.root, TMP);
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      // P5 O17 (the session sockets' names): it listens where mawsd's prepare names, as the render host does
+      const path = operation.socketPath!;
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
       const server = createServer((socket) => this.serve(appSessionId, socket));
-      await new Promise<void>((resolve) => server.listen(join(dir, `${appSessionId}.sock`), resolve));
+      await new Promise<void>((resolve) => server.listen(path, resolve));
       this.servers.set(appSessionId, server);
       await this.answer(id);
       await this.state(appSessionId);
@@ -366,7 +368,7 @@ async function attachApp(options: { engine?: boolean } = {}): Promise<{ leave():
 }
 
 const renderStatus = async (daemon: RunningDaemon) => (await daemon.status()).render!;
-const listening = () => until(() => existsSync(join(cuaSocketDir(scene.root, TMP), `${S}.sock`)), 3_000, 'the session’s socket listening');
+const listening = () => until(() => existsSync(daemonCuaSocketPath(cuaSocketDir(scene.root, TMP), S)!), 3_000, 'the session’s socket listening');
 
 describe('the first browser with no app (acceptance 1)', () => {
   it('reads the screencast before Chromium starts, answers cua cold, starts the render host at its first tab, and ends it after the quiet period while cua reconnects cold', async () => {
@@ -415,7 +417,9 @@ describe('the first browser with no app (acceptance 1)', () => {
   it('names a side thread’s parent in its prepare, read from mawsd’s own index (M4’s question): the render host reads no lineage', async () => {
     const t = await stand();
     await firstTab();
-    expect(t.host().requests[0]!.operation).toEqual({ op: 'prepare' }); // no spine with a record of S: a root session
+    // no spine with a record of S: a root session; the socket mawsd computed, where the render host listens (P5 O17, the
+    // session sockets' names)
+    expect(t.host().requests[0]!.operation).toEqual({ op: 'prepare', socketPath: daemonCuaSocketPath(renderCuaSocketDir(scene.root, TMP), S) });
     expect(scene.logs.some((line) => line.includes('was not read in time'))).toBe(false);
   });
 });

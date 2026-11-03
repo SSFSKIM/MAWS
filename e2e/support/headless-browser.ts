@@ -10,7 +10,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect } from '@playwright/test';
-import { cuaSocketPath, daemonCuaSocketPath } from '@shared/browser/cua-socket';
+import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
 import { cuaSocketDir, renderCuaSocketDir } from '@shared/daemon/files';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -119,7 +119,7 @@ export interface HeadlessSceneOptions {
 }
 
 // A scratch root short enough for every socket under it (`/tmp/mh-XXXXXX`; the render host's per-session socket is the
-// longest, `<profile>/mawsd/render-cua/<uuid>.sock`), each repository trusted and the user's default mode `default` in
+// longest, `<profile>/mawsd/rcua/<digest>.sock`), each repository trusted and the user's default mode `default` in
 // the daemon's engine store, so a start runs no trust bootstrap and no auto-mode fallback (the stub's prelude is
 // Session's minimal one, as e2e/local-latency.spec.ts's)
 export async function startHeadlessScene(o: HeadlessSceneOptions = {}): Promise<HeadlessScene> {
@@ -177,7 +177,7 @@ export async function startHeadlessScene(o: HeadlessSceneOptions = {}): Promise<
     },
     report: (repo) => connectorReport(repo),
     daemonSocket: (appSessionId) => daemonCuaSocketPath(cuaSocketDir(userData), appSessionId)!,
-    renderSocket: (appSessionId) => cuaSocketPath(renderCuaSocketDir(userData, tmpdir()), appSessionId),
+    renderSocket: (appSessionId) => daemonCuaSocketPath(renderCuaSocketDir(userData, tmpdir()), appSessionId),
     mawsdLog: () => (existsSync(join(userData, 'mawsd', 'mawsd.log')) ? readFileSync(join(userData, 'mawsd', 'mawsd.log'), 'utf8') : ''),
     async stop() {
       await daemon.stop().catch((error: unknown) => console.error(error));

@@ -49,7 +49,7 @@ function stand() {
       served.delete(id);
     },
     engineOf: (id) => served.get(id) ?? null,
-    socketPath: (id) => `/p/mawsd/render-cua/${id}.sock`,
+    socketPath: (id) => `/p/mawsd/rcua/${id}.sock`,
     appEngine: () => inputs.appEngine,
     post: (engine, request) => (inputs.posts ? (asked.push({ engine, request }), true) : false),
     routeChanged: (id) => void changed.push(`${id} ${route.reading(id).epoch}`),
@@ -61,7 +61,7 @@ function stand() {
   const promote = async (id: AppSessionId = S) => {
     const asked = route.ensureBrowser(demand(id));
     served.set(id, ENGINE);
-    starts.at(-1)!.answer.resolve({ epoch: route.reading(id).epoch, socketPath: `/p/mawsd/render-cua/${id}.sock` });
+    starts.at(-1)!.answer.resolve({ epoch: route.reading(id).epoch, socketPath: `/p/mawsd/rcua/${id}.sock` });
     await asked;
     expect(route.reading(id).state).toBe('headless');
   };
@@ -104,10 +104,10 @@ describe('the route’s state and epoch (§B)', () => {
     expect(t.route.selection(S), 'nothing prepared yet').toBeNull();
     t.served.set(S, ENGINE);
     expect(t.route.selection(S), 'the prepare’s connection, under the epoch').toEqual({ engine: ENGINE, period: epoch });
-    t.starts[0]!.answer.resolve({ epoch, socketPath: '/p/mawsd/render-cua/S.sock' });
-    expect(await asked).toEqual({ epoch, socketPath: '/p/mawsd/render-cua/S.sock' });
+    t.starts[0]!.answer.resolve({ epoch, socketPath: '/p/mawsd/rcua/S.sock' });
+    expect(await asked).toEqual({ epoch, socketPath: '/p/mawsd/rcua/S.sock' });
     expect(t.route.reading(S)).toEqual({ state: 'headless', epoch });
-    expect(t.route.target(S), 'later connections relayed straight to the render host').toBe('/p/mawsd/render-cua/S.sock');
+    expect(t.route.target(S), 'later connections relayed straight to the render host').toBe('/p/mawsd/rcua/S.sock');
   });
 
   it('starting → cold in the same epoch when the start fails, the failure passed on; a demand in any other state or epoch is refused', async () => {
@@ -135,7 +135,7 @@ describe('the route’s state and epoch (§B)', () => {
     await expect(first).rejects.toThrow('aborted');
     expect(t.route.reading(S), 'the retry is still under way').toEqual({ state: 'starting', epoch });
     t.served.set(S, ENGINE);
-    t.starts[1]!.answer.resolve({ epoch, socketPath: '/p/mawsd/render-cua/S.sock' });
+    t.starts[1]!.answer.resolve({ epoch, socketPath: '/p/mawsd/rcua/S.sock' });
     await retry;
     expect(t.route.reading(S)).toEqual({ state: 'headless', epoch });
   });
@@ -146,7 +146,7 @@ describe('the route’s state and epoch (§B)', () => {
     const { epoch } = t.route.reading(S);
     const first = t.route.ensureBrowser(t.demand());
     const retry = t.route.ensureBrowser(t.demand());
-    t.starts[0]!.answer.resolve({ epoch, socketPath: '/p/mawsd/render-cua/S.sock' });
+    t.starts[0]!.answer.resolve({ epoch, socketPath: '/p/mawsd/rcua/S.sock' });
     await first;
     expect(t.route.reading(S).state).toBe('starting');
     t.starts[1]!.answer.reject(new Error('the browser on mini did not start within 4000 ms'));
@@ -163,7 +163,7 @@ describe('the route’s state and epoch (§B)', () => {
     t.route.inputsChanged();
     const after = t.route.reading(S);
     expect(after.state).toBe('relay');
-    t.starts[0]!.answer.resolve({ epoch: before, socketPath: '/p/mawsd/render-cua/S.sock' });
+    t.starts[0]!.answer.resolve({ epoch: before, socketPath: '/p/mawsd/rcua/S.sock' });
     expect((await asked).epoch).toBe(before); // the broker compares it with the route's and never splices
     expect(t.route.reading(S)).toEqual(after);
     expect(t.route.target(S)).toBeNull();

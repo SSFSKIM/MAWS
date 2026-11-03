@@ -2,6 +2,7 @@ import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, rmS
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { daemonSessionSocketName } from '@shared/browser/cua-socket';
 import type { AppSessionId } from '@shared/graph/ids';
 import { PEER_AUTH_VERSION, PEER_ROOT_WAIT_MS, type PeerAddon } from '../main/browser/cua/peer';
 import { createCuaSockets, loadCuaBroker, PENDING_BUDGET, type CuaSocketsOptions } from './cua-socket';
@@ -212,7 +213,7 @@ describe('listening follows the attached tab engine', () => {
   it('a session\'s socket listens only while a tab engine is attached, 0600, and its file goes when none is', async () => {
     const { sockets, appDir, changes } = stand({ uidBoundary: true });
     const path = sockets.ensure(A)!;
-    expect(path.endsWith('/mawsd/cua/A.sock')).toBe(true);
+    expect(path.endsWith(`/mawsd/cua/${daemonSessionSocketName(A)}`)).toBe(true); // P5 O17: the session sockets' names
     expect(sockets.ensure(A)).toBe(path); // stable: the next launch is told the same path
     expect(exists(path)).toBe(false);
     expect(sockets.inspect()).toEqual({ A: { listening: false, relayed: 0, refused: 0, waiting: 0 } });
@@ -590,7 +591,7 @@ describe('the cold route (P5 O17 M1)', () => {
     addon.peerPid = STRANGER;
     const path = sockets.ensure(A)!;
     await until(() => exists(path));
-    browserCapability({ machine: 'mini', appSessionId: A, path, tabEngine: sockets.tabEngine(), headless: null });
+    browserCapability({ machine: 'mini', appSessionId: A, path, renderPath: '/p/mawsd/rcua/A.sock', tabEngine: sockets.tabEngine(), headless: null });
     sockets.inspect();
     const client = engineClient(path, frame({ jsonrpc: '2.0', id: 1, method: 'tabs.query', params: {} }));
     await until(client.closed);

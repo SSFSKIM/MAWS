@@ -7,9 +7,11 @@
 //
 // `mawsd` drives it with `browserEngine.request` (the host's request loop hands each here; each is answered once with
 // `browserEngine.answer`):
-// - `prepare`: the session's socket under `renderCuaSocketDir` listens, admitting only `mawsd`'s confirmed relay (the
-//   peer of this process's `machine.sock` link, through the addon, confirmed by `machine.identity` on that link; no
-//   trusted roots in production, §H). The request names a side thread's parent (P5 O17 M5: `mawsd` reads it from its own
+// - `prepare`: the session's socket listens at the path the request names (P5 O17, the session sockets' names: `mawsd`
+//   computes it under `renderCuaSocketDir` and relays to it; this engine computes none, and a request that names none,
+//   an older sender's, is refused by name), admitting only `mawsd`'s confirmed relay (the peer of this process's
+//   `machine.sock` link, through the addon, confirmed by `machine.identity` on that link; no trusted roots in
+//   production, §H). The request names a side thread's parent (P5 O17 M5: `mawsd` reads it from its own
 //   index), for the existing reach rule: a side thread reaches its parent's tabs (P-24). Answered null once both hold,
 //   then the session's inventory is pushed (`browserEngine.state`); a session already served answers at once.
 // - `drop`: the session's tabs closed, its socket closed and its connections ended (each lease let go), its partition's
@@ -90,7 +92,6 @@ export interface TabEngineDeps {
   socketFd(): number | null; // the link's descriptor: the relay this engine admits is its peer
   views(partitions: Pick<Partitions, 'session'>): TabEngineViews;
   fromPartition: ConstructorParameters<typeof Partitions>[0]; // Electron's `session.fromPartition`
-  socketDir: string; // renderCuaSocketDir
   userData: string;
   peer: { addon: PeerAddon | null; platform?: NodeJS.Platform };
   machine: string; // as the reasons name it
@@ -242,7 +243,7 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     windows: () => [HEADLESS_WINDOW],
     reaches: (appSessionId, tabSessionId) => tabSessionId === appSessionId || served.get(appSessionId)?.parent === tabSessionId,
     userData: deps.userData,
-    socketDir: deps.socketDir,
+    socketDir: null, // each session's socket at the path mawsd names in its prepare
     orphans: 'session',
     creations: { begin },
     version: deps.version,
@@ -364,9 +365,10 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
     cancels.delete(appSessionId);
   }
 
-  async function prepare(appSessionId: AppSessionId, parent: AppSessionId | null, signal: AbortSignal): Promise<null> {
+  async function prepare(appSessionId: AppSessionId, parent: AppSessionId | null, socketPath: string | null, signal: AbortSignal): Promise<null> {
     signal.throwIfAborted();
     if (served.has(appSessionId)) return null;
+    if (socketPath === null) throw new Error(`the headless browser on ${machine} was not told this session’s socket: mawsd predates the session sockets’ names`);
     const session: Served = { parent, creating: 0, fence: 'none', told: null };
     served.set(appSessionId, session);
     const serves = () => {
@@ -378,7 +380,7 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
       const why = uncleared.has(headlessPartition(appSessionId)) ? await clearPartition(appSessionId) : null;
       if (why !== null) throw new Error(why);
       serves();
-      if (cua.socketPathFor(appSessionId) === null) throw new Error(`the headless browser on ${machine} has no socket for this session`);
+      if (cua.socketPathFor(appSessionId, socketPath) !== socketPath) throw new Error(`the headless browser on ${machine} has no socket for this session`);
       const [, relay] = await cancellable(Promise.all([cua.listening(appSessionId), relayed]), signal);
       if (!relay) throw new Error(`the headless browser on ${machine} could not confirm mawsd's relay`);
       serves();
@@ -462,7 +464,7 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
         if (!cancel) cancels.set(appSessionId, (cancel = new AbortController()));
         const { signal } = cancel;
         const parent = (operation.parent ?? null) as AppSessionId | null;
-        run = serially(appSessionId, () => prepare(appSessionId, parent, signal));
+        run = serially(appSessionId, () => prepare(appSessionId, parent, operation.socketPath ?? null, signal));
       }
       run.then(
         (value) => {
