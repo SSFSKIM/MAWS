@@ -140,6 +140,22 @@ export type BrowserImportInspection = z.infer<typeof BrowserImportInspectionSche
 const RemoteViewIdSchema = z.string().min(1).max(64);
 const BrowserEpochSchema = z.string().min(1).max(128);
 export const BrowserInventorySchema = EngineInventorySchema.extend({ epoch: BrowserEpochSchema });
+// What the window's view is, beside §G's inventory (which stays as the machine wrote it), so the window words it (M10's
+// copy) by kind and never reads prose:
+// - `live`: the machine's inventory, ready.
+// - `connecting`: no channel to the machine is current yet, or it has not answered the open by its bound; the feed goes on.
+// - `lost`: the connection went down past its grace; the feed resumes with it.
+// - `unsupported`: the machine's endpoint offers no `browser.inventory` feed (an older MAWS there).
+// - `ended`: the view will not go on (open it again), `end` saying why: `removed` (this device may no longer view the
+//   session), `class` (this device's class cannot), `closed` (the link closed for good), `no-link` (no link reaches the
+//   machine from here), `window` (the window closed during the open), `failed` (the feed ended with another word).
+// - `unavailable`: the machine's own unavailable reading, its `inventory.reason` the machine's.
+// The inventory's `reason` for the other unavailable kinds is main's English, for logs; the window does not show it.
+export const RemoteViewStateSchema = z.union([
+  z.strictObject({ kind: z.enum(['live', 'connecting', 'lost', 'unsupported', 'unavailable']) }),
+  z.strictObject({ kind: z.literal('ended'), end: z.enum(['removed', 'class', 'closed', 'no-link', 'window', 'failed']) }),
+]);
+export type RemoteViewState = z.infer<typeof RemoteViewStateSchema>;
 export const BrowserRemoteFrameSchema = BrowserFrameMetaSchema.extend({
   epoch: BrowserEpochSchema,
   // realm-local, as pty.data's; any buffer's view (§G's BrowserFrame.jpeg is a Uint8Array over whichever buffer)
@@ -341,9 +357,9 @@ export const commands = {
   // P5 O17 M9b start: the remote view's bridge (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §K, "The
   // app's bridge"; src/main/browser/remote-view.ts): a window's own viewers of the agent's tabs on another machine's
   // session, over that machine's RL2 link. `open` names the session by its address (the router lowers it, the machine
-  // the handler's target) and answers the view and whether it is possible (the inventory's state and reason); the rest
+  // the handler's target) and answers the view and whether it is possible (its `view` kind, RemoteViewStateSchema); the rest
   // name the view, which only the window that opened it can.
-  'browser.remote.open': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ viewId: RemoteViewIdSchema, inventory: BrowserInventorySchema }), owner: 'main' },
+  'browser.remote.open': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ viewId: RemoteViewIdSchema, inventory: BrowserInventorySchema, view: RemoteViewStateSchema }), owner: 'main' },
   'browser.remote.select': { input: z.strictObject({ viewId: RemoteViewIdSchema, epoch: BrowserEpochSchema, tabId: BrowserTabIdSchema }), output: z.void(), owner: 'main' },
   'browser.remote.takeControl': { input: z.strictObject({ viewId: RemoteViewIdSchema }), output: z.strictObject({ control: z.boolean(), reason: z.string().max(1_024).optional() }), owner: 'main' },
   'browser.remote.releaseControl': { input: z.strictObject({ viewId: RemoteViewIdSchema }), output: z.void(), owner: 'main' },
@@ -403,9 +419,9 @@ export const events = {
   // cua #90 end
   // P5 O17 M9b start: to the window that opened the view only (remote-view.ts): its inventory at each change, each frame
   // (the next only after its `ack`), and the end of its stream with the endpoint's word (`tab-closed`, `engine-changed`,
-  // `control-revoked`, `carrier`, …); the view itself goes on until `close`, or its feed's end, told as an unavailable
-  // inventory
-  'browser.remote.inventory': z.strictObject({ viewId: RemoteViewIdSchema, inventory: BrowserInventorySchema }),
+  // `control-revoked`, `carrier`, `producer-failed`, …); the view itself goes on until `close`, or its feed's end, told
+  // as an inventory whose `view` is `ended`
+  'browser.remote.inventory': z.strictObject({ viewId: RemoteViewIdSchema, inventory: BrowserInventorySchema, view: RemoteViewStateSchema }),
   'browser.remote.frame': z.strictObject({ viewId: RemoteViewIdSchema, frame: BrowserRemoteFrameSchema }),
   'browser.remote.closed': z.strictObject({ viewId: RemoteViewIdSchema, reason: z.string().min(1).max(64) }),
   // P5 O17 M9b end

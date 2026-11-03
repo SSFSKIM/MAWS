@@ -99,24 +99,30 @@ function stand(options: { link?: Link | null; timing?: Partial<RemoteViewsTiming
 describe('browser.remote.open: the feed and whether the view is possible', () => {
   it('subscribes to the session’s browser.inventory feed and answers its first snapshot, each later one an event to the window', async () => {
     const t = stand();
-    const { viewId, inventory: first } = await t.opened();
+    const { viewId, inventory: first, view } = await t.opened();
     expect(t.link.subs[0]!.request).toEqual({ session: { lane: 'B', id: 'app-1' }, feed: 'browser.inventory' });
     expect(first).toEqual(inventory());
+    expect(view).toEqual({ kind: 'live' });
     t.link.subs[0]!.sink.event({ epoch: 's', seq: 1 }, inventory('e.1', [TAB]));
-    expect(t.of('browser.remote.inventory')).toEqual([{ viewId, inventory: inventory('e.1', [TAB]) }]);
+    expect(t.of('browser.remote.inventory')).toEqual([{ viewId, inventory: inventory('e.1', [TAB]), view: { kind: 'live' } }]);
     expect(t.told.every((event) => event.client === t.window.id)).toBe(true);
     t.link.subs[0]!.sink.event({ epoch: 's', seq: 2 }, { not: 'an inventory' });
     expect(t.of('browser.remote.inventory'), 'an inventory out of shape is dropped').toHaveLength(1);
+    // the machine's own unavailable reading: its reason, the kind `unavailable`
+    const theirs = { epoch: 'e.2', tabs: [], selected: null, state: 'unavailable' as const, reason: 'the MAWS app on mini is too old to share the agent’s tabs' };
+    t.link.subs[0]!.sink.event({ epoch: 's', seq: 3 }, theirs);
+    expect(t.of('browser.remote.inventory').at(-1)).toEqual({ viewId, inventory: theirs, view: { kind: 'unavailable' } });
   });
 
   it('answers at once, unavailable, when no channel is current, then tells the snapshot as it comes', async () => {
     const link = new Link();
     link.current = false;
     const t = stand({ link });
-    const { viewId, inventory: first } = await t.bridge.open({ appSessionId: 'app-1' }, t.ctx());
+    const { viewId, inventory: first, view } = await t.bridge.open({ appSessionId: 'app-1' }, t.ctx());
     expect(first).toMatchObject({ state: 'unavailable', reason: 'connecting to mini' });
+    expect(view).toEqual({ kind: 'connecting' });
     t.link.snapshot(inventory());
-    expect(t.of('browser.remote.inventory')).toEqual([{ viewId, inventory: inventory() }]);
+    expect(t.of('browser.remote.inventory')).toEqual([{ viewId, inventory: inventory(), view: { kind: 'live' } }]);
   });
 
   it('answers with what it has when the endpoint has not answered by the open’s bound, the feed going on', async () => {
@@ -124,19 +130,20 @@ describe('browser.remote.open: the feed and whether the view is possible', () =>
     const t = stand();
     const opening = t.bridge.open({ appSessionId: 'app-1' }, t.ctx());
     await vi.advanceTimersByTimeAsync(10_000);
-    const { viewId, inventory: first } = await opening;
+    const { viewId, inventory: first, view } = await opening;
     expect(first).toMatchObject({ state: 'unavailable', reason: 'mini has not answered yet' });
+    expect(view).toEqual({ kind: 'connecting' });
     t.link.snapshot(inventory());
-    expect(t.of('browser.remote.inventory')).toEqual([{ viewId, inventory: inventory() }]);
+    expect(t.of('browser.remote.inventory')).toEqual([{ viewId, inventory: inventory(), view: { kind: 'live' } }]);
   });
 
   it('reads a machine whose endpoint does not offer the feed as too old, and one with no link as unreachable', async () => {
     const t = stand();
     const opening = t.bridge.open({ appSessionId: 'app-1' }, t.ctx());
     t.link.subs[0]!.sink.ended('not-offered');
-    expect((await opening).inventory).toMatchObject({ state: 'unavailable', reason: 'the MAWS on mini is too old to show the agent’s browser here' });
+    expect(await opening).toMatchObject({ inventory: { state: 'unavailable', reason: 'the MAWS on mini is too old to show the agent’s browser here' }, view: { kind: 'unsupported' } });
     const other = await t.bridge.open({ appSessionId: 'app-1' }, t.ctx(t.window, 'mac-elsewhere' as MachineRef));
-    expect(other.inventory).toMatchObject({ state: 'unavailable', reason: expect.stringContaining('no link reaches') });
+    expect(other).toMatchObject({ inventory: { state: 'unavailable', reason: expect.stringContaining('no link reaches') }, view: { kind: 'ended', end: 'no-link' } });
     await expect(t.bridge.open({ appSessionId: 'app-1' }, t.ctx(t.window, LOCAL))).rejects.toMatchObject({ error: { code: 'invalid_input' } });
   });
 
@@ -144,7 +151,7 @@ describe('browser.remote.open: the feed and whether the view is possible', () =>
     const t = stand();
     const { viewId } = await t.opened();
     t.link.subs[0]!.sink.paused('offline');
-    expect(t.of('browser.remote.inventory').at(-1)).toMatchObject({ viewId, inventory: { state: 'unavailable', reason: 'the connection to mini was lost' } });
+    expect(t.of('browser.remote.inventory').at(-1)).toEqual({ viewId, inventory: expect.objectContaining({ state: 'unavailable', reason: 'the connection to mini was lost' }), view: { kind: 'lost' } });
     t.link.subs[0]!.sink.ended('behind');
     expect(t.link.subs).toHaveLength(2);
     expect(t.link.subs[1]!.request).toEqual(t.link.subs[0]!.request);
@@ -154,7 +161,7 @@ describe('browser.remote.open: the feed and whether the view is possible', () =>
     t.link.subs[1]!.sink.ended('removed');
     expect(t.link.streams[0]!.closed).toBe('closed');
     expect(t.of('browser.remote.closed')).toEqual([{ viewId, reason: 'removed' }]);
-    expect(t.of('browser.remote.inventory').at(-1)).toMatchObject({ inventory: { state: 'unavailable', reason: 'you can no longer view this session on mini' } });
+    expect(t.of('browser.remote.inventory').at(-1)).toMatchObject({ inventory: { state: 'unavailable', reason: 'you can no longer view this session on mini' }, view: { kind: 'ended', end: 'removed' } });
     expect(() => t.bridge.select({ viewId, epoch: 'e.1', tabId: TAB }, t.ctx())).toThrow(/ended/);
   });
 });

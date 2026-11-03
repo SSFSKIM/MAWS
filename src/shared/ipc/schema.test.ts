@@ -1311,8 +1311,14 @@ describe('ipc schema validates both directions', () => {
       expect(Object.keys(browser.events).slice(-3)).toEqual(['browser.remote.inventory', 'browser.remote.frame', 'browser.remote.closed']);
       for (const name of names) expect(commands[name as keyof typeof commands].owner).toBe('main');
       const inventory = { epoch: 'e.1', tabs: [{ tabId: 'b_000000000001', title: 'dev', url: 'http://127.0.0.1:5173/', control: 'agent' }], selected: null, state: 'ready' };
-      expect(validateCommandOutput('browser.remote.open', { viewId: 'v1', inventory }).ok).toBe(true);
-      expect(validateCommandOutput('browser.remote.open', { viewId: 'v1', inventory: { ...inventory, epoch: undefined } }).ok).toBe(false);
+      expect(validateCommandOutput('browser.remote.open', { viewId: 'v1', inventory, view: { kind: 'live' } }).ok).toBe(true);
+      expect(validateCommandOutput('browser.remote.open', { viewId: 'v1', inventory: { ...inventory, epoch: undefined }, view: { kind: 'live' } }).ok).toBe(false);
+      // the view's kind beside §G's inventory (M10 words it, never reading prose): one of six, `end` with `ended` alone
+      expect(validateCommandOutput('browser.remote.open', { viewId: 'v1', inventory }).ok).toBe(false);
+      expect(validateEventPayload('browser.remote.inventory', { viewId: 'v1', inventory, view: { kind: 'ended', end: 'removed' } }).ok).toBe(true);
+      expect(validateEventPayload('browser.remote.inventory', { viewId: 'v1', inventory, view: { kind: 'paused' } }).ok).toBe(false);
+      expect(validateEventPayload('browser.remote.inventory', { viewId: 'v1', inventory, view: { kind: 'lost', end: 'removed' } }).ok).toBe(false);
+      expect(validateEventPayload('browser.remote.inventory', { viewId: 'v1', inventory, view: { kind: 'ended' } }).ok).toBe(false);
       const frame = { epoch: 'e.1', tabId: 'b_000000000001', seq: 1, capturedAt: 1, width: 640, height: 400, viewport: { width: 1280, height: 800 } };
       expect(validateEventPayload('browser.remote.frame', { viewId: 'v1', frame: { ...frame, jpeg: new Uint8Array([0xff, 0xd8]) } }).ok).toBe(true);
       expect(validateEventPayload('browser.remote.frame', { viewId: 'v1', frame: { ...frame, jpeg: new Uint8Array(0) } }).ok).toBe(false);

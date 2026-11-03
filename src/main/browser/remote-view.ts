@@ -27,7 +27,7 @@
 import { ipcError } from '@shared/ipc/errors';
 import type { ClientRef } from '@shared/ipc/client';
 import type { CommandInput, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
-import { BrowserInventorySchema, BrowserRemoteFrameSchema } from '@shared/ipc/schema/browser';
+import { BrowserInventorySchema, BrowserRemoteFrameSchema, type RemoteViewState } from '@shared/ipc/schema/browser';
 import type { BrowserInventory } from '@shared/browser/screencast';
 import type { MachineRef } from '@shared/machine/ref';
 import { CommandFailure } from '../ipc/router';
@@ -90,6 +90,7 @@ interface View {
   link: RemoteViewLink | null;
   name: string;
   inventory: BrowserInventory;
+  state: RemoteViewState; // what the window words the view by (RemoteViewStateSchema), beside the inventory
   sub: { close(): void } | null;
   ended: boolean;
   selected: { tabId: string; epoch: string } | null;
@@ -97,7 +98,7 @@ interface View {
   pending: Shown | null;
   grant: { op: string; epoch: string } | null;
   wantsControl: boolean;
-  answer: ((inventory: BrowserInventory) => void) | null; // open's, until it answered
+  answer: (() => void) | null; // open's, until it answered (with the view's inventory and state)
   offGone: () => void;
 }
 
@@ -109,6 +110,11 @@ export function createRemoteViews(deps: RemoteViewsDeps): RemoteViews {
   let minted = 0;
 
   const unavailable = (view: Pick<View, 'inventory'> | null, reason: string): BrowserInventory => ({ epoch: view?.inventory.epoch ?? '-', tabs: [], selected: null, state: 'unavailable', reason });
+  // a feed's end as the view's state: `not-offered` an older MAWS there, any other final
+  const endOf = (word: string): RemoteViewState => {
+    if (word === 'not-offered') return { kind: 'unsupported' };
+    return { kind: 'ended', end: word === 'removed' || word === 'class' || word === 'closed' ? word : 'failed' };
+  };
   const why = (name: string, word: string): string => {
     switch (word) {
       case 'not-offered':
@@ -132,15 +138,16 @@ export function createRemoteViews(deps: RemoteViewsDeps): RemoteViews {
   const live = (view: View) => views.get(view.id) === view;
 
   // The view's inventory: kept, to the window (or as open's answer while it waits)
-  function told(view: View, inventory: BrowserInventory): void {
+  function told(view: View, inventory: BrowserInventory, state: RemoteViewState): void {
     if (inventory.state === 'ready' && view.grant !== null && inventory.epoch !== view.grant.epoch) letGoOfControl(view); // the grant died with its epoch
     view.inventory = inventory;
+    view.state = state;
     if (view.answer) {
       const answer = view.answer;
       view.answer = null;
-      return answer(inventory);
+      return answer();
     }
-    deps.emit(view.client, 'browser.remote.inventory', { viewId: view.id, inventory });
+    deps.emit(view.client, 'browser.remote.inventory', { viewId: view.id, inventory, view: state });
   }
 
   function letGoOfControl(view: View): void {
@@ -159,7 +166,7 @@ export function createRemoteViews(deps: RemoteViewsDeps): RemoteViews {
         subbed() {},
         snapshot: (_at, value) => inventoryArrived(value),
         event: (_at, body) => inventoryArrived(body),
-        paused: (reason) => live(view) && told(view, unavailable(view, why(view.name, reason))),
+        paused: (reason) => live(view) && told(view, unavailable(view, why(view.name, reason)), { kind: 'lost' }),
         resumed() {},
         ended(reason) {
           if (!live(view)) return;
@@ -174,7 +181,7 @@ export function createRemoteViews(deps: RemoteViewsDeps): RemoteViews {
       const read = BrowserInventorySchema.safeParse(value);
       if (!read.success) return deps.log(`[browser] the agent’s browser inventory from ${view.name} is out of shape: dropped (${read.error.issues[0]?.message ?? ''})`);
       snapshots += 1;
-      told(view, read.data);
+      told(view, read.data, { kind: read.data.state === 'ready' ? 'live' : 'unavailable' }); // the machine's own reading
     }
   }
 
@@ -184,7 +191,7 @@ export function createRemoteViews(deps: RemoteViewsDeps): RemoteViews {
     const shown = view.shown;
     closeStreams(view);
     if (shown) deps.emit(view.client, 'browser.remote.closed', { viewId: view.id, reason });
-    told(view, unavailable(view, why(view.name, reason)));
+    told(view, unavailable(view, why(view.name, reason)), endOf(reason));
   }
 
   // ---- the streams ---------------------------------------------------------------------------------------------------
@@ -277,6 +284,7 @@ export function createRemoteViews(deps: RemoteViewsDeps): RemoteViews {
         link,
         name: link?.name ?? ctx.target,
         inventory: { epoch: '-', tabs: [], selected: null, state: 'unavailable', reason: 'connecting' },
+        state: { kind: 'connecting' },
         sub: null,
         ended: link === null,
         selected: null,
@@ -291,19 +299,20 @@ export function createRemoteViews(deps: RemoteViewsDeps): RemoteViews {
       view.offGone = ctx.client.onGone(() => dispose(view)); // at once for a window already gone
       if (link === null) {
         view.inventory = unavailable(null, `no link reaches ${ctx.target} from here, so its agent’s browser cannot be shown`);
-        return Promise.resolve({ viewId: view.id, inventory: view.inventory });
+        view.state = { kind: 'ended', end: 'no-link' };
+        return Promise.resolve({ viewId: view.id, inventory: view.inventory, view: view.state });
       }
       return new Promise((resolve) => {
         const waiting: { timer?: ReturnType<typeof setTimeout> } = {};
-        view.answer = (inventory) => {
+        view.answer = () => {
           clearTimeout(waiting.timer);
-          resolve({ viewId: view.id, inventory });
+          resolve({ viewId: view.id, inventory: view.inventory, view: view.state });
         };
         if (live(view)) subscribe(view);
         if (!view.answer) return;
-        if (!live(view)) return view.answer(view.inventory);
-        if (link.carrier() === null) return told(view, unavailable(view, `connecting to ${view.name}`));
-        waiting.timer = setTimeout(() => view.answer && told(view, unavailable(view, `${view.name} has not answered yet`)), timing.openAnswerMs);
+        if (!live(view)) return view.answer();
+        if (link.carrier() === null) return told(view, unavailable(view, `connecting to ${view.name}`), { kind: 'connecting' });
+        waiting.timer = setTimeout(() => view.answer && told(view, unavailable(view, `${view.name} has not answered yet`), { kind: 'connecting' }), timing.openAnswerMs);
       });
     },
     select({ viewId, epoch, tabId }, ctx) {
@@ -391,7 +400,9 @@ export function createRemoteViews(deps: RemoteViewsDeps): RemoteViews {
     if (view.answer) {
       const answer = view.answer;
       view.answer = null;
-      answer(unavailable(view, 'the window closed'));
+      view.inventory = unavailable(view, 'the window closed');
+      view.state = { kind: 'ended', end: 'window' };
+      answer();
     }
   }
 }
