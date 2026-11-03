@@ -236,13 +236,15 @@ export function createRemoteViews(deps: RemoteViewsDeps): RemoteViews {
     return shown;
   }
 
-  // The view's streams closed telling the window nothing; a take waiting on one answered
+  // The view's streams closed telling the window nothing; a take waiting on one answered not taken, and the view no
+  // longer wanting control, so the stream that follows is read-only as the window was told (the grant stays for its epoch)
   function closeStreams(view: View): void {
     const { shown, pending } = view;
     view.shown = null;
     view.pending = null;
     shown?.stream.close();
     pending?.stream.close();
+    if (pending?.taking) view.wantsControl = false;
     pending?.taking?.({ control: false, reason: 'the view’s stream was replaced' });
   }
 
@@ -330,9 +332,21 @@ export function createRemoteViews(deps: RemoteViewsDeps): RemoteViews {
       const { tabId, epoch } = view.selected;
       view.pending?.stream.close();
       view.pending?.taking?.({ control: false, reason: 'another take of control' });
+      // the controlling stream's admission bounded as the act is: unanswered, it is closed and the take not taken
       return new Promise((resolve) => {
         const pending = openShown(view, tabId, epoch, true);
-        pending.taking = resolve;
+        const timer = setTimeout(() => {
+          if (view.pending !== pending) return;
+          view.pending = null;
+          view.wantsControl = view.shown?.control === true;
+          pending.stream.close();
+          pending.taking?.({ control: false, reason: `${view.name} did not admit control in time` });
+        }, timing.controlAnswerMs);
+        pending.taking = (answer) => {
+          clearTimeout(timer);
+          pending.taking = null;
+          resolve(answer);
+        };
         view.pending = pending;
       });
     },

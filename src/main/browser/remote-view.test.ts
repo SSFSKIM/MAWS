@@ -12,7 +12,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import type { ActOutcome, ActRequest } from '../machines/remote/link';
 import type { StreamRequest, StreamSink } from '../machines/remote/streams';
 import type { SubscribeRequest, SubscriptionSink } from '../machines/remote/subs';
-import { createRemoteViews, type RemoteViewLink, type RemoteViews } from './remote-view';
+import { createRemoteViews, type RemoteViewLink, type RemoteViews, type RemoteViewsTiming } from './remote-view';
 
 const LOCAL = 'mac-local' as MachineRef;
 const MINI = 'mac-mini' as MachineRef;
@@ -73,7 +73,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function stand(options: { link?: Link | null } = {}) {
+function stand(options: { link?: Link | null; timing?: Partial<RemoteViewsTiming> } = {}) {
   const link = options.link === undefined ? new Link() : options.link;
   const told: { client: string; name: string; payload: Record<string, unknown> }[] = [];
   const logged: string[] = [];
@@ -82,6 +82,7 @@ function stand(options: { link?: Link | null } = {}) {
     remote: (machine) => (machine === MINI ? link : null),
     emit: (client, name, payload) => void told.push({ client: client.id, name, payload: payload as Record<string, unknown> }),
     log: (line) => void logged.push(line),
+    ...(options.timing && { timing: options.timing }),
   });
   views.push(bridge);
   const window = endableClientRef('page:1.1');
@@ -270,6 +271,46 @@ describe('browser.remote.takeControl and .releaseControl: control under a done m
     expect(t.link.streams[0]!.closed).toBeNull();
     expect(t.of('browser.remote.closed')).toEqual([]);
     expect(await t.bridge.takeControl({ viewId: 'nope' }, t.ctx()).catch((error: { error: { code: string } }) => error.error.code)).toBe('invalid_input');
+  });
+
+  // P5 O17 M9b fix wave: the window's belief and the stream agree
+  it('a select while a take waits on its controlling stream answers the take not taken, and opens the new tab read-only', async () => {
+    const t = stand();
+    const { viewId } = await t.opened();
+    t.bridge.select({ viewId, epoch: 'e.1', tabId: TAB }, t.ctx());
+    t.link.opened(0, false);
+    const taking = t.bridge.takeControl({ viewId }, t.ctx());
+    await vi.waitFor(() => expect(t.link.acts).toHaveLength(1));
+    t.link.acts[0]!.settle({ state: 'done', result: { appSessionId: 'app-1', epoch: 'e.1' } });
+    await vi.waitFor(() => expect(t.link.streams).toHaveLength(2));
+    t.bridge.select({ viewId, epoch: 'e.1', tabId: OTHER }, t.ctx());
+    expect(await taking).toEqual({ control: false, reason: 'the view’s stream was replaced' });
+    expect(t.link.streams[1]!.closed).toBe('closed');
+    expect(t.link.streams[2]!.request.browser, 'read-only, as the window was told').toEqual({ appSessionId: 'app-1', epoch: 'e.1', tabId: OTHER });
+    // the grant stays for its epoch: the next take asks no new act
+    const again = t.bridge.takeControl({ viewId }, t.ctx());
+    await vi.waitFor(() => expect(t.link.streams).toHaveLength(4));
+    expect(t.link.acts).toHaveLength(1);
+    t.link.opened(3, true);
+    expect(await again).toEqual({ control: true });
+  });
+
+  it('bounds the wait for the controlling stream’s admission as the act’s: unanswered, the take is not taken and the stream closed', async () => {
+    const t = stand({ timing: { controlAnswerMs: 50 } });
+    const { viewId } = await t.opened();
+    t.bridge.select({ viewId, epoch: 'e.1', tabId: TAB }, t.ctx());
+    t.link.opened(0, false);
+    const taking = t.bridge.takeControl({ viewId }, t.ctx());
+    await vi.waitFor(() => expect(t.link.acts).toHaveLength(1));
+    t.link.acts[0]!.settle({ state: 'done', result: { appSessionId: 'app-1', epoch: 'e.1' } });
+    await vi.waitFor(() => expect(t.link.streams).toHaveLength(2));
+    expect(await taking).toEqual({ control: false, reason: 'mini did not admit control in time' });
+    expect(t.link.streams[1]!.closed).toBe('closed');
+    expect(t.link.streams[0]!.closed, 'the read-only stream goes on').toBeNull();
+    t.link.opened(1, true); // too late: nothing changes
+    expect(() => t.bridge.input({ viewId, seq: 1, event: { kind: 'blur' } }, t.ctx())).toThrow(/control/);
+    t.bridge.select({ viewId, epoch: 'e.1', tabId: OTHER }, t.ctx());
+    expect(t.link.streams[2]!.request.browser.control, 'the window was told read-only').toBeUndefined();
   });
 
   it('lets go of control at a revocation and at a new epoch: the next take asks a new act', async () => {
