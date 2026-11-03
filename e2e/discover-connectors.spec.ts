@@ -31,6 +31,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { invoke, value } from './support/c7-replay';
+import { firstRead } from './support/discover-read';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { openAppDestination } from './support/shell';
 import { engineKeychainCustody, readOAuthLog, startOAuthFixture, summarizeOAuthLog, type OAuthFixture } from './support/connector-oauth';
@@ -171,10 +172,13 @@ const pane = (page: Page) => page.locator('[data-discover="connectors"]');
 const row = (page: Page, name: string) => panel(page).locator(`[data-connector="${name}"]`);
 const addSheet = (page: Page) => page.locator('[data-plugins-sheet="mcp-add"]');
 
+// Discover once its catalog is shown: a cwd's first read runs the engine's CLI (support/discover-read.ts).
 async function openConnectors(page: Page, view: 'My items' | 'Discover'): Promise<void> {
+  const read = view === 'Discover' ? await firstRead(page) : null;
   await openAppDestination(page, 'Customize');
   await page.getByRole('tab', { name: 'Connectors', exact: true }).click();
   await panel(page).getByRole('radio', { name: view }).click();
+  await read?.(pane(page), 'connectors');
 }
 
 async function searchFor(page: Page, text: string): Promise<void> {
