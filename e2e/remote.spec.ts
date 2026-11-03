@@ -1461,18 +1461,26 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
 // tab is a headless one in B's render host. A opens B's session from its listed row and the Browser tool shows the
 // agent's group on B; then, in order:
 //   - A sees the tab and its pixels under `view` (it owns the session), and only this session's: B's second session holds
-//     the identical page, which A's view does not list, and a select naming that tab is refused, A's own stream going on;
+//     the identical page, which A's view does not list, and a select naming that tab is refused (`unknown`) with no frame
+//     of it reaching A's window, A's own stream going on;
 //   - after Take control, A's click on the page's button changes B's page and the next frame shows it, and what A types
-//     reaches B's field once; given back, A's clicks and keys reach nothing;
+//     reaches B's field once; A's Enter submits a form and breaks a text area's line (the producer's character event);
+//     given back, A's clicks and keys reach nothing;
 //   - the Browser tool hidden closes its view (its feed and stream), not B's tab, and shown again opens a new one;
 //   - B's app arriving mid-lease (the connector holds its tab's debugger) closes A's stream `engine-changed`; the agent's
 //     next tab is the app's, and A then views it.
-// Held below e2e level, as the Decision Log's "the remote Browser view's shape" allows: a `view`-only member, a non-owner's
-// step-up and a revocation (the fake sminos has one member; endpoint and lane-B units over the real authorizer); a slow
-// carrier's one frame plus 4 KiB (test/endpoint's backlog bound); a peer without `rl2.browser-screencast` (the device's
-// `not-offered` and the view's unsupported words, src/renderer/src/tools/browser/remote/View.test.tsx).
+// Held below e2e level, by the architect's two rulings in the Decision Log: a `view`-only member, a non-owner's step-up
+// and a revocation ("the remote Browser view's shape": the fake sminos has one member; endpoint and lane-B units over the
+// real authorizer); a slow carrier's one frame plus 4 KiB (M9a's endpoint backlog test) and a peer without
+// `rl2.browser-screencast` (M9a's device `not-offered` test and the view's unsupported words,
+// src/renderer/src/tools/browser/remote/View.test.tsx), the entry of 2026-11-03: the scene has no carrier throttling and
+// `e2e:remote` pairs no builds.
 const BROWSER_PROJECTS = ['e2e-remote-browser', 'e2e-remote-browser-other'];
 const BLANK_AT = { x: 900, y: 600 }; // a point of `/remote` nothing is drawn at, in the viewport's DIP
+// a form of one field and a text area the agent adds to B's `/remote` (step 3), in the viewport's DIP
+const FORM_FIELD = { x: 40, y: 220, width: 200, height: 30 } as const;
+const AREA = { x: 40, y: 270, width: 200, height: 60 } as const;
+const centre = (box: { x: number; y: number; width: number; height: number }) => ({ x: box.x + box.width / 2, y: box.y + box.height / 2 });
 
 // A viewport point of the agent's tab A shows, as client coordinates through its canvas's fitted image
 function remotePoint(page: Page, at: { x: number; y: number }): Promise<{ x: number; y: number }> {
@@ -1605,18 +1613,24 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
       const own = (await canvas.getAttribute('data-remote-tab'))!;
       expect(foreign, 'a tab of its own').not.toBe(own);
       await page.evaluate(() => {
-        const w = window as unknown as { __remoteClosed: string[]; maws: { on(name: string, listener: (payload: { reason: string }) => void): () => void } };
+        type Listen = <P>(name: string, listener: (payload: P) => void) => () => void;
+        const w = window as unknown as { __remoteClosed: string[]; __remoteFrames: string[]; maws: { on: Listen } };
         w.__remoteClosed = [];
-        w.maws.on('browser.remote.closed', (payload) => w.__remoteClosed.push(payload.reason));
+        w.__remoteFrames = [];
+        w.maws.on<{ reason: string }>('browser.remote.closed', (payload) => w.__remoteClosed.push(payload.reason));
+        w.maws.on<{ frame: { tabId: string } }>('browser.remote.frame', (payload) => w.__remoteFrames.push(payload.frame.tabId));
       });
       const viewId = (await canvas.getAttribute('data-remote-view'))!;
       const epoch = (await canvas.getAttribute('data-remote-epoch'))!;
       await invoke(page, 'browser.remote.select', { viewId, epoch, tabId: foreign });
       const closed = () => page.evaluate(() => (window as unknown as { __remoteClosed: string[] }).__remoteClosed);
       await expect.poll(closed, { timeout: 30_000, message: 'the stream for the other session’s tab is refused' }).toHaveLength(1);
-      expect((await closed())[0], 'refused as a tab this session does not hold').toMatch(/^(unknown|tab-closed)$/);
+      expect((await closed())[0], 'refused as a tab this session does not hold').toBe('unknown');
       await quoting(expect(canvas, 'A’s own tab again').toHaveAttribute('data-remote-tab', own, { timeout: 30_000 }), toolSaid);
       await expect(canvas).toHaveAttribute('data-remote-stream', 'live', { timeout: 30_000 });
+      const frames = await page.evaluate(() => (window as unknown as { __remoteFrames: string[] }).__remoteFrames);
+      expect(frames, 'frames of A’s own tab reached the window').toContain(own);
+      expect(frames, 'no frame of the other session’s tab reached the window').not.toContain(foreign);
     });
 
     await test.step('after Take control, A’s click changes B’s page and the next frame shows it; what A types reaches B’s field once; given back, nothing reaches it', async () => {
@@ -1630,6 +1644,22 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
       await page.keyboard.type('hi');
       // the agent's commands wait out the person's input (3 s after the last), then read B's page
       await expect(async () => expect(await onB(`[document.querySelector('#state').textContent, document.querySelector('#field').value, document.activeElement?.id ?? null]`)).toEqual(['clicked', 'hi', 'field'])).toPass({ timeout: 30_000 });
+      // Enter acts at its keypress: a form of one field submits, and a text area breaks its line
+      const place = (id: string, box: { x: number; y: number; width: number; height: number }) => `#${id}{position:absolute;left:${box.x}px;top:${box.y}px;width:${box.width}px;height:${box.height}px;box-sizing:border-box}`;
+      await onB(
+        `(() => { window.__submitted = 0; const style = document.createElement('style'); style.textContent = ${JSON.stringify(place('submit-field', FORM_FIELD) + place('area', AREA))}; ` +
+          `const form = document.createElement('form'); form.addEventListener('submit', (e) => { e.preventDefault(); window.__submitted += 1; }); form.innerHTML = '<input id="submit-field">'; ` +
+          `const area = document.createElement('textarea'); area.id = 'area'; document.head.append(style); document.body.append(form, area); return true; })()`,
+      );
+      const formField = await remotePoint(page, centre(FORM_FIELD));
+      await page.mouse.click(formField.x, formField.y);
+      await page.keyboard.press('Enter');
+      const area = await remotePoint(page, centre(AREA));
+      await page.mouse.click(area.x, area.y);
+      await page.keyboard.type('a');
+      await page.keyboard.press('Enter');
+      await page.keyboard.type('b');
+      await expect(async () => expect(await onB(`[window.__submitted, document.querySelector('#area').value]`), 'the form submitted once; the text area has two lines').toEqual([1, 'a\nb'])).toPass({ timeout: 30_000 });
       await tool.getByRole('button', { name: 'Give back', exact: true }).click();
       await expect(tool.locator('[data-remote-control-state="view"]')).toHaveText('View only', { timeout: 30_000 });
       await page.mouse.click(field.x, field.y);

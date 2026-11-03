@@ -184,16 +184,20 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
     const directPort = await freePort();
     let deadPort = await freePort();
     while (deadPort === directPort) deadPort = await freePort();
-    // short: B's sockets stay under it (P5 O17 M10: `b.root` shorter still, `/tmp`, so a session's cua socket and an app of
-    // B's own, whose cua socket is `<profile>/browser/cua/<session>.sock`, fit a Unix socket's bound; realpathed, as the
-    // headless scene's `/tmp/mh-` is, so nothing of B's reads its profile through the `/tmp` symlink)
-    const bUserData = opts.b?.root === undefined ? mkdtempSync(join(tmpdir(), 'maws-rb-')) : realpathSync(mkdtempSync(join(opts.b.root, 'maws-rb-')));
-    undo.push(() => rmSync(bUserData, { recursive: true, force: true }));
+    // short: B's sockets stay under it (P5 O17 M10: under `b.root`, shorter still, a scene root of its own, `/tmp/mrb-…`,
+    // so a session's cua socket and an app of B's own, whose cua socket is `<profile>/browser/cua/<session>.sock`, fit a
+    // Unix socket's bound; realpathed, as the headless scene's `/tmp/mh-` is, so nothing of B's reads its profile through
+    // the `/tmp` symlink)
+    const bRoot = opts.b?.root === undefined ? null : realpathSync(mkdtempSync(join(opts.b.root, 'mrb-')));
+    const bUserData = bRoot === null ? mkdtempSync(join(tmpdir(), 'maws-rb-')) : join(bRoot, 'p');
+    if (bRoot !== null) mkdirSync(bUserData);
+    undo.push(() => rmSync(bRoot ?? bUserData, { recursive: true, force: true }));
     const daemon = await startProfileDaemon({
       userData: bUserData,
-      // under `b.root`, B's tmpdir is that root too: a replay seeds its transcripts only where the config home is under the
-      // process's tmpdir (src/engine-host/replay-transcript.ts), and the sockets' short fallbacks are made there
-      env: { MAWS_MACHINE_NAME: B_NAME, MAWS_ENDPOINT_DIRECT: '1', MAWS_ENDPOINT_PORT: String(directPort), ...(opts.b?.root !== undefined && { TMPDIR: realpathSync(opts.b.root) }), ...opts.b?.env },
+      // under `b.root`, B's tmpdir is the scene's root too: a replay seeds its transcripts only where the config home is
+      // under the process's tmpdir (src/engine-host/replay-transcript.ts), and the sockets' short fallbacks are made there;
+      // whatever B leaves in it goes with the scene
+      env: { MAWS_MACHINE_NAME: B_NAME, MAWS_ENDPOINT_DIRECT: '1', MAWS_ENDPOINT_PORT: String(directPort), ...(bRoot !== null && { TMPDIR: bRoot }), ...opts.b?.env },
       ...(opts.b?.prepare === undefined ? {} : { prepare: opts.b.prepare }),
       nodeArgs: ['--require', preload],
     });
