@@ -68,7 +68,7 @@ function BrowserBody({ ctx }: { state: BrowserHandle; ctx: PanelToolContext }) {
   if (ctx.appSessionId === null) {
     return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{BROWSER_COPY.noSession}</p>;
   }
-  return <BrowserView key={ctx.appSessionId} appSessionId={ctx.appSessionId} surface="panel" />;
+  return <BrowserView key={ctx.appSessionId} appSessionId={ctx.appSessionId} surface="panel" visible={ctx.visible} />; // P5 O17 M10: visible
 }
 
 export const browserTool: PanelTool<BrowserHandle, BrowserParams> = {

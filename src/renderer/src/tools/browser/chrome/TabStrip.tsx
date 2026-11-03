@@ -4,7 +4,10 @@
 // Chips shrink to a minimum and the strip then scrolls sideways; a suspended tab's chip is muted, a loading one's title
 // shimmers. Closing a chip closes the browser tab. P3-G (M2): `trailing` sits at the row's right end (the floating
 // card's pill while the card is closed over this page in the panel). P5 O7 M3: a tab whose page is on a forward's local
-// listener carries "forwarded from <machine>" after its title.
+// listener carries "forwarded from <machine>" after its title. P5 O17 M10: on another machine's session, the agent's tabs
+// there follow the person's as their own group (`agent`, remote/View.tsx's AgentGroup); a chip of the person's or "+"
+// tells the surface the person's own tabs are shown again (`onLocal`), and while an agent tab is shown no chip of the
+// person's reads selected.
 import type { KeyboardEvent, ReactNode } from 'react';
 import type { BrowserTab, BrowserTabForward } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -24,19 +27,24 @@ export interface TabStripProps {
   tabs: BrowserTab[];
   shownId: string | null; // the tab the surface shows
   trailing?: ReactNode;
+  agent?: ReactNode; // P5 O17 M10: the agent's tabs on the session's machine, after the person's
+  onLocal?(): void; // P5 O17 M10: the person's own tabs are shown again
 }
 
-export function TabStrip({ appSessionId, surface, tabs, shownId, trailing }: TabStripProps) {
+export function TabStrip({ appSessionId, surface, tabs, shownId, trailing, agent, onLocal }: TabStripProps) {
   const show = (tabId: string) => {
+    onLocal?.();
     if (tabId === shownId) return;
     if (surface === 'panel') selectTab(appSessionId, tabId);
     else openMainTab(appSessionId, tabId);
   };
   // "+": an empty tab, selected in the session; a main tab moves to the new tab's own main tab.
-  const add = () =>
+  const add = () => {
+    onLocal?.();
     void openTab(appSessionId, null).then((tab) => {
       if (tab && surface === 'main') openMainTab(appSessionId, tab.tabId);
     });
+  };
   // Arrow keys move focus along the chips (the WAI-ARIA tabs pattern, manual activation), as the panel's strip does.
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
@@ -63,6 +71,7 @@ export function TabStrip({ appSessionId, surface, tabs, shownId, trailing }: Tab
       >
         <PlusIcon className="size-3.5" />
       </button>
+      {agent /* P5 O17 M10 */}
       {trailing && <div className="ml-auto flex shrink-0 items-center pl-1">{trailing}</div>}
     </div>
   );
