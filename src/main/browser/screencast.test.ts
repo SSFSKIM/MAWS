@@ -318,6 +318,29 @@ describe('a viewer’s input (§G: a person’s, through the takeover gate)', ()
     ]);
   });
 
+  // Blink's implicit submission and a text area's newline ride the keypress a character event makes; a raw press lets a
+  // page that cancels it (a composer sending on Enter) suppress that character, as a native key's is. Tab moves the focus
+  // at its press.
+  it('presses Enter as a native press and its character, so a form submits and a text area breaks the line; Tab is its press', () => {
+    const t = stand();
+    const entry = t.tab();
+    t.screencast.open({ subscriptionId: 'v1', appSessionId: A, tabId: entry.tab.tabId, control: true });
+    let seq = 0;
+    const send = (event: Parameters<Screencast['input']>[3]) => t.screencast.input(A, 'v1', ++seq, event);
+    send({ kind: 'key', type: 'down', key: 'Enter', code: 'Enter', repeat: false, modifiers: [] });
+    send({ kind: 'key', type: 'up', key: 'Enter', code: 'Enter', repeat: false, modifiers: [] });
+    send({ kind: 'key', type: 'down', key: 'Enter', code: 'NumpadEnter', repeat: true, modifiers: ['Shift'] });
+    send({ kind: 'key', type: 'down', key: 'Tab', code: 'Tab', repeat: false, modifiers: [] });
+    expect(t.contents(entry).sent).toEqual([
+      { type: 'rawKeyDown', keyCode: 'Enter', modifiers: [] },
+      { type: 'char', keyCode: '\r', modifiers: [] },
+      { type: 'keyUp', keyCode: 'Enter', modifiers: [] },
+      { type: 'rawKeyDown', keyCode: 'Enter', modifiers: ['shift', 'isAutoRepeat'] },
+      { type: 'char', keyCode: '\r', modifiers: ['shift', 'isAutoRepeat'] },
+      { type: 'keyDown', keyCode: 'Tab', modifiers: [] },
+    ]);
+  });
+
   it('takes a sequence once, and releases held keys and buttons at a blur and at the close', () => {
     const t = stand();
     const entry = t.tab();

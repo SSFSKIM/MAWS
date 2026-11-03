@@ -291,7 +291,13 @@ export function startScreencast<Image = NativeImage>(deps: ScreencastDeps<Image>
           }
           viewer.keys.set(id, keyCode);
         }
-        return contents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+        if (keyCode !== 'Enter') return contents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+        // Enter acts at its keypress (Blink's implicit submission, a text area's newline), which only a character event
+        // makes: Electron's `keyDown` carries no text, so it is sent as Chromium's own native pair, a raw press and its
+        // character, and a page that cancels the press suppresses the character as it would a native key's. Tab needs no
+        // character: the focus moves at its press.
+        contents.sendInputEvent({ type: 'rawKeyDown', keyCode, modifiers });
+        return contents.sendInputEvent({ type: 'char', keyCode: '\r', modifiers });
       }
       case 'text':
         person(viewer, 'key');
