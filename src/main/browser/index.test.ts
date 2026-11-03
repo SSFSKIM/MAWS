@@ -384,11 +384,11 @@ describe("startBrowser: the agent's presence (E4c's, re-homed when the browser t
     };
   };
 
-  it("listens to the engine host's session status only (no browser request any more), and stops at stop", () => {
+  it("listens to the engine host's session status (no browser request of the engine host's any more) and mawsd's browserEngine.request, and stops at stop", () => {
     start(fakeIndex([A]).index).stop(); // E4a alone: nothing to subscribe to
     const { hosts, events } = fakeHosts();
     const browser = start(fakeIndex([A]).index, { hosts: hosts as never });
-    expect([...events.keys()]).toEqual(['session.status']); // E13's status hook
+    expect([...events.keys()]).toEqual(['session.status', 'browserEngine.request']); // E13's status hook; P5 O17 M9b: the app as a tab engine
     browser.stop();
     expect(events.size).toBe(0);
   });
