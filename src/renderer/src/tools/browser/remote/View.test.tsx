@@ -16,6 +16,7 @@ import { installFakeMain, ok } from '../../../test-support/code';
 import { BROWSER_COPY } from '../copy';
 import { connectBrowser, resetBrowser } from '../store';
 import { BrowserView } from '../View';
+import type { RemoteInput } from './input';
 import { remoteStatus } from './View';
 
 const C = BROWSER_COPY.remote;
@@ -58,7 +59,7 @@ afterEach(() => {
 const frameOf = (seq: number, tabId = T1, epoch = 'e1') => ({ viewId: 'rv-1', frame: { epoch, tabId, seq, capturedAt: seq, width: 1280, height: 800, viewport: { width: 1280, height: 800 }, jpeg: new Uint8Array([0xff, 0xd8, 0xff]) } });
 const surfaceOf = () => document.querySelector<HTMLElement>('[data-remote-browser]');
 const focusTarget = () => screen.getByRole('textbox', { name: /The agent’s page on studio/ });
-const sentInputs = () => main.callsOf('browser.remote.input').map((call) => call.event);
+const sentInputs = () => main.callsOf('browser.remote.input').map((call) => call.event as RemoteInput);
 const sentTexts = () => sentInputs().filter((event) => event.kind === 'text');
 // happy-dom's CompositionEvent and InputEvent carry no data: the fields a real one has, set on a plain event
 function dispatch(target: HTMLElement, type: 'compositionend' | 'input', fields: Record<string, unknown>) {
@@ -275,7 +276,8 @@ describe('the agent’s tabs on another machine’s session', () => {
     expect(sentInputs().filter((event) => event.kind === 'key')).toEqual([]);
     fireEvent.pointerDown(surfaceOf()!, { button: 0, buttons: 1, clientX: 200, clientY: 200, pointerId: 1 });
     fireEvent.pointerCancel(surfaceOf()!, { button: -1, buttons: 0, clientX: 200, clientY: 200, pointerId: 1 });
-    expect(sentInputs().filter((event) => event.kind === 'pointer').map((event) => event.type), 'what was pressed is released').toEqual(['down', 'up']);
+    const pointers = sentInputs().filter((event): event is Extract<RemoteInput, { kind: 'pointer' }> => event.kind === 'pointer');
+    expect(pointers.map((event) => event.type), 'what was pressed is released').toEqual(['down', 'up']);
     expect(sentInputs().at(-1)).toMatchObject({ kind: 'pointer', type: 'up', button: 'left', buttons: 0 });
   });
 
