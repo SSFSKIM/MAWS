@@ -85,7 +85,7 @@ import { createServer, type Server } from 'node:net';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { daemonPaths, DAEMON_FILES, DAEMON_LOCK_BREAKER, type DaemonPaths } from '@shared/daemon/files';
-import { createHostSupervisor, type HostSupervisor } from '@shared/host/host-supervisor';
+import { createHostSupervisor, ENGINE_HOST_BUDGETS_MS, type HostSupervisor } from '@shared/host/host-supervisor';
 import { supervisorEnv, type DetachedTransportOptions } from '@shared/host/detached-transport';
 import type { RelayPort } from '@shared/host/doc-relay';
 import { appIdentity } from '@shared/host/identity';
@@ -334,7 +334,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const parked = { 'engine-host': true, 'pty-host': true };
   const hosts = createHostSupervisor({
     hosts: {
-      'engine-host': { modulePath: options.modules.engineHost, serviceName: 'maws-supervisor', transport: 'detached', readyBy: 'external', onDemand: true, detached: { buildPolicy: 'replace', identity: engineIdentity } },
+      'engine-host': { modulePath: options.modules.engineHost, serviceName: 'maws-supervisor', transport: 'detached', readyBy: 'external', onDemand: true, detached: { buildPolicy: 'replace', identity: engineIdentity }, requestBudgetsMs: ENGINE_HOST_BUDGETS_MS },
       'pty-host': {
         modulePath: options.modules.ptyHost,
         serviceName: 'maws-pty-host',
