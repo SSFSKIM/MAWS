@@ -115,8 +115,17 @@ test('MAWS opens light, hosts answer, pty echoes, survives reload and window clo
       }
     });
   });
+  // The page's `close` is its CDP target detaching, inside the webContents's teardown; the window leaves getAllWindows
+  // only at its own `closed`, later in that teardown, so the count below waits for `closed` too.
   const closed = page.waitForEvent('close');
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+  await app.evaluate(
+    ({ BrowserWindow }) =>
+      new Promise<void>((resolve) => {
+        const [win] = BrowserWindow.getAllWindows();
+        win.once('closed', () => resolve());
+        win.close();
+      }),
+  );
   await closed;
   expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 'the app runs with no window').toBe(0);
   expect(app.process().exitCode, 'the app process is still running').toBeNull();
