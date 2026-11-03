@@ -14,7 +14,7 @@
 import { existsSync, mkdirSync, rmSync, watch } from 'node:fs';
 import { createServer, connect, type Server, type Socket } from 'node:net';
 import { hostname } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
 import { cuaSocketDir, renderCuaSocketDir } from '@shared/daemon/files';
