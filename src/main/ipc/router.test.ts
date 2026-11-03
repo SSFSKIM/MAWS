@@ -217,7 +217,7 @@ describe('main ipc router', () => {
       const remote = vi.fn<RemoteDispatch>(async () => ({ ok: true, value: undefined }));
       await load(DEV_URL, undefined, remote);
       const targets: string[] = [];
-      router.registerMainHandler('browser.remote.open', (_input, context) => (targets.push(context.target), { viewId: 'v1', inventory: { epoch: 'e', tabs: [], selected: null, state: 'unavailable', reason: 'r' } }));
+      router.registerMainHandler('browser.remote.open', (_input, context) => (targets.push(context.target), { viewId: 'v1', inventory: { epoch: 'e', tabs: [], selected: null, state: 'unavailable', reason: 'r' }, view: { kind: 'unavailable' } }));
       router.registerMainHandler('browser.remote.close', (_input, context) => void targets.push(context.target));
       await expect(invoke(appWindow(), 'browser.remote.open', { appSessionId: 'app-1' }, OTHER)).resolves.toMatchObject({ ok: true, value: { viewId: 'v1' } });
       await expect(invoke(appWindow(), 'browser.remote.close', { viewId: 'v1' }, OTHER)).resolves.toEqual({ ok: true, value: undefined });
