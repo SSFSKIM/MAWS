@@ -9,6 +9,12 @@
 // `ready` said to the front. From then on each `render.request` is handed to the library as it arrives and answered
 // once with `render.answer` when its work ends; `render.exit` takes no further request and exits 0 when the work in
 // flight is answered; the connection's end exits 0 at once (nothing could be answered).
+//
+// P5 O17 M4 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M4, Interfaces §F): the render host is a tab engine too
+// (its hello lists `browser.engine`): each `browserEngine.request` goes to the tab engine (`browser`, tab-engine.ts),
+// composed over this link at the first such request and never for an artifact's work, which answers it once with
+// `browserEngine.answer`. One after `render.exit`, one it cannot read, and any to a host that composes no engine are
+// answered here as failures.
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { daemonPaths, type DaemonPaths } from '@shared/daemon/files';
@@ -19,6 +25,7 @@ import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@s
 import type { MawsArtifactCapture, MawsArtifactCapturedResult, MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import { events as renderEvents, RenderRequestSchema, type RenderAnswer, type RenderAuthors, type RenderRequest } from '@shared/ipc/schema/render';
 import { readTolerant } from '@shared/ipc/tolerant';
+import { BrowserEngineRequestSchema, type BrowserEngineRequest, type BrowserEngineResult } from '@shared/ipc/schema/browser-engine';
 import { connectRenderClient, hostCall, type RenderClient, type RenderClientOptions } from './client';
 
 const RenderHostGenerationSchema = renderEvents['render.hostGeneration']; // P5 O5 M4
@@ -51,8 +58,21 @@ export interface RenderHostDeps {
   compose(call: EngineCall, profile: string, hostGeneration: () => number): RenderLibrary;
   connect?: (paths: DaemonPaths, options: RenderClientOptions) => ReturnType<typeof connectRenderClient>;
   sandbox?(): string | null; // P5 O5 M6: why Chromium's sandbox is off (sandboxRefusal), or null
+  // P5 O17 M4: the tab engine over this link, composed at the first browserEngine.request (none: each is refused)
+  browser?(link: BrowserLink, paths: DaemonPaths): BrowserEngineService;
   log(line: string): void;
   exit(code: number): void;
+}
+
+// P5 O17 M4: what the tab engine is given of the link (its commands; its descriptor, whose peer is the relay it admits)
+// and what the request loop asks of it
+export interface BrowserLink {
+  call: EngineCall;
+  socketFd(): number | null;
+}
+export interface BrowserEngineService {
+  request(request: BrowserEngineRequest): void; // answered once, by the engine, with browserEngine.answer
+  dispose(): void;
 }
 
 // P5 O5 M6 (Interfaces §E; owner question Q2): artifact HTML is model-authored and runs scripts, so on Linux the render
@@ -115,7 +135,20 @@ export async function startRenderHost(deps: RenderHostDeps): Promise<void> {
   await deps.ready();
   deps.sessions(paths);
   const library = deps.compose(hostCall(client.invoke), profile, () => generation);
-  serving = requestLoop(library, client, log, () => {
+  // P5 O17 M4: the tab engine, composed at the first browser request
+  let engine: BrowserEngineService | null = null;
+  const browser = (request: BrowserEngineRequest): BrowserEngineResult | null => {
+    if (!deps.browser) return { ok: false, error: 'this render host serves no browser' };
+    try {
+      engine ??= deps.browser({ call: hostCall(client.invoke), socketFd: () => client.socketFd() }, paths);
+    } catch (error) {
+      log(`[render-host] the tab engine could not be composed: ${error instanceof Error ? error.message : String(error)}`);
+      return { ok: false, error: 'the render host’s browser could not start' };
+    }
+    engine.request(request);
+    return null;
+  };
+  serving = requestLoop(library, client, log, browser, () => {
     if (ending) return;
     ending = true;
     log('[render-host] render.exit: the work in flight is answered; exiting');
@@ -132,12 +165,29 @@ interface RequestLoop {
 
 // Each request handed to the library in arrival order and answered once; `render.exit` ends the loop when nothing is in
 // flight, and a request after it is answered that the render host is ending.
-function requestLoop(library: RenderLibrary, client: Pick<RenderClient, 'invoke'>, log: (line: string) => void, ended: () => void): RequestLoop {
+// P5 O17 M4: a browser request goes to `browser`, which answers it itself (null) or names the failure to answer here.
+function requestLoop(library: RenderLibrary, client: Pick<RenderClient, 'invoke'>, log: (line: string) => void, browser: (request: BrowserEngineRequest) => BrowserEngineResult | null, ended: () => void): RequestLoop {
   const inFlight = new Set<string>();
   let exiting = false;
   const answer = async (id: string, value: RenderAnswer) => {
     const posted = await client.invoke('render.answer', { id, answer: value });
     if (!posted.ok) log(`[render-host] render.answer for ${id} was refused: ${posted.error.code} ${posted.error.message}`);
+  };
+  const answerBrowser = async (id: string, result: BrowserEngineResult) => {
+    const posted = await client.invoke('browserEngine.answer', { id, result });
+    if (!posted.ok) log(`[render-host] browserEngine.answer for ${id} was refused: ${posted.error.code} ${posted.error.message}`);
+  };
+  const browserRequest = (payload: unknown) => {
+    const read = readTolerant(BrowserEngineRequestSchema, payload);
+    if (!read.ok) {
+      const id = (payload as { id?: unknown } | null)?.id;
+      log(`[render-host] dropped a malformed browserEngine.request${typeof id === 'string' ? ` (${id})` : ''}`);
+      if (typeof id === 'string' && id !== '') void answerBrowser(id, { ok: false, error: 'the render host could not read the request' });
+      return;
+    }
+    if (exiting) return void answerBrowser(read.value.id, { ok: false, error: 'the render host is ending' });
+    const refused = browser(read.value);
+    if (refused) void answerBrowser(read.value.id, refused);
   };
   const settle = (id: string) => {
     inFlight.delete(id);
@@ -160,6 +210,7 @@ function requestLoop(library: RenderLibrary, client: Pick<RenderClient, 'invoke'
         if (inFlight.size === 0) ended();
         return;
       }
+      if (name === 'browserEngine.request') return browserRequest(payload); // P5 O17 M4
       if (name !== 'render.request') return;
       const read = readTolerant(RenderRequestSchema, payload);
       if (!read.ok) {

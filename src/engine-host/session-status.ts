@@ -12,7 +12,7 @@ import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { InitializeResponse, ReloadPluginsResponse } from '@shared/wire/control';
 import type { CronRecord } from '@shared/engine/session-state-store'; // P5 O2 M2
-import { CRON_TOOLS, sessionCronsOf, WorkState, type CronRead, type LaunchKind } from './work-state'; // P5 O2 M2
+import { browserHoldOf, CRON_TOOLS, sessionCronsOf, WorkState, type BrowserEntry, type CronRead, type LaunchKind } from './work-state'; // P5 O2 M2; P5 O17 M7: the browser entry
 
 export const HELD_PEER_MESSAGE_TTL_MS = 5 * 60_000;
 
@@ -205,6 +205,18 @@ export class SessionStatusTracker {
 
   descendantsRead(readable: boolean): void {
     this.work.descendantsRead(readable);
+  }
+
+  // P5 O17 M7 (Interfaces §E): the session's headless-tab entry as `mawsd` last told it (null: none); true when its
+  // published hold changed (fix 3: a change of cause alone publishes nothing)
+  browserHold(entry: BrowserEntry | null): boolean {
+    const before = this.work.browser;
+    this.work.browser = entry ?? undefined; // nothing kept for a session no snapshot names
+    return (before === undefined ? null : browserHoldOf(before)) !== (entry === null ? null : browserHoldOf(entry));
+  }
+
+  browserEntry(): BrowserEntry | null {
+    return this.work.browser ?? null;
   }
 
   // The cron record, handed over when it differs from the one last written

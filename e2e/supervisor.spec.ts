@@ -81,6 +81,10 @@ import { FakeObserver } from '../src/engine-host/holder/fake-observer'; // O16 M
 // the case's scratch profile, its supervisors and the kept session's fixtures (moved there for e2e/cross-build.spec.ts)
 import { adoptedOf, attentionOf, DAEMON, eventsOf, firstPrompt, isRequestRow, isTaskFailureRow, keptQuitLine, pendingPermissions, PERMISSION, PROMPT, startTurn, statusOf, suffix, tailFixture, TASK_FAILED, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
 import { CLOCK } from './support/clock'; // L129
+// P5 O17 M8 start
+import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine';
+import { answered, BEFORE_M7, ENGINE_HOST_BROWSER_WORK, startPages as startHeadlessPages } from './support/headless-browser';
+// P5 O17 M8 end
 
 test.skip(process.env.MAWS_SUPERVISOR_E2E !== '1', 'the supervisor e2e runs under pnpm e2e:supervisor (MAWS_SUPERVISOR_E2E=1)');
 
@@ -1643,3 +1647,126 @@ test('(n) P5: a command that waits on the engine host wakes it from its park wit
     expect(s.daemonLog()).toContain('no client, both hosts parked and no hold for the idle time');
   });
 });
+
+// P5 O17 M8 start (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M8's scene 9; acceptance 4's idle close): on the
+// daemon shape with the harness's short idle time, a live session on the cua engine stub that comes ready (its connector
+// cua's host, driven over its control socket), started through the ordinary start path while the app runs; the app
+// quits, and cua makes a headless tab. With no turn and no interest, at the idle time the engine host emits
+// `host.browserIdle`, mawsd closes the tab, the hold clears and the session is released as idle at once; the render host
+// ends after its quiet period, and the next message resumes the session from disk. A second session takes a turn before
+// its idle time: nothing closes then. A bare machine.sock client stays connected throughout, so the private mawsd does
+// not end with the app. Before O17 M7 no engine host emits `host.browserIdle` or selects the headless route (BEFORE_M7).
+test('(o17) the idle close: a session holding a headless tab with no turn and no interest closes its tab and is released at its idle time; the render host ends; a message resumes it; a turn before the idle time closes nothing', async () => {
+  test.skip(!DAEMON, 'the agent’s headless browser is the daemon shape’s (MAWS_HOST_MODE=daemon)');
+  test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
+  test.setTimeout(420_000);
+  const IDLE_MS = 60_000; // the engine host's idle time (MAWS_E2E_SUPERVISOR_IDLE_MS): room for the tabs, then the busy session's turn at its half
+  const QUIET_MS = 15_000; // the render host's quiet period
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const pages = await startHeadlessPages();
+  try {
+    // a short root: the private mawsd's cua socket for each session, and each connector's control socket, fit 103 bytes
+    // only under one (a scratch under the runner's TMPDIR gives the launch no CUA_BROWSER_BACKENDS: the stub exits 64)
+    await withScratch('o17-idle', async (s) => {
+      const repos = [s.repo, join(s.root, 'repo2')];
+      mkdirSync(repos[1]!, { recursive: true });
+      const configDir = join(s.userData, 'claude-config');
+      mkdirSync(configDir, { recursive: true });
+      writeFileSync(join(configDir, '.claude.json'), `${JSON.stringify({ projects: Object.fromEntries(repos.map((repo) => [repo, { hasTrustDialogAccepted: true }])) })}\n`);
+      writeFileSync(join(configDir, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`);
+      const bin = writeCuaEngine(join(s.root, 'cua-engine'), { ready: true, retry: true, control: true, lifeMs: 600_000 });
+      const run = await s.launch({ MAWS_E2E_SUPERVISOR_IDLE_MS: String(IDLE_MS), MAWS_RENDER_QUIET_MS: String(QUIET_MS), MAWS_E2E_ENGINE_BIN: bin });
+      await s.ready(run.page);
+      const reached = await reachMachine(daemonPaths(s.userData), { build: 'e2e-o17-idle-close' });
+      if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+      const link = reached.link;
+      try {
+        const ask = async <T,>(name: string, input?: unknown): Promise<T> => {
+          const answer = await link.request(name, input, 30_000);
+          if (!answer.ok) throw new Error(`${name}: ${answer.error.code}: ${answer.error.message}`);
+          return answer.value as T;
+        };
+        const status = (id: AppSessionId) => ask<{ process: string; pid: number | null; turn: unknown; work?: { holds?: { browser?: string }; descendants?: number | null } }>('session.status', { appSessionId: id });
+        const render = async () => (await ask<{ render: { pid: number | null; starts: number; browserTabs?: number } }>('daemon.status')).render;
+        const readyAfter = (id: AppSessionId, not: number | null = null) =>
+          expect.poll(async () => { const st = await status(id).catch(() => null); return st !== null && st.process === 'ready' && st.turn === null && st.pid !== null && st.pid !== not; }, { timeout: 60_000, message: `${id}'s engine ready, its turn ended` }).toBe(true); // prettier-ignore
+        const start = async (repo: string, prompt: string) => {
+          const project = await ask<{ id: string }>('session.projects.add', { directory: repo });
+          const { appSessionId } = await ask<{ appSessionId: AppSessionId }>('session.create', { projectId: project.id, location: { kind: 'directory', path: repo } });
+          expect(await ask('session.start', { appSessionId, message: { content: prompt, display: prompt }, options: { gateway: 'direct' } })).toMatchObject({ status: 'starting' });
+          await readyAfter(appSessionId);
+          return appSessionId;
+        };
+        const cuaOf = async (repo: string) => {
+          let control: ConnectorControl | null = null;
+          await expect.poll(async () => (control = await connectorControl(repo).catch(() => null)) !== null, { timeout: 30_000 }).toBe(true);
+          return control!;
+        };
+        const released = (id: string) => s.journal(id).find((r) => r.direction === 'meta' && r.frame.event === 'exit');
+
+        const quiet = await start(repos[0]!, 'o17 idle session');
+        const busy = await start(repos[1]!, 'o17 busy session');
+        // O16's descendant veto (P5 O17 M7): each engine's one child, its connector, counts as work from the memory sample
+        // that first sees it until the next, once the engine's mcp_status has named it; past two samples (10 s each) of the
+        // later start both read none, so both idle clocks run from the quit
+        await sleep(2 * 10_000 + 1_000);
+        for (const id of [quiet, busy]) await expect.poll(async () => (await status(id)).work?.descendants, { timeout: 15_000, message: `${id}'s connector read as registered infrastructure` }).toBe(0);
+        await s.quit(run);
+        const quitAt = Date.now(); // no app and no interest from here: both sessions' idle clocks run
+        const headlessTab = async (id: AppSessionId, repo: string) => {
+          const cua = await cuaOf(repo);
+          await expect.poll(async () => { const answer = await cua.call('tabs.query'); return answer.ok; }, { timeout: 20_000, message: 'cua on the broker with no app' }).toBe(true); // prettier-ignore
+          await answered('cua’s creation sequence', cua.sequence(pages.url('/')));
+          await expect.poll(async () => (await status(id)).work?.holds?.browser, { message: 'the engine host holds the session for its tab' }).toBe('held');
+          return cua;
+        };
+        const a = await headlessTab(quiet, repos[0]!);
+        const b = await headlessTab(busy, repos[1]!);
+        expect((await render()).browserTabs).toBe(2);
+
+        // The busy session's turn at half its idle time: its clock restarts no earlier than the turn's start, so between its
+        // first deadline (quitAt + IDLE_MS) and the earliest reset one (turnAt + IDLE_MS) nothing of it may close
+        let turnAt = 0;
+        await test.step('a turn before the idle time', async () => {
+          await sleep(Math.max(0, quitAt + IDLE_MS / 2 - Date.now()));
+          turnAt = Date.now();
+          if (turnAt >= quitAt + IDLE_MS - 10_000) throw new Error(`the tabs took until ${turnAt - quitAt} ms after the quit: no room for a turn before the idle time`);
+          await ask('session.send', { appSessionId: busy, content: 'a turn before the idle time' });
+          await readyAfter(busy);
+        });
+
+        await test.step('the quiet session at its idle time: the tab closes, the hold clears, the session is released as idle', async () => {
+          await expect.poll(() => released(quiet)?.frame.reason ?? null, { timeout: Math.max(0, quitAt + IDLE_MS - Date.now()) + 30_000, message: 'released as idle' }).toBe('idle');
+          await expect.poll(async () => (await render()).browserTabs ?? 0, { message: 'its headless tab closed' }).toBe(1);
+          expect((await status(quiet)).work?.holds?.browser, 'its hold cleared').toBeUndefined();
+          expect(s.daemonLog(), 'the engine host’s host.browserIdle dropped the tab').toContain(`[browser] ${quiet}: headless → cold (idle for the machine’s whole idle time)`);
+        });
+
+        await test.step('past the busy session’s first deadline and before its reset one, it still holds its tab', async () => {
+          const checkAt = (quitAt + IDLE_MS + turnAt + IDLE_MS) / 2;
+          if (Date.now() > checkAt) throw new Error(`the quiet session's release took until ${Date.now() - quitAt} ms after the quit, past the busy session's check at ${Math.round(checkAt - quitAt)} ms`);
+          await sleep(checkAt - Date.now());
+          expect(released(busy), 'not released').toBeUndefined();
+          expect((await status(busy)).work?.holds?.browser).toBe('held');
+          expect((await render()).browserTabs, 'its tab open').toBe(1);
+          await answered('the busy session closes its tab', b.call('tabs.remove', { tabId: (await answered('tabs.query', b.call<{ id: number }[]>('tabs.query')))[0]!.id }));
+          await expect.poll(async () => (await render()).browserTabs ?? 0).toBe(0);
+        });
+
+        await test.step('the render host ends after its quiet period; a message resumes the released session from disk', async () => {
+          await expect.poll(() => s.daemonLog(), { timeout: QUIET_MS + 30_000, message: 'the render host ends' }).toContain(`[render] quiet for ${QUIET_MS / 1000} s: ending the render host`);
+          const before = (await status(quiet)).pid;
+          expect(await ask('session.start', { appSessionId: quiet, message: { content: 'resume', display: 'resume' }, options: { gateway: 'direct' } })).toMatchObject({ status: 'starting' });
+          await readyAfter(quiet, before);
+        });
+        a.close();
+        b.close();
+      } finally {
+        link.close();
+      }
+    }, { shortRoot: true });
+  } finally {
+    await pages.close();
+  }
+});
+// P5 O17 M8 end

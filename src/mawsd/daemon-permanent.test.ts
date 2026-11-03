@@ -7,7 +7,7 @@
 // P5 O5 M4: the stand-in engine host is one of O3-D's build (its welcome lists no `host.render`), which mawsd tells only
 // the attachment; a render-reading host's `render: true` and its tell at each streaming are daemon-render.test.ts's.
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY } from '@shared/host/socket-protocol';
 import type { HostResync } from '@shared/host/host-supervisor';
 import { takeSpineLock } from '../services/settings/spine-lock';
 import type { SpineDeps } from '../services/spine-root';
@@ -66,7 +66,7 @@ describe('the permanent client, on, to an engine host that lists host.attachment
     await scene.start({ endpoint: seam.endpoint, permanentClient: true });
     expect(await seam.services().dispatch('engine-host', 'engine.ping', undefined)).toMatchObject({ ok: true }); // wakes it, no app
     const engine = scene.lastEngine();
-    expect(engine.supervisor.peer()?.capabilities).toEqual([PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY]); // P5 O4 M2: host.connectors beside it; P5 O16 M3b: host.holder
+    expect(engine.supervisor.peer()?.capabilities).toEqual([PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY]); // P5 O4 M2: host.connectors beside it; P5 O16 M3b: host.holder; P5 O17 M7 fix 2: host.browserWork, the permanent link's alone
     // ready by its own resync with the spine cold (nothing to pull): events flow with no app, and are available
     await until(() => engine.send({ n: 1 }), 3_000, 'the link’s ready line');
     await until(() => seam.events.length === 1, 3_000, 'the event through the seam');

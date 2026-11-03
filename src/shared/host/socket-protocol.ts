@@ -197,6 +197,14 @@ export const RENDER_CLIENT_CAPABILITY = 'render.client';
 // reads `host.attachment`'s `render`, so `mawsd` knows its bridges send requests with no app attached.
 export const MACHINE_RENDER_CAPABILITY = 'machine.render';
 export const HOST_RENDER_CAPABILITY = 'host.render';
+// P5 O17 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §A, §E): the engine host's welcome lists it when
+// it serves `host.browserWork` from `mawsd`'s permanent link, counts a browser hold in its releases and emits
+// `host.browserIdle`; `mawsd` sends that host the snapshot and selects no headless browser for one that lists it not.
+export const HOST_BROWSER_WORK_CAPABILITY = 'host.browserWork';
+// P5 O17 M4 (Interfaces §A, §F): a `machine.sock` client's hello lists it when the client is a tab engine: it serves
+// `browserEngine.request` for the sessions `mawsd` prepares on it and pushes `browserEngine.state` (the render host; the
+// app from the remote stage, M9).
+export const BROWSER_ENGINE_CAPABILITY = 'browser.engine';
 // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §C, §D; D10, D11): one more per direction.
 // `host.connectors` on the engine host's welcome says it keys connector operations and dataset refreshes on a client
 // that lists it, and on a client's hello (only `mawsd`'s, beside `host.attachment`) that those are the client's own, app
@@ -225,14 +233,14 @@ export const HOLDER_CAPABILITY = 'host.holder';
 // `mawsd`'s hello to it list `host.connectors` too (`mawsd` beside `host.attachment`, under the same option), and main's
 // hellos `machine.connectors` (`mawsd` refuses, on engine-host.sock and machine.sock, an app's hello that lacks it).
 export const PEER_CAPABILITIES = {
-  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment; P5 O5 M4: host.render; P5 O4 M2: it keys the connectors on a declaring client; P5 O16 M3b: it hands over)
+  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment; P5 O5 M4: host.render; P5 O4 M2: it keys the connectors on a declaring client; P5 O16 M3b: it hands over; P5 O17 M7: host.browserWork)
   ptyHost: [PTY_FRAMES_CAPABILITY], // the pty host's welcome
   app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host (P5 O3-D M5b: machine.spine; P5 O4 M2: machine.connectors; P5 O16 M3b: host.holder)
-  daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3, O4 M2: both under its permanent-client option; P5 O16 M3b: host.holder, whatever the option)
+  daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3, O4 M2: both under its permanent-client option; P5 O16 M3b: host.holder, whatever the option; P5 O17 M7 fix 2: host.browserWork, it tells browser work, under the option too)
   daemonToPtyHost: [PTY_FRAMES_CAPABILITY], // `mawsd`'s hello to the pty host
   daemon: [PTY_FRAMES_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_DELIVERY_CAPABILITY], // `mawsd`'s welcome on machine.sock, and what its relays add (P5 O5 M2: machine.artifacts; M4: machine.render; P5 O7 M5c: machine.delivery, its spine serving delivery.send)
   link: [PTY_FRAMES_CAPABILITY], // O6's link's hello to another profile's machine.sock
-  renderClient: [RENDER_CLIENT_CAPABILITY], // P5 O5 M3: the render host's hello to machine.sock
+  renderClient: [RENDER_CLIENT_CAPABILITY, BROWSER_ENGINE_CAPABILITY], // P5 O5 M3: the render host's hello to machine.sock; P5 O17 M4: it is a tab engine
 } as const satisfies Record<string, readonly string[]>;
 const PTY_FIXED = 9; // the id's length byte and the offset's two words, inside L
 const OFFSET_HIGH_LIMIT = 2 ** 21; // the offset's high word stays below this: offset < 2^53

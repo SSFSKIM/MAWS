@@ -62,6 +62,13 @@
 // window's start: what the deferred chunks keep resident after use. It writes test-results/daemon-idle-render.json and
 // runs as `pnpm e2e:daemon-idle-render`, which the plain group's and the baseline's --grep-invert leave out.
 //
+// P5 O17 M8 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M8; OX7): the first case on the daemon shape also reads
+// mawsd's resources (a SIGUSR2 report under MAWS_E2E=1) at the unit's cold start and at the window: no session listener
+// and neither the broker's nor the feed's chunk at the cold start, at most the kept session's listener at the window,
+// still no chunk, and no timer the cold start lacked. Two more cases join `pnpm e2e:daemon-idle-render`: the agent's
+// browser warm to idle (daemon-idle-render-browser.json) and four kept sessions with live connectors and no app
+// (daemon-idle-render-kept.json), both waiting on O17 M7's engine host.
+//
 // The ninth (P5 O16 M6, docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Interfaces §I; D3, D18) is the session host's
 // own cost: the first case's scene on the daemon shape (its private mawsd) with the session's engine the stub engine
 // (e2e/support/stub-engine.ts, a real process playing the same fixture through MAWS_E2E_ENGINE_BIN) under a real session
@@ -107,6 +114,11 @@ import { stubLaunchReady, writeStubEngine, type StubEngine } from './support/stu
 import { writeReplayEngine } from '../test/support/replay-engine';
 import { writeScratchShellHome } from '../test/support/shell-home';
 import { supervisorEnv } from '@shared/host/detached-transport';
+// P5 O17 M8 start
+import { cuaSocketDir } from '@shared/daemon/files';
+import { answered, BEFORE_M7, ENGINE_HOST_BROWSER_WORK, startHeadlessScene, startPages, type HeadlessScene } from './support/headless-browser';
+import { browserWindowProblems, o17IdleProblems, type E2eResources } from '../test/support/daemon-idle';
+// P5 O17 M8 end
 
 test.skip(process.env.MAWS_DAEMON_IDLE_PERF !== '1', 'the idle-cost measurement runs under pnpm e2e:daemon-idle, e2e:daemon-idle-baseline, e2e:daemon-idle-floor, e2e:daemon-idle-mawsd, e2e:daemon-idle-enrolled, e2e:daemon-idle-aba, e2e:daemon-idle-spine, e2e:daemon-idle-mawsd-spine, e2e:daemon-idle-render and e2e:daemon-idle-session-host (MAWS_DAEMON_IDLE_PERF=1)');
 test.describe.configure({ timeout: 20 * 60_000 }); // about 13 minutes: the scene, the settle and the window
@@ -166,7 +178,7 @@ const lockOf = (userData: string): { pid: number; socketPath: string } | null =>
 
 // The processes the scene leaves behind, filled in as they start, so the cleanup ends whatever started. `endUnit` stops
 // the harness's restarts of a unit daemon (D7), before the cleanup kills it.
-interface Held { maws: MawsLaunch | null; supervisor: number | null; daemon: number | null; endUnit?: () => void; evidence?: ReturnType<typeof processEvidence> }
+interface Held { maws: MawsLaunch | null; supervisor: number | null; daemon: number | null; endUnit?: () => void; evidence?: ReturnType<typeof processEvidence>; cold?: { report: E2eResources; listeners: number } /* P5 O17 M8 */ }
 
 // The scene's launch environment beyond launchMaws's own
 const sceneEnv = (shape: Shape) => ({ MAWS_HARNESS: '0', MAWS_HOST_MODE: shape, MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, MAWS_E2E_QUIT_ANSWER: 'keep' });
@@ -194,7 +206,22 @@ async function startUnitDaemon(userData: string, held: Held, extraEnv: Record<st
   };
   run();
   await expect.poll(serving, { timeout: 30_000, message: 'the unit mawsd serves before the app launches' }).toBeGreaterThan(0);
+  held.cold = { report: await mawsdResources(userData, held.daemon!), listeners: sessionListeners(userData) }; // P5 O17 M8: what the cold start holds
 }
+
+// P5 O17 M8 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M8; OX7): mawsd's e2e resource report (SIGUSR2 under
+// MAWS_E2E=1, src/mawsd/e2e-seam.ts), read now, and the session listeners in its cua socket directory
+async function mawsdResources(userData: string, pid: number): Promise<E2eResources> {
+  const file = join(userData, 'mawsd', 'e2e-resources.json');
+  rmSync(file, { force: true });
+  process.kill(pid, 'SIGUSR2');
+  await expect.poll(() => existsSync(file), { timeout: 10_000, message: 'mawsd writes its e2e resource report' }).toBe(true);
+  return JSON.parse(readFileSync(file, 'utf8')) as E2eResources;
+}
+const sessionListeners = (userData: string) => {
+  const dir = cuaSocketDir(userData);
+  return existsSync(dir) ? readdirSync(dir).filter((name) => name.endsWith('.sock')).length : 0;
+};
 
 // The scene up to its idle: the app launched on `shape`, the seeded session's turn played to its request, the answer
 // given, the app quit mid-turn, and the turn ended with no app connected, the session held at its next prompt. The
@@ -281,7 +308,19 @@ test('daemon idle: the physical footprint and CPU of what stays behind holding o
   let leftover: unknown;
   try {
     const { id, electron } = await keptIdleScene(root, userData, held, SHAPE, { daemonKind: DAEMON ? 'unit' : 'private' }); // D7
-    const measurement = await measureWindow(await settledProcesses(root, held, SHAPE));
+    const procs = await settledProcesses(root, held, SHAPE);
+    // P5 O17 M8 (OX7): from the cold start, no session listener, neither the broker's nor the feed's chunk; at the
+    // window, at most the kept session's listener (P5 Decision Log 187), still no chunk, and no timer the cold start lacked
+    if (DAEMON) {
+      const cold = held.cold!;
+      const idle = await mawsdResources(userData, held.daemon!);
+      console.log(`[daemon-idle] mawsd's resources: cold start ${JSON.stringify(cold.report.resources)}, the window ${JSON.stringify(idle.resources)}`);
+      expect([
+        ...o17IdleProblems('cold start', cold.report, { listeners: cold.listeners, allowedListeners: 0 }),
+        ...o17IdleProblems('the window', idle, { listeners: sessionListeners(userData), allowedListeners: 1, cold: cold.report }),
+      ], 'nothing of O17 at the cold start or the idle').toEqual([]);
+    }
+    const measurement = await measureWindow(procs);
     const sessionEnded = launchEnded(journal(userData, id));
 
     const reasons = invalidReasons({ loads: measurement.samples.map((s) => s.load), measured: measurement.names, lost: measurement.lost, sessionEnded, mismatches: measurement.mismatches });
@@ -353,6 +392,105 @@ test('daemon idle render: the footprint and CPU the daemon shape keeps after a r
   }
   if (leftover !== null) throw leftover;
 });
+
+// P5 O17 M8 start (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M8; acceptance 9, OX7): the agent's browser warm
+// to idle, and four kept sessions with live connectors, each on a profile's mawsd with no app (e2e/support/headless-browser.ts)
+// whose engines are the cua engine stub that comes ready (the ordinary start path) with its connector, cua's host,
+// connected throughout; no idle release, so the sessions stay live through the window. Both measure mawsd, the engine
+// host and the pty host against DAEMON_IDLE_BOUND: the broker's code, each session's listener and connected socket are
+// counted, never excluded. M8's Decisions are asserted at the window's start, after the settle, and again at its end
+// (browserWindowProblems, from mawsd's SIGUSR2 report), and a render child at any sample fails the case. Before O17 M7 no
+// engine host selects the headless route, so neither runs (BEFORE_M7).
+const CUA_RETRY_MS = 5_000; // cua's CLIENT_RETRY_MS
+const BROWSER_QUIET_MS = 30_000;
+const browserElectron = () => execFileSync(electronBinary(), ['-p', 'process.versions.electron'], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8' }).trim();
+const renderHosts = (root: string) => processesNaming(root).filter((p) => p.command.includes('--render-host') || p.command.includes(join('mawsd', 'render-host'))).map((p) => `${p.pid} ${p.command}`);
+
+// The browser's idle at one edge of the window: what mawsd reports, the connectors' own reports, the render host's status
+async function browserWindow(scene: HeadlessScene, moment: string, startsAtFirstExit: number): Promise<{ problems: string[]; facts: E2eResources }> {
+  const repos = Array.from({ length: scene.repos }, (_, n) => scene.repo(n));
+  const facts = await mawsdResources(scene.userData, scene.daemon.pid);
+  const render = await scene.render();
+  const connected = repos.filter((repo) => { const report = scene.report(repo); return report?.connected === true && isAlive(report.pid); }).length; // prettier-ignore
+  const problems = browserWindowProblems(moment, facts, { sessions: repos.length, connected, renderPid: render.pid, starts: render.starts, startsAtFirstExit });
+  if ((render.browserTabs ?? 0) > 0) problems.push(`${moment}: ${render.browserTabs} headless tabs`);
+  for (const host of renderHosts(scene.root)) problems.push(`${moment}: a render host process: ${host}`);
+  return { problems, facts };
+}
+
+// The settle, then the window over a headless scene's daemon processes, M8's Decisions asserted at both edges and a render
+// child watched for at every sample; its report written as `file`, the bound asserted
+async function measuredHeadless(scene: HeadlessScene, ids: readonly AppSessionId[], file: string, startsAtFirstExit: number, extra: Record<string, unknown>): Promise<void> {
+  await sleep(IDLE_RUN.settleS * 1_000);
+  const procs = measured(processesNaming(scene.root), scene.root, measuredOn('daemon'));
+  expect(procs.map((p) => p.pid), "the profile's mawsd is measured").toContain(scene.daemon.pid);
+  const atStart = await browserWindow(scene, 'the window’s start', startsAtFirstExit);
+  expect(atStart.problems, 'the browser idle as the window starts').toEqual([]);
+  const electron = browserElectron();
+  const renderSeen: string[] = [];
+  const measurement = await measureWindow(procs, IDLE_RUN, () => renderSeen.push(...renderHosts(scene.root)));
+  const atEnd = await browserWindow(scene, 'the window’s end', startsAtFirstExit);
+  const ended = (await Promise.all(ids.map(async (id) => (await scene.sessionStatus(id)).process === 'exited'))).some(Boolean);
+  const reasons = windowReasons(measurement, ended);
+  const { footprintKiB, rssKiB, cpuS, load } = measurement;
+  const line = footprintKiB === null || rssKiB === null || cpuS === null ? null : idleLine({ footprintKiB, rssKiB, samples: measurement.whole, cpuS, processes: measurement.perProcess, bound: DAEMON_IDLE_BOUND, electron, load, loadPair: measurement.loadPair });
+  const misses = footprintKiB === null || cpuS === null ? [] : boundMisses({ footprintKiB, cpuS }, DAEMON_IDLE_BOUND);
+  report(file, line, reasons, { shape: 'daemon', electron, bound: DAEMON_IDLE_BOUND, misses, ...extra, browserAtStart: atStart.facts, browserAtEnd: atEnd.facts, renderSeen, ...measurement.record, sessionEnded: ended });
+  expect(renderSeen, 'no render child during the window').toEqual([]);
+  expect(atEnd.problems, 'the browser idle as the window ends').toEqual([]);
+  expect(misses, `the daemon shape's processes together are within DAEMON_IDLE_BOUND (${line})`).toEqual([]);
+}
+
+test('daemon idle render: the agent’s browser warm to idle, a real cua connector connected across two quiet periods and two 5 s retry intervals, the render host gone', async () => {
+  test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
+  test.skip(!DAEMON, 'the agent’s headless browser is the daemon shape’s (MAWS_HOST_MODE=daemon)');
+  const pages = await startPages();
+  const scene = await startHeadlessScene({ keepSessions: true, engine: { retryMs: CUA_RETRY_MS, lifeMs: 60 * 60_000 }, env: { MAWS_RENDER_QUIET_MS: String(BROWSER_QUIET_MS) } });
+  try {
+    const repo = scene.repo(0);
+    const id = await scene.start(repo);
+    const cua = await scene.connector(repo);
+    await expect.poll(async () => (await cua.state()).connected, { timeout: 15_000 }).toBe(true);
+    const created = await answered('cua’s creation sequence', cua.sequence(pages.url('/')));
+    await answered('tabs.remove', cua.call('tabs.remove', { tabId: created.tabId }));
+    const exitLine = `[render] quiet for ${BROWSER_QUIET_MS / 1000} s: ending the render host`;
+    await expect.poll(scene.mawsdLog, { timeout: BROWSER_QUIET_MS + 60_000, message: 'the first quiet period ends the render host' }).toContain(exitLine);
+    await expect.poll(async () => (await scene.render()).pid, { timeout: 15_000 }).toBeNull();
+    const starts = (await scene.render()).starts;
+    // cua's spliced connection ended with the render host: its retry reaches the broker, which serves it cold
+    await expect.poll(async () => (await cua.state()).connected, { timeout: 2 * CUA_RETRY_MS + 5_000, message: 'cua back on the broker' }).toBe(true);
+    const { closes, hellos } = await cua.state();
+    // a second quiet period, spanning two of cua's retry intervals, with nothing asked: cua stays on the broker
+    await sleep(Math.max(BROWSER_QUIET_MS, 2 * CUA_RETRY_MS) + 5_000);
+    expect(await cua.state(), 'cua stayed connected: no close, no new hello').toMatchObject({ connected: true, closes, hellos });
+    cua.close(); // the scene's control link only; the connector stays connected to the session's socket
+    await measuredHeadless(scene, [id], 'daemon-idle-render-browser.json', starts, { case: 'browser warm to idle', starts });
+  } finally {
+    await scene.stop();
+    await pages.close();
+  }
+});
+
+test('daemon idle render: four kept sessions with live stub engines and connected cua connectors and no app', async () => {
+  test.skip(!ENGINE_HOST_BROWSER_WORK, BEFORE_M7);
+  test.skip(!DAEMON, 'the agent’s headless browser is the daemon shape’s (MAWS_HOST_MODE=daemon)');
+  const scene = await startHeadlessScene({ repos: 4, keepSessions: true, engine: { retryMs: CUA_RETRY_MS, lifeMs: 60 * 60_000 } });
+  try {
+    const ids: AppSessionId[] = [];
+    for (let n = 0; n < 4; n += 1) ids.push(await scene.start(scene.repo(n), `kept session ${n + 1}`));
+    for (let n = 0; n < 4; n += 1) {
+      const cua = await scene.connector(scene.repo(n));
+      await expect.poll(async () => (await cua.state()).connected, { timeout: 15_000, message: `session ${n + 1}’s cua connected` }).toBe(true);
+      expect(await answered('tabs.query', cua.call('tabs.query')), 'answered cold').toEqual([]);
+      cua.close();
+    }
+    expect(sessionListeners(scene.userData), 'one listener per live session with no app').toBe(4);
+    await measuredHeadless(scene, ids, 'daemon-idle-render-kept.json', 0, { case: 'four kept sessions' });
+  } finally {
+    await scene.stop();
+  }
+});
+// P5 O17 M8 end
 
 // P5 O16 M6 (Interfaces §I; D3, D18): one session host's own cost. The first case's scene on the daemon shape, its private
 // mawsd, with the session on the stub engine under a real session host (the permission fixture at the scene's pace, so
@@ -808,7 +946,7 @@ function electronBinary(): string {
 // the first sample, and `ps -o time=` at the start and the end; the window's 30 s pair from its loads. Each sample's one
 // process table (`ps -axo`) tells which measured processes are still the ones it started with and, with the cores' CPU
 // times read beside the load, gives the sample's diagnostics.
-async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = IDLE_RUN) {
+async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = IDLE_RUN, onSample?: () => void /* P5 O17 M8: a scene's own watch at each sample */) {
   const started = new Map(procs.map((p) => [p.pid, ps(p.pid, 'lstart')]));
   const cpuAtStart = new Map(procs.map((p) => [p.pid, cpuSeconds(ps(p.pid, 'time'))]));
   const cpuAtEnd = new Map<number, number>();
@@ -822,6 +960,7 @@ async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = I
     await sleep(Math.max(0, windowStart + k * run.everyS * 1_000 - Date.now()));
     const atS = Math.round((Date.now() - windowStart) / 1_000);
     const table = readProcessTable();
+    onSample?.();
     const topProcess = topOutside(lastTable, table, procs.map((p) => p.pid));
     lastTable = table;
     const live = procs.filter((p) => table.get(p.pid)?.started === started.get(p.pid));

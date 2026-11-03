@@ -163,15 +163,42 @@ describe.skipIf(graph === null)('the built mawsd’s run path (P5 O5)', () => {
   });
 
   // P5 O5 M4 (acceptance 8): the render seam (its table, the render host's command line and spawn, the authors' read) is
-  // a chunk the handle loads at the first render request, never at start; the handle, which is, holds none of it
+  // a chunk the handle loads at the first render request, never at start; the handle, which is, holds none of it. P5 O17
+  // M5: the headless browser's sessions (createRenderBrowser) are the seam's too
   it('keep the render seam off the run path, in the chunk its handle loads at the first request', () => {
-    const markers = { createRenderSeam: /\bfunction createRenderSeam\(/, spawnRenderHost: /\bfunction spawnRenderHost\(/, renderAuthors: /\bfunction renderAuthors\(/ };
+    const markers = { createRenderSeam: /\bfunction createRenderSeam\(/, spawnRenderHost: /\bfunction spawnRenderHost\(/, renderAuthors: /\bfunction renderAuthors\(/, createRenderBrowser: /\bfunction createRenderBrowser\(/ };
     const run = runPathOf(MAWSD);
     for (const [what, marker] of Object.entries(markers)) {
       expect([...run].filter(([, text]) => marker.test(text)).map(([file]) => file), what).toEqual([]);
       expect([...graph!].some(([, text]) => marker.test(text)), `${what} beside it`).toBe(true);
     }
     expect([...run].some(([, text]) => /\bfunction createRenderHandle\(/.test(text)), 'the handle is on the run path').toBe(true);
+  });
+
+  // P5 O17 M1 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §C; acceptance 1 and 14): the cold broker
+  // is a chunk the cua sockets load at the first peer they admit on a cold route, never at start; the sockets, which
+  // are, hold none of it
+  it('keep the cold broker off the run path, in the chunk the cua sockets load at the first admitted cold peer', () => {
+    const markers = { createCuaBroker: /\bfunction createCuaBroker\(/ };
+    const run = runPathOf(MAWSD);
+    for (const [what, marker] of Object.entries(markers)) {
+      expect([...run].filter(([, text]) => marker.test(text)).map(([file]) => file), what).toEqual([]);
+      expect([...graph!].some(([, text]) => marker.test(text)), `${what} beside it`).toBe(true);
+    }
+    expect([...run].some(([, text]) => /\bfunction createCuaSockets\(/.test(text)), 'the sockets are on the run path').toBe(true);
+  });
+
+  // P5 O17 M6 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M6, Interfaces §G; acceptance 1 and 14): the viewers'
+  // feed is a chunk the daemon loads at the first open of DaemonServices.browser, never at start, at a capability or
+  // inventory read, or at an app's attachment; the route, which answers the inventory and its watchers, is eager
+  it('keep the viewers’ feed off the run path, in the chunk the first open loads', () => {
+    const markers = { createBrowserFeed: /\bfunction createBrowserFeed\(/ };
+    const run = runPathOf(MAWSD);
+    for (const [what, marker] of Object.entries(markers)) {
+      expect([...run].filter(([, text]) => marker.test(text)).map(([file]) => file), what).toEqual([]);
+      expect([...graph!].some(([, text]) => marker.test(text)), `${what} beside it`).toBe(true);
+    }
+    expect([...run].some(([, text]) => /\bfunction createBrowserRoute\(/.test(text)), 'the route is on the run path').toBe(true);
   });
 });
 

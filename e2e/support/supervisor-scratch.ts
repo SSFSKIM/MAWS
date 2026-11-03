@@ -86,6 +86,10 @@ export interface Run {
   exited: Promise<void>;
 }
 
+export interface ScratchOptions {
+  shortRoot?: boolean;
+}
+
 export class Scratch {
   readonly root: string;
   readonly userData: string;
@@ -97,8 +101,12 @@ export class Scratch {
   private readonly runs: Run[] = [];
   private readonly sockets = new Set<string>();
 
-  constructor(name: string) {
-    this.root = realpathSync(mkdtempSync(join(tmpdir(), `maws-e10-${name}-`)));
+  // P5 O17 M7 fix 1: `shortRoot`, a root under /tmp with a short prefix, for a case whose sockets live under the
+  // profile: the daemon's cua sockets (`<profile>/mawsd/cua/<id>.sock`, else a fallback under TMPDIR), the app's
+  // (`<profile>/browser/cua/<id>.sock`, no fallback) and a connector's control socket in the repository fit 103 bytes
+  // only there, as e2e/support/headless-browser.ts's scene makes its own
+  constructor(name: string, opts: ScratchOptions = {}) {
+    this.root = realpathSync(mkdtempSync(opts.shortRoot ? '/tmp/ms-' : join(tmpdir(), `maws-e10-${name}-`)));
     this.userData = join(this.root, 'ud');
     this.repo = join(this.root, 'repo');
     mkdirSync(this.repo, { recursive: true });
@@ -322,8 +330,8 @@ export async function bounded<T>(promise: Promise<T>, ms: number, message: () =>
   }
 }
 
-export async function withScratch(name: string, body: (s: Scratch) => Promise<void>): Promise<void> {
-  const s = new Scratch(name);
+export async function withScratch(name: string, body: (s: Scratch) => Promise<void>, opts: ScratchOptions = {}): Promise<void> {
+  const s = new Scratch(name, opts);
   let failed = false;
   try {
     await body(s);

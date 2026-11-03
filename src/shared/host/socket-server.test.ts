@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectLines, listenTemp, type LineClient, type TempSocket } from '../../../test/support/socket-lines';
 import { createHostRuntime, type DocPortEnd, type DocPortHandler, type HostEmit, type HostRuntime } from './runtime';
 import { SocketPort } from './socket-port';
-import { encodePtyFrame, PTY_FRAMES_CAPABILITY, PTY_MARK, splitLines } from './socket-protocol';
+import { ATTACHMENT_CAPABILITY, encodePtyFrame, PTY_FRAMES_CAPABILITY, PTY_MARK, splitLines } from './socket-protocol';
 import { serveSocketClients, type SocketClients, type SocketServerOptions } from './socket-server';
 
 const TOKEN = 'a'.repeat(64);
@@ -519,6 +519,23 @@ describe('the socket layer’s admission (server side, P5 O2 M5)', () => {
     client.send({ t: 'exit', when: 'idle' });
     await until(() => host.exits.length === 1);
     expect(host.refusedExits).toEqual([]);
+  });
+});
+
+// P5 O17 M7's landing fix wave: a declaring client's hello gives the runtime its pid (browser work's producer), at once.
+describe('the hello\'s pid, to the runtime (P5 O17 M7 landing fix wave)', () => {
+  it('tells the runtime the pid of a client whose hello listed host.attachment, at its serve; another client\'s is not told', async () => {
+    const host = await start();
+    const told: number[] = [];
+    host.runtime.onDeclaringHello((pid) => void told.push(pid));
+    const app = await host.connect();
+    app.send(hello({ appPid: 11 }));
+    await app.next();
+    expect(told).toEqual([]);
+    const mawsd = await host.connect();
+    mawsd.send(hello({ appPid: 12, capabilities: [ATTACHMENT_CAPABILITY] }));
+    await mawsd.next();
+    expect(told).toEqual([12]);
   });
 });
 

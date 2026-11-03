@@ -63,6 +63,8 @@ import { registerGoogleFaces } from './presentations/google-faces'; // P4-B2 D19
 import { registerConnectors } from './connectors/register'; // P3-H H3b
 import { hostDatasetRefresh } from './connectors/dataset-requests'; // E3
 import { registerAttachment } from './attachment'; // P5 O3-D M3
+import { e2eHoldFor, registerBrowserWork } from './browser-work'; // P5 O17 M7; M8's scene 6: e2eHoldFor
+import { spawnerProcess, takeSpawnedByMawsd } from './spawner'; // P5 O17 M7 fix 4; the landing fix wave: spawnerProcess
 import { Gate } from './holder/gate'; // O16 M5
 import { keepArtifactWrites } from './ops'; // P5 O7 M5a
 
@@ -74,6 +76,9 @@ const HOST_VERSION = __MAWS_VERSION__;
 const userData = process.env.MAWS_USER_DATA;
 if (!userData) throw new Error('the engine host needs MAWS_USER_DATA (main forwards app.getPath("userData"))');
 // C3 end
+// P5 O17 M7 fix 4: whether `mawsd` spawned this host, taken out of the environment before anything captures or builds one
+const spawnedByMawsd = takeSpawnedByMawsd(process.env);
+const spawner = spawnerProcess(spawnedByMawsd, process.ppid, procStartOf); // the landing fix wave: browser work's first producer
 
 // E10 start: the mode, decided at load. `process.parentPort` is Electron's, present only in a utility process; under
 // ELECTRON_RUN_AS_NODE it is undefined.
@@ -191,6 +196,10 @@ const register: HostRegister = (untimedOn, emit, client) => {
           },
   });
   ({ table } = ipc);
+  // P5 O17 M7 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E): browser work beside the attachment,
+  // from the same declaring client; here, once the table exists, so its kept snapshot gives every row created after it
+  // its verdict (a launch, an adoption), and the idle release's ask becomes host.browserIdle
+  registerBrowserWork(on, emit, client, table, { log: (line) => console.log(`[supervisor] ${line}`), hold: e2eHoldFor(process.env, 'MAWS_E2E_BROWSER_WORK_HOLD'), spawnedByMawsd, spawner });
   table.startSampling();
   // A follow lives while some client holds its session open, and FOLLOW_RELEASE_MS after (fs/service.ts)
   const interested = table;
@@ -290,7 +299,7 @@ function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHost
   const stopDeps = { hostsDir, isAlive, procStartOf, signal: signalOrphan, sleep: (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)), log };
   const heldHosts = { stop: (entry: RosterEntry) => stopHeldHost(entry, stopDeps), child: (entry: RosterEntry) => heldChild(entry, hostsDir) };
   const held = recordStart(engine.table, live, heldHosts);
-  void adoptAll(live, { adopt: (entry) => engine.adopt(entry), log }).then((outcome) => {
+  const ended = (outcome: Awaited<ReturnType<typeof adoptAll>>) => {
     // follow-up (the architect's ruling): a host left running with its engine and no row (its adoption failed, D59(6), or
     // a newer host of its session was adopted, D59(10)) is recorded unattached before its hold ends, so a launch, a forget
     // or a stop-all of its session stops it first; a host of another protocol major is that major's, and a failed
@@ -300,7 +309,12 @@ function adoptAtStart(dir: string): { liveHolders: ReadonlySet<string>; deadHost
     if (live.length > 0) log(`adoption: ${outcome.adopted.length} of ${live.length} live session host(s) adopted, ${outcome.failed.length} not`);
     life.adoptionsEnded(outcome.failed.length);
     startJournalPruning?.(() => readRoster(hostsDir, () => {}).map((entry) => entry.holderId));
-  });
+  };
+  // P5 O17 M8's scene 6: the e2e's hold on the adoptions, armed only under MAWS_E2E=1 with its own variable; unarmed,
+  // the adoptions run as before
+  const e2eHold = e2eHoldFor(process.env, 'MAWS_E2E_ADOPTION_HOLD');
+  if (e2eHold === undefined) void adoptAll(live, { adopt: (entry) => engine.adopt(entry), log }).then(ended);
+  else void e2eHold().then(() => adoptAll(live, { adopt: (entry) => engine.adopt(entry), log }).then(ended));
   return { liveHolders: new Set(live.map((entry) => entry.holderId)), deadHostChildren };
 }
 // E10 end

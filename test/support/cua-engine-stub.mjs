@@ -4,11 +4,24 @@
 // on a session launch it reads the cua socket from the `--settings` JSON's `env.CUA_BROWSER_BACKENDS` on its argv and
 // starts test/support/cua-connector.mjs on it as its own child (as the engine starts `cua serve`), reporting to
 // `cua-connector.json` in the session's working directory; then it stays silent and alive until its stdin closes.
+//
+// P5 O17 M8 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M8, "the ordinary start path"): with
+// MAWS_CUA_STUB_READY=1 the engine comes ready, so a session reaches its engine through the ordinary start path
+// (`session.create` and `session.start`, or a message that resumes it), which tells it the daemon's socket in its
+// settings, never a raw `session.launch`: the engine protocol is test/support/latency-engine-stub.mjs's (each control
+// answered from its recording, each user message one whole turn), run in this process (P5 O17 M7: not as a child, since
+// O16's descendant veto counts every process under the engine but registered infrastructure), so this process stays the
+// engine the host spawned and the connector its one child, as cua's host is the engine's; the engine's `mcp_status` names
+// the connector as a stdio server, as the engine names `cua serve`, so a resting session holds no work. The turns'
+// samples go to `cua-engine-turns.jsonl` beside the report. With MAWS_CUA_STUB_RESPAWN=1 a connector that ends (a
+// scene kills it) is started again, as the engine starts `cua serve` again; the new one reports to the same file.
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import process from 'node:process';
+import { setTimeout } from 'node:timers';
 import { fileURLToPath, URL } from 'node:url';
 
+const here = fileURLToPath(new URL('.', import.meta.url));
 const args = process.argv.slice(2);
 if (args.length === 1 && args[0] === '--version') {
   process.stdout.write(`${process.env.MAWS_CUA_STUB_VERSION} (Claude Code)\n`);
@@ -21,12 +34,37 @@ if (typeof socket !== 'string' || socket === '') {
   process.stderr.write('cua engine stub: no CUA_BROWSER_BACKENDS in --settings\n');
   process.exit(64);
 }
-const connector = spawn(process.execPath, [join(fileURLToPath(new URL('.', import.meta.url)), 'cua-connector.mjs'), socket, join(process.cwd(), 'cua-connector.json')], { stdio: 'ignore' });
-const end = () => {
-  connector.kill();
-  process.exit(0);
+
+let ending = false;
+let connector = null;
+const connectorArgs = [join(here, 'cua-connector.mjs'), socket, join(process.cwd(), 'cua-connector.json')];
+const startConnector = () => {
+  connector = spawn(process.execPath, connectorArgs, { stdio: 'ignore' });
+  connector.once('exit', () => {
+    if (!ending && process.env.MAWS_CUA_STUB_RESPAWN === '1') setTimeout(startConnector, 200);
+  });
 };
-process.stdin.on('data', () => {}); // the host's initialize and anything after it: never answered
-process.stdin.on('end', end);
-process.on('SIGTERM', end);
-process.on('SIGINT', end);
+startConnector();
+const stopConnector = () => {
+  ending = true;
+  connector?.kill();
+};
+
+if (process.env.MAWS_CUA_STUB_READY === '1') {
+  // the latency engine reads its arguments and stdin, answers end_session, stdin's end and SIGTERM by exiting, and the
+  // connector ends with this process
+  process.env.MAWS_LATENCY_STUB_STOP_HOOK = '1'; // each turn's Stop, so an adopted session's work reads known after one
+  process.env.MAWS_LATENCY_STUB_MCP_SERVERS = JSON.stringify([{ name: 'cua', status: 'connected', config: { type: 'stdio', command: process.execPath, args: connectorArgs } }]);
+  process.on('exit', stopConnector);
+  process.argv = [process.argv[0], join(here, 'latency-engine-stub.mjs'), join(process.cwd(), 'cua-engine-turns.jsonl'), ...args];
+  await import('./latency-engine-stub.mjs');
+} else {
+  const end = () => {
+    stopConnector();
+    process.exit(0);
+  };
+  process.stdin.on('data', () => {}); // the host's initialize and anything after it: never answered
+  process.stdin.on('end', end);
+  process.on('SIGTERM', end);
+  process.on('SIGINT', end);
+}

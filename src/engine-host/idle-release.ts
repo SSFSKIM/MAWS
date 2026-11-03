@@ -19,10 +19,23 @@
 // none was ever seen on the process), re-reading this rule (`held`) in the step that signals. A reap that ends without
 // a signal, or whose signal the engine ignored, restarts the row's clock (`restart`). The verdict is the reap's; the
 // idle times are unchanged.
+//
+// P5 O17 M7 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E; D20): the idle exception for a headless
+// tab's hold. The hold is work to every other reader (budget.ts `holdsWork`), so the due check and the reap still refuse
+// a held row; the clock alone reads `isIdleRowIgnoringBrowser`, so a session idle in every way but its hold starts its
+// clock. At its due time such a row is neither dropped (which would restart its clock at the next `track`) nor handed to
+// its reap: it waits, keeping its `since`, and the release asks once (`browserIdleDue`, which `mawsd` answers by closing
+// the session's headless tabs). The waits are kept apart from the clocks, in a map that exists only while some row waits,
+// so an ordinary row carries no browser state. A waiting row that has asked is out of `dueOf`, so no timer runs for it. The status change
+// that clears the hold ends the wait at once and the next `fire` hands the row to its reap as any due row; a turn, interest
+// or a Keep mark ends it as well and restarts or stops the clock as before. A fresh `mawsd` link's first snapshot
+// (`browserSnapshotApplied`) has every waiting row ask again. Closed (a handover's freeze, the exit order), it asks nothing.
+// The landing fix wave: before a due row starts to wait, browser work may settle what a dead producer held
+// (`browserCheck`, once per `fire`), and the row is read again; one it settled is released at once.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { ClientRef } from '@shared/ipc/client';
-import { isIdleRow } from './budget';
+import { isIdleRow, isIdleRowIgnoringBrowser } from './budget'; // P5 O17 M7: isIdleRowIgnoringBrowser
 import type { EngineSession } from './session';
 
 export const RECHECK_MS = 60_000;
@@ -37,6 +50,8 @@ export interface IdleReleaseDeps {
   log(line: string): void;
   interestChanged?(): void; // a holder's set replaced or ended (the supervisor's quiet reads `interested`)
   release(session: EngineSession): void; // O16 M5: the row's reap, due as `idle`
+  browserIdleDue?(appSessionId: AppSessionId): void; // P5 O17 M7: a due row held by its headless tab alone, once per wait
+  browserCheck?(): void; // P5 O17 M7 landing fix wave: a due row is about to wait on its hold; a dead producer's holds may settle first
 }
 
 interface RowClock { appSessionId: AppSessionId; since: number | null; kept: boolean; keptClearedAt: number | null }
@@ -48,6 +63,9 @@ export class IdleRelease {
   private readonly interestEnded = new Map<AppSessionId, number>(); // when each session last left the union
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  // P5 O17 M7: the rows due and held by their headless tab alone, each with whether its `browserIdleDue` was told for
+  // this wait; null while no row waits
+  private waits: Map<EngineSession, boolean> | null = null;
 
   constructor(private readonly deps: IdleReleaseDeps) {}
 
@@ -72,20 +90,25 @@ export class IdleRelease {
   track(session: EngineSession, status: EngineSessionStatus | null): void {
     if (status === null || status.process === 'exited') {
       if (status !== null) this.interestEnded.delete(status.appSessionId); // a later launch's eligibility comes after it
+      this.endWait(session);
       if (this.rows.delete(session)) this.schedule();
       return;
     }
     const prev = this.rows.get(session);
     const now = Date.now();
-    const eligible = isIdleRow(status, this.deps.stateful());
+    const eligible = isIdleRowIgnoringBrowser(status, this.deps.stateful()); // P5 O17 M7: the clock sets the hold aside
     const kept = status.kept === true;
+    // P5 O17 M7: a wait lasts while the row is held by its hold alone; ended before the equality return, since the
+    // hold's clearing changes none of the clock's fields
+    const waitEnded = this.waits?.has(session) === true && !(eligible && !kept && !isIdleRow(status, this.deps.stateful()));
+    if (waitEnded) this.endWait(session);
     const next: RowClock = {
       appSessionId: status.appSessionId,
       since: eligible ? (prev?.since ?? now) : null,
       kept,
       keptClearedAt: prev?.kept === true && !kept ? now : (prev?.keptClearedAt ?? null),
     };
-    if (prev && prev.since === next.since && prev.kept === next.kept && prev.keptClearedAt === next.keptClearedAt) return;
+    if (!waitEnded && prev && prev.since === next.since && prev.kept === next.kept && prev.keptClearedAt === next.keptClearedAt) return;
     this.rows.set(session, next);
     this.schedule();
   }
@@ -112,9 +135,28 @@ export class IdleRelease {
   restart(session: EngineSession): void {
     const status = this.deps.current(session);
     if (status === null || status.process === 'exited' || this.closed) return;
-    const eligible = isIdleRow(status, this.deps.stateful());
+    const eligible = isIdleRowIgnoringBrowser(status, this.deps.stateful()); // P5 O17 M7: the clock's own read
+    this.endWait(session);
     this.rows.set(session, { appSessionId: status.appSessionId, since: eligible ? Date.now() : null, kept: status.kept === true, keptClearedAt: null });
     this.schedule();
+  }
+
+  // P5 O17 M7: a fresh `mawsd` link applied its first snapshot: every row still waiting asks again, at the next check
+  browserSnapshotApplied(): void {
+    if (this.waits === null) return;
+    for (const session of this.waits.keys()) this.waits.set(session, false);
+    this.schedule();
+  }
+
+  // P5 O17 M7 landing fix wave: whether the session's row waits on its hold now (browser work's kept notice is sent only then)
+  browserWaiting(appSessionId: AppSessionId): boolean {
+    if (this.closed) return false; // a handover's freeze, the exit order: a frozen host asks nothing (D20)
+    for (const session of this.waits?.keys() ?? []) if (this.rows.get(session)?.appSessionId === appSessionId) return true;
+    return false;
+  }
+
+  private endWait(session: EngineSession): void {
+    if (this.waits?.delete(session) && this.waits.size === 0) this.waits = null;
   }
 
   // Whether any holder holds interest in any session.
@@ -130,6 +172,8 @@ export class IdleRelease {
     const after = this.union();
     const now = Date.now();
     for (const id of before) if (!after.has(id)) this.interestEnded.set(id, now);
+    // P5 O17 M7: interest ends a row's wait (unless exit-when-idle ignores it); its end restarts the clock as before
+    if (!this.policy.ignoreInterest && this.waits !== null) for (const session of [...this.waits.keys()]) if (after.has(this.rows.get(session)!.appSessionId)) this.endWait(session);
     this.schedule();
     this.deps.interestChanged?.();
   }
@@ -142,9 +186,10 @@ export class IdleRelease {
 
   // When a row's clock runs out, or null while it is held (not eligible by state, kept, interest held) or the release
   // is off.
-  private dueOf(clock: RowClock, union: ReadonlySet<AppSessionId>): number | null {
+  private dueOf(session: EngineSession, clock: RowClock, union: ReadonlySet<AppSessionId>): number | null {
     const { idleMs, activeSince, ignoreInterest } = this.policy;
     if (idleMs === null || activeSince === null || clock.since === null || clock.kept) return null;
+    if (this.waits?.get(session) === true) return null; // P5 O17 M7: it waits for its hold to clear, with no timer
     if (!ignoreInterest && union.has(clock.appSessionId)) return null;
     return Math.max(clock.since, this.interestEnded.get(clock.appSessionId) ?? -Infinity, clock.keptClearedAt ?? -Infinity, activeSince) + idleMs;
   }
@@ -154,7 +199,7 @@ export class IdleRelease {
     this.timer = null;
     if (this.closed) return;
     const union = this.union();
-    const dues = [...this.rows.values()].map((clock) => this.dueOf(clock, union)).filter((due): due is number => due !== null);
+    const dues = [...this.rows].map(([session, clock]) => this.dueOf(session, clock, union)).filter((due): due is number => due !== null);
     if (dues.length === 0) return;
     const wait = Math.min(Math.max(0, Math.min(...dues) - Date.now()), RECHECK_MS);
     this.timer = setTimeout(() => this.fire(), wait);
@@ -167,10 +212,30 @@ export class IdleRelease {
     this.timer = null;
     const now = Date.now();
     const union = this.union();
+    // P5 O17 M7: held by its headless tab alone (the landing fix wave: read before and after the check)
+    const heldByTabAlone = (status: EngineSessionStatus | null): boolean => status !== null && status.kept !== true && !isIdleRow(status, this.deps.stateful()) && isIdleRowIgnoringBrowser(status, this.deps.stateful());
+    let checked = false;
     for (const [session, clock] of [...this.rows]) {
-      const due = this.dueOf(clock, union);
+      const due = this.dueOf(session, clock, union);
       if (due === null || now < due) continue;
-      const status = this.deps.current(session);
+      let status = this.deps.current(session);
+      // P5 O17 M7 landing fix wave: a dead producer's holds settled first (once per fire), and the row read again
+      if (heldByTabAlone(status) && !checked) {
+        checked = true;
+        this.deps.browserCheck?.();
+        status = this.deps.current(session);
+      }
+      // P5 O17 M7: it waits, its clock kept, and asks once for this wait
+      if (status !== null && heldByTabAlone(status)) {
+        const asked = this.waits?.get(session) === true;
+        (this.waits ??= new Map()).set(session, true);
+        if (!asked) {
+          this.deps.log(`idle release of ${status.appSessionId}: due, held by its headless browser work alone; its tabs are asked to close`);
+          this.deps.browserIdleDue?.(status.appSessionId);
+        }
+        continue;
+      }
+      this.endWait(session);
       if (status === null || !isIdleRow(status, this.deps.stateful()) || status.kept === true) {
         this.rows.delete(session);
         continue;

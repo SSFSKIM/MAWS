@@ -220,6 +220,7 @@ describe('the detached transport: connecting', () => {
     expect(typeof stdio[1]).toBe('number');
     expect(stdio[2]).toBe(stdio[1]);
     expect(options.env).toEqual({ HOME: '/home/owner', MAWS_E2E: '1', MAWS_RELAY_URL: 'http://127.0.0.1:18641', ELECTRON_RUN_AS_NODE: '1', MAWS_USER_DATA: profile.userData });
+    expect(options.env).not.toHaveProperty('MAWS_ENGINE_HOST_SPAWNER'); // P5 O17 M7 fix 4: main's spawn (this default) never names a spawner; mawsd's names itself
     expect(candidates[0].unref).toHaveBeenCalledOnce();
     expect(statSync(profile.dir).mode & 0o777).toBe(0o700);
     expect(statSync(join(profile.dir, 'host.log')).mode & 0o777).toBe(0o600);

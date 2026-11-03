@@ -17,4 +17,5 @@ export const grades = {
   'host.artifactOp': 'internal', // P5 O7 M5a: an act on no session, the same route
   'host.opQuery': 'internal',
   'host.attachment': 'internal', // P5 O3-D: mawsd's alone
+  'host.browserWork': 'internal', // P5 O17: mawsd's alone
 } as const satisfies CommandGrades<'host'>;

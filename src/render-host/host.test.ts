@@ -11,7 +11,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { MawsArtifactCapturedResult } from '@shared/ipc/schema/maws';
-import { RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
+import { BROWSER_ENGINE_CAPABILITY, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
+import type { BrowserEngineRequest } from '@shared/ipc/schema/browser-engine';
 import { startFakeFront, type FakeFront, type FakeFrontClient } from '../../test/support/fake-front';
 import { EXIT_NO_SANDBOX, EXIT_UNREACHABLE, EXIT_USAGE, renderHostProfile, sandboxRefusal, startRenderHost, type RenderHostDeps, type RenderLibrary } from './host';
 
@@ -136,7 +137,7 @@ describe('the render host (src/render-host/host.ts)', () => {
     await startRenderHost(started.deps);
     const seen = await front.client();
     await seen.ready();
-    expect(seen.capabilities).toEqual([RENDER_CLIENT_CAPABILITY]);
+    expect(seen.capabilities).toEqual([RENDER_CLIENT_CAPABILITY, BROWSER_ENGINE_CAPABILITY]); // P5 O17 M4: a tab engine too
     expect(started.steps).toEqual([`userData ${join(front.paths.dir, 'render-host')}`, 'ready', `sessions ${front.paths.artifactsSocket}`, 'compose']);
     expect(readdirSync(join(front.paths.dir, 'render-host')), 'cleared at each start').toEqual([]);
   });
@@ -223,5 +224,45 @@ describe('the render host (src/render-host/host.ts)', () => {
     seen.send('render.hostGeneration', { generation: 3 });
     await expect.poll(() => started.generation.read?.()).toBe(3);
     expect(answers).toEqual([]);
+  });
+
+  // P5 O17 M4 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M4, Interfaces §F): `browserEngine.request` goes to the
+  // tab engine, composed at the first request over this link (its commands and its descriptor) and never for an
+  // artifact's work; one after render.exit, and any to a host that composes no engine, are answered as failures with
+  // browserEngine.answer
+  it('hands browserEngine.request to the tab engine, composed at the first one over this link, and refuses what it cannot serve', async () => {
+    const browserAnswers: unknown[] = [];
+    const { front } = await served({ 'browserEngine.answer': (input) => void browserAnswers.push(input) });
+    const started = host(front.profile, heldLibrary().library);
+    const requests: BrowserEngineRequest[] = [];
+    const composed: { fd: number | null; paths: string }[] = [];
+    started.deps.browser = (link, paths) => {
+      composed.push({ fd: link.socketFd(), paths: paths.dir });
+      return { request: (request) => void requests.push(request), dispose: () => {} };
+    };
+    await startRenderHost(started.deps);
+    const seen = await front.client();
+    await seen.ready();
+    expect(composed, 'nothing composed before a request').toEqual([]);
+    seen.send('render.request', { id: 'r', kind: 'capture', request: capture('cap-1') });
+    seen.send('browserEngine.request', { id: 'b1', appSessionId: 'app-1', operation: { op: 'prepare' } });
+    seen.send('browserEngine.request', { id: 'b2', appSessionId: 'app-1', operation: { op: 'inventory' } });
+    await expect.poll(() => requests.map((request) => request.id)).toEqual(['b1', 'b2']);
+    expect(composed).toEqual([{ fd: expect.any(Number), paths: front.paths.dir }]); // once
+    expect(requests[0]).toEqual({ id: 'b1', appSessionId: 'app-1', operation: { op: 'prepare' } });
+    seen.send('render.exit', {});
+    seen.send('browserEngine.request', { id: 'b4', appSessionId: 'app-1', operation: { op: 'drop' } });
+    await expect.poll(() => browserAnswers).toEqual([{ id: 'b4', result: { ok: false, error: 'the render host is ending' } }]);
+    expect(requests).toHaveLength(2);
+  });
+
+  it('answers every browserEngine.request a failure when it composes no tab engine', async () => {
+    const browserAnswers: unknown[] = [];
+    const { front } = await served({ 'browserEngine.answer': (input) => void browserAnswers.push(input) });
+    await startRenderHost(host(front.profile, heldLibrary().library).deps);
+    const seen = await front.client();
+    await seen.ready();
+    seen.send('browserEngine.request', { id: 'b1', appSessionId: 'app-1', operation: { op: 'prepare' } });
+    await expect.poll(() => browserAnswers).toEqual([{ id: 'b1', result: { ok: false, error: 'this render host serves no browser' } }]);
   });
 });

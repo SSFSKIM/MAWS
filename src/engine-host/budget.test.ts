@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { EngineSessionStatusSchema, type EngineSessionStatus } from '@shared/engine/status';
-import { DEFAULT_BUDGET_FRACTION, defaultBudgetKiB, evaluate, EXITED_RING, EXITED_ROWS_MAX, hardReasons, type BudgetInput } from './budget';
+import { DEFAULT_BUDGET_FRACTION, defaultBudgetKiB, evaluate, EXITED_RING, EXITED_ROWS_MAX, hardReasons, isIdleRow, isIdleRowIgnoringBrowser, type BudgetInput } from './budget';
 
 const id = (s: string) => s as AppSessionId;
 
@@ -90,6 +90,38 @@ describe('hard reasons', () => {
     const ambient = { taskId: 't-dream' as never, taskType: 'dream', description: 'memory consolidation', ambient: true };
     expect(hardReasons(row('a', { backgroundTasks: [ambient] }), NONE)).toEqual([]);
     expect(hardReasons(row('a', { backgroundTasks: [ambient, { taskId: 't2' as never, taskType: 'local_bash', description: 'sleep 900', ambient: false }] }), NONE)).toEqual(['background_tasks']);
+  });
+});
+
+// P5 O17 M7 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E; D20): a headless tab's hold, `held` or
+// `unknown`, is browser work through O16's one chokepoint: folded into background_tasks, so the budget and the reap's
+// verified-empty step (through isIdleRow) never take it; the idle release's clock alone reads it aside.
+describe('the browser hold (P5 O17 M7)', () => {
+  const holding = (browser: 'held' | 'unknown', over: Partial<EngineSessionStatus> = {}) => row('a', { work: { crons: [], unknown: null, descendants: 0, holds: { browser } }, ...over });
+
+  it.each(['held', 'unknown'] as const)('%s is background work: named once, never the budget\'s candidate, never an idle row', (browser) => {
+    expect(hardReasons(holding(browser), NONE)).toEqual(['background_tasks']);
+    expect(hardReasons(holding(browser, { backgroundTasks: [{ taskId: 't1' as never, taskType: 'local_bash', description: 'x', ambient: false }] }), NONE)).toEqual(['background_tasks']); // once
+    expect(evaluate(input([holding(browser)]))).toMatchObject({ over: true, release: null, candidates: 0, blocked: [{ appSessionId: 'a', reasons: ['background_tasks'] }] });
+    expect(isIdleRow(holding(browser), NONE)).toBe(false);
+  });
+
+  it('no entry holds nothing, and an older host\'s status has no holds at all', () => {
+    expect(hardReasons(row('a', { work: { crons: [], unknown: null, descendants: 0, holds: {} } }), NONE)).toEqual([]);
+    expect(evaluate(input([row('a', { work: { crons: [], unknown: null, descendants: 0, holds: {} } })]))).toMatchObject({ release: 'a' });
+    expect(isIdleRow(row('a', { work: { crons: [], unknown: null } }), NONE)).toBe(true);
+  });
+
+  it('the idle clock\'s read sets the hold aside and nothing else', () => {
+    expect(isIdleRowIgnoringBrowser(holding('held'), NONE)).toBe(true);
+    expect(isIdleRowIgnoringBrowser(holding('unknown'), NONE)).toBe(true);
+    expect(isIdleRowIgnoringBrowser(row('a'), NONE)).toBe(true);
+    expect(isIdleRowIgnoringBrowser(holding('held', { turn: TURN }), NONE)).toBe(false);
+    expect(isIdleRowIgnoringBrowser(holding('held', { work: { crons: [], unknown: 'resumed', holds: { browser: 'held' } } }), NONE)).toBe(false);
+    expect(isIdleRowIgnoringBrowser(holding('held', { engineState: 'running' }), NONE)).toBe(false);
+    const status = holding('held');
+    isIdleRowIgnoringBrowser(status, NONE);
+    expect(status.work?.holds).toEqual({ browser: 'held' }); // read, not changed
   });
 });
 

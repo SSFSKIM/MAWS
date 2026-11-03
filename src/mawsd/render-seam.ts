@@ -30,6 +30,14 @@
 // together, SIGKILL at the grace) and its exit awaited, bounded past the SIGKILL's settle. A request the seam answered
 // itself after handing it over (its answer deadline, or the stop) is remembered until the host exits, so the host's late
 // answer is taken (not refused as unknown) and an inspection export's file it names is removed: nobody will read it.
+//
+// P5 O17 M5 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §B, §D; render-browser.ts): the render host is
+// also the sessions' headless browser. `ensureBrowser` starts it or joins it as a request does (a demand waiting for its
+// ready starts it; one that comes while it ends waits for the next), then prepares the session on its ready connection;
+// `dropBrowser` ends a session's service there. Browser holds inhibit the quiet exit as the table does: demands and
+// operations in flight, and browser work held on the host's connection (its tabs and creations in flight); an idle cua
+// connection does not. The last tab's close arms the quiet period once renders and browser operations settle, and a
+// render host with no tabs ends (its sessions' routes return to `cold`, cua's reconnect reaching the broker).
 import { spawn as spawnProcess, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
@@ -40,6 +48,11 @@ import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { DaemonRender } from '@shared/ipc/schema/daemon';
 import type { MawsArtifactCapture, MawsArtifactCapturedResult, MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import { RENDER_AUTHOR_SESSIONS_MAX, type RenderAuthors, type RenderRequest } from '@shared/ipc/schema/render';
+import type { AppSessionId } from '@shared/graph/ids';
+import type { BrowserEngineRequest, BrowserEngineResult } from '@shared/ipc/schema/browser-engine';
+import type { EngineConnection } from './browser-work';
+import type { BrowserDemand, BrowserTarget } from './cua-broker'; // types alone: the broker is its own chunk
+import { createRenderBrowser } from './render-browser'; // P5 O17 M5: in this chunk
 import { renderCapabilities, type RenderCapabilities } from './session-capabilities'; // P5 O5 M5
 
 export type RenderState = 'off' | 'starting' | 'ready' | 'ending' | 'unavailable';
@@ -76,6 +89,17 @@ export interface RenderSeamOptions {
   restartBackoffMs?: readonly number[]; // the detached transport's RESTART_BACKOFF_MS unless a test says
   exitGraceMs?: number;
   removeFile?(path: string): Promise<void>;
+  browser?: RenderSeamBrowser; // P5 O17 M5: none, a seam that serves no headless browser
+}
+
+// P5 O17 M5: what the seam needs of `mawsd` to serve the sessions' headless browser
+export interface RenderSeamBrowser {
+  post(engine: EngineConnection, request: BrowserEngineRequest): boolean; // browserEngine.request, to that connection alone
+  socketPath(appSessionId: AppSessionId): string | null; // the render host's socket for the session (§D)
+  parentOf(appSessionId: AppSessionId, deadline: number): Promise<AppSessionId | null>; // a side thread's parent, by the deadline
+  held(engine: EngineConnection): boolean; // browser work is held on that connection (its tabs, its creations in flight)
+  ended(appSessionId: AppSessionId): void; // the render host serving or preparing the session ended
+  dropped(engine: EngineConnection, appSessionId: AppSessionId): void; // a drop answered: that connection's hold on the session ends
 }
 
 export interface RenderService {
@@ -89,12 +113,19 @@ export interface RenderSeam extends RenderService {
   capture(request: MawsArtifactCapture): void; // the engine host's raw event; answered through answerEngine
   captureForE2e(request: MawsArtifactCapture): Promise<MawsArtifactCapturedResult>; // `daemon.e2eRender`'s: the answer returned
   export(request: MawsArtifactExport): void; // likewise
-  clientReady(): void; // the front's: a render.client said ready
-  clientGone(): void; // the front's: a ready render.client's connection ended
+  clientReady(engine?: EngineConnection): void; // the front's: a render.client said ready (P5 O17 M5: its connection)
+  clientGone(engine?: EngineConnection): void; // the front's: a ready render.client's connection ended
   answer(input: { id: string; answer: unknown }): boolean; // the front's: false for an id the seam did not post
   capabilities(): RenderCapabilities;
   status(): DaemonRender;
   stop(): Promise<void>;
+  // P5 O17 M5
+  ensureBrowser(demand: BrowserDemand): Promise<BrowserTarget>;
+  dropBrowser(appSessionId: AppSessionId): Promise<void>;
+  browserAnswer(engine: EngineConnection, input: { id: string; result: BrowserEngineResult }): boolean; // false: not pending on that connection
+  browserEngine(appSessionId: AppSessionId): EngineConnection | null; // the connection preparing or serving the session
+  browserWorkChanged(): void; // the browser work held on the host may have changed: the quiet period follows
+  unavailable(): string | null; // why the seam is unavailable now (two failed starts), or null
 }
 
 export const DEFAULT_QUIET_MS = 120_000;
@@ -145,6 +176,7 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
   let detail: string | null = null;
   let child: RenderChild | null = null;
   let childReady = false; // the host takes requests: its client said ready and its connection holds
+  let childEngine: EngineConnection | null = null; // P5 O17 M5: that client's connection
   let reached = false; // the host said ready once (its exit is then no failed start)
   let starts = 0;
   let next = 0;
@@ -160,6 +192,20 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
   let killTimer: ReturnType<typeof setTimeout> | null = null;
   let exited: (() => void) | null = null; // stop()'s wait for the host's exit
   const deliveries = new Set<Promise<unknown>>(); // answers on their way to the engine host (stop() awaits them)
+  // P5 O17 M5: the sessions' headless browser on the render host
+  const browserDeps = options.browser;
+  const browser = createRenderBrowser({
+    machine,
+    post: (engine, request) => browserDeps?.post(engine, request) ?? false,
+    socketPath: (appSessionId) => browserDeps?.socketPath(appSessionId) ?? null,
+    parentOf: (appSessionId, deadline) => browserDeps?.parentOf(appSessionId, deadline) ?? Promise.resolve(null),
+    ended: (appSessionId) => browserDeps?.ended(appSessionId),
+    dropped: (engine, appSessionId) => browserDeps?.dropped(engine, appSessionId),
+    changed: () => reconsider(),
+    log,
+  });
+  // Browser holds: demands and operations in flight, and browser work held on the host's connection
+  const browserBusy = () => browser.active() || (childEngine !== null && (browserDeps?.held(childEngine) ?? false));
 
   const set = (to: RenderState, why: string | null = null) => {
     if (to === state && why === detail) return;
@@ -276,7 +322,7 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
       }
       return;
     }
-    if (state === 'off' && [...table.values()].some((entry) => !entry.posted)) start(why);
+    if (state === 'off' && ([...table.values()].some((entry) => !entry.posted) || browser.waiting())) start(why); // P5 O17 M5: a browser demand starts it too
   }
 
   // --- the host's life ------------------------------------------------------------------------------------------------
@@ -335,6 +381,8 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
     const expected = state === 'ending';
     child = null;
     childReady = false;
+    if (childEngine) browser.gone(childEngine); // P5 O17 M5: its sessions' service ended with it (its connection's end, usually first)
+    childEngine = null;
     retiring = false;
     killTimer = clear(killTimer);
     watchdog = clear(watchdog);
@@ -362,6 +410,7 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
       unavailableUntil = now + FAILURE_WINDOW_MS;
       set('unavailable', reason);
       log(`[render] two failures within ${FAILURE_WINDOW_MS / 1000} s: every request is answered with the reason until ${new Date(unavailableUntil).toISOString()}`);
+      browser.refuse(couldNotStart(reason)); // P5 O17 M5
       return failAll(couldNotStart(reason));
     }
     set('off', reason);
@@ -369,19 +418,26 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
   }
 
   function armQuiet(): void {
-    if (stopped || state !== 'ready' || table.size > 0 || quietTimer) return;
+    if (stopped || state !== 'ready' || table.size > 0 || browserBusy() || quietTimer) return;
     const ms = options.quietMs();
     quietTimer = setTimeout(() => {
       quietTimer = null;
-      if (state !== 'ready' || table.size > 0) return;
+      if (state !== 'ready' || table.size > 0 || browserBusy()) return;
       log(`[render] quiet for ${ms / 1000} s: ending the render host`);
       end();
     }, ms);
   }
 
+  // P5 O17 M5: browser holds came or went: the quiet period paused while any stands, armed once none does
+  function reconsider(): void {
+    if (browserBusy()) quietTimer = clear(quietTimer);
+    else armQuiet();
+  }
+
   // render.exit, then SIGTERM after the grace
   function end(): void {
     set('ending');
+    browser.ready(null); // P5 O17 M5: a demand from here on waits for the next host
     if (!options.postExit()) log('[render] render.exit reached no render host: SIGTERM after the grace');
     killTimer = clear(killTimer);
     const ending = child;
@@ -438,18 +494,22 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
         });
       });
     },
-    clientReady() {
+    clientReady(engine) {
       if (retiring) return log('[render] a render client said ready after its host’s start watchdog: not taken (it is being ended)');
       if (state !== 'starting' || child === null) return log(`[render] a render client said ready while the seam is ${state}: not taken`);
       childReady = true;
+      childEngine = engine ?? null;
       reached = true;
       watchdog = clear(watchdog);
       set('ready');
       log(`[render] the render host is ready (pid ${child.pid ?? 'unknown'})`);
       pump();
+      browser.ready(childEngine); // P5 O17 M5: browser demands proceed on its connection
       armQuiet();
     },
-    clientGone() {
+    clientGone(engine) {
+      if (engine) browser.gone(engine); // P5 O17 M5: its sessions' service ended, their routes told
+      if (engine && engine === childEngine) childEngine = null;
       if (!childReady) return;
       childReady = false; // nothing more is handed over; its exit (a failure unless asked) follows its connection's end
       failAll(`the render service ended on ${machine}`, (entry) => entry.posted);
@@ -487,9 +547,23 @@ export function createRenderSeam(options: RenderSeamOptions): RenderSeam {
         appAttached: options.appAttached(),
       }),
     status: () => ({ state, detail, pid: child?.pid ?? null, starts, requests: table.size }),
+    // P5 O17 M5: the headless browser
+    ensureBrowser(demand) {
+      const refused = refusal();
+      if (refused !== null) return Promise.reject(new Error(refused));
+      const ensured = browser.ensure(demand);
+      pump();
+      return ensured;
+    },
+    dropBrowser: (appSessionId) => browser.drop(appSessionId),
+    browserAnswer: (engine, input) => browser.answer(engine, input),
+    browserEngine: (appSessionId) => browser.engineOf(appSessionId),
+    browserWorkChanged: () => reconsider(),
+    unavailable: () => (state === 'unavailable' && Date.now() < unavailableUntil ? (lastFailure ?? 'it failed twice') : null),
     async stop() {
       if (stopped) return;
       stopped = true;
+      browser.refuse(`the render service is restarting on ${machine}`); // P5 O17 M5
       quietTimer = clear(quietTimer);
       startTimer = clear(startTimer);
       watchdog = clear(watchdog);

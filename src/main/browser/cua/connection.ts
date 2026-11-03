@@ -24,6 +24,16 @@
 //   badge (its group's title, else "agent") until the connection lets it go; the agent's downloads are reported to the
 //   host as Chrome's would be.
 //
+// - (P5 O17 M2) A lease is told only the CDP events its own commands asked for (event-scope.ts): each command is scoped
+//   as it is sent and settled at its answer; each event is read against the scope before it is told. What the
+//   connection keeps for itself (the children, the navigations and screenshots it tells the windows of, the targets'
+//   detaches) reads every event; the scope ends with the lease, a child's with its detach.
+//
+// - (P5 O17 M4) In the render host, a tab whose creating connection closed is an orphan (claims.ts's 'session' policy):
+//   a connection of the tab's own session adopts it at its first lease or close, and any other connection is refused it.
+//   A `tabs.create` there first passes the engine's creation gate (`creations`: the headless caps and the fence), which
+//   may refuse it with its reason; no tab is opened before the gate lets it through.
+//
 // Secrets: params, page content and typed text never reach a log line; errors name methods and tab ids only.
 import type { Socket } from 'node:net';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -33,6 +43,7 @@ import { personHolds } from '../agent/control';
 import type { DebuggerLease, TabDebugger } from '../debugger';
 import type { BrowserEmit, TabEntry, TabStore } from '../tabs';
 import type { TabClaims } from './claims';
+import { createEventScope, type CuaEventScope } from './event-scope';
 import { agentCapture, clickLabel, commandActivity, LABEL_LOOKUP_MS, navigatedUrl, within, type ActivityFeed } from './activity';
 import { commandClass, noteToggle, noToggles, methodNotAllowed, readsViewSize, routeCommand, undoCommands, type AgentToggles } from './filter';
 import { createPeer, frameDecoder, type Peer, type RpcHandler } from './framing';
@@ -72,6 +83,13 @@ export interface ServerContext {
   presence: AgentPresence | null; // M3: control, takeover and the cursor (null: the bare server's tests)
   feed: ActivityFeed | null; // M3: what the agent did, to the windows
   emit: BrowserEmit | null; // the final fix wave: `browser.agent.acting`, to the windows
+  creations: CuaCreations | null; // P5 O17 M4: the render host's creation gate (null: the app's, none)
+}
+
+// P5 O17 M4: what a tab engine asks before a `tabs.create` opens its tab: `begin` resolves with the creation's end, called
+// once the tab is open or its opening failed, or rejects with the reason the primitive answers (no tab is made)
+export interface CuaCreations {
+  begin(appSessionId: AppSessionId): Promise<() => void>;
 }
 
 interface Child {
@@ -93,6 +111,7 @@ interface Leased {
   awaitingFrame: boolean; // the agent's screencast started on the page, its first frame (the screenshot's row) not yet seen
   acted: boolean; // an acting command arrived through this lease: the windows were told `browser.agent.acting`
   released: Promise<void> | null; // the letting go under way, which a new attach waits for
+  scope: CuaEventScope; // P5 O17 M2: the events this lease's commands asked for
 }
 
 interface Held {
@@ -225,9 +244,10 @@ export class CuaConnection {
     return {
       'tabs.query': () => this.reachableEntries().map((entry) => this.record(entry)),
       'tabs.get': ({ tabId }) => this.record(this.tab(tabId)),
-      'tabs.create': ({ url, group }) => this.create(url, group),
+      'tabs.create': ({ url, group }) => (this.ctx.creations ? this.gatedCreate(url, group) : this.create(url, group)),
       'tabs.remove': ({ tabId }) => {
         const entry = this.tab(tabId);
+        this.adoptOrphan(entry);
         if (this.ctx.claims.reservedTo(entry.tab.tabId) !== this) fail(ERRORS.notOwned);
         this.closeTab(entry);
         return {};
@@ -260,8 +280,7 @@ export class CuaConnection {
   }
 
   private create(url: unknown, group: unknown): Record_ {
-    const target = typeof url === 'string' && url !== '' ? url : 'about:blank';
-    if (target !== 'about:blank' && !validateBrowserUrl(target).ok) fail(`Invalid url: only http and https pages open in MAWS`);
+    const target = createTarget(url);
     const { tab } = this.ctx.store.open({ appSessionId: this.appSessionId, url: target, select: false });
     this.ctx.claims.reserve(tab.tabId, this);
     const { key, title } = (typeof group === 'object' && group !== null ? group : {}) as { key?: unknown; title?: unknown };
@@ -269,6 +288,27 @@ export class CuaConnection {
     const entry = this.ctx.store.entry(tab.tabId)!;
     this.tell(entry, { kind: 'tabOpened', url: target });
     return this.record(entry);
+  }
+
+  // P5 O17 M4: the render host's create: the URL checked first (a refused URL takes nothing of the gate), then the gate,
+  // then the tab opened unless the connection closed meanwhile
+  private async gatedCreate(url: unknown, group: unknown): Promise<Record_> {
+    createTarget(url);
+    const done = await this.ctx.creations!.begin(this.appSessionId);
+    try {
+      if (this.closed) fail(ERRORS.cancelled('disconnected'));
+      return this.create(url, group);
+    } finally {
+      done();
+    }
+  }
+
+  // P5 O17 M4: an orphan (the render host's policy, claims.ts) is adopted by a connection of the tab's own session at its
+  // first lease or close; any other connection is refused it, as a tab another agent session holds
+  private adoptOrphan(entry: TabEntry): void {
+    if (!this.ctx.claims.isOrphan(entry.tab.tabId)) return;
+    if (entry.tab.appSessionId !== this.appSessionId) fail(ERRORS.heldElsewhere);
+    this.ctx.claims.adoptOrphan(entry.tab.tabId, this);
   }
 
   // ---- groups and the panel's badge ----------------------------------------------------------------------------------
@@ -316,12 +356,14 @@ export class CuaConnection {
       return this.attach(debuggee);
     }
     if (this.leases.has(tabId)) return { alreadyHeld: true };
+    this.adoptOrphan(entry); // P5 O17 M4
     this.refuseHeld(entry);
-    // the previous lease's undo still under way, this connection's or another's (bounded by UNDO_WAIT_MS): the new lease
-    // starts once it settles, so none of its own toggles is undone and the page reads its own size again
-    const undoing = this.ctx.claims.undoOf(tabId);
-    if (undoing) {
-      await undoing;
+    // the previous lease's undo still under way, this connection's or another's (bounded by UNDO_WAIT_MS), or the sizing
+    // of an adopted popup's page (P5 O17 M8): the new lease starts once they settle, so none of its own toggles is undone
+    // and the page reads its own size, the viewport's, before its first command
+    const awaited = this.ctx.claims.awaitedByNextLease(tabId);
+    if (awaited) {
+      await awaited;
       return this.attach(debuggee);
     }
     if (!entry.view && entry.tab.url !== '') this.ctx.store.load(tabId, entry.tab.url); // a suspended tab resumes, as Chrome reloads a discarded one
@@ -335,7 +377,7 @@ export class CuaConnection {
       this.refuseHeld(entry);
       fail(ERRORS.notLoaded(debuggee.tabId));
     }
-    const leased: Leased = { entry, dbg: dbg!, lease, toggles: noToggles(), children: new Map(), byTarget: new Set(), stops: [], closing: false, awaitingFrame: false, acted: false, released: null };
+    const leased: Leased = { entry, dbg: dbg!, lease, toggles: noToggles(), children: new Map(), byTarget: new Set(), stops: [], closing: false, awaitingFrame: false, acted: false, released: null, scope: createEventScope() };
     leased.stops.push(
       dbg!.on('*', (params, sessionId, method) => this.forward(leased, params, sessionId, method)),
       dbg!.onDetach(() => {
@@ -397,8 +439,20 @@ export class CuaConnection {
       }
       if (session === '') noteToggle(leased.toggles, method, commandParams);
       this.observe(leased, method, commandParams, session);
-      return leased.dbg.send(method, sent, session || undefined);
+      return this.scoped(leased, session, method, commandParams, () => leased.dbg.send(method, sent, session || undefined));
     });
+  }
+
+  // P5 O17 M2: the command as the lease's scope sees it, scoped as it goes (an enable can emit before it answers) and
+  // settled by its own answer.
+  private scoped(leased: Leased, session: string, method: string, params: Record<string, unknown>, send: () => Promise<unknown>): Promise<unknown> {
+    const settle = leased.scope.willSend(session || null, method, params);
+    const reply = send();
+    reply.then(
+      () => settle(true),
+      () => settle(false),
+    );
+    return reply;
   }
 
   // What a command the agent sends on the page's own session did, for the windows: a press is told once its node is
@@ -547,7 +601,7 @@ export class CuaConnection {
 
   private forward(leased: Leased, params: unknown, sessionId: string, method: string): void {
     if (this.leases.get(leased.entry.tab.tabId) !== leased) return;
-    const p = (params ?? {}) as { sessionId?: unknown; targetInfo?: { targetId?: unknown; type?: unknown; title?: unknown; url?: unknown } };
+    const p = (params ?? {}) as { sessionId?: unknown; targetId?: unknown; targetInfo?: { targetId?: unknown; type?: unknown; title?: unknown; url?: unknown } };
     if (sessionId === '' && method === 'Target.attachedToTarget' && typeof p.sessionId === 'string' && typeof p.targetInfo?.targetId === 'string') {
       const info = p.targetInfo;
       leased.children.set(p.sessionId, { targetId: info.targetId as string, type: String(info.type ?? 'other'), title: String(info.title ?? ''), url: String(info.url ?? '') });
@@ -557,13 +611,17 @@ export class CuaConnection {
       leased.awaitingFrame = false;
       this.tell(leased.entry, { kind: 'screenshot' });
     }
-    const tabId = this.idOf(leased.entry.tab.tabId);
-    this.notify('debugger.event', { debuggee: { tabId }, ...(sessionId ? { sessionId } : {}), method, params });
-    const child = sessionId ? leased.children.get(sessionId) : undefined;
-    if (child && leased.byTarget.has(child.targetId)) this.notify('debugger.event', { debuggee: { targetId: child.targetId }, method, params });
+    // P5 O17 M2: told only when the lease asked for it; everything above and below reads it all the same
+    if (leased.scope.admits(sessionId || null, method, params)) {
+      const tabId = this.idOf(leased.entry.tab.tabId);
+      this.notify('debugger.event', { debuggee: { tabId }, ...(sessionId ? { sessionId } : {}), method, params });
+      const child = sessionId ? leased.children.get(sessionId) : undefined;
+      if (child && leased.byTarget.has(child.targetId)) this.notify('debugger.event', { debuggee: { targetId: child.targetId }, method, params });
+    }
     if (sessionId === '' && method === 'Target.detachedFromTarget' && typeof p.sessionId === 'string') {
       const gone = leased.children.get(p.sessionId);
       leased.children.delete(p.sessionId);
+      leased.scope.detached(p.sessionId, typeof p.targetId === 'string' ? p.targetId : (gone?.targetId ?? null));
       if (gone && leased.byTarget.delete(gone.targetId)) this.notify('debugger.detached', { debuggee: { targetId: gone.targetId }, reason: 'target_closed' });
     }
   }
@@ -598,15 +656,16 @@ export class CuaConnection {
   }
 
   // The undo holds the release (the host's detach reply) for RESET_BOUND_MS at most; what is still out then goes on, and
-  // the tab's next lease waits for it until UNDO_WAIT_MS from now (TabClaims `undoing`).
+  // the tab's next lease waits for it until UNDO_WAIT_MS from now (TabClaims `beforeNextLease`).
   private async release(leased: Leased, why: string): Promise<void> {
     leased.closing = true;
+    leased.scope.released(); // the agent let go: nothing more is told of the tab, the undo's events included
     const { tabId } = leased.entry.tab;
     this.cancelHeld(tabId, why);
     const commands = undoCommands(leased.toggles, { mawsFocusEmulation: leased.dbg.heldBy('focus') });
     if (commands.length > 0 && leased.dbg.attached) {
       const undo = this.undo(leased, commands);
-      this.ctx.claims.undoing(tabId, undo.done);
+      this.ctx.claims.beforeNextLease(tabId, undo.done);
       if ((await within(undo.done.then(() => true), RESET_BOUND_MS)) === null && undo.out.size > 0) {
         this.ctx.log(`${this.undoLine(tabId, RESET_BOUND_MS, undo.out)}: its lease is released, and the tab's next lease waits for the undo`);
       }
@@ -646,6 +705,7 @@ export class CuaConnection {
     const tabId = leased.entry.tab.tabId;
     if (this.leases.get(tabId) !== leased) return;
     this.leases.delete(tabId);
+    leased.scope.released();
     for (const stop of leased.stops.splice(0)) stop();
     this.ctx.claims.unlease(tabId, this);
   }
@@ -755,6 +815,13 @@ export class CuaConnection {
 }
 
 const syntheticTargetId = (entry: TabEntry) => `maws-page-${entry.tab.tabId}`;
+
+// The page a `tabs.create` opens: its URL, or a blank page; anything but http, https or blank is refused
+function createTarget(url: unknown): string {
+  const target = typeof url === 'string' && url !== '' ? url : 'about:blank';
+  if (target !== 'about:blank' && !validateBrowserUrl(target).ok) fail(`Invalid url: only http and https pages open in MAWS`);
+  return target;
+}
 
 // Waits until the page reads its view's size again, polling its layout metrics; gives up at `until`, when the page or
 // its attachment goes (never sending to a detached tab, which would attach it again), or at a reading that cannot tell.

@@ -11,6 +11,10 @@
 // dispatch answers, so `composeRender` gets the same type from both roots. A request still waiting when the connection
 // ends, and one asked after, is answered `host_unavailable` rather than rejected, as main's dispatch answers a host that
 // is gone.
+//
+// P5 O17 M4 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §D, §H): the hello lists `browser.engine` too
+// (the render host serves `browserEngine.request`), and `socketFd` gives the link's descriptor, through which the render
+// host's cua sockets admit `mawsd`'s relay by the daemon actually connected, as the app's `HostLink.socketFd()` does.
 import { readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
@@ -23,6 +27,7 @@ import { HostEventSchema, HostResponseSchema, type HostResponse } from '@shared/
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { readTolerant } from '@shared/ipc/tolerant';
 import { WIRE_MINOR } from '@shared/ipc/wire';
+import { socketFd } from '../main/browser/cua/peer';
 
 export const HELLO_TIMEOUT_MS = 3_000;
 
@@ -32,6 +37,7 @@ export interface RenderClient {
   ready(): void; // the root can take work: the front may post it events from now on
   closed: Promise<string>; // resolves once, with why, when the connection ends
   close(): void;
+  socketFd(): number | null; // P5 O17 M4: the link's descriptor while it is open (main-process only: the peer check reads it)
 }
 
 export type Connected = { ok: true; client: RenderClient } | { ok: false; why: string };
@@ -91,7 +97,7 @@ export async function connectRenderClient(paths: DaemonPaths, options: RenderCli
       }
       socket.removeAllListeners('close');
       socket.removeAllListeners('error');
-      settle({ ok: true, client: linked(new SocketPort(socket, splitter.rest(), { log: () => {} }), welcome.value, options.onEvent) });
+      settle({ ok: true, client: linked(new SocketPort(socket, splitter.rest(), { log: () => {} }), welcome.value, options.onEvent, () => (socket.destroyed ? null : socketFd(socket))) });
     };
     socket.on('data', onData);
     socket.on('connect', () => {
@@ -100,7 +106,7 @@ export async function connectRenderClient(paths: DaemonPaths, options: RenderCli
   });
 }
 
-function linked(port: SocketPort, welcome: ServerWelcome, onEvent: RenderClientOptions['onEvent']): RenderClient {
+function linked(port: SocketPort, welcome: ServerWelcome, onEvent: RenderClientOptions['onEvent'], fd: () => number | null): RenderClient {
   const waiting = new Map<string, (response: HostResponse) => void>();
   const gone = (id: string, why: string): HostResponse => ({ t: 'res', id, ok: false, error: ipcError('host_unavailable', why) });
   let ended: string | null = null;
@@ -142,6 +148,7 @@ function linked(port: SocketPort, welcome: ServerWelcome, onEvent: RenderClientO
       end('the render host closed the connection');
       port.close();
     },
+    socketFd: () => (ended === null ? fd() : null), // a link told ended is no daemon's any more
   };
 }
 

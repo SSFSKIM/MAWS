@@ -121,6 +121,8 @@ import { daemonPaths } from '@shared/daemon/files';
 import { CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
 import { DEFAULT_IDLE_EXIT_MS } from '../src/mawsd/clocks';
 import { reachMachine } from '../src/mawsd/machine-client';
+import { answered, ENGINE_HOST_BROWSER_WORK, SCREENCAST, startPages as startHeadlessPages } from './support/headless-browser'; // P5 O17 M8; M7: the pre-O17 app's cell
+import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M7
 import { invoke, replaySpec, turnsJournal, value } from './support/c7-replay';
 import { AgentSeam } from './support/dashboards';
 import { DATASET, readDataset, SOURCE, writeBoard } from './support/live-data';
@@ -287,8 +289,8 @@ const recyclesTo = (daemonLog: string, hostPid: number) => daemonLog.split('\n')
 interface CrossingSteps {
   env?: Record<string, string>;
   keeperReady?(run: Run): Promise<string[]>;
-  awayOnKept?(): Promise<string[]>;
-  awayOnOwn?(): Promise<string[]>;
+  awayOnKept?(id: AppSessionId): Promise<string[]>; // P5 O17 M8: the kept session's id
+  awayOnOwn?(id: AppSessionId): Promise<string[]>;
   attacherMoved?(run: Run): Promise<string[]>;
 }
 
@@ -567,7 +569,7 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
 // `mawsd`'s log: the kept host's welcome it chose its path from (no host.attachment listed), its recycles at the
 // departure and at the reattach, and no host.attachment sent. The older host's log: its client leaving at the quit
 // (`client disconnected`, which O2-era and current hosts both print) and a fresh one coming.
-async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>, runs: Run[], o: { kept: { pid: number }; daemon: number; id: AppSessionId; capable: boolean; connectors: boolean; away?: () => Promise<string[]>; said: string[] }): Promise<Run> {
+async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>, runs: Run[], o: { kept: { pid: number }; daemon: number; id: AppSessionId; capable: boolean; connectors: boolean; away?: (id: AppSessionId) => Promise<string[]>; said: string[] }): Promise<Run> {
   const before = connectsFrom(s.log(), o.daemon);
   const leftBefore = departuresIn(s.log());
   const recycledBefore = recyclesTo(s.daemonLog(), o.kept.pid);
@@ -591,7 +593,7 @@ async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>,
   // the turn ends while no app runs (fix round 1, item 6): what the reattach recovers is then known, the end included
   const endRow = () => s.journal(o.id).find((r) => r.seq > awayFrom && r.direction === 'in' && r.frame.type === 'result');
   await expect.poll(() => endRow() !== undefined, { timeout: 30_000, message: 'the turn ends while no app runs' }).toBe(true);
-  if (o.away) o.said.push(...(await o.away())); // P5 O4 M4: the kept older host serving, no app
+  if (o.away) o.said.push(...(await o.away(o.id))); // P5 O4 M4: the kept older host serving, no app
   const departed = connectsFrom(s.log(), o.daemon);
   const leftAway = departuresIn(s.log());
   const recycledAway = recyclesTo(s.daemonLog(), o.kept.pid);
@@ -641,7 +643,7 @@ async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>,
 // host.attachment, `mawsd` is its permanent client: a session held mid-turn at its request (the unpaced replay holds there,
 // so neither the park nor the idle release ends the host while no app runs), the app's quit and reattach cross no new
 // connection, and the request is pending once after it.
-async function permanentAcrossReattach(s: Scratch, run: Run, attach: () => Promise<Run>, runs: Run[], o: { host: number; daemon: number; id: AppSessionId; connectors: boolean; away?: () => Promise<string[]>; said: string[] }): Promise<Run> {
+async function permanentAcrossReattach(s: Scratch, run: Run, attach: () => Promise<Run>, runs: Run[], o: { host: number; daemon: number; id: AppSessionId; connectors: boolean; away?: (id: AppSessionId) => Promise<string[]>; said: string[] }): Promise<Run> {
   value(await invoke(run.page, 'session.send', { appSessionId: o.id, content: PROMPT }));
   await expect.poll(async () => (await pendingPermissions(run.page, o.id)).length, { timeout: 30_000, message: 'the request, held' }).toBe(1);
   const connects = connectsFrom(s.log(), o.daemon);
@@ -655,7 +657,7 @@ async function permanentAcrossReattach(s: Scratch, run: Run, attach: () => Promi
     o.said.push(`  ${CONNECTORS_CAPABILITY} (acceptance 3): supervisor pid ${o.host} of this build and mawsd pid ${o.daemon} both list it, so its refreshes key on mawsd's connection`);
   }
   await s.quit(run);
-  if (o.away) o.said.push(...(await o.away())); // P5 O4 M4: the host of this build serving, no app
+  if (o.away) o.said.push(...(await o.away(o.id))); // P5 O4 M4: the host of this build serving, no app
   const next = await attach();
   runs.push(next);
   await s.ready(next.page, (st) => st.supervisor!.pid === o.host && st.daemon?.pid === o.daemon);
@@ -707,6 +709,34 @@ async function artifactPage(s: Scratch, run: Run, label: string, endpoint: boole
   const throughEndpoint = s.daemonLog().includes('[artifacts] the artifact endpoint’s handler loaded at its first use');
   expect(throughEndpoint, `mawsd's log: the page came ${endpoint ? 'through' : 'not through'} its artifact endpoint`).toBe(endpoint);
   return `  artifact page: ${url} loaded with the bridge script, ${throughEndpoint ? "through this build's mawsd's artifact endpoint, resolved by the kept engine host" : "by main's own handler (the app's mawsd lists no machine.artifacts)"}`;
+}
+
+// P5 O17 M8 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §A's cells with no app): whether a build's
+// engine host lists `host.browserWork` in its welcome (its socket-protocol.ts's PEER_CAPABILITIES.engineHost line: the
+// wire manifest's union lists the capability from O17 M3 on, before any engine host serves it), and the kept session's
+// browser reading from this build's mawsd while no app runs: the headless route's screencast when the serving engine
+// host lists it (macOS), else the old-host reason; on Linux the Linux reason whatever serves
+function hostsBrowserWork(build: Build): boolean {
+  if (build.root === undefined) return ENGINE_HOST_BROWSER_WORK;
+  const path = join(build.root, 'src', 'shared', 'host', 'socket-protocol.ts');
+  const line = existsSync(path) ? readFileSync(path, 'utf8').split('\n').find((l) => /^\s*engineHost:\s*\[/.test(l)) : undefined;
+  return line !== undefined && /HOST_BROWSER_WORK_CAPABILITY|'host\.browserWork'/.test(line.slice(0, line.indexOf(']')));
+}
+async function browserWithNoApp(s: Scratch, id: AppSessionId, host: string, listsWork: boolean): Promise<string[]> {
+  const expected = process.platform === 'linux' ? { available: false, reason: expect.stringMatching(/^cua's host cannot check its peers on Linux yet/) } : listsWork ? SCREENCAST : { available: false, reason: expect.stringMatching(/^the engine host on .+ predates browser work holds; it is replaced when idle$/) };
+  const reached = await reachMachine(daemonPaths(s.userData), { build: 'e2e-cross-build-browser' });
+  if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+  let reading: unknown = null;
+  try {
+    await expect.poll(async () => {
+      const answer = await reached.link.request('session.capabilities', { appSessionId: id });
+      reading = answer.ok ? (answer.value as { browser?: unknown }).browser ?? null : answer.error;
+      return reading;
+    }, { timeout: 30_000, message: `the kept session's browser with no app, ${host} serving` }).toMatchObject(expected);
+  } finally {
+    reached.link.close();
+  }
+  return [`  browser with no app (O17 §A), ${host}: ${JSON.stringify(reading)}`];
 }
 
 const record = (lines: string[]) => {
@@ -808,15 +838,22 @@ test('(update, daemon) the peer’s app keeps a session on its own supervisor; t
   test.setTimeout(600_000); // P5 O3-D M6: acceptance 9's two quits and reattaches; P5 O4 M4: a refresh at each, 200 s at most
   const { here, peer, newer, older } = builds();
   const gap = here === newer ? { newer, older } : null;
+  // a short root: the browser reading with no app (O17 §A) needs the daemon's cua socket for the session to fit 103 bytes
   await withScratch('xb-daemon-update', async (s) => {
     const agent = new AgentSeam(join(s.userData, 'dashboard-e2e'));
     const said = await crossing(s, peer, here, gap, { keeper: 'detached', attacher: 'daemon' }, {
       env: { MAWS_DASHBOARD_E2E: '1' },
-      awayOnKept: () => refreshWithNoApp(agent, 'xb-agent-kept', `${peer.label}'s kept engine host`, hostsAttachment(peer) && !hostsConnectors(peer)),
-      awayOnOwn: () => refreshWithNoApp(agent, 'xb-agent-own', `${here.label}'s engine host`, false),
+      awayOnKept: async (id) => [
+        ...(await refreshWithNoApp(agent, 'xb-agent-kept', `${peer.label}'s kept engine host`, hostsAttachment(peer) && !hostsConnectors(peer))),
+        ...(await browserWithNoApp(s, id, `${peer.label}'s kept engine host`, hostsBrowserWork(peer))), // P5 O17 M8
+      ],
+      awayOnOwn: async (id) => [
+        ...(await refreshWithNoApp(agent, 'xb-agent-own', `${here.label}'s engine host`, false)),
+        ...(await browserWithNoApp(s, id, `${here.label}'s engine host`, hostsBrowserWork(here))), // P5 O17 M8
+      ],
     });
     record(said);
-  });
+  }, { shortRoot: true });
 });
 
 // P5 O4 M4 (D11's downgrade residual): before the crossing, a launch of this build seals a grant as a pre-O4 build kept it
@@ -1175,8 +1212,8 @@ const UNIT_SKIP = process.platform !== 'darwin' ? 'a unit mawsd is a LaunchAgent
 const unitEnv = (userData: string): Record<string, string> => ({ MAWS_E2E: '1', CLAUDE_CONFIG_DIR: join(userData, 'claude-config'), MAWS_CLAUDE_USAGE_DIR: join(userData, 'claude-usage'), MAWS_MACHINE_ROLE: 'laptop' });
 const RENDER_PAGE = '<!doctype html><html><head><title>Render</title></head><body style="margin:0;background:#2a6"><p>CROSS_BUILD_RENDER</p></body></html>';
 
-async function withUnit(s: Scratch, build: Build, name: string, body: (unit: UnitDaemon) => Promise<void>): Promise<void> {
-  const unit = await installUnitDaemon({ root: build.root ?? REPO_ROOT, userData: s.userData, label: e2eLabel(runIdOf(process.env), name), env: unitEnv(s.userData) });
+async function withUnit(s: Scratch, build: Build, name: string, body: (unit: UnitDaemon) => Promise<void>, env: Record<string, string> = {} /* P5 O17 M7: the scene's own */): Promise<void> {
+  const unit = await installUnitDaemon({ root: build.root ?? REPO_ROOT, userData: s.userData, label: e2eLabel(runIdOf(process.env), name), env: { ...unitEnv(s.userData), ...env } });
   s.daemons.add(unit.pid);
   try {
     await body(unit);
@@ -1240,4 +1277,80 @@ test('(update, render) this build’s app on the peer’s unit mawsd, which list
       record(said);
     });
   });
+});
+
+// P5 O17 M7 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §A's "any app" cell, R5): an app from before
+// O17 (the peer) over this build's `mawsd`. A private `mawsd` of another build would be restarted by the app's build
+// check, so this build's runs as the profile's unit, as in (update, render). The session starts through the ordinary
+// start path on the cua engine stub (test/support/cua-engine.ts), whose connector dials `mawsd`'s socket for it: with the
+// app attached `mawsd` relays it to the app's own socket (O5 M5), the app makes the tab, the render host starts nothing,
+// and the engine host holds no browser work for it (an app's tabs are never browser work: they keep today's release). At
+// the app's quit the session reads this build's headless route. The app's cua sockets (`<profile>/browser/cua`, with no
+// fallback directory) fit sun_path only under a short root, so the scratch is a short one under /tmp (removed with it). Run on the crossing the
+// landing's gate stages (the peer at O16's merge, both listing host.holder): the handover crossing calls no `awayOnKept`,
+// so this cell stands on its own rather than in it.
+test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd: the agent’s browser relayed to the app’s own tabs, which hold no browser work; at the app’s quit the session reads this build’s headless route', async () => {
+  const { here, peer } = builds();
+  test.skip(hostsBrowserWork(peer) || !hostsBrowserWork(here) || !appObeysConnectors(peer) || !('commands.machine.client' in peer.manifest.entries), `the peer (wire ${wireOf(peer)}) is not an app from O5 M5 to before O17 that this build's mawsd serves`);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(300_000);
+  const pages = await startHeadlessPages();
+  try {
+    await withScratch('xb-o17-app', async (s) => {
+      const bin = writeCuaEngine(join(s.root, 'cua-engine'), { ready: true, retry: true, control: true, lifeMs: 600_000 });
+      await withUnit(s, here, 'xb-o17-app', async (unit) => {
+        const said = [`${peer.label}'s app (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`];
+        const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+        await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+        expect(run.output(), 'the peer’s build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+        // the engine store the unit's engine host reads (unitEnv): the repository trusted, the user's mode `default`
+        const configDir = join(s.userData, 'claude-config');
+        writeFileSync(join(configDir, '.claude.json'), `${JSON.stringify({ projects: { [s.repo]: { hasTrustDialogAccepted: true } } })}\n`);
+        writeFileSync(join(configDir, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`);
+        const reached = await reachMachine(daemonPaths(s.userData), { build: 'e2e-cross-build-o17-app' });
+        if (!reached.ok) throw new Error(`machine.sock: ${reached.state}: ${reached.why}`);
+        const link = reached.link;
+        try {
+          const ask = async <T,>(name: string, input?: unknown): Promise<T> => {
+            const answer = await link.request(name, input, 30_000);
+            if (!answer.ok) throw new Error(`${name}: ${answer.error.code}: ${answer.error.message}`);
+            return answer.value as T;
+          };
+          const browserOf = async (id: AppSessionId) => (await ask<{ browser?: unknown }>('session.capabilities', { appSessionId: id })).browser;
+          const holdOf = async (id: AppSessionId) => (await ask<{ work?: { holds?: { browser?: string } } }>('session.status', { appSessionId: id })).work?.holds?.browser;
+          const project = await ask<{ id: string }>('session.projects.add', { directory: s.repo });
+          const { appSessionId: id } = await ask<{ appSessionId: AppSessionId }>('session.create', { projectId: project.id, location: { kind: 'directory', path: s.repo } });
+          expect(await ask('session.start', { appSessionId: id, message: { content: 'o17 pre-O17 app', display: 'o17 pre-O17 app' }, options: { gateway: 'direct' } })).toMatchObject({ status: 'starting' });
+          await expect.poll(async () => { const st = await ask<{ process: string; turn: unknown; pid: number | null }>('session.status', { appSessionId: id }).catch(() => null); return st !== null && st.process === 'ready' && st.turn === null && st.pid !== null; }, { timeout: 60_000, message: 'the session’s engine ready, its first turn ended' }).toBe(true); // prettier-ignore
+          await expect.poll(() => browserOf(id), { timeout: 30_000, message: 'relayed to the attached pre-O17 app (O5 M5)' }).toEqual({ available: true, viewed: 'local' });
+
+          let cua: ConnectorControl | null = null;
+          await expect.poll(async () => (cua = await connectorControl(s.repo).catch(() => null)) !== null, { timeout: 30_000, message: 'the session’s connector listens on its control socket' }).toBe(true);
+          const agent = cua!;
+          try {
+            await expect.poll(async () => { const answer = await agent.call('tabs.query'); return answer.ok; }, { timeout: 30_000, message: 'cua served through the relay' }).toBe(true); // prettier-ignore
+            await answered('tabs.create in the app', agent.call('tabs.create', { url: pages.url('/') }));
+            expect(await answered('tabs.query', agent.call<unknown[]>('tabs.query')), 'the app holds the agent’s tab').toHaveLength(1);
+            expect(await holdOf(id), 'an app’s tab is no browser work (R5)').toBeUndefined();
+            expect((await ask<{ render: { starts: number } }>('daemon.status')).render.starts, 'the render host started nothing').toBe(0);
+            expect(s.daemonLog(), 'every snapshot this build’s engine host was told, taken').not.toMatch(/\[browser\] host\.browserWork .* failed/);
+            said.push(`  relayed: ${JSON.stringify(await browserOf(id))}; the app's tab holds no browser work; the render host started nothing`);
+
+            await s.quit(run);
+            await expect.poll(() => browserOf(id), { timeout: 30_000, message: 'with the app gone, this build’s headless route' }).toEqual(SCREENCAST);
+            expect(await holdOf(id), 'nothing held once the app’s tab went with it').toBeUndefined();
+            said.push(`  after the app's quit: ${JSON.stringify(await browserOf(id))}, nothing held`);
+          } finally {
+            agent.close();
+          }
+          expect(await ask('session.stop', { appSessionId: id, reason: 'stop' })).toMatchObject({ exited: true });
+        } finally {
+          link.close();
+        }
+        record(said);
+      }, { MAWS_E2E_ENGINE_BIN: bin });
+    }, { shortRoot: true });
+  } finally {
+    await pages.close();
+  }
 });

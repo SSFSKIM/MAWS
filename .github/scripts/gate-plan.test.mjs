@@ -379,9 +379,10 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
   assert.deepEqual(placement(plan({ ...named, HEAD_MESSAGE: 'ci-gate: test\n\nGates: e2e:composer,e2e:layout\nLane: vm' }).outputs), { composer: [vmMac, 30], layout: [vmMac, 30] });
   // The measured groups, which only a run naming them takes; class 1a on the Mac carries the wait too.
   const measured = plan({ ...own, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${own.MEASURED_E2E.split(/\s+/).filter((group) => !own.LIVE_E2E.includes(group)).map((group) => `e2e:${group}`).join(',')}\nRunner: macos\nClass1a: macos` }).outputs;
-  // daemon-idle-aba's three windows take its own 90 minutes (E2E_MINUTES), the home Mac's wait on top.
-  assert.equal(own.E2E_MINUTES, 'daemon-idle-aba=90 p1-live=45');
-  for (const [group, where] of Object.entries(placement(measured))) assert.deepEqual(where, [homeMac, group === 'daemon-idle-aba' ? 100 : UNBUILT_MEASURED.has(group) ? 55 : 70], group);
+  // daemon-idle-aba's three windows take its own 90 minutes (E2E_MINUTES), as daemon-idle-render's three (P5 O17 M7), the
+  // home Mac's wait on top.
+  assert.equal(own.E2E_MINUTES, 'daemon-idle-aba=90 daemon-idle-render=90 p1-live=45');
+  for (const [group, where] of Object.entries(placement(measured))) assert.deepEqual(where, [homeMac, group === 'daemon-idle-aba' || group === 'daemon-idle-render' ? 100 : UNBUILT_MEASURED.has(group) ? 55 : 70], group);
   assert.deepEqual(JSON.parse(measured.timeouts), { static: 40, unit: 40, probes: 40, unit_darwin: 40 });
   // A live run of every live group: all on the home Mac; p1-live, every sitting in one invocation, its own 45 minutes.
   const live = plan({ ...own, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${own.LIVE_E2E.split(/\s+/).map((group) => `e2e:${group}`).join(',')}\nRunner: macos\nLive: yes` }).outputs;
@@ -973,6 +974,7 @@ test("gate.yml carries ci-kit's VM contract line, and keeps its promise: every t
 const LIVENESS_BOUNDS = {
   'e2e/browser-cua.spec.ts': {
     'expect(Date.now() - refusedAt).toBeLessThan(2_000);': 'the refusal of an acting command while a person holds the tab is immediate; 2 s against the command\'s own 3 s timeout tells it from a timeout',
+    "expect(servedAt - lostAt, 'served within cua’s 5 s retry, and the read’s slack').toBeLessThan(5_000 + 3_000);": 'the connector\'s own 5 s retry timer (cua\'s CLIENT_RETRY_MS, P5 O17 M8 scene 2) after the handover closed its connection, then one accept on the app\'s socket, from the loss to the next hello, each timed when observed: a timer, against 3 s of margin; a slower reach is cua waiting another cycle, the finding',
   },
   'e2e/c12-quit.spec.ts': {
     "expect(exitAt - started, 'no stop-all: the quit is the report and the exit').toBeLessThan(PROBE_BOUND_MS + 8_000);": 'the daemon shape\'s quit (P5 O3-D): the same probe and quit path as the embedded bound below, with nothing to stop',

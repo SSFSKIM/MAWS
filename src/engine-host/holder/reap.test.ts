@@ -120,6 +120,9 @@ describe('isVerifiedEmpty', () => {
     ['queued messages', { queue: { length: 1, paused: false } }],
     ['the engine working', { engineState: 'running' as const }],
     ['a process not ready', { process: 'initializing' as const }],
+    // P5 O17 M7 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E): a headless tab's hold, through holdsWork
+    ['a headless tab held', { work: { crons: [], unknown: null, descendants: 0, holds: { browser: 'held' } } }],
+    ['a headless tab it cannot read', { work: { crons: [], unknown: null, descendants: 0, holds: { browser: 'unknown' } } }],
   ])('not with %s', (_what, over) => {
     expect(isVerifiedEmpty(status(over as Partial<EngineSessionStatus>), NONE, 0)).toBe(false);
   });
@@ -150,6 +153,8 @@ describe('no observer ever seen (owner Q1)', () => {
     ['a non-ambient task', (s: ReturnType<typeof scene>) => void (s.status = status({ backgroundTasks: [{ taskId: 't' as never, taskType: 'local_bash', description: 'd', ambient: false }] }))],
     ['a listed cron', (s: ReturnType<typeof scene>) => void (s.status = status({ work: { crons: [{ id: 'c', schedule: '* * * * *', recurring: true, prompt: 'p' }], unknown: null, descendants: 0 } }))],
     ['unknown work', (s: ReturnType<typeof scene>) => void (s.status = status({ work: { crons: [], unknown: 'dirty', descendants: 0 } }))],
+    ['a headless tab held (P5 O17 M7)', (s: ReturnType<typeof scene>) => void (s.status = status({ work: { crons: [], unknown: null, descendants: 0, holds: { browser: 'held' } } }))],
+    ['a headless tab it cannot read (P5 O17 M7)', (s: ReturnType<typeof scene>) => void (s.status = status({ work: { crons: [], unknown: null, descendants: 0, holds: { browser: 'unknown' } } }))],
     ['an unregistered descendant', (s: ReturnType<typeof scene>) => void (s.descendants = 1)],
     ['an unreadable tree', (s: ReturnType<typeof scene>) => void (s.descendants = 'unreadable')],
     ['no row', (s: ReturnType<typeof scene>) => void (s.status = null)],
@@ -173,6 +178,19 @@ describe('no observer ever seen (owner Q1)', () => {
     expect(t.reap.due('budget')).toBe(false); // held at once: not taken
     expect(t.reaped).toEqual([]);
     expect(t.cancelled).toEqual(['budget']);
+  });
+
+  // P5 O17 M7 (Interfaces §E): the budget never takes a session holding a headless tab, held or unknown, at the reap's
+  // step as at its evaluation; with the hold cleared it proceeds
+  it.each(['held', 'unknown'] as const)('a budget reap is held by a headless tab %s, and proceeds once it clears', (browser) => {
+    const s = scene();
+    s.status = status({ work: { crons: [], unknown: null, descendants: 0, holds: { browser } } });
+    expect(s.reap.due('budget')).toBe(false);
+    expect(s.reaped).toEqual([]);
+    expect(s.cancelled).toEqual(['budget']);
+    s.status = status({ work: { crons: [], unknown: null, descendants: 0, holds: {} } });
+    expect(s.reap.due('budget')).toBe(true);
+    expect(s.reaped).toEqual(['budget']);
   });
 
   it('a second due while a reap is under way does nothing and is not taken', () => {

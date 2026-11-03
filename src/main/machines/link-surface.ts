@@ -23,13 +23,15 @@ const LINK_RULES = {
 };
 const CLIENT_RULES = {
   // `maws.*` are the host-to-app bridges, which the machine's own app answers
-  namespaces: ['layout', 'voice', 'browser', 'maws', 'settings', 'catalog', 'connectors', 'delivery', 'library', 'spaces', 'artifacts', 'plugins', 'machines', 'org', 'render', 'remote' /* P5 O7 M2: main's remote lane B adapter to its own pages */],
+  namespaces: ['layout', 'voice', 'browser', 'maws', 'settings', 'catalog', 'connectors', 'delivery', 'library', 'spaces', 'artifacts', 'plugins', 'machines', 'org', 'render', 'remote' /* P5 O7 M2: main's remote lane B adapter to its own pages */, 'browserEngine' /* P5 O17 */],
   // P5 O3-D: `clientPort.request` is the machine's request to the client that asked, answered by that client's own app.
-  // P5 O5 M3: `render.*` go from a profile's `mawsd` to its own render host alone, never over a machine link
+  // P5 O5 M3: `render.*` go from a profile's `mawsd` to its own render host alone, never over a machine link. P5 O17:
+  // `browserEngine.*` likewise, to its own tab engines; and the engine host's `host.browserIdle` is `mawsd`'s own, heard
+  // by no app and no link
   // P5 O16 M3c: `daemon.engineHandover` is a profile's `mawsd` telling its own app why engine-host.sock holds that app's
   // hello (main's start budget and host.status's reason read it); a linked machine's app reaches that engine host
   // through the services front, whose hellos it never holds, as host.supervisorStatus is the app's own
-  names: ['attention.navigate', 'attention.notified', 'engine.budget', 'host.status', 'host.supervisorStatus', 'clientPort.request', 'daemon.engineHandover'],
+  names: ['attention.navigate', 'attention.notified', 'engine.budget', 'host.status', 'host.supervisorStatus', 'clientPort.request', 'daemon.engineHandover', 'host.browserIdle'],
 };
 
 const placedBy = (rules: { namespaces: string[]; names: string[] }) => (name: string) => rules.names.includes(name) || rules.namespaces.includes(name.slice(0, name.indexOf('.')));

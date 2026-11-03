@@ -28,6 +28,7 @@ export class FakeCdp extends EventEmitter {
   readonly sent: { method: string; params: unknown; sessionId: string | undefined }[] = [];
   readonly timeline: string[] = []; // `send <method>` and `reply <method>`, in the order they happened
   readonly hang = new Set<string>();
+  readonly failures = new Map<string, string>(); // a method's error, as Chromium rejects a command
   readonly replies: Record<string, unknown> = {}; // a method's canned reply, else `{echoed: method}`
   // The size the page's layout viewport reads (CSS px), which Page.getLayoutMetrics answers when set: a case moves it
   // as Chromium would, the clear's restored size reaching the page after the clear's reply.
@@ -62,6 +63,8 @@ export class FakeCdp extends EventEmitter {
     this.sent.push({ method, params, sessionId });
     this.timeline.push(`send ${method}`);
     if (this.hang.has(method)) return new Promise(() => {});
+    const failure = this.failures.get(method);
+    if (failure !== undefined) return Promise.reject(new Error(failure));
     const reply = () => {
       this.timeline.push(`reply ${method}`);
       if (method === 'Page.getLayoutMetrics' && this.viewport) {
@@ -144,10 +147,12 @@ export function testPeer(): NonNullable<CuaBackendDeps['peer']> {
   return { addon, trustedRoots: new Set<ProcessRoot>([rootOf(process.pid, addon)!]) };
 }
 
-// `peer: null` starts the backend without the option at all.
-export function harness({ presence = false, peer = testPeer() }: { presence?: boolean; peer?: CuaBackendDeps['peer'] | null } = {}) {
+// `peer: null` starts the backend without the option at all. A `peer` naming no platform judges by darwin's policy (the
+// process tree through the addon) on whatever machine runs the test; `prepare` runs on the userData before the start.
+export function harness({ presence = false, peer = testPeer(), prepare }: { presence?: boolean; peer?: CuaBackendDeps['peer'] | null; prepare?(root: string): void } = {}) {
   const root = mkdtempSync('/tmp/mcua-');
   roots.push(root);
+  prepare?.(root);
   const emitted: { name: EventName; payload: unknown }[] = [];
   const emit = <N extends EventName>(name: N, payload: EventPayload<N>) => void emitted.push({ name, payload });
   const store: TabStore = new TabStore({
@@ -164,7 +169,7 @@ export function harness({ presence = false, peer = testPeer() }: { presence?: bo
   const recorded: MawsDownloadRecorded[] = [];
   const logs: string[] = [];
   const backend = startCuaBackend({
-    store, windows: () => [{ id: 7, focused: true }], reaches, userData: root, version: '1.2.3', log: (line) => void logs.push(line), ...(peer && { peer }),
+    store, windows: () => [{ id: 7, focused: true }], reaches, userData: root, version: '1.2.3', log: (line) => void logs.push(line), ...(peer && { peer: { platform: 'darwin', ...peer } }),
     ...(controls && cursor && { presence: { controls, cursor }, emit, recordDownload: async (download: MawsDownloadRecorded) => void recorded.push(download) }),
   });
   backend.onChange((tabId) => changes.push(tabId));

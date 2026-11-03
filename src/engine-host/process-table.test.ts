@@ -1623,3 +1623,237 @@ describe('process table (P5 O2 M2): the strict, interest-keyed idle release', ()
   });
 });
 // P5 O2 M2 end
+
+// P5 O17 M7 start (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M7 and Interfaces §E; D20): the idle exception
+// for a headless tab's hold. The hold is work everywhere (budget.ts `holdsWork`) but the idle release's clock: a session
+// idle in every way but its hold starts its clock, and at its due time the table asks once (`onBrowserIdleDue`, which
+// browser-work.ts turns into `host.browserIdle`) and waits, with no timer, until the status change that clears the hold
+// hands it to its reap without restarting its clock. The rows are real sessions; the hold is set through the session.
+describe('process table (P5 O17 M7): the idle exception for a headless tab', () => {
+  const IDLE_MS = 10 * 60_000;
+  const T0 = new Date('2026-11-02T10:00:00.000Z');
+  type Scripted = ReturnType<typeof scriptedSession>;
+  const RESULT = { type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed' };
+
+  async function idleTable(names: string[]) {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(T0);
+    const logs: string[] = [];
+    const table = new ProcessTable({ ps: async () => '', log: (line) => void logs.push(line) });
+    const asked: string[] = [];
+    table.onBrowserIdleDue((appSessionId) => void asked.push(appSessionId));
+    const s: Record<string, Scripted> = {};
+    for (const [i, name] of names.entries()) {
+      s[name] = scriptedSession({ spec: { appSessionId: name as AppSessionId }, transport: { pid: 900 + i }, responder: handshakeResponder({ end_session: () => null }) });
+      table.reserve(name as AppSessionId, () => s[name]!.session);
+    }
+    await Promise.all(Object.values(s).map((x) => x.session.start()));
+    await vi.advanceTimersByTimeAsync(0);
+    return { table, s, asked, logs };
+  }
+  const lifecycle = (x: Scripted) => (x.transport.requestsOf('end_session').length > 0 ? 'released' : x.session.lifecycle);
+  async function humanTurn(x: Scripted): Promise<void> {
+    const { messageUuid } = await x.session.send('go');
+    x.transport.push({ type: 'command_lifecycle', command_uuid: messageUuid, state: 'started', uuid: `lc-${messageUuid}`, session_id: 's' });
+    x.transport.push({ ...RESULT, user_message_uuids: [messageUuid], origin: { kind: 'human' } });
+    x.transport.push({ type: 'command_lifecycle', command_uuid: messageUuid, state: 'completed', uuid: `lc-done-${messageUuid}`, session_id: 's' });
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  it('a held row idle in every other way starts its clock, asks once at its due time, waits with no timer, and is released at the clear without its clock restarting', async () => {
+    const { table, s, asked, logs } = await idleTable(['a']);
+    s.a!.session.setBrowserHold('held');
+    expect(s.a!.session.status()).toMatchObject({ work: { holds: { browser: 'held' } }, keepAlive: ['background_tasks'] });
+    // the release's own timer, read directly: the table's other timers (a reap's ladder, a sample) come and go meanwhile
+    const idleTimer = () => (table as unknown as { idle: { timer: unknown } }).idle.timer;
+    expect(idleTimer()).toBeNull();
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    expect(idleTimer()).not.toBeNull(); // its clock runs
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+    expect(asked).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(asked).toEqual(['a']);
+    expect(lifecycle(s.a!)).toBe('ready');
+    expect(idleTimer()).toBeNull(); // waiting: no timer, so no `fire` loop
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(asked).toEqual(['a']); // once for the due period
+    expect(lifecycle(s.a!)).toBe('ready');
+    expect(logs).toEqual([expect.stringContaining('idle release of a: due, held by its headless browser work')]);
+    s.a!.session.setBrowserHold(null); // mawsd's next snapshot, after it closed the tabs
+    await vi.advanceTimersByTimeAsync(0);
+    expect(lifecycle(s.a!)).toBe('released'); // at once, its clock not restarted
+  });
+
+  it('keeps no browser state on an ordinary row: the waits exist only while some row waits', async () => {
+    const { table, s } = await idleTable(['a', 'b']);
+    const idle = (table as unknown as { idle: { rows: Map<unknown, object>; waits: Map<unknown, boolean> | null } }).idle;
+    const clockKeys = () => [...idle.rows.values()].map((clock) => Object.keys(clock).sort());
+    s.a!.session.setBrowserHold('held');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    expect(idle.waits).toBeNull();
+    expect(clockKeys()).toEqual([['appSessionId', 'kept', 'keptClearedAt', 'since'], ['appSessionId', 'kept', 'keptClearedAt', 'since']]);
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(idle.waits?.size).toBe(1); // a waits; b was released as idle
+    s.a!.session.setBrowserHold(null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(idle.waits).toBeNull();
+  });
+
+  it('`unknown` is waited on the same way', async () => {
+    const { table, s, asked } = await idleTable(['a']);
+    s.a!.session.setBrowserHold('unknown:lost');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(asked).toEqual(['a']);
+    expect(lifecycle(s.a!)).toBe('ready');
+    s.a!.session.setBrowserHold(null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(lifecycle(s.a!)).toBe('released');
+  });
+
+  it('a turn between the ask and the clear restarts the clock as today: the next due period asks again', async () => {
+    const { table, s, asked } = await idleTable(['a']);
+    s.a!.session.setBrowserHold('held');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(asked).toEqual(['a']);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await humanTurn(s.a!);
+    s.a!.session.setBrowserHold(null); // cleared after the turn: the clock started again at the turn's end
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+    expect(lifecycle(s.a!)).toBe('ready');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(lifecycle(s.a!)).toBe('released');
+    expect(asked).toEqual(['a']);
+  });
+
+  it('a turn, then the hold kept: the next due period asks again', async () => {
+    const { table, s, asked } = await idleTable(['a']);
+    s.a!.session.setBrowserHold('held');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    await humanTurn(s.a!);
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+    expect(asked).toEqual(['a']);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(asked).toEqual(['a', 'a']);
+  });
+
+  it('interest between the ask and the clear ends the wait; its end restarts the clock and the next due asks again', async () => {
+    const { table, s, asked } = await idleTable(['a']);
+    s.a!.session.setBrowserHold('held');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(asked).toEqual(['a']);
+    const app = endableClientRef('1');
+    table.setInterest(app, ['a'] as AppSessionId[]);
+    s.a!.session.setBrowserHold(null); // cleared while interest holds it: no release
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    s.a!.session.setBrowserHold('held');
+    app.end();
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+    expect(asked).toEqual(['a']);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(asked).toEqual(['a', 'a']);
+    expect(lifecycle(s.a!)).toBe('ready');
+  });
+
+  it('a kept row never asks, held or not', async () => {
+    const { table, s, asked } = await idleTable(['a']);
+    s.a!.session.setBrowserHold('held');
+    s.a!.session.setKept(true);
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(asked).toEqual([]);
+    expect(lifecycle(s.a!)).toBe('ready');
+  });
+
+  it('a Keep mark set while it waits ends the wait; its clearing restarts the clock', async () => {
+    const { table, s, asked } = await idleTable(['a']);
+    s.a!.session.setBrowserHold('held');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    s.a!.session.setKept(true);
+    s.a!.session.setBrowserHold(null);
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(lifecycle(s.a!)).toBe('ready');
+    s.a!.session.setKept(false);
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+    expect(lifecycle(s.a!)).toBe('ready');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(lifecycle(s.a!)).toBe('released');
+    expect(asked).toEqual(['a']);
+  });
+
+  it('under an armed exit-when-idle, the same path, interest ignored', async () => {
+    const { table, s, asked } = await idleTable(['a']);
+    table.setInterest(endableClientRef('1'), ['a'] as AppSessionId[]);
+    s.a!.session.setBrowserHold('held');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true, ignoreInterest: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(asked).toEqual(['a']);
+    expect(lifecycle(s.a!)).toBe('ready');
+    s.a!.session.setBrowserHold(null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(lifecycle(s.a!)).toBe('released');
+  });
+
+  it('two sessions\' holds are independent', async () => {
+    const { table, s, asked } = await idleTable(['a', 'b']);
+    s.a!.session.setBrowserHold('held');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(asked).toEqual(['a']);
+    expect([lifecycle(s.a!), lifecycle(s.b!)]).toEqual(['ready', 'released']);
+    s.a!.session.setBrowserHold(null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(lifecycle(s.a!)).toBe('released');
+  });
+
+  it('a fresh link\'s first snapshot asks again for a row still due and held, once; a row not waiting is not asked', async () => {
+    const { table, s, asked } = await idleTable(['a', 'b']);
+    s.a!.session.setBrowserHold('held');
+    s.b!.session.setBrowserHold('held');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 60_000);
+    await humanTurn(s.b!); // b's clock starts again: not due yet
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(asked).toEqual(['a']);
+    table.browserSnapshotApplied();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked).toEqual(['a', 'a']);
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 60_000 - 1);
+    expect(asked).toEqual(['a', 'a']);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(asked).toEqual(['a', 'a', 'b']);
+  });
+
+  it('a frozen host asks nothing: neither at a due time nor after a snapshot', async () => {
+    const { table, s, asked } = await idleTable(['a']);
+    s.a!.session.setBrowserHold('held');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
+    table.freezeForHandover();
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    table.browserSnapshotApplied();
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(asked).toEqual([]);
+    expect(lifecycle(s.a!)).toBe('ready');
+  });
+
+  it('a waiting row frozen after its ask is not asked again', async () => {
+    const { table, s, asked } = await idleTable(['a']);
+    s.a!.session.setBrowserHold('held');
+    table.setIdleRelease({ idleMs: IDLE_MS, active: true });
+    await vi.advanceTimersByTimeAsync(IDLE_MS);
+    expect(asked).toEqual(['a']);
+    table.freezeForHandover();
+    table.browserSnapshotApplied();
+    s.a!.session.setBrowserHold(null);
+    await vi.advanceTimersByTimeAsync(10 * IDLE_MS);
+    expect(asked).toEqual(['a']);
+    expect(lifecycle(s.a!)).toBe('ready'); // the successor's to release (O16 D61(3))
+  });
+});
+// P5 O17 M7 end

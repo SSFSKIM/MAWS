@@ -21,13 +21,24 @@
 // work until it clears: `observer_unhealthy`, while an observer seen on the process is silent or gone (holder design
 // §3.2 step 1); `reap_term_ignored`, after an idle reap's end_session and SIGTERM were both ignored, until the next Stop;
 // `descendants_unreadable`, while the process tree under the engine cannot be read.
+// P5 O17 M7 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E): and the holds the engine host is told of
+// rather than reads (`holds`): a headless tab's (`browser`, fix 3: tagged by its cause), set by `mawsd`'s snapshots through the session (browser-work.ts), which
+// nothing here clears.
 import type { CronRecord } from '@shared/engine/session-state-store';
+import type { EngineSessionStatus } from '@shared/engine/status';
 
 export type LaunchKind = 'fresh' | 'resumed_after_release' | 'resumed' | 'adopted';
 export interface SessionCron { id: string; schedule: string; recurring: boolean; prompt: string }
 export type CronRead = SessionCron[] | 'unreadable';
 export const CRON_TOOLS: ReadonlySet<string> = new Set(['CronCreate', 'CronDelete', 'ScheduleWakeup']);
-export interface Work { crons: SessionCron[]; unknown: string | null } // unknown null: known
+export type Holds = NonNullable<NonNullable<EngineSessionStatus['work']>['holds']>; // P5 O17 M7
+export type BrowserHold = NonNullable<Holds['browser']>; // P5 O17 M7: 'held' | 'unknown'
+// P5 O17 M7 fix 3: the row's browser entry, its `unknown` tagged by its cause: an adoption's (reserved while this host
+// has had no capable client) or a lost link's (a capable link's row, held or not yet told, whose link ended). Published
+// as its hold ('held' | 'unknown'); the cause is the engine host's alone.
+export type BrowserEntry = 'held' | 'unknown:adopted' | 'unknown:lost';
+export const browserHoldOf = (entry: BrowserEntry): BrowserHold => (entry === 'held' ? 'held' : 'unknown');
+export interface Work { crons: SessionCron[]; unknown: string | null; holds?: Holds } // unknown null: known; holds only while one is set
 
 type Crons = { state: 'known' | 'dirty'; list: SessionCron[] } | { state: 'unknown'; why: string; list: SessionCron[] };
 const copy = (crons: readonly SessionCron[]): SessionCron[] => crons.map((c) => ({ ...c }));
@@ -41,6 +52,7 @@ export class WorkState {
   private observerUnhealthy = false;
   private reapTermIgnored = false;
   private descendantsUnreadable = false;
+  browser: BrowserEntry | undefined = undefined; // P5 O17 M7: a headless tab's entry, set by the session for `mawsd`'s snapshot; nothing while none is
 
   constructor(kind: LaunchKind) {
     this.crons = kind === 'fresh' || kind === 'resumed_after_release' ? { state: 'known', list: [] } : { state: 'unknown', why: kind, list: [] };
@@ -124,7 +136,7 @@ export class WorkState {
       : this.durable === 'unreadable' ? 'durable_unreadable'
       : this.tasksUnknown
         ?? (this.observerUnhealthy ? 'observer_unhealthy' : this.reapTermIgnored ? 'reap_term_ignored' : this.descendantsUnreadable ? 'descendants_unreadable' : null); // O16 M5
-    return { crons, unknown };
+    return { crons, unknown, ...(this.browser !== undefined && { holds: { browser: browserHoldOf(this.browser) } }) }; // P5 O17 M7
   }
 }
 

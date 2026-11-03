@@ -1,0 +1,26 @@
+{
+  "source": "Recorded 2026-11-01 from cua's host: the cua plugin 0.20.5 (commit 18cad987) in client mode, its browser service's create_tab and then tab_screenshot (the tab's first CDP use, then a later one), against cua's own fake MAWS peer (test/helpers/fake-maws-peer.mjs) answering as its contract test 4 does (test/chrome-client-mode-contract.test.mjs, cua #251). Each entry is one frame cua wrote to the MAWS socket: a primitive, or a debugger.sendCommand on the tab's own session by its CDP method and params. P5 O17 M2 replays it through MAWS's primitive server (src/main/browser/cua/event-scope.test.ts).",
+  "creation": [
+    { "primitive": "windows.query" },
+    { "primitive": "tabs.create", "params": { "url": "about:blank", "windowId": 1, "group": { "key": "session-a", "title": "cua" }, "guard": true } }
+  ],
+  "firstUse": [
+    { "primitive": "tabs.guard", "params": { "tabId": 100 } },
+    { "primitive": "debugger.attach", "params": { "tabId": 100 } }
+  ],
+  "attachPreamble": [
+    { "method": "Emulation.setFocusEmulationEnabled", "params": { "enabled": true } },
+    { "method": "Page.enable" },
+    { "method": "Runtime.enable" },
+    { "method": "Fetch.enable", "params": { "patterns": [{ "requestStage": "Response", "resourceType": "Document" }] } },
+    { "method": "Target.setAutoAttach", "params": { "autoAttach": true, "flatten": true, "waitForDebuggerOnStart": false, "filter": [{ "type": "iframe", "exclude": false }] } }
+  ],
+  "screenshot": [
+    { "method": "Runtime.evaluate", "params": { "expression": "window.devicePixelRatio", "returnByValue": true } },
+    { "method": "Page.getLayoutMetrics" },
+    { "method": "Page.startScreencast", "params": { "everyNthFrame": 1, "format": "jpeg", "maxHeight": 600, "maxWidth": 800, "quality": 80 } },
+    { "awaitEvent": "Page.screencastFrame" },
+    { "method": "Page.stopScreencast" },
+    { "method": "Page.screencastFrameAck", "params": { "sessionId": 1 } }
+  ]
+}

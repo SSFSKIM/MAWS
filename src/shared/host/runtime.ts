@@ -34,7 +34,9 @@ export type HostEmit<R extends WireRegistry = typeof REGISTRY> = <N extends Even
 // P3-A M4: and the document ports main posts on the parent port (`onDocPort`)
 // P5 O3-D M3: and the app's presence with the signal that sets it (`presence`, `setAttachment`; AppPresence below)
 // P5 O4 M2: and the connectors' presence (`connectorsPresence`, below)
-export type HostClientHooks = Pick<HostRuntime, 'onConnect' | 'hasClient' | 'onClientGone' /* E4c */ | 'onDocPort' /* P3-A M4 */ | 'presence' | 'setAttachment' /* P5 O3-D M3 */ | 'connectorsPresence' /* P5 O4 M2 */>;
+// P5 O17 M7: and whether the served client declared `host.attachment` (`declaresAttachment`, below); its landing fix
+// wave: and each declaring client's pid as its hello gave it (`onDeclaringHello`, below)
+export type HostClientHooks = Pick<HostRuntime, 'onConnect' | 'hasClient' | 'onClientGone' /* E4c */ | 'onDocPort' /* P3-A M4 */ | 'presence' | 'setAttachment' /* P5 O3-D M3 */ | 'connectorsPresence' /* P5 O4 M2 */ | 'declaresAttachment' | 'onDeclaringHello' /* P5 O17 M7 */>;
 // Registration is synchronous; an optional returned startup promise holds request admission, not the handshake.
 export type HostRegister<R extends WireRegistry = typeof REGISTRY> = (on: HostOn<R>, emit: HostEmit<R>, client: HostClientHooks) => void | Promise<void>;
 
@@ -73,8 +75,9 @@ export function thrownError(error: unknown): IpcError {
 // (X13 as made precise in the E10 execution document, §Design 3).
 export interface HostRuntime {
   // a second serve replaces the port (the previous client was closed by the caller); P5 O3-D M3: `peer` is what the
-  // client's hello listed of itself, over a socket (a MessagePort's client lists nothing)
-  serve(port: HostPort, peer?: { capabilities: readonly string[] }): void;
+  // client's hello listed of itself, over a socket (a MessagePort's client lists nothing); P5 O17 M7's landing fix
+  // wave: and its pid (the hello's `appPid`)
+  serve(port: HostPort, peer?: { capabilities: readonly string[]; pid?: number }): void;
   detach(): void; // no client: emits return false and are dropped
   setReady(): void; // the client sent `ready`: the onConnect hooks run synchronously, then events flow
   hasClient(): boolean; // connected and ready
@@ -122,9 +125,13 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
   // attached once it said so and while it is the ready client; any other is attached while it is the ready client, as
   // E10 keyed every app-bound gate. Presence's gone hooks fire at each fall from attached, whatever caused it.
   let declaring = false; // the served client listed ATTACHMENT_CAPABILITY in its hello
+  let declared: readonly string[] = []; // P5 O17 M7 fix 2: the rest of what that hello listed (read by declaresAttachment)
   let signalled = false; // its last `host.attachment`; false at its connect and at its connection's end
   const attached = () => port !== null && ready && (!declaring || signalled);
   const { presence, fell: presenceFell } = presenceOf(attached, 'an app-gone hook');
+  const declaresAttachment = (also?: string) => port !== null && declaring && (also === undefined || declared.includes(also)); // P5 O17 M7; fix 2: `also`
+  const declaringHelloHooks: ((pid: number) => void)[] = []; // P5 O17 M7 landing fix wave
+  const onDeclaringHello = (hook: (pid: number) => void) => void declaringHelloHooks.push(hook);
   const setAttachment = (value: boolean): AttachmentSignal => {
     if (!port || !declaring) return 'refused';
     if (signalled === value) return 'unchanged';
@@ -219,7 +226,7 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
     }
   };
   // P3-A M4 end
-  const startup = register(on as HostOn<R>, emit as HostEmit<R>, { onConnect, hasClient, onClientGone /* E4c */, onDocPort /* P3-A M4 */, presence, setAttachment /* P5 O3-D M3 */, connectorsPresence /* P5 O4 M2 */ });
+  const startup = register(on as HostOn<R>, emit as HostEmit<R>, { onConnect, hasClient, onClientGone /* E4c */, onDocPort /* P3-A M4 */, presence, setAttachment /* P5 O3-D M3 */, connectorsPresence /* P5 O4 M2 */, declaresAttachment, onDeclaringHello /* P5 O17 M7 */ });
   // One shared admission hold. The register owns its bound and logging; even rejection must not wedge the host.
   // Clearing it restores synchronous handler admission instead of awaiting a fulfilled promise on every request.
   let admission: Promise<void> | null = null;
@@ -255,12 +262,23 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
       port = p;
       ready = false; // E10
       declaring = peer?.capabilities.includes(ATTACHMENT_CAPABILITY) ?? false; // P5 O3-D M3
+      declared = declaring ? (peer?.capabilities ?? []) : []; // P5 O17 M7 fix 2
       declaringConnectors = peer?.capabilities.includes(CONNECTORS_CAPABILITY) ?? false; // P5 O4 M2
       signalled = false;
       endClients(); // P5 O1 M5: the replaced connection's clients end with it
       const served = (clients = remoteClients(++connections));
       if (replaced) clientGone(); // E4c
       presencesFell(wasAttached); // P5 O3-D M3
+      // P5 O17 M7 landing fix wave: before any of its lines is read
+      if (declaring && peer?.pid !== undefined) {
+        for (const hook of declaringHelloHooks) {
+          try {
+            hook(peer.pid);
+          } catch (error) {
+            console.error('[host] a declaring-hello hook failed', error);
+          }
+        }
+      }
       p.on('message', ({ data }) => {
         // E10: the client's ready line; one from a port this runtime no longer serves is stale and ignored
         const ready = readTolerant(HostReadySchema, data); // P5 O1 M6: this and the envelope below read tolerantly
@@ -309,6 +327,8 @@ export function createHostRuntime<R extends WireRegistry = typeof REGISTRY>(regi
     presence, // P5 O3-D M3
     setAttachment, // P5 O3-D M3
     connectorsPresence, // P5 O4 M2
+    declaresAttachment, // P5 O17 M7
+    onDeclaringHello, // P5 O17 M7 landing fix wave
   };
 
   async function answer({ id, name, input }: HostRequest, ctx: HandlerContext, source: HostPort): Promise<HostMessage | undefined> {
@@ -421,6 +441,13 @@ export type AttachmentSignal = 'refused' | 'changed' | 'unchanged';
 export interface HostRuntime {
   presence: AppPresence;
   setAttachment(attached: boolean): AttachmentSignal; // the served client's signal (host.attachment's handler)
+  // P5 O17 M7 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E): whether a client is served whose hello
+  // listed `host.attachment` (`mawsd`'s permanent link); fix 2: and, with `also`, listed that capability too (`mawsd`'s
+  // `host.browserWork`: it tells browser work, the one client `host.browserWork` is taken from)
+  declaresAttachment(also?: string): boolean;
+  // P5 O17 M7's landing fix wave: each served client whose hello listed `host.attachment` and gave its pid (over a
+  // socket), told synchronously at its serve, before any of its lines is read: browser work's producer
+  onDeclaringHello(hook: (pid: number) => void): void;
 }
 // P5 O3-D M3 end
 
