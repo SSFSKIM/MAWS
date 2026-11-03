@@ -8,7 +8,8 @@
 // So the endpoint bounds the acquisition itself, from the call's arrival at the gate (its authorization counted), at
 // ACQUIRE_WITHIN_MS: ACQUIRE_MARGIN_MS under the device's deadline, for the call's way here and its answer's way back (the
 // margin src/mawsd/discovery-wake.ts leaves under the same deadline). Past it the call answers `timeout` (the device's
-// own word at its deadline), and what the host answers after it is let go of here, at once, under the channel's ref.
+// own word at its deadline), and what the host answers after it is let go of here, at once, under the channel's ref. Past it is
+// judged by the clock at the answer's arrival as well as by a timer, since a stalled event loop runs the answer first.
 export const ACQUIRE_WITHIN_MS = 8_000;
 export const ACQUIRE_MARGIN_MS = 2_000;
 
@@ -18,7 +19,9 @@ export const LATE = Symbol('late');
 /**
  * `ask`'s answer if it settles by `by` (a time on `now`'s clock), else LATE, decided once: from that step on the answer is
  * `late`'s, whenever it comes, null for one that failed or was never asked (`by` passed before it could be). A rejection
- * within the bound rejects.
+ * within the bound rejects. The bound is judged by the clock at the moment the answer arrives as well as by the timer: an
+ * event loop that stalled across `by` runs the answer's continuation ahead of the overdue timer, and an answer then is
+ * late (the device's deadline has passed with it) whichever of the two runs first.
  */
 export function within<T>(by: number, now: () => number, ask: () => Promise<T>, late: (answer: T | null) => void): Promise<T | typeof LATE> {
   if (now() >= by) {
@@ -39,13 +42,19 @@ export function within<T>(by: number, now: () => number, ask: () => Promise<T>, 
         if (decided) return;
         decided = true;
         clearTimeout(timer);
-        resolve(answer);
+        if (now() >= by) {
+          resolve(LATE);
+          late(answer);
+        } else resolve(answer);
       },
       (error: unknown) => {
         if (decided) return;
         decided = true;
         clearTimeout(timer);
-        reject(error);
+        if (now() >= by) {
+          resolve(LATE);
+          late(null);
+        } else reject(error);
       },
     );
   });
