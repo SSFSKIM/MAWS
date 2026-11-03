@@ -21,10 +21,14 @@
 //   that artifact in the step that is decided: dropped here and released on the host.
 // - Bounded: at most ASSET_HOLDS_KEPT holds a channel, those being taken counted; one past it is refused `busy` before
 //   the host is asked.
+// - A hold is taken within its call's bound (acquire.ts; P5 O7 M5c review 1): the device gives up on the call at its
+//   deadline, so one the host answers past the bound is released at once and the call answers `timeout`; one whose bound
+//   passed while it was authorized is never asked of the host. Its count is held while the host's answer is out.
 import type { ClientRef } from '@shared/ipc/client';
 import type { ArtifactRanks } from './artifacts';
 import type { AuthorizeRequest, Decision, Who } from './authorize';
 import type { RemoteChannel } from './channels';
+import { LATE, within } from './acquire';
 import type { EndpointServices } from './services';
 import { RECHECK_RETRY_MS } from './subscriptions';
 
@@ -58,6 +62,9 @@ type Held = { groups: Map<string, Group>; kept: number; taking: number };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const asRefusal = (code: string) => (code === 'host_unavailable' || code === 'timeout' ? 'unavailable' : code);
+type Response = Awaited<ReturnType<EndpointServices['dispatch']>>;
+/** The hold a host's answer names, or null. */
+const holdIdOf = (response: Response): string | null => (response.ok && isObject(response.value) && typeof response.value.assetHoldId === 'string' ? response.value.assetHoldId : null);
 
 export class AssetHolds {
   readonly #ctx: AssetHoldsContext;
@@ -73,25 +80,32 @@ export class AssetHolds {
     this.#offDropped = ctx.artifacts.onDropped(() => this.#moved());
   }
 
-  /** An authorized `artifacts.holdAssets {artifactId, refs}`: taken on the engine host and kept for the channel. */
-  async hold(channel: RemoteChannel, input: unknown): Promise<Result> {
+  /**
+   * An authorized `artifacts.holdAssets {artifactId, refs}`: taken on the engine host by `by` (its call's bound, acquire.ts)
+   * and kept for the channel.
+   */
+  async hold(channel: RemoteChannel, input: unknown, by: number): Promise<Result> {
     const artifactId = isObject(input) ? input.artifactId : undefined;
     const refs = isObject(input) && Array.isArray(input.refs) ? (input.refs as string[]) : undefined;
     if (typeof artifactId !== 'string' || refs === undefined) return { ok: false, code: 'malformed' };
     const held = this.#held(channel);
     if (held === null) return { ok: false, code: 'unavailable' };
     if (held.kept + held.taking >= ASSET_HOLDS_KEPT) return { ok: false, code: 'busy' };
-    held.taking++;
     const upstream = this.#upstream;
-    let response: Awaited<ReturnType<EndpointServices['dispatch']>>;
-    try {
-      response = await this.#ctx.dispatch('engine-host', 'artifacts.holdAssets', { artifactId, refs }, channel.client);
-    } finally {
-      held.taking--;
-    }
+    const ask = () => {
+      held.taking++;
+      return this.#ctx.dispatch('engine-host', 'artifacts.holdAssets', { artifactId, refs }, channel.client).finally(() => held.taking--);
+    };
+    // answered past the bound, its device gone: released at once (a host link that went took it with its connection)
+    const late = (answer: Response | null) => {
+      const id = answer === null ? null : holdIdOf(answer);
+      if (id !== null && upstream === this.#upstream) this.#release(id, 'answered past its call’s bound');
+    };
+    const response = await within(by, () => this.#ctx.now(), ask, late);
+    if (response === LATE) return { ok: false, code: 'timeout' };
     if (!response.ok) return { ok: false, code: asRefusal(response.error.code) };
-    const assetHoldId = isObject(response.value) ? response.value.assetHoldId : undefined;
-    if (typeof assetHoldId !== 'string') return { ok: false, code: 'unavailable' };
+    const assetHoldId = holdIdOf(response);
+    if (assetHoldId === null) return { ok: false, code: 'unavailable' };
     // Kept or let go in this one step: a host link that went took it with its connection; a channel that ended meanwhile
     // releases it at once.
     if (upstream !== this.#upstream) return { ok: false, code: 'unavailable' };

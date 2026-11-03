@@ -20,7 +20,7 @@ import { OFFERS } from '../../src/endpoint/offers';
 import type { SessionRecord } from '../../src/endpoint/sources';
 import { createFilesService } from '../../src/services/files/service';
 import { registerLibraryReads } from '../../src/services/library/files';
-import { act, done, evs, makeOrg, openRemote, startEndpoint, stopAll, until, waitFor, type Fixture, type HostSession, type Msg, type Org, type Remote } from './sub-harness';
+import { act, done, evs, makeOrg, openRemote, startEndpoint, stopAll, until, waitFor, type Fixture, type HostSession, type Msg, type Org, type Remote, type StartOptions } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -92,8 +92,8 @@ function session(f: Fixture, app: string, owners: string[], fields: Partial<Sess
 }
 
 /** B owns `app-b` and its artifact `held`; `app-2` is the machine owners', and so is its artifact `other`. */
-async function setup(options: { capabilities?: string[] } = {}) {
-  const f = await startEndpoint(org, started);
+async function setup(options: { capabilities?: string[] } = {}, start: StartOptions = {}) {
+  const f = await startEndpoint(org, started, start);
   session(f, 'app-b', [org.B]);
   session(f, 'app-2', ['@machine']);
   const held = randomUUID();
@@ -367,8 +367,8 @@ describe('M5c’s rows', () => {
   }
 
   /** A shares `app-shared` (and its artifact `shared`) with B at `grade`; B owns `app-b` and `held`; `other` is the owners'. */
-  async function scene(grade: 'view' | 'converse' = 'view') {
-    const { f, held, other, a, b } = await setup();
+  async function scene(grade: 'view' | 'converse' = 'view', start: StartOptions = {}) {
+    const { f, held, other, a, b } = await setup({}, start);
     const shared = randomUUID();
     session(f, 'app-shared', ['@machine'], { shares: [{ member: org.B, grade }] });
     f.host.artifact(shared, ['app-shared']);
@@ -418,6 +418,28 @@ describe('M5c’s rows', () => {
     expect(codeOf(await call(b, 'connectors.visibility', { leaseId, visible: false }))).toBe('grade'); // closed: no longer held
     // every lease command reached the machine under the channel's one ref
     expect(new Set(asked.map((x) => x.client)).size).toBe(1);
+  });
+
+  // P5 O7 M5c review 1: the device forgets a call at its link's deadline, so a lease opened after it would reach no one
+  // and live until the channel ends, spending its bound (acquire.ts)
+  it('bound an open under the device’s call deadline: one the machine answers past it is `timeout`, its lease closed at once under the channel’s ref', async () => {
+    const { f, shared, b, asked } = await scene('view', { acquireWithinMs: 1_000 });
+    let answer!: () => void;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
+    const leaseId = randomUUID();
+    f.spine.handle('connectors.open', async (_input, context) => {
+      asked.push({ name: 'connectors.open', input: {}, client: context.client });
+      await answered;
+      return { leaseId };
+    });
+    expect(await call(b, 'connectors.open', { artifactId: shared })).toMatchObject({ ok: false, error: { code: 'timeout' } });
+    answer();
+    const closed = await until(() => asked.find((x) => x.name === 'connectors.close' && x.input.leaseId === leaseId), 'the late lease closed');
+    expect(closed.client).toBe(asked.find((x) => x.name === 'connectors.open')?.client);
+    expect(codeOf(await call(b, 'connectors.declare', { leaseId, tools: [] }))).toBe('grade'); // never the channel's
+    // its reservation given back: the channel opens as ever
+    machineServices(f);
+    await open(b, shared);
   });
 
   it('run a `converse` holder’s tool call once under `machine.op`, claimed on the artifact, with no step-up and the call’s session left out', async () => {

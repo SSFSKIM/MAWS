@@ -45,10 +45,14 @@
 //     is the endpoint's own: the device's window report, `connectors.windowShown` under the channel's ref.
 //   - P5 O7 M5c round 3: `artifacts.holdAssets` and `artifacts.releaseAssets` are the endpoint's own too: a remote
 //     dashboard's snapshot holds, taken on the engine host and kept per channel (asset-holds.ts).
+//   - P5 O7 M5c review 1: an acquisition (`connectors.open`, `artifacts.holdAssets`) is bounded from the call's arrival
+//     under the device's call deadline (acquire.ts): past it the call answers `timeout`, and what the machine answers
+//     after it is let go of at once (the lease closed, the hold released) under the channel's ref.
 // Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
 // `too-large`. For a device that listed `rl2.bytes` (P5 O7 M5a), the input came decoded (gate.ts) and the output goes in the
 // bytes codec's tagged form (bytes.ts), measured so.
 import { MESSAGE_MAX_BYTES, type CallMessage, type Listing, type Signed } from 'org-protocol';
+import { ACQUIRE_WITHIN_MS, LATE, within } from './acquire';
 import { gradeOf } from '@shared/ipc/grades';
 import { remoteDaemonStatus, type DaemonStatus } from '@shared/ipc/schema/daemon';
 import { SESSION_SEARCH_LIMIT, SESSION_SEARCH_SESSIONS_MAX } from '@shared/ipc/schema/session';
@@ -56,6 +60,7 @@ import { holdsArtifact, type ArtifactRanks, type CachedPlacement } from './artif
 import { holdsToSchema, type SessionRanks } from './authorize';
 import { writeBytes } from './bytes';
 import type { RemoteChannel } from './channels';
+import type { Granted } from './gate';
 import { isSessionRank, rankAtLeast, sessionRank } from './grades';
 import type { AssetHolds } from './asset-holds';
 import type { Leases } from './leases';
@@ -90,6 +95,9 @@ export type CallsContext = {
   /** P5 O7 M5c round 3: each channel's snapshot holds (asset-holds.ts). */
   assetHolds: Pick<AssetHolds, 'hold' | 'release'>;
   offers?: Offers;
+  /** P5 O7 M5c review 1: the clock an acquisition's bound is read on (the gate's), and the bound (acquire.ts). */
+  now(): number;
+  acquireWithinMs?: number;
   log(line: string): void;
 };
 
@@ -232,8 +240,8 @@ export class Calls {
     for (const heard of this.#heard) heard.set(record.appId, [...(heard.get(record.appId) ?? []), placement]);
   }
 
-  /** An authorized call, answered by its executor. */
-  execute(channel: RemoteChannel, m: CallMessage): void {
+  /** An authorized call, answered by its executor; `decision.askedAt`, its arrival, bounds an acquisition (acquire.ts). */
+  execute(channel: RemoteChannel, m: CallMessage, decision: Granted = {}): void {
     const offers = this.ctx.offers ?? OFFERS;
     const row = Object.hasOwn(offers.commands, m.name) ? offers.commands[m.name] : undefined;
     const answer = (result: { ok: true; output: unknown } | { ok: false; code: string }) => {
@@ -244,14 +252,15 @@ export class Calls {
       channel.send({ t: 'result', id: m.id, ok: true, output });
     };
     const dispatch = dispatchAs(this.ctx.dispatch, channel.client);
+    const by = (decision.askedAt ?? this.ctx.now()) + (this.ctx.acquireWithinMs ?? ACQUIRE_WITHIN_MS);
     // What runs answers a result, or (an `each-session` row) the step that makes it, taken as the answer goes.
     let run: Promise<Result | (() => Result)>;
     if (row?.target === 'each-session') run = this.#eachSession(dispatch, channel.member, m);
-    else if (m.name === 'connectors.open' && row?.executor === 'machine') run = this.#open(dispatch, channel, m);
+    else if (m.name === 'connectors.open' && row?.executor === 'machine') run = this.#open(dispatch, channel, m, by);
     else if (m.name === 'connectors.close' && row?.executor === 'machine') run = this.#close(dispatch, channel, m);
     else if (m.name === 'delivery.receipts' && row?.executor === 'machine') run = this.#receipts(dispatch, channel, m);
     else if (m.name === 'client.windowShown' && row?.executor === 'endpoint') run = this.#windowShown(dispatch, m);
-    else if (m.name === 'artifacts.holdAssets' && row?.executor === 'endpoint') run = this.ctx.assetHolds.hold(channel, m.input);
+    else if (m.name === 'artifacts.holdAssets' && row?.executor === 'endpoint') run = this.ctx.assetHolds.hold(channel, m.input, by);
     else if (m.name === 'artifacts.releaseAssets' && row?.executor === 'endpoint') run = this.ctx.assetHolds.release(channel, m.input);
     else if ((row?.executor === 'engine-host' || row?.executor === 'machine') && row.target === 'artifact' && SESSION_NAMING.has(m.name)) run = this.#sessionSafe(dispatch, row.executor, channel.member, m);
     else if (row?.executor === 'engine-host' || (row?.executor === 'machine' && m.name !== 'daemon.status')) run = this.#forward(dispatch, row.executor, m);
@@ -273,21 +282,26 @@ export class Calls {
     return { ok: false, code };
   }
 
-  /** P5 O7 M5c: a page's lease, opened for this channel's ref and kept with its artifact (leases.ts); `busy` past the bound. */
-  async #open(dispatch: EndpointServices['dispatch'], channel: RemoteChannel, m: CallMessage): Promise<Result> {
+  /**
+   * P5 O7 M5c: a page's lease, opened for this channel's ref and kept with its artifact (leases.ts); `busy` past the bound.
+   * Review 1: answered `timeout` past `by`, a lease the machine opens after it closed at once (`openedLate`).
+   */
+  async #open(dispatch: EndpointServices['dispatch'], channel: RemoteChannel, m: CallMessage, by: number): Promise<Result> {
     if (!this.ctx.leases.reserve(channel)) return { ok: false, code: 'busy' };
-    let result: Result;
+    const leaseOf = (result: Result | null) => (result?.ok === true && isObject(result.output) && isText(result.output.leaseId, 128) ? result.output.leaseId : null);
+    let answer: Result | typeof LATE;
     try {
-      result = await this.#forward(dispatch, 'machine', m);
+      answer = await within(by, () => this.ctx.now(), () => this.#forward(dispatch, 'machine', m), (late) => this.ctx.leases.openedLate(channel, leaseOf(late)));
     } catch (error) {
       this.ctx.leases.unopened(channel);
       throw error;
     }
-    const leaseId = result.ok && isObject(result.output) ? result.output.leaseId : undefined;
+    if (answer === LATE) return { ok: false, code: 'timeout' };
+    const leaseId = leaseOf(answer);
     const artifactId = isObject(m.input) ? m.input.artifactId : undefined;
-    if (isText(leaseId, 128) && isText(artifactId, 128)) this.ctx.leases.opened(channel, artifactId, leaseId);
+    if (leaseId !== null && isText(artifactId, 128)) this.ctx.leases.opened(channel, artifactId, leaseId);
     else this.ctx.leases.unopened(channel);
-    return result;
+    return answer;
   }
 
   /** P5 O7 M5c: a lease the device closed, its mapping dropped once the machine answered the close. */

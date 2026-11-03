@@ -8,12 +8,16 @@
 // engine host's going (it released them) forgets them.
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { budgetedMs } from '../../src/main/machines/budgets';
+import { REMOTE_TIMING } from '../../src/main/machines/remote/timing';
+import { COMMAND_BUDGETS_MS } from '../../src/services/command-budgets';
+import { ACQUIRE_MARGIN_MS, ACQUIRE_WITHIN_MS } from '../../src/endpoint/acquire';
 import { ASSET_HOLDS_KEPT } from '../../src/endpoint/asset-holds';
 import { ENDPOINT_CAPABILITIES } from '../../src/endpoint/capabilities';
 import { OFFERS } from '../../src/endpoint/offers';
 import type { SessionRecord } from '../../src/endpoint/sources';
 import { fakeAssetHolds } from './fake-services';
-import { drop, makeOrg, openRemote, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
+import { drop, makeOrg, openRemote, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote, type StartOptions } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -38,8 +42,8 @@ const holdIdOf = (m: Msg) => (m.output as { assetHoldId: string }).assetHoldId;
  * A shares `app-shared` (its artifact `shared`) with B at `view`; `other` is the machine owners' alone. The engine host's
  * holds are fakeAssetHolds', installed after the start.
  */
-async function scene() {
-  const f = await startEndpoint(org, started);
+async function scene(options: StartOptions = {}) {
+  const f = await startEndpoint(org, started, options);
   const add = (app: string, fields: Partial<SessionRecord>) => {
     const s = f.host.add(app);
     f.spine.set(app, s.engineSessionId, { appId: app });
@@ -137,6 +141,35 @@ describe('a remote dashboard’s snapshot holds', () => {
     f.host.upstream(false);
     expect(await call(b, 'artifacts.releaseAssets', { assetHoldId: holdIdOf(taken) })).toMatchObject({ ok: true, output: { released: false } });
     expect(holds.releaseAsked()).toBe(0);
+  });
+
+  // P5 O7 M5c review 1: the device forgets a call at its link's deadline, so a hold answered after it would reach no one
+  // and live, unreleasable, until the channel ends; the endpoint bounds the hold itself, under that deadline
+  it('bound a hold under the device’s call deadline, from the call’s arrival, and release one the host answers past it', async () => {
+    expect(ACQUIRE_MARGIN_MS).toBeGreaterThanOrEqual(1_500);
+    for (const deadline of [REMOTE_TIMING.CALL_TIMEOUT_MS, budgetedMs(COMMAND_BUDGETS_MS, 'connectors.open') ?? REMOTE_TIMING.CALL_TIMEOUT_MS]) expect(ACQUIRE_WITHIN_MS + ACQUIRE_MARGIN_MS).toBeLessThanOrEqual(deadline);
+    const { f, holds, shared, b } = await scene({ acquireWithinMs: 1_000 });
+    // the host answers past the bound: the call is refused `timeout`, and the hold the host made is released at once
+    let answer!: () => void;
+    holds.until = new Promise<void>((resolve) => (answer = resolve));
+    const late = await call(b, 'artifacts.holdAssets', { artifactId: shared, refs: REFS });
+    expect(late).toMatchObject({ ok: false, error: { code: 'timeout' } });
+    expect(holds.asked()).toBe(1);
+    answer();
+    await until(() => holds.released() === 1, 'the late hold released');
+    expect(holds.held(shared, REFS[0]!)).toBe(false);
+    holds.until = null;
+    // authorization counts: one decided past the bound never asks the host
+    f.host.hold('library.entry');
+    f.endpoint.artifactRanks.drop(shared); // placed afresh, its read held
+    const slow = call(b, 'artifacts.holdAssets', { artifactId: shared, refs: ['assets/query-2.json'] });
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    f.host.release('library.entry');
+    expect(await slow).toMatchObject({ ok: false, error: { code: 'timeout' } });
+    expect(holds.asked()).toBe(1);
+    // within the bound, a hold is kept as ever
+    expect(codeOf(await call(b, 'artifacts.holdAssets', { artifactId: shared, refs: REFS }))).toBe('ok');
+    expect(holds.held(shared, REFS[0]!)).toBe(true);
   });
 
   it('release every hold when the endpoint stops', async () => {

@@ -118,6 +118,8 @@ export type EndpointOptions = {
   projects?: CheckoutSource;
   /** The suites' seams for subscriptions: the resume window, lane A's ring and the unsent stream's bound. */
   subscriptions?: { resumeMs?: number; ringBytes?: number; backlogBytes?: number; recheckRetryMs?: readonly number[]; transmitDeadlineMs?: number };
+  /** P5 O7 M5c review 1: the suites' seam for a remote acquisition's bound (acquire.ts' ACQUIRE_WITHIN_MS). */
+  acquireWithinMs?: number;
 };
 
 /** The whole handshake of a direct connection is this long at most (M4). */
@@ -512,11 +514,13 @@ export class Endpoint implements EndpointModule {
       artifacts: this.artifactRanks,
       assetHolds: this.assetHolds, // P5 O7 M5c round 3
       offers: authorization.offers,
+      now: this.deps.now, // P5 O7 M5c review 1: an acquisition's bound, on the gate's clock
+      ...(options.acquireWithinMs === undefined ? {} : { acquireWithinMs: options.acquireWithinMs }),
       log,
     });
     this.gate.setExecutors({
       act: (channel, m, decision) => this.actions.execute(channel, m, decision),
-      call: (channel, m) => this.calls.execute(channel, m),
+      call: (channel, m, decision) => this.calls.execute(channel, m, decision),
       sub: (channel, m, decision) => this.subscriptions.start(channel, m, decision),
       subRefused: (channel, m, reason) => this.subscriptions.refused(channel, m, reason),
     });

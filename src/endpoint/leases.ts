@@ -29,6 +29,9 @@
 // answered as ended (done, or refused before it ran), or at its channel's end once no send of it is out; one whose
 // answer said nothing of the run (the machine unreachable, the run still in progress) is kept until then.
 //
+// An open the machine answers past its call's bound (acquire.ts; P5 O7 M5c review 1) reaches no device: its reservation is
+// given back and its lease closed at once under the channel's ref (`openedLate`).
+//
 // Bounded: at most LEASES_KEPT leases a channel (an open past it is refused `busy` before it reaches the machine), and
 // RUNS_KEPT reserved runs (a send past it `busy`: a reservation is never forgotten while its run may live). A channel's
 // leases go with its end, when the machine closes every lease of its ref.
@@ -118,6 +121,17 @@ export class Leases {
     const lease: Lease = { leaseId, artifactId, channel, generation: 0, pending: false };
     held.leases.set(leaseId, lease);
     this.#check(lease, 0);
+  }
+
+  /**
+   * P5 O7 M5c review 1: a reserved open answered past its call's bound (acquire.ts), whose device gave up on it: the
+   * reservation given back, and the lease the machine opened (`leaseId`, null for none) closed at once under the ref.
+   */
+  openedLate(channel: RemoteChannel, leaseId: string | null): void {
+    this.unopened(channel);
+    if (leaseId === null) return;
+    this.#ctx.log(`endpoint: lease ${leaseId} closed by the endpoint: opened past its call’s bound`);
+    this.#closeOnMachine(channel.client, leaseId);
   }
 
   /** The device closed the lease (the machine answered its close). */
@@ -235,11 +249,16 @@ export class Leases {
   #close(lease: Lease, reason: string): void {
     this.#channels.get(lease.channel.client)?.leases.delete(lease.leaseId);
     this.#ctx.log(`endpoint: lease ${lease.leaseId} on artifact ${lease.artifactId} closed by the endpoint: ${reason}`);
+    this.#closeOnMachine(lease.channel.client, lease.leaseId);
+  }
+
+  /** `connectors.close` on the machine under `client`, its failure logged. */
+  #closeOnMachine(client: ClientRef, leaseId: string): void {
     void this.#ctx
-      .dispatch('machine', 'connectors.close', { leaseId: lease.leaseId }, lease.channel.client)
+      .dispatch('machine', 'connectors.close', { leaseId }, client)
       .then((answer) => {
-        if (!answer.ok) this.#ctx.log(`endpoint: the machine did not close lease ${lease.leaseId}: ${answer.error.code}`);
+        if (!answer.ok) this.#ctx.log(`endpoint: the machine did not close lease ${leaseId}: ${answer.error.code}`);
       })
-      .catch((error: unknown) => this.#ctx.log(`endpoint: the machine did not close lease ${lease.leaseId}: ${(error as Error).message}`));
+      .catch((error: unknown) => this.#ctx.log(`endpoint: the machine did not close lease ${leaseId}: ${(error as Error).message}`));
   }
 }
