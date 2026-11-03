@@ -20,10 +20,11 @@
 //   or its epoch has passed (the grant dies with its epoch, §K's pin 3). Input goes only while it is held, in order, each
 //   with the view's next sequence; a move waits for the one on its way and only the newest is kept (§G: moves may
 //   coalesce, keys and buttons never drop).
-import type { BrowserFrame, BrowserInput, BrowserInventory } from '@shared/browser/screencast';
+import type { BrowserFrame, BrowserInventory } from '@shared/browser/screencast';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { RemoteViewState } from '@shared/ipc/schema/browser';
+import type { RemoteInput } from './input';
 
 export type RemoteStream = 'none' | 'opening' | 'live' | 'waiting' | 'stopped';
 export type RemoteControl = 'none' | 'taking' | 'held';
@@ -71,7 +72,7 @@ export class RemoteBrowserClient {
   #deferred: string | null = null; // a close heard while a select was on its way
   #seq = 0;
   #moving = false; // a move on its way
-  #nextMove: BrowserInput | null = null;
+  #nextMove: RemoteInput | null = null;
 
   constructor(
     readonly appSessionId: AppSessionId,
@@ -303,7 +304,7 @@ export class RemoteBrowserClient {
   }
 
   /** One input to the page, while control is held. */
-  input(event: BrowserInput): void {
+  input(event: RemoteInput): void {
     if (this.#state.control !== 'held' || this.#state.viewId === null) return;
     const isMove = event.kind === 'pointer' && event.type === 'move';
     if (isMove && this.#moving) {
@@ -318,7 +319,7 @@ export class RemoteBrowserClient {
     this.#send(event, isMove);
   }
 
-  #send(event: BrowserInput, isMove: boolean): void {
+  #send(event: RemoteInput, isMove: boolean): void {
     const { viewId } = this.#state;
     if (viewId === null) return;
     if (isMove) this.#moving = true;

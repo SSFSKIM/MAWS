@@ -9,7 +9,11 @@
 //   key or a Control chord is its press alone. A key the IME is composing is left to its commit, which the canvas sends
 //   as one `text`. Escape releases the keyboard (the canvas blurs and the page hears `blur`); a Command chord is the
 //   app's (its shortcuts), so it is passed on, never sent and never prevented.
-import { BROWSER_LIMITS, BROWSER_MODIFIERS, type BrowserInput } from '@shared/browser/screencast';
+import type * as z from 'zod';
+import { BROWSER_LIMITS, BROWSER_MODIFIERS, type BrowserInputSchema } from '@shared/browser/screencast';
+
+/** One input as `browser.remote.input` carries it (§G's BrowserInput, its modifiers the four names). */
+export type RemoteInput = z.infer<typeof BrowserInputSchema>;
 
 export interface Box {
   left: number;
@@ -63,7 +67,7 @@ export type PointerButton = (typeof BUTTONS)[number];
 export const buttonOf = (button: number): PointerButton | null => BUTTONS[button] ?? null;
 
 /** A pointer's move, press or release at `at`; null for a button §G has no name for (back, forward). */
-export function pointerInput(type: 'move' | 'down' | 'up', event: ModifierKeys & { button: number; buttons: number }, at: Point, clickCount: number): BrowserInput | null {
+export function pointerInput(type: 'move' | 'down' | 'up', event: ModifierKeys & { button: number; buttons: number }, at: Point, clickCount: number): RemoteInput | null {
   const button = type === 'move' ? 'left' : buttonOf(event.button);
   if (button === null) return null;
   return { kind: 'pointer', type, x: at.x, y: at.y, button, buttons: event.buttons & 7, clickCount: type === 'move' ? 0 : Math.min(3, Math.max(1, clickCount)), modifiers: modifiersOf(event) };
@@ -90,7 +94,7 @@ export class ClickCounter {
 }
 
 /** A wheel at `at`, its deltas in pixels (lines and pages converted), bounded. */
-export function wheelInput(event: ModifierKeys & { deltaX: number; deltaY: number; deltaMode: number }, at: Point, viewport: Size): BrowserInput {
+export function wheelInput(event: ModifierKeys & { deltaX: number; deltaY: number; deltaMode: number }, at: Point, viewport: Size): RemoteInput {
   const unit = event.deltaMode === 1 ? LINE_PX : event.deltaMode === 2 ? viewport.height : 1;
   const bound = (delta: number) => Math.min(WHEEL_MAX, Math.max(-WHEEL_MAX, delta * unit));
   return { kind: 'wheel', x: at.x, y: at.y, deltaX: bound(event.deltaX), deltaY: bound(event.deltaY), modifiers: modifiersOf(event) };
@@ -102,19 +106,19 @@ type KeyEventLike = ModifierKeys & { key: string; code: string; repeat: boolean;
  * What a key press or release sends: the inputs in order; `release` (Escape: the canvas lets the keyboard go); `pass` (a
  * Command chord, the app's). An IME's composing key, and a key §G cannot carry, send nothing.
  */
-export function keyInputs(type: 'down' | 'up', event: KeyEventLike): BrowserInput[] | 'release' | 'pass' {
+export function keyInputs(type: 'down' | 'up', event: KeyEventLike): RemoteInput[] | 'release' | 'pass' {
   if (event.metaKey) return 'pass';
   if (event.isComposing || event.keyCode === 229) return [];
   if (event.key === 'Escape' && !event.altKey && !event.ctrlKey && !event.shiftKey) return type === 'down' ? 'release' : [];
   if (event.key === '' || event.key.length > KEY_MAX || event.code.length > KEY_MAX) return [];
-  const press: BrowserInput = { kind: 'key', type, key: event.key, code: event.code, repeat: event.repeat, modifiers: modifiersOf(event) };
+  const press: RemoteInput = { kind: 'key', type, key: event.key, code: event.code, repeat: event.repeat, modifiers: modifiersOf(event) };
   const printable = [...event.key].length === 1 && !event.ctrlKey;
   return type === 'down' && printable ? [press, { kind: 'text', text: event.key }] : [press];
 }
 
 /** Committed text (an IME's composition, a paste) as `text` inputs within §G's bound, in order; none for empty text. */
-export function textInputs(text: string): BrowserInput[] {
-  const inputs: BrowserInput[] = [];
+export function textInputs(text: string): RemoteInput[] {
+  const inputs: RemoteInput[] = [];
   const encoder = new TextEncoder();
   let part = '';
   let bytes = 0;
