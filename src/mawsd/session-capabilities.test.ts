@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { daemonCuaSocketPath } from '@shared/browser/cua-socket';
 import { cuaSocketDir, renderCuaSocketDir, socketFallbackDir } from '@shared/daemon/files';
@@ -95,6 +96,16 @@ describe('the browser entry (P5 O17 M5, Interfaces §I)', () => {
       expect(path!.startsWith(`${socketFallbackDir(profile, TMP)}/cua/`) && Buffer.byteLength(path!)).toBe(98);
       expect(renderPath!.startsWith(`${socketFallbackDir(profile, TMP)}/rcua/`) && Buffer.byteLength(renderPath!)).toBe(99);
       expect(capability).toEqual(screencast);
+    });
+
+    // The app's own socket stays uuid-named (Residue): under a 24-character user's default profile it is 94 + 24 bytes,
+    // so the app attached there reads the reason, never `local`
+    it('the app’s own socket under a 24-character user’s default profile reads the too-long reason (uuid-named, Residue)', () => {
+      const profile = defaultProfileDir('darwin', {}, `/Users/${'u'.repeat(24)}`);
+      const tabEngine = join(profile, 'browser', 'cua');
+      expect(Buffer.byteLength(join(tabEngine, `${UUID}.sock`))).toBe(118);
+      const { path, renderPath } = reading(profile, TMP);
+      expect(browserCapability({ machine: 'mini', appSessionId: UUID, path, renderPath, tabEngine, headless: null })).toEqual(TOO_LONG);
     });
 
     it('a render host’s socket that fits nowhere while mawsd’s does is named before any use', () => {

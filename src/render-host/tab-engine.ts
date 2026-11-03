@@ -50,7 +50,9 @@
 // taken the room meanwhile, its opener closed or its session been dropped). The orphan policy (D1): a tab whose creating connection closed is adopted, at its first lease or
 // close, by a connection of its own session (claims.ts), so a tab whose cua connection died can still be closed.
 // `windows.query` answers one synthetic window, so the query that follows a promotion agrees with `windows.create`.
+import { basename, isAbsolute } from 'node:path';
 import type { Session, WebContents, WebContentsView, WebPreferences } from 'electron';
+import { DAEMON_SESSION_SOCKET_NAME } from '@shared/browser/cua-socket';
 import type { BrowserTabSummary } from '@shared/browser/screencast';
 import { BROWSER_SUMMARY_BOUNDS } from '@shared/browser/screencast';
 import type { BrowserTab } from '@shared/browser/tab';
@@ -368,7 +370,9 @@ export function startTabEngine(deps: TabEngineDeps): TabEngine {
   async function prepare(appSessionId: AppSessionId, parent: AppSessionId | null, socketPath: string | null, signal: AbortSignal): Promise<null> {
     signal.throwIfAborted();
     if (served.has(appSessionId)) return null;
-    if (socketPath === null) throw new Error(`the headless browser on ${machine} was not told this session’s socket: mawsd predates the session sockets’ names`);
+    if (socketPath === null) throw new Error(`the headless browser on ${machine} was not told this session's socket: mawsd predates the session sockets' names`);
+    // the backend sweeps, makes and narrows what the path names: only the shape mawsd computes is taken
+    if (!isAbsolute(socketPath) || !DAEMON_SESSION_SOCKET_NAME.test(basename(socketPath))) throw new Error(`the headless browser on ${machine} refuses the socket path it was told for this session: not an absolute path to a session digest's socket`);
     const session: Served = { parent, creating: 0, fence: 'none', told: null };
     served.set(appSessionId, session);
     const serves = () => {

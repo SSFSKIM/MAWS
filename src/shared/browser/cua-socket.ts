@@ -31,6 +31,7 @@ export const DAEMON_CUA_DIR = 'cua'; // under the daemon's socket directory (cua
 
 // A mawsd-owned socket's name for a session: 64 bits of the id's sha256, which no two of a machine's sessions share in
 // practice (the host set's 10,000 sessions collide with a chance of about 3e-12)
+export const DAEMON_SESSION_SOCKET_NAME = /^[0-9a-f]{16}\.sock$/; // every such name's shape, which the render host checks
 export function daemonSessionSocketName(appSessionId: string): string {
   return `${createHash('sha256').update(appSessionId).digest('hex').slice(0, 16)}.sock`;
 }

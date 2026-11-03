@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { cuaSocketPath, daemonCuaSocketPath, daemonSessionSocketName, MAX_SOCKET_PATH_BYTES } from './cua-socket';
+import { cuaSocketPath, DAEMON_SESSION_SOCKET_NAME, daemonCuaSocketPath, daemonSessionSocketName, MAX_SOCKET_PATH_BYTES } from './cua-socket';
 
 const UUID = '0b6f3c1e-7d2a-4c59-9e41-2f8a6b0d5c73';
 
@@ -14,6 +14,8 @@ describe('a session\'s cua socket path', () => {
     const name = daemonSessionSocketName(UUID);
     expect(name).toBe(`${createHash('sha256').update(UUID).digest('hex').slice(0, 16)}.sock`);
     expect(name).toMatch(/^[0-9a-f]{16}\.sock$/);
+    expect(name).toMatch(DAEMON_SESSION_SOCKET_NAME); // the shape the render host takes
+    expect('A.sock').not.toMatch(DAEMON_SESSION_SOCKET_NAME);
     expect(daemonSessionSocketName('S1')).toHaveLength(21);
     expect(daemonSessionSocketName(UUID)).toBe(name); // stable for the session's life
     expect(daemonSessionSocketName('0b6f3c1e-7d2a-4c59-9e41-2f8a6b0d5c74')).not.toBe(name);
