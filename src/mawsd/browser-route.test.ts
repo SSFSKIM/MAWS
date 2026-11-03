@@ -4,7 +4,7 @@
 // inventory cache fed by the selected engine alone, reset at each epoch, and its watchers.
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { EngineInventory } from '@shared/ipc/schema/browser-engine';
+import type { BrowserEngineRequest, EngineInventory } from '@shared/ipc/schema/browser-engine';
 import { createBrowserRoute, type BrowserRoute, type PeriodEnd } from './browser-route';
 import type { BrowserDemand, BrowserTarget } from './cua-broker';
 
@@ -28,7 +28,8 @@ function deferred<T>(): Deferred<T> {
 }
 
 function stand() {
-  const inputs = { app: false, headless: null as string | null };
+  const inputs = { app: false, headless: null as string | null, appEngine: null as object | null, posts: true };
+  const asked: { engine: object; request: BrowserEngineRequest }[] = []; // P5 O17 M9b: what the route asked the app
   const starts: { demand: BrowserDemand; answer: Deferred<BrowserTarget> }[] = [];
   const drops: AppSessionId[] = [];
   const changed: string[] = []; // the cua sockets' notices, with the epoch they read
@@ -49,6 +50,8 @@ function stand() {
     },
     engineOf: (id) => served.get(id) ?? null,
     socketPath: (id) => `/p/mawsd/render-cua/${id}.sock`,
+    appEngine: () => inputs.appEngine,
+    post: (engine, request) => (inputs.posts ? (asked.push({ engine, request }), true) : false),
     routeChanged: (id) => void changed.push(`${id} ${route.reading(id).epoch}`),
     log: () => {},
   });
@@ -63,7 +66,7 @@ function stand() {
     expect(route.reading(id).state).toBe('headless');
   };
   const live = (id: AppSessionId = S, pid: number | null = 4_321) => route.statusSeen(id, { process: 'ready', pid });
-  return { route, inputs, starts, drops, changed, ends, served, demand, promote, live };
+  return { route, inputs, asked, starts, drops, changed, ends, served, demand, promote, live };
 }
 
 describe('the route’s state and epoch (§B)', () => {
@@ -343,7 +346,7 @@ describe('the inventory cache (§G, read by M6)', () => {
     expect(seen.at(-1)).toMatchObject({ tabs: [TAB] });
     t.inputs.app = true;
     t.route.inputsChanged();
-    expect(seen.at(-1)).toEqual({ epoch: t.route.reading(S).epoch, tabs: [], selected: null, state: 'unavailable', reason: "the agent's browser is in the MAWS app on mini" });
+    expect(seen.at(-1)).toEqual({ epoch: t.route.reading(S).epoch, tabs: [], selected: null, state: 'unavailable', reason: 'the MAWS app on mini is too old to share the agent\'s tabs' }); // P5 O17 M9b: an app without browser.engine
     t.inputs.app = false;
     t.inputs.headless = 'the reason';
     t.route.inputsChanged();
@@ -379,5 +382,75 @@ describe('the inventory cache (§G, read by M6)', () => {
     await t.promote();
     t.route.state(ENGINE, { appSessionId: S, inventory: INVENTORY });
     expect(seen.at(-1)).toEqual({ epoch: t.route.reading(S).epoch, ...INVENTORY });
+  });
+});
+
+// P5 O17 M9b (M9's Decisions; the refresh's correction 1): in `relay` the attached app is the selected engine when its
+// hello lists `browser.engine`, its `state` taken and its `inventory` asked once per period at the first read; an app
+// whose hello does not list it reads "too old", replacing the local stage's sentence.
+describe('the app as the engine in `relay` (M9b)', () => {
+  const APP = { name: 'the app’s connection' };
+  const relay = () => {
+    const t = stand();
+    t.inputs.app = true;
+    t.inputs.appEngine = APP;
+    return t;
+  };
+  const answer = (t: ReturnType<typeof stand>, at: number, inventory: EngineInventory | null, engine: object = APP) =>
+    t.route.answer(engine, { id: t.asked[at]!.request.id, result: { ok: true, value: inventory } });
+
+  it('selects the app, asks its inventory at the first read of the period, and takes its answer and its pushes', () => {
+    const t = relay();
+    const { epoch } = t.route.reading(S);
+    expect(t.route.selection(S)).toEqual({ engine: APP, period: epoch });
+    const seen: unknown[] = [];
+    t.route.watchInventory(S, (inventory) => void seen.push(inventory));
+    expect(seen, 'ready with no tabs until the app answers').toEqual([{ epoch, tabs: [], selected: null, state: 'ready' }]);
+    expect(t.asked).toEqual([{ engine: APP, request: { id: expect.any(String), appSessionId: S, operation: { op: 'inventory' } } }]);
+    t.route.inventory(S);
+    expect(t.asked, 'once per period').toHaveLength(1);
+    expect(answer(t, 0, INVENTORY)).toBe(true);
+    expect(seen.at(-1)).toEqual({ epoch, ...INVENTORY });
+    expect(answer(t, 0, INVENTORY), 'answered already').toBe(false);
+    const pushed: EngineInventory = { tabs: [], selected: null, state: 'ready' };
+    expect(t.route.state(APP, { appSessionId: S, inventory: pushed })).toBe(true);
+    expect(t.route.inventory(S)).toEqual({ epoch, ...pushed });
+    expect(t.route.state(ENGINE, { appSessionId: S, inventory: INVENTORY }), 'not the selected connection').toBe(false);
+    expect(t.route.counts(), 'the app’s tabs are no headless browser’s').toEqual({ browserSessions: 0, browserTabs: 0 });
+  });
+
+  it('asks again in a new period, an older period’s answer taken and ignored, and asks at the move when someone watches', () => {
+    const t = relay();
+    t.route.inventory(S);
+    t.inputs.app = false;
+    t.route.inputsChanged(); // the app left: cold, a new epoch
+    const seen: unknown[] = [];
+    t.route.watchInventory(S, (inventory) => void seen.push(inventory));
+    t.inputs.app = true;
+    t.route.inputsChanged(); // it came back: relay, another epoch, its watcher's ask sent at the move
+    expect(t.asked).toHaveLength(2);
+    expect(answer(t, 0, INVENTORY), 'the older period’s answer').toBe(true);
+    expect(t.route.inventory(S).tabs).toEqual([]);
+    answer(t, 1, INVENTORY);
+    expect(seen.at(-1)).toEqual({ epoch: t.route.reading(S).epoch, ...INVENTORY });
+  });
+
+  it('asks again at the next read when the app could not be sent the ask, and forgets an ask its connection took with it', () => {
+    const t = relay();
+    t.inputs.posts = false;
+    t.route.inventory(S);
+    t.inputs.posts = true;
+    t.route.inventory(S);
+    expect(t.asked).toHaveLength(1);
+    t.route.engineGone(APP);
+    expect(answer(t, 0, INVENTORY), 'its connection ended').toBe(false);
+  });
+
+  it('reads an app whose hello lists no browser.engine as too old, selecting nothing and asking nothing', () => {
+    const t = stand();
+    t.inputs.app = true;
+    expect(t.route.inventory(S)).toEqual({ epoch: t.route.reading(S).epoch, tabs: [], selected: null, state: 'unavailable', reason: 'the MAWS app on mini is too old to share the agent\'s tabs' });
+    expect(t.route.selection(S)).toBeNull();
+    expect(t.asked).toEqual([]);
   });
 });

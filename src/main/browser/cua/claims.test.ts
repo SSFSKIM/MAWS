@@ -64,3 +64,44 @@ describe('TabClaims: what the next lease waits for', () => {
     expect(claims.awaitedByNextLease('t2')).toBeUndefined();
   });
 });
+
+// P5 O17 M9b (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M9's Decisions; the refresh's gap on the app's
+// producer): the agent's tabs are those a live connection reserves or leases, and the app's producer serves only them,
+// so it hears each change of that set: a reservation made or adopted, a lease taken or let go, a closed connection's
+// reservations dropped, a tab forgotten. `onChange` stays the leases' alone (parking reads it).
+describe('TabClaims: the agent’s tabs and their change notice', () => {
+  it('names a tab reserved or leased by a live holder, and tells each change of that once per tab', () => {
+    const claims = new TabClaims<string>();
+    const told: string[] = [];
+    const leases: string[] = [];
+    claims.onAgentTabs((tabId) => told.push(tabId));
+    claims.onChange((tabId) => leases.push(tabId));
+    expect(claims.agentTab('t1')).toBe(false);
+    claims.reserve('t1', 'c1');
+    expect(claims.agentTab('t1')).toBe(true);
+    claims.reserve('t1', 'c1'); // already reserved to it: no change
+    claims.lease('t2', 'c1');
+    expect(claims.agentTab('t2')).toBe(true);
+    claims.lease('t1', 'c1'); // reserved already: still an agent's, no change
+    claims.unlease('t1', 'c1');
+    expect(claims.agentTab('t1')).toBe(true); // its reservation stands
+    claims.dropReservations('c1');
+    expect(claims.agentTab('t1')).toBe(false);
+    expect(claims.agentTab('t2')).toBe(true); // a lease is let go by its holder, not by the drop
+    claims.unlease('t2', 'c1');
+    expect(claims.agentTab('t2')).toBe(false);
+    expect(told).toEqual(['t1', 't2', 't1', 't2']);
+    expect(leases).toEqual(['t2', 't1', 't1', 't2']); // the leases' notice is unchanged
+  });
+
+  it('tells an adopted orphan and a forgotten agent tab, and nothing for a tab that was no agent’s', () => {
+    const claims = new TabClaims<string>('session');
+    const told: string[] = [];
+    claims.onAgentTabs((tabId) => told.push(tabId));
+    claims.adoptOrphan('t1', 'c1');
+    claims.forget('t1');
+    claims.forget('t9');
+    expect(told).toEqual(['t1', 't1']);
+    expect(claims.agentTab('t1')).toBe(false);
+  });
+});

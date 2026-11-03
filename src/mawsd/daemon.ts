@@ -1143,6 +1143,8 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     dropBrowser: (appSessionId) => render.dropBrowser(appSessionId),
     engineOf: (appSessionId) => render.browserEngine(appSessionId),
     socketPath: renderSocketOf,
+    appEngine: () => front.appEngine(), // P5 O17 M9b: the attached app, a tab engine of its agent tabs
+    post: (engine, request) => front.postEngine(engine, 'browserEngine.request', request),
     routeChanged: (appSessionId) => cua?.routeChanged(appSessionId),
     log,
   });
@@ -1288,12 +1290,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     browser: {
       work: browserWork,
       selected: (appSessionId) => route.selection(appSessionId),
-      answer: (engine, input) => (feed?.answer(engine, input) ?? false) || render.browserAnswer(engine, input), // P5 O17 M6: the feed's requests first
+      answer: (engine, input) => (feed?.answer(engine, input) ?? false) || route.answer(engine, input) || render.browserAnswer(engine, input), // P5 O17 M6: the feed's requests first; M9b: then the route's asks of the app
       state: (engine, input) => route.state(engine, input),
       workChanged: () => render.browserWorkChanged(),
       frame: (engine, input) => feed?.frame(engine, input) ?? false, // P5 O17 M6
       ended: (engine, input) => feed?.ended(engine, input) ?? false,
-      gone: (engine) => feed?.gone(engine),
+      gone: (engine) => (feed?.gone(engine), route.engineGone(engine)), // P5 O17 M9b: the route's asks too
     },
     log,
   });

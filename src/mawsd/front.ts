@@ -67,6 +67,9 @@
 // subscription of the connection they arrive on (`browser.frame`, `.ended`: the feed's, browser-feed.ts, once loaded;
 // else none is open and each is refused), and a connection's end ends its subscriptions (`browser.gone`).
 //
+// P5 O17 M9b: the attached app is a tab engine too when its hello lists `browser.engine` (`appEngine`): the route selects
+// its connection in `relay`, so its `state`, `frame`, `ended` and answers are taken by the same rules as the render host's.
+//
 // P5 O3-D M5 (D44(3)): the engine host's names the spine intercepts (SPINE_ENGINE_INTERCEPTS: the stale answer's check,
 // the rewind's note and the acts that clear it) load a cold spine first, so the intercept applies whatever path the
 // request came by: a client here, the endpoint's `machine` route, and (`intercepted`, daemon.ts) a post-D app's relay
@@ -75,7 +78,7 @@
 // moved here: the note is then the lock holder's to keep. Any other failure to load answers it host_unavailable.
 import { HostCommandError, thrownError, type DocPortEnd, type HostPort } from '@shared/host/runtime';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
-import { MACHINE_SPINE_CAPABILITY, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
+import { BROWSER_ENGINE_CAPABILITY, MACHINE_SPINE_CAPABILITY, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
 import { remoteClients, type RemoteClients } from '@shared/host/client-refs';
 import { eventPosition } from '@shared/host/stream-catchup';
 import type { SessionEvent } from '@shared/graph/events';
@@ -205,6 +208,7 @@ export interface ServicesFront {
   intercepts(): CommandName[]; // the names the loaded spine intercepts now
   events(listener: (name: string, payload: unknown) => void): () => void; // every event `bus.emit` sent (the endpoint's owner `machine`)
   browserSocket(): string | null; // the attached app's cua socket directory, from its machine.client; null with no app
+  appEngine(): EngineConnection | null; // P5 O17 M9b: the attached app's connection, when its hello listed browser.engine
   // P5 O3-D fix wave (scalpel-4#1): the attached app's connection here said ready with machine.spine in its hello, so the
   // engine host's app-bound events reach it (the daemon's app presence for such an app, D40)
   appReady(): boolean;
@@ -615,6 +619,10 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       return () => void emitted.delete(listener);
     },
     browserSocket: () => [...clients].find((client) => options.isApp(client.facts.appPid))?.browserSocket ?? null,
+    appEngine() {
+      const app = [...clients].find((client) => options.isApp(client.facts.appPid));
+      return app && app.browserSocket !== null && app.facts.capabilities.includes(BROWSER_ENGINE_CAPABILITY) ? app : null;
+    },
     appReady: () => [...clients].some((client) => client.readsAppEvents() && options.isApp(client.facts.appPid)),
     clients: () => clients.size,
     renderClients: () => [...clients].filter((client) => client.renders).length,

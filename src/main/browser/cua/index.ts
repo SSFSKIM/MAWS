@@ -124,6 +124,10 @@ export interface CuaBackend extends LeaseHolds {
   // P5 O17 M8: work on the tab that the next lease, any connection's, waits for (TabClaims `beforeNextLease`): the render
   // host's sizing of an adopted popup's page. `done` settles by itself and never rejects.
   beforeNextLease(tabId: string, done: Promise<void>): void;
+  // P5 O17 M9b: whether a live connection reserves or leases the tab (an agent's tab, which the app's producer serves a
+  // remote viewer), and each change of that, tab by tab (TabClaims `onAgentTabs`)
+  agentTab(tabId: string): boolean;
+  onAgentTabs(listener: (tabId: string) => void): () => void;
   dispose(): void;
 }
 
@@ -460,6 +464,8 @@ export function startCuaBackend(deps: CuaBackendDeps): CuaBackend {
     dialogs: { holds: (tabId) => claims.leasedTo(tabId) !== undefined, hold: (entry, info, callback) => held.hold(entry, info, callback) },
     activities: (appSessionId) => feed?.list(appSessionId) ?? [],
     beforeNextLease: (tabId, done) => claims.beforeNextLease(tabId, done),
+    agentTab: (tabId) => claims.agentTab(tabId), // P5 O17 M9b
+    onAgentTabs: (listener) => claims.onAgentTabs(listener),
     inspect: () => ({
       peerModule: addon ? 'loaded' : 'unavailable',
       sessions: Object.fromEntries(

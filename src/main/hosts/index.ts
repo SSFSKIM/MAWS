@@ -24,6 +24,7 @@ import { buildIdOf, SUPERVISOR_FILES } from '../../engine-host/supervisor-files'
 import { isDefaultProfile, unitFor, type InstallDeps } from '../../mawsd/install';
 import { DEFAULT_LABEL, type UnitProgram } from '../../mawsd/units/unit';
 import { emit } from '../ipc/events';
+import type { EventName, EventPayload } from '@shared/ipc/schema'; // P5 O17 M9b
 import { registerMainHandler } from '../ipc/router';
 import { daemonHostSpecs, daemonStart, resolveLaunch, unitRunsThisApp, watchDaemon, type LaunchShape } from './daemon';
 import { watchEngineHandover } from './engine-handover'; // P5 O16 M3c fix wave 2
@@ -114,7 +115,7 @@ export function createHosts(
           'engine-host': { modulePath: engineHostPath, serviceName: 'maws-engine-host', transport: mode, requestBudgetsMs: ENGINE_HOST_BUDGETS_MS }, // the spine runs here
           'pty-host': { modulePath: ptyHostPath, serviceName: 'maws-pty-host' },
         },
-    emit,
+    emit: hostEventToWindows, // P5 O17 M9b: but what is main's alone
     detached: { identity },
   });
   engineHandover?.bind(supervisor); // for the launch's life
@@ -165,4 +166,12 @@ export function createHosts(
       }
     : null;
   return { hosts: supervisor, daemon: daemonWatch };
+}
+
+// P5 O17 M9b (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M9): a host's event goes to the windows, and then to
+// main's listeners, unless it is main's alone: `mawsd`'s `browserEngine.request` to the app's tab engine carries a
+// remote person's keys and text, which no window reads. Still taken (true), so main's listeners hear it.
+const MAIN_ONLY_EVENTS: ReadonlySet<string> = new Set(['browserEngine.request']);
+function hostEventToWindows<N extends EventName>(name: N, payload: EventPayload<N>): boolean {
+  return MAIN_ONLY_EVENTS.has(name) || emit(name, payload);
 }
