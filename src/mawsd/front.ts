@@ -279,6 +279,9 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       const client = from!;
       const { held } = input as CommandInput<'browserEngine.work'>;
       const appSessionId = (input as CommandInput<'browserEngine.work'>).appSessionId as AppSessionId;
+      // P5 O17 M9b: the fence (R5, §E) is the render host's alone; the app, selected in `relay`, makes its agent's tabs
+      // itself and holds no render host awake
+      if (!client.renders) throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.work for ${appSessionId} from a client whose hello did not list render.client`));
       const selection = browser.selected(appSessionId);
       if (held) {
         if (selection?.engine !== client) throw new HostCommandError(ipcError('forbidden_sender', `browserEngine.work {held: true} for ${appSessionId} from a connection not selected for that session`));
