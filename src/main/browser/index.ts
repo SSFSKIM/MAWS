@@ -43,6 +43,8 @@ import { startCommentMode } from './comment';
 // E4c start
 import type { HostSupervisor } from '../hosts/supervisor';
 import { e2eTabIds, reachableSessions, startAgentPresence } from './agent';
+import { PARKED_BOUNDS } from './agent/visible'; // P5 O17 M9b
+import { startAppEngine, type AppEngine, type EngineCallName } from './engine'; // P5 O17 M9b
 // E4c end
 // E13 start: cua's primitive server (the in-app browser spec of 2026-10-08, M2; P1 A-51, A-52), and the control and
 // cursor it drives (M3); the browser tools it replaced left on 2026-10-08 (M4, P1 A-54)
