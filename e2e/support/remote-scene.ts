@@ -191,7 +191,9 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
     undo.push(() => rmSync(bUserData, { recursive: true, force: true }));
     const daemon = await startProfileDaemon({
       userData: bUserData,
-      env: { MAWS_MACHINE_NAME: B_NAME, MAWS_ENDPOINT_DIRECT: '1', MAWS_ENDPOINT_PORT: String(directPort), ...opts.b?.env },
+      // under `b.root`, B's tmpdir is that root too: a replay seeds its transcripts only where the config home is under the
+      // process's tmpdir (src/engine-host/replay-transcript.ts), and the sockets' short fallbacks are made there
+      env: { MAWS_MACHINE_NAME: B_NAME, MAWS_ENDPOINT_DIRECT: '1', MAWS_ENDPOINT_PORT: String(directPort), ...(opts.b?.root !== undefined && { TMPDIR: realpathSync(opts.b.root) }), ...opts.b?.env },
       ...(opts.b?.prepare === undefined ? {} : { prepare: opts.b.prepare }),
       nodeArgs: ['--require', preload],
     });
