@@ -274,16 +274,20 @@ test('the app as a tab engine: a hidden agent tab yields frames to a viewer, ack
 
     await engine.request({ id: 'o1', appSessionId: A, operation: { op: 'open', subscriptionId: 's1', tabId: agentTab, control: false } });
     await expect.poll(() => answerOf('o1')).toEqual({ ok: true, value: null });
-    // frame after frame from the hidden tab, each after the viewer's ack of the last
+    // frame after frame from the hidden tab, each after the viewer's ack of the last; the fifth left unacknowledged is the
+    // one in flight, so however the page paints (every 50 ms) no sixth comes until its ack
     const started = Date.now();
     for (let seq = 1; seq <= 5; seq += 1) {
       await expect.poll(async () => (await framesOf('s1')).length, { timeout: 10_000, message: `frame ${seq} of the hidden agent tab` }).toBe(seq);
-      await engine.request({ id: `a${seq}`, appSessionId: A, operation: { op: 'ack', subscriptionId: 's1', seq } });
+      if (seq < 5) await engine.request({ id: `a${seq}`, appSessionId: A, operation: { op: 'ack', subscriptionId: 's1', seq } });
     }
-    const frames = await framesOf('s1');
-    expect(frames.map((frame) => frame.seq)).toEqual([1, 2, 3, 4, 5]);
-    expect(frames.every((frame) => frame.tabId === agentTab && frame.jpegBytes > 0 && frame.viewport.width === 1280 && frame.viewport.height === 800)).toBe(true);
     console.log(`[o17 m9b] five frames of a hidden agent tab in ${Date.now() - started} ms`);
+    await new Promise((resolve) => setTimeout(resolve, 1_000)); // twenty paints with frame 5 unacknowledged
+    const frames = await framesOf('s1');
+    expect(frames.map((frame) => frame.seq), 'one frame in flight: nothing after the unacknowledged fifth').toEqual([1, 2, 3, 4, 5]);
+    expect(frames.every((frame) => frame.tabId === agentTab && frame.jpegBytes > 0 && frame.viewport.width === 1280 && frame.viewport.height === 800)).toBe(true);
+    await engine.request({ id: 'a5', appSessionId: A, operation: { op: 'ack', subscriptionId: 's1', seq: 5 } });
+    await expect.poll(async () => (await framesOf('s1')).map((frame) => frame.seq), { timeout: 10_000, message: 'the sixth frame, after the fifth’s ack' }).toEqual([1, 2, 3, 4, 5, 6]);
     expect(await engine.visible(agentTab), 'still not on screen').toBe(false);
 
     // the agent's connection ends: its reservation goes, the tab is the person's now, its viewer ends tab_closed
