@@ -38,7 +38,8 @@
 // at `connectors.open {artifactId}`, the run at `delivery.send {runId, artifactId}`. The asking channel's own table
 // (`HeldNames`, leases.ts) reads the rest: a lease command by its `leaseId`, a lease the channel doesn't hold being
 // `unknown` (`grade`, as an artifact or a session nobody can be told of); `delivery.cancel` by its `runId`, a run the
-// channel didn't send being `no-target`.
+// channel didn't send being `no-target` (M5c review 1: a send it sent that is still being decided places its cancel on
+// the artifact the send names, and the cancel waits on it, actions.ts).
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, sep } from 'node:path';
 import type { Action, SessionRef } from 'org-protocol';
@@ -80,7 +81,10 @@ export const ORPHAN: Extract<Resolved, { kind: 'artifact' }> = { kind: 'artifact
  */
 export type ArtifactKey = { artifactId: string } | { appSessionId: string } | { orphan: true } | { unknown: true };
 
-/** P5 O7 M5c: the artifact of a lease or a run the asking channel holds (leases.ts); null for one it doesn't. */
+/**
+ * P5 O7 M5c: the artifact of a lease or a run the asking channel holds (leases.ts), a run reserved or its send still
+ * pending; null for one it doesn't.
+ */
 export type HeldNames = { lease(leaseId: string): string | null; run(runId: string): string | null };
 
 /** P5 O7 M5c: the page lease's commands that name their lease, not their artifact (`connectors.open` names the artifact). */

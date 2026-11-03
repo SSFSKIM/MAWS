@@ -9,7 +9,7 @@ import { endableClientRef, type EndableClientRef } from '@shared/ipc/client';
 import type { ArtifactRanks } from '../../src/endpoint/artifacts';
 import type { Decision } from '../../src/endpoint/authorize';
 import type { RemoteChannel } from '../../src/endpoint/channels';
-import { Leases } from '../../src/endpoint/leases';
+import { Leases, RUNS_KEPT } from '../../src/endpoint/leases';
 import { until } from './sub-harness';
 
 const RETRIES = [20, 20, 20];
@@ -96,5 +96,58 @@ describe('a lease decided again', () => {
     await until(() => closes.length === 1, 'the close');
     expect(closes[0]).toEqual({ input: { leaseId: 'lease-1' }, client });
     expect(leases.lease(client, 'lease-1')).toBeNull();
+  });
+});
+
+// P5 O7 M5c review 1: a send is pending from its receipt until it is decided, so its channel's cancel can wait on it; the
+// pending count toward the channel's run bound, and a cancel waits only on its own channel's send.
+describe('a send pending while it is decided', () => {
+  const waiting = () => {
+    const said: string[] = [];
+    return { said, cancel: { admit: () => void said.push('admit'), drop: () => void said.push('drop') } };
+  };
+
+  it('counts toward RUNS_KEPT with the reserved runs: one past it is refused, and an admitted send is counted once', () => {
+    const { leases, channel, client } = setup(async () => ({ ok: true }));
+    for (let i = 0; i < RUNS_KEPT - 1; i++) expect(leases.pendRun(channel, `run-${i}`, 'art-1')).toBe(true);
+    expect(leases.reserveRun(channel, 'run-0', 'art-1')).toBe(true); // pending to reserved: still RUNS_KEPT - 1 held
+    expect(leases.pendRun(channel, 'run-last', 'art-1')).toBe(true);
+    expect(leases.pendRun(channel, 'run-over', 'art-1')).toBe(false);
+    expect(leases.reserveRun(channel, 'run-1', 'art-1')).toBe(true); // its own pending send, not counted twice
+    leases.sendRefused(channel, 'run-2');
+    expect(leases.pendRun(channel, 'run-3', 'art-1')).toBe(false); // a second send of an id pending, with room
+    expect(leases.pendRun(channel, 'run-over', 'art-1')).toBe(true);
+    expect([leases.run(client, 'run-0'), leases.run(client, 'run-3'), leases.run(client, 'run-2')]).toEqual(['art-1', 'art-1', null]);
+  });
+
+  it('holds one cancel a pending send, hands it on as the send is reserved, and drops it when the send is refused', () => {
+    const { leases, channel, client } = setup(async () => ({ ok: true }));
+    leases.pendRun(channel, 'run-a', 'art-1');
+    leases.pendRun(channel, 'run-b', 'art-1');
+    const [a, b] = [waiting(), waiting()];
+    expect(leases.holdCancel(channel, 'run-a', a.cancel)).toBe(true);
+    expect(leases.holdCancel(channel, 'run-a', waiting().cancel)).toBe(false); // one at a time
+    expect(leases.holdCancel(channel, 'run-b', b.cancel)).toBe(true);
+    expect(leases.holdCancel(channel, 'run-none', waiting().cancel)).toBe(false);
+    expect(leases.reserved(client, 'run-a')).toBe(false);
+    expect(leases.reserveRun(channel, 'run-a', 'art-1')).toBe(true);
+    expect([a.said, leases.reserved(client, 'run-a')]).toEqual([['admit'], true]);
+    leases.sendRefused(channel, 'run-b');
+    expect(b.said).toEqual(['drop']);
+    expect(leases.run(client, 'run-b')).toBeNull();
+  });
+
+  it('places a pending send only for its own channel, and forgets it, with its cancel, at the channel’s end', () => {
+    const { leases, channel, client } = setup(async () => ({ ok: true }));
+    const other = endableClientRef('channel-2');
+    const elsewhere = { ...channel, client: other } as unknown as RemoteChannel;
+    leases.pendRun(channel, 'run-a', 'art-1');
+    expect(leases.run(other, 'run-a')).toBeNull();
+    expect(leases.holdCancel(elsewhere, 'run-a', waiting().cancel)).toBe(false);
+    const a = waiting();
+    leases.holdCancel(channel, 'run-a', a.cancel);
+    client.end();
+    expect(leases.run(client, 'run-a')).toBeNull();
+    expect(a.said).toEqual([]); // the channel is gone: nothing to answer
   });
 });

@@ -29,12 +29,20 @@
 // answered as ended (done, or refused before it ran), or at its channel's end once no send of it is out; one whose
 // answer said nothing of the run (the machine unreachable, the run still in progress) is kept until then.
 //
+// A send is pending from the step it reaches the endpoint (P5 O7 M5c review 1), before it is decided: the device may
+// cancel it then (the sheet closed while the send is authorized). Its channel's cancel is placed on the artifact the
+// send names (the one the send is decided on), and once decided it waits on the send (`holdCancel`): handed on in the
+// step the send is admitted, before the send itself (the machine keeps a cancel that comes first as the run's
+// tombstone), or answered again by the gate when the send is refused (`sendRefused`), where it names no run. A cancel
+// reaches the machine only for a run its own channel holds reserved, so it never ends another channel's run of that id.
+//
 // An open the machine answers past its call's bound (acquire.ts; P5 O7 M5c review 1) reaches no device: its reservation is
 // given back and its lease closed at once under the channel's ref (`openedLate`).
 //
 // Bounded: at most LEASES_KEPT leases a channel (an open past it is refused `busy` before it reaches the machine), and
-// RUNS_KEPT reserved runs (a send past it `busy`: a reservation is never forgotten while its run may live). A channel's
-// leases go with its end, when the machine closes every lease of its ref.
+// RUNS_KEPT reserved and pending runs (a send past it `busy`: a reservation is never forgotten while its run may live),
+// each pending one with at most one cancel waiting. A channel's leases go with its end, when the machine closes every
+// lease of its ref, and its pending sends and their cancels with it.
 import type { ClientRef } from '@shared/ipc/client';
 import type { ArtifactRanks } from './artifacts';
 import type { AuthorizeRequest, Decision, Who } from './authorize';
@@ -44,7 +52,7 @@ import { RECHECK_RETRY_MS } from './subscriptions';
 
 /** How many leases one channel may hold open (one per page that shows connector data). */
 export const LEASES_KEPT = 64;
-/** How many runs one channel may hold reserved at once. */
+/** How many runs one channel may hold reserved or pending at once. */
 export const RUNS_KEPT = 256;
 
 export type LeasesContext = {
@@ -67,7 +75,12 @@ type Lease = {
   pending: boolean;
 };
 
-type Held = { leases: Map<string, Lease>; opening: number; runs: Set<string> };
+/** A cancel waiting on its send: `admit` hands it on (the run now reserved), `drop` has the gate answer it again. */
+export type WaitingCancel = { admit(): void; drop(): void };
+/** A send not yet decided: the artifact it names, and the cancel its channel sent meanwhile. */
+type Pending = { artifactId: string; cancel: WaitingCancel | null };
+
+type Held = { leases: Map<string, Lease>; opening: number; runs: Set<string>; pending: Map<string, Pending> };
 /** A reserved run: its channel, its artifact, and how many of its sends are out. */
 type Run = { client: ClientRef; artifactId: string; sending: number };
 
@@ -90,10 +103,50 @@ export class Leases {
     return this.#channels.get(client)?.leases.get(leaseId)?.artifactId ?? null;
   }
 
-  /** The artifact of a run the channel reserved; null for one it didn't (another channel's, or one that ended). */
+  /**
+   * The artifact of a run the channel reserved, else of a send of it the channel made that is not decided yet; null for
+   * neither (another channel's, or one that ended).
+   */
   run(client: ClientRef, runId: string): string | null {
     const run = this.#runs.get(runId);
-    return run !== undefined && run.client === client ? run.artifactId : null;
+    if (run !== undefined && run.client === client) return run.artifactId;
+    return this.#channels.get(client)?.pending.get(runId)?.artifactId ?? null;
+  }
+
+  /** Whether the channel holds `runId` reserved: the one state in which its cancel goes to the machine. */
+  reserved(client: ClientRef, runId: string): boolean {
+    return this.#runs.get(runId)?.client === client;
+  }
+
+  /**
+   * A send of `runId` on `artifactId` reaching the endpoint, before it is decided: pending, or false when the channel
+   * has a send of that id pending already, or holds RUNS_KEPT reserved and pending. A true answer is settled by
+   * `reserveRun` or `sendRefused`.
+   */
+  pendRun(channel: RemoteChannel, runId: string, artifactId: string): boolean {
+    const held = this.#held(channel);
+    if (held === null || held.pending.has(runId) || held.runs.size + held.pending.size >= RUNS_KEPT) return false;
+    held.pending.set(runId, { artifactId, cancel: null });
+    return true;
+  }
+
+  /**
+   * A decided cancel of a send the channel has pending, waiting on it; false when there is none, or one waits already.
+   */
+  holdCancel(channel: RemoteChannel, runId: string, cancel: WaitingCancel): boolean {
+    const pending = this.#channels.get(channel.client)?.pending.get(runId);
+    if (pending === undefined || pending.cancel !== null || channel.closed) return false;
+    pending.cancel = cancel;
+    return true;
+  }
+
+  /** The pending send was refused: no longer pending, and its waiting cancel, if any, answered again. */
+  sendRefused(channel: RemoteChannel, runId: string): void {
+    const held = this.#channels.get(channel.client);
+    const pending = held?.pending.get(runId);
+    if (pending === undefined) return;
+    held!.pending.delete(runId);
+    pending.cancel?.drop();
   }
 
   /**
@@ -141,13 +194,18 @@ export class Leases {
 
   /**
    * A send of `runId` on `artifactId` about to be handed to the machine, in the step it is: reserved for the channel, or
-   * false when any channel holds the id reserved, or this one holds RUNS_KEPT. A true answer is given back by `sendEnded`.
+   * false when any channel holds the id reserved, or this one holds RUNS_KEPT (its own pending send not counted twice).
+   * A true answer is given back by `sendEnded`; the send is no longer pending, and the cancel waiting on it, if any, is
+   * handed on in this step, before the caller hands on the send.
    */
   reserveRun(channel: RemoteChannel, runId: string, artifactId: string): boolean {
     const held = this.#held(channel);
-    if (held === null || this.#runs.has(runId) || held.runs.size >= RUNS_KEPT) return false;
+    const pending = held?.pending.get(runId);
+    if (held === null || this.#runs.has(runId) || held.runs.size + held.pending.size - (pending === undefined ? 0 : 1) >= RUNS_KEPT) return false;
+    held.pending.delete(runId);
     this.#runs.set(runId, { client: channel.client, artifactId, sending: 1 });
     held.runs.add(runId);
+    pending?.cancel?.admit();
     return true;
   }
 
@@ -173,7 +231,7 @@ export class Leases {
     if (channel.closed || this.#stopped) return null;
     let held = this.#channels.get(channel.client);
     if (held === undefined) {
-      held = { leases: new Map(), opening: 0, runs: new Set() };
+      held = { leases: new Map(), opening: 0, runs: new Set(), pending: new Map() };
       this.#channels.set(channel.client, held);
       const client = channel.client;
       const ended = held;

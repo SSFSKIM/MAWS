@@ -30,6 +30,8 @@ export type Executors = {
   sub(channel: RemoteChannel, message: SubMessage, decision: Granted): void;
   /** A refused `sub`, answered by its executor (M8 registers a subscription before it is decided); else `ended` here. */
   subRefused?(channel: RemoteChannel, message: SubMessage, reason: string): void;
+  /** P5 O7 M5c review 1: a refused `act`, answered by its executor (which settles what it noted at its receipt); else here. */
+  actRefused?(channel: RemoteChannel, message: ActMessage, reason: string): void;
 };
 
 const UNAVAILABLE: Executors = {
@@ -67,7 +69,7 @@ export class Gate {
       act: (channel, m) =>
         this.#decide(channel, { kind: 'act', name: m.action.action, input: readBytes(channel, m.action.args), action: m.action }, {
           granted: (decision) => this.#executors.act(channel, m, decision),
-          refused: (reason) => void channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason }),
+          refused: (reason) => (this.#executors.actRefused === undefined ? void channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason }) : this.#executors.actRefused(channel, m, reason)),
         }),
       sub: (channel, m) =>
         this.#decide(channel, { kind: 'sub', name: 'sub', input: m }, {

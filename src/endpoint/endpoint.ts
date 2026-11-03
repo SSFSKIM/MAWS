@@ -523,6 +523,7 @@ export class Endpoint implements EndpointModule {
       call: (channel, m, decision) => this.calls.execute(channel, m, decision),
       sub: (channel, m, decision) => this.subscriptions.start(channel, m, decision),
       subRefused: (channel, m, reason) => this.subscriptions.refused(channel, m, reason),
+      actRefused: (channel, m, reason) => this.actions.refused(channel, m, reason), // P5 O7 M5c review 1
     });
     const { sub: gatedSub, ...gated } = this.gate.routes();
     this.channels.setRoutes({

@@ -553,6 +553,72 @@ describe('M5c’s rows', () => {
     await done(a, next, at2);
   });
 
+  // P5 O7 M5c review 1: the device may cancel a send it made before the endpoint admits it (the person closes the sheet
+  // while the send is being authorized); the cancel waits for its send, on its own channel, and never reaches another's run
+  it('apply a cancel sent while its send is being decided, once the send is admitted, and refuse another channel’s', async () => {
+    const { f, held, a, b, asked } = await scene('view');
+    const send = (artifactId: string, runId: string) => ({ runId, target: 'drive', artifactId, format: 'pdf', destination: { kind: 'default' } });
+    const runId = randomUUID();
+    f.host.hold('library.entry'); // the send's artifact being placed
+    const sent = actOf(f, b, 'delivery.send', send(held, runId));
+    const from = b.inbox.length;
+    await b.channel.send({ t: 'act', action: sent });
+    await until(() => f.host.calls.some((c) => c.name === 'library.entry'), 'the send being decided');
+    const cancelled = act(b, actOf(f, b, 'delivery.cancel', { runId }));
+    expect(await act(a, actOf(f, a, 'delivery.cancel', { runId }))).toBe('no-target'); // never its channel's run
+    f.host.release('library.entry');
+    expect(await cancelled).toBe('ok');
+    const cancel = await until(() => asked.find((x) => x.name === 'delivery.cancel' && x.input.runId === runId), 'the cancel on the machine');
+    expect(cancel.client).toBe(asked.find((x) => x.name === 'delivery.send')?.client);
+    expect(await done(b, sent, from)).toMatchObject({ state: 'done' });
+    expect(f.spine.claimed.filter((c) => c.name === 'delivery.cancel')).toHaveLength(1);
+  });
+
+  it('hand a cancel decided before its send on in the step the send is admitted, before the send itself', async () => {
+    const { f, held, b, asked } = await scene('view');
+    const send = (artifactId: string, runId: string) => ({ runId, target: 'drive', artifactId, format: 'pdf', destination: { kind: 'default' } });
+    const runId = randomUUID();
+    f.host.hold('library.entry');
+    const sent = actOf(f, b, 'delivery.send', send(held, runId));
+    const from = b.inbox.length;
+    await b.channel.send({ t: 'act', action: sent });
+    await until(() => f.host.calls.some((c) => c.name === 'library.entry'), 'the send being decided');
+    // the artifact relinked meanwhile: the send's placement is read again after the cancel's, so the cancel is decided first
+    f.endpoint.artifactRanks.drop(held);
+    const cancelled = act(b, actOf(f, b, 'delivery.cancel', { runId }));
+    await until(() => f.host.calls.filter((c) => c.name === 'library.entry').length === 2, 'the cancel being decided');
+    f.host.release('library.entry');
+    expect(await cancelled).toBe('ok');
+    await done(b, sent, from);
+    const ops = f.host.calls.filter((c) => c.name === 'machine.op').map((c) => (c.input as { name: string }).name);
+    expect(ops).toEqual(['delivery.cancel', 'delivery.send']);
+    expect(asked.find((x) => x.name === 'delivery.cancel')?.input).toEqual({ runId });
+  });
+
+  it('drop a cancel whose send is refused: answered `no-target`, never reaching the run another channel holds by that id', async () => {
+    const { f, held, other, a, b, asked } = await scene('view');
+    const send = (artifactId: string, runId: string) => ({ runId, target: 'drive', artifactId, format: 'pdf', destination: { kind: 'default' } });
+    const delivering = holdSends(f);
+    const runId = randomUUID();
+    const running = actOf(f, a, 'delivery.send', send(other, runId));
+    const at = a.inbox.length;
+    expect(await act(a, running)).toBe('ok');
+    await until(() => f.spine.claimed.find((c) => c.name === 'delivery.send'), 'A’s run');
+    f.host.hold('library.entry'); // B's send of the same id being decided (`held` placed afresh for B)
+    const entries = () => f.host.calls.filter((c) => c.name === 'library.entry' && (c.input as { artifactId?: string }).artifactId === held).length;
+    const refused = act(b, actOf(f, b, 'delivery.send', send(held, runId)));
+    await until(() => entries() === 1, 'B’s send being decided');
+    f.endpoint.artifactRanks.drop(held); // so B's cancel is decided first, and waits on the send
+    const cancel = act(b, actOf(f, b, 'delivery.cancel', { runId }));
+    await until(() => entries() === 2, 'B’s cancel being decided');
+    f.host.release('library.entry');
+    expect(await refused).toBe('busy');
+    expect(await cancel).toBe('no-target');
+    expect(asked.some((x) => x.name === 'delivery.cancel')).toBe(false);
+    delivering.finish();
+    await done(a, running, at);
+  });
+
   it('keep the owner’s connector management at `machine-admin`, a step-up each; refuse it to a member without the right', async () => {
     const { f, held, a, b } = await scene();
     const servers = { artifactId: held, tools: [] };
