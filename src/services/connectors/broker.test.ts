@@ -841,6 +841,45 @@ describe('a watch (30 s to 24 h, at most 64 per app, only while visible)', () =>
     expect(updates.at(-1)).toMatchObject({ ok: true, via: { route: 'engine' } });
   });
 
+  // P5 O7 M5c round 3 (e2e/dashboard-live-data.spec.ts:526's flake, run 41529053694): the owner's Start answers `ready`
+  // before the engine's MCP servers connect, so the refresh it asks can find no route and wait out its interval. The
+  // owner's grant resolved the route itself: a watch of that tool that found none asks again at once, not 30 s later.
+  it('wakes at a grant of its tool when its last refresh found no route (the Start was ready before its server connected)', async () => {
+    engine.tools.clear();
+    const lease = page();
+    const { listener, updates } = watcher();
+    const start = broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+    if (!start.ok) throw new Error('refused');
+    await settle();
+    expect(updates.at(-1)).toMatchObject({ ok: false, state: 'paused', reason: 'noRoute' });
+    engine.has(ROWS); // the server connects
+    expect(await broker.grantTool(ART, { ...ROWS, mode: 'read' })).toMatchObject({ ok: true });
+    await vi.advanceTimersByTimeAsync(1_000); // well inside the interval
+    expect(engine.calls).toHaveLength(1);
+    expect(updates.at(-1)).toMatchObject({ ok: true, via: { route: 'engine' } });
+    // and from then on at its interval, as any watch that ran
+    await vi.advanceTimersByTimeAsync(28_000);
+    expect(engine.calls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(engine.calls).toHaveLength(2);
+  });
+
+  it('wakes at a grant another window gave (the store’s announcement) when its last refresh found no route', async () => {
+    engine.tools.clear();
+    const lease = page();
+    const { listener, updates } = watcher();
+    const start = broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+    if (!start.ok) throw new Error('refused');
+    await settle();
+    expect(updates.at(-1)).toMatchObject({ ok: false, state: 'paused', reason: 'noRoute' });
+    engine.has(ROWS);
+    grants.put(ART, ROWS, 'fp-1', 'read');
+    broker.onGrantChange({ artifactId: ART, ...ROWS, change: 'granted' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(engine.calls).toHaveLength(1);
+    expect(updates.at(-1)).toMatchObject({ ok: true });
+  });
+
   it('refreshes on demand only when visible and idle', async () => {
     const lease = page();
     const { listener } = watcher();

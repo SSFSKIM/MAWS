@@ -77,7 +77,7 @@ describe('renderer ipc client', () => {
     const heard = vi.fn();
     const off = onCommandRefused(heard);
     await createClient(() => bridge).invoke('session.start', { appSessionId: addressOf(LOCAL, 'a' as AppSessionId), message: null, options: {} as never });
-    expect(heard).toHaveBeenCalledExactlyOnceWith('session.start', error);
+    expect(heard).toHaveBeenCalledExactlyOnceWith('session.start', error, LOCAL);
     off();
     await createClient(() => bridge).invoke('session.start', { appSessionId: addressOf(LOCAL, 'a' as AppSessionId), message: null, options: {} as never });
     expect(heard).toHaveBeenCalledOnce();
@@ -100,7 +100,7 @@ describe('renderer ipc client', () => {
     const off = onCommandRefused(heard);
     try {
       await expect(createClient(() => bridge).invoke('session.start', { appSessionId: addressOf(LOCAL, 'a' as AppSessionId), message: null, options: {} as never })).resolves.toEqual({ ok: false, error });
-      expect(heard).toHaveBeenCalledExactlyOnceWith('session.start', error);
+      expect(heard).toHaveBeenCalledExactlyOnceWith('session.start', error, LOCAL);
       expect(logged).toHaveBeenCalledWith(expect.stringContaining('session.start'), failure);
     } finally {
       offBroken();

@@ -93,7 +93,7 @@ import type { BrowserWork, EngineConnection } from './browser-work';
 import { readTolerant } from '@shared/ipc/tolerant';
 import { codecOf } from '@shared/ipc/validate';
 import type { ServicesBus } from '@shared/spine/bus';
-import { createClientPort, type ClientPortRequest, type FrontClientPort, type PortTarget } from './client-port';
+import { createClientPort, type ClientPortRequest, type FrontClientPort, type PortTarget, type RemotePortHandle } from './client-port';
 import { FrontStreams, STREAM_EVENTS, type Follower } from './front-streams';
 import type { LazySpine } from './spine-seam';
 import { SpineUnavailable } from './spine-seam';
@@ -193,6 +193,9 @@ export interface ServicesFront {
   runtimeFor(client: ClientFacts): ServedRuntime; // one per welcomed machine.sock client (socket-server's `many`)
   bus: ServicesBus; // what startSpine registers through
   port: ClientPort; // §E: the spine's client port
+  // P5 O7 M5c: a remote device's channel as the port's target for the endpoint's `ref`, which `route` consults after its own
+  // connections; the handle answers through the port's `answer` with `target` as `from`, and closes at the channel's end
+  serveRemote(ref: ClientRef, target: PortTarget): RemotePortHandle;
   // The endpoint's `dispatch('machine', …)`: a client's request in process, `client` the endpoint's ref for its device
   dispatch(name: string, input: unknown, client?: ClientRef): Promise<CommandResult<CommandName>>;
   // P5 O3-D M5 (D44(3)): an engine-host request through the spine's intercept for its name, the spine loaded for it if
@@ -235,6 +238,8 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
 
   // Who a ClientRef a client's request minted belongs to, and its id there (null: the connection's own).
   const owners = new WeakMap<ClientRef, { client: FrontClient; id: string | null }>();
+  // P5 O7 M5c: the endpoint's refs, each a remote device's channel, served while the channel is open.
+  const remotes = new Map<ClientRef, PortTarget>();
   const clientPort: FrontClientPort = createClientPort({
     route(ref) {
       if (ref === null) {
@@ -242,7 +247,9 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
         return app === undefined ? null : { target: app, client: null };
       }
       const owner = owners.get(ref);
-      return owner === undefined || !clients.has(owner.client) ? null : { target: owner.client, client: owner.id };
+      if (owner !== undefined) return clients.has(owner.client) ? { target: owner.client, client: owner.id } : null;
+      const remote = remotes.get(ref);
+      return remote === undefined ? null : { target: remote, client: null };
     },
     deadlineMs: options.portDeadlineMs,
     log,
@@ -583,6 +590,16 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     runtimeFor: (facts) => new FrontClient(facts),
     bus,
     port: clientPort,
+    serveRemote(ref, target) {
+      remotes.set(ref, target);
+      return {
+        answer: (input) => clientPort.answer(target, input),
+        close() {
+          if (remotes.get(ref) === target) remotes.delete(ref);
+          clientPort.gone(target);
+        },
+      };
+    },
     dispatch: (name, input, client) => answer(name, input, { client: client ?? endpointClient }, false, null),
     async intercepted(name, rawInput, client) {
       if (!codec.isCommandName(name) || REGISTRY.commands[name].owner !== 'engine-host') return null;
@@ -627,6 +644,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       offStreaming();
       for (const client of [...clients]) client.detach();
       streams.stop();
+      remotes.clear();
       clientPort.close();
     },
   };

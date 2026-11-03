@@ -61,6 +61,7 @@ export class SessionStatusTracker {
   gateway: Gateway = { baseUrl: null, verified: 'pending', autoModeServer: 'unknown', localLane: null };
   fastMode: EngineSessionStatus['fastMode'] = { state: null, disabledReason: null };
   plugins: EngineSessionStatus['plugins'] = [];
+  firstTurnAt: string | null = null; // O16 D69: the launch's first main-lane turn.started (the fold restores it)
   pluginErrors: EngineSessionStatus['pluginErrors'] = [];
   pluginWarnings: EngineSessionStatus['pluginWarnings'] = [];
   pluginsObservedAt: string | null = null; // P2-A: when this launch's init or reload last reported the plugins (null: not yet)
@@ -154,7 +155,9 @@ export class SessionStatusTracker {
 
   // A main-lane turn.started: the local-lane observation belongs to the turn it was made in (C11's correction).
   // P5 O2 M2: and the work state's turn edge.
-  turnStarted(eventId: EventId): void {
+  // O16 D69: and the first one's time, before which no child of the engine is the model's work (`firstTurnAt`)
+  turnStarted(eventId: EventId, at?: string): void {
+    this.firstTurnAt ??= at ?? null;
     this.currentTurnEventId = eventId;
     this.gateway.localLane = null;
     this.work.turnStarted();

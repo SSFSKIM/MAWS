@@ -82,6 +82,18 @@ export interface RemoteLink extends MachineLink {
   /** The permanent verdict holding it `refused`, else null. */
   refusal(): string | null;
   /**
+   * P5 O7 M5c: the machine's client-port requests (`client`, sent only to a device that listed `rl2.client-port`): each
+   * goes to the listeners with its `answer`, which sends one `clientAnswer` on the channel that asked and nothing once that
+   * channel ended (the endpoint settles its pending requests `noClient` at the channel's end). With no listener the link
+   * answers `{noClient: true}` at once.
+   */
+  onClient(listener: (request: ClientRequest, answer: (answer: unknown) => void) => void): () => void;
+  /**
+   * P5 O7 M5c: each channel's own life as it happens: `current` when one becomes current, `lost` when it ends (a loss, the
+   * relay-to-direct swap, a refusal or `close()`), which `onState` doesn't say through the grace's `up`.
+   */
+  onChannel(listener: (event: 'current' | 'lost') => void): () => void;
+  /**
    * P5 O7 M3: the link's end, heard on `onState`: `closed` once `close()` ran (for good), `removed` while a sealed
    * `removed` holds it refused (until the session changes or a person acts on the machine); null while it lives.
    */
@@ -115,10 +127,47 @@ export interface RemoteLink extends MachineLink {
   openStream(request: StreamRequest, sink: StreamSink): RemoteStream;
   /** `person`: a person acted on this machine (also lifts `refused`). */
   probe(reason: ProbeReason): void;
+  /**
+   * P5 O7 M7 (`rl2.pong-clock`): one `ping` on the current channel, answered with its pong's stamps; null with no
+   * channel, when the channel is lost first, or with no pong within `timeoutMs` (5 s). Unlike a probe it closes nothing
+   * and rechecks no carrier, so the remote bench can measure a carrier by its pings without moving it.
+   */
+  ping(options?: { timeoutMs?: number }): Promise<PongStamps | null>;
+  /** P5 O7 M7: the stamps of the newest PONG_STAMPS_KEPT pongs this link heard (a probe's, `ping`'s, any other), oldest first. */
+  pongs(): readonly PongStamps[];
+  /**
+   * P5 O7 M7, the live bench's resume (the bench seam's `drop`, never the app's own): the current channel closed as a
+   * loss and the link held off its machine, no attempt made (no retry, no probe) and no channel adopted (a direct
+   * recheck's included) until `benchRelease`, so the machine's session writes a turn while the link is down, with no
+   * routing touched. Only with a channel current: false, and nothing held, without one.
+   */
+  benchHold(): boolean;
+  /** The hold lifted: an attempt at once, as on a network's return. */
+  benchRelease(): void;
 }
 
+/**
+ * One pong as the remote bench reads it (P5 O7 M7), each stamp in milliseconds: `at`, this device's clock at the ping's
+ * send (the ping's own `at`, which the pong echoes); `received` and `sent`, the machine's clock at the ping's arrival and
+ * at the pong's send, from a peer that listed `rl2.pong-clock` (else null); `arrived`, this device's clock at the pong's
+ * arrival; `carrier`, the channel's.
+ */
+export type PongStamps = { at: number; received: number | null; sent: number | null; arrived: number; carrier: Carrier };
+/** How many pongs' stamps a link keeps (the bench reads at most a few hundred per run). */
+export const PONG_STAMPS_KEPT = 512;
+const PING_ANSWER_MS = 5_000;
+/** The most `ping()` exchanges pending at once; one past it answers null and sends nothing. */
+export const PINGS_PENDING_MAX = 16;
+
 export type CallResult = ({ ok: true; output: unknown } | { ok: false; error: { code: string; message?: string } }) & { fellBack?: true };
-export type CallOptions = { timeoutMs?: number; session?: SessionRef; lacking?: { capability: string; input: unknown } };
+/**
+ * `oneChannel` (P5 O7 M5c): a call that names what only one channel holds (a page's lease, the channel's window report) is
+ * sent only on the channel current when it was made: with none current it fails `offline` at once, and it fails
+ * `offline` at that channel's end, never carried to the next one.
+ */
+export type CallOptions = { timeoutMs?: number; session?: SessionRef; lacking?: { capability: string; input: unknown }; oneChannel?: true };
+/** P5 O7 M5c: a machine service's request of this device through the client port (`client`; `src/shared/client/port.ts`'s kinds). */
+export type ClientRequest = { id: string; kind: string; request: unknown };
 
 export interface RemoteLinkDeps {
   machine: { ref: MachineRef; name: string };
@@ -144,7 +193,10 @@ type Internal = 'connecting' | 'up' | 'reconnecting' | 'down' | 'refused' | 'clo
 type Trust = { generation: number; keys: string[]; identity: string };
 type Current = { channel: Channel; carrier: Carrier; serial: number; trust: Trust };
 type Attempt = { channel: Channel; carrier: Carrier; trust: Trust } | { failed: string };
-type PendingCall = { id: string; name: string; input: unknown; session: SessionRef | undefined; lacking: CallOptions['lacking']; fellBack: boolean; sentOn: number | null; timer: ReturnType<typeof setTimeout>; resolve(result: CallResult): void };
+type PendingCall = { id: string; name: string; input: unknown; session: SessionRef | undefined; lacking: CallOptions['lacking']; oneChannel: boolean; fellBack: boolean; sentOn: number | null; timer: ReturnType<typeof setTimeout>; resolve(result: CallResult): void };
+
+/** P5 O7 M5c: the client port's answer when this device performs nothing (`src/shared/client/port.ts`'s `NO_CLIENT`). */
+const NO_CLIENT_ANSWER = { noClient: true } as const;
 
 const REPORTED: Record<Internal, LinkState> = { connecting: 'connecting', up: 'up', reconnecting: 'up', down: 'down', refused: 'down', closed: 'down' };
 
@@ -217,6 +269,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   let attemptTrust: Trust | null = null;
   let attempting = false;
   let again = false;
+  let held = false; // P5 O7 M7: the bench seam's hold (`benchHold`)
   let failures = 0;
   let lossAt = now();
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -233,6 +286,11 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   const calls = new Map<string, PendingCall>();
   const stateListeners = new Set<(state: LinkState) => void>();
   const capsListeners = new Set<(caps: DeviceCaps) => void>();
+  const clientListeners = new Set<(request: ClientRequest, answer: (answer: unknown) => void) => void>();
+  const channelListeners = new Set<(event: 'current' | 'lost') => void>();
+  const channelSaid = (event: 'current' | 'lost'): void => {
+    for (const listener of [...channelListeners]) listener(event);
+  };
   let skippedRecord: string | null = null;
 
   const isCurrent = () => current !== null && (state === 'up' || state === 'reconnecting');
@@ -242,6 +300,27 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     return true;
   };
   const ended = (): 'removed' | 'closed' | null => (state === 'closed' ? 'closed' : state === 'refused' ? 'removed' : null);
+  // P5 O7 M7: the pongs heard, and the pings `ping()` waits on, each on the channel it was sent on (`serial`)
+  const pongStamps: PongStamps[] = [];
+  // Keyed by `<serial>:<at>`: one exchange per channel and millisecond, which a second `ping()` in that millisecond joins.
+  // The link's own pings (a probe's, a silence period's) never share a pending exchange's `at` on its channel: one sent
+  // while an exchange of that millisecond is pending is left out (the exchange's pong answers it, as any message does),
+  // and `ping()` in the millisecond of one of theirs waits for the next, so each pong settles only the ping it answers.
+  const pingWaiters = new Map<string, { promise: Promise<PongStamps | null>; serial: number; settle(stamps: PongStamps | null): void }>();
+  const pingKey = (on: number, at: number) => `${on}:${at}`;
+  let ownPing: { serial: number; at: number } | null = null;
+  /** The link's own ping (a probe's, a silence period's) on the current channel. */
+  const sendOwnPing = (): void => {
+    if (current === null) return;
+    const at = now();
+    if (pingWaiters.has(pingKey(current.serial, at))) return;
+    ownPing = { serial: current.serial, at };
+    send({ t: 'ping', at });
+  };
+  /** Settles with null every pending `ping()` (of channel `on` only, when given). */
+  const settlePings = (on?: number): void => {
+    for (const waiter of [...pingWaiters.values()]) if (on === undefined || waiter.serial === on) waiter.settle(null);
+  };
 
   const peerCapabilities = (): readonly string[] | null => current?.channel.peer.capabilities ?? null;
   const acts = new ActTable({ machine: ref, signedIn: () => deps.session.current(), send, current: () => current !== null, peerCapabilities, timing, now, log });
@@ -283,7 +362,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   }
 
   function startAttempt(): void {
-    if (state === 'closed' || state === 'refused') return;
+    if (state === 'closed' || state === 'refused' || held) return;
     if (attempting) {
       again = true;
       return;
@@ -327,7 +406,11 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       log(`skipped ${record.body.addresses.length - addresses.length} address(es) of the endpoint record issued ${record.body.issued}: not a tailnet ws:// address`);
     }
     if (addresses.length === 0) return null;
-    if (!bucket.take()) {
+    // The listener charges a source only for an upgrade it accepts, so the link spends a token only on a socket that
+    // opened: a dial refused, timed out or answered 503 spends none. One attempt runs at a time, so the token `holds`
+    // saw is still there when the socket opens. An accepted upgrade whose 101 is lost is counted by the listener alone;
+    // at worst the link's next dial is answered 503 and goes through the hub, while the listener refills.
+    if (!bucket.holds()) {
       once('bucket', 'direct attempts are over the listener’s handshake limit; going through the hub until the bucket refills');
       return null;
     }
@@ -337,6 +420,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     } catch {
       return null;
     }
+    bucket.take();
     let first: ByteDuplex | null = won.carrier;
     const dial = async (): Promise<ByteDuplex> => {
       if (first !== null) {
@@ -344,9 +428,11 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
         first = null;
         return sealedOnly(carrier);
       }
-      // A catch-up's next page takes another connection, and another token.
-      if (!bucket.take()) throw new Error('the direct bucket is empty');
-      return sealedOnly(await dialDirect(won.url, timing.DIRECT_DIAL_MS));
+      // A catch-up's next page takes another connection, and another token once it opens.
+      if (!bucket.holds()) throw new Error('the direct bucket is empty');
+      const carrier = await dialDirect(won.url, timing.DIRECT_DIAL_MS);
+      bucket.take();
+      return sealedOnly(carrier);
     };
     try {
       return await handshake(dial, signedIn, ref);
@@ -386,6 +472,10 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     attempting = false;
     attemptTrust = null;
     if ('channel' in result) {
+      if (held) {
+        result.channel.close('closed'); // the bench's hold: its release attempts again
+        return;
+      }
       if (state === 'closed' || state === 'refused' || result.trust.generation !== trustGeneration) {
         result.channel.close('closed');
         if (state === 'closed' || state === 'refused') return;
@@ -420,6 +510,10 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   // ---- A current channel ---------------------------------------------------------------------------------------------
 
   function adopt(result: { channel: Channel; carrier: Carrier; trust: Trust }): void {
+    if (held) {
+      result.channel.close('closed'); // every path that adopts: a held link adopts nothing
+      return;
+    }
     const mine: Current = { channel: result.channel, carrier: result.carrier, serial: ++serial, trust: result.trust };
     current = mine;
     mine.channel.onMessage((message) => {
@@ -443,6 +537,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     subs.onCurrent();
     streams.onCurrent();
     flushCalls();
+    channelSaid('current'); // P5 O7 M5c
     if (result.carrier === 'direct') closeRelay();
     else armRecheck();
     notify();
@@ -487,6 +582,10 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       case 'ping':
         send({ t: 'pong', at: message.at });
         return;
+      case 'client':
+        return clientAsked(message);
+      case 'pong':
+        return heardPong(message);
       case 'state': {
         const signedIn = deps.session.current();
         signedIn?.view.advance(message.states, message.transitions).catch((error: unknown) => log(`a state the endpoint sent did not advance the view: ${(error as Error).message}`));
@@ -497,10 +596,77 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     }
   }
 
+  /**
+   * P5 O7 M5c: a client-port request, answered once and only on the channel that asked, and only from a peer that listed
+   * `rl2.client-port` (a request of any other is not this device's to answer: it is left unread).
+   */
+  function clientAsked(message: Extract<EndpointMessage, { t: 'client' }>): void {
+    const on = current;
+    if (on === null || !on.channel.peer.capabilities.includes('rl2.client-port')) return;
+    let answered = false;
+    const answer = (value: unknown): void => {
+      if (answered) return;
+      answered = true;
+      if (current === on) send({ t: 'clientAnswer', id: message.id, answer: value ?? NO_CLIENT_ANSWER });
+    };
+    if (clientListeners.size === 0) return answer(NO_CLIENT_ANSWER);
+    for (const listener of [...clientListeners]) listener({ id: message.id, kind: message.kind, request: message.request }, answer);
+  }
+
+  /** P5 O7 M5c: the calls bound to the channel that just ended fail `offline`, never carried to the next one. */
+  function dropOneChannelCalls(): void {
+    for (const pending of [...calls.values()]) {
+      if (!pending.oneChannel) continue;
+      calls.delete(pending.id);
+      clearTimeout(pending.timer);
+      pending.resolve({ ok: false, error: { code: 'offline', message: `${pending.name}: the channel to machine ${name} it was made on ended` } });
+    }
+  }
+
+  /** P5 O7 M7: a pong's stamps kept, and the `ping()` it answers settled. */
+  function heardPong(message: Extract<EndpointMessage, { t: 'pong' }>): void {
+    if (current === null) return;
+    const clock = current.channel.peer.capabilities.includes('rl2.pong-clock');
+    const stamps: PongStamps = { at: message.at, received: clock ? (message.received ?? null) : null, sent: clock ? (message.sent ?? null) : null, arrived: now(), carrier: current.carrier };
+    pongStamps.push(stamps);
+    if (pongStamps.length > PONG_STAMPS_KEPT) pongStamps.splice(0, pongStamps.length - PONG_STAMPS_KEPT);
+    pingWaiters.get(pingKey(current.serial, message.at))?.settle(stamps);
+  }
+
+  async function ping(options: { timeoutMs?: number } = {}): Promise<PongStamps | null> {
+    if (!isCurrent()) return null;
+    // not in the millisecond of the link's own ping on this channel, whose pong would answer this one's `at` too
+    while (ownPing !== null && ownPing.serial === current!.serial && ownPing.at === now()) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      if (!isCurrent()) return null;
+    }
+    const at = now();
+    const on = current!.serial;
+    const key = pingKey(on, at);
+    const joined = pingWaiters.get(key);
+    if (joined !== undefined) return joined.promise;
+    if (pingWaiters.size >= PINGS_PENDING_MAX) return null;
+    let settle!: (stamps: PongStamps | null) => void;
+    const promise = new Promise<PongStamps | null>((resolve) => {
+      const timer = setTimeout(() => settle(null), options.timeoutMs ?? PING_ANSWER_MS);
+      settle = (stamps) => {
+        clearTimeout(timer);
+        pingWaiters.delete(key);
+        resolve(stamps);
+      };
+    });
+    pingWaiters.set(key, { promise, serial: on, settle });
+    send({ t: 'ping', at });
+    return promise;
+  }
+
   /** The current channel ended. A sealed `removed` refuses the link; anything else is a loss, retried at once. */
   function lost(reason: string): void {
     const was = current;
     current = null;
+    dropOneChannelCalls();
+    channelSaid('lost');
+    settlePings();
     silenceTimer = clear(silenceTimer);
     probeTimer = clear(probeTimer);
     recheckTimer = clear(recheckTimer);
@@ -571,7 +737,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
           return void current.channel.close('timeout');
         } else {
           unanswered += 1;
-          send({ t: 'ping', at: now() });
+          sendOwnPing();
         }
         armSilence();
       },
@@ -608,6 +774,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
           }
           return;
         }
+        if (held) return void result.channel.close('closed'); // the bench's hold: a held link adopts nothing
         if (state === 'closed' || state === 'refused' || generation !== trustGeneration || result.trust.generation !== trustGeneration) {
           result.channel.close('closed');
           if (state !== 'closed' && state !== 'refused') startAttempt();
@@ -622,7 +789,10 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
         // The swap is the linearization point: sends go to the new channel only, and the old one's messages are dropped.
         const old = current;
         current = null;
+        dropOneChannelCalls();
+        settlePings(old.serial); // the old channel's close is not a loss: its pings are answered nowhere now
         acts.onLost();
+        channelSaid('lost');
         streams.onLost(); // a stream is its channel's: the old channel's end at the endpoint ends them there too
         log('the direct carrier answers again: switching from the relay');
         adopt(result);
@@ -639,7 +809,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     if (state === 'up' && current !== null) {
       const mine = current;
       const before = received;
-      send({ t: 'ping', at: now() });
+      sendOwnPing();
       probeTimer = clear(probeTimer);
       probeTimer = setTimeout(() => {
         probeTimer = null;
@@ -759,6 +929,14 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       capsListeners.add(listener);
       return () => void capsListeners.delete(listener);
     },
+    onClient(listener) {
+      clientListeners.add(listener);
+      return () => void clientListeners.delete(listener);
+    },
+    onChannel(listener) {
+      channelListeners.add(listener);
+      return () => void channelListeners.delete(listener);
+    },
     // The caller is the channel's member and device (RL §5.5): its ClientRef is not sent. P5 O7 M4: the session a
     // path-class read is made from goes as the call's `session`.
     dispatch(commandName: CommandName, input: unknown, _client: unknown, session?: AppSessionId): Promise<CommandResult<CommandName>> {
@@ -774,6 +952,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     call(callName, input, options = {}) {
       const end = ended();
       if (end !== null) return Promise.resolve({ ok: false, error: { code: end, message: `${callName}: the link to machine ${name} is ${end}` } });
+      if (options.oneChannel === true && current === null) return Promise.resolve({ ok: false, error: { code: 'offline', message: `${callName}: no channel to machine ${name} is current` } });
       return new Promise<CallResult>((resolve) => {
         const id = `c${++nextCall}`;
         const timeoutMs = options.timeoutMs ?? timing.CALL_TIMEOUT_MS;
@@ -783,6 +962,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
           input,
           session: options.session,
           lacking: options.lacking,
+          oneChannel: options.oneChannel === true,
           fellBack: false,
           sentOn: null,
           resolve,
@@ -801,6 +981,23 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     subscribe: (request, sink) => subs.subscribe(request, sink, ended()),
     openStream: (request, sink) => streams.open(request, sink, ended()),
     probe,
+    ping,
+    pongs: () => [...pongStamps],
+    benchHold() {
+      // no channel, no hold: a link already reconnecting is left to its own attempts
+      if (state === 'closed' || held || current === null) return false;
+      held = true;
+      retryTimer = clear(retryTimer);
+      current.channel.close('closed');
+      return true;
+    },
+    benchRelease() {
+      if (!held) return;
+      held = false;
+      failures = 0;
+      lossAt = now();
+      startAttempt();
+    },
     close() {
       if (state === 'closed') return;
       state = 'closed';
@@ -811,10 +1008,12 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       clearExpiry = null;
       const was = current;
       current = null;
+      if (was !== null) channelSaid('lost');
       subs.close('closed');
       streams.close('closed');
       acts.close('closed');
       failCalls('closed');
+      settlePings();
       was?.channel.close('closed');
       closeRelay();
       notify();

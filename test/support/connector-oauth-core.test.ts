@@ -83,6 +83,20 @@ describe('the control file', () => {
     }
   });
 
+  // P5 O7 M5c: a consent another machine asks this Mac to open is never a loopback URL, so its authorization endpoint is
+  // advertised as an https URL a fake browser routes to the fixture's own `/authorize`
+  it('advertises an https authorization endpoint in the OAuth phase, and refuses any other override of it', () => {
+    const authorizationEndpoint = 'https://authorize.invalid/authorize';
+    const control = { ...OAUTH, advertise: { authorizationEndpoint } };
+    expect(parseOAuthControl(JSON.stringify(control))).toEqual(control);
+    for (const bad of ['http://authorize.invalid/authorize', `${ORIGIN}/authorize`, 'https://authorize.invalid/token', 7]) {
+      expect(parseOAuthControl(JSON.stringify({ ...OAUTH, advertise: { authorizationEndpoint: bad } })), String(bad)).toEqual(OPEN_CONTROL);
+    }
+    const metadata = json(send({ url: '/.well-known/oauth-authorization-server' }, control));
+    expect(metadata).toMatchObject({ issuer: ORIGIN, authorization_endpoint: authorizationEndpoint, token_endpoint: `${ORIGIN}/token`, registration_endpoint: `${ORIGIN}/register` });
+    expect(json(send({ url: '/.well-known/oauth-authorization-server' })).authorization_endpoint).toBe(`${ORIGIN}/authorize`); // none advertised: its own
+  });
+
   it('reads a complete control', () => {
     expect(parseOAuthControl(JSON.stringify(OAUTH))).toEqual(OAUTH);
     expect(parseOAuthControl(JSON.stringify({ seq: 4, phase: 'oauth', accessTtlSeconds: 2, revocation: 'unavailable' }))).toEqual({ seq: 4, phase: 'oauth', accessTtlSeconds: 2, revocation: 'unavailable' });

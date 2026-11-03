@@ -92,7 +92,7 @@ import { createServer, type Server } from 'node:net';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { daemonPaths, DAEMON_FILES, DAEMON_LOCK_BREAKER, type DaemonPaths } from '@shared/daemon/files';
-import { createHostSupervisor, type HostSupervisor } from '@shared/host/host-supervisor';
+import { createHostSupervisor, ENGINE_HOST_BUDGETS_MS, type HostSupervisor } from '@shared/host/host-supervisor';
 import { supervisorEnv, type DetachedTransportOptions } from '@shared/host/detached-transport';
 import type { RelayPort } from '@shared/host/doc-relay';
 import { appIdentity } from '@shared/host/identity';
@@ -356,7 +356,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const hosts = createHostSupervisor({
     hosts: {
       // P5 O17 M7 fix 4: the engine host's spawn names mawsd as its spawner (engine-host/spawner.ts); the pty host's does not
-      'engine-host': { modulePath: options.modules.engineHost, serviceName: 'maws-supervisor', transport: 'detached', readyBy: 'external', onDemand: true, detached: { buildPolicy: 'replace', identity: engineIdentity, env: () => ({ ...(options.detached?.env?.() ?? env), [ENGINE_HOST_SPAWNER_ENV]: 'mawsd' }) } },
+      'engine-host': { modulePath: options.modules.engineHost, serviceName: 'maws-supervisor', transport: 'detached', readyBy: 'external', onDemand: true, detached: { buildPolicy: 'replace', identity: engineIdentity, env: () => ({ ...(options.detached?.env?.() ?? env), [ENGINE_HOST_SPAWNER_ENV]: 'mawsd' }) }, requestBudgetsMs: ENGINE_HOST_BUDGETS_MS },
       'pty-host': {
         modulePath: options.modules.ptyHost,
         serviceName: 'maws-pty-host',
@@ -1426,6 +1426,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     },
     artifacts: { fetch: (request) => artifacts.fetch(request) }, // P5 O5 M2
     browser: browserFeed, // P5 O17 M6
+    clientPort: { serve: (ref, target) => front.serveRemote(ref, target) }, // P5 O7 M5c
     log: (line) => log(`[endpoint] ${line}`),
   };
 

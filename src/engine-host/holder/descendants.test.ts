@@ -9,7 +9,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { countWork, expectedArgv, Infrastructure, matchesArgv, parseTree, PS_TREE_ARGS, readTreeSync } from './descendants';
+import { countWork, expectedArgv, Infrastructure, isBashWrapper, isBridgeOf, matchesArgv, parseTree, PS_TREE_ARGS, readTreeSync, restoredBindings, SERVER_SPAWN_WINDOW_MS } from './descendants';
 
 const CLAUDE = 500;
 const MCP: string[][] = [['/usr/bin/node', '/tmp/o16-mcp.mjs', 'user'], ['/usr/bin/node', '/tmp/o16-mcp.mjs', 'flag']];
@@ -166,6 +166,172 @@ describe('the registration is bound by identity, pid and start time', () => {
   it('a cycle in a malformed read ends', () => {
     const t = parseTree([line(CLAUDE, 701, 'S', 'claude'), line(701, CLAUDE, 'S', 'loop')].join('\n'));
     expect(countWork(t, CLAUDE, { pids: new Set(), mcpCommands: [] })).toBe(1);
+  });
+});
+
+// D69 (the veto's registration after landing): the owner's server shapes as the veto probe recorded them
+// (spikes/protocol-probe/fixtures/p5/p5-o16-veto-mcp[-installed].jsonl, the live MacBook's tree in the plan's D69): a
+// bare command (cua's `node --disable-sigusr1 …/cua-shim.mjs`), a launcher that execs another binary (ptc's
+// `…/bin/ptc-launch`, running as its venv's python), a configured absolute path, and sminos's bridge before its
+// observer says hello. Every process of a server is a direct child of claude spawned within a second of claude itself.
+describe('D69: the bridge by its argv, the count rule, the restored bindings', () => {
+  const SESSION = '06b89407-68e7-4316-adcd-b62748ee9b3a';
+  const IDS = new Set([SESSION]);
+  const BORN = 'Mon Nov  2 14:26:56 2026';
+  const SOON = 'Mon Nov  2 14:26:57 2026';
+  const HOUR = 'Mon Nov  2 15:30:02 2026';
+  const CUA = ['node', '--disable-sigusr1', '/u/.claude/plugins/cache/cua/cua/0.21.0/cua-shim.mjs'];
+  const PTC = ['/u/.claude/plugins/cache/ptc-tool/ptc/0.6.1/bin/ptc-launch']; // configured; it execs into the venv's python
+  const ABS = ['/usr/bin/node', '/x/server.mjs', 'flag'];
+  const BRIDGE = `/Library/Frameworks/Python.framework/Versions/3.12/Resources/Python.app/Contents/MacOS/Python /u/.claude/plugins/cache/doperpowers/sminos/1.31.0/skills/sminos/scripts/sminos.py bridge --session ${SESSION} --launch=k9vHeE6YTaP3bkSm5E93tw`;
+  const WRAPPER = "/opt/homebrew/bin/bash -c source /u/.claude/shell-snapshots/snapshot-bash-1793629565532-co9nny.sh 2>/dev/null || true && shopt -u extglob 2>/dev/null || true && eval 'sleep 600'";
+  const owner = (...extra: string[]) => parseTree([
+    lined(CLAUDE, 1, BORN, '/u/.local/share/claude/versions/2.1.316 -p --input-format stream-json'),
+    lined(501, CLAUDE, BORN, CUA.join(' ')),
+    lined(502, CLAUDE, BORN, '/u/.ptc/venvs/4c410075651a/bin/python -m ptc.mcp'),
+    lined(503, 502, SOON, '/u/.ptc/venvs/4c410075651a/bin/python -m ipykernel_launcher'), // the server's own kernel
+    lined(504, CLAUDE, SOON, ABS.join(' ')),
+    lined(505, CLAUDE, SOON, BRIDGE),
+    ...extra,
+  ].join('\n'));
+  const fresh = { pids: new Set<number>(), mcpCommands: [CUA, PTC, ABS], sessionIds: IDS };
+  const all = { connected: 3, pending: 0 };
+
+  it('claude’s Bash wrapper shape, and nothing else', () => {
+    expect(isBashWrapper(WRAPPER)).toBe(true);
+    expect(isBashWrapper("/bin/bash -c source /tmp/c/shell-snapshots/snapshot-bash-1-x.sh 2>/dev/null || true && eval 'sleep 600'")).toBe(true);
+    expect(isBashWrapper('/bin/zsh -c source /u/.claude/shell-snapshots/snapshot-zsh-2-y.sh && eval x')).toBe(true);
+    expect(isBashWrapper('/bin/sh -c "${CLAUDE_PLUGIN_ROOT}/hooks/smns-record.sh"')).toBe(false); // a hook
+    expect(isBashWrapper('/bin/bash -c sleep 600')).toBe(false);
+    expect(isBashWrapper('node /x/shell-snapshots/snapshot-bash-1.sh')).toBe(false);
+  });
+
+  it('the bridge: `sminos` or `sminos.py`, first or after its interpreter, then `bridge --session` and one of the row’s ids', () => {
+    expect(isBridgeOf(BRIDGE, IDS)).toBe(true);
+    expect(isBridgeOf(`bash /p/sminos/skills/sminos/scripts/sminos bridge --session ${SESSION} --lane match`, IDS)).toBe(true); // before its exec
+    expect(isBridgeOf(`/p/skills/sminos/scripts/sminos bridge --session ${SESSION}`, IDS)).toBe(true);
+    expect(isBridgeOf(`python3 /work/sminos.py bridge --session ${SESSION}`, IDS)).toBe(false); // a script of that name elsewhere: not the plugin's
+    const root = '/u/.claude/plugins/cache/doperpowers/sminos/1.31.0';
+    expect(isBridgeOf(BRIDGE, IDS, [root])).toBe(true); // once the engine names sminos's root, only that root's script
+    expect(isBridgeOf(`python3 /work/skills/sminos/scripts/sminos.py bridge --session ${SESSION}`, IDS, [root])).toBe(false);
+    expect(isBridgeOf(BRIDGE, IDS, [])).toBe(false); // the engine reported its plugins, and sminos is not among them
+    expect(isBridgeOf(BRIDGE, new Set(['another-session']))).toBe(false);
+    expect(isBridgeOf(BRIDGE, new Set())).toBe(false);
+    expect(isBridgeOf(`python3 /p/sminos.py watch --session ${SESSION}`, IDS)).toBe(false);
+    expect(isBridgeOf(`python3 /p/not-sminos.py bridge --session ${SESSION}`, IDS)).toBe(false);
+    expect(isBridgeOf(`/bin/bash -c sminos bridge --session ${SESSION}`, IDS)).toBe(false); // a shell's -c, not the bridge
+    expect(isBridgeOf(`python3 -I /p/sminos.py bridge --session ${SESSION}`, IDS)).toBe(false); // not first or second: stays work
+    expect(isBridgeOf(`/opt/homebrew/bin/bash -c source /u/.claude/shell-snapshots/snapshot-bash-1-x.sh && sminos bridge --session ${SESSION}`, IDS)).toBe(false);
+  });
+
+  it('a fresh launch: cua and the absolute server by command line, the bridge by its argv, ptc by count once mcp_status settles', () => {
+    const infra = new Infrastructure();
+    expect(infra.count(owner(), CLAUDE, fresh)).toBe(2); // ptc's python matches no configured command line (it and its kernel)
+    expect(infra.unnamed.map((p) => p.pid)).toEqual([502]);
+    expect(infra.countable).toBe(true);
+    expect(infra.settle(owner(), CLAUDE, fresh, { connected: 3, pending: 1 })).toBe(2); // a server still pending: nothing by count
+    expect(infra.settle(owner(), CLAUDE, fresh, all)).toBe(0);
+    expect(infra.count(owner(), CLAUDE, fresh)).toBe(0); // bound by identity from then on, its kernel with it (D52)
+    expect(infra.bindings()).toEqual(expect.arrayContaining([{ pid: 501, start: BORN, kind: 'server' }, { pid: 502, start: BORN, kind: 'server' }, { pid: 504, start: SOON, kind: 'server' }, { pid: 505, start: SOON, kind: 'bridge' }]));
+  });
+
+  it('a background Bash keeps counting, and never stops the count from binding the servers', () => {
+    const infra = new Infrastructure();
+    const working = owner(lined(600, CLAUDE, HOUR, WRAPPER), lined(601, 600, HOUR, 'sleep 600'));
+    infra.count(working, CLAUDE, fresh);
+    expect(infra.unnamed.map((p) => p.pid)).toEqual([502]); // the wrapper is never a candidate
+    expect(infra.settle(working, CLAUDE, fresh, all)).toBe(2); // the wrapper and its sleep
+    expect(infra.count(owner(), CLAUDE, fresh)).toBe(0);
+  });
+
+  it('the count binds nothing while any other child is unnamed: a hook, a second server-like child, the bridge of another session', () => {
+    for (const extra of [lined(610, CLAUDE, SOON, '/bin/sh -c "${CLAUDE_PLUGIN_ROOT}/hooks/smns-record.sh"'), lined(611, CLAUDE, SOON, '/x/other-server --stdio'), lined(612, CLAUDE, SOON, BRIDGE.replace(SESSION, 'another-session'))]) {
+      const infra = new Infrastructure();
+      expect(infra.settle(owner(extra), CLAUDE, fresh, all)).toBe(3); // ptc, its kernel and the stranger
+      expect(infra.count(owner(), CLAUDE, fresh)).toBe(2); // the stranger gone: ptc still waits for a count
+      expect(infra.settle(owner(), CLAUDE, fresh, all)).toBe(0);
+    }
+  });
+
+  it('the count binds nothing started past the engine’s spawn window: a server started later is bound only by its command line', () => {
+    const late = parseTree([lined(CLAUDE, 1, BORN, 'claude'), lined(502, CLAUDE, HOUR, '/u/.ptc/venvs/4c41/bin/python -m ptc.mcp')].join('\n'));
+    const infra = new Infrastructure();
+    expect(infra.settle(late, CLAUDE, { pids: new Set(), mcpCommands: [PTC] }, { connected: 1, pending: 0 })).toBe(1);
+    expect(infra.countable).toBe(false);
+    expect(SERVER_SPAWN_WINDOW_MS).toBe(60_000);
+    const edge = (at: string) => parseTree([lined(CLAUDE, 1, BORN, 'claude'), lined(502, CLAUDE, at, 'python -m ptc.mcp')].join('\n'));
+    expect(new Infrastructure().settle(edge('Mon Nov  2 14:27:56 2026'), CLAUDE, { pids: new Set(), mcpCommands: [PTC] }, { connected: 1, pending: 0 })).toBe(0); // 60 s after
+    expect(new Infrastructure().settle(edge('Mon Nov  2 14:27:57 2026'), CLAUDE, { pids: new Set(), mcpCommands: [PTC] }, { connected: 1, pending: 0 })).toBe(1); // 61 s
+    expect(new Infrastructure().settle(parseTree([line(CLAUDE, 1, 'S', 'claude'), line(502, CLAUDE, 'S', 'python -m ptc.mcp')].join('\n')), CLAUDE, { pids: new Set(), mcpCommands: [PTC] }, { connected: 1, pending: 0 })).toBe(1); // no start time: never
+  });
+
+  it('the probe’s d after the first turn: a teammate born in the engine’s first minute is work, never a dead server’s replacement', () => {
+    const turned = { ...fresh, firstTurnAt: '2026-11-02T14:27:01.400Z' }; // the first turn, 5 s after claude
+    const infra = new Infrastructure();
+    expect(infra.settle(owner(), CLAUDE, turned, all)).toBe(0);
+    const early = (start: string) => parseTree([...owner().values()].filter((p) => p.pid !== 502 && p.pid !== 503).map((p) => lined(p.pid, p.ppid, p.start, p.command)).concat(lined(700, CLAUDE, start, '/u/.local/bin/claude --teammate')).join('\n'));
+    expect(infra.settle(early('Mon Nov  2 14:27:26 2026'), CLAUDE, turned, all)).toBe(1); // 30 s after claude, 25 s after the turn
+    expect(infra.settle(early('Mon Nov  2 14:27:02 2026'), CLAUDE, turned, all)).toBe(1); // the second after the turn's
+    expect(infra.countable).toBe(false);
+    // lstart counts seconds: a child of the turn's own second may have started after it, so it is never counted
+    const sameSecond = { ...fresh, firstTurnAt: '2026-11-02T14:27:01.100Z' };
+    const fill = new Infrastructure();
+    expect(fill.settle(owner(), CLAUDE, sameSecond, all)).toBe(0);
+    expect(fill.settle(early('Mon Nov  2 14:27:01 2026'), CLAUDE, sameSecond, all)).toBe(1); // born in the turn's second, after it began
+    expect(new Infrastructure().settle(owner(), CLAUDE, { ...fresh, firstTurnAt: '2026-11-02T14:26:57.000Z' }, all)).toBe(0); // servers a second before
+    expect(new Infrastructure().settle(owner(), CLAUDE, { ...fresh, firstTurnAt: '2026-11-02T14:26:56.900Z' }, all)).toBe(2); // ptc shares the turn's second: never by count
+  });
+
+  it('the probe’s d: a bound server killed stays `connected`, and a child started after it is work, not its replacement', () => {
+    const infra = new Infrastructure();
+    expect(infra.settle(owner(), CLAUDE, fresh, all)).toBe(0);
+    const killed = parseTree([...owner().values()].filter((p) => p.pid !== 502 && p.pid !== 503).map((p) => lined(p.pid, p.ppid, p.start, p.command)).join('\n'));
+    const teammate = parseTree([...killed.values()].map((p) => lined(p.pid, p.ppid, p.start, p.command)).concat(lined(700, CLAUDE, HOUR, '/u/.local/bin/claude --teammate')).join('\n'));
+    expect(infra.settle(killed, CLAUDE, fresh, all)).toBe(0);
+    expect(infra.settle(teammate, CLAUDE, fresh, all)).toBe(1); // 2 bound + 1 unnamed = 3 connected, but it started late
+    expect(infra.count(teammate, CLAUDE, fresh)).toBe(1);
+  });
+
+  it('the bridge bound before the engine names sminos’s root is dropped if it turns out to be another root’s', () => {
+    const infra = new Infrastructure();
+    expect(infra.count(owner(), CLAUDE, fresh)).toBe(2); // the bridge by the plugin's layout; ptc and its kernel unbound
+    expect(infra.count(owner(), CLAUDE, { ...fresh, sminosRoots: ['/u/.claude/plugins/cache/doperpowers/sminos/1.31.0'] })).toBe(2); // that root: still the bridge
+    expect(infra.count(owner(), CLAUDE, { ...fresh, sminosRoots: ['/elsewhere/sminos'] })).toBe(3); // another root: work
+    const unloaded = new Infrastructure();
+    expect(unloaded.count(owner(), CLAUDE, fresh)).toBe(2);
+    expect(unloaded.count(owner(), CLAUDE, { ...fresh, sminosRoots: [] })).toBe(3); // the engine reports no sminos: no bridge
+  });
+
+  it('the bridge: one process at a time, rebound once gone; a hello naming a pid supersedes it', () => {
+    const infra = new Infrastructure();
+    const second = lined(506, CLAUDE, HOUR, BRIDGE);
+    expect(infra.count(owner(second), CLAUDE, { ...fresh, mcpCommands: [CUA, ABS] })).toBe(3); // ptc and its kernel, and the second bridge
+    const restarted = parseTree([lined(CLAUDE, 1, BORN, 'claude'), second].join('\n'));
+    expect(infra.count(restarted, CLAUDE, fresh)).toBe(0); // the first gone: the next one is the bridge
+    expect(infra.count(restarted, CLAUDE, { ...fresh, pids: new Set([506]) })).toBe(0); // the hello names it
+    expect(infra.bindings()).toEqual([]); // the hello's bridge is named again by the next hello, never restored
+    expect(infra.count(owner(), CLAUDE, { ...fresh, pids: new Set([777]) })).toBe(3); // a hello naming another pid: the argv's bridge is work (ptc and its kernel unbound)
+  });
+
+  it('an adopter restores the bindings of the same processes: a bare command and an exec’d launcher without any command line', () => {
+    const rebuilt = { pids: new Set<number>(), mcpCommands: [ABS], sessionIds: IDS }; // a bare command dropped (the lineage holds the launch's own id)
+    const restored = restoredBindings({ launch: 'L1', processes: [{ pid: 501, start: BORN, kind: 'server' }, { pid: 502, start: BORN, kind: 'server' }, { pid: 504, start: SOON, kind: 'server' }, { pid: 505, start: SOON, kind: 'bridge' }, { pid: 9, start: BORN, kind: 'lsp' }] }, 'L1');
+    expect(restored).toHaveLength(4); // a kind this build does not know is skipped
+    expect(restoredBindings({ launch: 'L0', processes: [{ pid: 501, start: BORN, kind: 'server' }] }, 'L1')).toEqual([]); // another launch's
+    const infra = new Infrastructure(restored);
+    expect(infra.count(owner(), CLAUDE, rebuilt)).toBe(0);
+    expect(infra.changed()).toBeNull(); // nothing new to save
+    const reused = parseTree([...owner().values()].map((p) => lined(p.pid, p.ppid, p.pid === 501 ? HOUR : p.start, p.command)).join('\n'));
+    expect(new Infrastructure(restored).count(reused, CLAUDE, rebuilt)).toBe(1); // another process at that pid
+  });
+
+  it('the bindings are offered for saving when they change, and only then', () => {
+    const infra = new Infrastructure();
+    infra.count(owner(), CLAUDE, fresh);
+    expect(infra.changed()?.map((b) => b.pid).sort()).toEqual([501, 504, 505]);
+    expect(infra.changed()).toBeNull();
+    infra.settle(owner(), CLAUDE, fresh, all);
+    expect(infra.changed()?.map((b) => b.pid).sort()).toEqual([501, 502, 504, 505]);
   });
 });
 

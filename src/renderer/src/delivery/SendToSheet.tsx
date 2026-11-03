@@ -6,6 +6,9 @@
 // it: Connect (Notion's consent in the browser, sealed by MAWS), gws's own login (its URL opened in the browser, the
 // sign-in kept by the CLI), or a Terminal tab running gws's install or setup. The run (./run.ts) is the sheet's, outside
 // React; closing the sheet cancels what has not written yet.
+// P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Consent and the client port"): another machine's
+// artifact is exported and sent there, through that machine's connections, so what it needs first is done there: its
+// Connect, sign-in and gws Terminal actions stay, greyed with "Connect <service> on <machine>".
 import { useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import { destinationIdOf, type DeliveryDestination, type DeliveryTarget } from '@shared/delivery/destination';
@@ -16,6 +19,8 @@ import { formatAgo } from '@shared/app/date-format';
 import { addressOf } from '@shared/machine/address';
 import { useNow } from '../app/use-now';
 import { ipc } from '../ipc/client';
+import { REMOTE_SURFACE_WORDS } from '../artifacts/remote-surfaces';
+import { useArtifactMachine } from '../artifacts/use-artifact-machine';
 import { useExportFormats } from '../library/export';
 import { panelHost } from '../panel/host';
 import { Sheet } from '../sessions/Sheet';
@@ -24,7 +29,7 @@ import { TERMINAL_TOOL_ID, type TerminalParams } from '../tools/terminal';
 import { VIEWERS_COPY } from '../tools/artifacts/viewers/copy';
 import { GWS_INSTALL, GWS_SETUP, SEND_TO_COPY as C, SERVICE } from './copy';
 import type { SendToPhase, SendToRun } from './run';
-import { closeSendTo, useDelivery, type SendToSubject } from './store';
+import { closeSendTo, receiptKey, useDelivery, type SendToSubject } from './store';
 
 // Drive keeps Office files editable (a deck as PowerPoint), else a PDF.
 const DRIVE_PREFER: readonly ArtifactExportFormat[] = ['docx', 'pptx', 'pdf', 'md', 'html', 'png', 'claude'];
@@ -54,7 +59,8 @@ function SendToSheet({ subject, run }: { subject: SendToSubject; run: SendToRun 
   const [picked, setPicked] = useState<ArtifactExportFormat | null>(null);
   const [where, setWhere] = useState<'default' | 'inside'>('default');
   const [link, setLink] = useState('');
-  const receipt = useDelivery((s) => s.receipts[`${subject.artifactId}\0${target}`] ?? null);
+  const machine = useArtifactMachine(subject.artifactId); // P5 O7 M5c: its machine's receipts
+  const receipt = useDelivery((s) => s.receipts[receiptKey(subject.artifactId, target, machine)] ?? null);
   const now = useNow();
 
   const notionOffered = formats.length === 0 ? target === 'notion' : formats.includes('md');
@@ -175,11 +181,19 @@ function SendToSheet({ subject, run }: { subject: SendToSubject; run: SendToRun 
 // What MAWS sends through, and what it needs first when it cannot send yet.
 function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; phase: SendToPhase; run: SendToRun; terminal(command: string): void }) {
   const status = statusOf(phase);
+  // P5 O7 M5c: what is done first on another machine is done there (its sign-in, its gws), so it is offered greyed
+  const there = run.elsewhere === null ? null : REMOTE_SURFACE_WORDS.connectOn(target === 'drive' ? 'Drive' : 'Notion', run.elsewhere);
+  let greyed = false; // a greyed action is in this line: it says why
   const line = (text: string | null, actions?: ReactNode, code?: string) => (
     <div data-send-to-connection={status?.state ?? phase.phase} className="flex flex-col gap-2 rounded-sm border border-border p-2.5">
       {text !== null && <p className="m-0 text-ui text-fg">{text}</p>}
       {code && <code className="block rounded-sm bg-bg-raised px-2 py-1 font-mono text-ui-sm text-fg">{code}</code>}
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+      {greyed && there !== null && (
+        <p data-send-to-elsewhere="" className="m-0 text-ui-sm text-fg-muted">
+          {there}
+        </p>
+      )}
     </div>
   );
   const button = (label: string, onClick: () => void) => (
@@ -187,6 +201,16 @@ function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; 
       {label}
     </button>
   );
+  // an action that acts on the artifact's machine's connections: here, or greyed for another machine's
+  const here = (label: string, onClick: () => void) => {
+    if (there === null) return button(label, onClick);
+    greyed = true;
+    return (
+      <button type="button" disabled title={there} className={SECONDARY}>
+        {label}
+      </button>
+    );
+  };
   const again = button(C.checkAgain, () => void run.check());
   if (phase.phase === 'checking') return line(C.checking[target]);
   if (phase.phase === 'connecting') return line(target === 'notion' ? C.connecting : C.signingIn);
@@ -197,9 +221,9 @@ function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; 
       case 'ready':
         return source && status.connection ? line(C.notionReady(source, status.connection)) : line(C.notionUnavailable, again);
       case 'signIn':
-        return line(C.notionSignIn(source?.server ?? 'Notion'), button(C.connect, () => void run.connect()));
+        return line(C.notionSignIn(source?.server ?? 'Notion'), here(C.connect, () => void run.connect()));
       case 'reconnect':
-        return line(C.notionReconnect(source?.server ?? 'Notion'), button(C.reconnect, () => void run.connect()));
+        return line(C.notionReconnect(source?.server ?? 'Notion'), here(C.reconnect, () => void run.connect()));
       case 'busy':
         return line(C.notionBusy, again);
       case 'none':
@@ -212,15 +236,15 @@ function Connection({ target, phase, run, terminal }: { target: DeliveryTarget; 
     case 'ready':
       return line(C.driveReady(status.user));
     case 'absent':
-      return line(C.driveAbsent, <>{button(C.installInTerminal, () => terminal(GWS_INSTALL))}{again}</>, GWS_INSTALL);
+      return line(C.driveAbsent, <>{here(C.installInTerminal, () => terminal(GWS_INSTALL))}{again}</>, GWS_INSTALL);
     case 'needsSetup':
-      return line(C.driveNeedsSetup, <>{button(C.setupInTerminal, () => terminal(GWS_SETUP))}{again}</>, GWS_SETUP);
+      return line(C.driveNeedsSetup, <>{here(C.setupInTerminal, () => terminal(GWS_SETUP))}{again}</>, GWS_SETUP);
     case 'signedOut':
-      return line(C.driveSignedOut, button(C.signIn, () => void run.connect()));
+      return line(C.driveSignedOut, here(C.signIn, () => void run.connect()));
     case 'expired':
-      return line(C.driveExpired, button(C.signInAgain, () => void run.connect()));
+      return line(C.driveExpired, here(C.signInAgain, () => void run.connect()));
     case 'noDrive':
-      return line(C.driveNoDrive, button(C.signInAgain, () => void run.connect()));
+      return line(C.driveNoDrive, here(C.signInAgain, () => void run.connect()));
     default:
       return line(C.driveFailed(status.message), again);
   }

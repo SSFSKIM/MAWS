@@ -15,17 +15,21 @@
 //   cancel overtakes the hand-off).
 // - A hand-off that fails as a command (the machine unreachable, too slow) may have been sent: it says so, and the
 //   export's file is removed here.
+// - P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "O4's surfaces: leases, the window, delivery on
+//   the machine"): `delivery.send` is the machine's, its export there too, from a `mawsd` whose welcome lists
+//   `machine.delivery`; this is the shim for an older one, registered as the machine command on the daemon shape, which
+//   the router answers here only while the daemon's welcome lacks the capability (src/main/ipc/router.ts).
 import { rm } from 'node:fs/promises';
 import { mainClient } from '../ipc/clients';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import type { DeliveryFailure, DeliverySendAnswer, DeliveryStatus } from '@shared/ipc/schema/delivery';
 import type { ServicesBus } from '@shared/spine/bus';
-import type { BeforeHook, MainHandler } from '../ipc/router';
+import type { BeforeHook, MachineHandler } from '../ipc/router';
 
 const WORDS_MAX = 300;
 
 export interface DeliverySendDeps {
-  register(name: 'delivery.send', handler: MainHandler<'delivery.send'>): void;
+  register(name: 'delivery.send', handler: MachineHandler<'delivery.send'>): void; // the machine command, answered here for an older daemon
   before(names: readonly CommandName[], hook: BeforeHook): () => void; // the router's seam (beforeCommand)
   exportArtifact(input: CommandInput<'artifacts.export'>, options?: { dialect?: 'notion' }): Promise<CommandOutput<'artifacts.export'>>; // X31's export service, as the library exports
   call(name: 'artifacts.get', input: CommandInput<'artifacts.get'>): Promise<CommandResult<'artifacts.get'>>; // the engine host's

@@ -72,10 +72,16 @@ const LIVE: ReadonlySet<EngineSessionStatus['process']> = new Set(['starting', '
 // after its background tasks end moves `lastEventSeq` first and then opens a turn.
 const ENGINE_ACTIVE: ReadonlySet<EngineSessionStatus['engineState']> = new Set(['running', 'requires_action']);
 
+// P5 O16 D70: a turn under way by the host's own status: one open, the session busy, or the engine working or waiting.
+// The idle row's test below and an idle reap's last read before its SIGTERM (holder/reap.ts) are this one predicate.
+export function turnUnderWay(s: EngineSessionStatus): boolean {
+  return s.turn !== null || s.busy || ENGINE_ACTIVE.has(s.engineState);
+}
+
 // E10: a row the supervisor's idle clock may release (E10 execution document, §Design 1 "Idle exit, and idle rows"):
 // ready, holding no hard reason, and not working or waiting by the engine's own word (as the budget rules a row out).
 export function isIdleRow(s: EngineSessionStatus, stateful: ReadonlySet<string>): boolean {
-  return s.process === 'ready' && !ENGINE_ACTIVE.has(s.engineState) && hardReasons(s, stateful).length === 0;
+  return s.process === 'ready' && !turnUnderWay(s) && hardReasons(s, stateful).length === 0;
 }
 
 // P5 O17 M7 (Interfaces §E; D20): `isIdleRow` with the browser hold set aside, the idle release's clock alone: a session

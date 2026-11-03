@@ -8,6 +8,9 @@
 // the outstanding request is aborted, a body cancelled, and the refusal is `timeout`. The callback body is read to a
 // byte bound and the rest cancelled. It returns statuses and the callback's port, never the URL, state or code; the open
 // log holds them, so a scene never retains it.
+// P5 O7 M5c: `authorizeAt`, an https origin the fixture advertises as its authorization endpoint's (a consent another
+// machine asks this Mac to open is never a loopback URL, src/main/open-external.ts's `openForMachine`): the open is
+// followed only on that origin, and its request goes to the fixture's own `/authorize`, as a hosts entry would route it.
 import { existsSync, readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -98,21 +101,23 @@ export function openExternalUrls(logText: string): string[] {
   return logText.split('\n').filter((line) => line.startsWith(PREFIX)).map((line) => line.slice(PREFIX.length));
 }
 
-// The fixture's exact authorization endpoint, or null.
-function authorizationOf(url: string, origin: string): URL | null {
+// The fixture's exact authorization endpoint, or null; opened at `authorizeAt` (P5 O7 M5c), the same request on the
+// fixture's own origin.
+function authorizationOf(url: string, origin: string, authorizeAt?: string): URL | null {
+  const opened = authorizeAt ?? origin;
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
     return null;
   }
-  const exact = parsed.protocol === 'http:' && parsed.username === '' && parsed.password === '' && parsed.origin === origin && parsed.pathname === '/authorize' && url.startsWith(`${origin}/authorize?`);
-  return exact ? parsed : null;
+  const exact = parsed.protocol === (authorizeAt === undefined ? 'http:' : 'https:') && parsed.username === '' && parsed.password === '' && parsed.origin === opened && parsed.pathname === '/authorize' && url.startsWith(`${opened}/authorize?`);
+  return exact ? new URL(`${origin}${parsed.pathname}${parsed.search}`) : null;
 }
 
 // Browser opens of the fixture's authorization endpoint: one per Connect or Reconnect that reached consent.
-export function countAuthorizationOpens(logText: string, origin: string): number {
-  return openExternalUrls(logText).filter((url) => authorizationOf(url, origin) !== null).length;
+export function countAuthorizationOpens(logText: string, origin: string, authorizeAt?: string): number {
+  return openExternalUrls(logText).filter((url) => authorizationOf(url, origin, authorizeAt) !== null).length;
 }
 
 // An exact `http://127.0.0.1:<port><callbackPath>` other than the fixture's own origin, written as the URL parser writes it.
@@ -143,6 +148,7 @@ export interface FollowOptions {
   openLog: string; // the scene's MAWS_E2E_OPEN_LOG
   afterOpens: number; // openExternal lines already in the log before the owner's Connect
   origin: string; // the fixture's origin
+  authorizeAt?: string; // P5 O7 M5c: the https origin the fixture advertises its authorization endpoint at
   callbackPath?: string;
   timeoutMs?: number;
 }
@@ -169,7 +175,7 @@ async function follow(options: FollowOptions, deps: FakeBrowserDeps, signal: Abo
     if (url !== undefined) break;
     await deps.sleep(100);
   }
-  const authorize = authorizationOf(url, options.origin);
+  const authorize = authorizationOf(url, options.origin, options.authorizeAt);
   if (authorize === null) throw new FakeBrowserRefusal('notFixtureAuthorization');
   const redirect = redirectUriOf(authorize, options.callbackPath ?? CALLBACK_PATH);
 

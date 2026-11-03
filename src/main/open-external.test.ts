@@ -15,7 +15,7 @@ vi.mock('electron', () => ({
 
 import type { MachineRef } from '@shared/machine/ref';
 import { bindLocalMachine } from './machine/local';
-import { forwardedElsewhere, openExternalUrl } from './open-external';
+import { FORWARDED_ELSEWHERE, forwardedElsewhere, openExternalUrl, openForMachine, SCHEMES_ONLY } from './open-external';
 
 describe('openExternalUrl', () => {
   beforeEach(() => {
@@ -80,5 +80,17 @@ describe('openExternalUrl', () => {
     // a default port, written or implied, and a loopback host no forward reaches are refused all the same
     for (const url of ['http://localhost/', 'http://localhost:80/', 'https://127.0.0.1:443/', 'http://[::1]:8080/', 'http://127.0.0.2:3000/', 'ws://localhost:3000/', 'http://[::ffff:0.0.0.0]:3000/', 'http://[::ffff:0:0]:3000/', 'http://[::ffff:127.0.0.1]:3000/', 'http://[::ffff:7f00:1]:3000/']) expect(forwardedElsewhere(url, other), url).toBe(true);
     expect(forwardedElsewhere('http://[::1]:8080/', local)).toBe(false);
+  });
+
+  // P5 O7 M5c: a URL a machine's services asked this device to open (a connector's consent page), through the client port
+  it('opens a machine’s consent page here, and answers why for its loopback URL and another scheme', () => {
+    const local = 'LocalMachineRef0000000' as MachineRef;
+    const other = 'OtherMachineRef0000000' as MachineRef;
+    bindLocalMachine(local);
+    expect(openForMachine('https://auth.example/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A5%2Fcallback', other)).toEqual({ opened: true });
+    expect(openForMachine('http://127.0.0.1:8080/authorize', other)).toEqual({ opened: false, reason: FORWARDED_ELSEWHERE });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(openForMachine('file:///etc/passwd', other)).toEqual({ opened: false, reason: SCHEMES_ONLY });
+    expect(opened).toEqual(['https://auth.example/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A5%2Fcallback']);
   });
 });

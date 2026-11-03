@@ -10,7 +10,7 @@
 // message, which the device's `openChannel` resolves on, and sends it again whenever those grades change.
 //
 // A new head re-checks every channel synchronously, before anything else runs, and closes `removed` each whose device or
-// key it no longer holds. `ping` is answered with `pong`; a channel silent for one ping period is pinged, and one that
+// key it no longer holds. `ping` is answered with `pong` (stamped with this machine's clock, P5 O7 M7); a channel silent for one ping period is pinged, and one that
 // let two pings go unanswered is closed (`timeout`). While any channel is open the endpoint holds `mawsd`.
 //
 // The loop: `call`, `act`, `query`, `sub`, `credit` and `unsub` go to their routes (M5–M8 fill them; until then each
@@ -32,6 +32,7 @@ import {
   type ByteDuplex,
   type CallMessage,
   type Channel,
+  type ClientAnswerMessage,
   type ChannelMessage,
   type CreditMessage,
   type DeviceClass,
@@ -93,6 +94,8 @@ export type ChannelRoutes = {
   unsub(channel: RemoteChannel, message: UnsubMessage): void;
   /** P5 O7 M3: the stream kinds (§N), to the stream table. */
   stream(channel: RemoteChannel, message: DeviceStreamMessage): void;
+  /** P5 O7 M5c: the device's answer to the client port's request (client-port.ts). */
+  clientAnswer(channel: RemoteChannel, message: ClientAnswerMessage): void;
 };
 
 /** A carrier as a channel runs on it: RL2's duplex and, for one with a send buffer (CarrierDuplex), when it has room. */
@@ -108,6 +111,8 @@ const NOT_OFFERED: ChannelRoutes = {
   credit: () => {},
   unsub: () => {},
   stream: (channel, m) => void (m.t === 'streamOpen' && channel.send({ t: 'streamRefused', id: m.id, reason: 'unavailable' })),
+  // Nothing was asked of a channel the port does not serve.
+  clientAnswer: () => {},
 };
 
 export type ChannelsContext = {
@@ -129,6 +134,8 @@ export type ChannelsContext = {
    * on them beyond `caps` is authorized again (P5 O7 M3: the open streams and the kept forwards).
    */
   refreshed?(): void;
+  /** P5 O7 M5c: a channel admitted, `caps` sent, before any message of it is read (its client port target registered). */
+  admitted?(channel: RemoteChannel): void;
 };
 
 export const PING_MS: readonly [number, number] = [5000, 7000];
@@ -392,6 +399,11 @@ export class Channels {
     const entry = this.#register(key, carrier, channel, io, peer, kid, grades, machinePub);
     entry.remote.send(this.#caps(entry, grades, org.head().state.version));
     if (epoch !== this.#capsEpoch) this.#refresh(entry);
+    try {
+      this.#ctx.admitted?.(entry.remote);
+    } catch (error) {
+      this.#ctx.log(`endpoint: channel ${key}'s admission could not be told: ${(error as Error).message}`);
+    }
     channel.onMessage((message) => this.#receive(entry, message));
     return entry.remote;
   }
@@ -533,9 +545,13 @@ export class Channels {
     const remote = entry.remote;
     try {
       switch (message.t) {
-        case 'ping':
-          remote.send({ t: 'pong', at: message.at });
+        case 'ping': {
+          // P5 O7 M7 (`rl2.pong-clock`): this machine's clock at the ping's arrival and at the pong's send, for a
+          // device's clock-offset estimate
+          const received = this.#now();
+          remote.send({ t: 'pong', at: message.at, received, sent: this.#now() });
           return;
+        }
         case 'pong':
         case 'close':
           return;
@@ -560,6 +576,8 @@ export class Channels {
         case 'streamCredit':
         case 'streamClose':
           return routes.stream(remote, message);
+        case 'clientAnswer':
+          return routes.clientAnswer(remote, message);
       }
     } catch (error) {
       this.#ctx.log(`endpoint: channel ${remote.key}'s \`${message.t}\` route failed: ${(error as Error).message}`);

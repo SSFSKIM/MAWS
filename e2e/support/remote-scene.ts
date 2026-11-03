@@ -60,6 +60,10 @@ export interface RemoteScene {
   /** A's way to the hub (the pipe `devOrgDir` names): `cut` ends every connection through it and refuses new ones until
    * `restore`. */
   aHub: { cut(): void; restore(): void };
+  /** P5 O7 M7: A's way to B's direct listener, a pipe as `aHub` is, which `devOrgDir(true)` maps B's address to when the
+   * scene was started with `directPipe` (else null): `cut` ends every direct connection and refuses new ones until
+   * `restore`, so a forced drop of the direct carrier is the network's. */
+  aDirect: { cut(): void; restore(): void } | null;
   stop(): Promise<void>;
 }
 
@@ -162,7 +166,7 @@ net.Server.prototype.listen = function (...args) {
  * The org, B enrolled and served, sminos on B's RL10 socket and A's device listed. `b.env` and `b.prepare` are B's
  * own (its replay fixtures, its trusted folders), as profile-daemon.ts takes them.
  */
-export async function startRemoteScene(opts: { scratch: string; aUserData: string; b?: { env?: Record<string, string>; prepare?: (paths: { claudeConfigDir: string }) => void } }): Promise<RemoteScene> {
+export async function startRemoteScene(opts: { scratch: string; aUserData: string; b?: { env?: Record<string, string>; prepare?: (paths: { claudeConfigDir: string }) => void }; directPipe?: boolean }): Promise<RemoteScene> {
   const { scratch, aUserData } = opts;
   mkdirSync(scratch, { recursive: true });
   const undo: (() => Promise<void> | void)[] = [];
@@ -210,6 +214,9 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
 
     const aHub = await pipeTo(org.url);
     undo.push(() => aHub.close());
+    const aDirect = opts.directPipe === true ? await pipeTo(`http://127.0.0.1:${directPort}`) : null;
+    if (aDirect !== null) undo.push(() => aDirect.close());
+    const directTarget = aDirect === null ? directPort : Number(new URL(aDirect.url).port);
 
     // Read once every amendment is made (A listed, B enrolled): what A's dev session pins and holds.
     const chain = await org.chain();
@@ -224,7 +231,7 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
         device: aDevice.device,
         pins: chain.pins,
         hub: { url: aHub.url, standinUser: org.admin.email },
-        directMap: { [advertised]: `ws://127.0.0.1:${directMap ? directPort : deadPort}` },
+        directMap: { [advertised]: `ws://127.0.0.1:${directMap ? directTarget : deadPort}` },
       };
       writeFileSync(join(dir, 'session.json'), JSON.stringify(session, null, 2));
       writeFileSync(join(dir, 'chain.json'), JSON.stringify({ chain: chain.chain, transitions: chain.transitions, certificates: chain.certificates }));
@@ -255,6 +262,7 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
       },
       devOrgDir,
       aHub: { cut: () => aHub.cut(), restore: () => aHub.restore() },
+      aDirect: aDirect === null ? null : { cut: () => aDirect.cut(), restore: () => aDirect.restore() },
       stop: unwind,
     };
   } catch (error) {

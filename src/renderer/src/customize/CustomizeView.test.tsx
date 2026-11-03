@@ -6,12 +6,12 @@ import { heard, resetSignIns } from './connectors/sign-in';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { REGISTRY } from '@shared/ipc/registry';
-import { addressingOf, bareOf } from '@shared/machine/address';
+import { addressingOf, addressOf, bareOf } from '@shared/machine/address';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { project, record, status } from '../../../../test/support/builders';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useLibraryStore } from '../widgets/plugins/library-store';
@@ -351,6 +351,26 @@ describe('Connectors', () => {
     expect(await within(row).findByText('Sign in needed')).toBeTruthy();
     expect(within(row).getByRole('button', { name: 'Sign in to notion' })).toBeTruthy();
     expect(within(row).queryByText('Signed in · available in new sessions')).toBeNull();
+  });
+
+  // P5 O7 M5c (the architect's ruling): this Mac's Customize signs in on this Mac. A user-scope sign-in keeps its credential
+  // on the machine it runs on, so another machine's ready session is never offered for it; that machine's connectors are
+  // configured from its own Connectors sheet.
+  it('never offers another machine’s ready session for a user-scope sign-in; this Mac’s still is', async () => {
+    const remote = { ...pageStatus('on-mini'), appSessionId: addressOf(OTHER_MACHINE, 'on-mini' as AppSessionId) };
+    useSessions.setState({ engine: new Map([[remote.appSessionId, remote]]) });
+    const client = fresh();
+    posture(client, 'notion', 'auth_required');
+    mountWith(client);
+    const row = (await screen.findByText('notion')).closest('li')!;
+    expect(await within(row).findByText('Sign in needed')).toBeTruthy();
+    expect(within(row).queryByRole('button', { name: 'Sign in to notion' })).toBeNull();
+    expect(row.querySelector('[data-sign-in-needs-session]')).not.toBeNull();
+    const local = { ...pageStatus('signer'), cwd: '/two' };
+    act(() => useSessions.setState({ engine: new Map([[remote.appSessionId, remote], [local.appSessionId, local]]) }));
+    backend.script('connectors.signIn', () => ({ opId: 'op-1' }));
+    fireEvent.click(await within(row).findByRole('button', { name: 'Sign in to notion' }));
+    await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signIn').map((call) => (call.input as { appSessionId: string }).appSessionId)).toEqual(['signer']));
   });
 
   it('with no ready session whose scope includes the server, Sign in says to open one and does nothing else', async () => {

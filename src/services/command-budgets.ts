@@ -115,6 +115,9 @@ export const COMMAND_BUDGETS_MS: Readonly<Partial<Record<CommandName, number>>> 
   ...CONNECTORS_BUDGETS_MS,
   ...CATALOG_BUDGETS_MS,
   'artifacts.export': RENDER_START_MS + RENDER_EXPORT_MS + MARGIN_MS, // P5 O5 M4
+  // P5 O7 M5c: Send to on the machine: `artifacts.get`, the target read (gws's state, or Notion's find), the library's
+  // Export (its render host's start and the export), then the upload or route D's send, the longer
+  'delivery.send': HOST + RENDER_START_MS + RENDER_EXPORT_MS + Math.max(GWS_RUN(GWS_STATUS_TIMEOUT_MS) + GWS_RUN(GWS_UPLOAD_TIMEOUT_MS), NOTION_FIND + DIRECT) + MARGIN_MS,
   'daemon.e2eRender': RENDER_START_MS + RENDER_EXPORT_MS + MARGIN_MS, // P5 O5 M4: the e2e's capture, within the same bounds
   // a background job's `claude stop` and the registry's clearing after it, or a terminal pane's pause and resume
   'session.takeOver': Math.max(STOP_TIMEOUT_MS + TAKE_OVER_WAIT_MS, PANE_TAKE_OVER_MS) + MARGIN_MS,

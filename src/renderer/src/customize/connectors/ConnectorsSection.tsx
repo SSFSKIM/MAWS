@@ -10,9 +10,11 @@
 // its line stays, whichever view shows; Customize keeps the section mounted once visited.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import { machineOf } from '@shared/machine/address';
 import type { PluginsScope } from '@shared/plugins/cli';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import type { CustomizationServer } from '@shared/ipc/schema/customization';
+import { ipc } from '../../ipc/client';
 import { useSessions } from '../../stores/sessions';
 import { SECONDARY } from '../../sessions/ui';
 import { LibrarySwitch, type LibraryTab } from '../../widgets/plugins/LibraryHeader';
@@ -31,7 +33,7 @@ import { useCatalogPostures, useCatalogRefresh, useCatalogSources } from '../dis
 import { ConnectorSheet } from './ConnectorSheet';
 import { CONNECTORS as C } from './copy';
 import { removalDirectoryOf, removeRequestOf, resultFor, serverKey, shadowedBy, shadowWords, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type ReadySession, type SignInFacts, type SignInView } from './present';
-import { cancelSignIn, forgetSignIn, signInKeyOf, startSignIn, useSignIns } from './sign-in';
+import { cancelSignIn, forgetSignIn, signInKeyOf, signInMachineOf, startSignIn, useSignIns } from './sign-in';
 
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
 const TONE: Record<SignInView['tone'], string> = { muted: 'text-fg-muted', success: 'text-success', danger: 'text-danger' };
@@ -142,7 +144,9 @@ function ConnectorsDiscover({ cwd, onOpenInstalled }: { cwd: string | null; onOp
 function Configured({ servers, readAt, cwd, place, attached, askIn }: { servers: readonly CustomizationServer[]; readAt: number; cwd: string | null; place: string | null; attached: AppSessionId | null; askIn: AskIn }) {
   const { ops } = useManage();
   const engine = useSessions((s) => s.engine);
-  const ready = useMemo<ReadySession[]>(() => [...engine.values()].filter((status) => status.process === 'ready').map((status) => ({ appSessionId: status.appSessionId, cwd: status.cwd })), [engine]);
+  // P5 O7 M5c: this Mac's ready sessions alone (the architect's ruling): a sign-in keeps its credential on the machine it
+  // runs on, and this Mac's Customize signs in on this Mac; another machine's are configured from its Connectors sheet
+  const ready = useMemo<ReadySession[]>(() => [...engine.values()].filter((status) => status.process === 'ready' && machineOf(status.appSessionId) === ipc.localMachine).map((status) => ({ appSessionId: status.appSessionId, cwd: status.cwd })), [engine]);
   const read = useEngineRead('session.mcpStatus', { appSessionId: attached ?? ('' as AppSessionId) }, { enabled: attached !== null });
   const liveOf = (name: string) => {
     if (attached === null || !read.data) return undefined;
@@ -182,7 +186,9 @@ function Configured({ servers, readAt, cwd, place, attached, askIn }: { servers:
 function ServerRow({ server, askIn, shadow, cwd, place, session, live, liveRead, posture, fingerprint }: { server: CustomizationServer; askIn: AskIn; shadow: CustomizationServer['scope'] | null; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null; fingerprint: string | null }) {
   const { ops } = useManage();
   const target = server.scope === 'app' ? null : { name: server.name, scope: server.scope, cwd, path: server.path };
-  const record = resultFor(useSignIns((s) => (target === null ? null : (s.byServer.get(signInKeyOf(target)) ?? null))), fingerprint);
+  // P5 O7 M5c: the result of the machine its Sign in runs on (a session's address names it; none, this Mac)
+  const machine = signInMachineOf(session);
+  const record = resultFor(useSignIns((s) => (target === null ? null : (s.byServer.get(signInKeyOf({ ...target, machine })) ?? null))), fingerprint);
   const last = record?.event ?? null;
   const state: SignInView | null = shadow !== null ? { text: shadowWords(shadow, server.name), tone: 'muted', signIn: false, cancel: false } : signInViewOf({ live, liveRead, posture, last: record, transport: server.transport });
   const key = serverKey(server);
@@ -199,7 +205,7 @@ function ServerRow({ server, askIn, shadow, cwd, place, session, live, liveRead,
           </span>
         )}
         <span className="ml-auto flex shrink-0 items-baseline gap-1">
-          {state?.cancel && last && <TextButton onClick={() => cancelSignIn(last.opId)}>{C.cancel}</TextButton>}
+          {state?.cancel && last && <TextButton onClick={() => cancelSignIn(last.opId, record!.appSessionId)}>{C.cancel}</TextButton>}
           {state?.signIn &&
             (session === null ? (
               <span data-sign-in-needs-session className="text-ui-sm text-fg-muted">

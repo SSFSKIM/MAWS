@@ -22,4 +22,6 @@ export const mainOnlyCommands = [
   // P5 O4 M2 (Interfaces §C): the machine's, main's alone to send: the page's window as the app reads it (D8), and a grant
   // the app opened from Electron's safeStorage for the machine to re-seal (U7, D23)
   'connectors.windowShown', 'connectors.adoptGrant',
+  // P5 O7 M5c: a consent's redirect, main's alone to relay from its loopback listener to the machine whose flow it is
+  'connectors.callback',
 ] as const;

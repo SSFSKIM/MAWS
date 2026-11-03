@@ -27,6 +27,19 @@ describe('the e2e replay seam', () => {
     expect(seam.take()).toBeNull();
   });
 
+  // P5 O7 M5c: `live` in the list is a launch of the installed engine (MAWS_E2E_ENGINE_BIN) in its turn, so one scene can
+  // put a real engine among its replays; it exists only where the seam does, behind the seam's own gate
+  it('hands out a `live` entry as a launch with no fixture, in its turn, and never without the seam', () => {
+    const seam = ReplaySeam.fromEnv({ MAWS_E2E: '1', MAWS_E2E_REPLAY_FIXTURES: `${AUTO}, live, ${BOOT}` }, ROOT)!;
+    expect(seam.take()).toEqual({ path: AUTO, sessionId: '9d753242-8280-4bb4-a144-501cf423d6a1' });
+    expect(seam.take()).toEqual({ live: true });
+    expect(seam.take()).toEqual({ path: BOOT, sessionId: fixtureIdentity(BOOT).sessionId });
+    expect(seam.take()).toBeNull();
+    // a production launch: no MAWS_E2E, so no seam and nothing in the list resolves
+    expect(ReplaySeam.fromEnv({ MAWS_E2E_REPLAY_FIXTURES: 'live' }, ROOT)).toBeNull();
+    expect(ReplaySeam.fromEnv({ MAWS_E2E: '0', MAWS_E2E_REPLAY_FIXTURES: 'live' }, ROOT)).toBeNull();
+  });
+
   describe('through the service', () => {
     let h: SessionHarness;
     afterEach(() => h.dispose());
@@ -43,6 +56,19 @@ describe('the e2e replay seam', () => {
       await h.service.startSession(next, { message: null, options: { trust: 'declined' } });
       expect(await h.settled(next)).toMatchObject({ phase: 'failed', outcome: { kind: 'error', message: expect.stringContaining('MAWS_E2E_REPLAY_FIXTURES has no fixture left') } });
       expect(h.host.launches).toHaveLength(2);
+    });
+
+    it('launches a `live` entry as the installed engine (no replay, no fixture’s pin), then the list goes on', async () => {
+      h = await new SessionHarness({ replay: new ReplaySeam(['live', AUTO], ROOT) }).start();
+      // trust declined: no bootstrap, so each session's one launch takes the next entry
+      const { appSessionId: id } = await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } });
+      await h.service.startSession(id, { message: null, options: { trust: 'declined' } });
+      await h.settled(id);
+      expect(h.host.launches[0]).toMatchObject({ appSessionId: id, replay: null }); // its id MAWS's own, as without the seam
+      const { appSessionId: next } = await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } });
+      await h.service.startSession(next, { message: null, options: { trust: 'declined' } });
+      expect(await h.settled(next)).toMatchObject({ phase: 'ready', outcome: { engineSessionId: '9d753242-8280-4bb4-a144-501cf423d6a1' } });
+      expect(h.host.launches[1]).toMatchObject({ appSessionId: next, replay: AUTO, sessionId: '9d753242-8280-4bb4-a144-501cf423d6a1' });
     });
   });
 });

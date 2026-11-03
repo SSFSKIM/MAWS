@@ -136,8 +136,28 @@ describe('streams', () => {
     expect(read('device', { t: 'streamOpened', id: ID, credit: 1 })).toBe('unknown');
   });
 
-  it('is at minor 5 of major 1 (P5 O7 M5b: `rl2.read-open`)', () => {
-    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 5 });
+});
+
+// P5 O7 M7 (`rl2.pong-clock`; RL2 1.6): `pong` may carry the endpoint's clock at the ping's arrival (`received`) and at
+// the pong's send (`sent`), each in milliseconds, for the remote bench's clock offset; a pong without them reads as before.
+describe('the pong clock', () => {
+  it('reads a pong with or without the endpoint’s two stamps, either way', () => {
+    const stamped = { t: 'pong', at: 42, received: 1_799_000_000_001, sent: 1_799_000_000_002 };
+    for (const read of [(v: unknown) => readMessage('device', v), (v: unknown) => readMessage('endpoint', v)]) {
+      expect(read({ t: 'pong', at: 42 })).toEqual({ kind: 'message', message: { t: 'pong', at: 42 } });
+      expect(read(stamped)).toEqual({ kind: 'message', message: stamped });
+    }
+  });
+
+  it('refuses a stamp that is no count of milliseconds', () => {
+    for (const stamp of [-1, 1.5, '7', null, Number.MAX_SAFE_INTEGER + 2]) {
+      expect(readMessage('endpoint', { t: 'pong', at: 42, received: stamp, sent: 7 }).kind).toBe('malformed');
+      expect(readMessage('endpoint', { t: 'pong', at: 42, received: 7, sent: stamp }).kind).toBe('malformed');
+    }
+  });
+
+  it('is at minor 7 of major 1 (P5 O7 M5c: `rl2.client-port`, `rl2.asset-holds`, after M7’s `rl2.pong-clock` at 6)', () => {
+    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 7 });
   });
 });
 
@@ -199,5 +219,35 @@ describe('the read open', () => {
 
   it('reads the refusal `read-only`', () => {
     expect(read('endpoint', { t: 'streamRefused', id: ID, reason: 'read-only' })).toBe('message');
+  });
+});
+
+// P5 O7 M5c (`rl2.client-port`; RL2 1.6): the client port across the channel, `client` from the endpoint and
+// `clientAnswer` from the device, each read from its own side only.
+describe('the client port', () => {
+  const read = (from: 'device' | 'endpoint', m: Record<string, unknown>) => readMessage(from as 'device', m).kind;
+
+  it('reads a `client` request from the endpoint and a `clientAnswer` from the device', () => {
+    expect(read('endpoint', { t: 'client', id: 'cp-1', kind: 'openExternal', request: { url: 'https://example.com/consent' } })).toBe('message');
+    expect(read('endpoint', { t: 'client', id: 'cp-2', kind: 'someKindLater', request: null })).toBe('message');
+    expect(read('device', { t: 'clientAnswer', id: 'cp-1', answer: { opened: true } })).toBe('message');
+    expect(read('device', { t: 'clientAnswer', id: 'cp-1', answer: { noClient: true } })).toBe('message');
+  });
+
+  it('refuses either out of shape', () => {
+    for (const bad of [
+      { t: 'client', id: '', kind: 'openExternal', request: {} },
+      { t: 'client', id: 'x'.repeat(129), kind: 'openExternal', request: {} },
+      { t: 'client', id: 'cp-1', kind: '', request: {} },
+      { t: 'client', id: 'cp-1', kind: 7, request: {} },
+      { t: 'client', id: 'cp-1', kind: 'openExternal' },
+    ])
+      expect(read('endpoint', bad)).toBe('malformed');
+    for (const bad of [{ t: 'clientAnswer', id: '', answer: {} }, { t: 'clientAnswer', id: 7, answer: {} }, { t: 'clientAnswer', id: 'cp-1' }]) expect(read('device', bad)).toBe('malformed');
+  });
+
+  it('reads each from its own side only: a `client` from a device and a `clientAnswer` from the endpoint are unknown', () => {
+    expect(read('device', { t: 'client', id: 'cp-1', kind: 'openExternal', request: {} })).toBe('unknown');
+    expect(read('endpoint', { t: 'clientAnswer', id: 'cp-1', answer: {} })).toBe('unknown');
   });
 });

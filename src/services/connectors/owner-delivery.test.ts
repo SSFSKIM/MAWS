@@ -11,8 +11,9 @@ const ART = '11111111-1111-4111-8111-111111111111';
 const source = (patch: Partial<DirectSource> = {}): DirectSource => ({ directory: '/repo', sourceId: '22222222-2222-4222-8222-222222222222', generation: 1, server: 'notion', scope: 'user', transport: 'http', path: '/h/.claude.json', entryPath: ['mcpServers', 'notion'], observedAt: '2026-10-19T00:00:00.000Z', resourceUrl: 'https://mcp.notion.com/mcp', ...patch });
 const live = (n: number) => Array.from({ length: n }, (_, i) => ({ appSessionId: `app-${i}`, launchId: `L${i}`, cwd: `/d${i}`, process: i === 1 ? 'exited' : 'ready' }));
 
-function scene(options: { sessions?: ReturnType<typeof live>; links?: string[]; located?: DirectSource[] | null; state?: ConnectorOAuthState; discover?: DirectDiscoverAnswer[] } = {}) {
+function scene(options: { sessions?: ReturnType<typeof live>; links?: string[]; located?: DirectSource[] | null; state?: ConnectorOAuthState; discover?: DirectDiscoverAnswer[]; observe?: (appSessionId: string) => unknown } = {}) {
   const observed: string[] = [];
+  const logged: string[] = [];
   const discover = [...(options.discover ?? [])];
   const deps: OwnerDeliveryDeps = {
     call: (async (name: string, input: Record<string, unknown>) => {
@@ -20,7 +21,7 @@ function scene(options: { sessions?: ReturnType<typeof live>; links?: string[]; 
       if (name === 'library.entry') return { ok: true, value: { artifact: null, links: (options.links ?? []).map((appSessionId) => ({ appSessionId })) } };
       if (name === 'connectors.observe') {
         observed.push(input.appSessionId as string);
-        return { ok: true, value: { observed: true } };
+        return options.observe?.(input.appSessionId as string) ?? { ok: true, value: { observed: true } };
       }
       throw new Error(name);
     }) as never,
@@ -34,9 +35,9 @@ function scene(options: { sessions?: ReturnType<typeof live>; links?: string[]; 
       connect: vi.fn(async () => ({ ok: true as const, connectionId: 'c', reused: false })),
       reconnect: vi.fn(async () => ({ ok: true as const, connectionId: 'c', reused: false })),
     },
-    log: () => {},
+    log: (line) => void logged.push(line),
   };
-  return { delivery: createOwnerDelivery(deps), deps, observed };
+  return { delivery: createOwnerDelivery(deps), deps, observed, logged };
 }
 const signal = () => new AbortController().signal;
 const find = (delivery: ReturnType<typeof scene>['delivery']) => delivery.find({ tool: 'notion-create-pages', urlHosts: ['mcp.notion.com'], artifactId: ART }, signal());
@@ -50,6 +51,21 @@ describe('the owner’s delivery over route D (main)', () => {
     expect(observed).not.toContain('app-1'); // not ready
     expect(deps.direct.locate).toHaveBeenCalledWith('notion-create-pages', ['mcp.notion.com'], expect.anything());
     expect((await find(delivery))?.live).toBe(OBSERVE_LIMIT + 3); // the ready ones
+  });
+
+  // P5 O7 M5c: a live session whose report did not reach the cache is said, never passed over in silence (the locate
+  // that follows answers only from what the cache holds)
+  it('says each live session whose report was not observed, and why', async () => {
+    const { delivery, logged, deps } = scene({
+      sessions: live(4),
+      observe: (id) => (id === 'app-2' ? { ok: true, value: { observed: false } } : id === 'app-3' ? { ok: false, error: { code: 'timeout', message: 'the host did not answer' } } : undefined),
+    });
+    await find(delivery);
+    expect(logged).toEqual([
+      'connectors: app-2’s report was not observed (not live in its launch directory, or no answer)',
+      'connectors: app-3’s report was not observed (timeout: the host did not answer)',
+    ]);
+    expect(deps.direct.locate).toHaveBeenCalled(); // the find goes on with what the cache holds
   });
 
   it('gives each source MAWS’s own connection, one HTTP source per saved identity, the usable first', async () => {

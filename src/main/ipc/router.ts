@@ -25,6 +25,10 @@
 // `artifacts.export` alone is answered here, by the handler the root registered with `registerMachine`, while the
 // attached daemon does not render (`daemonRenders`: its welcome lists no `machine.render`, an older `mawsd` whose front
 // serves no such name). No other machine command's binding moves.
+//
+// P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "O4's surfaces: leases, the window, delivery on the
+// machine"): the same for `delivery.send`, answered here by main's shim (src/main/delivery/send.ts, export here and the
+// machine's `delivery.deliver`) while the attached daemon's welcome lists no `machine.delivery`.
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { HostDispatch, HostOwner } from '@shared/host/host-supervisor'; // P5 O2 M3
 import { HostCommandError, thrownError } from '@shared/host/runtime';
@@ -55,8 +59,19 @@ export type MachineHandler<N extends CommandName> = (input: CommandInput<N>, con
 // P5 O1 M5: `client` is the asker, passed for a `machine`-owned command only (the host binding). P5 O2 M3: both types
 // moved with the host supervisor to @shared/host/host-supervisor.
 export type { HostDispatch, HostOwner };
-export type MachineBinding = { kind: 'embedded' } | { kind: 'host'; daemonRenders?(): boolean /* P5 O5 M4: false answers artifacts.export here */ };
+export type MachineBinding =
+  | { kind: 'embedded' }
+  | {
+      kind: 'host';
+      daemonRenders?(): boolean; // P5 O5 M4: false answers artifacts.export here
+      daemonDelivers?(): boolean; // P5 O7 M5c: false answers delivery.send here
+    };
 // P5 O6 M3: the connection manager's dispatch, for a command whose target is another machine (its input validated).
+/** On the host binding, a machine command main answers itself while the attached daemon's welcome lacks what serves it. */
+function answeredHere(machine: { daemonRenders?(): boolean; daemonDelivers?(): boolean }, name: string): boolean {
+  return (name === 'artifacts.export' && machine.daemonRenders?.() === false) || (name === 'delivery.send' && machine.daemonDelivers?.() === false);
+}
+
 export type RemoteDispatch = (machine: MachineRef, name: CommandName, input: unknown, ctx: MainContext) => Promise<CommandResult<CommandName>>;
 
 // A handler over registry R, for `main` or `machine` alike: the same signature in main and in a host runtime.
@@ -157,7 +172,10 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
   // the renderer made there, or the stored file) and an open copy (`remote.openCopy`, invoked on the machine a checkout
   // file's address names). P5 O7 M5b ("The `http` stream"): a dashboard's Download of another machine's asset, fetched
   // through the scheme's remote responder over that machine's link.
-  const SAVED_HERE_FOR_ANY_MACHINE: ReadonlySet<string> = new Set(['library.saveAs', 'remote.openCopy', 'artifacts.downloadAsset']);
+  // P5 O7 M5c round 3: a dashboard's snapshot hold of another machine's artifact, by main's handler with that machine as
+  // `ctx.target`, which holds it on that machine over its link (src/main/dashboard/holds.ts); its release names a hold
+  // alone and comes here already.
+  const SAVED_HERE_FOR_ANY_MACHINE: ReadonlySet<string> = new Set(['library.saveAs', 'remote.openCopy', 'artifacts.downloadAsset', 'artifacts.holdDatasets']);
   const mainOnlyRefusal = (name: string): CommandResult<CommandName> => ({ ok: false, error: ipcError('forbidden_sender', `${name} may only be invoked by main`) });
 
   async function route(event: IpcMainInvokeEvent, name: string, rawInput: unknown, rawMachine: unknown, options: RouterOptions): Promise<CommandResult<CommandName>> {
@@ -229,7 +247,7 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     }
     if (interceptor) {
       answer = run(interceptor);
-    } else if (owner === 'machine' && machine.kind === 'host' && !(name === 'artifacts.export' && machine.daemonRenders?.() === false)) {
+    } else if (owner === 'machine' && machine.kind === 'host' && !answeredHere(machine, name)) {
       answer = () => dispatchToHost(owner, name, input.value, context.client); // P5 O1 M5
     } else if (owner === 'machine') {
       const handler = machineHandlers.get(name); // P5 O1 M5: embedded

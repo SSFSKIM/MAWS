@@ -1058,3 +1058,67 @@ test('p5 O16 (6) the session host\'s relay adds at most 0.33 ms at p50 and 0.45 
  }
 });
 const pctO16=(xs,q)=>{const s=[...xs].sort((a,b)=>a-b);return s[Math.min(s.length-1,Math.max(0,Math.ceil(q*s.length)-1))];};
+
+// P5 O16 after landing (docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, D69): what the descendant veto can bind the
+// owner's server shapes by. scenarios/pass3/p5-o16-veto-mcp.mjs on both engines; findings-p5-o16-veto-mcp.txt.
+const loadVeto=sfx=>load5('p5-o16-veto-mcp'+sfx);
+const oneVeto=(sfx,event,pick=()=>true)=>{const all=meta4(loadVeto(sfx),event).filter(pick);assert.equal(all.length,1,sfx+' '+event);return all[0];};
+const treeVeto=(sfx,label)=>oneVeto(sfx,'tree',t=>t.label===label);
+const VETO_SHAPES=[['bare',/^node --disable-sigusr1 \S+\/server\.mjs bare$/],['launcher',/^\/usr\/bin\/node \S+\/server\.mjs exec$/],['fork',/^\/bin\/sh \S+\/bin\/o16-fork$/],['flag',/^\/usr\/bin\/node \S+\/server\.mjs flag$/]];
+for(const [sfx,version] of O16_ENGINES)test(`p5/p5-o16-veto-mcp${sfx} is ordered NDJSON, P5-O16 provenance on ${version}, no managed settings, the owner file unchanged, no scenario error and no secret`,()=>{
+ const text=readFileSync(new URL('p5-o16-veto-mcp'+sfx+'.jsonl',dir5),'utf8');assert.ok(!text.includes('sk-ant-'));if(secret&&secret.length>=8)assert.ok(!text.includes(secret));
+ const rows=text.trim().split('\n').map(JSON.parse);rows.forEach((r,i)=>assert.equal(r.seq,i+1));
+ const prov=meta4(rows,'provenance')[0];
+ assert.deepEqual([prov.child,prov.engineVersion,prov.document],['P5-O16',version,'docs/doperpowers/plans/2026-10-31-p5-o16-holder.md']);
+ assert.deepEqual(prov.managedSettings,[]);assert.equal(meta4(rows,'owner_file_check')[1].same,true);assert.deepEqual(meta4(rows,'scenario_error'),[]);
+ assert.deepEqual([prov.installed.doperpowers.rev,prov.installed.doperpowers.sminos,prov.installed.steps.map(s=>s.status)],['17944939937ff757a5a25d9735c035569c3a5661','1.31.0',[0,0,0,0]]);
+});
+test('p5 O16 veto (a) mcp_status carries each plugin stdio server\'s config, ${CLAUDE_PLUGIN_ROOT} expanded, on both engines; 2.1.316 adds transport',()=>{
+ for(const [sfx] of O16_ENGINES){
+  const {servers}=oneVeto(sfx,'mcp_status_settled');const prov=oneVeto(sfx,'provenance');
+  const root=servers.find(s=>s.name==='plugin:o16-veto:bare').config.args[1].replace(/\/server\.mjs$/,'');
+  assert.ok(root.startsWith('/')&&!root.includes('${'),sfx);
+  assert.deepEqual(servers.map(s=>[s.name,s.status,s.scope,s.source]),[['plugin:o16-veto:bare','connected','dynamic','plugin'],['plugin:o16-veto:launcher','connected','dynamic','plugin'],['plugin:o16-veto:fork','connected','dynamic','plugin'],['flag','connected','dynamic','dynamic']],sfx);
+  assert.deepEqual(servers.map(s=>s.config),[
+   {type:'stdio',command:'node',args:['--disable-sigusr1',`${root}/server.mjs`,'bare']},
+   {type:'stdio',command:`${root}/bin/o16-launch`,args:[]},
+   {type:'stdio',command:`${root}/bin/o16-fork`,args:[]},
+   {type:'stdio',...prov.mcpConfig.mcpServers.flag},
+  ],sfx);
+  for(const s of servers)assert.equal(s.transport,sfx?'stdio':undefined,sfx+s.name);
+ }
+});
+test('p5 O16 veto (b) every stdio server is claude\'s direct child, spawned within a second of claude and before initialize is answered; an exec\'d launcher keeps its pid and start; 2.1.316 runs the bridge with this session\'s id',()=>{
+ for(const [sfx] of O16_ENGINES){
+  const rest=treeVeto(sfx,'rest');const claude=rest.rows[0];const children=rest.rows.filter(r=>r.depth===1);
+  const at=s=>Date.parse(s+' UTC');
+  for(const [name,shape] of VETO_SHAPES){const p=children.filter(r=>shape.test(r.command));assert.equal(p.length,1,sfx+name);assert.ok(at(p[0].lstart)-at(claude.lstart)<=1000,sfx+name);}
+  const fork=children.find(r=>/o16-fork$/.test(r.command));assert.ok(rest.rows.some(r=>r.ppid===fork.pid&&/server\.mjs fork$/.test(r.command)),sfx); // npx's shape: the server under its launcher
+  const early=oneVeto(sfx,'tree_before_initialize').samples;const init=oneVeto(sfx,'initialize_answer');
+  const launcher=children.find(r=>/server\.mjs exec$/.test(r.command));
+  const before=early.find(s=>s.rows.some(r=>r.pid===launcher.pid));assert.ok(before&&before.ms<init.ms,sfx);
+  assert.match(before.rows.find(r=>r.pid===launcher.pid).command,/^python3 \S+\/bin\/o16-launch$/,sfx); // before its exec
+  assert.equal(before.rows.find(r=>r.pid===launcher.pid).lstart,launcher.lstart,sfx);
+  const bridge=children.filter(r=>/sminos\.py bridge --session /.test(r.command));
+  if(sfx===''){assert.deepEqual(bridge,[],sfx);assert.equal(children.length,4,sfx);}
+  else{
+   assert.equal(bridge.length,1);assert.match(bridge[0].command,new RegExp(`^python3 \\S+/sminos/skills/sminos/scripts/sminos\\.py bridge --session ${loadVeto(sfx).find(r=>r.frame.session_id)?.frame.session_id} --launch=\\S+$`));
+   assert.equal(children.length,5);
+  }
+ }
+});
+test('p5 O16 veto (c) a background Bash is claude\'s Bash wrapper with its command under it, gone after stop_task',()=>{
+ for(const [sfx] of O16_ENGINES){
+  const bg=treeVeto(sfx,'background-bash');const claude=bg.rows[0];
+  const sleep=bg.rows.find(r=>r.command==='sleep 600');const wrapper=bg.rows.find(r=>r.pid===sleep.ppid);
+  assert.match(wrapper.command,/^\/bin\/bash -c source \S+\/shell-snapshots\/snapshot-bash-\S+\.sh /,sfx);assert.equal(wrapper.ppid,claude.pid,sfx);
+  assert.ok(!treeVeto(sfx,'rest-after-stop').rows.some(r=>r.pid===wrapper.pid||r.pid===sleep.pid),sfx);
+ }
+});
+test('p5 O16 veto (d) a server whose direct child is gone stays connected in mcp_status for 6 s, and the engine starts no new one: killed outright, or its forking launcher killed with the server alive',()=>{
+ for(const [sfx] of O16_ENGINES)for(const label of ['bare-killed','fork-launcher-killed']){
+  const k=oneVeto(sfx,'kill',x=>x.label===label);assert.ok(k.polls.length>=20&&k.polls.at(-1).ms>=5500,sfx+label);
+  for(const p of k.polls){assert.ok(p.servers.every(s=>s.status==='connected'),sfx+label);assert.ok(!p.children.some(c=>c.pid===k.pid),sfx+label);}
+  assert.ok(!treeVeto(sfx,label).rows.some(r=>r.depth===1&&r.pid!==k.pid&&r.command===k.command),sfx+label); // no respawn
+ }
+});

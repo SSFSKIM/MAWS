@@ -100,12 +100,13 @@ export function setupEvent(s: Setup, appSessionId: AppSessionId, phase: SetupPha
   s.emit('session.setup', { appSessionId, phase, detail, outcome });
 }
 
-// The next replay fixture, or null without the seam; a spent list refuses the launch.
+// The next replay fixture, or null without the seam or for its `live` entry (the installed engine, as without the
+// seam); a spent list refuses the launch.
 export function takeReplay(s: Setup, phase: SetupPhase): { path: string; sessionId: SessionId } | null {
   if (s.replay === null) return null;
   const fixture = s.replay.take();
   if (fixture === null) throw new SetupFailure(phase, 'replay_disabled: MAWS_E2E_REPLAY_FIXTURES has no fixture left for this launch');
-  return fixture;
+  return 'live' in fixture ? null : fixture;
 }
 
 export async function stopQuietly(s: Setup, appSessionId: AppSessionId): Promise<void> {

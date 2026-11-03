@@ -27,4 +27,13 @@ export const ENDPOINT_CAPABILITIES = [
   // `read-only`, sent only in answer to a read open. A read open from a device that listed none of it is `malformed`.
   // Not `rl2.browser-screencast`: reserved for O17 M9, listed by neither side until it builds the kind.
   'rl2.read-open',
+  // M7: `pong` carries this machine's clock at the ping's arrival (`received`) and the pong's send (`sent`), which the
+  // remote bench reads to place the machine's clock against the device's. Optional fields an older device passes by.
+  'rl2.pong-clock',
+  // M5c: the client port across the channel: `client` (a machine service's request for the asking device, posted only to
+  // a device that listed it) and the device's `clientAnswer` (client-port.ts).
+  'rl2.client-port',
+  // M5c (round 3): a remote dashboard's snapshot holds, main's link's calls `artifacts.holdAssets` and `releaseAssets`,
+  // which this endpoint keeps per channel (asset-holds.ts); a device asks them only of an endpoint that listed it.
+  'rl2.asset-holds',
 ] as const;

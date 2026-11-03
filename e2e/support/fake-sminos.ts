@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { expect } from '@playwright/test';
 import { build } from 'esbuild';
+import { goneFrame, helloFrame, memberFrame, projectFrames, restatedFrame, type LaneBMember } from '../../test/support/sminos-frames';
 
 const REPO_ROOT = resolve(__dirname, '../..');
 const FAKE_SMINOS = join(REPO_ROOT, 'test/endpoint/rl10/fake-sminos.ts');
@@ -19,16 +20,6 @@ const FAKE_SMINOS = join(REPO_ROOT, 'test/endpoint/rl10/fake-sminos.ts');
 type Frame = { t: string } & Record<string, unknown>;
 type Harness = { send(frame: object): void; close(): void; closed: boolean; received: Frame[] };
 type FakeSminosModule = { FakeSminos: { open(path: string): Promise<Harness> } };
-
-/** One lane B session's record, as sminos's `member` frame carries it (src/endpoint/rl10/members.ts's `Member`). */
-export interface LaneBMember {
-  engine: string; // the engine session id, which sminos keys its members by
-  alias: string;
-  title: string;
-  cwd: string;
-  owners: string[];
-  state?: string; // `idle` unless given
-}
 
 export interface FakeSminos {
   /** A project's `machine` presence (its checkouts here) and its log-plane `hello`, so the endpoint relays it and lists
@@ -53,21 +44,18 @@ export async function startFakeSminos(scratch: string, info: { socket: string; t
   await build({ entryPoints: [FAKE_SMINOS], outfile, bundle: true, format: 'cjs', platform: 'node', target: 'node22', logLevel: 'error', alias: { '@shared': join(REPO_ROOT, 'src/shared') } });
   const { FakeSminos } = createRequire(__filename)(outfile) as FakeSminosModule;
   const s = await FakeSminos.open(info.socket);
-  const policy = { read_only: false, ceiling: 'settings' };
-  s.send({ t: 'hello', protocol: { major: 1, minor: 0 }, capabilities: [], token: info.token, sminos: { version: 'e2e-remote' }, policy });
+  s.send(helloFrame(info.token, 'e2e-remote'));
   await expect.poll(() => s.received.some((frame) => frame.t === 'welcome'), { timeout: 15_000, message: 'the endpoint’s welcome' }).toBe(true);
-  s.send({ t: 'restated' });
+  s.send(restatedFrame());
   const present = new Set<string>();
   return {
     project(project, checkouts) {
       if (present.has(project)) return;
       present.add(project);
-      s.send({ t: 'session', message: { project, machine, session: null, kind: 'machine', sub: null, n: null, body: { online: true, policy, checkouts: checkouts.map((path) => ({ path, branch: 'main' })), desk: {} } } });
-      s.send({ t: 'hello', project, name: machine, have: {} });
+      for (const frame of projectFrames(project, machine, checkouts)) s.send(frame);
     },
-    member: (project, m) =>
-      s.send({ t: 'member', session: m.engine, alias: m.alias, project, lane: 'B', state: m.state ?? 'idle', title: m.title, cwd: m.cwd, owners: m.owners, ownersProof: [], origin: { kind: 'maws' }, access: 'listed' }),
-    gone: (engine) => s.send({ t: 'member', session: engine, gone: true }),
+    member: (project, m) => s.send(memberFrame(project, m)),
+    gone: (engine) => s.send(goneFrame(engine)),
     said: () => s.received.map((frame) => JSON.stringify(frame).slice(0, 300)).join('\n'),
     close: () => s.close(),
   };

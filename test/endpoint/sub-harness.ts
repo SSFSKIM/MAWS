@@ -660,6 +660,8 @@ export type StartOptions = {
   limits?: NonNullable<EndpointOptions['direct']>['limits'];
   /** A pty host behind `dispatch('pty-host', …)`, `onFrame` and the pty host's events (P5 O7 M3). */
   pty?: FakePtyHost;
+  /** P5 O7 M5c review 1: a remote acquisition's bound (`EndpointOptions.acquireWithinMs`). */
+  acquireWithinMs?: number;
 };
 
 export async function startEndpoint(org: Org, started: Fixture[], options: StartOptions = {}): Promise<Fixture> {
@@ -706,6 +708,7 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
     direct: { interfaces: () => ({ utun4: [{ address: TAILNET, family: 'IPv4', internal: false, netmask: '255.255.255.255', mac: '00:00:00:00:00:00', cidr: null }] }), listen, ...(options.limits === undefined ? {} : { limits: options.limits }) },
     authorization: { records, checkouts: { known: (path) => endpoint?.rl10.members.known(path) ?? false }, settingsMode: () => 'default' },
     subscriptions: options.subscriptions,
+    ...(options.acquireWithinMs === undefined ? {} : { acquireWithinMs: options.acquireWithinMs }),
   });
   records.bindLaneA(endpoint.rl10.members);
   await endpoint.start(services);

@@ -1,0 +1,82 @@
+P5 O16 after landing: the descendant veto's registration on the owner's server shapes
+(docs/doperpowers/plans/2026-10-31-p5-o16-holder.md, Decision Log D69; the veto of M5, Interfaces §F, D17, D48, D52;
+2026-11-02)
+
+Question (D-1). O16's veto counts every process under `claude` as work but registered infrastructure. On the owner's
+machine an MCP server goes unregistered on adoption (a bare `command` is dropped from the argv route once the plan's
+environment is rebuilt), and an exec'ing launcher (ptc) on any launch. fixtures/p4/p4-r8-owner.jsonl also lists the
+owner's plugin servers without a `config`. What does the pinned engine's `mcp_status` carry for a plugin's stdio server?
+Is `${CLAUDE_PLUGIN_ROOT}` expanded in it? What lives under a resting `-p` session with the owner's shapes, before and
+after a turn that leaves a background Bash? And what does `mcp_status` say once a server's process is gone?
+
+Method. scenarios/pass3/p5-o16-veto-mcp.mjs. MAWS's launch line and initialize (p1-common), the engine spawned
+detached as transport.ts spawns it, MAWS_LANE=B, SMNS_MEMBER the probe's own pid and CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1.
+The API was a scripted stand-in (stub-api.mjs over p5-o16-holder.mjs's plans; nothing was spent). The plugin `o16-veto`
+was installed from a directory marketplace, as the owner's plugins are. It carries four stdio servers over one
+one-tool server script:
+- `bare`: `{command: "node", args: ["--disable-sigusr1", "${CLAUDE_PLUGIN_ROOT}/server.mjs", "bare"]}`, cua's shape.
+- `launcher`: `${CLAUDE_PLUGIN_ROOT}/bin/o16-launch`, a `#!/usr/bin/env python3` script that sleeps 1.5 s, then
+  os.execv's node. This is ptc's shape: ptc-launch checks its venv, then execs the venv's python.
+- `fork`: `${CLAUDE_PLUGIN_ROOT}/bin/o16-fork`, a `#!/bin/sh` script that runs node as its child, npx's shape.
+- `flag`: an absolute `/usr/bin/node` server from --mcp-config.
+sminos 1.31.0 was installed from a doperpowers checkout at 17944939937f, the owner's installed version. Steps: the
+tree every 250 ms from the spawn to initialize; `mcp_status` every 300 ms until no stdio server was pending, with
+claude's direct children beside each answer; the tree at rest; a turn that leaves `sleep 600` in the background, then
+the tree again; stop_task, then the tree again. Last, the bare server's process was SIGKILLed and `mcp_status` polled
+every 200 ms for 6 s; the same was done to the forking launcher, with the server it started left alive.
+Fixtures fixtures/p5/p5-o16-veto-mcp.jsonl (2.1.283, the fixture pin) and -installed.jsonl (2.1.316, what the owner's
+MacBook runs); tests in fixtures.test.mjs ("p5 O16 veto"). Where it ran: devcloud VM dc-o16veto-d55a (GCE
+e2-custom-4-8192, us-west1-a, Ubuntu 24.04, Node 26.13.0; deleted after the recording). It ran as a dedicated user
+(o16probe) with no access to the owner's home and no credential, with /etc/claude-code hidden by a private tmpfs mount.
+Every fixture's provenance reads managedSettings []. Nothing ran on the owner's MacBook.
+
+a. config. On both engines every plugin stdio server's entry carries `config: {type: "stdio", command, args}` with
+   `${CLAUDE_PLUGIN_ROOT}` expanded to the plugin's root, `scope: "dynamic"` and `source: "plugin"`. The --mcp-config
+   server is `source: "dynamic"`. 2.1.316 adds `transport: "stdio"`. The engine source agrees: TMn (2.1.312
+   cli.pretty.js:19337-19363; 2.1.283 :583319) builds the stdio config for every connection, and the plugin loader
+   (2.1.312 :954980-955000) expands the root and env vars in `command` and `args` before connecting. The config-less
+   entries in fixtures/p4/p4-r8-owner.jsonl come from that recording's curation, which reduced every server but notion
+   to name, status, scope and type (findings-p4-r8-mcp-servers.txt, Method). The user-scope http server there has no
+   config either.
+b. The tree. The engine spawns every stdio server as its own direct child, in its own group, 0.5 to 0.8 s after its
+   start and before `initialize` is answered (2.2 s). Each server's lstart is within the same second as claude's or the
+   next. The exec'ing launcher reads `python3 <root>/bin/o16-launch` until its exec. After it, the same pid and lstart
+   read `/usr/bin/node <root>/server.mjs exec`, so no argv derived from the config matches it. The forking launcher
+   stays as `/bin/sh <root>/bin/o16-fork`, with the server as its child. The first `mcp_status` (2.2 s) found every
+   server settled on 2.1.283; on 2.1.316 the launcher was still `pending` and was settled at 2.5 s. Transients near the
+   settle point, all gone within about a second: a `[git] <defunct>` and a `[2.1.316] <defunct>` zombie, and sminos's
+   SessionStart hook `/bin/sh -c "${CLAUDE_PLUGIN_ROOT}/hooks/smns-record.sh"` with its children. On 2.1.316 the
+   bridge child reads `python3 <doperpowers>/sminos/skills/sminos/scripts/sminos.py bridge --session <this session's
+   engine id> --launch=<id>`, a direct child of claude in its group. 2.1.283 loads no sminos module, so there is no
+   bridge (as M0 found). At rest claude's children are the four server processes (and the bridge); nothing else.
+c. A background Bash is `/bin/bash -c source <config>/shell-snapshots/snapshot-bash-….sh 2>/dev/null || true &&
+   shopt -u extglob … && eval 'sleep 600'`, a direct child of claude leading its own group and session, with `sleep 600`
+   under it. After stop_task both are gone, and the tree is the resting one.
+d. A dead server stays `connected`. With the bare server's process SIGKILLed, every `mcp_status` for 6 s (28 polls on
+   each engine) still read all four servers `connected`, and the engine started no new process for it. The same held
+   with the forking launcher killed while the server it started lived on: the server was re-parented away from claude.
+   So "a connected stdio server has its process alive as claude's direct child" holds only until a server's process
+   dies.
+caffeinate (from source; Linux runs no sleep guard). The guard (2.1.312 cli.pretty.js:110183-110280, the same constants
+   in 2.1.283) is acquired by the interactive REPL while busy, and in `-p` only under CLAUDE_CODE_ENVIRONMENT_KIND=bridge
+   (vM, :538588; IC, :704527), which MAWS never sets. Released, it is SIGKILLed after 30 s (`Li`/`z7t`), restarted every
+   240 s only while held, and expires by itself at 300 s (`-t 300`).
+
+Verdicts for the fix (D69):
+- The argv route stays where it matches: the configured absolute path and, on a fresh launch, the bare `node`.
+- Process identity covers what argv cannot: an exec keeps the pid and start time, so a binding made at any read
+  survives it.
+- An adopter needs what the previous manager bound, kept per launch in the state file. Its own reading of a bare
+  command goes through a rebuilt PATH.
+- A count of connected stdio servers can bind the remaining processes only while every one of them is alive. By d, it
+  is safe only for children the engine started with itself (b: within a second). It must never bind a child that came
+  later into a dead server's place.
+- The bridge can be named by its argv against the row's engine session id until its observer says hello.
+- caffeinate needs no exemption: it never runs under a MAWS -p session, and where it does run it lives for the busy
+  span plus 30 s.
+
+Notes.
+- A directory marketplace loads the plugin in place, so `${CLAUDE_PLUGIN_ROOT}` is the marketplace's path, not a cache
+  copy. The expansion is the same either way.
+- Fixtures carry the VM's scratch paths under /tmp and /home/o16probe. No credential was on the VM user, and the
+  harness's redaction ran on every row.

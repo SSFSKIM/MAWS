@@ -16,6 +16,7 @@ import {
   ConnectorToolRefSchema,
   ConnectorWatchRequestSchema,
   type ConnectorCallOutcome,
+  type ConnectorInvalid,
   type ConnectorRefusal,
   type ConnectorToolRef,
 } from '@shared/artifacts/connectors';
@@ -30,6 +31,7 @@ export interface PagePort {
 export interface RelayReport {
   declared?(tools: ConnectorToolRef[]): void; // everything the page has declared, after each declaration
   outcome?(tool: ConnectorToolRef, outcome: ConnectorCallOutcome): void; // each call's and refresh's outcome
+  declareRefused?(outcome: ConnectorInvalid): void; // P5 O7 M5c: a declaration refused (no lease, say)
 }
 
 export interface PageRelay {
@@ -59,7 +61,10 @@ export function relayPage(port: PagePort, surface: ConnectorSurface, report: Rel
 
   const declare = async (tools: ConnectorToolRef[]) => {
     const outcome = await surface.declareTools(tools);
-    if (outcome.ok && live) report.declared?.(outcome.declared);
+    if (live) {
+      if (outcome.ok) report.declared?.(outcome.declared);
+      else report.declareRefused?.(outcome);
+    }
     return outcome;
   };
 

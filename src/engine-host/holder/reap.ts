@@ -1,16 +1,18 @@
 // O16 M5: the reap, the release of an idle session as a state machine over the gate (docs/doperpowers/plans/
-// 2026-10-31-p5-o16-holder.md, M5 and Interfaces §F; holder design §3.2; D15, D17, D29). One per row, made by the process
-// table at the reservation. The idle release (`idle`, the role's clock: idle-release.ts) and the memory budget's
+// 2026-10-31-p5-o16-holder.md, M5 and Interfaces §F; holder design §3.2; D15, D17, D29, D70). One per row, made by the
+// process table at the reservation. The idle release (`idle`, the role's clock: idle-release.ts) and the memory budget's
 // (`budget`: process-table.ts) both end a process through it, so neither signals into a turn.
 //
 //   idle --due, verified empty, observer healthy--> arming (`arm` sent)
 //   arming --armed--> armed, and the step at once
 //   arming/armed --turn, a veto at the step, the observer unhealthy, no armed within the lease--> idle (`proceed` for a
 //                  turn, `disarm`, the row's clock restarts; a budget reap's `releasing` clears)
-//   armed --step: verified empty, lease live--> signalled (the session's reap)
+//   armed --step: verified empty, lease confirmed live--> signalled (the session's reap)
 //   idle --due, verified empty, observer absent (never seen on the process: owner Q1)--> signalled
-//   idle --due, observer unhealthy--> idle (the row's work reads `observer_unhealthy`: held until a fresh hello)
+//   idle --due, observer unhealthy--> idle (the row's work reads `observer_unhealthy`: held until heard again)
 //   signalled --turn--> `stop`, state unchanged
+//   signalled --SIGTERM due (idle only): no confirmed lease and none by a re-arm's armed within the lease, or a turn
+//                  under way by the host's status--> idle (no SIGTERM; `disarm` when fenced, the row's clock restarts)
 //   signalled --exit--> the row is released (the table's released set, as today)
 //   signalled --end_session and SIGTERM ignored (idle only)--> term_ignored --> idle (`disarm`, the clock restarts; the
 //                  row's work reads `reap_term_ignored` until the next Stop)
@@ -21,8 +23,19 @@
 // once. The lease is the host's own clock from the `arm` it sent: the host signals only within `LEASE_MS` less
 // `LEASE_MARGIN_MS` of it, renewing the arm (the same fence, a fresh `armed` awaited) when the step comes later, and it
 // renews the lease while the signal runs, so a turn the engine starts before it exits still meets the fence.
+//
+// D70: no signal goes into a fenced process, the step's end_session nor an idle reap's SIGTERM after its grace, without a
+// confirmed live lease at that instant: the latest arm for the fence (first or renewal) answered by its own `armed` on
+// the observer's present connection (gate.ts pairs answers to arms), and both of the host's clocks inside its send time
+// plus the lease less the margin (the larger elapsed reading counts: a sleep jumps the wall clock forward, a step back
+// leaves the monotonic one advancing, and either way the lease reads expired). Each renewal is awaited as the first arm
+// is; at the SIGTERM with none confirmed, the reap re-arms and signals at that arm's `armed`, or withholds the SIGTERM.
+// A lease proves the observer listening, not that no turn runs (one it admitted while its lease had lapsed), so the
+// SIGTERM's last read, on every idle reap, fenced or not, is the host's own turn state (`turnUnderWay`, the step's
+// predicate too): a turn under way withholds it. A budget reap's later rungs (its ladder's SIGTERM and SIGKILL) are a forced release by design: the memory bound holds
+// even against an unresponsive observer.
 import type { EngineSessionStatus } from '@shared/engine/status';
-import { isIdleRow } from '../budget';
+import { isIdleRow, turnUnderWay } from '../budget';
 import type { GateChannel, ObserverState, TurnAnswer } from './gate';
 
 export type { ObserverState } from './gate';
@@ -40,8 +53,11 @@ export interface ReapDeps {
   stateful(): ReadonlySet<string>;
   interest(): boolean; // for `idle`: a client's interest holds the row, or the release is off
   descendants(): number | 'unreadable'; // a fresh read of the work under the engine
-  reap(reason: ReapReason): Promise<'exited' | 'ignored'>; // the session's signal path
-  now(): number;
+  // The session's signal path; `mayTerm`, an idle reap's, is the SIGTERM's gate (D70): true when it may go in now, false
+  // when it may not (`withheld`: the reap has ended and no SIGTERM was sent).
+  reap(reason: ReapReason, mayTerm: () => Promise<boolean>): Promise<'exited' | 'ignored' | 'withheld'>;
+  now(): number; // the wall clock
+  monotonic?(): number; // performance.now() unless a test gives one
   log(line: string): void;
   cancelled(reason: ReapReason): void; // the reap ended without a signal: the row's clock restarts, the budget's `releasing` clears
   ignored(reason: ReapReason): void; // the engine ignored the reap: the row's clock restarts, the budget's `releasing` clears
@@ -61,19 +77,25 @@ export class Reap {
   private current: ReapState = 'idle';
   private reason: ReapReason = 'idle';
   private fence = 0;
-  private armSentAt = 0;
+  private armSentAt = 0; // the latest arm's send, by both clocks
+  private armSentMono = 0;
+  private latestArm: number | null = null; // its id from the gate
+  private confirming: ((confirmed: boolean) => void) | null = null; // the SIGTERM awaiting a re-arm's armed
+  private fenced = false; // the signal went in under a fence (an observer was seen)
   private armTimer: ReturnType<typeof setTimeout> | null = null;
   private renewTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   private readonly leaseMs: number;
   private readonly marginMs: number;
+  private readonly monotonic: () => number;
   private lastView = '';
 
   constructor(private readonly label: string, private readonly deps: ReapDeps) {
     this.leaseMs = deps.leaseMs ?? LEASE_MS;
     this.marginMs = deps.leaseMarginMs ?? LEASE_MARGIN_MS;
+    this.monotonic = deps.monotonic ?? (() => performance.now());
     deps.gate.listen({
-      armed: (fence) => this.armed(fence),
+      armed: (fence, arm) => this.armed(fence, arm),
       turn: (fence) => this.turn(fence),
       health: (state) => this.health(state),
     });
@@ -108,10 +130,13 @@ export class Reap {
     if (this.current === 'arming' || this.current === 'armed') this.end(`${this.reason} reap of ${this.label} cancelled: ${why}`);
   }
 
-  // The row exited or left the table.
+  // The row exited or left the table; a SIGTERM awaiting confirmation is withheld.
   dispose(): void {
     this.disposed = true;
     this.clearTimers();
+    const confirming = this.confirming;
+    this.confirming = null;
+    confirming?.(false);
   }
 
   private arm(): void {
@@ -122,8 +147,7 @@ export class Reap {
 
   private sendArm(): void {
     this.clearTimers();
-    this.armSentAt = this.deps.now();
-    this.deps.gate.arm(this.fence, this.leaseMs);
+    this.armNow();
     this.set('arming');
     this.armTimer = setTimeout(() => {
       if (this.current === 'arming') this.end(`${this.reason} reap of ${this.label}: no armed for fence ${this.fence} within the lease`);
@@ -131,28 +155,52 @@ export class Reap {
     (this.armTimer as { unref?: () => void }).unref?.();
   }
 
-  private armed(fence: number): void {
-    if (this.current !== 'arming' || fence !== this.fence) return;
-    if (this.armTimer !== null) clearTimeout(this.armTimer);
-    this.armTimer = null;
-    this.set('armed');
-    this.step();
+  // An arm for the fence, first or renewal: the lease runs from its send, and only its own `armed` confirms it.
+  private armNow(): void {
+    this.armSentAt = this.deps.now();
+    this.armSentMono = this.monotonic();
+    this.latestArm = this.deps.gate.arm(this.fence, this.leaseMs);
+  }
+
+  // What is left of the latest arm's lease less its margin, by the clock that has run further since its send.
+  private leaseLeft(): number {
+    return this.leaseMs - this.marginMs - Math.max(this.deps.now() - this.armSentAt, this.monotonic() - this.armSentMono);
+  }
+
+  // A confirmed live lease (D70).
+  private confirmed(): boolean {
+    return this.latestArm !== null && this.deps.gate.acknowledged(this.latestArm) && this.leaseLeft() > 0;
+  }
+
+  private armed(fence: number, arm: number): void {
+    if (fence !== this.fence || arm !== this.latestArm) return; // an earlier arm's answer confirms no later one
+    if (this.current === 'arming') {
+      if (this.armTimer !== null) clearTimeout(this.armTimer);
+      this.armTimer = null;
+      this.set('armed');
+      this.step();
+    } else if (this.confirming !== null && this.confirmed()) {
+      const confirming = this.confirming;
+      this.confirming = null;
+      confirming(true);
+    }
   }
 
   // The linearization point: everything read again, the signal in the same synchronous step.
   private step(): void {
     const veto = this.veto() ?? (this.observer === 'healthy' ? null : `the observer is ${this.observer}`);
     if (veto !== null) return this.end(`${this.reason} reap of ${this.label} cancelled at the step: ${veto}`);
-    if (this.deps.now() > this.armSentAt + this.leaseMs - this.marginMs) return this.sendArm(); // renewed before any signal
+    if (!this.confirmed()) return this.sendArm(); // renewed before any signal
     this.signal();
   }
 
   private signal(): void {
     this.clearTimers();
     this.set('signalled');
-    if (this.observer !== 'absent') this.renewLater();
-    this.deps.log(`${this.reason} reap of ${this.label}: signalled${this.observer === 'absent' ? ' (no observer was ever seen on the process)' : ` (fence ${this.fence})`}`);
-    this.deps.reap(this.reason).then(
+    this.fenced = this.observer !== 'absent';
+    if (this.fenced) this.renewLater();
+    this.deps.log(`${this.reason} reap of ${this.label}: signalled${this.fenced ? ` (fence ${this.fence})` : ' (no observer was ever seen on the process)'}`);
+    this.deps.reap(this.reason, () => this.mayTerm()).then(
       (outcome) => this.settled(outcome),
       (error: unknown) => {
         this.deps.log(`${this.reason} reap of ${this.label} failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -162,22 +210,66 @@ export class Reap {
   }
 
   // O16 panel wave 1 (sweep#2): each renewal is due at the lease in force less the margin, the first against the arm
-  // the step signalled under (`armSentAt`), not a whole lease from the signal, so the fence never lapses while it runs.
+  // the step signalled under, not a whole lease from the signal, so the fence never lapses while it runs. D70: a
+  // renewal is confirmed only by its own `armed`; one the SIGTERM awaits that has none by then withholds the SIGTERM.
   private renewLater(): void {
-    const due = this.armSentAt + this.leaseMs - this.marginMs;
     this.renewTimer = setTimeout(() => {
-      this.armSentAt = this.deps.now();
-      this.deps.gate.arm(this.fence, this.leaseMs);
+      this.renewTimer = null;
+      if (this.confirming !== null) return this.withhold(`no armed for fence ${this.fence}'s re-arm within the lease`);
+      this.armNow();
       this.renewLater();
-    }, Math.max(0, due - this.deps.now()));
+    }, Math.max(0, this.leaseLeft()));
     (this.renewTimer as { unref?: () => void }).unref?.();
   }
 
-  private settled(outcome: 'exited' | 'ignored'): void {
+  // The SIGTERM's gate (D70), at its instant: a fenced row's confirmed live lease (`confirm`), then the host's own turn
+  // state, read last. Its answer reaches the session's kill within the same task, so no frame lands between.
+  private mayTerm(): Promise<boolean> {
+    const lease = this.fenced ? this.confirm() : Promise.resolve(!this.disposed && this.current === 'signalled');
+    return lease.then((ok) => {
+      if (!ok) return false;
+      const status = this.deps.current();
+      if (status !== null && !turnUnderWay(status)) return true;
+      this.withhold(status === null ? 'the row is gone' : 'a turn is under way by the host\'s own status');
+      return false;
+    });
+  }
+
+  // A fenced row's lease at the SIGTERM: true while confirmed; otherwise a re-arm now, true at its `armed` within the
+  // lease less its margin, and false (the reap ended, the fence disarmed) when none comes or there is nothing to arm.
+  private confirm(): Promise<boolean> {
+    if (this.disposed || this.current !== 'signalled') return Promise.resolve(false);
+    if (this.confirmed()) return Promise.resolve(true);
     this.clearTimers();
-    if (this.disposed || outcome === 'exited') return;
+    this.armNow();
+    if (this.latestArm === null) {
+      this.withhold('no observer connection to re-arm on');
+      return Promise.resolve(false);
+    }
+    this.deps.log(`${this.reason} reap of ${this.label}: the SIGTERM is due with fence ${this.fence}'s lease unconfirmed; re-armed`);
+    this.renewLater();
+    return new Promise((resolve) => (this.confirming = resolve));
+  }
+
+  // The SIGTERM withheld: the reap ends with no signal, its fence (if any) disarmed, the row's clock restarted (an
+  // unhealthy observer's row is held by its unknown work as at any due).
+  private withhold(why: string): void {
+    const confirming = this.confirming;
+    this.confirming = null;
+    this.clearTimers();
+    if (this.fenced) this.deps.gate.disarm(this.fence);
+    this.deps.log(`${this.reason} reap of ${this.label}: no SIGTERM: ${why}${this.observer === 'unhealthy' ? '; the observer is unhealthy' : ''}`);
+    this.set('idle');
+    this.deps.cancelled(this.reason);
+    confirming?.(false);
+  }
+
+  private settled(outcome: 'exited' | 'ignored' | 'withheld'): void {
+    if (this.current !== 'signalled') return; // a withheld SIGTERM ended the reap already
+    this.clearTimers();
+    if (this.disposed || outcome !== 'ignored') return;
     this.set('term_ignored');
-    if (this.observer !== 'absent') this.deps.gate.disarm(this.fence);
+    if (this.fenced) this.deps.gate.disarm(this.fence);
     this.deps.log(`${this.reason} reap of ${this.label}: the engine ignored it; the session goes on`);
     this.set('idle');
     this.deps.ignored(this.reason);

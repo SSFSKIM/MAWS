@@ -86,7 +86,8 @@ describe('an artifact answer to a member who can’t view all its sessions', () 
   it('goes through the projection for every artifact row whose answer’s schema names a session (its bytes aside)', () => {
     // A stream row's (P5 O7 M5b: `artifacts.fetch`, `documents.open`) answer is the artifact's own bytes, no registry output.
     const rows = Object.entries(OFFERS.commands).filter(([name, row]) => (row.target === 'artifact' && row.kind !== 'stream') || name === 'library.list');
-    const naming = rows.map(([name]) => name).filter((name) => JSON.stringify(z.toJSONSchema(commands[name as keyof typeof commands].output as z.ZodType, { unrepresentable: 'any' })).includes('appSessionId'));
+    // P5 O7 M5c: or a session by another name (a connector call's `via.sessionId`)
+    const naming = rows.map(([name]) => name).filter((name) => /"(appSessionId|sessionId)"/.test(JSON.stringify(z.toJSONSchema(commands[name as keyof typeof commands].output as z.ZodType, { unrepresentable: 'any' }))));
     expect(naming.sort()).toEqual([...SESSION_NAMING].sort());
   });
 

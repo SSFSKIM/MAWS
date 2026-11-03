@@ -144,6 +144,10 @@
     "test/support/latency-budget.ts",
     "test/support/latency-engine.ts", // P5 O1 M1: the local-latency bench's engine wrapper and markers
     "test/support/local-latency.ts", // P5 O1 M1: the local-latency bench's statistics, baseline and budget
+    "test/support/remote-latency.ts", // P5 O7 M7: the remote bench's bounds, validity and live clock
+    "test/support/remote-bench.ts", // P5 O7 M7: the live bench's runner (the bench agent is bundled by path, never imported)
+    "test/support/sminos-frames.ts", // P5 O7 M7: the fake sminos's frames, shared with the live bench's agent
+    "test/support/bench-sign-in.ts", // P5 O7 M7: the live bench app's sign-in
     "test/support/live-seed.ts",
     "test/support/machine.ts", // P5 O6 M2: through widget-backend.ts
     "test/support/owner-file.ts",

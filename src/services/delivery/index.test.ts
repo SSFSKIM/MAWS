@@ -515,3 +515,128 @@ describe('an export replaced after its admission', () => {
     expect(readFileSync(outside, 'utf8')).toBe('outside-secret');
   });
 });
+
+// P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "O4's surfaces: leases, the window, delivery on
+// the machine"; Interfaces §O): `delivery.send` on the machine, where the export runs: the library's Export
+// (`artifacts.export`, own-file, Notion's dialect for Notion) reached through the root's bus, as the root composes it (the
+// render seam's on mawsd's front, main's export service on the embedded root), then the delivery in process, the export
+// removed whatever the answer. A cancel during the export is the service's own run table's: the export is let finish,
+// nothing is sent and its file is removed.
+describe('delivery.send on the machine (P5 O7 M5c)', () => {
+  let exported: { input: Record<string, unknown> }[];
+  let exportGate: Promise<void> | null;
+  let exportFails: string | null;
+  // The library's Export as the root registers it on its bus, leaving the artifact's own file in the export grammar
+  function serveExports() {
+    exported = [];
+    exportGate = null;
+    exportFails = null;
+    start({ exportArtifact: (input, context) => bus.invoke('artifacts.export', input, context) });
+    bus.register('artifacts.export', async (input) => {
+      exported.push({ input: input as Record<string, unknown> });
+      if (exportGate) await exportGate;
+      if (exportFails) throw new Error(exportFails);
+      const path = plant(input.format, 7, input.artifactId);
+      return { path, revision: 7, exportId: /-([0-9a-f-]{36})\.[a-z]+$/.exec(path)![1]! };
+    });
+  }
+  const send = (target: 'notion' | 'drive', format: ArtifactExportFormat, extra: Record<string, unknown> = {}) =>
+    call('delivery.send', { runId: RUN(), target, artifactId: ART, format, destination: { kind: 'default' }, ...extra });
+  beforeEach(() => {
+    stop();
+    serveExports();
+  });
+
+  it('exports in Notion’s dialect as an own file, then sends it as one page under the artifact’s title, and removes it', async () => {
+    const answer = await send('notion', 'md', { versionId: 3 });
+    expect(exported).toEqual([{ input: { artifactId: ART, format: 'md', ownFile: true, versionId: 3, dialect: 'notion' } }]);
+    expect(connectors.send).toHaveBeenCalledTimes(1);
+    expect(connectors.send.mock.calls[0]![1]).toEqual({ artifactId: ART, tool: 'notion-create-pages', arguments: { pages: [{ properties: { title: 'Quarterly memo' }, content: '# Notion body' }], allow_async: false } });
+    expect(answer).toEqual({ ok: true, receipt: { artifactId: ART, target: 'notion', at: 1_000, name: 'Quarterly memo', url: 'https://www.notion.so/Quarterly-memo-0123456789abcdef0123456789abcdef', format: 'md', revision: 7, versionId: 3, destination: { kind: 'default' } } });
+    expect(bus.emittedOf('delivery.receipt')).toHaveLength(1);
+    expect(removed()).toBe(true);
+  });
+
+  it('exports the owner’s format (a design’s board named) and uploads it with gws, removing the export and its copy', async () => {
+    const answer = await send('drive', 'png', { board: 'cover' });
+    expect(exported).toEqual([{ input: { artifactId: ART, format: 'png', ownFile: true, board: 'cover' } }]);
+    expect(gws.upload).toHaveBeenCalledTimes(1);
+    expect(gws.upload.mock.calls[0]![2]).toMatchObject({ name: 'Quarterly memo.png', mime: 'image/png' });
+    expect(answer).toMatchObject({ ok: true, receipt: { target: 'drive', format: 'png', revision: 7 } });
+    expect(removed()).toBe(true);
+  });
+
+  it('refuses before any export what cannot send: Notion’s format, no connector, gws absent or signed out, a deleted artifact', async () => {
+    expect(await send('notion', 'pdf')).toEqual({ ok: false, why: 'invalid' });
+    connectors.find.mockResolvedValueOnce({ sources: [], live: 1 });
+    expect(await send('notion', 'md')).toEqual({ ok: false, why: 'none' });
+    gws.find.mockResolvedValueOnce(null);
+    expect(await send('drive', 'docx')).toEqual({ ok: false, why: 'absent' });
+    gws.state.mockResolvedValueOnce({ state: 'signedOut' });
+    expect(await send('drive', 'docx')).toEqual({ ok: false, why: 'auth' });
+    artifact = null;
+    expect(await send('drive', 'docx')).toEqual({ ok: false, why: 'deleted' });
+    expect(exported).toEqual([]);
+    expect(connectors.send).not.toHaveBeenCalled();
+    expect(gws.upload).not.toHaveBeenCalled();
+  });
+
+  it('answers an export that failed as `export` with its words, sending nothing', async () => {
+    exportFails = 'the render host is unavailable on mini';
+    expect(await send('drive', 'docx')).toEqual({ ok: false, why: 'export', message: 'the render host is unavailable on mini' });
+    expect(gws.upload).not.toHaveBeenCalled();
+  });
+
+  it('honours a cancel during the export: the export finishes, nothing is sent, and its file is removed', async () => {
+    let finish!: () => void;
+    exportGate = new Promise<void>((resolve) => (finish = resolve));
+    const runId = RUN();
+    const pending = send('notion', 'md', { runId });
+    await vi.waitFor(() => expect(exported).toHaveLength(1));
+    expect(await call('delivery.cancel', { runId })).toEqual({ cancelled: true });
+    expect(await send('notion', 'md', { runId })).toEqual({ ok: false, why: 'busy' }); // the run id is the run's until it ends
+    finish();
+    expect(await pending).toEqual({ ok: false, why: 'cancelled' });
+    expect(planted).toHaveLength(1);
+    expect(removed()).toBe(true);
+    expect(connectors.send).not.toHaveBeenCalled();
+    expect(await call('delivery.cancel', { runId })).toEqual({ cancelled: false }); // ended: no tombstone
+  });
+
+  // The cancel lands after the target's preparation last read the run's signal (inside its last step, the located
+  // source's read) and before the export: the export, which takes no signal, is never started
+  it('starts no export for a cancel accepted after the target was prepared, and ends the run cancelled at once', async () => {
+    const runId = RUN();
+    let cancelled: Promise<unknown> | null = null;
+    connectors.find.mockResolvedValueOnce({
+      sources: [{ get source() { cancelled ??= call('delivery.cancel', { runId }); return source; }, connection: 'connected' }],
+      live: 1,
+    });
+    expect(await send('notion', 'md', { runId })).toEqual({ ok: false, why: 'cancelled' });
+    expect(await cancelled).toEqual({ cancelled: true });
+    expect(exported).toEqual([]);
+    expect(connectors.send).not.toHaveBeenCalled();
+    expect(planted).toEqual([]);
+  });
+
+  it('holds one run per artifact and target, and answers a cancel ahead of its run as the run’s start', async () => {
+    let finish!: () => void;
+    exportGate = new Promise<void>((resolve) => (finish = resolve));
+    const first = send('drive', 'docx');
+    await vi.waitFor(() => expect(exported).toHaveLength(1));
+    expect(await send('drive', 'pdf')).toEqual({ ok: false, why: 'busy' });
+    finish();
+    expect(await first).toMatchObject({ ok: true });
+    const runId = RUN();
+    expect(await call('delivery.cancel', { runId })).toEqual({ cancelled: true });
+    expect(await send('drive', 'docx', { runId })).toEqual({ ok: false, why: 'cancelled' });
+    expect(exported).toHaveLength(1);
+  });
+
+  it('is served only by a root that exports', async () => {
+    stop();
+    start();
+    expect(bus.registered()).not.toContain('delivery.send');
+    expect(bus.registered()).toContain('delivery.deliver'); // the OX1 window's hand-off stays served
+  });
+});

@@ -7,7 +7,9 @@
 //   on the daemon shape (at once if it already streams), right away on the embedded one, whose spine is composed;
 // - at each streaming of the machine host after the first (a restarted `mawsd`, which holds no lease and no report),
 //   every page marked unreported, then `connectors.reset` told to the windows, whose connectors clients rebuild their
-//   leases (src/renderer/src/artifacts/connectors.ts). The embedded shape never tells it.
+//   leases (src/renderer/src/artifacts/connectors.ts). The embedded shape never tells it. P5 O7 M5c
+//   (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md): every reset names its machine, this one this Mac's, so the
+//   renderer rebuilds only its leases (another machine's are reset by remote lane B at its link's new channel).
 // - P5 O4 (whole-branch review): the adoption is once per launch when its pass settles every record. A pass that left a
 //   record the machine could not take yet (`retry`: the updated app's first streaming can be a pre-O4 `mawsd`'s, which
 //   answers `connectors.adoptGrant` unknown_command before the build check restarts it) runs again at the machine host's
@@ -15,19 +17,21 @@
 //   sealer stopped never asks for a retry (./adoption.ts), so the Keychain is asked at most once in the launch; a pass run
 //   again after the sealer opened records asks it nothing, since Electron's safeStorage keeps the encryptor it got.
 import type { ClientRef } from '@shared/ipc/client';
-import type { CommandName } from '@shared/ipc/schema';
+import type { CommandName, EventPayload } from '@shared/ipc/schema';
+import type { MachineRef } from '@shared/machine/ref';
 import type { ServicesBus } from '@shared/spine/bus';
 import type { ClientWindowShown } from '../client/window-shown';
 import type { BeforeHook } from '../ipc/router';
 import { startWindowReporter } from './windows';
 
 export interface AppConnectorsDeps {
+  local: MachineRef; // P5 O7 M5c: this Mac's machine, which the machine host's reset names
   // the daemon shape's machine host (`mawsd`'s services front); null on the embedded shape
   machine: { streaming(): boolean; onStreaming(listener: () => void): () => void } | null;
   windowShown(client: ClientRef): ClientWindowShown | null; // the window that shows a page (electronWindowShown), or null
   invoke: ServicesBus['invoke']; // main's own route
   before(names: readonly CommandName[], hook: BeforeHook): () => void; // the router's seam (beforeCommand)
-  emit(name: 'connectors.reset', payload: Record<string, never>): void; // to every window
+  emit(name: 'connectors.reset', payload: EventPayload<'connectors.reset'>): void; // to every window
   adopt(): Promise<{ retry: boolean }>; // the legacy grants' adoption pass (./adoption.ts)
   log?: (line: string) => void;
 }
@@ -36,7 +40,7 @@ export interface AppConnectors {
   stop(): void;
 }
 
-export function startAppConnectors({ machine, windowShown, invoke, before, emit, adopt, log = (line) => console.warn(`[connectors] ${line}`) }: AppConnectorsDeps): AppConnectors {
+export function startAppConnectors({ local, machine, windowShown, invoke, before, emit, adopt, log = (line) => console.warn(`[connectors] ${line}`) }: AppConnectorsDeps): AppConnectors {
   const reporter = startWindowReporter({
     windowShown,
     report: async (client, shown) => (await invoke('connectors.windowShown', { shown }, { client }).catch(() => null))?.ok === true,
@@ -91,7 +95,7 @@ export function startAppConnectors({ machine, windowShown, invoke, before, emit,
       return;
     }
     reporter.reportAgain(); // before the windows hear it, so a rebuilt lease's first command reports first
-    emit('connectors.reset', {});
+    emit('connectors.reset', { machine: local });
     adoptWhenDue(); // P5 O4 (whole-branch review): a pass the machine could not complete runs again
   });
   return {

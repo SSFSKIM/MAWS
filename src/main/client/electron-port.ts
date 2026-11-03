@@ -10,7 +10,7 @@ import { app, BrowserWindow, dialog, Notification, shell, type MessageBoxOptions
 import type { ClientRef } from '@shared/ipc/client';
 import type { ClientPort, NotifyEvent } from '@shared/client/port';
 import { pageOf } from '../ipc/clients';
-import { openExternalUrl } from '../open-external';
+import { openExternalUrl, SCHEMES_ONLY } from '../open-external';
 import { appWindows } from '../windows';
 import { openDialogFor } from './e2e-pick';
 
@@ -54,7 +54,7 @@ export function electronClientPort(deps: { env: NodeJS.ProcessEnv; openWindow():
     async openExternal(_client, target) {
       if ('url' in target) {
         // handed off as it always was: the scheme check, then the e2e log or the system browser, whose own failure is logged
-        return openExternalUrl(target.url) ? { opened: true } : { opened: false, reason: 'only http, https and mailto links open outside MAWS' };
+        return openExternalUrl(target.url) ? { opened: true } : { opened: false, reason: SCHEMES_ONLY };
       }
       const message = await shell.openPath(target.path); // '' on success, else the error text
       return message === '' ? { opened: true } : { opened: false, reason: message };
