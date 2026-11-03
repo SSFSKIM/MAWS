@@ -59,9 +59,9 @@ class Link implements RemoteViewLink {
     const { browser } = this.streams[at]!.request;
     this.streams[at]!.sink.opened({ credit: 0, browser: { epoch: browser.epoch, tabId: browser.tabId, control } } as never);
   }
-  frame(at: number, seq: number) {
+  frame(at: number, seq: number, width = 640) {
     const stream = this.streams[at]!;
-    const bytes = encodeScreencastFrame({ epoch: stream.request.browser.epoch, tabId: stream.request.browser.tabId, seq, capturedAt: seq, width: 640, height: 400, viewport: { width: 1280, height: 800 }, jpeg: new Uint8Array([0xff, 0xd8, seq]) });
+    const bytes = encodeScreencastFrame({ epoch: stream.request.browser.epoch, tabId: stream.request.browser.tabId, seq, capturedAt: seq, width, height: 400, viewport: { width: 1280, height: 800 }, jpeg: new Uint8Array([0xff, 0xd8, seq]) });
     stream.sink.data(stream.offset, bytes);
     stream.offset += bytes.byteLength;
   }
@@ -76,11 +76,12 @@ afterEach(() => {
 function stand(options: { link?: Link | null } = {}) {
   const link = options.link === undefined ? new Link() : options.link;
   const told: { client: string; name: string; payload: Record<string, unknown> }[] = [];
+  const logged: string[] = [];
   const bridge = createRemoteViews({
     local: LOCAL,
     remote: (machine) => (machine === MINI ? link : null),
     emit: (client, name, payload) => void told.push({ client: client.id, name, payload: payload as Record<string, unknown> }),
-    log: () => {},
+    log: (line) => void logged.push(line),
   });
   views.push(bridge);
   const window = endableClientRef('page:1.1');
@@ -91,7 +92,7 @@ function stand(options: { link?: Link | null } = {}) {
     link!.snapshot(value);
     return opening;
   };
-  return { link: link!, bridge, told, window, ctx, of, opened };
+  return { link: link!, bridge, told, logged, window, ctx, of, opened };
 }
 
 describe('browser.remote.open: the feed and whether the view is possible', () => {
@@ -184,6 +185,25 @@ describe('browser.remote.select, .ack and .close: one stream per view, frame cre
     t.bridge.close({ viewId }, t.ctx());
     expect(t.link.subs[0]!.closed).toBe(true);
     t.bridge.close({ viewId }, t.ctx()); // once more: nothing
+  });
+
+  it('closes the stream producer-failed at a frame out of shape, telling the window, never a silent stall', async () => {
+    const t = stand();
+    const { viewId } = await t.opened();
+    t.bridge.select({ viewId, epoch: 'e.1', tabId: TAB }, t.ctx());
+    t.link.opened(0, false);
+    t.link.frame(0, 1, 4000); // the wire's codec takes it; browser.remote.frame's schema, bounded at 1280 wide, refuses it
+    expect(t.of('browser.remote.frame')).toEqual([]);
+    expect(t.link.streams[0]!.closed, 'the stream closed, not left waiting on an ack the window cannot send').not.toBeNull();
+    expect(t.of('browser.remote.closed')).toEqual([{ viewId, reason: 'producer-failed' }]);
+    expect(t.logged.some((line) => /out of shape/.test(line))).toBe(true);
+    t.bridge.ack({ viewId, seq: 1 }, t.ctx());
+    expect(t.link.streams[0]!.controls, 'no credit for a frame never shown').toEqual([]);
+    // the window selects again to go on
+    t.bridge.select({ viewId, epoch: 'e.1', tabId: TAB }, t.ctx());
+    t.link.opened(1, false);
+    t.link.frame(1, 1);
+    expect(t.of('browser.remote.frame')).toEqual([{ viewId, frame: expect.objectContaining({ seq: 1 }) }]);
   });
 
   it('keeps a window’s views its own, and ends them with the window, an open answered after it disposed at once', async () => {

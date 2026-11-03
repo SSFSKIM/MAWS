@@ -16,7 +16,8 @@
 //   the window's `ack` of the frame it drew or dropped is the producer's credit for the next (M9's Decisions: neither the
 //   endpoint queuing a frame nor this bridge receiving it refunds it), taken only for the frame outstanding. Its end goes
 //   to the window as `browser.remote.closed` with the endpoint's word (`tab-closed`, `engine-changed`, `control-revoked`,
-//   `carrier`, …); the window selects again to go on. A stream the window replaced or closed tells nothing.
+//   `carrier`, …), or `producer-failed` when a frame comes out of `browser.remote.frame`'s shape (the window could never
+//   ack it); the window selects again to go on. A stream the window replaced or closed tells nothing.
 // - `takeControl` is the person's gesture: the `machine.browserControl` act for the session and the selected tab's epoch
 //   (a non-owner's step-up is the link's, once per grant), then a controlling stream for the selected tab, opened beside
 //   the read-only one, which it replaces once the endpoint admits it; refused, the read-only one goes on and the answer
@@ -26,7 +27,7 @@
 import { ipcError } from '@shared/ipc/errors';
 import type { ClientRef } from '@shared/ipc/client';
 import type { CommandInput, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
-import { BrowserInventorySchema } from '@shared/ipc/schema/browser';
+import { BrowserInventorySchema, BrowserRemoteFrameSchema } from '@shared/ipc/schema/browser';
 import type { BrowserInventory } from '@shared/browser/screencast';
 import type { MachineRef } from '@shared/machine/ref';
 import { CommandFailure } from '../ipc/router';
@@ -205,6 +206,16 @@ export function createRemoteViews(deps: RemoteViewsDeps): RemoteViews {
       },
       frame(frame) {
         if (!live(view) || view.shown !== shown) return;
+        const read = BrowserRemoteFrameSchema.safeParse(frame);
+        if (!read.success) {
+          // never shown, so never acked: closed rather than left a frozen picture, and a mismatch that persists ends
+          // every stream told, never each frame dropped in silence
+          deps.log(`[browser] a frame of ${view.name}'s tab ${shown.tabId} is out of shape: its stream closed producer-failed (${read.error.issues[0]?.message ?? ''})`);
+          view.shown = null;
+          shown.stream.close();
+          deps.emit(view.client, 'browser.remote.closed', { viewId: view.id, reason: 'producer-failed' });
+          return;
+        }
         shown.lastSeq = frame.seq;
         shown.outstanding = true;
         deps.emit(view.client, 'browser.remote.frame', { viewId: view.id, frame });
