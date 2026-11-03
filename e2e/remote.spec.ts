@@ -1189,7 +1189,22 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       });
       expect({ authorizeStatus: followed.authorizeStatus, outcome: followed.outcome, callbackStatus: followed.callbackStatus, throughA: followed.callbackPort === listener }, 'the consent’s redirect taken by A’s listener').toEqual({ authorizeStatus: 302, outcome: 'code', callbackStatus: 200, throughA: true });
       await expect.poll(() => tcpListeners(mainPid).includes(added[0]!), { timeout: 30_000, message: 'A’s listener closed at the flow’s end on B' }).toBe(false);
-      await quoting(expect(secure.locator('[data-connector-server-state]'), 'connected on B').toContainText(connectionWords('connected'), { timeout: 30_000 }), async () => `${await sheet.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      // M5c review 1: B's rows are read again only at the owner's Refresh (each a confirmation on B, as Show was); the
+      // Connect's own events marked them stale. Pressed while the mark shows, so an event after a read is read too.
+      const refresh = sheet.getByRole('button', { name: `Refresh the connectors on ${B_NAME}` });
+      await expect(sheet.locator('[data-connectors-servers-stale]'), 'B’s rows marked stale by the Connect').toBeVisible({ timeout: 30_000 });
+      await quoting(
+        expect
+          .poll(
+            async () => {
+              if (await refresh.isVisible()) await refresh.click();
+              return (await secure.locator('[data-connector-server-state]').textContent()) ?? '';
+            },
+            { timeout: 30_000, intervals: [1_000], message: 'connected on B, read at Refresh' },
+          )
+          .toContain(connectionWords('connected')),
+        async () => `${await sheet.innerText().catch(() => '')}\n${mainSaid(again)}`,
+      );
       const consented = summarizeOAuthLog(readOAuthLog(oauth!)).oauth;
       expect({ registrations: consented.registrations, authorizations: consented.authorizations, codeExchanges: consented.codeExchanges }, 'one consent, exchanged once, by B').toEqual({ registrations: 1, authorizations: 1, codeExchanges: 1 });
       const sealedOnB = join(b.userData, 'connectors', 'oauth');
