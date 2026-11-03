@@ -20,13 +20,15 @@
 import { ipcError, IPC_ERROR_CODES, type IpcErrorCode } from '@shared/ipc/errors';
 import type { AppSessionId } from '@shared/graph/ids';
 import { gradeOf } from '@shared/ipc/grades';
-import type { CommandName, CommandResult } from '@shared/ipc/schema';
+import { REGISTRY } from '@shared/ipc/registry';
+import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { codecOf } from '@shared/ipc/validate';
 import { budgetedMs, type CommandBudgets } from '../budgets';
 import { LINK_REGISTRY, onLink } from '../link-surface';
 import type { CallOptions, CallResult } from './link';
 
 const codec = codecOf(LINK_REGISTRY);
+const mainCodec = codecOf(REGISTRY);
 const isIpcCode = (code: string): code is IpcErrorCode => (IPC_ERROR_CODES as readonly string[]).includes(code);
 
 /** A refusal of `name` by machine `machine` as the router's IPC error (§F). */
@@ -58,12 +60,39 @@ export async function dispatchOverLink(link: Caller, name: CommandName, input: u
   const grade = gradeOf(name);
   if (grade !== 'list' && grade !== 'view') return { ok: false, error: ipcError('internal', `${name}: refused act-required by machine ${link.name}`, { refusal: 'act-required' }) };
   // A remote session's checkout is lane B's: lane A's roots are sminos's, which no `checkout` row reads.
+  return callOverLink(link, name, input, { ...(session !== undefined && { session: { lane: 'B' as const, id: session } }), ...(lacking !== undefined && { lacking }) });
+}
+
+/**
+ * P5 O7 M5c ("O4's surfaces: the grade"): `name` as a call whatever its grade, its output read as `dispatchOverLink` reads
+ * one. Only the adapter's `MACHINE_CALLS` come here directly (a page's lease reads, graded by effect on the artifact, which
+ * the endpoint offers as calls); every other command takes `dispatchOverLink`, which keeps the grade check.
+ */
+export async function callOverLink(link: Caller, name: CommandName, input: unknown, options: Omit<CallOptions, 'timeoutMs'> = {}): Promise<LinkResult> {
+  if (!onLink(name)) return { ok: false, error: ipcError('host_unavailable', `${name}: machine ${link.name} cannot answer it: ${name} does not cross a machine link`) };
   const timeoutMs = budgetedMs(link.budgets, name);
-  const options: CallOptions = { ...(session !== undefined && { session: { lane: 'B' as const, id: session } }), ...(lacking !== undefined && { lacking }), ...(timeoutMs !== undefined && { timeoutMs }) };
-  const result = await (Object.keys(options).length === 0 ? link.call(name, input) : link.call(name, input, options));
+  const withBudget: CallOptions = { ...options, ...(timeoutMs !== undefined && { timeoutMs }) };
+  const result = await (Object.keys(withBudget).length === 0 ? link.call(name, input) : link.call(name, input, withBudget));
   const fellBack = result.fellBack === true ? { fellBack: true as const } : {};
   if (!result.ok) return { ...refusalError(name, link.name, result.error), ...fellBack };
   const output = codec.readCommandOutput(name, voidAsUndefined(name, result.output));
   if (!output.ok) return { ok: false, error: ipcError('internal', output.error.message, output.error.issues), ...fellBack };
   return { ok: true, value: output.value, ...fellBack } as LinkResult;
+}
+
+/**
+ * P5 O7 M5c round 3: the main-only commands main itself asks of another machine's endpoint, never a window (the router
+ * refuses a window every main-only name, and none of these is on the link surface): a remote dashboard's snapshot holds
+ * (src/main/dashboard/holds.ts), each on the channel current when it is asked (`oneChannel`), since the endpoint keeps a
+ * hold per channel and releases them all at its end.
+ */
+export type MainOverLink = 'artifacts.holdAssets' | 'artifacts.releaseAssets';
+
+/** One of MainOverLink as a call on the current channel, its output read with the registry's own schema. */
+export async function callMainOverLink<N extends MainOverLink>(link: Caller, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
+  const result = await link.call(name, input, { oneChannel: true });
+  if (!result.ok) return refusalError(name, link.name, result.error) as CommandResult<N>;
+  const output = mainCodec.readCommandOutput(name, result.output);
+  if (!output.ok) return { ok: false, error: ipcError('internal', output.error.message, output.error.issues) };
+  return { ok: true, value: output.value as CommandOutput<N> };
 }

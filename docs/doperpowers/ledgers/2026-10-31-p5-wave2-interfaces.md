@@ -179,6 +179,10 @@
 | `RowReap`, `Infrastructure`, `session.restoredInfrastructure` and `saveInfrastructure`, and the per-launch `infrastructure {launch, processes}` the session persists and an adopter restores (the veto's bindings by pid, start time and parent `claude`) | the descendant veto (`src/engine-host/holder/descendants.ts`, `session.ts`, `process-table.ts`) | O16 | O17 (`process-table.ts`'s reaps), any child that adopts sessions |
 | `GateChannel.arm()` answering an arm id or null, `acknowledged(id)`, the listener's `armed(fence, armId)`, `Reap.confirmed()`, `session.reap('idle', {mayTerm})` and `reap('budget', {release})`, the journal's reap phases `end_session`, `term`, `term_ignored` and `term_withheld` | the gate and reap (`src/engine-host/holder/gate.ts`, `reap.ts`, `session.ts`) | O16 | O12 M4a and M4b (one `armed` per arm, in order), O17 (`process-table.ts`) |
 | `turnUnderWay(status)`, the one predicate the idle step's `isIdleRow` and the SIGTERM's re-read share | `src/engine-host/budget.ts` | O16 | O17 (its browser hold beside `holdsWork` in the same file) |
+| `rl2.client-port` (`client` endpoint to device, `clientAnswer` device to endpoint), `rl2.asset-holds` (main's link calls `artifacts.holdAssets` and `releaseAssets`), `RL2_PROTOCOL` 1.7 | RL2 capabilities and minor (`apps/org-protocol/src`) | O7 | any later RL2 child appends after them |
+| `WIRE_MINOR` 22: `delivery.send` retagged machine, the `callback` field on `connectors.connect`, `reconnect` and `signIn`, `connectors.callback`, `machine.delivery`, `connectors.serversChanged`'s `ended` | wire (`src/shared/ipc`) | O7 | O17 (#450 re-bumps to 23 at its landing) |
+| `ASSET_HOLDS_KEPT` (256 a channel), `ACQUIRE_WITHIN_MS` (8 s) and `ACQUIRE_MARGIN_MS` (2 s) with `within()`, `Executors.actRefused` | the endpoint (`src/endpoint/asset-holds.ts`, `acquire.ts`) | O7 | any later child adding a peer-held resource on the endpoint |
+| the replay seam's e2e-only `live` entry (a real engine started with no message, under `MAWS_E2E`) | `src/services/sessions/replay-seam.ts` | O7 | e2e scenes that need a live observer |
 
 ## Shared files and who goes first
 
@@ -277,3 +281,4 @@
 - 2026-11-02, the architect: O7 M5b landed (PR #445, P5 Decision Log 202); its names added above.
 - 2026-11-02, the architect: O7 M7 landed as code (PR #451, P5 Decision Log 204); its names added above.
 - 2026-11-02, the architect: O16's veto fix and gate and reap wave landed (PRs #448 and #449, P5 Decision Log 205); their names added above.
+- 2026-11-03, the architect: O7 M5c's names at its landing (PR #454, Decision Log 207).

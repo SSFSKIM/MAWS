@@ -148,10 +148,12 @@ const O4_EXPECTED: Record<string, number> = {
   'delivery.status': Math.max(GWS_RUN(GWS_STATUS_TIMEOUT_MS), DELIVERY_STATUS_DEADLINE_MS) + MARGIN,
   'delivery.connect': Math.max(GWS_RUN(GWS_STATUS_TIMEOUT_MS) + GWS_RUN(GWS_LOGIN_DEADLINE_MS), NOTION_FIND + 3 * OAUTH_REQUEST_TIMEOUT_MS + CONNECT_CALLBACK_TIMEOUT_MS + OAUTH_REQUEST_TIMEOUT_MS) + MARGIN,
   'delivery.deliver': HOST + Math.max(GWS_RUN(GWS_STATUS_TIMEOUT_MS) + GWS_RUN(GWS_UPLOAD_TIMEOUT_MS), NOTION_FIND + DIRECT) + MARGIN,
+  // P5 O7 M5c: on the machine, the library's Export (its own budget's waits) between the target's read and the send
+  'delivery.send': HOST + (COMMAND_BUDGETS_MS['artifacts.export']! - MARGIN) + Math.max(GWS_RUN(GWS_STATUS_TIMEOUT_MS) + GWS_RUN(GWS_UPLOAD_TIMEOUT_MS), NOTION_FIND + DIRECT) + MARGIN,
 };
 
 describe('the connectors’ and delivery’s command budgets (P5 O4)', () => {
-  it('names the six whose chains pass the default, each the sum of its chain', () => {
+  it('names the seven whose chains pass the default, each the sum of its chain', () => {
     for (const [name, budget] of Object.entries(O4_EXPECTED)) expect(COMMAND_BUDGETS_MS[name as CommandName], name).toBe(budget);
     const named = Object.keys(COMMAND_BUDGETS_MS).filter((name) => /^(connectors|delivery)\./.test(name));
     expect(named.sort()).toEqual(Object.keys(O4_EXPECTED).sort());

@@ -16,6 +16,7 @@ export interface OAuthAdvertise {
   readonly resource?: string; // protected-resource metadata's `resource`
   readonly authorizationServer?: string; // its one `authorization_servers` entry
   readonly issuer?: string; // the metadata's `issuer`, then also served as OpenID discovery metadata
+  readonly authorizationEndpoint?: string; // P5 O7 M5c: the metadata's `authorization_endpoint`, an https URL a fake browser routes here
 }
 export const OPEN_CONTROL: OAuthControl;
 export function parseOAuthControl(text: string | null): OAuthControl;

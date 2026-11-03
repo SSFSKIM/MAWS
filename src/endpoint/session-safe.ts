@@ -76,8 +76,22 @@ const at =
     return { ...output, [field]: list ? (Array.isArray(value) ? value.map((item) => part(item, sees)) : value) : value === null ? null : part(value, sees) };
   };
 
+/**
+ * P5 O7 M5c: a connector call's outcome (`ConnectorCallOutcomeSchema`), which may say the live session whose engine ran the
+ * tool (`via.sessionId`, optional): left out for every remote member, the machine's owners too, as a provisional frame's
+ * session is withheld for every member (stream-document.ts): a page's widget has no use for it, and nothing that ranked
+ * the member on that session placed it. Its route (`via.route`) stays.
+ */
+export function withoutVia(outcome: unknown): unknown {
+  if (!isObject(outcome) || !isObject(outcome.via) || !('sessionId' in outcome.via)) return outcome;
+  const via: Fields = { ...outcome.via };
+  delete via.sessionId;
+  return { ...outcome, via };
+}
+
 /** The artifact rows' answers that name sessions, each by how it names them (its output schema). */
 const PROJECTIONS: Record<string, (output: unknown, sees: Sees) => unknown> = {
+  'connectors.call': (output) => withoutVia(output), // P5 O7 M5c
   'artifacts.get': at('artifact', artifactRow),
   'artifacts.list': at('artifacts', artifactRow, true),
   'artifacts.create': at('artifact', artifactRow),

@@ -15,6 +15,7 @@ import { SnapshotReader } from '@artifacts/dashboard/snapshots';
 import { onUpdate, type Doc } from '@artifacts/yjs';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
 import { DocumentTabState, type DocumentTabDeps } from '../document/tab-state';
+import { leaseNotOfferedPause } from '../../artifacts/remote-surfaces'; // P5 O7 M5c
 import { LiveDatasetsController } from './live-datasets'; // E3
 import type { DashboardLiveDeps } from './live-start'; // E3
 import { PreviewHold } from './preview-hold'; // E3 panel
@@ -60,6 +61,7 @@ export class DashboardTabState {
       onGrantChanged: (listener) => deps.ipc.on('connectors.grantChanged', (change) => listener(change.artifactId)),
       startSession: (previous) => liveDeps.startSession(target.artifactId, previous),
       ...(liveDeps.openSession && { openSession: liveDeps.openSession as (appSessionId: string) => void }),
+      notOffered: () => leaseNotOfferedPause(target.artifactId), // P5 O7 M5c
       log: deps.log,
     });
     this.document = new DocumentTabState(target, { ...deps, extraChanges: datasetChanges }); // M4: B's history counts its dataset changes

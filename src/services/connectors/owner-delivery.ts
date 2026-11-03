@@ -95,7 +95,10 @@ export function createOwnerDelivery(deps: OwnerDeliveryDeps): OwnerDelivery {
     const worker = async () => {
       while (next < order.length && !signal.aborted) {
         const { appSessionId, launchId, cwd } = order[next++]!;
-        await deps.call('connectors.observe', { appSessionId, launchId, cwd }).catch(() => null);
+        // P5 O7 M5c: a report that did not reach the cache is said (the locate answers only from what it holds)
+        const answer = await deps.call('connectors.observe', { appSessionId, launchId, cwd }).catch((error: unknown) => ({ ok: false as const, error: { code: 'failed', message: error instanceof Error ? error.message : String(error) } }));
+        if (!answer.ok) log(`connectors: ${appSessionId}’s report was not observed (${answer.error.code}: ${answer.error.message})`);
+        else if (!answer.value.observed) log(`connectors: ${appSessionId}’s report was not observed (not live in its launch directory, or no answer)`);
       }
     };
     await Promise.all(Array.from({ length: Math.min(OBSERVE_CONCURRENCY, order.length) }, worker));

@@ -91,16 +91,18 @@ describe('machine.op', () => {
   });
 
   // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 8): the connectors' and delivery's
-  // commands, once machine's, by their grade: every machine-admin name, reads included; no view-graded or internal one
-  it('claims the connectors’ and delivery’s machine-admin names, and none graded view or internal', () => {
-    const admin = [
+  // commands, once machine's, by their grade: every act, reads graded as acts included; no list-, view-graded or internal
+  // one. P5 O7 M5c (A13, A14): the lease commands are graded by effect on their artifact (an act's grade), delivery's
+  // reads `view`, a send and its cancel `manage`, and `delivery.send` is the machine's; `connectors.callback` is a `list` read.
+  it('claims the connectors’ and delivery’s acts, and none graded list, view or internal', () => {
+    const acts = [
       'connectors.open', 'connectors.declare', 'connectors.call', 'connectors.watch', 'connectors.unwatch', 'connectors.refresh', 'connectors.visibility', 'connectors.close',
       'connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', 'connectors.signIn', 'connectors.signInCancel',
       'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool',
-      'delivery.status', 'delivery.connect', 'delivery.cancel', 'delivery.receipts',
+      'delivery.connect', 'delivery.send', 'delivery.cancel',
     ];
-    for (const name of admin) expect(claimable(name), name).toBe(true);
-    for (const name of ['artifacts.connectorGrants', 'connectors.windowShown', 'connectors.adoptGrant', 'delivery.deliver', 'delivery.send']) expect(claimable(name), name).toBe(false);
+    for (const name of acts) expect(claimable(name), name).toBe(true);
+    for (const name of ['artifacts.connectorGrants', 'connectors.windowShown', 'connectors.adoptGrant', 'connectors.callback', 'delivery.deliver', 'delivery.status', 'delivery.receipts']) expect(claimable(name), name).toBe(false);
   });
 
   // P5 O4 M3 (acceptance 8): the catalog's machine half takes the namespace's machine-admin grade, its read included; the

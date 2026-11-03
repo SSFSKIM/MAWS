@@ -229,6 +229,18 @@ describe('main ipc router', () => {
       expect(remote).not.toHaveBeenCalled();
     });
 
+    // P5 O7 M5c round 3: a dashboard's snapshot hold of another machine's artifact (the renderer's client sends every
+    // artifact-keyed invoke to the artifact's machine) is main's, which holds it on that machine over its link.
+    it('answers artifacts.holdDatasets for another machine here with that machine as ctx.target', async () => {
+      const remote = vi.fn<RemoteDispatch>(async () => ({ ok: true, value: undefined }));
+      await load(DEV_URL, undefined, remote);
+      const targets: string[] = [];
+      router.registerMainHandler('artifacts.holdDatasets', (_input, context) => (targets.push(context.target), { holdId: '22222222-2222-4222-8222-222222222222' }));
+      await expect(invoke(appWindow(), 'artifacts.holdDatasets', { artifactId: '11111111-1111-4111-8111-111111111111', refs: ['assets/query-1.json'] }, OTHER)).resolves.toEqual({ ok: true, value: { holdId: '22222222-2222-4222-8222-222222222222' } });
+      expect(targets).toEqual([OTHER]);
+      expect(remote).not.toHaveBeenCalled();
+    });
+
   // P5 O6 M3: the local link's entry (src/main/machines/local-link.ts): the route minus the sender check
   describe('dispatchLocal', () => {
     const remoteClient = { id: 'remote:1/page:3.1', onGone: () => () => {} } as unknown as MainContext['client'];
@@ -315,6 +327,36 @@ describe('main ipc router', () => {
       await expect(router.invokeOwn('artifacts.export', { artifactId: ARTIFACT, format: 'pdf' }, ctx)).resolves.toEqual({ ok: true, value: { ...exported, revision: 3 } });
       expect(dispatchToHost).toHaveBeenLastCalledWith('machine', 'artifacts.export', { artifactId: ARTIFACT, format: 'pdf' }, mainClient);
       expect(local).toHaveBeenCalledOnce();
+    });
+  });
+
+  // P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "O4's surfaces: leases, the window, delivery on
+  // the machine"): delivery.send is the machine's on a daemon whose welcome lists machine.delivery, and main's shim (the
+  // root's registration) answers it on an older one, O5's machine.render pattern; the export's selection stands apart
+  describe('delivery.send’s shim on an older daemon', () => {
+    const ARTIFACT = '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f';
+    const send = { runId: '3d4e5f6a-7b8c-4d9e-8f0a-1b2c3d4e5f6a', target: 'drive', artifactId: ARTIFACT, format: 'docx', destination: { kind: 'default' } } as const;
+
+    it('answers it in main while the daemon lists no machine.delivery, forwards it once it does, and leaves the export to its own capability', async () => {
+      const dispatchToHost = vi.fn<HostDispatch>(async (_owner, name) => ({ ok: true, value: name === 'delivery.send' ? { ok: false, why: 'cancelled' } : { path: '/p/x.pdf', revision: 4 } }));
+      let delivers = false;
+      vi.resetModules();
+      electron.handlers.clear();
+      router = await import('./router');
+      router.installRouter({ appUrl: DEV_URL, local: LOCAL, dispatchToHost, machine: { kind: 'host', daemonRenders: () => true, daemonDelivers: () => delivers } });
+      const shim = vi.fn(() => ({ ok: false, why: 'busy' as const }));
+      router.registerMachineHandler('delivery.send', shim);
+      const { mainClient } = await import('./clients');
+      const ctx = { client: mainClient, target: LOCAL };
+      await expect(router.invokeOwn('delivery.send', send, ctx)).resolves.toEqual({ ok: true, value: { ok: false, why: 'busy' } });
+      expect(shim).toHaveBeenCalledWith(send, ctx);
+      await expect(router.invokeOwn('artifacts.export', { artifactId: ARTIFACT, format: 'pdf' }, ctx)).resolves.toEqual({ ok: true, value: { path: '/p/x.pdf', revision: 4 } });
+      expect(dispatchToHost).toHaveBeenCalledWith('machine', 'artifacts.export', { artifactId: ARTIFACT, format: 'pdf' }, mainClient);
+
+      delivers = true;
+      await expect(router.invokeOwn('delivery.send', send, ctx)).resolves.toEqual({ ok: true, value: { ok: false, why: 'cancelled' } });
+      expect(dispatchToHost).toHaveBeenLastCalledWith('machine', 'delivery.send', send, mainClient);
+      expect(shim).toHaveBeenCalledOnce();
     });
   });
 

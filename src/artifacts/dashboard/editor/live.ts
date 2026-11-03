@@ -5,8 +5,16 @@
 // stays the data's authority, and nothing here writes it.
 import { DATASET_STATES } from '../states';
 
-/** Why a live query's refreshes are paused, as the bridge last answered it (a closed list, never a server's words). */
-export type LivePause = 'noRoute' | 'notAllowed' | 'allowChanged' | 'mayWrite' | 'watchLimit' | 'failed';
+/** Why a live query's refreshes are paused, as the bridge last answered it (a closed list, never a server's words).
+ * P5 O7 M5c: `notOffered:<machine>`, another machine's dashboard whose machine doesn't offer its connectors, named by the
+ * machine's shown name (the one open part: MAWS's name of a machine, never a server's words). */
+export type LivePause = 'noRoute' | 'notAllowed' | 'allowChanged' | 'mayWrite' | 'watchLimit' | 'failed' | NotOfferedPause;
+type NotOfferedPause = `notOffered:${string}`;
+
+/** P5 O7 M5c: the pause of a dashboard whose machine, `machine` by its shown name, doesn't offer its connectors. */
+export const notOfferedPause = (machine: string): LivePause => `notOffered:${machine}`;
+const NOT_OFFERED = 'notOffered:';
+const notOfferedOn = (pause: LivePause): string | null => (pause.startsWith(NOT_OFFERED) ? pause.slice(NOT_OFFERED.length) : null);
 
 /** The owner's grant of the query's tool, as the host's grants read: a read grant, none, or not read yet. */
 export type LivePermission = 'unknown' | 'read' | 'none';
@@ -52,19 +60,21 @@ export interface LiveDatasets {
   openSession(appSessionId: string): void;
 }
 
-// E3 M3 fix: a refusal that says what is wrong, which a missing grant does not cover
+// E3 M3 fix: a refusal that says what is wrong, which a missing grant does not cover (P5 O7 M5c: a machine that doesn't
+// offer connectors is one: no grant would make the dashboard refresh)
 const CONCRETE: readonly LivePause[] = ['mayWrite', 'failed', 'watchLimit'];
+const concrete = (pause: LivePause) => CONCRETE.includes(pause) || notOfferedOn(pause) !== null;
 
 /** The pause a view says: a concrete refusal first (the tool may write, a failed refresh, the watch limit), then no read
  * grant, else what the bridge last answered. */
 export function livePauseOf(status: LiveQueryStatus | undefined): LivePause | null {
   if (!status) return null;
-  if (status.pause !== null && CONCRETE.includes(status.pause)) return status.pause;
+  if (status.pause !== null && concrete(status.pause)) return status.pause;
   if (status.permission === 'none') return 'notAllowed';
   return status.pause;
 }
 
-const PAUSES: Record<LivePause, string> = {
+const PAUSES: Record<Exclude<LivePause, NotOfferedPause>, string> = {
   noRoute: DATASET_STATES.paused,
   notAllowed: DATASET_STATES.notAllowed,
   allowChanged: DATASET_STATES.allowChanged,
@@ -72,7 +82,13 @@ const PAUSES: Record<LivePause, string> = {
   watchLimit: DATASET_STATES.watchLimit,
   failed: DATASET_STATES.refreshFailed,
 };
-export const livePauseLabel = (pause: LivePause): string => PAUSES[pause];
+// P5 O7 M5c: the spec's words for an unoffered surface, as the Connectors sheet says them
+// (src/renderer/src/artifacts/remote-surfaces.ts, REMOTE_SURFACE_WORDS.connectorsNeedApp)
+const notOfferedWords = (machine: string) => `Connectors on ${machine} need its app`;
+export const livePauseLabel = (pause: LivePause): string => {
+  const machine = notOfferedOn(pause);
+  return machine === null ? PAUSES[pause as Exclude<LivePause, NotOfferedPause>] : notOfferedWords(machine);
+};
 
 const UNITS = [
   [86_400, 'day'],
@@ -86,6 +102,13 @@ export function scheduleWords(schedule: number | undefined): string {
   const [size, unit] = UNITS.find(([size]) => schedule % size === 0) ?? [1, 'second'];
   const count = schedule / size;
   return `Refreshes every ${count === 1 ? unit : `${count} ${unit}s`} while this dashboard is on screen`;
+}
+
+// P5 O7 M5c: a pause's sheet explanation, read by any pause (a machine's `notOffered` reads its label's words)
+function liveDetail(closed: Record<Exclude<LivePause, NotOfferedPause>, string>): Readonly<Record<LivePause, string>> {
+  return new Proxy(closed as Record<LivePause, string>, {
+    get: (target, key) => (typeof key === 'string' && notOfferedOn(key as LivePause) !== null ? livePauseLabel(key as LivePause) : Reflect.get(target, key)),
+  });
 }
 
 // Every sentence of the source sheet's live query block, in H's connector sheet's words where they say the same thing.
@@ -110,15 +133,15 @@ export const LIVE_COPY = {
   allowAgainLabel: (name: string) => `Allow ${name} again`,
   revokeLabel: (name: string) => `Revoke ${name}`,
   refreshLabel: (title: string) => `Refresh ${title}`,
-  // the pause's explanation in the sheet (the view says the closed label)
-  detail: {
+  // the pause's explanation in the sheet (the view says the closed label); a machine's `notOffered` is said by its label
+  detail: liveDetail({
     noRoute: 'No live session for this dashboard has this server. Start its session to read live data; no message is sent.',
     notAllowed: 'Allow it to read before this dashboard can refresh it.',
     allowChanged: 'Its server or tool changed since you allowed it.',
     mayWrite: 'This tool may change data, so it cannot refresh a dataset.',
     watchLimit: 'Too many live tools are open in MAWS; refresh it when fewer are.',
     failed: 'The last refresh did not reach the dashboard.',
-  } satisfies Record<LivePause, string>,
+  }),
   hidden: 'Refresh is available while this dashboard is on screen.',
   replaced: 'This query was replaced or removed after the source opened, so it cannot be refreshed from here.',
   showCurrent: 'Show current',

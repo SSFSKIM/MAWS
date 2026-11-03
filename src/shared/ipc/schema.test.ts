@@ -2070,6 +2070,41 @@ describe('ipc schema validates both directions', () => {
       expect([...HOST_EVENTS, ...MACHINE_EVENTS]).not.toContain('connectors.reset');
     });
 
+    // P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): a remote device's consent through
+    // a relayed callback, Send to on the machine, and a reset that names its machine
+    it('takes a remote asker’s callback port, relays its redirect, sends on the machine and names a reset’s machine', () => {
+      const source = { artifactId: ID, sourceHandle: '00000000-0000-4000-8000-000000000002' };
+      for (const name of ['connectors.connect', 'connectors.reconnect'] as const) {
+        expect(validateCommandInput(name, source).ok, name).toBe(true);
+        expect(validateCommandInput(name, { ...source, callback: { port: 51_234 } }).ok, name).toBe(true);
+        for (const port of [0, 65_536, 1.5, '51234']) expect(validateCommandInput(name, { ...source, callback: { port } }).ok, `${name} ${port}`).toBe(false);
+        expect(validateCommandInput(name, { ...source, callback: { port: 51_234, host: 'x' } }).ok, name).toBe(false);
+      }
+      const signIn = { name: 'notes', scope: 'user', cwd: null, path: '/p', appSessionId: 'app-1' };
+      expect(validateCommandInput('connectors.signIn', { ...signIn, callback: { port: 8_080 } }).ok).toBe(true);
+      expect(commands['connectors.callback'].owner).toBe('machine');
+      expect(MAIN_ONLY_COMMANDS).toContain('connectors.callback');
+      expect([...NAMES.connectors.commands]).not.toContain('connectors.callback');
+      expect(validateCommandInput('connectors.callback', { port: 51_234, method: 'GET', url: '/callback?code=c&state=s' }).ok).toBe(true);
+      expect(validateCommandInput('connectors.callback', { port: 51_234, method: 'GET', url: `/${'x'.repeat(4_096)}` }).ok, 'past 4 KiB').toBe(false);
+      expect(validateCommandInput('connectors.callback', { port: 51_234, method: '', url: '/callback' }).ok).toBe(false);
+      expect(validateCommandOutput('connectors.callback', { status: 404, body: '' }).ok).toBe(true);
+      expect(validateCommandOutput('connectors.callback', { status: 200, headers: { 'content-type': 'text/html' }, body: '<p>done</p>' }).ok).toBe(true);
+      expect(validateCommandOutput('connectors.callback', { status: 99, body: '' }).ok).toBe(false);
+      // P5 O7 M5c1 fix wave 1: the body's bound is 64 KiB of UTF-8, not of UTF-16 units
+      const body = (text: string) => validateCommandOutput('connectors.callback', { status: 200, body: text }).ok;
+      expect(body('x'.repeat(65_536)), 'ASCII at the bound').toBe(true);
+      expect(body('x'.repeat(65_537)), 'ASCII past it').toBe(false);
+      expect(body('é'.repeat(32_768)), 'two-byte characters at the bound').toBe(true);
+      expect(body('é'.repeat(32_769)), 'two-byte characters past it, in fewer units').toBe(false);
+      expect(body(`${'😀'.repeat(16_383)}xxxx`), 'four-byte characters to the bound').toBe(true);
+      expect(body(`${'😀'.repeat(16_383)}xxx€`), 'one byte past it').toBe(false);
+      expect(commands['delivery.send'].owner).toBe('machine');
+      expect(validateEventPayload('connectors.reset', {}).ok).toBe(true);
+      expect(validateEventPayload('connectors.reset', { machine: 'm'.repeat(20) }).ok).toBe(true);
+      expect(validateEventPayload('connectors.reset', { machine: 'bad ref' }).ok).toBe(false);
+    });
+
     it('passes a page’s own payload to the broker as it came, and answers a page only states and closed reasons', () => {
       expect(validateCommandInput('connectors.call', { leaseId: ID, request: { anything: [1] } }).ok).toBe(true);
       expect(validateCommandInput('connectors.call', { leaseId: 'lease', request: {} }).ok).toBe(false);

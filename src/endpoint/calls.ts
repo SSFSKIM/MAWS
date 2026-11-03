@@ -37,18 +37,33 @@
 //     through the same projection over its own placements; a listing filtered by a session the caller doesn't view
 //     lists nothing, as one by a session nobody minted does (an id is never a capability). Fix wave 2: the machine's
 //     owners too, whose rows are kept whole but told nothing of a member's private session.
+//   - P5 O7 M5c: a page's lease reads go to the machine's services as any `machine` row; an open is kept with its artifact
+//     in the channel's table (leases.ts), which holds at most LEASES_KEPT (an open past it `busy`, before the machine
+//     hears it), and a close the machine answered drops it. `delivery.receipts`, admitted at `list`, keeps each receipt
+//     whose artifact the member holds `view` on by the `artifact` rule's predicate, decided as the answer goes against the
+//     placements the channel's cache holds then (a placement dropped meanwhile withholds its rows). `client.windowShown`
+//     is the endpoint's own: the device's window report, `connectors.windowShown` under the channel's ref.
+//   - P5 O7 M5c round 3: `artifacts.holdAssets` and `artifacts.releaseAssets` are the endpoint's own too: a remote
+//     dashboard's snapshot holds, taken on the engine host and kept per channel (asset-holds.ts).
+//   - P5 O7 M5c review 1: an acquisition (`connectors.open`, `artifacts.holdAssets`) is bounded from the call's arrival
+//     under the device's call deadline (acquire.ts): past it the call answers `timeout`, and what the machine answers
+//     after it is let go of at once (the lease closed, the hold released) under the channel's ref.
 // Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
 // `too-large`. For a device that listed `rl2.bytes` (P5 O7 M5a), the input came decoded (gate.ts) and the output goes in the
 // bytes codec's tagged form (bytes.ts), measured so.
 import { MESSAGE_MAX_BYTES, type CallMessage, type Listing, type Signed } from 'org-protocol';
+import { ACQUIRE_WITHIN_MS, LATE, within } from './acquire';
 import { gradeOf } from '@shared/ipc/grades';
 import { remoteDaemonStatus, type DaemonStatus } from '@shared/ipc/schema/daemon';
 import { SESSION_SEARCH_LIMIT, SESSION_SEARCH_SESSIONS_MAX } from '@shared/ipc/schema/session';
-import { holdsArtifact } from './artifacts';
+import { holdsArtifact, type ArtifactRanks, type CachedPlacement } from './artifacts';
 import { holdsToSchema, type SessionRanks } from './authorize';
 import { writeBytes } from './bytes';
 import type { RemoteChannel } from './channels';
+import type { Granted } from './gate';
 import { isSessionRank, rankAtLeast, sessionRank } from './grades';
+import type { AssetHolds } from './asset-holds';
+import type { Leases } from './leases';
 import type { SessionReport } from './listings';
 import { OFFERS, type Offers } from './offers';
 import type { Member } from './rl10/members';
@@ -74,7 +89,15 @@ export type CallsContext = {
   ranks(member: string): Promise<SessionRanks>;
   /** P5 O7 M5a2 fix wave 1: what an artifact answer says of sessions (session-safe.ts). */
   sessionSafe: SessionSafe;
+  /** P5 O7 M5c: the leases each channel holds (leases.ts), and the `artifact` rule's placements (`delivery.receipts`' cut). */
+  leases: Leases;
+  artifacts: ArtifactRanks;
+  /** P5 O7 M5c round 3: each channel's snapshot holds (asset-holds.ts). */
+  assetHolds: Pick<AssetHolds, 'hold' | 'release'>;
   offers?: Offers;
+  /** P5 O7 M5c review 1: the clock an acquisition's bound is read on (the gate's), and the bound (acquire.ts). */
+  now(): number;
+  acquireWithinMs?: number;
   log(line: string): void;
 };
 
@@ -217,8 +240,8 @@ export class Calls {
     for (const heard of this.#heard) heard.set(record.appId, [...(heard.get(record.appId) ?? []), placement]);
   }
 
-  /** An authorized call, answered by its executor. */
-  execute(channel: RemoteChannel, m: CallMessage): void {
+  /** An authorized call, answered by its executor; `decision.askedAt`, its arrival, bounds an acquisition (acquire.ts). */
+  execute(channel: RemoteChannel, m: CallMessage, decision: Granted = {}): void {
     const offers = this.ctx.offers ?? OFFERS;
     const row = Object.hasOwn(offers.commands, m.name) ? offers.commands[m.name] : undefined;
     const answer = (result: { ok: true; output: unknown } | { ok: false; code: string }) => {
@@ -229,9 +252,17 @@ export class Calls {
       channel.send({ t: 'result', id: m.id, ok: true, output });
     };
     const dispatch = dispatchAs(this.ctx.dispatch, channel.client);
+    // an acquisition's bound, from the call's arrival (acquire.ts), read by the two rows that acquire
+    const by = () => (decision.askedAt ?? this.ctx.now()) + (this.ctx.acquireWithinMs ?? ACQUIRE_WITHIN_MS);
     // What runs answers a result, or (an `each-session` row) the step that makes it, taken as the answer goes.
     let run: Promise<Result | (() => Result)>;
     if (row?.target === 'each-session') run = this.#eachSession(dispatch, channel.member, m);
+    else if (m.name === 'connectors.open' && row?.executor === 'machine') run = this.#open(dispatch, channel, m, by());
+    else if (m.name === 'connectors.close' && row?.executor === 'machine') run = this.#close(dispatch, channel, m);
+    else if (m.name === 'delivery.receipts' && row?.executor === 'machine') run = this.#receipts(dispatch, channel, m);
+    else if (m.name === 'client.windowShown' && row?.executor === 'endpoint') run = this.#windowShown(dispatch, m);
+    else if (m.name === 'artifacts.holdAssets' && row?.executor === 'endpoint') run = this.ctx.assetHolds.hold(channel, m.input, by());
+    else if (m.name === 'artifacts.releaseAssets' && row?.executor === 'endpoint') run = this.ctx.assetHolds.release(channel, m.input);
     else if ((row?.executor === 'engine-host' || row?.executor === 'machine') && row.target === 'artifact' && SESSION_NAMING.has(m.name)) run = this.#sessionSafe(dispatch, row.executor, channel.member, m);
     else if (row?.executor === 'engine-host' || (row?.executor === 'machine' && m.name !== 'daemon.status')) run = this.#forward(dispatch, row.executor, m);
     else if (row?.executor === 'sminos' && Object.hasOwn(LANE_A, m.name)) run = Promise.resolve(this.#laneA(channel, m));
@@ -250,6 +281,76 @@ export class Calls {
     if (response.ok) return { ok: true, output: response.value ?? null };
     const code = response.error.code === 'host_unavailable' || response.error.code === 'timeout' ? 'unavailable' : response.error.code;
     return { ok: false, code };
+  }
+
+  /**
+   * P5 O7 M5c: a page's lease, opened for this channel's ref and kept with its artifact (leases.ts); `busy` past the bound.
+   * Review 1: answered `timeout` past `by`, a lease the machine opens after it closed at once (`openedLate`).
+   */
+  async #open(dispatch: EndpointServices['dispatch'], channel: RemoteChannel, m: CallMessage, by: number): Promise<Result> {
+    if (!this.ctx.leases.reserve(channel)) return { ok: false, code: 'busy' };
+    const leaseOf = (result: Result | null) => (result?.ok === true && isObject(result.output) && isText(result.output.leaseId, 128) ? result.output.leaseId : null);
+    let answer: Result | typeof LATE;
+    try {
+      answer = await within(by, () => this.ctx.now(), () => this.#forward(dispatch, 'machine', m), (late) => this.ctx.leases.openedLate(channel, leaseOf(late)));
+    } catch (error) {
+      this.ctx.leases.unopened(channel);
+      throw error;
+    }
+    if (answer === LATE) return { ok: false, code: 'timeout' };
+    const leaseId = leaseOf(answer);
+    const artifactId = isObject(m.input) ? m.input.artifactId : undefined;
+    if (leaseId !== null && isText(artifactId, 128)) this.ctx.leases.opened(channel, artifactId, leaseId);
+    else this.ctx.leases.unopened(channel);
+    return answer;
+  }
+
+  /** P5 O7 M5c: a lease the device closed, its mapping dropped once the machine answered the close. */
+  async #close(dispatch: EndpointServices['dispatch'], channel: RemoteChannel, m: CallMessage): Promise<Result> {
+    const result = await this.#forward(dispatch, 'machine', m);
+    const leaseId = isObject(m.input) ? m.input.leaseId : undefined;
+    if (result.ok && isText(leaseId, 128)) this.ctx.leases.closed(channel.client, leaseId);
+    return result;
+  }
+
+  /**
+   * P5 O7 M5c (A14): the latest receipts, each kept for a member who holds `view` on its artifact, by the `artifact` rule's
+   * predicate over the channel's placements (the machine's owners every one). Every read is made first; the cut is the
+   * step the answer goes in, against the ranks and placements as they stand then: a placement dropped since withholds its
+   * receipts, and ranks that moved answer `unavailable`.
+   */
+  async #receipts(dispatch: EndpointServices['dispatch'], channel: RemoteChannel, m: CallMessage): Promise<Result | (() => Result)> {
+    if (!holdsToSchema(m.name, m.input)) return { ok: false, code: 'malformed' };
+    const result = await this.#forward(dispatch, 'machine', m);
+    if (!result.ok) return result;
+    const receipts = isObject(result.output) && Array.isArray(result.output.receipts) ? result.output.receipts : [];
+    const ranks = await this.ctx.ranks(channel.member);
+    const placed = new Map<string, CachedPlacement>();
+    if (!ranks.ownsMachine()) {
+      const ids = [...new Set(receipts.map((receipt) => (isObject(receipt) ? receipt.artifactId : undefined)).filter((id): id is string => isText(id, 128)))];
+      const placing = { dispatch, log: (line: string) => this.ctx.log(line) };
+      for (const [id, placement] of await Promise.all(ids.map(async (id) => [id, await this.ctx.artifacts.of(channel.client, id, placing)] as const))) placed.set(id, placement);
+    }
+    return () => {
+      if (!ranks.current()) return { ok: false, code: 'unavailable' };
+      const owner = ranks.ownsMachine();
+      const viewable = (receipt: unknown): boolean => {
+        if (owner) return true;
+        const placement = isObject(receipt) && isText(receipt.artifactId, 128) ? placed.get(receipt.artifactId) : undefined;
+        if (placement === undefined || !placement.current() || placement.resolved.kind !== 'artifact') return false;
+        return holdsArtifact(placement.resolved, false, (session) => ranks.holds(session, 'view'));
+      };
+      return { ok: true, output: { ...(result.output as Fields), receipts: receipts.filter(viewable) } };
+    };
+  }
+
+  /** P5 O7 M5c: the device's report of whether a page holding a lease here is shown, as the machine's own client's report. */
+  async #windowShown(dispatch: EndpointServices['dispatch'], m: CallMessage): Promise<Result> {
+    const shown = isObject(m.input) && typeof m.input.shown === 'boolean' ? m.input.shown : null;
+    if (shown === null) return { ok: false, code: 'malformed' };
+    const response = await dispatch('machine', 'connectors.windowShown', { shown });
+    if (!response.ok) return { ok: false, code: response.error.code === 'host_unavailable' || response.error.code === 'timeout' ? 'unavailable' : response.error.code };
+    return { ok: true, output: { ok: true } };
   }
 
   /**

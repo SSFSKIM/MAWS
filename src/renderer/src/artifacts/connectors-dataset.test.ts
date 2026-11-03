@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CommandName, MawsBridge } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
 import { createConnectorHost } from './connectors';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 
 const ARTIFACT = '11111111-1111-4111-8111-111111111111';
 const LEASE = '22222222-2222-4222-8222-222222222222';
@@ -16,6 +17,7 @@ function bridge() {
   const sent: { name: CommandName; input: Record<string, unknown> }[] = [];
   const answers: Partial<Record<CommandName, unknown>> = { 'connectors.open': { leaseId: LEASE }, 'connectors.call': META, 'connectors.watch': { ok: true, watchId: WATCH, intervalMs: 30_000 }, 'connectors.refresh': { refreshing: true } /* E3 panel */ };
   const ipc = {
+    localMachine: TEST_MACHINE, // P5 O7 M5c: a surface's machine, this Mac's for an artifact the table doesn't place
     invoke: vi.fn(async (name: CommandName, input: Record<string, unknown>) => {
       expect(validateCommandInput(name, input).ok, `${name} ${JSON.stringify(input)}`).toBe(true);
       sent.push({ name, input });
@@ -23,7 +25,7 @@ function bridge() {
     }),
     on: vi.fn(() => () => {}),
   };
-  return { ipc: ipc as unknown as Pick<MawsBridge, 'invoke' | 'on'>, sent };
+  return { ipc: ipc as unknown as Pick<MawsBridge, 'invoke' | 'on' | 'localMachine'>, sent };
 }
 
 describe('the connector surface’s dataset sink', () => {

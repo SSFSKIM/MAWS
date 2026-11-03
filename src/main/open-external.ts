@@ -8,6 +8,7 @@
 // rest nowhere, and none is ever opened here, where it would load this Mac's.
 import { appendFile } from 'node:fs/promises';
 import { shell } from 'electron';
+import type { OpenAnswer } from '@shared/client/port';
 import { isLoopbackLink } from '@shared/machine/loopback-link';
 import type { MachineRef } from '@shared/machine/ref';
 import { registerMainHandler } from './ipc/router';
@@ -23,6 +24,8 @@ export function forwardedElsewhere(url: string, target: MachineRef | undefined):
 }
 
 const ALLOWED = new Set(['http:', 'https:', 'mailto:']);
+/** What a URL of another scheme is answered (the client port's `openExternal`). */
+export const SCHEMES_ONLY = 'only http, https and mailto links open outside MAWS';
 
 export function openExternalUrl(url: string): boolean {
   let protocol: string;
@@ -45,6 +48,16 @@ export function openExternalUrl(url: string): boolean {
   }
   shell.openExternal(url).catch((error: unknown) => console.error('[open-external] could not open the URL', error));
   return true;
+}
+
+/**
+ * P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Consent and the client port"): a URL machine
+ * `machine`'s services asked this device to open (a connector's consent page), through the client port across the channel:
+ * opened here as `layout.openExternal` opens one of that machine's sessions' links, a loopback one refused.
+ */
+export function openForMachine(url: string, machine: MachineRef): OpenAnswer {
+  if (forwardedElsewhere(url, machine)) return { opened: false, reason: FORWARDED_ELSEWHERE };
+  return openExternalUrl(url) ? { opened: true } : { opened: false, reason: SCHEMES_ONLY };
 }
 
 export function registerOpenExternal(): void {

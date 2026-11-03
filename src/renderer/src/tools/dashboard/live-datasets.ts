@@ -46,6 +46,9 @@ export interface LiveDatasetsDeps {
   /** The owner's Start for the artifact's session context; `previous`, the session an earlier Start named. */
   startSession(previous: AppSessionId | null): Promise<ArtifactSessionStart>;
   openSession?(appSessionId: string): void;
+  /** P5 O7 M5c: the pause of another machine's dashboard whose machine doesn't offer its connectors, read when the lease
+   * refused a query (`invalid: lease`, a declaration refused); null when that is not why (acceptance 6). */
+  notOffered?(): LivePause | null;
   now?(): number;
   log?(line: string): void;
 }
@@ -74,7 +77,8 @@ const INITIAL: LiveSnapshot = { shown: false, queries: new Map(), needsStart: fa
 
 // An outcome's pause: undefined when it changes nothing (the surface's own hide or close, an answer that is no dataset
 // phase), null when it ends the pause (the host published, recorded its error state, or found the dataset changed).
-function pauseOf(outcome: ConnectorCallOutcome | ConnectorGrantOutcome): LivePause | null | undefined {
+// P5 O7 M5c: a lease refused reads `noLease`, the pause of why there is none (undefined: none known).
+function pauseOf(outcome: ConnectorCallOutcome | ConnectorGrantOutcome, noLease?: LivePause): LivePause | null | undefined {
   if (outcome.ok) {
     if (!('result' in outcome)) return null; // a grant
     const result = outcome.result as { status?: unknown } | null;
@@ -86,7 +90,7 @@ function pauseOf(outcome: ConnectorCallOutcome | ConnectorGrantOutcome): LivePau
     case 'revoked':
       return outcome.reason === 'fingerprintChanged' ? 'allowChanged' : outcome.reason === 'wrongMode' ? 'mayWrite' : 'notAllowed';
     case 'invalid':
-      return outcome.reason === 'notReadOnly' ? 'mayWrite' : outcome.reason === 'watchLimit' ? 'watchLimit' : outcome.reason === 'lease' ? undefined : 'failed';
+      return outcome.reason === 'notReadOnly' ? 'mayWrite' : outcome.reason === 'watchLimit' ? 'watchLimit' : outcome.reason === 'lease' ? noLease : 'failed';
     case 'failed':
       return 'failed';
   }
@@ -169,7 +173,7 @@ export class LiveDatasetsController implements LiveDatasets {
     }
     const now = this.queries.get(id);
     if (this.disposed || now !== query || query.settings !== settings) return; // the query changed or went meanwhile
-    const pause = outcome ? pauseOf(outcome) : undefined;
+    const pause = outcome ? pauseOf(outcome, this.noLease()) : this.noLease(); // P5 O7 M5c: no outcome, a declaration refused
     this.patch(query, { busy: null, ...(pause !== undefined && { pause }) });
   }
 
@@ -354,7 +358,10 @@ export class LiveDatasetsController implements LiveDatasets {
     void (async () => {
       const surface = await this.declare(query.source);
       if (!surface || !mine()) {
-        if (mine()) query.watch = null;
+        if (!mine()) return;
+        query.watch = null;
+        const pause = this.noLease(); // P5 O7 M5c: a declaration refused
+        if (pause !== undefined) this.patch(query, { pause });
         return;
       }
       const start = await surface.watchTool({ server, tool, args, intervalMs: schedule * 1000 }, (update) => mine() && this.heard(query, update), { dataset: { id: query.id } });
@@ -370,7 +377,7 @@ export class LiveDatasetsController implements LiveDatasets {
         return;
       }
       query.watch = null;
-      const pause = pauseOf(start);
+      const pause = pauseOf(start, this.noLease());
       if (pause !== undefined) this.patch(query, { pause });
     })().catch((error: unknown) => {
       this.log(`the watch of dataset "${query.id}" could not start: ${messageOf(error)}`);
@@ -461,6 +468,11 @@ export class LiveDatasetsController implements LiveDatasets {
     if (query.probe !== undefined) clearTimeout(query.probe);
     delete query.probe;
     query.probes += 1; // E3 M3 residual: any ask in flight is obsolete
+  }
+
+  // P5 O7 M5c: why the surface has no lease, when that is known: its machine doesn't offer its connectors
+  private noLease(): LivePause | undefined {
+    return this.deps.notOffered?.() ?? undefined;
   }
 
   // ── grants and gestures ──

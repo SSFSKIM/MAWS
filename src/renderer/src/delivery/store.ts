@@ -2,11 +2,18 @@
 // sheet (one at a time, app-wide, opened from an editor header's Send to or a library row's Export menu), the deliveries
 // running (the header's "Sending to …"), and the receipts main keeps for its life (the header's "Sent to …" and the
 // library row's mark), read once and then followed by `delivery.receipt`.
+// P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "O4's surfaces: leases, the window, delivery on the
+// machine"): a Send to is its artifact's machine's (./run.ts), and so are its receipts, kept by machine: another machine's
+// are read at each opening of its artifacts feed (`artifacts.resync`, which says what went untold meanwhile) and followed
+// by the `delivery.receipt` it says; a receipt is shown only for the machine it came from.
 import { create } from 'zustand';
 import type { ArtifactKind } from '@shared/artifacts/entity';
-import type { DeliveryTarget } from '@shared/delivery/destination';
+import { DELIVERY_TARGETS, type DeliveryTarget } from '@shared/delivery/destination';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { DeliveryReceipt } from '@shared/ipc/schema/delivery';
+import type { MachineRef } from '@shared/machine/ref';
+import { artifactMachineOf } from '../artifacts/machines';
+import { machineNameOf } from '../artifacts/remote-surfaces';
 import { ipc } from '../ipc/client';
 import { createSendToRun, type SendToRun } from './run';
 
@@ -21,23 +28,37 @@ export interface SendToSubject {
 }
 
 interface DeliveryState {
-  receipts: Readonly<Record<string, DeliveryReceipt>>; // by artifact and target
+  receipts: Readonly<Record<string, DeliveryReceipt>>; // by machine (none: this Mac's), artifact and target (`receiptKey`)
   sending: Readonly<Record<string, Readonly<Record<string, DeliveryTarget>>>>; // by artifact, then run: the sends under way
   sheet: { subject: SendToSubject; run: SendToRun } | null;
 }
 
 export const useDelivery = create<DeliveryState>()(() => ({ receipts: {}, sending: {}, sheet: null }));
 
-const keyOf = (receipt: Pick<DeliveryReceipt, 'artifactId' | 'target'>) => `${receipt.artifactId}\0${receipt.target}`;
+// `machine`: another machine's (the artifact table's word), null for this Mac's
+export const receiptKey = (artifactId: string, target: DeliveryTarget, machine: MachineRef | null): string => (machine === null ? `${artifactId}\0${target}` : `${machine}\0${artifactId}\0${target}`);
+const machinePrefix = (machine: MachineRef) => `${machine}\0`;
 
-function keep(receipt: DeliveryReceipt): void {
-  useDelivery.setState((s) => ({ receipts: { ...s.receipts, [keyOf(receipt)]: receipt } }));
+function keep(receipt: DeliveryReceipt, machine: MachineRef | null): void {
+  useDelivery.setState((s) => ({ receipts: { ...s.receipts, [receiptKey(receipt.artifactId, receipt.target, machine)]: receipt } }));
 }
 
-// The latest receipt of an artifact, whichever target.
-export function latestReceipt(state: Pick<DeliveryState, 'receipts'>, artifactId: string): DeliveryReceipt | null {
+// Another machine's receipts as it answers them now, in place of those kept of it
+function replaceReceipts(machine: MachineRef, receipts: readonly DeliveryReceipt[]): void {
+  useDelivery.setState((s) => {
+    const kept = Object.fromEntries(Object.entries(s.receipts).filter(([key]) => !key.startsWith(machinePrefix(machine))));
+    for (const receipt of receipts) kept[receiptKey(receipt.artifactId, receipt.target, machine)] = receipt;
+    return { receipts: kept };
+  });
+}
+
+// The latest receipt of an artifact of `machine` (null: this Mac's), whichever target.
+export function latestReceipt(state: Pick<DeliveryState, 'receipts'>, artifactId: string, machine: MachineRef | null): DeliveryReceipt | null {
   let latest: DeliveryReceipt | null = null;
-  for (const receipt of Object.values(state.receipts)) if (receipt.artifactId === artifactId && (latest === null || receipt.at > latest.at)) latest = receipt;
+  for (const target of DELIVERY_TARGETS) {
+    const receipt = state.receipts[receiptKey(artifactId, target, machine)];
+    if (receipt && (latest === null || receipt.at > latest.at)) latest = receipt;
+  }
   return latest;
 }
 
@@ -66,7 +87,17 @@ export const defaultTarget = (kind: ArtifactKind): DeliveryTarget => (kind === '
 // one shown (its run cancelled where it may be).
 export function openSendTo(subject: SendToSubject, target: DeliveryTarget = defaultTarget(subject.kind), client: MawsBridge = ipc): void {
   useDelivery.getState().sheet?.run.close();
-  const run = createSendToRun({ client, artifactId: subject.artifactId, title: subject.title, target, onSending: (runId, sending) => markSending(subject.artifactId, runId, sending), onReceipt: keep });
+  const remote = artifactMachineOf(subject.artifactId); // P5 O7 M5c: the run is its artifact's machine's
+  const run = createSendToRun({
+    client,
+    artifactId: subject.artifactId,
+    machine: remote ?? client.localMachine,
+    elsewhere: remote === null ? null : machineNameOf(remote),
+    title: subject.title,
+    target,
+    onSending: (runId, sending) => markSending(subject.artifactId, runId, sending),
+    onReceipt: (receipt) => keep(receipt, remote),
+  });
   useDelivery.setState({ sheet: { subject, run } });
   void run.check();
 }
@@ -77,18 +108,41 @@ export function closeSendTo(run: SendToRun): void {
 }
 
 // App-wide: main's receipts read once, then each new one as it is made (a bridge that cannot answer leaves none).
+// P5 O7 M5c: each other machine's read at every opening of its feed, the latest read's answer standing.
 export function connectDelivery(client: MawsBridge = ipc): () => void {
   let live = true;
-  const stop = client.on('delivery.receipt', keep);
-  void client.invoke('delivery.receipts', undefined).then(
+  const local = client.localMachine;
+  const machineOf = (from: MachineRef): MachineRef | null => (from === local ? null : from);
+  const reads = new Map<MachineRef, { heard: DeliveryReceipt[] }>(); // each machine's latest read, and what it said meanwhile
+  const stop = client.on('delivery.receipt', (receipt, from) => {
+    const machine = machineOf(from.machine);
+    keep(receipt, machine);
+    if (machine !== null) reads.get(machine)?.heard.push(receipt); // newer than any answer the read may bring
+  });
+  void client.invoke('delivery.receipts', undefined, { machine: local }).then(
     (answer) => {
-      if (live && answer.ok) for (const receipt of answer.value.receipts) keep(receipt);
+      if (live && answer.ok) for (const receipt of answer.value.receipts) keep(receipt, null);
     },
     () => {},
   );
+  const stopResync = client.on('artifacts.resync', (_resync, from) => {
+    const machine = machineOf(from.machine);
+    if (machine === null) return;
+    const read = { heard: [] as DeliveryReceipt[] };
+    reads.set(machine, read);
+    const done = () => reads.get(machine) === read && reads.delete(machine);
+    void client.invoke('delivery.receipts', undefined, { machine }).then(
+      (answer) => {
+        if (live && answer.ok && reads.get(machine) === read) replaceReceipts(machine, [...answer.value.receipts, ...read.heard]);
+        done();
+      },
+      () => void done(),
+    );
+  });
   return () => {
     live = false;
     stop();
+    stopResync();
   };
 }
 

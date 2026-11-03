@@ -30,4 +30,10 @@ export const ENDPOINT_CAPABILITIES = [
   // M7: `pong` carries this machine's clock at the ping's arrival (`received`) and the pong's send (`sent`), which the
   // remote bench reads to place the machine's clock against the device's. Optional fields an older device passes by.
   'rl2.pong-clock',
+  // M5c: the client port across the channel: `client` (a machine service's request for the asking device, posted only to
+  // a device that listed it) and the device's `clientAnswer` (client-port.ts).
+  'rl2.client-port',
+  // M5c (round 3): a remote dashboard's snapshot holds, main's link's calls `artifacts.holdAssets` and `releaseAssets`,
+  // which this endpoint keeps per channel (asset-holds.ts); a device asks them only of an endpoint that listed it.
+  'rl2.asset-holds',
 ] as const;

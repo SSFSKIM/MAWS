@@ -79,7 +79,7 @@
 // Any other `stream` is the act open's binding (`#stream`, above).
 import { isMachineFeedSub, type Action, type Certificates, type DeviceClass, type OrgState, type RefusalReason, type Right, type SessionRef, type SubMessage } from 'org-protocol';
 import type { ClientRef } from '@shared/ipc/client';
-import { gradeOf as declaredGrade, type Grade, type GradeSpec, type SessionRank } from '@shared/ipc/grades';
+import { gradeOf as declaredGrade, type Grade, type GradeSpec, type MachineGrade, type SessionRank } from '@shared/ipc/grades';
 import { REGISTRY, type WireRegistry } from '@shared/ipc/registry';
 import { holdsArtifact, type ArtifactRanks, type PlacedArtifact } from './artifacts';
 import { BY_EFFECT, NO_RULE, QUESTION_REQUESTS, type EffectReads } from './by-effect';
@@ -90,7 +90,7 @@ import { spawnRefusal, type Policy } from './policy';
 import { dispatchAs, type EndpointServices } from './services';
 import type { CheckoutSource, RecordSource, SessionRecord, SessionTarget } from './sources';
 import { Assertions, deviceOf, stepUpRequired, verifyDeviceStepUp } from './step-up';
-import { artifactShortCut, CheckoutBounds, placeArtifact, resolveSubscription, resolveTarget, withinCheckout, type Placement, type Placing, type Resolved, type Spawner } from './targets';
+import { artifactShortCut, CheckoutBounds, placeArtifact, resolveSubscription, resolveTarget, withinCheckout, type HeldNames, type Placement, type Placing, type Resolved, type Spawner } from './targets';
 
 /**
  * `session`: a call's own (P5 O7 M4, RL2's `call.session`), which the `checkout` target rule reads. A `stream` (P5 O7 M3)
@@ -124,6 +124,8 @@ export type SessionRanks = {
   holds(placement: Placement, grade: SessionRank): boolean;
   /** P5 O7 M5a: whether the member is one of the machine's owners (the `artifact` rule's short cut), while `current`. */
   ownsMachine(): boolean;
+  /** P5 O7 M5c: whether the member holds the machine grade (a right: an owner's, or a grant's), while `current`. */
+  holdsRight(grade: MachineGrade): boolean;
   current(): boolean;
 };
 
@@ -149,6 +151,8 @@ export type AuthorizeContext = {
   stamp?(): unknown;
   /** P5 O7 M5a: the `artifact` rule's placements, kept per channel; absent, each decision reads its own. */
   artifacts?: ArtifactRanks;
+  /** P5 O7 M5c: the leases and runs each channel holds, by which a lease's or a run's command names its artifact (leases.ts). */
+  leases?: { lease(client: ClientRef, leaseId: string): string | null; run(client: ClientRef, runId: string): string | null };
   /** The suites' seams: another offer table, grade declaration or registry (a fixture namespace). */
   offers?: Offers;
   gradeOf?(name: string): GradeSpec | undefined;
@@ -204,7 +208,16 @@ class Reads implements EffectReads {
 
   /** How this decision places a lane B session (`live`: targets.ts' `Placing`), or an artifact (through the cache). */
   placing(live: boolean): Placing {
-    return { dispatch: this.dispatch, log: (line) => this.ctx.log(line), live, artifact: (artifactId) => this.artifact(artifactId) };
+    const held = this.held();
+    return { dispatch: this.dispatch, log: (line) => this.ctx.log(line), live, artifact: (artifactId) => this.artifact(artifactId), ...(held === undefined ? {} : { held }) };
+  }
+
+  /** P5 O7 M5c: the leases and runs the asking channel holds (none for the endpoint's own re-checks, which name the artifact). */
+  held(): HeldNames | undefined {
+    const { leases } = this.ctx;
+    const client = this.who.client;
+    if (leases === undefined || client === undefined) return undefined;
+    return { lease: (leaseId) => leases.lease(client, leaseId), run: (runId) => leases.run(client, runId) };
   }
 
   /** P5 O7 M5a: the artifact's placement, through the channel's cache. */
@@ -334,15 +347,17 @@ export class Authorizer {
       const before = this.#stamp();
       const current = () => sameStamp(before, this.#stamp());
       const owners = org === null || ref === null ? [] : await machineOwnerMembers(org.head, org.certificates, ref, new Date(now));
+      const rights = await this.ctx.rights(member); // P5 O7 M5c: the owners' and the grants', each in the stamp
       if (!current()) continue;
       const records = this.ctx.records;
       return {
         current,
         holds: (placement, grade) => placement !== null && current() && rankAtLeast(sessionRank(recordOf(records, placement.target, placement.launchedBy), member, owners), grade),
         ownsMachine: () => current() && owners.includes(member),
+        holdsRight: (grade) => current() && rights.includes(grade),
       };
     }
-    return { current: () => false, holds: () => false, ownsMachine: () => false };
+    return { current: () => false, holds: () => false, ownsMachine: () => false, holdsRight: () => false };
   }
 
   /** What a decision rests on beyond the records it reads: the head, the certificates, the policy and the grant ledger. */
@@ -395,7 +410,7 @@ export class Authorizer {
     const placing = reads.placing(!(kind === 'act' && row.executor === 'engine-host'));
     // P5 O7 M5a: a machine owner stands on every artifact, read before any link is placed; a listing by a session is
     // the session's, which they view as anyone does (the short cut admits artifacts, never a session).
-    const shortCut = row.target === 'artifact' && (await reads.owners()).includes(who.member) ? artifactShortCut(name, input, action) : null;
+    const shortCut = row.target === 'artifact' && (await reads.owners()).includes(who.member) ? artifactShortCut(name, input, action, reads.held()) : null;
     const resolved = shortCut ?? (await resolveTarget(row.target, input, action, placing, request.session, name));
     if (resolved.kind === 'refused') return no(resolved.reason);
     if (resolved.kind === 'unknown') return no('grade');

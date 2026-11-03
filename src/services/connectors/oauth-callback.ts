@@ -17,7 +17,12 @@ export interface LoopbackListener {
   readonly port: number;
   close(): Promise<void>;
 }
-export type ListenLoopback = (handle: (request: LoopbackRequest) => LoopbackReply) => Promise<LoopbackListener>;
+// P5 O7 M5c: `options.state`, the state the flow's callback must carry once the flow armed one (null before): the
+// relayed receiver (./relayed-callback.ts) hands the flow only a request carrying it; this listener ignores it.
+export interface ListenOptions {
+  state(): string | null;
+}
+export type ListenLoopback = (handle: (request: LoopbackRequest) => LoopbackReply, options?: ListenOptions) => Promise<LoopbackListener>;
 
 export const OAUTH_CALLBACK_HOST = '127.0.0.1';
 

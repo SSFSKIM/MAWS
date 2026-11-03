@@ -20,7 +20,7 @@ import { OFFERS } from '../../src/endpoint/offers';
 import type { SessionRecord } from '../../src/endpoint/sources';
 import { createFilesService } from '../../src/services/files/service';
 import { registerLibraryReads } from '../../src/services/library/files';
-import { act, done, makeOrg, openRemote, startEndpoint, stopAll, waitFor, type Fixture, type HostSession, type Msg, type Org, type Remote } from './sub-harness';
+import { act, done, evs, makeOrg, openRemote, startEndpoint, stopAll, until, waitFor, type Fixture, type HostSession, type Msg, type Org, type Remote, type StartOptions } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -92,8 +92,8 @@ function session(f: Fixture, app: string, owners: string[], fields: Partial<Sess
 }
 
 /** B owns `app-b` and its artifact `held`; `app-2` is the machine owners', and so is its artifact `other`. */
-async function setup(options: { capabilities?: string[] } = {}) {
-  const f = await startEndpoint(org, started);
+async function setup(options: { capabilities?: string[] } = {}, start: StartOptions = {}) {
+  const f = await startEndpoint(org, started, start);
   session(f, 'app-b', [org.B]);
   session(f, 'app-2', ['@machine']);
   const held = randomUUID();
@@ -118,7 +118,8 @@ describe('M5a’s rows', () => {
   // P5 O7 M5a1 fix wave 1: the engine host's `host.artifactOp` runs ARTIFACT_OP_COMMANDS and refuses anything else, so an
   // act row the endpoint offers by the artifact rule is exactly one of them
   it('offer as artifact acts exactly the commands host.artifactOp runs', () => {
-    const acts = Object.entries(OFFERS.commands).filter(([, row]) => row.target === 'artifact' && row.kind === 'act').map(([name]) => name);
+    // P5 O7 M5c: the machine's artifact acts (a lease's tool calls, Send to) go to `machine.op`, not the engine host's ledger
+    const acts = Object.entries(OFFERS.commands).filter(([, row]) => row.target === 'artifact' && row.kind === 'act' && row.executor === 'engine-host').map(([name]) => name);
     expect(new Set(acts)).toEqual(new Set(ARTIFACT_OP_COMMANDS));
   });
 
@@ -318,5 +319,368 @@ describe('library.read’s export form', () => {
     for (const export_ of [{ revision: 3, format: 'exe' }, { revision: 3, format: 'pdf', exportId: '../../../etc/passwd' }, { revision: 3, format: 'pdf', path: '/etc/passwd' }]) {
       expect([export_, codeOf(await call(b, 'library.read', { artifactId: held, export: export_ }))]).toEqual([export_, 'malformed']);
     }
+  });
+});
+
+// P5 O7 M5c (§L's M5c rows; M5 "O4's surfaces: the grade", "leases, the window, delivery on the machine"; Proves, M5c):
+// a page's lease on the `artifact` rule at `view`, its tool calls at `converse` by effect; Send to's reads at `view`, a
+// send and its cancel at `manage`; the owner's connector management at `machine-admin`, a step-up each. A lease is named
+// by its id after its open, placed by the channel's own table, re-authorized while it lives and closed by the endpoint once
+// its member can no longer view its artifact. The window report is the endpoint's own call, under the channel's ref.
+describe('M5c’s rows', () => {
+  const LEASE_CALLS = ['connectors.open', 'connectors.declare', 'connectors.watch', 'connectors.unwatch', 'connectors.visibility', 'connectors.close'];
+  const ADMIN = ['connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', 'connectors.signIn', 'connectors.signInCancel', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool'];
+
+  /** The machine's connectors and delivery as the spine answers them, each request kept with the asker's ref. */
+  function machineServices(f: Fixture) {
+    const asked: Array<{ name: string; input: Record<string, unknown>; client: unknown }> = [];
+    const answer = (name: string, value: (input: Record<string, unknown>) => unknown) =>
+      f.spine.handle(name, (input, context) => {
+        asked.push({ name, input: input as Record<string, unknown>, client: context.client });
+        return value(input as Record<string, unknown>);
+      });
+    answer('connectors.open', () => ({ leaseId: randomUUID() }));
+    answer('connectors.declare', () => ({ ok: true, declared: [] }));
+    answer('connectors.watch', () => ({ ok: true, watchId: randomUUID(), intervalMs: 60_000 }));
+    answer('connectors.unwatch', () => ({ stopped: true }));
+    answer('connectors.visibility', () => ({ ok: true }));
+    answer('connectors.close', () => ({ closed: true }));
+    answer('connectors.call', () => ({ ok: true, result: { rows: [1] }, fetchedAt: 1, via: { route: 'engine', sessionId: 'app-private' } }));
+    answer('connectors.refresh', () => ({ refreshing: true }));
+    answer('connectors.windowShown', () => ({ ok: true }));
+    answer('connectors.servers', () => ({ servers: [], saved: 'ok', withdrawnUnattributed: false }));
+    answer('delivery.status', () => ({ target: 'drive', state: 'ready' }));
+    answer('delivery.send', () => ({ ok: false, why: 'cancelled' }));
+    answer('delivery.cancel', () => ({ cancelled: true }));
+    return asked;
+  }
+
+  /** The machine's sends held until `finish`, so a run is live while a test acts on its id. */
+  function holdSends(f: Fixture): { finish(): void } {
+    let finish!: () => void;
+    const running = new Promise<void>((resolve) => (finish = resolve));
+    f.spine.handle('delivery.send', async () => {
+      await running;
+      return { ok: false, why: 'cancelled' };
+    });
+    return { finish: () => finish() };
+  }
+
+  /** A shares `app-shared` (and its artifact `shared`) with B at `grade`; B owns `app-b` and `held`; `other` is the owners'. */
+  async function scene(grade: 'view' | 'converse' = 'view', start: StartOptions = {}) {
+    const { f, held, other, a, b } = await setup({}, start);
+    const shared = randomUUID();
+    session(f, 'app-shared', ['@machine'], { shares: [{ member: org.B, grade }] });
+    f.host.artifact(shared, ['app-shared']);
+    return { f, held, other, shared, a, b, asked: machineServices(f) };
+  }
+
+  async function open(r: Remote, artifactId: string): Promise<string> {
+    const opened = await call(r, 'connectors.open', { artifactId });
+    expect(opened).toMatchObject({ ok: true });
+    return (opened.output as { leaseId: string }).leaseId;
+  }
+
+  it('are offered, each as its kind, executor and target, and Discover’s catalog, Drive’s sign-in and main’s own are not', async () => {
+    for (const name of [...LEASE_CALLS, 'delivery.status']) expect([name, OFFERS.commands[name]]).toEqual([name, { kind: 'call', executor: 'machine', target: 'artifact' }]);
+    for (const name of ['connectors.call', 'connectors.refresh', 'delivery.send', 'delivery.cancel']) expect([name, OFFERS.commands[name]]).toEqual([name, { kind: 'act', executor: 'machine', target: 'artifact' }]);
+    for (const name of ADMIN) expect([name, OFFERS.commands[name]]).toEqual([name, { kind: 'act', executor: 'machine', target: 'machine' }]);
+    expect(OFFERS.commands['delivery.receipts']).toEqual({ kind: 'call', executor: 'machine', target: 'machine', grade: 'list' });
+    expect(OFFERS.commands['connectors.callback']).toEqual({ kind: 'call', executor: 'machine', target: 'machine' });
+    expect(OFFERS.commands['client.windowShown']).toMatchObject({ kind: 'call', executor: 'endpoint', target: 'machine', grade: 'list' });
+    for (const name of ['catalog.engine', 'catalog.engineRefresh', 'delivery.connect', 'delivery.deliver', 'connectors.windowShown', 'connectors.adoptGrant', 'connectors.add', 'connectors.remove']) expect([name, OFFERS.commands[name]]).toEqual([name, undefined]);
+    const { a } = await scene();
+    expect(codeOf(await call(a, 'catalog.engine', { cwd: null }))).toBe('not-offered');
+    expect(codeOf(await call(a, 'catalog.engineRefresh', {}))).toBe('not-offered');
+  });
+
+  it('take each lease command at its floor: a `view` holder opens and uses a lease, and is refused its tool calls (`converse` by effect)', async () => {
+    const { f, shared, other, b, asked } = await scene('view');
+    expect(codeOf(await call(b, 'connectors.open', { artifactId: other }))).toBe('grade');
+    expect(asked.some((x) => x.name === 'connectors.open')).toBe(false);
+    const leaseId = await open(b, shared);
+    const watchId = randomUUID();
+    for (const [name, input] of [
+      ['connectors.declare', { leaseId, tools: [] }],
+      ['connectors.watch', { leaseId, request: { server: 's', tool: 't', intervalMs: 60_000 } }],
+      ['connectors.visibility', { leaseId, visible: true }],
+      ['connectors.unwatch', { leaseId, watchId }],
+    ] as const)
+      expect([name, codeOf(await call(b, name, input))]).toEqual([name, 'ok']);
+    // the tool calls are acts, at `converse`, which a `view` holder doesn't hold
+    expect(codeOf(await call(b, 'connectors.call', { leaseId, request: {} }))).toBe('act-required');
+    expect(await act(b, actOf(f, b, 'connectors.call', { leaseId, request: { server: 's', tool: 't' } }))).toBe('grade');
+    expect(await act(b, actOf(f, b, 'connectors.refresh', { leaseId, watchId }))).toBe('grade');
+    expect(f.spine.claimed.some((c) => c.name === 'connectors.call')).toBe(false);
+    // a lease the channel doesn't hold is nobody's to name: `grade`, as for an unknown artifact
+    expect(codeOf(await call(b, 'connectors.declare', { leaseId: randomUUID(), tools: [] }))).toBe('grade');
+    expect(codeOf(await call(b, 'connectors.close', { leaseId }))).toBe('ok');
+    expect(codeOf(await call(b, 'connectors.visibility', { leaseId, visible: false }))).toBe('grade'); // closed: no longer held
+    // every lease command reached the machine under the channel's one ref
+    expect(new Set(asked.map((x) => x.client)).size).toBe(1);
+  });
+
+  // P5 O7 M5c review 1: the device forgets a call at its link's deadline, so a lease opened after it would reach no one
+  // and live until the channel ends, spending its bound (acquire.ts)
+  it('bound an open under the device’s call deadline: one the machine answers past it is `timeout`, its lease closed at once under the channel’s ref', async () => {
+    const { f, shared, b, asked } = await scene('view', { acquireWithinMs: 1_000 });
+    let answer!: () => void;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
+    const leaseId = randomUUID();
+    f.spine.handle('connectors.open', async (_input, context) => {
+      asked.push({ name: 'connectors.open', input: {}, client: context.client });
+      await answered;
+      return { leaseId };
+    });
+    expect(await call(b, 'connectors.open', { artifactId: shared })).toMatchObject({ ok: false, error: { code: 'timeout' } });
+    answer();
+    const closed = await until(() => asked.find((x) => x.name === 'connectors.close' && x.input.leaseId === leaseId), 'the late lease closed');
+    expect(closed.client).toBe(asked.find((x) => x.name === 'connectors.open')?.client);
+    expect(codeOf(await call(b, 'connectors.declare', { leaseId, tools: [] }))).toBe('grade'); // never the channel's
+    // its reservation given back: the channel opens as ever
+    machineServices(f);
+    await open(b, shared);
+  });
+
+  it('run a `converse` holder’s tool call once under `machine.op`, claimed on the artifact, with no step-up and the call’s session left out', async () => {
+    const { f, shared, b } = await scene('converse');
+    const leaseId = await open(b, shared);
+    const called = actOf(f, b, 'connectors.call', { leaseId, request: { server: 's', tool: 't' } });
+    const from = b.inbox.length;
+    expect(await act(b, called)).toBe('ok');
+    const outcome = (await done(b, called, from)) as { state: string; result: { via: Record<string, unknown> } };
+    expect(outcome).toMatchObject({ state: 'done', result: { ok: true, result: { rows: [1] }, via: { route: 'engine' } } });
+    expect(outcome.result.via).not.toHaveProperty('sessionId');
+    expect(f.spine.claimed.filter((c) => c.name === 'connectors.call')).toHaveLength(1);
+    expect(f.spine.claimed.find((c) => c.name === 'connectors.call')?.op).toMatchObject({ member: org.B, device: org.b1.device.id });
+    // the claim names the artifact the endpoint placed the lease on, so a query re-places it through the rule
+    const ledger = readFileSync(join(f.services.machine.stateDir, 'spine-ops.jsonl'), 'utf8');
+    expect(ledger).toContain(`"target":"artifact:${shared}"`);
+    const queried = await (async () => {
+      const at = b.inbox.length;
+      await b.channel.send({ t: 'query', opId: called.opId, opCreated: called.opCreated, executor: 'machine' });
+      return waitFor(b, (m) => m.t === 'queried' && m.opId === called.opId, 'the query', at);
+    })();
+    expect(queried).toMatchObject({ state: 'done' });
+    expect(JSON.stringify(queried)).not.toContain('app-private');
+  });
+
+  it('close a lease itself when the last qualifying share is withdrawn while a watch runs and an update is in flight: the update is not forwarded, the next call refused `grade`', async () => {
+    const { f, shared, b, asked } = await scene('converse');
+    const sub = 'art';
+    await b.channel.send({ t: 'sub', sub, feed: 'artifacts', cursor: null, credit: 4 * 1024 * 1024 });
+    await waitFor(b, (m) => m.sub === sub && m.t === 'subbed', 'the artifacts feed');
+    const leaseId = await open(b, shared);
+    const watch = await call(b, 'connectors.watch', { leaseId, request: { server: 's', tool: 't', intervalMs: 60_000 } });
+    const watchId = (watch.output as { watchId: string }).watchId;
+    const update = (rows: number[]) => ({ leaseId, watchId, update: { ok: true, result: { rows }, fetchedAt: 2, via: { route: 'engine', sessionId: 'app-private' } } });
+    f.host.emitMachine('connectors.watchUpdate', update([1]));
+    await until(() => evs(b, sub).length === 1, 'the first update forwarded');
+    expect(evs(b, sub)[0].body).toEqual({ name: 'connectors.watchUpdate', payload: { leaseId, watchId, update: { ok: true, result: { rows: [1] }, fetchedAt: 2, via: { route: 'engine' } } } });
+    // another channel's lease update never reaches B
+    f.host.emitMachine('connectors.watchUpdate', { ...update([9]), leaseId: randomUUID() });
+    // the share withdrawn, and the machine's next refresh published before it heard anything of it
+    f.records.set({ lane: 'B', session: 'eng-app-shared', owners: ['@machine'], access: 'private' }, 'app-shared');
+    f.host.emitMachine('connectors.watchUpdate', update([2]));
+    const closed = await until(() => asked.find((x) => x.name === 'connectors.close' && x.input.leaseId === leaseId), 'the endpoint’s close of the lease');
+    expect(closed.client).toBe(asked.find((x) => x.name === 'connectors.open')?.client); // under the channel's ref
+    expect(f.services.lines.some((line) => line.includes(`lease ${leaseId} on artifact ${shared} closed by the endpoint: grade`))).toBe(true);
+    expect(await act(b, actOf(f, b, 'connectors.call', { leaseId, request: { server: 's', tool: 't' } }))).toBe('grade');
+    f.host.emitMachine('connectors.watchUpdate', update([3]));
+    f.host.emitMachine('library.changed', { revision: 7 }); // what the feed still carries, after anything it would have sent
+    await until(() => evs(b, sub).some((e) => (e.body as { name: string }).name === 'library.changed'), 'the library change');
+    expect(evs(b, sub).filter((e) => (e.body as { name: string }).name === 'connectors.watchUpdate')).toHaveLength(1);
+  });
+
+  it('grade Send to on the artifact: its status at `view`, a send and its cancel at `manage` with no step-up, a cancel by the run its channel sent', async () => {
+    const { f, held, shared, b, asked } = await scene('view');
+    expect(codeOf(await call(b, 'delivery.status', { target: 'drive', artifactId: shared }))).toBe('ok');
+    const send = (artifactId: string, runId = randomUUID()) => ({ runId, target: 'drive', artifactId, format: 'pdf', destination: { kind: 'default' } });
+    expect(validateCommandInput('delivery.send', send(held)).ok).toBe(true);
+    expect(await act(b, actOf(f, b, 'delivery.send', send(shared)))).toBe('grade'); // `view` only
+    const delivering = holdSends(f);
+    const runId = randomUUID();
+    const sent = actOf(f, b, 'delivery.send', send(held, runId));
+    const from = b.inbox.length;
+    expect(await act(b, sent)).toBe('ok'); // B owns `app-b`: `manage`, which never steps up
+    await until(() => f.spine.claimed.find((c) => c.name === 'delivery.send'), 'the send run');
+    expect(await act(b, actOf(f, b, 'delivery.cancel', { runId }))).toBe('ok'); // while it runs
+    await until(() => asked.some((x) => x.name === 'delivery.cancel'), 'the cancel run');
+    expect(await act(b, actOf(f, b, 'delivery.cancel', { runId: randomUUID() }))).toBe('no-target'); // a run this channel never sent
+    delivering.finish();
+    await done(b, sent, from);
+    expect(await act(b, actOf(f, b, 'delivery.cancel', { runId }))).toBe('no-target'); // the run ended with its send's answer
+  });
+
+  // P5 O7 M5c1 fix wave 1: the machine's runs are one namespace, by id (a second send of a running id answers `busy`, a
+  // cancel ends whichever run holds it), so the endpoint reserves an id for one channel and one artifact while it runs
+  it('reserve a run’s id for the one channel and artifact that sent it, while it runs: another send of it is `busy`, a cancel of it someone else’s', async () => {
+    const { f, held, other, a, b } = await scene('view');
+    session(f, 'app-b2', [org.B]);
+    const held2 = randomUUID();
+    f.host.artifact(held2, ['app-b2']);
+    const delivering = holdSends(f);
+    const send = (artifactId: string, runId: string) => ({ runId, target: 'drive', artifactId, format: 'pdf', destination: { kind: 'default' } });
+    const runId = randomUUID();
+    const sent = actOf(f, b, 'delivery.send', send(held, runId));
+    const from = b.inbox.length;
+    expect(await act(b, sent)).toBe('ok');
+    await until(() => f.spine.claimed.find((c) => c.name === 'delivery.send'), 'the send run');
+    // across artifacts: B loses `manage` on `held`, sends the same id on `held2` (which B owns), and can't move the run there
+    f.records.set({ lane: 'B', session: 'eng-app-b', owners: ['@machine'], access: 'private' }, 'app-b');
+    expect(await act(b, actOf(f, b, 'delivery.send', send(held2, runId)))).toBe('busy');
+    expect(await act(b, actOf(f, b, 'delivery.cancel', { runId }))).toBe('grade'); // decided on `held`, the run's own
+    // across channels: a machine owner's send of the id is `busy`, and its cancel names no run of its channel's
+    expect(await act(a, actOf(f, a, 'delivery.send', send(other, runId)))).toBe('busy');
+    expect(await act(a, actOf(f, a, 'delivery.cancel', { runId }))).toBe('no-target');
+    const b2 = await openRemote(f, org.b1, org.B);
+    expect(await act(b2, actOf(f, b2, 'delivery.cancel', { runId }))).toBe('no-target');
+    expect(f.spine.claimed.filter((c) => c.name === 'delivery.send')).toHaveLength(1);
+    expect(f.spine.claimed.some((c) => c.name === 'delivery.cancel')).toBe(false);
+    // the run's end frees its id
+    delivering.finish();
+    await done(b, sent, from);
+    const again = actOf(f, a, 'delivery.send', send(other, runId));
+    const at = a.inbox.length;
+    expect(await act(a, again)).toBe('ok');
+    await done(a, again, at);
+    // a send refused before it ran reserves nothing
+    const refused = randomUUID();
+    expect(await act(b, actOf(f, b, 'delivery.send', send(other, refused)))).toBe('grade');
+    const next = actOf(f, a, 'delivery.send', send(other, refused));
+    const at2 = a.inbox.length;
+    expect(await act(a, next)).toBe('ok');
+    await done(a, next, at2);
+  });
+
+  // P5 O7 M5c review 1: the device may cancel a send it made before the endpoint admits it (the person closes the sheet
+  // while the send is being authorized); the cancel waits for its send, on its own channel, and never reaches another's run
+  it('apply a cancel sent while its send is being decided, once the send is admitted, and refuse another channel’s', async () => {
+    const { f, held, a, b, asked } = await scene('view');
+    const send = (artifactId: string, runId: string) => ({ runId, target: 'drive', artifactId, format: 'pdf', destination: { kind: 'default' } });
+    const runId = randomUUID();
+    f.host.hold('library.entry'); // the send's artifact being placed
+    const sent = actOf(f, b, 'delivery.send', send(held, runId));
+    const from = b.inbox.length;
+    await b.channel.send({ t: 'act', action: sent });
+    await until(() => f.host.calls.some((c) => c.name === 'library.entry'), 'the send being decided');
+    const cancelled = act(b, actOf(f, b, 'delivery.cancel', { runId }));
+    expect(await act(a, actOf(f, a, 'delivery.cancel', { runId }))).toBe('no-target'); // never its channel's run
+    f.host.release('library.entry');
+    expect(await cancelled).toBe('ok');
+    const cancel = await until(() => asked.find((x) => x.name === 'delivery.cancel' && x.input.runId === runId), 'the cancel on the machine');
+    expect(cancel.client).toBe(asked.find((x) => x.name === 'delivery.send')?.client);
+    expect(await done(b, sent, from)).toMatchObject({ state: 'done' });
+    expect(f.spine.claimed.filter((c) => c.name === 'delivery.cancel')).toHaveLength(1);
+  });
+
+  it('hand a cancel decided before its send on in the step the send is admitted, before the send itself', async () => {
+    const { f, held, b, asked } = await scene('view');
+    const send = (artifactId: string, runId: string) => ({ runId, target: 'drive', artifactId, format: 'pdf', destination: { kind: 'default' } });
+    const runId = randomUUID();
+    f.host.hold('library.entry');
+    const sent = actOf(f, b, 'delivery.send', send(held, runId));
+    const from = b.inbox.length;
+    await b.channel.send({ t: 'act', action: sent });
+    await until(() => f.host.calls.some((c) => c.name === 'library.entry'), 'the send being decided');
+    // the artifact relinked meanwhile: the send's placement is read again after the cancel's, so the cancel is decided first
+    f.endpoint.artifactRanks.drop(held);
+    const cancelled = act(b, actOf(f, b, 'delivery.cancel', { runId }));
+    await until(() => f.host.calls.filter((c) => c.name === 'library.entry').length === 2, 'the cancel being decided');
+    f.host.release('library.entry');
+    expect(await cancelled).toBe('ok');
+    await done(b, sent, from);
+    const ops = f.host.calls.filter((c) => c.name === 'machine.op').map((c) => (c.input as { name: string }).name);
+    expect(ops).toEqual(['delivery.cancel', 'delivery.send']);
+    expect(asked.find((x) => x.name === 'delivery.cancel')?.input).toEqual({ runId });
+  });
+
+  it('drop a cancel whose send is refused: answered `no-target`, never reaching the run another channel holds by that id', async () => {
+    const { f, held, other, a, b, asked } = await scene('view');
+    const send = (artifactId: string, runId: string) => ({ runId, target: 'drive', artifactId, format: 'pdf', destination: { kind: 'default' } });
+    const delivering = holdSends(f);
+    const runId = randomUUID();
+    const running = actOf(f, a, 'delivery.send', send(other, runId));
+    const at = a.inbox.length;
+    expect(await act(a, running)).toBe('ok');
+    await until(() => f.spine.claimed.find((c) => c.name === 'delivery.send'), 'A’s run');
+    f.host.hold('library.entry'); // B's send of the same id being decided (`held` placed afresh for B)
+    const entries = () => f.host.calls.filter((c) => c.name === 'library.entry' && (c.input as { artifactId?: string }).artifactId === held).length;
+    const refused = act(b, actOf(f, b, 'delivery.send', send(held, runId)));
+    await until(() => entries() === 1, 'B’s send being decided');
+    f.endpoint.artifactRanks.drop(held); // so B's cancel is decided first, and waits on the send
+    const cancel = act(b, actOf(f, b, 'delivery.cancel', { runId }));
+    await until(() => entries() === 2, 'B’s cancel being decided');
+    f.host.release('library.entry');
+    expect(await refused).toBe('busy');
+    expect(await cancel).toBe('no-target');
+    expect(asked.some((x) => x.name === 'delivery.cancel')).toBe(false);
+    delivering.finish();
+    await done(a, running, at);
+  });
+
+  it('keep the owner’s connector management at `machine-admin`, a step-up each; refuse it to a member without the right', async () => {
+    const { f, held, a, b } = await scene();
+    const servers = { artifactId: held, tools: [] };
+    expect(await act(b, await b.device.stepUp(actOf(f, b, 'connectors.servers', servers)))).toBe('grade');
+    expect(await act(a, actOf(f, a, 'connectors.servers', servers))).toBe('step-up');
+    const stepped = await a.device.stepUp(actOf(f, a, 'connectors.servers', servers));
+    const from = a.inbox.length;
+    expect(await act(a, stepped)).toBe('ok');
+    expect(await done(a, stepped, from)).toMatchObject({ state: 'done', result: { saved: 'ok' } });
+  });
+
+  it('answer `client.windowShown` by the machine’s window report under the channel’s ref, and refuse it out of shape', async () => {
+    const { shared, b, asked } = await scene();
+    await open(b, shared);
+    expect(await call(b, 'client.windowShown', { shown: true })).toMatchObject({ ok: true, output: { ok: true } });
+    const report = asked.find((x) => x.name === 'connectors.windowShown');
+    expect(report?.input).toEqual({ shown: true });
+    expect(report?.client).toBe(asked.find((x) => x.name === 'connectors.open')?.client);
+    expect(codeOf(await call(b, 'client.windowShown', { shown: 'yes' }))).toBe('malformed');
+    expect(codeOf(await call(b, 'client.windowShown', { shown: true, page: 1 }))).toBe('malformed');
+  });
+
+  it('cut `delivery.receipts` to the artifacts the member views, every one for a machine owner', async () => {
+    const { f, held, other, shared, a, b } = await scene('view');
+    const receipt = (artifactId: string) => ({ artifactId, target: 'drive', at: 1, name: 'Report', url: null, format: 'pdf', revision: 1, destination: { kind: 'default' } });
+    f.spine.handle('delivery.receipts', () => ({ receipts: [receipt(held), receipt(other), receipt(shared)] }));
+    const ids = (m: Msg) => (m.output as { receipts: Array<{ artifactId: string }> }).receipts.map((r) => r.artifactId);
+    expect(ids(await call(b, 'delivery.receipts', null))).toEqual([held, shared]);
+    expect(ids(await call(a, 'delivery.receipts', null))).toEqual([held, other, shared]);
+  });
+
+  it('carry on the `artifacts` feed a receipt to a member who views its artifact, and the owner’s sheet’s events to `machine-admin` alone', async () => {
+    const { f, held, other, a, b } = await scene();
+    for (const r of [a, b]) {
+      await r.channel.send({ t: 'sub', sub: 'art', feed: 'artifacts', cursor: null, credit: 4 * 1024 * 1024 });
+      await waitFor(r, (m) => m.sub === 'art' && m.t === 'subbed', 'the artifacts feed');
+    }
+    const receipt = (artifactId: string) => ({ artifactId, target: 'drive', at: 1, name: 'Report', url: null, format: 'pdf', revision: 1, destination: { kind: 'default' } });
+    f.host.emitMachine('delivery.receipt', receipt(other));
+    f.host.emitMachine('delivery.receipt', receipt(held));
+    f.host.emitMachine('connectors.serversChanged', { artifactId: held });
+    f.host.emitMachine('connectors.signInChanged', { opId: 'op-1', name: 'notes', state: 'done', reason: null, message: null, where: 'here' });
+    f.host.emitMachine('library.changed', { revision: 2 });
+    const names = (r: Remote) => evs(r, 'art').map((e) => e.body as { name: string; payload: { artifactId?: string } });
+    await until(() => names(a).length === 5 && names(b).some((e) => e.name === 'library.changed'), 'every event heard');
+    expect(names(b)).toEqual([{ name: 'delivery.receipt', payload: receipt(held) }, { name: 'library.changed', payload: { revision: 2 } }]);
+    expect(names(a).map((e) => e.name)).toEqual(['delivery.receipt', 'delivery.receipt', 'connectors.serversChanged', 'connectors.signInChanged', 'library.changed']);
+  });
+
+  // the device ends a Connect's callback listener on its action's end, said with the row's handle
+  it('carry an owner action’s end on the `artifacts` feed whole, its `ended` handle with it, to `machine-admin` alone', async () => {
+    const { f, held, a, b } = await scene();
+    for (const r of [a, b]) {
+      await r.channel.send({ t: 'sub', sub: 'art', feed: 'artifacts', cursor: null, credit: 4 * 1024 * 1024 });
+      await waitFor(r, (m) => m.sub === 'art' && m.t === 'subbed', 'the artifacts feed');
+    }
+    const ended = { artifactId: held, ended: { sourceHandle: '99999999-9999-4999-8999-999999999999' } };
+    f.host.emitMachine('connectors.serversChanged', ended);
+    f.host.emitMachine('library.changed', { revision: 2 });
+    const heard = (r: Remote) => evs(r, 'art').map((e) => e.body as { name: string; payload: unknown });
+    await until(() => heard(a).length === 2 && heard(b).length === 1, 'every event heard');
+    expect(heard(a)).toEqual([{ name: 'connectors.serversChanged', payload: ended }, { name: 'library.changed', payload: { revision: 2 } }]);
+    expect(heard(b)).toEqual([{ name: 'library.changed', payload: { revision: 2 } }]);
   });
 });

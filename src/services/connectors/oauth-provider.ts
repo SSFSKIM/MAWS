@@ -62,6 +62,7 @@ import { SEALED_FORMAT_V1 } from '@shared/connectors/sealer';
 import type { ClientRef } from '@shared/ipc/client';
 import type { ConnectorAdoptRefusal, DirectSource } from '@shared/ipc/schema/connectors';
 import type { DirectCredentialPreparation, DirectCredentialPrepared } from './direct-route';
+import type { ListenLoopback } from './oauth-callback'; // P5 O7 M5c
 import { ConnectorOAuthError, type ConnectorOAuthFailure, type ConnectorOAuthFlow } from './oauth-flow';
 import { ConnectorOAuthStoreError, type ConnectorOAuthClaim, type ConnectorOAuthSaved, type ConnectorOAuthStore } from './oauth-store';
 import { oauthIdentityOf, sameOAuthIdentity, type ConnectorOAuthGrant, type ConnectorOAuthIdentity, type ConnectorOAuthRecord, type ConnectorOAuthTokens } from '@shared/connectors/oauth-types';
@@ -116,9 +117,11 @@ export interface ConnectorOAuthProvider extends DirectCredentialPreparation {
   saved(): Promise<ConnectorOAuthSaved[] | null>;
   // The owner's Connect for a verified HTTP source: answers when the connection is made, reused or refused.
   // `client`: who asked, the client its consent opens on (OX4); a concurrent Connect is busy, so a flow has one asker.
-  connect(source: DirectSource, signal?: AbortSignal, client?: ClientRef | null): Promise<ConnectorOAuthConnectResult>;
+  // P5 O7 M5c: `listen`, the receiver for that asker's callback when it is not this machine's loopback (a remote
+  // device's relayed receiver, ./relayed-callback.ts).
+  connect(source: DirectSource, signal?: AbortSignal, client?: ClientRef | null, listen?: ListenLoopback): Promise<ConnectorOAuthConnectResult>;
   // The owner's explicit replacement: the old grant is withdrawn first.
-  reconnect(source: DirectSource, signal?: AbortSignal, client?: ClientRef | null): Promise<ConnectorOAuthConnectResult>;
+  reconnect(source: DirectSource, signal?: AbortSignal, client?: ClientRef | null, listen?: ListenLoopback): Promise<ConnectorOAuthConnectResult>;
   // A saved (or connecting) connection, by id alone: needs no current source and no decryption.
   disconnect(connectionId: string): Promise<ConnectorOAuthDisconnectResult>;
   // A withdrawn connection's retirement still unanswered (`pending`) or answered without confirmation (`unconfirmed`):
@@ -535,7 +538,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
     return { host, local: local.then(({ local: answer }) => answer), revocation };
   }
 
-  async function runFlow(slot: Slot, replacing: ConnectorOAuthRecord | null, signal: AbortSignal | undefined, client: ClientRef | null): Promise<ConnectorOAuthConnectResult> {
+  async function runFlow(slot: Slot, replacing: ConnectorOAuthRecord | null, signal: AbortSignal | undefined, client: ClientRef | null, listen: ListenLoopback | undefined): Promise<ConnectorOAuthConnectResult> {
     const { identity } = slot;
     let replaced: Promise<ConnectorOAuthDisconnectResult['local']> | null = null;
     if (replacing) {
@@ -567,7 +570,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       if (!current()) return { ok: false, why: 'cancelled' };
       let granted: ConnectorOAuthGrant;
       try {
-        granted = await flow.connect({ requestUrl: identity.requestUrl, signal: controller.signal, client });
+        granted = await flow.connect({ requestUrl: identity.requestUrl, signal: controller.signal, client, ...(listen && { listen }) });
       } catch (error) {
         if (!current()) return { ok: false, why: 'cancelled' };
         return { ok: false, why: error instanceof ConnectorOAuthError ? error.code : 'failed' };
@@ -765,7 +768,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
       return listed.filter((entry) => !forgotten.has(entry.connectionId));
     },
 
-    async connect(source, signal, client = null) {
+    async connect(source, signal, client = null, listen) {
       const identity = oauthIdentityOf(source);
       if (!identity) return { ok: false, why: 'notHttp' };
       if (stopped) return { ok: false, why: 'stopped' };
@@ -784,11 +787,11 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
           }
           return { ok: true, connectionId: held.record.connectionId, reused: true };
         }
-        return runFlow(slot, null, signal, client);
+        return runFlow(slot, null, signal, client, listen);
       });
     },
 
-    async reconnect(source, signal, client = null) {
+    async reconnect(source, signal, client = null, listen) {
       const identity = oauthIdentityOf(source);
       if (!identity) return { ok: false, why: 'notHttp' };
       if (stopped) return { ok: false, why: 'stopped' };
@@ -798,7 +801,7 @@ export function createConnectorOAuthProvider(deps: ConnectorOAuthProviderDeps): 
         if (refused) return refused;
         const ended = admission(slot, alive); // no await between this and the flow
         if (ended) return ended;
-        return runFlow(slot, slot.held?.record ?? null, signal, client);
+        return runFlow(slot, slot.held?.record ?? null, signal, client, listen);
       });
     },
 

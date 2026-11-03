@@ -76,7 +76,7 @@ function scene(options: { backlogBytes?: number; getFails?: (id: string) => bool
       const head = state.head;
       await holds.ranks;
       const current = () => state.head === head;
-      return { current, holds: (placement) => current() && placement !== null && state.views.has(placement.target.session), ownsMachine: () => false };
+      return { current, holds: (placement) => current() && placement !== null && state.views.has(placement.target.session), ownsMachine: () => false, holdsRight: () => false };
     },
     log: () => {},
     backlogBytes: options.backlogBytes,

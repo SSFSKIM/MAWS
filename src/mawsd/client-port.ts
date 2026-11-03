@@ -6,7 +6,7 @@
 // `clientPort.answer` from that same connection; a notification's events are further answers of its id.
 //
 // Nothing waits on a client that cannot answer (OX4: `noClient`, never a hang): with no connection to ask (a ref the
-// endpoint minted for a remote device, until O7 M5 carries the port across the channel; no app attached) or an asking
+// endpoint minted for a remote device whose channel serves no port, P5 O7 M5c; no app attached) or an asking
 // ref that has ended (its page, though its connection lives), the answer is `noClient` at once and nothing is posted; an
 // asker that ends (its page, or its connection) settles what it was asked `noClient` and releases the notifications it
 // shows. The interactive kinds (`pick`, `save`, `confirm`) wait for the person while their asker lives (D43(1)): its end
@@ -31,6 +31,17 @@ export type ClientPortRequest = { id: string; client: string | null; kind: Kind;
 /** A connection the port can ask: false when the request could not be posted (the connection is gone). */
 export interface PortTarget {
   post(request: ClientPortRequest): boolean;
+}
+
+/**
+ * P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Consent and the client port"; §T): the endpoint's
+ * hold on a remote device's target (`DaemonServices.clientPort.serve`): `answer` is the device's `clientAnswer`, settled
+ * through the port's own `answer` with the registered target as `from`; `close` is the channel's end, which settles every
+ * request it was asked `noClient` (`gone`) and unregisters the target.
+ */
+export interface RemotePortHandle {
+  answer(input: { id: string; answer: unknown }): void;
+  close(): void;
 }
 
 export interface FrontClientPort extends ClientPort {

@@ -8,6 +8,10 @@
 // as an own-file export of the artifact under `<profile>/artifacts/<artifactId>/exports/` (its name in the export
 // grammar for the format and revision, a regular file with no link below the profile), sends it and removes it,
 // whatever the answer. A path not admitted is not the delivery's to remove: it answers `export`, nothing sent.
+// P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O): `delivery.send` is the machine's
+// too, the export and the delivery both here: the library's Export through the root's own (`exportArtifact`), then the
+// same admission and send in process; main's own send stays the shim for a `mawsd` whose welcome lists no
+// `machine.delivery`, and `delivery.deliver` stays served for the OX1 window.
 //
 // - Notion: the export in Notion's enhanced Markdown (X31's `notion` dialect) made into a page by Notion's
 //   `notion-create-pages` through MAWS's own connection (route D, ../connectors/owner-delivery.ts), whose sign-in is
@@ -33,8 +37,9 @@ import { tmpdir } from 'node:os';
 import { pipeline } from 'node:stream/promises';
 import { basename, dirname, extname, join, normalize } from 'node:path';
 import { isNoClient, NO_CLIENT_REASON, type ClientPort } from '@shared/client/port';
-import type { ClientRef } from '@shared/ipc/client';
+import type { ClientRef, HandlerContext } from '@shared/ipc/client';
 import { artifactExportName, type ArtifactExportFormat } from '@shared/maws/tools';
+import { ipcError } from '@shared/ipc/errors'; // P5 O7 M5c
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import type { DirectSource } from '@shared/ipc/schema/connectors';
 import type { DeliveryConnectAnswer, DeliveryFailure, DeliveryReceipt, DeliverySendAnswer, DeliveryStatus, DriveStatus, NotionStatus } from '@shared/ipc/schema/delivery';
@@ -81,9 +86,15 @@ export interface DeliveryDeps {
   artifactsRoot: string; // <profile>/artifacts: where `delivery.deliver` admits an export
   gws?: GwsDriver; // tests
   readFile?: (file: FileHandle) => Promise<string>; // tests: the Notion export's read, through the admitted descriptor
+  // P5 O7 M5c: the library's Export (`artifacts.export`) as this root answers it (mawsd: its render seam; main's embedded
+  // root: main's export service), through which `delivery.send` exports here. Absent: a root that exports nothing serves
+  // no `delivery.send`.
+  exportArtifact?: ExportArtifact;
   now?: () => number;
   log?: (line: string) => void;
 }
+
+export type ExportArtifact = (input: CommandInput<'artifacts.export'>, context: HandlerContext) => Promise<CommandResult<'artifacts.export'>>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -132,6 +143,7 @@ export async function admitExport(artifactsRoot: string, request: { artifactId: 
 interface Run {
   controller: AbortController;
   written: boolean; // its request may have reached the service: no longer cancelled
+  exporting: boolean; // P5 O7 M5c: `delivery.send`'s export is under way here
 }
 
 const failure = (why: DeliveryFailure, extra: { maybeSent?: boolean; message?: string } = {}): DeliverySendAnswer => ({ ok: false, why, ...(extra.maybeSent && { maybeSent: true }), ...(extra.message && { message: extra.message.slice(0, WORDS_MAX) }) });
@@ -251,7 +263,7 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
   function begin(runId: string): Run | 'cancelled' | null {
     if (tombstones.delete(runId)) return 'cancelled';
     if (stopped || runs.has(runId) || ended.has(runId)) return null;
-    const run: Run = { controller: new AbortController(), written: false };
+    const run: Run = { controller: new AbortController(), written: false, exporting: false };
     runs.set(runId, run);
     return run;
   }
@@ -348,9 +360,32 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
     return copy;
   }
 
-  async function send(input: CommandInput<'delivery.deliver'>, admitted: AdmittedExport, copies: string[]): Promise<DeliverySendAnswer> {
-    const { path } = admitted;
-    const { runId, target, artifactId, format, versionId, destination, revision, title } = input;
+  // P5 O7 M5c: what a run sends to, read before anything is sent (D38: no gws here is `absent`): Notion's connector, or
+  // gws, whose own sign-in is read first (past it the CLI would reach another identity's credentials, ./gws.ts); a refusal
+  // is the run's answer.
+  type Prepared = { notion: DirectSource } | { drive: { bin: string; env: Record<string, string> } };
+  async function prepare({ target, artifactId, source }: Pick<CommandInput<'delivery.send'>, 'target' | 'artifactId' | 'source'>, signal: AbortSignal): Promise<Prepared | DeliverySendAnswer> {
+    if (target === 'notion') {
+      if (!deps.connectors) return failure('unavailable');
+      const found = await sourceFor(source, artifactId, signal);
+      if (signal.aborted) return failure('cancelled');
+      if (found === 'unknown') return failure('source');
+      if (!found) return failure('none');
+      return { notion: directOf(found) };
+    }
+    const { bin, env, state } = await driveState(signal);
+    if (signal.aborted) return failure('cancelled');
+    if (bin === null) return failure('absent');
+    if (state.state === 'needsSetup') return failure('needsSetup');
+    if (state.state !== 'ready') return failure(state.state === 'failed' ? 'failed' : 'auth', state.state === 'failed' && state.message ? { message: state.message } : {});
+    return { drive: { bin, env } };
+  }
+
+  // One run, `delivery.deliver`'s and (P5 O7 M5c) `delivery.send`'s alike: begun (a cancel that came first answers
+  // `cancelled`; a run id or an artifact and target under way, `busy`), its artifact read and its target prepared, then
+  // `sending` (the export and its admission, then the send), ended whatever happens.
+  async function underRun(request: Pick<CommandInput<'delivery.send'>, 'runId' | 'target' | 'artifactId' | 'format' | 'source'>, sending: (run: Run, signal: AbortSignal, title: string, prepared: Prepared) => Promise<DeliverySendAnswer>): Promise<DeliverySendAnswer> {
+    const { runId, target, artifactId, format } = request;
     const slot = `${artifactId}\0${target}`;
     if (tombstones.delete(runId)) return failure('cancelled'); // P5 O4 D15: cancelled before it arrived
     if (active.has(slot)) return failure('busy');
@@ -359,65 +394,16 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
     if (!run) return failure('busy');
     active.add(slot);
     const signal = signalOf(run);
-    // the run's last read of its signal and its write, one synchronous step: a cancel answered `cancelled` sends nothing
-    const writes = (): boolean => {
-      if (signal.aborted) return false;
-      run.written = true;
-      return true;
-    };
     try {
       const got = (await deps.hosts.dispatch('engine-host', 'artifacts.get', { artifactId, prepare: false })) as CommandResult<'artifacts.get'>;
       if (signal.aborted) return failure('cancelled');
       if (!got.ok) return failure('unavailable');
       if (!got.value.artifact) return failure('deleted');
       if (target === 'notion' && format !== 'md') return failure('invalid');
-      // Notion's connector, or gws, before anything is sent (D38: no gws here is `absent`)
-      let notion: DirectSource | null = null;
-      let drive: { bin: string; env: Record<string, string> } | null = null;
-      if (target === 'notion') {
-        if (!deps.connectors) return failure('unavailable');
-        const found = await sourceFor(input.source, artifactId, signal);
-        if (signal.aborted) return failure('cancelled');
-        if (found === 'unknown') return failure('source');
-        if (!found) return failure('none');
-        notion = directOf(found);
-      } else {
-        // gws's own sign-in, read first: past it the CLI would reach another identity's credentials (./gws.ts)
-        const { bin, env, state } = await driveState(signal);
-        if (signal.aborted) return failure('cancelled');
-        if (bin === null) return failure('absent');
-        if (state.state === 'needsSetup') return failure('needsSetup');
-        if (state.state !== 'ready') return failure(state.state === 'failed' ? 'failed' : 'auth', state.state === 'failed' && state.message ? { message: state.message } : {});
-        drive = { bin, env };
-      }
-      const name = notionTitle(title);
-      const receipt = (url: string | null, arrivedAs: string): DeliveryReceipt => ({ artifactId, target, at: now(), name: arrivedAs.slice(0, 2_000), url, format, revision, ...(versionId !== undefined && { versionId }), destination });
-      if (notion) {
-        const content = await readExport(admitted.file);
-        if (signal.aborted) return failure('cancelled');
-        if (Buffer.byteLength(content) > NOTION_CONTENT_MAX_BYTES) return failure('tooLarge');
-        const args = notionArguments({ title, content, ...(destination.kind === 'inside' && { parent: destination.id }) });
-        if (!writes()) return failure('cancelled'); // from here the request may reach Notion: no cancel calls it back (route D admits it at its write)
-        const answer = await deps.connectors!.send(notion, { artifactId, tool: NOTION_TOOL, arguments: args }, stopping.signal);
-        if (!answer.ok) return notionFailure(answer);
-        const read = readNotionAnswer(answer.result);
-        if (!read.ok) return failure('toolError', { message: read.message });
-        return made(receipt(read.url, read.name ?? name));
-      }
-      const fileName = `${name}${extname(path)}`;
-      const file = await privateCopy(admitted, copies);
-      if (!writes()) return failure('cancelled'); // the upload is one request once gws runs: never called back
-      const uploaded = await gws.upload(drive!.bin, drive!.env, { file, name: fileName, mime: MIME[format], ...(destination.kind === 'inside' && { parent: destination.id }), signal: stopping.signal });
-      if (uploaded.ok) return made(receipt(uploaded.link ?? null, uploaded.name));
-      switch (uploaded.why) {
-        case 'timeout':
-        case 'failed':
-          return failure(uploaded.why, { maybeSent: true, ...(uploaded.message && { message: uploaded.message }) });
-        case 'cancelled':
-          return failure('cancelled', { maybeSent: true });
-        default:
-          return failure(uploaded.why, uploaded.message ? { message: uploaded.message } : {});
-      }
+      const prepared = await prepare(request, signal);
+      if ('ok' in prepared) return prepared;
+      if (signal.aborted) return failure('cancelled'); // a cancel after the preparation's last read: nothing begins
+      return await sending(run, signal, got.value.artifact.title, prepared);
     } catch (error) {
       if (signal.aborted && !run.written) return failure('cancelled'); // a read the cancel ended (gws's state)
       log(`the ${target} delivery of ${artifactId} failed: ${words(error)}`);
@@ -425,6 +411,93 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
     } finally {
       active.delete(slot);
       end(runId);
+    }
+  }
+
+  async function send(input: CommandInput<'delivery.deliver'>, admitted: AdmittedExport, copies: string[]): Promise<DeliverySendAnswer> {
+    return underRun(input, (run, signal, _title, prepared) => transmit(input, admitted, prepared, run, signal, copies));
+  }
+
+  // The admitted export sent; the run's last read of its signal and its write one synchronous step, so a cancel
+  // answered `cancelled` sends nothing.
+  async function transmit(request: Pick<CommandInput<'delivery.deliver'>, 'target' | 'artifactId' | 'format' | 'versionId' | 'destination' | 'revision' | 'title'>, admitted: AdmittedExport, prepared: Prepared, run: Run, signal: AbortSignal, copies: string[]): Promise<DeliverySendAnswer> {
+    const { path } = admitted;
+    const { target, artifactId, format, versionId, destination, revision, title } = request;
+    const writes = (): boolean => {
+      if (signal.aborted) return false;
+      run.written = true;
+      return true;
+    };
+    const name = notionTitle(title);
+    const receipt = (url: string | null, arrivedAs: string): DeliveryReceipt => ({ artifactId, target, at: now(), name: arrivedAs.slice(0, 2_000), url, format, revision, ...(versionId !== undefined && { versionId }), destination });
+    if ('notion' in prepared) {
+      const content = await readExport(admitted.file);
+      if (signal.aborted) return failure('cancelled');
+      if (Buffer.byteLength(content) > NOTION_CONTENT_MAX_BYTES) return failure('tooLarge');
+      const args = notionArguments({ title, content, ...(destination.kind === 'inside' && { parent: destination.id }) });
+      if (!writes()) return failure('cancelled'); // from here the request may reach Notion: no cancel calls it back (route D admits it at its write)
+      const answer = await deps.connectors!.send(prepared.notion, { artifactId, tool: NOTION_TOOL, arguments: args }, stopping.signal);
+      if (!answer.ok) return notionFailure(answer);
+      const read = readNotionAnswer(answer.result);
+      if (!read.ok) return failure('toolError', { message: read.message });
+      return made(receipt(read.url, read.name ?? name));
+    }
+    const { drive } = prepared;
+    const fileName = `${name}${extname(path)}`;
+    const file = await privateCopy(admitted, copies);
+    if (!writes()) return failure('cancelled'); // the upload is one request once gws runs: never called back
+    const uploaded = await gws.upload(drive.bin, drive.env, { file, name: fileName, mime: MIME[format], ...(destination.kind === 'inside' && { parent: destination.id }), signal: stopping.signal });
+    if (uploaded.ok) return made(receipt(uploaded.link ?? null, uploaded.name));
+    switch (uploaded.why) {
+      case 'timeout':
+      case 'failed':
+        return failure(uploaded.why, { maybeSent: true, ...(uploaded.message && { message: uploaded.message }) });
+      case 'cancelled':
+        return failure('cancelled', { maybeSent: true });
+      default:
+        return failure(uploaded.why, uploaded.message ? { message: uploaded.message } : {});
+    }
+  }
+
+  // P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "O4's surfaces: leases, the window, delivery on
+  // the machine"): `delivery.send` here, where the export runs. The run begins and its target is read before anything is
+  // exported (a state that cannot send exports nothing), then the library's Export (own-file, Notion's dialect for
+  // Notion), its file admitted as `delivery.deliver` admits main's, then sent. A cancel during the export (the export
+  // takes no signal and runs under its own budget) lets it finish and sends nothing; the export's file is removed on every
+  // path, after the run ended.
+  async function sendHere(input: CommandInput<'delivery.send'>, context: HandlerContext, exportArtifact: ExportArtifact): Promise<DeliverySendAnswer> {
+    const held: { path: string | null; admitted: AdmittedExport | null } = { path: null, admitted: null };
+    const copies: string[] = [];
+    try {
+      return await underRun(input, async (run, signal, title, prepared) => {
+        const { runId, target, artifactId, format, versionId, board } = input;
+        const asked = { artifactId, format, ownFile: true as const, ...(versionId !== undefined && { versionId }), ...(board !== undefined && { board }), ...(target === 'notion' && { dialect: 'notion' as const }) };
+        // the run's last read of its signal before the export and the export's start, one synchronous step: the export
+        // takes no signal, so a cancel answered before it never starts one
+        if (signal.aborted) return failure('cancelled');
+        run.exporting = true;
+        let exported: CommandResult<'artifacts.export'>;
+        try {
+          exported = await exportArtifact(asked, context).catch((error: unknown): CommandResult<'artifacts.export'> => ({ ok: false, error: ipcError('internal', words(error)) }));
+        } finally {
+          run.exporting = false;
+        }
+        if (exported.ok) held.path = exported.value.path;
+        if (signal.aborted) return failure('cancelled'); // D29: the export finished; its file goes below, nothing is sent
+        if (!exported.ok) return failure('export', { message: exported.error.message });
+        const { path, revision } = exported.value;
+        held.admitted = await admitExport(deps.artifactsRoot, { artifactId, format, revision, exportPath: path });
+        if (held.admitted === null) {
+          log(`the export for ${target} (run ${runId}) was not admitted: nothing was sent`);
+          return failure('export');
+        }
+        if (signal.aborted) return failure('cancelled');
+        return transmit({ ...input, revision, title }, held.admitted, prepared, run, signal, copies);
+      });
+    } finally {
+      if (held.admitted !== null) await removeAdmitted(held.admitted, input.target);
+      else if (held.path !== null) await rm(held.path, { force: true }).catch(() => log(`an export for ${input.target} was not removed`));
+      for (const directory of copies) await rm(directory, { recursive: true, force: true }).catch(() => log(`a copy of an export sent to ${input.target} was not removed`));
     }
   }
 
@@ -447,10 +520,13 @@ export function startDelivery(deps: DeliveryDeps): { stop(): void } {
   });
   bus.register('delivery.connect', (input, { client }) => connect(input, client));
   bus.register('delivery.deliver', (input) => deliver(input));
+  const { exportArtifact } = deps;
+  if (exportArtifact) bus.register('delivery.send', (input, context) => sendHere(input, context, exportArtifact)); // P5 O7 M5c
   bus.register('delivery.cancel', ({ runId }) => {
     const run = runs.get(runId);
     if (run) {
       if (run.written) return { cancelled: false };
+      if (run.exporting) log(`a send was cancelled in its export phase (run ${runId})`); // P5 O7 M5c: main's shim's words (e2e/delivery.spec.ts)
       run.controller.abort();
       return { cancelled: true };
     }
