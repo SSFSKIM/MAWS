@@ -166,7 +166,7 @@ net.Server.prototype.listen = function (...args) {
  * The org, B enrolled and served, sminos on B's RL10 socket and A's device listed. `b.env` and `b.prepare` are B's
  * own (its replay fixtures, its trusted folders), as profile-daemon.ts takes them.
  */
-export async function startRemoteScene(opts: { scratch: string; aUserData: string; b?: { env?: Record<string, string>; prepare?: (paths: { claudeConfigDir: string }) => void }; directPipe?: boolean }): Promise<RemoteScene> {
+export async function startRemoteScene(opts: { scratch: string; aUserData: string; b?: { env?: Record<string, string>; prepare?: (paths: { claudeConfigDir: string }) => void; root?: string }; directPipe?: boolean }): Promise<RemoteScene> {
   const { scratch, aUserData } = opts;
   mkdirSync(scratch, { recursive: true });
   const undo: (() => Promise<void> | void)[] = [];
@@ -184,7 +184,9 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
     const directPort = await freePort();
     let deadPort = await freePort();
     while (deadPort === directPort) deadPort = await freePort();
-    const bUserData = mkdtempSync(join(tmpdir(), 'maws-rb-')); // short: B's sockets stay under it
+    // short: B's sockets stay under it (P5 O17 M10: `b.root` shorter still, `/tmp`, for an app of B's own, whose cua socket
+    // is `<profile>/browser/cua/<session>.sock`)
+    const bUserData = mkdtempSync(join(opts.b?.root ?? tmpdir(), 'maws-rb-'));
     undo.push(() => rmSync(bUserData, { recursive: true, force: true }));
     const daemon = await startProfileDaemon({
       userData: bUserData,
