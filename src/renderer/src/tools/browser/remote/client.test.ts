@@ -3,7 +3,7 @@
 // own choice of tab, followed across the machine's epochs; each frame acknowledged only once drawn or dropped (held
 // while nothing draws it, so a hidden canvas costs the producer one frame); a closed stream resumed or waited out by its
 // word; control taken only at the person's gesture and only while it stands; input in order with moves coalesced.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { BrowserFrame, BrowserInventory } from '@shared/browser/screencast';
 import type { AppSessionId } from '@shared/graph/ids';
 import { addressOf } from '@shared/machine/address';
@@ -180,6 +180,54 @@ describe('a closed stream', () => {
     expect(fake.invoked('browser.remote.select').at(-1)).toEqual({ viewId: 'rv-1', epoch: 'e2', tabId: 'x1' });
   });
 
+  it('opens a waiting stream again when the person picks its tab, as at Retry', async () => {
+    const { fake, client, closedEvent } = await opened();
+    client.show('t1');
+    await settle();
+    closedEvent('tab-closed');
+    expect(client.getState().stream).toBe('waiting');
+    client.show('t1');
+    expect(fake.invoked('browser.remote.select')).toHaveLength(2);
+    expect(client.getState().stream).toBe('opening');
+  });
+
+  it('forgets a close heard during a select that failed, so the next select’s answer reads no old close', async () => {
+    const fake = fakeClient({ 'browser.remote.ack': undefined });
+    const client = new RemoteBrowserClient(R, fake.client);
+    client.open();
+    await fake.reply('browser.remote.open', { viewId: 'rv-1', inventory: ready('e1', [tab('t1')]), view: { kind: 'live' } });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    client.show('t1');
+    fake.event('browser.remote.closed', { viewId: 'rv-1', reason: 'engine-changed' });
+    await fake.fail('browser.remote.select', 'the view’s tab is gone');
+    expect(client.getState().stream).toBe('stopped');
+    client.retry();
+    await fake.reply('browser.remote.select', undefined);
+    expect(client.getState().stream, 'the failed select’s close is not this one’s').toBe('opening');
+    vi.restoreAllMocks();
+  });
+
+  it('lets a select or a draw of the view before a reopen touch nothing of the new one', async () => {
+    const fake = fakeClient({ 'browser.remote.close': undefined, 'browser.remote.ack': undefined });
+    const client = new RemoteBrowserClient(R, fake.client);
+    client.open();
+    await fake.reply('browser.remote.open', { viewId: 'rv-1', inventory: ready('e1', [tab('t1')]), view: { kind: 'live' } });
+    let finish = () => {};
+    client.setDrawer(() => new Promise<void>((resolve) => (finish = resolve)));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    client.show('t1');
+    await fake.reply('browser.remote.select', undefined);
+    fake.event('browser.remote.frame', { viewId: 'rv-1', frame: frame(7) }); // drawing
+    client.retry(); // a select on its way
+    client.reopen();
+    await fake.reply('browser.remote.open', { viewId: 'rv-2', inventory: ready('e1', [tab('t1')]), view: { kind: 'connecting' } });
+    finish();
+    await fake.fail('browser.remote.select', 'view rv-1 has ended');
+    expect(fake.invoked('browser.remote.ack'), 'the old view’s frame is acknowledged to no other view').not.toContainEqual({ viewId: 'rv-2', seq: 7 });
+    expect(client.getState(), 'the old select’s failure stops nothing of the new view').toMatchObject({ viewId: 'rv-2', stream: 'none', frame: null });
+    vi.restoreAllMocks();
+  });
+
   it('reads a close that reaches it while its own select is on its way once that select is answered (the close may be of the stream it replaced, or of the one it opened), and a frame after it as live', async () => {
     const fake = fakeClient({ 'browser.remote.ack': undefined });
     const client = new RemoteBrowserClient(R, fake.client);
@@ -252,6 +300,32 @@ describe('control and input', () => {
     closedEvent('control-busy');
     expect(fake.invoked('browser.remote.releaseControl')).toEqual([{ viewId: 'rv-1' }]);
     expect(client.getState()).toMatchObject({ control: 'none', notice: { kind: 'refused', reason: 'control-busy' } });
+  });
+
+  it('sends a paste as text within the input queue, and refuses one past it with a notice', async () => {
+    const { fake, client } = await opened();
+    client.show('t1');
+    const taking = client.takeControl();
+    await fake.reply('browser.remote.takeControl', { control: true });
+    await taking;
+    client.paste('a'.repeat(16_384 * 2 + 1));
+    expect(fake.invoked('browser.remote.input').map((call) => (call as { event: { text: string } }).event.text.length)).toEqual([16_384, 16_384, 1]);
+    client.paste('a'.repeat(16_384 * 16 + 1));
+    expect(fake.invoked('browser.remote.input'), 'nothing of a paste past the queue').toHaveLength(3);
+    expect(client.getState().notice).toEqual({ kind: 'paste-too-long', kb: 256 });
+  });
+
+  it('logs an input the bridge refused', async () => {
+    const { fake, client } = await opened();
+    client.show('t1');
+    const taking = client.takeControl();
+    await fake.reply('browser.remote.takeControl', { control: true });
+    await taking;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    client.input(click);
+    await fake.fail('browser.remote.input', 'view rv-1 does not control its tab', 'invalid_input');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('view rv-1 does not control its tab'));
+    vi.restoreAllMocks();
   });
 
   it('lets control go when the machine’s epoch moves (the grant died with it)', async () => {

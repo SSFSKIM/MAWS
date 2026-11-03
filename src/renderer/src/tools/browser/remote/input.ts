@@ -73,6 +73,11 @@ export function pointerInput(type: 'move' | 'down' | 'up', event: ModifierKeys &
   return { kind: 'pointer', type, x: at.x, y: at.y, button, buttons: event.buttons & 7, clickCount: type === 'move' ? 0 : Math.min(3, Math.max(1, clickCount)), modifiers: modifiersOf(event) };
 }
 
+/** The release of `button`, held down, at `at`: a cancelled pointer's, whose own event names no button. */
+export function pointerRelease(button: PointerButton, keys: ModifierKeys, at: Point, clickCount: number): RemoteInput {
+  return { kind: 'pointer', type: 'up', x: at.x, y: at.y, button, buttons: 0, clickCount: Math.min(3, Math.max(1, clickCount)), modifiers: modifiersOf(keys) };
+}
+
 /** A person's click count: a press soon after the last, near it and with the same button, counts on, to three. */
 export class ClickCounter {
   #last: { button: PointerButton; at: Point; time: number; count: number } | null = null;

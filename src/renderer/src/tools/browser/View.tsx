@@ -9,7 +9,8 @@
 // browser.md, M10): their group follows the person's own tabs in the strip, and an agent tab shown is its live picture in
 // place of the pane. The view is open while the panel shows the tool, so a hidden or collapsed tool closes its feed and
 // B's tab goes on. The agent's browser is shown when the person picks one of its tabs, or of itself while the person has
-// no tab of their own shown; a chip of the person's shows theirs again. The capability's notice gives way to the view's
+// no tab of their own shown; a chip of the person's shows theirs again, as does a new tab of theirs selected (a forwarded
+// link opened, the agent's show_pane), whichever was shown. The capability's notice gives way to the view's
 // own states, which carry the machine's reason, except for an older MAWS there, whose capabilities are all it tells.
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -50,6 +51,11 @@ export function BrowserView({ appSessionId, surface, browserTabId, visible = tru
   const client = remote?.client ?? null;
   const machine = useMachineName(appSessionId);
   const [choice, setChoice] = useState<boolean | null>(null); // the person's: the agent's browser, their own tabs, or not chosen yet
+  const [seenSelected, setSeenSelected] = useState(selected);
+  if (selected !== seenSelected) {
+    setSeenSelected(selected);
+    if (selected !== null) setChoice(false); // a tab of the person's newly selected is theirs to see
+  }
   const agentHasTabs = remote !== null && remote.state.view.kind === 'live' && remote.state.inventory?.state === 'ready' && remote.state.inventory.tabs.length > 0;
   // not chosen yet: shown once the agent has a tab and the person shows none of theirs, and kept through the view's states
   const wantsAgent = choice ?? (remote?.state.showing === true || (selected === null && agentHasTabs));
@@ -74,7 +80,7 @@ export function BrowserView({ appSessionId, surface, browserTabId, visible = tru
       {shownRemote ? (
         <div data-browser-chrome="" className="relative z-10 flex shrink-0 flex-col border-b border-border bg-bg-raised">
           <TabStrip appSessionId={appSessionId} surface={surface} tabs={tabs} shownId={null} agent={agent} onLocal={onLocal} />
-          <RemoteNav remote={shownRemote} />
+          <RemoteNav remote={shownRemote} machine={machine} />
         </div>
       ) : (
         <Chrome appSessionId={appSessionId} surface={surface} tab={tab} tabs={tabs} owns={owns} agent={agent ?? undefined} onLocal={elsewhere ? onLocal : undefined} />

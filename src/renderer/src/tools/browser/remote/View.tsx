@@ -12,7 +12,9 @@
 // - The canvas has a labelled focus target (a visually hidden text area, so an IME composes into it), which says whether
 //   the page is view only or under the person's control; the frame is fitted with letterboxing and pointer points are
 //   mapped through the image (./input.ts), a point in the letterbox refused. Escape gives the keyboard back to the
-//   window; a Command chord stays the app's; an IME's commit goes once, as text.
+//   window; a Command chord, or a key an app binding took first, stays the app's; text goes once, as text, whether a key,
+//   an IME's commit or what reached the target outside a composition (an IME's word space, the Character Viewer) brought
+//   it. A cancelled pointer releases what it held. A paste past what §G's input queue carries is refused, with a notice.
 // - In a narrow panel the image keeps the width and the agent's tabs collapse to a picker.
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useSyncExternalStore, type ClipboardEvent, type CompositionEvent, type FormEvent, type KeyboardEvent, type PointerEvent } from 'react';
 import type { BrowserFrame, BrowserInventory, BrowserTabSummary } from '@shared/browser/screencast';
@@ -23,10 +25,11 @@ import { machineOf } from '@shared/machine/address';
 import { ipc } from '../../../ipc/client';
 import { useMachines } from '../../../stores/machines';
 import { machineName } from '../../../stores/org-projects';
+import { moveAlongTabs, tabStop } from '../chrome/TabStrip';
 import { BROWSER_COPY } from '../copy';
 import { BrowserIcon, PersonIcon } from '../icons';
 import { RemoteBrowserClient, type RemoteBrowserState } from './client';
-import { buttonOf, ClickCounter, fitImage, keyInputs, pointAt, pointerInput, textInputs, wheelInput, type PointerButton } from './input';
+import { buttonOf, ClickCounter, fitImage, keyInputs, pointAt, pointerInput, pointerRelease, textInputs, wheelInput, type PointerButton } from './input';
 
 const C = BROWSER_COPY.remote;
 
@@ -72,6 +75,49 @@ export function remoteStatus(view: RemoteViewState, inventory: BrowserInventory 
   }
 }
 
+// a word of the machine's or the link's (RL2's hyphenated words, an act's state), as against main's own sentence
+const WORD = /^[a-z]+(?:-[a-z]+)*$/;
+
+/** Why control was not taken: a machine's word named (never shown as it came), main's own sentence as main says it. */
+export function controlRefusedWords(reason: string, machine: string): string {
+  const R = C.controlRefused;
+  switch (reason) {
+    case '':
+      return R.plain;
+    case 'control-busy':
+      return R.busy;
+    case 'grade':
+    case 'ungraded':
+    case 'no-rule':
+    case 'class':
+    case 'removed':
+      return R.noRight(machine);
+    case 'read-only':
+      return R.viewOnly(machine);
+    case 'unknown':
+    case 'tab-closed':
+    case 'view-gone':
+    case 'no-target':
+      return R.tabGone;
+    case 'engine-changed':
+    case 'stale':
+      return R.changed;
+    case 'step-up-cancelled':
+      return R.cancelled;
+    case 'expired':
+      return R.expired;
+    case 'not-offered':
+      return R.notOffered(machine);
+    case 'offline':
+    case 'unreachable':
+    case 'carrier':
+    case 'closed':
+    case 'not sent': // main's word for an act the machine never received
+      return R.unreachable(machine);
+  }
+  return WORD.test(reason) ? R.unavailable(machine) : R.said(reason);
+}
+
 const listedTabs = (state: RemoteBrowserState): BrowserTabSummary[] => (state.view.kind === 'live' && state.inventory?.state === 'ready' ? state.inventory.tabs : []);
 const shownTab = (state: RemoteBrowserState): BrowserTabSummary | null => listedTabs(state).find((tab) => tab.tabId === state.shown?.tabId) ?? null;
 const titleOf = (tab: BrowserTabSummary) => tab.title || tab.url || BROWSER_COPY.newTab;
@@ -82,6 +128,7 @@ export function AgentGroup({ remote, machine, onShow }: { remote: RemoteBrowser;
   const { state, client } = remote;
   const tabs = listedTabs(state);
   const shownId = state.showing ? (state.shown?.tabId ?? null) : null;
+  const stop = tabStop(tabs.map((tab) => tab.tabId), shownId);
   const status = remoteStatus(state.view, state.inventory, machine);
   const label = C.group(machine);
   return (
@@ -100,9 +147,9 @@ export function AgentGroup({ remote, machine, onShow }: { remote: RemoteBrowser;
         </span>
       ) : (
         <>
-          <div role="tablist" aria-label={label} className="hidden min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] @[26rem]:flex">
+          <div role="tablist" aria-label={label} onKeyDown={moveAlongTabs} className="hidden min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] @[26rem]:flex">
             {tabs.map((tab) => (
-              <AgentChip key={tab.tabId} tab={tab} selected={tab.tabId === shownId} onSelect={() => onShow(tab.tabId)} />
+              <AgentChip key={tab.tabId} tab={tab} selected={tab.tabId === shownId} tabbable={tab.tabId === stop} onSelect={() => onShow(tab.tabId)} />
             ))}
           </div>
           <select
@@ -125,7 +172,7 @@ export function AgentGroup({ remote, machine, onShow }: { remote: RemoteBrowser;
   );
 }
 
-function AgentChip({ tab, selected, onSelect }: { tab: BrowserTabSummary; selected: boolean; onSelect(): void }) {
+function AgentChip({ tab, selected, tabbable, onSelect }: { tab: BrowserTabSummary; selected: boolean; tabbable: boolean; onSelect(): void }) {
   const title = titleOf(tab);
   const tone = selected ? 'bg-bg text-fg' : 'text-fg-muted hover:bg-bg-hover hover:text-fg';
   return (
@@ -133,7 +180,7 @@ function AgentChip({ tab, selected, onSelect }: { tab: BrowserTabSummary; select
       type="button"
       role="tab"
       aria-selected={selected}
-      tabIndex={selected ? 0 : -1}
+      tabIndex={tabbable ? 0 : -1}
       data-browser-agent-chip={tab.tabId}
       title={tab.url === '' ? title : `${title}\n${tab.url}`}
       onClick={onSelect}
@@ -148,11 +195,12 @@ function AgentChip({ tab, selected, onSelect }: { tab: BrowserTabSummary; select
 
 // ---- the row under the strip ----------------------------------------------------------------------------------------
 
-export function RemoteNav({ remote }: { remote: RemoteBrowser }) {
+export function RemoteNav({ remote, machine }: { remote: RemoteBrowser; machine: string }) {
   const { state, client } = remote;
   const tab = shownTab(state);
   const held = state.control === 'held';
-  const notice = state.notice === null ? null : state.notice.kind === 'revoked' ? C.controlRevoked : C.controlRefused(state.notice.reason);
+  const { notice: said } = state;
+  const notice = said === null ? null : said.kind === 'revoked' ? C.controlRevoked : said.kind === 'paste-too-long' ? C.pasteTooLong(said.kb) : controlRefusedWords(said.reason, machine);
   return (
     <>
       <div data-browser-nav="remote" className="flex h-9 shrink-0 items-center gap-2 px-2">
@@ -232,6 +280,7 @@ export function RemoteCanvas({ remote, machine, draw = drawJpeg }: RemoteCanvasP
   const canvas = useRef<HTMLCanvasElement>(null);
   const target = useRef<HTMLTextAreaElement>(null);
   const pressed = useRef(new Set<PointerButton>());
+  const typed = useRef<string | null>(null); // the text the last key press sent, which an input after it is not to send again
   const clicks = useMemo(() => new ClickCounter(), []);
   const held = state.control === 'held';
   const frame = state.frame;
@@ -285,6 +334,13 @@ export function RemoteCanvas({ remote, machine, draw = drawJpeg }: RemoteCanvasP
     const input = at && pointerInput('up', event, at, clicks.up(button));
     if (input) client.input(input);
   };
+  // a cancelled pointer (its event names no button) releases every button it held
+  const onPointerCancel = (event: PointerEvent<HTMLDivElement>) => {
+    const buttons = [...pressed.current];
+    pressed.current.clear();
+    const at = held ? pointOf(event, true) : null;
+    if (at) for (const button of buttons) client.input(pointerRelease(button, event, at, clicks.up(button)));
+  };
 
   // the wheel's listener is not passive, so a scroll over a controlled page scrolls the page, not the panel
   const surface = useRef<HTMLDivElement>(null);
@@ -305,6 +361,8 @@ export function RemoteCanvas({ remote, machine, draw = drawJpeg }: RemoteCanvasP
 
   const onKey = (type: 'down' | 'up', event: KeyboardEvent<HTMLTextAreaElement>) => {
     const native = event.nativeEvent;
+    if (type === 'down') typed.current = null;
+    if (native.defaultPrevented) return; // an app binding took it first (the keymap's dispatcher, in the capture phase)
     const inputs = keyInputs(type, { key: event.key, code: event.code, repeat: event.repeat, altKey: event.altKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey, isComposing: native.isComposing, keyCode: native.keyCode });
     if (inputs === 'pass') return; // the app's shortcut
     if (inputs === 'release') {
@@ -314,7 +372,10 @@ export function RemoteCanvas({ remote, machine, draw = drawJpeg }: RemoteCanvasP
     if (!held) return;
     if (inputs.length === 0) return; // the IME composes: its commit is the text
     event.preventDefault();
-    for (const input of inputs) client.input(input);
+    for (const input of inputs) {
+      client.input(input);
+      if (input.kind === 'text') typed.current = input.text;
+    }
   };
   const onCompositionEnd = (event: CompositionEvent<HTMLTextAreaElement>) => {
     if (held) for (const input of textInputs(event.data ?? '')) client.input(input);
@@ -323,11 +384,19 @@ export function RemoteCanvas({ remote, machine, draw = drawJpeg }: RemoteCanvasP
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     if (!held) return;
     event.preventDefault();
-    for (const input of textInputs(event.clipboardData.getData('text/plain'))) client.input(input);
+    client.paste(event.clipboardData.getData('text/plain'));
   };
-  // the target holds no text of its own: whatever reached it outside a composition was sent as keys or text already
+  // The target holds no text of its own. What reaches it outside a composition is sent as text (an IME's word space after
+  // its commit, the Character Viewer's emoji), unless the key press before it sent it; a composition's own text is sent
+  // at its end.
   const onInput = (event: FormEvent<HTMLTextAreaElement>) => {
-    if (!(event.nativeEvent as InputEvent).isComposing) event.currentTarget.value = '';
+    const native = event.nativeEvent as InputEvent;
+    if (native.isComposing) return;
+    event.currentTarget.value = '';
+    const byKey = typed.current;
+    typed.current = null;
+    if (!held || !native.data || native.inputType === 'insertCompositionText' || native.data === byKey) return;
+    for (const input of textInputs(native.data)) client.input(input);
   };
   const onBlur = () => {
     if (held) client.input({ kind: 'blur' });
@@ -335,7 +404,9 @@ export function RemoteCanvas({ remote, machine, draw = drawJpeg }: RemoteCanvasP
 
   const status = remoteStatus(state.view, state.inventory, machine);
   const stale = frame !== null && state.stream !== 'live';
-  const overlay = status ?? (state.stream === 'stopped' ? C.stopped : frame === null ? C.loading : stale && state.stream === 'waiting' ? C.lost : null);
+  // the view's kind words what is wrong with the view; the stream's state only what is wrong with this tab's stream
+  const overlay = status ?? (state.stream === 'stopped' ? C.stopped : state.stream === 'waiting' ? C.waiting : frame === null || state.stream === 'opening' ? C.loading : null);
+  const retry = status === null && (state.stream === 'stopped' || state.stream === 'waiting');
   const label = `${tab ? C.page(titleOf(tab), machine) : C.group(machine)}. ${held ? C.youControlHint : C.viewOnlyHint}`;
   return (
     <div
@@ -351,7 +422,7 @@ export function RemoteCanvas({ remote, machine, draw = drawJpeg }: RemoteCanvasP
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      onPointerCancel={onPointerCancel}
       onContextMenu={(event) => held && event.preventDefault()}
       className={`relative h-full w-full touch-none overflow-hidden bg-bg-raised outline-accent has-[textarea:focus]:outline-2 has-[textarea:focus]:-outline-offset-2 ${held ? 'cursor-default' : 'cursor-not-allowed'}`}
     >
@@ -373,7 +444,7 @@ export function RemoteCanvas({ remote, machine, draw = drawJpeg }: RemoteCanvasP
         <div role="status" data-remote-overlay="" className="pointer-events-none absolute inset-0 flex items-center justify-center p-6 text-center">
           <span className="pointer-events-auto flex max-w-full flex-col items-center gap-2 rounded-md bg-bg/90 px-3 py-2 text-ui text-fg-muted">
             {overlay}
-            {state.stream === 'stopped' && status === null && (
+            {retry && (
               <button type="button" onPointerDown={(event) => event.stopPropagation()} onClick={() => client.retry()} className="h-6 rounded-sm border border-border px-2 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
                 {C.retry}
               </button>

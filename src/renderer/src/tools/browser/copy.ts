@@ -158,6 +158,7 @@ export const BROWSER_COPY = {
     },
     reconnect: 'Reconnect',
     loading: 'Waiting for the agent’s page…',
+    waiting: 'The agent’s tab isn’t available right now', // its stream closed with the tab or the engine; the next listing or Retry
     stopped: 'The picture stopped',
     retry: 'Retry',
     page: (title: string, machine: string) => `The agent’s page on ${machine}: ${title}`,
@@ -168,8 +169,24 @@ export const BROWSER_COPY = {
     takeControl: 'Take control',
     taking: 'Taking control…',
     giveBack: 'Give back',
-    controlRefused: (reason: string) => (reason === '' ? 'Couldn’t take control' : `Couldn’t take control: ${reason}`),
+    // why control was not taken: a machine's or the link's word, named (remote/View.tsx's `controlRefusedWords`); main's own
+    // sentence as it says it
+    controlRefused: {
+      plain: 'Couldn’t take control',
+      said: (reason: string) => `Couldn’t take control: ${reason}`,
+      busy: 'Couldn’t take control: someone else is using this tab',
+      noRight: (machine: string) => `Couldn’t take control: you don’t have the right to use the agent’s browser on ${machine}`,
+      viewOnly: (machine: string) => `Couldn’t take control: you can only view on ${machine}`,
+      tabGone: 'Couldn’t take control: the tab is no longer open',
+      changed: 'Couldn’t take control: the agent’s browser changed, so try again',
+      cancelled: 'Couldn’t take control: the confirmation was cancelled',
+      expired: 'Couldn’t take control: the request expired',
+      notOffered: (machine: string) => `Couldn’t take control: ${machine} doesn’t offer it`,
+      unreachable: (machine: string) => `Couldn’t take control: ${machine} isn’t reachable`,
+      unavailable: (machine: string) => `Couldn’t take control: the agent’s browser on ${machine} is unavailable`,
+    },
     controlRevoked: 'Control was taken back',
+    pasteTooLong: (kb: number) => `That paste is too long to send to the agent’s page (at most ${kb} KB)`,
   },
   // P5 O17 M10 end
 

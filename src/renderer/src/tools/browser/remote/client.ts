@@ -19,12 +19,15 @@
 //   assumed: held from an answer that says so until it is given back, revoked (`control-revoked`), refused at a reopen
 //   or its epoch has passed (the grant dies with its epoch, §K's pin 3). Input goes only while it is held, in order, each
 //   with the view's next sequence; a move waits for the one on its way and only the newest is kept (§G: moves may
-//   coalesce, keys and buttons never drop).
-import type { BrowserFrame, BrowserInventory } from '@shared/browser/screencast';
+//   coalesce, keys and buttons never drop). An input the bridge refuses is logged. The bridge answers an input before the
+//   machine has it, so nothing here paces input against §G's queue: a paste past half of it is refused, with a notice.
+// - What a view let go of left on its way (a select's answer, a frame being drawn) touches nothing of the view opened
+//   after it: no state, and no acknowledgement to another view.
+import { BROWSER_LIMITS, type BrowserFrame, type BrowserInventory } from '@shared/browser/screencast';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { RemoteViewState } from '@shared/ipc/schema/browser';
-import type { RemoteInput } from './input';
+import { textInputs, type RemoteInput } from './input';
 
 export type RemoteStream = 'none' | 'opening' | 'live' | 'waiting' | 'stopped';
 export type RemoteControl = 'none' | 'taking' | 'held';
@@ -45,7 +48,7 @@ export interface RemoteBrowserState {
   stream: RemoteStream;
   frame: RemoteFrameMeta | null; // the last drawn, of the shown tab
   control: RemoteControl;
-  notice: { kind: 'refused'; reason: string } | { kind: 'revoked' } | null;
+  notice: { kind: 'refused'; reason: string } | { kind: 'revoked' } | { kind: 'paste-too-long'; kb: number } | null;
 }
 
 /** Draws one frame on the canvas; a rejection is a frame dropped. */
@@ -57,6 +60,9 @@ const WAITS = new Set(['tab-closed', 'engine-changed', 'carrier', 'removed', 'cl
 // a controlling stream refused at its reopen: control is given back, the next stream read-only
 const CONTROL_REFUSED = new Set(['control-busy', 'grade', 'unknown', 'read-only']);
 const CONNECTING: RemoteViewState = { kind: 'connecting' };
+// a paste's text inputs at most: the bridge answers an input before the machine has it, so nothing here can pace a paste
+// against §G's queue (32 waiting there, past which control closes); half of it leaves room for the keys around a paste
+const PASTE_TEXTS = BROWSER_LIMITS.inputQueue / 2;
 
 export class RemoteBrowserClient {
   #state: RemoteBrowserState = { viewId: null, view: CONNECTING, inventory: null, showing: false, shown: null, stream: 'none', frame: null, control: 'none', notice: null };
@@ -123,6 +129,8 @@ export class RemoteBrowserClient {
     const { viewId } = this.#state;
     if (viewId !== null) void this.bridge.invoke('browser.remote.close', { viewId });
     this.#held = null;
+    this.#selecting = 0; // an answer of this view's selects is read by none that follows
+    this.#deferred = null;
     this.#set({ viewId: null, stream: 'none', control: 'none' });
   }
 
@@ -160,11 +168,11 @@ export class RemoteBrowserClient {
     if (this.#state.shown === null) this.#showDefault();
   }
 
-  /** Shows the agent's tab `tabId` in this viewer (the one it shows already goes on as it is). */
+  /** Shows the agent's tab `tabId` in this viewer (the one it shows already goes on as it is, unless its stream is down). */
   show(tabId: string): void {
     const { showing, shown, stream } = this.#state;
     this.#set({ showing: true });
-    if (showing && shown?.tabId === tabId && stream !== 'stopped') return;
+    if (showing && shown?.tabId === tabId && (stream === 'opening' || stream === 'live')) return;
     this.#resumes = 0;
     this.#select(tabId);
   }
@@ -194,15 +202,18 @@ export class RemoteBrowserClient {
     const { viewId, inventory, frame } = this.#state;
     if (viewId === null || inventory === null || this.#ended) return;
     const epoch = inventory.epoch;
+    const generation = this.#generation;
     this.#held = null;
     this.#selecting += 1;
     this.#set({ shown: { tabId, epoch }, stream: 'opening', frame: frame?.tabId === tabId ? frame : null });
     void this.bridge.invoke('browser.remote.select', { viewId, epoch, tabId }).then((result) => {
+      if (generation !== this.#generation) return; // of a view let go
       this.#selecting -= 1;
       if (!result.ok) {
         console.warn(`[browser] the agent’s tab ${tabId} could not be shown: ${result.error.message}`);
-        if (this.#selecting === 0) this.#set({ stream: 'stopped' });
-        return;
+        if (this.#selecting > 0) return;
+        this.#deferred = null; // the stream it would have read is not open
+        return this.#set({ stream: 'stopped' });
       }
       const deferred = this.#deferred;
       if (this.#selecting > 0 || deferred === null) return;
@@ -229,11 +240,13 @@ export class RemoteBrowserClient {
     const frame = this.#held;
     const drawer = this.#drawer;
     if (!frame || !drawer) return;
+    const generation = this.#generation;
     this.#held = null;
     this.#drawing = true;
     void drawer(frame)
       .then(
         () => {
+          if (generation !== this.#generation) return;
           const shown = this.#state.shown;
           if (shown?.tabId !== frame.tabId || shown.epoch !== frame.epoch) return;
           this.#resumes = 0;
@@ -245,7 +258,7 @@ export class RemoteBrowserClient {
       )
       .finally(() => {
         this.#drawing = false;
-        this.#ack(frame.seq);
+        if (generation === this.#generation) this.#ack(frame.seq); // a view let go is owed nothing, and another view no seq of it
         if (this.#held) this.#draw();
       });
   }
@@ -305,6 +318,14 @@ export class RemoteBrowserClient {
     this.#set({ notice: null });
   }
 
+  /** A paste, as text within §G's input queue; one past what the queue can carry is refused, with a notice. */
+  paste(text: string): void {
+    if (this.#state.control !== 'held') return;
+    const inputs = textInputs(text);
+    if (inputs.length > PASTE_TEXTS) return this.#set({ notice: { kind: 'paste-too-long', kb: (PASTE_TEXTS * BROWSER_LIMITS.textBytes) / 1024 } });
+    for (const input of inputs) this.input(input);
+  }
+
   /** One input to the page, while control is held. */
   input(event: RemoteInput): void {
     if (this.#state.control !== 'held' || this.#state.viewId === null) return;
@@ -325,7 +346,9 @@ export class RemoteBrowserClient {
     const { viewId } = this.#state;
     if (viewId === null) return;
     if (isMove) this.#moving = true;
-    const sent = this.bridge.invoke('browser.remote.input', { viewId, seq: ++this.#seq, event });
+    const sent = this.bridge.invoke('browser.remote.input', { viewId, seq: ++this.#seq, event }).then((result) => {
+      if (!result.ok) console.warn(`[browser] an input to the agent’s tab was refused (${event.kind}): ${result.error.message}`);
+    });
     if (!isMove) return void sent;
     void sent.finally(() => {
       this.#moving = false;
