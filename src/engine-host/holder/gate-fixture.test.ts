@@ -4,7 +4,9 @@
 // in the order it happened, with the moments that are not frames marked as events (the host's signal, a silence, the
 // server's restart). This test compares a run with the committed file, frame for frame; `MAWS_RECORD_GATE_FIXTURE=1`
 // rewrites the file from the run instead. Timings are shortened for the test (the header names them); every frame is
-// as the engine host writes it.
+// as the engine host writes it. D70's cases: a silence healed by a heartbeat on the same connection, an arm met by a
+// turn in either order of its late `armed`, and an idle reap's SIGTERM under the lease (the renewal answered; withheld;
+// re-armed, where an answer to the older arm confirms nothing) through a stand-in of the session's signal path.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,12 +14,13 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import { EngineSessionStatusSchema } from '@shared/engine/status';
 import { FakeObserver, type Exchanged } from './fake-observer';
 import { Gate, GATE_PROTOCOL, STOP_REASON } from './gate';
-import { Reap, type ReapReason } from './reap';
+import { Reap, type ReapDeps, type ReapReason } from './reap';
 
 const FIXTURE = join(__dirname, '../../../spikes/protocol-probe/fixtures/p5/p5-o16-gate.jsonl');
 const LEASE_MS = 400;
 const MARGIN_MS = 100;
 const SILENCE_MS = 200;
+const GRACE_MS = 450; // the end_session grace before an idle reap's SIGTERM: between the arm's renewal (300) and the next (600)
 const SESSION = '5f0c2a1e-6b7d-4c3e-9a8f-0123456789ab';
 const PID = 4711;
 const CHILD = 4712;
@@ -62,7 +65,8 @@ const IDLE = EngineSessionStatusSchema.parse({
 });
 
 // One case's scene: the row's channel and reap on the gate, the recording, and what the reap signalled.
-function scene(name: string, outcome: Promise<'exited' | 'ignored'> = new Promise(() => {}), descendants: () => number = () => 0) {
+// `signal`: the session's signal path, by default marked as one moment; D70's cases stand in its idle reap's steps.
+function scene(name: string, outcome: Promise<'exited' | 'ignored'> = new Promise(() => {}), descendants: () => number = () => 0, signal?: (mark: (event: string, detail?: string) => void, mayTerm: () => Promise<boolean>) => Promise<'exited' | 'ignored' | 'withheld'>) {
   const rows: Row[] = [];
   const sink = { push: (row: Exchanged) => rows.push({ case: name, ...row }) };
   const mark = (event: string, detail?: string) => rows.push({ case: name, event, ...(detail && { detail }) });
@@ -70,8 +74,9 @@ function scene(name: string, outcome: Promise<'exited' | 'ignored'> = new Promis
   const reaped: ReapReason[] = [];
   const reap = new Reap('app-fixture', {
     gate: channel, current: () => IDLE, stateful: () => new Set(), interest: () => false, descendants,
-    reap: (reason) => {
+    reap: (reason, mayTerm): ReturnType<ReapDeps['reap']> => {
       reaped.push(reason);
+      if (signal) return signal(mark, mayTerm);
       mark('signal', 'the engine host signals the engine: end_session, then SIGTERM');
       return outcome;
     },
@@ -88,6 +93,21 @@ function scene(name: string, outcome: Promise<'exited' | 'ignored'> = new Promis
     await o.next('welcome');
   };
   return { rows, mark, channel, reap, reaped, connect, hello };
+}
+
+// session.ts `reap('idle')` in brief: end_session, its grace, then the SIGTERM only under a confirmed lease (D70).
+function idleSignal(exit: Promise<'exited'>, sigterms: { n: number }) {
+  return async (mark: (event: string, detail?: string) => void, mayTerm: () => Promise<boolean>): Promise<'exited' | 'withheld'> => {
+    mark('end_session', 'the engine host sends end_session');
+    await sleep(GRACE_MS);
+    if (!(await mayTerm())) {
+      mark('sigterm_withheld', 'no confirmed lease at the SIGTERM: none sent, the reap ends and the fence is disarmed');
+      return 'withheld';
+    }
+    sigterms.n += 1;
+    mark('sigterm', `the engine host sends SIGTERM under a confirmed lease, ${GRACE_MS} ms after end_session`);
+    return exit;
+  };
 }
 
 async function cases(): Promise<Row[]> {
@@ -215,7 +235,8 @@ async function cases(): Promise<Row[]> {
     all.push(...s.rows.filter((r) => !('frame' in r && r.frame.t === 'hb')));
   }
 
-  { // a heartbeat lost while the fence is armed cancels the reap; the row is held until a fresh hello
+  { // a heartbeat lost while the fence is armed cancels the reap; the row is held until it is heard again, here by a
+    // heartbeat on the same connection (D70: no second hello), which re-arms nothing
     const s = scene('heartbeat-loss');
     const o = await s.connect();
     await s.hello(o);
@@ -228,15 +249,139 @@ async function cases(): Promise<Row[]> {
     s.mark('due', 'due again: the unhealthy observer holds the row, nothing is armed');
     s.reap.due('idle');
     await sleep(50);
-    o.hello(SESSION, { pid: PID, childPid: CHILD });
-    await o.next('welcome');
-    s.mark('healthy', 'heard again by a fresh hello');
+    o.hb();
+    await until(() => s.reap.observer === 'healthy', 'the heal');
+    expect(o.pending()).toEqual([]);
+    s.mark('healthy', 'heard again by a heartbeat on the same connection; nothing is re-armed');
     s.mark('due', 'the row is due and verified empty');
     s.reap.due('idle');
     expect(await o.next('arm')).toEqual({ t: 'arm', fence: 2, leaseMs: LEASE_MS });
     await o.close();
     s.channel.close();
     all.push(...s.rows);
+  }
+
+  { // D70: an arm that meets a turn already under way; the observer still answers the arm, here before the host's answer
+    // to the turn: the turn cancels the reap (proceed, disarm) and the late armed changes nothing
+    const s = scene('turn-armed-proceed');
+    const o = await s.connect();
+    await s.hello(o);
+    o.hb();
+    s.mark('due', 'the row is due and verified empty');
+    s.reap.due('idle');
+    await o.next('arm');
+    o.send({ t: 'turn', fence: 1, origin: 'cron' });
+    o.send({ t: 'armed', fence: 1 });
+    expect(await o.next('proceed')).toEqual({ t: 'proceed', fence: 1 });
+    expect(await o.next('disarm')).toEqual({ t: 'disarm', fence: 1 });
+    await sleep(50);
+    expect([s.reap.state, s.reaped, o.pending()]).toEqual(['idle', [], []]);
+    s.mark('unchanged', 'the late armed changes nothing: the reap stays idle, nothing armed or signalled');
+    await o.close();
+    s.channel.close();
+    all.push(...s.rows);
+  }
+
+  { // D70: the same, its armed sent after the host's proceed and disarm
+    const s = scene('turn-proceed-armed');
+    const o = await s.connect();
+    await s.hello(o);
+    o.hb();
+    s.mark('due', 'the row is due and verified empty');
+    s.reap.due('idle');
+    await o.next('arm');
+    o.send({ t: 'turn', fence: 1, origin: 'cron' });
+    expect(await o.next('proceed')).toEqual({ t: 'proceed', fence: 1 });
+    expect(await o.next('disarm')).toEqual({ t: 'disarm', fence: 1 });
+    o.send({ t: 'armed', fence: 1 });
+    await sleep(50);
+    expect([s.reap.state, s.reaped, o.pending()]).toEqual(['idle', [], []]);
+    s.mark('unchanged', 'the late armed changes nothing: the reap stays idle, nothing armed or signalled');
+    await o.close();
+    s.channel.close();
+    all.push(...s.rows);
+  }
+
+  { // D70: the lease renewed while signalled and its renewal answered: the SIGTERM goes in at its due time, no re-arm
+    let exit!: (outcome: 'exited') => void;
+    const sigterms = { n: 0 };
+    const s = scene('sigterm-confirmed', undefined, undefined, idleSignal(new Promise((resolve) => (exit = resolve)), sigterms));
+    const o = await s.connect();
+    await s.hello(o);
+    o.beat(50); // throughout; their count is timing, so the recording keeps none of them
+    s.mark('heartbeats', 'the observer beats throughout this case (not recorded)');
+    s.mark('due', 'the row is due and verified empty');
+    s.reap.due('idle');
+    await o.next('arm');
+    o.send({ t: 'armed', fence: 1 });
+    await until(() => s.reaped.length === 1, 'the signal');
+    s.mark('wait', `the signal outlives the arm's lease less its margin (${LEASE_MS - MARGIN_MS} ms)`);
+    await o.next('arm', LEASE_MS); // the renewal while signalled
+    o.send({ t: 'armed', fence: 1 }); // answered: the lease stays confirmed
+    await until(() => sigterms.n === 1, 'the SIGTERM');
+    expect(o.pending()).toEqual([]);
+    exit('exited');
+    s.mark('exit', 'the engine exits; its row closes the observer');
+    s.reap.dispose();
+    s.channel.close();
+    await o.closed;
+    all.push(...s.rows.filter((r) => !('frame' in r && r.frame.t === 'hb')));
+  }
+
+  { // D70: the renewal unanswered: at the SIGTERM's due time the host re-arms, and with no armed within the lease less
+    // its margin it sends no SIGTERM; the reap ends and the fence is disarmed
+    const sigterms = { n: 0 };
+    const s = scene('sigterm-withheld', undefined, undefined, idleSignal(new Promise(() => {}), sigterms));
+    const o = await s.connect();
+    await s.hello(o);
+    o.beat(50);
+    s.mark('heartbeats', 'the observer beats throughout this case (not recorded)');
+    s.mark('due', 'the row is due and verified empty');
+    s.reap.due('idle');
+    await o.next('arm');
+    o.send({ t: 'armed', fence: 1 });
+    await until(() => s.reaped.length === 1, 'the signal');
+    s.mark('wait', `the signal outlives the arm's lease less its margin (${LEASE_MS - MARGIN_MS} ms)`);
+    await o.next('arm', LEASE_MS); // the renewal, left unanswered
+    s.mark('unanswered', 'the observer leaves the renewal unanswered');
+    await o.next('arm', LEASE_MS); // the re-arm at the SIGTERM's due time
+    s.mark('wait', `no armed for the re-arm within the lease less its margin (${LEASE_MS - MARGIN_MS} ms)`);
+    expect(await o.next('disarm', LEASE_MS + 1_000)).toEqual({ t: 'disarm', fence: 1 });
+    expect([sigterms.n, s.reap.state]).toEqual([0, 'idle']);
+    await o.close();
+    s.channel.close();
+    all.push(...s.rows.filter((r) => !('frame' in r && r.frame.t === 'hb')));
+  }
+
+  { // D70: re-armed at the SIGTERM's due time with the renewal unanswered; the observer then answers both arms in order:
+    // the first answer is the renewal's and confirms nothing, the second is the re-arm's and the SIGTERM goes in
+    let exit!: (outcome: 'exited') => void;
+    const sigterms = { n: 0 };
+    const s = scene('sigterm-rearmed', undefined, undefined, idleSignal(new Promise((resolve) => (exit = resolve)), sigterms));
+    const o = await s.connect();
+    await s.hello(o);
+    o.beat(50);
+    s.mark('heartbeats', 'the observer beats throughout this case (not recorded)');
+    s.mark('due', 'the row is due and verified empty');
+    s.reap.due('idle');
+    await o.next('arm');
+    o.send({ t: 'armed', fence: 1 });
+    await until(() => s.reaped.length === 1, 'the signal');
+    s.mark('wait', `the signal outlives the arm's lease less its margin (${LEASE_MS - MARGIN_MS} ms)`);
+    await o.next('arm', LEASE_MS); // the renewal, not yet answered
+    await o.next('arm', LEASE_MS); // the re-arm at the SIGTERM's due time
+    o.send({ t: 'armed', fence: 1 }); // the renewal's
+    await sleep(50);
+    expect(sigterms.n).toBe(0);
+    s.mark('unconfirmed', 'the answer to the older arm confirms nothing: no SIGTERM');
+    o.send({ t: 'armed', fence: 1 }); // the re-arm's
+    await until(() => sigterms.n === 1, 'the SIGTERM');
+    exit('exited');
+    s.mark('exit', 'the engine exits; its row closes the observer');
+    s.reap.dispose();
+    s.channel.close();
+    await o.closed;
+    all.push(...s.rows.filter((r) => !('frame' in r && r.frame.t === 'hb')));
   }
 
   { // the server's restart (the engine host replaced): the connection closes, the observer reconnects and says hello again
@@ -278,12 +423,12 @@ it('the recorded exchanges are the gate’s, case by case', async () => {
   const rows = await cases();
   const header = {
     fixture: 'p5-o16-gate', protocol: GATE_PROTOCOL, source: 'src/engine-host/holder/gate-fixture.test.ts',
-    timings: { leaseMs: LEASE_MS, leaseMarginMs: MARGIN_MS, silenceMs: SILENCE_MS, production: { leaseMs: 10_000, leaseMarginMs: 1_000, silenceMs: 15_000, heartbeatMs: 5_000, reconnectBackoffMs: 5_000 } },
+    timings: { leaseMs: LEASE_MS, leaseMarginMs: MARGIN_MS, silenceMs: SILENCE_MS, endSessionGraceMs: GRACE_MS, production: { leaseMs: 10_000, leaseMarginMs: 1_000, silenceMs: 15_000, heartbeatMs: 5_000, reconnectBackoffMs: 5_000, endSessionGraceMs: 3_000 } },
     rows: '{case, from: observer|host, frame} for a frame; {case, event, detail} for a moment that is not one',
   };
   const text = `${[header, ...rows].map((row) => JSON.stringify(row)).join('\n')}\n`;
   if (process.env.MAWS_RECORD_GATE_FIXTURE === '1') writeFileSync(FIXTURE, text);
   const committed = readFileSync(FIXTURE, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as unknown);
   expect(committed).toEqual([header, ...rows]);
-  expect(new Set(rows.map((r) => r.case))).toEqual(new Set(['proceed', 'stop', 'armed-renewing-turn-proceed', 'armed-veto-turn-proceed', 'no-answer', 'renew', 'heartbeat-loss', 'server-restart', 'no-row']));
-}, 20_000);
+  expect(new Set(rows.map((r) => r.case))).toEqual(new Set(['proceed', 'stop', 'armed-renewing-turn-proceed', 'armed-veto-turn-proceed', 'no-answer', 'renew', 'heartbeat-loss', 'turn-armed-proceed', 'turn-proceed-armed', 'sigterm-confirmed', 'sigterm-withheld', 'sigterm-rearmed', 'server-restart', 'no-row']));
+}, 30_000);

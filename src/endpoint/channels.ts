@@ -10,7 +10,7 @@
 // message, which the device's `openChannel` resolves on, and sends it again whenever those grades change.
 //
 // A new head re-checks every channel synchronously, before anything else runs, and closes `removed` each whose device or
-// key it no longer holds. `ping` is answered with `pong`; a channel silent for one ping period is pinged, and one that
+// key it no longer holds. `ping` is answered with `pong` (stamped with this machine's clock, P5 O7 M7); a channel silent for one ping period is pinged, and one that
 // let two pings go unanswered is closed (`timeout`). While any channel is open the endpoint holds `mawsd`.
 //
 // The loop: `call`, `act`, `query`, `sub`, `credit` and `unsub` go to their routes (M5–M8 fill them; until then each
@@ -545,9 +545,13 @@ export class Channels {
     const remote = entry.remote;
     try {
       switch (message.t) {
-        case 'ping':
-          remote.send({ t: 'pong', at: message.at });
+        case 'ping': {
+          // P5 O7 M7 (`rl2.pong-clock`): this machine's clock at the ping's arrival and at the pong's send, for a
+          // device's clock-offset estimate
+          const received = this.#now();
+          remote.send({ t: 'pong', at: message.at, received, sent: this.#now() });
           return;
+        }
         case 'pong':
         case 'close':
           return;

@@ -114,6 +114,9 @@ export const CronRecordSchema = z.object({
 }).strip();
 export type CronRecord = z.infer<typeof CronRecordSchema>;
 
+// O16 (D69): a launch's bound infrastructure, each process by its pid and start time (`ps` lstart, as procStartOf reads it)
+export interface InfrastructureRecord { launch: string; processes: { pid: number; start: string; kind: string }[] }
+
 export interface SessionStateStore {
   exists(appSessionId: AppSessionId): Promise<boolean>; // a state file exists for the id (C10's ask: `session.queue.list` for an unreserved id)
   loadQueue(appSessionId: AppSessionId): Promise<StoredQueue>; // reads only: the recovery transitions happen in MessageQueue
@@ -141,6 +144,12 @@ export interface SessionStateStore {
   // last seen on the gate, so an engine host that adopts that process restores its observer as seen; null when never
   loadObserverSeen(appSessionId: AppSessionId): Promise<string | null>;
   saveObserverSeen(appSessionId: AppSessionId, launchId: string): Promise<void>;
+  // O16 (the plan's D69): the processes the descendant veto bound as a launch's infrastructure (its stdio MCP servers,
+  // the interim bridge), so an engine host that adopts that process restores them instead of resolving each server's
+  // command through a rebuilt PATH; null when never saved. `kind` is the holder's (`server`, `bridge`); one it does not
+  // know is skipped there
+  loadInfrastructure(appSessionId: AppSessionId): Promise<InfrastructureRecord | null>;
+  saveInfrastructure(appSessionId: AppSessionId, record: InfrastructureRecord): Promise<void>;
   // P5 O16 M2 (D12): an interrupt written to a hosted process and not yet answered (set before the write, cleared at the
   // answer or a failed write), which an adopter sends first; false when never set
   loadOwedInterrupt(appSessionId: AppSessionId): Promise<boolean>;

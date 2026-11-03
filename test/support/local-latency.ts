@@ -96,8 +96,10 @@ export function clockCheck(brackets: readonly ClockBracket[]): ClockCheck {
 
 const ms = (value: number) => Number(value.toFixed(1));
 
-// Why a run is invalid, each reason one line; empty when it is valid. `samples` are the kept markers' delays.
-export function invalidReasons(run: { samples: readonly number[]; expected: number; missing: readonly { turn: number; markers: readonly string[] }[]; clock: ClockCheck }): string[] {
+// Why a run is invalid, each reason one line; empty when it is valid. `samples` are the kept markers' delays. P5 O7 M7:
+// `signed`, a live remote case's raw delays across two clocks, negative while the clocks' offset is not yet applied, so
+// their sign is judged after it (test/support/remote-latency.ts's liveJudgement), not here.
+export function invalidReasons(run: { samples: readonly number[]; expected: number; missing: readonly { turn: number; markers: readonly string[] }[]; clock: ClockCheck }, options: { signed?: boolean } = {}): string[] {
   const reasons: string[] = [];
   const floor = Math.ceil(run.expected * BENCH.sampleFloor);
   if (run.samples.length < floor) reasons.push(`${run.samples.length} samples of ${run.expected}, under the floor of ${floor} (${BENCH.sampleFloor * 100}%)`);
@@ -106,7 +108,7 @@ export function invalidReasons(run: { samples: readonly number[]; expected: numb
     const [low, high] = run.clock.offsetRangeMs.map(ms);
     reasons.push(`the renderer's clock is not shown within ±${BENCH.clockToleranceMs} ms of the runner's: its offset lies in [${low}, ${high}] ms (tightest bracket ${ms(run.clock.widthMs)} ms)`);
   }
-  const negative = run.samples.filter((sample) => sample < 0).length;
+  const negative = options.signed === true ? 0 : run.samples.filter((sample) => sample < 0).length;
   if (negative > 0) reasons.push(`${negative} negative sample${negative === 1 ? '' : 's'}`);
   return reasons;
 }

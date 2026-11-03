@@ -1229,6 +1229,99 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       stop = null;
       expect(current.discoveryCurrent(null)).toBe(false);
     });
+
+    // The owner's store of 7,750 sessions (2026-11-03): its scan outran the request's deadline, the answer came too late
+    // to count, and nothing asked again before the engine host's next transition, so the archive and mawsd's discovery
+    // wake waited the whole run. A scan that answers null is asked again, on a bounded schedule, within its generation.
+    // `failsAt(n)`: whether the nth scan fails; the count is of every scan asked.
+    const scanFails = (fake: ReturnType<typeof scriptedHost>, failsAt: (n: number) => boolean) => {
+      const dispatch = fake.host.dispatch as ReturnType<typeof vi.fn>;
+      const answer = dispatch.getMockImplementation() as SourceHost['dispatch'];
+      let scans = 0;
+      dispatch.mockImplementation(async (...args: Parameters<SourceHost['dispatch']>) => {
+        if (args[1] !== 'fs.scan') return answer(...args);
+        scans += 1;
+        return failsAt(scans) ? { ok: false, error: ipcError('timeout', 'engine-host did not answer fs.scan within 10 s') } : answer(...args);
+      });
+      return () => scans;
+    };
+    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    it('a scan that fails once is asked again with no host transition, and discovery is then current and applied', async () => {
+      const fake = scriptedHost('starting');
+      const scans = scanFails(fake, (n) => n === 1);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const requeued = vi.spyOn(index.sessionSearch, 'retryFailures');
+      source = new IndexSessionSource(index, fake.host, { emit, tickMs: 5, scanRetryMs: [250] });
+      const applied = vi.fn();
+      source.onDiscoveryApplied(applied);
+      stop = source.start(recordingWriter().writer);
+      fake.setState('ready');
+      fake.stream();
+      await settle();
+      expect(scans()).toBe(1);
+      expect(source.discoveryApplied()).toBe(false);
+      await vi.waitFor(() => expect(source!.discoveryApplied()).toBe(true));
+      expect(scans()).toBe(2);
+      expect(source.discoveryCurrent(null)).toBe(true);
+      expect(applied).toHaveBeenCalledOnce();
+      expect(requeued, 'failed text stamps are requeued once a generation, not at each retry').toHaveBeenCalledOnce();
+    });
+
+    it('a scan that keeps failing is asked again only as often as the schedule says, and afresh at the next transition', async () => {
+      const fake = scriptedHost('starting');
+      const scans = scanFails(fake, (n) => n <= 3);
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      source = new IndexSessionSource(index, fake.host, { emit, tickMs: 5, scanRetryMs: [5, 5] });
+      stop = source.start(recordingWriter().writer);
+      fake.setState('ready');
+      fake.stream();
+      await vi.waitFor(() => expect(scans()).toBe(3));
+      await pause(100);
+      expect(scans(), 'the first ask and the schedule’s two').toBe(3);
+      expect(source.discoveryApplied()).toBe(false);
+      expect(errors).toHaveBeenCalledWith(expect.stringContaining('fs.scan failed 3 times'));
+      fake.setState('restarting');
+      fake.setState('ready');
+      fake.stream();
+      await vi.waitFor(() => expect(source!.discoveryApplied()).toBe(true));
+      expect(scans()).toBe(4);
+    });
+
+    it('a waiting retry asks nothing after a transition, after another sync’s scan answered, or after the stop', async () => {
+      const fake = scriptedHost('starting');
+      const scans = scanFails(fake, (n) => n !== 3);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      source = new IndexSessionSource(index, fake.host, { emit, tickMs: 5, scanRetryMs: [250, 250] });
+      stop = source.start(recordingWriter().writer);
+      fake.setState('ready');
+      fake.stream();
+      await settle(); // the 1st scan failed: its retry waits
+      expect(scans()).toBe(1);
+      fake.setState('restarting');
+      await pause(400);
+      expect(scans(), 'the transition dropped it: the next host’s streaming syncs').toBe(1);
+
+      fake.setState('ready');
+      fake.stream();
+      await settle(); // the 2nd failed: its retry waits
+      expect(scans()).toBe(2);
+      fake.stream(); // the same host streams again (no transition): the 3rd answers
+      await settle();
+      expect(source.discoveryApplied()).toBe(true);
+      await pause(400);
+      expect(scans(), 'the retry found a scan answered').toBe(3);
+
+      fake.setState('restarting');
+      fake.setState('ready');
+      fake.stream();
+      await settle(); // the 4th failed: its retry waits
+      expect(scans()).toBe(4);
+      stop!();
+      stop = null;
+      await pause(400);
+      expect(scans()).toBe(4);
+    });
   });
 
   it('stop unsubscribes from the host and the index', async () => {
