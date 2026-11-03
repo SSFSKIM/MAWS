@@ -219,6 +219,8 @@ export type FakeView = {
   input: { appSessionId: string; epoch: string; tabId: string; control: boolean };
   acks: number[];
   inputs: Array<[number, BrowserInput]>;
+  /** The next input's rejection, the subscription left as it is (an engine-side failure, or a refusal the producer does not also end it with). */
+  failInput: Error | null;
   /** Closed by its viewer (the endpoint), or ended by the producer. */
   closed: boolean;
   /** A frame of the tab to the viewer: `seq`, a JPEG of `jpegBytes`. */
@@ -285,6 +287,7 @@ export function fakeBrowser(services: FakeServices): {
         input: { ...input },
         acks: [],
         inputs: [],
+        failInput: null,
         closed: false,
         frame(seq, jpegBytes = 64) {
           const frame: BrowserFrame = { epoch: input.epoch, tabId: input.tabId, seq, capturedAt: seq * 100, width: 640, height: 400, viewport: { width: 1280, height: 800 }, jpeg: Uint8Array.from({ length: jpegBytes }, (_, i) => (i + seq) & 0xff) };
@@ -303,6 +306,9 @@ export function fakeBrowser(services: FakeServices): {
         input: async (seq, event) => {
           if (view.closed) throw new BrowserRefused('closed');
           if (!view.input.control) throw new BrowserRefused('read_only');
+          const failed = view.failInput;
+          view.failInput = null;
+          if (failed !== null) throw failed;
           view.inputs.push([seq, event]);
         },
         close: () => void (view.closed = true),

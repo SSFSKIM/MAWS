@@ -8,6 +8,7 @@
 import { randomBytes } from 'node:crypto';
 import { actionFingerprint, ScreencastFrameReader, type Action, type ScreencastFrame } from 'org-protocol';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { BrowserRefused } from '@shared/browser/screencast';
 import { OpLedger } from '@shared/host/op-ledger';
 import { BROWSER_WORDS, closeWord, refusalWord } from '../../src/endpoint/browser-words';
 import { BY_EFFECT, type EffectReads, type EffectRule } from '../../src/endpoint/by-effect';
@@ -314,6 +315,30 @@ describe('control', () => {
       [1, 'pointer'],
       [2, 'text'],
     ]);
+  });
+
+  it('logs an input the engine failed and keeps the stream, the next input going; closes with the word of a refusal the producer does not end it with', async () => {
+    const { f, browser } = await start();
+    session(f, 'app-1', ['@machine']);
+    tabs(browser, 'app-1');
+    const a = await openRemote(f, org.a1, org.A, { capabilities: CAPS });
+    const { action } = await grant(f, a, 'app-1', 'ep-1', false);
+    const { id } = await openView(a, { appSessionId: 'app-1', epoch: 'ep-1', tabId: TAB, control: { op: action.opId } });
+    const view = latest(browser);
+    // mawsd rejects an engine-side failure (a failed insertText) as a plain Error and keeps the subscription open.
+    view.failInput = new Error('insertText failed: the page navigated');
+    await control(a, id, { input: { seq: 1, event: { kind: 'text', text: 'lost' } } });
+    await until(() => f.services.lines.find((line) => line.includes('insertText failed')), 'the failed input logged');
+    await control(a, id, { input: { seq: 2, event: { kind: 'text', text: 'next' } } });
+    await until(() => view.inputs.length === 1 || undefined, 'the next input');
+    expect(view.inputs).toEqual([[2, { kind: 'text', text: 'next' }]]);
+    expect(closeOf(a, id)).toBeUndefined();
+    expect(view.closed).toBe(false);
+    // A refusal of the subscription itself that no `closed` follows: the stream ends with its word, the view let go.
+    view.failInput = new BrowserRefused('engine_changed');
+    await control(a, id, { input: { seq: 3, event: { kind: 'text', text: 'x' } } });
+    expect(await closed(a, id)).toBe('engine-changed');
+    expect(view.closed).toBe(true);
   });
 
   it('refuses a controlling open whose act is not this channel’s grant of this session and epoch `grade`, an unknown op `unknown`, a second controller `control-busy`', async () => {

@@ -18,7 +18,8 @@
 // `behind`. The device sends no data (`malformed`); its controls are `{ack: {seq}}` and, on a controlling stream only,
 // `{input: {seq, event}}`, each input passed on in order once the stream's decision stands (a re-check holds it; past the
 // feed's 32 waiting here, `input-overflow`). An input the feed finds out of shape (a point off the viewport the producer
-// moved meanwhile) is dropped and logged; any other refusal of it is the subscription's end, which closes the stream.
+// moved meanwhile) or the engine failed (a plain error; the subscription stays open) is dropped and logged; any other
+// refusal of it ends the stream with its word, whether or not the producer also ends the subscription.
 //
 // The end. The producer's (a closed tab, an engine change, a frame past the bound, …) closes the stream with its word
 // hyphenated (browser-words.ts; one this build doesn't know `producer-failed`, logged). The stream's own end, by its
@@ -39,11 +40,14 @@ export type BrowserPlaneDeps = {
   ledger(op: string): LedgerRead;
 };
 
-/** A refusal's word, read by its `reason` (the feed's BrowserRefused may be another chunk's class), else `producer_failed`. */
-const wordOf = (error: unknown): string => {
+/** A refusal's word, read by its `reason` (the feed's BrowserRefused may be another chunk's class); null for a plain error. */
+const reasonOf = (error: unknown): string | null => {
   const reason = typeof error === 'object' && error !== null ? (error as { reason?: unknown }).reason : undefined;
-  return typeof reason === 'string' ? reason : 'producer_failed';
+  return typeof reason === 'string' ? reason : null;
 };
+/** A refusal's word, else `producer_failed`. */
+const wordOf = (error: unknown): string => reasonOf(error) ?? 'producer_failed';
+const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 export function browserPlane(deps: BrowserPlaneDeps): ReadPlane {
   return async (opening) => {
@@ -187,10 +191,22 @@ class BrowserStream extends Stream {
       while (!this.ended && (this.held || !this.stands())) await this.gate;
       this.#waiting--;
       if (this.ended) return;
-      this.subscription.input(seq, event as Parameters<BrowserSubscription['input']>[1]).catch((error: unknown) => {
-        if (wordOf(error) === 'invalid') this.#log(`endpoint: a screencast's input ${seq} was dropped: ${(error as Error).message}`);
-      });
+      this.subscription.input(seq, event as Parameters<BrowserSubscription['input']>[1]).catch((error: unknown) => this.#inputFailed(seq, error));
     });
+  }
+
+  /**
+   * An input the feed rejected. Out of shape (`invalid`: a point off a viewport the producer moved) or failed in the engine
+   * (a plain error: mawsd keeps the subscription open), it is dropped, logged, and the stream goes on. Any other word is
+   * the subscription's own refusal (`closed`, `engine_changed`, `input_overflow`, …), which the producer may or may not
+   * also end it with: the stream ends with that word here (a second end is nothing).
+   */
+  #inputFailed(seq: number, error: unknown): void {
+    const word = reasonOf(error);
+    if (word === null || word === 'invalid') return this.#log(`endpoint: a screencast's input ${seq} was dropped (${word ?? 'the engine failed it'}): ${messageOf(error)}`);
+    if (this.ended) return;
+    this.#log(`endpoint: a screencast's input ${seq} was refused (${word}): ${messageOf(error)}`);
+    this.producerClosed(word);
   }
 
   closedByDevice(): void {

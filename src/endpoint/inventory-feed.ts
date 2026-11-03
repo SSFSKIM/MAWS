@@ -7,7 +7,8 @@
 // Every opening is `subbed {mode: 'snapshot', epoch: 'browser.inventory:<this endpoint's boot>', seq: 0}` and a `snap` of
 // the session's BrowserInventory; each later change is `ev {body: BrowserInventory}` at the next `seq`, a complete
 // inventory, so the device keeps only the latest. Each carries the route's epoch, which a screencast open names. The
-// feed ends `behind` when the device leaves more than its backlog unread, and the device opens it again.
+// feed ends `behind` once the device leaves more than its backlog unread (checked as each inventory is queued, the
+// snapshot included), and the device opens it again.
 import { randomBytes } from 'node:crypto';
 import { BACKLOG_BYTES } from '@shared/host/stream-catchup';
 import type { BrowserFeed } from '@shared/browser/screencast';
@@ -38,15 +39,20 @@ export class InventoryFeeds {
     let snapped = false;
     sub.subbed('snapshot', at);
     // The watch answers the current inventory at once (the snapshot), then each change.
+    const bound = this.#ctx.backlogBytes ?? BACKLOG_BYTES;
     const unwatch = browser.watchInventory(sub.session.id as AppSessionId, (inventory) => {
       if (sub.ended) return;
       if (!snapped) {
         snapped = true;
-        return sub.snap(at, inventory);
+        sub.snap(at, inventory);
+      } else sub.ev({ epoch: this.#epoch, seq: ++seq }, inventory);
+      // Checked once queued, so the inventory that crosses the bound ends the feed whether or not another follows.
+      if (sub.backlog > bound) {
+        sub.end('behind');
+        this.close(sub);
       }
-      if (sub.backlog > (this.#ctx.backlogBytes ?? BACKLOG_BYTES)) return void sub.end('behind');
-      sub.ev({ epoch: this.#epoch, seq: ++seq }, inventory);
     });
+    // The watch answers the snapshot before it returns: a feed it ended lets go of the watch here.
     if (sub.ended) return unwatch();
     this.#open.set(sub, unwatch);
   }

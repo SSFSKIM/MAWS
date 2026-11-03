@@ -27,9 +27,10 @@ export const SCREENCAST_BACKLOG_BYTES = SCREENCAST_FRAME_MAX + 4 * 1024;
 /**
  * Why a `browser.screencast` stream closes: its tab closed, its epoch's tab engine changed, a frame past the bound, the
  * tab's view gone, the producer failed, its control revoked (view kept), its input queue overflowed, its view revoked
- * (`removed`), its channel lost (`carrier`), or closed by its own side.
+ * (`removed`), past one frame plus 4 KiB left unread by its device (`behind`), its channel lost (`carrier`), or closed by
+ * its own side.
  */
-export const SCREENCAST_CLOSES = ['tab-closed', 'engine-changed', 'frame-too-large', 'view-gone', 'producer-failed', 'control-revoked', 'input-overflow', 'removed', 'carrier', 'closed'] as const;
+export const SCREENCAST_CLOSES = ['tab-closed', 'engine-changed', 'frame-too-large', 'view-gone', 'producer-failed', 'control-revoked', 'input-overflow', 'removed', 'behind', 'carrier', 'closed'] as const;
 export type ScreencastClose = (typeof SCREENCAST_CLOSES)[number];
 
 /** One frame: `epoch` is `mawsd`'s for the session's route, `capturedAt` the source's monotonic ms, `viewport` the tab's input coordinates. */

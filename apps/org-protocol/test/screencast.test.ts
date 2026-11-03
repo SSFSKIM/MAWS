@@ -71,7 +71,7 @@ describe('the bounds', () => {
   });
 
   it('closes with hyphenated words only, as RL2’s are', () => {
-    expect([...SCREENCAST_CLOSES]).toEqual(['tab-closed', 'engine-changed', 'frame-too-large', 'view-gone', 'producer-failed', 'control-revoked', 'input-overflow', 'removed', 'carrier', 'closed']);
+    expect([...SCREENCAST_CLOSES]).toEqual(['tab-closed', 'engine-changed', 'frame-too-large', 'view-gone', 'producer-failed', 'control-revoked', 'input-overflow', 'removed', 'behind', 'carrier', 'closed']);
     for (const word of SCREENCAST_CLOSES) expect(word).toMatch(/^[a-z]+(-[a-z]+)*$/);
   });
 });
