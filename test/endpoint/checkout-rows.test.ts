@@ -126,7 +126,7 @@ describe('the checkout’s offer rows (M4)', () => {
     for (const name of Object.keys(ACTS)) expect([name, OFFERS.commands[name]]).toEqual([name, { kind: 'act', executor: 'machine', target: 'appSessionId' }]);
     expect(OFFERS.commands['session.spawn']).toEqual({ kind: 'act', executor: 'machine', target: 'machine' });
     expect(OFFERS.commands['session.projects.list']).toEqual({ kind: 'call', executor: 'machine', target: 'machine' });
-    expect(OFFERS.feeds).toEqual(['checkout', 'attention', 'artifacts']); // P5 O7 M6's `attention`, M5a's `artifacts` (feeds.test.ts)
+    expect(OFFERS.feeds).toEqual(['checkout', 'attention', 'artifacts', 'browser.inventory']); // P5 O7 M6's `attention`, M5a's `artifacts` (feeds.test.ts); P5 O17 M9a's `browser.inventory` (browser-screencast.test.ts)
   });
 
   it('leave unoffered what the spec keeps local or for later', () => {
