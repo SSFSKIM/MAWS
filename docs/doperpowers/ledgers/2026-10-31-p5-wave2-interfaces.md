@@ -183,6 +183,13 @@
 | `WIRE_MINOR` 22: `delivery.send` retagged machine, the `callback` field on `connectors.connect`, `reconnect` and `signIn`, `connectors.callback`, `machine.delivery`, `connectors.serversChanged`'s `ended` | wire (`src/shared/ipc`) | O7 | O17 (#450 re-bumps to 23 at its landing) |
 | `ASSET_HOLDS_KEPT` (256 a channel), `ACQUIRE_WITHIN_MS` (8 s) and `ACQUIRE_MARGIN_MS` (2 s) with `within()`, `Executors.actRefused` | the endpoint (`src/endpoint/asset-holds.ts`, `acquire.ts`) | O7 | any later child adding a peer-held resource on the endpoint |
 | the replay seam's e2e-only `live` entry (a real engine started with no message, under `MAWS_E2E`) | `src/services/sessions/replay-seam.ts` | O7 | e2e scenes that need a live observer |
+| `WIRE_MINOR` 23: O17's `browser.engine` and `host.browserWork` capabilities, the `browserEngine` namespace, `host.browserWork` and `host.browserIdle`, re-bumped past O7 M5c's 22 (the manifest regenerated from master's) | wire (`src/shared/ipc`) | O17 | any later wire child appends after it |
+| `HostClientHooks.onDeclaringHello(hook)`, each declaring client's pid as its hello gave it | `src/shared/host/runtime.ts` | O17 M7 | the engine host's browser work (the producer's liveness) |
+| `ProcessTable.onBrowserIdleDue`, `.onBrowserCheck` and `.browserIdleWaiting`; `IdleRelease.browserWaiting`; `BrowserWorkOptions.processes` and `.spawner`; `BrowserWorkSessions` | `src/engine-host/process-table.ts`, `idle-release.ts`, `browser-work.ts` | O17 M7 | any later child that holds a session for work outside the engine |
+| `spawnerProcess`, `takeSpawnedByMawsd` and `ENGINE_HOST_SPAWNER_ENV` (`MAWS_ENGINE_HOST_SPAWNER`, set by `mawsd`'s spawn of the engine host and read and deleted at its start, under R4's scope exception) | `src/engine-host/spawner.ts` | O17 M7 | `mawsd`'s engine-host spawn, beside #452's `requestBudgetsMs` |
+| `TabClaims.beforeNextLease(tabId, done)` and `.awaitedByNextLease(tabId)`, `CuaBackend.beforeNextLease`; `OffscreenViews.place` and the tab engine's views' `place` return the sizing promise; the log line `[browser] the adopted popup <tabId>'s page could not be sized to the viewport: <message>` | `src/main/browser/cua/claims.ts` and `index.ts`, `src/render-host/offscreen-views.ts` and `tab-engine.ts` | O17 M7 (the panel's fix 8) | the render host's tab engine |
+| `SCREENCAST_HELD_KEYS` (16, the key-downs held through repeats to their release) | `src/main/browser/screencast.ts` | O17 (the panel's fix wave) | the screencast's injected input |
+| a fact, not a name: on O16's tree the first message on a fresh engine-host link is the detached transport's `host.supervisorStatus` probe (`probeStatus`), not the client's first command | the engine-host link | O16 | anything that counts or orders a link's first messages |
 
 ## Shared files and who goes first
 
@@ -282,3 +289,4 @@
 - 2026-11-02, the architect: O7 M7 landed as code (PR #451, P5 Decision Log 204); its names added above.
 - 2026-11-02, the architect: O16's veto fix and gate and reap wave landed (PRs #448 and #449, P5 Decision Log 205); their names added above.
 - 2026-11-03, the architect: O7 M5c's names at its landing (PR #454, Decision Log 207).
+- 2026-11-03, the architect: O17's landing names (PR #450, P5 Decision Log 209).
