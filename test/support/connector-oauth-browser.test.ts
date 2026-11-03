@@ -111,6 +111,24 @@ describe('following an authorization', () => {
     expect(JSON.stringify(followed)).not.toMatch(/secret/);
   });
 
+  // P5 O7 M5c: the advertised authorization origin (an https URL, never a loopback one, since another machine's consent
+  // is opened here) routed to the fixture's own `/authorize`, as a hosts entry would route it
+  it('follows an authorization opened at the advertised origin by asking the fixture’s own /authorize, and nothing else there', async () => {
+    const AT = 'https://authorize.invalid';
+    const advertised = authorizeUrl().replace(`${ORIGIN}/authorize`, `${AT}/authorize`);
+    const h = harness({ lines: [`openExternal ${advertised}`] });
+    const followed = await followAuthorization({ openLog: '/scratch/open.log', afterOpens: 0, origin: ORIGIN, authorizeAt: AT, timeoutMs: 1_000 }, h.deps);
+    expect(h.fetched.map((f) => f.url)).toEqual([authorizeUrl(), `${REDIRECT}?code=secret-code&state=secret-state&iss=${encodeURIComponent(ORIGIN)}`]);
+    expect(followed).toMatchObject({ authorizeStatus: 302, outcome: 'code', callbackPort: 52000, callbackStatus: 200 });
+    // the fixture's own loopback URL, or another https origin, is not the advertised one
+    for (const opened of [authorizeUrl(), advertised.replace(AT, 'https://elsewhere.invalid')]) {
+      const other = harness({ lines: [`openExternal ${opened}`] });
+      await expect(followAuthorization({ openLog: '/scratch/open.log', afterOpens: 0, origin: ORIGIN, authorizeAt: AT, timeoutMs: 1_000 }, other.deps)).rejects.toMatchObject({ reason: 'notFixtureAuthorization' });
+      expect(other.fetched).toEqual([]);
+    }
+    expect(countAuthorizationOpens(`openExternal ${advertised}\n`, ORIGIN, AT)).toBe(1);
+  });
+
   it('reports an error redirect as such, still delivering it to the callback', async () => {
     const h = harness({ lines: [`openExternal ${authorizeUrl()}`], location: `${REDIRECT}?error=access_denied&state=secret-state`, callbackStatus: 400 });
     expect(await follow(h.deps)).toMatchObject({ outcome: 'error', callbackStatus: 400 });

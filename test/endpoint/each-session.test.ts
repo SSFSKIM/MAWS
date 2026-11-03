@@ -15,6 +15,7 @@ async function search(oldHeldAfterSearch: boolean): Promise<{ answer: Answer; na
     current: () => true,
     holds: (placement: Placement) => placement !== null && (placement.target.session === 'new' || (placement.target.session === 'old' && oldHeld)),
     ownsMachine: () => false,
+    holdsRight: () => false,
   };
   let narrowed: unknown;
   const dispatch = async (_owner: string, name: string, input: unknown) => {

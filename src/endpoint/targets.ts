@@ -33,6 +33,13 @@
 // that can't answer leaves the artifact `unavailable`, as it leaves every lane B session (the machine's condition, not
 // the artifact's). An artifact `library.entry` answers null for is `unknown` (`grade`, as an unknown session). The
 // member's standing on it is artifacts.ts' (`holdsArtifact`), cached per channel there (`ArtifactRanks`).
+//
+// P5 O7 M5c (M5 "O4's surfaces: the grade"): a page's lease and a Send to's run name their artifact only once: the lease
+// at `connectors.open {artifactId}`, the run at `delivery.send {runId, artifactId}`. The asking channel's own table
+// (`HeldNames`, leases.ts) reads the rest: a lease command by its `leaseId`, a lease the channel doesn't hold being
+// `unknown` (`grade`, as an artifact or a session nobody can be told of); `delivery.cancel` by its `runId`, a run the
+// channel didn't send being `no-target` (M5c review 1: a send it sent that is still being decided places its cancel on
+// the artifact the send names, and the cancel waits on it, actions.ts).
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, sep } from 'node:path';
 import type { Action, SessionRef } from 'org-protocol';
@@ -72,7 +79,16 @@ export const ORPHAN: Extract<Resolved, { kind: 'artifact' }> = { kind: 'artifact
  * What the `artifact` rule reads of a command's input: the artifact, the session a listing names, or the orphan form.
  * Null: nothing it can read (`no-target`).
  */
-export type ArtifactKey = { artifactId: string } | { appSessionId: string } | { orphan: true };
+export type ArtifactKey = { artifactId: string } | { appSessionId: string } | { orphan: true } | { unknown: true };
+
+/**
+ * P5 O7 M5c: the artifact of a lease or a run the asking channel holds (leases.ts), a run reserved or its send still
+ * pending; null for one it doesn't.
+ */
+export type HeldNames = { lease(leaseId: string): string | null; run(runId: string): string | null };
+
+/** P5 O7 M5c: the page lease's commands that name their lease, not their artifact (`connectors.open` names the artifact). */
+export const LEASE_COMMANDS: ReadonlySet<string> = new Set(['connectors.declare', 'connectors.call', 'connectors.watch', 'connectors.unwatch', 'connectors.refresh', 'connectors.visibility', 'connectors.close']);
 
 /** P5 O12 M11: the spine record's `launchedBy`, as far as the bridge reads it: the member who spawned the session. */
 export type Spawner = Pick<LaunchedBy, 'member'>;
@@ -85,7 +101,7 @@ export type Spawner = Pick<LaunchedBy, 'member'>;
  * P5 O7 M5a: `artifact`, how the `artifact` rule places an artifact by its id (the asking channel's cache, artifacts.ts);
  * absent, `placeArtifact` reads it afresh.
  */
-export type Placing = { dispatch: EndpointServices['dispatch']; log(line: string): void; live?: boolean; artifact?(artifactId: string): Promise<Resolved> };
+export type Placing = { dispatch: EndpointServices['dispatch']; log(line: string): void; live?: boolean; artifact?(artifactId: string): Promise<Resolved>; held?: HeldNames };
 
 const isId = (value: unknown): value is string => typeof value === 'string' && value !== '' && value.length <= 512;
 const field = (input: unknown, name: string): unknown => (typeof input === 'object' && input !== null ? (input as Record<string, unknown>)[name] : undefined);
@@ -99,9 +115,10 @@ export async function resolveTarget(rule: TargetRule, input: unknown, action: Ac
   if (rule === 'artifact') {
     // An artifact act names no session (the third act shape): one that does is about something else.
     if (action?.session !== undefined) return { kind: 'refused', reason: 'malformed' };
-    const key = artifactKey(name ?? '', input);
+    const key = artifactKey(name ?? '', input, placing.held);
     if (key === null) return { kind: 'refused', reason: 'no-target' };
     if ('orphan' in key) return ORPHAN;
+    if ('unknown' in key) return { kind: 'unknown' };
     if ('appSessionId' in key) return laneB(key.appSessionId, placing);
     return (placing.artifact ?? ((id) => placeArtifact(id, placing)))(key.artifactId);
   }
@@ -167,7 +184,18 @@ async function laneB(appSessionId: string, { dispatch, log, live = true }: Placi
  * listing with none is `no-target`: `library.list` is the library's listing); `copyAsset` its `to` (the write; its `from`
  * is by-effect.ts'); `create` and a `pruneVersions` with no `artifactId` the orphan form; anything else its `artifactId`.
  */
-export function artifactKey(name: string, input: unknown): ArtifactKey | null {
+export function artifactKey(name: string, input: unknown, held?: HeldNames): ArtifactKey | null {
+  // P5 O7 M5c: a lease's or a run's artifact, as the asking channel's table holds it.
+  if (LEASE_COMMANDS.has(name)) {
+    const leaseId = field(input, 'leaseId');
+    const artifactId = isId(leaseId) ? (held?.lease(leaseId) ?? null) : null;
+    return artifactId === null ? { unknown: true } : { artifactId };
+  }
+  if (name === 'delivery.cancel') {
+    const runId = field(input, 'runId');
+    const artifactId = isId(runId) ? (held?.run(runId) ?? null) : null;
+    return artifactId === null ? null : { artifactId };
+  }
   // P5 O7 M5b: an `http` read open names its artifact by its URL (its fields already held to the scheme's shape).
   if (name === 'artifacts.fetch') {
     const url = field(input, 'url');
@@ -190,11 +218,12 @@ export function artifactKey(name: string, input: unknown): ArtifactKey | null {
  * (`artifacts.list {filter: {appSessionId}}`): that is the session's, placed and ranked as for anyone (the milestone
  * review: owning the machine is not viewing a member's private session, and an id is never a capability).
  */
-export function artifactShortCut(name: string, input: unknown, action: Action | undefined): Resolved | null {
+export function artifactShortCut(name: string, input: unknown, action: Action | undefined, held?: HeldNames): Resolved | null {
   if (action?.session !== undefined) return { kind: 'refused', reason: 'malformed' };
-  const key = artifactKey(name, input);
+  const key = artifactKey(name, input, held);
   if (key === null) return { kind: 'refused', reason: 'no-target' };
   if ('orphan' in key) return ORPHAN;
+  if ('unknown' in key) return { kind: 'unknown' };
   if ('appSessionId' in key) return null;
   return { kind: 'artifact', artifactId: key.artifactId, sessions: [], orphan: false, linked: [] };
 }

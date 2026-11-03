@@ -74,6 +74,8 @@ export interface RemoteArtifactsDeps {
   onRemote(listener: (machines: readonly MachineRef[]) => void): () => void;
   emit<N extends EventName>(machine: MachineRef, name: N, payload: EventPayload<N>): void;
   machines: ArtifactMachines;
+  /** P5 O7 M5c: the `artifacts` feed's events as they are said (./remote-artifact-feed.ts). */
+  heard?(machine: MachineRef, name: string, payload: unknown): void;
   /** The adapter's pending bound (./remote.ts's `bounded`): the outcome, or `pending` at the deadline once a copy went out. */
   bounded(handle: ActHandle, deadline: number): Promise<ActOutcome | 'pending'>;
   pendingMs: number;
@@ -112,7 +114,7 @@ const idOf = (value: unknown): string | null => (isObject(value) && typeof value
 
 export function createRemoteArtifacts(deps: RemoteArtifactsDeps): RemoteArtifacts {
   const tempDir = deps.tempDir ?? tmpdir;
-  const feed = createRemoteArtifactFeed({ remote: deps.remote, onRemote: deps.onRemote, emit: deps.emit, machines: deps.machines, retryMs: deps.feedRetryMs, log: deps.log });
+  const feed = createRemoteArtifactFeed({ remote: deps.remote, onRemote: deps.onRemote, emit: deps.emit, machines: deps.machines, ...(deps.heard !== undefined && { heard: deps.heard }), retryMs: deps.feedRetryMs, log: deps.log });
   const scheme = createRemoteScheme({ machines: deps.machines, remote: deps.remote, log: deps.log }); // P5 O7 M5b
   const documents = deps.docChannel === undefined ? null : createRemoteDocuments({ channel: deps.docChannel, openMs: deps.documentOpenMs ?? DOCUMENT_OPEN_MS, log: deps.log }); // P5 O7 M5b
 

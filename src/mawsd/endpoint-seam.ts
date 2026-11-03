@@ -22,6 +22,7 @@ import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { MachineRef } from '@shared/machine/ref';
 import { enrollmentOnDisk, unloadedAnswer, UNENROLLED_STATUS } from '../endpoint/presence';
 import type { CheckoutSource } from '../endpoint/index';
+import type { PortTarget, RemotePortHandle } from './client-port';
 
 export const ENDPOINT_STOP_MS = 2_500;
 // `daemon.endpoint`'s answer while there is no module (a daemon a test starts with none), `{code: 2, out:
@@ -56,6 +57,9 @@ export interface DaemonServices {
   // artifacts.sock serves it (the status, the scheme's headers, the bytes), its handler loaded at the first use; for
   // O7 M5's RL2 kind, graded by O10 as `view` on the artifact's session
   artifacts: { fetch(request: { url: string; method: 'GET' | 'HEAD'; range?: string }): Promise<{ status: number; headers: Record<string, string>; body: ReadableStream<Uint8Array> | null }> };
+  // P5 O7 M5c (O7's §T): the client port's remote targets: the endpoint registers one per channel's ref at admission, which
+  // the services front's `route` consults after its own connections; the handle answers and closes it (client-port.ts)
+  clientPort: { serve(ref: ClientRef, target: PortTarget): RemotePortHandle };
   log(line: string): void;
 }
 

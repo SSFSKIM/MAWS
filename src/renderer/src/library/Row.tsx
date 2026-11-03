@@ -18,6 +18,7 @@ import { RowContextMenu, RowMenu } from './RowMenu';
 import { setLibraryView, showSpace } from './view';
 import { SEND_TO_COPY } from '../delivery/copy'; // P4-B5
 import { latestReceipt, useDelivery } from '../delivery/store'; // P4-B5
+import { useArtifactMachine } from '../artifacts/use-artifact-machine'; // P5 O7 M5c
 import { ipc } from '../ipc/client'; // P4-B5
 
 const SHOWN_SESSIONS = 3;
@@ -78,7 +79,8 @@ const Dot = () => (
 // P4-B5: the row's receipt of the latest Send to (main's, this main's life): "Sent to Notion · 2 minutes ago", opening
 // the delivery where the service named one.
 function Receipt({ artifactId, now, tabIndex }: { artifactId: string; now: number; tabIndex: number }) {
-  const receipt = useDelivery((s) => latestReceipt(s, artifactId));
+  const machine = useArtifactMachine(artifactId); // P5 O7 M5c: the receipts of the row's machine
+  const receipt = useDelivery((s) => latestReceipt(s, artifactId, machine));
   if (!receipt) return null;
   const words = `${SEND_TO_COPY.actionSent(receipt.target)} · ${formatAgo(Math.max(0, now - receipt.at))}`;
   return (

@@ -58,6 +58,9 @@ import { importSigningKey, isListingGone, stateHash, type MachineIdentity, type 
 import { ArtifactRanks } from './artifacts';
 import { Authorizer, type AuthorizeContext } from './authorize';
 import { Calls } from './calls';
+import { ClientPorts } from './client-port';
+import { AssetHolds } from './asset-holds';
+import { Leases } from './leases';
 import { ENDPOINT_CAPABILITIES } from './capabilities';
 import { Channels } from './channels';
 import { DirectListener, type DirectListenerOptions } from './direct-listener';
@@ -115,6 +118,8 @@ export type EndpointOptions = {
   projects?: CheckoutSource;
   /** The suites' seams for subscriptions: the resume window, lane A's ring and the unsent stream's bound. */
   subscriptions?: { resumeMs?: number; ringBytes?: number; backlogBytes?: number; recheckRetryMs?: readonly number[]; transmitDeadlineMs?: number };
+  /** P5 O7 M5c review 1: the suites' seam for a remote acquisition's bound (acquire.ts' ACQUIRE_WITHIN_MS). */
+  acquireWithinMs?: number;
 };
 
 /** The whole handshake of a direct connection is this long at most (M4). */
@@ -170,6 +175,12 @@ export class Endpoint implements EndpointModule {
   readonly interest: Interest;
   /** Remote reads (M8). */
   readonly calls: Calls;
+  /** P5 O7 M5c: the client port across each channel (client-port.ts). */
+  readonly clientPorts: ClientPorts;
+  /** P5 O7 M5c: each channel's connector leases and Send to runs, re-authorized while they live (leases.ts). */
+  readonly leases: Leases;
+  /** P5 O7 M5c round 3: each channel's snapshot holds of a remote dashboard, re-authorized while they live (asset-holds.ts). */
+  readonly assetHolds: AssetHolds;
   /** What `start` subscribed to on mawsd's seam, let go at `stop`. */
   readonly #unseam: Array<() => void> = [];
   readonly #options: EndpointOptions;
@@ -310,10 +321,13 @@ export class Endpoint implements EndpointModule {
       now: this.deps.now,
       pingMs: options.pingMs,
       refreshed: () => {
+        this.planeFeeds.rightsMoved(); // P5 O7 M5c: the `artifacts` feeds' rights (an owner's sheet's events) read again
         this.artifactRanks.clear(); // P5 O7 M5a: a `caps` refresh drops every artifact placement
         this.streams.recheck();
       },
+      admitted: (channel) => this.clientPorts.admit(channel), // P5 O7 M5c
     });
+    this.clientPorts = new ClientPorts({ services: () => this.#services, log });
     this.hub.setChannels(this.channels.relay(this.hub));
     const authorization = options.authorization ?? {};
     this.checkouts = authorization.checkouts ?? (options.projects === undefined ? this.rl10.members : anyCheckout(this.rl10.members, options.projects));
@@ -330,6 +344,7 @@ export class Endpoint implements EndpointModule {
       checkouts: this.checkouts,
       checkoutBounds: this.checkoutBounds,
       artifacts: this.artifactRanks,
+      leases: { lease: (client, leaseId) => this.leases.lease(client, leaseId), run: (client, runId) => this.leases.run(client, runId) }, // P5 O7 M5c
       dispatch: (...request) => {
         if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
         return this.#services.dispatch(...request);
@@ -351,6 +366,22 @@ export class Endpoint implements EndpointModule {
       if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
       return this.#services.dispatch(...request);
     };
+    this.leases = new Leases({
+      authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
+      dispatch,
+      artifacts: this.artifactRanks,
+      now: this.deps.now,
+      log,
+      recheckRetryMs: options.subscriptions?.recheckRetryMs,
+    });
+    this.assetHolds = new AssetHolds({
+      authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
+      dispatch,
+      artifacts: this.artifactRanks,
+      now: this.deps.now,
+      log,
+      recheckRetryMs: options.subscriptions?.recheckRetryMs,
+    });
     this.own = new EndpointActions({
       stateDir: () => {
         if (this.#services === null) throw new Error('the endpoint has not started');
@@ -382,6 +413,7 @@ export class Endpoint implements EndpointModule {
       hold: (reason) => this.#services?.hold(reason) ?? (() => {}),
       engineHostLedger: (closed) => (this.#engineHostLedger = closed),
       offers: authorization.offers,
+      leases: this.leases, // P5 O7 M5c
       now: this.deps.now,
       log,
     });
@@ -442,7 +474,7 @@ export class Endpoint implements EndpointModule {
       resumeMs: seams.resumeMs,
     });
     this.planeB = new PlaneB({ dispatch, log, backlogBytes: seams.backlogBytes });
-    this.planeFeeds = new PlaneFeeds({ dispatch, bounds: this.checkoutBounds, ranks: (member) => this.authorizer.ranks(member, this.deps.now()), artifacts: this.artifactRanks, log, backlogBytes: seams.backlogBytes });
+    this.planeFeeds = new PlaneFeeds({ dispatch, bounds: this.checkoutBounds, ranks: (member) => this.authorizer.ranks(member, this.deps.now()), artifacts: this.artifactRanks, leases: this.leases, log, backlogBytes: seams.backlogBytes });
     this.rl10.onSession((message) => this.planeA.message(message));
     this.rl10.onPending((project, raised) => this.planeA.pendingSet(project, raised));
     this.rl10.onLink((connected) => connected || this.planeA.linkLost());
@@ -478,14 +510,20 @@ export class Endpoint implements EndpointModule {
       recordFor: (report) => this.listings.recordFor(report),
       ranks: (member) => this.authorizer.ranks(member, this.deps.now()),
       sessionSafe,
+      leases: this.leases, // P5 O7 M5c
+      artifacts: this.artifactRanks,
+      assetHolds: this.assetHolds, // P5 O7 M5c round 3
       offers: authorization.offers,
+      now: this.deps.now, // P5 O7 M5c review 1: an acquisition's bound, on the gate's clock
+      ...(options.acquireWithinMs === undefined ? {} : { acquireWithinMs: options.acquireWithinMs }),
       log,
     });
     this.gate.setExecutors({
       act: (channel, m, decision) => this.actions.execute(channel, m, decision),
-      call: (channel, m) => this.calls.execute(channel, m),
+      call: (channel, m, decision) => this.calls.execute(channel, m, decision),
       sub: (channel, m, decision) => this.subscriptions.start(channel, m, decision),
       subRefused: (channel, m, reason) => this.subscriptions.refused(channel, m, reason),
+      actRefused: (channel, m, reason) => this.actions.refused(channel, m, reason), // P5 O7 M5c review 1
     });
     const { sub: gatedSub, ...gated } = this.gate.routes();
     this.channels.setRoutes({
@@ -496,6 +534,7 @@ export class Endpoint implements EndpointModule {
       credit: (channel, m) => this.subscriptions.credit(channel, m),
       unsub: (channel, m) => this.subscriptions.unsub(channel, m),
       stream: (channel, m) => this.streams.receive(channel, m),
+      clientAnswer: (channel, m) => this.clientPorts.answer(channel, m), // P5 O7 M5c
     });
   }
 
@@ -535,7 +574,8 @@ export class Endpoint implements EndpointModule {
       services.documents.onClosed((channel, reason) => this.streams.documentClosed(channel, reason)),
       services.onAttachment((attached) => this.planeB.attachment(attached)),
       services.onUpstream((link) => {
-        if (!link.connected) return;
+        if (!link.connected) return this.assetHolds.upstreamLost(); // P5 O7 M5c round 3: the host released its connection's holds
+
         this.laneB.restate();
         this.planeB.relinked(); // P5 O3-D D41: each streaming of the link, every subscription catches up from its cursor
       }),
@@ -578,6 +618,8 @@ export class Endpoint implements EndpointModule {
     this.subscriptions.stop();
     this.streams.stop();
     this.forwards.stop();
+    this.leases.stop(); // P5 O7 M5c
+    this.assetHolds.stop(); // P5 O7 M5c round 3: every snapshot hold released on the engine host
     for (const off of this.#unseam.splice(0)) off();
     // Each channel's sealed `restart` goes out before the carriers end: the hub link and the listener close after.
     await this.channels.closeAll('restart');

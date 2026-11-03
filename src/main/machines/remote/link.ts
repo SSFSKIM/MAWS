@@ -82,6 +82,18 @@ export interface RemoteLink extends MachineLink {
   /** The permanent verdict holding it `refused`, else null. */
   refusal(): string | null;
   /**
+   * P5 O7 M5c: the machine's client-port requests (`client`, sent only to a device that listed `rl2.client-port`): each
+   * goes to the listeners with its `answer`, which sends one `clientAnswer` on the channel that asked and nothing once that
+   * channel ended (the endpoint settles its pending requests `noClient` at the channel's end). With no listener the link
+   * answers `{noClient: true}` at once.
+   */
+  onClient(listener: (request: ClientRequest, answer: (answer: unknown) => void) => void): () => void;
+  /**
+   * P5 O7 M5c: each channel's own life as it happens: `current` when one becomes current, `lost` when it ends (a loss, the
+   * relay-to-direct swap, a refusal or `close()`), which `onState` doesn't say through the grace's `up`.
+   */
+  onChannel(listener: (event: 'current' | 'lost') => void): () => void;
+  /**
    * P5 O7 M3: the link's end, heard on `onState`: `closed` once `close()` ran (for good), `removed` while a sealed
    * `removed` holds it refused (until the session changes or a person acts on the machine); null while it lives.
    */
@@ -148,7 +160,14 @@ const PING_ANSWER_MS = 5_000;
 export const PINGS_PENDING_MAX = 16;
 
 export type CallResult = ({ ok: true; output: unknown } | { ok: false; error: { code: string; message?: string } }) & { fellBack?: true };
-export type CallOptions = { timeoutMs?: number; session?: SessionRef; lacking?: { capability: string; input: unknown } };
+/**
+ * `oneChannel` (P5 O7 M5c): a call that names what only one channel holds (a page's lease, the channel's window report) is
+ * sent only on the channel current when it was made: with none current it fails `offline` at once, and it fails
+ * `offline` at that channel's end, never carried to the next one.
+ */
+export type CallOptions = { timeoutMs?: number; session?: SessionRef; lacking?: { capability: string; input: unknown }; oneChannel?: true };
+/** P5 O7 M5c: a machine service's request of this device through the client port (`client`; `src/shared/client/port.ts`'s kinds). */
+export type ClientRequest = { id: string; kind: string; request: unknown };
 
 export interface RemoteLinkDeps {
   machine: { ref: MachineRef; name: string };
@@ -174,7 +193,10 @@ type Internal = 'connecting' | 'up' | 'reconnecting' | 'down' | 'refused' | 'clo
 type Trust = { generation: number; keys: string[]; identity: string };
 type Current = { channel: Channel; carrier: Carrier; serial: number; trust: Trust };
 type Attempt = { channel: Channel; carrier: Carrier; trust: Trust } | { failed: string };
-type PendingCall = { id: string; name: string; input: unknown; session: SessionRef | undefined; lacking: CallOptions['lacking']; fellBack: boolean; sentOn: number | null; timer: ReturnType<typeof setTimeout>; resolve(result: CallResult): void };
+type PendingCall = { id: string; name: string; input: unknown; session: SessionRef | undefined; lacking: CallOptions['lacking']; oneChannel: boolean; fellBack: boolean; sentOn: number | null; timer: ReturnType<typeof setTimeout>; resolve(result: CallResult): void };
+
+/** P5 O7 M5c: the client port's answer when this device performs nothing (`src/shared/client/port.ts`'s `NO_CLIENT`). */
+const NO_CLIENT_ANSWER = { noClient: true } as const;
 
 const REPORTED: Record<Internal, LinkState> = { connecting: 'connecting', up: 'up', reconnecting: 'up', down: 'down', refused: 'down', closed: 'down' };
 
@@ -264,6 +286,11 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   const calls = new Map<string, PendingCall>();
   const stateListeners = new Set<(state: LinkState) => void>();
   const capsListeners = new Set<(caps: DeviceCaps) => void>();
+  const clientListeners = new Set<(request: ClientRequest, answer: (answer: unknown) => void) => void>();
+  const channelListeners = new Set<(event: 'current' | 'lost') => void>();
+  const channelSaid = (event: 'current' | 'lost'): void => {
+    for (const listener of [...channelListeners]) listener(event);
+  };
   let skippedRecord: string | null = null;
 
   const isCurrent = () => current !== null && (state === 'up' || state === 'reconnecting');
@@ -503,6 +530,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     subs.onCurrent();
     streams.onCurrent();
     flushCalls();
+    channelSaid('current'); // P5 O7 M5c
     if (result.carrier === 'direct') closeRelay();
     else armRecheck();
     notify();
@@ -547,6 +575,8 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       case 'ping':
         send({ t: 'pong', at: message.at });
         return;
+      case 'client':
+        return clientAsked(message);
       case 'pong':
         return heardPong(message);
       case 'state': {
@@ -556,6 +586,33 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       }
       default:
         return;
+    }
+  }
+
+  /**
+   * P5 O7 M5c: a client-port request, answered once and only on the channel that asked, and only from a peer that listed
+   * `rl2.client-port` (a request of any other is not this device's to answer: it is left unread).
+   */
+  function clientAsked(message: Extract<EndpointMessage, { t: 'client' }>): void {
+    const on = current;
+    if (on === null || !on.channel.peer.capabilities.includes('rl2.client-port')) return;
+    let answered = false;
+    const answer = (value: unknown): void => {
+      if (answered) return;
+      answered = true;
+      if (current === on) send({ t: 'clientAnswer', id: message.id, answer: value ?? NO_CLIENT_ANSWER });
+    };
+    if (clientListeners.size === 0) return answer(NO_CLIENT_ANSWER);
+    for (const listener of [...clientListeners]) listener({ id: message.id, kind: message.kind, request: message.request }, answer);
+  }
+
+  /** P5 O7 M5c: the calls bound to the channel that just ended fail `offline`, never carried to the next one. */
+  function dropOneChannelCalls(): void {
+    for (const pending of [...calls.values()]) {
+      if (!pending.oneChannel) continue;
+      calls.delete(pending.id);
+      clearTimeout(pending.timer);
+      pending.resolve({ ok: false, error: { code: 'offline', message: `${pending.name}: the channel to machine ${name} it was made on ended` } });
     }
   }
 
@@ -600,6 +657,8 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   function lost(reason: string): void {
     const was = current;
     current = null;
+    dropOneChannelCalls();
+    channelSaid('lost');
     settlePings();
     silenceTimer = clear(silenceTimer);
     probeTimer = clear(probeTimer);
@@ -723,8 +782,10 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
         // The swap is the linearization point: sends go to the new channel only, and the old one's messages are dropped.
         const old = current;
         current = null;
+        dropOneChannelCalls();
         settlePings(old.serial); // the old channel's close is not a loss: its pings are answered nowhere now
         acts.onLost();
+        channelSaid('lost');
         streams.onLost(); // a stream is its channel's: the old channel's end at the endpoint ends them there too
         log('the direct carrier answers again: switching from the relay');
         adopt(result);
@@ -861,6 +922,14 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       capsListeners.add(listener);
       return () => void capsListeners.delete(listener);
     },
+    onClient(listener) {
+      clientListeners.add(listener);
+      return () => void clientListeners.delete(listener);
+    },
+    onChannel(listener) {
+      channelListeners.add(listener);
+      return () => void channelListeners.delete(listener);
+    },
     // The caller is the channel's member and device (RL §5.5): its ClientRef is not sent. P5 O7 M4: the session a
     // path-class read is made from goes as the call's `session`.
     dispatch(commandName: CommandName, input: unknown, _client: unknown, session?: AppSessionId): Promise<CommandResult<CommandName>> {
@@ -876,6 +945,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     call(callName, input, options = {}) {
       const end = ended();
       if (end !== null) return Promise.resolve({ ok: false, error: { code: end, message: `${callName}: the link to machine ${name} is ${end}` } });
+      if (options.oneChannel === true && current === null) return Promise.resolve({ ok: false, error: { code: 'offline', message: `${callName}: no channel to machine ${name} is current` } });
       return new Promise<CallResult>((resolve) => {
         const id = `c${++nextCall}`;
         const timeoutMs = options.timeoutMs ?? timing.CALL_TIMEOUT_MS;
@@ -885,6 +955,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
           input,
           session: options.session,
           lacking: options.lacking,
+          oneChannel: options.oneChannel === true,
           fellBack: false,
           sentOn: null,
           resolve,
@@ -930,6 +1001,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       clearExpiry = null;
       const was = current;
       current = null;
+      if (was !== null) channelSaid('lost');
       subs.close('closed');
       streams.close('closed');
       acts.close('closed');

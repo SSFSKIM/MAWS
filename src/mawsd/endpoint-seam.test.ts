@@ -35,6 +35,7 @@ function services(enrolled = false): DaemonServices & { lines: string[] } {
     hold: () => () => {},
     interest: { report: () => {}, drop: () => {} },
     artifacts: { fetch: async () => ({ status: 404, headers: {}, body: null }) }, // P5 O5 M2
+    clientPort: { serve: () => ({ answer: () => {}, close: () => {} }) }, // P5 O7 M5c
     log: (line) => void lines.push(line),
     lines,
   };

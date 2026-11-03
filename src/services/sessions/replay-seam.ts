@@ -3,6 +3,9 @@
 // takes the next path as its `replay` (C3's transport, `MAWS_ENGINE_REPLAY=1`) and pins that fixture's recorded
 // session id, so every launch binds a distinct id its frames carry. The list is consumed once; a launch past its end is
 // refused, so a test that launches more than it planned fails loudly.
+// P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, e2e:remote): an entry `live` is a launch of the
+// installed engine in its turn (no replay, no pin: the engine MAWS_E2E_ENGINE_BIN names, as any launch without the seam
+// runs), so one scene can put a real engine among its replays. It is behind the seam's own gate and no other.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { SessionId } from '@shared/graph/ids';
@@ -28,6 +31,8 @@ export function fixtureSessionId(file: string): SessionId {
   return id as SessionId;
 }
 
+export const LIVE_ENTRY = 'live';
+
 export class ReplaySeam {
   private next_ = 0;
 
@@ -43,11 +48,13 @@ export class ReplaySeam {
     return new ReplaySeam(env.MAWS_E2E_REPLAY_FIXTURES.split(',').map((p) => p.trim()).filter((p) => p.length > 0), cwd);
   }
 
-  // The next launch's fixture and its pin, or null when the list is spent.
-  take(): { path: string; sessionId: SessionId } | null {
+  // The next launch's fixture and its pin, `{live: true}` for a launch of the installed engine, or null when the list is
+  // spent.
+  take(): { path: string; sessionId: SessionId } | { live: true } | null {
     const path = this.paths[this.next_];
     if (path === undefined) return null;
     this.next_ += 1;
+    if (path === LIVE_ENTRY) return { live: true };
     return { path, sessionId: fixtureSessionId(resolve(this.cwd, path)) };
   }
 }

@@ -126,7 +126,7 @@ describe('a tab’s MAWS server rows', () => {
     expect(tab.view.getState()).toMatchObject({ serverBusy: null, servers: { refused: { target: HANDLE, why: 'busy' } } });
     expect(owner.servers).toHaveBeenCalledTimes(2);
     await tab.disconnectServer('33333333-3333-4333-8333-333333333333');
-    expect(owner.disconnect).toHaveBeenCalledWith('33333333-3333-4333-8333-333333333333');
+    expect(owner.disconnect).toHaveBeenCalledWith(ARTIFACT, '33333333-3333-4333-8333-333333333333');
     expect(tab.view.getState().servers.refused).toBeNull();
   });
 });

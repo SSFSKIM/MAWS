@@ -27,8 +27,10 @@ import * as z from 'zod';
 import { artifactRouteOf, heardArtifacts } from '../artifacts/machines';
 
 // E10: main's own refusals, heard app-wide by what must react to one wherever it was asked (a launch refused while an
-// incompatible supervisor is waited for shows its banner again, `app/supervisor-notices.ts`).
-type RefusalListener = (name: CommandName, error: IpcError) => void;
+// incompatible supervisor is waited for shows its banner again, `app/supervisor-notices.ts`). P5 O7 M5c: with the machine
+// the command went to, so a machine's own refusal (`not-offered`: it serves no such command) is heard as that machine's
+// (`artifacts/remote-surfaces.ts`).
+type RefusalListener = (name: CommandName, error: IpcError, machine: MachineRef) => void;
 const refusalListeners = new Set<RefusalListener>();
 export function onCommandRefused(listener: RefusalListener): () => void {
   refusalListeners.add(listener);
@@ -88,7 +90,7 @@ export function createClient(bridge: () => PreloadBridge): MawsBridge {
         // A listener's fault is its own: the caller still gets the refusal, and the other listeners still hear it.
         for (const listener of refusalListeners) {
           try {
-            listener(name, envelope.data.error);
+            listener(name, envelope.data.error, machine);
           } catch (error) {
             console.error(`[ipc] a refusal listener failed on ${name}`, error);
           }

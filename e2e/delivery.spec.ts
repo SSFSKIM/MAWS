@@ -34,6 +34,7 @@ import { launchMaws } from './support/launch';
 import { coldHttpDelivery } from './support/connector-cold-delivery';
 import { MainOutput } from './support/connector-direct-oauth';
 import { HOLD_MAX_MS } from '../src/main/delivery/e2e-hold';
+import { daemonPaths } from '@shared/daemon/files';
 
 test.skip(process.env.MAWS_DELIVERY_E2E !== '1', 'the delivery group runs under MAWS_DELIVERY_E2E=1 (pnpm e2e:delivery)');
 test.describe.configure({ timeout: 300_000 });
@@ -108,8 +109,11 @@ test('notion: the document header’s Send to makes a readable page through MAWS
       await expect.poll(() => exportsOf(scene.userData, id), { timeout: 60_000, message: 'the export written, its send held' }).toHaveLength(1);
       await sheetOf(page).getByRole('button', { name: 'Cancel', exact: true }).click();
       await expect(sheetOf(page)).toHaveCount(0);
-      // the page sends its cancel without awaiting it, so the hold lifts only once main says it marked the run
-      await expect.poll(() => output.text(), { timeout: 15_000, message: 'main marked the held run cancelled' }).toMatch(/\[delivery\] a send was cancelled in its export phase \(run [0-9a-f-]{36}\)/);
+      // the page sends its cancel without awaiting it, so the hold lifts only once the send's runner says it marked the
+      // run. P5 O7 M5c: the send runs where the spine does, export and delivery both: on the daemon shape in `mawsd`
+      // (its welcome lists `machine.delivery`), whose log carries the line; on the embedded one in main
+      const sendLog = () => (daemon ? (existsSync(daemonPaths(scene.userData).log) ? readFileSync(daemonPaths(scene.userData).log, 'utf8') : '') : output.text());
+      await expect.poll(sendLog, { timeout: 15_000, message: `${daemon ? 'mawsd' : 'main'} marked the held run cancelled` }).toMatch(/\[delivery\] a send was cancelled in its export phase \(run [0-9a-f-]{36}\)/);
       rmSync(hold);
       await expect.poll(() => exportsOf(scene.userData, id), { timeout: 15_000, message: 'the cancelled export’s file removed' }).toEqual([]);
       await wait(3_000);

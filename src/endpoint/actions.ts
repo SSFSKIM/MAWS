@@ -48,6 +48,17 @@
 // `rl2.bytes` tagged (bytes.ts). An artifact act's result tells its sender nothing of a session they don't view
 // (session-safe.ts, P5 O7 M5a2 fix wave 1).
 //
+// P5 O7 M5c: a `machine` act on the `artifact` rule (a lease's `connectors.call` and `refresh`, Send to's `delivery.send`
+// and `cancel`) is claimed with the artifact authorization placed (the claim's `target`, `artifact:<id>`), so a query
+// re-places it as an artifact write's is; a `delivery.send` handed on is kept with its artifact for its cancel (leases.ts);
+// and its result tells the sender nothing of a session (session-safe.ts: a call's `via.sessionId`).
+//
+// P5 O7 M5c review 1: a `delivery.send` is pending on its channel from the step it is received (leases.ts), so a cancel
+// the device sends while the send is decided is placed on it. Such a cancel, once decided, waits on its send and is
+// handed on in the step the send is admitted, before the send; a send refused, its waiting cancel is refused
+// `no-target`. A cancel goes to the machine only for a run its channel holds reserved. Every refusal of a received act
+// (the gate's, through `refused`, and this module's own) settles its pending send.
+//
 // Each action in flight holds `mawsd` (`hold('op')`) until its result is recorded: lane B's and the endpoint's until
 // their answer, lane A's until sminos's result or its channel's close (sminos keeps its result, and a reconnecting device
 // asks). `stop()` takes no action more (`restart`) and waits up to STOP_WAIT_MS for those in flight.
@@ -58,6 +69,7 @@ import type { RemoteChannel } from './channels';
 import type { EndpointActions } from './endpoint-actions';
 import type { Freshness } from './freshness';
 import type { Granted } from './gate';
+import type { Leases } from './leases';
 import { DECISION_MOVED, LaneA } from './lane-a';
 import { OFFERS, type Offers } from './offers';
 import type { Rl10, RpcResult } from './rl10/link';
@@ -88,6 +100,8 @@ export type ActionsContext = {
   log(line: string): void;
   /** P5 O7 M5a2 fix wave 1: what an artifact act's result says of sessions (session-safe.ts). */
   sessionSafe?: SessionSafe;
+  /** P5 O7 M5c: the runs each channel sent, for their cancel (leases.ts); review 1: the sends still being decided. */
+  leases?: Pick<Leases, 'reserveRun' | 'sendEnded' | 'pendRun' | 'holdCancel' | 'sendRefused' | 'reserved'>;
 };
 
 /** A ledger's kept result (`{ok: true, value}` or `{ok: false, error}`) as a device reads an outcome. */
@@ -112,6 +126,8 @@ export function closedLedgerOf(value: unknown): string | null {
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+/** P5 O7 M5c: the run a `delivery.send` or `delivery.cancel` names, or null. */
+const runIdOf = (args: unknown): string | null => (isObject(args) && typeof args.runId === 'string' ? args.runId : null);
 
 /** P5 O7 M5a: the prefix of the target a claim stores for an artifact act, which a query reads back (queries.ts). */
 export const ARTIFACT_TARGET = 'artifact:';
@@ -129,6 +145,8 @@ export class Actions {
   readonly #fingerprints = new WeakMap<ActMessage, string>();
   /** Each received action's way back to authorization, taken once (a lane B act whose decision moved under its status read). */
   readonly #decideAgain = new WeakMap<ActMessage, () => void>();
+  /** P5 O7 M5c review 1: each received `delivery.send` still pending (leases.ts' `pendRun`), until it is admitted or refused. */
+  readonly #pending = new WeakSet<ActMessage>();
 
   constructor(private readonly ctx: ActionsContext) {
     this.#laneA = new LaneA({ rl10: ctx.rl10, hold: (reason) => ctx.hold(reason), now: () => ctx.now() });
@@ -138,20 +156,37 @@ export class Actions {
   receive(channel: RemoteChannel, m: ActMessage, authorized: (channel: RemoteChannel, m: ActMessage) => void): void {
     const refusal = this.#stopping ? 'restart' : this.ctx.freshness.check(m.action, channel.device, this.ctx.now());
     if (refusal !== null) return void channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason: refusal });
+    // P5 O7 M5c review 1: a send is pending from here, so its channel's cancel is placed on it while it is decided; one
+    // past the channel's bound, or a second of an id pending, is `busy` at once
+    const runId = m.action.action === 'delivery.send' ? runIdOf(m.action.args) : null;
+    const artifactId = runId !== null && isObject(m.action.args) && typeof m.action.args.artifactId === 'string' ? m.action.args.artifactId : null;
+    if (this.ctx.leases !== undefined && runId !== null && artifactId !== null) {
+      if (!this.ctx.leases.pendRun(channel, runId, artifactId)) return void channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason: 'busy' });
+      this.#pending.add(m);
+    }
     const fingerprinted = actionFingerprint(m.action).then(
       (fingerprint) => {
         if (channel.closed) return;
-        if (this.#stopping) return void channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason: 'restart' });
+        if (this.#stopping) return this.refused(channel, m, 'restart');
         this.#fingerprints.set(m, fingerprint);
         this.#decideAgain.set(m, () => authorized(channel, m));
         authorized(channel, m);
       },
       (error: unknown) => {
         this.ctx.log(`endpoint: an action on channel ${channel.key} could not be fingerprinted: ${(error as Error).message}`);
-        if (!channel.closed) channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason: 'unavailable' });
+        if (!channel.closed) this.refused(channel, m, 'unavailable');
       },
     );
     this.#track(fingerprinted);
+  }
+
+  /**
+   * A received action refused (the gate's `actRefused` executor, and this module's own refusals): answered, and a send
+   * still pending settled, its waiting cancel refused with it (P5 O7 M5c review 1).
+   */
+  refused(channel: RemoteChannel, m: ActMessage, reason: string): void {
+    channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason });
+    if (this.#pending.delete(m)) this.ctx.leases?.sendRefused(channel, runIdOf(m.action.args)!);
   }
 
   /** An authorized action, handed to its executing side (the gate's `act` executor). */
@@ -161,7 +196,7 @@ export class Actions {
       this.ctx.log(`endpoint: an action on channel ${channel.key} failed on its way to its executor: ${(error as Error).message}`);
       // Handed on already, its fate is the executor's to say: the device asks by `query`.
       if (progress.accepted) channel.send({ t: 'done', opId: m.action.opId, outcome: { state: 'unknown', reason: 'internal' } });
-      else channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason: 'unavailable' });
+      else this.refused(channel, m, 'unavailable');
     });
     this.#track(run);
   }
@@ -193,7 +228,7 @@ export class Actions {
 
   async #execute(channel: RemoteChannel, m: ActMessage, decision: Granted, progress: { accepted: boolean }): Promise<void> {
     const { action } = m;
-    const refuse = (reason: RefusalReason) => void channel.send({ t: 'ack', opId: action.opId, state: 'refused', reason });
+    const refuse = (reason: RefusalReason) => this.refused(channel, m, reason);
     const accept = () => {
       progress.accepted = true;
       channel.send({ t: 'ack', opId: action.opId, state: 'accepted' });
@@ -235,16 +270,41 @@ export class Actions {
     }
 
     if (row.executor === 'machine' || row.executor === 'pty-host') {
+      // P5 O7 M5c: an artifact act's claim names the artifact authorization placed.
+      const onArtifact = row.executor === 'machine' && row.target === 'artifact';
+      if (onArtifact && decision.artifact === undefined) return refuse('malformed');
+      // P5 O7 M5c review 1: a cancel goes to the machine only for a run its channel holds reserved; one of a send still
+      // being decided waits on it (handed on in the step the send is admitted, refused `no-target` with the send)
+      if (action.action === 'delivery.cancel') {
+        const cancelled = runIdOf(action.args);
+        if (cancelled === null || this.ctx.leases === undefined) return refuse('no-target');
+        if (!this.ctx.leases.reserved(channel.client, cancelled)) {
+          const waiting = { admit: () => this.execute(channel, m, decision), drop: () => refuse('no-target') };
+          return this.ctx.leases.holdCancel(channel, cancelled, waiting) ? undefined : refuse('no-target');
+        }
+      }
+      // A send's run id reserved for this channel and its artifact in the step it is handed on (leases.ts): one any
+      // channel holds is `busy`, never moved to another artifact; freed when the machine says the run ended. Its cancel
+      // waiting, if any, is handed on in that step, before the send.
+      const runId = action.action === 'delivery.send' ? runIdOf(action.args) : null;
+      if (runId !== null && (decision.artifact?.artifactId == null || this.ctx.leases?.reserveRun(channel, runId, decision.artifact.artifactId) !== true)) return refuse('busy');
+      this.#pending.delete(m);
       accept();
       const release = this.#hold();
+      let ended = false;
       try {
         const kept = row.executor === 'pty-host' || KEPT_WITHOUT_ACTION.has(action.action) ? {} : { action };
-        const op = { opId: action.opId, opCreated: action.opCreated, claim: { ...who, fingerprint }, name: action.action, input: action.args, ...kept };
+        const target = onArtifact ? { target: artifactTarget(decision.artifact!) } : {};
+        const op = { opId: action.opId, opCreated: action.opCreated, claim: { ...who, fingerprint, ...target }, name: action.action, input: action.args, ...kept };
         const answer = row.executor === 'machine' ? await dispatch('machine', 'machine.op', op) : await dispatch('pty-host', 'pty.op', op);
         // A pty host older than `pty.op` (adopted by a newer mawsd) knows no ledger: nothing ran, ask again later.
         const outcome = answer.ok ? answered(answer.value) : row.executor === 'pty-host' && answer.error.code === 'unknown_command' ? { state: 'refused', reason: 'unavailable' } : { state: 'unknown', reason: answer.error.code };
-        channel.send(doneMessage(channel, action.opId, outcome));
+        // the run ended when its op did (its send answered) or never ran; anything else may still be running
+        ended = answer.ok && isObject(answer.value) && (answer.value.state === 'done' || answer.value.state === 'refused');
+        const told = onArtifact ? (await this.#sessionSafe(who.member, action.action, outcome, dispatch))() : outcome;
+        if (!channel.closed) channel.send(doneMessage(channel, action.opId, told));
       } finally {
+        if (runId !== null) this.ctx.leases?.sendEnded(channel, runId, ended);
         release();
       }
       return;

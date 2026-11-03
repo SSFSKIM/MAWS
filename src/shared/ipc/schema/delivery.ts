@@ -8,13 +8,14 @@
 // export step. `delivery.status`, `.connect`, `.cancel` and `.receipts` are `machine`-owned (the delivery service runs
 // with the spine, so its receipts live for the spine's residency); `delivery.send` stays main's, exports as before and
 // hands the export's path to the machine's `delivery.deliver` (main-only), which admits it under the artifact's exports
-// directory, sends it and removes it.
+// directory, sends it and removes it. P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces
+// §O): `delivery.send` is the machine's too, the export and the delivery both there; main's send stays the shim for a
+// `mawsd` whose welcome lists no `machine.delivery`, and `delivery.deliver` stays served for the OX1 window.
 import * as z from 'zod';
 import { ARTIFACT_EXPORT_FORMATS } from '../../maws/tools';
 import type { CommandSpec } from './common';
 import { AbsolutePathSchema } from './settings';
 
-const main = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'main' as const });
 const machine = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'machine' as const }); // P5 O4 M2
 
 const ArtifactId = z.uuid();
@@ -103,7 +104,9 @@ export const commands = {
   'delivery.connect': machine(z.strictObject({ runId: RunId, target: DeliveryTargetSchema, artifactId: ArtifactId, source: SourceKey.optional() }), DeliveryConnectAnswerSchema),
   // The delivery: the shown artifact (a version's when named; a design's PNG, the board shown) exported in `format`, then
   // put where `destination` says. A `source` handle main no longer keeps is refused (`source`), never found again.
-  'delivery.send': main(DeliverySendInputSchema, DeliverySendAnswerSchema),
+  // P5 O7 M5c (Interfaces §O; O4's D14): the machine's, where the export runs: exported (`exportForLibrary`) then delivered
+  // in process; main's own send stays the shim for a `mawsd` whose welcome lists no `machine.delivery`.
+  'delivery.send': machine(DeliverySendInputSchema, DeliverySendAnswerSchema),
   // P5 O4 M2 (Interfaces §G; D14): main-only. The send's export, taken by the app (`exportPath`, an own-file export under
   // `<profile>/artifacts/<artifactId>/exports/`, at `revision`, of the artifact titled `title`), delivered by the machine:
   // admitted, sent and removed. A path outside the artifact's exports directory, a name outside the export grammar for

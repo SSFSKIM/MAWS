@@ -16,6 +16,9 @@
 //   once, `unavailable` on a doubling backoff. Any other end (`not-offered`, `grade`, `removed`, `closed`) leaves that
 //   channel without the feed; the next channel asks again.
 // - An `artifacts.changed` names its artifact's machine (./../artifacts/machines.ts).
+// - P5 O7 M5c (§R): O4's surfaces' events ride it too, said as the machine's own: a lease's `connectors.watchUpdate`, the
+//   owner's sheet's `connectors.serversChanged` and `connectors.signInChanged`, Send to's `delivery.receipt`; and each is
+//   told to `heard`, where a consent's listener hears its flow end (./remote-port.ts).
 import { REGISTRY } from '@shared/ipc/registry';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { codecOf } from '@shared/ipc/validate';
@@ -24,13 +27,18 @@ import type { ArtifactMachines } from '../artifacts/machines';
 import type { RemoteLink, Subscription } from '../machines/remote/link';
 
 /** What the feed carries, said as the machine's own. */
-export const ARTIFACT_FEED_EVENTS: ReadonlySet<string> = new Set(['artifacts.changed', 'library.changed']);
+export const ARTIFACT_FEED_EVENTS: ReadonlySet<string> = new Set([
+  'artifacts.changed', 'library.changed',
+  'connectors.watchUpdate', 'connectors.serversChanged', 'connectors.signInChanged', 'delivery.receipt', // P5 O7 M5c
+]);
 
 export interface RemoteArtifactFeedDeps {
   remote(machine: MachineRef): RemoteLink | null;
   onRemote(listener: (machines: readonly MachineRef[]) => void): () => void;
   emit<N extends EventName>(machine: MachineRef, name: N, payload: EventPayload<N>): void;
   machines: ArtifactMachines;
+  /** P5 O7 M5c: each event as it is said (a consent's listener hears its flow's end). */
+  heard?(machine: MachineRef, name: string, payload: unknown): void;
   /** An `unavailable` end's first wait and its cap. */
   retryMs: readonly [number, number];
   log(line: string): void;
@@ -78,6 +86,7 @@ export function createRemoteArtifactFeed(deps: RemoteArtifactFeedDeps): { stop()
           if (!read.ok) return deps.log(`lane B: ${link.name}: a ${body.name} on the artifacts feed doesn't read; left out`);
           if (body.name === 'artifacts.changed') deps.machines.record((read.value as EventPayload<'artifacts.changed'>).artifactId, machine);
           deps.emit(machine, body.name as EventName, read.value as never);
+          deps.heard?.(machine, body.name, read.value);
         },
         paused: () => {},
         resumed: () => {},

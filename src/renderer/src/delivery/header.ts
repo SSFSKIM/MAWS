@@ -2,7 +2,11 @@
 // §4.7): one pinned action an editor adds to its registration, drawn by its label beside the first three. Its label is
 // the header's receipt: "Send to…", "Sending to Notion…" while a delivery of the artifact runs, "Sent to Notion" once one
 // was made (main's receipt, this main's life). It opens the Send to sheet on the target last used, else the kind's.
+// P5 O7 M5c: another machine's artifact reads that machine's receipts, and its Send to is greyed while that machine
+// doesn't offer it (../artifacts/remote-surfaces.ts; the sheet that found it out said why).
 import { useMemo } from 'react';
+import { SEND_NEEDS, useRemoteGreyed } from '../artifacts/remote-surfaces';
+import { useArtifactMachine } from '../artifacts/use-artifact-machine';
 import type { EditorHostAction } from '../panel/editor-host';
 import { SEND_TO_COPY } from './copy';
 import { latestReceipt, openSendTo, sendingTo, useDelivery, type SendToSubject } from './store';
@@ -20,11 +24,13 @@ export function sendToSubject(artifactId: string, kind: SendToSubject['kind'], t
 export function useSendToAction(subject: SendToSubject | null): EditorHostAction | null {
   const artifactId = subject?.artifactId ?? null;
   const sending = useDelivery((s) => (artifactId === null ? null : sendingTo(s, artifactId)));
-  const receipt = useDelivery((s) => (artifactId === null ? null : latestReceipt(s, artifactId)));
+  const machine = useArtifactMachine(artifactId);
+  const receipt = useDelivery((s) => (artifactId === null ? null : latestReceipt(s, artifactId, machine)));
+  const greyed = useRemoteGreyed(artifactId, SEND_NEEDS) !== null;
   const { kind, title, versionId, board } = subject ?? {};
   return useMemo(() => {
     if (artifactId === null || kind === undefined || title === undefined) return null;
     const label = sending ? SEND_TO_COPY.actionSending(sending) : receipt ? SEND_TO_COPY.actionSent(receipt.target) : SEND_TO_COPY.action;
-    return { id: SEND_TO_ACTION, label, pinned: true, onSelect: () => openSendTo({ artifactId, kind, title, ...(versionId !== undefined && { versionId }), ...(board !== undefined && { board }) }, sending ?? receipt?.target) };
-  }, [artifactId, kind, title, versionId, board, sending, receipt]);
+    return { id: SEND_TO_ACTION, label, pinned: true, ...(greyed && { disabled: true }), onSelect: () => openSendTo({ artifactId, kind, title, ...(versionId !== undefined && { versionId }), ...(board !== undefined && { board }) }, sending ?? receipt?.target) };
+  }, [artifactId, kind, title, versionId, board, sending, receipt, greyed]);
 }

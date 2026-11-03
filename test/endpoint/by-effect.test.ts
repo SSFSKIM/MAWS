@@ -153,3 +153,27 @@ describe('artifacts.copyAsset', () => {
     expect(await grade('artifacts.copyAsset', copy, pending({}, ['art-to']))).toEqual({ refused: 'grade' });
   });
 });
+
+// P5 O7 M5c (A13): a page's lease is graded on its artifact at `view`, by effect: the two that run the owner's connector
+// tools take `converse`, the rest stay at the floor. Delivery's four and the owner's connector commands are no by-effect.
+describe('a page’s lease', () => {
+  it('declares the eight lease commands by effect at `view`', () => {
+    for (const name of ['connectors.open', 'connectors.declare', 'connectors.call', 'connectors.watch', 'connectors.unwatch', 'connectors.refresh', 'connectors.visibility', 'connectors.close'])
+      expect(gradeOf(name), name).toEqual({ floor: 'view', byEffect: true });
+    expect(gradeOf('delivery.status')).toBe('view');
+    expect(gradeOf('delivery.receipts')).toBe('view');
+    expect(gradeOf('delivery.send')).toBe('manage');
+    expect(gradeOf('delivery.cancel')).toBe('manage');
+    for (const name of ['connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', 'connectors.signIn', 'connectors.signInCancel', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool', 'delivery.connect', 'catalog.engine', 'catalog.engineRefresh'])
+      expect(gradeOf(name), name).toBe('machine-admin');
+    expect(gradeOf('connectors.callback')).toBe('list');
+  });
+
+  it('grades a call and a refresh `converse`, and the rest `view`', async () => {
+    const lease = { leaseId: 'lease-1' };
+    expect(await grade('connectors.call', { ...lease, request: { server: 's', tool: 't' } })).toBe('converse');
+    expect(await grade('connectors.refresh', { ...lease, watchId: 'w-1' })).toBe('converse');
+    expect(await grade('connectors.open', { artifactId: 'art-1' })).toBe('view');
+    for (const name of ['connectors.declare', 'connectors.watch', 'connectors.unwatch', 'connectors.visibility', 'connectors.close']) expect(await grade(name, lease), name).toBe('view');
+  });
+});

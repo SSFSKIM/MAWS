@@ -15,7 +15,7 @@
 // yield, side threads, the configure and defaults relays, the retired custody's removal); the read model, the inert index source,
 // observed facts and the library still answer, and the view says why the spine cannot be read.
 import { rm } from 'node:fs/promises';
-import { totalmem } from 'node:os';
+import { hostname, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { isActionable as archiveActionable, isOpen as archiveOpen } from '@shared/attention/kinds';
 import type { ClientPort } from '@shared/client/port';
@@ -23,8 +23,10 @@ import { claudeConfigDir } from '@shared/engine/config-dir';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import { OpLedger } from '@shared/host/op-ledger';
-import type { CommandResult } from '@shared/ipc/schema';
-import type { Enrollment } from '@shared/machine/identity';
+import type { HandlerContext } from '@shared/ipc/client'; // P5 O7 M5c
+import type { CommandInput, CommandResult } from '@shared/ipc/schema';
+import { exportHeldFor } from '@shared/delivery/export-hold'; // P5 O7 M5c
+import { machineName, type Enrollment } from '@shared/machine/identity';
 import type { MachineRef } from '@shared/machine/ref';
 import { settingsPaths } from '@shared/settings/paths';
 import type { ServicesBus } from '@shared/spine/bus';
@@ -36,6 +38,7 @@ import { startCheckouts } from './checkouts-root';
 import { startConnectors } from './connectors';
 import { fileKeyCustody } from './connectors/custody';
 import { listenLoopback, type ListenLoopback } from './connectors/oauth-callback';
+import { createRelayedCallbacks } from './connectors/relayed-callback'; // P5 O7 M5c
 import { startSignIn } from './connectors/sign-in';
 import { startDelivery } from './delivery';
 import { uploadRootsOf } from './files/upload';
@@ -475,7 +478,10 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // waits for an agent's refresh, an owner's action or a sign-in in flight; the commands' own runs are counted above.
   const oauthDirectory = join(profile, 'connectors', 'oauth');
   const listen = deps.listenLoopback ?? listenLoopback;
-  const connectors = startConnectors({ hosts, bus, view: spineView.view, port: deps.clientPort, custody: fileKeyCustody(oauthDirectory), directory: oauthDirectory, listen });
+  // P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Consent and the client port"): a remote
+  // asker's consent callbacks, relayed by its device, one registry for the Connect and the engine's sign-in
+  const relayed = createRelayedCallbacks();
+  const connectors = startConnectors({ hosts, bus, view: spineView.view, port: deps.clientPort, custody: fileKeyCustody(oauthDirectory), directory: oauthDirectory, listen, relayed });
   const signIn = startSignIn({
     bus,
     host: { call: (name, input) => hosts.dispatch('engine-host', name, input) as never },
@@ -490,8 +496,13 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     onHostStreaming: (listener) => hosts.onStreaming('engine-host', listener),
     port: deps.clientPort,
     listen,
+    relayed, // P5 O7 M5c
+    machine: machineName(deps.env, hostname()), // mawsd's own rule for this machine's name
   });
-  const delivery = startDelivery({ bus, hosts, connectors: connectors.delivery, shellEnv: () => engineEnv, port: deps.clientPort, artifactsRoot: join(profile, 'artifacts') });
+  // P5 O7 M5c (Interfaces §O): `delivery.send` here, its export the library's Export as this root's bus answers it (the
+  // render seam on mawsd's front, main's export service on the embedded root), under the e2e's hold on the export phase
+  const exportArtifact = exportHeldFor((input: CommandInput<'artifacts.export'>, context: HandlerContext) => bus.invoke('artifacts.export', input, context), deps.env);
+  const delivery = startDelivery({ bus, hosts, connectors: connectors.delivery, shellEnv: () => engineEnv, port: deps.clientPort, artifactsRoot: join(profile, 'artifacts'), exportArtifact });
   parts.splice(parts.length - 1, 0, ['connectors', () => connectors.stop()], ['connector sign-in', () => signIn.stop()], ['delivery', () => delivery.stop()]);
   settling.push(connectors, signIn);
 

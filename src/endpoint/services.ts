@@ -6,6 +6,7 @@ import type { DocumentsOpen } from '@shared/host/socket-protocol';
 import type { ClientRef } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { MachineRef } from '@shared/machine/ref';
+import type { PortTarget, RemotePortHandle } from '../mawsd/client-port';
 
 export interface EndpointServices {
   /** stateDir: <profile>/mawsd/endpoint, 0700; only `unit` binds the tailnet listener by default. */
@@ -52,6 +53,12 @@ export interface EndpointServices {
    * `view` on the artifact's session.
    */
   artifacts: { fetch(request: { url: string; method: 'GET' | 'HEAD'; range?: string }): Promise<{ status: number; headers: Record<string, string>; body: ReadableStream<Uint8Array> | null }> };
+  /**
+   * P5 O7 M5c (O7's §T): the client port's remote targets. The endpoint registers a channel's target under its ref at
+   * admission (client-port.ts); `mawsd`'s services front routes a request for that ref to it after its own connections,
+   * and the handle's `answer` settles through the port's own `answer` with the target as `from`, `close` at the channel's end.
+   */
+  clientPort: { serve(ref: ClientRef, target: PortTarget): RemotePortHandle };
   log(line: string): void;
 }
 

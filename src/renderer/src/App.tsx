@@ -151,6 +151,7 @@ import { registerDashboardEditor } from './tools/dashboard';
 // P3-E end
 // P4-B5 start
 import { connectDelivery } from './delivery/store';
+import { connectRemoteSurfaces } from './artifacts/remote-surfaces'; // P5 O7 M5c
 import { SendToHost } from './delivery/SendToSheet';
 // P4-B5 end
 
@@ -368,6 +369,7 @@ export function App() {
   useEffect(() => registerDesignEditor(), []);
   // P3-E end
   useEffect(() => connectDelivery(), []); // P4-B5: main's Send to receipts, for the headers and the library's rows
+  useEffect(() => connectRemoteSurfaces(), []); // P5 O7 M5c: what each other machine doesn't offer, for O4's surfaces there
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {

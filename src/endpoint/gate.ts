@@ -19,9 +19,10 @@ import type { SessionTarget } from './sources';
 
 /**
  * An authorized request's decision: the session it is about, where it names one, or the artifact (P5 O7 M5a); `stands`,
- * whether it stands still (authorize.ts' `Decision`).
+ * whether it stands still (authorize.ts' `Decision`); `askedAt`, when the gate was asked (P5 O7 M5c review 1: the call's
+ * arrival, from which an acquisition is bounded, acquire.ts).
  */
-export type Granted = { target?: SessionTarget; artifact?: ArtifactTarget; stands?: () => boolean };
+export type Granted = { target?: SessionTarget; artifact?: ArtifactTarget; stands?: () => boolean; askedAt?: number };
 
 export type Executors = {
   call(channel: RemoteChannel, message: CallMessage, decision: Granted): void;
@@ -29,6 +30,8 @@ export type Executors = {
   sub(channel: RemoteChannel, message: SubMessage, decision: Granted): void;
   /** A refused `sub`, answered by its executor (M8 registers a subscription before it is decided); else `ended` here. */
   subRefused?(channel: RemoteChannel, message: SubMessage, reason: string): void;
+  /** P5 O7 M5c review 1: a refused `act`, answered by its executor (which settles what it noted at its receipt); else here. */
+  actRefused?(channel: RemoteChannel, message: ActMessage, reason: string): void;
 };
 
 const UNAVAILABLE: Executors = {
@@ -66,7 +69,7 @@ export class Gate {
       act: (channel, m) =>
         this.#decide(channel, { kind: 'act', name: m.action.action, input: readBytes(channel, m.action.args), action: m.action }, {
           granted: (decision) => this.#executors.act(channel, m, decision),
-          refused: (reason) => void channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason }),
+          refused: (reason) => (this.#executors.actRefused === undefined ? void channel.send({ t: 'ack', opId: m.action.opId, state: 'refused', reason }) : this.#executors.actRefused(channel, m, reason)),
         }),
       sub: (channel, m) =>
         this.#decide(channel, { kind: 'sub', name: 'sub', input: m }, {
@@ -78,11 +81,12 @@ export class Gate {
 
   #decide(channel: RemoteChannel, request: AuthorizeRequest, answer: { granted(decision: Granted): void; refused(reason: string): void }): void {
     const who: Who = { member: channel.member, device: channel.device, clientClass: channel.clientClass, client: channel.client };
+    const askedAt = this.ctx.now();
     this.ctx
-      .authorize(request, who, this.ctx.now())
+      .authorize(request, who, askedAt)
       .then((decision) => {
         if (channel.closed) return;
-        if (decision.ok) answer.granted({ ...(decision.target === undefined ? {} : { target: decision.target }), ...(decision.artifact === undefined ? {} : { artifact: decision.artifact }), ...(decision.stands === undefined ? {} : { stands: decision.stands }) });
+        if (decision.ok) answer.granted({ ...(decision.target === undefined ? {} : { target: decision.target }), ...(decision.artifact === undefined ? {} : { artifact: decision.artifact }), ...(decision.stands === undefined ? {} : { stands: decision.stands }), askedAt });
         else answer.refused(decision.reason);
       })
       .catch((error: unknown) => {
