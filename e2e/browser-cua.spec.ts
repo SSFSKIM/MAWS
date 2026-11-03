@@ -80,6 +80,8 @@ function startPages(): Promise<{ origin: string; url(path: string): string; clos
     if (req.url === '/') return html(`<title>cua e2e</title><p id="marker">${MARKER}</p><button id="go" style="position:absolute;left:40px;top:60px;width:120px;height:40px" onclick="document.querySelector('#state').textContent='clicked'">Go</button><p id="state">idle</p>`);
     if (req.url === '/frames.html') return html(`<title>frames</title><p id="frame">waiting</p><script>addEventListener('message', (e) => { document.querySelector('#frame').textContent = String(e.data); });</script><iframe src="http://localhost:${port}/child.html"></iframe>`);
     if (req.url === '/child.html') return html(`<script>parent.postMessage('child-ran:' + location.host, '*');</script>`);
+    // P5 O17 M9b: a page that keeps painting (a counter, every 50 ms), for the screencast of a hidden agent tab
+    if (req.url === '/anim') return html(`<title>anim</title><p id="n" style="font-size:96px">0</p><script>let n = 0; setInterval(() => { document.querySelector('#n').textContent = String(++n); }, 50);</script>`);
     res.writeHead(404).end();
   });
   return new Promise((resolve) => {
@@ -216,6 +218,80 @@ test('a fake cua host drives a session\'s tabs through its socket: create, navig
     expect(await host.request<unknown[]>('tabs.query')).toHaveLength(2);
   } finally {
     for (const host of hosts) await host.close();
+    await maws.cleanup();
+    await pages.close();
+    rmSync(userData, { recursive: true, force: true });
+  }
+});
+
+// P5 O17 M9b (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M9's split; the architect's ruling on the capturer
+// count): the app as a tab engine of its agent tabs, on the real Electron. An agent tab the window does not show (the
+// person's own tab is the session's selection, the agent let go of its lease, so its view is hidden and throttled again)
+// still yields frames to a viewer, one after each ack, while the page paints; the person's tab never enters the
+// inventory nor takes a viewer; the agent's connection ending ends the viewer `tab_closed`. The engine is driven through
+// the e2e seam as `mawsd` drives it (`engine.request`), what it would send `mawsd` recorded (`engine.record`).
+test('the app as a tab engine: a hidden agent tab yields frames to a viewer, ack by ack; the person’s tab is never served; the agent’s leaving ends the viewer tab_closed', async () => {
+  const userData = mkdtempSync('/tmp/mcua-e2e-');
+  const pages = await startPages();
+  const maws = await launchMaws({ userData, env: { MAWS_HARNESS: '0' } });
+  let host: FakeHost | null = null;
+  type Call = { name: string; input: Record<string, unknown> };
+  type EngineSeam = { __maws_browser: { engine: { record(): void; request(request: unknown): void; calls(): Call[] }; tab(tabId: string): { visible: boolean } | null } };
+  const engine = {
+    record: () => maws.app.evaluate(() => (globalThis as unknown as EngineSeam).__maws_browser.engine.record()),
+    request: (request: Record<string, unknown>) => maws.app.evaluate((_electron, asked) => (globalThis as unknown as EngineSeam).__maws_browser.engine.request(asked), request),
+    calls: () => maws.app.evaluate(() => (globalThis as unknown as EngineSeam).__maws_browser.engine.calls().map(({ name, input }) => ({ name, input: name === 'browserEngine.frame' ? { ...input, frame: { ...(input.frame as Record<string, unknown>), jpegBytes: Buffer.from(String((input.frame as { jpegBase64: string }).jpegBase64), 'base64').byteLength, jpegBase64: undefined } } : input }))),
+    visible: (tabId: string) => maws.app.evaluate((_electron, tab) => (globalThis as unknown as EngineSeam).__maws_browser.tab(tab)?.visible ?? null, tabId),
+  };
+  const answerOf = async (id: string) => (await engine.calls()).find((call) => call.name === 'browserEngine.answer' && call.input.id === id)?.input.result as { ok: boolean; value?: { tabs: { tabId: string }[] } | null; error?: string } | undefined;
+  const framesOf = async (subscriptionId: string) => (await engine.calls()).filter((call) => call.name === 'browserEngine.frame' && call.input.subscriptionId === subscriptionId).map((call) => call.input.frame as { seq: number; tabId: string; width: number; height: number; viewport: { width: number; height: number }; jpegBytes: number });
+  try {
+    const app = seam(maws);
+    await app.trustThisProcess();
+    host = await connectFakeHost((await app.socketPathFor(A))!);
+    // the person's tab, the session's selection; the agent's, made unselected, driven to a painting page, then let go
+    expect(await app.open(A, pages.url('/'))).toMatchObject({ ok: true });
+    const created = await host.request<{ id: number; active: boolean }>('tabs.create', { url: 'about:blank', group: { key: 's', title: 'cua' } });
+    expect(created.active).toBe(false);
+    await host.request('debugger.attach', { tabId: created.id });
+    const agentTab = (await app.inspect())[A]!.leased[0]!;
+    const send = cdp(host, created.id);
+    await send('Page.enable');
+    await send('Page.navigate', { url: pages.url('/anim') });
+    expect(await until(() => evaluate(send, `Number(document.querySelector('#n')?.textContent ?? 0) > 0`), (v) => v === true)).toBe(true);
+    await host.request('debugger.detach', { tabId: created.id });
+    await expect.poll(async () => (await app.inspect())[A]!.leased).toEqual([]);
+    expect(await engine.visible(agentTab), 'the agent tab is not the one on screen').toBe(false);
+
+    await engine.record();
+    await engine.request({ id: 'i1', appSessionId: A, operation: { op: 'inventory' } });
+    await expect.poll(() => answerOf('i1')).toMatchObject({ ok: true });
+    const listed = (await answerOf('i1'))!.value!.tabs.map((tab) => tab.tabId);
+    expect(listed, 'the agent’s tab alone, never the person’s').toEqual([agentTab]);
+    const person = (value(await invoke(maws.page, 'browser.tabs.list', { appSessionId: A })) as { tabs: { tabId: string }[] }).tabs.find((tab) => tab.tabId !== agentTab)!.tabId;
+    await engine.request({ id: 'o0', appSessionId: A, operation: { op: 'open', subscriptionId: 'p0', tabId: person, control: false } });
+    await expect.poll(() => answerOf('o0')).toEqual({ ok: false, error: 'tab_closed' });
+
+    await engine.request({ id: 'o1', appSessionId: A, operation: { op: 'open', subscriptionId: 's1', tabId: agentTab, control: false } });
+    await expect.poll(() => answerOf('o1')).toEqual({ ok: true, value: null });
+    // frame after frame from the hidden tab, each after the viewer's ack of the last
+    const started = Date.now();
+    for (let seq = 1; seq <= 5; seq += 1) {
+      await expect.poll(async () => (await framesOf('s1')).length, { timeout: 10_000, message: `frame ${seq} of the hidden agent tab` }).toBe(seq);
+      await engine.request({ id: `a${seq}`, appSessionId: A, operation: { op: 'ack', subscriptionId: 's1', seq } });
+    }
+    const frames = await framesOf('s1');
+    expect(frames.map((frame) => frame.seq)).toEqual([1, 2, 3, 4, 5]);
+    expect(frames.every((frame) => frame.tabId === agentTab && frame.jpegBytes > 0 && frame.viewport.width === 1280 && frame.viewport.height === 800)).toBe(true);
+    console.log(`[o17 m9b] five frames of a hidden agent tab in ${Date.now() - started} ms`);
+    expect(await engine.visible(agentTab), 'still not on screen').toBe(false);
+
+    // the agent's connection ends: its reservation goes, the tab is the person's now, its viewer ends tab_closed
+    await host.close();
+    host = null;
+    await expect.poll(async () => (await engine.calls()).filter((call) => call.name === 'browserEngine.ended')).toEqual([{ name: 'browserEngine.ended', input: { subscriptionId: 's1', reason: 'tab_closed' } }]);
+  } finally {
+    await host?.close();
     await maws.cleanup();
     await pages.close();
     rmSync(userData, { recursive: true, force: true });
