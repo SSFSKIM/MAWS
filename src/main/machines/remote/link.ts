@@ -379,7 +379,11 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       log(`skipped ${record.body.addresses.length - addresses.length} address(es) of the endpoint record issued ${record.body.issued}: not a tailnet ws:// address`);
     }
     if (addresses.length === 0) return null;
-    if (!bucket.take()) {
+    // The listener charges a source only for an upgrade it accepts, so the link spends a token only on a socket that
+    // opened: a dial refused, timed out or answered 503 spends none. One attempt runs at a time, so the token `holds`
+    // saw is still there when the socket opens. An accepted upgrade whose 101 is lost is counted by the listener alone;
+    // at worst the link's next dial is answered 503 and goes through the hub, while the listener refills.
+    if (!bucket.holds()) {
       once('bucket', 'direct attempts are over the listener’s handshake limit; going through the hub until the bucket refills');
       return null;
     }
@@ -389,6 +393,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     } catch {
       return null;
     }
+    bucket.take();
     let first: ByteDuplex | null = won.carrier;
     const dial = async (): Promise<ByteDuplex> => {
       if (first !== null) {
@@ -396,9 +401,11 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
         first = null;
         return sealedOnly(carrier);
       }
-      // A catch-up's next page takes another connection, and another token.
-      if (!bucket.take()) throw new Error('the direct bucket is empty');
-      return sealedOnly(await dialDirect(won.url, timing.DIRECT_DIAL_MS));
+      // A catch-up's next page takes another connection, and another token once it opens.
+      if (!bucket.holds()) throw new Error('the direct bucket is empty');
+      const carrier = await dialDirect(won.url, timing.DIRECT_DIAL_MS);
+      bucket.take();
+      return sealedOnly(carrier);
     };
     try {
       return await handshake(dial, signedIn, ref);

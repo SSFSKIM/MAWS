@@ -172,6 +172,8 @@ async function harness(options: { addresses?: string[]; hub?: boolean; timing?: 
   const logs: string[] = [];
   const pending: Array<{ carrier: 'direct' | 'relay'; release(): void }> = [];
   let holdHandshakes = false;
+  /** When each direct dial was made, whether it opened or not. */
+  const directDials: number[] = [];
   /** What the next channel's peer lists in its `h2`. */
   const peer = { capabilities: [] as string[] };
   const link = createRemoteLink({
@@ -179,6 +181,7 @@ async function harness(options: { addresses?: string[]; hub?: boolean; timing?: 
     session,
     records,
     dialDirect: async () => {
+      directDials.push(Date.now());
       if (!net.direct) throw new Error('refused');
       return duplex('direct');
     },
@@ -195,7 +198,12 @@ async function harness(options: { addresses?: string[]; hub?: boolean; timing?: 
       const carrier = marked!;
       attempts.push({ carrier, at: Date.now() });
       if (holdHandshakes) await new Promise<void>((release) => pending.push({ carrier, release }));
-      const verdict = verdicts[carrier].shift() ?? null;
+      let verdict = verdicts[carrier].shift() ?? null;
+      // `behind`: a catch-up's next connection, from `dial` again, as connectChannel takes one
+      while (verdict === 'behind') {
+        (await dial()).send(new Uint8Array([1]));
+        verdict = verdicts[carrier].shift() ?? null;
+      }
       if (verdict !== null) throw new ChannelError(verdict);
       const channel = new FakeChannel(carrier, [...peer.capabilities]);
       channel.deliver(CAPS);
@@ -224,6 +232,7 @@ async function harness(options: { addresses?: string[]; hub?: boolean; timing?: 
     last,
     relay: () => ({ opened: relaySockets, closed: relayClosed }),
     relayTries: () => relayTries,
+    directDials: () => directDials,
     hold: (on: boolean) => void (holdHandshakes = on),
     pending,
     peer,
@@ -431,6 +440,63 @@ describe('grace and backoff', () => {
     await settle();
     await advance(1000);
     expect(h.relayTries().slice(-2).map((at) => at - probedAt)).toEqual([0, 1000]);
+  });
+
+  // A direct dial that never reaches the listener (refused, timed out, a 503) takes none of the listener's tokens, so it
+  // spends none of the link's: the network's return finds the bucket as the listener has it.
+  it.each([3500, 6900, 15_000])('resumes over the direct carrier at once when the network returns after a %i ms outage with no hub', async (outageMs) => {
+    const h = await harness();
+    await settle();
+    h.net.direct = false;
+    h.net.relay = false;
+    h.last().end('carrier');
+    await settle();
+    await advance(outageMs);
+    expect(h.link.state()).toBe('down');
+    h.net.direct = true;
+    const returnedAt = Date.now();
+    h.link.probe('network');
+    await settle();
+    expect(h.link.state()).toBe('up');
+    expect(h.link.carrier()).toBe('direct');
+    expect(h.attempts.at(-1)).toEqual({ carrier: 'direct', at: returnedAt });
+    // every attempt of the outage dialed direct first (the first `up` and the resume dialed no relay)
+    expect(h.directDials()).toHaveLength(h.relayTries().length + 2);
+  });
+
+  it('still holds the listener’s limit: three opened direct handshakes inside a minute send the fourth attempt through the hub', async () => {
+    const h = await harness();
+    h.net.relay = false;
+    h.verdicts.direct.push('protocol', 'protocol', 'protocol', 'protocol');
+    await settle();
+    await advance(3000); // attempts at 0, 1 and 3 s: each opened the direct socket, and failed its handshake
+    expect(h.attempts.map((a) => a.carrier)).toEqual(['direct', 'direct', 'direct']);
+    const dials = h.directDials().length;
+    h.net.relay = true;
+    await advance(4000); // the attempt at 7 s: under a token since the first, so no direct dial
+    expect(h.directDials()).toHaveLength(dials);
+    expect(h.attempts.map((a) => a.carrier)).toEqual(['direct', 'direct', 'direct', 'relay']);
+    expect(h.link.state()).toBe('up');
+    expect(h.link.carrier()).toBe('relay');
+  });
+
+  it('spends no token on a catch-up connection that does not open', async () => {
+    const h = await harness({ timing: { DIRECT_BUCKET: { burst: 2, perMinute: 0.001 } } });
+    h.net.relay = false;
+    h.verdicts.direct.push('behind');
+    h.hold(true);
+    await settle();
+    h.net.direct = false; // the catch-up's next connection is refused
+    h.pending.shift()!.release();
+    await settle();
+    expect(h.link.state()).toBe('down');
+    expect(h.directDials()).toHaveLength(2);
+    h.hold(false);
+    h.net.direct = true;
+    h.link.probe('network'); // the first connection took one token of two; the refused one, none
+    await settle();
+    expect(h.link.state()).toBe('up');
+    expect(h.link.carrier()).toBe('direct');
   });
 });
 

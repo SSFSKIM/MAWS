@@ -14,9 +14,9 @@
 // to first row); then 3 turns of 300 deltas, the first discarded (delta to frame); 220 `session.getContextUsage` invokes,
 // the first 20 discarded (round trip). Each carrier also: the link's own round trip, 100 pings through main's bench seam
 // (src/main/machines/remote/bench-seam.ts); and a forced drop: A's ways to B (the hub pipe, the direct pipe) cut, B's
-// session writing a turn while A can't see it, then both restored with the network probe a returning network brings, and
-// the time from the restore to the first event after the gap in A's renderer (resume). Engine start is `session.start`
-// to the process's `ready` on the machine that runs it.
+// session writing a turn while A can't see it, then the case's own way restored with the network probe a returning network
+// brings (the other way only once the turn arrived), and the time from the restore to the first event after the gap in
+// A's renderer (resume). Engine start is `session.start` to the process's `ready` on the machine that runs it.
 //
 // Everything goes to test-results/remote-latency.json (§S); the run is valid by each case's samples, markers and clock
 // and by Rule B on the load sampled every 30 s (test/support/remote-latency.ts), and each carrier is held to acceptance
