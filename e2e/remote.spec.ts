@@ -982,7 +982,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const SCREENCAST = { available: true, viewed: 'screencast' };
       const browserOnB = (await b.request<Capabilities>('session.capabilities', { appSessionId: app })).browser;
       expect(browserOnB, 'B’s session’s agent has a browser on B, seen by screencast').toEqual(SCREENCAST);
-      await expect.poll(async () => (await invoke<Capabilities>(again, 'session.capabilities', { appSessionId: address })).browser, { timeout: 30_000, message: 'A’s main reads B’s answer' }).toEqual(SCREENCAST);
+      await expect.poll(async () => (await invoke<Capabilities>(again, 'session.capabilities', { appSessionId: app }, b.ref)).browser, { timeout: 30_000, message: 'A’s main reads B’s answer' }).toEqual(SCREENCAST);
       await openSurface(again, 'Browser');
       const browserTool = surface(again, 'browser');
       await expect(browserTool.locator('[data-browser-agent-group]'), `the agent’s group on B\n${mainSaid(again)}`).toContainText(`Agent on ${B_NAME}`, { timeout: 30_000 });
@@ -1588,11 +1588,14 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
     await test.step('A sees the tab B’s agent made against B’s loopback, its title, address and pixels, under view', async () => {
       await quoting(expect(group, 'the agent’s group on B').toContainText(`Agent on ${B_NAME}`, { timeout: 60_000 }), toolSaid);
       await quoting(expect(canvas, 'the agent’s tab shown of itself, live').toHaveAttribute('data-remote-stream', 'live', { timeout: 60_000 }), toolSaid);
-      await expect(group.getByRole('tab'), 'one tab: this session’s, not the other session’s identical one').toHaveCount(1);
-      await expect(group.getByRole('tab', { name: /remote/ })).toHaveAttribute('aria-selected', 'true');
+      // the chips (or, in a narrow panel, the picker they collapse to) list one tab: this session's, not the other's
+      const chips = group.locator('[data-browser-agent-chip]');
+      await expect(chips, 'one tab: this session’s, not the other session’s identical one').toHaveCount(1);
+      await expect(chips).toHaveAttribute('aria-selected', 'true');
+      await expect(chips).toContainText('remote');
       await expect(tool.locator('[data-browser-remote-url]')).toHaveText(pages.url('/remote'));
       await expect(tool.locator('[data-remote-control-state="view"]')).toHaveText('View only');
-      await expect.poll(() => remotePixel(page, BLANK_AT), { timeout: 30_000, message: 'the page’s white, drawn' }).toSatisfy(isWhite);
+      await expect.poll(async () => isWhite(await remotePixel(page, BLANK_AT)), { timeout: 30_000, message: 'the page’s white, drawn' }).toBe(true);
       console.log(`[e2e:remote] M10: A shows B's agent tab ${await canvas.getAttribute('data-remote-tab')}, frame ${await canvas.getAttribute('data-remote-seq')}, ${await canvas.getAttribute('data-remote-viewport')}`);
     });
 
@@ -1620,7 +1623,7 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
       await quoting(expect(tool.locator('[data-remote-control-state="held"]'), 'A has control').toHaveText('You have control', { timeout: 60_000 }), toolSaid);
       const button = await remotePoint(page, { x: BUTTON.x + BUTTON.width / 2, y: BUTTON.y + BUTTON.height / 2 });
       await page.mouse.click(button.x, button.y);
-      await quoting(expect.poll(() => remotePixel(page, BLANK_AT), { timeout: 30_000, message: 'the next frame shows the click' }).toSatisfy(isClicked), toolSaid);
+      await quoting(expect.poll(async () => isClicked(await remotePixel(page, BLANK_AT)), { timeout: 30_000, message: 'the next frame shows the click' }).toBe(true), toolSaid);
       const field = await remotePoint(page, { x: FIELD.x + FIELD.width / 2, y: FIELD.y + FIELD.height / 2 });
       await page.mouse.click(field.x, field.y);
       await page.keyboard.type('hi');
@@ -1654,10 +1657,10 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
       await expect.poll(() => page.evaluate(() => (window as unknown as { __remoteClosed: string[] }).__remoteClosed), { timeout: 60_000, message: `A's stream closed as B's app took the agent's browser\n${await toolSaid()}` }).toContain('engine-changed');
       // cua's host lost its backend and is served by the app within its retry; the agent's next tab is the app's
       await expect(async () => void (await answered('the agent’s creation sequence in B’s app', cua.sequence(pages.url('/remote'))))).toPass({ timeout: 60_000 });
-      await quoting(expect(group.getByRole('tab', { name: /remote/ }), 'the app’s agent tab listed').toHaveCount(1, { timeout: 60_000 }), toolSaid);
+      await quoting(expect(group.locator('[data-browser-agent-chip]').filter({ hasText: 'remote' }), 'the app’s agent tab listed').toHaveCount(1, { timeout: 60_000 }), toolSaid);
       await quoting(expect(canvas, 'A views the app’s tab').not.toHaveAttribute('data-remote-tab', headlessTab, { timeout: 60_000 }), toolSaid);
       await quoting(expect(canvas, 'live').toHaveAttribute('data-remote-stream', 'live', { timeout: 60_000 }), toolSaid);
-      await expect.poll(() => remotePixel(page, BLANK_AT), { timeout: 30_000, message: 'the app’s tab, white' }).toSatisfy(isWhite);
+      await expect.poll(async () => isWhite(await remotePixel(page, BLANK_AT)), { timeout: 30_000, message: 'the app’s tab, white' }).toBe(true);
       console.log(`[e2e:remote] M10: B's app took over; A views its agent tab ${await canvas.getAttribute('data-remote-tab')}`);
     });
   } finally {
