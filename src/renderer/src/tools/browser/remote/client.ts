@@ -160,9 +160,11 @@ export class RemoteBrowserClient {
     if (this.#state.shown === null) this.#showDefault();
   }
 
-  /** Shows the agent's tab `tabId` in this viewer. */
+  /** Shows the agent's tab `tabId` in this viewer (the one it shows already goes on as it is). */
   show(tabId: string): void {
+    const { showing, shown, stream } = this.#state;
     this.#set({ showing: true });
+    if (showing && shown?.tabId === tabId && stream !== 'stopped') return;
     this.#resumes = 0;
     this.#select(tabId);
   }

@@ -75,6 +75,8 @@ describe('this viewer’s tab', () => {
     expect(fake.invoked('browser.remote.select')).toEqual([{ viewId: 'rv-1', epoch: 'e1', tabId: 't2' }]);
     client.show('t1');
     expect(fake.invoked('browser.remote.select')[1]).toEqual({ viewId: 'rv-1', epoch: 'e1', tabId: 't1' });
+    client.show('t1');
+    expect(fake.invoked('browser.remote.select'), 'the tab it shows goes on as it is').toHaveLength(2);
     expect(client.getState()).toMatchObject({ showing: true, shown: { tabId: 't1', epoch: 'e1' }, stream: 'opening' });
     client.hide();
     expect(client.getState().showing).toBe(false);
