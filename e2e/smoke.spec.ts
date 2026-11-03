@@ -105,16 +105,6 @@ test('MAWS opens light, hosts answer, pty echoes, survives reload and window clo
 
   // Window close (macOS, D-11): closing the only window leaves the app, both hosts and the shell running, and the
   // Dock's `activate` re-creates a window that finds the same hosts ready.
-  // TEMPORARY red-first injection (removed before landing): a ~300 ms busy-wait in main inside the webContents's
-  // `destroyed`, widening the gap between the page's CDP detach and the window leaving getAllWindows.
-  await app.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0].webContents.once('destroyed', () => {
-      const until = Date.now() + 300;
-      while (Date.now() < until) {
-        // busy-wait in main
-      }
-    });
-  });
   // The page's `close` is its CDP target detaching, inside the webContents's teardown; the window leaves getAllWindows
   // only at its own `closed`, later in that teardown, so the count below waits for `closed` too.
   const closed = page.waitForEvent('close');
