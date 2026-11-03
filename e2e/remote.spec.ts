@@ -86,7 +86,7 @@ import { menu } from './support/menu';
 import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-scene';
 import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M10
-import { mainTabById, openSurface, surface } from './support/shell';
+import { closeSurface, mainTabById, openSurface, surface } from './support/shell';
 import { SideJournal } from './support/side-replay';
 import { newChatIn, showProjectList, sidebarOf } from './support/sidebar';
 
@@ -506,6 +506,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       scratch: join(root, 'scene'),
       aUserData,
       b: {
+        root: '/tmp', // P5 O17 M10: the session's cua socket within a Unix socket's bound (the runner's tmpdir is long)
         env: {
           MAWS_ENGINE_REPLAY: '1',
           MAWS_E2E_REPLAY_FIXTURES: [fixture, 'live', spawnedFixture, worktreeFixture, waitingFixture].join(','), // M5c: the observer is B's second launch
@@ -1640,7 +1641,7 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
 
     await test.step('the Browser tool hidden closes its view, not B’s tab; shown again it opens a new view of the tab', async () => {
       const before = (await canvas.getAttribute('data-remote-view'))!;
-      await openSurface(page, 'Files');
+      await closeSurface(page, 'Browser'); // the panel's surfaces sit side by side: another opened beside it hides nothing
       await expect(canvas).toHaveCount(0);
       expect((await b.request<Render>('daemon.status')).render?.browserTabs, 'B’s tab goes on').toBe(2);
       const tabs = await cua.call<{ id: number }[]>('tabs.query');
