@@ -80,6 +80,9 @@ export interface BrowserDeps {
   // P5 O17 M9b: and the machine link's state (`onState`), whose every change starts the app's tab engine over (engine.ts)
   hosts?: Pick<HostSupervisor, 'onEvent' | 'dispatch'> & Partial<Pick<HostSupervisor, 'onState'>>;
   // E4c end
+  // P5 O17 M9b: the launch runs a machine host (the daemon shape), so the app is a tab engine to `mawsd`; the embedded
+  // shapes' supervisor runs engine-host and pty-host alone, and refuses an owner it does not run
+  machineHost?: boolean;
   // P5 O7 M3: a session of another machine's tabs (machines.ts: this machine, and its events said from theirs) and the
   // forwarded ports their loopback links load from (forwarded.ts); without them (E4a's own tests) every session is local
   remote?: { local: MachineRef; emitFrom: EmitFrom; forwards: BrowserForwards };
@@ -97,7 +100,7 @@ export interface Browser {
   extensions: Pick<ExtensionUi, 'removing'>; // cua #90: the action bar's popups and options tabs, for a profile's removal
 }
 
-export function startBrowser({ userData, settings, view, data, register, emit: emitHere, env, profiles: listProfiles, /* E4c */ hosts, remote }: BrowserDeps): Browser {
+export function startBrowser({ userData, settings, view, data, register, emit: emitHere, env, profiles: listProfiles, /* E4c */ hosts, machineHost = false, remote }: BrowserDeps): Browser {
   const dir = join(userData, 'browser');
   mkdirSync(dir, { recursive: true });
   const tabsFile = join(dir, 'tabs.json');
@@ -289,10 +292,10 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
   if (inspector && presence) inspector.agent = presence.seam;
   // E4c end
   // P5 O17 M9b: the app as a tab engine (engine.ts): `mawsd`'s requests for its sessions' agent tabs, answered over the
-  // machine link, which a change of starts over. Under MAWS_E2E=1 the seam can record what would go to `mawsd` instead
+  // machine link, which a change of starts over; only where a machine host runs. Under MAWS_E2E=1 the seam can record what would go to `mawsd` instead
   // (`engine.record`), so a scene with no daemon drives it and reads the real frames of a hidden agent tab.
   let recorded: { name: string; input: unknown }[] | null = null;
-  const engine: AppEngine | null = hosts
+  const engine: AppEngine | null = hosts && machineHost
     ? startAppEngine({
         store,
         agents: cua,

@@ -703,6 +703,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     // E4c start: the browser tools answer the engine host's requests (E4c Design §4; Decision Log 36)
     hosts,
     // E4c end
+    machineHost: launch.mode === 'daemon', // P5 O17 M9b: the app a tab engine to mawsd only where its machine host runs
     // P5 O7 M3: a remote session's tabs are this Mac's, said from its machine; a forwarded port's tab opens its forward
     // again at its first load past a relaunch (src/main/browser/machines.ts, forwarded.ts)
     remote: {
