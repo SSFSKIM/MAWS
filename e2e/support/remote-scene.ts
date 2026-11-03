@@ -24,7 +24,7 @@
 //
 // The scene changes nothing the machine checks: the device keys, the handshakes, the endpoint's authorization and the
 // listings are all production's. Nothing reaches beyond 127.0.0.1.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { connect, createServer, type AddressInfo, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -184,9 +184,10 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
     const directPort = await freePort();
     let deadPort = await freePort();
     while (deadPort === directPort) deadPort = await freePort();
-    // short: B's sockets stay under it (P5 O17 M10: `b.root` shorter still, `/tmp`, for an app of B's own, whose cua socket
-    // is `<profile>/browser/cua/<session>.sock`)
-    const bUserData = mkdtempSync(join(opts.b?.root ?? tmpdir(), 'maws-rb-'));
+    // short: B's sockets stay under it (P5 O17 M10: `b.root` shorter still, `/tmp`, so a session's cua socket and an app of
+    // B's own, whose cua socket is `<profile>/browser/cua/<session>.sock`, fit a Unix socket's bound; realpathed, as the
+    // headless scene's `/tmp/mh-` is, so nothing of B's reads its profile through the `/tmp` symlink)
+    const bUserData = opts.b?.root === undefined ? mkdtempSync(join(tmpdir(), 'maws-rb-')) : realpathSync(mkdtempSync(join(opts.b.root, 'maws-rb-')));
     undo.push(() => rmSync(bUserData, { recursive: true, force: true }));
     const daemon = await startProfileDaemon({
       userData: bUserData,
