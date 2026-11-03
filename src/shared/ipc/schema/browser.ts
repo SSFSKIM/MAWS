@@ -21,6 +21,10 @@ import { BROWSER_DIALOG_EXCERPT_MAX_CHARS } from '../../browser/dialog';
 import { BROWSER_ACTIVITIES_KEPT, BrowserAgentActivitySchema } from '../../browser/activity';
 // E13 end
 import type { CommandSpec } from './common';
+// P5 O17 M9b start
+import { BROWSER_LIMITS, BrowserFrameMetaSchema, BrowserInputSchema, BrowserSeqSchema } from '../../browser/screencast';
+import { EngineInventorySchema } from './browser-engine';
+// P5 O17 M9b end
 import { CaptureAnswerSchema } from '../../markup/image'; // P3-G
 // E4d start
 import { AnchorSchema } from '../../anchor/anchor';
@@ -131,6 +135,15 @@ export const BrowserImportInspectionSchema = z.strictObject({
 });
 export type BrowserImportInspection = z.infer<typeof BrowserImportInspectionSchema>;
 // E4b end
+
+// P5 O17 M9b: the remote view's (Interfaces §K): a view main mints, `mawsd`'s epoch, the inventory and frame as §G's
+const RemoteViewIdSchema = z.string().min(1).max(64);
+const BrowserEpochSchema = z.string().min(1).max(128);
+export const BrowserInventorySchema = EngineInventorySchema.extend({ epoch: BrowserEpochSchema });
+export const BrowserRemoteFrameSchema = BrowserFrameMetaSchema.extend({
+  epoch: BrowserEpochSchema,
+  jpeg: z.instanceof(Uint8Array).refine((jpeg) => jpeg.byteLength >= 1 && jpeg.byteLength <= BROWSER_LIMITS.frameBytes, `1 to ${BROWSER_LIMITS.frameBytes} bytes`), // realm-local, as pty.data's
+});
 
 export const commands = {
   // Every tab, or one session's, with each session's selected tab.
@@ -324,6 +337,19 @@ export const commands = {
   // crop's caps); refused for a tab not placed in the sender's window, `image: null` when no picture could be taken.
   'browser.view.capture': { input: TabOnly, output: CaptureAnswerSchema, owner: 'main' },
   // P3-G end
+  // P5 O17 M9b start: the remote view's bridge (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §K, "The
+  // app's bridge"; src/main/browser/remote-view.ts): a window's own viewers of the agent's tabs on another machine's
+  // session, over that machine's RL2 link. `open` names the session by its address (the router lowers it, the machine
+  // the handler's target) and answers the view and whether it is possible (the inventory's state and reason); the rest
+  // name the view, which only the window that opened it can.
+  'browser.remote.open': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ viewId: RemoteViewIdSchema, inventory: BrowserInventorySchema }), owner: 'main' },
+  'browser.remote.select': { input: z.strictObject({ viewId: RemoteViewIdSchema, epoch: BrowserEpochSchema, tabId: BrowserTabIdSchema }), output: z.void(), owner: 'main' },
+  'browser.remote.takeControl': { input: z.strictObject({ viewId: RemoteViewIdSchema }), output: z.strictObject({ control: z.boolean(), reason: z.string().max(1_024).optional() }), owner: 'main' },
+  'browser.remote.releaseControl': { input: z.strictObject({ viewId: RemoteViewIdSchema }), output: z.void(), owner: 'main' },
+  'browser.remote.input': { input: z.strictObject({ viewId: RemoteViewIdSchema, seq: BrowserSeqSchema, event: BrowserInputSchema }), output: z.void(), owner: 'main' },
+  'browser.remote.ack': { input: z.strictObject({ viewId: RemoteViewIdSchema, seq: BrowserSeqSchema }), output: z.void(), owner: 'main' },
+  'browser.remote.close': { input: z.strictObject({ viewId: RemoteViewIdSchema }), output: z.void(), owner: 'main' },
+  // P5 O17 M9b end
 } as const satisfies Record<`browser.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -374,6 +400,14 @@ export const events = {
     ]),
   }),
   // cua #90 end
+  // P5 O17 M9b start: to the window that opened the view only (remote-view.ts): its inventory at each change, each frame
+  // (the next only after its `ack`), and the end of its stream with the endpoint's word (`tab-closed`, `engine-changed`,
+  // `control-revoked`, `carrier`, …); the view itself goes on until `close`, or its feed's end, told as an unavailable
+  // inventory
+  'browser.remote.inventory': z.strictObject({ viewId: RemoteViewIdSchema, inventory: BrowserInventorySchema }),
+  'browser.remote.frame': z.strictObject({ viewId: RemoteViewIdSchema, frame: BrowserRemoteFrameSchema }),
+  'browser.remote.closed': z.strictObject({ viewId: RemoteViewIdSchema, reason: z.string().min(1).max(64) }),
+  // P5 O17 M9b end
 } as const satisfies Record<`browser.${string}`, z.ZodType>;
 
 // P2-E2 start (2026-10-09): the comment card's pin on `browser.comment.picked` (P2 spec §4.7, X21; P2 interface ledger §1),
