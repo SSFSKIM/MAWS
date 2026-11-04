@@ -16,7 +16,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { MAX_SEND_CONTENT_JSON_BYTES, MAX_SEND_DOCUMENT_BYTES } from '@shared/engine/session-state-store';
 import { REMOTE_UPLOAD_PART_BYTES, UPLOAD_FILE_MAX_BYTES, UPLOAD_ID_PATTERN, type FilesReadUploadsInput, type FilesReadUploadsOutput, type FilesUploadInput, type FilesUploadOutput, type UploadDocumentBlock, type UploadPart } from '@shared/ipc/schema/files';
 import type { SpineView } from '@shared/spine/view';
-import { AlreadyThere, excludeUploads, promoteStaged, readUpload, rootOf, saveFiles, stagePart, SWEEP_AFTER_MS, Unconfirmed, Unsafe, uploadId, uploadRecords, type UploadRecords } from '../fs/upload-roots';
+import { AlreadyThere, confirmOpens, excludeUploads, promoteStaged, readUpload, rootOf, saveFiles, stagePart, SWEEP_AFTER_MS, Unconfirmed, Unsafe, uploadId, uploadRecords, type UploadRecords } from '../fs/upload-roots';
 import type { GitRun } from '../git/runner';
 import { MEDIA_TYPES, typeOf } from '../lane-a/media';
 import { allowlistOf } from './allowlist';
@@ -113,6 +113,13 @@ export function createUpload({ sessions, roots, git, mint = uploadId, log }: Upl
       return refused(`the session’s working directory could not be read (${errorText(error)}), so nothing was saved`);
     }
     const root = rootOf(base, id);
+    // P5 O7 M8: nothing written (the record, the exclude, a file) where no open can be confirmed to follow no link
+    try {
+      confirmOpens();
+    } catch (error) {
+      if (error instanceof Unsafe) return refused(`the upload was not saved: ${error.message}`);
+      throw error;
+    }
     try {
       roots.record(id, root);
     } catch (error) {

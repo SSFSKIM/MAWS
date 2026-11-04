@@ -513,14 +513,18 @@ describe('files.upload in parts', () => {
 });
 
 // The module as it loads on another platform than macOS (Linux CI): its walk checks each ancestor, then opens with
-// O_NOFOLLOW and confirms the descriptor, in place of macOS's O_NOFOLLOW_ANY. On Linux both loads are this one.
+// O_NOFOLLOW and confirms the descriptor, in place of macOS's O_NOFOLLOW_ANY. On Linux both loads are this one. P5 O7
+// M8: as Linux with `/proc` mounted, where opens are confirmed (`OPENS_CONFIRMED`); a Mac has no `/proc`, which would
+// make the stand-in the unconfirmed machine that refuses every upload (upload-unconfirmed.test.ts).
 async function portableUpload(): Promise<typeof import('./upload')> {
   const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
   Object.defineProperty(process, 'platform', { value: 'linux' });
   try {
     vi.resetModules();
+    vi.doMock('../fs/no-link', async (actual) => ({ ...(await actual<typeof import('../fs/no-link')>()), OPENS_CONFIRMED: true }));
     return await import('./upload');
   } finally {
+    vi.doUnmock('../fs/no-link');
     Object.defineProperty(process, 'platform', platform);
     vi.resetModules();
   }

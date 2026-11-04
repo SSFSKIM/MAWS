@@ -44,8 +44,14 @@ export class Unsafe extends Error {}
 // P5 O7 M8: this machine can't confirm an open followed no link (no O_NOFOLLOW_ANY, no `/proc/self/fd`): no upload is read.
 export class Unconfirmed extends Unsafe {
   constructor() {
-    super('this machine can’t confirm that an open follows no link (it has neither macOS’s O_NOFOLLOW_ANY nor /proc/self/fd), so no upload is read from it');
+    super('this machine can’t confirm that an open follows no link (it has neither macOS’s O_NOFOLLOW_ANY nor /proc/self/fd), so no upload is read or written there');
   }
+}
+// P5 O7 M8: Unconfirmed where no open can be confirmed to have followed no link (./no-link.ts `OPENS_CONFIRMED`). A
+// send's upload read and `files.upload`'s write ask it before anything, so neither runs where a link an ancestor became
+// after the walk would be followed unseen.
+export function confirmOpens(): void {
+  if (!OPENS_CONFIRMED) throw new Unconfirmed();
 }
 // The name a file of the upload was to take is there already (a link included): nothing is written over it.
 export class AlreadyThere extends Unsafe {
@@ -254,8 +260,7 @@ export function removeFiles(root: string, owned: OwnedFiles, names?: readonly st
 // with no link on its way, and opened with no link, a regular file with no other link (a hard link is no symbolic one,
 // so the open passes it; it could name a file outside the root), read whole by that descriptor alone. Where an open
 // cannot be confirmed to have followed no link (./no-link.ts `OPENS_CONFIRMED`), nothing is read: the read would leave the
-// root through an ancestor turned into a link after the walk, unseen, which a write's exclusive create bounds and a read
-// does not.
+// root through an ancestor turned into a link after the walk, unseen (`confirmOpens`, which `files.upload` asks too).
 
 /** What `readUpload` found: the bytes and when the file was last written, or why nothing was read. */
 export type UploadRead = { bytes: Buffer; writtenAt: number } | { missing: true } | { tooLarge: number };
@@ -265,7 +270,7 @@ export type UploadRead = { bytes: Buffer; writtenAt: number } | { missing: true 
 // link on the way, a link or anything but a regular file of its own at the name; Unconfirmed, before anything, where no
 // open can be confirmed.
 export function readUpload(base: string, session: string, name: string, max: number): UploadRead {
-  if (!OPENS_CONFIRMED) throw new Unconfirmed();
+  confirmOpens();
   let root: Pinned;
   try {
     root = walk(base, [...UPLOADS, session]).at(-1)!;
