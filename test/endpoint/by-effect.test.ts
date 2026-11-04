@@ -164,7 +164,7 @@ describe('a page’s lease', () => {
     expect(gradeOf('delivery.receipts')).toBe('view');
     expect(gradeOf('delivery.send')).toBe('manage');
     expect(gradeOf('delivery.cancel')).toBe('manage');
-    for (const name of ['connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', 'connectors.signIn', 'connectors.signInCancel', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool', 'delivery.connect', 'catalog.engine', 'catalog.engineRefresh'])
+    for (const name of ['connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', 'connectors.signIn', 'connectors.signInCancel', 'connectors.signInServer', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool', 'delivery.connect', 'catalog.engine', 'catalog.engineRefresh'])
       expect(gradeOf(name), name).toBe('machine-admin');
     expect(gradeOf('connectors.callback')).toBe('list');
   });

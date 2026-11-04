@@ -329,7 +329,7 @@ describe('library.read’s export form', () => {
 // its member can no longer view its artifact. The window report is the endpoint's own call, under the channel's ref.
 describe('M5c’s rows', () => {
   const LEASE_CALLS = ['connectors.open', 'connectors.declare', 'connectors.watch', 'connectors.unwatch', 'connectors.visibility', 'connectors.close'];
-  const ADMIN = ['connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', 'connectors.signIn', 'connectors.signInCancel', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool'];
+  const ADMIN = ['connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', 'connectors.signIn', 'connectors.signInCancel', 'connectors.signInServer' /* P5 O7 M8 */, 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool'];
 
   /** The machine's connectors and delivery as the spine answers them, each request kept with the asker's ref. */
   function machineServices(f: Fixture) {
@@ -628,6 +628,20 @@ describe('M5c’s rows', () => {
     const from = a.inbox.length;
     expect(await act(a, stepped)).toBe('ok');
     expect(await done(a, stepped, from)).toMatchObject({ state: 'done', result: { saved: 'ok' } });
+  });
+
+  // P5 O7 M8 ("Sign in from the session's MCP widget"): a server signed in by its name and scope, as `connectors.signIn` is
+  it('keep Sign in by a server’s name at `machine-admin`, a step-up each, run once on the machine; refuse it to a member without the right', async () => {
+    const { f, a, b } = await scene();
+    f.spine.handle('connectors.signInServer', () => ({ opId: 'sign-in-1' }));
+    const signIn = { name: 'linear', scope: 'project', cwd: '/work/m8', appSessionId: 'app-shared', callback: { port: 8080 } };
+    expect(await act(b, await b.device.stepUp(actOf(f, b, 'connectors.signInServer', signIn)))).toBe('grade');
+    expect(await act(a, actOf(f, a, 'connectors.signInServer', signIn))).toBe('step-up');
+    const stepped = await a.device.stepUp(actOf(f, a, 'connectors.signInServer', signIn));
+    const from = a.inbox.length;
+    expect(await act(a, stepped)).toBe('ok');
+    expect(await done(a, stepped, from)).toMatchObject({ state: 'done', result: { opId: 'sign-in-1' } });
+    expect(f.spine.claimed.filter((c) => c.name === 'connectors.signInServer').map((c) => c.input)).toEqual([signIn]);
   });
 
   it('answer `client.windowShown` by the machine’s window report under the channel’s ref, and refuse it out of shape', async () => {
