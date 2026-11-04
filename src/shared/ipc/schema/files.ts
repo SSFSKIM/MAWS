@@ -191,6 +191,9 @@ export type FilesUploadOutput = z.infer<typeof FilesUploadOutputSchema>;
 // send names for the machine to attach. Its id is the name `files.upload` stored it under in the session's upload root
 // (the last part of the path it answered: `<upload id>.<n>[.<ext>]`), so it names a file of that root alone and never a
 // path. `as: 'document'`: the file goes to the model as a document block, as a PDF dropped on a local session does.
+// How long an upload is kept for a send to name (a day): the machine's sweep may take its root after it, and a send naming
+// an older one is refused (services/fs/upload-roots.ts, services/files/upload.ts); the composer warns before such a send.
+export const UPLOAD_KEPT_MS = 24 * 3600_000;
 export const UPLOAD_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}\.[0-7](?:\.[a-z0-9]{1,16})?$/;
 export const SendUploadSchema = z.strictObject({ uploadId: z.string().regex(UPLOAD_ID_PATTERN), as: z.literal('document') });
 export type SendUpload = z.infer<typeof SendUploadSchema>;

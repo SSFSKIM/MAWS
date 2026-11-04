@@ -27,12 +27,13 @@ import { randomBytes } from 'node:crypto';
 import { closeSync, constants, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmdirSync, unlinkSync, writeSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { atomicWriteFileSync } from '@shared/fs/atomic-write';
+import { UPLOAD_KEPT_MS } from '@shared/ipc/schema/files';
 import { NotARepositoryError, type GitRun } from '../git/runner';
 import { confirmOpenedSync, LinkOnTheWay, NO_LINK, OPENS_CONFIRMED, walkSync, WALKED } from './no-link';
 
 export const UPLOADS = ['.claude', 'desk-uploads'] as const; // under the working directory; the session's directory below
 export const EXCLUDE_LINE = '**/.claude/desk-uploads/'; // unanchored: a session in a subdirectory of the checkout matches too
-export const SWEEP_AFTER_MS = 24 * 3600_000;
+export const SWEEP_AFTER_MS = UPLOAD_KEPT_MS;
 // P5 O7 M4: a remote upload's parts, staged under its root until the last arrives (`stagePart`, `promoteStaged`)
 export const STAGING = '.staging';
 

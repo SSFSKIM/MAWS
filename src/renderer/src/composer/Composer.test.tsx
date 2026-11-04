@@ -47,7 +47,8 @@ import { ComposerAppKeys } from './ComposerAppKeys';
 import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
 import { docOf, mentionNode, paragraph, textNode } from './editor/doc';
-import { ON_THIS_MAC, STALE_UPLOADS, UPLOAD_ADVISORY_MS } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1); M8: STALE_UPLOADS, UPLOAD_ADVISORY_MS
+import { ON_THIS_MAC, STALE_UPLOADS } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1); M8: STALE_UPLOADS
+import { UPLOAD_KEPT_MS } from '@shared/ipc/schema/files'; // P5 O7 M8
 import { REMOTE_UPLOAD_REFUSED_WORDS } from '@shared/ipc/schema/remote'; // P5 O7 M8
 import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable'; // P5 O7 M8 review
 import { forgetSubmissions } from './editor/controller'; // M4c re-review: a reload's fresh modules
@@ -1543,7 +1544,7 @@ describe('a lane B session on another machine', () => {
       await dropPdf();
       await act(() => remote.fail('session.send', 'Not sent: mini is offline', 'host_unavailable'));
       await waitFor(() => expect(noticesOf()).toEqual([['Not sent: mini is offline', ['Send again']]]));
-      now.mockReturnValue(Date.now() + UPLOAD_ADVISORY_MS + 1);
+      now.mockReturnValue(Date.now() + UPLOAD_KEPT_MS + 1);
       act(() => useNotices.getState().notices[0].actions[0].run());
       await waitFor(() => expect(remote.pending('session.send')).toBe(1));
       expect(noticesOf()).toEqual([[STALE_UPLOADS(['paper.pdf']), []]]);

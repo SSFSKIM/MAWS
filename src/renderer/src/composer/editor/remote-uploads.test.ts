@@ -3,13 +3,14 @@
 // command's bounds, progress per attachment, each attachment's path kept for a send again), and the message they make.
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import { UPLOAD_KEPT_MS } from '@shared/ipc/schema/files';
 import { REMOTE_INLINE_MAX_BYTES } from '@shared/ipc/schema/remote';
 import { addressOf } from '@shared/machine/address';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import { OTHER_MACHINE } from '../../../../../test/support/machine';
 import type { Attachment } from './doc';
 import type { Serialized } from './serialize';
-import { classifyRemoteFile, composeRemoteSend, forgetUploads, planRemoteSend, remoteMessage, resetRemoteUploads, STALE_UPLOADS, UPLOAD_ADVISORY_MS, uploadAttachments, uploadName, useRemoteUploads } from './remote-uploads';
+import { classifyRemoteFile, composeRemoteSend, forgetUploads, planRemoteSend, remoteMessage, resetRemoteUploads, STALE_UPLOADS, uploadAttachments, uploadName, useRemoteUploads } from './remote-uploads';
 
 const MiB = 1024 * 1024;
 const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
@@ -179,7 +180,7 @@ describe('a send’s uploaded PDFs, as document blocks', () => {
     const fake = fakeClient({ 'files.upload': (input: { files: unknown[] }) => ({ status: 'ok', paths: input.files.map((_, i) => `${ROOT}/u${now}.${i}.pdf`) }) });
     const doc = pdf('p1', 10);
     await expect(composeRemoteSend(fake.client, R, s, [doc], '/work/app-r', () => now)).resolves.toMatchObject({ ok: true, stale: [] });
-    now += UPLOAD_ADVISORY_MS;
+    now += UPLOAD_KEPT_MS;
     await expect(composeRemoteSend(fake.client, R, s, [doc], '/work/app-r', () => now)).resolves.toMatchObject({ ok: true, stale: [] }); // a day to the millisecond: still within it
     now += 1;
     await expect(composeRemoteSend(fake.client, R, s, [doc], '/work/app-r', () => now)).resolves.toMatchObject({ ok: true, stale: ['p1.pdf'], uploads: [{ uploadId: 'u1000000.0.pdf', as: 'document' }] });

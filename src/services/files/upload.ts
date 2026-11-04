@@ -14,9 +14,9 @@ import { realpathSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import { MAX_SEND_CONTENT_JSON_BYTES, MAX_SEND_DOCUMENT_BYTES } from '@shared/engine/session-state-store';
-import { REMOTE_UPLOAD_PART_BYTES, UPLOAD_FILE_MAX_BYTES, UPLOAD_ID_PATTERN, type FilesReadUploadsInput, type FilesReadUploadsOutput, type FilesUploadInput, type FilesUploadOutput, type UploadDocumentBlock, type UploadPart } from '@shared/ipc/schema/files';
+import { REMOTE_UPLOAD_PART_BYTES, UPLOAD_FILE_MAX_BYTES, UPLOAD_ID_PATTERN, UPLOAD_KEPT_MS, type FilesReadUploadsInput, type FilesReadUploadsOutput, type FilesUploadInput, type FilesUploadOutput, type UploadDocumentBlock, type UploadPart } from '@shared/ipc/schema/files';
 import type { SpineView } from '@shared/spine/view';
-import { AlreadyThere, confirmOpens, excludeUploads, promoteStaged, readUpload, rootOf, saveFiles, stagePart, SWEEP_AFTER_MS, Unconfirmed, Unsafe, uploadId, uploadRecords, type UploadRecords } from '../fs/upload-roots';
+import { AlreadyThere, confirmOpens, excludeUploads, promoteStaged, readUpload, rootOf, saveFiles, stagePart, Unconfirmed, Unsafe, uploadId, uploadRecords, type UploadRecords } from '../fs/upload-roots';
 import type { GitRun } from '../git/runner';
 import { MEDIA_TYPES, typeOf } from '../lane-a/media';
 import { allowlistOf } from './allowlist';
@@ -157,9 +157,8 @@ export function createUpload({ sessions, roots, git, mint = uploadId, log }: Upl
 // by its bytes, within the engine's document bound, the whole within the message's. The first that fails refuses them
 // all, in a sentence that names it.
 
-// An upload is attached within the day it was written, the age at which the sweep may take its root: older is expired,
-// whether or not the sweep has come yet, so whether a send attaches does not hang on when the sweep last ran.
-export const UPLOAD_KEPT_MS = SWEEP_AFTER_MS;
+// An upload is attached within the day it was written (UPLOAD_KEPT_MS, the age at which the sweep may take its root):
+// older is expired, whether or not the sweep has come yet, so whether a send attaches does not hang on when it last ran.
 const base64Length = (bytes: number) => 4 * Math.ceil(bytes / 3);
 
 export interface UploadReaderDeps {

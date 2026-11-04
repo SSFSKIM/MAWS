@@ -22,7 +22,7 @@ import { create } from 'zustand';
 import type { ContentBlock } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { UPLOAD_CALL_MAX_BYTES, UPLOAD_FILE_MAX_BYTES, UPLOAD_FILES_MAX, UPLOAD_ID_PATTERN, type SendUpload } from '@shared/ipc/schema/files';
+import { UPLOAD_CALL_MAX_BYTES, UPLOAD_FILE_MAX_BYTES, UPLOAD_FILES_MAX, UPLOAD_ID_PATTERN, UPLOAD_KEPT_MS, type SendUpload } from '@shared/ipc/schema/files';
 import { REMOTE_INLINE_MAX_BYTES } from '@shared/ipc/schema/remote';
 import { MENTION, type Attachment, type ComposerDoc } from './doc';
 import { IMAGE_BYTE_TYPES, MAX_SOURCE_IMAGE_BYTES, mentionPath } from './paste';
@@ -101,9 +101,6 @@ export const useUploadProgress = (attachmentId: string): UploadProgress | null |
 // Each attachment's path on its session's machine, once uploaded (by attachment id: a drop's id is its own), and when
 // `files.upload` answered it (P5 O7 M8: the machine's own clock is not this Mac's, so this is the moment this app holds).
 const uploaded = new Map<string, { session: AppSessionId; path: string; at: number }>();
-
-/** P5 O7 M8: how long the machine reads an upload for (services/files/upload.ts UPLOAD_KEPT_MS, its sweep's day). */
-export const UPLOAD_ADVISORY_MS = 24 * 3600_000;
 
 /** P5 O7 M8: the advisory before a send that names uploads kept longer than the machine reads them. */
 export const STALE_UPLOADS = (names: readonly string[]): string => {
@@ -211,7 +208,7 @@ export async function composeRemoteSend(client: MawsBridge, appSessionId: AppSes
     const content = typeof message.content === 'string' ? [{ type: 'text' as const, text: message.content }] : message.content;
     if (inline.length === 0 || encoder.encode(JSON.stringify(content)).length <= REMOTE_INLINE_MAX_BYTES) {
       const at = now();
-      const stale = upload.filter((a) => at - (uploaded.get(a.id)?.at ?? at) > UPLOAD_ADVISORY_MS).map((a) => a.name);
+      const stale = upload.filter((a) => at - (uploaded.get(a.id)?.at ?? at) > UPLOAD_KEPT_MS).map((a) => a.name);
       return { ok: true, message, uploads: documentUploads(upload, sent.paths), stale };
     }
     upload = [...upload, inline[inline.length - 1]!];
