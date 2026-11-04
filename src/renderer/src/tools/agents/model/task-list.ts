@@ -3,13 +3,13 @@
 // launch's CLAUDE_CODE_TASK_LIST_ID, else the engine session id once known), never a guess; a disk-only session reads
 // its record's engine session id, labelled "session list".
 import type { EngineSessionStatus } from '@shared/engine/status';
+import { sanitiseListId } from '@shared/engine/task-list';
 import type { SessionRecord } from '@shared/graph/session';
 import type { PersistedTask } from '@shared/wire/store';
 
-// SPEC 20 §20.2.2: the engine makes a list id a path segment this way, and C4's reader applies the same rule.
-export function sanitiseListId(id: string): string {
-  return id.replace(/[^A-Za-z0-9_-]/g, '-');
-}
+// SPEC 20 §20.2.2: the engine makes a list id a path segment this way, and C4's reader applies the same rule. P5 O7
+// M8: the one rule, shared with the endpoint's `task-list` target rule and lane B's stream.
+export { sanitiseListId };
 
 export type ListIdAnswer = { listId: string; label: 'list' | 'session list' } | { listId: null; reason: 'no id yet' | 'no session' };
 

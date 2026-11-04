@@ -2,7 +2,8 @@
 // a panel tool, never unregistered (a registration's disposer closes the tool's tabs, which StrictMode's effect replay
 // would do, C8a's rule); the comment composer into E5's seam, in place of its placeholder sheet (since P2-E1 the sheet or
 // the comment card, by the producer's placement); the transcript's summary-row action; and the side questions'
-// completions, which patch the pane's store whether or not the question view is on screen. The last three are undone by the returned disposer. The `btw` slash widget is C11's registration
+// completions, which patch the pane's store whether or not the question view is on screen (P5 O7 M8: and a remote
+// session's reopened stream, which lists its log again). The last three are undone by the returned disposer. The `btw` slash widget is C11's registration
 // (`widgets/index.ts`), never this module's.
 import type { Anchor } from '@shared/anchor/anchor';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -14,7 +15,7 @@ import { openSideThread } from './actions';
 import { openCard } from './card/store';
 import { openComposer } from './CommentComposer';
 import { sideTool } from './SideTool';
-import { onSideOperation } from './store';
+import { onSideOperation, onSideReopened } from './store';
 
 export function registerSidePane(): void {
   registerPanelTool(sideTool);
@@ -32,9 +33,11 @@ export function connectSide(client: MawsBridge = ipc): () => void {
   const offComposer = registerCommentComposer(openComment);
   const offActions = registerTranscriptActions({ openSideThread });
   const offOperations = client.on('session.operation', (event) => onSideOperation(event, client));
+  const offReopened = client.on('remote.reopened', ({ appSessionId }) => onSideReopened(appSessionId, client)); // P5 O7 M8
   return () => {
     offComposer();
     offActions();
     offOperations();
+    offReopened();
   };
 }

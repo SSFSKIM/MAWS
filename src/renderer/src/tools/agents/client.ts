@@ -20,7 +20,9 @@ import { stopSessionTask } from '../../session/controls/controls-for'; // P5 O9 
 export interface AgentWorkClient {
   subagents(appSessionId: AppSessionId): Promise<SubagentEntry[]>;
   workflows(appSessionId: AppSessionId): Promise<WorkflowRun[]>;
-  tasks(machine: MachineRef, listId: string): Promise<PersistedTask[]>; // P5 O6 M4: a list id names no machine; the session's names it
+  // P5 O6 M4: a list id names no machine; the session's names it. P5 O7 M8: and the session whose list it is, which a
+  // remote read must name (the endpoint's `task-list` rule); null when none is known
+  tasks(machine: MachineRef, listId: string, appSessionId: AppSessionId | null): Promise<PersistedTask[]>;
   readSpill(machine: MachineRef, input: FsReadSpillInput): Promise<FsReadSpillOutput>; // P5 O6 M4: the machine whose disk holds it
   events(appSessionId: AppSessionId, afterSeq: number | null): Promise<EventsSnapshot>; // session.events { afterSeq, limit: null }
   agentEvents(appSessionId: AppSessionId, agentId: AgentId): Promise<SessionEvent[]>; // fs.agentEvents: a child's transcript so far, following it (later events on session.eventBatch); debt wave 4, the relay's receipt
@@ -50,7 +52,7 @@ export function createAgentWorkClient(bridge: MawsBridge): AgentWorkClient {
   return {
     subagents: async (appSessionId) => valueOf(await bridge.invoke('fs.subagents', { appSessionId })).agents,
     workflows: async (appSessionId) => valueOf(await bridge.invoke('fs.workflows', { appSessionId })).runs,
-    tasks: async (machine, listId) => valueOf(await bridge.invoke('fs.tasks', { listId }, { machine })).tasks,
+    tasks: async (machine, listId, appSessionId) => valueOf(await bridge.invoke('fs.tasks', { listId, ...(appSessionId !== null && { appSessionId }) }, { machine })).tasks,
     readSpill: async (machine, input) => valueOf(await bridge.invoke('fs.readSpill', input, { machine })),
     events: async (appSessionId, afterSeq) => valueOf(await bridge.invoke('session.events', { appSessionId, afterSeq, limit: null })),
     agentEvents: async (appSessionId, agentId) => valueOf(await bridge.invoke('fs.agentEvents', { appSessionId, agentId })).events,

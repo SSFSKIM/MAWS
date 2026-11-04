@@ -29,8 +29,10 @@ export interface Checklist {
 export function useChecklist(status: EngineSessionStatus | null, session: SessionRecord | null): Checklist {
   const answer = listIdFor(status, session);
   const listId = answer.listId;
-  const machine = machineFor(session?.appId ?? status?.appSessionId ?? null);
-  const tasks = useQuery({ queryKey: ['fs.tasks', listId, machine], queryFn: () => agentWorkClient().tasks(machine, listId!), enabled: listId !== null });
+  const appSessionId = session?.appId ?? status?.appSessionId ?? null;
+  const machine = machineFor(appSessionId);
+  // P5 O7 M8: the read names its session, so another machine admits it as that session's own list
+  const tasks = useQuery({ queryKey: ['fs.tasks', listId, machine], queryFn: () => agentWorkClient().tasks(machine, listId!, appSessionId), enabled: listId !== null });
   const list = listId !== null && tasks.data ? checklistOf(tasks.data) : null;
   const label = answer.listId !== null && answer.label === 'session list' ? BACKGROUND_COPY.sessionList : null;
   return { answer, list, error: tasks.error, label };

@@ -18,7 +18,7 @@ import { useSessions } from '../stores/sessions';
 import { A, B, panelOf, resetPanelStores } from '../test-support/panel';
 import { promoteSide, SIDE_TOOL_ID } from './actions';
 import { applyBtw } from './btw';
-import { registerSidePane } from './register';
+import { connectSide, registerSidePane } from './register';
 import { askSide, clearSide, onSideOperation, refreshSide, resetSideQuestions, retrySide, showSideChild, sidePaneOf, useSidePane } from './store';
 
 // P5 O6 M2: the fake is main: asked and answering with bare ids
@@ -207,6 +207,20 @@ describe('the side-question store', () => {
       await listed;
     });
     expect(exchanges()!.map((e) => [e.id, e.state])).toEqual([['op-1', 'failed']]);
+  });
+
+  // P5 O7 M8 (§U, the panel parts; m8-3's `remote.reopened`): a remote session's stream that reopened may have missed a
+  // side question's change, so its log is listed again, that session's only, and only where this window listed it
+  it('lists a session’s side questions again when main says its remote stream reopened, that session’s alone', async () => {
+    const off = connectSide(fake.client); // the fake as the page's client: page ids both ways
+    useSidePane.setState({ panes: new Map([[A, { view: null, shownChild: null, inlineQuestions: false, exchanges: [entry({})] }]]) });
+    fake.event('remote.reopened', { appSessionId: A });
+    expect(fake.invoked('side.question.list')).toEqual([{ appSessionId: A }]);
+    await fake.reply('side.question.list', { exchanges: [entry({ state: 'answered', response: 'ZEBRA' })] });
+    expect(exchanges()).toEqual([expect.objectContaining({ id: 'op-1', state: 'answered', response: 'ZEBRA' })]);
+    fake.event('remote.reopened', { appSessionId: B }); // never listed here: left to its first listing
+    expect(fake.invoked('side.question.list')).toHaveLength(1);
+    off();
   });
 
   it('an older listing answering after a newer one is dropped', async () => {

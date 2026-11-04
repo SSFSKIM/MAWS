@@ -31,6 +31,7 @@ const task = (id: string, taskStatus: PersistedTask['status'], subject: string, 
 
 let lists: Record<string, PersistedTask[] | Error>;
 const tasksCalls: string[] = [];
+const tasksSessions: (AppSessionId | null)[] = []; // P5 O7 M8: the session each read named
 const tasksChanged = new Set<(payload: EventPayload<'fs.tasksChanged'>) => void>();
 let disconnect: (() => void) | null = null;
 let scrolled: string[] = [];
@@ -50,12 +51,14 @@ beforeEach(() => {
     'list-b': [task('1', 'pending', 'Write the parser'), task('2', 'completed', 'Wire up the CLI')],
   };
   tasksCalls.splice(0);
+  tasksSessions.splice(0);
   tasksChanged.clear();
   const fake = fakeAgentWorkClient();
   const client = {
     ...fake.client,
-    tasks: async (_machine: unknown, listId: string) => {
+    tasks: async (_machine: unknown, listId: string, appSessionId: AppSessionId | null) => {
       tasksCalls.push(listId);
+      tasksSessions.push(appSessionId);
       const answer = lists[listId] ?? [];
       if (answer instanceof Error) throw answer;
       return answer;
@@ -108,6 +111,7 @@ describe('the Tasks tool', () => {
     await waitFor(() => expect(rows()).toEqual(['Checking keyboard reorder', 'Run tests']));
     expect(body()!.querySelector('[data-part="progress"]')?.textContent).toBe('2 of 4 completed');
     expect(tasksCalls).toEqual(['list-a']);
+    expect(tasksSessions, 'P5 O7 M8: the read names the session whose list it is').toEqual([A]);
     const fold = within(body()!).getByRole('button', { name: '2 earlier tasks completed' });
     expect(fold.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(fold);
