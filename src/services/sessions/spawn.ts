@@ -97,6 +97,7 @@ function startRefusal(outcome: Exclude<StartOutcome, { status: 'starting' }>): s
     case 'needs_trust':
       return 'untrusted';
     case 'invalid':
+      if (outcome.field === 'route') return outcome.message; // P5 O7 M9: route-unsupported, a sentence the asker shows as it is
       return outcome.field === 'location' && WORKTREE_EXISTS.has(outcome.message) ? 'worktree-exists' : `${outcome.field}: ${outcome.message}`;
     case 'missing_directory':
       return `the checkout's directory is missing: ${outcome.directory}`;

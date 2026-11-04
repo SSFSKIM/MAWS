@@ -48,6 +48,10 @@ export interface Setup {
   watches: Set<LaunchWatch>; // halted when the service is disposed
   rewinds: RewindNotes; // P5 O3-D M4 (D18): the rewind a resume repeats before any input
   spawnerProofs: SpawnerProofs; // P5 O12 M11: a remote spawn's proof, written before each launch of its session
+  // P5 O7 M9: whether the engine host's welcome lists `capability` (a host not connected is woken and asked once more),
+  // and the tests' seam for the managed settings' root (machine-route.ts)
+  hostLists(capability: string): Promise<boolean>;
+  systemRoot?: string;
 }
 
 // ---- failures ------------------------------------------------------------------------------------------------------

@@ -29,6 +29,7 @@ import { Index } from '../index/index';
 import { openSpineData, startSpine, type SpineData, type SpineRoot } from '../spine-root';
 import { buildEnvironment } from '../../engine-host/launch';
 import { transcriptPathOf } from './context';
+import { ROUTE_UNSUPPORTED } from './machine-route'; // P5 O7 M9
 
 const MACHINE = 'TestMachineRef00000000' as MachineRef;
 const BUILD = '0.0.0+spawn-test';
@@ -68,13 +69,14 @@ describe('session.spawn on the spine', () => {
   // The spine with a project on the checkout and the direct route as the machine's setting; its engine host answers a
   // launch with the session ready, and a first message as sent. `parked`: the host is not up until a command's need
   // wakes it (mawsd's parked engine host; #411), and `need` counts those wakes.
-  const composed = async ({ parked = false, seed }: { parked?: boolean; seed?: (index: Index) => void } = {}) => {
+  // P5 O7 M9: `machineRoute`, the machine route as the default instead (its managed settings beneath a scratch root)
+  const composed = async ({ parked = false, seed, machineRoute = false }: { parked?: boolean; seed?: (index: Index) => void; machineRoute?: boolean } = {}) => {
     const seeded = new Index(join(profile, 'index.sqlite'));
     seeded.projects.add(checkout);
     seed?.(seeded);
     seeded.close();
-    const data = await openSpineData(profile, { build: BUILD });
-    data.machineSettings.update({ gateway: { defaultRoute: 'direct' } });
+    const data = await openSpineData(profile, { build: BUILD, systemRoot: join(dir.path, 'system') });
+    if (!machineRoute) data.machineSettings.update({ gateway: { defaultRoute: 'direct' } });
     const host = new FakeSpineHost();
     const launched: LaunchSpec[] = [];
     const proofs: ({ mode: number; text: string } | 'missing' | null)[] = []; // P5 O12 M11: each launch's proof file as the launch found it
@@ -115,6 +117,7 @@ describe('session.spawn on the spine', () => {
       packaged: false, appPath: dir.path, devRoot: dir.path, home: join(dir.path, 'home'),
     });
     held.push({ data, spine });
+    if (machineRoute) await data.machineSettings.setDefaultRoute('machine');
     if (!parked) await host.ready();
     return { bus, host, launched, proofs, sent, need };
   };
@@ -361,6 +364,21 @@ describe('session.spawn on the spine', () => {
     expect(await bus.invoke('session.spawn', { checkout, permission_mode: 'yolo' })).toEqual({ ok: true, value: { status: 'refused', reason: 'permission_mode: yolo is not a permission mode' } });
     expect(await bus.invoke('session.intent.list', undefined)).toEqual({ ok: true, value: { intents: [] } });
     expect(launched).toEqual([]);
+  });
+
+  // P5 O7 M9 (M9 "The route"): a spawn on a machine whose default is the machine route, through an engine host that does
+  // not list engine.route-machine (this fake lists nothing): the legacy route where it reaches the same inference, and
+  // `route-unsupported`'s sentence, nothing launched, where the machine names another host
+  it('spawns on the machine route through an older host on the legacy route, and refuses it route-unsupported where that would change the inference', async () => {
+    trust(checkout);
+    const { bus, launched } = await composed({ machineRoute: true });
+    expect(await bus.invoke('session.spawn', { checkout, permission_mode: 'default' })).toMatchObject({ ok: true, value: { status: 'ok' } });
+    await expect.poll(() => launched.length).toBe(1);
+    expect(launched[0]!.gateway).toBe('direct'); // no base URL anywhere: the direct route empties nothing
+    expect(launched[0]).not.toHaveProperty('route');
+    writeFileSync(join(config, 'settings.json'), JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://inference.example.invalid' } }));
+    expect(await bus.invoke('session.spawn', { checkout, permission_mode: 'default' })).toEqual({ ok: true, value: { status: 'refused', reason: ROUTE_UNSUPPORTED } });
+    expect(launched).toHaveLength(1);
   });
 
   // P5 O7 M9 ("Remote setup"): the trust card answered on the asking device (the endpoint admits `trust` from a machine

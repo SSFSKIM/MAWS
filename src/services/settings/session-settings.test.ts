@@ -11,6 +11,7 @@ import { sessionIdFor, summary } from '../../../test/support/index-fixture'; // 
 import { T0 } from '../../../test/support/builders'; // P4-A2
 import { userScopeProfile, type LaunchProfile } from '@shared/engine/launch-profile'; // P4-A2
 import { sessionSettingsOf } from './session-settings';
+import { machineSettingsDefaults } from '@shared/settings/defaults'; // P5 O7 M9
 import { openSettingsFiles } from '../../../test/support/settings-files'; // P5 O3-A: the two files
 
 vi.mock('electron', () => {
@@ -41,6 +42,13 @@ describe('the session service reads the settings store', () => {
     store.update({ gateway: { defaultRoute: 'direct' } });
     expect((await create()).gateway).toBe('direct');
     expect(before.gateway).toBe('gateway');
+  });
+
+  // P5 O7 M9: the machine's resolved default route, beside the legacy field, seeds a new intent's `route`
+  it("passes the machine's default route through to a new intent's route, and leaves it out when none is given", () => {
+    const state = machineSettingsDefaults();
+    expect(sessionSettingsOf(state, 'machine').gateway).toEqual({ defaultRoute: 'gateway', relayUnreachable: 'ask', route: 'machine' });
+    expect(sessionSettingsOf(state).gateway).toEqual({ defaultRoute: 'gateway', relayUnreachable: 'ask' });
   });
 
   it("a subagent-model change reaches the next launch's subagentModel", async () => {

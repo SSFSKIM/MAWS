@@ -12,7 +12,8 @@ import type { StartOptions } from '@shared/ipc/schema/session';
 import { hostCall, pathExists, transcriptPathOf } from './context';
 import { holderAuthority, type PausedHolder } from './holders';
 import { LaunchWatch, type LaunchEnd } from './launch-watch';
-import { resumeLaunchSpec } from './launch-mapping';
+import { resumeLaunchSpec, resumeRouteOf } from './launch-mapping'; // P5 O7 M9: resumeRouteOf
+import { launchOnHost } from './machine-route'; // P5 O7 M9
 import { passLaunchGate, runBootstrap, writeSpawnerProof } from './setup'; // C12: passLaunchGate; P5 O12 M11: writeSpawnerProof
 import { exitFailure, heldOutcome, HeldFailure, messageOf, RelayFailure, SetupFailure, setupEvent, stopQuietly, takeReplay, WatchdogFailure, type Setup } from './setup-steps';
 import { trustStateOf } from './trust';
@@ -38,13 +39,13 @@ export async function runResume(
     await passLaunchGate(s); // C12: the gate refuses before the trust bootstrap and the handover
     const trust = await trustStateOf(record.directory, { git: s.git, env: s.env });
     const attestation = input.decision === 'accepted' ? { accepted: true as const, directory: trust.trustKey } : null;
-    const gateway = input.options.gateway ?? (record.gateway.routed === true ? 'gateway' : record.gateway.routed === false ? 'direct' : s.settings().gateway.defaultRoute);
+    const route = resumeRouteOf(record, input.options, s.settings()); // P5 O7 M9: `route` before `routed`
     if (input.decision === 'accepted' && !trust.isHome && !trust.trusted) {
       // under a bootstrap id of its own, never the record's (whose statuses C4 would apply to the conversation)
       await runBootstrap(s, appSessionId, {
         cwd: record.directory,
         additionalDirectories: record.additionalDirectories,
-        gateway,
+        ...route,
         trustKey: trust.trustKey,
         note: { put: (bootstrapId, at) => s.bootstraps.put({ bootstrapId, appSessionId, at }), clear: (bootstrapId) => s.bootstraps.remove(bootstrapId) },
       });
@@ -78,7 +79,7 @@ export async function runResume(
     for (;;) {
       await writeSpawnerProof(s, appSessionId, record.launchedBy); // P5 O12 M11: from the record, before each launch that names it
       watch = new LaunchWatch(s, appSessionId, previousLaunchId, input.paused ? PAUSED_READY_MS : undefined);
-      const answer = await hostCall(s.dispatch, 'session.launch', { spec, ...scope });
+      const answer = await launchOnHost(s, 'launching', { spec, ...scope }); // P5 O7 M9
       if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
       if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);
       launched = true;

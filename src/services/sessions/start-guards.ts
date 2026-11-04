@@ -7,6 +7,8 @@ import { randomUUID } from 'node:crypto';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { isGatewayModel } from '@shared/sessions/models';
+import { readRoute } from '@shared/engine/route'; // P5 O7 M9
+import { profileSettings } from '@shared/engine/launch-profile'; // P5 O7 M9
 import type { FirstMessage, SetupIntent } from '@shared/sessions/intent';
 import type { StartOutcome } from '@shared/sessions/setup';
 import type { TrustState } from '@shared/sessions/trust';
@@ -17,6 +19,8 @@ import { holderAuthority, type PausedHolder } from './holders';
 import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf } from './intent-rules';
 import { runResume } from './resume';
 import { runIntentSetup } from './setup';
+import { resumeRouteOf } from './launch-mapping'; // P5 O7 M9
+import { guardMachineRoute } from './machine-route'; // P5 O7 M9
 import type { Setup } from './setup-steps';
 import { trustStateOf } from './trust';
 
@@ -38,7 +42,9 @@ export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: Se
   // the options and the message first, persisted and published (C7's gate closes on the published message); the
   // decision is re-bound to the key the location answers to now
   let intent: SetupIntent = { ...intentIn, updatedAt: s.now() };
-  if (args.options.gateway !== undefined) intent = { ...intent, gateway: args.options.gateway };
+  // P5 O7 M9: the option's route, `route` before an older caller's `gateway`; a machine route keeps the legacy field
+  if (args.options.route !== undefined) intent = { ...intent, route: args.options.route, ...(args.options.route !== 'machine' && { gateway: args.options.route }) };
+  else if (args.options.gateway !== undefined) intent = { ...intent, gateway: args.options.gateway, ...(intent.route !== undefined && { route: args.options.gateway }) };
   if (args.message !== null) intent = { ...intent, message: args.message };
   intent = await ctx.bindTrust(intent, true, args.options.trust);
   intent = await ctx.putIntent(intent);
@@ -58,20 +64,25 @@ export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: Se
   }
   // a relay alias on the direct route (C7's model chip, or a Direct default route, can leave one): refused before any
   // card, since the launch would fail on the failure card; the page answers `field: 'model'` with pickDirectModel
-  if (intent.gateway === 'direct' && intent.model !== null && isGatewayModel(intent.model)) {
+  let route = readRoute(intent); // P5 O7 M9
+  if (route === 'direct' && intent.model !== null && isGatewayModel(intent.model)) {
     return reject({ status: 'invalid', appSessionId, field: 'model', message: directRouteRefusal(intent.model) });
   }
+  // P5 O7 M9 (machine-route.ts): the machine route's refusals (an older host that would change the inference, a gateway
+  // model it would not reach ClaudeUsage with) here, its advisory relay sheet with the other cards below
+  const machine = route === 'machine' ? await guardMachineRoute(s, { cwd: await sessionDirectoryOf(s, location), model: intent.model, flagEnv: launchProfileEnv(s), startAnyway: args.options.startAnyway === true }) : null;
+  if (machine !== null && 'refused' in machine) return reject({ status: 'invalid', appSessionId, ...machine.refused });
 
   // the card outcomes: the message stays with the intent until the card's continuation, a release or the handoff
   const trust = await trustStateOf(trustDirectoryOf(location), { git: s.git, env: s.env });
   if (!trust.trusted && intent.trust === 'unanswered') return [{ status: 'needs_trust', appSessionId, trust }, null];
-  let gateway = intent.gateway;
+  if (machine !== null) return [{ status: 'relay_unreachable', appSessionId, health: machine.relay }, null];
   let directFallback = false;
-  if (gateway === 'gateway') {
+  if (route === 'gateway') {
     const health = await hostCall(s.dispatch, 'engine.relayHealth', { force: true });
     if (!health.ok) {
       if (s.settings().gateway.relayUnreachable === 'direct' && !isGatewayModel(intent.model ?? '')) {
-        gateway = 'direct';
+        route = 'direct';
         directFallback = true;
       } else {
         return [{ status: 'relay_unreachable', appSessionId, health }, null];
@@ -84,7 +95,7 @@ export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: Se
   if (progress.engineSessionId === null) progress = { ...progress, engineSessionId: randomUUID() as NonNullable<typeof progress.engineSessionId> };
   if (progress.bootstrap !== null && (await ctx.forgetQuietly(progress.bootstrap.appSessionId))) progress = { ...progress, bootstrap: null };
   if (progress !== intent.progress) await ctx.putIntent({ ...intent, progress, updatedAt: s.now() });
-  return [{ status: 'starting', appSessionId }, () => runIntentSetup(s, appSessionId, { gateway, directFallback })];
+  return [{ status: 'starting', appSessionId }, () => runIntentSetup(s, appSessionId, { route, directFallback })];
 }
 
 // P3-H (P3 Decision Log 88): a `requireEmptyMessage` start meeting a first message, in the request or retained (an
@@ -135,11 +146,15 @@ export async function guardResumeStart(s: Setup, record: SessionRecord, args: { 
   if (verdict.live === 'self') return handBack({ status: 'already_live', appSessionId });
   if (verdict.live === 'foreign') return handBack({ status: 'held', appSessionId, holder: verdict.holder, attach: await attachOf(s, verdict.holder) });
   if (!(await isDirectory(record.directory))) return handBack({ status: 'missing_directory', appSessionId, directory: record.directory });
+  // P5 O7 M9: a resume on the machine route is held to the same refusals and sheet as an intent's start (machine-route.ts)
+  const machine = resumeRouteOf(record, args.options, s.settings()).route === 'machine' ? await guardMachineRoute(s, { cwd: record.directory, model: null, flagEnv: launchProfileEnv(s), startAnyway: args.options.startAnyway === true }) : null;
+  if (machine !== null && 'refused' in machine) return handBack({ status: 'invalid', appSessionId, ...machine.refused });
   const decision = args.options.trust === 'accepted' || args.options.trust === 'declined' ? args.options.trust : null;
   if (decision === null) {
     const trust: TrustState = await trustStateOf(record.directory, { git: s.git, env: s.env });
     if (!trust.trusted) return [{ status: 'needs_trust', appSessionId, trust }, null];
   }
+  if (machine !== null) return [{ status: 'relay_unreachable', appSessionId, health: machine.relay }, null];
   const message = resumeMessages.get(appSessionId) ?? null;
   // the retained message goes once it is C3's (sent) or handed back (a failure other than C3's relay answer)
   const drop = () => resumeMessages.delete(appSessionId);
@@ -151,4 +166,9 @@ async function attachOf(s: Setup, holder: SessionRecord['holder']): Promise<{ jo
   if (holder.kind !== 'background_job' || holder.jobId === null) return null;
   const binary = await hostCall(s.dispatch, 'engine.binaryInfo', undefined);
   return { jobId: holder.jobId, command: attachCommand(binary.path, holder.jobId) };
+}
+
+// P5 O7 M9: the `--settings` env a launch's profile passes, which the machine route's base URL is resolved under
+function launchProfileEnv(s: Setup): unknown {
+  return profileSettings(s.settings().engine.launchProfile).env;
 }

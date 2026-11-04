@@ -101,6 +101,18 @@ describe('launch mapping', () => {
     expect(resumeLaunchSpec(r, {}, { trust: null, replay: null }, { ...C10_SETTING_DEFAULTS, engine: { ...C10_SETTING_DEFAULTS.engine, subagentModel: 'haiku' } }).subagentModel).toBe('haiku');
   });
 
+  // P5 O7 M9: `route` read before the legacy fields: the caller's, then the record's, then the machine's default
+  it('resumes on the record’s route before its `routed`, an older caller’s gateway option over both, and the machine default for a record never verified', () => {
+    const machine = record(APP, { gateway: { routed: true, baseUrl: 'http://127.0.0.1:8641', autoModeServer: 'unknown', route: 'machine', observed: { kind: 'claudeusage', baseUrl: 'http://127.0.0.1:8641' } } });
+    expect(resumeLaunchSpec(machine, {}, { trust: null, replay: null })).toMatchObject({ route: 'machine', gateway: 'gateway' });
+    expect(resumeLaunchSpec(machine, { gateway: 'direct' }, { trust: null, replay: null })).toMatchObject({ route: 'direct', gateway: 'direct' });
+    expect(resumeLaunchSpec(record(APP, { gateway: { routed: false, baseUrl: null, autoModeServer: 'unknown' } }), { route: 'machine' }, { trust: null, replay: null })).toMatchObject({ route: 'machine', gateway: 'direct' });
+    const discovered = record(APP, { gateway: { routed: null, baseUrl: null, autoModeServer: 'unknown' } });
+    const machineDefault: C10Settings = { ...C10_SETTING_DEFAULTS, gateway: { defaultRoute: 'gateway', relayUnreachable: 'ask', route: 'machine' } };
+    expect(resumeLaunchSpec(discovered, {}, { trust: null, replay: null }, machineDefault)).toMatchObject({ route: 'machine', gateway: 'gateway' });
+    expect(intentLaunchSpec({ ...intent(), route: 'machine', gateway: 'direct' }, { cwd: REPO, trust: null, replay: null })).toMatchObject({ route: 'machine', gateway: 'direct' });
+  });
+
   it('runs the trust bootstrap under its own id: attested, resuming nothing, pinned by C3', () => {
     const spec = bootstrapSpec({ bootstrapId: BOOT, cwd: REPO, additionalDirectories: ['/extra'], gateway: 'gateway', trustKey: REPO, replay: null });
     expect(LaunchSpecSchema.parse(spec)).toEqual(spec);

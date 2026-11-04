@@ -101,7 +101,7 @@ export class SessionHarness {
     const worktrees = (this.worktrees = new WorktreeService({ git, holders: { dispatch: this.host.dispatch, sessions: this.index.sessions } }));
     this.service = new SessionService({
       index: this.index,
-      host: { dispatch: this.host.dispatch, onEvent: this.host.onEvent, onReady: this.host.onReady }, // E10: onReady
+      host: { dispatch: this.host.dispatch, onEvent: this.host.onEvent, onReady: this.host.onReady, capabilities: () => this.host.capabilities }, // E10: onReady; P5 O7 M9: capabilities
       git,
       worktrees,
       intents: gatedIntents(new FileIntentStore(join(this.userData, 'sessions', 'intents')), this.gate),
@@ -131,6 +131,7 @@ export class SessionHarness {
       takeOver: this.opts.takeOver, // P2-A
       timing: { watchdogMs: this.opts.watchdogMs ?? 2_000, stopWaitMs: this.opts.stopWaitMs ?? 200, ...(this.opts.exitWaitMs !== undefined && { exitWaitMs: this.opts.exitWaitMs }) },
       log: () => {},
+      systemRoot: join(this.root, 'system'), // P5 O7 M9: never the machine's own managed settings
     });
   }
 

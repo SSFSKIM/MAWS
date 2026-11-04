@@ -18,6 +18,7 @@ import type { QueueEntry } from '../../src/shared/engine/session-state-store';
 import type { CommandName, EventName, EventPayload, HostState } from '../../src/shared/ipc/schema';
 import type { FsHoldersQuery } from '../../src/shared/ipc/schema/fs';
 import type { LaunchResult } from '../../src/shared/ipc/schema/session';
+import { PEER_CAPABILITIES } from '../../src/shared/host/socket-protocol'; // P5 O7 M9
 import type { SetupIntent } from '../../src/shared/sessions/intent';
 import type { HostDispatch } from '../../src/main/ipc/router';
 import { status as statusOf, T0 } from './builders';
@@ -57,6 +58,7 @@ export class FakeEngineHost {
   readonly events = new Map<string, SessionEvent[]>();
   readonly forgotten: string[] = [];
   relay: RelayHealth = OK_RELAY;
+  capabilities: readonly string[] | null = PEER_CAPABILITIES.engineHost; // P5 O7 M9: the welcome's list; null, no host connected
   script: (spec: LaunchSpec) => LaunchScript = () => ({});
   stopExits = true; // false: session.stop answers { exited: false } and the process lingers until exitNow()
   send: 'answer' | 'queue' | 'hang' | 'persist-then-hang' | 'refuse' = 'answer'; // 'queue': held in the app queue (paused), nothing written to the engine

@@ -27,7 +27,7 @@ import type { ArchiveOutcome, DeleteOutcome, StartOptions } from '@shared/ipc/sc
 import { emptyProgress, HostError, hostCall, STOP_WAIT_MS, WATCHDOG_MS, type SessionServiceDeps } from './context';
 import { DeletionManifests, type DeletionManifest } from './delete-manifest';
 import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf, type RuleVerdict } from './intent-rules';
-import { readSettings, seedPermissionMode } from './launch-mapping';
+import { readSettings, routeOfSettings, seedPermissionMode } from './launch-mapping';
 import { archiveRecord, deleteRecord, forkIntentOf, previewDeletion, renameRecord, revealablePath } from './record-actions';
 import type { BootstrapNote } from './intents';
 import { awaitsReady, liveRows, markInterrupted, reconcileIntent, type LiveRows } from './recovery';
@@ -197,6 +197,8 @@ export class SessionService {
       watches: new Set(),
       rewinds: this.rewinds, // P5 O3-D M4
       spawnerProofs: this.spawnerProofs, // P5 O12 M11
+      hostLists: (capability) => this.hostLists(capability), // P5 O7 M9
+      systemRoot: this.deps.systemRoot, // P5 O7 M9
     };
     await this.work.track(this.deps.intents.load());
     if (this.disposed) return;
@@ -371,6 +373,19 @@ export class SessionService {
     return this.setup;
   }
 
+  // P5 O7 M9: what the engine host's welcome lists; a host not connected now (parked, or between restarts) is woken by
+  // a read of its table and asked again, so a parked host is never taken for an older one
+  private async hostLists(capability: string): Promise<boolean> {
+    const listed = this.deps.host.capabilities;
+    if (listed === undefined) return false;
+    let capabilities = listed();
+    if (capabilities === null) {
+      await hostCall(this.deps.host.dispatch, 'engine.sessions', undefined);
+      capabilities = listed();
+    }
+    return capabilities?.includes(capability) ?? false;
+  }
+
   private async ready(): Promise<Setup> {
     if (!this.hostSettled) this.deps.host.need?.(); // the boot still waits for the engine host: this wait is a need for it
     await (this.readyPromise ?? this.start());
@@ -454,6 +469,7 @@ export class SessionService {
       effort: null,
       permissionMode: seedPermissionMode(await s.userDefaults()), // W3: the user's defaultMode, else auto
       gateway: s.settings().gateway.defaultRoute,
+      ...routeOfSettings(s.settings()), // P5 O7 M9: the machine's default route, when its settings carry one
       trust: 'unanswered',
       trustKey: null,
       message: null,
@@ -500,7 +516,7 @@ export class SessionService {
       if (patch.location !== undefined && intent.progress.worktree?.createdHere) {
         throw new IntentRefused('retained_worktree', `retained_worktree: the failed attempt's worktree ${intent.progress.worktree.path} is kept; discard it or keep it first`);
       }
-      let next: SetupIntent = { ...intent, ...patch, updatedAt: this.now() };
+      let next: SetupIntent = { ...intent, ...patch, ...routePatch(intent, patch), updatedAt: this.now() };
       if (patch.location !== undefined) {
         this.rule(await checkLocation(s, next, { forStart: false }));
         if (intent.progress.worktree !== null) next = { ...next, progress: { ...next.progress, worktree: null } }; // an existing worktree's note: the next start re-reads it
@@ -1126,4 +1142,12 @@ export class SessionService {
       return false;
     }
   }
+}
+
+// P5 O7 M9: a patch's route kept beside the legacy field: a gateway or direct `route` writes the legacy field too, and an
+// older client's `gateway` alone moves a `route` the intent holds with it (else the machine route would outlive the
+// choice); a machine `route` keeps the legacy field, which its launch writes from the resolved base URL.
+function routePatch(intent: SetupIntent, patch: SetupIntentPatch): Partial<Pick<SetupIntent, 'route' | 'gateway'>> {
+  if (patch.route !== undefined) return patch.route === 'machine' || patch.gateway !== undefined ? {} : { gateway: patch.route };
+  return patch.gateway !== undefined && intent.route !== undefined ? { route: patch.gateway } : {};
 }

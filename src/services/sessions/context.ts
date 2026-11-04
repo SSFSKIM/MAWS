@@ -36,7 +36,9 @@ export interface SessionServiceDeps {
   // ready: the engine host answers (E10: streams, or has crashed); onReady: each later time it streams again (E10: the
   // start-time recovery deferred while `engine.sessions` could not be answered runs then); need: a command waits on
   // `ready` (P5: `mawsd` wakes a parked engine host for it; absent, the host is never parked)
-  host: { dispatch: HostDispatch; onEvent: HostEvents; ready?: () => Promise<void>; onReady?: (listener: () => void) => () => void; need?: () => void };
+  // P5 O7 M9: `capabilities`, what the engine host's welcome lists now (null while none is connected); absent, the host is
+  // read as one that lists nothing this build added
+  host: { dispatch: HostDispatch; onEvent: HostEvents; ready?: () => Promise<void>; onReady?: (listener: () => void) => () => void; need?: () => void; capabilities?: () => readonly string[] | null };
   git: GitRun;
   worktrees: WorktreeService;
   intents: IntentStore & { load(): Promise<void> };
@@ -63,6 +65,7 @@ export interface SessionServiceDeps {
   timing?: { watchdogMs?: number; stopWaitMs?: number; exitWaitMs?: number /* P2-A */ };
   now?: () => string;
   log?: (message: string) => void;
+  systemRoot?: string; // P5 O7 M9: the tests' seam, the file-system root the machine's managed settings are read beneath
 }
 
 export const WATCHDOG_MS = 150_000; // a launch with no status for this long fails (C3's own initialize deadline is 120 s, and 30 s for an engine that writes nothing at all)

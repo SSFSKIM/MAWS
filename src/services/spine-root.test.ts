@@ -427,6 +427,24 @@ describe('the spine and the checkouts composed under plain Node', () => {
   // P5 O3-D M5b (Interfaces §F, §G): what main's mirror and its settings mirror read of the spine over the services front
   // on the daemon shape: the machine half with its revision and its changes, the visible set with its changes, and files'
   // admission read
+  // P5 O7 M9 (M9 "The default, without a v2"; m9-1's hand-off): setting `machine` as the default writes, as the legacy
+  // field an older build here reads, the legacy route of the machine's base URL resolved with no project, under the
+  // engine's environment startSpine binds (managed settings beneath a scratch root, never the machine's)
+  it('sets the machine route as the default with the legacy route of the machine’s resolved base URL', async () => {
+    const systemRoot = join(dir.path, 'system');
+    const claude = join(dir.path, 'claude');
+    mkdirSync(claude, { recursive: true });
+    const data = await openSpineData(profile, { build: BUILD, systemRoot });
+    const bus = fakeBus();
+    compose(data, new FakeSpineHost(), bus);
+    writeFileSync(join(claude, 'settings.json'), JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:8641' } }));
+    expect(await bus.main('machineSettings.set', { patch: {}, defaultRoute: 'machine' })).toMatchObject({ ok: true, value: { settings: { gateway: { defaultRoute: 'gateway' } }, defaultRoute: 'machine' } });
+    writeFileSync(join(claude, 'settings.json'), JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://inference.example.invalid' } }));
+    expect(await bus.main('machineSettings.set', { patch: {}, defaultRoute: 'machine' })).toMatchObject({ ok: true, value: { settings: { gateway: { defaultRoute: 'direct' } }, defaultRoute: 'machine' } });
+    expect(JSON.parse(readFileSync(data.paths.machine, 'utf8'))).toMatchObject({ version: 1, gateway: { defaultRoute: 'direct' } });
+    expect(JSON.parse(readFileSync(join(profile, 'machine-route.json'), 'utf8'))).toEqual({ version: 1, defaultRoute: 'machine' });
+  });
+
   it('answers the machine half, the visible set and files’ admission read, and emits each change', async () => {
     const data = await openSpineData(profile, { build: BUILD });
     const host = new FakeSpineHost();

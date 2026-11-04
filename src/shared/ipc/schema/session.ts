@@ -481,6 +481,9 @@ export const StartOptionsSchema = z.strictObject({
   // nothing, while a first message is in the request or retained for the session (an intent's, or a resume's behind a
   // card); absent, a start keeps and sends a retained message as it always has.
   requireEmptyMessage: z.literal(true).optional(),
+  // P5 O7 M9 (M9 "The relay check and the features"): the relay sheet's "Start anyway" on the machine route, whose relay
+  // check is advisory: a start past it, the machine's own settings left to decide; read by nothing else
+  startAnyway: z.literal(true).optional(),
 });
 export type StartOptions = z.infer<typeof StartOptionsSchema>;
 
