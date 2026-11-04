@@ -81,7 +81,7 @@ import { listenLoopback, type LocalListener } from '../forwards';
 import type { MainContext, RemoteDispatch } from '../ipc/router';
 import type { LayoutFileStore } from '../layout/store';
 import { peerLists } from '../machines/remote/capabilities';
-import { dispatchOverLink } from '../machines/remote/dispatch';
+import { callOverLink, dispatchOverLink } from '../machines/remote/dispatch';
 import type { ActHandle, ActOutcome, RemoteLink } from '../machines/remote/link';
 import { ArtifactMachines } from '../artifacts/machines';
 import type { ClientWindowShown } from '../client/window-shown';
@@ -236,7 +236,10 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   'connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', 'connectors.signIn', 'connectors.signInCancel',
   'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool',
   'connectors.signInServer', // P5 O7 M8: the session's MCP widget's Sign in, the entry read on the machine
+  'session.projects.addFolder', // P5 O7 M9: the remote setup's registration (`machine-admin`, the machine's owners')
 ]);
+/** Acts the endpoint always asks a step-up of, signed before the first copy goes (no round trip to be asked). */
+const STEPPED_UP: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.addFolder']);
 // P5 O7 M5c ("O4's surfaces: the grade"): the six lease reads, sent as calls by name (./remote-connectors.ts)
 export { MACHINE_CALLS } from './remote-connectors';
 /** Reads the pane makes that no row offers, answered here from one that is. */
@@ -480,7 +483,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
    * up to `answerMs` past it (its command's budget on the machine).
    */
   async function machineAct(link: RemoteLink, name: CommandName, fields: Fields, deadline: number, options: MachineActOptions = {}): Promise<CommandResult<CommandName>> {
-    const handle = link.act({ action: name, args: fields, executor: 'machine', sendBy: deadline, ...(options.oneChannel === true ? { oneChannel: true as const } : {}) });
+    const handle = link.act({ action: name, args: fields, executor: 'machine', sendBy: deadline, ...(options.oneChannel === true ? { oneChannel: true as const } : {}), ...(STEPPED_UP.has(name) ? { stepUp: 'required' as const } : {}) });
     options.onHandle?.(handle);
     const result = await settle(link, name, handle, deadline + (options.answerMs ?? 0), String(fields.appSessionId ?? fields.artifactId ?? ''));
     if (name === 'session.acquire' && result.ok && record(result.value)?.status === 'ready') machines.get(link.machine)?.lanes.get(String(fields.appSessionId))?.session.kick();
@@ -685,6 +688,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       });
     }
     if (connectors.handles(name)) return connectors.dispatch(link, name, fields, ctx.client); // P5 O7 M5c
+    if (MACHINE_CALLS.has(name)) return callOverLink(link, name, fields); // P5 O7 M9: the remote setup's two reads
     if (TARGETED_CALLS.has(name)) return targeted(link, name, fields, ctx); // P5 O7 M8
     if (MACHINE_ACTS.has(name)) return machineAct(link, name, fields, deadline);
     const lane = lanesOf(link).get(String(fields.appSessionId));
