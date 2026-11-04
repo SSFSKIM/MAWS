@@ -1149,6 +1149,6 @@ export class SessionService {
 // older client's `gateway` alone moves a `route` the intent holds with it (else the machine route would outlive the
 // choice); a machine `route` keeps the legacy field, which its launch writes from the resolved base URL.
 function routePatch(intent: SetupIntent, patch: SetupIntentPatch): Partial<Pick<SetupIntent, 'route' | 'gateway'>> {
-  if (patch.route !== undefined) return patch.route === 'machine' || patch.gateway !== undefined ? {} : { gateway: patch.route };
+  if (patch.route !== undefined) return patch.route === 'machine' ? {} : { gateway: patch.route }; // a non-machine route is the legacy field too
   return patch.gateway !== undefined && intent.route !== undefined ? { route: patch.gateway } : {};
 }

@@ -437,9 +437,10 @@ describe('session records in the index', () => {
   });
 
   // P5 O7 M9 (Interfaces §U): the record's gateway keeps the route it launched on and what get_status reported of it, in
-  // two added columns an older build leaves alone; a verified status without them (a gateway or direct launch) clears
-  // them, so the record never says `machine` of a launch that was not
-  it('keeps the gateway’s route and observed across a reopen, and clears them with a status that carries neither', () => {
+  // two added columns an older build leaves alone. The route is the one the launch chose (setRoute, at the launch),
+  // which an older host's status, carrying none, leaves standing (fix round, item 1); what was observed is the status's
+  // alone, cleared by one without it
+  it('keeps the gateway’s route and observed across a reopen; a status carrying neither clears only what was observed', () => {
     const { record } = index.sessions.createForLaunch(LAUNCH);
     const machine = { routed: false, baseUrl: 'https://inference.example.invalid', autoModeServer: 'unknown', route: 'machine', observed: { kind: 'host', baseUrl: 'https://inference.example.invalid' } } as const;
     expect(index.sessions.applyEngineStatus(record.appId, { gateway: machine }).gateway).toEqual(machine);
@@ -447,7 +448,15 @@ describe('session records in the index', () => {
     index = new Index(join(dir.path, 'index.sqlite'));
     expect(index.sessions.get(record.appId)!.gateway).toEqual(machine);
     expect(SessionRecordSchema.parse(index.sessions.get(record.appId)).gateway).toEqual(machine);
-    expect(index.sessions.applyEngineStatus(record.appId, { gateway: { routed: true, baseUrl: 'http://127.0.0.1:8641', autoModeServer: 'enabled' } }).gateway).toEqual({ routed: true, baseUrl: 'http://127.0.0.1:8641', autoModeServer: 'enabled' });
+    expect(index.sessions.applyEngineStatus(record.appId, { gateway: { routed: false, baseUrl: null, autoModeServer: 'unknown' } }).gateway).toEqual({ routed: false, baseUrl: null, autoModeServer: 'unknown', route: 'machine' });
+  });
+
+  it('setRoute records the route a launch chose, and a later one replaces it; an unknown id is no write', () => {
+    const { record } = index.sessions.createForLaunch(LAUNCH);
+    expect(index.sessions.setRoute(record.appId, 'machine')?.gateway.route).toBe('machine');
+    expect(index.sessions.setRoute(record.appId, 'direct')?.gateway.route).toBe('direct');
+    expect(index.sessions.get(record.appId)!.gateway.route).toBe('direct');
+    expect(index.sessions.setRoute(randomUUID() as AppSessionId, 'gateway')).toBeNull();
   });
 
   // C3's ask (gateway filled for disk sessions): the transcript records no base URL or auto-mode server, so a session

@@ -311,8 +311,8 @@ describe('effectiveBaseUrl', () => {
     const project = join(root, 'project');
     await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: RELAY_URL } });
     await settings(project, 'settings.json', { env: { ANTHROPIC_BASE_URL: OTHER } });
-    expect(await resolve({ HOME: home }, project)).toEqual({ kind: 'resolved', baseUrl: OTHER });
-    expect(await resolve({ HOME: home }, null)).toEqual({ kind: 'resolved', baseUrl: RELAY_URL }); // no project: the user's
+    expect(await resolve({ HOME: home }, project)).toMatchObject({ kind: 'resolved', baseUrl: OTHER });
+    expect(await resolve({ HOME: home }, null)).toMatchObject({ kind: 'resolved', baseUrl: RELAY_URL }); // no project: the user's
   });
 
   it('takes the project settings naming the relay over the user settings that name another host', async () => {
@@ -320,10 +320,10 @@ describe('effectiveBaseUrl', () => {
     const project = join(root, 'project');
     await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: OTHER } });
     await settings(project, 'settings.json', { env: { ANTHROPIC_BASE_URL: RELAY_URL } });
-    expect(await resolve({ HOME: home, ANTHROPIC_BASE_URL: 'https://shell.example.invalid' }, project)).toEqual({ kind: 'resolved', baseUrl: RELAY_URL });
+    expect(await resolve({ HOME: home, ANTHROPIC_BASE_URL: 'https://shell.example.invalid' }, project)).toMatchObject({ kind: 'resolved', baseUrl: RELAY_URL });
     await settings(project, 'settings.local.json', { env: { ANTHROPIC_BASE_URL: OTHER } }); // local over project
-    expect(await resolve({ HOME: home }, project)).toEqual({ kind: 'resolved', baseUrl: OTHER });
-    expect(await resolve({ HOME: home }, project, { ANTHROPIC_BASE_URL: RELAY_URL })).toEqual({ kind: 'resolved', baseUrl: RELAY_URL }); // flag over local
+    expect(await resolve({ HOME: home }, project)).toMatchObject({ kind: 'resolved', baseUrl: OTHER });
+    expect(await resolve({ HOME: home }, project, { ANTHROPIC_BASE_URL: RELAY_URL })).toMatchObject({ kind: 'resolved', baseUrl: RELAY_URL }); // flag over local
   });
 
   it('reads no user, project or local settings under CLAUDE_CODE_RESTRICTED: the spawn environment, the global config and the flag settings', async () => {
@@ -332,28 +332,28 @@ describe('effectiveBaseUrl', () => {
     await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: OTHER } });
     await settings(project, 'settings.local.json', { env: { ANTHROPIC_BASE_URL: OTHER } });
     const env = { HOME: home, CLAUDE_CODE_RESTRICTED: '1', ANTHROPIC_BASE_URL: RELAY_URL };
-    expect(await resolve(env, project)).toEqual({ kind: 'resolved', baseUrl: RELAY_URL });
+    expect(await resolve(env, project)).toMatchObject({ kind: 'resolved', baseUrl: RELAY_URL });
     await writeFile(join(home, '.claude.json'), JSON.stringify({ env: { ANTHROPIC_BASE_URL: OTHER } }));
-    expect(await resolve(env, project)).toEqual({ kind: 'resolved', baseUrl: OTHER }); // the global config still applies
-    expect(await resolve(env, project, { ANTHROPIC_BASE_URL: RELAY_URL })).toEqual({ kind: 'resolved', baseUrl: RELAY_URL });
+    expect(await resolve(env, project)).toMatchObject({ kind: 'resolved', baseUrl: OTHER }); // the global config still applies
+    expect(await resolve(env, project, { ANTHROPIC_BASE_URL: RELAY_URL })).toMatchObject({ kind: 'resolved', baseUrl: RELAY_URL });
   });
 
   it('resolves without a managed file, and takes a managed value over every other source, fragments in name order', async () => {
     const home = join(root, 'home');
     await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: OTHER } });
-    expect(await resolve({ HOME: home }, null)).toEqual({ kind: 'resolved', baseUrl: OTHER }); // the directory itself is missing
+    expect(await resolve({ HOME: home }, null)).toMatchObject({ kind: 'resolved', baseUrl: OTHER }); // the directory itself is missing
     await managed('managed-settings.json', { env: { ANTHROPIC_BASE_URL: RELAY_URL } });
-    expect(await resolve({ HOME: home }, null, { ANTHROPIC_BASE_URL: OTHER })).toEqual({ kind: 'resolved', baseUrl: RELAY_URL });
+    expect(await resolve({ HOME: home }, null, { ANTHROPIC_BASE_URL: OTHER })).toMatchObject({ kind: 'resolved', baseUrl: RELAY_URL });
     await managed('managed-settings.d/20-b.json', { env: { ANTHROPIC_BASE_URL: 'https://b.example.invalid' } });
     await managed('managed-settings.d/10-a.json', { env: { ANTHROPIC_BASE_URL: 'https://a.example.invalid' } });
-    expect(await resolve({ HOME: home }, null)).toEqual({ kind: 'resolved', baseUrl: 'https://b.example.invalid' });
+    expect(await resolve({ HOME: home }, null)).toMatchObject({ kind: 'resolved', baseUrl: 'https://b.example.invalid' });
   });
 
   it('reads no base URL as none, and an empty value as none (the direct route blanks it so)', async () => {
-    expect(await resolve({ HOME: join(root, 'nobody') }, join(root, 'missing'))).toEqual({ kind: 'resolved', baseUrl: null });
+    expect(await resolve({ HOME: join(root, 'nobody') }, join(root, 'missing'))).toMatchObject({ kind: 'resolved', baseUrl: null });
     const home = join(root, 'home');
     await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: '' } });
-    expect(await resolve({ HOME: home, ANTHROPIC_BASE_URL: OTHER }, null)).toEqual({ kind: 'resolved', baseUrl: null });
+    expect(await resolve({ HOME: home, ANTHROPIC_BASE_URL: OTHER }, null)).toMatchObject({ kind: 'resolved', baseUrl: null });
   });
 
   it('is uncertain when a settings file that exists cannot be read as settings', async () => {
@@ -362,6 +362,31 @@ describe('effectiveBaseUrl', () => {
     await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: RELAY_URL } });
     await settings(project, 'settings.json', '{ not json');
     expect(await resolve({ HOME: home }, project)).toEqual({ kind: 'uncertain', why: expect.stringContaining(join(project, '.claude', 'settings.json')) });
-    expect(await resolve({ HOME: home }, null)).toEqual({ kind: 'resolved', baseUrl: RELAY_URL }); // that file is not this launch's
+    expect(await resolve({ HOME: home }, null)).toMatchObject({ kind: 'resolved', baseUrl: RELAY_URL }); // that file is not this launch's
+  });
+
+  // P5 O7 M9 fix round (item 5): the legacy direct route deletes every gateway key and blanks two in settings, so what
+  // the machine sets of them is told beside the base URL; an empty value is none
+  it('names the gateway keys the machine sets, through the same layering', async () => {
+    const home = join(root, 'home');
+    const project = join(root, 'project');
+    expect(await resolve({ HOME: home }, project)).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: [] });
+    await settings(home, 'settings.json', { env: { ANTHROPIC_AUTH_TOKEN: 'machine-token' } });
+    expect(await resolve({ HOME: home, ENABLE_TOOL_SEARCH: 'true' }, project)).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: ['ANTHROPIC_AUTH_TOKEN', 'ENABLE_TOOL_SEARCH'] });
+    await settings(project, 'settings.json', { env: { ANTHROPIC_AUTH_TOKEN: '' } });
+    expect(await resolve({ HOME: home }, project)).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: [] });
+  });
+
+  // P5 O7 M9 fix round (item 2): a launch in a worktree not yet created reads the project settings its branch tracks;
+  // the caller hands that file's text in place of the cwd's (null: the branch tracks none)
+  it('reads a project settings text handed in place of the cwd’s file', async () => {
+    const home = join(root, 'home');
+    const repo = join(root, 'repo');
+    await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: OTHER } });
+    await settings(repo, 'settings.json', { env: { ANTHROPIC_BASE_URL: OTHER } }); // the checkout's working tree, not the branch's
+    const at = (text: string | null) => effectiveBaseUrl({ env: { HOME: home }, cwd: repo, project: { text }, platform: 'linux', systemRoot: system });
+    expect(await at(JSON.stringify({ env: { ANTHROPIC_BASE_URL: RELAY_URL } }))).toMatchObject({ kind: 'resolved', baseUrl: RELAY_URL });
+    expect(await at(null)).toMatchObject({ kind: 'resolved', baseUrl: OTHER });
+    expect(await at('{ not json')).toMatchObject({ kind: 'uncertain' });
   });
 });

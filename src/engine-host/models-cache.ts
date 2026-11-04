@@ -12,6 +12,7 @@ import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as z from 'zod';
 import { BUILTIN_MODELS, ModelCatalogueEntrySchema, type ModelCatalogue } from '@shared/sessions/models';
+import { GATEWAY_KEYS } from './launch'; // P5 O7 M9
 import { localSettingsFiles } from './local-store'; // P2-F wave S (S-catalogue)
 import { managedSettings, managedSettingsDir } from './session-start-hooks'; // P5 O7 M9: resolve-style.ts's managed path
 
@@ -42,6 +43,9 @@ export interface ModelEnvSources {
   env: Record<string, string>; // the spawn environment (a launch plan's, or the captured shell's for a launch not yet made)
   cwd: string | null; // the project whose `.claude/settings.json` and `.claude/settings.local.json` the launch reads
   flagEnv?: unknown; // the `--settings` JSON's env
+  // P5 O7 M9: the project's `.claude/settings.json` text in place of the cwd's file (null: there is none), for a launch
+  // whose checkout does not exist yet (a new worktree, judged by what its branch tracks); the local store is the cwd's
+  project?: { text: string | null };
 }
 
 // The key a launch's catalogue lives under. The engine applies the global config's `env` over its spawn environment,
@@ -70,6 +74,7 @@ export async function catalogueKey(engineVersion: string, gateway: 'gateway' | '
 // there and cannot be read as settings sets nothing too, and is told to `unreadable`.
 async function layeredEnv(sources: ModelEnvSources, pick: (name: string) => boolean, unreadable: (file: string) => void): Promise<{ shared: Record<string, string>; launch: Record<string, string> }> {
   const read = (file: string) => settingsEnv(file, pick, unreadable);
+  const given = sources.project;
   const home = sources.env.HOME || null;
   const configDir = sources.env.CLAUDE_CONFIG_DIR || (home ? join(home, '.claude') : null);
   const restricted = envFlag(sources.env.CLAUDE_CODE_RESTRICTED); // no setting source is read but the flag's
@@ -78,7 +83,7 @@ async function layeredEnv(sources: ModelEnvSources, pick: (name: string) => bool
   const [globalEnv, user, projectEnv, localEnv] = await Promise.all([
     globalConfigEnv(configDir, sources.env.CLAUDE_CONFIG_DIR || home, read),
     configDir === null || restricted ? {} : read(join(configDir, 'settings.json')),
-    project === null ? {} : read(join(project, 'settings.json')),
+    project === null ? {} : given === undefined ? read(join(project, 'settings.json')) : given.text === null ? {} : settingsTextEnv(given.text, join(project, 'settings.json'), pick, unreadable),
     cwd === null ? {} : localSettingsFiles(cwd, home).then(async (files) => Object.assign({}, ...(await Promise.all(files.map(read)))) as Record<string, string>),
   ]);
   const shared = { ...envOf(sources.env, pick), ...globalEnv, ...user };
@@ -94,17 +99,20 @@ async function layeredEnv(sources: ModelEnvSources, pick: (name: string) => bool
 // launch reads is there and cannot be read as settings: what the engine makes of it is not known here, and a caller
 // defers to the engine (get_status stays authoritative after the launch). The managed preferences plists are not read
 // (resolve-style.ts reads none either). `platform` and `systemRoot` are the tests' seams, as resolve-style.ts's.
-export type BaseUrlResolution = { kind: 'resolved'; baseUrl: string | null } | { kind: 'uncertain'; why: string };
+// `gatewayKeys`: which of the keys the legacy routes set or delete (launch.ts GATEWAY_KEYS, the base URL among them)
+// resolve non-empty by the same precedence, in that order: the legacy direct route deletes them all, so it reaches what
+// the machine route reaches only where the machine sets none (fix round, item 5).
+export type BaseUrlResolution = { kind: 'resolved'; baseUrl: string | null; gatewayKeys: string[] } | { kind: 'uncertain'; why: string };
 
 export async function effectiveBaseUrl(sources: ModelEnvSources & { platform?: NodeJS.Platform; systemRoot?: string }): Promise<BaseUrlResolution> {
   const unreadable: string[] = [];
-  const pick = (name: string) => name === BASE_URL;
+  const pick = (name: string) => (GATEWAY_KEYS as readonly string[]).includes(name);
   const directory = sources.systemRoot === undefined ? managedSettingsDir(sources.platform) : join(sources.systemRoot, managedSettingsDir(sources.platform));
   const [{ launch }, managed] = await Promise.all([layeredEnv(sources, pick, (file) => unreadable.push(file)), managedSettings(directory)]);
   if (unreadable.length > 0) return { kind: 'uncertain', why: `not read as settings: ${unreadable.join(', ')}` };
   const merged: Record<string, string | undefined> = Object.assign({}, launch, ...managed.map((file) => envOf(isRecord(file) ? file.env : undefined, pick)));
-  const value = merged[BASE_URL];
-  return { kind: 'resolved', baseUrl: value === undefined || value === '' ? null : value };
+  const value = (key: string) => merged[key] || null; // an empty value is none
+  return { kind: 'resolved', baseUrl: value(BASE_URL), gatewayKeys: GATEWAY_KEYS.filter((key) => value(key) !== null) };
 }
 
 const BASE_URL = 'ANTHROPIC_BASE_URL';
@@ -144,6 +152,10 @@ async function settingsEnv(file: string, pick: (name: string) => boolean, unread
     if (code !== 'ENOENT' && code !== 'ENOTDIR') unreadable(file);
     return {};
   }
+  return settingsTextEnv(text, file, pick, unreadable);
+}
+
+function settingsTextEnv(text: string, file: string, pick: (name: string) => boolean, unreadable: (file: string) => void): Record<string, string> {
   try {
     const parsed = JSON.parse(text) as unknown;
     if (parsed !== null && !isRecord(parsed)) throw new Error('not an object');

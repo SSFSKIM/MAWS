@@ -17,7 +17,7 @@ import { branchName } from '@shared/sessions/branch';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import type { Db, Value } from './db';
 import type { SessionRecordPatch } from '@shared/engine/status';
-import { ObservedRouteSchema, RouteSchema } from '@shared/engine/route'; // P5 O7 M9
+import { ObservedRouteSchema, RouteSchema, type Route } from '@shared/engine/route'; // P5 O7 M9
 import { countLines } from '@shared/composer/pasted-framing';
 import { PASTED_BLOCK, pastedPlaceholder } from '@shared/composer/pasted-content';
 import { locate, type ProjectStore } from './projects';
@@ -444,7 +444,9 @@ export class SessionStore {
         values.gateway_routed = patch.gateway.routed;
         values.gateway_base_url = patch.gateway.baseUrl;
         values.gateway_auto_mode_server = patch.gateway.autoModeServer;
-        values.gateway_route = patch.gateway.route ?? null; // P5 O7 M9: a status without them clears them
+        // P5 O7 M9: the route is the launch's choice (setRoute), which a status carrying none (an older host's) leaves
+        // standing; what was observed is the status's alone
+        if (patch.gateway.route !== undefined) values.gateway_route = patch.gateway.route;
         values.gateway_observed = patch.gateway.observed === undefined ? null : JSON.stringify(patch.gateway.observed);
       }
       if (patch.model !== undefined) {
@@ -473,6 +475,13 @@ export class SessionStore {
 
   setPinned(appId: AppSessionId, pinned: boolean): SessionRecord {
     return this.set(appId, { pinned }, 'update');
+  }
+
+  // P5 O7 M9 (fix round, item 1): the route a launch of the session chose, recorded at the launch whatever the host it
+  // runs on carries on the wire, so a later resume reads the choice and not the legacy field; null: no such record (a
+  // bootstrap launch's id)
+  setRoute(appId: AppSessionId, route: Route): SessionRecord | null {
+    return this.get(appId) === null ? null : this.set(appId, { gateway_route: route }, 'update');
   }
 
   // C10's rename with provenance (the override of the Title rule; null clears it), archive, and a launch's worktree

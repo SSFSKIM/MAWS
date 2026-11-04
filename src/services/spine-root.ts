@@ -118,7 +118,7 @@ export async function openSpineData(profile: string, { build, lock: given, syste
   let engineEnv: Promise<Record<string, string>> | null = null;
   const legacyOfMachine = async (): Promise<LegacyRoute> => {
     if (engineEnv === null) throw new Error('The machine route is not set as the default yet: the engine’s environment is still being read.');
-    return legacyOfResolution(await machineBaseUrl({ env: await engineEnv, systemRoot }, null), machineSettings.state().gateway.defaultRoute);
+    return legacyOfResolution(await machineBaseUrl({ env: await engineEnv, systemRoot }, { cwd: null }), machineSettings.state().gateway.defaultRoute);
   };
   const machineSettings = startMachineSettings(paths.machine, { refused: lock.refused ?? split?.machineRefused ?? null, unsplit: split?.unsplit, legacyOfMachine });
   return { lock, refused: lock.refused, machineSettings, paths, bindEngineEnv: (env) => void (engineEnv = env), ...(systemRoot !== undefined && { systemRoot }) };

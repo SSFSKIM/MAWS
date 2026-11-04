@@ -20,7 +20,7 @@ import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDir
 import { runResume } from './resume';
 import { runIntentSetup } from './setup';
 import { resumeRouteOf } from './launch-mapping'; // P5 O7 M9
-import { guardMachineRoute } from './machine-route'; // P5 O7 M9
+import { guardMachineRoute, newWorktreeSettings, type SettingsSite } from './machine-route'; // P5 O7 M9
 import type { Setup } from './setup-steps';
 import { trustStateOf } from './trust';
 
@@ -70,7 +70,9 @@ export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: Se
   }
   // P5 O7 M9 (machine-route.ts): the machine route's refusals (an older host that would change the inference, a gateway
   // model it would not reach ClaudeUsage with) here, its advisory relay sheet with the other cards below
-  const machine = route === 'machine' ? await guardMachineRoute(s, { cwd: await sessionDirectoryOf(s, location), model: intent.model, flagEnv: launchProfileEnv(s), startAnyway: args.options.startAnyway === true }) : null;
+  // a new worktree, not made yet, is resolved by the project settings its branch tracks
+  const site: SettingsSite = location.kind === 'newWorktree' ? await newWorktreeSettings(s, location) : { cwd: await sessionDirectoryOf(s, location) };
+  const machine = route === 'machine' ? await guardMachineRoute(s, { site, model: intent.model, flagEnv: launchProfileEnv(s), startAnyway: args.options.startAnyway === true }) : null;
   if (machine !== null && 'refused' in machine) return reject({ status: 'invalid', appSessionId, ...machine.refused });
 
   // the card outcomes: the message stays with the intent until the card's continuation, a release or the handoff
@@ -147,7 +149,9 @@ export async function guardResumeStart(s: Setup, record: SessionRecord, args: { 
   if (verdict.live === 'foreign') return handBack({ status: 'held', appSessionId, holder: verdict.holder, attach: await attachOf(s, verdict.holder) });
   if (!(await isDirectory(record.directory))) return handBack({ status: 'missing_directory', appSessionId, directory: record.directory });
   // P5 O7 M9: a resume on the machine route is held to the same refusals and sheet as an intent's start (machine-route.ts)
-  const machine = resumeRouteOf(record, args.options, s.settings()).route === 'machine' ? await guardMachineRoute(s, { cwd: record.directory, model: null, flagEnv: launchProfileEnv(s), startAnyway: args.options.startAnyway === true }) : null;
+  // the resume's requested model, as its launch maps it (launch-mapping.ts): the option's, else the record's
+  const model = 'model' in args.options ? (args.options.model ?? null) : record.model.requested;
+  const machine = resumeRouteOf(record, args.options, s.settings()).route === 'machine' ? await guardMachineRoute(s, { site: { cwd: record.directory }, model, flagEnv: launchProfileEnv(s), startAnyway: args.options.startAnyway === true }) : null;
   if (machine !== null && 'refused' in machine) return handBack({ status: 'invalid', appSessionId, ...machine.refused });
   const decision = args.options.trust === 'accepted' || args.options.trust === 'declined' ? args.options.trust : null;
   if (decision === null) {

@@ -111,7 +111,9 @@ const EXCLUDED_KEYS = new Set([
 ]);
 const EXCLUDED_PREFIXES = ['CMUX_', 'ELECTRON_'];
 
-const GATEWAY_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ENABLE_TOOL_SEARCH'] as const;
+// The keys the gateway route sets and the direct route deletes (P5 O7 M9: effectiveBaseUrl reports which of them a
+// machine sets, so a legacy direct launch is equivalent to the machine route only where it sets none)
+export const GATEWAY_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ENABLE_TOOL_SEARCH'] as const;
 
 function isAllowed(key: string): boolean {
   if (EXCLUDED_KEYS.has(key) || EXCLUDED_PREFIXES.some((p) => key.startsWith(p))) return false;

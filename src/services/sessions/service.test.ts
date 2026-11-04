@@ -8,7 +8,7 @@ import { preAmendmentIndex, sessionIdFor, summary } from '../../../test/support/
 import { validateEventPayload } from '@shared/ipc/validate';
 import { SessionHarness } from '../../../test/support/session-harness';
 import { installToHumanPlugin } from '../../../test/support/to-human-plugin'; // P4-R7z
-import { DOWN_RELAY } from '../../../test/support/session-host';
+import { DOWN_RELAY, OK_RELAY } from '../../../test/support/session-host';
 import { storeLabel } from './record-actions';
 import { directRouteRefusal } from './start-guards';
 import { RETRY_DETAIL, RETRY_REASON } from './resume'; // C3 corrective
@@ -19,7 +19,7 @@ import { userScopeProfile } from '@shared/engine/launch-profile'; // P4-A2
 import type { StartOptions } from '@shared/ipc/schema/session'; // P5 O7 M9
 import { ENGINE_ROUTE_MACHINE_CAPABILITY, PEER_CAPABILITIES } from '@shared/host/socket-protocol'; // P5 O7 M9
 import type { C10Settings } from './launch-mapping'; // P5 O7 M9
-import { machineRouteRefusal, ROUTE_UNSUPPORTED } from './machine-route'; // P5 O7 M9
+import { machineRouteRefusal, ROUTE_RELAY_UNSUPPORTED, ROUTE_UNSUPPORTED } from './machine-route'; // P5 O7 M9
 
 // The service is Electron-free (its handlers are service-register.ts's).
 vi.mock('electron', () => {
@@ -1228,6 +1228,9 @@ describe('the machine route (P5 O7 M9)', () => {
     expect(await h.service.patch(id, { gateway: 'direct' })).toMatchObject({ route: 'direct', gateway: 'direct' });
     expect(await h.service.patch(id, { route: 'machine' })).toMatchObject({ route: 'machine', gateway: 'direct' });
     expect(await h.service.patch(id, { route: 'gateway' })).toMatchObject({ route: 'gateway', gateway: 'gateway' });
+    // a patch naming both keeps them one: a non-machine route is the legacy field too (fix round, item 6)
+    expect(await h.service.patch(id, { route: 'direct', gateway: 'gateway' })).toMatchObject({ route: 'direct', gateway: 'direct' });
+    expect(await h.service.patch(id, { route: 'machine', gateway: 'gateway' })).toMatchObject({ route: 'machine', gateway: 'gateway' });
   });
 
   it('launches `machine` on a host that lists it, the legacy field the resolved base URL’s', async () => {
@@ -1279,6 +1282,50 @@ describe('the machine route (P5 O7 M9)', () => {
       userBaseUrl(OTHER);
       expect(await h.service.startSession(record.appId, { message: null, options: {} })).toEqual({ status: 'invalid', appSessionId: record.appId, field: 'route', message: ROUTE_UNSUPPORTED });
     });
+
+    // fix round, item 1: the record keeps the route the session chose though the host it ran on carries none on the wire
+    it('keeps the chosen machine route through a legacy launch, so a later resume is held to it', async () => {
+      const id = await create();
+      expect(await started(id)).toMatchObject({ gateway: 'direct' });
+      h.index.sessions.applyEngineStatus(id, { gateway: { routed: false, baseUrl: null, autoModeServer: 'unknown' } }); // the older host's verified status
+      expect(h.index.sessions.get(id)?.gateway.route).toBe('machine');
+      h.host.table.clear();
+      userBaseUrl(OTHER);
+      expect(await h.service.startSession(id, { message: null, options: {} })).toEqual({ status: 'invalid', appSessionId: id, field: 'route', message: ROUTE_UNSUPPORTED });
+      // an explicit choice still replaces it
+      expect(await h.service.startSession(id, { message: null, options: { route: 'direct' } })).toMatchObject({ status: 'starting' });
+      expect(await h.settled(id, 2)).toMatchObject({ phase: 'ready' }); // the resume's, after the start's
+      expect(h.host.launches).toHaveLength(2);
+      expect(h.host.launches[1]).toMatchObject({ gateway: 'direct', resume: { fork: false } });
+      expect(h.index.sessions.get(id)?.gateway.route).toBe('direct');
+    });
+
+    // fix round, item 5: the legacy direct route deletes every gateway key, so no base URL is equivalent only where the
+    // machine sets none of them
+    it('refuses route-unsupported when the machine sets a gateway key without a base URL', async () => {
+      writeFileSync(join(h.trust.configHome, 'settings.json'), JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'machine-token' } }));
+      const id = await create();
+      expect(await h.service.startSession(id, { message: null, options: {} })).toEqual({ status: 'invalid', appSessionId: id, field: 'route', message: ROUTE_UNSUPPORTED });
+      expect(h.host.launches).toEqual([]);
+      writeFileSync(join(h.trust.configHome, 'settings.json'), '{}');
+      expect(await started(id)).toMatchObject({ gateway: 'direct' });
+    });
+
+    // fix round, item 3: an older host checks the relay on the legacy gateway route it is sent, so a start past the sheet
+    // cannot work there and is not offered
+    it('answers a dead relay with the refusal an older host would give, not a sheet it cannot pass', async () => {
+      h.host.script = (spec) => (spec.gateway === 'gateway' && spec.route === undefined && !h.host.relay.ok ? { answer: { relay: h.host.relay } } : {});
+      userBaseUrl(RELAY);
+      h.host.relay = DOWN_RELAY;
+      const id = await create();
+      const refused = { status: 'invalid', appSessionId: id, field: 'route', message: ROUTE_RELAY_UNSUPPORTED };
+      expect(await h.service.startSession(id, { message: null, options: {} })).toEqual(refused);
+      expect(await h.service.startSession(id, { message: null, options: { startAnyway: true } })).toEqual(refused);
+      expect(h.host.launches).toEqual([]);
+      expect(ROUTE_RELAY_UNSUPPORTED).toBe("ClaudeUsage's relay isn't answering, and this machine's engine host predates the machine route, so it can't start past the relay check; wait for the relay, restart MAWS there, or choose direct for this session.");
+      h.host.relay = OK_RELAY;
+      expect(await started(id)).toMatchObject({ gateway: 'gateway' });
+    });
   });
 
   describe('the advisory relay check', () => {
@@ -1314,6 +1361,54 @@ describe('the machine route (P5 O7 M9)', () => {
       h.index.sessions.applyEngineStatus(record.appId, { gateway: { routed: true, baseUrl: RELAY, autoModeServer: 'unknown', route: 'machine', observed: { kind: 'claudeusage', baseUrl: RELAY } } });
       expect(await h.service.startSession(record.appId, { message: null, options: {} })).toMatchObject({ status: 'relay_unreachable' });
       expect(await started(record.appId, { startAnyway: true })).toMatchObject({ route: 'machine', gateway: 'gateway' });
+    });
+  });
+
+  // fix round, item 4: a resume's requested model, the option's else the record's, is held to the same refusal
+  it('refuses a resume on a gateway model once the machine no longer reaches ClaudeUsage', async () => {
+    const record = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0x9a4), directory: h.work })).record;
+    h.index.sessions.applyEngineStatus(record.appId, { model: { requested: 'claude/astra', resolved: 'claude/astra' }, gateway: { routed: true, baseUrl: RELAY, autoModeServer: 'unknown', route: 'machine', observed: { kind: 'claudeusage', baseUrl: RELAY } } });
+    userBaseUrl(OTHER);
+    expect(await h.service.startSession(record.appId, { message: null, options: {} })).toEqual({ status: 'invalid', appSessionId: record.appId, field: 'model', message: machineRouteRefusal('claude/astra') });
+    expect(await h.service.startSession(record.appId, { message: null, options: { model: 'claude/fable' } })).toEqual({ status: 'invalid', appSessionId: record.appId, field: 'model', message: machineRouteRefusal('claude/fable') });
+    expect(h.host.launches).toEqual([]);
+  });
+
+  // fix round, item 2: a new worktree is judged by the project settings its branch tracks, read from the source
+  // checkout at the branch's ref, not by the checkout's working tree and not as if it had none
+  describe('a new worktree', () => {
+    let repo: ScratchRepo;
+    beforeEach(async () => {
+      repo = await ScratchRepo.create({ sentinels: false });
+      h.trustDirectory(repo.root, h.work);
+    });
+    afterEach(() => repo.dispose());
+
+    const tracking = async (tracked: string, working: string) => {
+      await repo.fixture.write('.claude/settings.json', JSON.stringify({ env: { ANTHROPIC_BASE_URL: tracked } }));
+      await repo.git('add', '.claude/settings.json');
+      await repo.git('commit', '-q', '-m', 'project settings');
+      await repo.fixture.write('.claude/settings.json', JSON.stringify({ env: { ANTHROPIC_BASE_URL: working } }));
+    };
+    const createIn = async (name: string) =>
+      (await h.service.create({ projectId: null, location: { kind: 'newWorktree', repoRoot: repo.root, name, branch: { kind: 'new', name: `worktree-${name}`, base: 'HEAD' } } })).appSessionId;
+
+    it('reads a tracked relay over the user’s other host: the relay sheet', async () => {
+      await tracking(RELAY, OTHER);
+      userBaseUrl(OTHER);
+      h.host.relay = DOWN_RELAY;
+      const id = await createIn('relay');
+      expect(await h.service.startSession(id, { message: null, options: { trust: 'accepted' } })).toMatchObject({ status: 'relay_unreachable' });
+      expect(existsSync(join(repo.root, '.claude', 'worktrees', 'relay'))).toBe(false);
+    });
+
+    it('reads a tracked other host over the user’s relay: a gateway model refused', async () => {
+      await tracking(OTHER, RELAY);
+      userBaseUrl(RELAY);
+      const id = await createIn('other');
+      await h.service.patch(id, { model: 'claude/astra' });
+      expect(await h.service.startSession(id, { message: null, options: { trust: 'accepted' } })).toEqual({ status: 'invalid', appSessionId: id, field: 'model', message: machineRouteRefusal('claude/astra') });
+      expect(existsSync(join(repo.root, '.claude', 'worktrees', 'other'))).toBe(false);
     });
   });
 
