@@ -990,13 +990,32 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     try {
       const scratchHost = await startHost(script, ['--detached', `${m.profile}/supervisor`], children);
       const production = await startHost(script, ['--detached', `${base}/Library/Application Support/MAWS/supervisor`], children);
-      const run = new BenchRun(m, { runner, engineVersion: ENGINE_VERSION, say: (line) => void said.push(line) });
+      // pinned outside the mini's quiet window, so the case holds whenever the gate runs
+      const run = new BenchRun(m, { runner, engineVersion: ENGINE_VERSION, say: (line) => void said.push(line), now: () => at('2026-11-03T12:00:00Z') });
       expect(await run.removeProfile()).toBe(true);
       expect(alive(scratchHost) && scratchHost.exitCode === null).toBe(false);
       expect(alive(production)).toBe(true);
       expect(existsSync(m.profile)).toBe(false);
       // no agent was ever copied there: its hosts' own stop could not run, which is said, and the reap ended the host
       expect(said.some((line) => /the hosts’ own stop exited 1/.test(line))).toBe(true);
+    } finally {
+      for (const child of children) if (alive(child)) child.kill('SIGKILL');
+    }
+  }, 60_000);
+
+  it('the mini’s removal inside its quiet window: refused before any command, the scratch host and the profile left', async () => {
+    const { m, script } = shortTree();
+    const children: ChildProcess[] = [];
+    const local = processRunner();
+    const commands: string[] = [];
+    const runner: CommandRunner = { run: (argv, options) => (commands.push(argv.at(-1)!), local.run(['sh', '-c', argv.at(-1)!], options)), start: () => { throw new Error('no agent is served'); } };
+    try {
+      const scratchHost = await startHost(script, ['--detached', `${m.profile}/supervisor`], children);
+      const run = new BenchRun(m, { runner, engineVersion: ENGINE_VERSION, say: () => undefined, now: () => at('2026-11-03T06:50:00Z') });
+      await expect(run.removeProfile()).rejects.toThrow(/refused: nothing reaches it from 06:45 to 07:00 UTC/);
+      expect(commands).toEqual([]);
+      expect(alive(scratchHost)).toBe(true);
+      expect(existsSync(m.profile)).toBe(true);
     } finally {
       for (const child of children) if (alive(child)) child.kill('SIGKILL');
     }
