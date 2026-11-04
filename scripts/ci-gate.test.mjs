@@ -34,7 +34,7 @@ esac
 // ci-gate.sh on a one-commit tree with `args` after the tree. Returns its status and output, the gh calls, the refs the
 // origin holds and the pushed commit's message (empty when nothing was pushed). With `change`, the origin's master holds
 // a first commit of `base` (path → content) and the tested commit is `change(tree, git)` on top of it.
-function gate(args, { alerts = false, base = {}, change, backlog, originUrl, hostedCap = '', hostedRepos = '', macEc2 = '', interrupt = false } = {}) {
+function gate(args, { alerts = false, base = {}, change, backlog, originUrl, hostedCap = '', hostedRepos = '', macEc2 = '', interrupt = false, runAfter = 0 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ci-gate-'));
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, XDG_CACHE_HOME: join(dir, 'cache'), MAWS_GATE_RUNNER: '', MAWS_GATE_IGNORE_ALERTS: alerts ? '' : '1' };
   for (const role of ['AUTHOR', 'COMMITTER']) Object.assign(env, { [`GIT_${role}_NAME`]: 'ci-gate test', [`GIT_${role}_EMAIL`]: 'ci-gate@test.invalid' });
@@ -78,13 +78,18 @@ function gate(args, { alerts = false, base = {}, change, backlog, originUrl, hos
   *" run list "*) echo 123 ;;
   *" run watch "*) kill -TERM "$PPID" ;;
   *" run cancel "*) ;;`);
+    // GitHub creating the run late: the run list answers only after `runAfter` empty polls.
+    if (runAfter) gh = gh.replace('*" run list "*) ;;', `
+  *" run list "*) if [ "$(grep -c ' run list ' "$(dirname "$0")/gh-calls")" -gt ${runAfter} ]; then echo 123; fi ;;
+  *" run watch "*) kill -TERM "$PPID" ;;
+  *" run cancel "*) ;;`);
     writeFileSync(join(dir, 'gh'), gh);
     writeFileSync(join(dir, 'node'), `#!/usr/bin/env bash
 printf '%s\\t%s\\t%s\\t%s\\t%s\\n' "$(basename "$1")" "$REPO" "$HOSTED_MAC_REPOS" "$HOSTED_MAC_CAP" "$MAC_EC2" >> '${join(dir, 'node-calls')}'
 exec '${process.execPath}' "$@"
 `);
     chmodSync(join(dir, 'node'), 0o755);
-    writeFileSync(join(dir, 'sleep'), '#!/bin/sh\n'); // the 30 polls for the run, at once
+    writeFileSync(join(dir, 'sleep'), '#!/bin/sh\n'); // the polls for the run, at once
     chmodSync(join(dir, 'gh'), 0o755);
     chmodSync(join(dir, 'sleep'), 0o755);
     const run = spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), tree, ...args, '--keep'], { encoding: 'utf8', env, maxBuffer: 8 << 20 });
@@ -436,6 +441,19 @@ test('origin identity and hosted variables reach the sampler, identity and pool 
       assert.deepEqual(result.nodeCalls.find(([name]) => name === script).slice(3), ['50', 'off'], script);
     }
   }
+});
+
+test('a run GitHub creates after the first minute is still found; one that never comes is given up after 5 min', () => {
+  const runLists = (result) => result.calls.filter((call) => call.includes(' run list ')).length;
+  const late = gate(['--gates', 'static', '--peer', 'none'], { runAfter: 40 });
+  assert.equal(late.status, 130, late.stdout + late.stderr);
+  assert.match(late.stdout, /^ci-gate: no run of [0-9a-f]{40} yet after a minute; waiting up to 5 min$/m);
+  assert.match(late.stdout, /^ci-gate: https:\/\/github\.com\/.+\/actions\/runs\/123$/m);
+  assert.equal(runLists(late), 41);
+  const never = gate(['--gates', 'static', '--peer', 'none']);
+  assert.equal(never.status, 1, never.stdout + never.stderr);
+  assert.match(never.stdout, /^ci-gate: no run of [0-9a-f]{40} on \S+ after 5 min \(a run GitHub creates later still runs: gh -R \S+ run list --commit [0-9a-f]{40}\)$/m);
+  assert.equal(runLists(never), 54);
 });
 
 test('interrupt cancellation writes to the origin repository, not its old name', () => {
