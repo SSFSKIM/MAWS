@@ -153,6 +153,8 @@ export class RemoteSession {
   #lastParts: { queue?: Record<string, unknown>; catalog?: { launchId: string; catalog: Record<string, unknown> }; items?: AttentionItem[] } = {};
   /** P5 O7 M8: the operations heard of, oldest first. */
   #ops = new Map<string, Op>();
+  /** P5 O7 M8: the `subbed`s heard, each an opening the waiters are asked at. */
+  #openings = 0;
   /** P5 O7 M8: status parts the stream delivered, so a re-read that answers after one doesn't replace it. */
   #statuses = 0;
   /** P5 O7 M8: a re-read after a gap is out; `again`: another gap came meanwhile, so one more follows it. */
@@ -272,13 +274,21 @@ export class RemoteSession {
     this.publish(true);
   }
 
+  /** P5 O7 M8: the openings answered so far (each `subbed`): an act made under one names it to `awaitOperation`. */
+  openings(): number {
+    return this.#openings;
+  }
+
   /**
    * P5 O7 M8: a receipt of this session's operation (the adapter's act answered `{opId}`): its completion is waited for,
-   * and asked of the machine at each opening until it comes. One whose completion came first waits for nothing.
+   * and asked of the machine at each opening until it comes. One whose completion came first waits for nothing. `since`,
+   * the opening its act was made under: a receipt heard after a later opening reconciled (RL4 recovered it once the link
+   * resubscribed) missed that opening's ask, so it is asked now.
    */
-  awaitOperation(opId: string, command: OperationCommand): void {
+  awaitOperation(opId: string, command: OperationCommand, since?: number): void {
     if (this.#ops.has(opId)) return;
     this.#remember(opId, { command, state: 'waiting', lateSaid: false });
+    if (since !== undefined && since !== this.#openings && this.#answered && this.#sub !== null) void this.#readOperations([opId], this.#token);
   }
 
   /** P5 O7 M6 fix wave 3: the broker's items the stream last delivered (none before its first part). */
@@ -369,6 +379,7 @@ export class RemoteSession {
         } else if (gap) this.#gap(at.epoch);
         else this.state.stream = 'live';
         this.publish();
+        this.#openings += 1;
         this.#askOperations(token);
       },
       snapshot: (at, value) => {
@@ -419,6 +430,7 @@ export class RemoteSession {
         this.#tellPendingGap();
         this.#cursor = this.#sub?.cursor() ?? this.#cursor;
         this.#sub = null;
+        this.#token = {}; // m8-3 review: a read made for this subscription (a gap's re-read, an operations ask) is not taken after its end
         if (reason === 'removed' || reason === 'closed') return this.stop(reason);
         // P5 O7 M8: the machine ended it past its notices' bound; the session runs on, so it is opened again from where
         // it stood, and that opening asks for the completions it missed
@@ -491,7 +503,7 @@ export class RemoteSession {
     const op = this.#ops.get(event.opId);
     if (op?.state === 'lost') return this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: ${event.opId} completed after it was settled lost; dropped`);
     if (event.late ? op?.lateSaid === true : op?.state === 'completed') return;
-    const first = op === undefined ? !event.late : op.state === 'waiting';
+    const first = op === undefined || op.state === 'waiting'; // a late one heard before its receipt is the first this app saw
     this.#remember(event.opId, { command: event.command, state: 'completed', lateSaid: op?.lateSaid === true || event.late });
     this.#deps.emit(this.state.machine, 'session.operation', first && event.late ? { ...event, late: false } : event);
   }

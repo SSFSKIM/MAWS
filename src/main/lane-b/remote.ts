@@ -548,11 +548,12 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     if (uploads && !blocks) {
       deps.log(`lane B: session.send on ${link.name}/${app}: its endpoint lists no rl2.upload-blocks; the uploads go as their mentions alone`);
     }
+    const since = lane.session.openings(); // the opening the act is made under: a receipt heard after a later one is asked of the machine
     const handle = link.act({ action: name, session: app, context: { lane: 'B', ...context }, args, executor: 'engine-host', sendBy: deadline, ...(requestDigest !== undefined && { requestDigest }), ...(blocks && { requires: 'rl2.upload-blocks' }) });
     const result = await settle(link, name, handle, deadline, app);
     if (blocks && !result.ok && (result.error.issues as { refusal?: unknown } | undefined)?.refusal === 'malformed') return failure('invalid_input', REMOTE_UPLOAD_REFUSED_WORDS, { refusal: 'malformed', uploads: 'refused' });
     const opId = result.ok && OPERATIONS.has(name) ? record(result.value)?.opId : undefined;
-    if (typeof opId === 'string') lane.session.awaitOperation(opId, name as OperationCommand);
+    if (typeof opId === 'string') lane.session.awaitOperation(opId, name as OperationCommand, since);
     return result;
   }
 

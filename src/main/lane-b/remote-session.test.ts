@@ -526,3 +526,47 @@ describe('remote.session', () => {
     expect(l.lastState()).toMatchObject({ link: { state: 'down', carrier: null }, reason: null, controls: { send: { available: true }, media: { available: true } } });
   });
 });
+
+// m8-3's task review: the races a reopening leaves open (the reviewer's reproductions, ported).
+describe('a reopening’s races', () => {
+  it('reconciles a receipt that comes after the opening it was made before has reconciled (RL4 recovered it late)', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    l.link.answers.set('session.operations', () => ({ ok: true, output: { outcomes: [{ opId: 'op-1', event: operation('op-1') }] } }));
+    const made = l.session.openings(); // the act went out on this opening
+    sub.sink.subbed('replay', { epoch: 'L1', seq: 0 }); // the channel lost the receipt and the completion; the link resubscribed
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.calls.filter((c) => c.name === 'session.operations')).toEqual([]); // nothing was waiting then
+    l.session.awaitOperation('op-1', 'session.mcpReconnect', made);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('session.operation')).toEqual([operation('op-1')]);
+    // a receipt made and heard within one opening asks nothing: its part comes on the stream
+    l.session.awaitOperation('op-2', 'session.mcpReconnect', l.session.openings());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.calls.filter((c) => c.name === 'session.operations')).toHaveLength(1);
+  });
+
+  it('takes a late completion heard before its receipt as the first this app saw', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { operation: { ...operation('op-1'), late: true } });
+    l.session.awaitOperation('op-1', 'session.mcpReconnect', l.session.openings());
+    expect(l.of('session.operation')).toEqual([operation('op-1')]);
+  });
+
+  it('never brings a released launch’s context back from a re-read that answers after the stream ended', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    let answer!: (value: unknown) => void;
+    l.link.answers.set('session.status', () => ({ ok: true, output: statusOf('L1') }));
+    l.link.answers.set('session.get', () => new Promise((resolve) => (answer = resolve)) as never);
+    deliver(sub, { epoch: 'L1', seq: 1, idx: 0 }, { kind: 'turn.ended', costUsd: 'bad' });
+    await vi.advanceTimersByTimeAsync(0); // the status answered; the record is still out
+    sub.sink.ended('unavailable');
+    expect(l.session.context()).toBeNull();
+    answer({ ok: true, output: record(APP) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.session.context()).toBeNull();
+    expect(l.session.state.stream).toBe('idle');
+  });
+});
