@@ -14,7 +14,7 @@
 //   `session.brokerItems`), unless the machine's attention feed follows it (P5 O7 M6 fix wave 1, `attentionFed`: the
 //   feed's list is the machine's whole one, and the feed's cache is what a page is told again); its events `session.eventBatch`, coalesced per macrotask into batches of at most `batchMax`,
 //   flushed before anything else is said. Every payload is read tolerantly first (the machine may be a newer build of the
-//   wire's major: its unknown keys are dropped), and an event that still doesn't read is left out, logged.
+//   wire's major: its unknown keys are dropped), and an event that still doesn't read is a gap (below).
 // - Gaps. The first `subbed` of a subscription says nothing, nor does a later `replay`. A later `snapshot` (a relaunch, a
 //   `/clear`) or `missing` (a range the journal lost), a fresh subscription's `missing` from a cursor this session held,
 //   and an event too large to carry (`omitted`) each emit `remote.gap {appSessionId, launchId, at?}` before what follows.
@@ -34,10 +34,24 @@
 //   too: fix wave 2), is kept for that try, and taken once it ends `unavailable` (one more try, each record at most once); a feed that stops following (`unfollowed`: a next
 //   channel's peer without feeds) puts a waiting stream on the backoff (fix wave 1). `removed` and `closed` end it for
 //   good; any other end ends the stream with its reason.
+// - P5 O7 M8 ("Operations and panel events"; Interfaces §U): the machine's notices beside the stream's state, each its
+//   local event under the machine's address: `{operation}` as `session.operation`, `{subagents}` as
+//   `fs.subagentsChanged`, `{workflow}` as `fs.workflowChanged`, `{tasks}` as `fs.tasksChanged`. `{side}` says nothing of
+//   its own: it follows a side question's completion, its `operation`, which the side store already patches its log from
+//   or lists it again on (src/renderer/src/side/store.ts, `onSideOperation`). A completion the channel lost is asked of
+//   the machine at every `subbed` (each opening, the link's own resubscriptions included) for the receipts this
+//   session's waiters hold (`awaitOperation`, from the adapter's receipts): `session.operations` answers each with its
+//   completion (emitted), `pending` (kept for its part) or `unknown` (settled as failed, LOST_OPERATION). A completion is
+//   emitted once, a late one once more; one for an opId settled here is dropped. An `ended('behind')` (a notice past
+//   the machine's bound) opens again from the cursor at once, and that opening asks.
+// - An event that doesn't read (P5 O7 M8, "What draws Working…") is a gap at its place, never a silent drop: the
+//   session's status and record are read again (`session.status`, `session.get`) and folded in, so a turn a dropped
+//   `turn.ended` left open closes by the machine's word; a status the stream delivers meanwhile stands over the re-read.
 // - `remote.session` at each change (the link's state and caps included), said once per change.
 // - A replay (`replay`): the record, the last of each part and `remote.session` said again, for a page that has just
 //   subscribed (a reload, a second window); what it said before was said to no one listening.
 import { readTolerant } from '@shared/ipc/tolerant';
+import { SESSION_OPERATIONS_MAX, type OperationCommand, type OperationEvent } from '@shared/engine/operations';
 import { AttentionItemSchema, type AttentionItem } from '@shared/graph/attention';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { SessionRecord } from '@shared/graph/session';
@@ -107,6 +121,12 @@ const isObject = (value: unknown): value is Record<string, unknown> => value !==
 const WAITING = new Set(['pending', 'delivered']);
 /** Call errors that say nothing about the session: the link or the machine's index couldn't answer now. */
 const TRANSIENT = new Set(['offline', 'timeout', 'unavailable']);
+/** P5 O7 M8: the words of an operation the machine says it doesn't know (`session.operations`' `unknown`). */
+export const LOST_OPERATION = 'the machine lost this operation’s result; check the transcript';
+/** Operations remembered past their completion, so a repeat or a late one for a settled op is told apart. */
+const OPS_KEPT = 256;
+/** An operation this session heard of: its receipt waiting, its completion said (`late` once more), or settled here. */
+type Op = { command: OperationCommand | null; state: 'waiting' | 'completed' | 'lost'; lateSaid: boolean };
 
 export class RemoteSession {
   readonly state: RemoteSessionState;
@@ -131,6 +151,10 @@ export class RemoteSession {
   #said = '';
   /** The last queue, catalog (with its launch) and waiting items the stream gave, said again by a replay. */
   #lastParts: { queue?: Record<string, unknown>; catalog?: { launchId: string; catalog: Record<string, unknown> }; items?: AttentionItem[] } = {};
+  /** P5 O7 M8: the operations heard of, oldest first. */
+  #ops = new Map<string, Op>();
+  /** P5 O7 M8: status parts the stream delivered, so a re-read that answers after one doesn't replace it. */
+  #statuses = 0;
 
   constructor(deps: RemoteSessionDeps) {
     this.#deps = deps;
@@ -246,6 +270,15 @@ export class RemoteSession {
     this.publish(true);
   }
 
+  /**
+   * P5 O7 M8: a receipt of this session's operation (the adapter's act answered `{opId}`): its completion is waited for,
+   * and asked of the machine at each opening until it comes. One whose completion came first waits for nothing.
+   */
+  awaitOperation(opId: string, command: OperationCommand): void {
+    if (this.#ops.has(opId)) return;
+    this.#remember(opId, { command, state: 'waiting', lateSaid: false });
+  }
+
   /** P5 O7 M6 fix wave 3: the broker's items the stream last delivered (none before its first part). */
   attentionItems(): AttentionItem[] {
     return this.#lastParts.items ?? [];
@@ -334,6 +367,7 @@ export class RemoteSession {
         } else if (gap) this.#gap(at.epoch);
         else this.state.stream = 'live';
         this.publish();
+        this.#askOperations(token);
       },
       snapshot: (at, value) => {
         if (!mine()) return;
@@ -354,7 +388,14 @@ export class RemoteSession {
           return;
         }
         const read = readTolerant(SessionEventSchema, body);
-        if (!read.ok) return this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: an event at ${at.epoch}:${at.seq}:${at.idx ?? ''} doesn't read; left out`);
+        if (!read.ok) {
+          this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: an event at ${at.epoch}:${at.seq}:${at.idx ?? ''} doesn't read; a gap there, the status and record read again`);
+          this.#flush();
+          this.#gap(at.epoch, place);
+          this.publish();
+          void this.#readAgain(token);
+          return;
+        }
         this.#batch.push(read.value);
         if (this.#batch.length >= this.#deps.timing.batchMax) this.#flush();
         else this.#flushTimer ??= setTimeout(() => this.#flush(), 0);
@@ -377,6 +418,9 @@ export class RemoteSession {
         this.#cursor = this.#sub?.cursor() ?? this.#cursor;
         this.#sub = null;
         if (reason === 'removed' || reason === 'closed') return this.stop(reason);
+        // P5 O7 M8: the machine ended it past its notices' bound; the session runs on, so it is opened again from where
+        // it stood, and that opening asks for the completions it missed
+        if (reason === 'behind') return this.#subscribe();
         this.state.status = null;
         if (reason !== 'unavailable') {
           this.state.stream = 'ended';
@@ -402,6 +446,7 @@ export class RemoteSession {
     if (!isObject(value)) return;
     const app = this.state.app;
     if (isObject(value.status)) {
+      this.#statuses += 1;
       this.state.status = value.status;
       if (typeof value.status.launchId === 'string') this.state.launch = value.status.launchId;
       this.#emit('session.status', { appSessionId: app, status: value.status });
@@ -424,6 +469,88 @@ export class RemoteSession {
       if (this.#deps.attentionFed?.() !== true) this.#emit('attention.changed', { appSessionId: app, items });
       this.#deps.attentionChanged?.();
     }
+    // P5 O7 M8: the notices; `side` is its completion's `operation` already (the header)
+    if (isObject(value.operation)) this.#operation(value.operation);
+    if (isObject(value.subagents)) this.#emit('fs.subagentsChanged', { appSessionId: app, agents: value.subagents.agents });
+    if (isObject(value.workflow)) this.#emit('fs.workflowChanged', { appSessionId: app, runId: value.workflow.runId });
+    if (isObject(value.tasks)) this.#emit('fs.tasksChanged', { listId: value.tasks.listId });
+  }
+
+  // ---- Operations (P5 O7 M8) -------------------------------------------------------------------------------------------
+
+  /**
+   * A completion, from the stream or the machine's answer: said once, a late one once more; nothing for an op settled
+   * here. A waiter that never saw its first is given the late one the machine kept in its place as its first.
+   */
+  #operation(raw: Record<string, unknown>): void {
+    const read = events.readEventPayload('session.operation', { ...raw, appSessionId: this.state.app });
+    if (!read.ok) return this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: session.operation doesn't read; left out`);
+    const event = read.value as OperationEvent;
+    const op = this.#ops.get(event.opId);
+    if (op?.state === 'lost') return this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: ${event.opId} completed after it was settled lost; dropped`);
+    if (event.late ? op?.lateSaid === true : op?.state === 'completed') return;
+    const first = op === undefined ? !event.late : op.state === 'waiting';
+    this.#remember(event.opId, { command: event.command, state: 'completed', lateSaid: op?.lateSaid === true || event.late });
+    this.#deps.emit(this.state.machine, 'session.operation', first && event.late ? { ...event, late: false } : event);
+  }
+
+  /** The waiters' opIds asked of the machine, for the subscription `token` is. */
+  #askOperations(token: object): void {
+    const waiting = [...this.#ops].filter(([, op]) => op.state === 'waiting').map(([opId]) => opId);
+    for (let i = 0; i < waiting.length; i += SESSION_OPERATIONS_MAX) void this.#readOperations(waiting.slice(i, i + SESSION_OPERATIONS_MAX), token);
+  }
+
+  async #readOperations(opIds: string[], token: object): Promise<void> {
+    const answer = await this.link.call('session.operations', { appSessionId: this.state.app, opIds });
+    if (this.#token !== token || !this.#running) return; // the next opening asks again
+    const read = answer.ok ? link.readCommandOutput('session.operations', answer.output) : null;
+    if (read === null || !read.ok) return this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: session.operations ${answer.ok ? 'answered what doesn’t read' : `failed (${answer.error.code})`}; asked again at the next opening`);
+    for (const outcome of read.value.outcomes) {
+      if ('event' in outcome) this.#operation(outcome.event);
+      else if ('unknown' in outcome) this.#lose(outcome.opId);
+    }
+  }
+
+  /** A waiter the machine doesn't know: settled as failed, and anything heard of it later dropped. */
+  #lose(opId: string): void {
+    const op = this.#ops.get(opId);
+    if (op?.state !== 'waiting' || op.command === null) return;
+    this.#remember(opId, { ...op, state: 'lost' });
+    const event: OperationEvent = { appSessionId: this.state.app as OperationEvent['appSessionId'], opId, command: op.command, late: false, outcome: { ok: false, error: { code: 'engine_error', message: LOST_OPERATION, engineCode: null } } };
+    this.#deps.emit(this.state.machine, 'session.operation', event);
+  }
+
+  /** An op's state, newest last; past OPS_KEPT the oldest settled ones go (a waiting one stays). */
+  #remember(opId: string, op: Op): void {
+    this.#ops.delete(opId);
+    this.#ops.set(opId, op);
+    for (const [old, kept] of this.#ops) {
+      if (this.#ops.size <= OPS_KEPT) break;
+      if (kept.state !== 'waiting') this.#ops.delete(old);
+    }
+  }
+
+  // ---- An event that doesn't read (P5 O7 M8) --------------------------------------------------------------------------
+
+  /** The status and record read again after a gap; a status part the stream delivered meanwhile stands. */
+  async #readAgain(token: object): Promise<void> {
+    const app = this.state.app;
+    const statuses = this.#statuses;
+    const [status, record] = await Promise.all([this.link.call('session.status', { appSessionId: app }), this.link.call('session.get', { appSessionId: app })]);
+    if (this.#token !== token || !this.#running) return;
+    const readStatus = status.ok ? link.readCommandOutput('session.status', status.output) : null;
+    if (readStatus?.ok === true && this.#statuses === statuses) {
+      this.#flush();
+      this.#parts(this.state.launch ?? '', { status: readStatus.value });
+      if (this.state.stream === 'gap') this.state.stream = 'live';
+      for (const waiter of [...this.#waiters]) waiter();
+    } else if (readStatus?.ok !== true) this.#deps.log(`lane B: ${this.link.name}/${app}: the status read again after a gap ${status.ok ? 'doesn’t read' : `failed (${status.error.code})`}`);
+    const readRecord = record.ok ? link.readCommandOutput('session.get', record.output) : null;
+    if (readRecord?.ok === true && readRecord.value !== null) {
+      this.state.record = readRecord.value as SessionRecord;
+      this.#deps.emit(this.state.machine, 'session.changed', { record: this.state.record, cause: 'live', revision: this.#deps.revision() });
+    }
+    this.publish();
   }
 
   /** A payload read as this build reads it, then emitted for the machine; one that doesn't read is left out, logged. */
