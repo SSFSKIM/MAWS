@@ -2,21 +2,25 @@
 // default, without a v2"): through the real file store, `machine-route.json` beside an unchanged `machine-settings.json`.
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import * as z from 'zod';
 import type { LegacyRoute, Route } from '@shared/engine/route';
 import { machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { settingsPaths, SETTINGS_FILES } from '@shared/settings/paths';
 import { startMachineSettings } from './machine';
 import { splitSettingsFiles } from './split';
+import { migrateMachineSettings as masterMigrateMachineSettings } from '../../../test/fixtures/settings/master-828114952/migrate-machine-settings.mjs';
 
-// An older build's reader: master's `migrateMachineSettings` (src/shared/settings/defaults.ts at 828114952, the base M9
-// branched from) is `MachineSettingsSchema.parse`, strict at every depth. Its schema is vendored as master rendered it
-// (`z.toJSONSchema(MachineSettingsSchema, { unrepresentable: 'any' })`) and read back with zod, so the reader stays
-// master's however this build's schema moves.
-const MASTER_MACHINE_SETTINGS = z.fromJSONSchema(JSON.parse(readFileSync(resolve(__dirname, '../../../test/fixtures/settings/machine-settings-v1.master.schema.json'), 'utf8')) as never);
-const olderBuildReads = (text: string) => MASTER_MACHINE_SETTINGS.safeParse(JSON.parse(text)).success;
+// An older build's reader: master's own `migrateMachineSettings` (src/shared/settings/defaults.ts at 828114952, the base
+// M9 branched from), its executable source vendored with every refinement (test/fixtures/settings/master-828114952/)
+const olderBuildReads = (text: string) => {
+  try {
+    masterMigrateMachineSettings(JSON.parse(text));
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 let profile: string;
 let paths: ReturnType<typeof settingsPaths>;
@@ -32,6 +36,15 @@ beforeEach(() => {
 afterEach(() => rmSync(profile, { recursive: true, force: true }));
 
 describe("the machine's default route on disk (P5 O7 M9)", () => {
+  it('holds the M9 files to master’s own reader, refinements included', () => {
+    const defaults = machineSettingsDefaults();
+    expect(olderBuildReads(JSON.stringify(defaults))).toBe(true);
+    // master's app MCP servers refuse the reserved name and a URL that is not one; a reconstructed schema did not
+    expect(olderBuildReads(JSON.stringify({ ...defaults, engine: { ...defaults.engine, mcpServers: [{ name: 'maws', type: 'http', url: 'not-a-url' }] } }))).toBe(false);
+    expect(olderBuildReads(JSON.stringify({ ...defaults, gateway: { ...defaults.gateway, defaultRoute: 'machine' } }))).toBe(false);
+    expect(olderBuildReads(JSON.stringify({ ...defaults, route: 'machine' }))).toBe(false);
+  });
+
   it('reads a v1 file holding gateway, the old default, as machine, and rewrites nothing', () => {
     machineFileWith('gateway');
     const before = bytes(paths.machine);
@@ -78,19 +91,37 @@ describe("the machine's default route on disk (P5 O7 M9)", () => {
     expect(open().defaultRoute()).toBe(route);
   });
 
-  it('keeps the legacy field as it is for machine when nothing resolves the machine’s legacy route', async () => {
-    machineFileWith('direct');
+  it('refuses machine, writing neither file, when nothing resolves the machine’s legacy route; gateway and direct need none', async () => {
+    machineFileWith('gateway');
+    const before = bytes(paths.machine);
     const machine = open();
-    await machine.setDefaultRoute('machine');
-    expect(machine.state().gateway.defaultRoute).toBe('direct');
+    const told = vi.fn();
+    machine.onChange(told);
+    await expect(machine.setDefaultRoute('machine')).rejects.toThrow('legacy route');
+    expect(bytes(paths.machine)).toBe(before);
+    expect(existsSync(routeFile())).toBe(false);
+    expect(told).not.toHaveBeenCalled();
+    expect(await machine.setDefaultRoute('direct')).toBe('direct');
+    expect(open().defaultRoute()).toBe('direct');
+  });
+
+  it('leaves the default alone when a legacy patch repeats the value the file holds (an older client re-saving its form)', async () => {
+    machineFileWith('gateway'); // a v1 profile with the old default, read as machine
+    const machine = open();
+    await machine.update({ gateway: { defaultRoute: 'gateway', relayUnreachable: 'wait' } });
+    expect(machine.defaultRoute()).toBe('machine');
+    expect(existsSync(routeFile())).toBe(false);
     expect(open().defaultRoute()).toBe('machine');
   });
 
-  it('takes a legacy patch of gateway.defaultRoute as a choice of the default, so an older client’s choice stands', async () => {
+  it('takes a legacy patch that changes gateway.defaultRoute as a choice of the default, so an older client’s choice stands', async () => {
+    machineFileWith('gateway');
     const machine = open();
-    expect(machine.defaultRoute()).toBe('machine'); // a first run
-    await machine.update({ gateway: { defaultRoute: 'gateway' } });
-    expect(machine.defaultRoute()).toBe('gateway'); // not read back as machine by the rule
+    await machine.update({ gateway: { defaultRoute: 'direct' } }); // gateway → direct, chosen in an older UI
+    expect(machine.defaultRoute()).toBe('direct');
+    expect(JSON.parse(bytes(routeFile()))).toEqual({ version: 1, defaultRoute: 'direct' });
+    await machine.update({ gateway: { defaultRoute: 'gateway' } }); // direct → gateway: not read back as machine by the rule
+    expect(machine.defaultRoute()).toBe('gateway');
     expect(JSON.parse(bytes(routeFile()))).toEqual({ version: 1, defaultRoute: 'gateway' });
     await machine.update({ gateway: { relayUnreachable: 'wait' } }); // a patch that names no route chooses none
     expect(open().defaultRoute()).toBe('gateway');

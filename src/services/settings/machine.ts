@@ -33,7 +33,8 @@ export interface MachineSettingsOptions {
   refused: string | null;
   unsplit?: MachineSettings | null;
   // P5 O7 M9: the machine route's legacy route at a set of `machine` (src/shared/engine/route.ts's legacyRouteOf over the
-  // machine's effective base URL); absent, the legacy field keeps what it holds
+  // machine's effective base URL); absent, a set of `machine` is refused, since no guess would tell an older build on this
+  // machine which inference the machine uses
   legacyOfMachine?: () => Promise<LegacyRoute>;
 }
 
@@ -52,10 +53,12 @@ export function startMachineSettings(file: string, { refused, unsplit = null, le
   return {
     state: () => store.value,
     // P5 O3-D M5b (Interfaces §G): persisted and told synchronously, as before; the promise settles at once
+    // P5 O7 M9: a patch that changes `gateway.defaultRoute` from what the file holds is a choice made in a form that knows
+    // only the legacy field (an older client's, or this build's before the route's own control); one that repeats it (a
+    // form re-saved whole) chooses nothing, so the resolved default stands
     update: async (patch) => {
-      const chosen = patch.gateway?.defaultRoute;
-      if (chosen === undefined) store.update((current) => applyMachinePatch(current, patch));
-      else choose(store, routeStore, chosen, (current) => applyMachinePatch(current, patch));
+      const legacy = patch.gateway?.defaultRoute;
+      choose(store, routeStore, (current) => ({ next: applyMachinePatch(current, patch), route: legacy !== undefined && legacy !== current.gateway.defaultRoute ? legacy : null }));
       return tell();
     },
     onChange: (listener) => {
@@ -65,22 +68,24 @@ export function startMachineSettings(file: string, { refused, unsplit = null, le
     defaultRoute: () => resolveDefaultRoute(routeStore.value, store.value.gateway.defaultRoute),
     setDefaultRoute: async (route) => {
       if (refused !== null) throw new Error(`${file} is not written this run: ${refused}`); // before asking the legacy route
-      const machineLegacy = route === 'machine' && legacyOfMachine ? await legacyOfMachine() : null;
-      choose(store, routeStore, route, (current) => applyMachinePatch(current, { gateway: { defaultRoute: legacyDefaultRoute(route, machineLegacy ?? current.gateway.defaultRoute) } }));
+      if (route === 'machine' && !legacyOfMachine) throw new Error('The machine route is not set as the default in this run: nothing resolves its legacy route, which an older build on this machine would launch.');
+      const machineLegacy = route === 'machine' ? await legacyOfMachine!() : route;
+      choose(store, routeStore, (current) => ({ next: applyMachinePatch(current, { gateway: { defaultRoute: legacyDefaultRoute(route, machineLegacy) } }), route }));
       tell();
       return route;
     },
   };
 }
 
-// One choice of the default, both files or neither as far as the files' own rules can tell: the machine file is read for
-// its update first, then the route file is written inside that update, so a file either store refuses (refused, invalid,
-// a version this build does not know) fails the choice before anything is written. Only a failed write of the machine
-// file itself, after the route file's, leaves the route chosen here with the legacy field as it was.
-function choose(store: SettingsFileStore<MachineSettings>, routeStore: SettingsFileStore<MachineRoute | null>, route: Route, change: (current: MachineSettings) => MachineSettings): void {
+// One write of the machine file and, when `change` chooses a route, of the route file: both or neither as far as the
+// files' own rules can tell. The machine file is read for its update first, then the route file is written inside that
+// update, so a file either store refuses (refused, invalid, a version this build does not know) fails the choice before
+// anything is written. Only a failed write of the machine file itself, after the route file's, leaves the route chosen
+// here with the legacy field as it was.
+function choose(store: SettingsFileStore<MachineSettings>, routeStore: SettingsFileStore<MachineRoute | null>, change: (current: MachineSettings) => { next: MachineSettings; route: Route | null }): void {
   store.update((current) => {
-    const next = change(current);
-    routeStore.update(() => ({ version: MACHINE_ROUTE_VERSION, defaultRoute: route }));
+    const { next, route } = change(current);
+    if (route !== null) routeStore.update(() => ({ version: MACHINE_ROUTE_VERSION, defaultRoute: route }));
     return next;
   });
 }

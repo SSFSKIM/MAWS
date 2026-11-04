@@ -4,8 +4,10 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MachineSettings } from '@shared/ipc/schema/settings';
-import { machineSettingsDefaults } from '@shared/settings/defaults';
+import * as z from 'zod';
+import { readTolerant } from '@shared/ipc/tolerant';
+import { MachineSettingsPatchSchema, type MachineSettings } from '@shared/ipc/schema/settings';
+import { applyMachinePatch, machineSettingsDefaults } from '@shared/settings/defaults';
 import { createMachineSettingsMirror } from './machine-settings-mirror';
 
 type Answer = { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } };
@@ -226,6 +228,47 @@ describe('the machine settings mirror (Interfaces §G)', () => {
       host.answers.set('machineSettings.set', async () => ({ ok: false, error: { code: 'host_unavailable', message: 'spine.lock is held by pid 4242' } }));
       await expect(mirror.setDefaultRoute('direct')).rejects.toThrow('spine.lock is held by pid 4242');
       expect(mirror.defaultRoute()).toBe('machine');
+    });
+
+    // A mawsd that predates M9, answering as its front does: `machineSettings.set`'s input read by the real tolerant
+    // reader against that build's schema (an unknown key dropped, never refused), and no `defaultRoute` in any answer
+    const OLDER_SET_INPUT = z.strictObject({ patch: MachineSettingsPatchSchema });
+    function olderMawsd(host: ReturnType<typeof machineHost>, start: MachineSettings) {
+      let settings = start;
+      const read: unknown[] = [];
+      host.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings, version: 1 } }));
+      host.answers.set('machineSettings.set', async () => {
+        const input = readTolerant(OLDER_SET_INPUT, host.asked.at(-1)!.input);
+        if (!input.ok) return { ok: false, error: { code: 'invalid_input', message: input.error.message } };
+        read.push(input.value);
+        settings = applyMachinePatch(settings, input.value.patch);
+        return { ok: true, value: { settings } };
+      });
+      return read;
+    }
+
+    it('learns whether mawsd carries the route before its first route write, and never takes a dropped write for done', async () => {
+      const host = machineHost();
+      const read = olderMawsd(host, withRoute('gateway'));
+      const mirror = createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} }); // not streaming: no answer yet
+      await expect(mirror.setDefaultRoute('machine')).rejects.toThrow('predates the machine route');
+      expect(host.asked.map(({ name }) => name)).toEqual(['machineSettings.get']); // asked first; nothing written
+      expect(read).toEqual([]);
+      expect(mirror.defaultRoute()).toBe('gateway'); // what that mawsd's sessions start on
+
+      const unanswered = createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} });
+      expect(await unanswered.setDefaultRoute('direct')).toBe('direct');
+      expect(read).toEqual([{ patch: { gateway: { defaultRoute: 'direct' } } }]);
+
+      // a mawsd replaced by an older one between its read and the write: the write is dropped, and the set rejects
+      const swapped = machineHost();
+      swapped.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings: withRoute('gateway'), version: 1, defaultRoute: 'machine' } }));
+      const mirrored = createMachineSettingsMirror({ file, hosts: swapped.hosts, log: () => {} });
+      swapped.stream();
+      await mirrored.answered();
+      const dropped = olderMawsd(swapped, withRoute('gateway'));
+      await expect(mirrored.setDefaultRoute('direct')).rejects.toThrow('predates the machine route');
+      expect(dropped).toEqual([{ patch: {} }]); // the route was dropped by that build's reader
     });
 
     it('sets gateway or direct on a mawsd that predates M9 through the legacy field, and refuses machine there', async () => {

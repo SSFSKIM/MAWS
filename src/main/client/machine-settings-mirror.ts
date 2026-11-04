@@ -49,15 +49,16 @@ export function createMachineSettingsMirror({ file, hosts, log }: MachineSetting
   let markAnswered!: () => void;
   const firstAnswer = new Promise<void>((resolve) => (markAnswered = resolve));
   let heard = 0; // changes heard; a read that saw one land while it was out is dropped
-  const refresh = () => {
+  // a read; it resolves with the answer taken (or a newer change heard while it was out), rejects on a refusal
+  const read = async () => {
     const before = heard;
-    void hosts.dispatch('machine', 'machineSettings.get', undefined).then((answer) => {
-      if (!answer.ok) return log(`[settings] machineSettings.get: ${answer.error.code} ${answer.error.message}`);
-      markAnswered();
-      const { settings, defaultRoute } = answer.value as CommandOutput<'machineSettings.get'>;
-      if (heard === before) take(settings, defaultRoute);
-    });
+    const answer = await hosts.dispatch('machine', 'machineSettings.get', undefined);
+    if (!answer.ok) throw new Error(`machineSettings.get: ${answer.error.code} ${answer.error.message}`);
+    markAnswered();
+    const { settings, defaultRoute } = answer.value as CommandOutput<'machineSettings.get'>;
+    if (heard === before) take(settings, defaultRoute);
   };
+  const refresh = () => void read().catch((error: unknown) => log(`[settings] ${error instanceof Error ? error.message : String(error)}`));
   const offs = [
     hosts.onEvent('machineSettings.changed', ({ settings, defaultRoute }) => {
       heard += 1;
@@ -68,7 +69,7 @@ export function createMachineSettingsMirror({ file, hosts, log }: MachineSetting
   ];
   if (hosts.streaming('machine')) refresh();
 
-  const set = async (input: { patch: MachineSettingsPatch; defaultRoute?: Route }) => {
+  const set = async (input: { patch: MachineSettingsPatch; defaultRoute?: Route }): Promise<{ defaultRoute?: Route }> => {
     const before = heard;
     const answer = await hosts.dispatch('machine', 'machineSettings.set', input);
     if (!answer.ok) throw new Error(answer.error.message);
@@ -78,6 +79,7 @@ export function createMachineSettingsMirror({ file, hosts, log }: MachineSetting
     const { settings, defaultRoute } = answer.value as CommandOutput<'machineSettings.set'>;
     if (heard === before) take(settings, defaultRoute);
     heard += 1;
+    return { defaultRoute };
   };
 
   return {
@@ -87,10 +89,14 @@ export function createMachineSettingsMirror({ file, hosts, log }: MachineSetting
       return current;
     },
     defaultRoute: () => route,
-    // before any answer, mawsd is taken to be this build's (it most often is); an older one refuses the property
+    // An older mawsd reads `set`'s input tolerantly and drops a `defaultRoute` it does not know, answering success, so
+    // whether it carries the route is learned first: from its last answer, or a read sent now (under the request's own
+    // deadline). A route write whose answer carries no `defaultRoute` was dropped, and rejects.
     async setDefaultRoute(next) {
-      if (routeKnown !== false) await set({ patch: {}, defaultRoute: next });
-      else if (next === 'machine') throw new Error('This machine’s mawsd predates the machine route; choose gateway or direct until it runs this build.');
+      if (routeKnown === null) await read();
+      if (routeKnown === true) {
+        if ((await set({ patch: {}, defaultRoute: next })).defaultRoute === undefined) throw new Error(PREDATES);
+      } else if (next === 'machine') throw new Error(PREDATES);
       else await set({ patch: { gateway: { defaultRoute: next satisfies LegacyRoute } } });
       return route;
     },
@@ -102,6 +108,8 @@ export function createMachineSettingsMirror({ file, hosts, log }: MachineSetting
     stop: () => offs.forEach((off) => off()),
   };
 }
+
+const PREDATES = 'This machine’s mawsd predates the machine route; choose gateway or direct until it runs this build.';
 
 // The file as it is, never migrated in place nor written: the defaults when it is absent or this build cannot read it
 function readOnly(file: string, log: (line: string) => void): MachineSettings {
