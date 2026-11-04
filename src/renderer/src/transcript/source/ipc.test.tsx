@@ -23,6 +23,7 @@ import { ipcLoadSpillOver, ipcOpenExternalOver, ipcRewindOver, ipcSourceOver, KN
 import type { TranscriptSource } from './types';
 import { HISTORY_GAP, HISTORY_OMITTED, HISTORY_TOO_LARGE } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED
 import { useMachines } from '../../stores/machines'; // P5 O7 M2
+import { record, status } from '../../../../../test/support/builders'; // P5 O7 M8
 
 const APP = at('app-1' as AppSessionId); // the page's: the sources run behind the client, over addresses
 const MAIN_APP = bareOf(APP); // P5 O6 M2: an event id is main's, under the bare app id
@@ -498,6 +499,29 @@ describe('ipcSource', () => {
       fake.calls[0].answer({ ok: true, value: { events: b.events, lastSeq: 3, complete: true } } as never);
       await hydrated;
       expect(kinds(APP)).not.toContain('gap');
+    });
+
+    // P5 O7 M8 (m8-1, red first; "What draws Working…"): the consumer half of main's gap rule (remote-session.test.ts,
+    // "marks an unreadable `turn.ended` as a gap…"). A remote turn whose `turn.ended` never came is open in the store, and
+    // the transcript's "Working…" is the store's `working` (`state.current !== null`). Main tells the gap, then folds in the
+    // machine's re-read status (idle, `turn: null`) and record; the gap bar is a notice and closes no turn, so today
+    // `working` stays true. The rule: the re-read word that the session runs no turn closes it. Flipped by m8-3 or m8-4.
+    it.fails('clears a remote turn’s working when the gap is followed by the re-read idle status and record', async () => {
+      const fake = fakeClient();
+      const source = ipcSourceOver(fake.client, REMOTE);
+      const hydrated = useTranscriptStore.getState().attach(REMOTE, source);
+      fake.calls[0].answer({ ok: true, value: { events: [], lastSeq: 0, complete: true } } as never);
+      await hydrated;
+      const b = builder();
+      b.turn('u1');
+      b.text('m1', 0, 'Working on it');
+      fake.emit('session.eventBatch', batch(b.events, REMOTE), OTHER_MACHINE);
+      expect(useTranscriptStore.getState().entries[REMOTE].working).toBe(true); // the turn is open
+      fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 5, idx: 0 } }, OTHER_MACHINE);
+      fake.emit('session.status', { appSessionId: REMOTE, status: { ...status(bareOf(REMOTE)), appSessionId: REMOTE } }, OTHER_MACHINE);
+      fake.emit('session.changed', { record: record(REMOTE), cause: 'live', revision: 2 }, OTHER_MACHINE);
+      await vi.waitFor(() => expect(kinds(REMOTE)).toContain('gap'));
+      expect(useTranscriptStore.getState().entries[REMOTE].working).toBe(false);
     });
   });
 
