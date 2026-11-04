@@ -37,9 +37,11 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
   const [promoting, setPromoting] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [starting, setStarting] = useState(false); // P2-A: this view's own start in flight
-  const blocked = ready ? null : driven?.available === false ? driven.reason : sideBlock(availability, holder);
+  // P5 O7 M8: an older machine with no side-question row greys Ask and Retry with its name (lane-b/remote-unavailable.ts)
+  const askUnavailable = useRemoteUnavailable(parent, 'session.sideQuestion');
+  const blocked = askUnavailable ?? (ready ? null : driven?.available === false ? driven.reason : sideBlock(availability, holder));
   const canAsk = blocked === null && !starting;
-  // P5 O7 M8: why Send to a side thread and Clear are greyed for a session on another machine (lane-b/remote-unavailable.ts)
+  // P5 O7 M8: why Continue as a side thread and Clear are greyed for a session on another machine (lane-b/remote-unavailable.ts)
   const promoteUnavailable = useRemoteUnavailable(parent, 'side.thread.open');
   const clearUnavailable = useRemoteUnavailable(parent, 'side.question.clear');
   const log = useRef<HTMLDivElement>(null);

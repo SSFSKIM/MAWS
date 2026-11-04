@@ -217,3 +217,21 @@ describe('a session driven through its holder (lane A)', () => {
     expect(decided({ driven: driven(false), mode: 'memory' })[2]).toBe(false);
   });
 });
+
+// P5 O7 M8 ("The offer audit and its contract"): `session.bash` and `session.memoryAppend` are declared not offered on
+// another machine (REMOTE_UNAVAILABLE); the composer answers why for the mode it is in, and Run and Save to memory are
+// greyed with those words, ready, busy, or with no ready process to acquire
+describe('a mode not offered on the session’s machine', () => {
+  const words = 'Not on another machine yet: ! shell commands';
+  it('greys Run and Save to memory with the reason, whatever the turn or the process', () => {
+    expect(row({ mode: 'bash', modeUnavailable: words })).toEqual(['send', 'Run', false, words, false]);
+    expect(row({ mode: 'memory', modeUnavailable: words })).toEqual(['send', 'Save to memory', false, words, false]);
+    expect(row({ mode: 'bash', status: turning, modeUnavailable: words })).toEqual(['send', 'Run', false, words, false]);
+    expect(row({ mode: 'bash', status: null, availability: 'usable', modeUnavailable: words })).toEqual(['send', 'Run', false, words, false]);
+  });
+
+  it('leaves Send and the modes with no reason as they were', () => {
+    expect(row({ mode: 'send', modeUnavailable: words })).toEqual(['send', 'Send', true, null, false]);
+    expect(row({ mode: 'bash', modeUnavailable: null })).toEqual(['send', 'Run', true, null, false]);
+  });
+});

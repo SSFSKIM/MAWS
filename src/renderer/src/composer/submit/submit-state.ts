@@ -34,6 +34,9 @@ export interface SubmitInput {
   driven?: { running: boolean; send: DrivenCapability; stop: DrivenCapability } | null;
   // P5 O16 M3b fix wave 2: a lane B session on another machine, whose link carries no session.stop
   remote?: boolean;
+  // P5 O7 M8: why the mode's command (`!` session.bash, `#` session.memoryAppend) is not offered on the session's machine
+  // (lane-b/remote-unavailable.ts); absent or null: it is
+  modeUnavailable?: string | null;
 }
 
 export interface SubmitDecision {
@@ -109,6 +112,8 @@ export function submitState(i: SubmitInput): SubmitDecision {
     if (!send.available) return decide('send', 'Send', false, send.reason);
     return decide('send', 'Send', !empty, null, running ? SENDS_AT_NEXT_STEP : null);
   }
+  // P5 O7 M8: a mode its machine doesn't offer is greyed with the reason, whatever the turn or the process
+  if (mode !== 'send' && (i.modeUnavailable ?? null) !== null) return decide('send', mode === 'bash' ? 'Run' : 'Save to memory', false, i.modeUnavailable);
   // P2-A start: with a record and no ready process the submission acquires the session first (the seam, and `!` and `#`
   // before their own dispatch), joining a start in flight; only an archived or a foreign-held session refuses
   if ((status === null || status.process !== 'ready') && i.availability !== null) {

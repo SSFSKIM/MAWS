@@ -49,6 +49,7 @@ import { dockCard, resetDockedCards } from './docked/registry';
 import { docOf, mentionNode, paragraph, textNode } from './editor/doc';
 import { ON_THIS_MAC, STALE_UPLOADS, UPLOAD_ADVISORY_MS } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1); M8: STALE_UPLOADS, UPLOAD_ADVISORY_MS
 import { REMOTE_UPLOAD_REFUSED_WORDS } from '@shared/ipc/schema/remote'; // P5 O7 M8
+import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable'; // P5 O7 M8 review
 import { forgetSubmissions } from './editor/controller'; // M4c re-review: a reload's fresh modules
 import { resetEffectiveEfforts } from './effective-effort'; // W3
 import { registerSlashWidget } from './mentions/widgets'; // W3
@@ -1553,6 +1554,23 @@ describe('a lane B session on another machine', () => {
     } finally {
       now.mockRestore();
     }
+  });
+
+  // P5 O7 M8 ("The offer audit and its contract"): `!` and `#` are declared not offered on another machine: typed into a
+  // ready session's box, Run and Save to memory are greyed with the declared words, and Enter dispatches nothing
+  it.each([
+    ['!ls', 'Run', 'session.bash'],
+    ['#remember this', 'Save to memory', 'session.memoryAppend'],
+  ] as const)('greys %s’s %s with the declared reason, and Enter runs nothing', async (typed, label, command) => {
+    mount([{ index: 0, id: R }]);
+    await type(typed);
+    await waitFor(() => expect(primary().textContent).toBe(label));
+    expect(primary().disabled).toBe(true);
+    expect(primary().title).toBe(REMOTE_UNAVAILABLE[command]);
+    await key(editorOf(), { key: 'Enter' });
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(remote.invoked(command)).toEqual([]);
+    expect(editorOf().editor.getText()).not.toBe('');
   });
 
   it('keeps the draft in this app’s memory, never asking the machine for it', async () => {

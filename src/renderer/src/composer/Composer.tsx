@@ -49,6 +49,7 @@ import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor
 import { ipcDrafts, type DraftPort, type EditorHandle } from './editor/controller';
 import { rememberingRemoteDrafts } from './editor/drafts'; // P5 O7 M2
 import { isRemoteLaneB, useIsRemoteLaneB, useRemoteSending } from '../lane-b/remote-session'; // P5 O7 M2
+import { remoteUnavailableOf, useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { useMachineMark } from '../app/machine-mark'; // P5 O7 M2
 import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
@@ -215,6 +216,9 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // availability decides the control, and a terminal or job holding it is named
   const holder = record?.holder ?? null;
   const heldBy = holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job') ? holderWords(holder) : null;
+  // P5 O7 M8: why `!` and `#` are greyed for a session on another machine (the mode's command not offered there)
+  const bashUnavailable = useRemoteUnavailable(appSessionId, 'session.bash');
+  const memoryUnavailable = useRemoteUnavailable(appSessionId, 'session.memoryAppend');
   const decision = submitState({
     status,
     intent: unstarted ? { starting, messageHeld, phase: setup.phase ?? null, noProject: setup.intent.location === null } : null, // C10: the setup phase
@@ -225,6 +229,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     heldBy, // P2-A
     driven, // P5 O9 M5
     remote: isRemoteLaneB(appSessionId), // P5 O16 M3b fix wave 2
+    modeUnavailable: draft.mode === 'bash' ? bashUnavailable : draft.mode === 'memory' ? memoryUnavailable : null, // P5 O7 M8
   });
 
   // ---- the docked swap ---------------------------------------------------------------------------------------------
@@ -362,7 +367,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     // P5 O7 M4: to a session on another machine, its files go up first and the message names their paths there
     if (s.mode === 'send' && controls !== null && isRemoteLaneB(appSessionId)) return submitRemoteSerialized(controls, client, appSessionId, s, attachmentsOf(handle.current?.doc() ?? emptyDoc()), cwd, retry);
     if (s.mode === 'send') return controls !== null && submitHumanSerialized(controls, client, appSessionId, s, retry);
-    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, availability: availabilityIn(useSessions.getState(), appSessionId), heldBy, driven });
+    const modeUnavailable = remoteUnavailableOf(appSessionId, s.mode === 'bash' ? 'session.bash' : 'session.memoryAppend'); // P5 O7 M8: Enter, as the button
+    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, availability: availabilityIn(useSessions.getState(), appSessionId), heldBy, driven, modeUnavailable });
     if (!decided.enabled) return false;
     // P2-A: `!` and `#` on a record with no ready process acquire it first; a card they meet docks without their text,
     // which stays in the draft (never sent to the model as a prompt by the card's continuation)
