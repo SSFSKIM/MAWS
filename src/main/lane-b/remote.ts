@@ -281,6 +281,8 @@ type Context = { launchId: string; engineSessionId: string };
 
 const record = (value: unknown): Fields | null => (value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Fields) : null);
 const failure = (code: IpcErrorCode, message: string, issues?: unknown): CommandResult<CommandName> => ({ ok: false, error: ipcError(code, message, issues) });
+/** m8-3 review (C, round 2): a session's agent follows this device holds, and its agent reads still out (each may hold one). */
+type Follows = { followed: Set<string>; reading: Map<Promise<unknown>, string> };
 const withoutUploads = (fields: Fields): Fields => Object.fromEntries(Object.entries(fields).filter(([key]) => key !== 'uploads'));
 
 export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
@@ -315,7 +317,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
    * m8-3's task review (C): the agents this device follows per session, by link (each `fs.agentEvents` answered starts or
    * holds one, held by this device's channel on the machine), so a session-wide unfollow lets go of these alone.
    */
-  const follows = new Map<RemoteLink, Map<string, Set<string>>>();
+  const follows = new Map<RemoteLink, Map<string, Follows>>();
   /** Each session's upload in flight (machine and session): the next waits for it. */
   const uploads = new Map<string, Promise<unknown>>();
   /** P5 O7 M4: each New chat tab's spawn, kept by the tab it is made from (remote-spawn.ts). */
@@ -552,7 +554,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     if (now() >= deadline) return resuming ? failure('host_unavailable', `Not sent: ${link.name} didn’t resume the session in time`) : outcomeAsResult(name, link.name, { state: 'refused', reason: 'offline' });
     // P5 O7 M8: a send's uploads only to an endpoint that reads them. A channel current now that lists none takes the
     // mention alone; with none current (m8-3's task review, D) the act carries them and `requires` the capability, so the
-    // channel it goes on judges it, and one an older peer refused as not offered (nothing ran) goes again without them.
+    // channel it goes on judges it, and one an older peer refused as not offered (nothing ran) goes again without them;
+    // a not-offered from a peer that lists the capability is the send's own error.
     const uploads = name === 'session.send' && fields.uploads !== undefined;
     const blocks = uploads && (link.peerCapabilities() === null || peerLists(link, 'rl2.upload-blocks'));
     if (uploads && !blocks) deps.log(`lane B: session.send on ${link.name}/${app}: its endpoint lists no rl2.upload-blocks; the uploads go as their mentions alone`);
@@ -561,7 +564,8 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       settle(link, name, link.act({ action: name, session: app, context: { lane: 'B', ...context }, args, executor: 'engine-host', sendBy: deadline, ...(requestDigest !== undefined && { requestDigest }), ...(requires && { requires: 'rl2.upload-blocks' }) }), deadline, app);
     let result = await make(blocks || !uploads ? fields : withoutUploads(fields), blocks);
     const refusal = result.ok ? null : (result.error.issues as { refusal?: unknown } | undefined)?.refusal;
-    if (blocks && refusal === 'not-offered' && now() < deadline) {
+    // m8-3 review round 2: only when the channel it went on lists no `rl2.upload-blocks`; any other not-offered is the send's error
+    if (blocks && refusal === 'not-offered' && link.peerCapabilities() !== null && !peerLists(link, 'rl2.upload-blocks') && now() < deadline) {
       deps.log(`lane B: session.send on ${link.name}/${app}: the channel it went on lists no rl2.upload-blocks; sent again with the uploads as their mentions alone`);
       result = await make(withoutUploads(fields), false);
     } else if (blocks && refusal === 'malformed') return failure('invalid_input', REMOTE_UPLOAD_REFUSED_WORDS, { refusal: 'malformed', uploads: 'refused' });
@@ -576,24 +580,36 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
    */
   async function targeted(link: RemoteLink, name: CommandName, fields: Fields, ctx: MainContext): Promise<CommandResult<CommandName>> {
     const app = String(fields.appSessionId);
-    const followed = () => {
-      const of = follows.get(link) ?? new Map<string, Set<string>>();
-      follows.set(link, of);
-      const agents = of.get(app) ?? new Set<string>();
-      of.set(app, agents);
-      return agents;
+    const of = () => {
+      const bySession = follows.get(link) ?? new Map<string, Follows>();
+      follows.set(link, bySession);
+      const held = bySession.get(app) ?? { followed: new Set<string>(), reading: new Map<Promise<unknown>, string>() };
+      bySession.set(app, held);
+      return held;
     };
     if (name === 'fs.agentEvents') {
-      const result = await dispatchOverLink(link, name, fields, ctx.session);
-      if (result.ok && typeof fields.agentId === 'string') followed().add(fields.agentId);
+      const reading = dispatchOverLink(link, name, fields, ctx.session);
+      const agentId = typeof fields.agentId === 'string' ? fields.agentId : null;
+      if (agentId !== null) of().reading.set(reading, agentId);
+      const result = await reading;
+      of().reading.delete(reading);
+      if (result.ok && agentId !== null) of().followed.add(agentId);
       return result;
     }
     if (name === 'fs.unfollow') {
-      const agents = typeof fields.agentId === 'string' ? [fields.agentId] : [...followed()];
+      let agents: string[];
+      if (typeof fields.agentId === 'string') agents = [fields.agentId];
+      else {
+        // m8-3 review round 2: a read still out may hold its follow already (the machine takes the hold before it
+        // answers), so the reads made before this one are waited for and their agents let go of too, answered or not
+        const out = [...of().reading];
+        await Promise.allSettled(out.map(([reading]) => reading));
+        agents = [...new Set([...of().followed, ...out.map(([, agentId]) => agentId)])];
+      }
       for (const agentId of agents) {
         const result = await dispatchOverLink(link, name, { appSessionId: app, agentId });
         if (!result.ok) return result;
-        followed().delete(agentId);
+        of().followed.delete(agentId);
       }
       return { ok: true, value: undefined } as CommandResult<CommandName>;
     }

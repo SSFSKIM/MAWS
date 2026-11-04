@@ -1075,6 +1075,27 @@ describe('the sitting’s failures (M8)', () => {
     ]);
   });
 
+  it('lets a session-wide unfollow cover an agent read still out when it was made (the machine took its hold before answering)', async () => {
+    const l = lab();
+    let answer!: (value: unknown) => void;
+    l.link.answers.set('fs.agentEvents', () => new Promise((resolve) => (answer = resolve)) as never);
+    l.link.answers.set('fs.unfollow', () => ({ ok: true, output: null }));
+    const reading = l.cmd('fs.agentEvents', { appSessionId: APP, agentId: 'agent-1' });
+    await vi.advanceTimersByTimeAsync(0);
+    const unfollowing = l.cmd('fs.unfollow', { appSessionId: APP, agentId: null });
+    answer({ ok: true, output: { events: [], complete: true } });
+    await Promise.all([reading, unfollowing]);
+    expect(l.link.calls.filter((c) => c.name === 'fs.unfollow').map((c) => c.input)).toEqual([{ appSessionId: APP, agentId: 'agent-1' }]);
+    // a read out that then failed is covered too: its hold may have been taken before it failed
+    l.link.answers.set('fs.agentEvents', () => new Promise((resolve) => (answer = resolve)) as never);
+    const failing = l.cmd('fs.agentEvents', { appSessionId: APP, agentId: 'agent-2' });
+    await vi.advanceTimersByTimeAsync(0);
+    const again = l.cmd('fs.unfollow', { appSessionId: APP, agentId: null });
+    answer({ ok: false, error: { code: 'timeout' } });
+    await Promise.all([failing, again]);
+    expect(l.link.calls.filter((c) => c.name === 'fs.unfollow').map((c) => c.input).slice(1)).toEqual([{ appSessionId: APP, agentId: 'agent-2' }]);
+  });
+
   it('sends a send’s uploads only to an endpoint that lists `rl2.upload-blocks`, and the mention alone to one that doesn’t', async () => {
     const l = lab();
     await live(l);
@@ -1095,7 +1116,10 @@ describe('the sitting’s failures (M8)', () => {
     await live(l);
     l.link.lose(); // within the grace: still `up`, no channel; the send waits under the link's hold
     const settles: Array<Parameters<FakeAct['settle']>[0]> = [{ state: 'refused', reason: 'not-offered' }, { state: 'done', result: { messageUuid: null, disposition: 'sent', queueId: 'q2' } }];
-    l.link.onAct = (act) => act.settle(settles.shift()!);
+    l.link.onAct = (act) => {
+      if (l.link.peerCapabilities() === null) l.link.relink(['rl2.executor.machine']); // the channel it goes on: an older peer
+      act.settle(settles.shift()!);
+    };
     const send = { appSessionId: APP, content: 'read @.claude/desk-uploads/app-1/u.0.pdf', uploads: [{ uploadId: 'u.0.pdf', as: 'document' }] };
     expect(await l.cmd('session.send', send)).toEqual({ ok: true, value: { messageUuid: null, disposition: 'sent', queueId: 'q2' } });
     const sent = l.link.acts.map((a) => a.request);
@@ -1103,6 +1127,19 @@ describe('the sitting’s failures (M8)', () => {
     expect(sent[1].args).toEqual({ appSessionId: APP, content: send.content });
     expect(sent[1].requires).toBeUndefined();
     expect(l.logs.some((line) => line.includes('rl2.upload-blocks'))).toBe(true);
+  });
+
+  it('sends again with the mention alone only when the channel it went on lists no `rl2.upload-blocks`; a not-offered from one that does is the send’s error', async () => {
+    const l = lab();
+    await live(l);
+    l.link.lose();
+    l.link.onAct = (act) => {
+      l.link.relink(['rl2.executor.machine', 'rl2.upload-blocks']); // the channel it went on reads uploads
+      act.settle({ state: 'refused', reason: 'not-offered' });
+    };
+    const send = { appSessionId: APP, content: 'read it', uploads: [{ uploadId: 'u.0.pdf', as: 'document' }] };
+    expect(await l.cmd('session.send', send)).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } });
+    expect(l.link.acts).toHaveLength(1);
   });
 
   it('words a send whose uploads the machine refused (`malformed`, no reason) as the attachment’s, for the composer to show', async () => {
