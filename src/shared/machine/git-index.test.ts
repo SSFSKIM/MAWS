@@ -2,6 +2,7 @@
 // repositories (index versions 2, 3 and 4, SHA-1 and SHA-256, a skipped hash), the entries git keeps out of a work
 // tree left out, a split index and every malformed or oversized index answered null.
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -94,6 +95,46 @@ describe('a checkout’s top-level files, read from its index', () => {
       return Buffer.concat([header, ...names.map(entry), Buffer.alloc(20)]); // a skipped hash
     };
     expect(parseIndex(index(['..', '.', 'ok.txt']), 20)).toEqual([{ name: 'ok.txt', id: 'ab'.repeat(20) }]);
+  });
+
+  // round 4: v4's prefix compression can make names far longer than the file; a name past git's PATH_MAX, or all names
+  // decoded past their budget, is null, counted before any is built or copied
+  it('answer null for v4 names past a path’s bound or past the decoded budget, however small the file', () => {
+    const v4 = (entries: { strip: number; suffix: string }[]) => {
+      const parts = entries.map(({ strip, suffix }) => {
+        const fixed = Buffer.alloc(62);
+        fixed.writeUInt32BE(0o100644, 24);
+        fixed.writeUInt16BE(Math.min(suffix.length, 0xfff), 60);
+        return Buffer.concat([fixed, Buffer.from([strip]), Buffer.from(suffix, 'latin1'), Buffer.alloc(1)]); // a strip under 128: one byte
+      });
+      const header = Buffer.alloc(12);
+      header.write('DIRC', 0, 'latin1');
+      header.writeUInt32BE(4, 4);
+      header.writeUInt32BE(entries.length, 8);
+      return Buffer.concat([header, ...parts, Buffer.alloc(20)]); // a skipped hash
+    };
+    expect(parseIndex(v4([{ strip: 0, suffix: 'a' }, { strip: 0, suffix: 'b' }]), 20)).toEqual([{ name: 'a', id: '0'.repeat(40) }, { name: 'ab', id: '0'.repeat(40) }]);
+    const growing = Array.from({ length: 5000 }, () => ({ strip: 0, suffix: 'x' })); // each name one byte longer: 5,000 bytes
+    expect(v4(growing).length).toBeLessThan(400_000);
+    expect(parseIndex(v4(growing), 20)).toBeNull();
+    const repeated = [{ strip: 0, suffix: 'y'.repeat(4000) }, ...Array.from({ length: 4300 }, () => ({ strip: 0, suffix: '' }))]; // 17 MB decoded
+    expect(v4(repeated).length).toBeLessThan(400_000);
+    expect(parseIndex(v4(repeated), 20)).toBeNull();
+  });
+
+  it('skip an optional extension (upper case first) and answer null for a mandatory one git would not understand', () => {
+    const empty = (signature: string) => {
+      const header = Buffer.alloc(12);
+      header.write('DIRC', 0, 'latin1');
+      header.writeUInt32BE(2, 4);
+      const extension = Buffer.alloc(8);
+      extension.write(signature, 0, 'latin1');
+      const body = Buffer.concat([header, extension]);
+      return Buffer.concat([body, createHash('sha1').update(body).digest()]); // hashed correctly
+    };
+    expect(parseIndex(empty('ZZZZ'), 20)).toEqual([]);
+    expect(parseIndex(empty('zzzz'), 20)).toBeNull();
+    expect(parseIndex(empty('sdir'), 20)).toBeNull();
   });
 
   it('answer null for a split index, and for an index malformed or past its bounds', async () => {

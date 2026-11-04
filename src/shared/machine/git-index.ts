@@ -8,8 +8,9 @@
 // The format (git's Documentation/gitformat-index.txt): `DIRC`, a version (2, 3 or 4), an entry count, the entries
 // (v2 and v3 padded to 8 bytes, v4's paths prefix-compressed), extensions, and a trailing hash of everything before it
 // (all zero under `index.skipHash`). Bounded and strict: a file over INDEX_MAX or a count over ENTRIES_MAX, an unknown
-// version, a malformed entry or extension, a split index (`link`: its entries live in another file) or a wrong hash
-// answers null, which folds nothing. Only plain top-level names are answered (no `/`, `.` or `..`).
+// version, a name over NAME_MAX or all names over NAMES_MAX decoded (v4's prefixes), a malformed entry or extension, a
+// mandatory extension (a split index's `link`, a sparse index's `sdir`, any lower-case one) or a wrong hash answers
+// null, which folds nothing. Only plain top-level names are answered (no `/`, `.` or `..`).
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import type { GitFiles, GitRepo } from './git-reads';
@@ -19,6 +20,8 @@ export type TopLevelFile = { name: string; id: string };
 
 const INDEX_MAX = 64 * 1024 * 1024;
 const ENTRIES_MAX = 1_000_000;
+const NAME_MAX = 4096; // git's own bound on a path (PATH_MAX)
+const NAMES_MAX = 16 * 1024 * 1024; // every entry's decoded name, the filtered ones counted: v4's prefixes can't grow it past this
 const FIXED = 40; // ctime, mtime, dev, ino, mode, uid, gid, size: ten 32-bit fields
 const EXTENDED = 0x4000;
 const STAGE = 0x3000;
@@ -43,6 +46,7 @@ export function parseIndex(bytes: Buffer, hashLength: number): TopLevelFile[] | 
   const out: TopLevelFile[] = [];
   let at = 12;
   let previous = '';
+  let decoded = 0;
   for (let n = 0; n < count; n++) {
     const header = FIXED + hashLength + 2;
     if (at + header > end) return null;
@@ -66,16 +70,18 @@ export function parseIndex(bytes: Buffer, hashLength: number): TopLevelFile[] | 
         strip = (strip + 1) * 128 + (byte & 0x7f);
       }
       const nul = bytes.indexOf(0, pathAt);
-      if (strip > previous.length || nul === -1 || nul >= end) return null;
+      if (strip > previous.length || nul === -1 || nul >= end || previous.length - strip + (nul - pathAt) > NAME_MAX) return null;
       name = previous.slice(0, previous.length - strip) + bytes.toString('latin1', pathAt, nul);
       at = nul + 1;
     } else {
       const nul = bytes.indexOf(0, pathAt);
-      if (nul === -1 || nul >= end) return null;
+      if (nul === -1 || nul >= end || nul - pathAt > NAME_MAX) return null;
       name = bytes.toString('latin1', pathAt, nul);
       at += (pathAt - at + (nul - pathAt) + 8) & ~7;
       if (at > end) return null;
     }
+    decoded += name.length;
+    if (decoded > NAMES_MAX) return null;
     previous = name; // compared and compressed as bytes: latin1 keeps one character per byte
     const regular = (mode & 0o170000) === 0o100000;
     if (regular && (flags & STAGE) === 0 && (extended & (SKIP_WORKTREE | INTENT_TO_ADD)) === 0 && !name.includes('/') && name !== '' && name !== '.' && name !== '..') {
@@ -86,7 +92,9 @@ export function parseIndex(bytes: Buffer, hashLength: number): TopLevelFile[] | 
     if (at + 8 > end) return null;
     const signature = bytes.toString('latin1', at, at + 4);
     const size = bytes.readUInt32BE(at + 4);
-    if (signature === 'link' || at + 8 + size > end) return null; // a split index's entries live in another file
+    // only an optional extension (its signature's first letter upper case) is skipped, as git skips it; a mandatory one
+    // (`link`, a split index's, whose entries live in another file; `sdir`, a sparse index's; any other) is not read here
+    if (!/^[A-Z]/.test(signature) || at + 8 + size > end) return null;
     at += 8 + size;
   }
   return out;
