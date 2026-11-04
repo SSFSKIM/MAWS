@@ -134,7 +134,8 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 export const isPersistentRow = (row: Row): boolean =>
   (row.kind === 'assistant_text' && row.cut === true) /* P5 O9: a reply an interrupt cut off, no work of the turn */ || row.kind === 'to_human' /* P4-R7 */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
   || isPersistentMessage(row) // E7
-  || row.kind === 'owner_record'; // P2-C (2026-10-09): placed by the report projection, never a work row
+  || row.kind === 'owner_record' // P2-C (2026-10-09): placed by the report projection, never a work row
+  || row.kind === 'gap'; // P5 O7 M8: events here were not delivered; a closed turn's fold never hides that
 
 // P5 O9 (the M10 sitting): the rows the fold leaves in view, the persistent ones and, while any agent it names still
 // works, an `Agent` call's row. A turn can end while the agents it started work in the background (a terminal session's

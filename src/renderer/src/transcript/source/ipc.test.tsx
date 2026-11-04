@@ -23,7 +23,7 @@ import { ipcLoadSpillOver, ipcOpenExternalOver, ipcRewindOver, ipcSourceOver, KN
 import type { TranscriptSource } from './types';
 import { HISTORY_GAP, HISTORY_OMITTED, HISTORY_TOO_LARGE } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED
 import { useMachines } from '../../stores/machines'; // P5 O7 M2
-import { record, status } from '../../../../../test/support/builders'; // P5 O7 M8
+import { humanTurn, record, status } from '../../../../../test/support/builders'; // P5 O7 M8
 
 const APP = at('app-1' as AppSessionId); // the page's: the sources run behind the client, over addresses
 const MAIN_APP = bareOf(APP); // P5 O6 M2: an event id is main's, under the bare app id
@@ -504,9 +504,9 @@ describe('ipcSource', () => {
     // P5 O7 M8 (m8-1, red first; "What draws Working…"): the consumer half of main's gap rule (remote-session.test.ts,
     // "marks an unreadable `turn.ended` as a gap…"). A remote turn whose `turn.ended` never came is open in the store, and
     // the transcript's "Working…" is the store's `working` (`state.current !== null`). Main tells the gap, then folds in the
-    // machine's re-read status (idle, `turn: null`) and record; the gap bar is a notice and closes no turn, so today
-    // `working` stays true. The rule: the re-read word that the session runs no turn closes it. Flipped by m8-3 or m8-4.
-    it.fails('clears a remote turn’s working when the gap is followed by the re-read idle status and record', async () => {
+    // machine's re-read status (idle, `turn: null`) and record; the gap bar is a notice and closes no turn. The rule (m8-4):
+    // after a gap, the first status that says the session runs no turn closes the turn left open, as a turn nobody saw end.
+    const openRemoteTurn = async () => {
       const fake = fakeClient();
       const source = ipcSourceOver(fake.client, REMOTE);
       const hydrated = useTranscriptStore.getState().attach(REMOTE, source);
@@ -517,11 +517,38 @@ describe('ipcSource', () => {
       b.text('m1', 0, 'Working on it');
       fake.emit('session.eventBatch', batch(b.events, REMOTE), OTHER_MACHINE);
       expect(useTranscriptStore.getState().entries[REMOTE].working).toBe(true); // the turn is open
+      return { fake, b };
+    };
+    const idle = { appSessionId: REMOTE, status: { ...status(bareOf(REMOTE)), appSessionId: REMOTE } };
+    const working = () => useTranscriptStore.getState().entries[REMOTE].working;
+
+    it('clears a remote turn’s working when the gap is followed by the re-read idle status and record', async () => {
+      const { fake } = await openRemoteTurn();
       fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 5, idx: 0 } }, OTHER_MACHINE);
-      fake.emit('session.status', { appSessionId: REMOTE, status: { ...status(bareOf(REMOTE)), appSessionId: REMOTE } }, OTHER_MACHINE);
+      fake.emit('session.status', idle, OTHER_MACHINE);
       fake.emit('session.changed', { record: record(REMOTE), cause: 'live', revision: 2 }, OTHER_MACHINE);
       await vi.waitFor(() => expect(kinds(REMOTE)).toContain('gap'));
-      expect(useTranscriptStore.getState().entries[REMOTE].working).toBe(false);
+      expect(working()).toBe(false);
+      expect(kinds(REMOTE).filter((kind) => kind === 'error'), 'no exit notice: nobody saw the process go').toEqual([]);
+    });
+
+    it('closes nothing on an idle status with no gap before it: the stream’s own turn.ended closes the turn', async () => {
+      const { fake } = await openRemoteTurn();
+      fake.emit('session.status', idle, OTHER_MACHINE);
+      expect(working()).toBe(true);
+    });
+
+    it('after a gap, a turn the stream itself starts or ends is the stream’s again: a later idle status closes nothing', async () => {
+      const { fake, b } = await openRemoteTurn();
+      fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 5, idx: 0 } }, OTHER_MACHINE);
+      fake.emit('session.status', { appSessionId: REMOTE, status: { ...status(bareOf(REMOTE), { process: 'ready', engineState: 'running', turn: humanTurn }), appSessionId: REMOTE } }, OTHER_MACHINE);
+      expect(working(), 'still running, as the machine says').toBe(true);
+      const seen = b.events.length;
+      b.end(['u1']);
+      b.turn('u2');
+      fake.emit('session.eventBatch', batch(b.events.slice(seen), REMOTE), OTHER_MACHINE);
+      fake.emit('session.status', idle, OTHER_MACHINE); // said before the new turn's own turn.ended arrives
+      expect(working(), 'u2 runs until its own turn.ended').toBe(true);
     });
   });
 

@@ -270,12 +270,14 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
     pass(batch: SessionEvent[]): void;
     foreign: boolean; // W7: the record's latest custody seen, a foreign holder's (remembered while the snapshot is pending)
     running: SessionEvent | null; // E10: the latest live-form event since the last exit the subscription delivered
+    gapped: boolean; // P5 O7 M8: a gap was told and no turn event passed since (`remote.gap`'s healing, below)
   }
   let latest: Subscription | null = null;
   const track = (subscription: Subscription, events: SessionEvent[]) => {
     for (const event of events) {
       if (event.kind === 'process.exited') subscription.running = null;
       else if (liveForm(event)) subscription.running = event;
+      if (event.kind === 'turn.started' || event.kind === 'turn.ended') subscription.gapped = false; // P5 O7 M8
     }
   };
   const resets = new Set<() => void>();
@@ -348,6 +350,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         live: false,
         foreign: false, // W7
         running: null, // E10
+        gapped: false, // P5 O7 M8
         held: [],
         batch: null,
         ended: new AbortController(),
@@ -389,6 +392,37 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         if (subscription.held) subscription.held.push([exit]);
         else subscription.pass([exit]);
       });
+      // P5 O7 M8 (M8, "What draws Working…"): what a gap lost may be a turn's end, which would leave the turn open, drawn
+      // Working…, for good. Main re-reads the session after a gap; the first status since that says it runs no turn,
+      // with no turn event passed in between (the stream speaks for its turns again once one does), closes the turns
+      // left open as turns nobody saw end: an app-synthesised exit of unknown reason, which the reducer closes them by
+      // and the rows draw nothing for (the process was not seen to go). Its cost: the plugins' lines and the agents rows
+      // of those turns end with it, as at any unseen end. The status is listened to only while a gap waits to heal.
+      const closeUnseen = () => {
+        const unseen: SessionEvent = {
+          id: `${bareOf(appSessionId)}:turn-unseen:${Date.now()}:${++gaps}` as EventId, sessionId: subscription.running?.sessionId ?? (bareOf(appSessionId) as string as SessionId),
+          at: new Date().toISOString(), seq: null, agentId: null, parentToolUseId: null,
+          kind: 'process.exited', code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null,
+        };
+        if (subscription.held) subscription.held.push([unseen]);
+        else subscription.pass([unseen]);
+      };
+      let offHeal: (() => void) | null = null;
+      const stopHealing = () => {
+        subscription.gapped = false;
+        offHeal?.();
+        offHeal = null;
+      };
+      const awaitHealing = () => {
+        subscription.gapped = true;
+        offHeal ??= client.on('session.status', ({ appSessionId: said, status }) => {
+          if (said !== appSessionId) return;
+          if (!subscription.gapped) return stopHealing(); // a turn event passed since: the stream closes its own turns
+          if (status.turn !== null) return; // still running, as the machine says
+          closeUnseen();
+          stopHealing();
+        });
+      };
       // P5 O7 M2: a remote lane B stream that went on past events it could not deliver says so in order with its batches;
       // the gap bar goes in here, where they would have been (model/gap.ts)
       const offGap = client.on('remote.gap', ({ appSessionId: gapped, launchId, at }) => {
@@ -399,6 +433,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
           gapPlaces.set(gap, { launchId, at: at ?? null }); // placed by the snapshot when the history it reads holds its place
           subscription.held.push([gap]);
         } else subscription.pass([gap]);
+        awaitHealing(); // P5 O7 M8
       });
       const offTooLarge = client.on('remote.historyTooLarge', ({ appSessionId: said, window }) => {
         if (said === appSessionId) tooLarge.add(window);
@@ -409,6 +444,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         offReleased();
         offLoss();
         offGap();
+        stopHealing();
         offTooLarge();
         subscription.held = null;
         subscription.pass = () => {};
