@@ -120,6 +120,35 @@ describe('setting a project up on another machine', () => {
     expect(spawnTargetOf(TAB, KEY)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: `${HOME}/Developer`, key: KEY }); // no trust to carry
   });
 
+  it('applies nothing once cancelled while the trust read is out: no registration starts', async () => {
+    install({ 'machine.folders.list': { entries: [], cursor: null } }); // the trust read stays out until answered
+    openFolderSetup();
+    fireEvent.click(folders().getByRole('button', { name: 'Developer' }));
+    await waitFor(() => expect(screen.getByText(SETUP_WORDS.empty)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: SETUP_WORDS.use }));
+    await waitFor(() => expect(fake.pending('session.trust.check')).toBe(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(useDialogs.getState().open).toBeNull();
+    await act(() => fake.reply('session.trust.check', trustOf({ trusted: true, source: 'trustKey' })));
+    expect(fake.invoked('session.projects.addFolder')).toEqual([]);
+    expect(spawnTargetOf(TAB, KEY)).toBeNull();
+  });
+
+  it('applies nothing once dismissed while the registration is out, and leaves a later dialog open', async () => {
+    install({ 'machine.folders.list': { entries: [], cursor: null }, 'session.trust.check': trustOf({ trusted: true, source: 'trustKey' }) });
+    openFolderSetup();
+    fireEvent.click(folders().getByRole('button', { name: 'Developer' }));
+    await waitFor(() => expect(screen.getByText(SETUP_WORDS.empty)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: SETUP_WORDS.use }));
+    await waitFor(() => expect(fake.pending('session.projects.addFolder')).toBe(1));
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Set up this project on mini' }), { key: 'Escape' });
+    expect(useDialogs.getState().open).toBeNull();
+    act(() => openDialog({ kind: 'hiddenProjects' }));
+    await act(() => fake.reply('session.projects.addFolder', registered(`${HOME}/Developer`)));
+    expect(spawnTargetOf(TAB, KEY)).toBeNull();
+    expect(useDialogs.getState().open).toEqual({ kind: 'hiddenProjects' });
+  });
+
   it('offers the trust card of a registered checkout the machine refused untrusted, and starts once it is accepted', async () => {
     install({ 'session.trust.check': trustOf() });
     const then = vi.fn();

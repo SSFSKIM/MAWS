@@ -25,9 +25,10 @@ export function catalogueRoute(status: LiveGateway | null, record: KeptGateway |
   return via === null ? null : via ? 'gateway' : 'direct';
 }
 
-/** The route the session was launched on (`route` first, then the legacy field); null when never recorded. */
+/** The route the session was launched on: the live `route`, then the record's (an older host's status names only the
+ *  legacy mode, and the record keeps the chosen route through it), then the legacy field; null when never recorded. */
 export function routeChosen(status: LiveGateway | null, record: KeptGateway | null): Route | null {
-  if (status) return readRoute({ route: status.gateway.route, gateway: status.gateway.mode });
+  if (status) return readRoute({ route: status.gateway.route ?? record?.gateway.route, gateway: status.gateway.mode });
   return record ? readRecordedRoute(record.gateway) : null;
 }
 

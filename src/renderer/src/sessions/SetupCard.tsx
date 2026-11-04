@@ -167,7 +167,8 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
   const decline = () => void releaseMessage(appSessionId, card.message);
   // C11 start: Enter runs Run direct on a gateway model too (C10 refused it there, `busy || gatewayModel`): it asks for a
   // Claude model first
-  const accept = busy ? null : direct;
+  // P5 O7 M9: on the machine's own route Enter takes the card's primary, Start anyway, which keeps the route
+  const accept = busy ? null : (anyway ?? direct);
   // C11 end
 
   return (

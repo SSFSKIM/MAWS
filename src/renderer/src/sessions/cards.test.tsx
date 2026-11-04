@@ -12,7 +12,7 @@ import { closeDialog, useDialogs } from './dialogs';
 import { health, ID as BARE_ID, intent as mainIntent, MESSAGE, putIntent, REPO, resetSetupStore, resources, trustState } from '../test-support/setup-intents';
 import { FailureCard } from './FailureCard';
 import { NewSessionEmptyState } from './NewSessionEmptyState';
-import { RelayCard } from './RelayCard';
+import { RELAY_CARD_TITLE, RelayCard } from './RelayCard';
 import { connectSetupDock } from './SetupCard';
 import { connectKeys } from '../keymap/dispatcher';
 import { resetDockedCards, useDockedCards } from '../composer/docked/registry';
@@ -253,6 +253,22 @@ describe('relay card', () => {
       await waitFor(() => expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: {} }));
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it('on the machine’s own route Enter takes Start anyway, never MAWS’s Direct route', async () => {
+    const disconnect = connectKeys();
+    try {
+      withMain({ 'session.start': answer({ status: 'relay_unreachable', appSessionId: BARE_ID, health: health() }), 'engine.relayHealth': () => health() });
+      putIntent(intent({ message: MESSAGE, gateway: 'gateway', route: 'machine' }));
+      render(<Docked />);
+      await act(() => startIntent(ID, MESSAGE));
+      await screen.findByRole('button', { name: 'Start anyway' });
+      act(() => screen.getByRole('group', { name: RELAY_CARD_TITLE }).focus());
+      await userEvent.keyboard('{Enter}');
+      expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { startAnyway: true } });
+    } finally {
+      disconnect();
     }
   });
 

@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react';
 import type { FolderEntry } from '@shared/ipc/schema/machine';
 import type { TrustState } from '@shared/sessions/trust';
-import { closeDialog } from './dialogs';
+import { closeDialog, useDialogs } from './dialogs';
 import { useRemoteSpawn, type SpawnTarget } from './remote-spawn';
 import { checkTrust, listFolders, registerFolder, SETUP_WORDS, type FolderPage, type SetupRequest } from './remote-setup';
 import { Sheet } from './Sheet';
@@ -24,6 +24,12 @@ type Step =
 
 const within = (path: string, root: string) => path === root || path.startsWith(`${root}/`);
 const parentOf = (path: string) => path.slice(0, path.lastIndexOf('/'));
+// Whether `request`'s sheet is still the dialog shown: a read or the act answering after Cancel, Escape or a replacing
+// dialog applies nothing, and closes nothing but its own sheet.
+const showing = (request: SetupRequest) => {
+  const open = useDialogs.getState().open;
+  return open?.kind === 'remoteSetup' && open.request === request;
+};
 const ROW = 'flex h-7 w-full cursor-default items-center gap-2 rounded-sm px-2 text-left text-ui outline-accent hover:bg-bg-hover focus-visible:outline-2';
 
 export function RemoteSetupSheet({ request }: { request: SetupRequest }) {
@@ -107,13 +113,16 @@ function FolderSetup({ request }: { request: FolderRequest }) {
     setError(null);
     setStep({ kind: 'busy', words: SETUP_WORDS.checking(name) });
     const read = await checkTrust(machine, name, directory);
+    if (!showing(request)) return;
     if (!read.ok) return fail(read.words);
     if (read.trust.trusted) return register(directory, false);
     setStep({ kind: 'trust', directory, trust: read.trust });
   };
   const register = async (directory: string, accepted: boolean) => {
+    if (!showing(request)) return;
     setStep({ kind: 'busy', words: SETUP_WORDS.registering(name) });
     const added = await registerFolder(machine, name, directory);
+    if (!showing(request)) return;
     if (!added.ok) return fail(added.words);
     const target: SpawnTarget = { machine, name, checkout: added.checkout, key: request.key, ...(accepted && { trust: 'accepted' as const }) };
     useRemoteSpawn.getState().choose(request.tab, target);

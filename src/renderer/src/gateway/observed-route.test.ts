@@ -57,6 +57,12 @@ describe('the route chosen and what was observed', () => {
     expect(routeChosen(null, kept({ routed: null }))).toBeNull();
   });
 
+  it("keeps the record's chosen route through an older host's status, which names only the legacy mode", () => {
+    expect(routeChosen(live({ mode: 'direct' }), kept({ routed: false, route: 'machine' }))).toBe('machine');
+    expect(routeChosen(live({ mode: 'gateway', route: 'gateway' }), kept({ routed: false, route: 'machine' }))).toBe('gateway'); // the live additive route wins
+    expect(routeChosen(live({ mode: 'gateway' }), kept({ routed: false }))).toBe('gateway'); // no additive route anywhere: the live legacy mode
+  });
+
   it('reads the observation of the live status, else of the record when no process runs', () => {
     const named = { kind: 'host', baseUrl: 'https://llm.example.test' } as const;
     expect(observedOf(live({ observed: named }), null)).toEqual(named);

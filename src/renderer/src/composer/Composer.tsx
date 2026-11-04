@@ -55,7 +55,7 @@ import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
 import { acquireBeforeMode, precheck, submitHumanSerialized, submitRemoteSerialized, submitSerialized, warn, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts; P2-A: acquireBeforeMode; P5 O7 M4: submitRemoteSerialized
 import { fileMentionsOf, ON_THIS_MAC } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1)
-import { SPAWN_WORDS, spawnOnMachine, takeFirstSend, useSpawning, useSpawnTarget } from '../sessions/remote-spawn'; // P5 O7 M4: the machine menu's spawn
+import { SPAWN_WORDS, spawnOnMachine, spawnTargetOf, takeFirstSend, useSpawning, useSpawnTarget } from '../sessions/remote-spawn'; // P5 O7 M4: the machine menu's spawn
 import { openDialog } from '../sessions/dialogs'; // P5 O7 M9: the machine's trust card
 import { useEffectiveEffort } from './effective-effort'; // W3
 import { autoFallbackNotice } from '@shared/sessions/models'; // W3
@@ -314,20 +314,22 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       const where = setup.intent.location; // New chat: Send waits for a project
       if (where === null || isStarting(useComposerStore.getState(), appSessionId) || setup.intent.message !== null || s.mode !== 'send' || s.empty) return false;
       setStarting(appSessionId, true);
-      // P5 O7 M4: another machine chosen: one `session.spawn` there, the tab moving to its session once it answers
-      if (spawnAt !== null) {
+      // P5 O7 M4: another machine chosen: one `session.spawn` there, the tab moving to its session once it answers. P5 O7
+      // M9: read at submit, not from the render: the trust card's Send again runs as its choice lands, before a render
+      const at = spawnTargetOf(appSessionId, projectKey);
+      if (at !== null) {
         try {
           const doc = handle.current?.doc() ?? emptyDoc();
           // a mention of this Mac's file names nothing there (a drop's own became its upload): said, the draft kept
           const local = fileMentionsOf(doc);
           if (local.length > 0) {
-            warn(ON_THIS_MAC(local, spawnAt.name));
+            warn(ON_THIS_MAC(local, at.name));
             return false;
           }
           if (attachmentsOf(doc).length === 0 && !precheck(s)) return false; // the text is the brief; attachments go up
           const fresh = startAnew.current; // the person's "Start a new session"
           startAnew.current = false;
-          const spawned = await spawnOnMachine({ from: appSessionId, target: spawnAt, s, doc, intent: setup.intent, mode: bindings.mode.value ?? 'default', fresh }, client);
+          const spawned = await spawnOnMachine({ from: appSessionId, target: at, s, doc, intent: setup.intent, mode: bindings.mode.value ?? 'default', fresh }, client);
           if (spawned.started && spawned.note !== undefined) toast({ level: 'info', text: spawned.note, actions: [], dismissible: true });
           if (spawned.started) return true;
           // a start the machine took but hasn't confirmed: the try checks on it (the same op), it never starts another;
@@ -338,15 +340,14 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
               text: spawned.words,
               actions: [
                 { label: SPAWN_WORDS.checkAgain, run: () => (useNotices.getState().dismiss(id), retry()) },
-                { label: SPAWN_WORDS.startNew(spawnAt.name), run: () => (useNotices.getState().dismiss(id), (startAnew.current = true), retry()) },
+                { label: SPAWN_WORDS.startNew(at.name), run: () => (useNotices.getState().dismiss(id), (startAnew.current = true), retry()) },
               ],
               dismissible: true,
             });
           } else if (spawned.trust) {
-            // P5 O7 M9: the machine refused an untrusted checkout: its trust card, then this Send again (once the tab's
-            // target carries the accepted trust, after the store's change has rendered)
-            const target = spawnAt;
-            warn(spawned.words, () => openDialog({ kind: 'remoteSetup', request: { kind: 'trust', tab: appSessionId, target, then: () => setTimeout(retry, 0) } }), undefined, SPAWN_WORDS.reviewTrust);
+            // P5 O7 M9: the machine refused an untrusted checkout: its trust card, then this Send again, which reads the
+            // tab's target as the card left it (the accepted trust)
+            warn(spawned.words, () => openDialog({ kind: 'remoteSetup', request: { kind: 'trust', tab: appSessionId, target: at, then: retry } }), undefined, SPAWN_WORDS.reviewTrust);
           } else warn(spawned.words, spawned.again === null ? undefined : retry, undefined, spawned.again === 'check' ? SPAWN_WORDS.checkAgain : 'Retry');
           return false;
         } finally {
