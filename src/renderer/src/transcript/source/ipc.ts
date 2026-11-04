@@ -15,7 +15,7 @@ import { turnId as turnIdOf } from '../model/keys';
 import type { TranscriptState } from '../model/reduce';
 import type { Spill, TurnId } from '../model/rows';
 import type { RewindInterface } from '../view/context';
-import { HISTORY_OMITTED, HISTORY_TOO_LARGE, historyGapEvent } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED
+import { HISTORY_OMITTED, HISTORY_TOO_LARGE, historyGapEvent, unseenTurnEndEvent } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED; M8: unseenTurnEndEvent
 import { remoteMachineName } from '../../lane-a/remote-session'; // P5 O7 M2: a machine's name for the bar's words
 import { HistoryPager, withHistoryGap, withOmittedBar, withoutOlderThanWindow } from './older';
 import type { TranscriptSource } from './types';
@@ -257,6 +257,8 @@ function remoteAdoptionsEnded(client: MawsBridge, machine: MachineRef, stale: ()
 // writes it; the live stream is not its history any more. When the record turns foreign-live (a terminal or job holds
 // it) after this attachment saw the live form, the source resets, and the hydration reads the transcript from disk,
 // which C3 then answers (src/engine-host/ipc.ts), followed read-only from there.
+const isTurnEvent = (event: SessionEvent) => event.kind === 'turn.started' || event.kind === 'turn.ended'; // P5 O7 M8
+
 function sessionSource(client: MawsBridge, appSessionId: AppSessionId): TranscriptSource {
   const liveForm = (event: SessionEvent) => event.seq !== null;
   // P5 O6 M2: an event id is its machine's, under the bare app id (main's synthesised ones and C3's live ones alike)
@@ -270,14 +272,13 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
     pass(batch: SessionEvent[]): void;
     foreign: boolean; // W7: the record's latest custody seen, a foreign holder's (remembered while the snapshot is pending)
     running: SessionEvent | null; // E10: the latest live-form event since the last exit the subscription delivered
-    gapped: boolean; // P5 O7 M8: a gap was told and no turn event passed since (`remote.gap`'s healing, below)
+    gapped: boolean; // P5 O7 M8: a gap was told and no live turn event arrived since (`remote.gap`'s healing, below)
   }
   let latest: Subscription | null = null;
   const track = (subscription: Subscription, events: SessionEvent[]) => {
     for (const event of events) {
       if (event.kind === 'process.exited') subscription.running = null;
       else if (liveForm(event)) subscription.running = event;
-      if (event.kind === 'turn.started' || event.kind === 'turn.ended') subscription.gapped = false; // P5 O7 M8
     }
   };
   const resets = new Set<() => void>();
@@ -368,6 +369,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       latest = subscription;
       const off = client.on('session.eventBatch', (batch) => {
         if (batch.appSessionId !== appSessionId) return;
+        if ((subscription.gapped || heldHeal !== null) && batch.events.some(isTurnEvent)) liveTurnArrived(); // P5 O7 M8, by arrival
         subscription.batch?.();
         if (subscription.held) subscription.held.push(batch.events);
         else subscription.pass(batch.events);
@@ -392,33 +394,38 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         if (subscription.held) subscription.held.push([exit]);
         else subscription.pass([exit]);
       });
-      // P5 O7 M8 (M8, "What draws Working…"): what a gap lost may be a turn's end, which would leave the turn open, drawn
-      // Working…, for good. Main re-reads the session after a gap; the first status since that says it runs no turn,
-      // with no turn event passed in between (the stream speaks for its turns again once one does), closes the turns
-      // left open as turns nobody saw end: an app-synthesised exit of unknown reason, which the reducer closes them by
-      // and the rows draw nothing for (the process was not seen to go). Its cost: the plugins' lines and the agents rows
-      // of those turns end with it, as at any unseen end. The status is listened to only while a gap waits to heal.
-      const closeUnseen = () => {
-        const unseen: SessionEvent = {
-          id: `${bareOf(appSessionId)}:turn-unseen:${Date.now()}:${++gaps}` as EventId, sessionId: subscription.running?.sessionId ?? (bareOf(appSessionId) as string as SessionId),
-          at: new Date().toISOString(), seq: null, agentId: null, parentToolUseId: null,
-          kind: 'process.exited', code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null,
-        };
-        if (subscription.held) subscription.held.push([unseen]);
-        else subscription.pass([unseen]);
-      };
+      // P5 O7 M8 (M8, "What draws Working…"; m8-4a's task review): what a gap lost may be a turn's end, which would leave
+      // the turn open, drawn Working…, for good. Main re-reads the session after a gap and flushes the batches it holds
+      // before it says the re-read status, so arrival order is the machine's: the first status since the gap that says
+      // no turn runs, with no live turn event arrived in between, closes the turns left open (an unseen turn end,
+      // model/gap.ts: the turns alone, never the process). A turn event arriving after the gap means the stream speaks
+      // for its turns again: the healing stands down, and a heal still held behind a hydration is withdrawn (a new turn's
+      // start closes the one before it by its own rule). History a snapshot replays is not an arrival. The status is
+      // listened to only while a gap waits to heal.
       let offHeal: (() => void) | null = null;
+      let heldHeal: SessionEvent[] | null = null; // the heal's batch while it waits in `held`
       const stopHealing = () => {
         subscription.gapped = false;
         offHeal?.();
         offHeal = null;
       };
+      const liveTurnArrived = () => {
+        if (heldHeal !== null && subscription.held) subscription.held = subscription.held.filter((batch) => batch !== heldHeal);
+        heldHeal = null;
+        stopHealing();
+      };
+      const closeUnseen = () => {
+        const sessionId = subscription.running?.sessionId ?? (bareOf(appSessionId) as string as SessionId);
+        const unseen = [unseenTurnEndEvent(bareOf(appSessionId), `${Date.now()}:${++gaps}`, new Date().toISOString(), sessionId)];
+        if (subscription.held) {
+          heldHeal = unseen;
+          subscription.held.push(unseen);
+        } else subscription.pass(unseen);
+      };
       const awaitHealing = () => {
         subscription.gapped = true;
         offHeal ??= client.on('session.status', ({ appSessionId: said, status }) => {
-          if (said !== appSessionId) return;
-          if (!subscription.gapped) return stopHealing(); // a turn event passed since: the stream closes its own turns
-          if (status.turn !== null) return; // still running, as the machine says
+          if (said !== appSessionId || status.turn !== null) return; // still running, as the machine says
           closeUnseen();
           stopHealing();
         });

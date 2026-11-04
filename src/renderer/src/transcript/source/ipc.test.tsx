@@ -550,6 +550,85 @@ describe('ipcSource', () => {
       fake.emit('session.status', idle, OTHER_MACHINE); // said before the new turn's own turn.ended arrives
       expect(working(), 'u2 runs until its own turn.ended').toBe(true);
     });
+
+    it('closes the cut turn as an unseen end, not an exit: the plugins’ lines and the process’s agents stay live', async () => {
+      const { fake, b } = await openRemoteTurn();
+      const seen = b.events.length;
+      b.toolUse('bg1', 'Agent', { description: 'background', prompt: 'go', run_in_background: true }, 'm2');
+      b.emit('plugin.status', { plugin: 'alpha', text: 'one' });
+      fake.emit('session.eventBatch', batch(b.events.slice(seen), REMOTE), OTHER_MACHINE);
+      fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 5, idx: 0 } }, OTHER_MACHINE);
+      fake.emit('session.status', idle, OTHER_MACHINE);
+      const state = useTranscriptStore.getState().entries[REMOTE].state;
+      expect(state.current).toBeNull();
+      expect([...state.pluginStatus.keys()]).toEqual(['alpha']);
+      expect([...state.turns.values()].map((turn) => turn.agentsEndedAt)).toEqual([undefined]);
+    });
+
+    // m8-4a's task review (gap-review.test.ts): the healing follows what arrived after the gap, not what a hydration
+    // delivers later; main flushes the batches before it emits the re-read status (remote-session.ts)
+    describe('while the source hydrates', () => {
+      const hydrating = () => {
+        const fake = fakeClient();
+        const source = ipcSourceOver(fake.client, REMOTE);
+        const delivered: SessionEvent[][] = [];
+        const off = source.subscribe((events) => delivered.push(events));
+        const snapshot = source.snapshot();
+        const answer = (events: SessionEvent[]) => fake.calls.find((call) => call.name === 'session.events')!.answer({ ok: true, value: { events, lastSeq: events.length, complete: true } } as never);
+        const gap = () => fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 5, idx: 0 } }, OTHER_MACHINE);
+        const rested = () => fake.emit('session.status', idle, OTHER_MACHINE);
+        const state = async () => {
+          const history = await snapshot;
+          off();
+          return applyEvents(createState(null, null), [...history, ...delivered.flat()]);
+        };
+        return { fake, answer, gap, rested, state, settled: snapshot };
+      };
+
+      it('a newer turn that arrived after the gap is not closed by the status that follows it', async () => {
+        const f = hydrating();
+        const b = builder();
+        b.turn('u1');
+        b.text('m1', 0, 'old turn');
+        const history = [...b.events];
+        f.gap();
+        const seen = b.events.length;
+        b.end(['u1']);
+        b.turn('u2');
+        f.fake.emit('session.eventBatch', batch(b.events.slice(seen), REMOTE), OTHER_MACHINE);
+        f.rested(); // stale for u2, which arrived after the gap: the stream speaks for its turns again
+        f.answer(history);
+        expect((await f.state()).current, 'u2 is still live').not.toBeNull();
+      });
+
+      it('a snapshot replaying the cut turn’s start is history, not an arrival: the status still heals the turn', async () => {
+        const f = hydrating();
+        const b = builder();
+        b.turn('u1');
+        b.text('m1', 0, 'old turn');
+        f.gap();
+        f.answer(b.events);
+        await f.settled; // the hydration is over before the status comes
+        f.rested();
+        expect((await f.state()).current, 'the missed end closes u1').toBeNull();
+      });
+
+      it('a heal held behind the hydration gives way to a turn that arrives before it is delivered', async () => {
+        const f = hydrating();
+        const b = builder();
+        b.turn('u1');
+        b.text('m1', 0, 'old turn');
+        const history = [...b.events];
+        f.gap();
+        f.rested(); // the heal waits behind the hydration
+        const seen = b.events.length;
+        b.turn('u2'); // a new turn's start: it closes u1 by its own rule, and the held heal must not close u2
+        f.fake.emit('session.eventBatch', batch(b.events.slice(seen), REMOTE), OTHER_MACHINE);
+        f.answer(history);
+        const state = await f.state();
+        expect(state.current, 'u2 runs').toBe(turnId.ofMessage(uuid('u2')));
+      });
+    });
   });
 
   // C6 · C10 (debt wave 4): a session started through "+" shows its pane when main records it, before C3's launch has
