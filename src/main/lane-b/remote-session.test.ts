@@ -570,3 +570,29 @@ describe('a reopening’s races', () => {
     expect(l.session.state.stream).toBe('idle');
   });
 });
+
+// m8-3's task review, the architect's A: what a panel lists is never left silently stale across a reopening.
+describe('the panels across a reopening', () => {
+  it('makes every panel list again at each opening after the first: the task list, the subagents, the workflow runs, and the side questions’ word', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { status: { ...statusOf('L1'), taskListId: 'team/list' } });
+    l.link.answers.set('fs.subagents', () => ({ ok: true, output: { agents: [] } }));
+    l.link.answers.set('fs.workflows', () => ({ ok: true, output: { runs: [{ runId: 'run-9', snapshot: null, journal: [] }] } }));
+    const panelEvents = () => l.names().filter((n) => ['fs.tasksChanged', 'fs.subagentsChanged', 'fs.workflowChanged', 'remote.reopened'].includes(n));
+    expect(panelEvents()).toEqual([]); // the first opening: each panel lists on its mount
+    sub.sink.subbed('replay', { epoch: 'L1', seq: 0 }); // the link resubscribed
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('fs.tasksChanged')).toEqual([{ listId: 'team-list' }]);
+    expect(l.of('fs.subagentsChanged')).toEqual([{ appSessionId: APP, agents: [] }]);
+    expect(l.of('fs.workflowChanged')).toEqual([{ appSessionId: APP, runId: 'run-9' }]);
+    expect(l.of('remote.reopened')).toEqual([{ appSessionId: APP }]);
+    // a run the stream named is the one said, with no read of the runs
+    sub.sink.snapshot({ epoch: 'L1', seq: 1 }, { workflow: { runId: 'run-3' } });
+    sub.sink.ended('behind');
+    l.link.open()[0].sink.subbed('replay', { epoch: 'L1', seq: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('fs.workflowChanged').at(-1)).toEqual({ appSessionId: APP, runId: 'run-3' });
+    expect(l.link.calls.filter((c) => c.name === 'fs.workflows')).toHaveLength(1);
+  });
+});

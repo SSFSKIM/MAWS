@@ -303,6 +303,7 @@
 "events.remote.attention":[".items[].appSessionId AppSessionId",".items[].id AttentionId"],
 "events.remote.gap":[".appSessionId AppSessionId"],
 "events.remote.historyTooLarge":[".appSessionId AppSessionId"],
+"events.remote.reopened":[".appSessionId AppSessionId"],
 "events.remote.session":[".address AppSessionId"],
 "events.remote.upload":[".appSessionId AppSessionId"],
 "events.render.request":["<kind=capture>.request.appSessionId AppSessionId","<kind=export>.request.appSessionId AppSessionId"],

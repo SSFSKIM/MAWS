@@ -77,7 +77,6 @@ import { BUILTIN_MODELS } from '@shared/sessions/models';
 import type { FilesUploadInput } from '@shared/ipc/schema/files';
 import { REMOTE_UPLOAD_REFUSED_WORDS } from '@shared/ipc/schema/remote';
 import { OPERATION_COMMANDS, type OperationCommand } from '@shared/engine/operations';
-import { sanitiseListId } from '@shared/engine/task-list';
 import { listenLoopback, type LocalListener } from '../forwards';
 import type { MainContext, RemoteDispatch } from '../ipc/router';
 import type { LayoutFileStore } from '../layout/store';
@@ -565,17 +564,11 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       return { ok: true, value: undefined } as CommandResult<CommandName>;
     }
     const listId = String(fields.listId);
-    const session = typeof fields.appSessionId === 'string' ? fields.appSessionId : (ctx.session ?? [...lanesOf(link).values()].find((lane) => listOf(lane) === listId)?.session.state.app);
+    const session = typeof fields.appSessionId === 'string' ? fields.appSessionId : (ctx.session ?? [...lanesOf(link).values()].find((lane) => lane.session.taskList() === listId)?.session.state.app);
     if (session === undefined) return failure('internal', `fs.tasks: no open session on ${link.name} has the task list ${listId}`, { refusal: 'no-target' });
     return dispatchOverLink(link, name, { ...fields, appSessionId: session });
   }
 
-  /** A session's task list as the task panel derives it (its status's `taskListId`, else its record's engine session), or null. */
-  function listOf(lane: Lane): string | null {
-    const { status, record: held } = lane.session.state;
-    const id = status !== null ? status.taskListId : held?.engineSessionId;
-    return typeof id === 'string' ? sanitiseListId(id) : null;
-  }
 
   /** The session's sends, one at a time: the next act is made only at the one before's answer. */
   async function pump(link: RemoteLink, lane: Lane): Promise<void> {

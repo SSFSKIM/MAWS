@@ -43,7 +43,11 @@
 //   session's waiters hold (`awaitOperation`, from the adapter's receipts): `session.operations` answers each with its
 //   completion (emitted), `pending` (kept for its part) or `unknown` (settled as failed, LOST_OPERATION). A completion is
 //   emitted once, a late one once more; one for an opId settled here is dropped. An `ended('behind')` (a notice past
-//   the machine's bound) opens again from the cursor at once, and that opening asks.
+//   the machine's bound) opens again from the cursor at once, and that opening asks. At each opening after the first
+//   (m8-3's task review) every panel is made to list again, since a notice may have been lost on the way: the session's
+//   task list (`fs.tasksChanged`), its subagents (`fs.subagents` read, said as `fs.subagentsChanged`), its workflow runs
+//   (`fs.workflowChanged` for the last run the stream named, else for the last `fs.workflows` lists) and, for the side
+//   questions, which have no change event of their own, `remote.reopened`.
 // - An event that doesn't read (P5 O7 M8, "What draws Working…") is a gap at its place, never a silent drop: the
 //   session's status and record are read again (`session.status`, `session.get`) and folded in, so a turn a dropped
 //   `turn.ended` left open closes by the machine's word; a status the stream delivers meanwhile stands over the re-read.
@@ -54,6 +58,7 @@ import { readTolerant } from '@shared/ipc/tolerant';
 import { SESSION_OPERATIONS_MAX, type OperationCommand, type OperationEvent, type OperationOutcome } from '@shared/engine/operations';
 import { AttentionItemSchema, type AttentionItem } from '@shared/graph/attention';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
+import { sanitiseListId } from '@shared/engine/task-list';
 import type { SessionRecord } from '@shared/graph/session';
 import { REGISTRY } from '@shared/ipc/registry';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
@@ -153,6 +158,8 @@ export class RemoteSession {
   #lastParts: { queue?: Record<string, unknown>; catalog?: { launchId: string; catalog: Record<string, unknown> }; items?: AttentionItem[] } = {};
   /** P5 O7 M8: the operations heard of, oldest first. */
   #ops = new Map<string, Op>();
+  /** m8-3 review: the last workflow run the stream named, said again at a reopening. */
+  #lastRun: string | null = null;
   /** P5 O7 M8: the `subbed`s heard, each an opening the waiters are asked at. */
   #openings = 0;
   /** P5 O7 M8: status parts the stream delivered, so a re-read that answers after one doesn't replace it. */
@@ -274,6 +281,12 @@ export class RemoteSession {
     this.publish(true);
   }
 
+  /** The session's task list as the task panel derives it (its status's `taskListId`, else its record's engine session), or null. */
+  taskList(): string | null {
+    const id = this.state.status !== null ? this.state.status.taskListId : this.state.record?.engineSessionId;
+    return typeof id === 'string' ? sanitiseListId(id) : null;
+  }
+
   /** P5 O7 M8: the openings answered so far (each `subbed`): an act made under one names it to `awaitOperation`. */
   openings(): number {
     return this.#openings;
@@ -381,6 +394,7 @@ export class RemoteSession {
         this.publish();
         this.#openings += 1;
         this.#askOperations(token);
+        if (this.#openings > 1) this.#relist(token);
       },
       snapshot: (at, value) => {
         if (!mine()) return;
@@ -486,7 +500,10 @@ export class RemoteSession {
     // P5 O7 M8: the notices; `side` is its completion's `operation` already (the header)
     if (isObject(value.operation)) this.#operation(value.operation);
     if (isObject(value.subagents)) this.#emit('fs.subagentsChanged', { appSessionId: app, agents: value.subagents.agents });
-    if (isObject(value.workflow)) this.#emit('fs.workflowChanged', { appSessionId: app, runId: value.workflow.runId });
+    if (isObject(value.workflow)) {
+      if (typeof value.workflow.runId === 'string') this.#lastRun = value.workflow.runId;
+      this.#emit('fs.workflowChanged', { appSessionId: app, runId: value.workflow.runId });
+    }
     if (isObject(value.tasks)) this.#emit('fs.tasksChanged', { listId: value.tasks.listId });
   }
 
@@ -542,6 +559,32 @@ export class RemoteSession {
       if (this.#ops.size <= OPS_KEPT) break;
       if (kept.state !== 'waiting') this.#ops.delete(old);
     }
+  }
+
+  // ---- The panels across a reopening (m8-3's task review) ------------------------------------------------------------
+
+  /** Every panel made to list again: a notice it lists by may have been lost between the openings. */
+  #relist(token: object): void {
+    const app = this.state.app;
+    const list = this.taskList();
+    if (list !== null) this.#emit('fs.tasksChanged', { listId: list });
+    this.#emit('remote.reopened', { appSessionId: app });
+    void this.#read('fs.subagents', token, (value) => this.#emit('fs.subagentsChanged', { appSessionId: app, agents: (value as { agents: unknown }).agents }));
+    if (this.#lastRun !== null) this.#emit('fs.workflowChanged', { appSessionId: app, runId: this.#lastRun });
+    else
+      void this.#read('fs.workflows', token, (value) => {
+        const runId = (value as { runs: Array<{ runId: string }> }).runs.at(-1)?.runId;
+        if (runId !== undefined) this.#emit('fs.workflowChanged', { appSessionId: app, runId });
+      });
+  }
+
+  /** A session read over the link for the subscription `token` is; one that fails or doesn't read is logged. */
+  async #read(name: 'fs.subagents' | 'fs.workflows', token: object, then: (value: unknown) => void): Promise<void> {
+    const answer = await this.link.call(name, { appSessionId: this.state.app });
+    if (this.#token !== token || !this.#running) return;
+    const read = answer.ok ? link.readCommandOutput(name, answer.output) : null;
+    if (read?.ok === true) return then(read.value);
+    this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: ${name} at a reopening ${answer.ok ? 'answered what doesn’t read' : `failed (${answer.error.code})`}; its panel lists at its next change`);
   }
 
   // ---- An event that doesn't read (P5 O7 M8) --------------------------------------------------------------------------
