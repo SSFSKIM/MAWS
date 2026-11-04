@@ -249,8 +249,8 @@ describe('a send carrying documents while a turn runs', () => {
   // fresh send at idle goes past, does not), and messages waiting go first
   it('says a paused queue holds it, and that waiting messages go first', () => {
     const detail = (queue: SubmitInput['queue']) => submitState(input({ status: turning, sendsDocuments: true, queue })).detail;
-    expect(detail({ entries: [], paused: true, pauseReason: 'error' })).toBe('Joins the paused queue; Resume sends it');
-    expect(detail({ entries: [entry('queued')], paused: true, pauseReason: 'error' })).toBe('Joins the paused queue; Resume sends it');
+    expect(detail({ entries: [], paused: true, pauseReason: 'user' })).toBe('Joins the paused queue; Resume sends it');
+    expect(detail({ entries: [entry('queued')], paused: true, pauseReason: 'user' })).toBe('Joins the paused queue; Resume sends it');
     expect(detail({ entries: [entry('queued')], paused: true, pauseReason: 'interrupt' })).toBe(SENDS_AFTER_THIS_TURN);
     expect(detail({ entries: [entry('queued')], paused: false })).toBe('Sends after the queued messages');
     expect(submitState(input({ status: turning, sendsDocuments: true, queue: { entries: [entry('queued')], paused: false } })).steer).toBe(false);
