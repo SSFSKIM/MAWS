@@ -768,6 +768,43 @@ describe('a followed session backfills, then tails its transcript', () => {
     expect(followed()).toBe(false);
   });
 
+  // P5 O7 M8 task review: a reader still waiting on the follow counts. Two readers await one start, and the first one's
+  // client ends while the follow is being made; its continuation runs first, so it must not stop the follow the second
+  // one is about to hold. Likewise a reader handed a follow that exists already, whose last holder ends before the
+  // reader's continuation runs.
+  it('keeps a follow a waiting reader is about to hold when another client’s end leaves it unheld', async () => {
+    const session = 'bac6130b-8eb8-499e-aeb1-89e7624a52cd' as SessionId;
+    const app = 'app-workflow' as AppSessionId;
+    await fixture.addTranscript('/private/tmp/maws-probe2-1RzDNs', session, [
+      JSON.stringify({ type: 'user', uuid: 'w1', parentUuid: null, cwd: '/private/tmp/maws-probe2-1RzDNs', message: { role: 'user', content: 'run it' } }),
+    ]);
+    const fs = await start();
+    fs.bind([{ sessionId: session, appSessionId: app }]);
+    const agentId = 'a014f6be436bed86b' as AgentId;
+    await fixture.addSidecar(session, `subagents/workflows/wf_7cacbb2d-902/agent-${agentId}.jsonl`, `${JSON.stringify({ type: 'user', uuid: 'c1', parentUuid: null, isSidechain: true, agentId, cwd: '/private/tmp/maws-probe2-1RzDNs', message: { role: 'user', content: 'Reply with exactly ALPHA.' } })}\n`);
+    const followed = () => fs.state().followed.some((f) => f.appSessionId === app && f.agentId === agentId);
+
+    // two readers of one start, the first one's client ended while the follow is made
+    const [first, second] = ['first-device', 'second-device'].map(endableClientRef);
+    const reads = [fs.agentEvents(app, agentId, {}, first!), fs.agentEvents(app, agentId, {}, second!)];
+    first!.end();
+    await Promise.all(reads);
+    expect(followed()).toBe(true); // the second reader holds it
+    second!.end();
+    expect(followed()).toBe(false); // and its end, the last holder's, stops it
+
+    // a reader of a follow that exists, its only holder ended before the reader's continuation runs
+    const holder = endableClientRef('holder-device');
+    await fs.agentEvents(app, agentId, {}, holder);
+    const late = endableClientRef('late-device');
+    const read = fs.agentEvents(app, agentId, {}, late);
+    holder.end();
+    await read;
+    expect(followed()).toBe(true);
+    late.end();
+    expect(followed()).toBe(false);
+  });
+
   it('reads workflow runs, and a followed session emits one workflow.progress per snapshot change', async () => {
     const session = 'bac6130b-8eb8-499e-aeb1-89e7624a52cd' as SessionId;
     const app = 'app-workflow' as AppSessionId;

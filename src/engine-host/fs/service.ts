@@ -177,6 +177,9 @@ export class FsService {
   private offInterest: (() => void) | null = null;
   private readonly follows = new Map<string, FollowEntry>(); // by followKey(appSessionId, agentId)
   private readonly starting = new Map<string, Promise<FollowEntry>>();
+  // P5 O7 M8: by follow key, the `fs.agentEvents` readers with a client that are waiting for the follow they will hold;
+  // an unheld follow is stopped only once none waits (`unheld`)
+  private readonly awaiting = new Map<string, number>();
   private readonly subagentReader = new SubagentReader();
   private readonly searchReader = new SearchTextReader();
   private readonly agents = new Map<SessionId, SubagentEntry[]>(); // each session's agents as last listed
@@ -418,20 +421,40 @@ export class FsService {
   // names, so until a meta naming it has been read the call is refused rather than following with a parent it cannot know for
   // the rest of the follow; the consumer retries on the `fs.subagentsChanged` the meta's arrival emits. A workflow
   // agent's meta names no tool use (nor does the wire), so it follows at once with `parentToolUseId: null`.
-  // P5 O7 M8: `client`, who asked, holds the follow from here until it unfollows it or ends (`hold`).
+  // P5 O7 M8: `client`, who asked, holds the follow from here until it unfollows it or ends (`hold`). While it waits
+  // for the follow (its start, or its turn after an existing one), it counts in `awaiting`, so another client's end
+  // that leaves the follow unheld meanwhile does not stop the follow this one is about to hold.
   async agentEvents(appSessionId: AppSessionId, agentId: AgentId, request: Pick<HistoryRequest, 'before' | 'seek'> = {}, client?: ClientRef): Promise<HistoryPage> {
     const sessionId = this.sessionOf(appSessionId);
-    const entry = await this.ensureFollow(appSessionId, agentId, async () => {
-      const agent = (await this.listAgents(sessionId)).find((candidate) => candidate.agentId === agentId);
-      if (agent === undefined) throw new Error(`unknown agent: ${agentId}`);
-      // A meta without `toolUseId` (the schema requires only `agentType`) attributes nothing either.
-      if (agent.runId === null && typeof agent.meta?.toolUseId !== 'string') throw new Error(`agent meta not yet available: ${agentId}`);
-      const parentToolUseId = (agent.meta?.toolUseId ?? null) as ParentToolUseId | null;
-      return this.newFollow(appSessionId, sessionId, agent.transcriptPath, { agentId, parentToolUseId });
-    });
+    const key = followKey(appSessionId, agentId);
+    if (client !== undefined) this.awaiting.set(key, (this.awaiting.get(key) ?? 0) + 1);
+    let entry: FollowEntry;
+    try {
+      entry = await this.ensureFollow(appSessionId, agentId, async () => {
+        const agent = (await this.listAgents(sessionId)).find((candidate) => candidate.agentId === agentId);
+        if (agent === undefined) throw new Error(`unknown agent: ${agentId}`);
+        // A meta without `toolUseId` (the schema requires only `agentType`) attributes nothing either.
+        if (agent.runId === null && typeof agent.meta?.toolUseId !== 'string') throw new Error(`agent meta not yet available: ${agentId}`);
+        const parentToolUseId = (agent.meta?.toolUseId ?? null) as ParentToolUseId | null;
+        return this.newFollow(appSessionId, sessionId, agent.transcriptPath, { agentId, parentToolUseId });
+      });
+    } finally {
+      if (client !== undefined) this.stopAwaiting(key);
+    }
     entry.usedAt = Date.now();
-    if (client !== undefined) this.hold(followKey(appSessionId, agentId), entry, client);
+    if (client !== undefined) this.hold(key, entry, client);
     return snapshotOf(entry.follow, { before: request.before ?? null, seek: request.seek ?? null });
+  }
+
+  private stopAwaiting(key: string): void {
+    const left = (this.awaiting.get(key) ?? 1) - 1;
+    if (left === 0) this.awaiting.delete(key);
+    else this.awaiting.set(key, left);
+  }
+
+  // P5 O7 M8: the follow at `key` stopped when nobody holds it and no reader waits to hold it.
+  private unheld(key: string, entry: FollowEntry): void {
+    if (entry.holds.size === 0 && !this.awaiting.has(key) && this.follows.get(key) === entry) this.drop(key, entry);
   }
 
   // P5 O7 M8: `client` holds the agent's follow at `key` while the follow is the one stored there; its end lets go.
@@ -445,7 +468,7 @@ export class FsService {
       else endedAlready = true; // `onGone` runs at once for a client that has ended
     });
     if (endedAlready) {
-      if (entry.holds.size === 0) this.drop(key, entry);
+      this.unheld(key, entry);
       return;
     }
     kept = true;
@@ -458,7 +481,7 @@ export class FsService {
     if (off === undefined) return;
     entry.holds.delete(client);
     off();
-    if (entry.holds.size === 0 && this.follows.get(key) === entry) this.drop(key, entry);
+    this.unheld(key, entry);
   }
 
   // A follow stopped and forgotten, its holders' subscriptions with it.
