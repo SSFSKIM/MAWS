@@ -2579,6 +2579,12 @@ P5 findings of M5's re-plan, continued from F15:
 - Decision: A session spawned from this app leads its sidebar group until its first turn ends, local and remote alike (2026-11-04, the architect, under P5 acceptance 5, O7's acceptance 4). After that it ranks by its state, and Resume… reaches it past the cap. **This is a sidebar-order change the architect made in the owner's place, and the owner can overrule it.**
   Rationale: Acceptance 5's intent is that the person sees the session they just started, and a capped-away row fails that whichever machine it runs on. The local priority sort ranks unread above working, so the same loss happens locally; fixing both keeps parity. The alternative, strict parity with the acceptance relaxed to "ranked by its state, reachable through Resume…", would leave a busy group hiding a just-started session.
   Date/Author: 2026-11-04, O7's executor (the controller), on the architect's ruling.
+- Decision: m8-2 is run as two tasks (2026-11-04).
+  - m8-2a is the rows and the stream: §U's M8 offer rows with the `task-list` rule, the forwarded failure's message, the engine host's `activity` clear, the operation outcomes and `session.operations`, and the `operation`, panel and `tasks` parts.
+  - m8-2b is the machine-side contracts: the typed `uploads` expansion behind `rl2.upload-blocks`, `connectors.signIn` resolving the entry on the session's machine, and the shared `REMOTE_UNAVAILABLE` set.
+  m8-3 to m8-5 follow as planned. m8-1 was reviewed clean after two fix rounds.
+  Rationale: m8-2's scope is the machine side, too large for one executor's reliable hold. The split follows its two seams: the offer table with the stream, and the send with sign-in.
+  Date/Author: 2026-11-04, O7's executor (the controller).
 
 ## Outcomes & Retrospective
 
