@@ -199,7 +199,7 @@ describe('`fs.tasks` on the `task-list` rule', () => {
 
   it('reads a list only from a status of the engine session placed (`ownTaskList`)', async () => {
     const target = { lane: 'B' as const, appSessionId: APP, session: 'old-engine' };
-    const placing = (value: unknown) => ({ dispatch: async () => ({ ok: true as const, value }), log() {} });
+    const placing = (value: unknown) => ({ dispatch: async () => ({ t: 'res' as const, id: 'r1', ok: true as const, value }), log() {} });
     expect(await ownTaskList(tasks('new-private-list'), target, placing({ engineSessionId: 'new-engine', taskListId: 'new-private-list' }))).toBe('unavailable');
     expect(await ownTaskList(tasks('old-list'), target, placing({ engineSessionId: 'old-engine', taskListId: 'old-list' }))).toBe('own');
     expect(await ownTaskList(tasks('another'), target, placing({ engineSessionId: 'old-engine', taskListId: 'old-list' }))).toBe('no-target');
