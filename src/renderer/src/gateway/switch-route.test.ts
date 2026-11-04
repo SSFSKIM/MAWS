@@ -21,6 +21,15 @@ import type { SetupEvent, StartOutcome } from '@shared/sessions/setup';
 import { sessionStartOver, type StartOptions } from './session-start';
 import { createGatewayStore, type GatewayStore } from './store';
 import { createRouteSwitcher, switchButtonLabel, type SwitchAnswer } from './switch-route';
+// P5 O7 M9: the features a switch back to the machine's own route hands back to its observation
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { routeOf } from '../composer/list-models';
+import { readsEngineUsage } from '../statusline/direct-fallback';
+import { createSessionsStore } from '../stores/sessions';
+import { createUsageStore, windowsFor } from '../stores/usage';
+import { throughClaudeUsage } from './observed-route';
+import { hasLiveGatewaySession } from './relay-monitor';
+import { routingFacts } from './routing-facts';
 
 const ROOT = join(__dirname, '../../../..');
 const READY = 'app-7412a115' as AppSessionId; // Settings idle probe: ready, idle, routed
@@ -410,5 +419,93 @@ describe('the queue after a switch', () => {
     expect(await run).toBe('done');
     expect(s.log).not.toContain('session.queue.setPaused');
     (unscript as (() => void) | null)?.();
+  });
+});
+
+// P5 O7 M9 (the architect's ruling on m9-4): the machine's route is every session's default and gateway and direct are
+// per-session choices, so the switch reaches all three: back to the machine's own is a restart on `route: 'machine'`,
+// verified as a launch is, by what get_status reports (`observed`), never a mismatch, and every feature then follows
+// that observation again.
+describe('back to the machine’s own route', () => {
+  const RELAY = 'http://127.0.0.1:8641';
+  const onMachine = (observed: NonNullable<EngineSessionStatus['gateway']['observed']> | undefined, verified: EngineSessionStatus['gateway']['verified']) => ({
+    mode: (observed?.kind === 'claudeusage' ? 'gateway' : 'direct') as 'gateway' | 'direct',
+    baseUrl: observed?.baseUrl ?? null,
+    verified,
+    autoModeServer: 'enabled' as const,
+    localLane: null,
+    route: 'machine' as const,
+    ...(observed !== undefined && { observed }),
+  });
+  const pageScenarioRecord = () => pageScenario(loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json'))).sessions.find((r) => r.appId === ID)!;
+  const pageStatus = (s: Setup) => addressing.output('engine.sessions').lift([s.backend.status(READY)], TEST_MACHINE)[0]!;
+  const features = (s: Setup) => {
+    const status = pageStatus(s);
+    const sessions = createSessionsStore();
+    sessions.getState().applyStatus({ appSessionId: ID, status }, TEST_MACHINE);
+    const usage = createUsageStore();
+    return {
+      claudeUsage: throughClaudeUsage(status, null),
+      catalogue: routeOf(status, null),
+      engineUsage: readsEngineUsage(status),
+      relayBanner: hasLiveGatewaySession(sessions.getState()),
+      windows: windowsFor(usage.getState(), pageScenarioRecord(), status).source,
+      facts: routingFacts(pageScenarioRecord(), status, null, SETTINGS_DEFAULTS_V21, null),
+    };
+  };
+
+  it('machine → gateway → machine: each restart on the route asked for, the way back verified by what the machine reached, and the features following it', async () => {
+    const s = setup({ start: 'no_ready' });
+    s.backend.emitStatus(READY, { gateway: onMachine({ kind: 'login', baseUrl: null, login: 'Claude Max' }, 'direct') }); // on its own route, through its login
+    expect(features(s)).toMatchObject({ claudeUsage: false, catalogue: 'direct', engineUsage: true, relayBanner: false, windows: 'direct', facts: { machine: true, targets: ['gateway', 'direct'] } });
+
+    const toGateway = s.switcher.switchRoute(ID, 'gateway');
+    await confirming(s);
+    s.switcher.answer(ID, CONFIRM);
+    await vi.waitFor(() => expect(s.starts).toHaveLength(1));
+    expect(s.starts[0]!.options).toEqual({ gateway: 'gateway' });
+    s.backend.emitStatus(READY, { process: 'ready', launchId: 'launch-2', exit: null, gateway: { mode: 'gateway', baseUrl: RELAY, verified: 'routed', autoModeServer: 'enabled', localLane: null } });
+    expect(await toGateway).toBe('done');
+    expect(features(s)).toMatchObject({ claudeUsage: true, catalogue: 'gateway', engineUsage: false, relayBanner: true, windows: 'drain', facts: { machine: false, targets: ['direct', 'machine'] } });
+
+    const back = s.switcher.switchRoute(ID, 'machine');
+    const sheet = await confirming(s);
+    expect(sheet.confirm).toEqual({ target: 'machine', backgroundTasks: [], requiresModel: false, model: null, effort: null });
+    expect(switchButtonLabel(sheet.confirm!)).toBe('Restart on the machine’s own');
+    s.switcher.answer(ID, CONFIRM);
+    await vi.waitFor(() => expect(s.starts).toHaveLength(2));
+    // the person chose it: the machine route's advisory relay check is passed, and get_status says what it reached
+    expect(s.starts[1]!.options).toEqual({ route: 'machine', startAnyway: true });
+    s.backend.emitStatus(READY, { process: 'ready', launchId: 'launch-3', exit: null, gateway: onMachine(undefined, 'pending') });
+    expect(stateOf(s)?.phase).toBe('starting'); // not verified yet
+    s.backend.emitStatus(READY, { gateway: onMachine({ kind: 'claudeusage', baseUrl: RELAY }, 'routed') });
+    expect(await back).toBe('done');
+    expect(s.toasts.at(-1)).toBe('Settings idle probe restarted · now on this machine’s own setup (ClaudeUsage)');
+    expect(features(s)).toMatchObject({
+      claudeUsage: true,
+      catalogue: 'gateway',
+      engineUsage: false,
+      relayBanner: true,
+      windows: 'drain',
+      facts: { machine: true, route: 'gateway', line: `The machine’s own · ClaudeUsage relay · ${RELAY}`, targets: ['gateway', 'direct'] },
+    });
+  });
+
+  it('names a login or a host the machine reached after the switch back, and never calls one a mismatch', async () => {
+    for (const [observed, verified, words] of [
+      [{ kind: 'login', baseUrl: null, login: 'Claude Max' }, 'direct', 'Anthropic login · Claude Max'],
+      [{ kind: 'host', baseUrl: 'https://llm.example.test/v1' }, 'direct', 'llm.example.test'],
+      [{ kind: 'host', baseUrl: 'https://llm.example.test/v1' }, 'mismatch', 'llm.example.test'], // whatever an older host wrote
+    ] as const) {
+      const s = setup({ start: 'no_ready' });
+      const run = s.switcher.switchRoute(ID, 'machine');
+      await confirming(s);
+      s.switcher.answer(ID, CONFIRM);
+      await vi.waitFor(() => expect(s.starts).toHaveLength(1));
+      s.backend.emitStatus(READY, { process: 'ready', launchId: 'launch-2', exit: null, gateway: onMachine(observed, verified) });
+      expect(await run, words).toBe('done');
+      expect(s.toasts.at(-1)).toBe(`Settings idle probe restarted · now on this machine’s own setup (${words})`);
+      expect(features(s)).toMatchObject({ claudeUsage: false, catalogue: 'direct', engineUsage: true, relayBanner: false, windows: 'direct' });
+    }
   });
 });

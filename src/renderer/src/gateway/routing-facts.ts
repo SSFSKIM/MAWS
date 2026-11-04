@@ -11,7 +11,7 @@ import type { UsageSnapshot, UsageWindow } from '@shared/usage/types';
 import { formatClock, formatWeekdayHour } from '@shared/app/date-format';
 import type { Route as AnyRoute } from '@shared/engine/route';
 import { readRoute } from '@shared/engine/route';
-import { MACHINE_ROUTE, PACE, ROUTE, type Route } from './copy';
+import { MACHINE_ROUTE, PACE, ROUTE, type Route, type SwitchTarget } from './copy';
 import { machineReached, machineRouteLine, observedOf, routeChosen, throughClaudeUsage } from './observed-route'; // P5 O7 M9
 
 export type DirectLogin = { login: string; email: string | null; organization: string | null };
@@ -22,7 +22,7 @@ export interface RoutingFacts {
   line: string;
   note: string | null; // a second sentence (a direct session's: no gateway models, windows from the engine)
   account: { email: string; why: 'pinned' | 'routing' } | null;
-  targets: Route[]; // the switches offered, in order; both for a session whose route was never recorded
+  targets: SwitchTarget[]; // the switches offered, in order; every route for a session whose route was never recorded (P5 O7 M9: the machine's own among them)
   canSwitch: boolean;
   switchLabel: string; // the first target's label ('' without one)
   refusal: string | null; // why no switch is offered, when a reason is worth saying (held elsewhere, archived)
@@ -71,9 +71,12 @@ export function routingFacts(record: SessionRecord, status: EngineSessionStatus 
   }
 
   const refusal = switchRefusal(record);
-  // D-19: the relay is the default, so `Switch to gateway…` is always offered; `offerDirect` hides only the other.
-  const offered: Route[] = route === 'gateway' ? ['direct'] : route === 'direct' ? ['gateway'] : ['gateway', 'direct'];
-  const targets = refusal !== null ? [] : offered.filter((t) => t === 'gateway' || settings.gateway.offerDirect);
+  // D-19: `Switch to gateway…` is always offered; `offerDirect` hides only Direct. P5 O7 M9 (the architect's ruling): the
+  // machine's own route is every session's default and the other two are per-session choices, so the switch reaches all
+  // three: every route but the one the session was launched on, the machine's own last ("Back to the machine’s own…").
+  const chosen = machine ? 'machine' : route;
+  const offered: SwitchTarget[] = chosen === 'machine' ? ['gateway', 'direct'] : chosen === 'gateway' ? ['direct', 'machine'] : chosen === 'direct' ? ['gateway', 'machine'] : ['gateway', 'direct', 'machine'];
+  const targets = refusal !== null ? [] : offered.filter((t) => t !== 'direct' || settings.gateway.offerDirect);
   return { route, machine, line, note, account, targets, canSwitch: targets.length > 0, switchLabel: targets.length > 0 ? ROUTE.switchTo[targets[0]] : '', refusal };
 }
 

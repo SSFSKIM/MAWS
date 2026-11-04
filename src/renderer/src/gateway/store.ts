@@ -10,9 +10,10 @@ import type { Effort } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ClaudeUsageStatus, MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
+import type { SwitchTarget } from './copy'; // P5 O7 M9
 
-export type SwitchConfirm = { target: 'gateway' | 'direct'; backgroundTasks: EngineSessionStatus['backgroundTasks']; requiresModel: boolean; model: string | null; effort: Effort | null };
-export type SwitchState = { target: 'gateway' | 'direct'; phase: 'confirming' | 'interrupting' | 'rechecking' | 'stopping' | 'starting' | 'done' | 'failed'; confirm: SwitchConfirm | null; error: string | null };
+export type SwitchConfirm = { target: SwitchTarget; backgroundTasks: EngineSessionStatus['backgroundTasks']; requiresModel: boolean; model: string | null; effort: Effort | null };
+export type SwitchState = { target: SwitchTarget; phase: 'confirming' | 'interrupting' | 'rechecking' | 'stopping' | 'starting' | 'done' | 'failed'; confirm: SwitchConfirm | null; error: string | null };
 
 export interface GatewayState {
   relay: RelayHealth | null; // carries its own checkedAt

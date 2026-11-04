@@ -10,7 +10,9 @@ import type { SetupEvent, StartOutcome } from '@shared/sessions/setup';
 import { holderWords } from '../sessions/holder-words';
 import { START, type Route } from './copy';
 
-export type StartOptions = { gateway: Route; model?: string | null; effort?: Effort | null };
+// P5 O7 M9: back to the machine's own route is `route: 'machine'` (the services' route patch writes the legacy field), past
+// its advisory relay check (`startAnyway`: the person chose it, and get_status says what it reached)
+export type StartOptions = ({ gateway: Route } | { route: 'machine'; startAnyway: true }) & { model?: string | null; effort?: Effort | null };
 export type StartAnswer = { status: 'starting' } | { status: 'refused'; reason: string };
 
 export interface SessionStart {

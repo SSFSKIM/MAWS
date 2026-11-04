@@ -20,7 +20,8 @@ import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { isGatewayModel } from '@shared/sessions/models';
 import { runAction } from '../keymap/actions-runtime';
-import { FOOTER, SWITCH, type Route } from './copy';
+import { FOOTER, SWITCH, type SwitchTarget } from './copy';
+import { machineReachedBriefly } from './observed-route'; // P5 O7 M9
 import { switchRefusal } from './routing-facts';
 import { sessionStartOver, type SessionStart, type StartOptions } from './session-start';
 import { useGateway, type GatewayStore, type SwitchConfirm, type SwitchState } from './store';
@@ -116,7 +117,7 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
     return new Promise((resolve) => asks.set(id, resolve));
   }
 
-  async function switchRoute(id: AppSessionId, target: Route): Promise<SwitchOutcome> {
+  async function switchRoute(id: AppSessionId, target: SwitchTarget): Promise<SwitchOutcome> {
     const current = store.getState().switching.get(id);
     if (current && current.phase !== 'done' && current.phase !== 'failed') {
       deps.toast(SWITCH.alreadySwitching);
@@ -217,7 +218,7 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
 
       state = { ...state, phase: 'starting', error: null };
       put(id, state);
-      const options: StartOptions = { gateway: target };
+      const options: StartOptions = target === 'machine' ? { route: 'machine', startAnyway: true } : { gateway: target }; // P5 O7 M9
       if (answer.model !== null) options.model = answer.model;
       if (answer.effort !== null) options.effort = answer.effort;
       // Subscribed before the start, so a setup failure that follows at once is heard.
@@ -237,6 +238,9 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
           (s) => {
             if (s.launchId === beforeLaunch || s.process !== 'ready' || s.gateway.verified === 'pending') return undefined;
             // verified on the route asked for; a mismatch, or a verified launch on the other route, fails at once
+            // P5 O7 M9: back on the machine's own route, verified as a launch is: whatever get_status reported is what the
+            // machine reached (`observed`), never a mismatch
+            if (target === 'machine') return 'ready';
             const verified = s.gateway.verified === 'routed' || s.gateway.verified === 'direct';
             return verified && s.gateway.mode === target ? 'ready' : 'mismatch';
           },
@@ -247,7 +251,7 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
           },
         );
         if (failure !== null) return fail(SWITCH.refused(failure));
-        if (verdict === 'mismatch') return fail(SWITCH.mismatch(target));
+        if (verdict === 'mismatch' && target !== 'machine') return fail(SWITCH.mismatch(target));
         if (verdict === null) return fail(SWITCH.notReady);
       } finally {
         (offFailure as (() => void) | null)?.();
@@ -255,7 +259,7 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
 
       await resumeQueue();
       put(id, { ...state, phase: 'done', error: null });
-      deps.toast(SWITCH.toast(displayTitle(record), target, answer.displayName));
+      deps.toast(target === 'machine' ? SWITCH.toastMachine(displayTitle(record), machineReachedBriefly(deps.status(id)?.gateway.observed ?? null), answer.displayName) : SWITCH.toast(displayTitle(record), target, answer.displayName));
       return 'done';
     } catch (error) {
       if (error instanceof Failed) return fail(error.message);
@@ -292,5 +296,5 @@ const app = createRouteSwitcher(
   useGateway,
 );
 
-export const switchRoute = (appSessionId: AppSessionId, target: Route): Promise<SwitchOutcome> => app.switchRoute(appSessionId, target);
+export const switchRoute = (appSessionId: AppSessionId, target: SwitchTarget): Promise<SwitchOutcome> => app.switchRoute(appSessionId, target);
 export const answerSwitch = (appSessionId: AppSessionId, reply: SwitchAnswer | null): boolean => app.answer(appSessionId, reply);

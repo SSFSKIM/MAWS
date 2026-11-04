@@ -58,5 +58,10 @@ export function machineReached(observed: ObservedRoute | null): string {
   }
 }
 
+/** What the machine reached, in a few words (the switch's toast): ClaudeUsage, the login, or the host. */
+export function machineReachedBriefly(observed: ObservedRoute | null): string {
+  return observed?.kind === 'claudeusage' ? MACHINE_ROUTE.reachedClaudeUsage : machineReached(observed);
+}
+
 /** Session info's words for a session on the machine's own route: what the machine reached, never a mismatch. */
 export const machineRouteLine = (observed: ObservedRoute | null): string => MACHINE_ROUTE.line(machineReached(observed));

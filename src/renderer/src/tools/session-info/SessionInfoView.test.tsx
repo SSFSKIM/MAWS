@@ -106,7 +106,7 @@ describe('session info renders the six sections', () => {
     expect(valueOf('Session id')).toBe(record.engineSessionId);
     expect(valueOf('Main')).toBe('claude-sonnet-5[1m]');
     expect(valueOf('Subagents')).toBe("each agent's own, else Main"); // W3: no "engine default"
-    expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…'); // W2: the switch
+    expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…Back to the machine’s own…'); // W2: the switch; P5 O7 M9: and back
     expect(valueOf('Account')).toBe('1@example.test · pinned for this session');
     expect(valueOf('Tool search')).toBe('on · ENABLE_TOOL_SEARCH, needed behind a base URL');
     expect(valueOf('Mode')).toBe('Auto · effective, from the init frame');
@@ -213,7 +213,7 @@ describe('session info renders the six sections', () => {
     useSessions.setState({ engine: new Map([[READY, direct]]) });
     backend.script('session.getStatus', () => fixtureLine(ROOT, 'pass2/routing-flag-override#12'));
     mount(ctxOf(READY));
-    await waitFor(() => expect(valueOf('Route')).toBe("Direct · engine's own login · Expired — log in againSwitch to gateway…")); // W2: the switch
+    await waitFor(() => expect(valueOf('Route')).toBe("Direct · engine's own login · Expired — log in againSwitch to gateway…Back to the machine’s own…")); // W2: the switch
     expect(valueOf('Email')).toBe('owner@redacted.invalid');
     expect(valueOf('Tool search')).toBe('off');
     expect(screen.queryByText('Account', { selector: 'dt' })).toBeNull();
@@ -227,21 +227,21 @@ describe('session info renders the six sections', () => {
     });
     useSessions.setState({ engine: new Map([[READY, onMachine({ kind: 'claudeusage', baseUrl: 'http://127.0.0.1:8641' }, 'gateway')]]) });
     mount(ctxOf(READY));
-    expect(valueOf('Route')).toBe('The machine’s own · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…');
+    expect(valueOf('Route')).toBe('The machine’s own · ClaudeUsage relay · http://127.0.0.1:8641Switch to gateway…Switch to Direct…');
     expect(valueOf('Account')).toBe('1@example.test · pinned for this session');
     expect(valueOf('Tool search')).toBe('as the machine’s settings set it');
     cleanup();
 
     useSessions.setState({ engine: new Map([[READY, onMachine({ kind: 'login', baseUrl: null, login: 'Claude Max', organization: 'Acme' }, 'direct')]]) });
     mount(ctxOf(READY));
-    expect(valueOf('Route')).toBe('The machine’s own · Anthropic login · Claude MaxSwitch to gateway…');
+    expect(valueOf('Route')).toBe('The machine’s own · Anthropic login · Claude MaxSwitch to gateway…Switch to Direct…');
     expect(valueOf('Organization')).toBe('Acme');
     expect(screen.queryByText('Account', { selector: 'dt' })).toBeNull();
     cleanup();
 
     useSessions.setState({ engine: new Map([[READY, onMachine({ kind: 'host', baseUrl: 'https://llm.example.test/v1' }, 'direct')]]) });
     mount(ctxOf(READY));
-    expect(valueOf('Route')).toBe('The machine’s own · llm.example.testSwitch to gateway…');
+    expect(valueOf('Route')).toBe('The machine’s own · llm.example.testSwitch to gateway…Switch to Direct…');
     expect(valueOf('Route')).not.toMatch(/unverified|match/);
     expect(screen.queryByText('Account', { selector: 'dt' })).toBeNull();
   });
@@ -250,7 +250,7 @@ describe('session info renders the six sections', () => {
     mount(ctxOf(READY, false));
     await new Promise((r) => setTimeout(r, 30));
     expect(backend.calls.filter((c) => c.command.startsWith('session.'))).toEqual([]);
-    expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…'); // the stores render at once
+    expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…Back to the machine’s own…'); // the stores render at once
     cleanup();
     mount(ctxOf(null));
     expect(screen.getByText('Open a session to see its details')).toBeTruthy();
@@ -355,7 +355,7 @@ describe('the route switch and the Direct poll, re-homed from the status line', 
   it('offerDirect false hides Switch to Direct…; while the switch reads the status it says so and holds the button', () => {
     settingsWith({ offerDirect: false });
     mount(ctxOf(READY));
-    expect(within(route()).queryByRole('button')).toBeNull();
+    expect(within(route()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Back to the machine’s own…']); // P5 O7 M9: the way back stays
     cleanup();
     settingsWith({});
     useGateway.setState({ switching: new Map([[READY, { target: 'direct', phase: 'confirming', confirm: null, error: null }]]) });
@@ -385,7 +385,7 @@ describe('the route switch and the Direct poll, re-homed from the status line', 
     cleanup();
     useSetup.setState({ intents: new Map() });
     mount(ctxOf(READY)); // an exited session whose route was never recorded: both, as the footer offered them
-    expect(within(route()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Switch to gateway…', 'Switch to Direct…']);
+    expect(within(route()).getAllByRole('button').map((b) => b.textContent)).toEqual(['Switch to gateway…', 'Switch to Direct…', 'Back to the machine’s own…']);
   });
 
   it('a Direct session’s get_usage is read while the tab is shown, and not while it is hidden', async () => {

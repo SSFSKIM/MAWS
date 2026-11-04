@@ -13,7 +13,7 @@ import type { SessionWindows } from '../../stores/usage';
 import { MODE_REFUSAL_WORDS, modeReported } from '../../statusline/mode-menu';
 import { resetsIn, windowShown } from '../../statusline/format';
 import { directLoginOf } from '../../gateway/direct-login';
-import { MACHINE_ROUTE, type Route } from '../../gateway/copy'; // P5 O7 M9: MACHINE_ROUTE
+import { MACHINE_ROUTE, type SwitchTarget } from '../../gateway/copy'; // P5 O7 M9: MACHINE_ROUTE, SwitchTarget
 import { paceLine, type DirectLogin, type RoutingFacts } from '../../gateway/routing-facts';
 import { present as presentContext } from '../../widgets/ContextWidget';
 import { present as presentMcp } from '../../widgets/McpWidget';
@@ -37,7 +37,7 @@ import { FRESHNESS } from '../../sessions/observed';
 // P2-A end
 
 // W2: `route` is the Direct⇄gateway switch, offering `targets` (the routing facts' own)
-export type InfoRow = { label: string; value: string; note?: string; action?: 'permissions' | 'route'; targets?: Route[] };
+export type InfoRow = { label: string; value: string; note?: string; action?: 'permissions' | 'route'; targets?: SwitchTarget[] };
 export type InfoSection = { title: string; rows: InfoRow[] };
 
 export interface SessionInfoInput {

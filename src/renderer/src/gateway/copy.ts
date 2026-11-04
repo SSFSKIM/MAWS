@@ -2,6 +2,9 @@
 // sheet, the Direct model choice; W2: the usage popover's footer went with the status line, the switch is Session info's).
 
 export type Route = 'gateway' | 'direct';
+// P5 O7 M9: the route switch's targets, the machine's own route among them (every session's default, so always one to go
+// back to); the legacy two routes stay `Route` wherever only they apply
+export type SwitchTarget = Route | 'machine';
 
 export const ROUTE = {
   routed: "Routed through ClaudeUsage's relay",
@@ -11,7 +14,7 @@ export const ROUTE = {
   lastRouted: 'Last ran routed',
   lastDirect: 'Last ran direct',
   notRecorded: 'Route not recorded · a resume uses the default route', // P5 O7 M9: the machine's, which the legacy field no longer names
-  switchTo: { direct: 'Switch to Direct…', gateway: 'Switch to gateway…' } satisfies Record<Route, string>,
+  switchTo: { direct: 'Switch to Direct…', gateway: 'Switch to gateway…', machine: 'Back to the machine’s own…' } satisfies Record<SwitchTarget, string>,
   held: (holder: string) => `Held by ${holder} · switch it there`,
   holders: { terminal: 'a terminal', background_job: 'a background job' } as Record<string, string>,
   archived: 'Archived · unarchive it to switch',
@@ -26,6 +29,7 @@ export const MACHINE_ROUTE = {
   claudeUsage: (baseUrl: string) => (baseUrl === '' ? 'ClaudeUsage relay' : `ClaudeUsage relay · ${baseUrl}`),
   login: (login: string | null) => (login === null ? 'Anthropic login' : `Anthropic login · ${login}`),
   pending: 'not verified yet',
+  reachedClaudeUsage: 'ClaudeUsage', // the switch's toast: what the machine reached, briefly
   choice: 'Machine’s own', // the route segment's (an unstarted session's, Settings › Gateway's)
   starts: 'Starts on the machine’s own route · its settings and login decide',
   lastRan: (what: string) => `Last ran on the machine’s own route · ${what}`,
@@ -42,12 +46,16 @@ export const PACE = {
 };
 
 export const SWITCH = {
-  title: (target: Route) => `Switch this session to ${target === 'direct' ? 'Direct' : 'the gateway'}?`,
+  title: (target: SwitchTarget) => (target === 'machine' ? 'Switch this session back to the machine’s own route?' : `Switch this session to ${target === 'direct' ? 'Direct' : 'the gateway'}?`),
   body: 'The engine process restarts and resumes the same session: the transcript and session grants are kept, and queued messages are kept and sent after the restart; a running turn is stopped first.',
-  effect: { direct: 'Gateway models become unavailable · usage windows come from the engine', gateway: 'Gateway models become available' } satisfies Record<Route, string>,
+  effect: {
+    direct: 'Gateway models become unavailable · usage windows come from the engine',
+    gateway: 'Gateway models become available',
+    machine: 'MAWS injects nothing: the machine’s own settings, environment and login decide · Session info names what it reaches',
+  } satisfies Record<SwitchTarget, string>,
   backgroundLead: 'These stop with the process and do not resume:',
   stopAndSwitch: 'Stop them and switch',
-  restart: { direct: 'Restart direct', gateway: 'Restart routed' } satisfies Record<Route, string>,
+  restart: { direct: 'Restart direct', gateway: 'Restart routed', machine: 'Restart on the machine’s own' } satisfies Record<SwitchTarget, string>,
   cancel: 'Cancel',
   newWork: 'New background work started since you confirmed · check the list again',
   checking: 'Checking the session…', // confirming, before the sheet: the fresh status read
@@ -73,6 +81,8 @@ export const SWITCH = {
   mismatch: (target: Route) => `Restarted, but the route reads unverified (asked for ${target === 'direct' ? 'Direct' : 'the gateway'}) · check Session info`,
   retry: 'Retry',
   toast: (title: string, target: Route, model: string | null) => `${title} restarted ${target === 'direct' ? 'direct' : 'routed'}${model === null ? '' : ` · on ${model}`}`,
+  // P5 O7 M9: back on the machine's own route, named by what get_status reported it reaching
+  toastMachine: (title: string, reached: string, model: string | null) => `${title} restarted · now on this machine’s own setup (${reached})${model === null ? '' : ` · on ${model}`}`,
 };
 
 // C10's start outcomes other than `starting`, and its setup failures, as the switch's refusal words.
