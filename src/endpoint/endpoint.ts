@@ -56,6 +56,7 @@
 import { homedir, networkInterfaces } from 'node:os';
 import { importSigningKey, isListingGone, stateHash, type MachineIdentity, type OrgState, type Right, type Rl1Refusal, type SignedOrgState, type SigningKey } from 'org-protocol';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { Home } from '@shared/machine/home-folders';
 import { ArtifactRanks } from './artifacts';
 import { Authorizer, type AuthorizeContext } from './authorize';
 import { Calls } from './calls';
@@ -83,7 +84,7 @@ import { EndpointOrg, type OrgChange } from './org-sync';
 import { PlaneA } from './plane-a';
 import { PlaneB } from './plane-b';
 import { PlaneFeeds } from './plane-feeds';
-import { EndpointPolicy, settingsDefaultMode } from './policy';
+import { EndpointPolicy, MachineSetup, settingsDefaultMode } from './policy';
 import { completeProvisioning, provisionInto, type DelegatedInput } from './provision';
 import { retireInto, type Retired } from './retire';
 import { Queries } from './queries';
@@ -104,7 +105,8 @@ import { directPort, type InterfaceTable } from './tailnet';
  * `MAWS_ENDPOINT_PORT` are read (the process's); `pingMs` and `direct` are the suites' seams for channel liveness and
  * the listener (its interface table, how it listens, its limits). `authorization` holds the sources authorization reads
  * (RL10's members and presences unless a suite gives others) and the machine's `defaultMode` (read from the user's
- * settings), and the suites' seams for another offer table, grade declaration or registry.
+ * settings), and the suites' seams for another offer table, grade declaration or registry, and (P5 O7 M9) the home and the
+ * platform the setup policy reads (this process's unless a suite gives a fake home).
  */
 export type EndpointOptions = {
   build?: string;
@@ -114,7 +116,7 @@ export type EndpointOptions = {
   env?: Record<string, string | undefined>;
   pingMs?: readonly [number, number];
   direct?: { interfaces?(): InterfaceTable } & Pick<DirectListenerOptions, 'listen' | 'limits' | 'rescanMs'>;
-  authorization?: { records?: RecordSource; checkouts?: CheckoutSource; settingsMode?(): string } & Pick<AuthorizeContext, 'offers' | 'gradeOf' | 'registry'>;
+  authorization?: { records?: RecordSource; checkouts?: CheckoutSource; settingsMode?(): string; setup?: Home } & Pick<AuthorizeContext, 'offers' | 'gradeOf' | 'registry'>;
   /** MAWS's own projects as checkouts (P5 O3-D M4, `mawsd` injects them), known beside RL10's; `authorization.checkouts` replaces both. */
   projects?: CheckoutSource;
   /** The suites' seams for subscriptions: the resume window, lane A's ring and the unsent stream's bound. */
@@ -332,6 +334,8 @@ export class Endpoint implements EndpointModule {
     this.hub.setChannels(this.channels.relay(this.hub));
     const authorization = options.authorization ?? {};
     this.checkouts = authorization.checkouts ?? (options.projects === undefined ? this.rl10.members : anyCheckout(this.rl10.members, options.projects));
+    const setupHome = authorization.setup;
+    const setup = new MachineSetup(setupHome === undefined ? undefined : () => setupHome); // P5 O7 M9: the authorizer's and the folder list's
     this.authorizer = new Authorizer({
       ref: () => this.#services?.machine.ref ?? null,
       org: () => {
@@ -357,6 +361,7 @@ export class Endpoint implements EndpointModule {
         setCounter: (credentialId, counter) => this.#state?.setWebAuthn({ ...this.#state.webauthn, [credentialId]: counter }),
       },
       stamp: () => this.#state?.ledger,
+      setup,
       offers: authorization.offers,
       gradeOf: authorization.gradeOf,
       registry: authorization.registry,
@@ -533,6 +538,7 @@ export class Endpoint implements EndpointModule {
       now: this.deps.now, // P5 O7 M5c review 1: an acquisition's bound, on the gate's clock
       ...(options.acquireWithinMs === undefined ? {} : { acquireWithinMs: options.acquireWithinMs }),
       engineHostLists: (capability) => this.#services?.engineHostLists(capability) ?? false, // P5 O7 M8
+      setup,
       log,
     });
     this.gate.setExecutors({

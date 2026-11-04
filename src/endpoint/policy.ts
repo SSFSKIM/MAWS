@@ -8,9 +8,20 @@
 // Applied (M5) to a spawn's args: no field outside DX6's spawn fields (no flags, environment or shell, `spec-field`), a
 // permission mode no looser than the ceiling by the order `plan` < `default` < `acceptEdits` < `auto` < `dontAsk` <
 // `bypassPermissions` (none asked is the ceiling, as sminos takes it; `ceiling`), and a checkout the machine knows
-// (`unknown-checkout`).
+// (`unknown-checkout`). P5 O7 M9: `session.spawn`'s `trust: 'accepted'` is one of its fields for a current machine owner
+// alone, `spec-field` for anyone else.
+//
+// P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Remote setup"): the setup policy, apart from the
+// spawn guard. A setup act or read naming a directory (`session.projects.addFolder`, and `session.trust.check`, whose trust
+// read looks inside the folder as the registration does) is held to `setupRefusal`: the directory exists, its real path is
+// under the machine's home with no link out of it on the way, and it is not in a protected folder that wasn't opened
+// (src/shared/machine/home-folders.ts; nothing past such a folder is touched to find out). A protected folder is opened by
+// an owner's `machine.folders.list` with `open: true` that the machine answered (`MachineSetup.listed`), for that member, so
+// the folder they browsed into is one they may register; kept for the endpoint's life, the latest FOLDERS_OPENED_MAX each.
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { isAbsolute, join } from 'node:path';
+import { expandHome, readableInside, resolveInHome, within, type Home, type HomeRefusal } from '@shared/machine/home-folders';
 import { DEFAULT_POLICY, type Policy, type PolicySource } from './answers';
 import type { CheckoutSource } from './sources';
 import { PERMISSION_MODES, type Ceiling, type EndpointState } from './state/store';
@@ -57,15 +68,62 @@ export class EndpointPolicy {
 /** DX6's spawn fields: all a remote spawn's args may carry (Interfaces §G). */
 export const SPAWN_FIELDS: ReadonlySet<string> = new Set(['checkout', 'worktree', 'brief', 'model', 'effort', 'permission_mode']);
 
-/** Why the policy refuses a spawn with these args, or null. `settingsMode` is the machine's `defaultMode`, which `settings` reads. */
-export function spawnRefusal(args: Readonly<Record<string, unknown>>, policy: Policy, settingsMode: () => string, checkouts: CheckoutSource): 'spec-field' | 'ceiling' | 'unknown-checkout' | null {
-  if (Object.keys(args).some((field) => !SPAWN_FIELDS.has(field))) return 'spec-field';
+/**
+ * Why the policy refuses a spawn with these args, or null. `settingsMode` is the machine's `defaultMode`, which `settings`
+ * reads. `acceptsTrust` (P5 O7 M9): the spawn is `session.spawn` asked by a current machine owner, whose `trust` (the
+ * registry's schema holds it to `'accepted'`) is then one of its fields.
+ */
+export function spawnRefusal(args: Readonly<Record<string, unknown>>, policy: Policy, settingsMode: () => string, checkouts: CheckoutSource, acceptsTrust = false): 'spec-field' | 'ceiling' | 'unknown-checkout' | null {
+  if (Object.keys(args).some((field) => !SPAWN_FIELDS.has(field) && !(acceptsTrust && field === 'trust'))) return 'spec-field';
   const modes: readonly string[] = PERMISSION_MODES;
   const ceiling = policy.ceiling === 'settings' ? settingsMode() : policy.ceiling;
   const mode = args.permission_mode ?? ceiling;
   if (!modes.includes(ceiling) || typeof mode !== 'string' || !modes.includes(mode) || modes.indexOf(mode) > modes.indexOf(ceiling)) return 'ceiling';
   if (typeof args.checkout !== 'string' || !checkouts.known(args.checkout)) return 'unknown-checkout';
   return null;
+}
+
+/** The setup rows that name a directory, held to `setupRefusal`. */
+export const SETUP_DIRECTORY_COMMANDS: ReadonlySet<string> = new Set(['session.projects.addFolder', 'session.trust.check']);
+export type SetupRefusal = HomeRefusal;
+/** The protected folders kept as opened for one member: the latest this many. */
+export const FOLDERS_OPENED_MAX = 32;
+
+/** Why the setup policy refuses a setup row's directory, or null: an absolute path (anything else `no-folder`), read by `opened`. */
+export async function setupRefusal(input: unknown, where: Home, opened: (folder: string) => boolean): Promise<SetupRefusal | null> {
+  const directory = typeof input === 'object' && input !== null ? (input as { directory?: unknown }).directory : undefined;
+  if (typeof directory !== 'string' || !isAbsolute(directory)) return 'no-folder';
+  const resolved = await resolveInHome(directory, where, opened);
+  return resolved.ok ? null : resolved.reason;
+}
+
+/** The machine's setup policy as the endpoint holds it: its home, and the protected folders each member opened. */
+export class MachineSetup {
+  readonly #opened = new Map<string, string[]>();
+
+  constructor(private readonly where: () => Home = () => ({ home: homedir(), platform: process.platform })) {}
+
+  /** Whether `member` opened `folder`: it is, or holds, a folder they listed with `open: true`. */
+  opened(member: string, folder: string): boolean {
+    return (this.#opened.get(member) ?? []).some((listed) => within(listed, folder));
+  }
+
+  /** An answered `machine.folders.list`: with `open: true` on a path in or at a protected folder, that path is kept as opened. */
+  listed(member: string, input: unknown): void {
+    if (typeof input !== 'object' || input === null || (input as { open?: unknown }).open !== true) return;
+    const where = this.where();
+    const path = (input as { path?: unknown }).path;
+    const named = typeof path === 'string' ? expandHome(path, where.home) : null;
+    if (named === null || !within(named, where.home) || readableInside(named, where, () => false)) return; // in no protected folder: nothing to open
+    const kept = (this.#opened.get(member) ?? []).filter((listed) => listed !== named);
+    kept.push(named);
+    this.#opened.set(member, kept.slice(-FOLDERS_OPENED_MAX));
+  }
+
+  /** `setupRefusal` of a setup row's input, asked by `member`. */
+  refusal(member: string, input: unknown): Promise<SetupRefusal | null> {
+    return setupRefusal(input, this.where(), (folder) => this.opened(member, folder));
+  }
 }
 
 /**

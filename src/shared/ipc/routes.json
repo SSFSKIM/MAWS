@@ -316,6 +316,7 @@
   "git.worktree.remove",
   "git.worktree.status",
   "host.op",
+  "machine.folders.list",
   "machineSettings.set",
   "marketplaces.add",
   "marketplaces.list",

@@ -31,11 +31,20 @@ export type MachineIdentity = z.infer<typeof MachineIdentitySchema>;
 export const ClaimedOpInputSchema = z.strictObject({ opId: OpIdSchema, opCreated: z.string(), claim: z.strictObject(OpBindingShape), name: z.string().min(1), input: JsonValueSchema, action: JsonValueSchema.optional() });
 export const MachineOpInputSchema = ClaimedOpInputSchema.extend({ claim: z.strictObject({ ...OpBindingShape, target: OpTargetSchema.optional() /* P5 O7 M5a */ }) });
 
+// P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Remote setup", §U): the folders under the machine's
+// home, a page at a time, names only, for "+ Session" on a machine with no checkout of the project. `path` is absolute or
+// `~`-relative (absent: the home); `protected` marks a macOS TCC-protected folder, read inside only with `open: true`
+// (src/shared/machine/home-folders.ts); `cursor` is the next page's, null after the last.
+export const FolderEntrySchema = z.strictObject({ name: z.string(), path: z.string(), protected: z.boolean() });
+export type FolderEntry = z.infer<typeof FolderEntrySchema>;
+export const FoldersListInputSchema = z.strictObject({ path: z.string().min(1).max(4096).optional(), open: z.literal(true).optional(), cursor: z.string().min(1).max(1024).optional() });
+
 export const commands = {
   'machine.identity': { input: z.void(), output: MachineIdentitySchema, owner: 'machine' },
   'machine.client': { input: z.strictObject({ browserSocket: z.string().nullable() }), output: z.void(), owner: 'machine' }, // the attached app's browser socket directory (E13; each session's `<dir>/<appSessionId>.sock`, @shared/browser/cua-socket): null, none
   'machine.op': { input: MachineOpInputSchema, output: HostOpOutputSchema, owner: 'machine' },
   'machine.opQuery': { input: z.strictObject({ opId: OpIdSchema, opCreated: z.string(), tombstoneIfAbsent: z.boolean() }), output: HostOpQueryOutputSchema, owner: 'machine' },
+  'machine.folders.list': { input: FoldersListInputSchema, output: z.strictObject({ entries: z.array(FolderEntrySchema), cursor: z.string().nullable() }), owner: 'machine' }, // P5 O7 M9
 } as const satisfies Record<`machine.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {} as const satisfies Record<`machine.${string}`, z.ZodType>;

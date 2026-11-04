@@ -5,6 +5,8 @@
 // A command is decided in this order, the first refusal answering:
 //   1. it is in the offer table (`not-offered`), as the kind of request its row is: a call of an act is `act-required`,
 //      an act of a call `not-offered`; an action names this org, this machine and the channel's own device (`malformed`);
+//      P5 O7 M9: an `owners` row (the remote setup's) is asked by one of the machine's owners as the head now gives them
+//      (`owners-only` for anyone else, a grant-holder included), before its grade is read;
 //   2. it has a grade (`ungraded`), never a routing class (`grade`: no caller holds one); a registry command's input
 //      holds to its schema (`malformed`);
 //   3. the caller's class: a `web-cards` device reads listings and answers on its member's own sessions, nothing else
@@ -22,7 +24,9 @@
 //   6. the machine's policy: a head too old stops every action but a delivered state (`state-too-old`), read-only
 //      refuses everything graded above `view` (`read-only`), and a spawn (every `spawn`-graded row with the `machine`
 //      target: `sminos.spawn`, and from P5 O7 M4 `session.spawn`) is held to the ceiling, the known checkouts and its
-//      allowed fields (`ceiling`, `unknown-checkout`, `spec-field`);
+//      allowed fields (`ceiling`, `unknown-checkout`, `spec-field`; P5 O7 M9: `session.spawn`'s `trust` one of them for a
+//      machine owner alone), and (P5 O7 M9) a setup row naming a directory to the setup policy (`no-folder`,
+//      `outside-home`, `symlink-escape`, `protected`: policy.ts' `setupRefusal`), never to the spawn guard;
 //   7. what the class may say: a web-cards answer only takes or refuses what is pending (`class`);
 //   8. presence: a web-cards action's WebAuthn assertion, a native action's step-up where RL §5.6 asks for it
 //      (`step-up`).
@@ -88,7 +92,7 @@ import { BY_EFFECT, NO_RULE, QUESTION_REQUESTS, type EffectReads } from './by-ef
 import { machineOwnerMembers } from './grants';
 import { higher, isMachineGrade, isRoutingClass, isSessionRank, owns, rankAtLeast, sessionRank } from './grades';
 import { OFFERS, type OfferRow, type Offers } from './offers';
-import { spawnRefusal, type Policy } from './policy';
+import { MachineSetup, SETUP_DIRECTORY_COMMANDS, spawnRefusal, type Policy } from './policy';
 import { dispatchAs, type EndpointServices } from './services';
 import type { CheckoutSource, RecordSource, SessionRecord, SessionTarget } from './sources';
 import { Assertions, deviceOf, stepUpRequired, verifyDeviceStepUp } from './step-up';
@@ -155,6 +159,8 @@ export type AuthorizeContext = {
   artifacts?: ArtifactRanks;
   /** P5 O7 M5c: the leases and runs each channel holds, by which a lease's or a run's command names its artifact (leases.ts). */
   leases?: { lease(client: ClientRef, leaseId: string): string | null; run(client: ClientRef, runId: string): string | null };
+  /** P5 O7 M9: the setup policy's home and the folders each member opened (policy.ts); absent, this process's home. */
+  setup?: MachineSetup;
   /** The suites' seams: another offer table, grade declaration or registry (a fixture namespace). */
   offers?: Offers;
   gradeOf?(name: string): GradeSpec | undefined;
@@ -298,10 +304,12 @@ class Reads implements EffectReads {
 export class Authorizer {
   readonly #assertions: Assertions;
   readonly #bounds: CheckoutBounds;
+  readonly #setup: MachineSetup;
 
   constructor(private readonly ctx: AuthorizeContext) {
     this.#assertions = new Assertions(ctx.webauthn, () => ctx.webauthn.origin());
     this.#bounds = ctx.checkoutBounds ?? new CheckoutBounds();
+    this.#setup = ctx.setup ?? new MachineSetup();
   }
 
   /**
@@ -395,6 +403,8 @@ export class Authorizer {
     if (kind === 'act' && (action === undefined || action.action !== name || action.org !== org.head.org || action.machine !== ref || action.device !== who.device)) return no('malformed');
     // An act's args as the gate read them (P5 O7 M5a: decoded from the bytes codec's form, for a device that sent it).
     const input = request.input;
+    // P5 O7 M9: the setup rows, the machine's owners' alone, whatever right a grant gives.
+    if (row.owners === true && !(await reads.owners()).includes(who.member)) return no('owners-only');
 
     // 2. A grade, and an input its command takes.
     const spec = this.#gradeOf(name, row);
@@ -449,13 +459,19 @@ export class Authorizer {
     if (kind === 'act' && org.tooOld && name !== 'endpoint.state') return no('state-too-old');
     const policy = this.ctx.policy();
     if (grade !== null && grade !== 'list' && grade !== 'view' && policy.read_only) return no('read-only');
+    const owners = await reads.owners();
     if (grade === 'spawn' && row.target === 'machine') {
-      const refusal = spawnRefusal(input as Readonly<Record<string, unknown>>, policy, () => this.ctx.settingsMode(), this.ctx.checkouts);
+      // P5 O7 M9: a trust card's answer is a current owner's alone to give
+      const acceptsTrust = name === 'session.spawn' && owners.includes(who.member);
+      const refusal = spawnRefusal(input as Readonly<Record<string, unknown>>, policy, () => this.ctx.settingsMode(), this.ctx.checkouts, acceptsTrust);
+      if (refusal !== null) return no(refusal);
+    }
+    if (SETUP_DIRECTORY_COMMANDS.has(name)) {
+      const refusal = await this.#setup.refusal(who.member, input);
       if (refusal !== null) return no(refusal);
     }
 
     // 7. A web-cards answer on its member's own session, taking or refusing only what is pending.
-    const owners = await reads.owners();
     if (webCards && name !== 'endpoint.listings') {
       if (!owns(record, who.member, owners)) return no('class');
       if (!(await this.#asPending(name, input as Readonly<Record<string, unknown>>, reads))) return no('class');

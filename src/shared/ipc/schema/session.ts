@@ -756,6 +756,9 @@ export const SessionSpawnInputSchema = z.strictObject({
   model: z.string().min(1).optional(),
   effort: z.string().min(1).optional(),
   permission_mode: z.string().min(1),
+  // P5 O7 M9 (Interfaces §U): the asker accepted the checkout's trust card, so the machine runs the attested bootstrap the
+  // local start runs; the endpoint admits it for a machine owner only (src/endpoint/policy.ts' `spawnRefusal`)
+  trust: z.literal('accepted').optional(),
 });
 export type SessionSpawnInput = z.infer<typeof SessionSpawnInputSchema>;
 export const SPAWN_REFUSALS = ['untrusted', 'unknown-checkout', 'worktree-exists'] as const; // the reasons a caller words; any other is a sentence

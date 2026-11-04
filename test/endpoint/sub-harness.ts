@@ -40,6 +40,7 @@ import { createHostRuntime, type HostPort } from '@shared/host/runtime';
 import { REGISTRY, type WireRegistry } from '@shared/ipc/registry';
 import type { CommandInput } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
+import type { Home } from '@shared/machine/home-folders';
 import { opCommands } from '../../src/engine-host/ops';
 import { machineOps } from '../../src/services/machine-ops';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
@@ -664,6 +665,8 @@ export type StartOptions = {
   pty?: FakePtyHost;
   /** P5 O7 M5c review 1: a remote acquisition's bound (`EndpointOptions.acquireWithinMs`). */
   acquireWithinMs?: number;
+  /** P5 O7 M9: the home and platform the setup policy reads (a fake home: no suite reads a real protected folder). */
+  setup?: Home;
 };
 
 export async function startEndpoint(org: Org, started: Fixture[], options: StartOptions = {}): Promise<Fixture> {
@@ -708,7 +711,7 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
     sleep: (ms) => sleep(Math.min(ms, 50)),
     env: { MAWS_ENDPOINT_DIRECT: '1' },
     direct: { interfaces: () => ({ utun4: [{ address: TAILNET, family: 'IPv4', internal: false, netmask: '255.255.255.255', mac: '00:00:00:00:00:00', cidr: null }] }), listen, ...(options.limits === undefined ? {} : { limits: options.limits }) },
-    authorization: { records, checkouts: { known: (path) => endpoint?.rl10.members.known(path) ?? false }, settingsMode: () => 'default' },
+    authorization: { records, checkouts: { known: (path) => endpoint?.rl10.members.known(path) ?? false }, settingsMode: () => 'default', ...(options.setup === undefined ? {} : { setup: options.setup }) },
     subscriptions: options.subscriptions,
     ...(options.acquireWithinMs === undefined ? {} : { acquireWithinMs: options.acquireWithinMs }),
   });

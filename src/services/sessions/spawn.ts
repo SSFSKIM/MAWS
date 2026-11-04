@@ -73,7 +73,9 @@ async function spawn(bus: Pick<ServicesBus, 'onEmitted'>, deps: SpawnDeps, input
   let outcome: StartOutcome;
   try {
     const message = input.brief === undefined ? null : { content: input.brief, display: input.brief };
-    outcome = await deps.sessions.startSession(appSessionId, { message, options: {} });
+    // P5 O7 M9: the trust card answered on the asking device (an owner's alone, the endpoint's policy) runs the attested
+    // bootstrap the local start runs for an accepted card; MAWS writes no trust itself
+    outcome = await deps.sessions.startSession(appSessionId, { message, options: input.trust === 'accepted' ? { trust: 'accepted' } : {} });
   } catch (error) {
     launching.cancel();
     if (error instanceof IntentRefused) return abandon(error.message);

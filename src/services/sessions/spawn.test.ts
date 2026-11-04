@@ -362,4 +362,18 @@ describe('session.spawn on the spine', () => {
     expect(await bus.invoke('session.intent.list', undefined)).toEqual({ ok: true, value: { intents: [] } });
     expect(launched).toEqual([]);
   });
+
+  // P5 O7 M9 ("Remote setup"): the trust card answered on the asking device (the endpoint admits `trust` from a machine
+  // owner alone) runs the attested bootstrap the local start runs, then the session's own launch.
+  it('runs the trust bootstrap for an untrusted checkout when the spawn carries `trust: accepted`, then launches the session', async () => {
+    const { bus, launched } = await composed();
+    const spawned = await bus.invoke('session.spawn', { checkout, permission_mode: 'default', trust: 'accepted' });
+    expect(spawned).toMatchObject({ ok: true, value: { status: 'ok' } });
+    const appSessionId = (spawned as { value: { appSessionId: AppSessionId } }).value.appSessionId;
+    await expect.poll(() => launched.length).toBe(2);
+    const [bootstrap, session] = launched;
+    expect(bootstrap).toMatchObject({ cwd: checkout, trust: { accepted: true } });
+    expect(bootstrap!.appSessionId).not.toBe(appSessionId);
+    expect(session).toMatchObject({ appSessionId, cwd: checkout });
+  });
 });

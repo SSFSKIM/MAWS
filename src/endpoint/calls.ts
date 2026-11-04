@@ -47,6 +47,9 @@
 //     is the endpoint's own: the device's window report, `connectors.windowShown` under the channel's ref.
 //   - P5 O7 M5c round 3: `artifacts.holdAssets` and `artifacts.releaseAssets` are the endpoint's own too: a remote
 //     dashboard's snapshot holds, taken on the engine host and kept per channel (asset-holds.ts).
+//   - P5 O7 M9: `machine.folders.list` goes to the machine's services as any `machine` row; one with `open: true` that
+//     they answered keeps the protected folder it read in as opened by the caller (policy.ts' `MachineSetup`), which the
+//     setup policy then lets them register a folder in.
 //   - P5 O7 M5c review 1: an acquisition (`connectors.open`, `artifacts.holdAssets`) is bounded from the call's arrival
 //     under the device's call deadline (acquire.ts): past it the call answers `timeout`, and what the machine answers
 //     after it is let go of at once (the lease closed, the hold released) under the channel's ref.
@@ -69,6 +72,7 @@ import type { AssetHolds } from './asset-holds';
 import type { Leases } from './leases';
 import type { SessionReport } from './listings';
 import { OFFERS, type Offers } from './offers';
+import type { MachineSetup } from './policy';
 import type { Member } from './rl10/members';
 import { dispatchAs, type EndpointServices } from './services';
 import type { RecordSource, SessionTarget } from './sources';
@@ -103,6 +107,8 @@ export type CallsContext = {
   acquireWithinMs?: number;
   /** P5 O7 M8: whether the engine host's welcome lists `capability` now (EndpointServices.engineHostLists). */
   engineHostLists(capability: string): boolean;
+  /** P5 O7 M9: the folders each member opened (the authorizer's own); absent, none is kept. */
+  setup?: Pick<MachineSetup, 'listed'>;
   log(line: string): void;
 };
 
@@ -282,6 +288,7 @@ export class Calls {
     else if (m.name === 'artifacts.releaseAssets' && row?.executor === 'endpoint') run = this.ctx.assetHolds.release(channel, m.input);
     else if ((row?.executor === 'engine-host' || row?.executor === 'machine') && row.target === 'artifact' && SESSION_NAMING.has(m.name)) run = this.#sessionSafe(dispatch, row.executor, channel.member, m);
     else if (m.name === 'fs.unfollow' && row?.executor === 'engine-host' && !this.ctx.engineHostLists(FOLLOW_OWNERS_CAPABILITY)) run = Promise.resolve(this.#unownedUnfollow());
+    else if (m.name === 'machine.folders.list' && row?.executor === 'machine') run = this.#folders(dispatch, channel.member, m);
     else if (row?.executor === 'engine-host' || (row?.executor === 'machine' && m.name !== 'daemon.status')) run = this.#forward(dispatch, row.executor, m);
     else if (row?.executor === 'sminos' && Object.hasOwn(LANE_A, m.name)) run = Promise.resolve(this.#laneA(channel, m));
     else if (row?.executor === 'machine') run = this.#daemonStatus(dispatch);
@@ -297,6 +304,13 @@ export class Calls {
   #unownedUnfollow(): Result {
     this.ctx.log(`endpoint: the engine host does not list \`${FOLLOW_OWNERS_CAPABILITY}\`: a remote \`fs.unfollow\` answered unavailable, since it would stop another client's follow`);
     return { ok: false, code: 'unavailable' };
+  }
+
+  /** P5 O7 M9: the folder list, an answered open kept as the caller's. */
+  async #folders(dispatch: EndpointServices['dispatch'], member: string, m: CallMessage): Promise<Result> {
+    const result = await this.#forward(dispatch, 'machine', m);
+    if (result.ok) this.ctx.setup?.listed(member, m.input);
+    return result;
   }
 
   /** A read its executor answers raw: the engine host's, or the machine's services', a failure with its message (M8). */

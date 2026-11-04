@@ -49,6 +49,11 @@ export type OfferRow = {
   accepts?(input: unknown): boolean;
   /** P5 O7 M5b: the stream kind a `stream` row admits (its open's kind fields are the row's input). */
   stream?: ReadStreamKind;
+  /**
+   * P5 O7 M9: the machine's owners' alone (the remote setup's rows): checked before the grade (authorize.ts), anyone else,
+   * a grant-holder included, refused `owners-only`.
+   */
+  owners?: true;
 };
 
 /**
@@ -110,6 +115,13 @@ const isBrowserControlArgs = (input: unknown): boolean =>
 const isWindowShown = (input: unknown): boolean => isFields(input, ['shown']) && typeof input.shown === 'boolean';
 /** P5 O7 M5c: the owner's connector and grant management on the machine (`machine-admin`, a step-up each), under `machine.op`. */
 const machineAdmin: OfferRow = { kind: 'act', executor: 'machine', target: 'machine' };
+/**
+ * P5 O7 M9: the remote setup's rows, the machine's owners' alone. The folder list and the trust read are calls at `list`
+ * (an owner reads their own machine's folder names and trust state without a step-up per page; their registry grade is
+ * `spawn`); the registration is a `machine-admin` act, a step-up each, held to the setup policy (policy.ts), never to the
+ * spawn guard.
+ */
+const ownersCall: OfferRow = { kind: 'call', executor: 'machine', target: 'machine', grade: 'list', owners: true };
 /** P5 O7 M8: `fs.unfollow` from another machine names the agent whose follow it lets go of. */
 const namesAnAgent = (input: unknown): boolean => typeof input === 'object' && input !== null && typeof (input as { agentId?: unknown }).agentId === 'string';
 /** `forward.open`'s args: exactly a port. */
@@ -207,6 +219,11 @@ export const OFFERS: Offers = {
     // and the projects "+ Session"'s machine menu lists (`list`).
     'session.spawn': { kind: 'act', executor: 'machine', target: 'machine' },
     'session.projects.list': { kind: 'call', executor: 'machine', target: 'machine' },
+    // P5 O7 M9: "+ Session" on a machine with no checkout of the project: its folders, the chosen one registered, its trust
+    // read for the trust card (whose answer goes as `session.spawn`'s `trust`), each the machine's owners' alone.
+    'machine.folders.list': ownersCall,
+    'session.trust.check': ownersCall,
+    'session.projects.addFolder': { kind: 'act', executor: 'machine', target: 'machine', grade: 'machine-admin', owners: true },
     // P5 O7 M3: a remote terminal's acts, each `shell` on the machine, under the pty host's ledger; the terminal's bytes go
     // over a stream opened under the spawn or the attach (streams.ts). `pty.listFor` is `pty.list` for one session, since an
     // act's args are an object and `pty.list` takes none.
