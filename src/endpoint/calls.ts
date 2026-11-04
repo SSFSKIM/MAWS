@@ -102,7 +102,19 @@ export type CallsContext = {
 };
 
 type Fields = Record<string, unknown>;
-type Result = { ok: true; output: unknown } | { ok: false; code: string };
+type Result = { ok: true; output: unknown } | { ok: false; code: string; message?: string };
+/**
+ * P5 O7 M8: a forwarded failure's message reaches the device as the local IPC carries it (a missing file's `not found:
+ * <path>` and the files service's refusal answer one code, `internal`, told apart by the message), at most this many
+ * characters of it.
+ */
+export const FAILURE_MESSAGE_MAX = 512;
+/** `message` within FAILURE_MESSAGE_MAX UTF-16 units, never cut between a surrogate pair's halves. */
+export function failureMessage(message: string): string {
+  if (message.length <= FAILURE_MESSAGE_MAX) return message;
+  const end = /[\uD800-\uDBFF]/.test(message[FAILURE_MESSAGE_MAX - 1]) ? FAILURE_MESSAGE_MAX - 1 : FAILURE_MESSAGE_MAX;
+  return message.slice(0, end);
+}
 const isObject = (v: unknown): v is Fields => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isText = (v: unknown, max = 256): v is string => typeof v === 'string' && v !== '' && v.length <= max;
 const isInt = (v: unknown, min: number, max: number): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min && v <= max;
@@ -244,9 +256,9 @@ export class Calls {
   execute(channel: RemoteChannel, m: CallMessage, decision: Granted = {}): void {
     const offers = this.ctx.offers ?? OFFERS;
     const row = Object.hasOwn(offers.commands, m.name) ? offers.commands[m.name] : undefined;
-    const answer = (result: { ok: true; output: unknown } | { ok: false; code: string }) => {
+    const answer = (result: Result) => {
       if (channel.closed) return;
-      if (!result.ok) return void channel.send({ t: 'result', id: m.id, ok: false, error: { code: result.code } });
+      if (!result.ok) return void channel.send({ t: 'result', id: m.id, ok: false, error: { code: result.code, ...(result.message === undefined ? {} : { message: result.message }) } });
       const output = writeBytes(channel, result.output);
       if (Buffer.byteLength(JSON.stringify(output ?? null)) > MESSAGE_MAX_BYTES - 1024) return void channel.send({ t: 'result', id: m.id, ok: false, error: { code: 'too-large' } });
       channel.send({ t: 'result', id: m.id, ok: true, output });
@@ -275,12 +287,13 @@ export class Calls {
     });
   }
 
-  /** A read its executor answers raw: the engine host's, or the machine's services'. */
-  async #forward(dispatch: EndpointServices['dispatch'], owner: 'engine-host' | 'machine', m: CallMessage): Promise<{ ok: true; output: unknown } | { ok: false; code: string }> {
+  /** A read its executor answers raw: the engine host's, or the machine's services', a failure with its message (M8). */
+  async #forward(dispatch: EndpointServices['dispatch'], owner: 'engine-host' | 'machine', m: CallMessage): Promise<Result> {
     const response = await dispatch(owner, m.name, m.input === null ? undefined : m.input);
     if (response.ok) return { ok: true, output: response.value ?? null };
     const code = response.error.code === 'host_unavailable' || response.error.code === 'timeout' ? 'unavailable' : response.error.code;
-    return { ok: false, code };
+    const message = response.error.message;
+    return { ok: false, code, ...(typeof message === 'string' && message !== '' ? { message: failureMessage(message) } : {}) };
   }
 
   /**
@@ -359,7 +372,9 @@ export class Calls {
    */
   async #sessionSafe(dispatch: EndpointServices['dispatch'], owner: 'engine-host' | 'machine', member: string, m: CallMessage): Promise<Result | (() => Result)> {
     const result = await this.#forward(dispatch, owner, m);
-    return result.ok ? this.ctx.sessionSafe.prepare(member, m.name, result.output, dispatch) : result;
+    // A failure goes with its code alone: its message is the store's words, which no projection reads (it could name a
+    // session the caller doesn't view).
+    return result.ok ? this.ctx.sessionSafe.prepare(member, m.name, result.output, dispatch) : { ok: false, code: result.code };
   }
 
   /**
