@@ -794,6 +794,7 @@ A local session past the cap is reached through Resume…, but a listed one has 
   - The listed row's last activity is its listing's latest `issued` or status change.
 
   A just-spawned, working remote session then leads the way a working local one does.
+- **A session spawned from this app leads its group until its first turn ends, on any machine, local and remote alike** (the architect's ruling of 2026-11-04 under P5 acceptance 5, a sidebar-order change made in the owner's place, which the owner can overrule). Today local ranks unread above working (`src/renderer/src/overview/derive.ts`), so a just-spawned local session in a group holding more unread sessions than the cap is cut too. After the first turn it ranks by its state, and Resume… reaches it past the cap. Red first in `derive.test.ts`, for both lanes: a group already holding more unread sessions than the cap, then a just-spawned local session and a just-spawned remote one, each within the visible rows until its first turn ends.
 - "Always drawn" (listed rows exempt from the cap) is rejected: a member with many listed sessions would get an uncapped group.
 
 The acceptance is the failure the owner saw. In a project group already holding more busy local records (pinned, waiting, unread, working) than the cap, a just-spawned remote session shows within the visible rows within 5 s and stays reachable through Resume… after its tab closes.
@@ -2574,6 +2575,9 @@ P5 findings of M5's re-plan, continued from F15:
   - The owner's 05:36Z screenshot shows only the MacBook's mini group: six rows, no "Testing session", no Show more. The session wasn't misfiled under the machine, and the MAWS group's count stays unconfirmed.
   - The stale "Working…" cause stays unsettled. The MacBook keeps no main log on disk (main's lines go to stdout, which a Dock launch doesn't keep), so M8 relies on the gap rule. A persistent main log is a tracker line in M8's PR.
   Rationale: The recorded identities rule out a misfile, and the code leaves a listed row nowhere to go past the cap.
+  Date/Author: 2026-11-04, O7's executor (the controller), on the architect's ruling.
+- Decision: A session spawned from this app leads its sidebar group until its first turn ends, local and remote alike (2026-11-04, the architect, under P5 acceptance 5, O7's acceptance 4). After that it ranks by its state, and Resume… reaches it past the cap. **This is a sidebar-order change the architect made in the owner's place, and the owner can overrule it.**
+  Rationale: Acceptance 5's intent is that the person sees the session they just started, and a capped-away row fails that whichever machine it runs on. The local priority sort ranks unread above working, so the same loss happens locally; fixing both keeps parity. The alternative, strict parity with the acceptance relaxed to "ranked by its state, reachable through Resume…", would leave a busy group hiding a just-started session.
   Date/Author: 2026-11-04, O7's executor (the controller), on the architect's ruling.
 
 ## Outcomes & Retrospective
