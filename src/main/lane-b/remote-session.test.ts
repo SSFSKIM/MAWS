@@ -586,15 +586,9 @@ describe('the panels across a reopening', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(l.of('fs.tasksChanged')).toEqual([{ listId: 'team-list' }]);
     expect(l.of('fs.subagentsChanged')).toEqual([{ appSessionId: APP, agents: [] }]);
-    expect(l.of('fs.workflowChanged')).toEqual([{ appSessionId: APP, runId: 'run-9' }]);
+    expect(l.of('fs.workflowChanged')).toEqual([{ appSessionId: APP, runId: '' }]); // no run in particular: the list as a whole
     expect(l.of('remote.reopened')).toEqual([{ appSessionId: APP }]);
-    // a run the stream named is the one said, with no read of the runs
-    sub.sink.snapshot({ epoch: 'L1', seq: 1 }, { workflow: { runId: 'run-3' } });
-    sub.sink.ended('behind');
-    l.link.open()[0].sink.subbed('replay', { epoch: 'L1', seq: 1 });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(l.of('fs.workflowChanged').at(-1)).toEqual({ appSessionId: APP, runId: 'run-3' });
-    expect(l.link.calls.filter((c) => c.name === 'fs.workflows')).toHaveLength(1);
+    expect(l.link.calls.filter((c) => c.name === 'fs.workflows')).toEqual([]); // the panels read their own
   });
 });
 
@@ -627,5 +621,50 @@ describe('`behind` bounded by progress', () => {
     deliver(moving, { epoch: 'L1', seq: 5, idx: 0 }, notice('L1', 5, 0));
     moving.sink.ended('behind');
     expect(opens()).toBe(1);
+  });
+});
+
+// m8-3's task review, round 2 (the reviewer's probes, ported).
+describe('a reopening’s races, round 2', () => {
+  it('keeps doubling the fallback’s backoff across openings that end `behind` with no progress', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    sub.sink.ended('behind');
+    for (const delay of [250, 500, 1000]) {
+      const next = l.link.open()[0];
+      next.sink.subbed('replay', { epoch: 'L1', seq: 0 });
+      next.sink.ended('behind');
+      await vi.advanceTimersByTimeAsync(delay);
+      expect(l.link.open()).toHaveLength(1);
+    }
+    const next = l.link.open()[0];
+    next.sink.subbed('replay', { epoch: 'L1', seq: 0 });
+    next.sink.ended('behind');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(l.link.open()).toHaveLength(0); // the second fallback waits 2 s
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(l.link.open()).toHaveLength(1);
+  });
+
+  it('never replaces a newer subagents part with the reopening’s older read', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    let answer!: (value: unknown) => void;
+    l.link.answers.set('fs.subagents', () => new Promise((resolve) => (answer = resolve)) as never);
+    sub.sink.subbed('replay', { epoch: 'L1', seq: 0 });
+    const agents = [{ agentId: 'agent-1', meta: null, transcriptPath: '/scratch/agent-1.jsonl', size: 0, mtimeMs: 1, runId: null }];
+    sub.sink.snapshot({ epoch: 'L1', seq: 1 }, { subagents: { agents } });
+    answer({ ok: true, output: { agents: [] } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('fs.subagentsChanged').at(-1)?.agents).toEqual(agents);
+  });
+
+  it('tells the workflow panels to list again at a reopening though no run was ever named and none is listed now', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    l.link.answers.set('fs.workflows', () => ({ ok: true, output: { runs: [] } }));
+    sub.sink.subbed('replay', { epoch: 'L1', seq: 0 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('fs.workflowChanged')).toEqual([{ appSessionId: APP, runId: '' }]);
   });
 });

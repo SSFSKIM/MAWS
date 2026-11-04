@@ -46,9 +46,9 @@
 //   the machine's bound) opens again from the cursor at once, and that opening asks; one with no progress since the last
 //   backs off, and three in a row show the gap and fall back to the idle backoff (`#behind`). At each opening after the first
 //   (m8-3's task review) every panel is made to list again, since a notice may have been lost on the way: the session's
-//   task list (`fs.tasksChanged`), its subagents (`fs.subagents` read, said as `fs.subagentsChanged`), its workflow runs
-//   (`fs.workflowChanged` for the last run the stream named, else for the last `fs.workflows` lists) and, for the side
-//   questions, which have no change event of their own, `remote.reopened`.
+//   task list (`fs.tasksChanged`), its subagents (`fs.subagents` read, said as `fs.subagentsChanged` unless a newer part
+//   came first), its workflow runs (`fs.workflowChanged` naming no run, `runId: ''`: the list as a whole) and, for the
+//   side questions, which have no change event of their own, `remote.reopened`.
 // - An event that doesn't read (P5 O7 M8, "What draws Working…") is a gap at its place, never a silent drop: the
 //   session's status and record are read again (`session.status`, `session.get`) and folded in, so a turn a dropped
 //   `turn.ended` left open closes by the machine's word; a status the stream delivers meanwhile stands over the re-read.
@@ -165,9 +165,10 @@ export class RemoteSession {
   /** P5 O7 M8: the operations heard of, oldest first. */
   #ops = new Map<string, Op>();
   /** m8-3 review (B): where the stream stood at its last `behind`, and the reopens in a row since that made no progress. */
-  #behindAt: { at: Cursor | null; stalls: number } | null = null;
+  #behindAt: { at: Cursor | null; stalls: number; fallbackMs: number } | null = null;
   /** m8-3 review: the last workflow run the stream named, said again at a reopening. */
-  #lastRun: string | null = null;
+  /** m8-3 review round 2: `subagents` parts the stream delivered, so a reopening's read that answers after one is dropped. */
+  #subagentParts = 0;
   /** P5 O7 M8: the `subbed`s heard, each an opening the waiters are asked at. */
   #openings = 0;
   /** P5 O7 M8: status parts the stream delivered, so a re-read that answers after one doesn't replace it. */
@@ -507,11 +508,11 @@ export class RemoteSession {
     }
     // P5 O7 M8: the notices; `side` is its completion's `operation` already (the header)
     if (isObject(value.operation)) this.#operation(value.operation);
-    if (isObject(value.subagents)) this.#emit('fs.subagentsChanged', { appSessionId: app, agents: value.subagents.agents });
-    if (isObject(value.workflow)) {
-      if (typeof value.workflow.runId === 'string') this.#lastRun = value.workflow.runId;
-      this.#emit('fs.workflowChanged', { appSessionId: app, runId: value.workflow.runId });
+    if (isObject(value.subagents)) {
+      this.#subagentParts += 1;
+      this.#emit('fs.subagentsChanged', { appSessionId: app, agents: value.subagents.agents });
     }
+    if (isObject(value.workflow)) this.#emit('fs.workflowChanged', { appSessionId: app, runId: value.workflow.runId });
     if (isObject(value.tasks)) this.#emit('fs.tasksChanged', { listId: value.tasks.listId });
   }
 
@@ -574,27 +575,30 @@ export class RemoteSession {
   /**
    * An `ended('behind')`: opened again at once when the cursor moved since the last one; while it stands, after
    * BEHIND_FIRST_MS doubling to BEHIND_MAX_MS; after BEHIND_STALLS reopens in a row with no progress, the stream shows
-   * the gap and is tried on the idle backoff, as an `unavailable` one is.
+   * the gap and is tried on a backoff of the idle one's steps, its own, which an opening's `subbed` doesn't reset and only
+   * progress does.
    */
   #behind(): void {
     const at = this.#cursor;
     const last = this.#behindAt;
     const moved = last === null || JSON.stringify(last.at) !== JSON.stringify(at);
     const stalls = moved ? 0 : last.stalls + 1;
-    this.#behindAt = { at, stalls };
+    // the fallback's own backoff, kept across the openings (a `subbed` resets the idle one) and reset only by progress
+    const [firstMs, capMs] = this.#deps.timing.idleRetryMs;
+    const fallbackMs = moved ? firstMs : last.fallbackMs;
+    this.#behindAt = { at, stalls, fallbackMs: stalls >= BEHIND_STALLS ? Math.min(fallbackMs * 2, capMs) : fallbackMs };
     if (stalls === 0) return this.#subscribe();
     if (stalls >= BEHIND_STALLS) {
-      this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: the stream ended behind ${stalls} times in a row with no progress; tried on the idle backoff`);
+      this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: the stream ended behind ${stalls} times in a row with no progress; tried again in ${fallbackMs} ms`);
       this.state.stream = 'gap';
       this.publish();
-      return this.#later(() => this.#subscribe());
     }
     this.#timer = setTimeout(
       () => {
         this.#timer = null;
         if (this.#running) this.#subscribe();
       },
-      Math.min(BEHIND_FIRST_MS * 2 ** (stalls - 1), BEHIND_MAX_MS),
+      stalls >= BEHIND_STALLS ? fallbackMs : Math.min(BEHIND_FIRST_MS * 2 ** (stalls - 1), BEHIND_MAX_MS),
     );
   }
 
@@ -606,22 +610,19 @@ export class RemoteSession {
     const list = this.taskList();
     if (list !== null) this.#emit('fs.tasksChanged', { listId: list });
     this.#emit('remote.reopened', { appSessionId: app });
-    void this.#read('fs.subagents', token, (value) => this.#emit('fs.subagentsChanged', { appSessionId: app, agents: (value as { agents: unknown }).agents }));
-    if (this.#lastRun !== null) this.#emit('fs.workflowChanged', { appSessionId: app, runId: this.#lastRun });
-    else
-      void this.#read('fs.workflows', token, (value) => {
-        const runId = (value as { runs: Array<{ runId: string }> }).runs.at(-1)?.runId;
-        if (runId !== undefined) this.#emit('fs.workflowChanged', { appSessionId: app, runId });
-      });
+    // the runs as a whole (no run in particular, `runId: ''`): both of the workflow panels list them again on any change
+    this.#emit('fs.workflowChanged', { appSessionId: app, runId: '' });
+    void this.#readSubagents(token);
   }
 
-  /** A session read over the link for the subscription `token` is; one that fails or doesn't read is logged. */
-  async #read(name: 'fs.subagents' | 'fs.workflows', token: object, then: (value: unknown) => void): Promise<void> {
-    const answer = await this.link.call(name, { appSessionId: this.state.app });
-    if (this.#token !== token || !this.#running) return;
-    const read = answer.ok ? link.readCommandOutput(name, answer.output) : null;
-    if (read?.ok === true) return then(read.value);
-    this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: ${name} at a reopening ${answer.ok ? 'answered what doesn’t read' : `failed (${answer.error.code})`}; its panel lists at its next change`);
+  /** The subagents read and said, unless the stream delivered a `subagents` part while the read was out (it is newer). */
+  async #readSubagents(token: object): Promise<void> {
+    const parts = this.#subagentParts;
+    const answer = await this.link.call('fs.subagents', { appSessionId: this.state.app });
+    if (this.#token !== token || !this.#running || this.#subagentParts !== parts) return;
+    const read = answer.ok ? link.readCommandOutput('fs.subagents', answer.output) : null;
+    if (read?.ok === true) return this.#emit('fs.subagentsChanged', { appSessionId: this.state.app, agents: (read.value as { agents: unknown }).agents });
+    this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: fs.subagents at a reopening ${answer.ok ? 'answered what doesn’t read' : `failed (${answer.error.code})`}; its panel lists at its next change`);
   }
 
   // ---- An event that doesn't read (P5 O7 M8) --------------------------------------------------------------------------
