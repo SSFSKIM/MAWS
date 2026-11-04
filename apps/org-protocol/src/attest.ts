@@ -7,7 +7,8 @@
 // org-owned machine, or its delegation's owners for a certificate), or when a proof in `ownersProof` proves it. A proof
 // is a step-up-signed action that names the sending machine, its step-up key verifying by RL8's key rule against the
 // action's `created`: the device's current key, or one retired at a `notAfter` no earlier, never a revoked one.
-//   - a spawn (`sminos.spawn`, later `session.launch`) proves its signer's member;
+//   - a spawn (lane A's `sminos.spawn`, the app's remote `session.spawn`, later `session.launch`) proves its signer's
+//     member;
 //   - an owner-add (`record.owners` with `{ add: true, member }`, O8's) proves the member it names, provided its signer's
 //     member is an owner by the machine or by an earlier proof in the list, so a chain of additions verifies in order.
 // Grants play no part (RL §5.8). The machine's owners are judged at the event's (or the proof's) own `created`, with the
@@ -23,7 +24,7 @@ import { accept, refuse, type Verdict } from './verdict.ts';
 export type Attest = { owners: MemberId[]; ownersProof: Action[]; origin: { kind: string; requester?: string; spawnerSession?: string }; stateVersion: number };
 
 /** The actions whose signer's member a spawn proof proves. */
-export const SPAWN_ACTIONS: readonly string[] = ['sminos.spawn', 'session.launch'];
+export const SPAWN_ACTIONS: readonly string[] = ['sminos.spawn', 'session.spawn', 'session.launch'];
 /** The owner-add action (O8): `args: { add: true, member }`. */
 export const OWNER_ADD_ACTION = 'record.owners';
 
