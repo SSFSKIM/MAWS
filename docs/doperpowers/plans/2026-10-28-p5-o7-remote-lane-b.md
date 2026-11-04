@@ -1694,8 +1694,10 @@ The link's `subscribe` takes `{feed, session?}` in place of `session` alone.
 | `files.readUploads` (new, `internal`: the endpoint's resolver for `uploads`, the sending session's own upload root only) | not offered; called by the endpoint | `internal` | M8 |
 | `fs.unfollow` | `laneB('call')` with `accepts: namesAnAgent` (the caller's own follow of a named agent; the session-wide form refused) | `view` | M8 |
 
+  *(m8-3.)* The device turns a session-wide `fs.unfollow {agentId: null}` of a remote session into one named unfollow for each agent it follows there. It records each from its own `fs.agentEvents` reads, waits for any read still out, and counts a read that failed as possibly followed. An agent is removed only when its unfollow succeeds, and a refusal is the answer.
+
 - **`REMOTE_UNAVAILABLE`** (`src/shared/ipc/remote-unavailable.ts`): `Record<CommandName, string>`, each command's reason in the words its control shows ("Not on another machine yet: …"). It is read by the renderer's controls and by `test/lane-b/offer-coverage.test.ts`.
-- **The `operation` and panel parts** (`src/shared/host/stream-catchup.ts`): `{part: 'operation', body: OperationEvent}`, `{part: 'subagents', body: {agents}}`, `{part: 'workflow', body: {runId}}` and `{part: 'side', body: {exchanges}}`. Each is emitted by `remote-session.ts` as its event (`session.operation`, `fs.subagentsChanged`, `fs.workflowChanged`, the side store's change) under the machine's address. An older device drops an unknown part.
+- **The `operation` and panel parts** (`src/shared/host/stream-catchup.ts`): `{part: 'operation', body: OperationEvent}`, `{part: 'subagents', body: {agents}}`, `{part: 'workflow', body: {runId}}` and `{part: 'side', body: {exchanges}}`. Each is emitted by `remote-session.ts` as its event (`session.operation`, `fs.subagentsChanged`, `fs.workflowChanged`, the side store's change) under the machine's address. An older device drops an unknown part. *(m8-3, 2026-11-04.)* The device emits nothing for `side`: a side question's completion is its `operation` part, which the side store patches its log from or re-lists on. At every `subbed` after a stream's first (a `behind` reopen or the link's resubscription), main makes each panel re-list: `fs.tasksChanged` for the session's list, an `fs.subagents` read emitted as `fs.subagentsChanged` (dropped if a newer `subagents` part arrived while it was out), `fs.workflowChanged {appSessionId, runId: ''}` (both consumers re-list the session's runs whatever the `runId`), and `remote.reopened {appSessionId}` (main-owned, outside the wire manifest) for the side store's `refreshSide`. A `behind` end reopens from the cursor at once after progress; with the cursor standing it backs off from 250 ms doubling to 5 s, and after three reopens in a row with no progress the stream shows `gap` and falls back to the idle retry with its own doubling backoff, which only cursor progress resets.
 - **`fs.tasks`'s input** gains `appSessionId?` (`src/shared/ipc/schema/fs.ts`), required by the `task-list` rule over RL2; a `tasks` part carries `fs.tasksChanged`.
 - **`machine.folders.list`** (M9): input `{path?: string, open?: true, cursor?: string}`; output `{entries: [{name, path, protected: boolean}], cursor: string | null}`. `protected` marks a macOS TCC-protected folder, which is read inside only with `open: true`.
 - **The forwarded failure** (`src/endpoint/calls.ts`): `{code, message?}`, with the message capped at 512 characters.
@@ -1709,8 +1711,8 @@ The link's `subscribe` takes `{feed, session?}` in place of `session` alone.
 - **`route-unsupported`**: a start refusal for `route: 'machine'` on an engine host without `engine.route-machine` when the machine names a host other than the relay.
 - **`engine.route-machine`**: an engine host capability; main sends `route: 'machine'` only to a host listing it.
 - **`setupRefusal`** (`src/endpoint/policy.ts`): `addFolder`'s directory exists, its real path is under the machine's home with no symlink escape, and it is not inside a protected folder that was not opened.
-- **The operation outcomes** (M8): `OperationTable` keeps each completed outcome by `opId`, at most 64 per session for 10 minutes; `session.operations {appSessionId, opIds}` (new, `view`, `laneB('call')`) answers `{outcomes: [{opId, event} | {opId, pending: true} | {opId, unknown: true}]}`; the `operation` part's snapshot key is `operation:<opId>`.
-- **The send's uploads** (M8): `session.send`'s input gains `uploads?: [{uploadId, as: 'document'}]`, behind `rl2.upload-blocks` (RL2 1.9). The endpoint reads each through `files.readUploads`: the sending session's own upload root, no link on the way, still there, within the day, a PDF within the engine's bound. A refusal is `ack refused malformed`, with nothing queued, and the engine host refuses a send that still names uploads.
+- **The operation outcomes** (M8): `OperationTable` keeps each completed outcome by `opId`, at most 64 per session for 10 minutes; `session.operations {appSessionId, opIds}` (new, `view`, `laneB('call')`) answers `{outcomes: [{opId, event} | {opId, pending: true} | {opId, unknown: true}]}`; the `operation` part's snapshot key is `operation:<opId>`. *(m8-3.)* The device asks it at every `subbed` for the receipts its waiters hold, and at once for a receipt heard after its opening had reconciled. A completion is emitted once, and a late one once more. A waiter's first may be the late one the host kept in its place, said `late: false`. `unknown` settles as `engine_error` with the spec's sentence, and anything later for that opId is dropped. Every stream end invalidates that subscription's in-flight status and record reads.
+- **The send's uploads** (M8): `session.send`'s input gains `uploads?: [{uploadId, as: 'document'}]`, behind `rl2.upload-blocks` (RL2 1.9). The endpoint reads each through `files.readUploads`: the sending session's own upload root, no link on the way, still there, within the day, a PDF within the engine's bound. A refusal is `ack refused malformed`, with nothing queued, and the engine host refuses a send that still names uploads. *(m8-3.)* The device sends `uploads` with the act's `requires: 'rl2.upload-blocks'` when the current peer lists it, or when there is no current channel (the act waits for one within its `sendBy`, and the channel it goes on judges it). A `not-offered` from a channel whose peer lists no `rl2.upload-blocks` is sent again, within the same bound, with the mention alone, and logged. Any other refusal is the send's error. A `malformed` refusal of a send that carried uploads is answered `invalid_input` with REMOTE_UPLOAD_REFUSED_WORDS ("The message wasn’t sent. If its attachment is more than a day old or isn’t a supported file, attach it again.", the architect's wording, since the refusal can't say which part failed) and `issues: {refusal: 'malformed', uploads: 'refused'}`.
 - **`connectors.signInServer`** (M8) takes `{name, scope, cwd, appSessionId}`. `connectors.signIn`'s `path` stays required, because a request field moved from required to optional breaks an older receiver.
 - **`session.spawn`'s input** gains `trust?: 'accepted'`, accepted by `spawnRefusal` only for a current machine owner, `spec-field` for anyone else.
 - **`mawsd endpoint sync`** (M10): it runs `syncNow()` then `promoteIfListed`, and answers as `endpoint status --json`.
@@ -2636,6 +2638,41 @@ P5 findings of M5's re-plan, continued from F15:
   3. **Uploads fail closed where an open can't be confirmed.** `no-link.ts` names the condition `OPENS_CONFIRMED`: false off macOS when there is no `/proc/self/fd`, because there an ancestor turned into a link after the walk would lead an open out of the root unseen. `confirmOpens()` (`upload-roots.ts`) runs before `readUpload` walks and before `files.upload` writes its record, the exclude or any file. Both refuse with their existing typed refusal (`3b8ef5e22`, `8e449ce85`; the write side was added beyond the finding).
   Lane A's `media.ts` still writes through `saveFiles` without the check. That is pre-existing: remote lane A refuses `laneA.media`, and the macOS path opens every component atomically. It stays as conditional debt (non-macOS, no `/proc`, a same-uid client), not this task's scope. The static gate passed on `8e449ce85` (run 41819631532).
   Rationale: the task review and re-review (`task-3-report.md`, sections 1 to 4).
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: m8-3's build, its three review rounds and the architect's rulings (2026-11-04). The range is 5b23199a8..f163352c7.
+  - **Accepted as built:**
+    1. `{side}` emits nothing, because its completion is the `operation` part.
+    2. A lost operation's code is `engine_error`. A new `OperationErrorSchema.code` member would be a wire major.
+    3. A recovered late completion is a waiter's first.
+    7. The attachment's refusal is worded in main.
+    8. `session.operations` is asked at every `subbed`.
+    9. Gap re-reads run one at a time per subscription.
+    10. `EndpointCapability` types the endpoint-only capability.
+  - **Accepted on a condition:** decision 5, `fs.tasks`'s session fallbacks (input, then envelope, then the open lane whose list matches). m8-4 always passes `appSessionId`, so the open-lane fallback serves only older renderer paths.
+  - **Built on the architect's rulings:**
+    - A: every panel re-lists at a reopening.
+    - B: `behind` backs off when bounded by progress.
+    - C: decision 4 is reversed. A session-wide unfollow becomes this device's named unfollows.
+    - D: a send with no current channel carries its uploads under `requires`. The mention-only resend goes only to a peer without the capability.
+    - The refusal's wording is honest about its cause.
+    §U carries each.
+  - **Review fixes:**
+    - Round 1: a receipt heard after a later opening reconciled is asked at once (an openings count), and every `ended` invalidates in-flight reads, so a released launch's context can't come back.
+    - Round 2: the typecheck; the subagents relist guarded by a part count; workflow invalidation without a last run; the stalled backoff kept apart from `subbed`; a session-wide unfollow waiting for reads in flight; the resend guarded by the peer's capability.
+    - Round 3: a failed read's agent is kept until its unfollow succeeds.
+    The controller verified round 3 directly, a one-function change with its red-first case.
+  - **For m8-4:**
+    - Flip `ipc.test.tsx:509`. Main emits `remote.gap`, the re-read `session.status`, then `session.changed`.
+    - `refreshSide` on `remote.reopened`.
+    - `uploads` on `session.send` for each uploaded PDF. The `uploadId` is the last path component `files.upload` answered.
+    - Show REMOTE_UPLOAD_REFUSED_WORDS as a send error, known by `issues.uploads`.
+    - `connectors.signInServer {name, scope, cwd, appSessionId}` from the widget.
+    - `fs.tasks` always passes `appSessionId`.
+  - **PR tracker lines:**
+    - Remote side questions re-list on a reopening only once the renderer listens to `remote.reopened`; this closes with m8-4.
+    - Follows are held per device, not per window, so one window's session-wide unfollow also ends another's follows of that session on that machine. This matches the local form.
+    - The `test/lane-b/remote.test.ts` fsevents watch timeout, not yet in the tracker.
+  Rationale: `task-4-report.md` with its three fix sections, and the task review rounds.
   Date/Author: 2026-11-04, O7's executor (the controller).
 
 ## Outcomes & Retrospective
