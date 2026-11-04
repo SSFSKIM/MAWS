@@ -3,7 +3,7 @@
 // command's bounds, progress per attachment, each attachment's path kept for a send again), and the message they make.
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { UPLOAD_KEPT_MS } from '@shared/ipc/schema/files';
+import { SEND_UPLOADS_MAX, SendUploadsSchema, UPLOAD_FILES_MAX, UPLOAD_KEPT_MS } from '@shared/ipc/schema/files';
 import { REMOTE_INLINE_MAX_BYTES } from '@shared/ipc/schema/remote';
 import { addressOf } from '@shared/machine/address';
 import { fakeClient } from '../../../../../test/support/fake-client';
@@ -166,6 +166,28 @@ describe('a send’s uploaded PDFs, as document blocks', () => {
       ],
       stale: [],
     });
+  });
+
+  // M8's reviewer-high review: the upload calls split a set past UPLOAD_FILES_MAX across calls, so the message's own
+  // bound on the PDFs it names is SEND_UPLOADS_MAX, which the send's schema holds too
+  it('names more PDFs than one upload call carries, each call within its bound, in a send its schema takes', async () => {
+    const fake = fakeClient();
+    const nine = Array.from({ length: UPLOAD_FILES_MAX + 1 }, (_, i) => pdf(`p${i}`, 10));
+    const sending = composeRemoteSend(fake.client, R, s, nine, '/work/app-r');
+    await fake.reply('files.upload', { status: 'ok', paths: nine.slice(0, UPLOAD_FILES_MAX).map((_, i) => `${ROOT}/a.${i}.pdf`) });
+    await fake.reply('files.upload', { status: 'ok', paths: [`${ROOT}/b.0.pdf`] });
+    const sent = await sending;
+    expect(sent).toMatchObject({ ok: true });
+    const uploads = (sent as { uploads: unknown[] }).uploads;
+    expect(uploads).toHaveLength(UPLOAD_FILES_MAX + 1);
+    expect(SendUploadsSchema.safeParse(uploads).success).toBe(true);
+  });
+
+  it('refuses a send naming more PDFs than a message takes before anything goes up', async () => {
+    const fake = fakeClient();
+    const many = Array.from({ length: SEND_UPLOADS_MAX + 1 }, (_, i) => pdf(`p${i}`, 10));
+    await expect(composeRemoteSend(fake.client, R, s, many, '/work/app-r')).resolves.toEqual({ ok: false, error: `A message to a session on another machine can attach at most ${SEND_UPLOADS_MAX} PDFs; remove some and send again` });
+    expect(fake.calls).toEqual([]);
   });
 
   it('names no upload whose path is no upload id (its mention alone)', async () => {

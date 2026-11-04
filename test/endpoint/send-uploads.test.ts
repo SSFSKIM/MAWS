@@ -14,6 +14,7 @@ import type { Action } from 'org-protocol';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { MAX_SEND_DOCUMENT_BYTES } from '@shared/engine/session-state-store';
+import { SEND_UPLOADS_MAX, UPLOAD_FILES_MAX } from '@shared/ipc/schema/files';
 import { MessageQueue } from '../../src/engine-host/queue';
 import { FileSessionStateStore } from '../../src/engine-host/store/file-session-state-store';
 import { ENDPOINT_CAPABILITIES } from '../../src/endpoint/capabilities';
@@ -116,6 +117,23 @@ describe('a send’s uploads', () => {
       const [op] = handed(t, from);
       expect((op!.input as { input: Record<string, unknown> }).input).toEqual({ appSessionId: APP, content: [block(PDF), { type: 'text', text: TEXT }] });
       expect(t.f.host.runs.at(-1)?.content).toEqual([block(PDF), { type: 'text', text: TEXT }]);
+    } finally {
+      t.dispose();
+    }
+  });
+
+  // M8's reviewer-high review: a message's PDFs are bounded by SEND_UPLOADS_MAX, not by one upload call's file count
+  it('reads more uploads than one upload call carries into the send, and refuses past the message’s bound by its schema', async () => {
+    const t = await setup();
+    try {
+      const paths: string[] = [];
+      for (let i = 0; i <= UPLOAD_FILES_MAX; i += 1) paths.push(await t.upload(APP));
+      const action = send(t, uploads(...paths.map((path) => basename(path))));
+      expect(await act(t.a, action)).toBe('ok');
+      await done(t.a, action);
+      expect(t.f.host.runs.at(-1)?.content).toEqual([...paths.map(() => block(PDF)), { type: 'text', text: TEXT }]);
+      const past = Array.from({ length: SEND_UPLOADS_MAX + 1 }, (_, i) => `past${String(i).padStart(4, '0')}.0.pdf`);
+      await refusedAndNothingQueued(t, send(t, uploads(...past)), null);
     } finally {
       t.dispose();
     }

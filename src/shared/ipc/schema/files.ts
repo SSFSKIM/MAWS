@@ -197,7 +197,12 @@ export const UPLOAD_KEPT_MS = 24 * 3600_000;
 export const UPLOAD_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}\.[0-7](?:\.[a-z0-9]{1,16})?$/;
 export const SendUploadSchema = z.strictObject({ uploadId: z.string().regex(UPLOAD_ID_PATTERN), as: z.literal('document') });
 export type SendUpload = z.infer<typeof SendUploadSchema>;
-export const SendUploadsSchema = z.array(SendUploadSchema).min(1).max(UPLOAD_FILES_MAX);
+// The most uploads one message names (M8's reviewer-high review). Not UPLOAD_FILES_MAX, which bounds one `files.upload`
+// call: the composer splits a larger set across calls. A count bound for the schema, the endpoint's read and the
+// composer alike; the bytes are bounded apart, each document within MAX_SEND_DOCUMENT_BYTES and the message within
+// MAX_SEND_CONTENT_JSON_BYTES (the machine's read, services/files/upload.ts, and the expansion's check).
+export const SEND_UPLOADS_MAX = 100;
+export const SendUploadsSchema = z.array(SendUploadSchema).min(1).max(SEND_UPLOADS_MAX);
 // `files.readUploads` (internal: the machine's endpoint's own read, never offered and never bridged): each upload of the
 // session's root read whole as the block a send carries, or the refusal, a sentence naming the upload, with nothing read
 // for any of them.

@@ -22,7 +22,7 @@ import { create } from 'zustand';
 import type { ContentBlock } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { UPLOAD_CALL_MAX_BYTES, UPLOAD_FILE_MAX_BYTES, UPLOAD_FILES_MAX, UPLOAD_ID_PATTERN, UPLOAD_KEPT_MS, type SendUpload } from '@shared/ipc/schema/files';
+import { SEND_UPLOADS_MAX, UPLOAD_CALL_MAX_BYTES, UPLOAD_FILE_MAX_BYTES, UPLOAD_FILES_MAX, UPLOAD_ID_PATTERN, UPLOAD_KEPT_MS, type SendUpload } from '@shared/ipc/schema/files';
 import { REMOTE_INLINE_MAX_BYTES } from '@shared/ipc/schema/remote';
 import { MENTION, type Attachment, type ComposerDoc } from './doc';
 import { IMAGE_BYTE_TYPES, MAX_SOURCE_IMAGE_BYTES, mentionPath } from './paste';
@@ -191,6 +191,9 @@ function documentUploads(upload: readonly Attachment[], paths: readonly string[]
   });
 }
 
+/** M8's reviewer-high review: a send naming more PDFs than one message takes (SEND_UPLOADS_MAX). */
+export const TOO_MANY_DOCUMENTS = `A message to a session on another machine can attach at most ${SEND_UPLOADS_MAX} PDFs; remove some and send again`;
+
 export type RemoteSend = { ok: true; message: Serialized; uploads: SendUpload[]; stale: string[] } | { ok: false; error: string };
 
 /**
@@ -200,6 +203,8 @@ export type RemoteSend = { ok: true; message: Serialized; uploads: SendUpload[];
  * a day ago (`stale`).
  */
 export async function composeRemoteSend(client: MawsBridge, appSessionId: AppSessionId, s: Serialized, attachments: readonly Attachment[], cwd: string, now: () => number = Date.now): Promise<RemoteSend> {
+  // the message's own bound on the PDFs it names (each a document block), before anything goes up
+  if (attachments.filter((a) => a.kind === 'document').length > SEND_UPLOADS_MAX) return { ok: false, error: TOO_MANY_DOCUMENTS };
   let { inline, upload } = planRemoteSend(s.text, attachments);
   for (;;) {
     const sent = await uploadAttachments(client, appSessionId, upload, now);
