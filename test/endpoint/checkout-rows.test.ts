@@ -238,7 +238,8 @@ describe('an older engine host behind the endpoint', () => {
 // `internal`, told apart only by the message (`not found: <path>`, FILES_REFUSAL), and `#forward` sends the device the
 // code alone (calls.ts): so the VM's missing file read as an error. Flipped by m8-2, which forwards the message.
 describe('a checkout read the files service fails', () => {
-  it.fails('reaches the device with the service’s message: a file absent from the session’s root as not found, a path outside its directories as refused', async () => {
+  /** A live session rooted at a scratch checkout, its `files.*` answered by the real files service. */
+  async function served(): Promise<{ dir: string; a: Remote; dispose: () => void }> {
     const { f, dir, a } = await setup();
     const files = registerFilesHandlers(() => ({ directory: dir, additionalDirectories: [], worktree: null }), {
       bus: f.spine.bus as never,
@@ -246,12 +247,25 @@ describe('a checkout read the files service fails', () => {
       port: { openExternal: async () => ({ opened: false, message: null }), reveal: async () => ({ revealed: false }) } as never,
       env: {},
     });
+    return { dir, a, dispose: () => files.dispose() };
+  }
+
+  it.fails('reaches the device with the service’s message: a file absent from the session’s root as not found', async () => {
+    const { dir, a, dispose } = await served();
     try {
       const absent = join(dir, '.claude', 'scheduled_tasks.json');
       expect(await call(a, 'files.read', at({ path: absent, hash: true }))).toMatchObject({ ok: false, error: { code: 'internal', message: `not found: ${absent}` } });
+    } finally {
+      dispose();
+    }
+  });
+
+  it.fails('reaches the device with the service’s message: a path outside the session’s directories as refused', async () => {
+    const { a, dispose } = await served();
+    try {
       expect(await call(a, 'files.read', at({ path: join(tmpdir(), 'elsewhere', 'scheduled_tasks.json'), hash: true }))).toMatchObject({ ok: false, error: { code: 'internal', message: FILES_REFUSAL } });
     } finally {
-      files.dispose();
+      dispose();
     }
   });
 });

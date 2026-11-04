@@ -6,7 +6,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { EventName } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import type { MachineRef } from '@shared/machine/ref';
-import { item, record, status } from '../../../test/support/builders';
+import { humanTurn, item, record, status } from '../../../test/support/builders';
 import { deliver, FakeLink, MINI } from '../../../test/lane-b/fake-link';
 import { RemoteSession } from './remote-session';
 
@@ -183,16 +183,36 @@ describe('the stream', () => {
 
   // P5 O7 M8 (m8-1, red first; "What draws Working…"): an event this build can't read is left out with a log line and
   // nothing else, so a dropped `turn.ended` leaves its turn open and the pane drawing "Working…" until a relaunch. The
-  // rule M8 binds: it is a gap at its place, and the session's status and record are read again so the turn heals.
-  // Flipped by m8-3.
-  it.fails('marks an event it can’t read as a gap at its place and reads the status and the record again', async () => {
+  // rule M8 binds: it is a gap at its place, and the session's status and record are read again, the re-read folded in,
+  // so the turn the stream left open closes by the machine's word. The renderer's gap bar is a notice and closes no turn
+  // (transcript/source/ipc.ts), so the healing is the re-read status (`turn: null`) emitted after the gap. Flipped by m8-3.
+  it.fails('marks an unreadable `turn.ended` as a gap at its place, reads the status and the record again, and the re-read status closes the open turn', async () => {
     const l = lab();
-    const sub = await opened(l);
+    l.session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const sub = l.link.open()[0];
+    const running = { ...status(APP, { engineState: 'running', turn: humanTurn }), launchId: 'L1', engineSessionId: 'eng-1' };
+    sub.sink.subbed('snapshot', { epoch: 'L1', seq: 0 });
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { status: running, queue, pendingItems: [], catalog });
+    const started = { id: `${APP}:L1:4:0`, sessionId: 'eng-1', at: '2026-10-31T00:00:00.000Z', seq: 4, agentId: null, parentToolUseId: null, kind: 'turn.started', userMessageUuid: null, origin: 'human' };
+    deliver(sub, { epoch: 'L1', seq: 4, idx: 0 }, started);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('session.eventBatch').flatMap((b) => b.events as SessionEvent[]).map((e) => e.kind)).toEqual(['turn.started']); // the turn is open
+    const rested = statusOf('L1'); // the machine's word after the turn: idle, `turn: null`
+    l.link.answers.set('session.status', () => ({ ok: true, output: rested }));
     const asked = l.link.calls.length;
-    deliver(sub, { epoch: 'L1', seq: 5, idx: 0 }, { ...notice('L1', 5, 0), kind: 'turn.ended', costUsd: 'not a number' });
+    const from = l.emitted.length;
+    deliver(sub, { epoch: 'L1', seq: 5, idx: 0 }, { ...started, id: `${APP}:L1:5:0`, seq: 5, kind: 'turn.ended', costUsd: 'not a number' });
     await vi.advanceTimersByTimeAsync(0);
     expect(l.of('remote.gap')).toEqual([{ appSessionId: APP, launchId: 'L1', at: { seq: 5, idx: 0 } }]);
-    expect(l.link.calls.slice(asked).map((c) => c.name)).toEqual(expect.arrayContaining(['session.status', 'session.get']));
+    expect(l.link.calls.slice(asked)).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'session.status', input: { appSessionId: APP } }), expect.objectContaining({ name: 'session.get', input: { appSessionId: APP } })]));
+    const after = l.emitted.slice(from);
+    const gapAt = after.findIndex((e) => e.name === 'remote.gap');
+    const healed = after.findIndex((e, i) => i > gapAt && e.name === 'session.status');
+    expect([gapAt >= 0, healed > gapAt]).toEqual([true, true]);
+    expect(after[healed].payload).toEqual({ appSessionId: APP, status: rested });
+    expect(after.slice(gapAt).some((e) => e.name === 'session.changed')).toBe(true);
+    expect(l.session.state.status).toMatchObject({ engineState: 'idle', turn: null });
   });
 
   it('passes the link’s and the machine’s pauses on as the stream’s state', async () => {

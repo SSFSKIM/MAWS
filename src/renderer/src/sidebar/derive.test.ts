@@ -380,19 +380,25 @@ describe('an expanded project’s records and listed rows in one ordering', () =
     expect(trees.slice(0, shownCount(trees.length, true)).flatMap((t) => t.rows)).toHaveLength(9);
   });
 
-  // P5 O7 M8 (m8-1, red first): why the sitting's remote-spawned session had no row at all. Its listing joined its org
-  // project (the mini's listings.json: `1c155c56…`, the appSessionId, lane B, project ebb30c31), and the record joins it
-  // by that id, so it was filed under MAWS; but a project shows eight rows at most and the Resume… picker lists records
-  // only, so a listed row past the eighth has no way back. Under the default `priority` sort every local session that is
-  // working, waiting or unread leads it, and under either sort its one `issued` (a listing re-issues only when its fields
-  // move, and the sitting's stayed `idle` from 04:01:46.999Z) falls behind every local session that moves after it.
-  // Flipped by m8-4, whose fix decides how a listed row stays reachable.
-  const drawn = (merged: ReturnType<typeof projectItems>) => nestItems(merged).slice(0, SESSIONS_CAP).flatMap((t) => t.rows.map((r) => ('listed' in r ? `@${r.listed.session}` : r.record.appId)));
-  it.fails('a session spawned here on another machine stays reachable under its project, however many local sessions lead or move after it', () => {
-    const leading = Array.from({ length: SESSIONS_CAP + 1 }, (_, i) => rec(`u${i}`, i, { unread: true }));
-    expect(drawn(items(leading, [lst('spawned', 9)], 'priority'))).toContain('@spawned');
-    const movedSince = Array.from({ length: SESSIONS_CAP }, (_, i) => rec(`r${i}`, 8 - i));
-    expect(drawn(items(movedSince, [lst('spawned', 0)], 'recency'))).toContain('@spawned');
+  // P5 O7 M8 (m8-1, red first; M8's *The sidebar row*): why the sitting's remote-spawned session had no row at all. Its
+  // listing joins its project by its app id, but a group draws five rows (eight after Show more), and under the default
+  // `priority` sort pinned, waiting, unread and working local records lead while a listed row ranks by its `issued` time
+  // alone, so behind more busy local records than the cap it is never drawn. The fix is parity: the priority sort ranks
+  // a listed row by its own state, as it ranks a local record, so a just-spawned working session leads into the visible
+  // rows. (Resume… listing listed rows is the same fix's other half, red first with its own interface in m8-4.)
+  // Each case flips on its own in m8-4.
+  const visible = (merged: ReturnType<typeof projectItems>) => nestItems(merged).slice(0, shownCount(nestItems(merged).length, false)).flatMap((t) => t.rows.map((r) => ('listed' in r ? `@${r.listed.session}` : r.record.appId)));
+  const busy = (over: Partial<SessionRecord>) => Array.from({ length: SESSIONS_CAP + 1 }, (_, i) => rec(`b${i}`, SESSIONS_CAP - i, over)); // newest first, as `projectSessions` sorts them
+  const spawned = (state: string) => ({ ...lst('spawned', SESSIONS_CAP + 2), state });
+
+  it.fails('a just-spawned working remote session leads into the visible rows under priority, past more unread local sessions than the cap', () => {
+    expect(visible(items(busy({ unread: true }), [spawned('working')], 'priority'))).toContain('@spawned');
+  });
+
+  it.fails('a just-spawned working remote session leads into the visible rows under priority, past more working local sessions than the cap', () => {
+    const working = busy({});
+    const digests = new Map(working.map((r) => [r.appId, digest(r.appId, { phase: 'working' })]));
+    expect(visible(projectItems({ sorted: working, listed: [spawned('working')], digests, rows: [], sort: 'priority' }))).toContain('@spawned');
   });
 });
 

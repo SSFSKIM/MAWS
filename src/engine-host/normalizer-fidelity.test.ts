@@ -85,25 +85,47 @@ describe('the remote reader over the recorded journals', () => {
     const path = join(dir, name);
     return statSync(path).isDirectory() ? files(path) : path.endsWith('.jsonl') ? [path] : [];
   });
-  const journal = (file: string): JournalRow[] | null => {
-    try {
-      return readFileSync(file, 'utf8').split('\n').filter((line) => line.length > 0).map((line) => parseJournalRow(JSON.parse(line)));
-    } catch {
-      return null; // a fixture that is not a probe journal (a transcript, a hook log)
-    }
-  };
+  // The fixtures that are no probe journal, by name: engine transcripts and subagent sidecars kept beside a probe, the
+  // holder's gate fixture and the workflow probe's own launch log. Any other file is a journal, and a row in it that
+  // doesn't parse fails with its file and line, so no journal can drop out of the walk unseen.
+  const NOT_JOURNALS = [
+    'p5/p5-o16-gate.jsonl',
+    ...['kill-after-rewind-1s', 'kill-after-rewind-200ms', 'kill-after-rewind', 'plain-release', 'post', 'pre-files', 'pre-release', 'pre', 'same-release'].map((arm) => `p5/p5-o3-rewind-resume-transcripts/p5-o3-rewind-resume-${arm}.jsonl`),
+    'pass2/workflow-disk/journal.jsonl',
+    'pass3/e7-peer-transcripts/07b1a2b6-2ef6-48ef-93ba-1841c4634739.jsonl',
+    'pass3/e7-peer-transcripts/129dfa09-096e-4626-a92d-715896d83e6e.jsonl',
+    'pass3/e7-peer-transcripts/db45d92e-e979-4edf-a62a-61f21dc01acb.jsonl',
+    'pass3/e7-team-terminal/b4b10738-4b3f-4539-906b-fcb5da9669a5.jsonl',
+    'pass3/e7-team-terminal/b4b10738-4b3f-4539-906b-fcb5da9669a5/subagents/agent-ascout-bcbb17e39be8c1bd.jsonl',
+    'pass3/nested-agents-sidecars/agent-a38d4aebfaea9f6b1.jsonl',
+    'pass3/nested-agents-sidecars/agent-a425e926e506edeb1.jsonl',
+    'pass3/w7-collision-disk/transcript.jsonl',
+    'subagent-sidecars/agent-ad286defbc77bc090.jsonl',
+    'subagent-sidecars/agent-ae75ba6ce5d866acc.jsonl',
+  ];
+  const named = (file: string) => file.slice(FIXTURES.length + 1);
+  const journal = (file: string): JournalRow[] =>
+    readFileSync(file, 'utf8').split('\n').flatMap((line, i) => {
+      if (line.length === 0) return [];
+      try {
+        return [parseJournalRow(JSON.parse(line))];
+      } catch (error) {
+        throw new Error(`${named(file)}:${i + 1}: ${(error as Error).message.slice(0, 200)}`, { cause: error });
+      }
+    });
 
   it('reads every event the normalizer makes from them, each turn’s end included', () => {
+    const all = files(FIXTURES).map(named);
+    expect(NOT_JOURNALS.filter((name) => !all.includes(name))).toEqual([]); // each named exception still exists
     const unread: string[] = [];
     let ends = 0;
-    for (const file of files(FIXTURES)) {
+    for (const file of files(FIXTURES).filter((path) => !NOT_JOURNALS.includes(named(path)))) {
       const rows = journal(file);
-      if (rows === null) continue;
       const n = normalizer();
       for (const event of rows.flatMap((row) => n.push(row))) {
         if (event.kind === 'turn.ended') ends++;
         const read = readTolerant(SessionEventSchema, JSON.parse(JSON.stringify(event)));
-        if (!read.ok) unread.push(`${file.slice(FIXTURES.length)} seq ${event.seq} ${event.kind}`);
+        if (!read.ok) unread.push(`${named(file)} seq ${event.seq} ${event.kind}`);
       }
     }
     expect(ends).toBeGreaterThan(300);
