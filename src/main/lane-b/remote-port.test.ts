@@ -46,7 +46,7 @@ function lab(options: { timing?: Partial<RemotePortTiming>; listen?: RemotePortD
   });
   ports.push(port);
   /** A consent asked: its act (made once the listener bound) and the command's answer, which the act's outcome gives. */
-  async function consent(name: 'connectors.connect' | 'connectors.reconnect' | 'connectors.signIn', fields: Record<string, unknown>) {
+  async function consent(name: 'connectors.connect' | 'connectors.reconnect' | 'connectors.signIn' | 'connectors.signInServer', fields: Record<string, unknown>) {
     const before = link.acts.length;
     const answer = port.consent(link, name, fields, (withCallback, onHandle) => {
       const handle = link.act({ action: name, args: withCallback, executor: 'machine' });
@@ -197,6 +197,29 @@ describe('the callback listener', () => {
     await second.answer;
     expect(l.alive()).toEqual([]);
     expect(await refused(second.port)).toBe(true);
+  });
+
+  // P5 O7 M8: the session's MCP widget signs in by the server's name, the entry read on the machine; its listener keys on
+  // its command's name as `connectors.signIn`'s does: its receipt's operation ends it, and its time is a sign-in's
+  it('treats the sign-in by a server’s name as a sign-in: its operation’s end ends it, and its time is a sign-in’s, not a Connect’s', async () => {
+    let next = 7000;
+    const listen: RemotePortDeps['listen'] = async () => {
+      const port = next++;
+      return { port, close: () => {} };
+    };
+    const l = lab({ listen, timing: { consentConnectMs: 60_000, consentSignInMs: 60, consentActMs: 60_000 } });
+    const byName = { name: 'linear', scope: 'user', cwd: null, appSessionId: 'app-1' };
+    const first = await l.consent('connectors.signInServer', byName);
+    expect(first.act.request.args).toEqual({ ...byName, callback: { port: first.port } });
+    first.act.settle({ state: 'done', result: { opId: 'op-7' } });
+    await first.answer;
+    expect(l.alive()).toEqual([first.port]);
+    l.port.heard(MINI, 'connectors.signInChanged', { opId: 'op-7', name: 'linear', state: 'done', reason: null, message: null, where: 'here' });
+    expect(l.alive()).toEqual([]);
+
+    const timed = await l.consent('connectors.signInServer', byName);
+    timed.act.move('accepted');
+    await until(() => !l.alive().includes(timed.port), 'the end of a sign-in’s time', 1000);
   });
 
   it('ends at its time from the act’s acceptance, and at the act’s own window when it is never accepted', async () => {

@@ -39,6 +39,9 @@ export const MACHINE_RIGHTS = ['spawn', 'shell', 'machine-admin'] as const;
 // answers them for the link's own `too-large` refusal).
 export const REMOTE_INLINE_MAX_BYTES = 4 * 1024 * 1024 - 64 * 1024;
 export const REMOTE_TOO_LARGE_WORDS = 'an image larger than 2.5 MiB goes to a session on another machine as a file';
+// P5 O7 M8 ("The attachment"): a send whose uploads the machine refused (`malformed`, which says no reason over RL2: a
+// missing, expired, foreign or oversized upload), as main answers it and the composer shows it.
+export const REMOTE_UPLOAD_REFUSED_WORDS = 'The attachment couldn’t be sent. It may have expired or isn’t a supported file. Attach it again.';
 
 // The link as a remote session's state carries it: its reported state, its carrier while up, the permanent verdict holding
 // it down, this device's member there (null before the first `caps`) and the member's machine rights.

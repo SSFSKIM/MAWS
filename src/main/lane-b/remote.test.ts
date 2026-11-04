@@ -7,6 +7,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import { requestDigestOf } from '@shared/host/request-digest';
 import type { CommandName, CommandResult, EventName } from '@shared/ipc/schema';
 import { NO_PROJECT } from '@shared/ipc/schema/layout';
+import { REMOTE_UPLOAD_REFUSED_WORDS } from '@shared/ipc/schema/remote';
 import { addressOf } from '@shared/machine/address';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MachineRef } from '@shared/machine/ref';
@@ -962,3 +963,124 @@ describe('the attention feed beside a session’s stream', () => {
   });
 });
 
+
+// P5 O7 M8 ("The sitting's failures"): the adapter's half of M8's rows (§U), the operations' receipts, the task list's and
+// the unfollow's targets, and the send's uploads behind `rl2.upload-blocks`.
+describe('the sitting’s failures (M8)', () => {
+  const ready = { status: 'ready', appSessionId: APP, launched: true, joined: false };
+
+  it('takes M8’s acts, the sign-in by name, the task list and the unfollow', () => {
+    const l = lab();
+    for (const name of ['maws.ask.answer', 'side.question.clear', 'session.reloadPlugins', 'connectors.signInServer', 'fs.tasks', 'fs.unfollow'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(true);
+    for (const name of ['maws.asks.list', 'side.question.list', 'session.operations', 'fs.subagents', 'fs.workflows'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(false); // plain calls: the manager's path
+  });
+
+  it('answers a MAWS ask on a released session by resuming it first, then the act sealed with the resumed launch', async () => {
+    const l = lab();
+    await vi.advanceTimersByTimeAsync(0);
+    l.link.open()[0].sink.ended('unavailable');
+    l.link.onAct = (act) => {
+      if (act.request.action === 'session.acquire') return act.settle({ state: 'done', result: ready });
+      act.settle({ state: 'done', result: { outcome: 'delivered' } });
+    };
+    const answer = { appSessionId: APP, askId: 'ask-1', answers: [] };
+    const answering = l.cmd('maws.ask.answer', answer);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.acts.map((a) => a.request.action)).toEqual(['session.acquire']);
+    const resumed = l.link.open()[0];
+    resumed.sink.subbed('snapshot', { epoch: 'L2', seq: 0 });
+    resumed.sink.snapshot({ epoch: 'L2', seq: 0 }, { status: statusOf(APP, 'L2') });
+    expect(await answering).toEqual({ ok: true, value: { outcome: 'delivered' } });
+    expect(l.link.acts[1].request).toEqual({ action: 'maws.ask.answer', session: APP, context: { lane: 'B', launchId: 'L2', engineSessionId: `eng-${APP}` }, args: answer, executor: 'engine-host', sendBy: expect.any(Number) });
+  });
+
+  it('builds the side question’s clear and Reload plugins as engine-host acts; an operation’s receipt is waited for across a reopening', async () => {
+    const l = lab();
+    const sub = await live(l);
+    l.link.onAct = (act) => act.settle({ state: 'done', result: act.request.action === 'session.reloadPlugins' ? { opId: 'op-reload' } : {} });
+    expect(await l.cmd('side.question.clear', { appSessionId: APP })).toEqual({ ok: true, value: {} });
+    expect(await l.cmd('session.reloadPlugins', { appSessionId: APP })).toEqual({ ok: true, value: { opId: 'op-reload' } });
+    expect(l.link.acts.map((a) => [a.request.action, a.request.executor, a.request.session])).toEqual([
+      ['side.question.clear', 'engine-host', APP],
+      ['session.reloadPlugins', 'engine-host', APP],
+    ]);
+    l.link.answers.set('session.operations', (input) => ({ ok: true, output: { outcomes: (input.opIds as string[]).map((opId) => ({ opId, pending: true })) } }));
+    sub.sink.ended('behind');
+    l.link.open()[0].sink.subbed('replay', { epoch: 'L1', seq: 0 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.calls.filter((c) => c.name === 'session.operations').map((c) => c.input)).toEqual([{ appSessionId: APP, opIds: ['op-reload'] }]);
+  });
+
+  it('sends the sign-in by a server’s name as a `machine` act with a listener for its consent', async () => {
+    const closed: number[] = [];
+    const l = lab();
+    const adapter = createRemoteLaneB({
+      local: LOCAL,
+      layout: { get: () => tabsOf(), onChange: () => () => {} },
+      remote: (machine) => (machine === MINI ? l.link : null),
+      onRemote: () => () => {},
+      emit: () => {},
+      listenCallback: async () => ({ port: 4711, close: () => void closed.push(4711) }),
+      log: () => {},
+    });
+    l.link.onAct = settleWith({ state: 'done', result: { opId: 'op-sign' } });
+    const fields = { name: 'linear', scope: 'user', cwd: null, appSessionId: APP };
+    const ctx: MainContext = { client: endableClientRef('page-1'), target: MINI };
+    expect(await adapter.dispatch(l.link, 'connectors.signInServer', fields, ctx)).toEqual({ ok: true, value: { opId: 'op-sign' } });
+    expect(l.link.acts.map((a) => a.request)).toEqual([{ action: 'connectors.signInServer', args: { ...fields, callback: { port: 4711 } }, executor: 'machine', sendBy: expect.any(Number) }]);
+    adapter.stop();
+    expect(closed).toEqual([4711]);
+  });
+
+  it('names the session a task list belongs to: the input’s, the page’s, else the open session whose list it is; none, refused here', async () => {
+    const l = lab();
+    const sub = await live(l);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { status: { ...statusOf(APP, 'L1'), taskListId: 'team/list' } });
+    l.link.answers.set('fs.tasks', () => ({ ok: true, output: { tasks: [] } }));
+    expect(await l.cmd('fs.tasks', { listId: 'team-list' })).toEqual({ ok: true, value: { tasks: [] } });
+    expect(await l.cmdFrom('fs.tasks', { listId: 'other' }, 'app-2')).toEqual({ ok: true, value: { tasks: [] } });
+    expect(await l.cmd('fs.tasks', { listId: 'other', appSessionId: 'app-3' })).toEqual({ ok: true, value: { tasks: [] } });
+    expect(l.link.calls.filter((c) => c.name === 'fs.tasks').map((c) => c.input)).toEqual([
+      { listId: 'team-list', appSessionId: APP },
+      { listId: 'other', appSessionId: 'app-2' },
+      { listId: 'other', appSessionId: 'app-3' },
+    ]);
+    expect(await l.cmd('fs.tasks', { listId: 'nobody-s' })).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'no-target' } } });
+    expect(l.link.calls.filter((c) => c.name === 'fs.tasks')).toHaveLength(3);
+  });
+
+  it('sends an unfollow of a named agent; the session-wide one, which would end every client’s follows there, never goes', async () => {
+    const l = lab();
+    l.link.answers.set('fs.unfollow', () => ({ ok: true, output: null }));
+    expect(await l.cmd('fs.unfollow', { appSessionId: APP, agentId: 'agent-1' })).toEqual({ ok: true, value: undefined });
+    expect(await l.cmd('fs.unfollow', { appSessionId: APP, agentId: null })).toEqual({ ok: true, value: undefined });
+    expect(l.link.calls.filter((c) => c.name === 'fs.unfollow').map((c) => c.input)).toEqual([{ appSessionId: APP, agentId: 'agent-1' }]);
+    expect(l.logs.some((line) => line.includes('fs.unfollow') && line.includes('names no agent'))).toBe(true);
+  });
+
+  it('sends a send’s uploads only to an endpoint that lists `rl2.upload-blocks`, and the mention alone to one that doesn’t', async () => {
+    const l = lab();
+    await live(l);
+    l.link.onAct = settleWith({ state: 'done', result: { messageUuid: null, disposition: 'sent', queueId: 'q1' } });
+    const send = { appSessionId: APP, content: 'read @.claude/desk-uploads/app-1/u.0.pdf', uploads: [{ uploadId: 'u.0.pdf', as: 'document' }] };
+    await l.cmd('session.send', send);
+    l.link.peers = ['rl2.executor.machine', 'rl2.upload-blocks'];
+    await l.cmd('session.send', send);
+    const sent = l.link.acts.map((a) => a.request);
+    expect(sent[0]).toMatchObject({ args: { appSessionId: APP, content: send.content } });
+    expect(sent[0].args).not.toHaveProperty('uploads');
+    expect(sent[0].requires).toBeUndefined();
+    expect(sent[1]).toMatchObject({ args: send, requires: 'rl2.upload-blocks' });
+  });
+
+  it('words a send whose uploads the machine refused (`malformed`, no reason) as the attachment’s, for the composer to show', async () => {
+    const l = lab();
+    await live(l);
+    l.link.peers = ['rl2.executor.machine', 'rl2.upload-blocks'];
+    l.link.onAct = settleWith({ state: 'refused', reason: 'malformed' });
+    const send = { appSessionId: APP, content: 'read it', uploads: [{ uploadId: 'u.0.pdf', as: 'document' }] };
+    expect(await l.cmd('session.send', send)).toEqual({ ok: false, error: { code: 'invalid_input', message: REMOTE_UPLOAD_REFUSED_WORDS, issues: { refusal: 'malformed', uploads: 'refused' } } });
+    // a send without uploads keeps the machine's word
+    expect(await l.cmd('session.send', { appSessionId: APP, content: 'plain' })).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'malformed' } } });
+  });
+});

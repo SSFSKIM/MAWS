@@ -40,8 +40,14 @@ export const DEVICE_CAPABILITIES = [
 ] as const;
 export type Capability = (typeof DEVICE_CAPABILITIES)[number];
 
+/**
+ * The endpoint's additions this device sends without reading anything new back, so it lists none of them in its own
+ * `h1`: P5 O7 M8's `rl2.upload-blocks` (`session.send`'s `uploads`).
+ */
+export type EndpointCapability = 'rl2.upload-blocks';
+
 /** Whether the peer of the current channel listed `capability` in its handshake; false while no channel is current. */
-export function peerLists(link: { peerCapabilities(): readonly string[] | null }, capability: Capability): boolean {
+export function peerLists(link: { peerCapabilities(): readonly string[] | null }, capability: Capability | EndpointCapability): boolean {
   return link.peerCapabilities()?.includes(capability) === true;
 }
 
