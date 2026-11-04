@@ -51,7 +51,7 @@
 // - A replay (`replay`): the record, the last of each part and `remote.session` said again, for a page that has just
 //   subscribed (a reload, a second window); what it said before was said to no one listening.
 import { readTolerant } from '@shared/ipc/tolerant';
-import { SESSION_OPERATIONS_MAX, type OperationCommand, type OperationEvent } from '@shared/engine/operations';
+import { SESSION_OPERATIONS_MAX, type OperationCommand, type OperationEvent, type OperationOutcome } from '@shared/engine/operations';
 import { AttentionItemSchema, type AttentionItem } from '@shared/graph/attention';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { SessionRecord } from '@shared/graph/session';
@@ -507,7 +507,7 @@ export class RemoteSession {
     if (this.#token !== token || !this.#running) return; // the next opening asks again
     const read = answer.ok ? link.readCommandOutput('session.operations', answer.output) : null;
     if (read === null || !read.ok) return this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: session.operations ${answer.ok ? 'answered what doesn’t read' : `failed (${answer.error.code})`}; asked again at the next opening`);
-    for (const outcome of read.value.outcomes) {
+    for (const outcome of (read.value as { outcomes: OperationOutcome[] }).outcomes) {
       if ('event' in outcome) this.#operation(outcome.event);
       else if ('unknown' in outcome) this.#lose(outcome.opId);
     }
