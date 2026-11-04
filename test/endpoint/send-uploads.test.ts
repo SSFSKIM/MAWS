@@ -73,8 +73,8 @@ async function setup(): Promise<Setup> {
     upload: write,
     readUploads: createUploadReader({ sessions: view }),
   });
-  const upload = async (appSessionId: string, bytes = PDF): Promise<string> => {
-    const answer = await write({ appSessionId, files: [{ name: 'brief.pdf', bytes: bytes.toString('base64') }] });
+  const upload = async (appSessionId: string, bytes: Buffer = PDF): Promise<string> => {
+    const answer = await write({ appSessionId: appSessionId as AppSessionId, files: [{ name: 'brief.pdf', bytes: bytes.toString('base64') }] });
     if (answer.status !== 'ok') throw new Error(answer.reason);
     return answer.paths[0]!;
   };
@@ -82,7 +82,7 @@ async function setup(): Promise<Setup> {
 }
 
 const send = (t: Setup, args: Record<string, unknown>): Action =>
-  t.a.device.action({ machine: t.f.ref, action: 'session.send', session: APP, context: { lane: 'B', launchId: t.s.launchId, engineSessionId: t.s.engineSessionId }, args: { appSessionId: APP, content: TEXT, ...args } });
+  t.a.device.action({ machine: t.f.ref, action: 'session.send', session: APP, context: { lane: 'B', launchId: t.s.launchId, engineSessionId: t.s.engineSessionId! }, args: { appSessionId: APP, content: TEXT, ...args } });
 const uploads = (...ids: string[]) => ({ uploads: ids.map((uploadId) => ({ uploadId, as: 'document' })) });
 /** Each `host.op` of a `session.send` the engine host was handed, from `from` on. */
 const handed = (t: Setup, from = 0) => t.f.host.calls.slice(from).filter((c) => c.name === 'host.op' && (c.input as { name?: string }).name === 'session.send');

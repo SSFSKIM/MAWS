@@ -10,7 +10,7 @@ import type { FilesChanged, FilesReadUploadsInput, FilesReadUploadsOutput, Files
 import type { ServicesBus } from '@shared/spine/bus';
 import type { AllowlistRecord } from './allowlist';
 import { createFilesService, type FilesService } from './service';
-import { UPLOADS_UNAVAILABLE } from './upload';
+import { UPLOAD_READS_UNAVAILABLE, UPLOADS_UNAVAILABLE } from './upload';
 
 export interface FilesHandlerDeps {
   bus: Pick<ServicesBus, 'register'>; // P5 O3-C: where files.* are answered
@@ -59,6 +59,6 @@ export function registerFilesHandlers(records: (appSessionId: AppSessionId) => A
   register('files.upload', (input) => (upload ? upload({ ...input, appSessionId: session(input.appSessionId) }) : Promise.resolve(UPLOADS_UNAVAILABLE)));
   // P5 O7 M8 ("The attachment"): the endpoint's read of a remote send's uploads, each a document block, before the send
   // reaches the engine host
-  register('files.readUploads', (input) => (readUploads ? readUploads({ ...input, appSessionId: session(input.appSessionId) }) : Promise.resolve(UPLOADS_UNAVAILABLE)));
+  register('files.readUploads', (input) => (readUploads ? readUploads({ ...input, appSessionId: session(input.appSessionId) }) : Promise.resolve(UPLOAD_READS_UNAVAILABLE)));
   return Object.assign(files, { followed: followed as ReadonlySet<ClientId> });
 }

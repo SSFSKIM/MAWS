@@ -23,6 +23,7 @@ import { allowlistOf } from './allowlist';
 
 // A run with no record of the upload roots (a run refused the spine) writes nothing
 export const UPLOADS_UNAVAILABLE: FilesUploadOutput = { status: 'refused', reason: 'uploads are not available this run' };
+export const UPLOAD_READS_UNAVAILABLE: FilesReadUploadsOutput = { status: 'refused', reason: 'uploads are not available this run' }; // P5 O7 M8
 // Lane B's own file names: the only ones its rollback and its sweep remove (lane A's are `<id>.<0-3>.<media ext>`)
 const UPLOAD_FILE = UPLOAD_ID_PATTERN; // P5 O7 M8: a stored name is the id a send names it by
 // P5 O7 M4: a remote upload's staging, named by the sender's upload id (UploadPartSchema's pattern)
