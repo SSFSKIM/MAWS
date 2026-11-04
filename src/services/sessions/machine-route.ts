@@ -70,7 +70,7 @@ export async function specForHost(s: Setup, spec: LaunchSpec): Promise<{ spec: L
 // `session.launch` with the spec this engine host is sent (specForHost): a launch an older host would serve on another
 // inference fails the setup with `route-unsupported`'s words, nothing launched (the guards refused it first, unless the
 // host or the settings changed since).
-export async function launchOnHost(s: Setup, phase: SetupPhase, input: CommandInput<'session.launch'>): Promise<CommandOutput<'session.launch'>> {
+export async function launchOnHost(s: Setup, phase: SetupPhase, input: Omit<CommandInput<'session.launch'>, 'spec'> & { spec: LaunchSpec }): Promise<CommandOutput<'session.launch'>> {
   const sent = await specForHost(s, input.spec);
   if ('refused' in sent) throw new SetupFailure(phase, sent.refused);
   return hostCall(s.dispatch, 'session.launch', { ...input, spec: sent.spec });

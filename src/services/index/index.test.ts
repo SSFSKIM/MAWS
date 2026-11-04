@@ -59,6 +59,8 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       expect(columns).toContainEqual(['removed_at', 'TEXT', 0]);
       expect(columns).toContainEqual(['gateway_routed', 'INTEGER', 0]); // v2: null is unknown
       expect(columns).toContainEqual(['launched_by', 'TEXT', 0]); // P5 O7 M4's added column (ADDED_COLUMNS): null for every session but a remote spawn
+      expect(columns).toContainEqual(['gateway_route', 'TEXT', 0]); // P5 O7 M9's (ADDED_COLUMNS): null but on the machine route
+      expect(columns).toContainEqual(['gateway_observed', 'TEXT', 0]);
     } finally {
       db.close();
     }
@@ -163,7 +165,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     });
     const db = new DatabaseSync(path, { readOnly: true });
     try {
-      expect(columnsOf(db)).toEqual([...v1Columns, 'lineage', 'lineage_source', 'root_uuid', 'transcript_birthtime_ms', 'launched_by'].sort()); // v4 adds four; P5 O7 M4 adds launched_by at any version (ADDED_COLUMNS)
+      expect(columnsOf(db)).toEqual([...v1Columns, 'lineage', 'lineage_source', 'root_uuid', 'transcript_birthtime_ms', 'launched_by', 'gateway_route', 'gateway_observed'].sort()); // v4 adds four; P5 O7 M4 adds launched_by at any version (ADDED_COLUMNS), P5 O7 M9 the gateway's route and observed
       const indexes = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'sessions'").all() as { name: string }[]).map((i) => i.name);
       expect(indexes).toContain('sessions_project');
     } finally {

@@ -152,7 +152,6 @@ export interface IntentAttempt {
 // rewrites from the resolved base URL (machine-route.ts)
 const attemptRoute = (intent: SetupIntent, attempt: IntentAttempt): { route: Route; gateway: 'gateway' | 'direct' } => ({ route: attempt.route, gateway: attempt.route === 'machine' ? intent.gateway : attempt.route });
 
-
 export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attempt: IntentAttempt): Promise<void> {
   const run = new IntentRun(s, appSessionId);
   let cwd: string | null = null;

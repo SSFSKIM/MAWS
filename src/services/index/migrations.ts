@@ -297,4 +297,9 @@ export const ADDED_COLUMNS: readonly AddedColumn[] = [
   // a session a remote spawn launched keeps who asked and the signed action (`SessionRecord.launchedBy`, JSON), for O12's
   // observer (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §O); null for every other session
   { table: 'sessions', column: 'launched_by', definition: 'TEXT' },
+  // P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Interfaces §U): the record gateway's `route` (the
+  // route the session launched on) and `observed` (what get_status reported of it, JSON), beside `gateway_routed`, which
+  // an older build reads and writes as before; null for a session never verified on the machine route
+  { table: 'sessions', column: 'gateway_route', definition: 'TEXT' },
+  { table: 'sessions', column: 'gateway_observed', definition: 'TEXT' },
 ];

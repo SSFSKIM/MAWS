@@ -17,6 +17,7 @@ import { branchName } from '@shared/sessions/branch';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import type { Db, Value } from './db';
 import type { SessionRecordPatch } from '@shared/engine/status';
+import { ObservedRouteSchema, RouteSchema } from '@shared/engine/route'; // P5 O7 M9
 import { countLines } from '@shared/composer/pasted-framing';
 import { PASTED_BLOCK, pastedPlaceholder } from '@shared/composer/pasted-content';
 import { locate, type ProjectStore } from './projects';
@@ -74,6 +75,8 @@ interface SessionRow {
   root_uuid: string | null;
   transcript_birthtime_ms: number | null;
   launched_by: string | null; // P5 O7 M4 (an added column, ADDED_COLUMNS): a remote spawn's requester and signed action, as JSON
+  gateway_route?: string | null; // P5 O7 M9 (added columns): the gateway's route and observed (JSON); absent before the opener adds them
+  gateway_observed?: string | null;
 }
 
 export interface LaunchInit {
@@ -172,7 +175,7 @@ function toRecord(row: SessionRow): SessionRecord {
     lastSeen: { messageUuid: row.last_seen_uuid as MessageUuid | null, at: row.last_seen_at },
     unread: row.unread === 1,
     engineVersion: row.engine_version,
-    gateway: { routed: row.gateway_routed === null ? null : row.gateway_routed === 1, baseUrl: row.gateway_base_url, autoModeServer: row.gateway_auto_mode_server as SessionRecord['gateway']['autoModeServer'] },
+    gateway: { routed: row.gateway_routed === null ? null : row.gateway_routed === 1, baseUrl: row.gateway_base_url, autoModeServer: row.gateway_auto_mode_server as SessionRecord['gateway']['autoModeServer'], ...gatewayRouteOf(row) },
     model: { requested: row.model_requested, resolved: row.model_resolved },
     effort: row.effort,
     permissionMode: {
@@ -441,6 +444,8 @@ export class SessionStore {
         values.gateway_routed = patch.gateway.routed;
         values.gateway_base_url = patch.gateway.baseUrl;
         values.gateway_auto_mode_server = patch.gateway.autoModeServer;
+        values.gateway_route = patch.gateway.route ?? null; // P5 O7 M9: a status without them clears them
+        values.gateway_observed = patch.gateway.observed === undefined ? null : JSON.stringify(patch.gateway.observed);
       }
       if (patch.model !== undefined) {
         values.model_requested = patch.model.requested;
@@ -745,4 +750,21 @@ function bornBefore(a: FamilyRow, b: FamilyRow): boolean {
 // W7: MAWS's own holder with the foreign one it shares the session with, if any (charter §4.3 as amended 2026-10-01).
 export function contested(foreign: Holder): Holder {
   return foreign.kind === 'terminal' || foreign.kind === 'background_job' ? { kind: 'self', contestedBy: foreign } : { kind: 'self' };
+}
+
+// P5 O7 M9: the gateway's route and observed from their added columns, each left out when unset or unreadable (a value a
+// later build wrote that this one does not know)
+function gatewayRouteOf(row: SessionRow): Partial<Pick<SessionRecord['gateway'], 'route' | 'observed'>> {
+  const route = RouteSchema.safeParse(row.gateway_route ?? undefined);
+  const observed = ObservedRouteSchema.safeParse(jsonOrNull(row.gateway_observed ?? null));
+  return { ...(route.success && { route: route.data }), ...(observed.success && { observed: observed.data }) };
+}
+
+function jsonOrNull(text: string | null): unknown {
+  if (text === null) return null;
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
 }

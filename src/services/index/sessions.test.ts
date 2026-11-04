@@ -436,6 +436,20 @@ describe('session records in the index', () => {
     expect(bindings).toEqual([[record.appId, engineId]]);
   });
 
+  // P5 O7 M9 (Interfaces §U): the record's gateway keeps the route it launched on and what get_status reported of it, in
+  // two added columns an older build leaves alone; a verified status without them (a gateway or direct launch) clears
+  // them, so the record never says `machine` of a launch that was not
+  it('keeps the gateway’s route and observed across a reopen, and clears them with a status that carries neither', () => {
+    const { record } = index.sessions.createForLaunch(LAUNCH);
+    const machine = { routed: false, baseUrl: 'https://inference.example.invalid', autoModeServer: 'unknown', route: 'machine', observed: { kind: 'host', baseUrl: 'https://inference.example.invalid' } } as const;
+    expect(index.sessions.applyEngineStatus(record.appId, { gateway: machine }).gateway).toEqual(machine);
+    index.close();
+    index = new Index(join(dir.path, 'index.sqlite'));
+    expect(index.sessions.get(record.appId)!.gateway).toEqual(machine);
+    expect(SessionRecordSchema.parse(index.sessions.get(record.appId)).gateway).toEqual(machine);
+    expect(index.sessions.applyEngineStatus(record.appId, { gateway: { routed: true, baseUrl: 'http://127.0.0.1:8641', autoModeServer: 'enabled' } }).gateway).toEqual({ routed: true, baseUrl: 'http://127.0.0.1:8641', autoModeServer: 'enabled' });
+  });
+
   // C3's ask (gateway filled for disk sessions): the transcript records no base URL or auto-mode server, so a session
   // discovered on disk carries null and 'unknown' until a verified status of a live process fills them, and what a
   // status filled stays through later summaries (and restarts: they are columns).

@@ -1211,7 +1211,7 @@ describe('the machine route (P5 O7 M9)', () => {
     writeFileSync(join(h.work, '.claude', 'settings.json'), text);
   };
   const create = async () => (await h.service.create({ projectId: null, location: { kind: 'directory', path: h.work } })).appSessionId;
-  const started = async (id: string, options: StartOptions = {}) => {
+  const started = async (id: AppSessionId, options: StartOptions = {}) => {
     expect(await h.service.startSession(id, { message: null, options })).toMatchObject({ status: 'starting' });
     expect(await h.settled(id)).toMatchObject({ phase: 'ready' });
     return h.host.launches.at(-1)!;
@@ -1271,7 +1271,7 @@ describe('the machine route (P5 O7 M9)', () => {
 
     it('resumes a machine record on the legacy route where it reaches the same inference, and refuses it otherwise', async () => {
       const record = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0x9a1), directory: h.work })).record;
-      h.index.sessions.update(record.appId, { gateway: { routed: false, baseUrl: null, autoModeServer: 'unknown', route: 'machine', observed: { kind: 'login', baseUrl: null } } });
+      h.index.sessions.applyEngineStatus(record.appId, { gateway: { routed: false, baseUrl: null, autoModeServer: 'unknown', route: 'machine', observed: { kind: 'login', baseUrl: null } } });
       const spec = await started(record.appId);
       expect(spec).toMatchObject({ gateway: 'direct', resume: { sessionId: sessionIdFor(0x9a1), fork: false } });
       expect(spec).not.toHaveProperty('route');
@@ -1311,7 +1311,7 @@ describe('the machine route (P5 O7 M9)', () => {
       userBaseUrl(RELAY);
       h.host.relay = DOWN_RELAY;
       const record = h.index.sessions.upsertFromSummary(summary({ sessionId: sessionIdFor(0x9a2), directory: h.work })).record;
-      h.index.sessions.update(record.appId, { gateway: { routed: true, baseUrl: RELAY, autoModeServer: 'unknown', route: 'machine', observed: { kind: 'claudeusage', baseUrl: RELAY } } });
+      h.index.sessions.applyEngineStatus(record.appId, { gateway: { routed: true, baseUrl: RELAY, autoModeServer: 'unknown', route: 'machine', observed: { kind: 'claudeusage', baseUrl: RELAY } } });
       expect(await h.service.startSession(record.appId, { message: null, options: {} })).toMatchObject({ status: 'relay_unreachable' });
       expect(await started(record.appId, { startAnyway: true })).toMatchObject({ route: 'machine', gateway: 'gateway' });
     });
@@ -1329,7 +1329,7 @@ describe('the machine route (P5 O7 M9)', () => {
   it('reads the route before the legacy field: a record’s, a fork’s source’s and the start’s option', async () => {
     const SID = sessionIdFor(0x9a3);
     const record = h.index.sessions.upsertFromSummary(summary({ sessionId: SID, directory: h.work })).record;
-    h.index.sessions.update(record.appId, { gateway: { routed: true, baseUrl: OTHER, autoModeServer: 'unknown', route: 'machine', observed: { kind: 'host', baseUrl: OTHER } } });
+    h.index.sessions.applyEngineStatus(record.appId, { gateway: { routed: true, baseUrl: OTHER, autoModeServer: 'unknown', route: 'machine', observed: { kind: 'host', baseUrl: OTHER } } });
     h.writeTranscript(h.work, SID);
     const fork = await h.service.fork(record.appId, { kind: 'inPlace' }, { message: null, rewindTo: null });
     expect(await h.settled(fork.appSessionId)).toMatchObject({ phase: 'ready' });
