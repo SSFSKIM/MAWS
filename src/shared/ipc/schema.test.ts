@@ -233,7 +233,7 @@ describe('ipc schema validates both directions', () => {
     // C8c start: the read-only files.* service over a session's own directories (P5 O3-E: owned by machine, mawsd's with
     // the spine, with library.read's reach and the upload).
     it('carries the C8c files.* entries, every command owned by machine, with the read bounds', () => {
-      expect(Object.keys(files.commands).sort()).toEqual(['files.list', 'files.openExternal', 'files.read', 'files.readResolved' /* P5 O3-E */, 'files.reveal' /* E1 */, 'files.unwatch', 'files.upload' /* P5 O3-E */, 'files.watch', 'files.write']);
+      expect(Object.keys(files.commands).sort()).toEqual(['files.list', 'files.openExternal', 'files.read', 'files.readResolved' /* P5 O3-E */, 'files.readUploads' /* P5 O7 M8 */, 'files.reveal' /* E1 */, 'files.unwatch', 'files.upload' /* P5 O3-E */, 'files.watch', 'files.write']);
       for (const spec of Object.values(files.commands)) expect(spec.owner).toBe('machine');
       expect(Object.keys(files.events)).toEqual(['files.changed']);
       const read = (extra: object) => validateCommandInput('files.read', { appSessionId: 'a', path: '/r/a.ts', ...extra }).ok;

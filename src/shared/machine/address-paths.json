@@ -41,6 +41,7 @@
 "commands.files.list.input":[".appSessionId AppSessionId"],
 "commands.files.openExternal.input":[".appSessionId AppSessionId"],
 "commands.files.read.input":[".appSessionId AppSessionId"],
+"commands.files.readUploads.input":[".appSessionId AppSessionId"],
 "commands.files.reveal.input":[".appSessionId AppSessionId"],
 "commands.files.unwatch.input":[".appSessionId AppSessionId"],
 "commands.files.upload.input":[".appSessionId AppSessionId"],

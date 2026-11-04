@@ -11,4 +11,5 @@ export const grades = {
   'files.reveal': 'view',
   'files.readResolved': 'internal', // P5 O3-E: main's own read for library.read; P5 O4 M3: served for OX1's window, library.read reads in process
   'files.upload': 'manage', // P5 O3-E: a write into the session's attachments directory, claimed by machine.op
+  'files.readUploads': 'internal', // P5 O7 M8: the endpoint's read of a send's uploads, before the send reaches the engine host
 } as const satisfies CommandGrades<'files'>;

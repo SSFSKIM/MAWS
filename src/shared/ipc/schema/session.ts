@@ -54,6 +54,7 @@ import { AcquireOutcomeSchema, SetupEventSchema, SetupResourcesSchema, StartOutc
 import { TrustStateSchema } from '../../sessions/trust';
 // C10 end
 import type { CommandSpec } from './common';
+import { SendUploadsSchema } from './files'; // P5 O7 M8: a send's uploads
 import { PtyIdSchema } from './pty'; // P5 O6 M1: takeOverPane's ptyId, branded for the address codec (loose, so its JSON Schema is the plain string's)
 // P2-C start (2026-10-09)
 import { PromptHistoryEventSchema } from '../../graph/events';
@@ -126,7 +127,11 @@ const c3Commands = {
   'session.pendingRequest': host(input({ requestId: RequestIdSchema }), z.strictObject({ event: SessionEventSchema.nullable() })),
   'session.catalog': host(input({}), CatalogSchema),
   // the composer: sends, the app queue, steer, interrupt, answers, `!` and `#`
-  'session.send': host(input({ content: SendContentSchema }), z.strictObject({ messageUuid: MessageUuidSchema.nullable(), disposition: z.enum(['sent', 'queued']), queueId: z.string() })),
+  // P5 O7 M8 ("The attachment"): `uploads`, files of the session's upload root a remote device sent up, which the
+  // machine's endpoint reads into `content` as document blocks before the act reaches the engine host (behind the
+  // endpoint capability `rl2.upload-blocks`); the engine host takes a send only once they are read, and refuses one
+  // that still carries them
+  'session.send': host(input({ content: SendContentSchema, uploads: SendUploadsSchema.optional() }), z.strictObject({ messageUuid: MessageUuidSchema.nullable(), disposition: z.enum(['sent', 'queued']), queueId: z.string() })),
   // priority on 2.1.283: 'now' (the default; "Send now") preempts the running turn; 'next' (Enter while a turn runs, W1) folds into it at its next tool boundary (pass3/steer-next)
   'session.steer': host(input({ content: SendContentSchema, priority: z.enum(['now', 'next']).optional() }), MessageUuidOutput),
   // W1: "Hold until the turn ends" on a pending `next` steer: withdrawn from the engine (`cancel_async_message`) into the app queue's end; refused once the engine started it (pass3/steer-next-cancelled)

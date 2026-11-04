@@ -471,7 +471,10 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   on('engine.pendingItems', async () => pendingCounts(table.list()));
 
   // -- the composer ----------------------------------------------------------------------------------------------------
-  handle('session.send', async ({ appSessionId, content }) => {
+  handle('session.send', async ({ appSessionId, content, uploads }) => {
+    // P5 O7 M8: a send's uploads are read into its content by the machine's endpoint (src/endpoint/send-uploads.ts); one
+    // that still names them would lose its documents here, so it is refused rather than sent without them
+    if (uploads !== undefined) throw new HostCommandError({ code: 'invalid_input', message: 'a send’s uploads are read by the machine’s endpoint; this one reached the engine host unread' });
     const { messageUuid, disposition, queueId } = await sessionOf(appSessionId).send(content);
     return { messageUuid, disposition, queueId };
   });

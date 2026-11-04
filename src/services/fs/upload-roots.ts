@@ -243,6 +243,52 @@ export function removeFiles(root: string, owned: OwnedFiles, names?: readonly st
   return clear(pins[0]!, pins[1]!, names, owned, staged);
 }
 
+// ---- an upload read back (P5 O7 M8, docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The attachment") ------
+// A send names a file of its session's root for the machine to attach: it is reached as every write here is, from `/`
+// with no link on its way, and opened with no link, a regular file with no other link (a hard link is no symbolic one,
+// so the open passes it; it could name a file outside the root), read whole by that descriptor alone.
+
+/** What `readUpload` found: the bytes and when the file was last written, or why nothing was read. */
+export type UploadRead = { bytes: Buffer; writtenAt: number } | { missing: true } | { tooLarge: number };
+
+// The file `name` of `session`'s root under `base` (the session's resolved working directory), read whole when it is at
+// most `max` bytes. A root or a file that is not there is missing; a file past `max` is not read. Throws Unsafe for a
+// link on the way, a link or anything but a regular file of its own at the name.
+export function readUpload(base: string, session: string, name: string, max: number): UploadRead {
+  let root: Pinned;
+  try {
+    root = walk(base, [...UPLOADS, session]).at(-1)!;
+  } catch (error) {
+    if (code(error) === 'ENOENT') return { missing: true };
+    throw error;
+  }
+  if (name !== basename(name) || name === '.' || name === '..') throw new Unsafe(`${name} is not a name in the root: nothing is read`);
+  still(root);
+  const path = join(root.path, name);
+  let fd: number;
+  try {
+    fd = openNoLink(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch (error) {
+    if (code(error) === 'ENOENT') return { missing: true };
+    throw error;
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) throw new Unsafe(`${path} is not a regular file: nothing is read from it`);
+    if (stat.nlink !== 1) throw new Unsafe(`${path} has other links: nothing is read through one`);
+    if (stat.size > max) return { tooLarge: stat.size };
+    const bytes = Buffer.alloc(stat.size);
+    for (let at = 0; at < stat.size; ) {
+      const read = readSync(fd, bytes, at, stat.size - at, at);
+      if (read === 0) throw new Error(`${path} ended at ${at} of ${stat.size} bytes`);
+      at += read;
+    }
+    return { bytes, writtenAt: stat.mtimeMs };
+  } finally {
+    closeSync(fd);
+  }
+}
+
 // ---- staged parts (P5 O7 M4, docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Uploads in parts") -------------
 // A remote upload crosses its channel in parts, each its own act: the parts of upload `upload` are appended in order to
 // `<root>/.staging/<upload>` (`.staging` 0700, the file 0600 and created exclusively by the first part), and the last

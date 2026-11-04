@@ -12,7 +12,7 @@ import { fileAdmission } from './files/admission';
 import { allowlistOf } from './files/allowlist';
 import { registerFilesHandlers } from './files/register';
 import type { FilesService } from './files/service';
-import { createUpload, scheduleUploadSweep } from './files/upload';
+import { createUpload, createUploadReader, scheduleUploadSweep } from './files/upload';
 import { FileLister, followSpineRoots, spineRoots } from './git/ls-files';
 import { createMutatingRunner } from './git/mutate';
 import { registerGitHandlers } from './git/register';
@@ -59,6 +59,7 @@ export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRo
     port: clientPort, // files.openExternal; E1: files.reveal
     admitted: fileAdmission(view),
     upload: uploadRoots ? createUpload({ sessions: view, roots: uploadRoots, git: createGitRunner(), log: uploadLog }) : undefined,
+    readUploads: createUploadReader({ sessions: view }), // P5 O7 M8: a remote send's uploads, read for the endpoint
   });
   const stopUploadSweep = uploadRoots ? scheduleUploadSweep(uploadRoots, { log: uploadLog }) : () => {};
   // E6: source control over the session's checkout (reader R15); mutations through the mutating runner under the

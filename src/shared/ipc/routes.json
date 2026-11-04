@@ -111,6 +111,7 @@
   "files.list",
   "files.openExternal",
   "files.read",
+  "files.readUploads",
   "files.reveal",
   "files.unwatch",
   "files.upload",

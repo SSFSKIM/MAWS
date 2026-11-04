@@ -177,6 +177,15 @@ describe('x2 deadlines fit the bridge', () => {
     await expect(handlers.get('session.status')!({ appSessionId: 'nobody' })).rejects.toEqual(new HostCommandError({ code: 'internal', message: 'unknown session nobody' }));
     await expect(handlers.get('session.getUsage')!({ appSessionId: 'nobody' })).rejects.toBeInstanceOf(HostCommandError);
   });
+
+  // P5 O7 M8 ("The attachment"): the machine's endpoint reads a send's uploads into its content before the send gets here
+  it('refuses a send that still names uploads, which only the machine’s endpoint reads, before any session is asked', async () => {
+    const { handlers } = engineHost();
+    const uploads = [{ uploadId: 'AAAAAAAAAAAAAAAAAAAAAA.0.pdf', as: 'document' }];
+    await expect(handlers.get('session.send')!({ appSessionId: 'nobody', content: 'hi', uploads })).rejects.toEqual(
+      new HostCommandError({ code: 'invalid_input', message: 'a send’s uploads are read by the machine’s endpoint; this one reached the engine host unread' }),
+    );
+  });
 });
 
 describe('engine host X2 surface', () => {

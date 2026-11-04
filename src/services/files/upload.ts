@@ -13,9 +13,10 @@
 import { realpathSync } from 'node:fs';
 import { extname, join } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
-import { REMOTE_UPLOAD_PART_BYTES, UPLOAD_FILE_MAX_BYTES, type FilesUploadInput, type FilesUploadOutput, type UploadPart } from '@shared/ipc/schema/files';
+import { MAX_SEND_CONTENT_JSON_BYTES, MAX_SEND_DOCUMENT_BYTES } from '@shared/engine/session-state-store';
+import { REMOTE_UPLOAD_PART_BYTES, UPLOAD_FILE_MAX_BYTES, UPLOAD_ID_PATTERN, type FilesReadUploadsInput, type FilesReadUploadsOutput, type FilesUploadInput, type FilesUploadOutput, type UploadDocumentBlock, type UploadPart } from '@shared/ipc/schema/files';
 import type { SpineView } from '@shared/spine/view';
-import { AlreadyThere, excludeUploads, promoteStaged, rootOf, saveFiles, stagePart, Unsafe, uploadId, uploadRecords, type UploadRecords } from '../fs/upload-roots';
+import { AlreadyThere, excludeUploads, promoteStaged, readUpload, rootOf, saveFiles, stagePart, SWEEP_AFTER_MS, Unsafe, uploadId, uploadRecords, type UploadRecords } from '../fs/upload-roots';
 import type { GitRun } from '../git/runner';
 import { MEDIA_TYPES, typeOf } from '../lane-a/media';
 import { allowlistOf } from './allowlist';
@@ -23,7 +24,7 @@ import { allowlistOf } from './allowlist';
 // A run with no record of the upload roots (a run refused the spine) writes nothing
 export const UPLOADS_UNAVAILABLE: FilesUploadOutput = { status: 'refused', reason: 'uploads are not available this run' };
 // Lane B's own file names: the only ones its rollback and its sweep remove (lane A's are `<id>.<0-3>.<media ext>`)
-const UPLOAD_FILE = /^[A-Za-z0-9_-]{1,128}\.[0-7](?:\.[a-z0-9]{1,16})?$/;
+const UPLOAD_FILE = UPLOAD_ID_PATTERN; // P5 O7 M8: a stored name is the id a send names it by
 // P5 O7 M4: a remote upload's staging, named by the sender's upload id (UploadPartSchema's pattern)
 const STAGED_FILE = /^[A-Za-z0-9_-]{16,128}$/;
 export const UPLOAD_SWEEP_MS = 3600_000; // as lane A's driver sweeps its own
@@ -56,7 +57,7 @@ export function scheduleUploadSweep(roots: UploadRecords, { log }: { log: (line:
 }
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
-const refused = (reason: string): FilesUploadOutput => ({ status: 'refused', reason });
+const refused = (reason: string): { status: 'refused'; reason: string } => ({ status: 'refused', reason }); // either command's refusal
 
 // The stored extension: the signature's, else the name's when usable, else none.
 function extensionOf(name: string, bytes: Buffer): string | null {
@@ -137,5 +138,57 @@ export function createUpload({ sessions, roots, git, mint = uploadId, log }: Upl
       if (error instanceof Unsafe) return refused(`a path on the way is a link or not a directory (${error.message})`);
       return refused(`the upload could not be written (${errorText(error)}), so nothing was saved`);
     }
+  };
+}
+
+// ---- a send's uploads read back (P5 O7 M8, docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The attachment") --
+// `files.readUploads`: the machine's endpoint reads a remote send's `uploads` here before the send reaches the engine
+// host, so the model gets each PDF as the document block a local drop sends. An upload id is the name `files.upload`
+// stored the file under; it is read only from the sending session's own root, under its working directory's real path,
+// with no link on the way (../fs/upload-roots.ts `readUpload`), a file still there, written within UPLOAD_KEPT_MS, a PDF
+// by its bytes, within the engine's document bound, the whole within the message's. The first that fails refuses them
+// all, in a sentence that names it.
+
+// An upload is attached within the day it was written, the age at which the sweep may take its root: older is expired,
+// whether or not the sweep has come yet, so whether a send attaches does not hang on when the sweep last ran.
+export const UPLOAD_KEPT_MS = SWEEP_AFTER_MS;
+const base64Length = (bytes: number) => 4 * Math.ceil(bytes / 3);
+
+export interface UploadReaderDeps {
+  sessions: Pick<SpineView, 'record' | 'intent'>; // whose working directory: as `files.upload` resolves it
+  now?: () => number;
+}
+
+export function createUploadReader({ sessions, now = Date.now }: UploadReaderDeps): (input: FilesReadUploadsInput) => Promise<FilesReadUploadsOutput> {
+  const directoriesOf = allowlistOf(sessions);
+  return async ({ appSessionId, uploads }) => {
+    const id = appSessionId as AppSessionId;
+    const directories = directoriesOf(id);
+    if (directories === null) return refused(sessions.record(id) === null && sessions.intent(id) == null ? `unknown app session: ${id}` : 'the session has no working directory');
+    let base: string;
+    try {
+      base = realpathSync(directories.worktree?.path ?? directories.directory);
+    } catch (error) {
+      return refused(`the session’s working directory could not be read (${errorText(error)})`);
+    }
+    const blocks: UploadDocumentBlock[] = [];
+    let encoded = 0;
+    for (const { uploadId: name } of uploads) {
+      let read: ReturnType<typeof readUpload>;
+      try {
+        read = readUpload(base, id, name, MAX_SEND_DOCUMENT_BYTES);
+      } catch (error) {
+        if (error instanceof Unsafe) return refused(`${name} is a link or not a file of its own, so it was not attached`);
+        return refused(`${name} could not be read (${errorText(error)})`);
+      }
+      if ('missing' in read) return refused(`${name} is not among this session’s uploads (it may have been swept); attach the file again`);
+      if ('tooLarge' in read) return refused(`${name} is larger than ${MAX_SEND_DOCUMENT_BYTES / 1024 / 1024} MiB, the most a document can be`);
+      if (now() - read.writtenAt > UPLOAD_KEPT_MS) return refused(`${name} was uploaded more than a day ago; attach the file again`);
+      if (typeOf(read.bytes) !== 'application/pdf') return refused(`${name} is not a PDF, so it can’t be attached as a document`);
+      encoded += base64Length(read.bytes.length);
+      if (encoded > MAX_SEND_CONTENT_JSON_BYTES) return refused(`the uploads are larger than ${MAX_SEND_CONTENT_JSON_BYTES / 1024 / 1024} MiB together, the most a message can be`);
+      blocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: read.bytes.toString('base64') } });
+    }
+    return { status: 'ok', blocks };
   };
 }
