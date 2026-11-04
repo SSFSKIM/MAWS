@@ -2515,6 +2515,11 @@ P5 findings of M5's re-plan, continued from F15:
   The other four of the first round's findings it judged closed.
   Rationale: Each is a correctness boundary against an older peer or a running operation, which the first fold-in had left implicit.
   Date/Author: 2026-11-04, O7's executor (the re-plan).
+- Decision: M8's execution (2026-11-04), on `p5-o7-m8`, cut from the re-plan's head d990d1033. It runs as five tasks, m8-1 to m8-5, in the order M8 names, each reviewed at its frontier before the next one dispatches. The milestone review is reviewer-high.
+  - m8-1's red-first tests land as `it.fails` expectations, so every gate stays green; the task that fixes each one flips it to `it`.
+  - m8-1's protocol probe runs on CI's probe lane, never on this MacBook.
+  Rationale: Each later task consumes m8-1's findings or the layer below it. A red test committed as a plain failure would hold every gate in between.
+  Date/Author: 2026-11-04, O7's executor (the controller).
 
 ## Outcomes & Retrospective
 
