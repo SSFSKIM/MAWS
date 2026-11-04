@@ -17,6 +17,9 @@
 //   map is read once at the session's load: `directMap: true` maps B's address to its listener (the direct carrier);
 //   `false` maps it to a closed loopback port, so the direct dial fails at once and the link goes through the hub (the
 //   relay), with no dial leaving this Mac.
+// - P5 O7 M8: optionally a second app of the same member (`secondUserData`): its own device keys, listed beside A's, and
+//   its own `MAWS_DEV_ORG` directory (`devOrgDir(…, 'second')`), on the same pipe to the hub, so two clients are attached
+//   to B at once, each over its own channel.
 // - A's way to the hub (P5 O7 M4): a loopback TCP pipe in front of the hub, which `devOrgDir` names as A's hub, so a spec
 //   cuts A off from B (and from the hub) and joins it again, as a lost network would: the pipe ends every connection
 //   through it and refuses new ones until restored. B's own hub link does not go through it. With the relay launch's
@@ -55,8 +58,9 @@ export interface RemoteScene {
     list(session: { engine: string; app: string; owners: string[]; project: string; title?: string; cwd?: string }): Promise<void>;
     gone(engine: string): Promise<void>;
   };
-  /** A's MAWS_DEV_ORG directory; `directMap` says whether the link may reach B's listener directly. */
-  devOrgDir(directMap: boolean): string;
+  /** A's MAWS_DEV_ORG directory; `directMap` says whether the link may reach B's listener directly. P5 O7 M8: `client`
+   * 'second' is the second device's (the scene started with `secondUserData`), the same member's, on the same hub pipe. */
+  devOrgDir(directMap: boolean, client?: 'first' | 'second'): string;
   /** A's way to the hub (the pipe `devOrgDir` names): `cut` ends every connection through it and refuses new ones until
    * `restore`. */
   aHub: { cut(): void; restore(): void };
@@ -166,7 +170,7 @@ net.Server.prototype.listen = function (...args) {
  * The org, B enrolled and served, sminos on B's RL10 socket and A's device listed. `b.env` and `b.prepare` are B's
  * own (its replay fixtures, its trusted folders), as profile-daemon.ts takes them.
  */
-export async function startRemoteScene(opts: { scratch: string; aUserData: string; b?: { env?: Record<string, string>; prepare?: (paths: { claudeConfigDir: string }) => void; root?: string }; directPipe?: boolean }): Promise<RemoteScene> {
+export async function startRemoteScene(opts: { scratch: string; aUserData: string; secondUserData?: string; b?: { env?: Record<string, string>; prepare?: (paths: { claudeConfigDir: string }) => void; root?: string }; directPipe?: boolean }): Promise<RemoteScene> {
   const { scratch, aUserData } = opts;
   mkdirSync(scratch, { recursive: true });
   const undo: (() => Promise<void> | void)[] = [];
@@ -178,6 +182,9 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
     undo.push(() => org.stop());
     const aDevice = await deviceOf(scratch, aUserData);
     await org.listDevice({ id: aDevice.device, channelPub: aDevice.channelPub, stepUpPub: aDevice.stepUpPub });
+    // P5 O7 M8: a second app of the member's, its own device keys in its own profile, listed beside A's
+    const secondDevice = opts.secondUserData === undefined ? null : await deviceOf(scratch, opts.secondUserData);
+    if (secondDevice !== null) await org.listDevice({ id: secondDevice.device, channelPub: secondDevice.channelPub, stepUpPub: secondDevice.stepUpPub });
 
     const preload = join(scratch, 'fake-tailnet.cjs');
     writeFileSync(preload, FAKE_TAILNET);
@@ -230,14 +237,15 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
     // Read once every amendment is made (A listed, B enrolled): what A's dev session pins and holds.
     const chain = await org.chain();
     const advertised = `ws://${TAILNET}:${directPort}`;
-    const devOrgDir = (directMap: boolean): string => {
-      const dir = join(scratch, directMap ? 'dev-org-direct' : 'dev-org-relay');
+    const devOrgDir = (directMap: boolean, client: 'first' | 'second' = 'first'): string => {
+      if (client === 'second' && secondDevice === null) throw new Error('the scene was started with no second device (secondUserData)');
+      const dir = join(scratch, `${directMap ? 'dev-org-direct' : 'dev-org-relay'}${client === 'second' ? '-second' : ''}`);
       mkdirSync(dir, { recursive: true });
       const session = {
         version: 1,
         org: chain.org,
         member: org.admin.member,
-        device: aDevice.device,
+        device: (client === 'second' ? secondDevice! : aDevice).device,
         pins: chain.pins,
         hub: { url: aHub.url, standinUser: org.admin.email },
         directMap: { [advertised]: `ws://127.0.0.1:${directMap ? directTarget : deadPort}` },
