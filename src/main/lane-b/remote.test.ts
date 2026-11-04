@@ -1112,6 +1112,8 @@ describe('the sitting’s failures (M8)', () => {
     l.link.onAct = settleWith({ state: 'refused', reason: 'malformed' });
     const send = { appSessionId: APP, content: 'read it', uploads: [{ uploadId: 'u.0.pdf', as: 'document' }] };
     expect(await l.cmd('session.send', send)).toEqual({ ok: false, error: { code: 'invalid_input', message: REMOTE_UPLOAD_REFUSED_WORDS, issues: { refusal: 'malformed', uploads: 'refused' } } });
+    // the refusal can't say which part failed, so the words name the message and the attachment's likely causes alike
+    expect(REMOTE_UPLOAD_REFUSED_WORDS).toBe('The message wasn’t sent. If its attachment is more than a day old or isn’t a supported file, attach it again.');
     // a send without uploads keeps the machine's word
     expect(await l.cmd('session.send', { appSessionId: APP, content: 'plain' })).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'malformed' } } });
   });
