@@ -1715,6 +1715,29 @@ The link's `subscribe` takes `{feed, session?}` in place of `session` alone.
 - **The send's uploads** (M8): `session.send`'s input gains `uploads?: [{uploadId, as: 'document'}]`, behind `rl2.upload-blocks` (RL2 1.9). The endpoint reads each through `files.readUploads`: the sending session's own upload root, no link on the way, still there, within the day, a PDF within the engine's bound. A refusal is `ack refused malformed`, with nothing queued, and the engine host refuses a send that still names uploads. *(m8-3.)* The device sends `uploads` with the act's `requires: 'rl2.upload-blocks'` when the current peer lists it, or when there is no current channel (the act waits for one within its `sendBy`, and the channel it goes on judges it). A `not-offered` from a channel whose peer lists no `rl2.upload-blocks` is sent again, within the same bound, with the mention alone, and logged. Any other refusal is the send's error. A `malformed` refusal of a send that carried uploads is answered `invalid_input` with REMOTE_UPLOAD_REFUSED_WORDS ("The message wasn’t sent. If its attachment is more than a day old or isn’t a supported file, attach it again.", the architect's wording, since the refusal can't say which part failed) and `issues: {refusal: 'malformed', uploads: 'refused'}`.
 - **`connectors.signInServer`** (M8) takes `{name, scope, cwd, appSessionId}`. `connectors.signIn`'s `path` stays required, because a request field moved from required to optional breaks an older receiver.
 - **`session.spawn`'s input** gains `trust?: 'accepted'`, accepted by `spawnRefusal` only for a current machine owner, `spec-field` for anyone else.
+- **The spawned-here lead** (M8, m8-4a; `src/renderer/src/sessions/spawned-here.ts`, read by the sidebar only through `leadsAsSpawned`).
+  - **The mark.** A mark kept in the window's memory is set when `session.start` answers `starting` or a `session.spawn` succeeds. It records the setup phase held at that moment, so a retry's lead ignores an earlier attempt's failure.
+  - **Where the lead sits.** While it holds, the session leads its group under the pinned rows, under either sort. Its tree is always shown: the cap grows by one, and Show more counts with the same tree-wide predicate.
+  - **When it ends:**
+    - at the first turn's end while the session is attached;
+    - at an exited process, at once;
+    - for a listing, at the first rest after `busy`, or when the listing says the session ended;
+    - with nothing showing a first turn running, `LISTING_LEAD_MS` ends it;
+    - a failed or removed start clears it.
+  - *Known limit (accepted by the architect, 2026-11-04):* the mark is per window and is lost on a reload, after which the row ranks by its state.
+- **Resume…'s listed rows** (M8, m8-4a). Each listed row shows under its machine (`@<name>`), and so does a remote record's row. Another member's session, in either form, shows only under a row whose People toggle is on, and a hidden row never grants People. A listed row's preview reads nothing remote.
+- **The remote greying** (M8, m8-4b; `src/renderer/src/lane-b/remote-unavailable.ts`). Applies to a session reached over RL2 (`isOverRl2`: main holds a `remote.session` for it, or the org rows list its machine), whether lane A or lane B. Socket-linked and local sessions grey nothing.
+  - A control greys with its REMOTE_UNAVAILABLE words, or once a `not-offered` refusal has been heard for its command on that machine (`heardRefusal`, now for every session surface).
+  - It covers the composer's `!` and `#` modes, `/btw`'s Ask and Retry, the widgets, Session info, Rename and Dismiss, an archived row's Unarchive and Delete…, and the plugin panes.
+  - An RL2 session's pane tabs show the reason in place of the plugin's drawing, and ask the machine nothing: no `session.ui.panes`, no show or focus, a local close. Its surface sites draw unhooked.
+- **A remote PDF during a running turn** (M8, m8-4b; the architect's option (a), 2026-11-04). A send carrying `uploads` is a `session.send`, never a steer, so it goes through the queue. While a turn runs, the composer says where it will go:
+  - "Joins the paused queue; Resume sends it" for any paused queue (an interrupt's pause holds a fresh send while busy, `queue.ts` `submitNow`);
+  - "Sends after the queued messages" when messages are waiting;
+  - else "Sends after this turn".
+  A local busy send steers its document blocks into the running turn, so the remote one differs. The exit is `uploads?` on the steer path (a tracker line).
+  The upload's day is one value, `UPLOAD_KEPT_MS` (`@shared/ipc/schema/files`), read by the sweep, the send-time refusal and the composer's advisory.
+- **The follow log** (M8, m8-5). The engine host's FsService logs one line when a client holds an agent follow, one when it releases it, and one when the follow is dropped. Each line gives the client's tag, the first 8 hex digits of a sha256 of its id, never the raw id, and the count still holding. Nothing is logged per event.
+- **`ANSWERED_IN_MAIN`** (M8, m8-5; `src/main/machines/remote/answered-in-main.ts`) is the named list of the commands main's adapters answer with no offer row, 25 at M8, each with how it is answered. `test/lane-b/offer-coverage.test.ts` holds every session command crossing a link to exactly one of: offered, REMOTE_UNAVAILABLE, or this list. It checks the list both ways against the adapters.
 - **`mawsd endpoint sync`** (M10): it runs `syncNow()` then `promoteIfListed`, and answers as `endpoint status --json`.
 
 ## Open questions for the owner
@@ -2673,6 +2696,57 @@ P5 findings of M5's re-plan, continued from F15:
     - Follows are held per device, not per window, so one window's session-wide unfollow also ends another's follows of that session on that machine. This matches the local form.
     - The `test/lane-b/remote.test.ts` fsevents watch timeout, not yet in the tracker.
   Rationale: `task-4-report.md` with its three fix sections, and the task review rounds.
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: m8-4 was run as two tasks, m8-4a and m8-4b, and m8-4b ran beside m8-4a's review (2026-11-04).
+  - m8-4a is where sessions show and how their streams draw. m8-4b is the session surfaces, greyed or working.
+  - The two touched disjoint files. Each executor fast-forwarded before each commit and committed only its own paths.
+  - m8-5 ran the same way beside both fix rounds.
+  Rationale: the renderer's scope is too large for one executor's reliable hold. Disjoint files let the independent halves run at once.
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: m8-4a's build, two review rounds and the architect's rulings (2026-11-04). The commits run from 052ea5914 to c9096fbc2. §U carries the lead and Resume….
+  - **Built:**
+    - listed-row parity, in Resume… and in the priority sort (waiting comes from the attention feed only, as for a record);
+    - the spawned-here lead;
+    - gap healing by arrival order at the IPC listener, withdrawn only by a turn the parent's display admits, with an unseen-turn closure that claims no process exit;
+    - `refreshSide` on `remote.reopened`;
+    - `fs.tasks` passing `appSessionId` whenever the session is known.
+  - **The architect's rulings:**
+    - the lead sits under pinned rows, always shown while it holds, the cap growing by one, under either sort;
+    - the per-window mark is accepted as a known limit.
+  - **Fixes:**
+    - Round 1: People in both forms; arrival-order healing; no synthetic `process.exited`; the lead bounded and cleared on a failed start; no listing-only waiting tier.
+    - Round 2: a child's turn not cancelling the parent's heal; an exited process ending the lead, and an idle status no longer suppressing the fallback; a retry's lead tied to its own attempt; the cap exception tree-wide.
+    - Plus m8-5's discovery, a remote record row's machine chip.
+    The controller verified round 2 directly.
+  Rationale: `task-5-report.md` and the two task reviews.
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: m8-4b's build, two review rounds and the architect's rulings (2026-11-04). The task's own commits run from aa8cea562 to 306b06806. §U carries the greying and the PDF rule.
+  - **Built:**
+    - greying from one helper;
+    - Sign in on the MCP widget through `connectors.signInServer`, local and remote, with Reconnect staying a restart;
+    - Review's untracked rows through `git.diff` scope `untracked`, an untracked binary drawn and signed by its fetched patch;
+    - scheduled jobs reading no jobs on a machine with no file (confirmed, no product change);
+    - the composer's `uploads`, with the refusal shown as a send error with Send again, and the day-old advisory.
+  - **The architect's ruling:** option (a) for a PDF during a running turn. Local steers its document blocks, so remote steer parity is a PR tracker line.
+  - **Fixes:**
+    - Round 1: the greying reaching `!`/`#` and `/btw`; keying on RL2 transport (lane A too); the queued wording; the binary signature; the shared day constant.
+    - Round 2: the plugin panes; the paused-queue wording, corrected by the controller for an interrupt's pause while busy.
+  - A widget read the machine refused shows `error` with the machine's words, not `unavailable`, which would offer a Load now that can't help.
+  Rationale: `task-6-report.md` and the two task reviews.
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: m8-5's build, one review round and the architect's rulings (2026-11-04). The commits are d2bc44e00, c92b99084, 7fa4aacc5, 2c3f5d8fc and 86089a51b.
+  - **The contract test** has the third kind the architect required (`ANSWERED_IN_MAIN`, §U). It was shown to fail on a deliberately unclassified command. It found no gap on the branch.
+  - **The `e2e:remote` M8 case:**
+    - a group over the cap, then a session spawned on B through New chat, shown within the visible rows, closed, and reopened through Resume…;
+    - a concurrent second app of the member's (A2, a second device in the fake org) that proves acceptance 5's second client: (a) the listed row and Resume… on the client with no mark; (b) the ask answered on A settling on A2; (c) A's unfollow, and then A quitting, leaving A2's follow held, read from B's follow log, with A2's own unfollow as the control;
+    - the MAWS ask answered from this Mac;
+    - `/btw` across a link drop, asserting the opId's `session.operation` (`late: false`) reaches A exactly once after the restore;
+    - greying with its reason.
+  - **No 5 s assertion** (the architect: acceptance 5's bound is measured live at M10, and a hosted runner carries no wall-clock bound). The case logs the time to the row, and the figure goes in M8's PR.
+  - The follow log (§U) is the product seam (c) needed. Without it no client can observe a follow on B.
+  Rationale: `task-7-report.md` and the task review, which found the operation assertion passable without delivery and the reload not a second client.
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: The browser-screencast inventory case waits for its snapshot (2026-11-04, the architect). Unit 2/4 of run 41859199882 failed at `test/endpoint/browser-screencast.test.ts:532` (`expected false to be true`). The case read the inbox for the resubscribed feed's snap right at `subbed`. The trace showed m8-2b's `accepts` step does not reach it: a feed's `sub` is authorized on the subscription path, not `#command`. So the test raced. It now waits (`c859697de`, `d5e04bb5f`). This is one PR-body line, with no tracker line.
   Date/Author: 2026-11-04, O7's executor (the controller).
 
 ## Outcomes & Retrospective
