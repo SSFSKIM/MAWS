@@ -8,11 +8,11 @@
 //
 // What is read, each as git reads it: the nearest `.git` from the folder up (a directory, else a file naming one), the
 // git dir's `commondir`, the config (the common dir's, and the git dir's `config.worktree` where the repository turns it
-// on), and the common dir's `worktrees` (./git-objects.ts reads HEAD and the object store). Git's rules mirrored: a
-// folder that is itself a git dir is a bare repository's; outside a linked worktree, `core.worktree` names the work
-// tree, relative to the git dir, and `core.bare` leaves none. Not mirrored, since none changes a key: git's ownership check (`safe.directory`) and its stop
-// at a file-system boundary.
-import { lstat, open, readdir, type FileHandle } from 'node:fs/promises';
+// on), and the common dir's `worktrees` (./git-index.ts reads the index). Git's rules mirrored: a folder that is
+// itself a git dir is a bare repository's; outside a linked worktree, `core.worktree` names the work tree, relative to
+// the git dir, and `core.bare` leaves none; discovery stops at a mount boundary. Not mirrored: git's ownership check
+// (`safe.directory`), where git fails and this answers (the spawn after trust then fails on git's own check).
+import { lstat, open, readdir } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { walk, type Home, type HomeRefusal } from './home-folders';
 
@@ -39,8 +39,10 @@ export interface GitFiles {
   read(path: string, max: number): Promise<Buffer | null>;
   /** The names in the directory `path` leads to, or null when there is none. */
   list(path: string): Promise<string[] | null>;
-  /** The regular file `path` leads to, opened for reading, or null; the caller closes it. */
-  open(path: string): Promise<FileHandle | null>;
+  /** The size of the regular file `path` itself (its last link not followed), or null when it is no regular file. */
+  fileSize(path: string): Promise<number | null>;
+  /** The device of the folder `path` leads to (git's mount boundary), or null when there is none. */
+  device(path: string): Promise<number | null>;
 }
 
 /** The files under `where` read so that nothing inside a protected folder `opened` doesn't admit is touched. */
@@ -82,9 +84,14 @@ export function guardedFiles(where: Home, opened: (folder: string) => boolean): 
       const at = await real(path);
       return at === null ? null : readdir(at).catch(() => null);
     },
-    async open(path) {
-      const at = await regular(path);
-      return at === null ? null : open(at, 'r').catch(() => null);
+    async fileSize(path) {
+      const folder = await real(dirname(path));
+      const stat = folder === null ? null : await lstat(join(folder, basename(path))).catch(() => null);
+      return stat?.isFile() === true ? stat.size : null;
+    },
+    async device(path) {
+      const at = await real(path);
+      return at === null ? null : ((await lstat(at).catch(() => null))?.dev ?? null);
     },
   };
 }
@@ -139,7 +146,8 @@ const SECTION_CHAR = /[A-Za-z0-9.-]/;
 /**
  * A config's entries as git's own parser takes them (config.c: `git_parse_source`): sections `[name]`, `[name "sub"]` and
  * the legacy `[name.sub]`; keys with or without a value; values with quotes, the escapes `\n` `\t` `\b` `\\` `\"`, a
- * trailing `\` continuing the line, comments after `#` or `;`, spaces outside quotes kept only between words. An
+ * trailing `\` continuing the line, comments after `#` or `;`, whitespace outside quotes kept, as written, only between
+ * words. An
  * `[include]` or `[includeIf]` is an entry like any other; nothing here reads what it names. Throws `GitLayoutError` where
  * git reports a bad config line.
  */
@@ -209,7 +217,7 @@ export function parseConfig(text: string): GitConfig {
 
   function parseValue(): string {
     let value = '';
-    let spaces = 0; // spaces outside quotes, kept only once a word follows them
+    let spaces = ''; // whitespace outside quotes, kept as written (a TAB stays one) only once a word follows it
     let quoted = false;
     let comment = false;
     for (;;) {
@@ -223,16 +231,16 @@ export function parseConfig(text: string): GitConfig {
       i++;
       if (comment) continue;
       if (!quoted && (c === ' ' || c === '\t')) {
-        if (value.length > 0) spaces++;
+        if (value.length > 0) spaces += c;
         continue;
       }
       if (!quoted && (c === '#' || c === ';')) {
         comment = true;
         continue;
       }
-      if (spaces > 0) {
-        value += ' '.repeat(spaces);
-        spaces = 0;
+      if (spaces !== '') {
+        value += spaces;
+        spaces = '';
       }
       if (c === '\\') {
         let escaped = peek();
@@ -263,8 +271,8 @@ export interface GitRepo {
   config: GitConfig;
 }
 
-/** A pointer file (`.git`, `commondir`, a worktree's `gitdir`) is a line; anything longer is no pointer git writes. */
-const POINTER_MAX = 64 * 1024;
+/** A pointer file (`.git`, `commondir`, a worktree's `gitdir`, HEAD) is a line; anything longer is no pointer git writes. */
+export const POINTER_MAX = 4096;
 
 const text = (bytes: Buffer | null) => (bytes === null ? null : bytes.toString('utf8'));
 
@@ -276,7 +284,10 @@ const named = (target: string, base: string) => (isAbsolute(target) ? target : `
  * `GitLayoutError` where git refuses the layout, `SetupReadRefused` where a read would touch an unopened protected folder.
  */
 export async function discoverRepo(directory: string, files: GitFiles): Promise<GitRepo | null> {
+  const device = await files.device(directory);
   for (let folder = directory; ; folder = dirname(folder)) {
+    // git stops at a mount boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM unset): a parent on another device is not looked in
+    if (folder !== directory && (await files.device(folder)) !== device) return null;
     const dot = join(folder, '.git');
     const at = await files.real(dot);
     if (at !== null) {

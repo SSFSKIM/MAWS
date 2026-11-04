@@ -10,10 +10,10 @@
 // The machine's home is a fake one under a temp directory and the platform is injected as macOS: nothing here reads a
 // real protected folder. The folder list is the real services' handler over that home.
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { keyId, signRecord, SIGNING_DOMAINS, type Action, type Grant } from 'org-protocol';
 import type { CommandName } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
@@ -195,27 +195,40 @@ describe('the remote setup with the machine’s own handlers', () => {
     git(path, 'commit', '-q', '-m', 'one');
   };
 
-  /** A script at `path` that appends its arguments to `marker` (and then runs `then`, when given). */
+  /** A script at `path` that appends its working directory and arguments to `marker` (then runs `then`, when given). */
   const script = (path: string, marker: string, then = '') => {
-    writeFileSync(path, `#!/bin/sh\necho "$@" >> '${marker}'\n${then}`);
+    writeFileSync(path, `#!/bin/sh\necho "$(pwd) $@" >> '${marker}'\n${then}`);
     chmodSync(path, 0o755);
     return path;
   };
-  const wasGit = process.env.MAWS_GIT;
+  const was = { git: process.env.MAWS_GIT, home: process.env.HOME };
   afterEach(() => {
-    if (wasGit === undefined) delete process.env.MAWS_GIT;
-    else process.env.MAWS_GIT = wasGit;
+    for (const [key, value] of [['MAWS_GIT', was.git], ['HOME', was.home]] as const) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   });
+  /** `check` once it holds, within a few seconds (a new project's org derivation runs after its registration answers). */
+  const eventually = async <T>(check: () => T | undefined): Promise<T> => {
+    for (let tries = 0; tries < 200; tries++) {
+      const value = check();
+      if (value !== undefined) return value;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error('it never held');
+  };
 
-  async function real(): Promise<{ f: Fixture; home: string; a: Remote }> {
+  /** The machine's own handlers over a fake home, the index built as production builds it (its org refresh started). */
+  async function real(configDir = '.claude-config'): Promise<{ f: Fixture; home: string; a: Remote; index: Index }> {
     const { f, home, a, guard } = await setup();
     const index = new Index(join(tempDir('setup-rows-index-'), 'index.sqlite'));
     indexes.push(index);
+    void index.refreshOrgProjects({ machine: 'machine-test' as never, enrollment: () => null });
     registerIndexHandlers(index, f.spine.bus as never, guard);
-    const env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: join(home, '.claude-config') };
+    const env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: join(home, configDir) };
     const runGit = createGitRunner({ env });
     registerSetupTrust(f.spine.bus.register as never, { trustCheck: (directory, guarded) => trustStateOf(directory, { git: runGit, env, ...guarded }) }, guard);
-    return { f, home, a };
+    return { f, home, a, index };
   }
   const register = async (f: Fixture, a: Remote, directory: string) => act(a, await stepped(f, a, 'session.projects.addFolder', { directory }));
   const open = async (a: Remote, path: string) => expect(await call(a, 'machine.folders.list', { path, open: true })).toMatchObject({ ok: true });
@@ -258,23 +271,70 @@ describe('the remote setup with the machine’s own handlers', () => {
     expect(existsSync(ran)).toBe(false);
   });
 
-  // Round 2: before trust the setup runs no git at all; git's files are read directly, each through the walk, and a
+  // Round 2: before trust the setup runs no git but one; git's files are read directly, each through the walk, and a
   // config's include is never followed (git would read it: here it would make the checkout a bare repository's, so the
-  // worktree would fold nowhere and its trust read would fail).
-  it('run no git before trust: the registration and the trust read read git’s files themselves, never a config’s include', async () => {
+  // worktree would fold nowhere and its trust read would fail). Round 3: the one is the new project's org derivation's
+  // read of its remotes (`git config --file <common>/config --no-includes`), run from no checkout and reading no config of
+  // git's own: a global config's include into an unopened protected folder (invalid there, so git would fail on it, and
+  // the project would take no remote) is never read.
+  it('run no git before trust but the org derivation’s isolated config read, and follow no config’s include', async () => {
     const ran = join(tempDir('setup-rows-ran-'), 'git-ran');
     process.env.MAWS_GIT = script(join(tempDir('setup-rows-bin-'), 'git'), ran, 'exec /usr/bin/git "$@"\n');
-    const { f, home, a } = await real();
+    const { f, home, a, index } = await real();
     const main = join(home, 'Developer/main');
     repo(main);
+    git(main, 'remote', 'add', 'origin', 'https://github.com/example/main.git');
     git(main, 'worktree', 'add', '-q', join(home, 'Developer/wt'));
-    git(main, 'repack', '-adq');
     writeFileSync(join(home, 'Documents/included'), '[core]\n\tbare = true\n');
     git(main, 'config', 'include.path', join(home, 'Documents/included'));
+    writeFileSync(join(home, 'Documents/global-included'), 'not a config line [[[\n');
+    writeFileSync(join(home, '.gitconfig'), `[include]\n\tpath = ${join(home, 'Documents/global-included')}\n`);
+    process.env.HOME = home; // the machine's git now finds that global config
     expect(await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: join(home, 'Developer/wt') }))).toMatchObject({ state: 'done', result: { project: { directory: main }, location: { kind: 'existingWorktree', path: join(home, 'Developer/wt') } } });
     expect(await call(a, 'session.trust.check', { directory: join(home, 'Developer/wt') })).toMatchObject({ ok: true, output: { trustKey: main, keyKind: 'repo' } });
     expect(await call(a, 'session.trust.check', { directory: main })).toMatchObject({ ok: true, output: { trustKey: main, keyKind: 'repo' } });
-    expect(existsSync(ran)).toBe(false);
+    const org = await eventually(() => index.projects.list({ includeHidden: true }).find((project) => project.directory === main)?.org);
+    expect(org).toMatchObject({ key: 'remote:github.com/example/main', source: 'remote' });
+    const calls = readFileSync(ran, 'utf8').trim().split('\n');
+    expect(calls).toHaveLength(1);
+    const [cwd, ...args] = calls[0].split(' ');
+    expect(args.join(' ')).toBe(`config --file ${join(main, '.git/config')} --no-includes -z --get-regexp ^remote\\.`);
+    expect(cwd.startsWith(home) || cwd.startsWith(realpathSync(home))).toBe(false);
+  });
+
+  // Round 3: the new project's org derivation reads a `.smns` through the walk too
+  it('derive no org from a `.smns` linked into an unopened protected folder', async () => {
+    const { f, home, a, index } = await real();
+    mkdirSync(join(home, 'Developer/linked-smns'));
+    writeFileSync(join(home, 'Documents/smns.json'), JSON.stringify({ project: 'hidden-id' }));
+    symlinkSync(join(home, 'Documents/smns.json'), join(home, 'Developer/linked-smns/.smns'));
+    const errors: string[] = [];
+    const error = vi.spyOn(console, 'error').mockImplementation((...line: unknown[]) => void errors.push(line.map(String).join(' ')));
+    try {
+      expect(await register(f, a, join(home, 'Developer/linked-smns'))).toBe('ok');
+      await eventually(() => (errors.length > 0 ? true : undefined));
+      expect(errors).toEqual([expect.stringMatching(/the org project of .*linked-smns failed: protected: .*\.smns/)]);
+      expect(index.projects.list({ includeHidden: true }).find((project) => project.directory === join(home, 'Developer/linked-smns'))?.org).toBeUndefined();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  // Round 3: the trust read's store (the engine's global config) is read through the same guard
+  it('refuse a trust read whose trust store lies in, or links into, an unopened protected folder, until it is opened', async () => {
+    for (const [configDir, linked] of [['Documents/cfg', false], ['cfg', true]] as const) {
+      const { home, a } = await real(configDir);
+      mkdirSync(join(home, 'Documents/cfg'), { recursive: true });
+      mkdirSync(join(home, 'cfg'), { recursive: true });
+      mkdirSync(join(home, 'Developer/proj'), { recursive: true });
+      const store = join(home, 'Documents/cfg/.claude.json');
+      writeFileSync(store, JSON.stringify({ projects: { [join(home, 'Developer/proj')]: { hasTrustDialogAccepted: true } } }));
+      if (linked) symlinkSync(store, join(home, 'cfg/.claude.json'));
+      const refused = await call(a, 'session.trust.check', { directory: join(home, 'Developer/proj') }); // the machine's refusal
+      expect([configDir, (refused.error as { message?: string } | undefined)?.message]).toEqual([configDir, expect.stringMatching(/^protected: .*\.c(laude|onfig)\.json/)]);
+      await open(a, '~/Documents');
+      expect(await call(a, 'session.trust.check', { directory: join(home, 'Developer/proj') })).toMatchObject({ ok: true, output: { trusted: true } });
+    }
   });
 
   it('refuse a trust read whose trust file leads into an unopened protected folder', async () => {

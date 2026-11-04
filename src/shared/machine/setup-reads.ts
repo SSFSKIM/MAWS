@@ -15,14 +15,13 @@
 // A pointer that leads nowhere (a pruned worktree, a missing file) touches nothing past what was checked, so it is no
 // refusal; one through an unopened protected folder is `protected`. A pointer may lead out of the home: nothing outside it
 // is protected.
-import { lstat, readdir, readFile } from 'node:fs/promises';
+import { lstat, open, readdir } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
+import { POINTER_MAX } from './git-reads';
 import { walk, type Home, type HomeRefusal } from './home-folders';
 
 /** The files the trust read reads in the folder (src/services/sessions/trust.ts' `gatedFiles`). */
 export const TRUST_FILES = ['.claude/settings.json', '.claude/settings.local.json', '.mcp.json'] as const;
-/** A pointer file is a line; anything longer is no pointer git writes. */
-const POINTER_MAX = 4096;
 
 type Opened = (folder: string) => boolean;
 
@@ -103,12 +102,8 @@ async function gitRefusal(directory: string, where: Home, opened: Opened): Promi
 async function followPointer(file: string, base: string, pattern: RegExp, where: Home, opened: Opened, named = false): Promise<string | { refusal: HomeRefusal } | null> {
   const at = await walk(file, where, { opened, outside: true, file: true });
   if (!at.ok) return at.reason === 'no-folder' ? null : { refusal: at.reason };
-  let text: string;
-  try {
-    text = (await readFile(at.real, 'utf8')).slice(0, POINTER_MAX);
-  } catch {
-    return null;
-  }
+  const text = await pointerText(at.real);
+  if (text === null) return null;
   const match = pattern.exec(text);
   if (match === null) return null;
   const target = match[1].trim();
@@ -117,6 +112,25 @@ async function followPointer(file: string, base: string, pattern: RegExp, where:
   const resolved = await walk(path, where, { opened, outside: true });
   if (!resolved.ok) return resolved.reason === 'no-folder' ? null : { refusal: resolved.reason };
   return resolved.real;
+}
+
+/**
+ * The regular file `path`'s text, at most POINTER_MAX bytes read: null when it is no regular file (a FIFO's open would
+ * block), can't be read, or is longer (no pointer git writes; the machine's own read refuses that layout).
+ */
+async function pointerText(path: string): Promise<string | null> {
+  if ((await lstat(path).catch(() => null))?.isFile() !== true) return null;
+  const handle = await open(path, 'r').catch(() => null);
+  if (handle === null) return null;
+  try {
+    const bytes = Buffer.alloc(POINTER_MAX + 1);
+    const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+    return bytesRead > POINTER_MAX ? null : bytes.toString('utf8', 0, bytesRead);
+  } catch {
+    return null;
+  } finally {
+    await handle.close();
+  }
 }
 
 async function exists(path: string): Promise<boolean> {

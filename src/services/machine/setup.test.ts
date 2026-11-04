@@ -1,8 +1,8 @@
 // A remote setup's reads before trust answer what git's would (P5 O7 M9, round 2): the trust key read from git's files
-// is the one `git rev-parse` gives, and the project fold read from them is the one `git worktree list` and `ls-tree`
+// is the one `git rev-parse` gives, and the project fold read from them is the one `git worktree list` and the index
 // give, over real repositories of each layout in a fake macOS home under a temp directory.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -44,7 +44,12 @@ beforeAll(() => {
   git(home, 'clone', '-q', '--bare', main, at('bare.git'));
   git(at('bare.git'), 'worktree', 'add', '-q', at('bare-linked'));
   mkdirSync(at('plain'));
-  directories.push(main, join(main, 'src'), at('wt'), at('edited'), join(main, 'mod'), at('sepwt'), at('sep-linked'), at('bare-linked'), at('plain'));
+  // the review's case: a `core.worktree` with a TAB in it, beside a decoy spelled with a space
+  mkdirSync(at('one\ttwo'));
+  mkdirSync(at('one two'));
+  git(home, 'init', '-q', '--separate-git-dir', at('tab.git'), at('one\ttwo'));
+  appendFileSync(at('tab.git/config'), '[core]\n\tworktree = ../one\ttwo\n'); // a literal TAB (`git config` would write `\\t`)
+  directories.push(at('one\ttwo'), main, join(main, 'src'), at('wt'), at('edited'), join(main, 'mod'), at('sepwt'), at('sep-linked'), at('bare-linked'), at('plain'));
   writeFileSync(at('other/README.md'), 'edited in the main checkout\n'); // `edited`'s main no longer holds HEAD's bytes
 });
 afterAll(() => rmSync(home, { recursive: true, force: true }));

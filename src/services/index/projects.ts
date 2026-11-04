@@ -12,7 +12,7 @@ import { basename, dirname, join } from 'node:path';
 import type { ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectOrg, ProjectRecord } from '@shared/ipc/schema/session';
-import { headTreeFiles, type TreeFile } from '@shared/machine/git-objects';
+import { indexTopLevelFiles, type TopLevelFile } from '@shared/machine/git-index';
 import { discoverRepo, GitLayoutError, worktreeList, type GitFiles } from '@shared/machine/git-reads';
 import type { OrgKey } from '@shared/machine/org-key';
 import { slugOf } from '../../engine-host/fs/paths';
@@ -136,10 +136,11 @@ function listedMain(root: string, listed: string | null): string | null {
 // SHA-256 repository). The smallest few non-empty files are read (an empty one matches any empty file of its name), each
 // at most EVIDENCE_BYTES. Every doubt answers no: a checkout whose top-level files are all edited, or whose HEAD tracks
 // none, stays apart, as every linked worktree did before the fold.
-function holdsHead(main: string, tree: TreeFile[] | null): boolean {
+function holdsHead(main: string, tree: TopLevelFile[] | null): boolean {
   if (tree === null) return false;
   const candidates: { path: string; id: string; size: number }[] = [];
   for (const { name, id } of tree) {
+    if (!isBasename(name)) continue;
     const path = join(main, name);
     const stat = lstatSync(path, { throwIfNoEntry: false });
     if (stat?.isFile() && stat.size > 0 && stat.size <= EVIDENCE_BYTES) candidates.push({ path, id, size: stat.size });
@@ -156,8 +157,29 @@ function holdsHead(main: string, tree: TreeFile[] | null): boolean {
   });
 }
 
+// A name that is one entry of the folder it is joined to, never a way out of it.
+const isBasename = (name: string) => name !== '' && name !== '.' && name !== '..' && !name.includes('/') && !name.includes('\0');
+
+// `holdsHead` with every stat and read through the walk (a remote setup's, before trust; `mainWorktreeRead`).
+async function holdsHeadRead(main: string, tree: TopLevelFile[] | null, files: GitFiles): Promise<boolean> {
+  if (tree === null) return false;
+  const candidates: { path: string; id: string; size: number }[] = [];
+  for (const { name, id } of tree) {
+    if (!isBasename(name)) continue;
+    const path = join(main, name);
+    const size = await files.fileSize(path);
+    if (size !== null && size > 0 && size <= EVIDENCE_BYTES) candidates.push({ path, id, size });
+  }
+  candidates.sort((a, b) => a.size - b.size);
+  for (const { path, id } of candidates.slice(0, EVIDENCE_FILES)) {
+    const bytes = await files.read(path, EVIDENCE_BYTES);
+    if (bytes !== null && createHash(id.length === 64 ? 'sha256' : 'sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex') === id) return true;
+  }
+  return false;
+}
+
 // HEAD's regular top-level files as `ls-tree -z HEAD` lists them; null when git gave no answer.
-function treeFiles(tree: string | null): TreeFile[] | null {
+function treeFiles(tree: string | null): TopLevelFile[] | null {
   if (tree === null) return null;
   return tree.split('\0').flatMap((entry) => {
     const match = TOP_LEVEL_FILE.exec(entry);
@@ -262,7 +284,9 @@ export async function warmLinkedWorktrees(directories: Iterable<string>): Promis
 
 // P5 O7 M9 round 2: a remote setup's registration, before the folder's trust is accepted, answers the linked-worktree
 // question with no git run in it: what `mainWorktree` asks git is read from git's files (src/shared/machine/git-reads.ts,
-// git-objects.ts), each through the home's walk, a config's include never followed. The answer fills the cache, so the
+// git-index.ts), each through the home's walk, a config's include never followed. The content check's evidence is the
+// main checkout's index rather than HEAD's tree (round 3: no object store is read): the same answer but for a main
+// checkout whose smallest top-level files are staged and not committed. The answer fills the cache, so the
 // `locate` that follows asks git nothing; one already there stays. A read the walk refuses throws; any other doubt
 // answers no fold, as a git that cannot answer does.
 export async function warmLinkedWorktreeRead(directory: string, files: GitFiles): Promise<void> {
@@ -280,7 +304,7 @@ export async function warmLinkedWorktreeRead(directory: string, files: GitFiles)
 }
 
 // `mainWorktree`'s answer from git's files: the listing's main worktree when `root` is one of its linked entries, the
-// repository is not bare, the main worktree holds a `.git` and HEAD's work tree (`holdsHead`).
+// repository is not bare, the main worktree holds a `.git` and the work tree its index records (`holdsHead`).
 async function mainWorktreeRead(root: string, files: GitFiles): Promise<string | null> {
   const realOf = async (path: string) => (await files.real(path))?.normalize('NFC') ?? null;
   try {
@@ -296,7 +320,7 @@ async function mainWorktreeRead(root: string, files: GitFiles): Promise<string |
     const main = listed ? await realOf(first.path) : null;
     if (main === null || (await files.entry(join(main, '.git'))) === null) return null;
     const own = await discoverRepo(main, files);
-    return own !== null && holdsHead(main, await headTreeFiles(own, files)) ? main : null;
+    return own !== null && (await holdsHeadRead(main, await indexTopLevelFiles(own, files), files)) ? main : null;
   } catch (error) {
     if (error instanceof GitLayoutError) return null; // where git refuses the layout, it answers nothing
     throw error;
@@ -333,6 +357,7 @@ export interface OrgRow {
   id: ProjectId;
   directory: string;
   name: string;
+  files?: GitFiles; // P5 O7 M9 round 3: a remote setup's registration's checked reader, read through before trust
 }
 export type DeriveOrgOf = (row: OrgRow) => void;
 
@@ -393,7 +418,9 @@ export class ProjectStore {
 
   // The project for a realpath, creating it with `origin` when there is none. An explicit add (`user`) of a project
   // discovery created, or one the user removed, makes it the user's and visible again; discovery never unhides.
-  ensureForDirectory(realpath: string, origin: Origin): ProjectRecord {
+  // `files` (P5 O7 M9 round 3): a remote setup's registration's checked reader, which the new row's org derivation reads
+  // through (org-project.ts' `OrgIo`)
+  ensureForDirectory(realpath: string, origin: Origin, files?: GitFiles): ProjectRecord {
     return this.db.transaction(() => {
       const existing = this.db.get<ProjectRow>('SELECT * FROM projects WHERE directory = ?', realpath);
       if (existing) {
@@ -418,7 +445,7 @@ export class ProjectStore {
       });
       this.changed();
       this.attachOrphans(id, realpath);
-      this.db.defer(`org:${id}`, () => this.deriveOrg?.({ id, directory: realpath, name: basename(realpath) || realpath }));
+      this.db.defer(`org:${id}`, () => this.deriveOrg?.({ id, directory: realpath, name: basename(realpath) || realpath, ...(files === undefined ? {} : { files }) }));
       return project(this.row(id));
     });
   }

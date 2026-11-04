@@ -57,6 +57,7 @@ describe('a git config read as git reads it', () => {
       'two',
       '[x "sub \\"q\\" \\\\ s"]',
       '\tk = " sp " mid\\ttab\\"q\\\\  ',
+      '\tinner = one\ttwo  three \t',
       '\tempty =',
       '[include]',
       '\tpath = /nowhere',
@@ -77,6 +78,16 @@ describe('a git config read as git reads it', () => {
     expect(config.bool('core.worktree')).toBe(true); // a key with no value
     expect(config.bool('core.bare')).toBe(false);
     expect(config.get('include.path')).toBe('/nowhere'); // an entry like any other: nothing follows it
+  });
+
+  // the review's case: a literal TAB inside a value is kept, so a `core.worktree` names the folder git names
+  it('keeps a value’s internal whitespace as written: `core.worktree` names the folder git’s does, not a decoy', async () => {
+    mkdirSync(join(home, 'Developer/one\ttwo'));
+    mkdirSync(join(home, 'Developer/one two'));
+    git(home, 'init', '-q', '--separate-git-dir', join(home, 'Developer/sep.git'), join(home, 'Developer/one\ttwo'));
+    writeFileSync(join(home, 'Developer/sep.git/config'), '[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tworktree = ../one\ttwo\n');
+    expect(await read(join(home, 'Developer/one\ttwo'))).toEqual(revParse(join(home, 'Developer/one\ttwo')));
+    expect((await read(join(home, 'Developer/one\ttwo')))?.workTree).toBe(join(home, 'Developer/one\ttwo'));
   });
 
   it('refuses a line git refuses', () => {
@@ -109,11 +120,22 @@ describe('a repository found from a folder as git finds it', () => {
     expect(await read(join(main, '.git/refs'))).toMatchObject({ workTree: null, gitDir: join(main, '.git') });
   });
 
+  it('stops at a mount boundary, as git does unless GIT_DISCOVERY_ACROSS_FILESYSTEM is set', async () => {
+    const main = repo(join(home, 'Developer/main'));
+    mkdirSync(join(main, 'mounted/inner'), { recursive: true });
+    expect((await read(join(main, 'mounted/inner')))?.workTree).toBe(main);
+    const mounted: GitFiles = { ...files, device: async (path) => (path.startsWith(join(main, 'mounted')) ? 2 : 1) }; // `mounted` another volume
+    expect(await discoverRepo(join(main, 'mounted/inner'), mounted)).toBeNull();
+  });
+
   it('refuses a `.git` file git refuses', async () => {
     mkdirSync(join(home, 'Developer/odd'));
     writeFileSync(join(home, 'Developer/odd/.git'), 'nonsense\n');
     await expect(discoverRepo(join(home, 'Developer/odd'), files)).rejects.toThrow(GitLayoutError);
     writeFileSync(join(home, 'Developer/odd/.git'), 'gitdir: ../nowhere\n');
+    await expect(discoverRepo(join(home, 'Developer/odd'), files)).rejects.toThrow(GitLayoutError);
+    const real = repo(join(home, 'Developer/real'));
+    writeFileSync(join(home, 'Developer/odd/.git'), `gitdir: ${join(real, '.git')}\n${'#'.repeat(5000)}\n`); // longer than a pointer
     await expect(discoverRepo(join(home, 'Developer/odd'), files)).rejects.toThrow(GitLayoutError);
   });
 

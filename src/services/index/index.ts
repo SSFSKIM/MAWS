@@ -119,7 +119,7 @@ export class Index {
     };
     const one = async (row: OrgRow, attempt = 0): Promise<void> => {
       try {
-        const org = await inSlot(async () => (this.closed ? null : derive({ directory: row.directory, machine, projectId: row.id, name: row.name }, enrollment(), attempt === 0 ? ORG_GIT_TIMEOUT_MS : ORG_RETRY_GIT_TIMEOUT_MS)));
+        const org = await inSlot(async () => (this.closed ? null : derive({ directory: row.directory, machine, projectId: row.id, name: row.name, ...(row.files === undefined ? {} : { files: row.files }) }, enrollment(), attempt === 0 ? ORG_GIT_TIMEOUT_MS : ORG_RETRY_GIT_TIMEOUT_MS)));
         if (this.closed) return;
         if (org !== null) this.projects.setOrg(row.id, org);
         else if (attempt < ORG_RETRY_MS.length) {

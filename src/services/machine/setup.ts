@@ -101,12 +101,14 @@ export const setupRepoDirs =
 
 /**
  * A remote registration: the checked directory, checked again, its linked-worktree question answered from git's files
- * (no git run in it), then `register` (the index's `addFolder`) on it.
+ * (no git run in it), then `register` (the index's `addFolder`) on it with the checked reader, which the new project's
+ * org derivation reads through.
  */
-export async function setupAddFolder<T>(directory: string, guard: SetupGuard, register: (directory: string) => T): Promise<T> {
+export async function setupAddFolder<T>(directory: string, guard: SetupGuard, register: (directory: string, files: GitFiles) => T): Promise<T> {
   await checkSetupDirectory(directory, guard, { trustFiles: false });
-  await refusing(() => warmLinkedWorktreeRead(directory, setupFiles(directory, guard)));
-  return register(directory);
+  const files = setupFiles(directory, guard);
+  await refusing(() => warmLinkedWorktreeRead(directory, files));
+  return register(directory, files);
 }
 
 /**

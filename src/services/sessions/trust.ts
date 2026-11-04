@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { SetupReadRefused } from '@shared/machine/git-reads';
 import { normalizePath, type TrustState } from '@shared/sessions/trust';
 import { NotARepositoryError, type GitRun } from '../git/runner';
 
@@ -26,11 +27,14 @@ function homeOf(env: NodeJS.ProcessEnv): string {
 // CLAUDE_CODE_CUSTOM_OAUTH_URL selects one, `-custom-oauth`.
 export function configFilePath(env: NodeJS.ProcessEnv, exists: (path: string) => boolean = existsSync): string {
   const home = homeOf(env);
-  const configHome = env.CLAUDE_CONFIG_DIR || join(home, '.claude');
-  const legacy = join(configHome, '.config.json');
+  const legacy = legacyConfigPath(env);
   if (exists(legacy)) return legacy;
   const suffix = env.CLAUDE_CODE_CUSTOM_OAUTH_URL ? '-custom-oauth' : '';
   return join(env.CLAUDE_CONFIG_DIR || home, `.claude${suffix}.json`);
+}
+
+function legacyConfigPath(env: NodeJS.ProcessEnv): string {
+  return join(env.CLAUDE_CONFIG_DIR || join(homeOf(env), '.claude'), '.config.json');
 }
 
 async function realOrSelf(path: string): Promise<{ path: string; exists: boolean }> {
@@ -131,7 +135,11 @@ export type TrustedKey = Pick<TrustState, 'directory' | 'trustKey' | 'keyKind' |
 
 export async function trustedKeyOf(directory: string, deps: TrustDeps): Promise<TrustedKey> {
   const key = await trustKeyOf(directory, deps.git, deps.repo);
+  // P5 O7 M9 round 3: under a remote setup's guard the store is a file of what is read too: the legacy file looked for,
+  // then the store, each through the guard first
+  if (deps.guard !== undefined) await guarded(legacyConfigPath(deps.env), deps.guard);
   const configPath = configFilePath(deps.env);
+  if (deps.guard !== undefined) await guarded(configPath, deps.guard);
   const projects = await readTrustStore(configPath, { warn: deps.warn });
   return { ...key, configPath, trusted: projects[key.trustKey]?.hasTrustDialogAccepted === true };
 }
@@ -185,9 +193,13 @@ function settingsSummary(settings: Record<string, unknown>): string {
   return parts.join(', ');
 }
 
+async function guarded(path: string, guard: NonNullable<TrustDeps['guard']>): Promise<void> {
+  if (!(await guard(path))) throw new SetupReadRefused('protected', path); // the setup's handler answers it as its refusal
+}
+
 async function gatedFiles(directory: string, guard?: TrustDeps['guard']): Promise<TrustState['found']> {
   const readJson = async (path: string) => {
-    if (guard !== undefined && !(await guard(path))) throw new Error(`protected: ${path} leads into a folder macOS protects`);
+    if (guard !== undefined) await guarded(path, guard);
     return readJsonAt(path);
   };
   const found: TrustState['found'] = [];

@@ -85,6 +85,15 @@ describe('a setup’s reads past its folder', () => {
     expect(await setupReadsRefusal(join(home, 'Developer/linked'), mac, documents, trust)).toBeNull();
   });
 
+  it('read a pointer no further than a pointer is long: a longer `.git` file is followed nowhere', async () => {
+    repo(join(home, 'Documents/real'));
+    mkdirSync(join(home, 'Developer/long'));
+    writeFileSync(join(home, 'Developer/long/.git'), `gitdir: ${join(home, 'Documents/real/.git')}\n`);
+    expect(await setupReadsRefusal(join(home, 'Developer/long'), mac, none, trust)).toBe('protected');
+    writeFileSync(join(home, 'Developer/long/.git'), `gitdir: ${join(home, 'Documents/real/.git')}\n${'#'.repeat(5000)}\n`);
+    expect(await setupReadsRefusal(join(home, 'Developer/long'), mac, none, trust)).toBeNull(); // nothing past it is read
+  });
+
   it('refuse a trust file linked into an unopened protected folder for the trust read, not the registration', async () => {
     mkdirSync(join(home, 'Developer/proj/.claude'), { recursive: true });
     writeFileSync(join(home, 'Documents/mcp.json'), '{}');
