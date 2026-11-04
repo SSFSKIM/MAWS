@@ -87,8 +87,8 @@ describe('agents harness fake client', () => {
     expect((await fake.client.subagents(A)).map((a) => a.agentId)).toEqual(['a1', 'a2', 'w1']);
     expect(await fake.client.subagents(B)).toEqual([]);
     expect(await fake.client.workflows(A)).toEqual([run]);
-    expect(await fake.client.tasks(TEST_MACHINE, 'sess-1')).toHaveLength(1);
-    expect(await fake.client.tasks(TEST_MACHINE, 'other')).toEqual([]);
+    expect(await fake.client.tasks(TEST_MACHINE, 'sess-1', A)).toHaveLength(1);
+    expect(await fake.client.tasks(TEST_MACHINE, 'other', null)).toEqual([]);
     expect(seen).toEqual(['subagents A a1,a2', 'subagents A a1,a2,w1', 'workflow A wf_1', 'tasks sess-1']);
   });
 
