@@ -339,7 +339,9 @@ function Row({ id, row, kind, now, selected, badge, onSelect, onOpen }: RowProps
       <span data-title className="min-w-8 shrink truncate">
         {title}
       </span>
-      {record.archived && <span className="shrink-0 rounded-sm border border-border px-1 text-ui-sm text-fg-faint">{COPY.archived}</span>}
+      {/* P5 O7 M8: another machine's record, marked as its listed row is */}
+      <MachineChip address={record.appId} className="max-w-[9rem]" />
+      {record.archived &&<span className="shrink-0 rounded-sm border border-border px-1 text-ui-sm text-fg-faint">{COPY.archived}</span>}
       {branch && (
         <span data-testid="row-branch" title={branch} className="max-w-[9rem] min-w-9 shrink-[100] truncate text-ui-sm text-fg-faint">
           ⎇ {shortBranch(branch)}

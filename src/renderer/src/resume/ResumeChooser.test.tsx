@@ -187,6 +187,17 @@ describe('the resume chooser', () => {
     off();
   });
 
+  // m8-5's discovery (review 2): a window that still holds a remote session's record draws it as a record row, marked as
+  // its listed row is; a local record keeps no mark
+  it('marks another machine’s record row with its machine, as its listed row is, and a local record with none', () => {
+    fill([...base, record(addressOf(OTHER_MACHINE, 'remote-rec' as AppSessionId), { title: { text: 'remote record', source: 'user' }, projectId: P.id, updatedAt: minute(7) })]);
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: minute(0), generation: 1, carrier: 'relay' }]);
+    mount();
+    const row = (title: string) => screen.getAllByRole('option').find((o) => o.querySelector('[data-title]')!.textContent === title)!;
+    expect(row('remote record').querySelector('[data-machine-chip]')?.textContent).toBe('@mini');
+    expect(row('alpha').querySelector('[data-machine-chip]')).toBeNull();
+  });
+
   it('draws the 100 newest, loads 100 more when the list scrolls near its end or ArrowDown passes the last row, and a new search starts over', async () => {
     const user = userEvent.setup();
     const t0 = Date.UTC(2026, 9, 1, 12);
