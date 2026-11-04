@@ -9,7 +9,8 @@
 //
 // The machine's home is a fake one under a temp directory and the platform is injected as macOS: nothing here reads a
 // real protected folder. The folder list is the real services' handler over that home.
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -17,19 +18,26 @@ import { keyId, signRecord, SIGNING_DOMAINS, type Action, type Grant } from 'org
 import type { CommandName } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
 import { OFFERS } from '../../src/endpoint/offers';
+import { createGitRunner } from '../../src/services/git/runner';
+import { Index } from '../../src/services/index/index';
+import { registerIndexHandlers } from '../../src/services/index/register';
 import { registerFolders } from '../../src/services/machine/folders';
+import { registerSetupTrust, SetupOpens, type SetupGuard } from '../../src/services/machine/setup';
+import { trustStateOf } from '../../src/services/sessions/trust';
 import { iso } from './org-fixtures';
 import { act, CHECKOUT, makeOrg, openRemote, ORG, sminos, startEndpoint, stopAll, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
 const dirs: string[] = [];
+const indexes: Index[] = [];
 
 beforeAll(async () => {
   org = await makeOrg();
 });
 afterEach(async () => {
   await stopAll(started);
+  for (const index of indexes.splice(0)) index.close();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 afterAll(() => stopAll(started));
@@ -41,15 +49,16 @@ const tempDir = (prefix: string) => {
 };
 
 /** The machine with a fake macOS home, the folder list the services' own, the registration and trust read answering what they were asked. */
-async function setup(): Promise<{ f: Fixture; home: string; a: Remote; b: Remote }> {
+async function setup(): Promise<{ f: Fixture; home: string; a: Remote; b: Remote; guard: SetupGuard }> {
   const home = tempDir('setup-rows-home-');
   for (const dir of ['Developer/GitHub/maws', 'Documents/proj']) mkdirSync(join(home, dir), { recursive: true });
   const f = await startEndpoint(org, started, { setup: { home, platform: 'darwin' } });
-  registerFolders(f.spine.bus.register as never, { home, platform: 'darwin' });
+  const guard: SetupGuard = { where: { home, platform: 'darwin' }, opens: new SetupOpens() };
+  registerFolders(f.spine.bus.register as never, guard);
   f.spine.handle('session.projects.addFolder', (input) => ({ registered: (input as { directory: string }).directory }));
-  f.spine.handle('session.trust.check', (input) => ({ trustKey: (input as { directory: string }).directory, trusted: false }));
+  f.spine.handle('machine.setupTrust', (input) => ({ trustKey: (input as { directory: string }).directory, trusted: false })); // the endpoint's remote trust read
   f.spine.handle('session.spawn', () => ({ status: 'ok', appSessionId: 'app-new' }));
-  return { f, home, a: await openRemote(f, org.a1, org.A), b: await openRemote(f, org.b1, org.B) };
+  return { f, home, a: await openRemote(f, org.a1, org.A), b: await openRemote(f, org.b1, org.B), guard };
 }
 
 /** A grant of `rights` on the machine to `member`, signed by the owner's device. */
@@ -73,8 +82,12 @@ async function admitted(r: Remote, action: Action): Promise<unknown> {
   return (await waitFor(r, (m) => m.t === 'done' && m.opId === action.opId, `the done of ${action.action}`, from)).outcome;
 }
 
-/** What reached the machine's services by `name` from `from` on: a call's dispatch, or an act's claim under `machine.op`. */
-const reached = (f: Fixture, from: number, name: string) => f.host.calls.slice(from).filter((c) => c.name === name || (c.name === 'machine.op' && (c.input as { name?: string }).name === name));
+/**
+ * What reached the machine's services by `name` from `from` on: a call's dispatch (a remote trust read is asked as
+ * `machine.setupTrust`), or an act's claim under `machine.op`.
+ */
+const reached = (f: Fixture, from: number, name: string) =>
+  f.host.calls.slice(from).filter((c) => c.name === name || (name === 'session.trust.check' && c.name === 'machine.setupTrust') || (c.name === 'machine.op' && (c.input as { name?: string }).name === name));
 
 describe('the remote setup’s rows', () => {
   it('are offered as §U has them: two `list` calls and a `machine-admin` act, each the machine’s owners’ alone', () => {
@@ -168,3 +181,102 @@ describe('the remote setup’s rows', () => {
     expect(await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: join(home, 'Developer/proj') }))).toMatchObject({ state: 'done' });
   });
 });
+
+// The task review's findings 1 to 3, with the machine's own handlers: the index's registration (`addFolder` under
+// `machine.op`) and the guarded trust read (`machine.setupTrust`), over real git in the fake home. Each runs on the
+// directory the endpoint checked, and checks it again before any git call or read.
+describe('the remote setup with the machine’s own handlers', () => {
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, stdio: 'ignore' });
+  const repo = (path: string) => {
+    mkdirSync(path, { recursive: true });
+    git(path, 'init', '-q', '-b', 'main');
+    writeFileSync(join(path, 'README.md'), 'hello\n');
+    git(path, 'add', '.');
+    git(path, 'commit', '-q', '-m', 'one');
+  };
+
+  async function real(): Promise<{ f: Fixture; home: string; a: Remote }> {
+    const { f, home, a, guard } = await setup();
+    const index = new Index(join(tempDir('setup-rows-index-'), 'index.sqlite'));
+    indexes.push(index);
+    registerIndexHandlers(index, f.spine.bus as never, guard);
+    const env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: join(home, '.claude-config') };
+    const runGit = createGitRunner({ env });
+    registerSetupTrust(f.spine.bus.register as never, { trustCheck: (directory, read) => trustStateOf(directory, { git: runGit, env, ...(read === undefined ? {} : { guard: read }) }) }, guard);
+    return { f, home, a };
+  }
+  const register = async (f: Fixture, a: Remote, directory: string) => act(a, await stepped(f, a, 'session.projects.addFolder', { directory }));
+  const open = async (a: Remote, path: string) => expect(await call(a, 'machine.folders.list', { path, open: true })).toMatchObject({ ok: true });
+
+  it('register a checkout and read its trust on the machine', async () => {
+    const { f, home, a } = await real();
+    repo(join(home, 'Developer/GitHub/maws/repo'));
+    const directory = join(home, 'Developer/GitHub/maws/repo');
+    expect(await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory }))).toMatchObject({ state: 'done', result: { project: { directory }, location: { kind: 'directory', path: directory } } });
+    expect(await call(a, 'session.trust.check', { directory })).toMatchObject({ ok: true, output: { directory, trustKey: directory, keyKind: 'repo', trusted: false } });
+  });
+
+  it('refuse a linked worktree whose git lives in an unopened protected folder, before any git call, until it is opened', async () => {
+    const { f, home, a } = await real();
+    repo(join(home, 'Documents/main'));
+    git(join(home, 'Documents/main'), 'worktree', 'add', '-q', join(home, 'Developer/wt'));
+    const from = f.host.calls.length;
+    expect(await register(f, a, join(home, 'Developer/wt'))).toBe('protected');
+    expect(code(await call(a, 'session.trust.check', { directory: join(home, 'Developer/wt') }))).toBe('protected');
+    expect(reached(f, from, 'session.projects.addFolder')).toEqual([]);
+    expect(reached(f, from, 'session.trust.check')).toEqual([]);
+    await open(a, '~/Documents');
+    expect(await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: join(home, 'Developer/wt') }))).toMatchObject({ state: 'done', result: { project: { directory: join(home, 'Documents/main') }, location: { kind: 'existingWorktree', path: join(home, 'Developer/wt') } } });
+  });
+
+  it('refuse a trust read whose trust file leads into an unopened protected folder', async () => {
+    const { f, home, a } = await real();
+    mkdirSync(join(home, 'Developer/proj'));
+    writeFileSync(join(home, 'Documents/mcp.json'), '{"mcpServers":{"x":{}}}');
+    symlinkSync(join(home, 'Documents/mcp.json'), join(home, 'Developer/proj/.mcp.json'));
+    expect(code(await call(a, 'session.trust.check', { directory: join(home, 'Developer/proj') }))).toBe('protected');
+    expect(await register(f, a, join(home, 'Developer/proj'))).toBe('ok'); // the registration reads no trust file
+    await open(a, '~/Documents');
+    expect(await call(a, 'session.trust.check', { directory: join(home, 'Developer/proj') })).toMatchObject({ ok: true, output: { found: [{ file: '.mcp.json' }] } });
+  });
+
+  it('run on the directory the policy resolved, a `..` after a link climbing from its target, the signed spelling kept with the claim', async () => {
+    const { f, home, a } = await real();
+    mkdirSync(join(home, 'Documents/sub'));
+    mkdirSync(join(home, 'Documents/secret'));
+    mkdirSync(join(home, 'secret'));
+    symlinkSync(join(home, 'Documents/sub'), join(home, 'shortcut'));
+    const spelled = `${home}/shortcut/../secret`; // the kernel's `~/Documents/secret`, never the lexical `~/secret`
+    expect(await register(f, a, spelled)).toBe('protected');
+    expect(code(await call(a, 'session.trust.check', { directory: spelled }))).toBe('protected');
+    await open(a, '~/Documents');
+    const action = await stepped(f, a, 'session.projects.addFolder', { directory: spelled });
+    expect(await admitted(a, action)).toMatchObject({ state: 'done', result: { location: { path: join(home, 'Documents/secret') } } });
+    expect(f.spine.claimed.at(-1)).toMatchObject({ name: 'session.projects.addFolder', input: { directory: join(home, 'Documents/secret') }, op: { action: { args: { directory: spelled } } } });
+    expect(await call(a, 'session.trust.check', { directory: spelled })).toMatchObject({ ok: true, output: { directory: join(home, 'Documents/secret') } });
+  });
+
+  it('refuse on the machine a folder that changed after the endpoint checked it, reading nothing through the change', async () => {
+    const { f, home, a } = await real();
+    mkdirSync(join(home, 'Developer/moving'));
+    mkdirSync(join(home, 'Developer/elsewhere'));
+    mkdirSync(join(home, 'Documents/inside'));
+    const registration = f.spine.handlers.get('session.projects.addFolder')!;
+    let swap = (): void => {};
+    f.spine.handle('session.projects.addFolder', (input, context) => (swap(), registration(input, context))); // between the check and the run
+    const outcomeOf = async (directory: string) => JSON.stringify(await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory })));
+    swap = () => {
+      renameSync(join(home, 'Developer/moving'), join(home, 'Developer/moved'));
+      symlinkSync(join(home, 'Developer/elsewhere'), join(home, 'Developer/moving'));
+    };
+    expect(await outcomeOf(join(home, 'Developer/moving'))).toContain('no-folder: ');
+    rmSync(join(home, 'Developer/moving')); // the link the first swap left: a folder again for the endpoint's check
+    mkdirSync(join(home, 'Developer/moving'));
+    swap = () => {
+      rmSync(join(home, 'Developer/moving'), { recursive: true });
+      symlinkSync(join(home, 'Documents/inside'), join(home, 'Developer/moving'));
+    };
+    expect(await outcomeOf(join(home, 'Developer/moving'))).toContain('protected: ');
+  });
+});
+

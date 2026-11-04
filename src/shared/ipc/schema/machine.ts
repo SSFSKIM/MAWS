@@ -8,6 +8,7 @@
 // `machine.opQuery`, the services' operation ledger (O3X7), which the endpoint reaches as `host.op` reaches lane B's.
 import * as z from 'zod';
 import { MachineRefSchema } from '../../machine/ref';
+import { TrustStateSchema } from '../../sessions/trust';
 import { JsonValueSchema, type CommandSpec } from './common';
 import { HostOpOutputSchema, HostOpQueryOutputSchema, OpBindingShape, OpIdSchema, OpTargetSchema } from './host';
 
@@ -45,6 +46,9 @@ export const commands = {
   'machine.op': { input: MachineOpInputSchema, output: HostOpOutputSchema, owner: 'machine' },
   'machine.opQuery': { input: z.strictObject({ opId: OpIdSchema, opCreated: z.string(), tombstoneIfAbsent: z.boolean() }), output: HostOpQueryOutputSchema, owner: 'machine' },
   'machine.folders.list': { input: FoldersListInputSchema, output: z.strictObject({ entries: z.array(FolderEntrySchema), cursor: z.string().nullable() }), owner: 'machine' }, // P5 O7 M9
+  // P5 O7 M9 (the task review's findings 2 and 3): main-only, the endpoint's: a remote `session.trust.check` read on the
+  // directory its setup policy resolved and checked, guarded again on the machine (src/services/machine/setup.ts)
+  'machine.setupTrust': { input: z.strictObject({ directory: z.string().min(1) }), output: TrustStateSchema, owner: 'machine' },
 } as const satisfies Record<`machine.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {} as const satisfies Record<`machine.${string}`, z.ZodType>;

@@ -59,6 +59,7 @@ import { startLibrary } from './library';
 import { registerLibraryReads } from './library/files';
 import { registerMachineOps } from './machine-ops';
 import { registerFolders } from './machine/folders'; // P5 O7 M9
+import { registerSetupTrust, SetupOpens, type SetupGuard } from './machine/setup'; // P5 O7 M9
 import { startOwnerChannel } from './owner/register';
 import { startEngineConfigure } from './settings/engine-configure';
 import { startHostConfigure } from './settings/host-configure';
@@ -176,8 +177,10 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // launch mode scenario) and stops it. P5 O3-A: unavailable, its file never opened, in a run refused the spine.
   const index = new Index(join(profile, 'index.sqlite'), { refused: data.refused });
   void index.refreshOrgProjects({ machine: deps.machine, enrollment: deps.enrollment }); // P5 O6 M5: each project's org project, derived again at every start (OX3)
-  registerIndexHandlers(index, bus);
-  registerFolders(bus.register, { home: deps.home, platform: process.platform }); // P5 O7 M9: "+ Session"'s folder list on this machine
+  // P5 O7 M9: a remote setup's home and what the folder list opened, which its handlers check again on this machine
+  const setupGuard: SetupGuard = { where: { home: deps.home, platform: process.platform }, opens: new SetupOpens() };
+  registerIndexHandlers(index, bus, setupGuard);
+  registerFolders(bus.register, setupGuard); // P5 O7 M9: "+ Session"'s folder list on this machine
   const indexSource = new IndexSessionSource(index, hosts, { emit: bus.emit });
   // C3's attention service over the index (its fallback file only when the index cannot be read); none when refused
   const attention = spineRuns
@@ -366,6 +369,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     });
     const unintercept = registerSessionServiceHandlers(service, bus, sessions.mode); // P5 O3-D M4: the rewind repair's intercepts in launch mode index only
     registerSpawn(bus, { sessions: service, projects: () => index.projects.list({ includeHidden: true }) }); // P5 O7 M4: a spawn from another device
+    registerSetupTrust(bus.register, service, setupGuard); // P5 O7 M9: a remote setup's trust read, guarded
     sessionService = service;
     settling.push(service.work);
     // The sweep keeps the machine's interest union (D11): on the embedded shape main's interest report's set

@@ -12,17 +12,18 @@
 // it; an act's executor gets the action as it was sealed, its `args` tagged, which the ledger decodes for itself. An
 // `artifact`-rule decision names its artifact (`Granted.artifact`), which an act's claim records.
 import type { ActMessage, CallMessage, SubMessage } from 'org-protocol';
-import type { ArtifactTarget, AuthorizeRequest, Decision, Who } from './authorize';
+import type { ArtifactTarget, AuthorizeRequest, Decision, SetupTarget, Who } from './authorize';
 import { readBytes } from './bytes';
 import type { ChannelRoutes, RemoteChannel } from './channels';
 import type { SessionTarget } from './sources';
 
 /**
- * An authorized request's decision: the session it is about, where it names one, or the artifact (P5 O7 M5a); `stands`,
+ * An authorized request's decision: the session it is about, where it names one, or the artifact (P5 O7 M5a), or (P5 O7
+ * M9) a setup row's checked directory, which its executor acts on; `stands`,
  * whether it stands still (authorize.ts' `Decision`); `askedAt`, when the gate was asked (P5 O7 M5c review 1: the call's
  * arrival, from which an acquisition is bounded, acquire.ts).
  */
-export type Granted = { target?: SessionTarget; artifact?: ArtifactTarget; stands?: () => boolean; askedAt?: number };
+export type Granted = { target?: SessionTarget; artifact?: ArtifactTarget; setup?: SetupTarget; stands?: () => boolean; askedAt?: number };
 
 export type Executors = {
   call(channel: RemoteChannel, message: CallMessage, decision: Granted): void;
@@ -86,7 +87,7 @@ export class Gate {
       .authorize(request, who, askedAt)
       .then((decision) => {
         if (channel.closed) return;
-        if (decision.ok) answer.granted({ ...(decision.target === undefined ? {} : { target: decision.target }), ...(decision.artifact === undefined ? {} : { artifact: decision.artifact }), ...(decision.stands === undefined ? {} : { stands: decision.stands }), askedAt });
+        if (decision.ok) answer.granted({ ...(decision.target === undefined ? {} : { target: decision.target }), ...(decision.artifact === undefined ? {} : { artifact: decision.artifact }), ...(decision.setup === undefined ? {} : { setup: decision.setup }), ...(decision.stands === undefined ? {} : { stands: decision.stands }), askedAt });
         else answer.refused(decision.reason);
       })
       .catch((error: unknown) => {

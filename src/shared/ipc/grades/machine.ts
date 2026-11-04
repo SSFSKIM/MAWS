@@ -13,4 +13,5 @@ export const grades = {
   'machine.client': 'internal',
   'machine.op': 'internal',
   'machine.opQuery': 'internal',
+  'machine.setupTrust': 'internal', // P5 O7 M9: the endpoint's guarded trust read for a remote setup
 } as const satisfies CommandGrades<'machine'>;

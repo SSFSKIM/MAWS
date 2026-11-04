@@ -5,10 +5,12 @@ import type { AppSessionId, MessageUuid, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionPatch } from '@shared/ipc/schema/session';
 import type { ServicesBus } from '@shared/spine/bus';
+import { setupAddFolder, thisGuard, type SetupGuard } from '../machine/setup';
 import { addFolder } from './add-folder'; // New chat
 import type { Index } from './index';
 
-export function registerIndexHandlers(index: Index, { register }: Pick<ServicesBus, 'register'>): void {
+// `setup` (P5 O7 M9): where a remote setup's registration is checked again (src/services/machine/setup.ts).
+export function registerIndexHandlers(index: Index, { register }: Pick<ServicesBus, 'register'>, setup: SetupGuard = thisGuard()): void {
   register('session.search', ({ query, sessions }) => ({ hits: index.sessionSearch.search(query, undefined, sessions as AppSessionId[] | undefined), indexing: index.sessionSearch.indexing(), incomplete: index.sessionSearch.incomplete() }));
   register('session.list', ({ includeArchived }) => ({ sessions: index.sessions.list({ includeArchived }), revision: index.revision }));
   // An app session id with no row (an unstarted tab) is an answer, not an error.
@@ -17,7 +19,9 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
   // W11 (I5): hidden projects included, marked `hidden`, so the renderer keeps their sessions out of Other sessions
   register('session.projects.list', () => ({ projects: index.projects.listWithRemoved(), revision: index.revision, rows: index.projects.list({ includeHidden: true }) })); // P5 O3-D: every row too (D13)
   register('session.projects.add', ({ directory }) => index.projects.add(directory));
-  register('session.projects.addFolder', ({ directory }) => addFolder(index.projects, directory)); // New chat: "Open folder…"
+  // New chat: "Open folder…"; P5 O7 M9: another machine's owner's, claimed under `machine.op`, on the directory the
+  // endpoint checked, checked again here before anything reads in it
+  register('session.projects.addFolder', ({ directory }, context) => (context.op === undefined ? addFolder(index.projects, directory) : setupAddFolder(directory, setup, (checked) => addFolder(index.projects, checked))));
   register('session.projects.update', ({ id, patch }) => index.projects.update(id as ProjectId, patch));
   register('session.projects.remove', ({ id }) => index.projects.hide(id as ProjectId));
   register('session.drafts.get', ({ appSessionId }) => index.drafts.get(appSessionId as AppSessionId));

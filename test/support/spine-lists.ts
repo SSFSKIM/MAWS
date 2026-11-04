@@ -25,6 +25,7 @@ export const SPINE_COMMANDS = [
   'library.spaces',
   'machine.folders.list', // P5 O7 M9: the remote setup's folder list (src/services/machine/folders.ts)
   'machine.op', 'machine.opQuery', // P5 O3-D M4: the services' operation ledger, opened only while the run holds spine.lock
+  'machine.setupTrust', // P5 O7 M9: its guarded trust read (src/services/machine/setup.ts), with the session service
   'machineSettings.get', 'machineSettings.set', // P5 O3-D M5b (Interfaces §G): the machine half, for main's settings mirror
   'mods.list', 'mods.setSessionOverride',
   'ownerChannel.answered', 'ownerChannel.cancel', 'ownerChannel.markRead', 'ownerChannel.state',

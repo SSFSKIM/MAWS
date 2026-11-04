@@ -49,7 +49,8 @@
 //     dashboard's snapshot holds, taken on the engine host and kept per channel (asset-holds.ts).
 //   - P5 O7 M9: `machine.folders.list` goes to the machine's services as any `machine` row; one with `open: true` that
 //     they answered keeps the protected folder it read in as opened by the caller (policy.ts' `MachineSetup`), which the
-//     setup policy then lets them register a folder in.
+//     setup policy then lets them register a folder in. `session.trust.check` is asked of the machine as
+//     `machine.setupTrust` on the directory the setup policy resolved and checked (`Granted.setup`), never the input.
 //   - P5 O7 M5c review 1: an acquisition (`connectors.open`, `artifacts.holdAssets`) is bounded from the call's arrival
 //     under the device's call deadline (acquire.ts): past it the call answers `timeout`, and what the machine answers
 //     after it is let go of at once (the lease closed, the hold released) under the channel's ref.
@@ -289,6 +290,7 @@ export class Calls {
     else if ((row?.executor === 'engine-host' || row?.executor === 'machine') && row.target === 'artifact' && SESSION_NAMING.has(m.name)) run = this.#sessionSafe(dispatch, row.executor, channel.member, m);
     else if (m.name === 'fs.unfollow' && row?.executor === 'engine-host' && !this.ctx.engineHostLists(FOLLOW_OWNERS_CAPABILITY)) run = Promise.resolve(this.#unownedUnfollow());
     else if (m.name === 'machine.folders.list' && row?.executor === 'machine') run = this.#folders(dispatch, channel.member, m);
+    else if (m.name === 'session.trust.check' && row?.executor === 'machine') run = this.#setupTrust(dispatch, m, decision);
     else if (row?.executor === 'engine-host' || (row?.executor === 'machine' && m.name !== 'daemon.status')) run = this.#forward(dispatch, row.executor, m);
     else if (row?.executor === 'sminos' && Object.hasOwn(LANE_A, m.name)) run = Promise.resolve(this.#laneA(channel, m));
     else if (row?.executor === 'machine') run = this.#daemonStatus(dispatch);
@@ -309,8 +311,14 @@ export class Calls {
   /** P5 O7 M9: the folder list, an answered open kept as the caller's. */
   async #folders(dispatch: EndpointServices['dispatch'], member: string, m: CallMessage): Promise<Result> {
     const result = await this.#forward(dispatch, 'machine', m);
-    if (result.ok) this.ctx.setup?.listed(member, m.input);
+    if (result.ok) await this.ctx.setup?.listed(member, m.input);
     return result;
+  }
+
+  /** P5 O7 M9: a remote trust read, on the directory the setup policy checked (`machine.setupTrust`, guarded again there). */
+  #setupTrust(dispatch: EndpointServices['dispatch'], m: CallMessage, decision: Granted): Promise<Result> {
+    if (decision.setup === undefined) return Promise.resolve({ ok: false, code: 'unavailable' });
+    return this.#forward(dispatch, 'machine', { ...m, name: 'machine.setupTrust', input: { directory: decision.setup.directory } });
   }
 
   /** A read its executor answers raw: the engine host's, or the machine's services', a failure with its message (M8). */

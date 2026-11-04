@@ -1104,9 +1104,10 @@ export class SessionService {
   }
 
   // `session.trust.check`, read with the environment the engine receives.
-  async trustCheck(directory: string): Promise<TrustState> {
+  // P5 O7 M9: `guard`, a remote setup's (src/services/machine/setup.ts), asked before each file the read opens
+  async trustCheck(directory: string, guard?: (path: string) => Promise<boolean>): Promise<TrustState> {
     const s = await this.ready();
-    return trustStateOf(directory, { git: s.git, env: s.env });
+    return trustStateOf(directory, { git: s.git, env: s.env, ...(guard === undefined ? {} : { guard }) });
   }
 
   // ---- reconciliation ---------------------------------------------------------------------------------------------

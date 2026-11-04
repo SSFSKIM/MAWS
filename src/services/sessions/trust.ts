@@ -103,6 +103,9 @@ export interface TrustDeps {
   git: GitRun;
   env: NodeJS.ProcessEnv;
   warn?: (message: string) => void;
+  // P5 O7 M9: a remote setup's guarded read (src/services/machine/setup.ts): asked before each file of what trust would
+  // load is read, its link followed only where it may be; a file it refuses fails the read rather than being skipped
+  guard?: (path: string) => Promise<boolean>;
 }
 
 // E11 (tracker row E6 "small per-call costs in scm.*"): the key and whether the store trusts it, reading nothing of what
@@ -127,7 +130,7 @@ export async function trustStateOf(directory: string, deps: TrustDeps): Promise<
     trusted: key.trusted,
     source: key.trusted ? 'trustKey' : null,
     isHome: key.directory === home,
-    found: await gatedFiles(key.directory),
+    found: await gatedFiles(key.directory, deps.guard),
   };
 }
 
@@ -136,7 +139,7 @@ export async function trustStateOf(directory: string, deps: TrustDeps): Promise<
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-async function readJson(path: string): Promise<Record<string, unknown> | null> {
+async function readJsonAt(path: string): Promise<Record<string, unknown> | null> {
   try {
     const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
     return isObject(parsed) ? parsed : null;
@@ -165,7 +168,11 @@ function settingsSummary(settings: Record<string, unknown>): string {
   return parts.join(', ');
 }
 
-async function gatedFiles(directory: string): Promise<TrustState['found']> {
+async function gatedFiles(directory: string, guard?: TrustDeps['guard']): Promise<TrustState['found']> {
+  const readJson = async (path: string) => {
+    if (guard !== undefined && !(await guard(path))) throw new Error(`protected: ${path} leads into a folder macOS protects`);
+    return readJsonAt(path);
+  };
   const found: TrustState['found'] = [];
   for (const file of ['.claude/settings.json', '.claude/settings.local.json']) {
     const settings = await readJson(join(directory, file));

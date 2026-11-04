@@ -301,7 +301,9 @@ export class Actions {
       try {
         const kept = row.executor === 'pty-host' || KEPT_WITHOUT_ACTION.has(action.action) ? {} : { action };
         const target = onArtifact ? { target: artifactTarget(decision.artifact!) } : {};
-        const op = { opId: action.opId, opCreated: action.opCreated, claim: { ...who, fingerprint, ...target }, name: action.action, input: action.args, ...kept };
+        // P5 O7 M9: a setup act runs on the directory the setup policy checked; the sealed action keeps what was signed
+        const input = decision.setup === undefined ? action.args : { directory: decision.setup.directory };
+        const op = { opId: action.opId, opCreated: action.opCreated, claim: { ...who, fingerprint, ...target }, name: action.action, input, ...kept };
         const answer = row.executor === 'machine' ? await dispatch('machine', 'machine.op', op) : await dispatch('pty-host', 'pty.op', op);
         // A pty host older than `pty.op` (adopted by a newer mawsd) knows no ledger: nothing ran, ask again later.
         const outcome = answer.ok ? answered(answer.value) : row.executor === 'pty-host' && answer.error.code === 'unknown_command' ? { state: 'refused', reason: 'unavailable' } : { state: 'unknown', reason: answer.error.code };

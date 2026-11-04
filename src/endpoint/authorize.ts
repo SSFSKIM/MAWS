@@ -26,7 +26,8 @@
 //      target: `sminos.spawn`, and from P5 O7 M4 `session.spawn`) is held to the ceiling, the known checkouts and its
 //      allowed fields (`ceiling`, `unknown-checkout`, `spec-field`; P5 O7 M9: `session.spawn`'s `trust` one of them for a
 //      machine owner alone), and (P5 O7 M9) a setup row naming a directory to the setup policy (`no-folder`,
-//      `outside-home`, `symlink-escape`, `protected`: policy.ts' `setupRefusal`), never to the spawn guard;
+//      `outside-home`, `symlink-escape`, `protected`: policy.ts' `setupRefusal`), never to the spawn guard, its checked
+//      directory the decision's (`setup`), which the executor acts on;
 //   7. what the class may say: a web-cards answer only takes or refuses what is pending (`class`);
 //   8. presence: a web-cards action's WebAuthn assertion, a native action's step-up where RL §5.6 asks for it
 //      (`step-up`).
@@ -112,7 +113,9 @@ export type Who = { member: string; device: string; clientClass: DeviceClass; cl
  * placements it read, the head, the policy): an executor that must await something between the decision and the effect
  * (a lane B act's status read) asks it in the step it hands the act on.
  */
-export type Decision = { ok: true; target?: SessionTarget; artifact?: ArtifactTarget; stands?: () => boolean } | { ok: false; reason: RefusalReason };
+export type Decision = { ok: true; target?: SessionTarget; artifact?: ArtifactTarget; setup?: SetupTarget; stands?: () => boolean } | { ok: false; reason: RefusalReason };
+/** P5 O7 M9: a setup row's directory as the setup policy resolved and checked it, which its executor acts on (never the input's spelling). */
+export type SetupTarget = { directory: string };
 export type ArtifactTarget = { artifactId: string | null };
 /**
  * What an executing side stored for an operation (M7): a query's `input`, its `name` the operation's. P5 O12 M11:
@@ -466,9 +469,11 @@ export class Authorizer {
       const refusal = spawnRefusal(input as Readonly<Record<string, unknown>>, policy, () => this.ctx.settingsMode(), this.ctx.checkouts, acceptsTrust);
       if (refusal !== null) return no(refusal);
     }
+    let setup: SetupTarget | undefined;
     if (SETUP_DIRECTORY_COMMANDS.has(name)) {
-      const refusal = await this.#setup.refusal(who.member, input);
-      if (refusal !== null) return no(refusal);
+      const checked = await this.#setup.check(who.member, name, input);
+      if (!checked.ok) return no(checked.reason);
+      setup = { directory: checked.directory };
     }
 
     // 7. A web-cards answer on its member's own session, taking or refusing only what is pending.
@@ -478,7 +483,8 @@ export class Authorizer {
     }
 
     // 8. Presence, once the decision is known to stand. A read open (P5 O7 M5b) asks no step-up: its device is the head's.
-    const granted: Decision = artifact !== undefined ? { ok: true, artifact: { artifactId: artifact.artifactId } } : target === undefined ? { ok: true } : { ok: true, target };
+    const placed: Decision = artifact !== undefined ? { ok: true, artifact: { artifactId: artifact.artifactId } } : target === undefined ? { ok: true } : { ok: true, target };
+    const granted: Decision = setup === undefined ? placed : { ...placed, setup };
     if (kind !== 'act' && kind !== 'stream') return decided(granted);
     const device = deviceOf(org.head, who.member, who.device);
     if (device === undefined) return no('removed');

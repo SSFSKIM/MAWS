@@ -60,6 +60,12 @@ describe('machine.folders.list', () => {
     expect(names(await listFolders({ path: '~/Documents/proj', open: true }, mac))).toEqual([]);
     expect(names(await listFolders({ path: '~/Library', open: true }, mac))).toEqual(['Caches']);
     expect(names(await listFolders({ path: '~/Documents' }, { home, platform: 'linux' }))).toEqual(['proj']);
+    // the task review's finding 1: a case alias is the folder it names (or, on a case-sensitive volume, no folder)
+    expect(['protected', 'no-folder']).toContain(await refusal(listFolders({ path: '~/documents' }, mac)));
+    expect(['protected', 'no-folder']).toContain(await refusal(listFolders({ path: '~/documents/proj' }, mac)));
+    // `..` climbs from where a link led: `~/shortcut/..` is `~/Documents`, which the call didn't open
+    symlinkSync(join(home, 'Documents/proj'), join(home, 'shortcut'));
+    expect(await refusal(listFolders({ path: '~/shortcut/..' }, mac))).toBe('protected');
   });
 
   it('refuses a path outside the home, a missing one, and a link out of the home', async () => {

@@ -40,10 +40,10 @@ describe('the protected folders', () => {
 });
 
 describe('a path under the home', () => {
-  it('expands `~` and `~/…`, keeps an absolute path normalized, and takes nothing relative', () => {
+  it('expands `~` and `~/…`, keeps an absolute path as given, and takes nothing relative', () => {
     expect(expandHome('~', home)).toBe(home);
     expect(expandHome('~/Developer/GitHub', home)).toBe(join(home, 'Developer/GitHub'));
-    expect(expandHome(`${home}/Developer/../Documents/`, home)).toBe(join(home, 'Documents'));
+    expect(expandHome(`${home}/Developer/../Documents/`, home)).toBe(`${home}/Developer/../Documents/`); // the walk resolves `..`, never a lexical collapse
     expect(expandHome('Developer', home)).toBeNull();
     expect(expandHome('~other/x', home)).toBeNull();
     expect(within(join(home, 'a'), home)).toBe(true);
@@ -106,6 +106,38 @@ describe('a path under the home', () => {
     expect(await resolveInHome(join(home, 'Library/Mobile Documents/com~apple~CloudDocs'), mac, library)).toEqual({ ok: false, reason: 'protected' });
     // on Linux nothing is protected
     expect(await resolveInHome(join(documents, 'proj'), { home, platform: 'linux' }, none)).toEqual({ ok: true, real: join(documents, 'proj') });
+  });
+
+  // The task review's findings 1 and 2: a name the volume takes for a protected folder's is that folder; a `..` climbs from
+  // where the link before it led, as the kernel resolves it.
+  it('takes a name as its folder lists it, so a case alias of a protected folder is that folder', async () => {
+    expect(isProtected(join(home, 'documents'), mac)).toBe(true);
+    expect(isProtected(join(home, 'LIBRARY/mobile documents/x'), mac)).toBe(true);
+    mkdirSync(join(home, 'Documents/secret'));
+    const alias = await resolveInHome(join(home, 'documents/secret'), mac, none);
+    expect(alias.ok).toBe(false); // `protected` on a case-insensitive volume (macOS's), `no-folder` where the alias names nothing
+    expect(['protected', 'no-folder']).toContain(alias.ok ? null : alias.reason);
+    const library = (folder: string) => folder === join(home, 'Library');
+    const mobile = await resolveInHome(join(home, 'Library/mobile documents/com~apple~CloudDocs'), mac, library);
+    expect(mobile.ok).toBe(false);
+    expect(['protected', 'no-folder']).toContain(mobile.ok ? null : mobile.reason);
+    // opened under its own name, the alias reaches it by the name the home lists
+    const documents = (folder: string) => folder === join(home, 'Documents');
+    const opened = await resolveInHome(join(home, 'documents/secret'), mac, documents);
+    if (opened.ok) expect(opened.real).toBe(join(home, 'Documents/secret')); // a case-insensitive volume: its listed spelling
+  });
+
+  it('climbs a `..` from where the link before it led, never collapsing it first', async () => {
+    mkdirSync(join(home, 'Documents/sub'));
+    mkdirSync(join(home, 'Documents/secret'));
+    mkdirSync(join(home, 'secret'));
+    symlinkSync(join(home, 'Documents/sub'), join(home, 'shortcut'));
+    expect(await resolveInHome(`${home}/shortcut/../secret`, mac, none)).toEqual({ ok: false, reason: 'protected' }); // the kernel's `~/Documents/secret`
+    expect(await resolveInHome(`${home}/shortcut/../secret`, mac, (folder) => folder === join(home, 'Documents'))).toEqual({ ok: true, real: join(home, 'Documents/secret') });
+    expect(await resolveInHome(`${home}/Developer/../secret`, mac, none)).toEqual({ ok: true, real: join(home, 'secret') });
+    expect(await resolveInHome(`${home}/Developer/../..`, mac, all)).toEqual({ ok: false, reason: 'outside-home' });
+    symlinkSync('..', join(home, 'Developer/up'));
+    expect(await resolveInHome(`${home}/Developer/up/..`, mac, all)).toEqual({ ok: false, reason: 'symlink-escape' }); // a link's climb out of the home
   });
 
   it('touches nothing inside an unopened protected folder: a missing path in one is `protected`, never `no-folder`', async () => {

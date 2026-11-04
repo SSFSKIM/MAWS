@@ -46,6 +46,7 @@ export const PATH_COMMANDS = [
   'files.readResolved', // P5 O3-E: main-only (library.read's reach), never bridged; a bare path
   'machineSettings.set', // P5 O3-D: as settings.set, its engine patch's paths
   'machine.folders.list', // P5 O7 M9: a folder under the machine's home, named for that machine
+  'machine.setupTrust', // P5 O7 M9: main-only (the endpoint's guarded trust read), never bridged; a directory
   'render.answer', // P5 O5 M3: main-only (the render host's answer to mawsd), never bridged; an export's answer's `path`
 ] as const satisfies readonly CommandName[];
 export type PathCommandName = (typeof PATH_COMMANDS)[number];

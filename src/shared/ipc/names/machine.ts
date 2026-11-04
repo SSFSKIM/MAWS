@@ -5,4 +5,4 @@ export const commands = ['machine.identity', 'machine.folders.list' /* P5 O7 M9 
 export const events = [] as const;
 
 // P5 O3-D: the services front's own, sent by main (the browser's socket) and by the endpoint (the services' ledger)
-export const mainOnlyCommands = ['machine.client', 'machine.op', 'machine.opQuery'] as const;
+export const mainOnlyCommands = ['machine.client', 'machine.op', 'machine.opQuery', 'machine.setupTrust' /* P5 O7 M9: the endpoint's */] as const;
