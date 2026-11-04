@@ -731,7 +731,7 @@ Everything above is run from the MacBook against the mini and the Linux VM, and 
 The live sitting failed two of O7's own acceptance lines. Answering a question from another Mac failed (acceptance 2, P5 acceptance 4). A remote-spawned session had no sidebar row on the Mac that spawned it, and so no way back once its tab closed (acceptance 4, P5 acceptance 5). The other failures were remote surfaces showing an error where local works. M8 removes each observed failure, each proved red first. Where the sitting left a cause unknown, the milestone's first task finds it before anything is built on it.
 
 **At its end.**
-- A lane B session spawned from this app on another machine sits under its org project's row, with its machine, within 5 s of the engine's first event. It stays there after its tab closes, and a click on that row reopens it. A second client, one that did not spawn it, sees and opens it the same way.
+- A lane B session spawned from this app on another machine shows within its org project's visible rows within 5 s of the engine's first event, even in a project group already holding more busy local records than the cap, and stays reachable through Resume… after its tab closes. A second client, one that did not spawn it, sees and opens it the same way.
 - A question raised on a remote MAWS-launched session can be read and answered from this Mac. These sessions only ever raise the MAWS ask. The answer settles the card on the machine and in every attached app.
 - Every command the renderer issues for a session is either offered over RL2 at its kind and grade, or its control is drawn disabled for a remote session, with its reason. A contract test fails on any session-scoped command that is neither offered nor declared remote-unavailable.
 - An operation on a remote session (`/btw`, Reload plugins, MCP Reconnect and toggle, Generate title) completes in the app. Its `session.operation` and the panels' own change events cross the channel.
@@ -781,17 +781,28 @@ The fixes follow in tasks grouped by layer, so that no two executors edit one fi
 
 m8-1's first commit also pins a clock. `test/support/remote-bench.test.ts`'s "the mini's removal on this Mac…" builds its `BenchRun` with no clock, so it refuses on the real time inside the mini's 06:45–07:00Z quiet window. Any unit gate that falls in that window fails (the desk track's #464, run 41788418951 at 06:56Z). That test, and any sibling built the same way, takes a clock pinned outside the window. One added case, pinned inside the window, expects the refusal.
 
-*The sidebar row* (acceptance 4). The device keys a remote record by its app id (`RemoteSession.#readRecord`, `session.get {appSessionId}`), and `rowOfListedRecord` looks the record up in `listed` by that id (`src/renderer/src/stores/org-projects.ts`). The endpoint lists a lane B member under its `appSessionId` only once `#join` has mapped its engine id through `engine.sessions` (`src/endpoint/rl10/members.ts`, `listingId`). A member sminos reports as lane A is listed under its engine id. The sitting's listing carried the engine id (`1c155c56…`) where the record carried the app id (`edad6b82`), so the join missed. The record then fell back to `rowOfSession`, and with no project known on an RL2 machine it was filed under the machine's row.
-- **Fix at the source:** an engine id that `engine.sessions` reports is lane B, whatever sminos's lane field says, and is listed under its `appSessionId`.
-- **Fix in the renderer, as defence:** `rowOfListedRecord` and `sessionSetKey` also try `addressOf(machine, record.engineSessionId)`, and `projectList` skips a listing a record already claims.
-- **m8-1 establishes, red first, why the member read as lane A.** The leads are sminos honouring `MAWS_LANE=B` only with its `SMNS_MEMBER` parent check (`src/engine-host/launch.ts`, `launcher.ts`), and the desk track's A11 verifier fix (`apps/org-protocol/src/attest.ts` `SPAWN_ACTIONS`, O10's code, not M8's).
-- **m8-1 also finds why no row showed at all:** a misfile would show the session twice, not hide it. Candidates are a newly appearing machine row drawn collapsed (`sidebar/Sidebar.tsx`), a `mine: false` listing counted only in "+N others", and a known project hidden.
-- **The closed tab.** `stop()` emits nothing, so the record stays in the store until a reload, and a reload brings nothing back. The listing row is what persists, and `ListedRow.activate` reopens it through lane B's opener.
-- Red first:
-  - `src/renderer/src/sidebar/derive.test.ts`: a record whose listing is at its engine id;
-  - `test/endpoint/rl10/`: a member sminos reports as lane A that `engine.sessions` knows;
-  - `e2e:remote`: the spawned session's row under its org project, and a reopen after its tab closes.
-- Rejected: keying the device's records by engine id (every lane B command addresses the app id).
+*The sidebar row* (acceptance 4). *(Rewritten 2026-11-04 after m8-1.)* The id-mismatch premise of the first plan is withdrawn. The sitting's listing (`1c155c56`, lane B) is the app id, and the device's join by app id meets it (m8-1's Decision Log entry). The row was lost to the sidebar's cut:
+- A project group shows `SESSIONS_FIRST` (5) rows, or `SESSIONS_CAP` (8) after Show more (`src/renderer/src/sidebar/derive.ts`, `shownCount`).
+- Under the default `priority` sort, pinned, waiting, unread and working local records lead, while a listed row ranks only by its `issued` time.
+- The Resume… picker lists records only (`resume/model.ts`, `chooserRows`).
+
+A local session past the cap is reached through Resume…, but a listed one has no way back. The fix is parity with local (the architect's call, 2026-11-04):
+- **Resume… lists listed rows.** `chooserRows` includes the listed rows of the person's org projects, each under its machine, and opening one goes through lane B's opener (`ListedRow.activate`'s path, `remoteOpenerFor`).
+- **The priority sort ranks a listed row by its own state, as it ranks a local record.**
+  - Working, idle and the rest come from the listing's status.
+  - Waiting comes from M6's attention feed (the listed row's address in `remote.attention`).
+  - The listed row's last activity is its listing's latest `issued` or status change.
+
+  A just-spawned, working remote session then leads the way a working local one does.
+- "Always drawn" (listed rows exempt from the cap) is rejected: a member with many listed sessions would get an uncapped group.
+
+The acceptance is the failure the owner saw. In a project group already holding more busy local records (pinned, waiting, unread, working) than the cap, a just-spawned remote session shows within the visible rows within 5 s and stays reachable through Resume… after its tab closes.
+
+Red first:
+- `src/renderer/src/sidebar/derive.test.ts`: m8-1's `it.fails`, flipped by m8-4, plus the Resume… case in `resume/model.test.ts` or its nearest test;
+- `e2e:remote`: more than eight busy local sessions in one project, a session spawned on B within the visible rows, its tab closed, and the session reopened through Resume… (m8-5).
+
+Rejected: keying the device's records by engine id, and treating an engine id as lane B at the endpoint (m8-1 found no evidence for either).
 
 *The offer audit and its contract.* A command reaches a remote machine only through `dispatchOverLink`. A name with no row is `not-offered` at the endpoint. A name graded above `list`/`view` that the adapter doesn't `handle` is refused on the device, before any round trip, as "refused act-required" (`src/main/machines/remote/dispatch.ts`). That is the sitting's `session.reloadPlugins`: it has no row at all, so the brief's "a call against an act row" is the device's own refusal.
 - **The rule.** Every command whose route class is `addressed` by an `AppSessionId` and that is on the link (`src/main/machines/link-surface.ts`) is one of two things:
@@ -1882,7 +1893,7 @@ Added at M5's re-plan (2026-11-01). Each changes what a person may do on another
   Evidence: b3's task review; `91f9cd47a`.
 - Observation (M5b): a byte count of what is unsent is not a bound on memory: `subarray()` keeps a frame's backing buffer whole until its last byte drains, so a budget must count each frame whole while any of it waits.
   Evidence: the narrow re-check's reproduction (three 60 MiB frames, 1 KiB left each, 180 MiB held); `deb7fa0a9`.
-- Observation (M7's sitting, 2026-11-04): a lane B session spawned from the MacBook on the mini or the VM opens in the pane but gets no row in the MacBook's sidebar, reproducibly (S1's spawn and a fresh one), though `org/listings.json` holds its listing within a second of the spawn; with the tab closed nothing reopens it (no row, no deep link: the app registers no URL protocol).
+- Observation (M7's sitting, 2026-11-04): a lane B session spawned from the MacBook on the mini or the VM opens in the pane but gets no row in the MacBook's sidebar, reproducibly (S1's spawn and a fresh one), though `org/listings.json` holds its listing within a second of the spawn; with the tab closed nothing reopens it (no row, no deep link: the app registers no URL protocol). *Corrected 2026-11-04 (m8-1): there was no id mismatch. The listing is keyed by the app id and the join meets it. The row was cut by the sidebar's 5-or-8 cap under the priority sort, and Resume… lists no listed rows (M8, The sidebar row).*
   Evidence: the owner's screenshots at 05:36Z and about 05:4xZ; the MacBook's `org/listings.json` read at 04:03Z.
 - Observation (M7's sitting): every question on a MAWS-launched session is the MAWS ask, since the launch withdraws the native `AskUserQuestion` (`src/engine-host/launch.ts`, `--disallowedTools`; P2 Decision Log 33), and the ask panel reads and answers through `maws.asks.list` and `maws.ask.answer` (`src/renderer/src/tools/maws/ask/store.ts`), which `src/endpoint/offers.ts` doesn't offer; so a remote question shows (its `maws.ask.opened` event crosses) but can't be read or answered from another Mac. The engine's own `session.answer` is offered and never reached on these sessions.
   Evidence: `src/renderer/src/tools/maws/ask/store.ts` (`maws.asks.list`, `maws.ask.answer`); `src/endpoint/offers.ts` (no row for either at 75944744d, 01d4488cf or 02de6c88c); `src/engine-host/launch.ts` (`NATIVE_ASK_TOOL`).
@@ -2556,6 +2567,14 @@ P5 findings of M5's re-plan, continued from F15:
   M8's "fix at the source" (an engine id treated as lane B) and the renderer's engine-id join are dropped: m8-1 showed the listing id was right. m8-4's sidebar fix is a listed row that stays reachable, waiting on the architect's call on its shape. The recommendation is parity: Resume… lists listed rows, and the priority sort ranks a listed row by its own state.
   Rationale: m8-1's findings; the brief's scope gave the activity flip no owner.
   Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: The sidebar row's premise is corrected (2026-11-04, the architect on m8-1's finding).
+  - M8's *The sidebar row* is rewritten. The fix is parity: Resume… lists listed rows, and the priority sort ranks a listed row by its own state (the listing's status, M6's attention feed for waiting). "Always drawn" is rejected.
+  - The acceptance is the failure the owner saw: a just-spawned remote session within the visible rows of a group busier than the cap, reachable through Resume… after its tab closes.
+  - M7's Surprises line carries the correction.
+  - The owner's 05:36Z screenshot shows only the MacBook's mini group: six rows, no "Testing session", no Show more. The session wasn't misfiled under the machine, and the MAWS group's count stays unconfirmed.
+  - The stale "Working…" cause stays unsettled. The MacBook keeps no main log on disk (main's lines go to stdout, which a Dock launch doesn't keep), so M8 relies on the gap rule. A persistent main log is a tracker line in M8's PR.
+  Rationale: The recorded identities rule out a misfile, and the code leaves a listed row nowhere to go past the cap.
+  Date/Author: 2026-11-04, O7's executor (the controller), on the architect's ruling.
 
 ## Outcomes & Retrospective
 
