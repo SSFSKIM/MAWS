@@ -36,6 +36,8 @@ import { useUsage } from '../../stores/usage';
 import { applyEvents, createState } from '../../transcript/model/reduce';
 import { builder, tool } from '../../transcript/model/test-events';
 import { sessionInfoTool } from '.';
+import { RouteSwitch } from './RouteSwitch';
+import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import { heldModel, resetModelRequests, useModelRequests, type HeldModel } from '../../widgets/model';
 import { liveBindings } from '../../composer/frame/bindings';
 // E4a start
@@ -300,6 +302,21 @@ describe('session info of a session with no live process', () => {
 describe('the route switch and the Direct poll, re-homed from the status line', () => {
   const settingsWith = (gateway: Partial<Settings['gateway']>) => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, gateway: { ...SETTINGS_DEFAULTS_V21.gateway, ...gateway } }, resolvedTheme: 'light' } as never });
   const route = () => screen.getByText('Route', { selector: 'dt' }).nextElementSibling as HTMLElement;
+
+  // P5 O7 M8: the switch's restart (`session.stop`) is declared not offered on another machine (REMOTE_UNAVAILABLE): the
+  // button is greyed with the declared words
+  it('greys the switch for a session on another machine, with the declared reason', () => {
+    const remote = addressOf(OTHER_MACHINE, READY_BARE);
+    useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, READY_BARE), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    try {
+      render(<RouteSwitch appSessionId={remote} targets={['direct']} />);
+      const button = screen.getByRole('button', { name: 'Switch to Direct…' });
+      expect(button).toHaveProperty('disabled', true);
+      expect(button.title).toBe(REMOTE_UNAVAILABLE['session.stop']);
+    } finally {
+      useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    }
+  });
 
   it('a routed session’s Route offers Switch to Direct…, which opens the switch’s confirm', async () => {
     mount(ctxOf(READY));

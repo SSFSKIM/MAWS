@@ -4,14 +4,18 @@
 // `write_failed` keeps the drafts and offers Retry; a restored tab reads the host's table (the reload path); an answered
 // capsule reopens read-only with nothing to submit, with no read at all; a cancelled ask says the session ended.
 // P2-C3: a choice's previews in a pane that follows the focused option; a note beside any answer, shown read-only too.
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import type { PendingAsk } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client';
-import { project, record } from '../../../../../../test/support/builders';
+import { project, record, remoteRow } from '../../../../../../test/support/builders';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
+import { heardRefusal, resetRemoteSurfaces } from '../../../artifacts/remote-surfaces';
+import { useMachines } from '../../../stores/machines';
 import type { PanelToolContext } from '../../../panel/tool';
 import { useSessions } from '../../../stores/sessions';
 import type { AskRowData } from '../../../transcript';
@@ -464,3 +468,29 @@ it('no session: the sheet says to open one', () => {
   render(<Body state={{ appSessionId: null }} ctx={ctx({ appSessionId: null, session: null })} />);
   expect(screen.getByText('Open a session to see its questions')).toBeTruthy();
 });
+
+// P5 O7 M8 ("An older peer"): a machine heard refusing `maws.ask.answer` as not offered greys Submit for its sessions,
+// with the reason in place of the draft's (lane-b/remote-unavailable.ts)
+describe('a session on a machine that doesn’t offer the answer', () => {
+  it('greys Submit with the machine’s reason', async () => {
+    const remote = addressOf(OTHER_MACHINE, 'app-a' as AppSessionId);
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+    useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, 'app-a'), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    try {
+      const one: PendingAsk = { ...ASK, questions: [QUESTIONS[2]!] };
+      const state = askSheetTool.createState({ appSessionId: remote, session: record(remote), instanceId: 'ask-sheet:r', params: { askId: one.askId } });
+      const Body = askSheetTool.render;
+      render(<Body state={state} ctx={ctx({ appSessionId: remote, session: record(remote, { directory: '/work/app-a' }) })} />);
+      await fake.reply('maws.asks.list', { asks: [one] });
+      await userEvent.type(within(section('q3')).getByRole('textbox', { name: 'What should the title be?' }), 'Hello');
+      expect(submitButton()).toHaveProperty('disabled', false);
+      act(() => heardRefusal('maws.ask.answer', { issues: { refusal: 'not-offered' } }, OTHER_MACHINE, TEST_MACHINE));
+      expect(submitButton()).toHaveProperty('disabled', true);
+      expect(submitButton().title).toBe('mini doesn’t offer this');
+    } finally {
+      resetRemoteSurfaces();
+      useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    }
+  });
+});
+

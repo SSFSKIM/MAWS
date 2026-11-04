@@ -13,6 +13,7 @@ import { availabilityRefusal, useAvailability } from '../sessions/availability';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { sendComment, type CommentDestination } from './actions';
+import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { SIDE_COPY } from './copy';
 
 const COPY = SIDE_COPY.composer;
@@ -98,10 +99,15 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending
   const holder = useSessions((s) => s.records.get(parent)?.holder ?? null);
   const availability = useAvailability(parent);
   const mainBlocked = availabilityRefusal(availability, holder, COPY.mainNotRunning);
-  const mainEnabled = ready || mainBlocked === null;
+  // P5 O7 M8: a parent on another machine takes neither destination yet (lane-b/remote-unavailable.ts): each is greyed
+  // with its reason, said as its caption
+  const threadUnavailable = useRemoteUnavailable(parent, 'side.thread.open');
+  const mainUnavailable = useRemoteUnavailable(parent, 'side.sendToMain');
+  const mainEnabled = (ready || mainBlocked === null) && mainUnavailable === null;
+  const threadEnabled = threadUnavailable === null;
   // P2-A end
   const sending = phase.kind === 'sending';
-  const canSend = (to: CommentDestination) => text.trim() !== '' && !sending && (to === 'thread' || mainEnabled);
+  const canSend = (to: CommentDestination) => text.trim() !== '' && !sending && (to === 'thread' ? threadEnabled : mainEnabled);
 
   const send = async (to: CommentDestination) => {
     if (!canSend(to)) return;
@@ -181,13 +187,15 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending
     phase,
     ready,
     mainEnabled, // P2-A: Send to main is offered (ready, or a parent the Send can start)
+    threadEnabled, // P5 O7 M8: a side thread is offered (not for a parent on another machine yet)
+    threadCaption: threadUnavailable ?? COPY.threadCaption, // P5 O7 M8
     sending,
     canSend,
     send,
     onKeyDown,
     // P2-A: Send to main reads Starting… while its parent starts
     submitLabel: sending ? (phase.destination === 'thread' || !ready ? COPY.starting : COPY.sending) : COPY.send,
-    mainCaption: ready ? (status?.turn ? COPY.mainBusy : COPY.mainIdle) : (mainBlocked ?? STARTS), // P2-A
+    mainCaption: mainUnavailable ?? (ready ? (status?.turn ? COPY.mainBusy : COPY.mainIdle) : (mainBlocked ?? STARTS)), // P2-A; P5 O7 M8: mainUnavailable
   };
 }
 

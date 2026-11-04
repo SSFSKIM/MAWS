@@ -15,6 +15,7 @@ import { Icon } from '../../../app/IconButton';
 import { ipc } from '../../../ipc/client';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../../panel/tool';
 import { CardButton } from '../../../request-card/controls';
+import { useRemoteUnavailable } from '../../../lane-b/remote-unavailable'; // P5 O7 M8
 import { selectProjectOrder, useSessions } from '../../../stores/sessions';
 import { TranscriptActionsProvider } from '../../../transcript/view/context'; // P2-C3
 import { openFile } from '../../code/open-file'; // P2-C3
@@ -109,6 +110,8 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
   const busy = state.submitting !== null; // one answer in flight at a time, across the session's asks (store.ts)
   const failed = state.failed?.askId === ask.askId ? state.failed : null;
   const submit = () => void submitAsk(appSessionId, ask.askId, ipc, projects);
+  // P5 O7 M8 ("An older peer"): a machine heard not offering the answer greys Submit, with why (lane-b/remote-unavailable.ts)
+  const unavailable = useRemoteUnavailable(appSessionId, 'maws.ask.answer');
 
   if (ask.state === 'cancelled') {
     return (
@@ -127,6 +130,7 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
   }
 
   const ready = canSubmit(ask.questions, drafts); // Submit's rule, Retry's too (submitAsk enforces it)
+  const why = unavailable ?? (ready ? undefined : SHEET.incomplete);
   const skipped = ask.questions.filter((question) => drafts?.get(question.id ?? '')?.skip).length;
   return (
     <>
@@ -155,13 +159,13 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
             <span className="flex-1" title={failed.detail ?? undefined}>
               {SHEET.failed}
             </span>
-            <CardButton disabled={busy || !ready} title={ready ? undefined : SHEET.incomplete} onClick={submit}>
+            <CardButton disabled={busy || !ready || unavailable !== null} title={why} onClick={submit}>
               {SHEET.retry}
             </CardButton>
           </div>
         )}
         <div className="flex justify-end">
-          <CardButton tone="primary" disabled={busy || !ready} title={ready ? undefined : SHEET.incomplete} onClick={submit}>
+          <CardButton tone="primary" disabled={busy || !ready || unavailable !== null} title={why} onClick={submit}>
             {sending ? SHEET.submitting : skipped > 0 ? SHEET.submitSkipping(skipped) : SHEET.submit}
           </CardButton>
         </div>

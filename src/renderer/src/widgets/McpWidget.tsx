@@ -6,7 +6,8 @@
 // P5 O7 M8 ("Sign in from the session's MCP widget"): a server that needs auth also offers Sign in, for a session on this Mac
 // or another machine alike: by its name and scope (`connectors.signInServer`, the entry read on the session's machine),
 // with the session's directory, its progress and result in Customize's words (customize/connectors/sign-in.ts).
-// Reconnect stays a restart.
+// Reconnect stays a restart. Each control is greyed, with its reason, for a session on a machine that doesn't offer its
+// command (lane-b/remote-unavailable.ts: an older machine heard refusing it).
 import { useRef, useState } from 'react';
 import * as z from 'zod';
 import type { OperationEvent } from '@shared/engine/operations';
@@ -19,6 +20,7 @@ import { signInKeyOf, signInMachineOf, startSignInByName, useSignIns } from '../
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M5
 import { useSessions } from '../stores/sessions';
 import { McpDriven } from './McpDriven'; // P5 O9 M5
+import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { MCP, MCP_ACTIONS, WIDGET_TITLE } from './copy';
 import { operationLine, outcomeWords, useOperation } from './operation';
 import { Mono, parseEach, Row, Rows, TextButton } from './parts';
@@ -103,13 +105,14 @@ function SignIn({ server, appSessionId, cwd, readAt }: { server: McpServerView; 
   const scope = signInScope(server.scope);
   const target = scope === null || (scope !== 'user' && cwd === null) ? null : { name: server.name, scope, cwd };
   const record = useSignIns((s) => (target === null ? null : (s.byServer.get(signInKeyOf({ ...target, machine: signInMachineOf(appSessionId) })) ?? null)));
+  const unavailable = useRemoteUnavailable(appSessionId, 'connectors.signInServer'); // an older machine's refusal
   if (target === null) return null;
   const live = { status: server.status, error: server.error };
   const line = record === null ? null : signInViewOf({ live, liveRead: readAt === null ? null : { appSessionId, at: readAt }, posture: null, last: record, transport: null })?.text;
   return (
     <>
       {server.status === 'needs-auth' && (
-        <button type="button" aria-label={CONNECTORS.signInName(server.name)} onClick={() => void startSignInByName(target, appSessionId)} className={SIGN_IN}>
+        <button type="button" aria-label={CONNECTORS.signInName(server.name)} disabled={unavailable !== null} title={unavailable ?? undefined} onClick={() => void startSignInByName(target, appSessionId)} className={SIGN_IN}>
           {CONNECTORS.signIn}
         </button>
       )}
@@ -121,7 +124,7 @@ function SignIn({ server, appSessionId, cwd, readAt }: { server: McpServerView; 
     </>
   );
 }
-const SIGN_IN = 'shrink-0 rounded-sm px-1 text-ui-sm text-accent outline-accent hover:bg-bg-hover focus-visible:outline-2';
+const SIGN_IN = 'shrink-0 rounded-sm px-1 text-ui-sm text-accent outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
 
 function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readAt }: { server: McpServerView; appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh']; cwd: string | null; readAt: number | null }) {
   const [last, setLast] = useState<'reconnect' | 'toggle' | null>(null);
@@ -170,7 +173,8 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readA
           aria-checked={checked}
           aria-label={MCP_ACTIONS.enabled(server.name)}
           data-state={position}
-          disabled={!ready || busy}
+          disabled={!ready || busy || toggle.unavailable !== null}
+          title={toggle.unavailable ?? undefined}
           onClick={() => void flip()}
           className={`${SWITCH} ${position === 'on' ? 'bg-accent' : 'bg-bg-active'}`}
         >
@@ -182,7 +186,8 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readA
             setLast('reconnect');
             void reconnect.run({ serverName: server.name });
           }}
-          disabled={!ready || busy}
+          disabled={!ready || busy || reconnect.unavailable !== null}
+          title={reconnect.unavailable ?? undefined}
         >
           {MCP_ACTIONS.reconnect}
         </TextButton>

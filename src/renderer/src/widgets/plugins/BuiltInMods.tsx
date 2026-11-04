@@ -21,7 +21,7 @@ export function BuiltInMods({ appSessionId, search }: { appSessionId: AppSession
       <section aria-label={L.group.builtIn} data-plugins-group="builtIn">
         <GroupHeading label={L.group.builtIn} />
         <p role="status" data-mods-unavailable="" className="m-0 px-2 py-2 text-ui-sm text-fg-muted [overflow-wrap:anywhere]">
-          {L.mod.unavailable(read.reason)}
+          {read.elsewhere ? read.reason : L.mod.unavailable(read.reason)}
         </p>
       </section>
     );

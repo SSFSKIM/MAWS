@@ -6,9 +6,11 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
-import { digest, record, status } from '../../../../test/support/builders';
+import { digest, record, remoteRow, status } from '../../../../test/support/builders';
+import { addressOf } from '@shared/machine/address';
+import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE } from '../../../../test/support/machine';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { fileLineAnchor } from '../tools/code/anchor/anchor';
@@ -81,6 +83,27 @@ describe('the comment composer', () => {
     withParent('ready', true);
     show();
     expect(screen.getByText('Sends at the next step')).toBeTruthy();
+  });
+
+  // P5 O7 M8 ("The offer audit and its contract"): a parent on another machine takes neither a side thread nor a send to
+  // main yet (REMOTE_UNAVAILABLE): both destinations greyed, each with its declared words as its caption; nothing sends
+  it('greys both destinations for a parent on another machine, each saying why, and sends nothing', async () => {
+    const remote = addressOf(OTHER_MACHINE, PARENT_ID);
+    useSessions.setState({ records: new Map([[remote, record(remote)]]), engine: new Map([[remote, status(remote)]]), listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, PARENT_ID), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    try {
+      render(<CommentComposerHost />);
+      act(() => openComposer(ANCHOR, { appSessionId: remote }));
+      expect((screen.getByRole('radio', { name: /Side thread/ }) as HTMLInputElement).disabled).toBe(true);
+      expect((screen.getByRole('radio', { name: /Send to main/ }) as HTMLInputElement).disabled).toBe(true);
+      expect(screen.getByText(REMOTE_UNAVAILABLE['side.thread.open']!)).toBeTruthy();
+      expect(screen.getByText(REMOTE_UNAVAILABLE['side.sendToMain']!)).toBeTruthy();
+      await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), 'Why twice?{Enter}');
+      expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true);
+      expect(fake.invoked('side.thread.open')).toEqual([]);
+      expect(fake.invoked('side.sendToMain')).toEqual([]);
+    } finally {
+      useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    }
   });
 
   it('Send to main on an exited parent starts it (side), reading Starting…, then sends once and closes', async () => {

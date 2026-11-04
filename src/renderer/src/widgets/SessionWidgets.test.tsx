@@ -12,7 +12,10 @@ import { SessionRecordSchema } from '@shared/graph/session';
 import { compileAddressing } from '@shared/machine/address';
 import { loadScenario, ScenarioDigestSchema } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { remoteRow } from '../../../../test/support/builders';
+import { addressOf } from '@shared/machine/address';
+import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import { registerSessionAction } from '../app/session-actions';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -85,6 +88,31 @@ describe('rename widget', () => {
     fireEvent.change(field, { target: { value: 'Settings probe, renamed' } });
     fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
     await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Renamed · Settings probe, renamed'));
+  });
+
+  // P5 O7 M8 ("The offer audit and its contract"): `session.rename` is declared not offered on another machine
+  // (REMOTE_UNAVAILABLE): nothing is asked, no dialog opens, and the field and Rename are greyed with the declared words
+  it('for a session on another machine, renames nothing and opens no dialog: Rename greyed with the declared reason', async () => {
+    const remote = addressOf(OTHER_MACHINE, READY_ID);
+    useSessions.setState({ records: new Map(useSessions.getState().records).set(remote, { ...useSessions.getState().records.get(READY)!, appId: remote }), listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, READY_ID), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    const dialog = vi.fn();
+    const off = registerSessionAction('rename', dialog);
+    try {
+      mount(RenameWidget, remote, 'Over there');
+      mount(RenameWidget, remote);
+      expect(dialog).not.toHaveBeenCalled();
+      const words = REMOTE_UNAVAILABLE['session.rename']!;
+      expect(screen.getAllByRole('status').map((s) => s.textContent)).toEqual([words, words]);
+      const rename = screen.getByRole('button', { name: 'Rename' });
+      expect(rename).toHaveProperty('disabled', true);
+      expect(rename.title).toBe(words);
+      expect(screen.getByRole('textbox', { name: 'New title' })).toHaveProperty('disabled', true);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(backend.calls.filter((c) => c.command === 'session.rename')).toEqual([]);
+    } finally {
+      off();
+      useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    }
   });
 });
 

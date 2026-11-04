@@ -18,6 +18,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, CommandOutput, AddressedInvoke } from '@shared/ipc/schema';
 import type { AcquireOutcome } from '@shared/sessions/setup';
 import { ipc } from '../ipc/client';
+import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { IpcCommandError, type QueryCommand } from '../ipc/query';
 import { acquireSession, refusalWords } from '../sessions/acquire';
 import { availabilityIn, availabilityRefusal } from '../sessions/availability';
@@ -140,7 +141,9 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
   const active = useContext(WidgetReadPolicyContext).mode === 'active';
   const appSessionId = (input as { appSessionId: AppSessionId }).appSessionId;
   const refreshOn = options.refreshOn ?? MOVES_READS;
-  const wanted = options.enabled ?? true;
+  // P5 O7 M8 ("An older peer"): a read the session's machine was heard not offering is asked no more (its words instead)
+  const greyed = useRemoteUnavailable(appSessionId, command);
+  const wanted = (options.enabled ?? true) && greyed === null;
   const ready = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
   const moved = useSessions((s) => {
     const status = s.engine.get(appSessionId);
@@ -193,11 +196,12 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
   const dormant = useSessions(useShallow((s) => (active && !ready ? dormantStateOf(s, load, appSessionId) : null)));
 
   let state: ReadState;
-  if (dormant) state = dormant.state;
+  if (greyed !== null) state = 'error';
+  else if (dormant) state = dormant.state;
   else if (query.data !== undefined) state = 'ready';
   else if (query.isError) state = 'error';
   else state = 'loading';
-  const error = dormant ? dormant.words : query.data !== undefined && query.error ? staleWords(query.error) : errorWords(query.error);
+  const error = greyed ?? (dormant ? dormant.words : query.data !== undefined && query.error ? staleWords(query.error) : errorWords(query.error));
   return {
     state,
     data: query.data,
@@ -205,11 +209,11 @@ export function useEngineRead<N extends SessionRead>(command: N, input: CommandI
     readAt: query.data !== undefined ? query.dataUpdatedAt : null,
     // P2-A: nothing is read without a ready process (TanStack's refetch would ignore `enabled`)
     refetch: () => {
-      if (ready || !active) void refetch();
+      if ((ready || !active) && greyed === null) void refetch();
     },
     // joins a read already in flight (the one an operation's completion started), so a read-back costs one read
     refresh: async () => {
-      if (active && !ready) return { data: query.data, failed: null };
+      if ((active && !ready) || greyed !== null) return { data: query.data, failed: null };
       const result = await refetch({ cancelRefetch: false });
       return { data: result.data, failed: result.isError ? result.error : null };
     },

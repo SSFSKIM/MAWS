@@ -31,6 +31,9 @@ export interface Reloads {
   line: string | null; // the last reload's operation line
   failed: boolean; // that line is an error
   busy: boolean;
+  // P5 O7 M8: why each is greyed for a session on another machine (lane-b/remote-unavailable.ts); null: it isn't
+  modsUnavailable: string | null;
+  skillsUnavailable: string | null;
 }
 
 export function useReloads(appSessionId: AppSessionId): Reloads {
@@ -52,6 +55,8 @@ export function useReloads(appSessionId: AppSessionId): Reloads {
     line,
     failed,
     busy: mods.state.phase === 'working' || skills.state.phase === 'working',
+    modsUnavailable: mods.unavailable,
+    skillsUnavailable: skills.unavailable,
   };
 }
 
@@ -59,10 +64,10 @@ export function useReloads(appSessionId: AppSessionId): Reloads {
 export function ReloadControls({ reloads }: { reloads: Reloads }) {
   return (
     <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-      <TextButton onClick={reloads.reloadMods} disabled={reloads.busy}>
+      <TextButton onClick={reloads.reloadMods} disabled={reloads.busy || reloads.modsUnavailable !== null} title={reloads.modsUnavailable ?? undefined}>
         {PLUGIN_MANAGEMENT.reloadMods}
       </TextButton>
-      <TextButton onClick={reloads.reloadSkills} disabled={reloads.busy}>
+      <TextButton onClick={reloads.reloadSkills} disabled={reloads.busy || reloads.skillsUnavailable !== null} title={reloads.skillsUnavailable ?? undefined}>
         {PLUGIN_MANAGEMENT.reloadSkills}
       </TextButton>
       {reloads.line !== null && (

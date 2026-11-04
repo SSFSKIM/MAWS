@@ -6,7 +6,10 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, syntheticFixture, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { at, OTHER_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { remoteRow } from '../../../../test/support/builders';
+import { heardRefusal, resetRemoteSurfaces } from '../artifacts/remote-surfaces';
+import { useMachines } from '../stores/machines';
 import { addressOf } from '@shared/machine/address';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { heard, resetSignIns } from '../customize/connectors/sign-in';
@@ -173,6 +176,27 @@ describe('mcp sign in', () => {
     await row(DOCS);
     expect(screen.queryByRole('button', { name: `Sign in to ${DOCS}` })).toBeNull(); // connected
     expect(screen.queryByRole('button', { name: 'Sign in to plugin:ptc:ptc' })).toBeNull(); // `dynamic`: --mcp-config's
+  });
+
+  // P5 O7 M8 ("An older peer"): a machine heard refusing a command `not-offered` greys its control for that machine's
+  // sessions, with the reason, as the Connectors sheet's surfaces grey (lane-b/remote-unavailable.ts)
+  it('greys Sign in, Reconnect and the switch for a session on a machine heard not offering them, with the reason', async () => {
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+    useSessions.setState({ engine: new Map([[REMOTE, { ...backend.status(BARE), appSessionId: REMOTE }]]), listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, BARE), appId: REMOTE }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    try {
+      mountFor(REMOTE);
+      const signIn = await within(await row(DOCS)).findByRole('button', { name: `Sign in to ${DOCS}` });
+      expect(signIn).toHaveProperty('disabled', false);
+      for (const name of ['connectors.signInServer', 'session.mcpReconnect', 'session.mcpToggle'] as const) act(() => heardRefusal(name, { issues: { refusal: 'not-offered' } }, OTHER_MACHINE, TEST_MACHINE));
+      const docs = await row(DOCS);
+      for (const control of [within(docs).getByRole('button', { name: `Sign in to ${DOCS}` }), within(docs).getByRole('button', { name: 'Reconnect' }), within(docs).getByRole('switch')]) {
+        expect(control).toHaveProperty('disabled', true);
+        expect(control.title).toBe('mini doesn’t offer this');
+      }
+    } finally {
+      resetRemoteSurfaces();
+      useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    }
   });
 });
 

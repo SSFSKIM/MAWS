@@ -34,6 +34,7 @@ import { NOT_YET } from '../composer/submit/submit-state'; // P2-A
 import { routeOf, useModelCatalogue } from '../composer/list-models'; // P2-A
 import { isStarting, listedModelsOf, rememberListedModels, useComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
+import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M5
 import { useSettings } from '../stores/settings';
@@ -89,6 +90,7 @@ function useLiveBinding(appSessionId: AppSessionId, models: readonly ModelRow[])
   const status = useSessions((s) => s.engine.get(appSessionId) ?? null);
   const requests = useModelRequests();
   const effort = useShownEffort(appSessionId);
+  const fastGreyed = useRemoteUnavailable(appSessionId, 'session.applyFlagSettings'); // P5 O7 M8: not on another machine yet
   return useMemo(() => {
     if (!status) return null;
     // P2-F S chip (review): the composer's model chip reads the same request and the same rule (`modelAsk`)
@@ -107,14 +109,14 @@ function useLiveBinding(appSessionId: AppSessionId, models: readonly ModelRow[])
       setModel: (model) => (model === asked || (model !== null && model === row?.value) ? Promise.resolve(ok) : setModel({ appSessionId, model })),
       setEffort: (next) => (next === status.effort ? Promise.resolve(ok) : setEffort({ appSessionId, effort: next })),
       fast: {
-        view: fastView(status.fastMode, shownRow),
+        view: fastGreyed === null ? fastView(status.fastMode, shownRow) : { ...fastView(status.fastMode, shownRow), disabled: fastGreyed },
         pending: fastPending(requests, appSessionId, status),
         set: (on) => applyFlagSettings({ appSessionId, settings: { fastMode: on } }),
       },
       unstarted: false,
       route: null,
     };
-  }, [appSessionId, models, status, requests, effort]);
+  }, [appSessionId, models, status, requests, effort, fastGreyed]);
 }
 
 // An unstarted session: C7's frame binding over C10's setup intent (the chip writes the same intent the same way), the
