@@ -745,6 +745,7 @@ The live sitting failed two of O7's own acceptance lines. Answering a question f
 - Endpoint:
   - `src/endpoint/offers.ts`: §U's M8 rows;
   - `src/endpoint/calls.ts`: the forwarded failure's message;
+  - `src/endpoint/targets.ts`: the `task-list` target rule;
   - `src/endpoint/rl10/members.ts`: the lane B listing id;
   - `src/shared/host/stream-catchup.ts` and `src/endpoint/subscriptions*.ts`: the operation and panel parts.
 - Main:
@@ -797,7 +798,9 @@ The fixes follow in tasks grouped by layer, so that no two executors edit one fi
   - every act row is in the adapter's `handles`;
   - every unhandled call row is graded plain `list` or `view`;
   - nothing is both offered and declared.
-- **M8's rows** are §U's table: the MAWS ask, the side panels, the side question, Reload plugins and the widget reads. A command with no session target (`fs.tasks {listId}`, `mods.list`) is declared, not offered: a machine-wide read needs M6's `each-session` filter, and that is residue unless a task finds the list's sessions cheaply.
+- **M8's rows** are §U's table: the MAWS ask, the side panels, the side question, Reload plugins and the widget reads.
+- **`fs.tasks` is offered** (P5 §5: what the panel shows for a local session works for a remote one). A task list belongs to its session: the renderer derives the list id from the session's status (`taskListId`, else its sanitised engine session id; `src/renderer/src/tools/agents/model/task-list.ts`). So the call names the session too: `fs.tasks`'s input gains `appSessionId?`, which the remote call always carries. A new target rule, `task-list`, resolves that session as the `checkout` rule does and admits the call only when `listId` is that session's own list id, at the registry's `view`; anything else is refused `no-target`. `fs.tasksChanged` crosses as the `tasks` part. The added input field is a wire change, so M8 takes `WIRE_MINOR` master's plus one at its landing (P5 Decision Log 44).
+- **`mods.list`** (machine-wide, no session target) is declared, with its reason, and gets a tracker line.
 - **The MAWS ask's grades.** `maws.asks.list` is `view`. `maws.ask.answer` is plain `converse`, the same as `session.answer`'s for a question (`src/endpoint/by-effect.ts`, `QUESTION_REQUESTS` already holds `maws.ask.opened`). The answer runs through the host as a `next` steer (`src/engine-host/session-maws.ts`), so the adapter resumes a released session first, as it does for `session.send`.
 - **An older peer.** An older peer answers `not-offered` for a new row. The renderer greys a surface for a session on that machine once it hears a refusal for it, extending `heardRefusal` (`src/renderer/src/artifacts/remote-surfaces.ts`) from the connector surfaces to every session surface.
 - Rejected:
@@ -816,8 +819,9 @@ The fixes follow in tasks grouped by layer, so that no two executors edit one fi
 
 *What draws "Working…".* `activity` is set on a main-lane `system/status` frame and cleared only by another status frame (`src/engine-host/session-status.ts`). The fixtures end 389 of 401 turns with `requesting` as the last status, tool or no tool. So the VM's `activity: requesting` after `end_turn` is every turn's state, local too. No renderer code reads it: "Working…" is an open turn in the transcript store or the composer's submit state.
 - `activity` clears at a main-lane `result` (red first in `src/engine-host/session-status.test.ts` over `permission-roundtrip.jsonl`). It is cheap and right, but it is not the sitting's symptom.
+- The rule, whatever m8-1 finds: an event the device can't read is a visible gap, never a silent drop. `remote-session.ts` marks `remote.gap` for it and re-reads the session's status (`session.status`, and the record through `session.get`), so a turn left open by a dropped `turn.ended` heals at once. Red first in `src/main/lane-b/remote-session.test.ts`: an unknown-shaped `turn.ended` leaves a gap, the status re-read closes the turn, and the pane stops drawing "Working…".
 - The symptom is a `turn.ended` the device never folded. `remote-session.ts` drops an event that fails `readTolerant(SessionEventSchema)` with a log line and no gap, and the sitting's app (01d4488cf) read a VM on 75944744d.
-- m8-1 decides it red first, by feeding the older build's `turn.ended` shape to the newer reader. The fix either way: an unreadable event emits `remote.gap`, as `omitted` does (red first in `remote-session.test.ts`), and if the shapes differ, the reader takes the older one.
+- m8-1 decides it red first, by feeding the older build's `turn.ended` shape to the newer reader. If the shapes differ, the reader also takes the older one.
 
 *The attachment* (P5 acceptance 4's "take an image"; the sitting's "@ is not working"). The brief's premise is corrected by the code:
 - Locally, a dropped PDF is a `document` content block (`composer/editor/paste.ts`, `serialize.ts`); only a file the API can't take becomes an `@path` mention.
@@ -829,7 +833,7 @@ The fixes follow in tasks grouped by layer, so that no two executors edit one fi
 *Sign in from the session's MCP widget.* `startSignIn` needs `{name, scope, cwd, path}` and the session's address (`customize/connectors/sign-in.ts`). The widget has the name, scope and status from `mcp_status` and the cwd from the session's status, but not `path`: on a remote machine `customization.serverEndpoints` is main-only and not offered.
 - `connectors.signIn` resolves the entry on the session's machine from `{name, scope, cwd}`, with `path` optional and the machine's own `customization.serverEndpoints` read there.
 - The widget offers Sign in on `needs-auth`, beside Reconnect.
-- Show on the remote Connectors sheet does step up by design: `connectors.servers` is `machine-admin`, which always asks (`src/endpoint/step-up.ts`; `test/endpoint/artifact-rows.test.ts`). The owner's missing Touch ID was the MCP widget's `session.mcpStatus`, a `view` call. No fix.
+- Show on the remote Connectors sheet is meant to ask for Touch ID, and does: M5c's sheet is "Show, then Touch ID, then Refresh for any re-read" (M5c's Outcomes), because `connectors.servers` is `machine-admin` (A13 and A14 keep credential and grant management there; F17), and `stepUpRequired` asks for every `machine-admin` act whoever owns the machine (`src/endpoint/step-up.ts`; asserted by `test/endpoint/artifact-rows.test.ts`). The owner saw no Touch ID because they were on the MCP widget, whose read is `session.mcpStatus`, a `view` call that asks nothing. No fix.
 - Red first: `src/renderer/src/widgets/McpWidget.test.tsx`, `src/services/connectors/sign-in.test.ts`.
 
 *Untracked files.* Review lists untracked rows with no hunks and says "not in the diff" (`tools/code/review/ReviewShell.tsx`, asserted by `review.test.tsx`). Source control already asks `git.diff {scope: 'untracked', path}`, served by the git service with `--no-index /dev/null <path>`.
@@ -908,7 +912,7 @@ The owner's ruling: "We shouldn't be using ClaudeUsage, We should be just using 
 
 *Remote setup.* The machine refuses a spawn whose checkout isn't a registered project directory (`unknown-checkout`) or isn't trusted there (`untrusted`, `spawn.ts`).
 - When `readCandidates` (`src/renderer/src/sessions/remote-spawn.ts`) finds no registered checkout of the org project, the sheet asks for the folder on that machine:
-  - `machine.folders.list {path?}` (new, `machine` owner) lists directories under the machine's home, a page at a time, names only;
+  - `machine.folders.list {path?}` (new, `machine` owner) lists directories under the machine's home, a page at a time, names only. It never raises a privacy prompt by itself. On macOS the TCC-protected folders (`~/Desktop`, `~/Documents`, `~/Downloads`, `~/Pictures`, `~/Movies`, `~/Music`, `~/Library` and any under `~/Library/Mobile Documents`) are listed as entries, marked `protected: true`, and never read inside unless an owner opens one explicitly (`{path, open: true}`). The sheet warns first that the machine may show a privacy prompt; on the mini such a dialog holds CI. No test or e2e opens one. The sheet lists first the paths the project's other checkouts use (for example `~/Developer/GitHub/<name>`), read from the org project's known checkouts, since that is usually the answer;
   - `session.projects.addFolder` registers the answer.
 - When the chosen folder isn't trusted, the sheet reads `session.trust.check` and shows `TrustCard`. Its answer goes as `session.spawn`'s new optional `trust: 'accepted'`, and the machine runs the attested bootstrap launch the local path runs (`launch-mapping.ts`'s `bootstrapSpec`). MAWS still never writes trust itself.
 - The three new rows are `owners: true`: a new `OfferRow` field, checked in `authorize.ts` against `ranks.ownsMachine()`, and refused `owners-only`. A grant naming the machine does not suffice. They are graded `spawn`, which always steps up.
@@ -1598,13 +1602,16 @@ The link's `subscribe` takes `{feed, session?}` in place of `session` alone.
 | `session.reloadPlugins` | `laneB('act')` | `manage` | M8 |
 | `fs.subagents`, `fs.workflows` | `laneB('call')` | `view` | M8 |
 | the session-scoped `view` reads the audit finds unoffered (`session.getHooksListing`, `getMemoryDialog`, `getSandboxDialog`, `getSkillsDialog`, `session.drafts.get`, `session.observedFacts`, …) | `laneB('call')`, or declared | `view` | M8 |
-| `fs.tasks`, `mods.list` (no session target) | declared in `REMOTE_UNAVAILABLE` | `view` | M8 |
+| `fs.tasks` | `laneB('call')` under the `task-list` target rule (`listId` must be the named session's own list) | `view` | M8 |
+| `mods.list` (no session target) | declared in `REMOTE_UNAVAILABLE`, tracker line | `view` | M8 |
 | `machine.folders.list` (new) | `{call, executor 'machine', target 'machine', owners: true}` | `spawn` | M9 |
 | `session.projects.addFolder` | `{act, executor 'machine', target 'machine', owners: true}` | `spawn` | M9 |
 | `session.trust.check` | `{call, executor 'machine', target 'machine', owners: true}` | `spawn` | M9 |
 
 - **`REMOTE_UNAVAILABLE`** (`src/shared/ipc/remote-unavailable.ts`): `Record<CommandName, string>`, each command's reason in the words its control shows ("Not on another machine yet: …"). It is read by the renderer's controls and by `test/lane-b/offer-coverage.test.ts`.
 - **The `operation` and panel parts** (`src/shared/host/stream-catchup.ts`): `{part: 'operation', body: OperationEvent}`, `{part: 'subagents', body: {agents}}`, `{part: 'workflow', body: {runId}}` and `{part: 'side', body: {exchanges}}`. Each is emitted by `remote-session.ts` as its event (`session.operation`, `fs.subagentsChanged`, `fs.workflowChanged`, the side store's change) under the machine's address. An older device drops an unknown part.
+- **`fs.tasks`'s input** gains `appSessionId?` (`src/shared/ipc/schema/fs.ts`), required by the `task-list` rule over RL2; a `tasks` part carries `fs.tasksChanged`.
+- **`machine.folders.list`** (M9): input `{path?: string, open?: true, cursor?: string}`; output `{entries: [{name, path, protected: boolean}], cursor: string | null}`. `protected` marks a macOS TCC-protected folder, which is read inside only with `open: true`.
 - **The forwarded failure** (`src/endpoint/calls.ts`): `{code, message?}`, with the message capped at 512 characters.
 - **`RouteSchema`** (`src/shared/engine/route.ts`): `z.enum(['gateway', 'direct', 'machine'])`.
 - **The record's `gateway`** gains:
