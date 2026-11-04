@@ -4,11 +4,13 @@
 // arrives ahead of the receipt is not lost, follows only its own `opId`, and only while the widget is mounted: a widget
 // closed mid-operation shows nothing later (the effect is visible in the next read). A rejected invoke is the transport
 // branch, apart from every outcome.
+// P5 O7 M8: with why its control is greyed for a session on another machine (`unavailable`), which the widget draws.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OperationCommand, OperationEvent } from '@shared/engine/operations';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, AddressedInvoke } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
+import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { OPERATION } from './copy';
 import { transportWords } from './read';
 
@@ -24,6 +26,8 @@ export type OperationState =
 
 export interface Operation<C extends OperationCommand> {
   state: OperationState;
+  // P5 O7 M8: why its control is greyed for a session on another machine (../lane-b/remote-unavailable.ts); null: it isn't
+  unavailable: string | null;
   // Starts the operation; answers its first completion (or null when the invoke was refused or the widget closed).
   run(input: Omit<CommandInput<C>, 'appSessionId'>): Promise<OperationEvent['outcome'] | null>;
 }
@@ -85,7 +89,7 @@ export function useOperation<C extends OperationCommand>(appSessionId: AppSessio
     [appSessionId, command, settle],
   );
 
-  return { state, run };
+  return { state, run, unavailable: useRemoteUnavailable(appSessionId, command) };
 }
 
 // What an operation's line says: nothing before it runs, `Working…`, the outcome, or the correction a late one made.

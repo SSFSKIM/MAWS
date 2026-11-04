@@ -54,8 +54,9 @@ export function retryRemoteSession(client: MawsBridge = connected ?? ipc): void 
 }
 
 export function connectRemoteLaneB(client: MawsBridge = ipc): () => void {
-  const offOpener = registerRemoteOpener('B', (listed) => {
-    useLayout.getState().openSession(listed.appId);
+  const offOpener = registerRemoteOpener('B', (listed, how) => {
+    if (how?.newTab) useLayout.getState().openTab({ kind: 'session', appSessionId: listed.appId }); // P5 O7 M8: Resume…'s ⌘Enter
+    else useLayout.getState().openSession(listed.appId);
     if (remoteLaneBStateOf(listed.appId)?.stream === 'ended') retryRemoteSession(client);
   });
   const offReadMarks = connectRemoteReadMarks();

@@ -7,6 +7,7 @@
 // first write, which it reports as `fs.foreignWrite` (main yields MAWS's process), and re-folds a follower that held a
 // branch back once the foreign holder exits.
 // Read-only: it never writes under the config home.
+import { createHash } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -15,6 +16,7 @@ import { FOLLOW_RELEASED, type WindowBudget } from '@shared/graph/history-window
 import type { AgentId, AppSessionId, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import type { ForeignHolder } from '@shared/graph/session';
 import type { HostEmit } from '@shared/host/runtime';
+import type { ClientId, ClientRef } from '@shared/ipc/client'; // P5 O7 M8: an agent's follow held per client
 import type {
   FsHoldersAnswer,
   FsHoldersQuery,
@@ -86,7 +88,14 @@ export interface FsServiceOptions {
   window?: WindowBudget; // tests' smaller pages
   releaseMs?: number; // FOLLOW_RELEASE_MS
   agentRetryMs?: number; // AGENT_RETRY_MS
+  log?: (line: string) => void; // P5 O7 M8: the follows' holds and drops (stderr, the host's log, by default)
 }
+
+/**
+ * P5 O7 M8: how the service's log names a client that holds an agent's follow: a short digest of its id, the same at
+ * its hold and its release, so a diagnosis can pair them, but never the id itself, which names a remote device.
+ */
+export const followClientTag = (client: ClientId | string): string => createHash('sha256').update(client).digest('hex').slice(0, 8);
 
 // The replay runs' side of the snapshot seam (ReplayHost): null for an app id no run has.
 export interface ReplaySnapshots {
@@ -108,6 +117,9 @@ interface FollowEntry {
   workflowIds: Map<string, number>; // deliveries per workflow.progress id in this follow, for the occurrence suffix
   workflowWork: Promise<unknown>; // workflow deliveries run one at a time, in change order
   usedAt: number; // its last read, or the last moment its session was in some client's interest
+  // P5 O7 M8: an agent's follow, by each client that started it (`fs.agentEvents`), with that client's end's unsubscribe;
+  // stopped when the last of them unfollows or ends (`release`), never by a client that holds none of it
+  holds: Map<ClientId, () => void>;
 }
 
 // A session's agent listing kept current, one pass at a time: a walk of the whole tree when a caller asks for the list
@@ -139,6 +151,7 @@ interface Contest {
 export class FsService {
   private readonly paths: StorePaths;
   private readonly emit: HostEmit;
+  private readonly log: (line: string) => void;
   private readonly bindings = new Bindings();
   private readonly discovery: Discovery;
   private readonly watcher: StoreWatcher;
@@ -173,6 +186,9 @@ export class FsService {
   private offInterest: (() => void) | null = null;
   private readonly follows = new Map<string, FollowEntry>(); // by followKey(appSessionId, agentId)
   private readonly starting = new Map<string, Promise<FollowEntry>>();
+  // P5 O7 M8: by follow key, the `fs.agentEvents` readers with a client that are waiting for the follow they will hold;
+  // an unheld follow is stopped only once none waits (`unheld`)
+  private readonly awaiting = new Map<string, number>();
   private readonly subagentReader = new SubagentReader();
   private readonly searchReader = new SearchTextReader();
   private readonly agents = new Map<SessionId, SubagentEntry[]>(); // each session's agents as last listed
@@ -192,6 +208,7 @@ export class FsService {
   constructor(options: FsServiceOptions) {
     this.paths = options.paths;
     this.emit = options.emit;
+    this.log = options.log ?? ((line) => console.error(line));
     this.openReader = options.openReader ?? ((locate) => new FsFileReader(locate));
     this.reconcileMs = options.reconcileMs ?? RECONCILE_MS;
     this.window = options.window;
@@ -240,8 +257,7 @@ export class FsService {
     this.holders.stop();
     if (this.reconcile) clearInterval(this.reconcile);
     this.offInterest?.();
-    for (const entry of this.follows.values()) entry.follow.stop();
-    this.follows.clear();
+    for (const [key, entry] of [...this.follows]) this.drop(key, entry);
     for (const sync of this.agentSyncs.values()) if (sync.timer) clearTimeout(sync.timer);
     this.searchReader.stop();
   }
@@ -311,8 +327,7 @@ export class FsService {
     for (const [key, entry] of this.follows) {
       if (!key.startsWith(`${appSessionId}\0`) || entry.sessionId === current) continue;
       followed ||= entry.agentId === null;
-      this.follows.delete(key);
-      entry.follow.stop();
+      this.drop(key, entry);
     }
     return followed;
   }
@@ -407,8 +422,7 @@ export class FsService {
         continue;
       }
       if (now - entry.usedAt < this.releaseMs) continue;
-      this.follows.delete(key);
-      entry.follow.stop(FOLLOW_RELEASED); // a source still attached knows to read the history again
+      this.drop(key, entry, FOLLOW_RELEASED); // a source still attached knows to read the history again
     }
   }
 
@@ -417,29 +431,94 @@ export class FsService {
   // names, so until a meta naming it has been read the call is refused rather than following with a parent it cannot know for
   // the rest of the follow; the consumer retries on the `fs.subagentsChanged` the meta's arrival emits. A workflow
   // agent's meta names no tool use (nor does the wire), so it follows at once with `parentToolUseId: null`.
-  async agentEvents(appSessionId: AppSessionId, agentId: AgentId, request: Pick<HistoryRequest, 'before' | 'seek'> = {}): Promise<HistoryPage> {
+  // P5 O7 M8: `client`, who asked, holds the follow from here until it unfollows it or ends (`hold`). While it waits
+  // for the follow (its start, or its turn after an existing one), it counts in `awaiting`, so another client's end
+  // that leaves the follow unheld meanwhile does not stop the follow this one is about to hold.
+  async agentEvents(appSessionId: AppSessionId, agentId: AgentId, request: Pick<HistoryRequest, 'before' | 'seek'> = {}, client?: ClientRef): Promise<HistoryPage> {
     const sessionId = this.sessionOf(appSessionId);
-    const entry = await this.ensureFollow(appSessionId, agentId, async () => {
-      const agent = (await this.listAgents(sessionId)).find((candidate) => candidate.agentId === agentId);
-      if (agent === undefined) throw new Error(`unknown agent: ${agentId}`);
-      // A meta without `toolUseId` (the schema requires only `agentType`) attributes nothing either.
-      if (agent.runId === null && typeof agent.meta?.toolUseId !== 'string') throw new Error(`agent meta not yet available: ${agentId}`);
-      const parentToolUseId = (agent.meta?.toolUseId ?? null) as ParentToolUseId | null;
-      return this.newFollow(appSessionId, sessionId, agent.transcriptPath, { agentId, parentToolUseId });
-    });
+    const key = followKey(appSessionId, agentId);
+    if (client !== undefined) this.awaiting.set(key, (this.awaiting.get(key) ?? 0) + 1);
+    let entry: FollowEntry;
+    try {
+      entry = await this.ensureFollow(appSessionId, agentId, async () => {
+        const agent = (await this.listAgents(sessionId)).find((candidate) => candidate.agentId === agentId);
+        if (agent === undefined) throw new Error(`unknown agent: ${agentId}`);
+        // A meta without `toolUseId` (the schema requires only `agentType`) attributes nothing either.
+        if (agent.runId === null && typeof agent.meta?.toolUseId !== 'string') throw new Error(`agent meta not yet available: ${agentId}`);
+        const parentToolUseId = (agent.meta?.toolUseId ?? null) as ParentToolUseId | null;
+        return this.newFollow(appSessionId, sessionId, agent.transcriptPath, { agentId, parentToolUseId });
+      });
+    } finally {
+      if (client !== undefined) this.stopAwaiting(key);
+    }
     entry.usedAt = Date.now();
+    if (client !== undefined) this.hold(key, entry, client);
     return snapshotOf(entry.follow, { before: request.before ?? null, seek: request.seek ?? null });
   }
 
-  // `fs.unfollow`: stops the follower, and with agentId null every follower of the session. Following no one is a no-op.
-  async unfollow(appSessionId: AppSessionId, agentId: AgentId | null): Promise<void> {
+  private stopAwaiting(key: string): void {
+    const left = (this.awaiting.get(key) ?? 1) - 1;
+    if (left === 0) this.awaiting.delete(key);
+    else this.awaiting.set(key, left);
+  }
+
+  // P5 O7 M8: the follow at `key` stopped when nobody holds it and no reader waits to hold it.
+  private unheld(key: string, entry: FollowEntry): void {
+    if (entry.holds.size === 0 && !this.awaiting.has(key) && this.follows.get(key) === entry) this.drop(key, entry);
+  }
+
+  // P5 O7 M8: `client` holds the agent's follow at `key` while the follow is the one stored there; its end lets go.
+  // A client that had ended already holds nothing, and a follow nobody holds stops.
+  private hold(key: string, entry: FollowEntry, client: ClientRef): void {
+    if (this.follows.get(key) !== entry || entry.holds.has(client.id)) return;
+    let kept = false;
+    let endedAlready = false;
+    const off = client.onGone(() => {
+      if (kept) this.release(key, entry, client.id);
+      else endedAlready = true; // `onGone` runs at once for a client that has ended
+    });
+    if (endedAlready) {
+      this.unheld(key, entry);
+      return;
+    }
+    kept = true;
+    entry.holds.set(client.id, off);
+    this.log(`[fs] follow ${followName(entry)}: held by client ${followClientTag(client.id)} (${entry.holds.size} holding)`);
+  }
+
+  // P5 O7 M8: `client`'s hold on the follow at `key` let go; the follow stopped once nobody holds it.
+  private release(key: string, entry: FollowEntry, client: ClientId): void {
+    const off = entry.holds.get(client);
+    if (off === undefined) return;
+    entry.holds.delete(client);
+    off();
+    this.log(`[fs] follow ${followName(entry)}: released by client ${followClientTag(client)} (${entry.holds.size} holding)`);
+    this.unheld(key, entry);
+  }
+
+  // A follow stopped and forgotten, its holders' subscriptions with it.
+  private drop(key: string, entry: FollowEntry, reason?: typeof FOLLOW_RELEASED): void {
+    this.follows.delete(key);
+    for (const off of entry.holds.values()) off();
+    entry.holds.clear();
+    if (reason === undefined) entry.follow.stop();
+    else entry.follow.stop(reason);
+    // the host's own stop drops every follow at once: only a drop while it runs is told
+    if (!this.stopped) this.log(`[fs] follow ${followName(entry)}: dropped${reason === undefined ? '' : ' (its session no longer open anywhere)'}`);
+  }
+
+  // `fs.unfollow`: stops the follower, and with agentId null every follower of the session (the session's own lifecycle:
+  // its record's engine id cleared, the transcript handed to a live process). Following no one is a no-op. P5 O7 M8: an
+  // agent's follow that `client` asks to stop is only let go by it: stopped when nobody holds it then (`release`), never
+  // by a client that holds none of it.
+  async unfollow(appSessionId: AppSessionId, agentId: AgentId | null, client?: ClientRef): Promise<void> {
     this.sessionOf(appSessionId);
     const matches = (key: string) => (agentId === null ? key.startsWith(`${appSessionId}\0`) : key === followKey(appSessionId, agentId));
     await Promise.allSettled([...this.starting].filter(([key]) => matches(key)).map(([, starting]) => starting));
     for (const [key, entry] of this.follows) {
       if (!matches(key)) continue;
-      this.follows.delete(key);
-      entry.follow.stop();
+      if (agentId !== null && client !== undefined) this.release(key, entry, client.id);
+      else this.drop(key, entry);
     }
   }
 
@@ -545,7 +624,7 @@ export class FsService {
       isOwnRecord: (record) => this.holders.ownsTranscriptRecord(sessionId, record),
       emit: this.send,
     });
-    return { follow, sessionId, agentId: agent?.agentId ?? null, location, workflows: new Map(), workflowIds: new Map(), workflowWork: Promise.resolve(), usedAt: Date.now() };
+    return { follow, sessionId, agentId: agent?.agentId ?? null, location, workflows: new Map(), workflowIds: new Map(), workflowWork: Promise.resolve(), usedAt: Date.now(), holds: new Map() };
   }
 
   // The session's agents from a walk that begins after this call (one asked for and not yet begun is shared).
@@ -1049,6 +1128,8 @@ function deferred<T>(): Deferred<T> {
 function followKey(appSessionId: AppSessionId, agentId: AgentId | null): string {
   return `${appSessionId}\0${agentId ?? ''}`;
 }
+// P5 O7 M8: a follow as the log names it: its app session and its agent, or `session` for the session's own.
+const followName = (entry: FollowEntry): string => `${entry.follow.appSessionId}/${entry.agentId ?? 'session'}`;
 
 // The quiet follow of a session a live process writes (eventsSnapshot), under the session's prefix so `fs.unfollow` of
 // the session stops it too; an agent id is never empty, so no agent's key is this.

@@ -22,13 +22,14 @@ describe('agent-work client', () => {
     const client = createAgentWorkClient(fake.client);
     expect(await client.subagents(A)).toEqual([]);
     expect(await client.workflows(A)).toEqual([]);
-    expect(await client.tasks(TEST_MACHINE, 'list-1')).toEqual([]);
+    expect(await client.tasks(TEST_MACHINE, 'list-1', A)).toEqual([]);
+    expect(await client.tasks(TEST_MACHINE, 'list-2', null)).toEqual([]); // no session known: the list alone
     expect(await client.readSpill(TEST_MACHINE, { path: '/p', offset: 0, length: 4 })).toMatchObject({ content: 'x', length: 1 });
     expect(await client.events(A, 3)).toEqual({ events: [], lastSeq: 7, complete: true });
     expect(await client.steer(A, 'hello', 'next')).toEqual({ messageUuid: 'u1' });
     await client.stopTask(A, 't1' as TaskId);
     expect(fake.invoked('fs.subagents')).toEqual([{ appSessionId: 'A' }]);
-    expect(fake.invoked('fs.tasks')).toEqual([{ listId: 'list-1' }]);
+    expect(fake.invoked('fs.tasks'), 'P5 O7 M8: the session whose list it is, which a remote read must name').toEqual([{ listId: 'list-1', appSessionId: 'A' }, { listId: 'list-2' }]);
     expect(fake.invoked('session.events')).toEqual([{ appSessionId: 'A', afterSeq: 3, limit: null }]);
     expect(fake.invoked('session.steer')).toEqual([{ appSessionId: 'A', content: 'hello', priority: 'next' }]);
     expect(fake.invoked('session.stopTask')).toEqual([{ appSessionId: 'A', taskId: 't1' }]);

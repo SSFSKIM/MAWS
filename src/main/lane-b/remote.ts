@@ -53,6 +53,16 @@
 // - P5 O7 M5c: O4's surfaces (./remote-connectors.ts): a page's leases, on the channel whose reset was said and under the
 //   device's window report per machine (./remote-windows.ts); Connect and Sign in with a listener for their consent's
 //   redirect, and the client port's answers (./remote-port.ts); Send to on the machine.
+// - P5 O7 M8 ("The sitting's failures"; Interfaces §U): the MAWS ask's answer, the side question's clear and Reload
+//   plugins are engine-host acts (an answer resumes a released session first, as a send does, and never waits behind
+//   one); the sign-in by a server's name (`connectors.signInServer`) a consent's `machine` act. An operation's receipt
+//   (`{opId}`) is handed to the session's fold, which asks the machine for its completion at each opening until it comes
+//   (./remote-session.ts). A task list's read names the session it is of (`fs.tasks`' `appSessionId`: the input's, the
+//   page's, else the open session whose list it is). An unfollow goes for a named agent; the session-wide one, which the
+//   machine would take as every client's, goes as one per agent this device follows there (its `fs.agentEvents` reads). A send's `uploads` go only to an
+//   endpoint that lists `rl2.upload-blocks` (the act `requires` it, so a later channel's older peer refuses rather than
+//   misreads it); to any other the message goes with its `@` mention alone, as before. The machine's refusal of a send's
+//   uploads, `malformed` with no reason, is the attachment's words.
 import type { Socket } from 'node:net';
 import type { MessageChannelMain } from 'electron';
 import type { OpenAnswer } from '@shared/client/port';
@@ -65,6 +75,8 @@ import type { MachineRef } from '@shared/machine/ref';
 import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
 import { BUILTIN_MODELS } from '@shared/sessions/models';
 import type { FilesUploadInput } from '@shared/ipc/schema/files';
+import { REMOTE_UPLOAD_REFUSED_WORDS } from '@shared/ipc/schema/remote';
+import { OPERATION_COMMANDS, type OperationCommand } from '@shared/engine/operations';
 import { listenLoopback, type LocalListener } from '../forwards';
 import type { MainContext, RemoteDispatch } from '../ipc/router';
 import type { LayoutFileStore } from '../layout/store';
@@ -209,6 +221,7 @@ export const ENGINE_HOST_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   'session.setModel', 'session.setEffort', 'session.setThinking', 'session.setPermissionMode',
   'session.stopTask', 'session.sideQuestion', 'session.mcpToggle', 'session.mcpReconnect',
   'session.rewind', 'session.rewindFiles', 'session.forget', 'session.setKeep', 'session.generateTitle',
+  'maws.ask.answer', 'side.question.clear', 'session.reloadPlugins', // P5 O7 M8 (§U)
 ]);
 /** The `machine` acts §L offers for lane B: placed by their args (or, a spawn, on the machine), neither a session nor a context. */
 export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
@@ -222,6 +235,7 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   'delivery.send', 'delivery.cancel',
   'connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', 'connectors.signIn', 'connectors.signInCancel',
   'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool',
+  'connectors.signInServer', // P5 O7 M8: the session's MCP widget's Sign in, the entry read on the machine
 ]);
 // P5 O7 M5c ("O4's surfaces: the grade"): the six lease reads, sent as calls by name (./remote-connectors.ts)
 export { MACHINE_CALLS } from './remote-connectors';
@@ -229,7 +243,13 @@ export { MACHINE_CALLS } from './remote-connectors';
 export const SUBSTITUTES: ReadonlySet<CommandName> = new Set<CommandName>(['attention.request', 'engine.models']);
 /** Reads offered as calls that the adapter makes in pages the channel carries (./remote-history.ts). */
 export const PAGED_READS: ReadonlySet<CommandName> = new Set<CommandName>(['session.events', 'files.read']); // files.read: M4's milestone review
+/**
+ * P5 O7 M8: calls the adapter gives a target before they go (`fs.tasks`' session, `fs.unfollow`'s agents), and the
+ * follows it keeps track of for them (`fs.agentEvents`, m8-3's task review).
+ */
+export const TARGETED_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['fs.tasks', 'fs.unfollow', 'fs.agentEvents']);
 const SENDS: ReadonlySet<CommandName> = new Set<CommandName>(['session.send', 'session.steer']);
+const OPERATIONS: ReadonlySet<string> = new Set<string>(OPERATION_COMMANDS);
 export const NOT_OPEN = 'open the session to drive it';
 
 /**
@@ -261,6 +281,9 @@ type Context = { launchId: string; engineSessionId: string };
 
 const record = (value: unknown): Fields | null => (value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Fields) : null);
 const failure = (code: IpcErrorCode, message: string, issues?: unknown): CommandResult<CommandName> => ({ ok: false, error: ipcError(code, message, issues) });
+/** m8-3 review (C, round 2): a session's agent follows this device holds, and its agent reads still out (each may hold one). */
+type Follows = { followed: Set<string>; reading: Map<Promise<unknown>, string> };
+const withoutUploads = (fields: Fields): Fields => Object.fromEntries(Object.entries(fields).filter(([key]) => key !== 'uploads'));
 
 export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   const timing: RemoteLaneBTiming = { ...REMOTE_LANE_B_TIMING, ...deps.timing };
@@ -290,6 +313,11 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     unfollowed: (machine, app) => sessionOf(machine, app)?.unfollowed(),
     log: deps.log,
   });
+  /**
+   * m8-3's task review (C): the agents this device follows per session, by link (each `fs.agentEvents` answered starts or
+   * holds one, held by this device's channel on the machine), so a session-wide unfollow lets go of these alone.
+   */
+  const follows = new Map<RemoteLink, Map<string, Follows>>();
   /** Each session's upload in flight (machine and session): the next waits for it. */
   const uploads = new Map<string, Promise<unknown>>();
   /** P5 O7 M4: each New chat tab's spawn, kept by the tab it is made from (remote-spawn.ts). */
@@ -406,6 +434,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     close,
   });
   const offRemote = deps.onRemote(() => {
+    for (const link of [...follows.keys()]) if (deps.remote(link.machine) !== link) follows.delete(link);
     spawns.linksChanged(deps.remote); // M4c fix wave 2: a spawn out on a link that ended can't be known
     ptys.linksChanged(); // P5 O7 M3: a terminal or a forward on a link that ended ends
     forwards.linksChanged();
@@ -510,21 +539,88 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       if ('ok' in resume) return resume;
       context = resume;
     }
-    let requestDigest;
+    let requestDigest: NonNullable<ReturnType<typeof requestDigestOf>> | undefined;
     if (name === 'session.answer') {
       const read = await dispatchOverLink(link, 'session.pendingRequest', { appSessionId: app, requestId: fields.requestId });
       if (!read.ok) return read;
       const event = (read.value as { event: SessionEvent | null }).event;
       if (event === null) return { ok: true, value: { outcome: 'not_pending' } } as CommandResult<CommandName>;
-      requestDigest = requestDigestOf(app, event);
-      if (requestDigest === null) return failure('internal', `${name}: the request on ${link.name} has no digest to answer it by`);
+      const digest = requestDigestOf(app, event);
+      if (digest === null) return failure('internal', `${name}: the request on ${link.name} has no digest to answer it by`);
+      requestDigest = digest;
     }
     // One bound from the act's turn: what the resume (or the request's read) spent is not given back, so an act made at
     // the deadline is not made, and one made before it goes out by it or not at all (`sendBy`: no outbox, A4).
     if (now() >= deadline) return resuming ? failure('host_unavailable', `Not sent: ${link.name} didn’t resume the session in time`) : outcomeAsResult(name, link.name, { state: 'refused', reason: 'offline' });
-    const handle = link.act({ action: name, session: app, context: { lane: 'B', ...context }, args: fields, executor: 'engine-host', sendBy: deadline, ...(requestDigest !== undefined && { requestDigest }) });
-    return settle(link, name, handle, deadline, app);
+    // P5 O7 M8: a send's uploads only to an endpoint that reads them. A channel current now that lists none takes the
+    // mention alone; with none current (m8-3's task review, D) the act carries them and `requires` the capability, so the
+    // channel it goes on judges it, and one an older peer refused as not offered (nothing ran) goes again without them;
+    // a not-offered from a peer that lists the capability is the send's own error.
+    const uploads = name === 'session.send' && fields.uploads !== undefined;
+    const blocks = uploads && (link.peerCapabilities() === null || peerLists(link, 'rl2.upload-blocks'));
+    if (uploads && !blocks) deps.log(`lane B: session.send on ${link.name}/${app}: its endpoint lists no rl2.upload-blocks; the uploads go as their mentions alone`);
+    const since = lane.session.openings(); // the opening the act is made under: a receipt heard after a later one is asked of the machine
+    const make = (args: Fields, requires: boolean) =>
+      settle(link, name, link.act({ action: name, session: app, context: { lane: 'B', ...context }, args, executor: 'engine-host', sendBy: deadline, ...(requestDigest !== undefined && { requestDigest }), ...(requires && { requires: 'rl2.upload-blocks' }) }), deadline, app);
+    let result = await make(blocks || !uploads ? fields : withoutUploads(fields), blocks);
+    const refusal = result.ok ? null : (result.error.issues as { refusal?: unknown } | undefined)?.refusal;
+    // m8-3 review round 2: only when the channel it went on lists no `rl2.upload-blocks`; any other not-offered is the send's error
+    if (blocks && refusal === 'not-offered' && link.peerCapabilities() !== null && !peerLists(link, 'rl2.upload-blocks') && now() < deadline) {
+      deps.log(`lane B: session.send on ${link.name}/${app}: the channel it went on lists no rl2.upload-blocks; sent again with the uploads as their mentions alone`);
+      result = await make(withoutUploads(fields), false);
+    } else if (blocks && refusal === 'malformed') return failure('invalid_input', REMOTE_UPLOAD_REFUSED_WORDS, { refusal: 'malformed', uploads: 'refused' });
+    const opId = result.ok && OPERATIONS.has(name) ? record(result.value)?.opId : undefined;
+    if (typeof opId === 'string') lane.session.awaitOperation(opId, name as OperationCommand, since);
+    return result;
   }
+
+  /**
+   * P5 O7 M8: `fs.tasks` naming its session; `fs.unfollow` for a named agent, the session-wide one (m8-3's task review)
+   * as one per agent this device follows there, since the machine stops every client's follows for it; each a call.
+   */
+  async function targeted(link: RemoteLink, name: CommandName, fields: Fields, ctx: MainContext): Promise<CommandResult<CommandName>> {
+    const app = String(fields.appSessionId);
+    const of = () => {
+      const bySession = follows.get(link) ?? new Map<string, Follows>();
+      follows.set(link, bySession);
+      const held = bySession.get(app) ?? { followed: new Set<string>(), reading: new Map<Promise<unknown>, string>() };
+      bySession.set(app, held);
+      return held;
+    };
+    if (name === 'fs.agentEvents') {
+      const reading = dispatchOverLink(link, name, fields, ctx.session);
+      const agentId = typeof fields.agentId === 'string' ? fields.agentId : null;
+      if (agentId !== null) of().reading.set(reading, agentId);
+      const result = await reading;
+      of().reading.delete(reading);
+      if (result.ok && agentId !== null) of().followed.add(agentId);
+      return result;
+    }
+    if (name === 'fs.unfollow') {
+      let agents: string[];
+      if (typeof fields.agentId === 'string') agents = [fields.agentId];
+      else {
+        // m8-3 review round 2: a read still out may hold its follow already (the machine takes the hold before it
+        // answers), so the reads made before this one are waited for and their agents let go of too, answered or not
+        const out = [...of().reading];
+        await Promise.allSettled(out.map(([reading]) => reading));
+        // each is possibly followed from here, kept until its own unfollow succeeds (m8-3 review round 3)
+        for (const [, agentId] of out) of().followed.add(agentId);
+        agents = [...of().followed];
+      }
+      for (const agentId of agents) {
+        const result = await dispatchOverLink(link, name, { appSessionId: app, agentId });
+        if (!result.ok) return result;
+        of().followed.delete(agentId);
+      }
+      return { ok: true, value: undefined } as CommandResult<CommandName>;
+    }
+    const listId = String(fields.listId);
+    const session = typeof fields.appSessionId === 'string' ? fields.appSessionId : (ctx.session ?? [...lanesOf(link).values()].find((lane) => lane.session.taskList() === listId)?.session.state.app);
+    if (session === undefined) return failure('internal', `fs.tasks: no open session on ${link.name} has the task list ${listId}`, { refusal: 'no-target' });
+    return dispatchOverLink(link, name, { ...fields, appSessionId: session });
+  }
+
 
   /** The session's sends, one at a time: the next act is made only at the one before's answer. */
   async function pump(link: RemoteLink, lane: Lane): Promise<void> {
@@ -589,6 +685,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       });
     }
     if (connectors.handles(name)) return connectors.dispatch(link, name, fields, ctx.client); // P5 O7 M5c
+    if (TARGETED_CALLS.has(name)) return targeted(link, name, fields, ctx); // P5 O7 M8
     if (MACHINE_ACTS.has(name)) return machineAct(link, name, fields, deadline);
     const lane = lanesOf(link).get(String(fields.appSessionId));
     if (lane === undefined || !lane.open) return failure('internal', `${name}: ${NOT_OPEN}`, { refusal: 'not-open' });
@@ -597,7 +694,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   }
 
   return {
-    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
+    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || TARGETED_CALLS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
     async dispatch(link, name, input, ctx) {
       try {
         return await run(link, name, record(input) ?? {}, ctx);
@@ -642,6 +739,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       port.stop();
       for (const { lanes } of machines.values()) for (const lane of lanes.values()) lane.session.stop();
       machines.clear();
+      follows.clear();
     },
   };
 }

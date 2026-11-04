@@ -24,13 +24,14 @@ import { machineName, selectOrgIndex } from '../stores/org-projects'; // P5 O6 M
 import { ProjectFilter } from './ProjectFilter';
 import type { SidebarSort } from '../overview/derive';
 import { selectGreyedNeedsYou, selectNeedsYou, useAttention } from '../stores/attention';
+import { useSpawnedHere } from '../sessions/spawned-here'; // P5 O7 M8
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { openArtifacts } from '../main/artifacts'; // P3-G
 import { selectHiddenProjects, selectProjectOrder, useSessions } from '../stores/sessions';
 import { usePeople } from '../stores/people'; // P5 O8 M5
 import { openDialog } from '../sessions/dialogs';
-import { filterProjectList, isListedRow, listedMatcher, nestItems, projectItems, projectList, projectSessions, PROJECTS_FIRST, SESSIONS_CAP, sessionMatcher, shownCount, sidebarSessionId, type ProjectEntry, type ProjectKey, type SidebarSession, type SidebarTreeRow } from './derive';
+import { filterProjectList, isListedRow, listedMatcher, nestItems, projectItems, projectList, projectSessions, PROJECTS_FIRST, sessionMatcher, shownTrees, sidebarSessionId, type ProjectEntry, type ProjectKey, type SidebarSession, type SidebarTreeRow } from './derive';
 import type { AppSessionId } from '@shared/graph/ids';
 import { menuTargetOf, SidebarMenuContent, type MenuTarget } from './menus';
 import { ProjectRow, ShowMoreRow } from './ProjectRow';
@@ -77,6 +78,7 @@ function SidebarBody() {
   const digests = useSessions((s) => s.digests);
   const listedSessions = useSessions((s) => s.listed); // P5 O8 M2
   const people = usePeople((s) => s.on); // P5 O8 M5: the rows drawing other people's sessions
+  const spawned = useSpawnedHere((s) => s.leading); // P5 O7 M8: the sessions spawned here that lead their group
   const [projectFilter, setProjectFilter] = useState<ReadonlySet<ProjectKey> | null>(null);
   const allKnownProjects = useSessions(selectProjectOrder);
   const hiddenProjects = useSessions(selectHiddenProjects);
@@ -144,9 +146,9 @@ function SidebarBody() {
   const search = useRef<HTMLDivElement>(null);
 
   const rankedEntries = useMemo((): RankedEntry[] => projectList({ records, digests, projects, rows, local, machineName: (m) => machineName(machines, m, local), alsoListed: projectFilter ?? undefined, listed: listedSessions, people }).map((entry) => {
-    const sorted = projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches: () => true });
-    return { ...entry, sessions: sorted, items: projectItems({ sorted, listed: entry.listed, digests, rows, sort: sidebar.sort }) };
-  }), [records, digests, projects, rows, local, machines, projectFilter, sidebar.sort, listedSessions, people]);
+    const sorted = projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches: () => true, spawned });
+    return { ...entry, sessions: sorted, items: projectItems({ sorted, listed: entry.listed, digests, rows, sort: sidebar.sort, spawned }) };
+  }), [records, digests, projects, rows, local, machines, projectFilter, sidebar.sort, listedSessions, people, spawned]);
   // Hold ranks, not data: titles, glyphs and counts remain live. Pointer presence, keyboard focus (including
   // portalled cards/menus), or an open context menu keeps the same targets in place until the person leaves.
   // A deliberate sort change is immediate; no timer can reshuffle a row between two actions.
@@ -187,10 +189,11 @@ function SidebarBody() {
         const open = searching || expanded.has(entry.key);
         if (!open) return { entry, open, sessions: [], more: 0 };
         const all = nestItems(entry.items.filter(itemMatches)); // E3: the caps count trees; rank was settled above
-        const count = searching ? all.length : shownCount(all.length, more.has(entry.key));
-        return { entry, open, sessions: all.slice(0, count).flatMap((tree) => tree.rows), more: searching ? 0 : Math.min(all.length, SESSIONS_CAP) - count };
+        if (searching) return { entry, open, sessions: all.flatMap((tree) => tree.rows), more: 0 };
+        const drawn = shownTrees(all, more.has(entry.key), spawned); // P5 O7 M8: a spawned lead is never cut
+        return { entry, open, sessions: drawn.shown.flatMap((tree) => tree.rows), more: drawn.more };
       }),
-    [listed, searching, expanded, itemMatches, more],
+    [listed, searching, expanded, itemMatches, more, spawned],
   );
   // The list's "Show more" sits after the last project row, before the machines' rows.
   const moreAt = folded > 0 ? shown.filter((p) => p.entry.machine === null).length : -1;
@@ -274,8 +277,8 @@ function SidebarBody() {
     const group = shown.find((p) => p.entry.key === key);
     if (!group) return;
     setMore(new Set(more).add(key));
-    const shownTrees = group.sessions.filter((row) => row.nestedUnder === null).length; // E3: the next tree's root
-    const next = nestItems(group.entry.items.filter(itemMatches))[shownTrees]?.root;
+    const drawn = new Set(group.sessions.filter((row) => row.nestedUnder === null).map((row) => (isListedRow(row) ? row.listed.appId : row.record.appId))); // E3: the trees' roots
+    const next = nestItems(group.entry.items.filter(itemMatches)).find((tree) => !drawn.has(sidebarSessionId(tree.root)))?.root; // P5 O7 M8: a lead past the cap is drawn already
     if (next) focusItem(sessionNodeId(sidebarSessionId(next)));
   };
 

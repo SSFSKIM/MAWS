@@ -9,7 +9,8 @@ export const commands = [
 ] as const;
 
 // P5 O3-E (Interfaces §D): `library.read`'s reach to a path main resolved, main's alone to send
-export const mainOnlyCommands = ['files.readResolved'] as const;
+// P5 O7 M8: the machine's endpoint's read of a send's uploads, which no page sends
+export const mainOnlyCommands = ['files.readResolved', 'files.readUploads'] as const;
 
 export const events = [
   'files.changed',

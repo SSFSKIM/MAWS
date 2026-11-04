@@ -6,6 +6,7 @@ import { dividerCopy } from './copy';
 import { rowsOf, withAllExpanded } from './derive';
 import { rowId, turnId } from './keys';
 import { applyEvents, createState } from './reduce';
+import { unseenTurnEndEvent } from './gap'; // P5 O7 M8
 import type { Row } from './rows';
 import { serializeRows } from './serialize';
 import { api, builder, request, task, tool, uuid, USAGE, type Builder } from './test-events';
@@ -586,6 +587,40 @@ describe('turn boundaries', () => {
     expect(kinds(list)).toEqual(['time', 'user', 'divider', 'cell']);
     expect(find(list, 'divider').state).toBe('stopped');
     expect(find(list, 'cell').status).toBe('stopped');
+  });
+});
+
+// P5 O7 M8 (m8-4a's task review): a turn whose end a remote gap lost is closed by the source's unseen-end event, which
+// says nothing of the process: its plugins' lines and any agent still working stay live, and with no turn open it does
+// nothing.
+describe('an unseen turn end', () => {
+  const unseen = (id: string) => unseenTurnEndEvent('app', id, '2026-09-28T10:05:00.000Z', 'sess' as never);
+  it('closes the open turn, and leaves the plugins’ lines and the agents rows as they were', () => {
+    const b = builder();
+    b.turn('u0');
+    b.toolUse('bg1', 'Agent', { description: 'background', prompt: 'go', run_in_background: true }, 'm0');
+    b.end(['u0']);
+    b.turn('u1');
+    b.toolUse('fg1', 'Agent', { description: 'foreground', prompt: 'go' }, 'm1');
+    b.emit('plugin.status', { plugin: 'alpha', text: 'one' });
+    const open = reduce(b.events);
+    expect(open.current).not.toBeNull();
+    const closed = applyEvents(open, [unseen('1')]);
+    expect(closed.current).toBeNull();
+    expect(closed.turns.get(turnId.ofMessage(uuid('u1')))).toMatchObject({ state: 'closed', closedBy: 'completed' });
+    expect([...closed.pluginStatus.keys()]).toEqual(['alpha']);
+    expect([...closed.turns.values()].map((turn) => turn.agentsEndedAt)).toEqual([undefined, undefined]);
+    expect(rowsOf(closed).some((row) => row.kind === 'error' || row.kind === 'gap'), 'it draws nothing').toBe(false);
+  });
+
+  it('does nothing with no turn open', () => {
+    const b = builder();
+    b.turn('u0');
+    b.end(['u0']);
+    const done = reduce(b.events);
+    const after = applyEvents(done, [unseen('2')]);
+    expect(rowsOf(after)).toEqual(rowsOf(done));
+    expect([...after.turns.values()].map((turn) => [turn.state, turn.closedBy, turn.ended?.id ?? null])).toEqual([...done.turns.values()].map((turn) => [turn.state, turn.closedBy, turn.ended?.id ?? null]));
   });
 });
 

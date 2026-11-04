@@ -28,6 +28,11 @@
 //
 // What reaches the engine host or the machine's services carries the asking channel's `ClientRef` (P5 O7 M2).
 //
+// P5 O7 M8: a `session.send`'s `uploads` are read into its content after the context check and before the ledger
+// (send-uploads.ts), so what the engine host claims and queues is the send with its documents. The claim's fingerprint is
+// the sealed action's, which names the uploads: a resealed copy reads them again and the ledger answers it as the first
+// (an upload swept between the two, a day after its root's last upload, would refuse the copy `malformed` instead).
+//
 // P5 O7 M4: a `machine` act goes to `machine.op` with the sealed action beside its claim (`action`), which the services'
 // ledger keeps and hands to the handler as the requester's proof (`session.spawn`'s `launchedBy`, RL9's `ownersProof`).
 // `files.upload` goes without it: its args are the file's bytes, which the ledger would keep for a day, and the claim's
@@ -73,6 +78,7 @@ import type { Leases } from './leases';
 import { DECISION_MOVED, LaneA } from './lane-a';
 import { OFFERS, type Offers } from './offers';
 import type { Rl10, RpcResult } from './rl10/link';
+import { readSendUploads } from './send-uploads';
 import { dispatchAs, type EndpointServices } from './services';
 import type { SessionSafe } from './session-safe';
 
@@ -351,6 +357,13 @@ export class Actions {
     // The engine session authorization placed (the index's) must be the one running, else the index lags a change of it.
     if (now.engineSessionId !== decision.target?.session) return refuse('unavailable');
     if (now.launchId !== context.launchId || now.engineSessionId !== context.engineSessionId) return refuse('context');
+    // P5 O7 M8: a send's uploads read into its content here, so the engine host queues the blocks themselves
+    // (send-uploads.ts); one the files service refuses is the act's `malformed`, and nothing is queued
+    const read = action.action === 'session.send' ? await readSendUploads(action.args, appSessionId, dispatch) : { ok: true as const, args: action.args };
+    if (!read.ok) {
+      this.ctx.log(`endpoint: a send on channel ${channel.key} was refused ${read.reason}: ${read.why}`);
+      return refuse(read.reason);
+    }
     if (channel.closed) return;
     // The status read was awaited: the decision is asked whether it stands in the step the act goes to the ledger, and
     // taken again, once, when it moved meanwhile (authorize's own rule), `unavailable` when it moved again.
@@ -365,7 +378,7 @@ export class Actions {
         device: who.device,
         fingerprint,
         name: action.action,
-        input: action.args,
+        input: read.args,
         context: { launchId: context.launchId, engineSessionId: context.engineSessionId },
         ...(action.requestDigest === undefined ? {} : { requestDigest: action.requestDigest }),
       });

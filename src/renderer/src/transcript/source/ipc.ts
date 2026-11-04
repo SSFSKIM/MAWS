@@ -15,7 +15,7 @@ import { turnId as turnIdOf } from '../model/keys';
 import type { TranscriptState } from '../model/reduce';
 import type { Spill, TurnId } from '../model/rows';
 import type { RewindInterface } from '../view/context';
-import { HISTORY_OMITTED, HISTORY_TOO_LARGE, historyGapEvent } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED
+import { HISTORY_OMITTED, HISTORY_TOO_LARGE, historyGapEvent, unseenTurnEndEvent } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED; M8: unseenTurnEndEvent
 import { remoteMachineName } from '../../lane-a/remote-session'; // P5 O7 M2: a machine's name for the bar's words
 import { HistoryPager, withHistoryGap, withOmittedBar, withoutOlderThanWindow } from './older';
 import type { TranscriptSource } from './types';
@@ -257,6 +257,8 @@ function remoteAdoptionsEnded(client: MawsBridge, machine: MachineRef, stale: ()
 // writes it; the live stream is not its history any more. When the record turns foreign-live (a terminal or job holds
 // it) after this attachment saw the live form, the source resets, and the hydration reads the transcript from disk,
 // which C3 then answers (src/engine-host/ipc.ts), followed read-only from there.
+const isTurnEvent = (event: SessionEvent) => event.kind === 'turn.started' || event.kind === 'turn.ended'; // P5 O7 M8
+
 function sessionSource(client: MawsBridge, appSessionId: AppSessionId): TranscriptSource {
   const liveForm = (event: SessionEvent) => event.seq !== null;
   // P5 O6 M2: an event id is its machine's, under the bare app id (main's synthesised ones and C3's live ones alike)
@@ -270,6 +272,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
     pass(batch: SessionEvent[]): void;
     foreign: boolean; // W7: the record's latest custody seen, a foreign holder's (remembered while the snapshot is pending)
     running: SessionEvent | null; // E10: the latest live-form event since the last exit the subscription delivered
+    gapped: boolean; // P5 O7 M8: a gap was told and no live turn event arrived since (`remote.gap`'s healing, below)
   }
   let latest: Subscription | null = null;
   const track = (subscription: Subscription, events: SessionEvent[]) => {
@@ -348,13 +351,14 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         live: false,
         foreign: false, // W7
         running: null, // E10
+        gapped: false, // P5 O7 M8
         held: [],
         batch: null,
         ended: new AbortController(),
         pass(batch) {
           const events = batch.filter((event) => {
             if (liveForm(event)) subscription.live = true;
-            return ofParent(event) && !(subscription.live && diskForm(event));
+            return shown(event);
           });
           track(subscription, events);
           if (events.length === 0) return;
@@ -362,9 +366,13 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
           listener(events);
         },
       };
+      // what the key shows: the parent's own events and the child traffic under its tool uses, the live form once seen
+      const shown = (event: SessionEvent) => ofParent(event) && !(subscription.live && diskForm(event));
       latest = subscription;
       const off = client.on('session.eventBatch', (batch) => {
         if (batch.appSessionId !== appSessionId) return;
+        // P5 O7 M8, by arrival: only a turn of the parent's own, as the key shows it (a child's slice is not)
+        if ((subscription.gapped || heldHeal !== null) && batch.events.some((event) => isTurnEvent(event) && shown(event))) liveTurnArrived();
         subscription.batch?.();
         if (subscription.held) subscription.held.push(batch.events);
         else subscription.pass(batch.events);
@@ -389,6 +397,42 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         if (subscription.held) subscription.held.push([exit]);
         else subscription.pass([exit]);
       });
+      // P5 O7 M8 (M8, "What draws Working…"; m8-4a's task review): what a gap lost may be a turn's end, which would leave
+      // the turn open, drawn Working…, for good. Main re-reads the session after a gap and flushes the batches it holds
+      // before it says the re-read status, so arrival order is the machine's: the first status since the gap that says
+      // no turn runs, with no live turn event arrived in between, closes the turns left open (an unseen turn end,
+      // model/gap.ts: the turns alone, never the process). A turn event arriving after the gap means the stream speaks
+      // for its turns again: the healing stands down, and a heal still held behind a hydration is withdrawn (a new turn's
+      // start closes the one before it by its own rule). History a snapshot replays is not an arrival. The status is
+      // listened to only while a gap waits to heal.
+      let offHeal: (() => void) | null = null;
+      let heldHeal: SessionEvent[] | null = null; // the heal's batch while it waits in `held`
+      const stopHealing = () => {
+        subscription.gapped = false;
+        offHeal?.();
+        offHeal = null;
+      };
+      const liveTurnArrived = () => {
+        if (heldHeal !== null && subscription.held) subscription.held = subscription.held.filter((batch) => batch !== heldHeal);
+        heldHeal = null;
+        stopHealing();
+      };
+      const closeUnseen = () => {
+        const sessionId = subscription.running?.sessionId ?? (bareOf(appSessionId) as string as SessionId);
+        const unseen = [unseenTurnEndEvent(bareOf(appSessionId), `${Date.now()}:${++gaps}`, new Date().toISOString(), sessionId)];
+        if (subscription.held) {
+          heldHeal = unseen;
+          subscription.held.push(unseen);
+        } else subscription.pass(unseen);
+      };
+      const awaitHealing = () => {
+        subscription.gapped = true;
+        offHeal ??= client.on('session.status', ({ appSessionId: said, status }) => {
+          if (said !== appSessionId || status.turn !== null) return; // still running, as the machine says
+          closeUnseen();
+          stopHealing();
+        });
+      };
       // P5 O7 M2: a remote lane B stream that went on past events it could not deliver says so in order with its batches;
       // the gap bar goes in here, where they would have been (model/gap.ts)
       const offGap = client.on('remote.gap', ({ appSessionId: gapped, launchId, at }) => {
@@ -399,6 +443,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
           gapPlaces.set(gap, { launchId, at: at ?? null }); // placed by the snapshot when the history it reads holds its place
           subscription.held.push([gap]);
         } else subscription.pass([gap]);
+        awaitHealing(); // P5 O7 M8
       });
       const offTooLarge = client.on('remote.historyTooLarge', ({ appSessionId: said, window }) => {
         if (said === appSessionId) tooLarge.add(window);
@@ -409,6 +454,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         offReleased();
         offLoss();
         offGap();
+        stopHealing();
         offTooLarge();
         subscription.held = null;
         subscription.pass = () => {};

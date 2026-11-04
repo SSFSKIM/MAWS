@@ -26,7 +26,7 @@ const plugin = (name: string) => ({ name, path: `/cfg/plugins/cache/m/${name}/1.
 const NOW_FACTS: LoadedPlugins = { plugins: [plugin('a'), plugin('b')], errors: [], warnings: [], freshness: { kind: 'now' } };
 const LAST: LoadedPlugins = { plugins: [plugin('a'), plugin('b'), plugin('c')], errors: [{ plugin: 'd', type: 'load', message: 'bad manifest', path: null }], warnings: [], freshness: { kind: 'last', at: new Date(NOW - 2 * 86_400_000).toISOString() } };
 const UNKNOWN: LoadedPlugins = { plugins: [], errors: [], warnings: [], freshness: { kind: 'unknown' } };
-const RELOADS: Reloads = { reloadMods: () => {}, reloadSkills: () => {}, line: null, failed: false, busy: false };
+const RELOADS: Reloads = { reloadMods: () => {}, reloadSkills: () => {}, line: null, failed: false, busy: false, modsUnavailable: null, skillsUnavailable: null };
 const READY: AcquireOutcome = { status: 'ready', appSessionId: BARE, launched: true, joined: false };
 
 // what main answers `session.acquire` in a case

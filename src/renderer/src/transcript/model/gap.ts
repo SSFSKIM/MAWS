@@ -37,3 +37,17 @@ export function historyGapEvent(bareApp: string, tag: string, at: string, sessio
     kind: 'notice.posted', level: 'notice', key: HISTORY_GAP_KEY, text,
   };
 }
+
+// P5 O7 M8 (M8, "What draws Working…"; m8-4a's task review): a remote turn whose end a gap may have lost, closed by the
+// source once main's re-read status says no turn runs (source/ipc.ts). An event of the app's own as the gap's is, which
+// the reducer reads as "the open turns ended unseen": it closes the turns still open and touches nothing else (the
+// process lives on: its plugins' lines and its agents are its own), is never retained, so no row draws it, and rides the
+// history the source keeps, so a rebuild closes the turn again.
+export const UNSEEN_TURN_END_KEY = 'maws:unseen-turn-end';
+export const isUnseenTurnEnd = (event: SessionEvent): boolean => event.kind === 'notice.posted' && event.key === UNSEEN_TURN_END_KEY;
+export function unseenTurnEndEvent(bareApp: string, tag: string, at: string, sessionId: SessionId): SessionEvent {
+  return {
+    id: `${bareApp}:unseen-turn-end:${tag}` as EventId, sessionId, at, seq: null, agentId: null, parentToolUseId: null,
+    kind: 'notice.posted', level: 'notice', key: UNSEEN_TURN_END_KEY, text: '',
+  };
+}

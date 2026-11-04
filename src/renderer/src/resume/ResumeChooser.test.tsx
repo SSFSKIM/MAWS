@@ -3,14 +3,19 @@
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import { addressOf } from '@shared/machine/address';
+import type { OrgKey } from '@shared/machine/org-key';
 import type { SessionRecord } from '@shared/graph/session';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { project, record } from '../../../../test/support/builders';
-import { at } from '../../../../test/support/machine';
+import { project, record, remoteRow } from '../../../../test/support/builders';
+import { at, OTHER_MACHINE } from '../../../../test/support/machine';
+import { registerRemoteOpener } from '../sessions/remote-openers';
+import { useMachines } from '../stores/machines';
+import { orgKeyOf } from '../stores/org-projects';
 import { formatDateTime } from '@shared/app/date-format';
-import { useSessions } from '../stores/sessions';
+import { useSessions, type ListedSession } from '../stores/sessions';
 import { RESUME_COPY } from './copy';
 import { clearPreviewCache, SETTLE_MS } from './preview';
 import { ResumeChooser } from './ResumeChooser';
@@ -46,7 +51,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
-  useSessions.setState({ records: new Map(), digests: new Map(), projects: new Map() });
+  useSessions.setState({ records: new Map(), digests: new Map(), projects: new Map(), listed: new Map() });
+  useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
   delete (window as { maws?: PreloadBridge }).maws;
 });
 
@@ -157,6 +163,41 @@ describe('the resume chooser', () => {
   });
 
   // P2-F W-V (L131): Claude Desktop's picker (cc43287c9-ua-2O55p.js:34271-34273, 34393-34399, 34519-34525, 34487-34495)
+  // P5 O7 M8 (*The sidebar row*): a remote-spawned session whose tab closed stays reachable here, under its machine
+  it('lists another machine’s listed session under its machine, and opens it through its lane’s opener, ⌘Enter in a new tab', async () => {
+    const user = userEvent.setup();
+    fill(base);
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: minute(0), generation: 1, carrier: 'relay' }]);
+    const spawned: ListedSession = { ...remoteRow(OTHER_MACHINE, 'spawned', { title: 'Testing session', orgKey: orgKeyOf(P) as OrgKey, issued: minute(7) }), appId: addressOf(OTHER_MACHINE, 'spawned' as AppSessionId) };
+    useSessions.setState({ listed: new Map([[spawned.appId, spawned]]) });
+    const open = vi.fn();
+    const off = registerRemoteOpener('B', open);
+    const close = vi.fn();
+    render(<ResumeChooser context={{ projectId: P.id as ProjectId, row: orgKeyOf(P), exclude: null }} close={close} />);
+    expect(titles()).toEqual(['alpha', 'Testing session', 'beta', 'gamma']);
+    const option = screen.getAllByRole('option')[1]!;
+    expect(option.textContent).toContain('@mini');
+    await user.click(option);
+    expect(screen.getByTestId('resume-preview').textContent).toContain('mini');
+    await user.keyboard('{Enter}');
+    expect(open).toHaveBeenLastCalledWith(spawned, { newTab: false });
+    expect(close).toHaveBeenLastCalledWith('opened');
+    await user.keyboard('{Meta>}{Enter}{/Meta}');
+    expect(open).toHaveBeenLastCalledWith(spawned, { newTab: true });
+    off();
+  });
+
+  // m8-5's discovery (review 2): a window that still holds a remote session's record draws it as a record row, marked as
+  // its listed row is; a local record keeps no mark
+  it('marks another machine’s record row with its machine, as its listed row is, and a local record with none', () => {
+    fill([...base, record(addressOf(OTHER_MACHINE, 'remote-rec' as AppSessionId), { title: { text: 'remote record', source: 'user' }, projectId: P.id, updatedAt: minute(7) })]);
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: minute(0), generation: 1, carrier: 'relay' }]);
+    mount();
+    const row = (title: string) => screen.getAllByRole('option').find((o) => o.querySelector('[data-title]')!.textContent === title)!;
+    expect(row('remote record').querySelector('[data-machine-chip]')?.textContent).toBe('@mini');
+    expect(row('alpha').querySelector('[data-machine-chip]')).toBeNull();
+  });
+
   it('draws the 100 newest, loads 100 more when the list scrolls near its end or ArrowDown passes the last row, and a new search starts over', async () => {
     const user = userEvent.setup();
     const t0 = Date.UTC(2026, 9, 1, 12);

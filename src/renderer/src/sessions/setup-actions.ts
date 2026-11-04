@@ -20,6 +20,7 @@ import { heldToast } from './attach';
 import { cleanupTargetAt, confirm, removeWorktreeAction } from './dialogs';
 import { holderWords } from './holder-words';
 import { returnMessage } from './message-return';
+import { markSpawnedHere } from './spawned-here'; // P5 O7 M8
 import { isStarting, startNoticeId, useSetup, type HeldMessage } from './store'; // P2-A: startNoticeId; P2-F: HeldMessage
 import { machineOf } from '@shared/machine/address';
 
@@ -66,6 +67,9 @@ async function start(appSessionId: AppSessionId, message: FirstMessage | null, o
   store.setInvoking(appSessionId, true);
   try {
     const result = await ipc.invoke('session.start', { appSessionId, message, options });
+    // P5 O7 M8: a New chat this window started (its first Send, or a card's continuation) leads its sidebar group until
+    // its first turn ends
+    if (result.ok && result.value.status === 'starting') markSpawnedHere(appSessionId);
     return result.ok ? result.value : { error: result.error.message };
   } finally {
     useSetup.getState().setInvoking(appSessionId, false);

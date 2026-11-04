@@ -8,7 +8,7 @@
 //   `openExternal {path}` answers `{opened: false, reason: 'a path on <machine>'}`; `reveal` has no failure form and
 //   answers `noClient`, as does any other kind. Every answer is given at once: nothing is held for the machine.
 // - The callback listener. A consent's redirect lands on the browser's loopback, this Mac's, where nothing of the
-//   machine's listens. For `connectors.connect`, `reconnect` and `signIn` on an RL2 machine a loopback listener is bound on
+//   machine's listens. For `connectors.connect`, `reconnect`, `signIn` and (P5 O7 M8) `signInServer` on an RL2 machine a loopback listener is bound on
 //   127.0.0.1:0 before the act goes and the act carries its port (`callback: {port}`); each request it receives is relayed
 //   as the machine's `connectors.callback {port, method, url}` (`url` the path and query as received) and the machine's
 //   `{status, headers?, body}` is written to the browser. A request the machine routes to no flow (a favicon, an old tab)
@@ -41,7 +41,9 @@ import { budgetedMs } from '../machines/budgets';
 import type { ActHandle, ActOutcome, ClientRequest, RemoteLink } from '../machines/remote/link';
 
 /** The acts whose consent's redirect lands here: each gets a listener, its port in the act's `callback`. */
-export const CONSENT_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>(['connectors.connect', 'connectors.reconnect', 'connectors.signIn']);
+export const CONSENT_COMMANDS: ReadonlySet<CommandName> = new Set<CommandName>(['connectors.connect', 'connectors.reconnect', 'connectors.signIn', 'connectors.signInServer' /* P5 O7 M8 */]);
+/** The sign-ins among them, by the entry's file or (P5 O7 M8) by the server's name: a receipt, a sign-in's time and its end by `opId`. */
+const SIGN_INS: ReadonlySet<CommandName> = new Set<CommandName>(['connectors.signIn', 'connectors.signInServer']);
 /** Listeners at once per machine: the machine's own bound on owner actions running at once (OWNER_ACTION_LIMIT). */
 export const LISTENERS_PER_MACHINE = 16;
 /** Relays in flight per listener: a consent's redirect, and what the browser asks beside it. */
@@ -233,14 +235,14 @@ export function createRemotePort(deps: RemotePortDeps): RemotePort {
     listener.accepted = true;
     listener.channel = listener.link.peerCapabilities();
     if (listener.channel === null) return end(listener, 'the channel that took the act ended');
-    after(listener, listener.name === 'connectors.signIn' ? deps.timing.consentSignInMs : deps.timing.consentConnectMs, 'its time passed');
+    after(listener, SIGN_INS.has(listener.name) ? deps.timing.consentSignInMs : deps.timing.consentConnectMs, 'its time passed');
   }
 
   function settled(listener: Listener, outcome: ActOutcome): void {
     if (listener.ended) return;
     if (outcome.state !== 'done') return end(listener, `the act ended ${outcome.state}${'reason' in outcome ? ` ${outcome.reason}` : ''}`);
     const result = outcome.result;
-    if (listener.name === 'connectors.signIn') {
+    if (SIGN_INS.has(listener.name)) {
       const opId = isObject(result) && typeof result.opId === 'string' ? result.opId : null;
       if (opId === null) return end(listener, 'the sign-in gave no receipt');
       listener.opId = opId;
@@ -395,7 +397,7 @@ export function createRemotePort(deps: RemotePortDeps): RemotePort {
       const ended = isObject(payload.ended) && typeof payload.ended.sourceHandle === 'string' ? payload.ended.sourceHandle : null;
       if (name === 'connectors.serversChanged' && typeof payload.artifactId === 'string' && ended !== null) {
         for (const listener of [...listeners]) {
-          if (listener.machine === machine && listener.name !== 'connectors.signIn' && listener.sent && listener.artifactId === payload.artifactId && listener.sourceHandle === ended) end(listener, 'the flow ended');
+          if (listener.machine === machine && !SIGN_INS.has(listener.name) && listener.sent && listener.artifactId === payload.artifactId && listener.sourceHandle === ended) end(listener, 'the flow ended');
         }
       }
     },

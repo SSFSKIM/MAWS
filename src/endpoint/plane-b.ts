@@ -17,6 +17,10 @@
 //
 // A `cards` subscription carries only the session's pending requests, hydrated, as `snap {pendingItems: [{item,
 // request, context, requestDigest}]}`; it never carries an event, the queue, the catalog or the status.
+//
+// P5 O7 M8: a `full` subscription also carries the session's operation completions and its panels' changes, each a
+// `snap` of its own under its key (`{operation}` by its opId, `{subagents}`, `{workflow}` by its run, `{tasks}`, `{side}`:
+// stream-catchup.ts), so a remote operation completes and a remote panel follows its session as a local one does.
 import { SessionStreams, type StreamHandle, type StreamSink } from '@shared/host/stream-catchup';
 import type { EndpointServices } from './services';
 import type { Plane, SessionSubscription } from './subscriptions';
@@ -40,6 +44,7 @@ export class PlaneB implements Plane<SessionSubscription> {
       log: (line) => ctx.log(`endpoint: ${line}`),
       backlogBytes: ctx.backlogBytes,
       available: false, // none is when the endpoint starts; `onAttachment` says each change
+      panels: true, // P5 O7 M8: the session's operations and panels' changes, as parts of their own
     });
   }
 

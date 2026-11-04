@@ -205,6 +205,14 @@ export function onSideOperation(event: OperationEvent, client: MawsBridge = ipc)
   patch(parent, { exchanges: exchanges.map((e) => (e === entry ? settled : e)) });
 }
 
+// P5 O7 M8 (§U, the panel parts): main's `remote.reopened`, a remote session's stream opened again after an end, over
+// which a side question's change may have gone unheard: its log is listed again. A session whose log this window never
+// listed is left to its first listing, as a completion leaves it.
+export function onSideReopened(parent: AppSessionId, client: MawsBridge = ipc): void {
+  if (sidePaneOf(useSidePane.getState(), parent).exchanges === null) return;
+  void refreshSide(parent, client);
+}
+
 // `text` within `cap` UTF-16 units: whole, or cut with `…` as its last unit (never between a surrogate pair's halves).
 function clip(text: string, cap: number): string {
   if (text.length <= cap) return text;

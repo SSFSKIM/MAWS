@@ -20,9 +20,11 @@ import type { GradeSpec } from '@shared/ipc/grades';
  * repositories: targets.ts), or `each-session` (P5 O7 M6: a machine-wide read whose answer is per session, admitted at the
  * row's own grade, `list`, and cut by `calls.ts` to the sessions the caller holds the registry's declared grade on), or
  * `artifact` (P5 O7 M5a: an artifact by its id, ranked the highest of its linked sessions' ranks, the machine's owners
- * holding `manage` on every one: targets.ts, artifacts.ts).
+ * holding `manage` on every one: targets.ts, artifacts.ts), or `task-list` (P5 O7 M8: a task list's read, `fs.tasks`: the
+ * input's `appSessionId` names the session, placed as an `appSessionId`, and its `listId` must be that session's own
+ * list: targets.ts).
  */
-export type TargetRule = 'appSessionId' | 'session' | 'machine' | 'checkout' | 'each-session' | 'artifact';
+export type TargetRule = 'appSessionId' | 'session' | 'machine' | 'checkout' | 'each-session' | 'artifact' | 'task-list';
 
 /** Who runs an authorized request (M7 routes acts by it, M8 calls): a lane, the endpoint itself, or one of mawsd's hosts. */
 export type OfferExecutor = 'engine-host' | 'sminos' | 'endpoint' | 'machine' | 'pty-host' | 'main';
@@ -41,7 +43,8 @@ export type OfferRow = {
   /**
    * The input a name outside the registry takes (P5 O7 M3: `forward.open`), held to it at authorization's step 2 as a
    * registry command's is to its schema (`malformed`). Absent for such a name: its executor reads its input (sminos's RPCs,
-   * the endpoint's signed actions).
+   * the endpoint's signed actions). P5 O7 M8: on a registry command's row, what of its schema's inputs a remote caller may
+   * send, held at step 2 after the schema (`fs.unfollow`: an agent named, never the session-wide form).
    */
   accepts?(input: unknown): boolean;
   /** P5 O7 M5b: the stream kind a `stream` row admits (its open's kind fields are the row's input). */
@@ -107,6 +110,8 @@ const isBrowserControlArgs = (input: unknown): boolean =>
 const isWindowShown = (input: unknown): boolean => isFields(input, ['shown']) && typeof input.shown === 'boolean';
 /** P5 O7 M5c: the owner's connector and grant management on the machine (`machine-admin`, a step-up each), under `machine.op`. */
 const machineAdmin: OfferRow = { kind: 'act', executor: 'machine', target: 'machine' };
+/** P5 O7 M8: `fs.unfollow` from another machine names the agent whose follow it lets go of. */
+const namesAnAgent = (input: unknown): boolean => typeof input === 'object' && input !== null && typeof (input as { agentId?: unknown }).agentId === 'string';
 /** `forward.open`'s args: exactly a port. */
 const isForwardArgs = (input: unknown): boolean =>
   typeof input === 'object' && input !== null && !Array.isArray(input) && Object.keys(input).length === 1 && Number.isInteger((input as { port?: unknown }).port) && (input as { port: number }).port >= 1 && (input as { port: number }).port <= 65535;
@@ -182,8 +187,11 @@ export const OFFERS: Offers = {
     'git.worktree.list': checkout,
     'git.worktree.status': checkout,
     'git.worktree.branch': checkout,
-    // A child agent's events, the engine host's read.
+    // A child agent's events, the engine host's read. P5 O7 M8: the follow it starts is held by the channel's client, and
+    // ends with the channel or that client's unfollow of the agent it names (the engine host lets go of its own hold
+    // alone); the session-wide unfollow (`agentId: null`) would stop every client's follow of the session and is refused.
     'fs.agentEvents': laneB('call'),
+    'fs.unfollow': { ...laneB('call'), accepts: namesAnAgent },
     // The checkout's writes, under the services' ledger (`machine.op`), placed by their session with no launch context,
     // so the editor saves to an idle session's checkout without resuming it.
     'files.write': laneBMachine('act'),
@@ -303,6 +311,8 @@ export const OFFERS: Offers = {
     'connectors.disconnect': machineAdmin,
     'connectors.signIn': machineAdmin,
     'connectors.signInCancel': machineAdmin,
+    // P5 O7 M8: Sign in from a session's MCP widget, the server named as the engine reports it (no entry file)
+    'connectors.signInServer': machineAdmin,
     'artifacts.grantConnectorTool': machineAdmin,
     'artifacts.revokeConnectorTool': machineAdmin,
     // A consent's redirect relayed from this device's loopback listener (`list`), run by the flow its own channel armed
@@ -325,6 +335,32 @@ export const OFFERS: Offers = {
     // The session's tabs as they change ride its `browser.inventory` feed (plane-feeds.ts), at `view`.
     'browser.screencast': { kind: 'stream', stream: 'browser.screencast', executor: 'endpoint', target: 'appSessionId', grade: { floor: 'view', byEffect: true }, accepts: isBrowserOpen },
     'machine.browserControl': { kind: 'act', executor: 'endpoint', target: 'appSessionId', grade: 'approve', accepts: isBrowserControlArgs },
+    // P5 O7 M8 (Interfaces §U): what a remote session's panels read and do as a local one's do. The MAWS ask (its list at
+    // `view`, its answer plain `converse`, as `session.answer`'s for a question), the side question's log and its new
+    // conversation, Reload plugins (`manage`), the agents panel's reads, and the outcomes the engine host keeps by opId,
+    // which a device asks for the operations its waiters hold at each reopen.
+    'maws.asks.list': laneB('call'),
+    'maws.ask.answer': laneB('act'),
+    'side.question.list': laneB('call'),
+    'side.question.clear': laneB('act'),
+    'session.reloadPlugins': laneB('act'),
+    'fs.subagents': laneB('call'),
+    'fs.workflows': laneB('call'),
+    'session.operations': laneB('call'),
+    // A task list names no session: the call names it too, and the list must be that session's own (the `task-list` rule).
+    'fs.tasks': { kind: 'call', executor: 'engine-host', target: 'task-list' },
+    // The offer audit's session-scoped `view` reads: the engine's dialogs and reads of the session (the family of
+    // `session.getSettings` and `getStatus`), its prompt history, and Session info's facts and the recent turns from the
+    // machine's services. Every other unoffered session-scoped command is declared remote-unavailable (m8-2b).
+    'session.getHooksListing': laneB('call'),
+    'session.getMemoryDialog': laneB('call'),
+    'session.getSkillsDialog': laneB('call'),
+    'session.getSandboxDialog': laneB('call'),
+    'session.exportConversation': laneB('call'),
+    'session.getBinaryVersion': laneB('call'),
+    'session.promptHistory': laneB('call'),
+    'session.observedFacts': laneBMachine('call'),
+    'session.recentTurns': laneBMachine('call'),
   },
   subscriptions: ['A', 'B'],
   // P5 O7 M5a: the machine's `artifacts` feed (artifacts-feed.ts). P5 O17 M9a: a session's `browser.inventory`.

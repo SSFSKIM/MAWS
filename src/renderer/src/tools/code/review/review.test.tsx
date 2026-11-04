@@ -10,7 +10,9 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import { record } from '../../../../../../test/support/builders';
 import { loadSyntheticJournal } from '../../../../../../test/support/fixtures';
-import { TEST_MACHINE } from '../../../../../../test/support/machine';
+import type { AppSessionId } from '@shared/graph/ids';
+import { addressOf } from '@shared/machine/address';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { createClient } from '../../../ipc/client';
 import { checkoutKey } from '../../../ipc/machine';
 import { connectPanelEvents } from '../../../ipc/events';
@@ -424,6 +426,26 @@ describe('review store', () => {
     off();
   });
 
+  // P5 O7 M8 ("Untracked files"): one path for this Mac's checkout and another machine's: the read goes to the target's
+  // machine, made from its session (the endpoint's `checkout` rule bounds it there)
+  it('reads an untracked file in the untracked scope, on another machine’s checkout for its session', async () => {
+    const asked: unknown[] = [];
+    const main = installFakeMain((name, input, machine) => {
+      if (name !== 'git.diff') return ok();
+      asked.push([input, machine]);
+      return ok(input.scope === 'untracked' ? { patch: ['diff --git a/scratch.txt b/scratch.txt', 'new file mode 100644', '--- /dev/null', '+++ b/scratch.txt', '@@ -0,0 +1 @@', '+hi', ''].join('\n'), files: [] } : { patch: APP_PATCH, files: APP_FILES });
+    });
+    const store = createReviewStore(createClient(() => main.bridge));
+    const target = { machine: OTHER_MACHINE, directory: '/work', scope: 'uncommitted', base: null, session: addressOf(OTHER_MACHINE, 'app-r' as AppSessionId) } as const;
+    const off = store.getState().hold(target);
+    await tick();
+    store.getState().loadFile(target, 'scratch.txt', true);
+    await tick();
+    expect(asked.at(-1)).toEqual([{ directory: '/work', scope: 'untracked', path: 'scratch.txt' }, { machine: OTHER_MACHINE, session: 'app-r' }]);
+    expect(fileDiffOf(store.getState(), target, 'scratch.txt')).toMatchObject({ status: 'ok', file: { path: 'scratch.txt', hunks: ['@@ -0,0 +1 @@\n+hi'] } });
+    off();
+  });
+
   it('says why This branch is unavailable when C10 answers no branch (null) or a detached main worktree (HEAD)', async () => {
     const main = installFakeMain((name, input) =>
       name === 'git.worktree.branch'
@@ -678,12 +700,20 @@ describe('review tool', () => {
     expect(currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/repo/big.ts', line: 4 }));
   });
 
+  // P5 O7 M8 ("Untracked files"): an untracked file is read as Source control reads it, `git.diff`'s `untracked` scope
+  // (the file against /dev/null), so it shows as added; one path serves this Mac's checkout and another machine's
   it('selects the first file when the selected one leaves the list', async () => {
+    main.state.perFile['scratch.txt'] = {
+      patch: ['diff --git a/scratch.txt b/scratch.txt', 'new file mode 100644', 'index 0000000..ce01362', '--- /dev/null', '+++ b/scratch.txt', '@@ -0,0 +1,2 @@', '+hello', '+there', ''].join('\n'),
+      files: [{ path: 'scratch.txt', oldPath: null, insertions: 2, deletions: 0, binary: false }],
+    };
     render(<TestHost />);
     openReview({ path: 'scratch.txt' });
     await waitFor(() => expect(selectedPath()).toBe('scratch.txt'));
-    expect(document.querySelector('[data-review-note]')?.textContent).toBe('Untracked file · not in the diff');
-    expect(screen.queryByText('Split')).toBeNull(); // no diff, no mode
+    await waitFor(() => expect(hunkLabel()).toBe('Showing hunk 1 of 1'));
+    expect(main.callsOf('git.diff')).toContainEqual({ directory: '/repo', scope: 'untracked', path: 'scratch.txt' });
+    expect(document.querySelector('[data-review-note]')).toBeNull();
+    await waitFor(() => expect(bodyText()).toContain('there'));
     expect(screen.getByText('Open file ↗')).toBeTruthy();
     const tracked = statusOf({ dirty: true, files: DIRTY.files.slice(0, 2) });
     act(() => main.emit('git.changed', { repoRoot: '/repo', status: tracked, reason: 'worktree' }));
@@ -804,6 +834,52 @@ describe('review tool', () => {
     await waitFor(() => expect(main.callsOf('git.diff').filter((input) => input.path === 'logo.png')).toHaveLength(3));
     await waitFor(() => expect(screen.getByText('Mark viewed')).toBeTruthy());
     expect(row('logo.png').dataset.viewed).toBeUndefined();
+  });
+
+  // P5 O7 M8 (e2e/code-tools.spec.ts's untracked rows): an untracked symlink reads as git shows one (services/git
+  // service.ts `untrackedDiff`: mode 120000, its one added line the target's path), so Review draws that line, never the
+  // target's content; an untracked file whose one hunk is past the file cap says it is too large, with Open the file
+  it('draws an untracked symlink as its target’s path, and an untracked file past the cap as too large', async () => {
+    main.state.perFile['scratch.txt'] = {
+      patch: ['diff --git a/scratch.txt b/scratch.txt', 'new file mode 120000', 'index 0000000..ce01362', '--- /dev/null', '+++ b/scratch.txt', '@@ -0,0 +1 @@', '+/outside/secret.txt', '\\ No newline at end of file', ''].join('\n'),
+      files: [{ path: 'scratch.txt', oldPath: null, insertions: 1, deletions: 0, binary: false }],
+    };
+    render(<TestHost />);
+    openReview({ path: 'scratch.txt' });
+    await waitFor(() => expect(hunkLabel()).toBe('Showing hunk 1 of 1'));
+    await waitFor(() => expect(bodyText()).toContain('/outside/secret.txt'));
+    expect(document.querySelector('[data-review-note]')).toBeNull();
+    const lines = Array.from({ length: REVIEW_FILE_LINES_CAP + 1 }, (_, i) => `+line ${i}`);
+    main.state.perFile['scratch.txt'] = {
+      patch: ['diff --git a/scratch.txt b/scratch.txt', 'new file mode 100644', 'index 0000000..ce01363', '--- /dev/null', '+++ b/scratch.txt', `@@ -0,0 +1,${lines.length} @@`, ...lines, ''].join('\n'),
+      files: [{ path: 'scratch.txt', oldPath: null, insertions: lines.length, deletions: 0, binary: false }],
+    };
+    act(() => main.emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
+    await waitFor(() => expect(document.querySelector('[data-review-too-large]')?.textContent).toBe('Diff too large to display. Open the file'));
+    expect(document.querySelector('[data-review-body]')).toBeNull();
+  });
+
+  // P5 O7 M8 review: an untracked binary is read in the untracked scope like any untracked file; its read answers a binary
+  // patch, so its mark signs that header (the new blob's `index` line), and a changed blob drops it
+  it('signs an untracked binary’s mark over the header its read answers, and drops it when the blob changes', async () => {
+    const binary = (index: string) => ({
+      patch: `diff --git a/scratch.txt b/scratch.txt\nnew file mode 100644\nindex 0000000..${index}\nBinary files /dev/null and b/scratch.txt differ\n`,
+      files: [{ path: 'scratch.txt', oldPath: null, insertions: 0, deletions: 0, binary: true }],
+    });
+    main.state.perFile['scratch.txt'] = binary('9fc36a0');
+    render(<TestHost />);
+    openReview({ path: 'scratch.txt' });
+    await waitFor(() => expect(screen.getByText('Mark viewed')).toBeTruthy());
+    fireEvent.click(screen.getByText('Mark viewed'));
+    expect(row('scratch.txt').dataset.viewed).toBe('true');
+    act(() => main.emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
+    await waitFor(() => expect(main.callsOf('git.diff').filter((input) => input.path === 'scratch.txt')).toHaveLength(2));
+    await waitFor(() => expect(row('scratch.txt').dataset.viewed).toBe('true')); // the same blob: the mark stands
+    main.state.perFile['scratch.txt'] = binary('76ca49d');
+    act(() => main.emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
+    await waitFor(() => expect(main.callsOf('git.diff').filter((input) => input.path === 'scratch.txt')).toHaveLength(3));
+    await waitFor(() => expect(screen.getByText('Mark viewed')).toBeTruthy());
+    expect(row('scratch.txt').dataset.viewed).toBeUndefined();
   });
 
   it('keeps viewed marks across unmounts and drops a mark when the file’s hunks change', async () => {

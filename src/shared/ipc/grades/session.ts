@@ -45,6 +45,7 @@ export const grades = {
   'session.mcpReconnect': 'converse',
   'session.mcpToggle': 'manage',
   'session.sideQuestion': 'converse',
+  'session.operations': 'view', // P5 O7 M8: an operation's outcome, the completion `session.operation` carries
   // structured reads
   'session.getUsage': 'view',
   'session.getContextUsage': 'view',

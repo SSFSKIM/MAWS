@@ -17,6 +17,7 @@ import { FIELD, PRIMARY, QUIET, SECONDARY } from '../sessions/ui';
 import { useSessions } from '../stores/sessions';
 import { Markdown } from '../transcript'; // lazy.tsx's: the side pane registers from the entry, and a static import would pull Markdown into it
 import { promoteSide } from './actions';
+import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { sideBlock, startForSide, useDrivenAsk } from './btw';
 import { STARTING_SESSION } from '../sessions/acquire'; // P2-A
 import { SIDE_COPY } from './copy';
@@ -36,8 +37,13 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
   const [promoting, setPromoting] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [starting, setStarting] = useState(false); // P2-A: this view's own start in flight
-  const blocked = ready ? null : driven?.available === false ? driven.reason : sideBlock(availability, holder);
+  // P5 O7 M8: an older machine with no side-question row greys Ask and Retry with its name (lane-b/remote-unavailable.ts)
+  const askUnavailable = useRemoteUnavailable(parent, 'session.sideQuestion');
+  const blocked = askUnavailable ?? (ready ? null : driven?.available === false ? driven.reason : sideBlock(availability, holder));
   const canAsk = blocked === null && !starting;
+  // P5 O7 M8: why Continue as a side thread and Clear are greyed for a session on another machine (lane-b/remote-unavailable.ts)
+  const promoteUnavailable = useRemoteUnavailable(parent, 'side.thread.open');
+  const clearUnavailable = useRemoteUnavailable(parent, 'side.question.clear');
   const log = useRef<HTMLDivElement>(null);
 
   useEffect(() => void refreshSide(parent), [parent, process]);
@@ -73,7 +79,7 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
     void ask();
   };
   const note = blocked ?? (starting || availability === 'starting' ? STARTING_SESSION : ready ? null : STARTS);
-  const canPromote = !promoting && promotable(exchanges ?? []).length > 0;
+  const canPromote = !promoting && promotable(exchanges ?? []).length > 0 && promoteUnavailable === null;
   const promote = async () => {
     if (!canPromote) return;
     setPromoting(true);
@@ -120,10 +126,10 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
           </button>
         </div>
         <div className="flex items-center justify-between gap-2">
-          <button type="button" className={`${QUIET} text-ui-sm`} disabled={shown.every((e) => e.state === 'pending')} onClick={() => void clearSide(parent)}>
+          <button type="button" className={`${QUIET} text-ui-sm`} disabled={shown.every((e) => e.state === 'pending') || clearUnavailable !== null} title={clearUnavailable ?? undefined} onClick={() => void clearSide(parent)}>
             {COPY.clear}
           </button>
-          <button type="button" className={`${SECONDARY} text-ui-sm`} disabled={!canPromote} onClick={() => void promote()}>
+          <button type="button" className={`${SECONDARY} text-ui-sm`} disabled={!canPromote} title={promoteUnavailable ?? undefined} onClick={() => void promote()}>
             {promoting ? COPY.promoting : COPY.promote}
           </button>
         </div>

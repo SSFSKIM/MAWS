@@ -19,6 +19,7 @@ import { serializeDraft } from '../composer/editor/serialize';
 import { rememberingRemoteDrafts, resetRemoteDrafts } from '../composer/editor/drafts';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
+import { resetSpawnedHere, useSpawnedHere } from './spawned-here';
 import { readCandidates, resetRemoteSpawn, spawnErrorWords, spawnOnMachine, SPAWN_WORDS, restoreHeldAttempts, spawnTargetOf, spawnUnconfirmed, takeFirstSend, useRemoteSpawn, type SpawnTarget } from './remote-spawn';
 
 const THIRD = 'ThirdMachineRef0000000' as MachineRef;
@@ -32,6 +33,7 @@ const target: SpawnTarget = { machine: OTHER_MACHINE, name: 'mini', checkout: '/
 beforeEach(() => {
   resetRemoteSpawn();
   resetRemoteDrafts();
+  resetSpawnedHere();
 });
 afterEach(() => useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() }));
 
@@ -102,6 +104,7 @@ describe('a spawn on another machine', () => {
     expect(tabOpen(LOCAL_TAB)).toBe(false);
     expect(fake.invoked('session.intent.discard')).toEqual([{ appSessionId: LOCAL_TAB }]);
     expect(takeFirstSend(NEW)).toBe(false); // the brief was the first message
+    expect(useSpawnedHere.getState().leading.has(NEW), 'P5 O7 M8: it leads its sidebar group until its first turn ends').toBe(true);
   });
 
   it('names the worktree a Worktree box asked for', async () => {
@@ -136,6 +139,7 @@ describe('a spawn on another machine', () => {
       await expect(spawnOnMachine({ from: LOCAL_TAB, target, s: serializeDraft(doc, { sessionId: null, cwd: '' }), doc, intent: { model: null, effort: null, location: null }, mode: 'default' }, fake.client), words).resolves.toEqual({ started: false, words, again: 'retry' });
       expect(tabOpen(LOCAL_TAB)).toBe(true);
       expect(fake.invoked('session.intent.discard')).toEqual([]);
+      expect(useSpawnedHere.getState().leading.size, 'a refused spawn leads nothing').toBe(0);
     }
     const fake = fakeClient();
     const doc = docOf([paragraph(textNode('go'))]);

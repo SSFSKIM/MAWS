@@ -68,7 +68,7 @@ export function SkillsWidget({ appSessionId, close }: { appSessionId: AppSession
     insertComposerText(appSessionId, `/${name} `);
   };
   const failed = read.state === 'error';
-  const toolbar = inDetail ? null : <SkillsToolbar plugins={plugin} canReload={ready} reloading={reload.state.phase === 'working'} onReload={() => void reload.run({})} />;
+  const toolbar = inDetail ? null : <SkillsToolbar plugins={plugin} canReload={ready} reloading={reload.state.phase === 'working'} onReload={() => void reload.run({})} unavailable={reload.unavailable} />;
 
   return (
     <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.skills} command="skills" state={failed ? 'ready' : read.state} error={failed ? null : read.error} readAt={read.readAt} close={close} size="library" toolbar={toolbar}>

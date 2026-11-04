@@ -6,7 +6,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { EventName } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import type { MachineRef } from '@shared/machine/ref';
-import { item, record, status } from '../../../test/support/builders';
+import { humanTurn, item, record, status } from '../../../test/support/builders';
 import { deliver, FakeLink, MINI } from '../../../test/lane-b/fake-link';
 import { RemoteSession } from './remote-session';
 
@@ -19,6 +19,14 @@ const notice = (launch: string, seq: number, idx: number): SessionEvent =>
 const statusOf = (launch: string) => ({ ...status(APP), launchId: launch, engineSessionId: 'eng-1' });
 const queue = { entries: [], paused: false, pauseReason: null };
 const catalog = { commands: [], agents: [], skills: [], terminalSlashCommands: [], revision: 1 };
+/** An operation's completion as the engine host says it (`session.operation`); the two MCP commands carry no value. */
+const operation = (opId: string, command: 'session.mcpReconnect' | 'session.generateTitle' = 'session.mcpReconnect', value: { title: string } | null = null) => ({
+  appSessionId: APP,
+  opId,
+  command,
+  late: false,
+  outcome: { ok: true as const, value },
+});
 
 type Emitted = { machine: MachineRef; name: EventName; payload: Record<string, unknown> };
 
@@ -181,6 +189,73 @@ describe('the stream', () => {
     expect(l.of('remote.gap')).toEqual([{ appSessionId: APP, launchId: 'L1' }]);
   });
 
+  // P5 O7 M8 (m8-1, red first; "What draws Working…"): an event this build can't read is left out with a log line and
+  // nothing else, so a dropped `turn.ended` leaves its turn open and the pane drawing "Working…" until a relaunch. The
+  // rule M8 binds: it is a gap at its place, and the session's status and record are read again, the re-read folded in,
+  // so the turn the stream left open closes by the machine's word. The renderer's gap bar is a notice and closes no turn
+  // (transcript/source/ipc.ts), so the healing is the re-read status (`turn: null`) emitted after the gap. Flipped by m8-3.
+  it('marks an unreadable `turn.ended` as a gap at its place, reads the status and the record again, and the re-read status closes the open turn', async () => {
+    const l = lab();
+    l.session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const sub = l.link.open()[0];
+    const running = { ...status(APP, { engineState: 'running', turn: humanTurn }), launchId: 'L1', engineSessionId: 'eng-1' };
+    sub.sink.subbed('snapshot', { epoch: 'L1', seq: 0 });
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { status: running, queue, pendingItems: [], catalog });
+    const started = { id: `${APP}:L1:4:0`, sessionId: 'eng-1', at: '2026-10-31T00:00:00.000Z', seq: 4, agentId: null, parentToolUseId: null, kind: 'turn.started', userMessageUuid: null, origin: 'human' };
+    deliver(sub, { epoch: 'L1', seq: 4, idx: 0 }, started);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('session.eventBatch').flatMap((b) => b.events as SessionEvent[]).map((e) => e.kind)).toEqual(['turn.started']); // the turn is open
+    const rested = statusOf('L1'); // the machine's word after the turn: idle, `turn: null`
+    l.link.answers.set('session.status', () => ({ ok: true, output: rested }));
+    const asked = l.link.calls.length;
+    const from = l.emitted.length;
+    deliver(sub, { epoch: 'L1', seq: 5, idx: 0 }, { ...started, id: `${APP}:L1:5:0`, seq: 5, kind: 'turn.ended', costUsd: 'not a number' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('remote.gap')).toEqual([{ appSessionId: APP, launchId: 'L1', at: { seq: 5, idx: 0 } }]);
+    expect(l.link.calls.slice(asked)).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'session.status', input: { appSessionId: APP } }), expect.objectContaining({ name: 'session.get', input: { appSessionId: APP } })]));
+    const after = l.emitted.slice(from);
+    const gapAt = after.findIndex((e) => e.name === 'remote.gap');
+    const healed = after.findIndex((e, i) => i > gapAt && e.name === 'session.status');
+    expect([gapAt >= 0, healed > gapAt]).toEqual([true, true]);
+    expect(after[healed].payload).toEqual({ appSessionId: APP, status: rested });
+    expect(after.slice(gapAt).some((e) => e.name === 'session.changed')).toBe(true);
+    expect(l.session.state.status).toMatchObject({ engineState: 'idle', turn: null });
+  });
+
+  it('keeps a status the stream delivered after the gap over the re-read that answers later', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    let answer!: (value: unknown) => void;
+    l.link.answers.set('session.status', () => new Promise((resolve) => (answer = resolve)) as never);
+    deliver(sub, { epoch: 'L1', seq: 5, idx: 0 }, { kind: 'turn.ended', costUsd: 'not a number' });
+    await vi.advanceTimersByTimeAsync(0);
+    const newer = { ...status(APP, { engineState: 'running', turn: humanTurn }), launchId: 'L1', engineSessionId: 'eng-1' };
+    sub.sink.snapshot({ epoch: 'L1', seq: 6 }, { status: newer });
+    answer({ ok: true, output: statusOf('L1') });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('session.status').at(-1)).toEqual({ appSessionId: APP, status: newer });
+    expect(l.session.state.status).toEqual(newer);
+  });
+
+  it('reads again once per run of unreadable events: one read out at a time, one more after it for those it missed', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    const answers: Array<() => void> = [];
+    l.link.answers.set('session.status', () => new Promise((resolve) => answers.push(() => resolve({ ok: true, output: statusOf('L1') }))) as never);
+    const reads = () => l.link.calls.filter((c) => c.name === 'session.status').length;
+    for (let seq = 5; seq < 9; seq += 1) deliver(sub, { epoch: 'L1', seq, idx: 0 }, { kind: 'turn.ended', costUsd: 'not a number' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('remote.gap')).toHaveLength(4); // each at its place
+    expect(reads()).toBe(1);
+    answers.shift()!();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads()).toBe(2);
+    answers.shift()!();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads()).toBe(2);
+  });
+
   it('passes the link’s and the machine’s pauses on as the stream’s state', async () => {
     const l = lab();
     const sub = await opened(l);
@@ -188,6 +263,133 @@ describe('the stream', () => {
     expect(l.lastState()).toMatchObject({ stream: 'paused' });
     sub.sink.resumed();
     expect(l.lastState()).toMatchObject({ stream: 'live' });
+  });
+
+  // P5 O7 M8 ("Operations and panel events"; Interfaces §U): the machine's notices beside the stream's state, each its
+  // local event under the machine's address. The `side` part says nothing of its own: the side question's completion is
+  // its `operation` part, which the side store already patches its log from or lists it again on (side/store.ts,
+  // `onSideOperation`).
+  it('emits each panel part as its local event, two completions in a row both, a completion in the opening too; the side part adds none', async () => {
+    const l = lab();
+    l.session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const sub = l.link.open()[0];
+    sub.sink.subbed('snapshot', { epoch: 'L1', seq: 0 });
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { operation: operation('op-0') }); // ahead of the opening's state
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { status: statusOf('L1'), queue, pendingItems: [], catalog });
+    sub.sink.snapshot({ epoch: 'L1', seq: 1 }, { operation: operation('op-1') });
+    sub.sink.snapshot({ epoch: 'L1', seq: 1 }, { operation: operation('op-2', 'session.generateTitle', { title: 'Named' }) });
+    sub.sink.snapshot({ epoch: 'L1', seq: 1 }, { subagents: { agents: [] } });
+    sub.sink.snapshot({ epoch: 'L1', seq: 1 }, { workflow: { runId: 'run-1' } });
+    sub.sink.snapshot({ epoch: 'L1', seq: 1 }, { tasks: { listId: 'eng-1' } });
+    const said = l.emitted.length;
+    sub.sink.snapshot({ epoch: 'L1', seq: 1 }, { side: { exchanges: [] } });
+    expect(l.emitted.slice(said).filter((e) => e.name !== 'remote.session')).toEqual([]);
+    expect(l.of('session.operation')).toEqual([operation('op-0'), operation('op-1'), operation('op-2', 'session.generateTitle', { title: 'Named' })]);
+    expect(l.of('fs.subagentsChanged')).toEqual([{ appSessionId: APP, agents: [] }]);
+    expect(l.of('fs.workflowChanged')).toEqual([{ appSessionId: APP, runId: 'run-1' }]);
+    expect(l.of('fs.tasksChanged')).toEqual([{ listId: 'eng-1' }]);
+    expect(l.emitted.every((e) => e.machine === MINI)).toBe(true);
+  });
+
+  it('opens again from its cursor at once when the machine ends the stream `behind`, with the status kept', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    deliver(sub, { epoch: 'L1', seq: 4, idx: 0 }, notice('L1', 4, 0));
+    sub.sink.ended('behind');
+    expect(l.link.open().map((s) => s.request.cursor)).toEqual([{ epoch: 'L1', seq: 4, idx: 0 }]);
+    expect(l.session.state).toMatchObject({ ended: null, status: statusOf('L1') });
+    expect(l.lastState()).not.toMatchObject({ stream: 'ended' });
+    l.link.open()[0].sink.subbed('replay', { epoch: 'L1', seq: 4, idx: 0 });
+    expect(l.lastState()).toMatchObject({ stream: 'live' });
+    expect(l.of('remote.gap')).toEqual([]);
+  });
+});
+
+// P5 O7 M8 ("Operations and panel events"): a completion the channel lost on the way is asked of the machine at every
+// opening of the stream, for the receipts this session's waiters hold (`session.operations`).
+describe('operations across a reopening', () => {
+  const LOST = 'the machine lost this operation’s result; check the transcript';
+  function asked(l: ReturnType<typeof lab>) {
+    return l.link.calls.filter((c) => c.name === 'session.operations').map((c) => c.input);
+  }
+
+  it('asks at the reopening for the waiters’ opIds: emits a completion it missed, keeps a pending one for its part, settles a forgotten one as failed; drops what follows a settled one', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    for (const opId of ['op-done', 'op-running', 'op-gone']) l.session.awaitOperation(opId, 'session.mcpReconnect');
+    l.link.answers.set('session.operations', (input) => ({
+      ok: true,
+      output: { outcomes: (input.opIds as string[]).map((opId) => (opId === 'op-done' ? { opId, event: operation(opId) } : opId === 'op-running' ? { opId, pending: true } : { opId, unknown: true })) },
+    }));
+    sub.sink.ended('unavailable'); // the session was released between the receipts and their completions
+    expect(asked(l)).toEqual([]);
+    l.session.kick();
+    l.link.open()[0].sink.subbed('snapshot', { epoch: 'L1', seq: 0 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked(l)).toEqual([{ appSessionId: APP, opIds: ['op-done', 'op-running', 'op-gone'] }]);
+    expect(l.of('session.operation')).toEqual([
+      operation('op-done'),
+      { appSessionId: APP, opId: 'op-gone', command: 'session.mcpReconnect', late: false, outcome: { ok: false, error: { code: 'engine_error', message: LOST, engineCode: null } } },
+    ]);
+    const again = l.link.open()[0];
+    again.sink.snapshot({ epoch: 'L1', seq: 1 }, { operation: operation('op-running') });
+    again.sink.snapshot({ epoch: 'L1', seq: 1 }, { operation: operation('op-gone') }); // late, for one settled: dropped
+    again.sink.snapshot({ epoch: 'L1', seq: 1 }, { operation: operation('op-done') }); // a repeat: dropped
+    expect(l.of('session.operation').map((e) => e.opId)).toEqual(['op-done', 'op-gone', 'op-running']);
+    // nothing left waiting: the next opening asks nothing
+    again.sink.ended('behind');
+    l.link.open()[0].sink.subbed('replay', { epoch: 'L1', seq: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked(l)).toHaveLength(1);
+  });
+
+  it('emits a completion that came on the stream during the opening once, though the machine’s answer carries it too; a late success still passes once', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    l.session.awaitOperation('op-1', 'session.mcpReconnect');
+    l.link.answers.set('session.operations', () => ({ ok: true, output: { outcomes: [{ opId: 'op-1', event: operation('op-1') }] } }));
+    sub.sink.ended('behind');
+    const next = l.link.open()[0];
+    next.sink.subbed('replay', { epoch: 'L1', seq: 0 });
+    next.sink.snapshot({ epoch: 'L1', seq: 0 }, { operation: operation('op-1') }); // ahead of the answer
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('session.operation')).toEqual([operation('op-1')]);
+    const late = { ...operation('op-1'), late: true };
+    next.sink.snapshot({ epoch: 'L1', seq: 1 }, { operation: late });
+    next.sink.snapshot({ epoch: 'L1', seq: 1 }, { operation: late });
+    expect(l.of('session.operation')).toEqual([operation('op-1'), late]);
+  });
+
+  it('gives a waiter whose first completion it never saw the late one the machine kept in its place as its first', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    l.session.awaitOperation('op-1', 'session.mcpReconnect');
+    l.link.answers.set('session.operations', () => ({ ok: true, output: { outcomes: [{ opId: 'op-1', event: { ...operation('op-1'), late: true } }] } }));
+    sub.sink.ended('behind');
+    l.link.open()[0].sink.subbed('replay', { epoch: 'L1', seq: 0 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('session.operation')).toEqual([operation('op-1')]);
+  });
+
+  it('holds no waiter for a receipt whose completion came first, and asks again at the next opening after a read that failed', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    sub.sink.snapshot({ epoch: 'L1', seq: 1 }, { operation: operation('op-early') });
+    l.session.awaitOperation('op-early', 'session.mcpReconnect'); // its receipt answered after its completion
+    l.session.awaitOperation('op-1', 'session.mcpReconnect');
+    l.link.answers.set('session.operations', () => ({ ok: false, error: { code: 'offline' } }));
+    sub.sink.ended('behind');
+    l.link.open()[0].sink.subbed('replay', { epoch: 'L1', seq: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked(l)).toEqual([{ appSessionId: APP, opIds: ['op-1'] }]);
+    l.link.answers.set('session.operations', () => ({ ok: true, output: { outcomes: [{ opId: 'op-1', event: operation('op-1') }] } }));
+    l.link.open()[0].sink.ended('behind');
+    await vi.advanceTimersByTimeAsync(250); // a second `behind` with the cursor standing backs off
+    l.link.open()[0].sink.subbed('replay', { epoch: 'L1', seq: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(asked(l)).toHaveLength(2);
+    expect(l.of('session.operation').map((e) => e.opId)).toEqual(['op-early', 'op-1']);
   });
 });
 
@@ -323,5 +525,165 @@ describe('remote.session', () => {
     l.link.set('down');
     // media too since M4c lifted its gap (uploads cross in parts), as a send does while the link is down
     expect(l.lastState()).toMatchObject({ link: { state: 'down', carrier: null }, reason: null, controls: { send: { available: true }, media: { available: true } } });
+  });
+});
+
+// m8-3's task review: the races a reopening leaves open (the reviewer's reproductions, ported).
+describe('a reopening’s races', () => {
+  it('reconciles a receipt that comes after the opening it was made before has reconciled (RL4 recovered it late)', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    l.link.answers.set('session.operations', () => ({ ok: true, output: { outcomes: [{ opId: 'op-1', event: operation('op-1') }] } }));
+    const made = l.session.openings(); // the act went out on this opening
+    sub.sink.subbed('replay', { epoch: 'L1', seq: 0 }); // the channel lost the receipt and the completion; the link resubscribed
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.calls.filter((c) => c.name === 'session.operations')).toEqual([]); // nothing was waiting then
+    l.session.awaitOperation('op-1', 'session.mcpReconnect', made);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('session.operation')).toEqual([operation('op-1')]);
+    // a receipt made and heard within one opening asks nothing: its part comes on the stream
+    l.session.awaitOperation('op-2', 'session.mcpReconnect', l.session.openings());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.calls.filter((c) => c.name === 'session.operations')).toHaveLength(1);
+  });
+
+  it('takes a late completion heard before its receipt as the first this app saw', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { operation: { ...operation('op-1'), late: true } });
+    l.session.awaitOperation('op-1', 'session.mcpReconnect', l.session.openings());
+    expect(l.of('session.operation')).toEqual([operation('op-1')]);
+  });
+
+  it('never brings a released launch’s context back from a re-read that answers after the stream ended', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    let answer!: (value: unknown) => void;
+    l.link.answers.set('session.status', () => ({ ok: true, output: statusOf('L1') }));
+    l.link.answers.set('session.get', () => new Promise((resolve) => (answer = resolve)) as never);
+    deliver(sub, { epoch: 'L1', seq: 1, idx: 0 }, { kind: 'turn.ended', costUsd: 'bad' });
+    await vi.advanceTimersByTimeAsync(0); // the status answered; the record is still out
+    sub.sink.ended('unavailable');
+    expect(l.session.context()).toBeNull();
+    answer({ ok: true, output: record(APP) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.session.context()).toBeNull();
+    expect(l.session.state.stream).toBe('idle');
+  });
+});
+
+// m8-3's task review, the architect's A: what a panel lists is never left silently stale across a reopening.
+describe('the panels across a reopening', () => {
+  it('makes every panel list again at each opening after the first: the task list, the subagents, the workflow runs, and the side questions’ word', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { status: { ...statusOf('L1'), taskListId: 'team/list' } });
+    l.link.answers.set('fs.subagents', () => ({ ok: true, output: { agents: [] } }));
+    l.link.answers.set('fs.workflows', () => ({ ok: true, output: { runs: [{ runId: 'run-9', snapshot: null, journal: [] }] } }));
+    const panelEvents = () => l.names().filter((n) => ['fs.tasksChanged', 'fs.subagentsChanged', 'fs.workflowChanged', 'remote.reopened'].includes(n));
+    expect(panelEvents()).toEqual([]); // the first opening: each panel lists on its mount
+    sub.sink.subbed('replay', { epoch: 'L1', seq: 0 }); // the link resubscribed
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('fs.tasksChanged')).toEqual([{ listId: 'team-list' }]);
+    expect(l.of('fs.subagentsChanged')).toEqual([{ appSessionId: APP, agents: [] }]);
+    expect(l.of('fs.workflowChanged')).toEqual([{ appSessionId: APP, runId: '' }]); // no run in particular: the list as a whole
+    expect(l.of('remote.reopened')).toEqual([{ appSessionId: APP }]);
+    expect(l.link.calls.filter((c) => c.name === 'fs.workflows')).toEqual([]); // the panels read their own
+  });
+});
+
+// m8-3's task review, the architect's B: a stream that keeps ending `behind` with no progress backs off, then falls back.
+describe('`behind` bounded by progress', () => {
+  it('reopens at once, then backs off from 250 ms while the cursor stands, and after three reopens with no progress shows the gap and retries on the idle backoff; progress resets it', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    deliver(sub, { epoch: 'L1', seq: 4, idx: 0 }, notice('L1', 4, 0));
+    const opens = () => l.link.open().length;
+    sub.sink.ended('behind');
+    expect(opens()).toBe(1); // the first reopen: at once
+    for (const wait of [250, 500]) {
+      l.link.open()[0].sink.ended('behind'); // no event since: the cursor stands
+      expect(opens()).toBe(0);
+      await vi.advanceTimersByTimeAsync(wait - 1);
+      expect(opens()).toBe(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(opens()).toBe(1);
+    }
+    l.link.open()[0].sink.ended('behind'); // the third reopen with no progress
+    expect(l.lastState()).toMatchObject({ stream: 'gap' });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(opens()).toBe(0);
+    await vi.advanceTimersByTimeAsync(1); // the idle backoff's first step
+    expect(opens()).toBe(1);
+    // progress: the next `behind` reopens at once again
+    const moving = l.link.open()[0];
+    moving.sink.subbed('replay', { epoch: 'L1', seq: 4, idx: 0 });
+    deliver(moving, { epoch: 'L1', seq: 5, idx: 0 }, notice('L1', 5, 0));
+    moving.sink.ended('behind');
+    expect(opens()).toBe(1);
+  });
+});
+
+// m8-3's task review, round 2 (the reviewer's probes, ported).
+describe('a reopening’s races, round 2', () => {
+  it('keeps doubling the fallback’s backoff across openings that end `behind` with no progress', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    sub.sink.ended('behind');
+    for (const delay of [250, 500, 1000]) {
+      const next = l.link.open()[0];
+      next.sink.subbed('replay', { epoch: 'L1', seq: 0 });
+      next.sink.ended('behind');
+      await vi.advanceTimersByTimeAsync(delay);
+      expect(l.link.open()).toHaveLength(1);
+    }
+    const next = l.link.open()[0];
+    next.sink.subbed('replay', { epoch: 'L1', seq: 0 });
+    next.sink.ended('behind');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(l.link.open()).toHaveLength(0); // the second fallback waits 2 s
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(l.link.open()).toHaveLength(1);
+  });
+
+  it('never replaces a newer subagents part with the reopening’s older read', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    let answer!: (value: unknown) => void;
+    l.link.answers.set('fs.subagents', () => new Promise((resolve) => (answer = resolve)) as never);
+    sub.sink.subbed('replay', { epoch: 'L1', seq: 0 });
+    const agents = [{ agentId: 'agent-1', meta: null, transcriptPath: '/scratch/agent-1.jsonl', size: 0, mtimeMs: 1, runId: null }];
+    sub.sink.snapshot({ epoch: 'L1', seq: 1 }, { subagents: { agents } });
+    answer({ ok: true, output: { agents: [] } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('fs.subagentsChanged').at(-1)?.agents).toEqual(agents);
+  });
+
+  it('tells the workflow panels to list again at a reopening though no run was ever named and none is listed now', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    l.link.answers.set('fs.workflows', () => ({ ok: true, output: { runs: [] } }));
+    sub.sink.subbed('replay', { epoch: 'L1', seq: 0 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('fs.workflowChanged')).toEqual([{ appSessionId: APP, runId: '' }]);
+  });
+});
+
+// M8's reviewer-high review: a gap's re-read never rolls a newer record back.
+describe('a gap’s re-read and the record feed', () => {
+  it('drops the re-read record when the checkout feed changed the record while the reads were out', async () => {
+    const l = lab({ followed: () => true });
+    const sub = await opened(l);
+    let status!: (value: unknown) => void;
+    l.link.answers.set('session.status', () => new Promise((resolve) => (status = resolve)) as never);
+    l.link.answers.set('session.get', () => ({ ok: true, output: record(APP) })); // R1, answered at once
+    deliver(sub, { epoch: 'L1', seq: 5, idx: 0 }, { kind: 'turn.ended', costUsd: 'not a number' });
+    await vi.advanceTimersByTimeAsync(0);
+    const renamed = { ...record(APP), title: { text: 'renamed', source: 'user' as const } }; // R2, from the feed
+    l.session.recordChanged(renamed);
+    status({ ok: true, output: statusOf('L1') });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.session.state.record).toEqual(renamed);
+    expect(l.of('session.changed').at(-1)).toMatchObject({ record: renamed });
   });
 });

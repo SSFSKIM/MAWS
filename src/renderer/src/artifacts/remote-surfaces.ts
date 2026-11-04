@@ -8,6 +8,7 @@
 //   decides at the request, and its refusal is said in words (`remoteRefusalWords`).
 // - the machine's offer: a command it refused `not-offered` (the client's refusal hook, ../ipc/client.ts) is not offered
 //   there, until its artifacts feed opens again (`artifacts.resync`, said at each opening, a new channel's included).
+//   P5 O7 M8: every session surface reads the same refusals (../lane-b/remote-unavailable.ts, `heardNotOffered`).
 //
 // This Mac's artifacts are never greyed here. The words the spec names are its own: "Connectors on <machine> need its app"
 // for a connector surface the machine doesn't offer, and "Connect Drive on <machine>" (`delivery.connect` is not offered
@@ -56,6 +57,13 @@ export function heardRefusal(name: CommandName, error: Pick<IpcError, 'issues'>,
   const key = offerKey(machine, name);
   useNotOffered.setState((s) => (s.refused.has(key) ? s : { refused: new Set(s.refused).add(key) }));
 }
+
+/** P5 O7 M8 ("An older peer"): whether `machine` was heard refusing `name` as not offered (every session surface reads it,
+ * through lane-b/remote-unavailable.ts). */
+export const heardNotOffered = (refused: ReadonlySet<string>, machine: MachineRef, name: CommandName): boolean => refused.has(offerKey(machine, name));
+/** The machines' `not-offered` refusals heard, read now, or followed in a render. */
+export const notOfferedRefusals = (): ReadonlySet<string> => useNotOffered.getState().refused;
+export const useNotOfferedRefusals = (): ReadonlySet<string> => useNotOffered((s) => s.refused);
 
 /** The machine's feed opened again: what it offers is asked afresh. */
 export function forgetOffers(machine: MachineRef): void {

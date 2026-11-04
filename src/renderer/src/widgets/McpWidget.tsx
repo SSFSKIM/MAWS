@@ -3,14 +3,24 @@
 // disclosure. It refetches when the session's MCP table in C3's status moves. Each server offers Reconnect (for this
 // session) and the enable switch, which the engine records for the project in ~/.claude.json (said beside the
 // switch); both run as operations, and the switch's position after either outcome is the next read's.
+// P5 O7 M8 ("Sign in from the session's MCP widget"): a server that needs auth also offers Sign in, for a session on this Mac
+// or another machine alike: by its name and scope (`connectors.signInServer`, the entry read on the session's machine),
+// with the session's directory, its progress and result in Customize's words (customize/connectors/sign-in.ts).
+// Reconnect stays a restart. Each control is greyed, with its reason, for a session on a machine that doesn't offer its
+// command (lane-b/remote-unavailable.ts: an older machine heard refusing it).
 import { useRef, useState } from 'react';
 import * as z from 'zod';
 import type { OperationEvent } from '@shared/engine/operations';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { McpStatusResponse } from '@shared/wire/control';
+import { PLUGINS_SCOPES, type PluginsScope } from '@shared/plugins/cli';
+import { CONNECTORS } from '../customize/connectors/copy';
+import { signInViewOf } from '../customize/connectors/present';
+import { signInKeyOf, signInMachineOf, startSignInByName, useSignIns } from '../customize/connectors/sign-in';
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M5
 import { useSessions } from '../stores/sessions';
 import { McpDriven } from './McpDriven'; // P5 O9 M5
+import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { MCP, MCP_ACTIONS, WIDGET_TITLE } from './copy';
 import { operationLine, outcomeWords, useOperation } from './operation';
 import { Mono, parseEach, Row, Rows, TextButton } from './parts';
@@ -86,7 +96,37 @@ export function toggleView(requested: boolean, outcome: Outcome, read: ReadBack)
 
 const SWITCH = 'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border border-border outline-accent focus-visible:outline-2 disabled:opacity-50';
 
-function McpServerRow({ server, appSessionId, ready, answer, refresh }: { server: McpServerView; appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh'] }) {
+// P5 O7 M8: a scope the engine signs a server in from (its configuration files'); `dynamic`, `claudeai` and the managed
+// scopes are signed in nowhere a session reaches
+const signInScope = (scope: string | null): PluginsScope | null => (PLUGINS_SCOPES as readonly (string | null)[]).includes(scope) ? (scope as PluginsScope) : null;
+
+// P5 O7 M8: Sign in on a server that needs auth, and the line its sign-in says (Customize's words); none before one ran
+function SignIn({ server, appSessionId, cwd, readAt }: { server: McpServerView; appSessionId: AppSessionId; cwd: string | null; readAt: number | null }) {
+  const scope = signInScope(server.scope);
+  const target = scope === null || (scope !== 'user' && cwd === null) ? null : { name: server.name, scope, cwd };
+  const record = useSignIns((s) => (target === null ? null : (s.byServer.get(signInKeyOf({ ...target, machine: signInMachineOf(appSessionId) })) ?? null)));
+  const unavailable = useRemoteUnavailable(appSessionId, 'connectors.signInServer'); // an older machine's refusal
+  if (target === null) return null;
+  const live = { status: server.status, error: server.error };
+  const line = record === null ? null : signInViewOf({ live, liveRead: readAt === null ? null : { appSessionId, at: readAt }, posture: null, last: record, transport: null })?.text;
+  return (
+    <>
+      {server.status === 'needs-auth' && (
+        <button type="button" aria-label={CONNECTORS.signInName(server.name)} disabled={unavailable !== null} title={unavailable ?? undefined} onClick={() => void startSignInByName(target, appSessionId)} className={SIGN_IN}>
+          {CONNECTORS.signIn}
+        </button>
+      )}
+      {line && (
+        <span data-sign-in-state className="min-w-0 text-ui-sm text-fg-muted">
+          {line}
+        </span>
+      )}
+    </>
+  );
+}
+const SIGN_IN = 'shrink-0 rounded-sm px-1 text-ui-sm text-accent outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
+
+function McpServerRow({ server, appSessionId, ready, answer, refresh, cwd, readAt }: { server: McpServerView; appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh']; cwd: string | null; readAt: number | null }) {
   const [last, setLast] = useState<'reconnect' | 'toggle' | null>(null);
   // the toggle's view, from the read that followed its outcome (`basis`: the answer that read produced)
   const [toggled, setToggled] = useState<(ToggleView & { basis: McpStatusResponse | undefined }) | null>(null);
@@ -133,7 +173,8 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh }: { server
           aria-checked={checked}
           aria-label={MCP_ACTIONS.enabled(server.name)}
           data-state={position}
-          disabled={!ready || busy}
+          disabled={!ready || busy || toggle.unavailable !== null}
+          title={toggle.unavailable ?? undefined}
           onClick={() => void flip()}
           className={`${SWITCH} ${position === 'on' ? 'bg-accent' : 'bg-bg-active'}`}
         >
@@ -145,10 +186,12 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh }: { server
             setLast('reconnect');
             void reconnect.run({ serverName: server.name });
           }}
-          disabled={!ready || busy}
+          disabled={!ready || busy || reconnect.unavailable !== null}
+          title={reconnect.unavailable ?? undefined}
         >
           {MCP_ACTIONS.reconnect}
         </TextButton>
+        <SignIn server={server} appSessionId={appSessionId} cwd={cwd} readAt={readAt} />
       </div>
       {line !== null && (
         <span role="status" className={`text-ui-sm ${position === 'unconfirmed' ? 'text-warning' : 'text-fg-muted'}`}>
@@ -164,7 +207,7 @@ function McpServerRow({ server, appSessionId, ready, answer, refresh }: { server
   );
 }
 
-export function McpBody({ view, actions, compact = false }: { view: { servers: McpServerView[] }; compact?: boolean; actions?: { appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh'] } }) {
+export function McpBody({ view, actions, compact = false }: { view: { servers: McpServerView[] }; compact?: boolean; actions?: { appSessionId: AppSessionId; ready: boolean; answer: McpStatusResponse; refresh: EngineRead<McpStatusResponse>['refresh']; cwd: string | null; readAt: number | null } }) {
   if (view.servers.length === 0) return <p className="m-0 text-ui-sm text-fg-muted">{MCP.none}</p>;
   if (compact) return <ul aria-label={MCP.list} className="m-0 list-none p-0">
     {view.servers.map((server) => <li key={`${server.name}:${server.scope}:${server.source}`} className="border-b border-border px-2 py-2 last:border-b-0">
@@ -224,9 +267,10 @@ export function McpWidget(props: { appSessionId: AppSessionId; args: string; clo
 function McpEngine({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.mcpStatus', { appSessionId }, { refreshOn: MOVES_MCP });
   const ready = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
+  const cwd = useSessions((s) => s.engine.get(appSessionId)?.cwd ?? s.records.get(appSessionId)?.directory ?? null); // P5 O7 M8: a server's identity, with its name and scope
   return (
     <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.mcp} command="mcp" state={read.state} error={read.error} readAt={read.readAt} close={close}>
-      {read.data && <McpBody view={present(read.data)} actions={{ appSessionId, ready, answer: read.data, refresh: read.refresh }} />}
+      {read.data && <McpBody view={present(read.data)} actions={{ appSessionId, ready, answer: read.data, refresh: read.refresh, cwd, readAt: read.readAt }} />}
     </WidgetFrame>
   );
 }

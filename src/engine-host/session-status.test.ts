@@ -141,3 +141,34 @@ describe('SessionStatusTracker: the Stop\'s background tasks', () => {
     expect(tracker.snapshot().backgroundTasks.map((t) => t.taskId)).toEqual(['t1']);
   });
 });
+
+// P5 O7 M8 (m8-1, red first): `activity` is set by a main-lane `system/status` and cleared only by another one, and the
+// engine sends none at a turn's end, so a finished turn keeps `requesting` (permission-roundtrip.jsonl: `requesting` at
+// seq 54, the turn's `result` at 93, the next turn's status at 99). Every local turn ends so; it is the VM's
+// `activity: requesting` after `end_turn` in M7's sitting, though no renderer reads it (not what drew "Working…").
+// m8-2 clears it at a main-lane `result` (session-status.ts `observe`).
+describe('SessionStatusTracker: activity at a turn’s end', () => {
+  const rows = readFileSync(resolve(ROOT, 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl'), 'utf8')
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as { seq: number; direction: string; frame: Record<string, unknown> });
+
+  it('clears at the main lane’s result', () => {
+    const tracker = new SessionStatusTracker(spec, () => {});
+    for (const row of rows) {
+      if (row.seq > 93) break;
+      if (row.direction === 'in') tracker.observe(row.frame, '2026-10-06T02:52:00.000Z');
+    }
+    expect(rows.find((row) => row.seq === 93)?.frame.type).toBe('result');
+    expect(tracker.snapshot().activity).toBeNull();
+  });
+
+  it('keeps it at a subagent’s result, which is not the turn’s end', () => {
+    const tracker = new SessionStatusTracker(spec, () => {});
+    tracker.observe({ type: 'system', subtype: 'status', status: 'requesting' }, '2026-10-06T02:52:00.000Z');
+    tracker.observe({ type: 'result', subtype: 'success', parent_tool_use_id: 'toolu_1' }, '2026-10-06T02:52:01.000Z');
+    expect(tracker.snapshot().activity).toBe('requesting');
+    tracker.observe({ type: 'result', subtype: 'success' }, '2026-10-06T02:52:02.000Z');
+    expect(tracker.snapshot().activity).toBeNull();
+  });
+});

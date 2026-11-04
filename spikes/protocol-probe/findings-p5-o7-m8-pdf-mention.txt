@@ -1,0 +1,43 @@
+P5 O7 M8, task m8-1: what the engine attaches for an @<path> mention of a PDF in a stream-json user frame
+(docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M8 "The PDF"; parent docs/doperpowers/plans/2026-10-27-p5-org.md,
+child O7; 2026-11-04)
+
+Question. A PDF dropped on a remote session uploads to the machine and the message carries
+`@.claude/desk-uploads/<appSessionId>/<name>.pdf` after the words (remote-uploads.ts `remoteMessage`). In M7's sitting
+the agent read the file with a tool. Does the engine expand such a mention in a stream-json user frame, and does the
+model then get the PDF, as a `document` block or otherwise?
+
+Method. p5-o7-m8-pdf-mention.test.mjs, on CI's Linux probe lane (`scripts/ci-gate.sh <worktree> --gates probes`), never
+on a workstation. Engine 2.1.312 (TESTED_ENGINE_VERSION), linux-x64, provisioned by scripts/provision-engine.sh against
+the checksum its release manifest publishes (sha256 4f4178ce41d83e23341ebfbaecdbcf8ea6bf7baea0690025abe49eeec3a5d01d).
+MAWS's product flags and `--settings {"dialogExpiry":"never"}`, a scratch CLAUDE_CONFIG_DIR, every inherited CLAUDE*
+variable dropped, the Messages API the scripted stand-in (stub-api.mjs), so nothing was spent. The model asked was
+`haiku`, sent as `claude-haiku-5-5`. The cwd holds a one-page PDF (586 bytes, its page drawing PDFMARKER7Q) at
+`.claude/desk-uploads/<id>/brief.pdf` and `notes.txt` (TEXTMARKER4K). One launch, three turns:
+  pdf-string    "Summarise the attached brief.\n\n@<upload>" as a string (MAWS's form without an inline image)
+  pdf-block     the same as one text block (MAWS's form beside an inline image)
+  text-control  "What does this note say?\n\n@notes.txt"
+Runs: 41796086203 (first record) and 41796455398 (the record widened to the whole expansion and the attachment's shape),
+both green; the record is in each probes job's log, lines prefixed `# m8-pdf`.
+
+1. The engine expands the mention in stream-json, in both forms. Each turn's first main-loop request carries the
+   human's text unchanged, then a message the engine adds that begins "Called the Read tool with the following input:
+   {"file_path":"<absolute path>"}\nResult of calling the Read tool:\n…". The engine echoes the human frame as sent
+   (`isReplay: true`), and the transcript keeps the user record followed by an `attachment` record of type `file`.
+
+2. A text file's expansion carries its content: "1\tThe note reads TEXTMARKER4K.\n2\t", as the Read tool numbers lines.
+   Its attachment keeps `{filePath, content, numLines, startLine, totalLines}`.
+
+3. A PDF's expansion carries no content. The model reads only "PDF file read: <absolute path> (586 bytes)". There is no
+   `document` block, and no block other than text in either PDF turn. The page's text (PDFMARKER7Q) is nowhere in the
+   request. The transcript's attachment is `{type: 'pdf', file: {filePath, base64: '', originalSize: 586}}`: the bytes
+   are empty. The second PDF turn's expansion is the same note (419 characters with its reminders, against 9486 on the
+   first turn, which carries the session's opening reminders too).
+
+So the sitting's symptom is the engine's own behaviour, not a lost frame: on 2.1.312 an `@` mention of a PDF tells the
+model the file exists and its size, and the model has to Read it to see it. M8's parity (a typed `uploads` reference
+the endpoint expands into a `document` block, as a local drop sends one) is needed. Parsing mentions would not help.
+
+Not established: whether a larger or multi-page PDF, or another model, changes 3. Only one PDF and one model were tried.
+The empty `base64` looks deliberate (the size is right), but its rule is the engine's and is not read here (D-1).
+The test's assertions pin 1 to 3, so an engine bump that starts attaching the PDF fails the probe lane.

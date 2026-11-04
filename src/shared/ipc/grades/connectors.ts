@@ -24,6 +24,7 @@ export const grades = {
   'connectors.remove': 'machine-admin',
   'connectors.signIn': 'machine-admin',
   'connectors.signInCancel': 'machine-admin',
+  'connectors.signInServer': 'machine-admin', // P5 O7 M8: connectors.signIn's, for the session's MCP widget
   // main-only
   'connectors.grants': 'internal',
   'connectors.grant': 'internal',

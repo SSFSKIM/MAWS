@@ -34,7 +34,7 @@ O7 makes the app use it, and then brings lane B to full depth across it. Lane B 
 - [x] M6 — Attention and search across machines — built on branch `p5-o7-m6` (2026-11-01, from master a0a7f81a2; master merged at da2cbd333; `WIRE_MINOR` 19) as four tasks, each reviewed clean, and reviewer-high on the milestone (three rounds, the last narrow on the final fix wave at the architect's direction, converged after its fix, verified by the controller); report `docs/doperpowers/plans/2026-10-31-p5-o7-report.md`
 - [x] M5 — Artifacts, documents and the client-bound surfaces — M5c landed (PR #454, merge a4655841a, P5 Decision Log 207), built on `p5-o7-m5c` (2026-11-02, from master 242375483; RL2 1.7 and `WIRE_MINOR` 22 at its master merge) as five tasks, each reviewed clean after its fixes, plus the architect's three rulings on c5's handback (a remote dashboard's snapshot holds behind `rl2.asset-holds`, the `dashboard-live-data` :526 race fixed in the broker, Send to's skipped read accepted as residue); reviewer-high on the milestone (round 1 over 242375483..c39d940d5: three Important findings, fixed in c09646e11..3d8006045, class 1a 41552593862 and hosted 41553653036; its narrow pass found one more, fixed in 1300f2d1d, class 1a 41559318685; the loop stopped there), master 01d4488cf merged as acc0d3e9b (class 1a 41558751875), landing pending; M5b landed (PR #445, master 62a1dec05, P5 Decision Log 202), built on `p5-o7-m5b` (2026-11-02, from master 95050efd1; RL2 1.5, no manifest change) as five tasks, each reviewed clean after its fixes, and reviewer-high on the milestone (one round and a narrow re-check of its fix wave, whose three findings the controller verified), landing pending; M5c to follow; M5a landed (PR #441, master 3a183be2f, P5 Decision Log 199), built on `p5-o7-m5a` (2026-11-02, from master 2d27995f6, M6 landed as PR #439; `WIRE_MINOR` 20, RL2 1.4) as five tasks, each reviewed clean, and reviewer-high on the milestone (one round and a narrow re-check of its fix wave, whose one finding the controller verified; the standing check before every executor branch and lane A's carried as O10's code for the desk track's review), landing pending; M5b and M5c to follow; re-planned 2026-11-01 against O4's and O5's landings, executable as three landings: M5a (the artifact rule and the reads), M5b (pages and documents on the read open; O17 M9 waits on it), M5c (O4's surfaces: leases, delivery, consent and the client port); A12 to A15 answered by the owner as recommended on 2026-11-01; after M2 and M4
 - [x] M7 — Acceptance and the remote bench — the code landed (PR #451, merge 080de8f81, P5 Decision Log 204; the direct resume PR #457, P5 Decision Log 208); the measured group recorded on CI's mini (run 41573992251, every bound held) and the live runs at the owner's sitting of 2026-11-04 (the live bench voided by the runner's load; the checklist's passes, fails and skips in Outcomes, its gaps carried as residue) (2026-11-04)
-- [ ] M8 — The sitting's failures: the remote-spawned session's sidebar row and reopen, every session surface offered or greyed (the MAWS ask among them) under a contract test, operations and panel events across the channel, a turn's end, the PDF as a block, Sign in from the MCP widget, untracked files in Review, the forwarded failure's message. Planned 2026-11-04; reviewer-high; its own PR.
+- [x] M8 — The sitting's failures: the remote-spawned session's sidebar row and reopen, every session surface offered or greyed (the MAWS ask among them) under a contract test, operations and panel events across the channel, a turn's end, the PDF as a block, Sign in from the MCP widget, untracked files in Review, the forwarded failure's message. Planned 2026-11-04; reviewer-high; its own PR. Built on `p5-o7-m8` (2026-11-04): seven tasks, each task-reviewed, then reviewer-high on the whole; master merged before the final gate; the PR carries the gate.
 - [ ] M9 — Spawn on the machine's own terms: the `machine` route as every machine's default (an additive `route`, machine settings still v1), what the machine reports named and never a mismatch, older peers on the legacy fields, and the remote setup path (folder and trust, owners-only acts). Planned 2026-11-04, after M8; reviewer-high; its own PR.
 - [ ] M10 — The live re-check: the bench's fixes, then a short sitting against the mini and a fresh acceptance VM. O7 closes when it is recorded in Outcomes. Planned 2026-11-04, after M9; reviewer-medium.
 
@@ -731,7 +731,7 @@ Everything above is run from the MacBook against the mini and the Linux VM, and 
 The live sitting failed two of O7's own acceptance lines. Answering a question from another Mac failed (acceptance 2, P5 acceptance 4). A remote-spawned session had no sidebar row on the Mac that spawned it, and so no way back once its tab closed (acceptance 4, P5 acceptance 5). The other failures were remote surfaces showing an error where local works. M8 removes each observed failure, each proved red first. Where the sitting left a cause unknown, the milestone's first task finds it before anything is built on it.
 
 **At its end.**
-- A lane B session spawned from this app on another machine sits under its org project's row, with its machine, within 5 s of the engine's first event. It stays there after its tab closes, and a click on that row reopens it. A second client, one that did not spawn it, sees and opens it the same way.
+- A lane B session spawned from this app on another machine shows within its org project's visible rows within 5 s of the engine's first event, even in a project group already holding more busy local records than the cap, and stays reachable through Resume… after its tab closes. A second client, one that did not spawn it, sees and opens it the same way.
 - A question raised on a remote MAWS-launched session can be read and answered from this Mac. These sessions only ever raise the MAWS ask. The answer settles the card on the machine and in every attached app.
 - Every command the renderer issues for a session is either offered over RL2 at its kind and grade, or its control is drawn disabled for a remote session, with its reason. A contract test fails on any session-scoped command that is neither offered nor declared remote-unavailable.
 - An operation on a remote session (`/btw`, Reload plugins, MCP Reconnect and toggle, Generate title) completes in the app. Its `session.operation` and the panels' own change events cross the channel.
@@ -781,17 +781,29 @@ The fixes follow in tasks grouped by layer, so that no two executors edit one fi
 
 m8-1's first commit also pins a clock. `test/support/remote-bench.test.ts`'s "the mini's removal on this Mac…" builds its `BenchRun` with no clock, so it refuses on the real time inside the mini's 06:45–07:00Z quiet window. Any unit gate that falls in that window fails (the desk track's #464, run 41788418951 at 06:56Z). That test, and any sibling built the same way, takes a clock pinned outside the window. One added case, pinned inside the window, expects the refusal.
 
-*The sidebar row* (acceptance 4). The device keys a remote record by its app id (`RemoteSession.#readRecord`, `session.get {appSessionId}`), and `rowOfListedRecord` looks the record up in `listed` by that id (`src/renderer/src/stores/org-projects.ts`). The endpoint lists a lane B member under its `appSessionId` only once `#join` has mapped its engine id through `engine.sessions` (`src/endpoint/rl10/members.ts`, `listingId`). A member sminos reports as lane A is listed under its engine id. The sitting's listing carried the engine id (`1c155c56…`) where the record carried the app id (`edad6b82`), so the join missed. The record then fell back to `rowOfSession`, and with no project known on an RL2 machine it was filed under the machine's row.
-- **Fix at the source:** an engine id that `engine.sessions` reports is lane B, whatever sminos's lane field says, and is listed under its `appSessionId`.
-- **Fix in the renderer, as defence:** `rowOfListedRecord` and `sessionSetKey` also try `addressOf(machine, record.engineSessionId)`, and `projectList` skips a listing a record already claims.
-- **m8-1 establishes, red first, why the member read as lane A.** The leads are sminos honouring `MAWS_LANE=B` only with its `SMNS_MEMBER` parent check (`src/engine-host/launch.ts`, `launcher.ts`), and the desk track's A11 verifier fix (`apps/org-protocol/src/attest.ts` `SPAWN_ACTIONS`, O10's code, not M8's).
-- **m8-1 also finds why no row showed at all:** a misfile would show the session twice, not hide it. Candidates are a newly appearing machine row drawn collapsed (`sidebar/Sidebar.tsx`), a `mine: false` listing counted only in "+N others", and a known project hidden.
-- **The closed tab.** `stop()` emits nothing, so the record stays in the store until a reload, and a reload brings nothing back. The listing row is what persists, and `ListedRow.activate` reopens it through lane B's opener.
-- Red first:
-  - `src/renderer/src/sidebar/derive.test.ts`: a record whose listing is at its engine id;
-  - `test/endpoint/rl10/`: a member sminos reports as lane A that `engine.sessions` knows;
-  - `e2e:remote`: the spawned session's row under its org project, and a reopen after its tab closes.
-- Rejected: keying the device's records by engine id (every lane B command addresses the app id).
+*The sidebar row* (acceptance 4). *(Rewritten 2026-11-04 after m8-1.)* The id-mismatch premise of the first plan is withdrawn. The sitting's listing (`1c155c56`, lane B) is the app id, and the device's join by app id meets it (m8-1's Decision Log entry). The row was lost to the sidebar's cut:
+- A project group shows `SESSIONS_FIRST` (5) rows, or `SESSIONS_CAP` (8) after Show more (`src/renderer/src/sidebar/derive.ts`, `shownCount`).
+- Under the default `priority` sort, pinned, waiting, unread and working local records lead, while a listed row ranks only by its `issued` time.
+- The Resume… picker lists records only (`resume/model.ts`, `chooserRows`).
+
+A local session past the cap is reached through Resume…, but a listed one has no way back. The fix is parity with local (the architect's call, 2026-11-04):
+- **Resume… lists listed rows.** `chooserRows` includes the listed rows of the person's org projects, each under its machine, and opening one goes through lane B's opener (`ListedRow.activate`'s path, `remoteOpenerFor`).
+- **The priority sort ranks a listed row by its own state, as it ranks a local record.**
+  - Working, idle and the rest come from the listing's status.
+  - Waiting comes from M6's attention feed (the listed row's address in `remote.attention`).
+  - The listed row's last activity is its listing's latest `issued` or status change.
+
+  A just-spawned, working remote session then leads the way a working local one does.
+- **A session spawned from this app leads its group until its first turn ends, on any machine, local and remote alike** (the architect's ruling of 2026-11-04 under P5 acceptance 5, a sidebar-order change made in the owner's place, which the owner can overrule). Today local ranks unread above working (`src/renderer/src/overview/derive.ts`), so a just-spawned local session in a group holding more unread sessions than the cap is cut too. After the first turn it ranks by its state, and Resume… reaches it past the cap. Red first in `derive.test.ts`, for both lanes: a group already holding more unread sessions than the cap, then a just-spawned local session and a just-spawned remote one, each within the visible rows until its first turn ends.
+- "Always drawn" (listed rows exempt from the cap) is rejected: a member with many listed sessions would get an uncapped group.
+
+The acceptance is the failure the owner saw. In a project group already holding more busy local records (pinned, waiting, unread, working) than the cap, a just-spawned remote session shows within the visible rows within 5 s and stays reachable through Resume… after its tab closes.
+
+Red first:
+- `src/renderer/src/sidebar/derive.test.ts`: m8-1's `it.fails`, flipped by m8-4, plus the Resume… case in `resume/model.test.ts` or its nearest test;
+- `e2e:remote`: more than eight busy local sessions in one project, a session spawned on B within the visible rows, its tab closed, and the session reopened through Resume… (m8-5).
+
+Rejected: keying the device's records by engine id, and treating an engine id as lane B at the endpoint (m8-1 found no evidence for either).
 
 *The offer audit and its contract.* A command reaches a remote machine only through `dispatchOverLink`. A name with no row is `not-offered` at the endpoint. A name graded above `list`/`view` that the adapter doesn't `handle` is refused on the device, before any round trip, as "refused act-required" (`src/main/machines/remote/dispatch.ts`). That is the sitting's `session.reloadPlugins`: it has no row at all, so the brief's "a call against an act row" is the device's own refusal.
 - **The rule.** Every command whose route class is `addressed` by an `AppSessionId` and that is on the link (`src/main/machines/link-surface.ts`) is one of two things:
@@ -1497,6 +1509,8 @@ Not offered, and why: `git.worktree.add`, `remove`, `deleteBranch` (a new sessio
 
 **§M. RL2 additions** (`apps/org-protocol/src/messages.ts`, `channel.ts`), each behind a capability a side lists in its handshake. The device's are `DEVICE_CAPABILITIES` (`src/main/machines/remote/capabilities.ts`), the endpoint's `ENDPOINT_CAPABILITIES` (`src/endpoint/capabilities.ts`); both list every capability their build implements, and `RL2_PROTOCOL.minor` moves to master's plus one at each landing that adds one.
 
+- `rl2.upload-blocks` (M8; endpoint; RL2 1.9 on the branch, re-bumped at landing if master has moved): `session.send`'s `uploads?`, expanded at the endpoint through `files.readUploads` before the act reaches the engine host. A device sends `uploads` only to an endpoint listing it.
+
 | Capability | Milestone | What it admits |
 |---|---|---|
 | `rl2.executor.machine` | M2 | `Executor` gains `machine` (`FROM_DEVICE.query` admits it); `RL2_PROTOCOL.minor` 1 |
@@ -1676,9 +1690,14 @@ The link's `subscribe` takes `{feed, session?}` in place of `session` alone.
 | `session.projects.addFolder` | `{act, executor 'machine', target 'machine', owners: true}` in `MACHINE_ACTS`, row grade `machine-admin` | `spawn` | M9 |
 | `session.trust.check` | `{call, executor 'machine', target 'machine', owners: true}`, row grade `list` | `spawn` | M9 |
 | `session.operations` (new) | `laneB('call')` | `view` | M8 |
+| `connectors.signInServer` (new; sign-in by a server's name and scope, the entry read on the session's machine) | `machineAdmin`, offered as `connectors.signIn` is, in `MACHINE_ACTS` and `CONSENT_COMMANDS` (m8-3) | `machine-admin` | M8 |
+| `files.readUploads` (new, `internal`: the endpoint's resolver for `uploads`, the sending session's own upload root only) | not offered; called by the endpoint | `internal` | M8 |
+| `fs.unfollow` | `laneB('call')` with `accepts: namesAnAgent` (the caller's own follow of a named agent; the session-wide form refused) | `view` | M8 |
+
+  *(m8-3.)* The device turns a session-wide `fs.unfollow {agentId: null}` of a remote session into one named unfollow for each agent it follows there. It records each from its own `fs.agentEvents` reads, waits for any read still out, and counts a read that failed as possibly followed. An agent is removed only when its unfollow succeeds, and a refusal is the answer.
 
 - **`REMOTE_UNAVAILABLE`** (`src/shared/ipc/remote-unavailable.ts`): `Record<CommandName, string>`, each command's reason in the words its control shows ("Not on another machine yet: …"). It is read by the renderer's controls and by `test/lane-b/offer-coverage.test.ts`.
-- **The `operation` and panel parts** (`src/shared/host/stream-catchup.ts`): `{part: 'operation', body: OperationEvent}`, `{part: 'subagents', body: {agents}}`, `{part: 'workflow', body: {runId}}` and `{part: 'side', body: {exchanges}}`. Each is emitted by `remote-session.ts` as its event (`session.operation`, `fs.subagentsChanged`, `fs.workflowChanged`, the side store's change) under the machine's address. An older device drops an unknown part.
+- **The `operation` and panel parts** (`src/shared/host/stream-catchup.ts`): `{part: 'operation', body: OperationEvent}`, `{part: 'subagents', body: {agents}}`, `{part: 'workflow', body: {runId}}` and `{part: 'side', body: {exchanges}}`. Each is emitted by `remote-session.ts` as its event (`session.operation`, `fs.subagentsChanged`, `fs.workflowChanged`, the side store's change) under the machine's address. An older device drops an unknown part. *(m8-3, 2026-11-04.)* The device emits nothing for `side`: a side question's completion is its `operation` part, which the side store patches its log from or re-lists on. At every `subbed` after a stream's first (a `behind` reopen or the link's resubscription), main makes each panel re-list: `fs.tasksChanged` for the session's list, an `fs.subagents` read emitted as `fs.subagentsChanged` (dropped if a newer `subagents` part arrived while it was out), `fs.workflowChanged {appSessionId, runId: ''}` (both consumers re-list the session's runs whatever the `runId`), and `remote.reopened {appSessionId}` (main-owned, outside the wire manifest) for the side store's `refreshSide`. A `behind` end reopens from the cursor at once after progress; with the cursor standing it backs off from 250 ms doubling to 5 s, and after three reopens in a row with no progress the stream shows `gap` and falls back to the idle retry with its own doubling backoff, which only cursor progress resets.
 - **`fs.tasks`'s input** gains `appSessionId?` (`src/shared/ipc/schema/fs.ts`), required by the `task-list` rule over RL2; a `tasks` part carries `fs.tasksChanged`.
 - **`machine.folders.list`** (M9): input `{path?: string, open?: true, cursor?: string}`; output `{entries: [{name, path, protected: boolean}], cursor: string | null}`. `protected` marks a macOS TCC-protected folder, which is read inside only with `open: true`.
 - **The forwarded failure** (`src/endpoint/calls.ts`): `{code, message?}`, with the message capped at 512 characters.
@@ -1692,9 +1711,33 @@ The link's `subscribe` takes `{feed, session?}` in place of `session` alone.
 - **`route-unsupported`**: a start refusal for `route: 'machine'` on an engine host without `engine.route-machine` when the machine names a host other than the relay.
 - **`engine.route-machine`**: an engine host capability; main sends `route: 'machine'` only to a host listing it.
 - **`setupRefusal`** (`src/endpoint/policy.ts`): `addFolder`'s directory exists, its real path is under the machine's home with no symlink escape, and it is not inside a protected folder that was not opened.
-- **The operation outcomes** (M8): `OperationTable` keeps each completed outcome by `opId`, at most 64 per session for 10 minutes; `session.operations {appSessionId, opIds}` (new, `view`, `laneB('call')`) answers `{outcomes: [{opId, event} | {opId, pending: true} | {opId, unknown: true}]}`; the `operation` part's snapshot key is `operation:<opId>`.
-- **The send's uploads** (M8): `session.send`'s input gains `uploads?: [{uploadId, as: 'document'}]`, behind `rl2.upload-blocks`.
+- **The operation outcomes** (M8): `OperationTable` keeps each completed outcome by `opId`, at most 64 per session for 10 minutes; `session.operations {appSessionId, opIds}` (new, `view`, `laneB('call')`) answers `{outcomes: [{opId, event} | {opId, pending: true} | {opId, unknown: true}]}`; the `operation` part's snapshot key is `operation:<opId>`. *(m8-3.)* The device asks it at every `subbed` for the receipts its waiters hold, and at once for a receipt heard after its opening had reconciled. A completion is emitted once, and a late one once more. A waiter's first may be the late one the host kept in its place, said `late: false`. `unknown` settles as `engine_error` with the spec's sentence, and anything later for that opId is dropped. Every stream end invalidates that subscription's in-flight status and record reads.
+- **The send's uploads** (M8): `session.send`'s input gains `uploads?: [{uploadId, as: 'document'}]`, behind `rl2.upload-blocks` (RL2 1.9). The endpoint reads each through `files.readUploads`: the sending session's own upload root, no link on the way, still there, within the day, a PDF within the engine's bound. A refusal is `ack refused malformed`, with nothing queued, and the engine host refuses a send that still names uploads. `SEND_UPLOADS_MAX` (100) bounds the uploads one message names, apart from `UPLOAD_FILES_MAX` (8), which bounds one `files.upload` call. The composer splits uploads across calls and refuses past the message's bound before anything goes up; the bytes stay bounded per document (32 MiB) and per message (48 MiB) *(M8's review)*. *(m8-3.)* The device sends `uploads` with the act's `requires: 'rl2.upload-blocks'` when the current peer lists it, or when there is no current channel (the act waits for one within its `sendBy`, and the channel it goes on judges it). A `not-offered` from a channel whose peer lists no `rl2.upload-blocks` is sent again, within the same bound, with the mention alone, and logged. Any other refusal is the send's error. A `malformed` refusal of a send that carried uploads is answered `invalid_input` with REMOTE_UPLOAD_REFUSED_WORDS ("The message wasn’t sent. If its attachment is more than a day old or isn’t a supported file, attach it again.", the architect's wording, since the refusal can't say which part failed) and `issues: {refusal: 'malformed', uploads: 'refused'}`.
+- **`connectors.signInServer`** (M8) takes `{name, scope, cwd, appSessionId}`. `connectors.signIn`'s `path` stays required, because a request field moved from required to optional breaks an older receiver.
 - **`session.spawn`'s input** gains `trust?: 'accepted'`, accepted by `spawnRefusal` only for a current machine owner, `spec-field` for anyone else.
+- **The spawned-here lead** (M8, m8-4a; `src/renderer/src/sessions/spawned-here.ts`, read by the sidebar only through `leadsAsSpawned`).
+  - **The mark.** A mark kept in the window's memory is set when `session.start` answers `starting` or a `session.spawn` succeeds. It records the setup phase held at that moment, so a retry's lead ignores an earlier attempt's failure.
+  - **Where the lead sits.** While it holds, the session leads its group under the pinned rows, under either sort. Its tree is always shown: the cap grows by one, and Show more counts with the same tree-wide predicate.
+  - **When it ends:**
+    - at the first turn's end while the session is attached;
+    - at an exited process, at once;
+    - for a listing, at the first rest after `busy`, or when the listing says the session ended;
+    - with nothing showing a first turn running, `LISTING_LEAD_MS` ends it;
+    - a failed or removed start clears it.
+  - *Known limit (accepted by the architect, 2026-11-04):* the mark is per window and is lost on a reload, after which the row ranks by its state.
+- **Resume…'s listed rows** (M8, m8-4a). Each listed row shows under its machine (`@<name>`), and so does a remote record's row. Another member's session, in either form, shows only under a row whose People toggle is on, and a hidden row never grants People. A listed row's preview reads nothing remote.
+- **The remote greying** (M8, m8-4b; `src/renderer/src/lane-b/remote-unavailable.ts`). Applies to a session reached over RL2 (`isOverRl2`: main holds a `remote.session` for it, or the org rows list its machine), whether lane A or lane B. Socket-linked and local sessions grey nothing.
+  - A control greys with its REMOTE_UNAVAILABLE words, or once a `not-offered` refusal has been heard for its command on that machine (`heardRefusal`, now for every session surface).
+  - It covers the composer's `!` and `#` modes, `/btw`'s Ask and Retry, the widgets, Session info, Rename and Dismiss, an archived row's Unarchive and Delete…, and the plugin panes.
+  - An RL2 session's pane tabs show the reason in place of the plugin's drawing, and ask the machine nothing: no `session.ui.panes`, no show or focus, a local close. Its surface sites draw unhooked.
+- **A remote PDF during a running turn** (M8, m8-4b; the architect's option (a), 2026-11-04). A send carrying `uploads` is a `session.send`, never a steer, so it goes through the queue. While a turn runs, the composer says where it will go:
+  - "Joins the paused queue; Resume sends it" for any paused queue (an interrupt's pause holds a fresh send while busy, `queue.ts` `submitNow`);
+  - "Sends after the queued messages" when messages are waiting;
+  - else "Sends after this turn".
+  A local busy send steers its document blocks into the running turn, so the remote one differs. The exit is `uploads?` on the steer path (a tracker line).
+  The upload's day is one value, `UPLOAD_KEPT_MS` (`@shared/ipc/schema/files`), read by the sweep, the send-time refusal and the composer's advisory.
+- **The follow log** (M8, m8-5). The engine host's FsService logs one line when a client holds an agent follow, one when it releases it, and one when the follow is dropped. Each line gives the client's tag, the first 8 hex digits of a sha256 of its id, never the raw id, and the count still holding. Nothing is logged per event.
+- **`ANSWERED_IN_MAIN`** (M8, m8-5; `src/main/machines/remote/answered-in-main.ts`) is the named list of the commands main's adapters answer with no offer row, 25 at M8, each with how it is answered. `test/lane-b/offer-coverage.test.ts` holds every session command crossing a link to exactly one of: offered, REMOTE_UNAVAILABLE, or this list. It checks the list both ways against the adapters.
 - **`mawsd endpoint sync`** (M10): it runs `syncNow()` then `promoteIfListed`, and answers as `endpoint status --json`.
 
 ## Open questions for the owner
@@ -1882,7 +1925,7 @@ Added at M5's re-plan (2026-11-01). Each changes what a person may do on another
   Evidence: b3's task review; `91f9cd47a`.
 - Observation (M5b): a byte count of what is unsent is not a bound on memory: `subarray()` keeps a frame's backing buffer whole until its last byte drains, so a budget must count each frame whole while any of it waits.
   Evidence: the narrow re-check's reproduction (three 60 MiB frames, 1 KiB left each, 180 MiB held); `deb7fa0a9`.
-- Observation (M7's sitting, 2026-11-04): a lane B session spawned from the MacBook on the mini or the VM opens in the pane but gets no row in the MacBook's sidebar, reproducibly (S1's spawn and a fresh one), though `org/listings.json` holds its listing within a second of the spawn; with the tab closed nothing reopens it (no row, no deep link: the app registers no URL protocol).
+- Observation (M7's sitting, 2026-11-04): a lane B session spawned from the MacBook on the mini or the VM opens in the pane but gets no row in the MacBook's sidebar, reproducibly (S1's spawn and a fresh one), though `org/listings.json` holds its listing within a second of the spawn; with the tab closed nothing reopens it (no row, no deep link: the app registers no URL protocol). *Corrected 2026-11-04 (m8-1): there was no id mismatch. The listing is keyed by the app id and the join meets it. The row was cut by the sidebar's 5-or-8 cap under the priority sort, and Resume… lists no listed rows (M8, The sidebar row).*
   Evidence: the owner's screenshots at 05:36Z and about 05:4xZ; the MacBook's `org/listings.json` read at 04:03Z.
 - Observation (M7's sitting): every question on a MAWS-launched session is the MAWS ask, since the launch withdraws the native `AskUserQuestion` (`src/engine-host/launch.ts`, `--disallowedTools`; P2 Decision Log 33), and the ask panel reads and answers through `maws.asks.list` and `maws.ask.answer` (`src/renderer/src/tools/maws/ask/store.ts`), which `src/endpoint/offers.ts` doesn't offer; so a remote question shows (its `maws.ask.opened` event crosses) but can't be read or answered from another Mac. The engine's own `session.answer` is offered and never reached on these sessions.
   Evidence: `src/renderer/src/tools/maws/ask/store.ts` (`maws.asks.list`, `maws.ask.answer`); `src/endpoint/offers.ts` (no row for either at 75944744d, 01d4488cf or 02de6c88c); `src/engine-host/launch.ts` (`NATIVE_ASK_TOOL`).
@@ -2515,6 +2558,204 @@ P5 findings of M5's re-plan, continued from F15:
   The other four of the first round's findings it judged closed.
   Rationale: Each is a correctness boundary against an older peer or a running operation, which the first fold-in had left implicit.
   Date/Author: 2026-11-04, O7's executor (the re-plan).
+- Decision: M8's execution (2026-11-04), on `p5-o7-m8`, cut from the re-plan's head d990d1033. It runs as five tasks, m8-1 to m8-5, in the order M8 names, each reviewed at its frontier before the next one dispatches. The milestone review is reviewer-high.
+  - m8-1's red-first tests land as `it.fails` expectations, so every gate stays green; the task that fixes each one flips it to `it`.
+  - m8-1's protocol probe runs on CI's probe lane, never on this MacBook.
+  Rationale: Each later task consumes m8-1's findings or the layer below it. A red test committed as a plain failure would hold every gate in between.
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: m8-1's sidebar cause (2026-11-04). The listing id was right, and M8's *The sidebar row* premise is withdrawn: the member never read as lane A. What hid the row is the sidebar's cap.
+  - The mini's sminos record of the session (engine id `edad6b82-08c0-49e1-8cf2-c8054dac0d40`) has origin `{kind: 'maws'}`, owners and an owners proof under the `session.spawn` action, and `controller {lane: 'B', since 04:01:38Z}`. The mini endpoint's `listings.json` lists `1c155c56-48a1-4d03-b4b0-76881dfb58cd` as lane **B**, project `ebb30c31…`, the member among its owners, issued 04:01:46.999Z and never re-issued. So `1c155c56` is the appSessionId and `edad6b82` the engine id. The sitting's "app id `edad6b82`" came from sminos's own list (alias `maws-88`), which names sessions by engine id. The device's join by app id meets the listing, so nothing was misfiled. Neither sminos's lane nor A11's `SPAWN_ACTIONS` touches the row.
+  - The row was hidden by the sidebar's own cut. A project shows `SESSIONS_FIRST` (5) rows, and up to `SESSIONS_CAP` (8) after Show more (`sidebar/derive.ts`, `shownCount`). Under the default `priority` sort, pinned, waiting, unread and working local records lead, and a listed row ranks by its one `issued` time. Under `recency` it sinks as local records move. The Resume… picker lists records only (`resume/model.ts`, `chooserRows`). So a listed session past the eighth row of a busy project has no way back. The other candidates are ruled out in code: `mine` is the owners holding the member (`src/main/org/rows.ts`), the machine row is not involved for a listing with a project, and the project was the owner's own.
+  - Red first: `src/renderer/src/sidebar/derive.test.ts`, two `it.fails` cases, "a just-spawned working remote session leads into the visible rows under priority, past more unread local sessions than the cap" and the same "…past more working local sessions than the cap". Each sees only `b0` to `b4` drawn today. *Rewritten after m8-1's review to the parity fix (*The sidebar row*): the earlier `recency` half was what Resume… answers, not the sidebar.* Resume…'s listed rows need a new chooser row kind, so m8-4 writes that red test against its own interface.
+  - For m8-2: "Fix at the source" (an engine id treated as lane B) has no evidence behind it. It is defence only, the controller's call to keep or drop. For m8-4: the renderer engine-id join is defence on the same footing. The fix is how a listed remote row stays reachable (a product call: always drawn, as a lead while it is new or working, or reachable through Resume…), and it flips the test. m8-5's e2e reproduces the row's loss with more than eight local sessions in one project.
+  - Not verified: the owner's group size at the time. The owner's 05:36Z screenshot of the MAWS group, showing eight rows or a Show more, would confirm it.
+  Rationale: The code leaves a listed row nowhere to go past the cap, and the recorded identities rule out a lane A listing. A fix for a misfile that never happened would leave the real loss in place.
+  Date/Author: 2026-11-04, m8-1's executor, from read-only reads of the mini's sminos record and endpoint `listings.json` and the code at 4ce1eab8a.
+- Decision: m8-1's stale "Working…" (2026-11-04). The older build's `turn.ended` shape is ruled out as the cause. The cause is not settled from code.
+  - The producer (`src/engine-host/normalizer.ts`), `SessionEventSchema` and the device's reader are the same at 75944744d (the mini), 01d4488cf and the head. The only shared change is the additive `holds` in `src/shared/engine/status.ts`, after 01d4488cf. Every recorded journal under `spikes/protocol-probe/fixtures/` was pushed through the normalizer and read back with `readTolerant(SessionEventSchema)`: 15144 events, 399 `turn.ended`, none unread. This is now a green pin in `src/engine-host/normalizer-fidelity.test.ts`, "the remote reader over the recorded journals". It names the 21 fixtures that are not journals (transcripts, sidecars, the holder's gate fixture, the workflow probe's launch log). Every other file is a journal, and a row in it that doesn't parse fails with its file and line.
+  - The engine host's `activity: requesting` after `end_turn` is real at the source on every turn, local too (`spikes/protocol-probe/fixtures/permission-roundtrip.jsonl`: set at seq 54, the `result` at 93, cleared only at the next turn's status at 99). No renderer reads it for "Working…" (the re-plan's correction 3). Red first: `src/engine-host/session-status.test.ts`, "clears at the main lane's result" (`it.fails`). M8's acceptance requires it ("The engine host's `activity` clears at a turn's end, local and remote"): m8-2 fixes it and flips the test (the task split's entry). *Corrected 2026-11-04 by the controller, after m8-1's review.*
+  - The design's defence stands: an event the device can't read is dropped with only a log line (`RemoteSession`'s sink, `readTolerant`), so a lost `turn.ended` leaves the turn open. Red first: `src/main/lane-b/remote-session.test.ts`, "marks an unreadable `turn.ended` as a gap at its place, reads the status and the record again, and the re-read status closes the open turn" (`it.fails`, flipped by m8-3). It opens a turn (a running status and a `turn.started` delivered), feeds a `turn.ended` that doesn't read, and expects the gap at its place, `session.status` and `session.get` asked, a `session.status` of the re-read status (idle, `turn: null`) after the gap, a `session.changed` after it, and the session's status idle. The renderer's gap bar is a notice and closes no turn (`transcript/source/ipc.ts`), so the healing runs through the re-read status. *Strengthened after m8-1's review.* Its consumer half: `src/renderer/src/transcript/source/ipc.test.tsx`, "clears a remote turn's working when the gap is followed by the re-read idle status and record" (`it.fails`, flipped by m8-3 or m8-4). It asserts the transcript store's `working` (`state.current !== null`), which draws "Working…"; today it stays true after the gap, the idle status and the record.
+  - What would settle it: the MacBook's main log around 05:28Z for `lane B: …6adfd847…: an event … doesn't read`. A line there means the defence is the fix. No line points to the remaining candidates, the subscription's cursor de-duplication (`subs.ts`) or the renderer's history hydration ordering against the live tail. That log is the owner's data, so the owner or the desk track reads it.
+  Rationale: The shape hypothesis is refuted by every recorded turn end. The defence is cheap and the design already chose it. Choosing between the remaining candidates needs the sitting's own log, not more code reading.
+  Date/Author: 2026-11-04, m8-1's executor.
+- Decision: m8-1's `files.read` `internal` (2026-11-04). The VM's file was absent: an absent file under the session's root and a path outside its directories reach the device as the same bare `internal`.
+  - The panel reads `<record.directory>/.claude/scheduled_tasks.json` (`tools/agents/model/scheduled.ts`, `projectRootOf`). The record's directory is in the session's allowlist, so the files service answers an absent file `not found: <path>` (`missing`, `service.ts`). It answers FILES_REFUSAL only for a path outside the roots or a root that no longer resolves. A fresh VM session with no durable job has no such file.
+  - `#forward` (`src/endpoint/calls.ts`) and the result frame keep only the code, so the device can't tell the two apart. Red first: `test/endpoint/checkout-rows.test.ts`, two `it.fails` cases over the real `registerFilesHandlers` in a scratch checkout, "reaches the device with the service's message: a file absent from the session's root as not found" and "…: a path outside the session's directories as refused". It turned green under a throwaway forward of the message (reverted), so the message is the whole cause. Flipped by m8-2.
+  - Placed in `checkout-rows.test.ts` rather than `calls.test.ts`: it is the files rows' own test, with a session rooted at a real directory.
+  Rationale: The service already tells the two cases apart by message, and the endpoint drops that message. The panel's own `not found:` rule then does the rest.
+  Date/Author: 2026-11-04, m8-1's executor.
+- Decision: m8-1's `@` reference probe (2026-11-04). On engine 2.1.312 an `@<pdf>` mention in a stream-json user frame is expanded but carries no PDF, so M8's typed `uploads` reference stands as designed.
+  - The probe is `spikes/protocol-probe/p5-o7-m8-pdf-mention.test.mjs`, findings in `findings-p5-o7-m8-pdf-mention.txt`. It ran on CI's Linux probe lane (runs 41796086203 and 41796455398). The engine was provisioned by checksum: `scripts/engine-checksums.txt` gains 2.1.312's darwin-arm64, linux-x64 and linux-arm64 lines from its release manifest. It runs against the stub API and spends nothing.
+  - The engine expands a mention in both MAWS forms (a string, and a text block), and a text file's expansion carries its lines. A PDF's expansion is only "PDF file read: <path> (586 bytes)". There is no `document` block and none of the page's text, and the transcript's `file` attachment keeps `base64: ''`. So the sitting's "the agent had to read the file with a tool" is the engine's behaviour, not a lost frame.
+  - The probe's assertions pin this, so an engine bump that starts attaching PDFs fails the probe lane. M8's parity may then be moot.
+  - Not established: a multi-page PDF or another model (one PDF, `claude-haiku-5-5`).
+  Rationale: The mention already reaches the engine and the engine keeps the bytes out of it. Only a block the device or the endpoint builds gives the model the document, as a local drop does.
+  Date/Author: 2026-11-04, m8-1's executor.
+- Decision: M8's task split after m8-1 (2026-11-04).
+  - m8-2 is the machine side, covering the endpoint, the engine host and the shared rows. It also takes the engine host's `activity` cleared at a main-lane `result` and flips that `it.fails`.
+  - m8-3 is main, the device side.
+  - m8-4 is the renderer.
+  - m8-5 holds the contract test and the e2e cases.
+  M8's "fix at the source" (an engine id treated as lane B) and the renderer's engine-id join are dropped: m8-1 showed the listing id was right. m8-4's sidebar fix is a listed row that stays reachable, waiting on the architect's call on its shape. The recommendation is parity: Resume… lists listed rows, and the priority sort ranks a listed row by its own state.
+  Rationale: m8-1's findings; the brief's scope gave the activity flip no owner.
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: The sidebar row's premise is corrected (2026-11-04, the architect on m8-1's finding).
+  - M8's *The sidebar row* is rewritten. The fix is parity: Resume… lists listed rows, and the priority sort ranks a listed row by its own state (the listing's status, M6's attention feed for waiting). "Always drawn" is rejected.
+  - The acceptance is the failure the owner saw: a just-spawned remote session within the visible rows of a group busier than the cap, reachable through Resume… after its tab closes.
+  - M7's Surprises line carries the correction.
+  - The owner's 05:36Z screenshot shows only the MacBook's mini group: six rows, no "Testing session", no Show more. The session wasn't misfiled under the machine, and the MAWS group's count stays unconfirmed.
+  - The stale "Working…" cause stays unsettled. The MacBook keeps no main log on disk (main's lines go to stdout, which a Dock launch doesn't keep), so M8 relies on the gap rule. A persistent main log is a tracker line in M8's PR.
+  Rationale: The recorded identities rule out a misfile, and the code leaves a listed row nowhere to go past the cap.
+  Date/Author: 2026-11-04, O7's executor (the controller), on the architect's ruling.
+- Decision: A session spawned from this app leads its sidebar group until its first turn ends, local and remote alike (2026-11-04, the architect, under P5 acceptance 5, O7's acceptance 4). After that it ranks by its state, and Resume… reaches it past the cap. **This is a sidebar-order change the architect made in the owner's place, and the owner can overrule it.**
+  Rationale: Acceptance 5's intent is that the person sees the session they just started, and a capped-away row fails that whichever machine it runs on. The local priority sort ranks unread above working, so the same loss happens locally; fixing both keeps parity. The alternative, strict parity with the acceptance relaxed to "ranked by its state, reachable through Resume…", would leave a busy group hiding a just-started session.
+  Date/Author: 2026-11-04, O7's executor (the controller), on the architect's ruling.
+- Decision: m8-2 is run as two tasks (2026-11-04).
+  - m8-2a is the rows and the stream: §U's M8 offer rows with the `task-list` rule, the forwarded failure's message, the engine host's `activity` clear, the operation outcomes and `session.operations`, and the `operation`, panel and `tasks` parts.
+  - m8-2b is the machine-side contracts: the typed `uploads` expansion behind `rl2.upload-blocks`, `connectors.signIn` resolving the entry on the session's machine, and the shared `REMOTE_UNAVAILABLE` set.
+  m8-3 to m8-5 follow as planned. m8-1 was reviewed clean after two fix rounds.
+  Rationale: m8-2's scope is the machine side, too large for one executor's reliable hold. The split follows its two seams: the offer table with the stream, and the send with sign-in.
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: A subagent follow is owned by the client that started it (2026-11-04, the architect, on m8-2a's concern). An `fs.agentEvents` follow ends when that client's channel ends or that client unfollows, and another client never stops it. m8-2b builds it with a test, and `fs.unfollow` is offered for the caller's own follows.
+  `WIRE_MINOR` is the landing's, by P5 Decision Log 44's rule. To keep the branch's unit gate green in between, m8-2b bumps it once to master's plus one (24 to 25) with the manifest, and the landing re-bumps if master has moved.
+  Rationale: A remote client can now start a follow (M4's offered `fs.agentEvents`). The unoffered `fs.unfollow` stops every client's, so a remote panel could end the machine's own. A red `wire.test.ts` across four tasks would hold every class 1a run.
+  Date/Author: 2026-11-04, O7's executor (the controller), on the architect's ruling.
+- Decision: m8-2a's build (2026-11-04, reviewed clean after one fix round).
+  - **Offered, with registry grades.**
+    - Engine-host `laneB('call')` reads: `session.getHooksListing`, `getMemoryDialog`, `getSkillsDialog`, `getSandboxDialog`, `exportConversation`, `getBinaryVersion` and `promptHistory`.
+    - Machine-services `laneBMachine('call')`: `session.observedFacts` and `session.recentTurns`.
+    - §U's rows.
+  - **Left for `REMOTE_UNAVAILABLE`:**
+    - `session.drafts.get`: per member, O8 M6;
+    - `fs.unfollow`: offered by m8-2b for the caller's own follows;
+    - the `session.ui.*` reads;
+    - `session.setVisible`, `session.intent.get`, `attention.request`, `files.openExternal`, `files.reveal`, `side.screenshot.preview`, `ownerChannel.*`, `laneA.*`.
+    The rule: offer a session's own read when it is harmless to other clients. Declare anything per member, anything that acts on the asking client, anything with cross-client effects, and anything of another lane.
+  - **The forwarded message** goes on every forwarded failure code. The artifact rule's session-naming reads keep their code alone.
+  - **Operation outcomes** are kept at emission, so `session.operations` never answers ahead of the live event. It is its own command group, `o7m8Commands`.
+  - **The `task-list` rule** checks the list after the rank. It reads the list only from a status of the engine session the request was placed on, and a session moved since is `unavailable`. The sanitiser lives in `src/shared/engine/task-list.ts`.
+  - **Panel parts** are plane B change notices. `workflow:<runId>` and `operation:<opId>` are keyed. `subagents`, `tasks` and `side` are one slot each.
+    - The `side` part is derived from `side.question.list`, read at each side question's completion, and is generation-checked.
+    - Notices are bounded both queued and held. Past the bound the stream ends `behind`.
+  - **m8-3 consumes:**
+    - `handles` for `maws.ask.answer` (resuming a released session first), `side.question.clear` and `session.reloadPlugins`;
+    - each part emitted as its event (`{side}` has no existing event, so the side store needs one or a refresh);
+    - a remote `fs.tasks` carrying `appSessionId`;
+    - on reopen, `session.operations` for its waiters;
+    - `ended('behind')` reopening from the cursor rather than ending for good. Today only `unavailable` retries (`remote-session.ts` `ended`). This is the gap rule applied to the bound.
+  Rationale: The executor's report (`task-2-report.md`) and the task review's three fixes: the task list bound to its engine session, the notices bounded, and the side read checked against its generation.
+  Date/Author: 2026-11-04, O7's executor (the controller), from m8-2a's executor.
+- Decision: m8-2b's build and the architect's rulings on it (2026-11-04).
+  1. **Sign in by name.** It is a new command, `connectors.signInServer`, which departs from the spec's "`connectors.signIn` with `path` optional". A request field going from required to optional breaks an older receiver, so the additive command is the right shape (the architect, confirmed). m8-3 adds it to `MACHINE_ACTS` and `CONSENT_COMMANDS`, and m8-3 and m8-4 use that name.
+  2. **`attention.request` and `laneA.*`** stay out of `REMOTE_UNAVAILABLE`, because main's adapters answer them. Accepted on a condition: m8-5's contract test counts main's adapter-answered commands through an explicit named list, a third kind of coverage. Every session command must sit in exactly one of three: offered, declared unavailable, or answered by main.
+  3. **A refused upload send** reaches the device as `ack refused malformed` with no reason. m8-4 shows it the way a session shows an error, never raw and never dropped: "The attachment couldn't be sent. It may have expired or isn't a supported file. Attach it again." The device may warn before sending an upload acked more than a day ago (advisory). The reasonless RL2 refusal is a tracker line in M8's PR.
+  4. **A page reload** ends that page's agent follows, and the next read starts a new one. This follows from follow ownership.
+  5. **Versions.** RL2 1.8 to 1.9 (`rl2.upload-blocks`) and `WIRE_MINOR` 25 on the branch. The landing re-bumps both if master has moved.
+  6. **`authorize.ts` step 2 now applies a registry row's `accepts`.** This is a lens for M8's reviewer-high. At e01ba1876..4e797a49b, the only registry command whose row carries `accepts` is the new `fs.unfollow`. `forward.open`, `client.windowShown` and `machine.browserControl` are the endpoint's own names. `artifacts.fetch`, `documents.open` and `browser.screencast` are stream rows, whose `accepts` was already read at the open. So no existing row's `accepts` was written on the assumption that it was never enforced.
+  `REMOTE_UNAVAILABLE` holds 53 commands plus `mods.list`. The unit gate's four fixes include m8-2a's `remote-link.test.ts`, which was hidden while `wire.test.ts` was red. The static and unit gates passed (run 41814137865).
+  Rationale: m8-2b's report (`task-3-report.md`) and the architect's rulings on its concerns.
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: m8-2b's review fixes (2026-11-04). The task review raised three Important findings; each is closed, and the re-review approved the range 23a4c1546..8e449ce85.
+  1. **A waiting reader holds the follow.** `FsService.awaiting` counts a reader waiting on a follow that is being started or already exists. Another client's end that would leave the follow unheld no longer stops it while a reader is about to take its hold (`7a338f61a`).
+  2. **An unfollow reaches only a host that keeps ownership.** A new engine-host capability, `host.followOwners`, means "a follow is held by each client that started it, and an unfollow lets go only of the caller's hold". The endpoint reads the live host's welcome through the seam's `engineHostLists` and sends `fs.unfollow` only to a host that lists it. An older same-major host stops a named follow whoever asks, so it is not asked (`unavailable`, logged). `WIRE_MINOR` is 26 on the branch, re-bumped at the landing (`30aa7406b`).
+  3. **Uploads fail closed where an open can't be confirmed.** `no-link.ts` names the condition `OPENS_CONFIRMED`: false off macOS when there is no `/proc/self/fd`, because there an ancestor turned into a link after the walk would lead an open out of the root unseen. `confirmOpens()` (`upload-roots.ts`) runs before `readUpload` walks and before `files.upload` writes its record, the exclude or any file. Both refuse with their existing typed refusal (`3b8ef5e22`, `8e449ce85`; the write side was added beyond the finding).
+  Lane A's `media.ts` still writes through `saveFiles` without the check. That is pre-existing: remote lane A refuses `laneA.media`, and the macOS path opens every component atomically. It stays as conditional debt (non-macOS, no `/proc`, a same-uid client), not this task's scope. The static gate passed on `8e449ce85` (run 41819631532).
+  Rationale: the task review and re-review (`task-3-report.md`, sections 1 to 4).
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: m8-3's build, its three review rounds and the architect's rulings (2026-11-04). The range is 5b23199a8..f163352c7.
+  - **Accepted as built:**
+    1. `{side}` emits nothing, because its completion is the `operation` part.
+    2. A lost operation's code is `engine_error`. A new `OperationErrorSchema.code` member would be a wire major.
+    3. A recovered late completion is a waiter's first.
+    7. The attachment's refusal is worded in main.
+    8. `session.operations` is asked at every `subbed`.
+    9. Gap re-reads run one at a time per subscription.
+    10. `EndpointCapability` types the endpoint-only capability.
+  - **Accepted on a condition:** decision 5, `fs.tasks`'s session fallbacks (input, then envelope, then the open lane whose list matches). m8-4 always passes `appSessionId`, so the open-lane fallback serves only older renderer paths.
+  - **Built on the architect's rulings:**
+    - A: every panel re-lists at a reopening.
+    - B: `behind` backs off when bounded by progress.
+    - C: decision 4 is reversed. A session-wide unfollow becomes this device's named unfollows.
+    - D: a send with no current channel carries its uploads under `requires`. The mention-only resend goes only to a peer without the capability.
+    - The refusal's wording is honest about its cause.
+    §U carries each.
+  - **Review fixes:**
+    - Round 1: a receipt heard after a later opening reconciled is asked at once (an openings count), and every `ended` invalidates in-flight reads, so a released launch's context can't come back.
+    - Round 2: the typecheck; the subagents relist guarded by a part count; workflow invalidation without a last run; the stalled backoff kept apart from `subbed`; a session-wide unfollow waiting for reads in flight; the resend guarded by the peer's capability.
+    - Round 3: a failed read's agent is kept until its unfollow succeeds.
+    The controller verified round 3 directly, a one-function change with its red-first case.
+  - **For m8-4:**
+    - Flip `ipc.test.tsx:509`. Main emits `remote.gap`, the re-read `session.status`, then `session.changed`.
+    - `refreshSide` on `remote.reopened`.
+    - `uploads` on `session.send` for each uploaded PDF. The `uploadId` is the last path component `files.upload` answered.
+    - Show REMOTE_UPLOAD_REFUSED_WORDS as a send error, known by `issues.uploads`.
+    - `connectors.signInServer {name, scope, cwd, appSessionId}` from the widget.
+    - `fs.tasks` always passes `appSessionId`.
+  - **PR tracker lines:**
+    - Remote side questions re-list on a reopening only once the renderer listens to `remote.reopened`; this closes with m8-4.
+    - Follows are held per device, not per window, so one window's session-wide unfollow also ends another's follows of that session on that machine. This matches the local form.
+    - The `test/lane-b/remote.test.ts` fsevents watch timeout, not yet in the tracker.
+  Rationale: `task-4-report.md` with its three fix sections, and the task review rounds.
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: m8-4 was run as two tasks, m8-4a and m8-4b, and m8-4b ran beside m8-4a's review (2026-11-04).
+  - m8-4a is where sessions show and how their streams draw. m8-4b is the session surfaces, greyed or working.
+  - The two touched disjoint files. Each executor fast-forwarded before each commit and committed only its own paths.
+  - m8-5 ran the same way beside both fix rounds.
+  Rationale: the renderer's scope is too large for one executor's reliable hold. Disjoint files let the independent halves run at once.
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: m8-4a's build, two review rounds and the architect's rulings (2026-11-04). The commits run from 052ea5914 to c9096fbc2. §U carries the lead and Resume….
+  - **Built:**
+    - listed-row parity, in Resume… and in the priority sort (waiting comes from the attention feed only, as for a record);
+    - the spawned-here lead;
+    - gap healing by arrival order at the IPC listener, withdrawn only by a turn the parent's display admits, with an unseen-turn closure that claims no process exit;
+    - `refreshSide` on `remote.reopened`;
+    - `fs.tasks` passing `appSessionId` whenever the session is known.
+  - **The architect's rulings:**
+    - the lead sits under pinned rows, always shown while it holds, the cap growing by one, under either sort;
+    - the per-window mark is accepted as a known limit.
+  - **Fixes:**
+    - Round 1: People in both forms; arrival-order healing; no synthetic `process.exited`; the lead bounded and cleared on a failed start; no listing-only waiting tier.
+    - Round 2: a child's turn not cancelling the parent's heal; an exited process ending the lead, and an idle status no longer suppressing the fallback; a retry's lead tied to its own attempt; the cap exception tree-wide.
+    - Plus m8-5's discovery, a remote record row's machine chip.
+    The controller verified round 2 directly.
+  Rationale: `task-5-report.md` and the two task reviews.
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: m8-4b's build, two review rounds and the architect's rulings (2026-11-04). The task's own commits run from aa8cea562 to 306b06806. §U carries the greying and the PDF rule.
+  - **Built:**
+    - greying from one helper;
+    - Sign in on the MCP widget through `connectors.signInServer`, local and remote, with Reconnect staying a restart;
+    - Review's untracked rows through `git.diff` scope `untracked`, an untracked binary drawn and signed by its fetched patch;
+    - scheduled jobs reading no jobs on a machine with no file (confirmed, no product change);
+    - the composer's `uploads`, with the refusal shown as a send error with Send again, and the day-old advisory.
+  - **The architect's ruling:** option (a) for a PDF during a running turn. Local steers its document blocks, so remote steer parity is a PR tracker line.
+  - **Fixes:**
+    - Round 1: the greying reaching `!`/`#` and `/btw`; keying on RL2 transport (lane A too); the queued wording; the binary signature; the shared day constant.
+    - Round 2: the plugin panes; the paused-queue wording, corrected by the controller for an interrupt's pause while busy.
+  - A widget read the machine refused shows `error` with the machine's words, not `unavailable`, which would offer a Load now that can't help.
+  Rationale: `task-6-report.md` and the two task reviews.
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: m8-5's build, one review round and the architect's rulings (2026-11-04). The commits are d2bc44e00, c92b99084, 7fa4aacc5, 2c3f5d8fc and 86089a51b.
+  - **The contract test** has the third kind the architect required (`ANSWERED_IN_MAIN`, §U). It was shown to fail on a deliberately unclassified command. It found no gap on the branch.
+  - **The `e2e:remote` M8 case:**
+    - a group over the cap, then a session spawned on B through New chat, shown within the visible rows, closed, and reopened through Resume…;
+    - a concurrent second app of the member's (A2, a second device in the fake org) that proves acceptance 5's second client: (a) the listed row and Resume… on the client with no mark; (b) the ask answered on A settling on A2; (c) A's unfollow, and then A quitting, leaving A2's follow held, read from B's follow log, with A2's own unfollow as the control;
+    - the MAWS ask answered from this Mac;
+    - `/btw` across a link drop, asserting the opId's `session.operation` (`late: false`) reaches A exactly once after the restore;
+    - greying with its reason.
+  - **No 5 s assertion** (the architect: acceptance 5's bound is measured live at M10, and a hosted runner carries no wall-clock bound). The case logs the time to the row, and the figure goes in M8's PR.
+  - The follow log (§U) is the product seam (c) needed. Without it no client can observe a follow on B.
+  Rationale: `task-7-report.md` and the task review, which found the operation assertion passable without delivery and the reload not a second client.
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: The browser-screencast inventory case waits for its snapshot (2026-11-04, the architect). Unit 2/4 of run 41859199882 failed at `test/endpoint/browser-screencast.test.ts:532` (`expected false to be true`). The case read the inbox for the resubscribed feed's snap right at `subbed`. The trace showed m8-2b's `accepts` step does not reach it: a feed's `sub` is authorized on the subscription path, not `#command`. So the test raced. It now waits (`c859697de`, `d5e04bb5f`). This is one PR-body line, with no tracker line.
+  Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: M8's reviewer-high fixes, and master merged before the final gate (2026-11-04).
+  - The review covered `d990d1033..86089a51b` under the accepts lens, upload confinement, follow ownership, wire additivity, the device's reconcile, the renderer and the tests. It found two Important defects and nothing in authorization or the wire:
+    1. A gap's re-read applied its `session.get` record unconditionally, so a record the checkout feed delivered while the reads were out was rolled back under a fresh device revision. It is now guarded by a record-change generation, as the status already was (`674eddeec`).
+    2. `session.send.uploads` was bounded by `UPLOAD_FILES_MAX` (8), the per-call upload batch. Nine small PDFs uploaded in two calls and the send was then refused. The send now takes `SEND_UPLOADS_MAX` (100), one constant shared by the schema, `files.readUploads`, the endpoint's expansion and the composer (`4515a6bb5`).
+  - The manifest's two `maxItems` were edited by hand. `pnpm wire:manifest` classes a raised `maxItems` as breaking, but both entries exist only since minor 25 on this branch (master is at 24), so no peer ever held the old bound. `wire.test.ts` passes byte for byte, and `WIRE_MINOR` stays 26.
+  - origin/master (828114952) was merged in (`23b97fd50`) so the final `--gates all` runs on the tree that lands. The architect confirmed no re-bump: master is still WIRE 24 and RL2 1.8, so the branch's 26 and 1.9 stand. P5's own entry is the architect's, written at M8's landing.
+  Rationale: the review's two findings, with their failure scenarios; and the architect's landing rulings.
+  Date/Author: 2026-11-04, O7's executor (the controller).
 
 ## Outcomes & Retrospective
 
@@ -2649,6 +2890,25 @@ P5 findings of M5's re-plan, continued from F15:
   - The lessons of M5a and M5b bound every brief, and the reviews still found the same class each round: a resource a peer can hold that one path forgets (a late acquisition, a cancel before its send, a stalled event loop past a deadline). Naming that class as a review lens found each before it shipped; writing every acquisition as one decision on one clock is what closed it.
   - The scene's first observer was a replay that could not verify a source, and a correct product refusal looked like a test failure; asking which layer is right before fixing the test saved a wrong fix.
   - A flaky line in an unrelated-looking spec was a product race older than this work; treating it as red until explained found it.
+
+**M8 (2026-11-04).** The sitting's failures are removed in tests and `e2e:remote` on CI. Their live re-check is M10's.
+- **Acceptance 4.** A just-spawned remote session leads its group under the pins and is always shown while its first turn runs. Resume… reaches listed sessions, other members' only under People. Proved in `derive.test.ts`, `resume/model.test.ts` and `e2e:remote`.
+- **Acceptance 5.** A second attached app sees and opens the session by parity. An ask answered on one app settles on the other. One client's unfollow, or its quitting, leaves the other client's follow held. Proved in `e2e:remote` with two apps, read from B's follow log.
+- **Acceptance 2 and 9.** The MAWS ask is answered from another Mac. `/btw`, Reload plugins and the widgets complete across the link, an operation's completion surviving a link drop exactly once. Proved in `remote-session.test.ts` and `e2e:remote`.
+- **Acceptance 6.** Every session command crossing a link is offered, declared unavailable, or answered by main, held by `offer-coverage.test.ts`. A declared control greys with its reason, for lane A and lane B over RL2.
+- **The rest.**
+  - A remote PDF reaches the model as a `document` block (`rl2.upload-blocks`).
+  - Sign in from the MCP widget.
+  - Untracked files in Review.
+  - "No jobs" on a machine without a schedule.
+  - A forwarded failure's message.
+  - An unreadable event as a gap that re-reads and heals the turn.
+- **Not proved here.** Acceptance 5's 5 s bound is measured live at M10. Remote PDF steering into a running turn is not parity with local (a tracker line).
+- **Retrospective:**
+  - A diagnosis pass before any fix paid for itself. m8-1 withdrew the plan's id-mismatch premise: the row was cut by the cap. Without that pass, M8 would have built a join for a mismatch that didn't exist.
+  - Lifecycle code drew the most review rounds: reopen and backoff, operation reconciliation, hydration order, the lead's end conditions. Each round found a real interleaving the last one missed. The rounds converged once each fix came with a reproduction ported into the suite.
+  - Running disjoint tasks side by side in one worktree worked: fast-forward before each commit, and commit only your own paths. It cost only harmless ref-lock messages.
+  - A product seam for observability (the follow log) was the cheapest way to make a multi-client authorization property provable end to end.
 
 **M7's live runs (2026-11-04).** The measured acceptance is CI's: `e2e:remote-latency` on the mini, run 41573992251 (master bf6766af7, the direct-resume fix of PR #457; 2026-11-03 03:44Z; valid; the mini's load 3.26/4.33/3.69 at its start), every figure within item 3's bounds against the same run's local numbers:
 

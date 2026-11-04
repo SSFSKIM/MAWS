@@ -450,16 +450,19 @@ export class EditorController {
     this.busy = false;
     this.view.setBusy(false);
     this.editor?.setEditable(this.inputs.disabled === null);
+    // The caret comes back only if the focus has not gone elsewhere since the send: going read-only for the flight
+    // drops it to the page in Chromium, and then the editor takes it again; an editor that kept it keeps it (an empty
+    // document has one caret place); a focus the person moved meanwhile, to a transcript row's Copy or another pane,
+    // stays where they put it.
+    const back = focused && !this.editor?.isFocused && focusIsOnThePage();
     if (accepted) {
       this.inputs.onSuggestionTaken?.();
       this.nav = { index: null, draft: null };
-      // The caret comes back only if the focus has not gone elsewhere since the send: going read-only for the flight
-      // drops it to the page in Chromium, and then the editor takes it again; an editor that kept it keeps it (an empty
-      // document has one caret place); a focus the person moved meanwhile, to a transcript row's Copy or another pane,
-      // stays where they put it.
-      const back = focused && !this.editor?.isFocused && focusIsOnThePage();
       this.setDoc(emptyDoc(), { silently: true, caret: back ? 'end' : null });
       void this.refreshHistory();
+    } else if (back) {
+      // P5 O7 M8: a refused send (a greyed `!` or `#`, a failed send) keeps its text, and the caret where it was
+      this.editor?.view.focus();
     }
     this.takePrefill();
     drainComposerAttachments(this.inputs.appSessionId); // P3-G: what the queue held while this composer was busy, after a prefill (it adds to the document)

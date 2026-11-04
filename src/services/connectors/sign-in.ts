@@ -84,7 +84,7 @@ export interface SignInDeps {
   emit(event: ConnectorSignInChanged): void;
   ready(appSessionId: string): boolean; // the session's process is ready now
   onSessionGone(listener: (appSessionId: string) => void): () => void; // its process left ready
-  check(entry: ConnectorConfiguration & { path: string; appSessionId: string }): Promise<string | null>; // why the session's engine does not use this entry, or null
+  check(entry: ConnectorConfiguration & { path?: string; appSessionId: string }): Promise<string | null>; // why the session's engine does not use this entry, or null (P5 O7 M8: no path, the entry of the name and scope it uses)
   // P5 O7 M5c: a remote asker's relayed receivers (the spine's one registry, shared with the connectors' Connect), and
   // this machine's name, for a sign-in that must be made here. Absent: a registry of its own, and "this machine".
   relayed?: Pick<RelayedCallbacks, 'arm'>;
@@ -108,7 +108,7 @@ export const connectorKey = ({ name, scope, cwd }: ConnectorConfiguration): stri
 
 export interface SignIn extends Settling {
   // P5 O7 M5c: `callback`, a remote asker's loopback port (./relayed-callback.ts)
-  start(input: ConnectorConfiguration & { path: string; appSessionId: string }, client: ClientRef | null, callback?: { port: number }): { opId: string };
+  start(input: ConnectorConfiguration & { path?: string; appSessionId: string }, client: ClientRef | null, callback?: { port: number }): { opId: string };
   cancel(opId: string): boolean;
   stop(): void;
 }
@@ -128,7 +128,7 @@ interface Operation {
   opId: string;
   name: string;
   connector: string; // connectorKey
-  configuration: ConnectorConfiguration & { path: string }; // the entry asked for
+  configuration: ConnectorConfiguration & { path?: string }; // the entry asked for (P5 O7 M8: by its file, or by its name and scope alone)
   appSessionId: string;
   client: ClientRef | null; // who asked: the browser the authorization URL opens in
   state: State;
@@ -447,6 +447,8 @@ export function startSignIn(deps: SignInServiceDeps): Settling & { stop(): void 
     check,
   });
   deps.bus.register('connectors.signIn', ({ name, scope, cwd, path, appSessionId, callback }, { client }) => signIn.start({ name, scope, cwd, path, appSessionId }, client, callback));
+  // P5 O7 M8: the server the session's engine uses for the name, of the scope asked, its entry read here (`check`)
+  deps.bus.register('connectors.signInServer', ({ name, scope, cwd, appSessionId, callback }, { client }) => signIn.start({ name, scope, cwd, appSessionId }, client, callback));
   deps.bus.register('connectors.signInCancel', ({ opId }) => ({ cancelled: signIn.cancel(opId) }));
   return {
     busy: () => signIn.busy(),

@@ -128,6 +128,24 @@ describe('watchScheduledFile', () => {
     expect((states.at(-1) as { message: string }).message.length).toBeGreaterThan(0);
   });
 
+  // P5 O7 M8 (m8-4b; "Scheduled jobs and `internal`"): a remote session's machine with no scheduled_tasks.json. The
+  // machine's files service fails the read `internal` with `not found: <path>` (test/endpoint/checkout-rows.test.ts pins
+  // the endpoint forwarding that message, m8-2a), the link passes the failure on as it came (link.ts `answered`), and
+  // main's refusalError keeps an IPC code's message as the IPC error's (dispatch.ts): the panel hears that message and
+  // reads no jobs. Before m8-2a the device heard the code alone, which main words `files.read: internal on machine <name>`:
+  // an error, the sitting's.
+  it('reads no jobs from a remote machine’s missing file, its message as main delivers it; the code alone was an error', async () => {
+    fake.dirs.add(DIR).add(ROOT);
+    fake.refuse.set(FILE, `not found: ${FILE}`);
+    await start();
+    expect(states.at(-1)).toEqual({ status: 'ok', jobs: [] });
+    stop?.();
+    states = [];
+    fake.refuse.set(FILE, 'files.read: internal on machine vm');
+    await start();
+    expect(states.at(-1)).toEqual({ status: 'error', message: 'files.read: internal on machine vm' });
+  });
+
   // main drops a root that no longer resolves from the allowlist and refuses every path under it (allowlist.ts rootsOf)
   it('reads no jobs, and says nothing, when the project root is gone', async () => {
     const refusal = "path outside the session's directories";

@@ -9,6 +9,7 @@ import type { PaneRoster } from '@shared/engine/surface';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
+import { remoteUnavailableOf } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { instanceOf, panelHost, registerPanelTool, setTitle, shownSession } from '../panel/host';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -80,10 +81,12 @@ function reconcile(appSessionId: AppSessionId): void {
   }
   if (answered.get(appSessionId) === request) return;
   answered.set(appSessionId, request);
+  // P5 O7 M8: a session on another machine reached over RL2 is not offered the pane commands; its tab still opens
+  const answers = remoteUnavailableOf(appSessionId, 'session.ui.paneFocus') === null;
   if (shown && open.has(request)) {
     openPaneTab(appSessionId, request);
-    void panesClient().invoke('session.ui.paneFocus', { appSessionId, id: request });
-  } else void panesClient().invoke('session.ui.paneFocus', { appSessionId, id: null });
+    if (answers) void panesClient().invoke('session.ui.paneFocus', { appSessionId, id: request });
+  } else if (answers) void panesClient().invoke('session.ui.paneFocus', { appSessionId, id: null });
 }
 
 function setRoster(appSessionId: AppSessionId, roster: PaneRoster | null): void {
@@ -114,6 +117,7 @@ export function connectPluginPanes(client: MawsBridge = ipc): () => void {
   const pushed = new Map<AppSessionId, number>(); // pushes seen per session, so a read older than a push is dropped
   let disposed = false; // a read this connection made after it was replaced (a remount) never applies
   const read = (appSessionId: AppSessionId) => {
+    if (remoteUnavailableOf(appSessionId, 'session.ui.panes') !== null) return; // P5 O7 M8: its pushes alone say its roster
     const before = pushed.get(appSessionId) ?? 0;
     void client.invoke('session.ui.panes', { appSessionId }).then((result) => {
       if (disposed || !result.ok || !attached.has(appSessionId) || (pushed.get(appSessionId) ?? 0) !== before) return;

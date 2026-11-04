@@ -10,6 +10,7 @@ import { Icon } from '../app/IconButton';
 import { useComposerStore } from '../stores/composer';
 import { useNotices } from '../stores/notices';
 import type { PanelTool, PanelToolContext } from '../panel/tool';
+import { remoteUnavailableOf, useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { panesClient, usePaneRoster } from './pane-roster';
 import { useCells } from './cells';
 import { SurfaceSite } from './SurfaceSite';
@@ -58,6 +59,9 @@ function PaneBody({ state, ctx }: { state: PluginPaneState; ctx: PanelToolContex
   const { columns, rows } = useCells(ref, { columns: COLUMNS, rows: ROWS });
   const client = panesClient();
   const { appSessionId, paneId } = state;
+  // P5 O7 M8: a session on another machine reached over RL2 is offered none of the pane commands (REMOTE_UNAVAILABLE's
+  // `session.ui.*`): the tab says why in place of the plugin's drawing, and nothing is asked of the machine
+  const unavailable = useRemoteUnavailable(appSessionId, 'session.ui.render', 'session.ui.paneShow', 'session.ui.paneFocus');
 
   // R3: only a visible dialog-like pane holds transient notices (PaneOpenArgs.holdToasts).
   useLayoutEffect(() => {
@@ -75,7 +79,7 @@ function PaneBody({ state, ctx }: { state: PluginPaneState; ctx: PanelToolContex
   const shownId = roster?.shownId ?? null;
   const present = pane !== null;
   useEffect(() => {
-    if (appSessionId === null || paneId === null || !present || shownId === paneId) return;
+    if (appSessionId === null || paneId === null || !present || shownId === paneId || unavailable !== null) return;
     void client.invoke('session.ui.paneShow', { appSessionId, id: paneId });
     // asked once per showing of the tab; a later move of the engine's shown pane is the roster's to follow
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -90,11 +94,11 @@ function PaneBody({ state, ctx }: { state: PluginPaneState; ctx: PanelToolContex
 
   const focusedId = roster?.focusedId ?? null;
   const onFocus = () => {
-    if (appSessionId === null || paneId === null || focusedId === paneId) return;
+    if (appSessionId === null || paneId === null || focusedId === paneId || unavailable !== null) return;
     void client.invoke('session.ui.paneFocus', { appSessionId, id: paneId });
   };
   const onBlur = (event: FocusEvent<HTMLDivElement>) => {
-    if (appSessionId === null || ref.current?.contains(event.relatedTarget as Node | null) || focusedId !== paneId) return;
+    if (appSessionId === null || ref.current?.contains(event.relatedTarget as Node | null) || focusedId !== paneId || unavailable !== null) return;
     void client.invoke('session.ui.paneFocus', { appSessionId, id: null });
   };
 
@@ -109,6 +113,14 @@ function PaneBody({ state, ctx }: { state: PluginPaneState; ctx: PanelToolContex
   };
 
   if (pane === null) return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{PANE_COPY.closed}</p>;
+  if (unavailable !== null)
+    return (
+      <div ref={ref} tabIndex={-1} data-plugin-pane={pane.id} className="flex h-full min-h-0 flex-col outline-none" onKeyDown={onKeyDown}>
+        <p role="status" className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">
+          {unavailable}
+        </p>
+      </div>
+    );
   return (
     <div ref={ref} tabIndex={-1} data-plugin-pane={pane.id} className="flex h-full min-h-0 flex-col outline-none" onFocus={onFocus} onBlur={onBlur} onKeyDown={onKeyDown}>
       <SurfaceSite
@@ -151,6 +163,7 @@ export const pluginPaneTool: PanelTool<PluginPaneState, PluginPaneParams | undef
   // attached has no pane to keep, so its tab just goes
   async beforeClose(state) {
     if (gone.has(state) || state.appSessionId === null || state.paneId === null) return true;
+    if (remoteUnavailableOf(state.appSessionId, 'session.ui.close') !== null) return true; // P5 O7 M8: closed here alone
     const result = await panesClient().invoke('session.ui.close', { appSessionId: state.appSessionId, id: state.paneId });
     return !result.ok || result.value.closed;
   },

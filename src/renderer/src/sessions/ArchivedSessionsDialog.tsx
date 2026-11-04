@@ -11,6 +11,7 @@ import { machineOf } from '@shared/machine/address';
 import { machineKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
+import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { selectOffline, useMachines } from '../stores/machines';
 import { machineName, machineOfRow, orgKeyOf, rowName, rowOfSession, rowProjects, selectOrgIndex, type RowKey } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
@@ -71,27 +72,37 @@ export function ArchivedSessionsDialog({ projectId, machine: named }: { projectI
       ) : (
         <ul aria-label="Archived sessions" className="m-0 flex max-h-[50vh] list-none flex-col overflow-auto p-0">
           {rows.map((r) => (
-            <li key={r.appId} aria-label={displayTitle(r)} className="flex items-center gap-2 border-b border-border py-1.5 last:border-b-0">
-              <div className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-fg">{displayTitle(r)}</span>
-                <span className="truncate font-mono text-ui-sm text-fg-muted">{r.worktree?.path ?? r.directory}</span>
-              </div>
-              <button type="button" onClick={() => void unarchive(r.appId)} className={SECONDARY}>
-                Unarchive
-              </button>
-              {r.worktree !== null && isManagedWorktree(r.worktree.path) && (
-                <button type="button" onClick={() => openDialog({ kind: 'cleanup', target: cleanupTargetOf(r)! })} className={QUIET}>
-                  Remove worktree…
-                </button>
-              )}
-              <button type="button" onClick={() => openDialog({ kind: 'delete', appSessionId: r.appId })} className={QUIET}>
-                Delete…
-              </button>
-            </li>
+            <ArchivedRow key={r.appId} record={r} onUnarchive={() => void unarchive(r.appId)} />
           ))}
         </ul>
       )}
       {rows !== null && error && <p className="m-0 mt-2 text-ui-sm text-danger">{error}</p>}
     </Sheet>
+  );
+}
+
+// P5 O7 M8: unarchiving and deleting a session of a machine reached over RL2 are declared not offered there
+// (lane-b/remote-unavailable.ts): the buttons stay, greyed with the declared words
+function ArchivedRow({ record: r, onUnarchive }: { record: SessionRecord; onUnarchive(): void }) {
+  const unarchiveUnavailable = useRemoteUnavailable(r.appId, 'session.update');
+  const deleteUnavailable = useRemoteUnavailable(r.appId, 'session.delete');
+  return (
+    <li aria-label={displayTitle(r)} className="flex items-center gap-2 border-b border-border py-1.5 last:border-b-0">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-fg">{displayTitle(r)}</span>
+        <span className="truncate font-mono text-ui-sm text-fg-muted">{r.worktree?.path ?? r.directory}</span>
+      </div>
+      <button type="button" onClick={onUnarchive} disabled={unarchiveUnavailable !== null} title={unarchiveUnavailable ?? undefined} className={SECONDARY}>
+        Unarchive
+      </button>
+      {r.worktree !== null && isManagedWorktree(r.worktree.path) && (
+        <button type="button" onClick={() => openDialog({ kind: 'cleanup', target: cleanupTargetOf(r)! })} className={QUIET}>
+          Remove worktree…
+        </button>
+      )}
+      <button type="button" onClick={() => openDialog({ kind: 'delete', appSessionId: r.appId })} disabled={deleteUnavailable !== null} title={deleteUnavailable ?? undefined} className={QUIET}>
+        Delete…
+      </button>
+    </li>
   );
 }

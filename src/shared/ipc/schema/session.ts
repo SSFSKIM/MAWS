@@ -12,7 +12,7 @@ import { HistorySoughtSchema } from '../../graph/history-window';
 import { AgentIdSchema, AppSessionIdSchema, EventIdSchema, MessageUuidSchema, RequestIdSchema, TaskIdSchema } from '../../graph/ids';
 import { RequestAnswerSchema } from '../../engine/answers';
 import { EffortSchema, LaunchSpecSchema } from '../../engine/launch-spec';
-import { OperationEventSchema, OperationReceiptSchema } from '../../engine/operations';
+import { OperationEventSchema, OperationOutcomeSchema, OperationReceiptSchema, SESSION_OPERATIONS_MAX } from '../../engine/operations';
 import { RelayHealthSchema } from '../../engine/relay-health';
 import { RewindFilesOutcomeSchema, RewindOutcomeSchema } from '../../engine/rewind-outcome';
 import { PendingSteerSchema, QueueEntrySchema, QueuePauseReasonSchema, QueueStateSchema, SendContentSchema } from '../../engine/session-state-store'; // C7: QueuePauseReasonSchema; W1: PendingSteerSchema
@@ -54,6 +54,7 @@ import { AcquireOutcomeSchema, SetupEventSchema, SetupResourcesSchema, StartOutc
 import { TrustStateSchema } from '../../sessions/trust';
 // C10 end
 import type { CommandSpec } from './common';
+import { SendUploadsSchema } from './files'; // P5 O7 M8: a send's uploads
 import { PtyIdSchema } from './pty'; // P5 O6 M1: takeOverPane's ptyId, branded for the address codec (loose, so its JSON Schema is the plain string's)
 // P2-C start (2026-10-09)
 import { PromptHistoryEventSchema } from '../../graph/events';
@@ -126,7 +127,11 @@ const c3Commands = {
   'session.pendingRequest': host(input({ requestId: RequestIdSchema }), z.strictObject({ event: SessionEventSchema.nullable() })),
   'session.catalog': host(input({}), CatalogSchema),
   // the composer: sends, the app queue, steer, interrupt, answers, `!` and `#`
-  'session.send': host(input({ content: SendContentSchema }), z.strictObject({ messageUuid: MessageUuidSchema.nullable(), disposition: z.enum(['sent', 'queued']), queueId: z.string() })),
+  // P5 O7 M8 ("The attachment"): `uploads`, files of the session's upload root a remote device sent up, which the
+  // machine's endpoint reads into `content` as document blocks before the act reaches the engine host (behind the
+  // endpoint capability `rl2.upload-blocks`); the engine host takes a send only once they are read, and refuses one
+  // that still carries them
+  'session.send': host(input({ content: SendContentSchema, uploads: SendUploadsSchema.optional() }), z.strictObject({ messageUuid: MessageUuidSchema.nullable(), disposition: z.enum(['sent', 'queued']), queueId: z.string() })),
   // priority on 2.1.283: 'now' (the default; "Send now") preempts the running turn; 'next' (Enter while a turn runs, W1) folds into it at its next tool boundary (pass3/steer-next)
   'session.steer': host(input({ content: SendContentSchema, priority: z.enum(['now', 'next']).optional() }), MessageUuidOutput),
   // W1: "Hold until the turn ends" on a pending `next` steer: withdrawn from the engine (`cancel_async_message`) into the app queue's end; refused once the engine started it (pass3/steer-next-cancelled)
@@ -761,6 +766,15 @@ const o7Commands = {
   'session.spawn': { input: SessionSpawnInputSchema, output: SessionSpawnOutputSchema, owner: 'machine' },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // P5 O7 M4 end
+// P5 O7 M8 start (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, §U, "The operation outcomes") -------------------
+// What the engine host says of each of these operations of the session: its completion while kept (at most 64 a session,
+// for 10 minutes), `pending` while it runs, else `unknown`; for a waiter whose completion may have been lost on the way (a
+// remote device's channel dropped between the receipt and the completion). Owner engine-host; immediate.
+const o7m8Commands = {
+  'session.operations': host(input({ opIds: z.array(z.string().max(256)).max(SESSION_OPERATIONS_MAX) }), z.strictObject({ outcomes: z.array(OperationOutcomeSchema) })),
+} as const;
+export const O7M8_SESSION_COMMANDS = Object.keys(o7m8Commands) as (keyof typeof o7m8Commands)[];
+// P5 O7 M8 end ----------------------------------------------------------------------------------------------------------
 
 export const commands = {
   ...c3Commands, // C3
@@ -779,6 +793,7 @@ export const commands = {
   ...o3dCommands, // P5 O3-D
   ...o5Commands, // P5 O5 M5
   ...o7Commands, // P5 O7 M4
+  ...o7m8Commands, // P5 O7 M8
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

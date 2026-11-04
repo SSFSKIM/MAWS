@@ -68,6 +68,11 @@ export interface EndpointServices {
    * never on a remote boolean, and maps its words to RL2's (browser-words.ts).
    */
   browser: BrowserFeed;
+  /**
+   * P5 O7 M8: whether the engine host's welcome on `mawsd`'s link lists `capability` now; false while no link is up.
+   * The endpoint sends a remote device a command whose meaning a newer host changed only to a host that lists it.
+   */
+  engineHostLists(capability: string): boolean;
   log(line: string): void;
 }
 

@@ -15,6 +15,7 @@ import type { AskAnswer } from '@shared/maws/tools'; // E1
 import { isInterruptionMarker, isLocalCommand } from './user-text';
 import { INTERRUPT_CUT } from '@shared/lane-a/interrupt-cut'; // P5 O9
 import { presentationOf } from './classify'; // P5 O9
+import { isUnseenTurnEnd } from './gap'; // P5 O7 M8
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
 
@@ -728,6 +729,7 @@ function apply(batch: Batch, event: SessionEvent): void {
     }
     case 'notice.posted':
     case 'plugin.log': { // R1: a plugin's log line, a notice at its arrival position
+      if (isUnseenTurnEnd(event)) return closeUnseen(batch, event.at); // P5 O7 M8: never retained, no row
       if (!pushRouted(null)) batch.loose(event);
       return;
     }
@@ -881,6 +883,16 @@ const makesAgentsRow = (event: SessionEvent) =>
 // Interrupt evidence a turn retains: the engine's interrupt marker, or a call the human rejected.
 const wasInterrupted = (turn: TurnState) =>
   turn.events.some((event) => (event.kind === 'user.message' && isInterruptionMarker(event.origin, event.content)) || (event.kind === 'tool.result' && event.denial === 'user-rejected'));
+
+// P5 O7 M8: the source's unseen turn end (model/gap.ts): every turn still open and accepted closes as a turn whose end
+// nobody saw (stopped on interrupt evidence, else completed); a prompt waiting for its turn stays pending.
+function closeUnseen(batch: Batch, at: string): void {
+  for (const id of batch.state.order) {
+    const turn = batch.state.turns.get(id)!;
+    if (turn.state !== 'open' || !turn.accepted) continue;
+    batch.closeUnended(batch.touch(id), wasInterrupted(turn) ? 'stopped' : 'completed', at);
+  }
+}
 
 // How a session's process exiting closes a turn it was running: stopped, unless the exit is no evidence of a stop
 // (reason unknown) and the turn retains none of its own; in the engine's words when the process crashed unasked.

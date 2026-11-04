@@ -11,6 +11,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import { PERMISSION_MODE_LABELS } from '@shared/sessions/permission-mode-labels';
 import { useNow } from '../../app/use-now';
 import { ipc } from '../../ipc/client';
+import { useRemoteUnavailable } from '../../lane-b/remote-unavailable'; // P5 O7 M8
 import { itemAge } from '../../sidebar/derive';
 import { CardButton, Muted } from '../controls';
 
@@ -56,7 +57,10 @@ function useSeenWhileInFront({ appSessionId, id }: AttentionItem, enabled: boole
 export function NoticeBody({ item, seenHere = false }: { item: AttentionItem; seenHere?: boolean }) {
   const now = useNow();
   const isError = item.kind === 'error';
-  useSeenWhileInFront(item, seenHere && isError && (item.state === 'pending' || item.state === 'delivered'));
+  // P5 O7 M8: an error of a session on another machine can't be acknowledged from here yet (lane-b/remote-unavailable.ts):
+  // it isn't counted as seen, and Dismiss is greyed, saying why
+  const unavailable = useRemoteUnavailable(item.appSessionId, 'attention.acknowledge');
+  useSeenWhileInFront(item, seenHere && isError && unavailable === null && (item.state === 'pending' || item.state === 'delivered'));
   return (
     <div className="flex flex-col gap-2">
       <p className="m-0 text-fg">{item.summary}</p>
@@ -67,7 +71,7 @@ export function NoticeBody({ item, seenHere = false }: { item: AttentionItem; se
         </CardButton>
       )}
       {isError && item.state !== 'retired' && (
-        <CardButton className="self-start" onClick={() => acknowledge(item, 'dismissed')}>
+        <CardButton className="self-start" disabled={unavailable !== null} title={unavailable ?? undefined} onClick={() => acknowledge(item, 'dismissed')}>
           Dismiss
         </CardButton>
       )}

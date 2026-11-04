@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, SessionId } from '@shared/graph/ids';
 import type { HostEmit } from '@shared/host/runtime';
+import { endableClientRef } from '@shared/ipc/client'; // P5 O7 M8
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
@@ -13,7 +14,7 @@ import type { ReadRange } from '../../../test/support/memory-reader';
 import { StoreFixture } from '../../../test/support/store-fixture';
 import { ChainFollower, type FileReader } from './chain-follower';
 import { Follow, FsFileReader } from './follow';
-import { FsService } from './service';
+import { followClientTag, FsService } from './service';
 import { DEBOUNCE_MS, SETTLE_MS } from './watcher';
 
 const S1 = '11111111-1111-4111-8111-111111111111';
@@ -253,11 +254,13 @@ describe('a followed session backfills, then tails its transcript', () => {
   let service: FsService | null;
   let emitted: Emitted[];
   let readers: RecordingReader[];
+  let logged: string[]; // P5 O7 M8: the service's log lines
   beforeEach(async () => {
     fixture = await StoreFixture.create();
     service = null;
     emitted = [];
     readers = [];
+    logged = [];
   });
   afterEach(async () => {
     service?.stop();
@@ -279,6 +282,7 @@ describe('a followed session backfills, then tails its transcript', () => {
         return reader;
       },
       reconcileMs: options.reconcileMs,
+      log: (line) => void logged.push(line),
     });
     await service.start();
     await settled();
@@ -727,6 +731,116 @@ describe('a followed session backfills, then tails its transcript', () => {
     for (const event of child.events) expect([event.agentId, event.parentToolUseId]).toEqual([agentId, null]);
     await fixture.addSidecar(session, `${dir}/agent-${agentId}.meta.json`, readFileSync(join(WORKFLOW_DISK, `agent-${agentId}.meta.json`), 'utf8'));
     await expect.poll(() => events('fs.subagentsChanged').at(-1)?.agents[0]).toMatchObject({ agentId, runId: 'wf_7cacbb2d-902', meta: { agentType: 'workflow-subagent' } });
+  });
+
+  // P5 O7 M8 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Decision Log "A subagent follow is owned by the
+  // client that started it"): a remote device's agents panel starts follows here as the machine's own app does, so a
+  // follow is held by each client that asked for it, ends when the last of them unfollows or ends, and is never stopped by
+  // a client that holds none of it. The session-wide unfollow (`agentId` null) is the session's own lifecycle, unchanged.
+  it('keeps an agent’s follow while any client that started it holds it: another client’s unfollow never stops it, and the last holder’s end does', async () => {
+    const session = 'bac6130b-8eb8-499e-aeb1-89e7624a52cd' as SessionId;
+    const app = 'app-workflow' as AppSessionId;
+    await fixture.addTranscript('/private/tmp/maws-probe2-1RzDNs', session, [
+      JSON.stringify({ type: 'user', uuid: 'w1', parentUuid: null, cwd: '/private/tmp/maws-probe2-1RzDNs', message: { role: 'user', content: 'run it' } }),
+    ]);
+    const fs = await start();
+    fs.bind([{ sessionId: session, appSessionId: app }]);
+    const agentId = 'a014f6be436bed86b' as AgentId;
+    await fixture.addSidecar(session, `subagents/workflows/wf_7cacbb2d-902/agent-${agentId}.jsonl`, `${JSON.stringify({ type: 'user', uuid: 'c1', parentUuid: null, isSidechain: true, agentId, cwd: '/private/tmp/maws-probe2-1RzDNs', message: { role: 'user', content: 'Reply with exactly ALPHA.' } })}\n`);
+    const followed = () => fs.state().followed.some((f) => f.appSessionId === app && f.agentId === agentId);
+    const [machine, remote, other] = ['machine-app', 'remote-device', 'another-device'].map(endableClientRef);
+
+    await fs.agentEvents(app, agentId, {}, machine!);
+    await fs.unfollow(app, agentId, remote!); // a client that started nothing stops nothing
+    expect(followed()).toBe(true);
+    remote!.end();
+    expect(followed()).toBe(true);
+
+    await fs.agentEvents(app, agentId, {}, other!); // a second holder
+    await fs.unfollow(app, agentId, machine!); // the first lets go: the second still holds it
+    expect(followed()).toBe(true);
+    other!.end(); // the last holder's channel ends
+    expect(followed()).toBe(false);
+
+    // a client that started it and unfollows it stops it when it holds it alone
+    const again = endableClientRef('machine-app-2');
+    await fs.agentEvents(app, agentId, {}, again);
+    await fs.unfollow(app, agentId, again);
+    expect(followed()).toBe(false);
+    again.end(); // its end later changes nothing
+    expect(followed()).toBe(false);
+  });
+
+  // P5 O7 M8 (m8-5's task review, the architect's (c)): an agent follow's holds are told in the service's log, one line
+  // each when a client takes one, lets one go, and when the follow is dropped, naming the agent and an opaque tag of the
+  // client (never its raw id, which carries a remote device's id), so a live diagnosis, and e2e:remote, can read whose
+  // hold ended and whether the follow still runs.
+  it('logs one line each when a client holds an agent’s follow, lets it go, and when the follow is dropped', async () => {
+    const session = 'bac6130b-8eb8-499e-aeb1-89e7624a52cd' as SessionId;
+    const app = 'app-workflow' as AppSessionId;
+    await fixture.addTranscript('/private/tmp/maws-probe2-1RzDNs', session, [
+      JSON.stringify({ type: 'user', uuid: 'w1', parentUuid: null, cwd: '/private/tmp/maws-probe2-1RzDNs', message: { role: 'user', content: 'run it' } }),
+    ]);
+    const fs = await start();
+    fs.bind([{ sessionId: session, appSessionId: app }]);
+    const agentId = 'a014f6be436bed86b' as AgentId;
+    await fixture.addSidecar(session, `subagents/workflows/wf_7cacbb2d-902/agent-${agentId}.jsonl`, `${JSON.stringify({ type: 'user', uuid: 'c1', parentUuid: null, isSidechain: true, agentId, cwd: '/private/tmp/maws-probe2-1RzDNs', message: { role: 'user', content: 'Reply with exactly ALPHA.' } })}\n`);
+    const [first, second] = ['conn-1/DEVICEAAAA/channel-1', 'conn-1/DEVICEBBBB/channel-2'].map(endableClientRef);
+    const [a, b] = [followClientTag(first!.id), followClientTag(second!.id)];
+    const follows = () => logged.filter((line) => line.startsWith('[fs] follow '));
+    logged.length = 0;
+
+    await fs.agentEvents(app, agentId, {}, first!);
+    await fs.agentEvents(app, agentId, {}, second!);
+    await fs.agentEvents(app, agentId, {}, first!); // a hold it has already: no line
+    await fs.unfollow(app, agentId, first!);
+    second!.end();
+    expect(follows()).toEqual([
+      `[fs] follow ${app}/${agentId}: held by client ${a} (1 holding)`,
+      `[fs] follow ${app}/${agentId}: held by client ${b} (2 holding)`,
+      `[fs] follow ${app}/${agentId}: released by client ${a} (1 holding)`,
+      `[fs] follow ${app}/${agentId}: released by client ${b} (0 holding)`,
+      `[fs] follow ${app}/${agentId}: dropped`,
+    ]);
+    expect(a).not.toBe(b);
+    expect(follows().join('\n'), 'no raw client id, so no device id').not.toMatch(/DEVICE|conn-1|channel-/);
+  });
+
+  // P5 O7 M8 task review: a reader still waiting on the follow counts. Two readers await one start, and the first one's
+  // client ends while the follow is being made; its continuation runs first, so it must not stop the follow the second
+  // one is about to hold. Likewise a reader handed a follow that exists already, whose last holder ends before the
+  // reader's continuation runs.
+  it('keeps a follow a waiting reader is about to hold when another client’s end leaves it unheld', async () => {
+    const session = 'bac6130b-8eb8-499e-aeb1-89e7624a52cd' as SessionId;
+    const app = 'app-workflow' as AppSessionId;
+    await fixture.addTranscript('/private/tmp/maws-probe2-1RzDNs', session, [
+      JSON.stringify({ type: 'user', uuid: 'w1', parentUuid: null, cwd: '/private/tmp/maws-probe2-1RzDNs', message: { role: 'user', content: 'run it' } }),
+    ]);
+    const fs = await start();
+    fs.bind([{ sessionId: session, appSessionId: app }]);
+    const agentId = 'a014f6be436bed86b' as AgentId;
+    await fixture.addSidecar(session, `subagents/workflows/wf_7cacbb2d-902/agent-${agentId}.jsonl`, `${JSON.stringify({ type: 'user', uuid: 'c1', parentUuid: null, isSidechain: true, agentId, cwd: '/private/tmp/maws-probe2-1RzDNs', message: { role: 'user', content: 'Reply with exactly ALPHA.' } })}\n`);
+    const followed = () => fs.state().followed.some((f) => f.appSessionId === app && f.agentId === agentId);
+
+    // two readers of one start, the first one's client ended while the follow is made
+    const [first, second] = ['first-device', 'second-device'].map(endableClientRef);
+    const reads = [fs.agentEvents(app, agentId, {}, first!), fs.agentEvents(app, agentId, {}, second!)];
+    first!.end();
+    await Promise.all(reads);
+    expect(followed()).toBe(true); // the second reader holds it
+    second!.end();
+    expect(followed()).toBe(false); // and its end, the last holder's, stops it
+
+    // a reader of a follow that exists, its only holder ended before the reader's continuation runs
+    const holder = endableClientRef('holder-device');
+    await fs.agentEvents(app, agentId, {}, holder);
+    const late = endableClientRef('late-device');
+    const read = fs.agentEvents(app, agentId, {}, late);
+    holder.end();
+    await read;
+    expect(followed()).toBe(true);
+    late.end();
+    expect(followed()).toBe(false);
   });
 
   it('reads workflow runs, and a followed session emits one workflow.progress per snapshot change', async () => {

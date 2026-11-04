@@ -104,6 +104,8 @@ export type HostSession = {
   requests: Map<string, SessionEvent>;
   queue: Record<string, unknown>;
   catalog: Record<string, unknown>;
+  /** P5 O7 M8: the status's `taskListId` (its list, as the engine names it), told only where a suite sets it. */
+  taskListId?: string | null;
 };
 
 const ok = (value: unknown): HostResponse => ({ t: 'res', id: '0', ok: true, value });
@@ -435,7 +437,7 @@ export class FakeEngineHost {
   }
 
   status(s: HostSession): Record<string, unknown> {
-    return { appSessionId: s.appSessionId, launchId: s.launchId, engineSessionId: s.engineSessionId, process: 'ready' };
+    return { appSessionId: s.appSessionId, launchId: s.launchId, engineSessionId: s.engineSessionId, process: 'ready', ...(s.taskListId === undefined ? {} : { taskListId: s.taskListId }) };
   }
 
   /**

@@ -6,6 +6,7 @@ import { useEffect, useId, useState } from 'react';
 import type { AnchorScreenshot } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../ipc/client';
+import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { QUIET, SECONDARY } from '../sessions/ui';
 import type { CommentDestination } from './actions';
 import type { CommentForm } from './comment-form';
@@ -18,7 +19,9 @@ const COPY = SIDE_COPY.composer;
 // (`side.screenshot.preview`). Until it answers, or when it refuses, the size in words stands in. Remove is its own button.
 export function ScreenshotThumbnail({ parent, screenshot, disabled, onRemove }: { parent: AppSessionId; screenshot: AnchorScreenshot; disabled: boolean; onRemove(): void }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null);
+  const unavailable = useRemoteUnavailable(parent, 'side.screenshot.preview'); // P5 O7 M8: the size in words stands in, asked nothing
   useEffect(() => {
+    if (unavailable !== null) return;
     let live = true;
     void ipc.invoke('side.screenshot.preview', { appSessionId: parent, screenshot }).then((result) => {
       if (live && result.ok) setDataUrl(result.value.dataUrl);
@@ -26,12 +29,14 @@ export function ScreenshotThumbnail({ parent, screenshot, disabled, onRemove }: 
     return () => {
       live = false;
     };
-  }, [parent, screenshot]);
+  }, [parent, screenshot, unavailable]);
   const name = COPY.screenshot(screenshot.width, screenshot.height);
   return (
     <div className="flex items-end justify-between gap-2 rounded-sm border border-border bg-bg-raised p-1.5 text-ui-sm text-fg-muted" data-comment-screenshot="">
       {dataUrl === null ? (
-        <span className="px-0.5">{name}</span>
+        <span className="px-0.5" title={unavailable ?? undefined}>
+          {name}
+        </span>
       ) : (
         <img src={dataUrl} alt={name} title={name} className="max-h-24 max-w-[60%] rounded-sm border border-border object-contain" />
       )}
@@ -47,7 +52,7 @@ export function ScreenshotThumbnail({ parent, screenshot, disabled, onRemove }: 
 export function DestinationControl({ form, compact = false }: { form: CommentForm; compact?: boolean }) {
   const name = useId();
   const options: { to: CommentDestination; label: string; caption: string; enabled: boolean }[] = [
-    { to: 'thread', label: COPY.thread, caption: COPY.threadCaption, enabled: true },
+    { to: 'thread', label: COPY.thread, caption: form.threadCaption, enabled: form.threadEnabled }, // P5 O7 M8: threadEnabled
     { to: 'main', label: COPY.main, caption: form.mainCaption, enabled: form.mainEnabled }, // P2-A: mainEnabled
   ];
   return (

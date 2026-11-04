@@ -9,8 +9,11 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
-import { record } from '../../../../test/support/builders';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { record, remoteRow } from '../../../../test/support/builders';
+import { addressOf } from '@shared/machine/address';
+import { heardRefusal, resetRemoteSurfaces } from '../artifacts/remote-surfaces';
+import { useMachines } from '../stores/machines';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { ReloadPluginsWidget } from './ReloadPluginsWidget';
@@ -32,10 +35,10 @@ afterEach(() => {
   delete (window as { maws?: unknown }).maws;
 });
 
-const mount = () =>
+const mount = (appSessionId: AppSessionId = ID) =>
   render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <ReloadPluginsWidget appSessionId={ID} args="" close={() => {}} />
+      <ReloadPluginsWidget appSessionId={appSessionId} args="" close={() => {}} />
     </QueryClientProvider>,
   );
 const reloads = () => backend.calls.filter((c) => c.subtype === 'reload_plugins');
@@ -71,5 +74,26 @@ describe('/reload-plugins', () => {
     expect(backend.calls.filter((c) => c.command === 'session.acquire').map((c) => c.input)).toEqual([{ appSessionId: BARE, reason: 'read' }]);
     offStatus();
     useSessions.setState({ records: new Map() });
+  });
+
+  // P5 O7 M8 ("An older peer"): a machine heard refusing `session.reloadPlugins` as not offered reloads nothing on
+  // opening; Reload plugins is greyed with the reason, shown beside it
+  it('on a session of a machine heard not offering it, reloads nothing and greys Reload plugins with the reason', async () => {
+    const remote = addressOf(OTHER_MACHINE, BARE);
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+    useSessions.setState({ engine: new Map([[remote, { ...backend.status(BARE), appSessionId: remote }]]), listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, BARE), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    heardRefusal('session.reloadPlugins', { issues: { refusal: 'not-offered' } }, OTHER_MACHINE, TEST_MACHINE);
+    try {
+      mount(remote);
+      const button = screen.getByRole('button', { name: 'Reload plugins' });
+      expect(button).toHaveProperty('disabled', true);
+      expect(button.title).toBe('mini doesn’t offer this');
+      expect(screen.getByText('mini doesn’t offer this')).toBeTruthy();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(reloads()).toHaveLength(0);
+    } finally {
+      resetRemoteSurfaces();
+      useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    }
   });
 });

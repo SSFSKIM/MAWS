@@ -15,6 +15,8 @@ import type { CommandName } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
 import { KEPT_WITHOUT_ACTION } from '../../src/endpoint/actions';
 import { OFFERS } from '../../src/endpoint/offers';
+import { registerFilesHandlers } from '../../src/services/files/register';
+import { FILES_REFUSAL } from '../../src/services/files/service';
 import { act, CHECKOUT, makeOrg, openRemote, sminos, startEndpoint, stopAll, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
@@ -227,5 +229,55 @@ describe('an older engine host behind the endpoint', () => {
       name === 'session.events' && (input as { maxBytes?: number }).maxBytes !== undefined ? { t: 'res', id: '0', ok: false, error: { code: 'invalid_input', message: 'maxBytes: unrecognized key' } } : answer(owner, name, input);
     expect(await call(a, 'session.events', at({ afterSeq: null, limit: null, maxBytes: 1024 * 1024 }))).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
     expect(await call(a, 'session.events', at({ afterSeq: null, limit: null }))).toMatchObject({ ok: true, output: { events: [] } });
+  });
+});
+
+// P5 O7 M8 (m8-1, red first; the spec's *Scheduled jobs and `internal`*). The scheduled-jobs panel reads
+// `<root>/.claude/scheduled_tasks.json` and counts a `not found:` message as no jobs (scheduled-file.ts). Over the real
+// files service, that file absent from the session's root and a path outside the session's directories both answer
+// `internal`, told apart only by the message (`not found: <path>`, FILES_REFUSAL), and `#forward` sends the device the
+// code alone (calls.ts): so the VM’s missing file read as an error. m8-2 forwards the message, capped (calls.ts).
+describe('a checkout read the files service fails', () => {
+  /** A live session rooted at a scratch checkout, its `files.*` answered by the real files service. */
+  async function served(): Promise<{ dir: string; a: Remote; dispose: () => void }> {
+    const { f, dir, a } = await setup();
+    const files = registerFilesHandlers(() => ({ directory: dir, additionalDirectories: [], worktree: null }), {
+      bus: f.spine.bus as never,
+      emit: () => {},
+      port: { openExternal: async () => ({ opened: false, message: null }), reveal: async () => ({ revealed: false }) } as never,
+      env: {},
+    });
+    return { dir, a, dispose: () => files.dispose() };
+  }
+
+  it('reaches the device with the service’s message: a file absent from the session’s root as not found', async () => {
+    const { dir, a, dispose } = await served();
+    try {
+      const absent = join(dir, '.claude', 'scheduled_tasks.json');
+      expect(await call(a, 'files.read', at({ path: absent, hash: true }))).toMatchObject({ ok: false, error: { code: 'internal', message: `not found: ${absent}` } });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('reaches the device with the service’s message: a path outside the session’s directories as refused', async () => {
+    const { a, dispose } = await served();
+    try {
+      expect(await call(a, 'files.read', at({ path: join(tmpdir(), 'elsewhere', 'scheduled_tasks.json'), hash: true }))).toMatchObject({ ok: false, error: { code: 'internal', message: FILES_REFUSAL } });
+    } finally {
+      dispose();
+    }
+  });
+
+  it('reaches the device with at most the first 512 characters of a long message, never half a surrogate pair', async () => {
+    const { f, a } = await setup();
+    f.spine.handle('files.read', () => {
+      throw new Error(`${'x'.repeat(511)}😀${'y'.repeat(1000)}`);
+    });
+    expect(await call(a, 'files.read', at({ path: 'README.md' }))).toMatchObject({ ok: false, error: { code: 'internal', message: 'x'.repeat(511) } });
+    f.spine.handle('files.read', () => {
+      throw new Error('z'.repeat(2000));
+    });
+    expect(await call(a, 'files.read', at({ path: 'README.md' }))).toMatchObject({ ok: false, error: { code: 'internal', message: 'z'.repeat(512) } });
   });
 });

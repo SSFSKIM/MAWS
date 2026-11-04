@@ -8,12 +8,12 @@ export const SPINE_COMMANDS = [
   'attention.acknowledge', 'attention.list', 'attention.request',
   'catalog.engine', 'catalog.engineRefresh', // P5 O4 M3: the catalog's machine half (LIBRARY_CATALOG_COMMANDS below)
   'connectors.adoptGrant', 'connectors.call', 'connectors.callback' /* P5 O7 M5c */, 'connectors.close', 'connectors.connect', 'connectors.declare', 'connectors.disconnect', 'connectors.open',
-  'connectors.reconnect', 'connectors.refresh', 'connectors.servers', 'connectors.signIn', 'connectors.signInCancel', 'connectors.unwatch',
+  'connectors.reconnect', 'connectors.refresh', 'connectors.servers', 'connectors.signIn', 'connectors.signInCancel', 'connectors.signInServer', 'connectors.unwatch',
   'connectors.visibility', 'connectors.watch', 'connectors.windowShown',
   'delivery.cancel', 'delivery.connect', 'delivery.deliver', 'delivery.receipts', 'delivery.send' /* P5 O7 M5c: on the machine */, 'delivery.status',
   // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §C, D4): the checkouts, the root's last
   // parts (CHECKOUTS_COMMANDS below), interleaved here in sorted order
-  'files.list', 'files.openExternal', 'files.read', 'files.readResolved', 'files.reveal', 'files.unwatch', 'files.upload', 'files.watch', 'files.write',
+  'files.list', 'files.openExternal', 'files.read', 'files.readResolved', 'files.readUploads', 'files.reveal', 'files.unwatch', 'files.upload', 'files.watch', 'files.write',
   'git.branches', 'git.diff', 'git.log', 'git.lsFiles', 'git.status', 'git.unwatch', 'git.watch',
   'git.worktree.add', 'git.worktree.branch', 'git.worktree.deleteBranch', 'git.worktree.list', 'git.worktree.remove', 'git.worktree.status',
   // P5 O9's lane A driver (O3 Decision Log 13): composed only while the run holds spine.lock, with no intercept or tap
@@ -46,7 +46,7 @@ export const SPINE_COMMANDS = [
 // P5 O3-E M2: what the checkouts register through the spine's bus, in every run (a refused one too): the 26 retagged
 // commands, files.readResolved (library.read's reach) and files.upload (M3's write; refused until then), sorted
 export const CHECKOUTS_COMMANDS = [
-  'files.list', 'files.openExternal', 'files.read', 'files.readResolved', 'files.reveal', 'files.unwatch', 'files.upload', 'files.watch', 'files.write',
+  'files.list', 'files.openExternal', 'files.read', 'files.readResolved', 'files.readUploads', 'files.reveal', 'files.unwatch', 'files.upload', 'files.watch', 'files.write',
   'git.branches', 'git.diff', 'git.log', 'git.lsFiles', 'git.status', 'git.unwatch', 'git.watch',
   'scm.commit', 'scm.discard', 'scm.pr.create', 'scm.pr.plan', 'scm.pr.state', 'scm.push', 'scm.push.plan', 'scm.remote.cancel', 'scm.remote.last',
   'scm.stage', 'scm.status', 'scm.unstage',
@@ -59,7 +59,7 @@ export const CHECKOUTS_COMMANDS = [
 export const CONNECTORS_COMMANDS = [
   'artifacts.connectorGrants', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool',
   'connectors.adoptGrant', 'connectors.call', 'connectors.callback' /* P5 O7 M5c */, 'connectors.close', 'connectors.connect', 'connectors.declare', 'connectors.disconnect', 'connectors.open',
-  'connectors.reconnect', 'connectors.refresh', 'connectors.servers', 'connectors.signIn', 'connectors.signInCancel', 'connectors.unwatch',
+  'connectors.reconnect', 'connectors.refresh', 'connectors.servers', 'connectors.signIn', 'connectors.signInCancel', 'connectors.signInServer', 'connectors.unwatch',
   'connectors.visibility', 'connectors.watch', 'connectors.windowShown',
   'delivery.cancel', 'delivery.connect', 'delivery.deliver', 'delivery.receipts', 'delivery.send' /* P5 O7 M5c: on the machine */, 'delivery.status',
 ];

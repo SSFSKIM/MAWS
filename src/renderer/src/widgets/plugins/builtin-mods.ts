@@ -6,14 +6,18 @@
 // registry's own state, not an engine read's (a session with no ready process still has its mods). Writes: the app's
 // switch is `settings.set` on `mods.toHuman.enabled`, a session's override `mods.setSessionOverride`; a refused write is
 // kept in main's words for the section to say, and the rows read again show what holds.
+// P5 O7 M8: the mods a session on another machine runs are that machine's (`mods.list` is declared not offered there,
+// lane-b/remote-unavailable.ts): nothing is asked, and the section says why.
 import { useCallback, useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ModId, ModRow } from '@shared/mods/registry';
 import type { LaneOverride } from '@shared/owner/state';
 import { ipc } from '../../ipc/client';
+import { useRemoteUnavailable } from '../../lane-b/remote-unavailable'; // P5 O7 M8
 
-export type ModRowsRead = { state: 'loading' } | { state: 'ready'; rows: ModRow[] } | { state: 'unavailable'; reason: string };
+// `elsewhere`: P5 O7 M8, the reason is that a session on another machine can't read them from here (said as it is)
+export type ModRowsRead = { state: 'loading' } | { state: 'ready'; rows: ModRow[] } | { state: 'unavailable'; reason: string; elsewhere?: true };
 
 export interface BuiltInModsState {
   read: ModRowsRead;
@@ -23,12 +27,15 @@ export interface BuiltInModsState {
 }
 
 export function useBuiltInMods(appSessionId: AppSessionId | null, client: MawsBridge = ipc): BuiltInModsState {
-  const [read, setRead] = useState<ModRowsRead>({ state: 'loading' });
+  const [fetched, setRead] = useState<ModRowsRead>({ state: 'loading' });
+  const greyed = useRemoteUnavailable(appSessionId, 'mods.list');
+  const read: ModRowsRead = greyed !== null ? { state: 'unavailable', reason: greyed, elsewhere: true } : fetched;
   const [asked, setAsked] = useState(0); // bumped to read again
   const [failure, setFailure] = useState<string | null>(null);
   const again = useCallback(() => setAsked((n) => n + 1), []);
 
   useEffect(() => {
+    if (greyed !== null) return;
     let live = true;
     void client.invoke('mods.list', appSessionId === null ? {} : { appSessionId }).then((result) => {
       if (!live) return;
@@ -37,7 +44,7 @@ export function useBuiltInMods(appSessionId: AppSessionId | null, client: MawsBr
     return () => {
       live = false;
     };
-  }, [appSessionId, asked, client]);
+  }, [appSessionId, asked, client, greyed]);
 
   useEffect(() => {
     const offs = [

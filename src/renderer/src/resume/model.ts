@@ -16,9 +16,10 @@ import type { MachineRef } from '@shared/machine/ref';
 import { dateFormats, formatClock, formatShortDate, formatWeekdayClock } from '@shared/app/date-format';
 import { lastActivity } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
-import { displayTitle } from '../sessions/title';
-import { sessionMatcher } from '../sidebar/derive';
-import { orgIndex, rowOfSession, type RowKey } from '../stores/org-projects';
+import { displayTitle, listedTitle } from '../sessions/title';
+import { issuedAt, listedMatcher, sessionMatcher } from '../sidebar/derive';
+import { orgIndex, rowOfListed, rowOfListedRecord, rowOfSession, type OrgIndex, type RowKey } from '../stores/org-projects';
+import type { ListedSession } from '../stores/sessions';
 
 export interface ChooserToggles {
   allProjects: boolean;
@@ -54,26 +55,49 @@ export interface ChooserInput {
   branch: string | null; // the project's checked-out branch, null while unknown (Current branch then keeps nothing)
   query: string;
   local: MachineRef; // this machine, for the org index a row's scope reads
+  listed?: ReadonlyMap<AppSessionId, ListedSession>; // P5 O7 M8: other machines' listed sessions (the sessions store's)
+  people?: ReadonlySet<RowKey>; // P5 O7 M8: the rows whose People toggle is on, which draw others' listed sessions
 }
 
-export interface ChooserRow {
+// A row is a record's, or (P5 O7 M8) another machine's listed session with no record here, opened through its lane's
+// opener (`remote-openers.ts`).
+export interface ChooserRecordRow {
   record: SessionRecord;
   at: number; // the one activity time: order, group, row time and preview age
 }
+export interface ChooserListedRow {
+  listed: ListedSession;
+  at: number; // its listing's issue (sminos re-issues a listing at each change of its state)
+}
+export type ChooserRow = ChooserRecordRow | ChooserListedRow;
+export const isListedChooserRow = (row: ChooserRow): row is ChooserListedRow => 'listed' in row;
+export const chooserRowId = (row: ChooserRow): AppSessionId => (isListedChooserRow(row) ? row.listed.appId : row.record.appId);
+const rowTitle = (row: ChooserRow): string => (isListedChooserRow(row) ? listedTitle(row.listed) : displayTitle(row.record));
 
 // The branch a session ran on: its worktree's, else the one its transcript recorded (W9's rule, H2: HEAD and empty are none).
 export const sessionBranch = (record: SessionRecord): string | null => branchLabel(recordBranch(record));
 
 // The candidates, newest first (ties by title, then id, so the order is stable while the stores change).
-export function chooserRows({ records, digests, projects, context, toggles, branch, query, local }: ChooserInput): ChooserRow[] {
+//
+// P5 O7 M8: the listed sessions with no record here join them, filed as the sidebar files them (`rowOfListed`; a record
+// at a listed address whose project is not known here sits where its listing does, `rowOfListedRecord`). Another
+// member's session (its listing not yours), held as a listing or as a record, is listed only under a row whose People
+// toggle is on, whatever the toggles; a row nobody draws (an all-hidden project's) never lets it through. A listing
+// names no folder, worktree or branch: All worktrees keeps them, Current branch none.
+export function chooserRows({ records, digests, projects, context, toggles, branch, query, local, listed = new Map(), people = new Set() }: ChooserInput): ChooserRow[] {
   const matches = sessionMatcher(query, projects);
-  let inScope = (record: SessionRecord) => record.projectId === context.projectId;
+  const matchesListed = listedMatcher(query);
+  let held: OrgIndex | null = null; // built when a row or a listing asks for it
+  const index = () => (held ??= orgIndex(projects.values(), local));
   const { row } = context;
-  if (row !== undefined) {
-    const index = orgIndex(projects.values(), local);
-    const listed = new Set([row]); // the row it opened on is listed, as the sidebar showed it
-    inScope = (record) => rowOfSession(index, projects, record, listed) === row;
-  }
+  const shown = row === undefined ? undefined : new Set([row]); // the row it opened on is listed, as the sidebar showed it
+  const recordRow = (record: SessionRecord): RowKey | null => {
+    const filed = rowOfListedRecord(index(), projects, record, listed, shown);
+    return filed === undefined ? rowOfSession(index(), projects, record, shown) : filed;
+  };
+  const inScope = (record: SessionRecord) => (row === undefined ? record.projectId === context.projectId : recordRow(record) === row);
+  const drawsOthers = (filed: RowKey | null) => filed !== null && people.has(filed);
+  const othersRecord = (record: SessionRecord) => listed.get(record.appId)?.mine === false;
   const rows: ChooserRow[] = [];
   for (const record of records.values()) {
     if (record.appId === context.exclude) continue;
@@ -83,20 +107,32 @@ export function chooserRows({ records, digests, projects, context, toggles, bran
     if (!toggles.allWorktrees && record.worktree !== null) continue;
     if (toggles.currentBranch && (branch === null || sessionBranch(record) !== branch)) continue;
     if (!matches(record)) continue;
+    if (othersRecord(record) && !drawsOthers(recordRow(record))) continue;
     rows.push({ record, at: lastActivity(record, digests.get(record.appId)) });
   }
-  return rows.sort((a, b) => b.at - a.at || displayTitle(a.record).localeCompare(displayTitle(b.record)) || a.record.appId.localeCompare(b.record.appId));
+  if (!toggles.currentBranch) {
+    for (const session of listed.values()) {
+      if (records.has(session.appId) || session.appId === context.exclude) continue; // a record is listed in its place
+      const filed = rowOfListed(index(), session, shown);
+      if (filed === null && !toggles.archived) continue; // an all-hidden project's
+      if (!session.mine && !drawsOthers(filed)) continue; // others' behind their row's toggle
+      if (!toggles.allProjects && (row === undefined || filed !== row)) continue;
+      if (!matchesListed(session)) continue;
+      rows.push({ listed: session, at: issuedAt(session) });
+    }
+  }
+  return rows.sort((a, b) => b.at - a.at || rowTitle(a).localeCompare(rowTitle(b)) || chooserRowId(a).localeCompare(chooserRowId(b)));
 }
 
 // ---- groups ----------------------------------------------------------------------------------------------------------
 
 export type GroupKind = 'today' | 'yesterday' | 'thisWeek' | 'lastWeek' | 'week';
 
-export interface ChooserGroup {
+export interface ChooserGroup<R extends { at: number } = ChooserRow> {
   key: string;
   kind: GroupKind;
   label: string;
-  rows: ChooserRow[];
+  rows: R[];
 }
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -133,8 +169,8 @@ export function groupOf(at: number, now: number): { key: string; kind: GroupKind
 }
 
 // Rows (already newest first) in their groups, newest group first.
-export function chooserGroups(rows: readonly ChooserRow[], now: number): ChooserGroup[] {
-  const groups: ChooserGroup[] = [];
+export function chooserGroups<R extends { at: number }>(rows: readonly R[], now: number): ChooserGroup<R>[] {
+  const groups: ChooserGroup<R>[] = [];
   for (const row of rows) {
     const group = groupOf(row.at, now);
     const last = groups.at(-1);

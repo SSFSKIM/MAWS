@@ -27,12 +27,13 @@ import { randomBytes } from 'node:crypto';
 import { closeSync, constants, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmdirSync, unlinkSync, writeSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { atomicWriteFileSync } from '@shared/fs/atomic-write';
+import { UPLOAD_KEPT_MS } from '@shared/ipc/schema/files';
 import { NotARepositoryError, type GitRun } from '../git/runner';
-import { confirmOpenedSync, LinkOnTheWay, NO_LINK, walkSync, WALKED } from './no-link';
+import { confirmOpenedSync, LinkOnTheWay, NO_LINK, OPENS_CONFIRMED, walkSync, WALKED } from './no-link';
 
 export const UPLOADS = ['.claude', 'desk-uploads'] as const; // under the working directory; the session's directory below
 export const EXCLUDE_LINE = '**/.claude/desk-uploads/'; // unanchored: a session in a subdirectory of the checkout matches too
-export const SWEEP_AFTER_MS = 24 * 3600_000;
+export const SWEEP_AFTER_MS = UPLOAD_KEPT_MS;
 // P5 O7 M4: a remote upload's parts, staged under its root until the last arrives (`stagePart`, `promoteStaged`)
 export const STAGING = '.staging';
 
@@ -41,6 +42,18 @@ export type OwnedFiles = RegExp;
 
 // A component of an upload's path that is a link or not a directory, or a file there already: nothing goes through it.
 export class Unsafe extends Error {}
+// P5 O7 M8: this machine can't confirm an open followed no link (no O_NOFOLLOW_ANY, no `/proc/self/fd`): no upload is read.
+export class Unconfirmed extends Unsafe {
+  constructor() {
+    super('this machine can’t confirm that an open follows no link (it has neither macOS’s O_NOFOLLOW_ANY nor /proc/self/fd), so no upload is read or written there');
+  }
+}
+// P5 O7 M8: Unconfirmed where no open can be confirmed to have followed no link (./no-link.ts `OPENS_CONFIRMED`). A
+// send's upload read and `files.upload`'s write ask it before anything, so neither runs where a link an ancestor became
+// after the walk would be followed unseen.
+export function confirmOpens(): void {
+  if (!OPENS_CONFIRMED) throw new Unconfirmed();
+}
 // The name a file of the upload was to take is there already (a link included): nothing is written over it.
 export class AlreadyThere extends Unsafe {
   constructor(readonly file: string) {
@@ -241,6 +254,56 @@ export function removeFiles(root: string, owned: OwnedFiles, names?: readonly st
     return code(error) === 'ENOENT';
   }
   return clear(pins[0]!, pins[1]!, names, owned, staged);
+}
+
+// ---- an upload read back (P5 O7 M8, docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The attachment") ------
+// A send names a file of its session's root for the machine to attach: it is reached as every write here is, from `/`
+// with no link on its way, and opened with no link, a regular file with no other link (a hard link is no symbolic one,
+// so the open passes it; it could name a file outside the root), read whole by that descriptor alone. Where an open
+// cannot be confirmed to have followed no link (./no-link.ts `OPENS_CONFIRMED`), nothing is read: the read would leave the
+// root through an ancestor turned into a link after the walk, unseen (`confirmOpens`, which `files.upload` asks too).
+
+/** What `readUpload` found: the bytes and when the file was last written, or why nothing was read. */
+export type UploadRead = { bytes: Buffer; writtenAt: number } | { missing: true } | { tooLarge: number };
+
+// The file `name` of `session`'s root under `base` (the session's resolved working directory), read whole when it is at
+// most `max` bytes. A root or a file that is not there is missing; a file past `max` is not read. Throws Unsafe for a
+// link on the way, a link or anything but a regular file of its own at the name; Unconfirmed, before anything, where no
+// open can be confirmed.
+export function readUpload(base: string, session: string, name: string, max: number): UploadRead {
+  confirmOpens();
+  let root: Pinned;
+  try {
+    root = walk(base, [...UPLOADS, session]).at(-1)!;
+  } catch (error) {
+    if (code(error) === 'ENOENT') return { missing: true };
+    throw error;
+  }
+  if (name !== basename(name) || name === '.' || name === '..') throw new Unsafe(`${name} is not a name in the root: nothing is read`);
+  still(root);
+  const path = join(root.path, name);
+  let fd: number;
+  try {
+    fd = openNoLink(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  } catch (error) {
+    if (code(error) === 'ENOENT') return { missing: true };
+    throw error;
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) throw new Unsafe(`${path} is not a regular file: nothing is read from it`);
+    if (stat.nlink !== 1) throw new Unsafe(`${path} has other links: nothing is read through one`);
+    if (stat.size > max) return { tooLarge: stat.size };
+    const bytes = Buffer.alloc(stat.size);
+    for (let at = 0; at < stat.size; ) {
+      const read = readSync(fd, bytes, at, stat.size - at, at);
+      if (read === 0) throw new Error(`${path} ended at ${at} of ${stat.size} bytes`);
+      at += read;
+    }
+    return { bytes, writtenAt: stat.mtimeMs };
+  } finally {
+    closeSync(fd);
+  }
 }
 
 // ---- staged parts (P5 O7 M4, docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Uploads in parts") -------------

@@ -7,9 +7,12 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
+import { forgetOffers, heardRefusal, resetRemoteSurfaces } from '../artifacts/remote-surfaces';
+import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
-import { digest, record } from '../../../../test/support/builders';
+import { digest, record, remoteRow } from '../../../../test/support/builders';
 import { trustState } from '../test-support/setup-intents';
 import { readIntoCache, useEngineRead, useReadLoads, WidgetReadPolicyContext, type WidgetReadPolicy } from './read';
 
@@ -147,6 +150,28 @@ describe('useEngineRead', () => {
     expect(reads('session.mcpStatus')).toBe(1);
     act(() => backend.emitOperation({ ...done, appSessionId: BARE }));
     await waitFor(() => expect(reads('session.mcpStatus')).toBe(2));
+  });
+
+  // P5 O7 M8 ("An older peer"): a read a session's machine was heard refusing `not-offered` is not asked again: the
+  // widget says the machine doesn't offer it, by name, until that machine's feed opens again
+  it('reads nothing a session’s machine was heard not offering, and says so by the machine’s name', async () => {
+    const remote = addressOf(OTHER_MACHINE, BARE);
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+    useSessions.setState({ engine: new Map([[remote, { ...backend.status(BARE), appSessionId: remote }]]), listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, BARE), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    heardRefusal('session.getHooksListing', { issues: { refusal: 'not-offered' } }, OTHER_MACHINE, TEST_MACHINE);
+    try {
+      const { result } = renderHook(() => useEngineRead('session.getHooksListing', { appSessionId: remote }), { wrapper: wrapper() });
+      expect(result.current).toMatchObject({ state: 'error', error: 'mini doesn’t offer this' });
+      result.current.refetch();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(reads('session.getHooksListing')).toBe(0);
+      act(() => forgetOffers(OTHER_MACHINE)); // its feed opened again: what it offers is asked afresh
+      await waitFor(() => expect(result.current.state).toBe('ready'));
+      expect(reads('session.getHooksListing')).toBe(1);
+    } finally {
+      resetRemoteSurfaces();
+      useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    }
   });
 
   it("shows an engine refusal in words, and a timeout as the engine's silence", async () => {

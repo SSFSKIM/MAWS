@@ -3,13 +3,15 @@ import { describe, expect, it } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
-import { project, record } from '../../../../test/support/builders';
+import { project, record, remoteRow } from '../../../../test/support/builders';
+import type { RemoteRow } from '@shared/ipc/schema/org';
+import type { ListedSession } from '../stores/sessions';
 import { formatClock, formatShortDate, formatWeekdayClock } from '@shared/app/date-format';
 import { addressOf } from '@shared/machine/address';
 import type { OrgKey } from '@shared/machine/org-key';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import type { RowKey } from '../stores/org-projects';
-import { chooserGroups, chooserRows, folderBadge, groupOf, initialToggles, NO_TOGGLES, rowTime, sessionBranch, shortBranch, TOGGLE_KEYS, type ChooserInput } from './model';
+import { chooserGroups, chooserRowId, chooserRows, folderBadge, groupOf, initialToggles, isListedChooserRow, NO_TOGGLES, rowTime, sessionBranch, shortBranch, TOGGLE_KEYS, type ChooserInput, type ChooserRow } from './model';
 
 const P = project('p', 0, { name: 'maws' });
 const Q = project('q', 1, { name: 'usage' });
@@ -36,7 +38,7 @@ const input = (over: Partial<ChooserInput> = {}): ChooserInput => ({
   local: TEST_MACHINE,
   ...over,
 });
-const ids = (rows: { record: { appId: AppSessionId } }[]) => rows.map((r) => r.record.appId);
+const ids = (rows: ChooserRow[]) => rows.map(chooserRowId);
 
 describe('the chooser’s rows', () => {
   it('are the project’s main-checkout sessions, newest first, never archived, never the session it opened from', () => {
@@ -81,6 +83,73 @@ describe('the chooser’s rows', () => {
       context: { projectId: here.id, row: 'repo:maws' as RowKey, exclude: null },
     });
     expect(ids(chooserRows(scoped))).toEqual([addressOf(OTHER_MACHINE, 'b'), addressOf(TEST_MACHINE, 'a')]);
+  });
+
+  // P5 O7 M8 (*The sidebar row*, parity with a local record past the cap): another machine's listed sessions, each under
+  // its machine (`@<name>`), so a remote-spawned session stays reachable after its tab closes. Red first in m8-4.
+  describe('another machine’s listed sessions', () => {
+    const org = (key: string) => ({ key: key as OrgKey, name: key, source: 'remote' as const, smnsId: null });
+    const here = project(addressOf(TEST_MACHINE, 'm1'), 0, { name: 'maws', org: org('repo:maws') });
+    const ROW = 'repo:maws' as RowKey;
+    const listing = (id: string, minute: number, over: Partial<RemoteRow> = {}): ListedSession => ({ ...remoteRow(OTHER_MACHINE, id, { orgKey: 'repo:maws' as OrgKey, issued: at(minute), title: id, ...over }), appId: addressOf(OTHER_MACHINE, id as AppSessionId) });
+    const mine = listing('spawned', 6);
+    const elsewhere = listing('other-project', 7, { orgKey: 'repo:usage' as OrgKey });
+    const theirs = listing('theirs', 8, { mine: false });
+    const opened = listing('opened', 9); // a lane B tab holds its record: the record's row is listed in its place
+    const listed = new Map([mine, elsewhere, theirs, opened].map((l) => [l.appId, l]));
+    const local = record(addressOf(TEST_MACHINE, 'a'), { projectId: here.id, updatedAt: at(5) });
+    const openedRecord = record(opened.appId, { projectId: null, updatedAt: at(2) }); // its project is not known here
+    const scoped = (over: Partial<ChooserInput> = {}) => input({
+      records: new Map([local, openedRecord].map((r) => [r.appId, r])),
+      projects: new Map([[here.id, here]]),
+      context: { projectId: here.id, row: ROW, exclude: null },
+      listed,
+      ...over,
+    });
+
+    it('lists yours as the sidebar files them under the row, by their listing’s issue among the records; a held record in its listing’s place', () => {
+      const rows = chooserRows(scoped());
+      expect(rows.map(chooserRowId)).toEqual([mine.appId, local.appId, opened.appId]);
+      expect(rows[0]).toEqual({ listed: mine, at: Date.parse(at(6)) });
+      expect(isListedChooserRow(rows[2]), 'the record, not its listing').toBe(false);
+    });
+
+    it('lists others’ only while the row’s People toggle is on, and never the session it opened from', () => {
+      expect(chooserRows(scoped({ people: new Set([ROW]) })).map(chooserRowId)).toEqual([theirs.appId, mine.appId, local.appId, opened.appId]);
+      expect(chooserRows(scoped({ context: { projectId: here.id, row: ROW, exclude: mine.appId } })).map(chooserRowId)).toEqual([local.appId, opened.appId]);
+    });
+
+    // m8-4a's task review: another member's session stays behind its row's People toggle in whichever form it is held, and
+    // a row nobody draws (an all-hidden project's) never lets it through
+    it('keeps another member’s session out while the toggle is off, its listing or a record held at its address', () => {
+      const heldTheirs = record(theirs.appId, { projectId: null, updatedAt: at(3) });
+      const held = scoped({ records: new Map([local, heldTheirs].map((r) => [r.appId, r])) });
+      expect(chooserRows(held).map(chooserRowId)).toEqual([opened.appId, mine.appId, local.appId]);
+      expect(chooserRows({ ...held, people: new Set([ROW]) }).map(chooserRowId), 'the toggle on: the record, in its listing’s place').toEqual([opened.appId, mine.appId, local.appId, theirs.appId]);
+    });
+
+    it('never shows another member’s listing from an all-hidden project, whatever the toggles', () => {
+      const KEY = 'repo:privacy' as OrgKey;
+      const hidden = project(addressOf(TEST_MACHINE, 'p'), 0, { hidden: true, org: org('repo:privacy') });
+      const secret = listing('secret', 4, { mine: false, orgKey: KEY });
+      const every = input({
+        records: new Map(),
+        projects: new Map([[hidden.id, hidden]]),
+        context: { projectId: null, exclude: null },
+        toggles: { ...NO_TOGGLES, allProjects: true, archived: true },
+        listed: new Map([[secret.appId, secret]]),
+        people: new Set([KEY as RowKey]),
+      });
+      expect(chooserRows(every)).toEqual([]);
+      const ownSecret = listing('own-secret', 4, { orgKey: KEY });
+      expect(chooserRows({ ...every, listed: new Map([[ownSecret.appId, ownSecret]]) }).map(chooserRowId), 'yours: Archived shows a hidden project’s').toEqual([ownSecret.appId]);
+    });
+
+    it('All projects takes every listed row a row files; Current branch keeps none (a listing names no branch); the search matches its title', () => {
+      expect(chooserRows(scoped({ toggles: { ...NO_TOGGLES, allProjects: true } })).map(chooserRowId)).toEqual([elsewhere.appId, mine.appId, local.appId, opened.appId]);
+      expect(chooserRows(scoped({ toggles: { ...NO_TOGGLES, currentBranch: true } })).map(chooserRowId)).not.toContain(mine.appId);
+      expect(chooserRows(scoped({ query: 'SPAWN' })).map(chooserRowId)).toEqual([mine.appId]);
+    });
   });
 
   it('the search narrows by title, project name, folder and branch (G2: the branch joins the sidebar’s matcher)', () => {

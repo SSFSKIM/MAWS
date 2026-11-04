@@ -296,6 +296,18 @@ describe('lane B on another machine', () => {
     expect(fake.calls.filter((call) => call.startsWith('invoke'))).toEqual(['invoke session.steer']);
   });
 
+  // P5 O7 M8 ("The attachment"): a send naming uploads is a send while a turn runs too (the host queues it behind the
+  // turn), since a steer carries no uploads; the uploads go beside the content, whose mentions name them for a reader
+  it('sends a message naming uploads even while a turn runs, its uploads beside the content', async () => {
+    useSessions.getState().applyStatus({ appSessionId: REMOTE, status: status(REMOTE, { engineState: 'running', turn: humanTurn }) }, OTHER_MACHINE);
+    const fake = fakeClient({ 'session.send': { disposition: 'queued', queueId: 'q1', messageUuid: null } });
+    const port = laneBControls(record(REMOTE), remoteInputs(fake.client));
+    const uploads = [{ uploadId: 'u.0.pdf', as: 'document' as const }];
+    expect(await port.send('read @.claude/desk-uploads/app-r/u.0.pdf', { origin: 'composer', uploads })).toEqual({ disposition: 'queued', started: false, queueId: 'q1' });
+    expect(fake.invoked('session.send')).toEqual([{ appSessionId: REMOTE, content: 'read @.claude/desk-uploads/app-r/u.0.pdf', uploads }]);
+    expect(fake.invoked('session.steer')).toEqual([]);
+  });
+
   it('closes the chips with the overlay’s reasons, and changes a released session’s model without acquiring it', async () => {
     remoteRecord();
     const reason = 'mini refused this device (grade)';

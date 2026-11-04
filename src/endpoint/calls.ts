@@ -3,7 +3,9 @@
 //   - Lane B's engine-host reads (`session.status`, `.events`, `.pendingRequest`, `.pendingItems`, `.queue.list`,
 //     `.catalog`, and from P5 O7 M2 a remote pane's: the context, usage, settings, models, rules, MCP and cost reads) go
 //     through `dispatch` to the engine host, and its answer is the result. A host error `host_unavailable` or `timeout`
-//     is `unavailable`; any other code passes through.
+//     is `unavailable`; any other code passes through. P5 O7 M8: `fs.unfollow` goes only to an engine host whose
+//     welcome lists `host.followOwners`, which lets go of the caller's own hold alone; an older one, which stops the
+//     named follow whoever asks, is not asked (`unavailable`).
 //   - Lane A's `sminos.rows`, `.diff`, `.output` and `.read` go down RL10 as DX2's frames on the caller's own upstream
 //     subscription (named by the caller's `sub` on that session), as the hub carried a browser's: sminos answers on that
 //     subscription, so the answer comes in its stream at its place in the sequence, and the result says it was asked.
@@ -53,6 +55,7 @@
 // bytes codec's tagged form (bytes.ts), measured so.
 import { MESSAGE_MAX_BYTES, type CallMessage, type Listing, type Signed } from 'org-protocol';
 import { ACQUIRE_WITHIN_MS, LATE, within } from './acquire';
+import { FOLLOW_OWNERS_CAPABILITY } from '@shared/host/socket-protocol';
 import { gradeOf } from '@shared/ipc/grades';
 import { remoteDaemonStatus, type DaemonStatus } from '@shared/ipc/schema/daemon';
 import { SESSION_SEARCH_LIMIT, SESSION_SEARCH_SESSIONS_MAX } from '@shared/ipc/schema/session';
@@ -98,11 +101,25 @@ export type CallsContext = {
   /** P5 O7 M5c review 1: the clock an acquisition's bound is read on (the gate's), and the bound (acquire.ts). */
   now(): number;
   acquireWithinMs?: number;
+  /** P5 O7 M8: whether the engine host's welcome lists `capability` now (EndpointServices.engineHostLists). */
+  engineHostLists(capability: string): boolean;
   log(line: string): void;
 };
 
 type Fields = Record<string, unknown>;
-type Result = { ok: true; output: unknown } | { ok: false; code: string };
+type Result = { ok: true; output: unknown } | { ok: false; code: string; message?: string };
+/**
+ * P5 O7 M8: a forwarded failure's message reaches the device as the local IPC carries it (a missing file's `not found:
+ * <path>` and the files service's refusal answer one code, `internal`, told apart by the message), at most this many
+ * characters of it.
+ */
+export const FAILURE_MESSAGE_MAX = 512;
+/** `message` within FAILURE_MESSAGE_MAX UTF-16 units, never cut between a surrogate pair's halves. */
+export function failureMessage(message: string): string {
+  if (message.length <= FAILURE_MESSAGE_MAX) return message;
+  const end = /[\uD800-\uDBFF]/.test(message[FAILURE_MESSAGE_MAX - 1]) ? FAILURE_MESSAGE_MAX - 1 : FAILURE_MESSAGE_MAX;
+  return message.slice(0, end);
+}
 const isObject = (v: unknown): v is Fields => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isText = (v: unknown, max = 256): v is string => typeof v === 'string' && v !== '' && v.length <= max;
 const isInt = (v: unknown, min: number, max: number): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v >= min && v <= max;
@@ -244,9 +261,9 @@ export class Calls {
   execute(channel: RemoteChannel, m: CallMessage, decision: Granted = {}): void {
     const offers = this.ctx.offers ?? OFFERS;
     const row = Object.hasOwn(offers.commands, m.name) ? offers.commands[m.name] : undefined;
-    const answer = (result: { ok: true; output: unknown } | { ok: false; code: string }) => {
+    const answer = (result: Result) => {
       if (channel.closed) return;
-      if (!result.ok) return void channel.send({ t: 'result', id: m.id, ok: false, error: { code: result.code } });
+      if (!result.ok) return void channel.send({ t: 'result', id: m.id, ok: false, error: { code: result.code, ...(result.message === undefined ? {} : { message: result.message }) } });
       const output = writeBytes(channel, result.output);
       if (Buffer.byteLength(JSON.stringify(output ?? null)) > MESSAGE_MAX_BYTES - 1024) return void channel.send({ t: 'result', id: m.id, ok: false, error: { code: 'too-large' } });
       channel.send({ t: 'result', id: m.id, ok: true, output });
@@ -264,6 +281,7 @@ export class Calls {
     else if (m.name === 'artifacts.holdAssets' && row?.executor === 'endpoint') run = this.ctx.assetHolds.hold(channel, m.input, by());
     else if (m.name === 'artifacts.releaseAssets' && row?.executor === 'endpoint') run = this.ctx.assetHolds.release(channel, m.input);
     else if ((row?.executor === 'engine-host' || row?.executor === 'machine') && row.target === 'artifact' && SESSION_NAMING.has(m.name)) run = this.#sessionSafe(dispatch, row.executor, channel.member, m);
+    else if (m.name === 'fs.unfollow' && row?.executor === 'engine-host' && !this.ctx.engineHostLists(FOLLOW_OWNERS_CAPABILITY)) run = Promise.resolve(this.#unownedUnfollow());
     else if (row?.executor === 'engine-host' || (row?.executor === 'machine' && m.name !== 'daemon.status')) run = this.#forward(dispatch, row.executor, m);
     else if (row?.executor === 'sminos' && Object.hasOwn(LANE_A, m.name)) run = Promise.resolve(this.#laneA(channel, m));
     else if (row?.executor === 'machine') run = this.#daemonStatus(dispatch);
@@ -275,12 +293,19 @@ export class Calls {
     });
   }
 
-  /** A read its executor answers raw: the engine host's, or the machine's services'. */
-  async #forward(dispatch: EndpointServices['dispatch'], owner: 'engine-host' | 'machine', m: CallMessage): Promise<{ ok: true; output: unknown } | { ok: false; code: string }> {
+  /** P5 O7 M8: a remote unfollow an engine host without follow ownership would apply to every client's follow. */
+  #unownedUnfollow(): Result {
+    this.ctx.log(`endpoint: the engine host does not list \`${FOLLOW_OWNERS_CAPABILITY}\`: a remote \`fs.unfollow\` answered unavailable, since it would stop another client's follow`);
+    return { ok: false, code: 'unavailable' };
+  }
+
+  /** A read its executor answers raw: the engine host's, or the machine's services', a failure with its message (M8). */
+  async #forward(dispatch: EndpointServices['dispatch'], owner: 'engine-host' | 'machine', m: CallMessage): Promise<Result> {
     const response = await dispatch(owner, m.name, m.input === null ? undefined : m.input);
     if (response.ok) return { ok: true, output: response.value ?? null };
     const code = response.error.code === 'host_unavailable' || response.error.code === 'timeout' ? 'unavailable' : response.error.code;
-    return { ok: false, code };
+    const message = response.error.message;
+    return { ok: false, code, ...(typeof message === 'string' && message !== '' ? { message: failureMessage(message) } : {}) };
   }
 
   /**
@@ -359,7 +384,9 @@ export class Calls {
    */
   async #sessionSafe(dispatch: EndpointServices['dispatch'], owner: 'engine-host' | 'machine', member: string, m: CallMessage): Promise<Result | (() => Result)> {
     const result = await this.#forward(dispatch, owner, m);
-    return result.ok ? this.ctx.sessionSafe.prepare(member, m.name, result.output, dispatch) : result;
+    // A failure goes with its code alone: its message is the store's words, which no projection reads (it could name a
+    // session the caller doesn't view).
+    return result.ok ? this.ctx.sessionSafe.prepare(member, m.name, result.output, dispatch) : { ok: false, code: result.code };
   }
 
   /**

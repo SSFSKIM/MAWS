@@ -7,6 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ModRow } from '@shared/mods/registry';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { remoteRow } from '../../../../../test/support/builders';
+import { OTHER_MACHINE } from '../../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
+import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import { useSessions } from '../../stores/sessions';
 import { BuiltInMods } from './BuiltInMods';
 
 const hold = vi.hoisted(() => ({ client: null as ReturnType<typeof import('../../../../../test/support/fake-client').fakeClient>['client'] | null }));
@@ -99,5 +104,20 @@ describe('the built-in mods section', () => {
     const searched = render(<BuiltInMods appSessionId={APP} search="sandbox" />);
     await act(() => fake.reply('mods.list', [ROW]));
     expect(searched.container.textContent).toBe('');
+  });
+
+  // P5 O7 M8: `mods.list` is declared not offered on another machine (REMOTE_UNAVAILABLE): nothing is asked, and the
+  // section says why in the declared words
+  it('for a session on another machine asks nothing and says why, in the declared words', async () => {
+    const remote = addressOf(OTHER_MACHINE, 'app-mods' as AppSessionId);
+    useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, 'app-mods'), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    try {
+      render(<BuiltInMods appSessionId={remote} search="" />);
+      expect(within(section()).getByRole('status').textContent).toBe(REMOTE_UNAVAILABLE['mods.list']);
+      await act(() => Promise.resolve());
+      expect(fake.invoked('mods.list')).toEqual([]);
+    } finally {
+      useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    }
   });
 });

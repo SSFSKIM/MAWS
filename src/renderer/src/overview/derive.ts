@@ -123,30 +123,35 @@ export function lastActivity(record: SessionRecord, digest: SessionDigest | null
 
 const recency = (record: SessionRecord, digest: SessionDigest | undefined) => lastActivity(record, digest);
 
+// A record's place under `priority`: its group (0 a Needs-you row, 1 unread, 2 working, 3 the rest) and its key within
+// the group (the row's index, then the latest turn end or turn start first); the rest go by recency. P5 O7 M8: the
+// sidebar ranks a listed row on the same scale (`sidebar/derive.ts`, `projectItems`).
+export const RANK_REST = 3;
+export function priorityRank(record: SessionRecord, digest: SessionDigest | undefined, row: number | undefined): [group: number, key: number] {
+  if (row !== undefined) return [0, row];
+  if (record.unread) return [1, -time(digest?.lastTurnEndedAt)];
+  if (digest?.phase === 'working' || digest?.phase === 'starting') return [2, -time(digest.turnStartedAt)];
+  return [RANK_REST, 0];
+}
+
 // Within a project. `priority`: sessions with a Needs-you row (in row order), then unread by last turn end, then working
 // by turn start, then the rest by recency. `recency`: `lastActivity`. Ties by title.
 export function sortSessions(
   sessions: SessionRecord[],
   sort: SidebarSort,
-  { digests, rows }: { digests: Map<AppSessionId, SessionDigest>; rows: NeedsYouRow[] },
+  { digests, rows }: { digests: ReadonlyMap<AppSessionId, SessionDigest>; rows: NeedsYouRow[] },
 ): SessionRecord[] {
   const rowIndex = new Map(rows.map((row, i) => [row.appSessionId, i]));
   // Each session's keys are computed once, not per comparison (debt wave 5: a cold index sorts thousands per render).
   const keyed = sessions.map((r) => {
     const d = digests.get(r.appId);
-    const row = rowIndex.get(r.appId);
-    const [group, key]: [number, number] =
-      sort === 'recency' ? [3, 0]
-      : row !== undefined ? [0, row]
-      : r.unread ? [1, -time(d?.lastTurnEndedAt)]
-      : d?.phase === 'working' || d?.phase === 'starting' ? [2, -time(d.turnStartedAt)]
-      : [3, 0];
+    const [group, key] = sort === 'recency' ? [RANK_REST, 0] : priorityRank(r, d, rowIndex.get(r.appId));
     return { r, group, key, recency: recency(r, d) };
   });
   return keyed
     .sort((a, b) => {
       if (a.group !== b.group) return a.group - b.group;
-      if (a.group === 3) return b.recency - a.recency || byTitle(a.r, b.r);
+      if (a.group === RANK_REST) return b.recency - a.recency || byTitle(a.r, b.r);
       return a.key - b.key || byTitle(a.r, b.r);
     })
     .map(({ r }) => r);

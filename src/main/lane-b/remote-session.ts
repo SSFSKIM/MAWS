@@ -14,7 +14,7 @@
 //   `session.brokerItems`), unless the machine's attention feed follows it (P5 O7 M6 fix wave 1, `attentionFed`: the
 //   feed's list is the machine's whole one, and the feed's cache is what a page is told again); its events `session.eventBatch`, coalesced per macrotask into batches of at most `batchMax`,
 //   flushed before anything else is said. Every payload is read tolerantly first (the machine may be a newer build of the
-//   wire's major: its unknown keys are dropped), and an event that still doesn't read is left out, logged.
+//   wire's major: its unknown keys are dropped), and an event that still doesn't read is a gap (below).
 // - Gaps. The first `subbed` of a subscription says nothing, nor does a later `replay`. A later `snapshot` (a relaunch, a
 //   `/clear`) or `missing` (a range the journal lost), a fresh subscription's `missing` from a cursor this session held,
 //   and an event too large to carry (`omitted`) each emit `remote.gap {appSessionId, launchId, at?}` before what follows.
@@ -34,12 +34,32 @@
 //   too: fix wave 2), is kept for that try, and taken once it ends `unavailable` (one more try, each record at most once); a feed that stops following (`unfollowed`: a next
 //   channel's peer without feeds) puts a waiting stream on the backoff (fix wave 1). `removed` and `closed` end it for
 //   good; any other end ends the stream with its reason.
+// - P5 O7 M8 ("Operations and panel events"; Interfaces §U): the machine's notices beside the stream's state, each its
+//   local event under the machine's address: `{operation}` as `session.operation`, `{subagents}` as
+//   `fs.subagentsChanged`, `{workflow}` as `fs.workflowChanged`, `{tasks}` as `fs.tasksChanged`. `{side}` says nothing of
+//   its own: it follows a side question's completion, its `operation`, which the side store already patches its log from
+//   or lists it again on (src/renderer/src/side/store.ts, `onSideOperation`). A completion the channel lost is asked of
+//   the machine at every `subbed` (each opening, the link's own resubscriptions included) for the receipts this
+//   session's waiters hold (`awaitOperation`, from the adapter's receipts): `session.operations` answers each with its
+//   completion (emitted), `pending` (kept for its part) or `unknown` (settled as failed, LOST_OPERATION). A completion is
+//   emitted once, a late one once more; one for an opId settled here is dropped. An `ended('behind')` (a notice past
+//   the machine's bound) opens again from the cursor at once, and that opening asks; one with no progress since the last
+//   backs off, and three in a row show the gap and fall back to the idle backoff (`#behind`). At each opening after the first
+//   (m8-3's task review) every panel is made to list again, since a notice may have been lost on the way: the session's
+//   task list (`fs.tasksChanged`), its subagents (`fs.subagents` read, said as `fs.subagentsChanged` unless a newer part
+//   came first), its workflow runs (`fs.workflowChanged` naming no run, `runId: ''`: the list as a whole) and, for the
+//   side questions, which have no change event of their own, `remote.reopened`.
+// - An event that doesn't read (P5 O7 M8, "What draws Working…") is a gap at its place, never a silent drop: the
+//   session's status and record are read again (`session.status`, `session.get`) and folded in, so a turn a dropped
+//   `turn.ended` left open closes by the machine's word; a status the stream delivers meanwhile stands over the re-read.
 // - `remote.session` at each change (the link's state and caps included), said once per change.
 // - A replay (`replay`): the record, the last of each part and `remote.session` said again, for a page that has just
 //   subscribed (a reload, a second window); what it said before was said to no one listening.
 import { readTolerant } from '@shared/ipc/tolerant';
+import { SESSION_OPERATIONS_MAX, type OperationCommand, type OperationEvent, type OperationOutcome } from '@shared/engine/operations';
 import { AttentionItemSchema, type AttentionItem } from '@shared/graph/attention';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
+import { sanitiseListId } from '@shared/engine/task-list';
 import type { SessionRecord } from '@shared/graph/session';
 import { REGISTRY } from '@shared/ipc/registry';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
@@ -107,6 +127,17 @@ const isObject = (value: unknown): value is Record<string, unknown> => value !==
 const WAITING = new Set(['pending', 'delivered']);
 /** Call errors that say nothing about the session: the link or the machine's index couldn't answer now. */
 const TRANSIENT = new Set(['offline', 'timeout', 'unavailable']);
+/** P5 O7 M8: the words of an operation the machine says it doesn't know (`session.operations`' `unknown`). */
+export const LOST_OPERATION = 'the machine lost this operation’s result; check the transcript';
+/** m8-3 review (B): a `behind` with no progress since the last backs off from this, doubling to the cap. */
+const BEHIND_FIRST_MS = 250;
+const BEHIND_MAX_MS = 5_000;
+/** Reopens in a row with no progress before the stream shows the gap and falls back to the idle backoff. */
+const BEHIND_STALLS = 3;
+/** Operations remembered past their completion, so a repeat or a late one for a settled op is told apart. */
+const OPS_KEPT = 256;
+/** An operation this session heard of: its receipt waiting, its completion said (`late` once more), or settled here. */
+type Op = { command: OperationCommand; state: 'waiting' | 'completed' | 'lost'; lateSaid: boolean };
 
 export class RemoteSession {
   readonly state: RemoteSessionState;
@@ -131,6 +162,21 @@ export class RemoteSession {
   #said = '';
   /** The last queue, catalog (with its launch) and waiting items the stream gave, said again by a replay. */
   #lastParts: { queue?: Record<string, unknown>; catalog?: { launchId: string; catalog: Record<string, unknown> }; items?: AttentionItem[] } = {};
+  /** P5 O7 M8: the operations heard of, oldest first. */
+  #ops = new Map<string, Op>();
+  /** m8-3 review (B): where the stream stood at its last `behind`, and the reopens in a row since that made no progress. */
+  #behindAt: { at: Cursor | null; stalls: number; fallbackMs: number } | null = null;
+  /** m8-3 review: the last workflow run the stream named, said again at a reopening. */
+  /** m8-3 review round 2: `subagents` parts the stream delivered, so a reopening's read that answers after one is dropped. */
+  #subagentParts = 0;
+  /** P5 O7 M8: the `subbed`s heard, each an opening the waiters are asked at. */
+  #openings = 0;
+  /** M8 review: records the checkout feed delivered, so a gap's re-read that answers after one doesn't roll it back. */
+  #records = 0;
+  /** P5 O7 M8: status parts the stream delivered, so a re-read that answers after one doesn't replace it. */
+  #statuses = 0;
+  /** P5 O7 M8: a re-read after a gap is out; `again`: another gap came meanwhile, so one more follows it. */
+  #rereading: { token: object; again: boolean } | null = null;
 
   constructor(deps: RemoteSessionDeps) {
     this.#deps = deps;
@@ -184,6 +230,7 @@ export class RemoteSession {
   recordChanged(record: SessionRecord): void {
     if (!this.#running) return;
     const before = this.state.record;
+    this.#records += 1;
     this.state.record = record;
     this.#deps.emit(this.state.machine, 'session.changed', { record, cause: 'live', revision: this.#deps.revision() });
     if (record.holder.kind !== 'self' && record.engineSessionId === before?.engineSessionId) return;
@@ -244,6 +291,29 @@ export class RemoteSession {
     if (catalog !== undefined) this.#emit('session.catalogChanged', { appSessionId: app, ...catalog });
     if (items !== undefined && this.#deps.attentionFed?.() !== true) this.#emit('attention.changed', { appSessionId: app, items });
     this.publish(true);
+  }
+
+  /** The session's task list as the task panel derives it (its status's `taskListId`, else its record's engine session), or null. */
+  taskList(): string | null {
+    const id = this.state.status !== null ? this.state.status.taskListId : this.state.record?.engineSessionId;
+    return typeof id === 'string' ? sanitiseListId(id) : null;
+  }
+
+  /** P5 O7 M8: the openings answered so far (each `subbed`): an act made under one names it to `awaitOperation`. */
+  openings(): number {
+    return this.#openings;
+  }
+
+  /**
+   * P5 O7 M8: a receipt of this session's operation (the adapter's act answered `{opId}`): its completion is waited for,
+   * and asked of the machine at each opening until it comes. One whose completion came first waits for nothing. `since`,
+   * the opening its act was made under: a receipt heard after a later opening reconciled (RL4 recovered it once the link
+   * resubscribed) missed that opening's ask, so it is asked now.
+   */
+  awaitOperation(opId: string, command: OperationCommand, since?: number): void {
+    if (this.#ops.has(opId)) return;
+    this.#remember(opId, { command, state: 'waiting', lateSaid: false });
+    if (since !== undefined && since !== this.#openings && this.#answered && this.#sub !== null) void this.#readOperations([opId], this.#token);
   }
 
   /** P5 O7 M6 fix wave 3: the broker's items the stream last delivered (none before its first part). */
@@ -334,6 +404,9 @@ export class RemoteSession {
         } else if (gap) this.#gap(at.epoch);
         else this.state.stream = 'live';
         this.publish();
+        this.#openings += 1;
+        this.#askOperations(token);
+        if (this.#openings > 1) this.#relist(token);
       },
       snapshot: (at, value) => {
         if (!mine()) return;
@@ -354,7 +427,14 @@ export class RemoteSession {
           return;
         }
         const read = readTolerant(SessionEventSchema, body);
-        if (!read.ok) return this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: an event at ${at.epoch}:${at.seq}:${at.idx ?? ''} doesn't read; left out`);
+        if (!read.ok) {
+          this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: an event at ${at.epoch}:${at.seq}:${at.idx ?? ''} doesn't read; a gap there, the status and record read again`);
+          this.#flush();
+          this.#gap(at.epoch, place);
+          this.publish();
+          this.#readAgain(token);
+          return;
+        }
         this.#batch.push(read.value);
         if (this.#batch.length >= this.#deps.timing.batchMax) this.#flush();
         else this.#flushTimer ??= setTimeout(() => this.#flush(), 0);
@@ -376,7 +456,11 @@ export class RemoteSession {
         this.#tellPendingGap();
         this.#cursor = this.#sub?.cursor() ?? this.#cursor;
         this.#sub = null;
+        this.#token = {}; // m8-3 review: a read made for this subscription (a gap's re-read, an operations ask) is not taken after its end
         if (reason === 'removed' || reason === 'closed') return this.stop(reason);
+        // P5 O7 M8: the machine ended it past its notices' bound; the session runs on, so it is opened again from where
+        // it stood, and that opening asks for the completions it missed
+        if (reason === 'behind') return this.#behind();
         this.state.status = null;
         if (reason !== 'unavailable') {
           this.state.stream = 'ended';
@@ -402,6 +486,7 @@ export class RemoteSession {
     if (!isObject(value)) return;
     const app = this.state.app;
     if (isObject(value.status)) {
+      this.#statuses += 1;
       this.state.status = value.status;
       if (typeof value.status.launchId === 'string') this.state.launch = value.status.launchId;
       this.#emit('session.status', { appSessionId: app, status: value.status });
@@ -424,6 +509,165 @@ export class RemoteSession {
       if (this.#deps.attentionFed?.() !== true) this.#emit('attention.changed', { appSessionId: app, items });
       this.#deps.attentionChanged?.();
     }
+    // P5 O7 M8: the notices; `side` is its completion's `operation` already (the header)
+    if (isObject(value.operation)) this.#operation(value.operation);
+    if (isObject(value.subagents)) {
+      this.#subagentParts += 1;
+      this.#emit('fs.subagentsChanged', { appSessionId: app, agents: value.subagents.agents });
+    }
+    if (isObject(value.workflow)) this.#emit('fs.workflowChanged', { appSessionId: app, runId: value.workflow.runId });
+    if (isObject(value.tasks)) this.#emit('fs.tasksChanged', { listId: value.tasks.listId });
+  }
+
+  // ---- Operations (P5 O7 M8) -------------------------------------------------------------------------------------------
+
+  /**
+   * A completion, from the stream or the machine's answer: said once, a late one once more; nothing for an op settled
+   * here. A waiter that never saw its first is given the late one the machine kept in its place as its first.
+   */
+  #operation(raw: Record<string, unknown>): void {
+    const read = events.readEventPayload('session.operation', { ...raw, appSessionId: this.state.app });
+    if (!read.ok) return this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: session.operation doesn't read; left out`);
+    const event = read.value as OperationEvent;
+    const op = this.#ops.get(event.opId);
+    if (op?.state === 'lost') return this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: ${event.opId} completed after it was settled lost; dropped`);
+    if (event.late ? op?.lateSaid === true : op?.state === 'completed') return;
+    const first = op === undefined || op.state === 'waiting'; // a late one heard before its receipt is the first this app saw
+    this.#remember(event.opId, { command: event.command, state: 'completed', lateSaid: op?.lateSaid === true || event.late });
+    this.#deps.emit(this.state.machine, 'session.operation', first && event.late ? { ...event, late: false } : event);
+  }
+
+  /** The waiters' opIds asked of the machine, for the subscription `token` is. */
+  #askOperations(token: object): void {
+    const waiting = [...this.#ops].filter(([, op]) => op.state === 'waiting').map(([opId]) => opId);
+    for (let i = 0; i < waiting.length; i += SESSION_OPERATIONS_MAX) void this.#readOperations(waiting.slice(i, i + SESSION_OPERATIONS_MAX), token);
+  }
+
+  async #readOperations(opIds: string[], token: object): Promise<void> {
+    const answer = await this.link.call('session.operations', { appSessionId: this.state.app, opIds });
+    if (this.#token !== token || !this.#running) return; // the next opening asks again
+    const read = answer.ok ? link.readCommandOutput('session.operations', answer.output) : null;
+    if (read === null || !read.ok) return this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: session.operations ${answer.ok ? 'answered what doesn’t read' : `failed (${answer.error.code})`}; asked again at the next opening`);
+    for (const outcome of (read.value as { outcomes: OperationOutcome[] }).outcomes) {
+      if ('event' in outcome) this.#operation(outcome.event);
+      else if ('unknown' in outcome) this.#lose(outcome.opId);
+    }
+  }
+
+  /** A waiter the machine doesn't know: settled as failed, and anything heard of it later dropped. */
+  #lose(opId: string): void {
+    const op = this.#ops.get(opId);
+    if (op?.state !== 'waiting') return;
+    this.#remember(opId, { ...op, state: 'lost' });
+    const event: OperationEvent = { appSessionId: this.state.app as OperationEvent['appSessionId'], opId, command: op.command, late: false, outcome: { ok: false, error: { code: 'engine_error', message: LOST_OPERATION, engineCode: null } } };
+    this.#deps.emit(this.state.machine, 'session.operation', event);
+  }
+
+  /** An op's state, newest last; past OPS_KEPT the oldest settled ones go (a waiting one stays). */
+  #remember(opId: string, op: Op): void {
+    this.#ops.delete(opId);
+    this.#ops.set(opId, op);
+    for (const [old, kept] of this.#ops) {
+      if (this.#ops.size <= OPS_KEPT) break;
+      if (kept.state !== 'waiting') this.#ops.delete(old);
+    }
+  }
+
+  // ---- `behind` (P5 O7 M8; m8-3's task review, B) --------------------------------------------------------------------
+
+  /**
+   * An `ended('behind')`: opened again at once when the cursor moved since the last one; while it stands, after
+   * BEHIND_FIRST_MS doubling to BEHIND_MAX_MS; after BEHIND_STALLS reopens in a row with no progress, the stream shows
+   * the gap and is tried on a backoff of the idle one's steps, its own, which an opening's `subbed` doesn't reset and only
+   * progress does.
+   */
+  #behind(): void {
+    const at = this.#cursor;
+    const last = this.#behindAt;
+    const moved = last === null || JSON.stringify(last.at) !== JSON.stringify(at);
+    const stalls = moved ? 0 : last.stalls + 1;
+    // the fallback's own backoff, kept across the openings (a `subbed` resets the idle one) and reset only by progress
+    const [firstMs, capMs] = this.#deps.timing.idleRetryMs;
+    const fallbackMs = moved ? firstMs : last.fallbackMs;
+    this.#behindAt = { at, stalls, fallbackMs: stalls >= BEHIND_STALLS ? Math.min(fallbackMs * 2, capMs) : fallbackMs };
+    if (stalls === 0) return this.#subscribe();
+    if (stalls >= BEHIND_STALLS) {
+      this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: the stream ended behind ${stalls} times in a row with no progress; tried again in ${fallbackMs} ms`);
+      this.state.stream = 'gap';
+      this.publish();
+    }
+    this.#timer = setTimeout(
+      () => {
+        this.#timer = null;
+        if (this.#running) this.#subscribe();
+      },
+      stalls >= BEHIND_STALLS ? fallbackMs : Math.min(BEHIND_FIRST_MS * 2 ** (stalls - 1), BEHIND_MAX_MS),
+    );
+  }
+
+  // ---- The panels across a reopening (m8-3's task review) ------------------------------------------------------------
+
+  /** Every panel made to list again: a notice it lists by may have been lost between the openings. */
+  #relist(token: object): void {
+    const app = this.state.app;
+    const list = this.taskList();
+    if (list !== null) this.#emit('fs.tasksChanged', { listId: list });
+    this.#emit('remote.reopened', { appSessionId: app });
+    // the runs as a whole (no run in particular, `runId: ''`): both of the workflow panels list them again on any change
+    this.#emit('fs.workflowChanged', { appSessionId: app, runId: '' });
+    void this.#readSubagents(token);
+  }
+
+  /** The subagents read and said, unless the stream delivered a `subagents` part while the read was out (it is newer). */
+  async #readSubagents(token: object): Promise<void> {
+    const parts = this.#subagentParts;
+    const answer = await this.link.call('fs.subagents', { appSessionId: this.state.app });
+    if (this.#token !== token || !this.#running || this.#subagentParts !== parts) return;
+    const read = answer.ok ? link.readCommandOutput('fs.subagents', answer.output) : null;
+    if (read?.ok === true) return this.#emit('fs.subagentsChanged', { appSessionId: this.state.app, agents: (read.value as { agents: unknown }).agents });
+    this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: fs.subagents at a reopening ${answer.ok ? 'answered what doesn’t read' : `failed (${answer.error.code})`}; its panel lists at its next change`);
+  }
+
+  // ---- An event that doesn't read (P5 O7 M8) --------------------------------------------------------------------------
+
+  /**
+   * The status and record read again after a gap; a status part the stream, or a record the checkout feed, delivered
+   * meanwhile stands. One read is out at a time per subscription: gaps that come while it is make one more after it,
+   * not one each.
+   */
+  #readAgain(token: object): void {
+    if (this.#rereading?.token === token) {
+      this.#rereading.again = true;
+      return;
+    }
+    const reading = { token, again: false };
+    this.#rereading = reading;
+    void this.#reread(token).finally(() => {
+      if (this.#rereading !== reading) return;
+      this.#rereading = null;
+      if (reading.again && this.#token === token && this.#running) this.#readAgain(token);
+    });
+  }
+
+  async #reread(token: object): Promise<void> {
+    const app = this.state.app;
+    const statuses = this.#statuses;
+    const records = this.#records;
+    const [status, record] = await Promise.all([this.link.call('session.status', { appSessionId: app }), this.link.call('session.get', { appSessionId: app })]);
+    if (this.#token !== token || !this.#running) return;
+    const readStatus = status.ok ? link.readCommandOutput('session.status', status.output) : null;
+    if (readStatus?.ok === true && this.#statuses === statuses) {
+      this.#flush();
+      this.#parts(this.state.launch ?? '', { status: readStatus.value });
+      if (this.state.stream === 'gap') this.state.stream = 'live';
+      for (const waiter of [...this.#waiters]) waiter();
+    } else if (readStatus?.ok !== true) this.#deps.log(`lane B: ${this.link.name}/${app}: the status read again after a gap ${status.ok ? 'doesn’t read' : `failed (${status.error.code})`}`);
+    const readRecord = record.ok ? link.readCommandOutput('session.get', record.output) : null;
+    if (readRecord?.ok === true && readRecord.value !== null && this.#records === records) {
+      this.state.record = readRecord.value as SessionRecord;
+      this.#deps.emit(this.state.machine, 'session.changed', { record: this.state.record, cause: 'live', revision: this.#deps.revision() });
+    }
+    this.publish();
   }
 
   /** A payload read as this build reads it, then emitted for the machine; one that doesn't read is left out, logged. */

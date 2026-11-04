@@ -187,6 +187,35 @@ export const FilesUploadOutputSchema = z.discriminatedUnion('status', [
 ]);
 export type FilesUploadOutput = z.infer<typeof FilesUploadOutputSchema>;
 
+// P5 O7 M8 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M8 "The attachment", Interfaces §U): an upload a
+// send names for the machine to attach. Its id is the name `files.upload` stored it under in the session's upload root
+// (the last part of the path it answered: `<upload id>.<n>[.<ext>]`), so it names a file of that root alone and never a
+// path. `as: 'document'`: the file goes to the model as a document block, as a PDF dropped on a local session does.
+// How long an upload is kept for a send to name (a day): the machine's sweep may take its root after it, and a send naming
+// an older one is refused (services/fs/upload-roots.ts, services/files/upload.ts); the composer warns before such a send.
+export const UPLOAD_KEPT_MS = 24 * 3600_000;
+export const UPLOAD_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}\.[0-7](?:\.[a-z0-9]{1,16})?$/;
+export const SendUploadSchema = z.strictObject({ uploadId: z.string().regex(UPLOAD_ID_PATTERN), as: z.literal('document') });
+export type SendUpload = z.infer<typeof SendUploadSchema>;
+// The most uploads one message names (M8's reviewer-high review). Not UPLOAD_FILES_MAX, which bounds one `files.upload`
+// call: the composer splits a larger set across calls. A count bound for the schema, the endpoint's read and the
+// composer alike; the bytes are bounded apart, each document within MAX_SEND_DOCUMENT_BYTES and the message within
+// MAX_SEND_CONTENT_JSON_BYTES (the machine's read, services/files/upload.ts, and the expansion's check).
+export const SEND_UPLOADS_MAX = 100;
+export const SendUploadsSchema = z.array(SendUploadSchema).min(1).max(SEND_UPLOADS_MAX);
+// `files.readUploads` (internal: the machine's endpoint's own read, never offered and never bridged): each upload of the
+// session's root read whole as the block a send carries, or the refusal, a sentence naming the upload, with nothing read
+// for any of them.
+export const UploadDocumentBlockSchema = z.strictObject({ type: z.literal('document'), source: z.strictObject({ type: z.literal('base64'), media_type: z.literal('application/pdf'), data: z.base64() }) });
+export type UploadDocumentBlock = z.infer<typeof UploadDocumentBlockSchema>;
+export const FilesReadUploadsInputSchema = z.strictObject({ appSessionId: AppSessionIdSchema, uploads: SendUploadsSchema });
+export type FilesReadUploadsInput = z.infer<typeof FilesReadUploadsInputSchema>;
+export const FilesReadUploadsOutputSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('ok'), blocks: z.array(UploadDocumentBlockSchema) }),
+  z.strictObject({ status: z.literal('refused'), reason: z.string() }),
+]);
+export type FilesReadUploadsOutput = z.infer<typeof FilesReadUploadsOutputSchema>;
+
 export const commands = {
   // No path: the roots as 'dir' entries in record order (directory, additionalDirectories…, worktree when it differs),
   // deduplicated by realpath, root null, path ''.
@@ -202,6 +231,7 @@ export const commands = {
   'files.reveal': { input: SessionPathSchema, output: FilesRevealOutputSchema, owner: 'machine' }, // E1
   'files.readResolved': { input: FilesReadResolvedInputSchema, output: FilesReadOutputSchema, owner: 'machine' }, // P5 O3-E: main-only
   'files.upload': { input: FilesUploadInputSchema, output: FilesUploadOutputSchema, owner: 'machine' }, // P5 O3-E
+  'files.readUploads': { input: FilesReadUploadsInputSchema, output: FilesReadUploadsOutputSchema, owner: 'machine' }, // P5 O7 M8: main-only, the endpoint's
 } as const satisfies Record<`files.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 // `invalidated`: the watched directory (path is its confirmed realpath) failed a re-confirmation and its watch was

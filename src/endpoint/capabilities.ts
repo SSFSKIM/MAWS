@@ -40,4 +40,8 @@ export const ENDPOINT_CAPABILITIES = [
   // controls `ack` and `input`, the refusals `engine-changed` and `control-busy`), the act `machine.browserControl` and a
   // session's `browser.inventory` feed. A screencast open from a device that listed none of it is `malformed`.
   'rl2.browser-screencast',
+  // P5 O7 M8 ("The attachment"): `session.send`'s `uploads`, files of the session's upload root this endpoint reads into
+  // the send as document blocks before the engine host sees it (send-uploads.ts); a device names them only to an
+  // endpoint that listed it, since an older one holds the send's args to a schema without them (`malformed`).
+  'rl2.upload-blocks',
 ] as const;

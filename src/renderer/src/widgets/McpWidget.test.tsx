@@ -6,7 +6,13 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, fixtureLine, syntheticFixture, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { at } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { remoteRow } from '../../../../test/support/builders';
+import { heardRefusal, resetRemoteSurfaces } from '../artifacts/remote-surfaces';
+import { useMachines } from '../stores/machines';
+import { addressOf } from '@shared/machine/address';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import { heard, resetSignIns } from '../customize/connectors/sign-in';
 import { useSessions } from '../stores/sessions';
 import { McpWidget, toggleView } from './McpWidget';
 
@@ -115,6 +121,82 @@ describe('mcp toggle discloses persistence and reads its state back after either
     const before = reads();
     fireEvent.click(within(await row(DOCS)).getByRole('button', { name: 'Read again' }));
     await waitFor(() => expect(reads()).toBe(before + 1));
+  });
+});
+
+// P5 O7 M8 ("Sign in from the session's MCP widget"): a server that needs auth offers Sign in beside Reconnect, for a
+// session on this Mac or another machine alike: `connectors.signInServer` by the server's name and scope, with the
+// session's directory, sent to the session's machine, which reads the entry there. Reconnect stays a restart.
+describe('mcp sign in', () => {
+  const REMOTE = addressOf(OTHER_MACHINE, BARE);
+  let targets: [string, unknown][];
+  beforeEach(() => {
+    resetSignIns();
+    targets = [];
+    const bridge = window.maws as PreloadBridge;
+    window.maws = { ...bridge, invoke: (name, input, target) => (targets.push([name, target]), bridge.invoke(name, input, target)) } as PreloadBridge;
+    backend.script('session.mcpStatus', () => withServer(DOCS, { status: 'needs-auth' }));
+    backend.script('connectors.signInServer', () => ({ opId: 'op-1' }));
+  });
+  const mountFor = (appSessionId: AppSessionId) =>
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <McpWidget appSessionId={appSessionId} args="" close={() => {}} />
+      </QueryClientProvider>,
+    );
+  const signIns = () => backend.calls.filter((c) => c.command === 'connectors.signInServer').map((c) => c.input);
+
+  it('offers Sign in beside Reconnect on a server that needs auth, and signs it in by name and scope in the session’s directory', async () => {
+    mountFor(ID);
+    const docs = await row(DOCS);
+    expect(within(docs).getByRole('button', { name: 'Reconnect' })).toBeTruthy();
+    fireEvent.click(within(docs).getByRole('button', { name: `Sign in to ${DOCS}` }));
+    await waitFor(() => expect(signIns()).toEqual([{ name: DOCS, scope: 'user', cwd: backend.status(BARE).cwd, appSessionId: BARE }]));
+    act(() => heard({ opId: 'op-1', name: DOCS, state: 'waiting_callback', reason: null, message: null, where: null }, Date.now(), null));
+    await waitFor(async () => expect((await row(DOCS)).querySelector('[data-sign-in-state]')?.textContent).toBe('Finish signing in in your browser…'));
+    // Reconnect is still the restart it was
+    fireEvent.click(within(await row(DOCS)).getByRole('button', { name: 'Reconnect' }));
+    await waitFor(() => expect(backend.calls.find((c) => c.subtype === 'mcp_reconnect')?.input).toEqual({ appSessionId: BARE, serverName: DOCS }));
+    expect(signIns()).toHaveLength(1);
+  });
+
+  it('signs a remote session’s server in on its machine, and hears that machine’s sign-in', async () => {
+    useSessions.setState({ engine: new Map([[REMOTE, { ...backend.status(BARE), appSessionId: REMOTE }]]) });
+    mountFor(REMOTE);
+    fireEvent.click(within(await row(DOCS)).getByRole('button', { name: `Sign in to ${DOCS}` }));
+    await waitFor(() => expect(signIns()).toEqual([{ name: DOCS, scope: 'user', cwd: backend.status(BARE).cwd, appSessionId: BARE }]));
+    expect(targets.filter(([name]) => name === 'connectors.signInServer')).toEqual([['connectors.signInServer', OTHER_MACHINE]]);
+    act(() => heard({ opId: 'op-1', name: DOCS, state: 'done', reason: null, message: null, where: 'here' }, Date.now(), OTHER_MACHINE));
+    await waitFor(async () => expect((await row(DOCS)).querySelector('[data-sign-in-state]')?.textContent).toBe('Signed in · connected here'));
+  });
+
+  it('offers no Sign in on a connected server, nor on one of a scope the engine signs in nowhere', async () => {
+    backend.script('session.mcpStatus', () => withServer('plugin:ptc:ptc', { status: 'needs-auth' }));
+    mountFor(ID);
+    await row(DOCS);
+    expect(screen.queryByRole('button', { name: `Sign in to ${DOCS}` })).toBeNull(); // connected
+    expect(screen.queryByRole('button', { name: 'Sign in to plugin:ptc:ptc' })).toBeNull(); // `dynamic`: --mcp-config's
+  });
+
+  // P5 O7 M8 ("An older peer"): a machine heard refusing a command `not-offered` greys its control for that machine's
+  // sessions, with the reason, as the Connectors sheet's surfaces grey (lane-b/remote-unavailable.ts)
+  it('greys Sign in, Reconnect and the switch for a session on a machine heard not offering them, with the reason', async () => {
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+    useSessions.setState({ engine: new Map([[REMOTE, { ...backend.status(BARE), appSessionId: REMOTE }]]), listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, BARE), appId: REMOTE }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    try {
+      mountFor(REMOTE);
+      const signIn = await within(await row(DOCS)).findByRole('button', { name: `Sign in to ${DOCS}` });
+      expect(signIn).toHaveProperty('disabled', false);
+      for (const name of ['connectors.signInServer', 'session.mcpReconnect', 'session.mcpToggle'] as const) act(() => heardRefusal(name, { issues: { refusal: 'not-offered' } }, OTHER_MACHINE, TEST_MACHINE));
+      const docs = await row(DOCS);
+      for (const control of [within(docs).getByRole('button', { name: `Sign in to ${DOCS}` }), within(docs).getByRole('button', { name: 'Reconnect' }), within(docs).getByRole('switch')]) {
+        expect(control).toHaveProperty('disabled', true);
+        expect(control.title).toBe('mini doesn’t offer this');
+      }
+    } finally {
+      resetRemoteSurfaces();
+      useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    }
   });
 });
 

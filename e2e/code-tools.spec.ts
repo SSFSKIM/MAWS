@@ -583,11 +583,23 @@ test.describe('the product in stub mode over a scratch repository', () => {
       await expect(review.locator('[data-review-hunk]')).toHaveText('Showing hunk 1 of 3');
       await selectReviewFile(review, 'src/staged.ts');
       await expect(review.locator('[data-review-file-header]')).toHaveText('src/staged.ts · Added');
-      for (const path of ['big.log', 'link-out', 'scratch.txt']) {
-        await selectReviewFile(review, path);
-        await expect(review.locator('[data-review-note]')).toHaveText('Untracked file · not in the diff');
-        await expect(review.locator('[data-review-body]')).toHaveCount(0);
-      }
+      // P5 O7 M8: an untracked file is read as Source control reads it (`git.diff`'s untracked scope, what `git add` would
+      // stage), so it shows as added: its one hunk drawn, no note
+      await selectReviewFile(review, 'scratch.txt');
+      await expect(review.locator('[data-review-file-header]')).toHaveText('scratch.txt · Untracked');
+      await expect(review.locator('[data-review-hunk]')).toHaveText('Showing hunk 1 of 1');
+      await expect(review.locator('[data-review-body]')).toContainText('scratch');
+      await expect(review.locator('[data-review-note]')).toHaveCount(0);
+      // a symlink diffs as git shows one (mode 120000): its one added line is the target's path, never the target's content
+      await selectReviewFile(review, 'link-out');
+      await expect(review.locator('[data-review-hunk]')).toHaveText('Showing hunk 1 of 1');
+      await expect(review.locator('[data-review-body]')).toContainText(p.scratch.outsideFile);
+      await expect(review.locator('[data-review-body]')).not.toContainText('outside the repository');
+      // big.log (20 MiB, one hunk of 327,680 added lines) is past Review's file cap: it says so and offers the file
+      await selectReviewFile(review, 'big.log');
+      await expect(review.locator('[data-review-too-large]')).toHaveText('Diff too large to display. Open the file', { timeout: 30_000 });
+      await expect(review.locator('[data-review-body]')).toHaveCount(0);
+      await expect(review.locator('[data-review-note]')).toHaveCount(0);
       await expect(review.locator('[data-review-footer]')).toHaveText('main · Working tree against HEAD');
     });
   });

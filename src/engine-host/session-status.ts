@@ -278,6 +278,12 @@ export class SessionStatusTracker {
       if (list(delta?.safeguard_results).some((r) => (r.status as { type?: unknown } | undefined)?.type === 'unavailable')) this.observeLocalLane(frame, at);
       return;
     }
+    // P5 O7 M8: a turn's end; the engine sends no status after it, so the last (`requesting`) would stand till the next
+    // turn's. A subagent's own result is not the turn's.
+    if (frame.type === 'result') {
+      if (!isSubagentFrame(frame)) this.activity = null;
+      return;
+    }
     if (frame.type !== 'system') return;
     switch (frame.subtype) {
       case 'init':

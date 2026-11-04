@@ -8,6 +8,7 @@ import { project, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
+import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import type { OrgKey } from '@shared/machine/org-key';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -383,6 +384,27 @@ describe('dialogs', () => {
     const dialog = await screen.findByRole('dialog', { name: `Archived sessions · ${OTHER_MACHINE}` });
     await waitFor(() => expect(within(dialog).getAllByRole('listitem').map((li) => li.getAttribute('aria-label'))).toEqual(['Loose', 'In tmp']));
     expect(fake.machines('session.list')).toEqual([OTHER_MACHINE]);
+  });
+
+  // P5 O7 M8 ("The offer audit and its contract"): unarchiving and deleting are declared not offered on another machine
+  // its sessions reach over RL2 (REMOTE_UNAVAILABLE): its archived rows keep their buttons, greyed with those words
+  it('greys Unarchive and Delete… for an archived session of a machine reached over RL2, with the declared words', async () => {
+    const tmp = project(addressOf(OTHER_MACHINE, 'tmp'), 0, { discovered: true, org: { key: `folder:${OTHER_MACHINE}:tmp` as OrgKey, name: 'tmp', source: 'folder', smnsId: null } });
+    withMain({ 'session.list': () => ({ sessions: [record(BARE_IDLE1, { projectId: 'tmp' as ProjectId, archived: true, title: { text: 'In tmp', source: 'user' } })], revision: 1 }) });
+    useSessions.setState({ projects: new Map([[tmp.id, tmp]]), listedMachines: new Set([OTHER_MACHINE]) });
+    try {
+      render(<SessionDialogs />);
+      act(() => openDialog({ kind: 'archived', projectId: null, machine: OTHER_MACHINE }));
+      const row = await within(await screen.findByRole('dialog', { name: `Archived sessions · ${OTHER_MACHINE}` })).findByRole('listitem', { name: 'In tmp' });
+      const unarchive = within(row).getByRole('button', { name: 'Unarchive' });
+      expect(unarchive).toHaveProperty('disabled', true);
+      expect(unarchive.title).toBe(REMOTE_UNAVAILABLE['session.update']);
+      const del = within(row).getByRole('button', { name: 'Delete…' });
+      expect(del).toHaveProperty('disabled', true);
+      expect(del.title).toBe(REMOTE_UNAVAILABLE['session.delete']);
+    } finally {
+      useSessions.setState({ listedMachines: new Set() });
+    }
   });
 
   // W11 (I5): the projects removed from the sidebar, each shown again by adding its directory

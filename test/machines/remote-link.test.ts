@@ -360,8 +360,8 @@ describe('the link over the direct carrier', { timeout: 30_000 }, () => {
     await until(() => watch.heard.some((x) => x[0] === 'snapshot'), 'the snapshot');
     const answer = await l.link.call('machine.identity', undefined);
     // Answered (P5 O7 M2: a `machine` row reaches the machine's services, and the fakes serve no machine.identity, whose
-    // `unknown_command` passes through), not a channel closed `malformed`.
-    expect(answer).toEqual({ ok: false, error: { code: 'unknown_command' } });
+    // `unknown_command` passes through, with its message since P5 O7 M8's forwarded failure), not a channel closed `malformed`.
+    expect(answer).toEqual({ ok: false, error: { code: 'unknown_command', message: 'unknown_command' } });
     const live = l.f.host.row('app-1', 1);
     await until(() => watch.events().some((e) => (e.body as SessionEvent).id === live[0].id), 'a live event after the void call');
     expect(l.carriers).toHaveLength(1);

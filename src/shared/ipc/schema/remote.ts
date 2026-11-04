@@ -39,6 +39,10 @@ export const MACHINE_RIGHTS = ['spawn', 'shell', 'machine-admin'] as const;
 // answers them for the link's own `too-large` refusal).
 export const REMOTE_INLINE_MAX_BYTES = 4 * 1024 * 1024 - 64 * 1024;
 export const REMOTE_TOO_LARGE_WORDS = 'an image larger than 2.5 MiB goes to a session on another machine as a file';
+// P5 O7 M8 ("The attachment"): a send with uploads the machine refused (`malformed`, which says no reason over RL2: a
+// missing, expired, foreign or oversized upload, or something else of the message), as main answers it and the composer
+// shows it; since the refusal can't say which part failed, the words say the message wasn't sent and when to attach again.
+export const REMOTE_UPLOAD_REFUSED_WORDS = 'The message wasn’t sent. If its attachment is more than a day old or isn’t a supported file, attach it again.';
 
 // The link as a remote session's state carries it: its reported state, its carrier while up, the permanent verdict holding
 // it down, this device's member there (null before the first `caps`) and the member's machine rights.
@@ -102,6 +106,11 @@ export const events = {
   // newest window (the engine host's disk read); `older`, an older page (or a seek, a subagent's slice). The renderer's
   // bar for that answer says the history can't be shown here yet (new messages still appear), not that it is lost.
   'remote.historyTooLarge': z.strictObject({ appSessionId: AppSessionIdSchema, window: z.enum(['newest', 'older']) }),
+  // P5 O7 M8 (m8-3's task review): the session's stream opened again after a break (the link resubscribed, or the
+  // machine ended it `behind`), so a notice a panel lists by may have been lost on the way. Main makes the task list,
+  // the subagents and the workflow runs list again with their own change events; this is the word for a panel that has
+  // none (the side questions: their store lists `side.question.list` again on it).
+  'remote.reopened': z.strictObject({ appSessionId: AppSessionIdSchema }),
   // P5 O7 M4 ("Uploads in parts"): a `files.upload` to a session on another machine crosses as parts, each its own act;
   // after each lands (and once before the first), how far one file of the call has come: `file`, its index in the call's
   // `files`; `sent` of `parts` landed. The composer's chip for that file shows it.

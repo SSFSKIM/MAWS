@@ -13,7 +13,7 @@ import { usedEntry, type ConfiguredEntry } from '@shared/plugins/connector-prece
 export interface RequestedEntry {
   name: string;
   scope: 'user' | 'project' | 'local';
-  path: string; // the file the entry is in
+  path?: string; // the file the entry is in; P5 O7 M8: absent (`connectors.signInServer`), whichever the session uses
   cwd: string | null; // the page's directory: a local entry is that project's
 }
 
@@ -37,7 +37,7 @@ export function entryRefusal(requested: RequestedEntry, sessionCwd: string, entr
   if (requested.scope === 'local' && requested.cwd !== sessionCwd) return `that session runs in ${sessionCwd}, not ${requested.cwd ?? 'the user configuration'}`;
   const used = usedEntry(requested.name, entries);
   if (used === null) return `that session has no ${requested.name} entry`;
-  if (used.scope !== requested.scope || used.path !== requested.path) return used.scope === 'app' ? `that session uses MAWS’s ${requested.name} server` : `that session uses the ${used.scope} entry in ${used.path}`;
+  if (used.scope !== requested.scope || (requested.path !== undefined && used.path !== requested.path)) return used.scope === 'app' ? `that session uses MAWS’s ${requested.name} server` : `that session uses the ${used.scope} entry in ${used.path}`;
   const held = live.find((server) => server.name === requested.name);
   if (held !== undefined && !holds(held, used)) return `this session uses a different ${requested.name}; start a new session to sign in`;
   return null;

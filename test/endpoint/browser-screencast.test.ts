@@ -17,7 +17,7 @@ import { OFFERS, READ_OPENS } from '../../src/endpoint/offers';
 import type { SessionRecord, SessionTarget, RecordSource } from '../../src/endpoint/sources';
 import { ENDPOINT_CAPABILITIES } from '../../src/endpoint/capabilities';
 import { fakeBrowser } from './fake-services';
-import { act, CHECKOUT, done, evs, laneAMember, makeOrg, of, openRemote, PROJECT, Records, sleep, sminos, snapshot, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote, type StartOptions } from './sub-harness';
+import { act, CHECKOUT, done, evs, laneAMember, makeOrg, openRemote, PROJECT, Records, sleep, sminos, snapshot, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote, type StartOptions } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -529,7 +529,7 @@ describe('the `browser.inventory` feed', () => {
     await a.channel.send({ t: 'unsub', sub: 'inv' });
     await until(() => browser.watchers('app-1') === 0 || undefined, 'the watch ended');
     await inventoryFeed(a, 'inv2', 'app-1');
-    expect(of(a, 'inv2').some((m) => m.t === 'snap')).toBe(true);
+    await waitFor(a, (m) => m.sub === 'inv2' && m.t === 'snap', 'the second feed’s snapshot'); // the snap follows its subbed
     a.channel.close('closed');
     await until(() => browser.watchers('app-1') === 0 || undefined, 'the watch ended with its channel');
   });

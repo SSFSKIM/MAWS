@@ -6,10 +6,12 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import { SessionRecordSchema } from '@shared/graph/session';
 import { compileAddressing } from '@shared/machine/address';
-import { digest } from '../../../../test/support/builders';
+import { digest, remoteRow } from '../../../../test/support/builders';
+import { addressOf } from '@shared/machine/address';
+import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import { loadScenario } from '../../../../test/support/scenario';
 import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerSetupIntentHook, type SetupIntentHook } from '../composer';
 import { effortBasis, resetEffectiveEfforts, useEffectiveEfforts } from '../composer/effective-effort';
 import { GatewayDialogs } from '../gateway/SwitchSheet';
@@ -113,6 +115,22 @@ describe('the effort view: the effort in words over the model, a slider over its
     expect(fast.getAttribute('aria-checked')).toBe('false');
     fireEvent.click(screen.getByRole('button', { name: 'Turn on fast mode' }));
     await waitFor(() => expect(calls('apply_flag_settings').map((c) => c.input)).toEqual([{ appSessionId: BARE, settings: { fastMode: true } }]));
+  });
+
+  // P5 O7 M8: `session.applyFlagSettings` is declared not offered on another machine (REMOTE_UNAVAILABLE): the lightning
+  // is greyed with the declared words, and `/fast on` opens no warning
+  it('greys the lightning for a session on another machine, with the declared reason', async () => {
+    const remote = addressOf(OTHER_MACHINE, BARE);
+    useSessions.setState({ engine: new Map([[remote, { ...backend.status(BARE), model: { ...backend.status(BARE).model, requested: 'opus', resolved: 'claude-opus-5-5[1m]' }, appSessionId: remote }]]), listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, BARE), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    try {
+      mount('fast', 'on', remote);
+      const fast = await screen.findByRole('switch', { name: 'Fast mode' });
+      expect(fast).toHaveProperty('disabled', true);
+      expect(fast.title).toBe(REMOTE_UNAVAILABLE['session.applyFlagSettings']);
+      expect(screen.queryByRole('button', { name: 'Turn on fast mode' })).toBeNull();
+    } finally {
+      useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    }
   });
 });
 

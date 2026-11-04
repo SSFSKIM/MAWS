@@ -6,8 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
-import { item } from '../../../../../test/support/builders';
-import { at } from '../../../../../test/support/machine';
+import { item, remoteRow } from '../../../../../test/support/builders';
+import { at, OTHER_MACHINE } from '../../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
+import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import { useSessions } from '../../stores/sessions';
 import { NoticeBody } from './Notice';
 import { REL } from '../../test-support/relative-time';
 
@@ -38,6 +41,24 @@ describe('an error notice', () => {
     expect(acknowledged(), 'a card elsewhere is not seeing it in its session').toEqual([]);
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Dismiss' })));
     expect(acknowledged()).toEqual([{ appSessionId: APP, attentionId: `${APP}:error:e1`, how: 'dismissed' }]);
+  });
+
+  // P5 O7 M8: `attention.acknowledge` is declared not offered on another machine (REMOTE_UNAVAILABLE): Dismiss is
+  // greyed with the declared words, and nothing is acknowledged
+  // (a lane A session there too: its adapter takes only laneA.*)
+  it.each(['B', 'A'] as const)('for a lane %s session on another machine, greys Dismiss with the declared reason and acknowledges nothing', async (lane) => {
+    const remote = addressOf(OTHER_MACHINE, APP);
+    useSessions.setState({ listed: new Map([[remote as never, { ...remoteRow(OTHER_MACHINE, APP, { lane }), appId: remote as never }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    try {
+      render(<NoticeBody item={error({ appSessionId: remote as never, id: addressOf(OTHER_MACHINE, `${APP}:error:e1`) as never })} seenHere />);
+      const dismiss = screen.getByRole('button', { name: 'Dismiss' });
+      expect(dismiss).toHaveProperty('disabled', true);
+      expect(dismiss.title).toBe(REMOTE_UNAVAILABLE['attention.acknowledge']);
+      await act(async () => fireEvent.click(dismiss));
+      expect(acknowledged()).toEqual([]);
+    } finally {
+      useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    }
   });
 
   // L102 (P2-F wave S; the owner at the sitting, B6: "2초 확인 후 해제"): seen only after two continuous seconds in

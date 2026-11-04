@@ -40,10 +40,16 @@
 // `unknown` (`grade`, as an artifact or a session nobody can be told of); `delivery.cancel` by its `runId`, a run the
 // channel didn't send being `no-target` (M5c review 1: a send it sent that is still being decided places its cancel on
 // the artifact the send names, and the cancel waits on it, actions.ts).
+//
+// P5 O7 M8 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M8 "The offer audit and its contract"): `task-list`,
+// a task list's read (`fs.tasks`). A list names no session, so the call names it too (`appSessionId`), placed as the
+// `appSessionId` rule places it, and once the caller is known to view it the `listId` must be that session's own list
+// (`ownTaskList`), else `no-target`: a member who views one session reads no other session's list by its id.
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, sep } from 'node:path';
 import type { Action, SessionRef } from 'org-protocol';
 import { parseArtifactUrl } from '@shared/artifacts/scheme';
+import { sanitiseListId } from '@shared/engine/task-list';
 import type { LaunchedBy } from '@shared/graph/session';
 import type { TargetRule } from './offers';
 import type { EndpointServices } from './services';
@@ -124,7 +130,8 @@ export async function resolveTarget(rule: TargetRule, input: unknown, action: Ac
   }
   // A checkout is a lane B session's, named by the call (its rows are calls); lane A's checkouts are sminos's.
   if (rule === 'checkout') return action === undefined && session?.lane === 'B' && isId(session.id) ? laneB(session.id, placing) : { kind: 'refused', reason: 'no-target' };
-  const id = field(input, rule);
+  // P5 O7 M8: a task list's read names its session as an `appSessionId` (its list is checked after the rank: `ownTaskList`).
+  const id = field(input, rule === 'task-list' ? 'appSessionId' : rule);
   if (!isId(id)) return { kind: 'refused', reason: 'no-target' };
   if (action?.session !== undefined && action.session !== id) return { kind: 'refused', reason: 'malformed' };
   return rule === 'session' ? { kind: 'session', target: { lane: 'A', session: id } } : laneB(id, placing);
@@ -269,6 +276,24 @@ export async function placeRecorded(appSessionId: string, dispatch: EndpointServ
   const record = await dispatch('machine', 'session.get', { appSessionId });
   if (!record.ok) throw new Error(`the spine answered ${record.error.code} for ${appSessionId}`);
   return recordedPlacement(appSessionId, record.value);
+}
+
+/**
+ * P5 O7 M8: whether a `task-list` read's `listId` is its session's own list, as the renderer's task panel derives it
+ * (task-list.ts' `listIdFor`): the engine host's status's `taskListId` (null before the engine said its id: no list yet),
+ * or, for a session the host holds no row for, the engine session its record places it on; sanitised as the engine names
+ * the list's directory. Read only for a caller who views the session. The status must be of the engine session the
+ * request was placed and ranked on: one the session moved to since (a `/clear` between the two reads) is `unavailable`,
+ * as the placement says of a live row it lags, so a rank on one engine session never reads another's list.
+ */
+export async function ownTaskList(input: unknown, target: Extract<SessionTarget, { lane: 'B' }>, placing: Placing): Promise<'own' | 'no-target' | 'unavailable'> {
+  const listId = field(input, 'listId');
+  if (!isId(listId)) return 'no-target';
+  const status = await placing.dispatch('engine-host', 'session.status', { appSessionId: target.appSessionId }).catch(() => null);
+  if (status === null || (!status.ok && (status.error.code === 'host_unavailable' || status.error.code === 'timeout'))) return 'unavailable';
+  if (status.ok && field(status.value, 'engineSessionId') !== target.session) return 'unavailable';
+  const own = status.ok ? field(status.value, 'taskListId') : target.session;
+  return typeof own === 'string' && sanitiseListId(own) === listId ? 'own' : 'no-target';
 }
 
 /** How many sessions' checkout bounds are kept: one entry per distinct set of roots. */

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { AppSessionId } from '@shared/graph/ids';
 import { humanTurn, status } from '../../../../../test/support/builders';
-import { isBusy, REATTACHING_STOP_REMOTE, steerPriority, submitState, type SubmitInput } from './submit-state';
+import { isBusy, REATTACHING_STOP_REMOTE, SENDS_AFTER_THIS_TURN, steerPriority, submitState, type SubmitInput } from './submit-state';
 
 const APP = 'app-1';
 const entry = (state: QueueEntry['state'], over: Partial<QueueEntry> = {}): QueueEntry => ({
@@ -215,5 +215,52 @@ describe('a session driven through its holder (lane A)', () => {
     expect(decided({ driven: driven(false, { send: shut('Not in this session’s sminos (1.10.0)') }) })).toEqual(['send', 'Send', false, 'Not in this session’s sminos (1.10.0)', null, false]);
     expect(decided({ driven: driven(false), mode: 'bash' })).toEqual(['send', 'Run', false, 'A terminal session runs `!` and `#` in its terminal', null, false]);
     expect(decided({ driven: driven(false), mode: 'memory' })[2]).toBe(false);
+  });
+});
+
+// P5 O7 M8 ("The offer audit and its contract"): `session.bash` and `session.memoryAppend` are declared not offered on
+// another machine (REMOTE_UNAVAILABLE); the composer answers why for the mode it is in, and Run and Save to memory are
+// greyed with those words, ready, busy, or with no ready process to acquire
+describe('a mode not offered on the session’s machine', () => {
+  const words = 'Not on another machine yet: ! shell commands';
+  it('greys Run and Save to memory with the reason, whatever the turn or the process', () => {
+    expect(row({ mode: 'bash', modeUnavailable: words })).toEqual(['send', 'Run', false, words, false]);
+    expect(row({ mode: 'memory', modeUnavailable: words })).toEqual(['send', 'Save to memory', false, words, false]);
+    expect(row({ mode: 'bash', status: turning, modeUnavailable: words })).toEqual(['send', 'Run', false, words, false]);
+    expect(row({ mode: 'bash', status: null, availability: 'usable', modeUnavailable: words })).toEqual(['send', 'Run', false, words, false]);
+  });
+
+  it('leaves Send and the modes with no reason as they were', () => {
+    expect(row({ mode: 'send', modeUnavailable: words })).toEqual(['send', 'Send', true, null, false]);
+    expect(row({ mode: 'bash', modeUnavailable: null })).toEqual(['send', 'Run', true, null, false]);
+  });
+});
+
+// P5 O7 M8 review (the architect's option (a)): a remote send naming uploaded PDFs is a `session.send` even while a turn
+// runs (a steer carries no uploads), so it waits for the turn; the control says so, and is not the steer
+describe('a send carrying documents while a turn runs', () => {
+  it('reads “Sends after this turn”, not the next-step steer', () => {
+    const d = submitState(input({ status: turning, sendsDocuments: true }));
+    expect([d.primary, d.label, d.enabled, d.reason, d.detail, d.steer]).toEqual(['send', 'Send', true, null, SENDS_AFTER_THIS_TURN, false]);
+    expect(SENDS_AFTER_THIS_TURN).toBe('Sends after this turn');
+  });
+
+  // review 2: the queue's own words where they say more: a paused queue holds it for Resume, whatever the pause (an
+  // interrupt's pause lets a fresh send past only at idle: engine-host queue.ts `submitNow` needs `!busy`), and messages
+  // waiting go first
+  it('says a paused queue holds it, and that waiting messages go first', () => {
+    const detail = (queue: SubmitInput['queue']) => submitState(input({ status: turning, sendsDocuments: true, queue })).detail;
+    expect(detail({ entries: [], paused: true, pauseReason: 'user' })).toBe('Joins the paused queue; Resume sends it');
+    expect(detail({ entries: [entry('queued')], paused: true, pauseReason: 'user' })).toBe('Joins the paused queue; Resume sends it');
+    expect(detail({ entries: [entry('queued')], paused: true, pauseReason: 'interrupt' })).toBe('Joins the paused queue; Resume sends it');
+    expect(detail({ entries: [], paused: true, pauseReason: 'interrupt' })).toBe('Joins the paused queue; Resume sends it');
+    expect(detail({ entries: [entry('queued')], paused: false })).toBe('Sends after the queued messages');
+    expect(submitState(input({ status: turning, sendsDocuments: true, queue: { entries: [entry('queued')], paused: false } })).steer).toBe(false);
+  });
+
+  it('changes nothing idle, on an empty box, or without documents', () => {
+    expect(submitState(input({ sendsDocuments: true })).detail).toBeNull();
+    expect(submitState(input({ status: turning, empty: true, sendsDocuments: true })).primary).toBe('stop');
+    expect(submitState(input({ status: turning })).steer).toBe(true);
   });
 });

@@ -87,8 +87,10 @@ import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-sce
 import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M10
 import { closeSurface, mainTabById, openSurface, surface } from './support/shell';
-import { SideJournal } from './support/side-replay';
-import { newChatIn, showProjectList, sidebarOf } from './support/sidebar';
+import { seedTranscript, SIDE_QUESTION, SideJournal, slugOf, transcript } from './support/side-replay';
+import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarOf } from './support/sidebar';
+import { clickRevealed } from './support/hover'; // P5 O7 M8
+import { REMOTE_UNAVAILABLE } from '../src/shared/ipc/remote-unavailable'; // P5 O7 M8
 
 test.skip(process.env.MAWS_REMOTE_E2E !== '1', 'the remote scenes run under pnpm e2e:remote (MAWS_REMOTE_E2E=1)');
 test.setTimeout(900_000);
@@ -1700,6 +1702,383 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
     await scene?.stop();
     await pages.close();
     rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// P5 O7 M8 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M8's Proves: acceptance 4's row, 5's second client,
+// 2's and 9's MAWS ask answered from this Mac, an operation across a link drop, 6's greying with its reason): the sitting's
+// failures, on e2e:remote's scene over the relay (A's way to the hub is then its only carrier to B, so the scene's cut drops
+// the link). Two apps of the member's are attached to B at once: A, whose own checkout of the org project holds nine
+// pinned local sessions (seeded transcripts its engine host indexes; pinned is among the "busy" a project's cut ranks
+// first), more than the group's cap of eight; and A2, a second device with a checkout of its own. Then, in order:
+//   - "+ Session" on B from A, in that project: its row shows within A's group's visible rows (above the cut, with no
+//     Show more) while its first turn runs, from A's spawn mark; the turn ends and the tab closes, its row falls below the
+//     cut, and Resume… in the project opens it again;
+//   - A2, which has no mark, has it as a listed row and opens it through Resume…, the row naming `@B`;
+//   - the composer's `!` on it, a command declared not offered on another machine, greys Run with its declared reason and
+//     Enter sends nothing;
+//   - a MAWS ask B's session raises is read and answered from A, and the card settles on A, on B and on A2;
+//   - `/btw` across a link drop: the side question is taken on B, A's link drops, B answers it, and once the link is back
+//     the operation's completion (`session.operation`, the outcome B's engine host kept, asked for at the reopening)
+//     reaches A once, with B's answer, and A's view shows it;
+//   - follow ownership: A and A2 each follow an agent of the session on B; A's unfollow, then A quitting, lets go of A's
+//     hold alone, and B keeps the follow for A2, read in B's engine host's log (its follow lines: a client's hold, its
+//     release, the follow's drop), since no client sees whether B's follow runs.
+// No wall-clock bound (e2e:remote carries none; the gate's note on the group): the row's time from B's engine running the
+// session is logged, and its 5 s bound is M10's to measure live.
+// Held below e2e level: Reload plugins (the replay engine records no `reload_plugins`); the operation's `pending` and
+// `unknown` answers at the reopening (remote-session.test.ts).
+const M8_SPAWNED = 'b0c0d0e0-0000-4000-8000-0000000000b6'; // the engine session id the spawn's journal pins
+const M8_TITLE = 'B’s session started from A';
+const M8_BRIEF = 'Start the M8 session on B.';
+// its first turn streams a prefix of its reply, then holds at a read until the spec lets it go, so the turn is running
+// (the spawn mark leads) for as long as the spec reads the sidebar
+const M8_DELTAS = ['Started ', 'on B '];
+const M8_PARTIAL = 'Started on B';
+const M8_REPLY = 'Started on B from A, first turn over.';
+const M8_ASK_PROMPT = 'Ask me before you go on.';
+const M8_QUESTION = 'Go on with the plan on B?';
+const M8_ASK = { questions: [{ id: 'q1', question: M8_QUESTION, modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] }] };
+const M8_ASK_REPLY = 'Going on, as A answered.';
+const M8_SIDE_ANSWER = 'ZEBRA'; // p1-side-question-session seq 92's
+const M8_PINNED = 9; // past the cap: SESSIONS_CAP (8) in src/renderer/src/sidebar/derive.ts
+const M8_FIRST_SHOWN = 5; // SESSIONS_FIRST: a group's rows before its Show more
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// A's renderer's `session.operation` events as the raw bridge hears them (window.__operations), kept from now on
+type HeardOperation = { opId: string; command: string; late: boolean; outcome: { ok: boolean; value?: unknown } };
+async function keepOperations(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const heard: HeardOperation[] = [];
+    (window as unknown as { __operations: HeardOperation[] }).__operations = heard;
+    window.maws.on('session.operation', (event) => void heard.push(event as unknown as HeardOperation));
+  });
+}
+const heardOperations = (page: Page) => page.evaluate(() => (window as unknown as { __operations: HeardOperation[] }).__operations);
+
+test('M8: a session spawned on B leads a busy project past its cap and comes back through Resume…, a second app has it by parity; a declared control greys with its reason; a MAWS ask answered on one app settles on the other; /btw’s completion crosses a link drop', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-m8-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-m8-'));
+  const a2UserData = mkdtempSync(join(tmpdir(), 'maws-ra2-m8-'));
+  const checkout = join(root, 'b-checkout');
+  const journals = join(root, 'journals');
+  const hooks = join(root, 'no-hooks');
+  const aCheckout = join(root, A_PROJECT);
+  const a2Checkout = join(root, 'second', A_PROJECT); // A2's own checkout of the org project
+  for (const dir of [checkout, journals, hooks, aCheckout]) mkdirSync(dir);
+  mkdirSync(a2Checkout, { recursive: true });
+  checkoutRepository(checkout, hooks);
+  checkoutRepository(aCheckout, hooks);
+  checkoutRepository(a2Checkout, hooks);
+  let scene: RemoteScene | null = null;
+  let a: MawsLaunch | null = null;
+  let a2: MawsLaunch | null = null;
+  try {
+    // B's session, the first launch on B's replay list: the brief's turn (held mid-reply), A's turn that raises a MAWS ask,
+    // then a side question held between its receipt and its answer
+    const journal = new SideJournal(M8_SPAWNED, checkout);
+    const first = journal.prompt();
+    journal.reply(first, M8_REPLY, M8_DELTAS, () => journal.holdAtContextUsage());
+    journal.completed(first);
+    const asking = journal.prompt();
+    journal.mawsToolCall('ask', M8_ASK, { status: 'answered', answers: [{ id: 'q1', status: 'answered', value: ['Yes'] }] }, { asked: false });
+    journal.reply(asking, M8_ASK_REPLY);
+    journal.completed(asking);
+    journal.sideQuestions([88, 91]); // the question and the engine's `started`
+    journal.holdAtContextUsage(); // held: the link drops here
+    journal.sideQuestions([92]); // the answer
+    const fixture = journal.write(journals, 'b-m8');
+
+    scene = await startRemoteScene({
+      scratch: join(root, 'scene'),
+      aUserData,
+      secondUserData: a2UserData,
+      b: {
+        // B's profile under a realpathed root of its own: the replay writes the session's transcript (which B's index
+        // lists, and its agents' directory with it) only into a config home that is its own real path
+        root: '/tmp',
+        env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: fixture, DISABLE_AUTOUPDATER: '1' },
+        prepare: ({ claudeConfigDir }) => {
+          writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, projects: { [checkout]: { hasTrustDialogAccepted: true } } }));
+          writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
+        },
+      },
+    });
+    const { b } = scene;
+    await b.request('machineSettings.set', { patch: { gateway: { defaultRoute: 'direct' } } });
+    await b.request('session.projects.add', { directory: checkout }); // B's checkout of the org project, which "+ Session" offers
+
+    // A's nine local sessions of the org project, in A's own checkout: transcripts its engine host indexes at its start
+    const pinnedIds = Array.from({ length: M8_PINNED }, (_, i) => `a0c0d0e0-0000-4000-8000-0000000000${String(i + 10)}`);
+    a = await launchMaws({
+      userData: aUserData,
+      env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A', MAWS_E2E_STEP_UP: 'accept' }, // the step-up a spawn always asks, accepted
+      prepare: ({ claudeConfigDir }) => {
+        pinnedIds.forEach((sessionId, i) => {
+          const t = transcript({ sessionId, cwd: aCheckout, start: Date.UTC(2026, 10, 1, 9, i, 0) });
+          t.user(`a1c0d0e0-0000-4000-8000-0000000000${String(i + 10)}`, `Local pinned session ${i + 1}`);
+          t.text(`a2c0d0e0-0000-4000-8000-0000000000${String(i + 10)}`, `Answered on A, ${i + 1}.`);
+          t.turnEnd(`a3c0d0e0-0000-4000-8000-0000000000${String(i + 10)}`);
+          seedTranscript(claudeConfigDir, aCheckout, sessionId, t.records);
+        });
+      },
+    });
+    keepMainLines(a);
+    const { page, app: aApp } = a;
+    // A2: the member's second app, attached to B over its own channel, with no session of its own
+    a2 = await launchMaws({ userData: a2UserData, env: { MAWS_DEV_ORG: scene.devOrgDir(false, 'second'), MAWS_MACHINE_NAME: 'A2' } });
+    keepMainLines(a2);
+    const page2 = a2.page;
+    type Projects = { projects: { directory: string; org?: { key: string } }[] };
+    const attach = async (on: Page, directory: string): Promise<string> => {
+      await expect
+        .poll(async () => (await machineOf(on, b.ref))?.state ?? null, { timeout: 60_000, message: `the app's link to B comes up over the relay\n${mainSaid(on)}` })
+        .toBe('up');
+      const added = await invoke<{ id: string }>(on, 'session.projects.add', { directory });
+      await expect
+        .poll(async () => (await invoke<Projects>(on, 'session.projects.list', undefined)).projects.find((p) => p.directory === directory)?.org?.key ?? null, { timeout: 30_000 })
+        .toBe(`smns:${PROJECT}`);
+      return added.id;
+    };
+    const project = await attach(page, aCheckout);
+    await attach(page2, a2Checkout);
+    type Records = { sessions: { appId: string; engineSessionId: string | null; projectId: string | null }[] };
+    let pinned: string[] = [];
+    await expect
+      .poll(async () => (pinned = (await invoke<Records>(page, 'session.list', { includeArchived: true })).sessions.filter((r) => r.engineSessionId !== null && pinnedIds.includes(r.engineSessionId) && r.projectId === project).map((r) => r.appId)).length, {
+        timeout: 60_000,
+        message: 'A indexes its nine local sessions in its checkout',
+      })
+      .toBe(M8_PINNED);
+    for (const id of pinned) await invoke(page, 'session.update', { appSessionId: id, patch: { pinned: true } });
+
+    // Each app's group of the org project, its drawn rows (a record's or a listing's) and its Show more (never pressed)
+    const groupOf = (on: Page) => projectRow(on, A_PROJECT);
+    const shownRowsOf = (on: Page) => groupOf(on).locator('[data-kind="session"], [data-kind="listed"]');
+    const showMoreOf = async (on: Page) => groupOf(on).locator(`[data-tree-id="more:${(await groupOf(on).getAttribute('data-tree-id'))!.slice('p:'.length)}"]`);
+    await openProject(page, A_PROJECT);
+    await expect(shownRowsOf(page), 'A’s group draws its first five pinned sessions').toHaveCount(M8_FIRST_SHOWN, { timeout: 30_000 });
+    await expect(await showMoreOf(page), 'and holds the rest behind Show more').toHaveCount(1);
+
+    // B's own lines about the spawn, for a failure
+    const bSaid = async () => {
+      const engines = await b.request<unknown[]>('engine.sessions').catch((error: unknown) => String(error));
+      const lines = b.log().split('\n').filter((line) => /spawn|session\.(create|start|intent)|machine\.op|step-up|refus|replay|endpoint|side|ask/i.test(line));
+      return `B's engine sessions: ${JSON.stringify(engines)}\nB's log:\n${lines.slice(-40).join('\n')}`;
+    };
+    type UserMessage = Extract<SessionEvent, { kind: 'user.message' }>;
+    const writtenOn = async (session: string) => (await b.request<{ events: SessionEvent[] }>('session.events', { appSessionId: session, afterSeq: null, limit: null })).events.filter((e): e is UserMessage => e.kind === 'user.message' && !e.isReplay);
+    let spawnedApp = '';
+    let address = '';
+    const turnOverOnB = async () => (await b.request<{ turn: unknown }>('session.status', { appSessionId: spawnedApp })).turn === null;
+    const composerOn = (on: Page) => main(on).locator(`[data-composer="${address}"]`);
+    const chooserOf = (on: Page) => on.getByRole('dialog', { name: 'Resume session' });
+    const spawnedRowOf = (on: Page) => groupOf(on).locator(`[role="treeitem"][data-tree-id="s:${address}"]`);
+    // Resume… in the app's group: the option `hasText` names, opened by a double click, the session's history then in its pane
+    const resumeOn = async (on: Page, hasText: string | RegExp, says: string) => {
+      await openProject(on, A_PROJECT);
+      await clickRevealed(projectLine(groupOf(on)), groupOf(on).getByRole('button', { name: `Resume a session in ${A_PROJECT}`, exact: true }));
+      const chooser = chooserOf(on);
+      await expect(chooser).toBeVisible();
+      const option = chooser.getByRole('option').filter({ hasText });
+      await quoting(expect(option, `Resume… lists it, ${says}`).toContainText(`@${B_NAME}`, { timeout: 30_000 }), async () => `the chooser: ${await chooser.innerText().catch(() => '')}`);
+      await option.dblclick();
+      await expect(chooser).toHaveCount(0);
+      await quoting(expect(composerOn(on), 'Resume… opened it in the pane').toBeVisible({ timeout: 60_000 }), async () => `${await paneSaid(on)}\n${mainSaid(on)}`);
+      await expect(main(on).getByText(M8_REPLY).first(), 'with its history').toBeVisible({ timeout: 60_000 });
+    };
+
+    await test.step('acceptance 4: the session spawned on B shows within the busy group’s visible rows while its first turn runs, falls below the cut after it, and comes back through Resume…', async () => {
+      await newChat(page, A_PROJECT);
+      await chooseMachine(page, B_NAME);
+      await composerOf(page).click();
+      await page.keyboard.type(M8_BRIEF);
+      await page.keyboard.press('Enter');
+      // the engine's first event: B's engine host runs the pinned engine session
+      await expect
+        .poll(async () => (spawnedApp = (await b.request<{ appSessionId: string; engineSessionId: string | null }[]>('engine.sessions')).find((s) => s.engineSessionId === M8_SPAWNED)?.appSessionId ?? ''), {
+          timeout: 120_000,
+          intervals: [100],
+          message: 'B’s engine host runs the spawned session',
+        })
+        .not.toBe('')
+        .catch(async (error: unknown) => {
+          throw new Error(`${error instanceof Error ? error.message : String(error)}\n${await paneSaid(page)}\n${mainSaid(page)}\n${await bSaid()}`);
+        });
+      const ranAt = Date.now();
+      address = addressOf(b.ref, spawnedApp);
+      // B's owner names it, and sminos lists it as it does every session its machine starts (the harness's fake)
+      await b.request('session.update', { appSessionId: spawnedApp, patch: { title: { text: M8_TITLE, source: 'user' } } });
+      await scene!.sminos.list({ engine: M8_SPAWNED, app: spawnedApp, owners: [scene!.member], project: PROJECT, title: M8_TITLE, cwd: checkout });
+      expect(bareOf(await movedTo(page, b.ref, null, bSaid)), 'the New chat tab moved to the session B started').toBe(spawnedApp);
+      await expect(main(page).getByText(M8_PARTIAL).first(), `its first turn runs in A's pane\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
+      await expect(main(page).getByText(M8_REPLY), 'held mid-reply: the turn still runs').toHaveCount(0);
+      await quoting(expect(spawnedRowOf(page), 'the spawned session within the group’s visible rows, Show more not pressed').toBeVisible({ timeout: 60_000 }), async () => `the group's rows: ${(await shownRowsOf(page).allTextContents()).join(' | ')}\n${mainSaid(page)}`);
+      const shownAfter = Date.now() - ranAt;
+      await expect(shownRowsOf(page), 'the five pinned rows and the spawned one above the cut').toHaveCount(M8_FIRST_SHOWN + 1);
+      await expect(await showMoreOf(page), 'the pinned rest still behind Show more').toHaveCount(1);
+      console.log(`[e2e:remote] M8: the spawned row (${address}) within the visible rows ${shownAfter} ms after B's engine host ran it`);
+
+      // the first turn ends: the lead with it, so the row ranks by its state below the nine pinned
+      await b.request('session.getContextUsage', { appSessionId: spawnedApp, detail: 'summary' }); // lets B's engine go on
+      await expect(main(page).getByText(M8_REPLY).first(), 'the first turn’s whole reply in A’s pane').toBeVisible({ timeout: 60_000 });
+      await expect.poll(turnOverOnB, { timeout: 30_000 }).toBe(true);
+      await mainTabById(page, `session:${address}`).click();
+      await menu(aApp, 'tab.close');
+      await expect(composerOn(page), 'the session’s tab closed').toHaveCount(0, { timeout: 30_000 });
+      await expect(spawnedRowOf(page), 'its first turn over and its tab closed, the row below the cut').toHaveCount(0, { timeout: 30_000 });
+      // A still holds the record main read for the tab, which Resume… lists in the listing's place, by the record's title:
+      // B's owner's, or the brief's if the rename hadn't reached the record when the tab let it go
+      await resumeOn(page, new RegExp(`${escaped(M8_TITLE)}|${escaped(M8_BRIEF)}`), 'its record’s row naming its machine');
+    });
+
+    await test.step('acceptance 5: A2, attached to B and holding no mark, has the session as a listed row and opens it through Resume…', async () => {
+      await expect.poll(async () => (await rowsOf(page2)).some((row) => row.machine === b.ref && row.session === spawnedApp), { timeout: 60_000, message: `A2 has B's listing of it\n${mainSaid(page2)}` }).toBe(true);
+      await openProject(page2, A_PROJECT);
+      await quoting(expect(spawnedRowOf(page2), 'A2’s group draws it, a listed row').toHaveAttribute('data-kind', 'listed', { timeout: 30_000 }), async () => `A2's rows: ${(await shownRowsOf(page2).allTextContents()).join(' | ')}\n${mainSaid(page2)}`);
+      await resumeOn(page2, M8_TITLE, 'a listed row naming its machine');
+    });
+
+    await test.step('acceptance 6: `!` on the session on B greys Run with its declared reason, and Enter sends nothing', async () => {
+      const before = (await writtenOn(spawnedApp)).length;
+      await composerOf(page).click();
+      await page.keyboard.type('!ls');
+      const run = composerOn(page).locator('[data-submit-state]');
+      await expect(run, 'the `!` mode’s control').toHaveText('Run', { timeout: 30_000 });
+      await expect(run).toBeDisabled();
+      expect(await run.getAttribute('title'), 'its reason, the declared words').toContain(REMOTE_UNAVAILABLE['session.bash']!);
+      await page.keyboard.press('Enter');
+      await expect(composerOf(page), 'Enter kept the text').toContainText('ls');
+      expect((await writtenOn(spawnedApp)).length, 'nothing reached B').toBe(before);
+      // the refused Enter's flight went read-only, which drops the focus to the page; the box takes it back, so clearing
+      // the text by the keyboard leaves the greyed `!` for a plain Send
+      await expect(composerOf(page), 'the box has the keyboard back').toBeFocused({ timeout: 5_000 });
+      await page.keyboard.press('ControlOrMeta+a');
+      await page.keyboard.press('Backspace');
+      await expect(run, 'the cleared box, out of `!`').toHaveText('Send');
+    });
+
+    await test.step('acceptances 2, 5 and 9: a MAWS ask B’s session raises is read and answered from A, and the card settles on A, on B and on A2', async () => {
+      await composerOf(page).click();
+      await page.keyboard.type(M8_ASK_PROMPT);
+      await page.keyboard.press('Enter');
+      type Asks = { asks: { askId: string }[] };
+      let askId = '';
+      await expect
+        .poll(async () => (askId = (await b.request<Asks>('maws.asks.list', { appSessionId: spawnedApp })).asks[0]?.askId ?? ''), { timeout: 60_000, message: `B's session asks\n${await bSaid()}` })
+        .not.toBe('');
+      const capsuleOn = (on: Page) => main(on).locator('section.transcript-ask');
+      await quoting(expect(capsuleOn(page), 'the ask’s card in A’s pane, waiting').toHaveAttribute('data-ask-state', 'pending', { timeout: 60_000 }), async () => `${await paneSaid(page)}\n${mainSaid(page)}`);
+      await quoting(expect(capsuleOn(page2), 'and in A2’s').toHaveAttribute('data-ask-state', 'pending', { timeout: 60_000 }), async () => `${await paneSaid(page2)}\n${mainSaid(page2)}`);
+      const sheet = page.locator('[data-ask-sheet]');
+      await expect(sheet, 'its sheet, read from A').toHaveAttribute('data-ask-id', askId, { timeout: 30_000 });
+      const question = sheet.locator('section[data-question-id="q1"]');
+      await expect(question).toContainText(M8_QUESTION);
+      await question.getByRole('radio', { name: 'Yes' }).click();
+      await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
+      await quoting(expect(capsuleOn(page), 'settled on A').toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 }), async () => `${mainSaid(page)}\n${await bSaid()}`);
+      await expect.poll(async () => (await b.request<Asks>('maws.asks.list', { appSessionId: spawnedApp })).asks, { timeout: 30_000, message: 'on B: nothing pending' }).toEqual([]);
+      await quoting(expect(capsuleOn(page2), 'and on A2, which answered nothing').toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 }), async () => `${await paneSaid(page2)}\n${mainSaid(page2)}`);
+      const { events } = await b.request<{ events: SessionEvent[] }>('session.events', { appSessionId: spawnedApp, afterSeq: null, limit: null });
+      expect(events.filter((e): e is Extract<SessionEvent, { kind: 'maws.ask.answered' }> => e.kind === 'maws.ask.answered').map((e) => e.askId), 'B recorded the answer once').toEqual([askId]);
+      await expect(main(page).getByText(M8_ASK_REPLY).first(), 'the turn goes on on B').toBeVisible({ timeout: 60_000 });
+      await expect.poll(turnOverOnB, { timeout: 30_000 }).toBe(true);
+    });
+
+    await test.step('an operation across a link drop: /btw taken on B, the link dropped, B answers, and its completion reaches A once the link is back', async () => {
+      type Side = { exchanges: { id: string; question: string; state: string; response: string | null }[] };
+      const exchangesOnB = async () => (await b.request<Side>('side.question.list', { appSessionId: spawnedApp })).exchanges;
+      const onB = async () => (await exchangesOnB()).map((e) => [e.question, e.state, e.response]);
+      await keepOperations(page);
+      await composerOf(page).click();
+      await page.keyboard.type(`/btw ${SIDE_QUESTION}`);
+      await page.keyboard.press('Enter');
+      const view = page.locator(`[data-side-btw-view="${address}"]`);
+      await expect(view, 'the side question’s view').toBeVisible({ timeout: 30_000 });
+      await expect(view.locator('[data-side-exchange="pending"]'), 'asked, pending').toContainText(SIDE_QUESTION, { timeout: 30_000 });
+      await expect.poll(onB, { timeout: 30_000, message: `B took it (its receipt)\n${await bSaid()}` }).toEqual([[SIDE_QUESTION, 'pending', null]]);
+      const opId = (await exchangesOnB())[0]!.id; // the exchange's id is its operation's
+      // a read over the link after the receipt: the channel carried what came before it, the act's answer included
+      await invoke(page, 'side.question.list', { appSessionId: spawnedApp }, b.ref);
+      // its completions as A hears them, the late correction §U allows left out (`late: true`, at most once more)
+      const completions = async () => (await heardOperations(page)).filter((event) => event.opId === opId && !event.late);
+
+      scene!.aHub.cut();
+      await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 60_000, message: `A's link to B goes down once cut\n${mainSaid(page)}` }).toBe('down');
+      expect(await onB(), 'still unanswered when the link dropped').toEqual([[SIDE_QUESTION, 'pending', null]]);
+      await b.request('session.getContextUsage', { appSessionId: spawnedApp, detail: 'summary' }); // lets B's engine answer
+      await expect.poll(onB, { timeout: 30_000, message: 'B answers it while A is cut off' }).toEqual([[SIDE_QUESTION, 'answered', M8_SIDE_ANSWER]]);
+      expect(await completions(), 'A heard no completion while cut off').toEqual([]);
+      await expect(view.locator('[data-side-exchange="answered"]'), 'nor drew one').toHaveCount(0);
+      scene!.aHub.restore();
+      await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
+      // the completion itself, not only the view (which the reopening's re-read of the log would also settle)
+      await quoting(
+        expect.poll(async () => (await completions()).map((event) => [event.command, event.outcome.ok, (event.outcome.value as { response?: string } | undefined)?.response ?? null]), { timeout: 60_000, message: 'the side question’s completion reaches A after the reconnect' }).toEqual([['session.sideQuestion', true, M8_SIDE_ANSWER]]),
+        async () => `${mainSaid(page)}\n${await bSaid()}`,
+      );
+      await expect(view.locator('[data-side-exchange="answered"]'), 'the answer in A’s view').toContainText(M8_SIDE_ANSWER, { timeout: 60_000 });
+      await expect(view.locator('[data-side-exchange="pending"]'), 'nothing left pending').toHaveCount(0);
+      expect(await completions(), 'its completion came once').toHaveLength(1);
+    });
+
+    await test.step('follow ownership: A and A2 each follow an agent of the session on B; A’s unfollow, then A quitting, lets go of A’s hold alone, and B keeps A2’s follow', async () => {
+      // a workflow agent of the session on B (a workflow's agent follows at once, its meta naming no tool use)
+      const agentId = 'a0e2e5f0110b6d8c1';
+      const agentDir = join(b.claudeConfigDir, 'projects', slugOf(checkout), M8_SPAWNED, 'subagents', 'workflows', 'wf_m8e2e00-001');
+      mkdirSync(agentDir, { recursive: true });
+      writeFileSync(join(agentDir, `agent-${agentId}.jsonl`), `${JSON.stringify({ type: 'user', uuid: 'f6e30000-0000-4000-8000-0000000000c1', parentUuid: null, isSidechain: true, agentId, cwd: checkout, message: { role: 'user', content: 'Count the files on B.' } })}\n`);
+      const follow = { appSessionId: spawnedApp, agentId };
+      // B's engine host's lines about this follow, from every log of B's (the scene's way of reading B's files)
+      const prefix = `[fs] follow ${spawnedApp}/${agentId}: `;
+      const followLines = () =>
+        (readdirSync(b.userData, { recursive: true }) as string[])
+          .filter((name) => name.endsWith('.log'))
+          .flatMap((name) => readFileSync(join(b.userData, name), 'utf8').split('\n'))
+          .map((line) => line.slice(Math.max(0, line.indexOf(prefix))))
+          .filter((line) => line.startsWith(prefix))
+          .map((line) => line.slice(prefix.length));
+      const heldBy = (n: number) => new RegExp(`^held by client ([0-9a-f]{8}) \\(${n} holding\\)$`);
+      const tagOf = (re: RegExp) => followLines().map((line) => re.exec(line)?.[1]).find((tag) => tag !== undefined) ?? null;
+      const said = async () => `B's lines for the follow:\n${followLines().join('\n') || 'none'}\n${await bSaid()}`;
+
+      // A follows (retried while B's index lists the agent), then A2
+      await expect(async () => void (await invoke(page, 'fs.agentEvents', follow, b.ref))).toPass({ timeout: 30_000 });
+      let tagA: string | null = null;
+      await quoting(expect.poll(() => (tagA = tagOf(heldBy(1))), { timeout: 30_000, message: 'B logs A’s hold' }).not.toBeNull(), said);
+      await invoke(page2, 'fs.agentEvents', follow, b.ref);
+      let tagA2: string | null = null;
+      await quoting(expect.poll(() => (tagA2 = tagOf(heldBy(2))), { timeout: 30_000, message: 'B logs A2’s hold beside it' }).not.toBeNull(), said);
+      expect(tagA2, 'two clients, two holds').not.toBe(tagA);
+
+      // A unfollows: its hold alone is let go, and the follow runs on for A2
+      await invoke(page, 'fs.unfollow', follow, b.ref);
+      await quoting(expect.poll(followLines, { timeout: 30_000, message: 'A’s hold released, A2’s kept' }).toContain(`released by client ${tagA} (1 holding)`), said);
+      expect(followLines(), 'no drop: A2 still follows').not.toContain('dropped');
+
+      // A follows again and quits: its channel's end lets go of its hold alone
+      await invoke(page, 'fs.agentEvents', follow, b.ref);
+      await quoting(expect.poll(() => followLines().filter((line) => line === `held by client ${tagA} (2 holding)`).length, { timeout: 30_000, message: 'A holds it again' }).toBe(1), said);
+      await a!.cleanup();
+      a = null;
+      await quoting(
+        expect.poll(() => followLines().filter((line) => line === `released by client ${tagA} (1 holding)`).length, { timeout: 120_000, message: 'A quit: B lets go of its hold as its channel ends' }).toBe(2),
+        said,
+      );
+      expect(followLines(), 'no drop: A2 still follows').not.toContain('dropped');
+      expect(followLines().filter((line) => line.startsWith(`released by client ${tagA2}`)), 'and A2’s hold untouched').toEqual([]);
+
+      // the log tells a drop when there is one: A2, the last holder, lets go
+      await invoke(page2, 'fs.unfollow', follow, b.ref);
+      await quoting(expect.poll(followLines, { timeout: 30_000, message: 'the last hold let go, the follow dropped' }).toEqual(expect.arrayContaining([`released by client ${tagA2} (0 holding)`, 'dropped'])), said);
+      console.log(`[e2e:remote] M8: B's follow of ${agentId}: ${followLines().join('; ')}`);
+    });
+  } finally {
+    await a2?.cleanup();
+    await a?.cleanup();
+    await scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(a2UserData, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
 });

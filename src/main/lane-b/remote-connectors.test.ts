@@ -125,7 +125,7 @@ describe('what crosses, as what', () => {
     const l = lab();
     expect([...MACHINE_CALLS]).toEqual(['connectors.open', 'connectors.declare', 'connectors.watch', 'connectors.unwatch', 'connectors.visibility', 'connectors.close']);
     for (const name of [...MACHINE_CALLS, ...MACHINE_ACTS]) expect([name, l.adapter.handles(name)]).toEqual([name, true]);
-    for (const name of ['connectors.call', 'connectors.refresh', 'delivery.send', 'delivery.cancel', 'connectors.connect', 'connectors.signIn', 'artifacts.grantConnectorTool'] as CommandName[]) expect(MACHINE_ACTS.has(name)).toBe(true);
+    for (const name of ['connectors.call', 'connectors.refresh', 'delivery.send', 'delivery.cancel', 'connectors.connect', 'connectors.signIn', 'connectors.signInServer', 'artifacts.grantConnectorTool'] as CommandName[]) expect(MACHINE_ACTS.has(name)).toBe(true);
     // nothing else is widened: the plainly graded reads keep the manager's path
     for (const name of ['delivery.status', 'delivery.receipts', 'connectors.callback'] as CommandName[]) expect([name, l.adapter.handles(name)]).toEqual([name, false]);
   });
