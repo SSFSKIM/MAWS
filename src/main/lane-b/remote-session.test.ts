@@ -385,6 +385,7 @@ describe('operations across a reopening', () => {
     expect(asked(l)).toEqual([{ appSessionId: APP, opIds: ['op-1'] }]);
     l.link.answers.set('session.operations', () => ({ ok: true, output: { outcomes: [{ opId: 'op-1', event: operation('op-1') }] } }));
     l.link.open()[0].sink.ended('behind');
+    await vi.advanceTimersByTimeAsync(250); // a second `behind` with the cursor standing backs off
     l.link.open()[0].sink.subbed('replay', { epoch: 'L1', seq: 1 });
     await vi.advanceTimersByTimeAsync(0);
     expect(asked(l)).toHaveLength(2);
@@ -594,5 +595,37 @@ describe('the panels across a reopening', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(l.of('fs.workflowChanged').at(-1)).toEqual({ appSessionId: APP, runId: 'run-3' });
     expect(l.link.calls.filter((c) => c.name === 'fs.workflows')).toHaveLength(1);
+  });
+});
+
+// m8-3's task review, the architect's B: a stream that keeps ending `behind` with no progress backs off, then falls back.
+describe('`behind` bounded by progress', () => {
+  it('reopens at once, then backs off from 250 ms while the cursor stands, and after three reopens with no progress shows the gap and retries on the idle backoff; progress resets it', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    deliver(sub, { epoch: 'L1', seq: 4, idx: 0 }, notice('L1', 4, 0));
+    const opens = () => l.link.open().length;
+    sub.sink.ended('behind');
+    expect(opens()).toBe(1); // the first reopen: at once
+    for (const wait of [250, 500]) {
+      l.link.open()[0].sink.ended('behind'); // no event since: the cursor stands
+      expect(opens()).toBe(0);
+      await vi.advanceTimersByTimeAsync(wait - 1);
+      expect(opens()).toBe(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(opens()).toBe(1);
+    }
+    l.link.open()[0].sink.ended('behind'); // the third reopen with no progress
+    expect(l.lastState()).toMatchObject({ stream: 'gap' });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(opens()).toBe(0);
+    await vi.advanceTimersByTimeAsync(1); // the idle backoff's first step
+    expect(opens()).toBe(1);
+    // progress: the next `behind` reopens at once again
+    const moving = l.link.open()[0];
+    moving.sink.subbed('replay', { epoch: 'L1', seq: 4, idx: 0 });
+    deliver(moving, { epoch: 'L1', seq: 5, idx: 0 }, notice('L1', 5, 0));
+    moving.sink.ended('behind');
+    expect(opens()).toBe(1);
   });
 });

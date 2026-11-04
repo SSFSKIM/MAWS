@@ -43,7 +43,8 @@
 //   session's waiters hold (`awaitOperation`, from the adapter's receipts): `session.operations` answers each with its
 //   completion (emitted), `pending` (kept for its part) or `unknown` (settled as failed, LOST_OPERATION). A completion is
 //   emitted once, a late one once more; one for an opId settled here is dropped. An `ended('behind')` (a notice past
-//   the machine's bound) opens again from the cursor at once, and that opening asks. At each opening after the first
+//   the machine's bound) opens again from the cursor at once, and that opening asks; one with no progress since the last
+//   backs off, and three in a row show the gap and fall back to the idle backoff (`#behind`). At each opening after the first
 //   (m8-3's task review) every panel is made to list again, since a notice may have been lost on the way: the session's
 //   task list (`fs.tasksChanged`), its subagents (`fs.subagents` read, said as `fs.subagentsChanged`), its workflow runs
 //   (`fs.workflowChanged` for the last run the stream named, else for the last `fs.workflows` lists) and, for the side
@@ -128,6 +129,11 @@ const WAITING = new Set(['pending', 'delivered']);
 const TRANSIENT = new Set(['offline', 'timeout', 'unavailable']);
 /** P5 O7 M8: the words of an operation the machine says it doesn't know (`session.operations`' `unknown`). */
 export const LOST_OPERATION = 'the machine lost this operation’s result; check the transcript';
+/** m8-3 review (B): a `behind` with no progress since the last backs off from this, doubling to the cap. */
+const BEHIND_FIRST_MS = 250;
+const BEHIND_MAX_MS = 5_000;
+/** Reopens in a row with no progress before the stream shows the gap and falls back to the idle backoff. */
+const BEHIND_STALLS = 3;
 /** Operations remembered past their completion, so a repeat or a late one for a settled op is told apart. */
 const OPS_KEPT = 256;
 /** An operation this session heard of: its receipt waiting, its completion said (`late` once more), or settled here. */
@@ -158,6 +164,8 @@ export class RemoteSession {
   #lastParts: { queue?: Record<string, unknown>; catalog?: { launchId: string; catalog: Record<string, unknown> }; items?: AttentionItem[] } = {};
   /** P5 O7 M8: the operations heard of, oldest first. */
   #ops = new Map<string, Op>();
+  /** m8-3 review (B): where the stream stood at its last `behind`, and the reopens in a row since that made no progress. */
+  #behindAt: { at: Cursor | null; stalls: number } | null = null;
   /** m8-3 review: the last workflow run the stream named, said again at a reopening. */
   #lastRun: string | null = null;
   /** P5 O7 M8: the `subbed`s heard, each an opening the waiters are asked at. */
@@ -448,7 +456,7 @@ export class RemoteSession {
         if (reason === 'removed' || reason === 'closed') return this.stop(reason);
         // P5 O7 M8: the machine ended it past its notices' bound; the session runs on, so it is opened again from where
         // it stood, and that opening asks for the completions it missed
-        if (reason === 'behind') return this.#subscribe();
+        if (reason === 'behind') return this.#behind();
         this.state.status = null;
         if (reason !== 'unavailable') {
           this.state.stream = 'ended';
@@ -559,6 +567,35 @@ export class RemoteSession {
       if (this.#ops.size <= OPS_KEPT) break;
       if (kept.state !== 'waiting') this.#ops.delete(old);
     }
+  }
+
+  // ---- `behind` (P5 O7 M8; m8-3's task review, B) --------------------------------------------------------------------
+
+  /**
+   * An `ended('behind')`: opened again at once when the cursor moved since the last one; while it stands, after
+   * BEHIND_FIRST_MS doubling to BEHIND_MAX_MS; after BEHIND_STALLS reopens in a row with no progress, the stream shows
+   * the gap and is tried on the idle backoff, as an `unavailable` one is.
+   */
+  #behind(): void {
+    const at = this.#cursor;
+    const last = this.#behindAt;
+    const moved = last === null || JSON.stringify(last.at) !== JSON.stringify(at);
+    const stalls = moved ? 0 : last.stalls + 1;
+    this.#behindAt = { at, stalls };
+    if (stalls === 0) return this.#subscribe();
+    if (stalls >= BEHIND_STALLS) {
+      this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: the stream ended behind ${stalls} times in a row with no progress; tried on the idle backoff`);
+      this.state.stream = 'gap';
+      this.publish();
+      return this.#later(() => this.#subscribe());
+    }
+    this.#timer = setTimeout(
+      () => {
+        this.#timer = null;
+        if (this.#running) this.#subscribe();
+      },
+      Math.min(BEHIND_FIRST_MS * 2 ** (stalls - 1), BEHIND_MAX_MS),
+    );
   }
 
   // ---- The panels across a reopening (m8-3's task review) ------------------------------------------------------------
