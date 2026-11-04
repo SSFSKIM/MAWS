@@ -1509,6 +1509,8 @@ Not offered, and why: `git.worktree.add`, `remove`, `deleteBranch` (a new sessio
 
 **§M. RL2 additions** (`apps/org-protocol/src/messages.ts`, `channel.ts`), each behind a capability a side lists in its handshake. The device's are `DEVICE_CAPABILITIES` (`src/main/machines/remote/capabilities.ts`), the endpoint's `ENDPOINT_CAPABILITIES` (`src/endpoint/capabilities.ts`); both list every capability their build implements, and `RL2_PROTOCOL.minor` moves to master's plus one at each landing that adds one.
 
+- `rl2.upload-blocks` (M8; endpoint; RL2 1.9 on the branch, re-bumped at landing if master has moved): `session.send`'s `uploads?`, expanded at the endpoint through `files.readUploads` before the act reaches the engine host. A device sends `uploads` only to an endpoint listing it.
+
 | Capability | Milestone | What it admits |
 |---|---|---|
 | `rl2.executor.machine` | M2 | `Executor` gains `machine` (`FROM_DEVICE.query` admits it); `RL2_PROTOCOL.minor` 1 |
@@ -1688,6 +1690,9 @@ The link's `subscribe` takes `{feed, session?}` in place of `session` alone.
 | `session.projects.addFolder` | `{act, executor 'machine', target 'machine', owners: true}` in `MACHINE_ACTS`, row grade `machine-admin` | `spawn` | M9 |
 | `session.trust.check` | `{call, executor 'machine', target 'machine', owners: true}`, row grade `list` | `spawn` | M9 |
 | `session.operations` (new) | `laneB('call')` | `view` | M8 |
+| `connectors.signInServer` (new; sign-in by a server's name and scope, the entry read on the session's machine) | `machineAdmin`, offered as `connectors.signIn` is, in `MACHINE_ACTS` and `CONSENT_COMMANDS` (m8-3) | `machine-admin` | M8 |
+| `files.readUploads` (new, `internal`: the endpoint's resolver for `uploads`, the sending session's own upload root only) | not offered; called by the endpoint | `internal` | M8 |
+| `fs.unfollow` | `laneB('call')` with `accepts: namesAnAgent` (the caller's own follow of a named agent; the session-wide form refused) | `view` | M8 |
 
 - **`REMOTE_UNAVAILABLE`** (`src/shared/ipc/remote-unavailable.ts`): `Record<CommandName, string>`, each command's reason in the words its control shows ("Not on another machine yet: …"). It is read by the renderer's controls and by `test/lane-b/offer-coverage.test.ts`.
 - **The `operation` and panel parts** (`src/shared/host/stream-catchup.ts`): `{part: 'operation', body: OperationEvent}`, `{part: 'subagents', body: {agents}}`, `{part: 'workflow', body: {runId}}` and `{part: 'side', body: {exchanges}}`. Each is emitted by `remote-session.ts` as its event (`session.operation`, `fs.subagentsChanged`, `fs.workflowChanged`, the side store's change) under the machine's address. An older device drops an unknown part.
@@ -1705,7 +1710,8 @@ The link's `subscribe` takes `{feed, session?}` in place of `session` alone.
 - **`engine.route-machine`**: an engine host capability; main sends `route: 'machine'` only to a host listing it.
 - **`setupRefusal`** (`src/endpoint/policy.ts`): `addFolder`'s directory exists, its real path is under the machine's home with no symlink escape, and it is not inside a protected folder that was not opened.
 - **The operation outcomes** (M8): `OperationTable` keeps each completed outcome by `opId`, at most 64 per session for 10 minutes; `session.operations {appSessionId, opIds}` (new, `view`, `laneB('call')`) answers `{outcomes: [{opId, event} | {opId, pending: true} | {opId, unknown: true}]}`; the `operation` part's snapshot key is `operation:<opId>`.
-- **The send's uploads** (M8): `session.send`'s input gains `uploads?: [{uploadId, as: 'document'}]`, behind `rl2.upload-blocks`.
+- **The send's uploads** (M8): `session.send`'s input gains `uploads?: [{uploadId, as: 'document'}]`, behind `rl2.upload-blocks` (RL2 1.9). The endpoint reads each through `files.readUploads`: the sending session's own upload root, no link on the way, still there, within the day, a PDF within the engine's bound. A refusal is `ack refused malformed`, with nothing queued, and the engine host refuses a send that still names uploads.
+- **`connectors.signInServer`** (M8) takes `{name, scope, cwd, appSessionId}`. `connectors.signIn`'s `path` stays required, because a request field moved from required to optional breaks an older receiver.
 - **`session.spawn`'s input** gains `trust?: 'accepted'`, accepted by `spawnRefusal` only for a current machine owner, `spec-field` for anyone else.
 - **`mawsd endpoint sync`** (M10): it runs `syncNow()` then `promoteIfListed`, and answers as `endpoint status --json`.
 
@@ -2614,6 +2620,16 @@ P5 findings of M5's re-plan, continued from F15:
     - `ended('behind')` reopening from the cursor rather than ending for good. Today only `unavailable` retries (`remote-session.ts` `ended`). This is the gap rule applied to the bound.
   Rationale: The executor's report (`task-2-report.md`) and the task review's three fixes: the task list bound to its engine session, the notices bounded, and the side read checked against its generation.
   Date/Author: 2026-11-04, O7's executor (the controller), from m8-2a's executor.
+- Decision: m8-2b's build and the architect's rulings on it (2026-11-04).
+  1. **Sign in by name.** It is a new command, `connectors.signInServer`, which departs from the spec's "`connectors.signIn` with `path` optional". A request field going from required to optional breaks an older receiver, so the additive command is the right shape (the architect, confirmed). m8-3 adds it to `MACHINE_ACTS` and `CONSENT_COMMANDS`, and m8-3 and m8-4 use that name.
+  2. **`attention.request` and `laneA.*`** stay out of `REMOTE_UNAVAILABLE`, because main's adapters answer them. Accepted on a condition: m8-5's contract test counts main's adapter-answered commands through an explicit named list, a third kind of coverage. Every session command must sit in exactly one of three: offered, declared unavailable, or answered by main.
+  3. **A refused upload send** reaches the device as `ack refused malformed` with no reason. m8-4 shows it the way a session shows an error, never raw and never dropped: "The attachment couldn't be sent. It may have expired or isn't a supported file. Attach it again." The device may warn before sending an upload acked more than a day ago (advisory). The reasonless RL2 refusal is a tracker line in M8's PR.
+  4. **A page reload** ends that page's agent follows, and the next read starts a new one. This follows from follow ownership.
+  5. **Versions.** RL2 1.8 to 1.9 (`rl2.upload-blocks`) and `WIRE_MINOR` 25 on the branch. The landing re-bumps both if master has moved.
+  6. **`authorize.ts` step 2 now applies a registry row's `accepts`.** This is a lens for M8's reviewer-high. At e01ba1876..4e797a49b, the only registry command whose row carries `accepts` is the new `fs.unfollow`. `forward.open`, `client.windowShown` and `machine.browserControl` are the endpoint's own names. `artifacts.fetch`, `documents.open` and `browser.screencast` are stream rows, whose `accepts` was already read at the open. So no existing row's `accepts` was written on the assumption that it was never enforced.
+  `REMOTE_UNAVAILABLE` holds 53 commands plus `mods.list`. The unit gate's four fixes include m8-2a's `remote-link.test.ts`, which was hidden while `wire.test.ts` was red. The static and unit gates passed (run 41814137865).
+  Rationale: m8-2b's report (`task-3-report.md`) and the architect's rulings on its concerns.
+  Date/Author: 2026-11-04, O7's executor (the controller).
 
 ## Outcomes & Retrospective
 
