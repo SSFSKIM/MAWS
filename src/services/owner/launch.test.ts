@@ -129,7 +129,7 @@ describe('ownerChannelLaunch over a scratch config home', () => {
       binaryCalls += 1;
       return { ok: true, value: { path: '/bin/claude', testedVersion: '2.1.293', version: '2.1.295', ok: true, error: null, ...(declares === undefined ? {} : { declaresSystemPromptSnapshot: declares }) } };
     };
-    launches = new OwnerChannelLaunches({ store: index.ownerChannel, appEnabled: () => appEnabled, managedSettingsPath: join(root, 'managed.json'), log: () => {} });
+    launches = new OwnerChannelLaunches({ store: index.ownerChannel, appEnabled: () => appEnabled, systemRoot: join(root, 'system'), log: () => {} });
     s = { env: { HOME: join(root, 'home'), CLAUDE_CONFIG_DIR: configHome }, dispatch, sessions: index.sessions, log: () => {}, owner: launches };
   });
   afterEach(() => {

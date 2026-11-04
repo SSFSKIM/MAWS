@@ -3,11 +3,15 @@
 // whether the to-human plugin registers its message tool under it, which alone carries the lane. Reads, never writes. Its
 // config home is the engine's (the captured login-shell environment's, never main's own `process.env`). `outputStyle` is
 // taken from the highest-precedence source that sets it: managed settings, then MAWS's own `--settings`, then local,
-// project and user settings; a missing or malformed file sets nothing. The named style is then found:
+// project and user settings; a missing or malformed file sets nothing. Managed settings are the machine's, as the engine
+// reads them (2.1.318): in the platform's directory (/Library/Application Support/ClaudeCode on macOS, /etc/claude-code
+// on Linux), `managed-settings.json`, then each `managed-settings.d/*.json` (no dotfiles) in name order, a later file
+// winning. The named style is then found:
 // - `default`, `Explanatory` and `Learning` are built-ins and never compatible;
 // - `<plugin>:<style>` among the installed plugins (`plugins/installed_plugins.json`, version 2) that are enabled in the
-//   merged settings' `enabledPlugins` and whose installation applies to the cwd (user scope, or project or local scope
-//   for this project), in `<installPath>/output-styles/*.md` by front-matter `name`, else file stem;
+//   merged settings' `enabledPlugins` and whose installation applies to the cwd (user or managed scope, the engine
+//   recording at `managed` a plugin its managed settings enable; or project or local scope for this project), in
+//   `<installPath>/output-styles/*.md` by front-matter `name`, else file stem;
 // - any other name in `<cwd>/.claude/output-styles/`, then `<configHome>/output-styles/`.
 // A style that cannot be found has no shape, and the reason is said; the engine's own report at `system/init` corrects a
 // misreading (the mismatch check, ./launch.ts).
@@ -21,16 +25,17 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { carriesPluginMessageTool, PLUGIN_STYLE, STYLE_CONTRACT_KEY, styleShape, TO_HUMAN_PLUGIN, type StyleShape } from '@shared/owner/contract';
+import { managedSettings, managedSettingsDir } from '../../engine-host/session-start-hooks';
 import { realOrSelf } from '../sessions/context';
 
-export const MANAGED_SETTINGS_PATH = '/Library/Application Support/ClaudeCode/managed-settings.json';
 const BUILT_IN_STYLES = new Set(['default', 'Explanatory', 'Learning']);
 
 export interface StyleContext {
   configHome: string; // the engine's config home
   cwd: string | null; // the launch's directory; null: what a launch in no project would do (user and managed only)
   flagSettings?: Record<string, unknown> | null; // MAWS's own --settings (the spec's extraSettings)
-  managedSettingsPath?: string; // the tests' seam
+  platform?: NodeJS.Platform; // the tests' seam: whose managed settings directory is read (this machine's by default)
+  systemRoot?: string; // the tests' seam: the file-system root that directory is read beneath (the machine's by default)
 }
 
 export interface ResolvedStyle {
@@ -42,6 +47,11 @@ export interface ResolvedStyle {
 }
 
 type SettingsFile = Record<string, unknown>;
+// The settings sources, highest precedence first, every one (`all`) and the managed ones alone.
+interface Sources {
+  all: SettingsFile[];
+  managed: SettingsFile[];
+}
 
 async function readJson(path: string): Promise<unknown> {
   try {
@@ -53,18 +63,22 @@ async function readJson(path: string): Promise<unknown> {
 
 const asObject = (value: unknown): SettingsFile | null => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as SettingsFile) : null);
 
-// The settings sources, highest precedence first.
-async function sources(ctx: StyleContext): Promise<SettingsFile[]> {
-  const files = [ctx.managedSettingsPath ?? MANAGED_SETTINGS_PATH];
+const present = (files: (SettingsFile | null)[]): SettingsFile[] => files.filter((s): s is SettingsFile => s !== null);
+
+// The settings sources: the managed files (the last fragment first, a later file's value replacing an earlier one's, and
+// an object such as `enabledPlugins` merging key by key, which reading them in this order gives), MAWS's own --settings,
+// then local, project and user settings.
+async function sources(ctx: StyleContext): Promise<Sources> {
+  const directory = ctx.systemRoot === undefined ? managedSettingsDir(ctx.platform) : join(ctx.systemRoot, managedSettingsDir(ctx.platform));
+  const managed = present((await managedSettings(directory)).map(asObject)).reverse();
   const project = ctx.cwd === null ? [] : [join(ctx.cwd, '.claude', 'settings.local.json'), join(ctx.cwd, '.claude', 'settings.json')];
-  const read = await Promise.all([...files, ...project, join(ctx.configHome, 'settings.json')].map(async (path) => asObject(await readJson(path))));
-  const [managed, ...rest] = read;
-  return [managed, asObject(ctx.flagSettings ?? null), ...rest].filter((s): s is SettingsFile => s !== null);
+  const files = await Promise.all([...project, join(ctx.configHome, 'settings.json')].map(async (path) => asObject(await readJson(path))));
+  return { all: present([...managed, asObject(ctx.flagSettings ?? null), ...files]), managed };
 }
 
 export async function resolveStyle(ctx: StyleContext): Promise<ResolvedStyle> {
   const settings = await sources(ctx);
-  const selected = settings.map((s) => s.outputStyle).find((value): value is string => typeof value === 'string' && value.trim() !== '');
+  const selected = settings.all.map((s) => s.outputStyle).find((value): value is string => typeof value === 'string' && value.trim() !== '');
   return lookupIn(selected ?? 'default', ctx, settings);
 }
 
@@ -74,7 +88,7 @@ export async function lookupStyle(name: string, ctx: StyleContext): Promise<Reso
   return lookupIn(name, ctx, await sources(ctx));
 }
 
-async function lookupIn(name: string, ctx: StyleContext, settings: SettingsFile[]): Promise<ResolvedStyle> {
+async function lookupIn(name: string, ctx: StyleContext, settings: Sources): Promise<ResolvedStyle> {
   const none = (unresolved: string | null): ResolvedStyle => ({ name, shape: 'none', contract: null, unresolved, messageTool: false });
   if (BUILT_IN_STYLES.has(name)) return none(null);
   const colon = name.indexOf(':');
@@ -90,39 +104,41 @@ async function lookupIn(name: string, ctx: StyleContext, settings: SettingsFile[
     const contract = contractOf(style);
     const shape = styleShape(contract);
     if (shape === 'none') return none(null);
-    const messageTool = name === PLUGIN_STYLE && carriesPluginMessageTool(contract) && !hooksDisabled(settings) && !(await managedHooksOnly(ctx)) && typeof (await pluginInstallPaths(TO_HUMAN_PLUGIN, ctx, settings)) !== 'string';
+    const messageTool = name === PLUGIN_STYLE && carriesPluginMessageTool(contract) && !hooksDisabled(settings.all) && !managedHooksOnly(settings.managed) && typeof (await pluginInstallPaths(TO_HUMAN_PLUGIN, ctx, settings)) !== 'string';
     return { name, shape, contract, unresolved: null, messageTool };
   }
   return none(colon > 0 ? `the plugin ${name.slice(0, colon)} has no output style ${wanted}` : `no output style named ${name} in the project or the config home`);
 }
 
 // The output-style directories of the enabled installations of a plugin that apply to the cwd, or why there are none.
-async function pluginStyleDirectories(plugin: string, ctx: StyleContext, settings: SettingsFile[]): Promise<string[] | string> {
+async function pluginStyleDirectories(plugin: string, ctx: StyleContext, settings: Sources): Promise<string[] | string> {
   const paths = await pluginInstallPaths(plugin, ctx, settings);
   return typeof paths === 'string' ? paths : paths.map((path) => join(path, 'output-styles'));
 }
 
 // P4-R7z: whether every hook is off, as the highest-precedence source that says so has it (`disableAllHooks`).
-// P4-R7z: whether managed settings let only managed hooks run (`allowManagedHooksOnly`, honoured there alone), which
-// keeps a user-installed plugin's hooks from loading; a to-human plugin installed by policy is read the same, off.
-const managedHooksOnly = async (ctx: StyleContext): Promise<boolean> => asObject(await readJson(ctx.managedSettingsPath ?? MANAGED_SETTINGS_PATH))?.allowManagedHooksOnly === true;
+// P4-R7z: whether managed settings let only managed hooks run (`allowManagedHooksOnly`, honoured there alone, the last
+// managed file that sets it deciding), which keeps a user-installed plugin's hooks and mods from loading. The engine still
+// loads an organization's own mod (its plugin enabled by managed settings and loaded in place from a marketplace they
+// name as a directory), the plugin's tool among them; the resolver does not read that far and has the tool off.
+const managedHooksOnly = (managed: SettingsFile[]): boolean => managed.map((s) => s.allowManagedHooksOnly).find((value) => typeof value === 'boolean') === true;
 const hooksDisabled = (settings: SettingsFile[]): boolean => settings.map((s) => s.disableAllHooks).find((value) => typeof value === 'boolean') === true;
 
 // The install paths of the enabled installations of a plugin that apply to the cwd, or why there are none.
-async function pluginInstallPaths(plugin: string, ctx: StyleContext, settings: SettingsFile[]): Promise<string[] | string> {
+async function pluginInstallPaths(plugin: string, ctx: StyleContext, settings: Sources): Promise<string[] | string> {
   const registry = asObject(await readJson(join(ctx.configHome, 'plugins', 'installed_plugins.json')));
   const plugins = registry?.version === 2 ? asObject(registry.plugins) : null;
   if (plugins === null) return `no readable plugin registry (version 2) for ${plugin}`;
   // enabledPlugins merged across the sources, the higher precedence winning per plugin id
   const enabled: Record<string, unknown> = {};
-  for (const source of [...settings].reverse()) Object.assign(enabled, asObject(source.enabledPlugins) ?? {});
+  for (const source of [...settings.all].reverse()) Object.assign(enabled, asObject(source.enabledPlugins) ?? {});
   const cwd = ctx.cwd === null ? null : await realOrSelf(ctx.cwd);
   const paths: string[] = [];
   for (const [id, records] of Object.entries(plugins)) {
     if (id.split('@')[0] !== plugin || enabled[id] !== true || !Array.isArray(records)) continue;
     for (const record of records.map(asObject)) {
       if (record === null || typeof record.installPath !== 'string') continue;
-      const applies = record.scope === 'user' || ((record.scope === 'project' || record.scope === 'local') && cwd !== null && typeof record.projectPath === 'string' && (await realOrSelf(record.projectPath)) === cwd);
+      const applies = record.scope === 'user' || record.scope === 'managed' || ((record.scope === 'project' || record.scope === 'local') && cwd !== null && typeof record.projectPath === 'string' && (await realOrSelf(record.projectPath)) === cwd);
       if (applies) paths.push(record.installPath);
     }
   }
