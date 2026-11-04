@@ -10,7 +10,7 @@
 // The machine's home is a fake one under a temp directory and the platform is injected as macOS: nothing here reads a
 // real protected folder. The folder list is the real services' handler over that home.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -195,6 +195,18 @@ describe('the remote setup with the machine’s own handlers', () => {
     git(path, 'commit', '-q', '-m', 'one');
   };
 
+  /** A script at `path` that appends its arguments to `marker` (and then runs `then`, when given). */
+  const script = (path: string, marker: string, then = '') => {
+    writeFileSync(path, `#!/bin/sh\necho "$@" >> '${marker}'\n${then}`);
+    chmodSync(path, 0o755);
+    return path;
+  };
+  const wasGit = process.env.MAWS_GIT;
+  afterEach(() => {
+    if (wasGit === undefined) delete process.env.MAWS_GIT;
+    else process.env.MAWS_GIT = wasGit;
+  });
+
   async function real(): Promise<{ f: Fixture; home: string; a: Remote }> {
     const { f, home, a, guard } = await setup();
     const index = new Index(join(tempDir('setup-rows-index-'), 'index.sqlite'));
@@ -202,7 +214,7 @@ describe('the remote setup with the machine’s own handlers', () => {
     registerIndexHandlers(index, f.spine.bus as never, guard);
     const env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: join(home, '.claude-config') };
     const runGit = createGitRunner({ env });
-    registerSetupTrust(f.spine.bus.register as never, { trustCheck: (directory, read) => trustStateOf(directory, { git: runGit, env, ...(read === undefined ? {} : { guard: read }) }) }, guard);
+    registerSetupTrust(f.spine.bus.register as never, { trustCheck: (directory, guarded) => trustStateOf(directory, { git: runGit, env, ...guarded }) }, guard);
     return { f, home, a };
   }
   const register = async (f: Fixture, a: Remote, directory: string) => act(a, await stepped(f, a, 'session.projects.addFolder', { directory }));
@@ -227,6 +239,42 @@ describe('the remote setup with the machine’s own handlers', () => {
     expect(reached(f, from, 'session.trust.check')).toEqual([]);
     await open(a, '~/Documents');
     expect(await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: join(home, 'Developer/wt') }))).toMatchObject({ state: 'done', result: { project: { directory: join(home, 'Documents/main') }, location: { kind: 'existingWorktree', path: join(home, 'Developer/wt') } } });
+  });
+
+  // Round 2: the git the machine runs is hardened (src/services/git/runner.ts' `gitEnv`): a config's `core.fsmonitor`
+  // never runs, whatever the setup asks.
+  it('run nothing a folder’s config names: its fsmonitor never runs through the list, the registration or the trust read', async () => {
+    const { f, home, a } = await real();
+    const ran = join(home, 'fsmonitor-ran');
+    const main = join(home, 'Developer/main');
+    repo(main);
+    git(main, 'worktree', 'add', '-q', join(home, 'Developer/wt'));
+    git(main, 'config', 'core.fsmonitor', script(join(tempDir('setup-rows-bin-'), 'fsmonitor'), ran));
+    expect(await call(a, 'machine.folders.list', { path: '~/Developer' })).toMatchObject({ ok: true });
+    for (const directory of [main, join(home, 'Developer/wt')]) {
+      expect(await register(f, a, directory)).toBe('ok');
+      expect(await call(a, 'session.trust.check', { directory })).toMatchObject({ ok: true });
+    }
+    expect(existsSync(ran)).toBe(false);
+  });
+
+  // Round 2: before trust the setup runs no git at all; git's files are read directly, each through the walk, and a
+  // config's include is never followed (git would read it: here it would make the checkout a bare repository's, so the
+  // worktree would fold nowhere and its trust read would fail).
+  it('run no git before trust: the registration and the trust read read git’s files themselves, never a config’s include', async () => {
+    const ran = join(tempDir('setup-rows-ran-'), 'git-ran');
+    process.env.MAWS_GIT = script(join(tempDir('setup-rows-bin-'), 'git'), ran, 'exec /usr/bin/git "$@"\n');
+    const { f, home, a } = await real();
+    const main = join(home, 'Developer/main');
+    repo(main);
+    git(main, 'worktree', 'add', '-q', join(home, 'Developer/wt'));
+    git(main, 'repack', '-adq');
+    writeFileSync(join(home, 'Documents/included'), '[core]\n\tbare = true\n');
+    git(main, 'config', 'include.path', join(home, 'Documents/included'));
+    expect(await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: join(home, 'Developer/wt') }))).toMatchObject({ state: 'done', result: { project: { directory: main }, location: { kind: 'existingWorktree', path: join(home, 'Developer/wt') } } });
+    expect(await call(a, 'session.trust.check', { directory: join(home, 'Developer/wt') })).toMatchObject({ ok: true, output: { trustKey: main, keyKind: 'repo' } });
+    expect(await call(a, 'session.trust.check', { directory: main })).toMatchObject({ ok: true, output: { trustKey: main, keyKind: 'repo' } });
+    expect(existsSync(ran)).toBe(false);
   });
 
   it('refuse a trust read whose trust file leads into an unopened protected folder', async () => {

@@ -7,20 +7,26 @@
 //   checked directory, the sealed action keeping what was signed. A local client's own (no claim) runs as before.
 // - The trust read is `machine.setupTrust` (`internal`), the endpoint's call for a remote `session.trust.check`.
 //
-// Each first checks the directory again, here, before any git call or read: it is still its own real path (a folder
-// swapped for a link since the endpoint's check is refused), and every pointer git or the trust read follows from it
-// touches no protected folder but the ones the directory itself is in (which the endpoint held to the member's opens) and
-// the ones this machine's folder list read with `open: true` (`SetupOpens`, src/services/machine/folders.ts). The
-// endpoint's per-member record is the authorization; this one only keeps a change made between its check and the run
-// from reading anywhere nobody opened. The trust read's files are guarded again at each read.
+// Neither runs git (round 2): until the folder's trust is accepted, what they need of git (the trust key's repository,
+// the project fold's main worktree) is read from git's files directly, each through the walk, nothing a config names
+// followed (src/shared/machine/git-reads.ts). Each first checks the directory again, here, before any read: it is
+// still its own real path (a folder swapped for a link since the endpoint's check is refused), and every pointer git or
+// the trust read follows from it touches no protected folder but the ones the directory itself is in (which the endpoint
+// held to the member's opens) and the ones this machine's folder list read with `open: true` (`SetupOpens`,
+// src/services/machine/folders.ts). The endpoint's per-member record is the authorization; this one only keeps a change
+// made between its check and the run from reading anywhere nobody opened. The trust read's files, and each of git's, are
+// guarded again at each read.
 import { homedir } from 'node:os';
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName } from '@shared/ipc/schema';
+import { discoverRepo, guardedFiles, SetupReadRefused, type GitFiles } from '@shared/machine/git-reads';
 import { walk, within, type Home, type HomeRefusal } from '@shared/machine/home-folders';
 import { readable, setupReadsRefusal } from '@shared/machine/setup-reads';
 import type { TrustState } from '@shared/sessions/trust';
 import type { ServiceHandler } from '@shared/spine/bus';
+import { warmLinkedWorktreeRead } from '../index/projects';
+import type { RepoDirs, TrustDeps } from '../sessions/trust';
 
 /** This process's home, for a registration with no guard given. */
 export const thisGuard = (): SetupGuard => ({ where: { home: homedir(), platform: process.platform }, opens: new SetupOpens() });
@@ -67,20 +73,54 @@ export async function checkSetupDirectory(directory: string, { where, opens }: S
   if (reads !== null) throw refuse(reads, directory);
 }
 
-/** A remote registration: the checked directory, checked again, then `register` (the index's `addFolder`) on it. */
+/** git's files as a run on the checked `directory` may read them (round 2: no git runs before trust; git-reads.ts). */
+const setupFiles = (directory: string, { where, opens }: SetupGuard): GitFiles => guardedFiles(where, openedFor(directory, opens));
+
+/** A refused read as the handler's refusal; anything else as it is. */
+async function refusing<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof SetupReadRefused) throw refuse(error.reason, error.path);
+    throw error;
+  }
+}
+
+/**
+ * The repository a folder is in, read from git's files as `git rev-parse` answers it (`trustKeyOf`'s `repoOf`, the same
+ * trust key): none outside one; no work tree (a bare repository, a folder inside a git dir) fails as git fails.
+ */
+export const setupRepoDirs =
+  (files: GitFiles): RepoDirs =>
+  async (directory) => {
+    const repo = await discoverRepo(directory, files);
+    if (repo === null) return null;
+    if (repo.workTree === null) throw new Error(`no work tree for ${directory}: a bare repository, or a folder inside a git dir`);
+    return { toplevel: repo.workTree, commonDir: repo.commonDir, gitDir: repo.gitDir };
+  };
+
+/**
+ * A remote registration: the checked directory, checked again, its linked-worktree question answered from git's files
+ * (no git run in it), then `register` (the index's `addFolder`) on it.
+ */
 export async function setupAddFolder<T>(directory: string, guard: SetupGuard, register: (directory: string) => T): Promise<T> {
   await checkSetupDirectory(directory, guard, { trustFiles: false });
+  await refusing(() => warmLinkedWorktreeRead(directory, setupFiles(directory, guard)));
   return register(directory);
 }
 
-/** Registers `machine.setupTrust`: the checked directory, checked again, then the trust read with each file guarded. */
+/**
+ * Registers `machine.setupTrust`: the checked directory, checked again, then the trust read with each file guarded and
+ * its repository read from git's files (no git run in it).
+ */
 export function registerSetupTrust(
   register: <N extends CommandName>(name: N, handler: ServiceHandler<N>) => void,
-  sessions: { trustCheck(directory: string, guard?: (path: string) => Promise<boolean>): Promise<TrustState> },
+  sessions: { trustCheck(directory: string, guarded?: Pick<TrustDeps, 'guard' | 'repo'>): Promise<TrustState> },
   guard: SetupGuard,
 ): void {
   register('machine.setupTrust', async ({ directory }) => {
     await checkSetupDirectory(directory, guard, { trustFiles: true });
-    return sessions.trustCheck(directory, (path) => readable(path, guard.where, openedFor(directory, guard.opens)));
+    const repo = setupRepoDirs(setupFiles(directory, guard));
+    return refusing(() => sessions.trustCheck(directory, { guard: (path) => readable(path, guard.where, openedFor(directory, guard.opens)), repo }));
   });
 }

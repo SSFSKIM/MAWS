@@ -7,7 +7,11 @@ import type { SessionPatch } from '@shared/ipc/schema/session';
 import type { ServicesBus } from '@shared/spine/bus';
 import { setupAddFolder, thisGuard, type SetupGuard } from '../machine/setup';
 import { addFolder } from './add-folder'; // New chat
+import { locate } from './projects';
 import type { Index } from './index';
+
+// P5 O7 M9 round 2: a remote registration's `locate`, which never runs git (setup.ts answers its question first).
+const setupLocate = (directory: string | null) => locate(directory, () => null);
 
 // `setup` (P5 O7 M9): where a remote setup's registration is checked again (src/services/machine/setup.ts).
 export function registerIndexHandlers(index: Index, { register }: Pick<ServicesBus, 'register'>, setup: SetupGuard = thisGuard()): void {
@@ -21,7 +25,8 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
   register('session.projects.add', ({ directory }) => index.projects.add(directory));
   // New chat: "Open folder…"; P5 O7 M9: another machine's owner's, claimed under `machine.op`, on the directory the
   // endpoint checked, checked again here before anything reads in it
-  register('session.projects.addFolder', ({ directory }, context) => (context.op === undefined ? addFolder(index.projects, directory) : setupAddFolder(directory, setup, (checked) => addFolder(index.projects, checked))));
+  // (its linked-worktree answer read from git's files beforehand, so `setupLocate` asks no git: a miss would not fold)
+  register('session.projects.addFolder', ({ directory }, context) => (context.op === undefined ? addFolder(index.projects, directory) : setupAddFolder(directory, setup, (checked) => addFolder(index.projects, checked, setupLocate))));
   register('session.projects.update', ({ id, patch }) => index.projects.update(id as ProjectId, patch));
   register('session.projects.remove', ({ id }) => index.projects.hide(id as ProjectId));
   register('session.drafts.get', ({ appSessionId }) => index.drafts.get(appSessionId as AppSessionId));

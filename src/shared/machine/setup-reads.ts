@@ -5,10 +5,12 @@
 // (./home-folders.ts) and held to the same protected rule.
 //
 // - git's discovery: the nearest `.git` from the folder up. A directory is the git dir; a file names one (`gitdir:`),
-//   relative to its folder. The git dir's `commondir`, relative to it, names the common dir (else the git dir is it). The
-//   main checkout is the common dir's folder when it is named `.git` (the project fold's content check reads there), and
-//   each linked worktree the common dir lists (`worktrees/*/gitdir`, the worktree's `.git` file) is read by
-//   `git worktree list`.
+//   relative to its folder. The git dir's `commondir`, relative to it, names the common dir (else the git dir is it), whose
+//   `config` is read. The main checkout is the common dir's folder when it is named `.git` (the project fold's content
+//   check reads there), and each linked worktree the common dir lists (`worktrees/*/gitdir`, the worktree's `.git` file,
+//   `worktrees` itself walked first) is read by the worktree listing.
+// None of these is read by git before trust: ./git-reads.ts reads them directly, each through the walk, and follows
+// nothing a config names (its `[include]` is no read to refuse).
 // - the trust read's files: `.claude/settings.json`, `.claude/settings.local.json` and `.mcp.json`, each followed.
 // A pointer that leads nowhere (a pruned worktree, a missing file) touches nothing past what was checked, so it is no
 // refusal; one through an unopened protected folder is `protected`. A pointer may lead out of the home: nothing outside it
@@ -72,14 +74,18 @@ async function gitRefusal(directory: string, where: Home, opened: Opened): Promi
     const main = await pointerRefusal(dirname(commonDir), where, opened, false);
     if (main !== null) return main;
   }
+  const config = await pointerRefusal(join(commonDir, 'config'), where, opened, true); // its remotes and settings are read
+  if (config !== null) return config;
+  const listed = await walk(join(commonDir, 'worktrees'), where, { opened, outside: true }); // walked before it is listed
+  if (!listed.ok) return listed.reason === 'no-folder' ? null : listed.reason;
   let worktrees: string[];
   try {
-    worktrees = await readdir(join(commonDir, 'worktrees'));
+    worktrees = await readdir(listed.real);
   } catch {
     return null;
   }
   for (const id of worktrees) {
-    const entry = await followPointer(join(commonDir, 'worktrees', id, 'gitdir'), join(commonDir, 'worktrees', id), /^(.+)$/m, where, opened, true);
+    const entry = await followPointer(join(listed.real, id, 'gitdir'), join(listed.real, id), /^(.+)$/m, where, opened, true);
     if (entry !== null && typeof entry === 'object') return entry.refusal;
     if (entry !== null) {
       const refusal = await pointerRefusal(dirname(entry), where, opened, false); // `git worktree list` reads the worktree's `.git` there

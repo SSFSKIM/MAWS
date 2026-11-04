@@ -3,7 +3,7 @@
 // each held to the protected rule before anything reads through it. Real git over a fake macOS home under a temp
 // directory: no test reads a real protected folder.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -62,6 +62,27 @@ describe('a setup’s reads past its folder', () => {
     mkdirSync(join(home, 'Developer/front'));
     symlinkSync(join(home, 'Documents/real/.git'), join(home, 'Developer/front/.git'));
     expect(await setupReadsRefusal(join(home, 'Developer/front'), mac, none, trust)).toBe('protected');
+  });
+
+  // round 2: the reviewer's two cases; a config's include is never followed, so it is nothing to refuse
+  it('refuse a common dir whose `worktrees` is linked into an unopened protected folder, walked before it is listed', async () => {
+    repo(join(home, 'Developer/repo'));
+    mkdirSync(join(home, 'Documents/worktrees'));
+    symlinkSync(join(home, 'Documents/worktrees'), join(home, 'Developer/repo/.git/worktrees'));
+    expect(await setupReadsRefusal(join(home, 'Developer/repo'), mac, none, trust)).toBe('protected');
+    expect(await setupReadsRefusal(join(home, 'Developer/repo'), mac, documents, trust)).toBeNull();
+  });
+
+  it('refuse a config linked into an unopened protected folder; an include there is no read to refuse', async () => {
+    repo(join(home, 'Developer/repo'));
+    writeFileSync(join(home, 'Documents/included'), '[core]\n\tbare = true\n');
+    git(join(home, 'Developer/repo'), 'config', 'include.path', join(home, 'Documents/included'));
+    expect(await setupReadsRefusal(join(home, 'Developer/repo'), mac, none, trust)).toBeNull();
+    repo(join(home, 'Developer/linked'));
+    renameSync(join(home, 'Developer/linked/.git/config'), join(home, 'Documents/config'));
+    symlinkSync(join(home, 'Documents/config'), join(home, 'Developer/linked/.git/config'));
+    expect(await setupReadsRefusal(join(home, 'Developer/linked'), mac, none, trust)).toBe('protected');
+    expect(await setupReadsRefusal(join(home, 'Developer/linked'), mac, documents, trust)).toBeNull();
   });
 
   it('refuse a trust file linked into an unopened protected folder for the trust read, not the registration', async () => {

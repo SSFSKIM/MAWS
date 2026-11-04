@@ -12,6 +12,8 @@ import { basename, dirname, join } from 'node:path';
 import type { ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectOrg, ProjectRecord } from '@shared/ipc/schema/session';
+import { headTreeFiles, type TreeFile } from '@shared/machine/git-objects';
+import { discoverRepo, GitLayoutError, worktreeList, type GitFiles } from '@shared/machine/git-reads';
 import type { OrgKey } from '@shared/machine/org-key';
 import { slugOf } from '../../engine-host/fs/paths';
 import { gitBinary, gitEnv } from '../git/runner';
@@ -93,7 +95,7 @@ const exists = (path: string) => lstatSync(path, { throwIfNoEntry: false }) !== 
 // directory of its own rather than folding under the wrong one.
 export function mainWorktree(root: string): string | null {
   const main = listedMain(root, gitOutput(root, LIST));
-  return main !== null && holdsHead(main, gitOutput(main, TREE)) ? main : null;
+  return main !== null && holdsHead(main, treeFiles(gitOutput(main, TREE))) ? main : null;
 }
 
 // `mainWorktree` off main's thread; `holdsHeadOf` runs `holdsHead` over the main checkout's tree, once per warm-up.
@@ -134,15 +136,13 @@ function listedMain(root: string, listed: string | null): string | null {
 // SHA-256 repository). The smallest few non-empty files are read (an empty one matches any empty file of its name), each
 // at most EVIDENCE_BYTES. Every doubt answers no: a checkout whose top-level files are all edited, or whose HEAD tracks
 // none, stays apart, as every linked worktree did before the fold.
-function holdsHead(main: string, tree: string | null): boolean {
+function holdsHead(main: string, tree: TreeFile[] | null): boolean {
   if (tree === null) return false;
   const candidates: { path: string; id: string; size: number }[] = [];
-  for (const entry of tree.split('\0')) {
-    const match = TOP_LEVEL_FILE.exec(entry);
-    if (match === null) continue;
-    const path = join(main, match[2]);
+  for (const { name, id } of tree) {
+    const path = join(main, name);
     const stat = lstatSync(path, { throwIfNoEntry: false });
-    if (stat?.isFile() && stat.size > 0 && stat.size <= EVIDENCE_BYTES) candidates.push({ path, id: match[1], size: stat.size });
+    if (stat?.isFile() && stat.size > 0 && stat.size <= EVIDENCE_BYTES) candidates.push({ path, id, size: stat.size });
   }
   candidates.sort((a, b) => a.size - b.size);
   return candidates.slice(0, EVIDENCE_FILES).some(({ path, id }) => {
@@ -153,6 +153,15 @@ function holdsHead(main: string, tree: string | null): boolean {
       return false; // gone or unreadable since the stat
     }
     return createHash(id.length === 64 ? 'sha256' : 'sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex') === id;
+  });
+}
+
+// HEAD's regular top-level files as `ls-tree -z HEAD` lists them; null when git gave no answer.
+function treeFiles(tree: string | null): TreeFile[] | null {
+  if (tree === null) return null;
+  return tree.split('\0').flatMap((entry) => {
+    const match = TOP_LEVEL_FILE.exec(entry);
+    return match === null ? [] : [{ name: match[2], id: match[1] }];
   });
 }
 
@@ -231,7 +240,7 @@ export async function warmLinkedWorktrees(directories: Iterable<string>): Promis
   const checked = new Map<string, Promise<boolean>>();
   const holdsHeadOf = (main: string) => {
     let answer = checked.get(main);
-    if (answer === undefined) checked.set(main, (answer = gitOutputAsync(main, TREE).then((tree) => holdsHead(main, tree))));
+    if (answer === undefined) checked.set(main, (answer = gitOutputAsync(main, TREE).then((tree) => holdsHead(main, treeFiles(tree)))));
     return answer;
   };
   const worker = async () => {
@@ -249,6 +258,49 @@ export async function warmLinkedWorktrees(directories: Iterable<string>): Promis
     }
   };
   await Promise.all(Array.from({ length: WARM_CONCURRENCY }, worker));
+}
+
+// P5 O7 M9 round 2: a remote setup's registration, before the folder's trust is accepted, answers the linked-worktree
+// question with no git run in it: what `mainWorktree` asks git is read from git's files (src/shared/machine/git-reads.ts,
+// git-objects.ts), each through the home's walk, a config's include never followed. The answer fills the cache, so the
+// `locate` that follows asks git nothing; one already there stays. A read the walk refuses throws; any other doubt
+// answers no fold, as a git that cannot answer does.
+export async function warmLinkedWorktreeRead(directory: string, files: GitFiles): Promise<void> {
+  const realpath = canonical(directory);
+  const asked = WORKTREE.exec(realpath)?.[1] ?? realpath;
+  if (linkedWorktrees.has(asked)) return;
+  let root: string | null;
+  try {
+    root = candidateRoot(asked);
+  } catch {
+    root = null; // a directory that cannot be read: no fold
+  }
+  const main = root === null ? null : await mainWorktreeRead(root, files);
+  if (!linkedWorktrees.has(asked)) linkedWorktrees.set(asked, root === null || main === null ? null : { main, root });
+}
+
+// `mainWorktree`'s answer from git's files: the listing's main worktree when `root` is one of its linked entries, the
+// repository is not bare, the main worktree holds a `.git` and HEAD's work tree (`holdsHead`).
+async function mainWorktreeRead(root: string, files: GitFiles): Promise<string | null> {
+  const realOf = async (path: string) => (await files.real(path))?.normalize('NFC') ?? null;
+  try {
+    const repo = await discoverRepo(root, files);
+    if (repo === null) return null;
+    const [first, ...linked] = await worktreeList(repo, files);
+    if (first === undefined || first.bare) return null;
+    let listed = false;
+    for (const entry of linked) {
+      listed = (await realOf(entry.path)) === root;
+      if (listed) break;
+    }
+    const main = listed ? await realOf(first.path) : null;
+    if (main === null || (await files.entry(join(main, '.git'))) === null) return null;
+    const own = await discoverRepo(main, files);
+    return own !== null && holdsHead(main, await headTreeFiles(own, files)) ? main : null;
+  } catch (error) {
+    if (error instanceof GitLayoutError) return null; // where git refuses the layout, it answers nothing
+    throw error;
+  }
 }
 
 // The nearest `.git` decides, as it does for git itself: a directory is a main checkout's, which folds nowhere and needs

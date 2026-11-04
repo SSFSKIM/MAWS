@@ -41,21 +41,36 @@ async function realOrSelf(path: string): Promise<{ path: string; exists: boolean
   }
 }
 
+// The repository a directory is in, as `git rev-parse --show-toplevel --git-common-dir --git-dir` answers it: null
+// when it is in none; throws where git fails otherwise (a bare repository has no toplevel).
+export type RepoDirs = (directory: string) => Promise<{ toplevel: string; commonDir: string; gitDir: string } | null>;
+
+export const revParsed =
+  (git: GitRun): RepoDirs =>
+  async (directory) => {
+    let out: string;
+    try {
+      out = await git(directory, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir', '--git-dir']);
+    } catch (error) {
+      if (error instanceof NotARepositoryError) return null;
+      throw error;
+    }
+    const [toplevel, commonDir, gitDir] = out.split('\n').map((line) => line.trim());
+    if (!toplevel || !commonDir || !gitDir) throw new Error(`git rev-parse answered no toplevel, common dir and git dir for ${directory}`);
+    return { toplevel, commonDir, gitDir };
+  };
+
 // The trust key (SPEC §3 15.1-15.4): the main worktree's root when the directory is inside a repository (linked
 // worktrees share it), else the directory's own NFC realpath. A missing directory answers its own spelling, never
-// throws; any other git failure does, because a wrong key would ask about, and attest, the wrong directory.
-export async function trustKeyOf(directory: string, git: GitRun): Promise<{ trustKey: string; keyKind: 'repo' | 'directory'; directory: string }> {
+// throws; any other git failure does, because a wrong key would ask about, and attest, the wrong directory. `repoOf`
+// is git's answer by default; a remote setup's trust read, before trust, reads git's files instead (P5 O7 M9 round 2,
+// src/services/machine/setup.ts), the same key for the same folder.
+export async function trustKeyOf(directory: string, git: GitRun, repoOf: RepoDirs = revParsed(git)): Promise<{ trustKey: string; keyKind: 'repo' | 'directory'; directory: string }> {
   const resolved = await realOrSelf(directory);
   if (!resolved.exists) return { trustKey: resolved.path, keyKind: 'directory', directory: resolved.path };
-  let out: string;
-  try {
-    out = await git(resolved.path, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir', '--git-dir']);
-  } catch (error) {
-    if (error instanceof NotARepositoryError) return { trustKey: resolved.path, keyKind: 'directory', directory: resolved.path };
-    throw error;
-  }
-  const [toplevel, commonDir, gitDir] = out.split('\n').map((line) => line.trim());
-  if (!toplevel || !commonDir || !gitDir) throw new Error(`git rev-parse answered no toplevel, common dir and git dir for ${resolved.path}`);
+  const repo = await repoOf(resolved.path);
+  if (repo === null) return { trustKey: resolved.path, keyKind: 'directory', directory: resolved.path };
+  const { toplevel, commonDir, gitDir } = repo;
   let root: string;
   if (basename(commonDir) === '.git') root = dirname(commonDir);
   else {
@@ -106,6 +121,8 @@ export interface TrustDeps {
   // P5 O7 M9: a remote setup's guarded read (src/services/machine/setup.ts): asked before each file of what trust would
   // load is read, its link followed only where it may be; a file it refuses fails the read rather than being skipped
   guard?: (path: string) => Promise<boolean>;
+  // P5 O7 M9 round 2: the same run's repository, read from git's files rather than by git (`trustKeyOf`'s `repoOf`)
+  repo?: RepoDirs;
 }
 
 // E11 (tracker row E6 "small per-call costs in scm.*"): the key and whether the store trusts it, reading nothing of what
@@ -113,7 +130,7 @@ export interface TrustDeps {
 export type TrustedKey = Pick<TrustState, 'directory' | 'trustKey' | 'keyKind' | 'configPath' | 'trusted'>;
 
 export async function trustedKeyOf(directory: string, deps: TrustDeps): Promise<TrustedKey> {
-  const key = await trustKeyOf(directory, deps.git);
+  const key = await trustKeyOf(directory, deps.git, deps.repo);
   const configPath = configFilePath(deps.env);
   const projects = await readTrustStore(configPath, { warn: deps.warn });
   return { ...key, configPath, trusted: projects[key.trustKey]?.hasTrustDialogAccepted === true };

@@ -44,7 +44,7 @@ import { screenshotPreview } from '../side/screenshot'; // E11 F2b (Q4)
 import { InvalidSideInput } from '../side/invalid';
 import { sendToMain, type SendToMainInput, type SendToMainOutput } from '../side/send-to-main';
 // E3 end
-import { trustKeyOf, trustStateOf } from './trust';
+import { trustKeyOf, trustStateOf, type TrustDeps } from './trust';
 import { findPane, paneCall, readProcesses } from './pane-holder';
 import { pauseTakeOver, until } from './pause-take-over';
 import { holderAuthority } from './holders';
@@ -1104,10 +1104,11 @@ export class SessionService {
   }
 
   // `session.trust.check`, read with the environment the engine receives.
-  // P5 O7 M9: `guard`, a remote setup's (src/services/machine/setup.ts), asked before each file the read opens
-  async trustCheck(directory: string, guard?: (path: string) => Promise<boolean>): Promise<TrustState> {
+  // P5 O7 M9: `guarded`, a remote setup's (src/services/machine/setup.ts): its guard asked before each file the read
+  // opens, and its repository read from git's files rather than by git
+  async trustCheck(directory: string, guarded?: Pick<TrustDeps, 'guard' | 'repo'>): Promise<TrustState> {
     const s = await this.ready();
-    return trustStateOf(directory, { git: s.git, env: s.env, ...(guard === undefined ? {} : { guard }) });
+    return trustStateOf(directory, { git: s.git, env: s.env, ...guarded });
   }
 
   // ---- reconciliation ---------------------------------------------------------------------------------------------
