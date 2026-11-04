@@ -18,7 +18,7 @@ import type { HandlerContext } from '@shared/ipc/client'; // P5 O10 M7
 import { captureShellEnvironment, SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import type { C3_ENGINE_COMMANDS, O10_ENGINE_COMMANDS /* P5 O10 */ } from '@shared/ipc/schema/engine';
-import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, P2C_SESSION_COMMANDS /* P2-C */, P5O2_SESSION_COMMANDS /* P5 O2 M2 */, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
+import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, O7M8_SESSION_COMMANDS /* P5 O7 M8 */, P2C_SESSION_COMMANDS /* P2-C */, P5O2_SESSION_COMMANDS /* P5 O2 M2 */, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
 import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
 import { binaryInfoOf, createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
@@ -129,6 +129,8 @@ export const P2C_DEADLINE_SHAPES: Record<(typeof P2C_SESSION_COMMANDS)[number], 
 export const P5O2_DEADLINE_SHAPES: Record<(typeof P5O2_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.setKeep': 'immediate' };
 // P5 O10 M8: the broker's items, answered from the session's own list; every session's at once, from each session's
 export const O10_DEADLINE_SHAPES: Record<(typeof O10_SESSION_COMMANDS)[number] | (typeof O10_ENGINE_COMMANDS)[number], DeadlineShape> = { 'session.pendingItems': 'immediate', 'engine.pendingItems': 'immediate' };
+// P5 O7 M8: the operations' outcomes, answered from the OperationTable at once
+export const O7M8_DEADLINE_SHAPES: Record<(typeof O7M8_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.operations': 'immediate' };
 // P2-C end
 // E1: the `maws` tool server's commands (P1 ledger §5), each immediate: answered from the host's table or at the
 // answer's flushed write
@@ -636,6 +638,9 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     const { id, client } = operation(appSessionId);
     return operations.start(id, 'session.mcpToggle', client, 'mcp_toggle', { serverName, enabled });
   });
+  // P5 O7 M8: the operations' outcomes by opId, for a waiter whose completion may have been lost on the way (any session's
+  // id: the table answers `unknown` for an op it never kept of it)
+  on('session.operations', async ({ appSessionId, opIds }) => ({ outcomes: operations.outcomes(appSessionId as AppSessionId, opIds) }));
   // E3: the host's side-question log supplies `history` and keeps the exchange (`side.question.list`)
   handle('session.sideQuestion', async ({ appSessionId, question, retryOf }) => {
     const { session, client } = ready(appSessionId);

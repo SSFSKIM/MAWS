@@ -27,3 +27,16 @@ export const OperationEventSchema = z.strictObject({
   ]),
 });
 export type OperationEvent = z.infer<typeof OperationEventSchema>;
+
+// P5 O7 M8 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, §U, "The operation outcomes"): what the engine host
+// says of an operation by its opId (`session.operations`), for a waiter whose completion may have been lost on the way:
+// the completion while the host keeps it, `pending` while it runs, `unknown` otherwise (forgotten, never minted, or
+// another session's).
+export const OperationOutcomeSchema = z.union([
+  z.strictObject({ opId: z.string(), event: OperationEventSchema }),
+  z.strictObject({ opId: z.string(), pending: z.literal(true) }),
+  z.strictObject({ opId: z.string(), unknown: z.literal(true) }),
+]);
+export type OperationOutcome = z.infer<typeof OperationOutcomeSchema>;
+/** The opIds one `session.operations` asks of: the host keeps no more completions a session than this. */
+export const SESSION_OPERATIONS_MAX = 64;

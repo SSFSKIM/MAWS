@@ -219,6 +219,7 @@
   "session.mcpToggle",
   "session.memoryAppend",
   "session.observedFacts",
+  "session.operations",
   "session.pendingItems",
   "session.pendingRequest",
   "session.projects.remove",

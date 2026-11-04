@@ -12,7 +12,7 @@ import { HistorySoughtSchema } from '../../graph/history-window';
 import { AgentIdSchema, AppSessionIdSchema, EventIdSchema, MessageUuidSchema, RequestIdSchema, TaskIdSchema } from '../../graph/ids';
 import { RequestAnswerSchema } from '../../engine/answers';
 import { EffortSchema, LaunchSpecSchema } from '../../engine/launch-spec';
-import { OperationEventSchema, OperationReceiptSchema } from '../../engine/operations';
+import { OperationEventSchema, OperationOutcomeSchema, OperationReceiptSchema, SESSION_OPERATIONS_MAX } from '../../engine/operations';
 import { RelayHealthSchema } from '../../engine/relay-health';
 import { RewindFilesOutcomeSchema, RewindOutcomeSchema } from '../../engine/rewind-outcome';
 import { PendingSteerSchema, QueueEntrySchema, QueuePauseReasonSchema, QueueStateSchema, SendContentSchema } from '../../engine/session-state-store'; // C7: QueuePauseReasonSchema; W1: PendingSteerSchema
@@ -761,6 +761,15 @@ const o7Commands = {
   'session.spawn': { input: SessionSpawnInputSchema, output: SessionSpawnOutputSchema, owner: 'machine' },
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // P5 O7 M4 end
+// P5 O7 M8 start (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, §U, "The operation outcomes") -------------------
+// What the engine host says of each of these operations of the session: its completion while kept (at most 64 a session,
+// for 10 minutes), `pending` while it runs, else `unknown`; for a waiter whose completion may have been lost on the way (a
+// remote device's channel dropped between the receipt and the completion). Owner engine-host; immediate.
+const o7m8Commands = {
+  'session.operations': host(input({ opIds: z.array(z.string().max(256)).max(SESSION_OPERATIONS_MAX) }), z.strictObject({ outcomes: z.array(OperationOutcomeSchema) })),
+} as const;
+export const O7M8_SESSION_COMMANDS = Object.keys(o7m8Commands) as (keyof typeof o7m8Commands)[];
+// P5 O7 M8 end ----------------------------------------------------------------------------------------------------------
 
 export const commands = {
   ...c3Commands, // C3
@@ -779,6 +788,7 @@ export const commands = {
   ...o3dCommands, // P5 O3-D
   ...o5Commands, // P5 O5 M5
   ...o7Commands, // P5 O7 M4
+  ...o7m8Commands, // P5 O7 M8
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

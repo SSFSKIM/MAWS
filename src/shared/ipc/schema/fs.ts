@@ -136,7 +136,9 @@ export const commands = {
     owner: 'engine-host',
   },
   'fs.workflows': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ runs: z.array(WorkflowRunSchema) }), owner: 'engine-host' },
-  'fs.tasks': { input: z.strictObject({ listId: z.string() }), output: z.strictObject({ tasks: z.array(PersistedTaskSchema) }), owner: 'engine-host' },
+  // P5 O7 M8: `appSessionId`, the session whose list `listId` is, which a remote call always names (the endpoint's
+  // `task-list` rule admits only that session's own list); the host reads by `listId` alone
+  'fs.tasks': { input: z.strictObject({ listId: z.string(), appSessionId: AppSessionIdSchema.optional() }), output: z.strictObject({ tasks: z.array(PersistedTaskSchema) }), owner: 'engine-host' },
   // C6's name and fields (`bytes` is the file's total size); `offset` is additive. Only a path whose realpath lies under
   // `<configHome>/projects/`, `tasks/` or `jobs/`, or under the engine's task-output root `<CLAUDE_CODE_TMPDIR or /tmp>/claude-<uid>`, is read.
   'fs.readSpill': { input: FsReadSpillInputSchema, output: FsReadSpillOutputSchema, owner: 'engine-host' },

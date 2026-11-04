@@ -479,6 +479,13 @@ describe('engine host X2 surface', () => {
     transport.answer('generate_session_title', { title: 'Generated' });
     await until(() => host.emitted.some((e) => e.name === 'session.operation'), 'session.operation');
     expect(host.emitted.find((e) => e.name === 'session.operation')!.payload).toEqual({ appSessionId: id, opId, command: 'session.generateTitle', late: false, outcome: { ok: true, value: { title: 'Generated' } } });
+    // P5 O7 M8: the completion kept by its opId, another op in flight `pending`, and one never minted `unknown`
+    const running = await host.call('session.reloadPlugins', { appSessionId: id });
+    expect(await host.call('session.operations', { appSessionId: id, opIds: [opId, running.opId, 'never'] })).toEqual({
+      outcomes: [{ opId, event: host.emitted.find((e) => e.name === 'session.operation')!.payload }, { opId: running.opId, pending: true }, { opId: 'never', unknown: true }],
+    });
+    const { O7M8_DEADLINE_SHAPES } = await import('./ipc');
+    expect(O7M8_DEADLINE_SHAPES).toEqual({ 'session.operations': 'immediate' });
 
     const stopping = host.call('engine.shutdown', { graceMs: 5_000 });
     await until(() => transport.requestsOf('end_session').length === 1, 'end_session');
