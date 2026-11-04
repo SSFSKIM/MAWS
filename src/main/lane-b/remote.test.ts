@@ -1096,6 +1096,26 @@ describe('the sitting’s failures (M8)', () => {
     expect(l.link.calls.filter((c) => c.name === 'fs.unfollow').map((c) => c.input).slice(1)).toEqual([{ appSessionId: APP, agentId: 'agent-2' }]);
   });
 
+  it('keeps an agent whose read failed while out, and whose unfollow was refused, for the next session-wide unfollow', async () => {
+    const l = lab();
+    let answer!: (value: unknown) => void;
+    l.link.answers.set('fs.agentEvents', () => new Promise((resolve) => (answer = resolve)) as never);
+    l.link.answers.set('fs.unfollow', () => ({ ok: false, error: { code: 'unavailable' } }));
+    const reading = l.cmd('fs.agentEvents', { appSessionId: APP, agentId: 'agent-1' });
+    await vi.advanceTimersByTimeAsync(0);
+    const cleanup = l.cmd('fs.unfollow', { appSessionId: APP, agentId: null });
+    answer({ ok: false, error: { code: 'timeout' } }); // the machine may have taken its hold already
+    await reading;
+    expect(await cleanup).toMatchObject({ ok: false });
+    expect(l.link.calls.filter((c) => c.name === 'fs.unfollow')).toHaveLength(1);
+    l.link.answers.set('fs.unfollow', () => ({ ok: true, output: null }));
+    expect(await l.cmd('fs.unfollow', { appSessionId: APP, agentId: null })).toMatchObject({ ok: true });
+    expect(l.link.calls.filter((c) => c.name === 'fs.unfollow').map((c) => c.input)).toEqual([
+      { appSessionId: APP, agentId: 'agent-1' },
+      { appSessionId: APP, agentId: 'agent-1' },
+    ]);
+  });
+
   it('sends a send’s uploads only to an endpoint that lists `rl2.upload-blocks`, and the mention alone to one that doesn’t', async () => {
     const l = lab();
     await live(l);

@@ -604,7 +604,9 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
         // answers), so the reads made before this one are waited for and their agents let go of too, answered or not
         const out = [...of().reading];
         await Promise.allSettled(out.map(([reading]) => reading));
-        agents = [...new Set([...of().followed, ...out.map(([, agentId]) => agentId)])];
+        // each is possibly followed from here, kept until its own unfollow succeeds (m8-3 review round 3)
+        for (const [, agentId] of out) of().followed.add(agentId);
+        agents = [...of().followed];
       }
       for (const agentId of agents) {
         const result = await dispatchOverLink(link, name, { appSessionId: app, agentId });
