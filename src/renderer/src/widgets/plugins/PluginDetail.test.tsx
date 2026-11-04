@@ -131,7 +131,7 @@ describe('the detail: enabled for this project and loaded in this session', () =
   it('a ready session offers Reload plugins instead; a disabled plugin is offered neither; no list is Not observed yet', () => {
     const p = inst(ID);
     const reloadMods = vi.fn();
-    show(identityOf(p, viewOf(p)), { availability: 'usable', loaded: loadedWith(['other@x'], { kind: 'now' }), loadedIds: new Set(['other@x']), reloads: { reloadMods, reloadSkills: () => {}, line: null, failed: false, busy: false } });
+    show(identityOf(p, viewOf(p)), { availability: 'usable', loaded: loadedWith(['other@x'], { kind: 'now' }), loadedIds: new Set(['other@x']), reloads: { reloadMods, reloadSkills: () => {}, line: null, failed: false, busy: false, modsUnavailable: null, skillsUnavailable: null } });
     fireEvent.click(within(fact('loaded')).getByRole('button', { name: 'Reload plugins' }));
     expect(reloadMods).toHaveBeenCalledTimes(1);
     cleanup();
