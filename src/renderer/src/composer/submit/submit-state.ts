@@ -98,9 +98,10 @@ const decide = (primary: SubmitState, label: string, enabled: boolean, reason: s
 });
 
 // P5 O7 M8 review: where a send queued behind the running turn goes, in the queue's own words: a paused queue holds it for
-// Resume (an interrupt's pause, which a fresh send goes past, aside), and messages waiting go before it
+// Resume, whatever the pause (an interrupt's lets a fresh send past only at idle: engine-host queue.ts `submitNow` needs
+// `!busy`), and messages waiting go before it
 function queuedBehindTurn(queue: SubmitInput['queue']): string {
-  if (queue.paused) return queue.pauseReason === 'interrupt' ? SENDS_AFTER_THIS_TURN : JOINS_PAUSED_QUEUE; // Stop holds the older text alone
+  if (queue.paused) return JOINS_PAUSED_QUEUE;
   return queue.entries.length > 0 ? SENDS_AFTER_QUEUED : SENDS_AFTER_THIS_TURN;
 }
 
