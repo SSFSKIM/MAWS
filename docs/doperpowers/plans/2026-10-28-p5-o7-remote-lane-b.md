@@ -2757,6 +2757,39 @@ P5 findings of M5's re-plan, continued from F15:
   Rationale: the review's two findings, with their failure scenarios; and the architect's landing rulings.
   Date/Author: 2026-11-04, O7's executor (the controller).
 
+- Decision: M9's execution plan (2026-11-04, the architect's scheduling). M9 is cut stacked on M8's gated head as `p5-o7-m9` (`7994df987`). origin/master is merged in once M8 lands, and M9's PR goes against master. M9's bump is `WIRE_MINOR` 27, on top of M8's 26, and the landing re-bumps if master moves in between. It runs as five tasks by layer, so no two executors edit one file at once:
+  - m9-1, the shared shapes and settings:
+    - `RouteSchema`;
+    - `route?` and `observed?` on the launch spec, the setup intent, `StartOptions`, `engine.models`' input, the record and the status;
+    - `machine-route.json` and the default's resolution, with the on-disk tests and an older build's reader;
+    - the wire bump and the manifest.
+  - m9-2, the engine host and the session services:
+    - the `machine` launch (nothing injected, nothing blanked);
+    - `verifyGateway`'s naming over the three fixtures;
+    - the advisory relay check on the resolved base URL, using the precedence `models-cache.ts` implements and `resolve-style.ts`'s managed path (which landed in #466);
+    - `engine.route-machine`;
+    - the readers taking `route` first;
+    - `route-unsupported` for an older host when the machine names another host.
+  - m9-3, the endpoint and main's adapter:
+    - the `owners` row flag and its check before the grade;
+    - `machine.folders.list` and `session.trust.check` as `list` calls in `MACHINE_CALLS`;
+    - `session.projects.addFolder` as a `machine-admin` act in `MACHINE_ACTS`, with `setupRefusal`;
+    - `trust: 'accepted'` in `spawnRefusal` for a current owner only;
+    - the tests through the real gate.
+  - m9-4, the renderer:
+    - the features keyed on `observed.kind`;
+    - the default route's setting;
+    - the spawn sheet's folder picker and `TrustCard` for a remote machine;
+    - Session info naming what the machine reports.
+  - m9-5, the e2e and the compatibility proofs:
+    - `e2e:remote`'s spawn on a machine with an unregistered checkout;
+    - `cross-build`'s zero breaking changes;
+    - an older engine host given the legacy route.
+
+  m9-1 goes first. m9-2 and m9-3 run side by side (disjoint layers, fast-forward only, own paths), then m9-4, then m9-5. Each task gets a task review. Then reviewer-high reviews the whole.
+  Rationale: the shapes are every other task's interface, and the layers split cleanly after them.
+  Date/Author: 2026-11-04, O7's executor (the controller), on the architect's scheduling.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28).** Acceptance 1 is met in tests, and nothing changes for the owner until O8's sign-in provides a production `OrgSession`.
