@@ -12,6 +12,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { CommandName } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
 import { OFFERS } from '../../src/endpoint/offers';
+import { ownTaskList } from '../../src/endpoint/targets';
 import { act, makeOrg, openRemote, startEndpoint, stopAll, waitFor, type Fixture, type HostSession, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
@@ -175,6 +176,33 @@ describe('`fs.tasks` on the `task-list` rule', () => {
     expect(answered.ok === true || !AUTHORIZATION.includes(codeOf(answered)!)).toBe(true);
     expect(f.host.calls.some((c) => c.name === 'fs.tasks')).toBe(true);
     expect(codeOf(await call(a, 'fs.tasks', tasks('eng.app:1')))).toBe('no-target');
+  });
+
+  it('refuses the replacement engine session’s list when a `/clear` swaps it after the placement (`unavailable`), and reads none', async () => {
+    const { f, s, a } = await setup();
+    s.taskListId = 'eng-app-1';
+    // The placement's status read answers the recorded engine session; the session is cleared before the list's own read.
+    const dispatch = f.host.dispatch.bind(f.host);
+    let statuses = 0;
+    f.host.dispatch = async (owner, name, input, client) => {
+      const answer = await dispatch(owner, name, input, client);
+      if (name === 'session.status' && ++statuses === 1) {
+        s.engineSessionId = 'eng-replacement';
+        s.taskListId = 'eng-replacement';
+      }
+      return answer;
+    };
+    expect(codeOf(await call(a, 'fs.tasks', tasks('eng-replacement')))).toBe('unavailable');
+    expect(statuses).toBe(2);
+    expect(f.host.calls.some((c) => c.name === 'fs.tasks')).toBe(false);
+  });
+
+  it('reads a list only from a status of the engine session placed (`ownTaskList`)', async () => {
+    const target = { lane: 'B' as const, appSessionId: APP, session: 'old-engine' };
+    const placing = (value: unknown) => ({ dispatch: async () => ({ ok: true as const, value }), log() {} });
+    expect(await ownTaskList(tasks('new-private-list'), target, placing({ engineSessionId: 'new-engine', taskListId: 'new-private-list' }))).toBe('unavailable');
+    expect(await ownTaskList(tasks('old-list'), target, placing({ engineSessionId: 'old-engine', taskListId: 'old-list' }))).toBe('own');
+    expect(await ownTaskList(tasks('another'), target, placing({ engineSessionId: 'old-engine', taskListId: 'old-list' }))).toBe('no-target');
   });
 
   it('refuses a caller who holds nothing on the session `grade`, whatever list it names, before any list is read', async () => {

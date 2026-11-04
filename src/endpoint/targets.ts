@@ -282,15 +282,18 @@ export async function placeRecorded(appSessionId: string, dispatch: EndpointServ
  * P5 O7 M8: whether a `task-list` read's `listId` is its session's own list, as the renderer's task panel derives it
  * (task-list.ts' `listIdFor`): the engine host's status's `taskListId` (null before the engine said its id: no list yet),
  * or, for a session the host holds no row for, the engine session its record places it on; sanitised as the engine names
- * the list's directory. Read only for a caller who views the session.
+ * the list's directory. Read only for a caller who views the session. The status must be of the engine session the
+ * request was placed and ranked on: one the session moved to since (a `/clear` between the two reads) is `unavailable`,
+ * as the placement says of a live row it lags, so a rank on one engine session never reads another's list.
  */
-export async function ownTaskList(input: unknown, target: Extract<SessionTarget, { lane: 'B' }>, placing: Placing): Promise<boolean> {
+export async function ownTaskList(input: unknown, target: Extract<SessionTarget, { lane: 'B' }>, placing: Placing): Promise<'own' | 'no-target' | 'unavailable'> {
   const listId = field(input, 'listId');
-  if (!isId(listId)) return false;
+  if (!isId(listId)) return 'no-target';
   const status = await placing.dispatch('engine-host', 'session.status', { appSessionId: target.appSessionId }).catch(() => null);
-  if (status === null || (!status.ok && (status.error.code === 'host_unavailable' || status.error.code === 'timeout'))) return false;
+  if (status === null || (!status.ok && (status.error.code === 'host_unavailable' || status.error.code === 'timeout'))) return 'unavailable';
+  if (status.ok && field(status.value, 'engineSessionId') !== target.session) return 'unavailable';
   const own = status.ok ? field(status.value, 'taskListId') : target.session;
-  return typeof own === 'string' && sanitiseListId(own) === listId;
+  return typeof own === 'string' && sanitiseListId(own) === listId ? 'own' : 'no-target';
 }
 
 /** How many sessions' checkout bounds are kept: one entry per distinct set of roots. */

@@ -15,7 +15,8 @@
 //      floor, so a refusal says nothing of whether a session exists: a lane B session whose live engine session isn't
 //      its recorded one is `unavailable` only after the caller's rank on the recorded one (P5 O7 M4, fix wave 1); then,
 //      for the `checkout` rule (P5 O7 M4), the input's path within the session's checkout, and for the `task-list` rule
-//      (P5 O7 M8), the input's list the session's own (`no-target`);
+//      (P5 O7 M8), the input's list the session's own (`no-target`; `unavailable` when the session moved to another
+//      engine session since it was placed);
 //   5. a by-effect command's rule gives the grade its input takes (`no-rule`), held to the floor, and the standing is
 //      checked again at it; a call is a read, so anything graded above `view` must come as an act (`act-required`);
 //   6. the machine's policy: a head too old stops every action but a delivered state (`state-too-old`), read-only
@@ -425,7 +426,10 @@ export class Authorizer {
     // A checkout read's path, read only for a caller who views the session: in its checkout, or no target of it.
     if (row.target === 'checkout' && !(target?.lane === 'B' && (await withinCheckout(input, target.appSessionId, placing, this.#bounds)))) return no('no-target');
     // P5 O7 M8: a task list's read, likewise: the session's own list, or no target of it.
-    if (row.target === 'task-list' && !(target?.lane === 'B' && (await ownTaskList(input, target, placing)))) return no('no-target');
+    if (row.target === 'task-list') {
+      const list = target?.lane === 'B' ? await ownTaskList(input, target, placing) : 'no-target';
+      if (list !== 'own') return no(list);
+    }
 
     // 5. The grade its input's effect takes, and the standing at it.
     const grade = await this.#effectiveGrade(name, spec, input, reads);
