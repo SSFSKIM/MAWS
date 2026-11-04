@@ -48,7 +48,8 @@ export interface HeldDiffs<T> {
   hold(target: T): () => void; // ref-counted; the first reads, the last forgets
   refresh(target: T): void; // re-read now, if held
   reread(match: (target: T) => boolean): void; // every held target that matches, trailing
-  loadFile(target: T, path: string): void; // one file of a held scope past its cap
+  // one file of a held scope past its cap; `input`, the file's own read where it is not the scope's (an untracked file)
+  loadFile(target: T, path: string, input?: GitDiffInput): void;
   clear(): void; // forgets every hold and file load; the store's reset empties its maps
 }
 
@@ -156,13 +157,13 @@ export function createHeldDiffs<T extends { machine: MachineRef; session?: AppSe
       for (const [key, h] of held) if (match(h.target)) schedule(h, key);
     },
 
-    loadFile(target, path) {
+    loadFile(target, path, input) {
       const key = keys.file(target, path);
       if (!held.has(keys.diff(target)) || fileLoads.has(key)) return;
       const generation = Symbol();
       fileLoads.set(key, generation);
       set((s) => ({ files: mapWith(s.files, key, { status: 'loading' }) }));
-      void settled(client.invoke('git.diff', spec.input(target, path), pathTarget(target.machine, target.session))).then((result) => {
+      void settled(client.invoke('git.diff', input ?? spec.input(target, path), pathTarget(target.machine, target.session))).then((result) => {
         if (fileLoads.get(key) !== generation) return; // the scope re-read or was released meanwhile
         const next: FileDiff = result.ok ? { status: 'ok', file: splitPatch(result.value.patch)[0] ?? null } : { status: 'error', message: result.error.message };
         set((s) => ({ files: mapWith(s.files, key, next) }));

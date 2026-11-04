@@ -43,7 +43,7 @@ export interface ReviewStore {
   hold(target: DiffTarget): () => void; // ref-counted; the first reads, the last forgets
   refresh(target: DiffTarget): void; // re-read now (the tool shown again, a focus request)
   statusChanged(checkout: string): void; // a new status for the git store's checkout: every held scope of it re-reads, trailing
-  loadFile(target: DiffTarget, path: string): void;
+  loadFile(target: DiffTarget, path: string, untracked?: boolean): void; // P5 O7 M8: `untracked`, a file the status lists untracked
   lookupBase(machine: MachineRef, repoRoot: string, branch: string, session?: AppSessionId): void; // P5 O7 M4: `session`, the read's
   reset(): void; // tests
 }
@@ -81,7 +81,11 @@ export function createReviewStore(
         heldDiffs.reread((t) => checkoutKey(t.machine, t.directory) === checkout);
       },
 
-      loadFile: heldDiffs.loadFile,
+      // P5 O7 M8 ("Untracked files"): an untracked file is no scope's diff; it is read as Source control reads it, the
+      // `untracked` scope (the file against /dev/null, as `git add` would stage it), so it shows as added
+      loadFile(target, path, untracked = false) {
+        heldDiffs.loadFile(target, path, untracked ? { directory: target.directory, scope: 'untracked', path } : undefined);
+      },
 
       lookupBase(machine, repoRoot, branch, session) {
         const key = baseKey(machine, repoRoot, branch);

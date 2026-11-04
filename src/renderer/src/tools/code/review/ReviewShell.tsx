@@ -227,13 +227,17 @@ function FileSection({ file, files, ui, appSessionId, data, viewedKey: key }: { 
   // A scope past its cap fetches the selected file's hunks on selection, and a binary's header (what its mark signs).
   const target = data.target;
   const binary = file.kind === 'binary';
-  const fetch = target !== null && (binary ? file.header === null : file.hunks === null && file.kind !== 'untracked');
+  // P5 O7 M8 ("Untracked files"): an untracked file is fetched too, as Source control reads it (the `untracked` scope), so
+  // it shows as added; an untracked directory (`dir/`, its files unlisted) has no diff and keeps the note
+  const untracked = file.kind === 'untracked';
+  const untrackedDirectory = untracked && file.path.endsWith('/');
+  const fetch = target !== null && (binary ? file.header === null : file.hunks === null && !untrackedDirectory);
   const fetched = useReview((s) => (fetch && target ? fileDiffOf(s, target, file.path) : undefined));
   // Keyed on the scope's diff too: a re-read of the scope drops the per-file loads, and the selected file asks again.
   const scopeDiff = useReview((s) => (fetch && target ? diffOf(s, target) : undefined));
   useEffect(() => {
-    if (fetch && target) useReview.getState().loadFile(target, file.path);
-  }, [fetch, target, file.path, scopeDiff]);
+    if (fetch && target) useReview.getState().loadFile(target, file.path, untracked);
+  }, [fetch, target, file.path, untracked, scopeDiff]);
   const hunks = useMemo(() => (binary ? null : (file.hunks ?? (fetched?.status === 'ok' ? (fetched.file?.hunks ?? []) : null))), [binary, file.hunks, fetched]);
   const header = file.header ?? (fetched?.status === 'ok' ? (fetched.file?.header ?? null) : null);
   // Stable while the file's hunks are, so the diff body does not re-parse on every render.
@@ -256,7 +260,7 @@ function FileSection({ file, files, ui, appSessionId, data, viewedKey: key }: { 
         <span data-review-file-header className="min-w-0 flex-1 truncate text-ui-sm text-fg" title={file.path}>
           {REVIEW_COPY.fileHeader(file.path, kindLabel(file))}
         </span>
-        {(binary ? header !== null : file.kind !== 'untracked' && hunks !== null) ? (
+        {(binary ? header !== null : !untrackedDirectory && hunks !== null) ? (
           <button type="button" className={toggle} aria-pressed={viewed} onClick={() => ui.setState((s) => toggleViewed(s, key, file.path, signature))}>
             {viewed ? REVIEW_COPY.viewed : REVIEW_COPY.markViewed}
           </button>
@@ -300,7 +304,7 @@ function FileSection({ file, files, ui, appSessionId, data, viewedKey: key }: { 
       ) : (
         <div className="shrink-0 border-b border-border" />
       )}
-      {file.kind === 'untracked' ? (
+      {untrackedDirectory ? (
         <p data-review-note className="px-3 py-2 text-ui-sm text-fg-muted">
           {REVIEW_COPY.untrackedNote}
         </p>
