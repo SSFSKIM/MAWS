@@ -2548,6 +2548,14 @@ P5 findings of M5's re-plan, continued from F15:
   - Not established: a multi-page PDF or another model (one PDF, `claude-haiku-5-5`).
   Rationale: The mention already reaches the engine and the engine keeps the bytes out of it. Only a block the device or the endpoint builds gives the model the document, as a local drop does.
   Date/Author: 2026-11-04, m8-1's executor.
+- Decision: M8's task split after m8-1 (2026-11-04).
+  - m8-2 is the machine side, covering the endpoint, the engine host and the shared rows. It also takes the engine host's `activity` cleared at a main-lane `result` and flips that `it.fails`.
+  - m8-3 is main, the device side.
+  - m8-4 is the renderer.
+  - m8-5 holds the contract test and the e2e cases.
+  M8's "fix at the source" (an engine id treated as lane B) and the renderer's engine-id join are dropped: m8-1 showed the listing id was right. m8-4's sidebar fix is a listed row that stays reachable, waiting on the architect's call on its shape. The recommendation is parity: Resume… lists listed rows, and the priority sort ranks a listed row by its own state.
+  Rationale: m8-1's findings; the brief's scope gave the activity flip no owner.
+  Date/Author: 2026-11-04, O7's executor (the controller).
 
 ## Outcomes & Retrospective
 
