@@ -123,11 +123,11 @@ export function chooserRows({ records, digests, projects, context, toggles, bran
 
 export type GroupKind = 'today' | 'yesterday' | 'thisWeek' | 'lastWeek' | 'week';
 
-export interface ChooserGroup {
+export interface ChooserGroup<R extends { at: number } = ChooserRow> {
   key: string;
   kind: GroupKind;
   label: string;
-  rows: ChooserRow[];
+  rows: R[];
 }
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -164,8 +164,8 @@ export function groupOf(at: number, now: number): { key: string; kind: GroupKind
 }
 
 // Rows (already newest first) in their groups, newest group first.
-export function chooserGroups(rows: readonly ChooserRow[], now: number): ChooserGroup[] {
-  const groups: ChooserGroup[] = [];
+export function chooserGroups<R extends { at: number }>(rows: readonly R[], now: number): ChooserGroup<R>[] {
+  const groups: ChooserGroup<R>[] = [];
   for (const row of rows) {
     const group = groupOf(row.at, now);
     const last = groups.at(-1);

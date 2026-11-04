@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { addressOf } from '@shared/machine/address';
+import type { OrgKey } from '@shared/machine/org-key';
 import type { SessionRecord } from '@shared/graph/session';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
@@ -167,7 +168,7 @@ describe('the resume chooser', () => {
     const user = userEvent.setup();
     fill(base);
     useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: minute(0), generation: 1, carrier: 'relay' }]);
-    const spawned: ListedSession = { ...remoteRow(OTHER_MACHINE, 'spawned', { title: 'Testing session', orgKey: orgKeyOf(P), issued: minute(7) }), appId: addressOf(OTHER_MACHINE, 'spawned' as AppSessionId) };
+    const spawned: ListedSession = { ...remoteRow(OTHER_MACHINE, 'spawned', { title: 'Testing session', orgKey: orgKeyOf(P) as OrgKey, issued: minute(7) }), appId: addressOf(OTHER_MACHINE, 'spawned' as AppSessionId) };
     useSessions.setState({ listed: new Map([[spawned.appId, spawned]]) });
     const open = vi.fn();
     const off = registerRemoteOpener('B', open);
