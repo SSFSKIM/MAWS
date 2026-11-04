@@ -21,6 +21,12 @@ const EXPECTED: Record<string, { call: string; expect: unknown }> = {
   'an attested owner whose proof is from a revoked device': { call: 'verifyAttestation', expect: no('revoked') },
   "an attested owner whose proof's step-up signature fails": { call: 'verifyAttestation', expect: no('bad-signature') },
   'an attested owner proven by another member\'s spawn': { call: 'verifyAttestation', expect: no('not-owner') },
+  // The app's remote spawn (`session.spawn`), a spawn proof as `sminos.spawn` is.
+  'an attested owner proven by their session.spawn': { call: 'verifyAttestation', expect: ok({ owners: ['B'] }) },
+  "an attested owner proven by another member's session.spawn": { call: 'verifyAttestation', expect: no('not-owner') },
+  'an attested owner whose session.spawn names another machine': { call: 'verifyAttestation', expect: no('other-machine') },
+  'an attested owner whose session.spawn is from a revoked device': { call: 'verifyAttestation', expect: no('revoked') },
+  'an attested owner whose session.spawn names a device the org never listed': { call: 'verifyAttestation', expect: no('unknown-signer') },
   'owners added in a chain: Alice adds Bob, Bob adds Carol': { call: 'verifyAttestation', expect: ok({ owners: ['A', 'B', 'C'] }) },
   'an owner added by a member who is no owner': { call: 'verifyAttestation', expect: no('not-owner') },
   'an attested owner of a certified VM, by its delegation': { call: 'verifyAttestation', expect: ok({ owners: ['B'] }) },

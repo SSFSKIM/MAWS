@@ -412,13 +412,18 @@ for attempt in 1 2 3; do
   if [[ $attempt -eq 1 ]]; then sleep 3; else sleep 8; fi
 done
 
-# The run appears a few seconds after the push; a minute without it means the workflow did not trigger.
-for _ in $(seq 1 30); do
+# The run usually appears a few seconds after the push, but GitHub has created it more than a minute late (2026-11-04,
+# twice in a row on one head), and the late run still ran after ci-gate had given up. So: every 2 s for a minute, then
+# every 10 s up to 5 min. Only a run that never comes costs the longer wait, and then the workflow did not trigger.
+for poll in $(seq 1 54); do
   run_id=$(gh -R "$REPO" run list --workflow gate.yml --event push --branch "$ref" --json databaseId,headSha --jq ".[] | select(.headSha == \"$pushed\") | .databaseId" | head -1)
   [[ -n $run_id ]] && break
-  sleep 2
+  if [[ $poll -lt 30 ]]; then sleep 2; else
+    [[ $poll -eq 30 ]] && echo "ci-gate: no run of $pushed yet after a minute; waiting up to 5 min" >&2
+    sleep 10
+  fi
 done
-[[ -n $run_id ]] || { echo "ci-gate: no run of $pushed on $ref" >&2; finish 1; }
+[[ -n $run_id ]] || { echo "ci-gate: no run of $pushed on $ref after 5 min (a run GitHub creates later still runs: gh -R $REPO run list --commit $pushed)" >&2; finish 1; }
 # tee keeps the same open file while the invocation directory gains its run id.
 run_dir=$out/ci-$short-$run_id-$invocation_token
 mv "$invocation" "$run_dir" || finish 1
