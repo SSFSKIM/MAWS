@@ -55,7 +55,20 @@
 // and its choices) and what an answer needs, its context (`launchId`, `engineSessionId`, null until the engine said it)
 // and its request digest (`requestDigestOf`, the one lane B rule), as `{pendingItems: [{item, request, context,
 // requestDigest}]}`. It never carries an event, the queue, the catalog or the status; every opening of it is a snapshot.
+//
+// P5 O7 M8 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M8 *Operations and panel events*; Interfaces §U):
+// a stream with `panels` (lane B's plane) also carries what the session's operations and panels publish, which is not
+// replace-whole state and never in the journal, each as a part of its own, at the stream's position: an operation's
+// completion (`session.operation`) as `{operation}` keyed `operation:<opId>`, so no completion replaces another's (a late
+// one replaces its own unsent one); the subagents' list as `{subagents: {agents}}`; a workflow run's change as
+// `{workflow: {runId}}`, keyed by its run; a change of the session's own task list (`fs.tasksChanged` names its list,
+// not its session: the list its status names, `taskListId`, sanitised) as `{tasks: {listId}}`; and the side question's
+// log (`side.question.list`), read again at each of its completions, as `{side: {exchanges}}`. One that comes during an
+// opening goes once the opening's state went. They are change notices: the opening reads none of them (a panel lists
+// its own on mount, as a local one does), and a completion a reader missed is the engine host's `session.operations`
+// to answer. The mawsd front's streams carry none (its app hears these events itself).
 import type { SessionEvent } from '../graph/events';
+import { sanitiseListId } from '../engine/task-list';
 import { requestDigestOf } from './request-digest';
 
 export const BACKLOG_BYTES = 2 * 1024 * 1024;
@@ -74,6 +87,10 @@ export type StreamPart = 'status' | 'queue' | 'pendingItems' | 'catalog';
 export const STREAM_PARTS: readonly StreamPart[] = ['status', 'queue', 'pendingItems', 'catalog'];
 const READS: Record<StreamPart, string> = { status: 'session.status', queue: 'session.queue.list', pendingItems: 'session.pendingItems', catalog: 'session.catalog' };
 
+/** P5 O7 M8: the notices a `panels` stream carries beside its state, and the key each one's snapshot replaces an unsent one of. */
+export type PanelPart = 'operation' | 'subagents' | 'workflow' | 'tasks' | 'side';
+export type PanelKey = `operation:${string}` | 'subagents' | `workflow:${string}` | 'tasks' | 'side';
+
 export type StreamMode = 'replay' | 'snapshot' | 'missing';
 /** Where a stream stands: `(launchId, seq, idx)`, `idx` absent before the row's first event. */
 export type StreamPosition = { epoch: string; seq: number; idx?: number };
@@ -87,8 +104,11 @@ export interface StreamSink {
   readonly backlog: number;
   /** An opening answered: the mode, and the position the stream goes on after. */
   subbed(mode: StreamMode, at: StreamPosition): void;
-  /** Replace-whole state at `at`: the opening's parts together (`state`), a live part alone, or a cards set (`cards`). */
-  snap(at: StreamPosition, values: Partial<Record<StreamPart, unknown>>, kind: StreamPart | 'state' | 'cards'): void;
+  /**
+   * Replace-whole state at `at`: the opening's parts together (`state`), a live part alone, or a cards set (`cards`);
+   * P5 O7 M8: or, on a `panels` stream, a notice under its key.
+   */
+  snap(at: StreamPosition, values: Partial<Record<StreamPart | PanelPart, unknown>>, kind: StreamPart | 'state' | 'cards' | PanelKey): void;
   /** One event, at its own position. */
   ev(at: StreamPosition, event: SessionEvent): void;
   /** Live events stopped being available; `resumed` once they are again and the stream caught up. */
@@ -107,6 +127,8 @@ export interface SessionStreamsOptions {
   backlogBytes?: number;
   /** Whether live events are available when the streams start (`available` says each change). */
   available: boolean;
+  /** P5 O7 M8: the streams carry the session's operations and panels' changes too (lane B's plane). */
+  panels?: boolean;
 }
 
 export interface OpenStream {
@@ -154,6 +176,12 @@ class Stream implements StreamHandle {
   overflow = false;
   readonly dirty = new Set<StreamPart>();
   readonly latest = new Map<StreamPart, unknown>();
+  /** P5 O7 M8: notices that came during an opening, the latest of each key, sent once its state went. */
+  readonly notices = new Map<PanelKey, Partial<Record<PanelPart, unknown>>>();
+  /** P5 O7 M8: the session's task list as its status names it, sanitised (null: none yet). */
+  taskList: string | null = null;
+  /** P5 O7 M8: side log reads started, so an older answer never replaces a newer one. */
+  sideReads = 0;
   /** `subbed` went: a later opening is quiet unless it starts the stream over. */
   answered = false;
   /** The reader was told `missing` for this stream: what the launch's start lacks is announced, so a read of it stands. */
@@ -242,6 +270,12 @@ export class SessionStreams {
   liveEvent(name: string, payload: unknown): void {
     if (typeof payload !== 'object' || payload === null) return;
     const record = payload as Record<string, unknown>;
+    // P5 O7 M8: a task list's change names its list: to each stream whose session reads that list.
+    if (name === 'fs.tasksChanged') {
+      if (this.#options.panels !== true || typeof record.listId !== 'string') return;
+      for (const stream of this.#streams) if (stream.taskList === record.listId) this.#notice(stream, 'tasks', { tasks: { listId: record.listId } });
+      return;
+    }
     if (typeof record.appSessionId !== 'string') return;
     for (const stream of this.#streams) if (stream.app === record.appSessionId) this.#live(stream, name, record);
   }
@@ -279,6 +313,7 @@ export class SessionStreams {
     // whatever `from` says.
     const from: StreamFrom = how === 'relaunch' || relaunched || stream.unanswered ? 'start' : stream.from;
     stream.engine = engineOf(status);
+    stream.taskList = taskListOf(status);
     if (stream.view === 'cards') {
       stream.epoch = launch;
       return this.#openCards(stream, gen, catchUp);
@@ -406,13 +441,14 @@ export class SessionStreams {
 
   /** Parts read or published during an opening, applied: false when the status says the session launched again. */
   #apply(stream: Stream, values: Partial<Record<StreamPart, unknown>>): boolean {
-    const status = values.status as { launchId?: unknown; engineSessionId?: unknown } | undefined;
+    const status = values.status as { launchId?: unknown; engineSessionId?: unknown; taskListId?: unknown } | undefined;
     if (status !== undefined) {
       if (status.launchId !== stream.epoch) {
         void this.#open(stream, 'relaunch');
         return false;
       }
       stream.engine = engineOf(status);
+      stream.taskList = taskListOf(status);
     }
     this.#state(stream, values);
     return true;
@@ -423,8 +459,11 @@ export class SessionStreams {
     const held = stream.held;
     const overflow = stream.overflow;
     this.#unhold(stream);
+    const hadState = stream.holdState;
     stream.holdEvents = false;
     stream.holdState = false;
+    // P5 O7 M8: the notices that came while the state was read go after it.
+    if (hadState) this.#flushNotices(stream);
     // What it dropped past the backlog is the journal's to give: it catches up from the last event sent.
     if (overflow) stream.catching = true;
     for (const event of held) {
@@ -464,6 +503,7 @@ export class SessionStreams {
     stream.holdState = false;
     stream.dirty.clear();
     stream.latest.clear();
+    stream.notices.clear();
     stream.reading = false;
     stream.catching = true;
     if (!stream.answered) stream.unanswered = true;
@@ -484,7 +524,11 @@ export class SessionStreams {
       return;
     }
     const part = partOf(name, payload);
-    if (part === null) return;
+    if (part === null) {
+      const panel = this.#options.panels === true ? panelOf(name, payload) : null;
+      if (panel !== null) this.#notice(stream, panel.key, panel.values);
+      return;
+    }
     // A cards view carries none of the queue or the catalog.
     if (stream.view === 'cards' && (part.part === 'queue' || part.part === 'catalog')) return;
     if (stream.holdState) {
@@ -496,8 +540,9 @@ export class SessionStreams {
       return;
     }
     if (part.part === 'status') {
-      const status = part.value as { launchId?: unknown; engineSessionId?: unknown };
+      const status = part.value as { launchId?: unknown; engineSessionId?: unknown; taskListId?: unknown };
       if (status.launchId !== stream.epoch) return void this.#open(stream, 'relaunch');
+      stream.taskList = taskListOf(status);
       // A status of the launch it stands in: the catch-up a failed read left undone restarts from the cursor, as at the
       // link's next streaming (the opening reads this status again). Each restart waits on a status of its own.
       if (stream.failed && stream.restarts < CATCHUP_RESTARTS) {
@@ -523,6 +568,41 @@ export class SessionStreams {
     }
     // Each part its own snapshot, replacing one of its part not yet sent.
     for (const part of STREAM_PARTS) if (values[part] !== undefined) stream.sink.snap(this.#at(stream), { [part]: values[part] }, part);
+  }
+
+  /**
+   * P5 O7 M8: a notice of the session's operations or panels, at the stream's position, or held while an opening reads
+   * its state (the latest of each key). A side question's completion has the side log read again after it.
+   */
+  #notice(stream: Stream, key: PanelKey, values: Partial<Record<PanelPart, unknown>>): void {
+    if (stream.view === 'cards' || stream.closed || stream.sink.ended) return;
+    if (stream.holdState) {
+      stream.notices.delete(key);
+      stream.notices.set(key, values);
+      return;
+    }
+    stream.sink.snap(this.#at(stream), values, key);
+    if ((values.operation as { command?: unknown } | undefined)?.command === 'session.sideQuestion') void this.#readSide(stream);
+  }
+
+  #flushNotices(stream: Stream): void {
+    const notices = [...stream.notices];
+    stream.notices.clear();
+    for (const [key, values] of notices) this.#notice(stream, key, values);
+  }
+
+  /** P5 O7 M8: the side question's log as the engine host holds it now; a read that fails leaves the device's own. */
+  async #readSide(stream: Stream): Promise<void> {
+    const n = ++stream.sideReads;
+    let response;
+    try {
+      response = await this.#options.read('side.question.list', { appSessionId: stream.app });
+    } catch {
+      return;
+    }
+    if (n !== stream.sideReads || !response.ok) return;
+    const exchanges = (response.value as { exchanges?: unknown } | null)?.exchanges;
+    if (Array.isArray(exchanges)) this.#notice(stream, 'side', { side: { exchanges } });
   }
 
   async #rehydrate(stream: Stream, items?: unknown): Promise<void> {
@@ -695,6 +775,22 @@ export class SessionStreams {
 }
 
 const engineOf = (status: { engineSessionId?: unknown }): string | null => (typeof status.engineSessionId === 'string' ? status.engineSessionId : null);
+/** P5 O7 M8: the task list a status names, as `fs.tasksChanged` names it (sanitised); null before the engine said one. */
+const taskListOf = (status: { taskListId?: unknown }): string | null => (typeof status.taskListId === 'string' ? sanitiseListId(status.taskListId) : null);
+
+/** P5 O7 M8: a live event of the session's operations or panels as the notice it is (`fs.tasksChanged`: liveEvent's). */
+function panelOf(name: string, payload: Record<string, unknown>): { key: PanelKey; values: Partial<Record<PanelPart, unknown>> } | null {
+  switch (name) {
+    case 'session.operation':
+      return typeof payload.opId === 'string' ? { key: `operation:${payload.opId}`, values: { operation: payload } } : null;
+    case 'fs.subagentsChanged':
+      return Array.isArray(payload.agents) ? { key: 'subagents', values: { subagents: { agents: payload.agents } } } : null;
+    case 'fs.workflowChanged':
+      return typeof payload.runId === 'string' ? { key: `workflow:${payload.runId}`, values: { workflow: { runId: payload.runId } } } : null;
+    default:
+      return null;
+  }
+}
 
 /** An event's launch, row and index within the row, read from its id; null for an event of no launch. P5 O3-D M5b:
  * main's mirror keeps its cursors by it too (src/main/sessions/spine-mirror.ts). */

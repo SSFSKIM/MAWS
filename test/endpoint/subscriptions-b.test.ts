@@ -6,8 +6,12 @@
 // attached (until O3). Every event's full cursor is checked against the producer's own numbering: the id's launch, row
 // and index within the row.
 import type { SessionEvent } from '@shared/graph/events';
+import type { AppSessionId } from '@shared/graph/ids';
 import { requestDigestOf } from '@shared/host/request-digest';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { MemoryJournal, scriptedTransport, type ScriptedTransport } from '../../src/engine-host/conformance/scripted-transport';
+import { OPERATION_KEPT_MS, OperationTable } from '../../src/engine-host/operations';
+import { ControlClient } from '../../src/engine-host/rpc';
 import { act, cursorOf, done, drop, evs, HUB, item, makeOrg, of, openRemote, snapshot, snapshots, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type Org, type Remote } from './sub-harness';
 
 let org: Org;
@@ -686,5 +690,169 @@ describe('a lane B subscription standing at the launch’s start when the journa
     s.journal = false;
     f.host.attach(true);
     await waitFor(a, (m) => m.t === 'subbed' && m.sub === 's1' && m.mode === 'missing', 'a `missing` start-over');
+  });
+});
+
+// ---- P5 O7 M8: operations and the panels' changes (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M8
+// *Operations and panel events*; Interfaces §U) ---------------------------------------------------------------------
+//
+// An operation answers a receipt and completes by `session.operation`; the panels change by their own events. Each
+// crosses as a part of its own beside the replace-whole state: `{operation}` keyed by its opId, so no completion replaces
+// another; `{subagents: {agents}}`, `{workflow: {runId}}`, `{tasks: {listId}}` (the session's own list), and the side
+// question's log, `{side: {exchanges}}`, read again at each of its completions. A completion the device missed (its
+// channel dropped between the receipt and the completion) is not in the stream when it comes back: it asks
+// `session.operations`, which the engine host's own table answers.
+
+const opEvent = (opId: string, fields: Record<string, unknown> = {}) => ({ appSessionId: 'app-1', opId, command: 'session.reloadPlugins', late: false, outcome: { ok: true, value: null }, ...fields });
+const RELOADED = { commands: [], agents: [], plugins: [], error_count: 0 };
+const reloaded = (opId: string) => opEvent(opId, { outcome: { ok: true, value: RELOADED } });
+const parts = (r: Remote, sub: string) => snapshots(r, sub).filter((s) => !('status' in s));
+
+/** The engine host's real operation table behind the fake: Reload plugins runs through it, `session.operations` reads it. */
+function operations(f: Fixture) {
+  const transport: ScriptedTransport = scriptedTransport();
+  const client = new ControlClient(transport, new MemoryJournal(), 'LAUNCHM8', { warn: () => {} });
+  transport.frames[Symbol.asyncIterator]();
+  let now = Date.now();
+  const table = new OperationTable((event) => f.host.emit('session.operation', event), { now: () => now });
+  f.host.handlers.set('session.reloadPlugins', (input) => table.start((input as { appSessionId: AppSessionId }).appSessionId, 'session.reloadPlugins', client, 'reload_plugins', {}));
+  f.host.reads.set('session.operations', (input) => {
+    const { appSessionId, opIds } = input as { appSessionId: AppSessionId; opIds: string[] };
+    return { outcomes: table.outcomes(appSessionId, opIds) };
+  });
+  return {
+    complete(opId: string) {
+      client.observe({ type: 'control_response', response: { subtype: 'success', request_id: opId, response: RELOADED } });
+    },
+    later(ms: number) {
+      now += ms;
+    },
+  };
+}
+
+async function reloadPlugins(f: Fixture, r: Remote): Promise<string> {
+  const s = f.host.session('app-1');
+  const action = r.device.action({ machine: f.ref, action: 'session.reloadPlugins', session: 'app-1', context: { lane: 'B', launchId: s.launchId, engineSessionId: s.engineSessionId! }, args: { appSessionId: 'app-1' } });
+  const from = r.inbox.length;
+  expect(await act(r, action)).toBe('ok');
+  const outcome = (await done(r, action, from)) as { state: string; result: { opId: string } };
+  expect(outcome.state).toBe('done');
+  return outcome.result.opId;
+}
+
+async function askOperations(r: Remote, opIds: string[]): Promise<unknown> {
+  const id = `ops-${r.inbox.length}`;
+  await r.channel.send({ t: 'call', id, name: 'session.operations', input: { appSessionId: 'app-1', opIds } });
+  const m = await waitFor(r, (x) => x.t === 'result' && x.id === id, 'the outcomes');
+  expect(m.ok).toBe(true);
+  return (m.output as { outcomes: unknown }).outcomes;
+}
+
+describe('a lane B subscription’s operations and panels (M8)', () => {
+  it('carries the session’s operation completions as parts of their own, and no other session’s', async () => {
+    const f = await lab();
+    f.host.add('app-2');
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 's1', { lane: 'B', id: 'app-1' });
+    await snapshot(a, 's1');
+    f.host.emit('session.operation', opEvent('op-2', { appSessionId: 'app-2' }));
+    f.host.emit('session.operation', opEvent('op-1'));
+    await until(() => parts(a, 's1').length === 1, 'the completion');
+    expect(parts(a, 's1')).toEqual([{ operation: opEvent('op-1') }]);
+  });
+
+  it('delivers both of two completions that came while the device had no credit, each by its opId', async () => {
+    const f = await lab();
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 's1', { lane: 'B', id: 'app-1' }, { credit: 1 });
+    await until(() => of(a, 's1').some((m) => m.t === 'snap' && m.last === true), 'the snapshot');
+    f.host.emit('session.operation', opEvent('op-1'));
+    f.host.emit('session.operation', opEvent('op-2', { command: 'session.generateTitle', outcome: { ok: true, value: { title: 't' } } }));
+    // A late success of op-1 replaces its timeout while neither went: the latest of one opId is what it settled as.
+    f.host.emit('session.operation', opEvent('op-3', { outcome: { ok: false, error: { code: 'timeout', message: 'unanswered', engineCode: null } } }));
+    f.host.emit('session.operation', opEvent('op-3', { late: true }));
+    await sleep(30);
+    await a.channel.send({ t: 'credit', sub: 's1', bytes: 4 * MiB });
+    await until(() => parts(a, 's1').length === 3, 'every completion');
+    expect(parts(a, 's1').map((p) => p.operation)).toEqual([opEvent('op-1'), opEvent('op-2', { command: 'session.generateTitle', outcome: { ok: true, value: { title: 't' } } }), opEvent('op-3', { late: true })]);
+  });
+
+  it('delivers a completion that came during the opening after the opening’s state', async () => {
+    const f = await lab();
+    f.host.hold('session.queue.list');
+    const a = await openRemote(f, org.a1, org.A);
+    await a.channel.send({ t: 'sub', sub: 's1', session: { lane: 'B', id: 'app-1' }, cursor: null, credit: 4 * MiB });
+    await until(() => reads(f, 'session.queue.list') === 1, 'the state’s read in flight');
+    f.host.emit('session.operation', opEvent('op-1'));
+    f.host.emit('session.operation', opEvent('op-2'));
+    f.host.release('session.queue.list');
+    await until(() => parts(a, 's1').length === 2, 'the completions');
+    const all = snapshots(a, 's1');
+    expect('status' in all[0]).toBe(true);
+    expect(all.slice(1)).toEqual([{ operation: opEvent('op-1') }, { operation: opEvent('op-2') }]);
+    expect(reads(f, 'session.queue.list')).toBe(1); // an operation is not state: nothing is read again for it
+  });
+
+  it('after a drop between the receipt and the completion, answers the operation completed, then pending until its part comes, then forgotten', async () => {
+    const f = await lab();
+    const host = operations(f);
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 's1', { lane: 'B', id: 'app-1' });
+    await snapshot(a, 's1');
+    const done1 = await reloadPlugins(f, a);
+    const running = await reloadPlugins(f, a);
+    drop(a);
+    host.complete(done1);
+    await sleep(20); // the completion's macrotask, while no device is subscribed
+    const b = await openRemote(f, org.a1, org.A);
+    await subscribe(b, 's1', { lane: 'B', id: 'app-1' });
+    await snapshot(b, 's1');
+    // The stream gives no completion it missed: the device asks for what its waiters hold.
+    expect(parts(b, 's1')).toEqual([]);
+    expect(await askOperations(b, [done1, running, 'op-never'])).toEqual([
+      { opId: done1, event: reloaded(done1) },
+      { opId: running, pending: true },
+      { opId: 'op-never', unknown: true },
+    ]);
+    // The one still running completes by its part on the new subscription.
+    host.complete(running);
+    await until(() => parts(b, 's1').length === 1, 'the running one’s completion');
+    expect(parts(b, 's1')).toEqual([{ operation: reloaded(running) }]);
+    // Past the time the table keeps an outcome, it is forgotten.
+    host.later(OPERATION_KEPT_MS + 1);
+    expect(await askOperations(b, [done1])).toEqual([{ opId: done1, unknown: true }]);
+  });
+
+  it('carries the panels’ changes: the subagents, a workflow run, the session’s own task list, and the side question’s log at each completion', async () => {
+    const f = await lab();
+    const s = f.host.session('app-1');
+    s.taskListId = 'team list';
+    const exchanges = [{ id: 'op-side', question: 'why?', state: 'answered', response: 'because', synthetic: false, error: null, askedAt: '2026-11-04T00:00:00.000Z', answeredAt: '2026-11-04T00:00:01.000Z' }];
+    f.host.reads.set('side.question.list', () => ({ exchanges }));
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 's1', { lane: 'B', id: 'app-1' });
+    await snapshot(a, 's1');
+    const agents = [{ agentId: 'ag-1' }];
+    f.host.emit('fs.subagentsChanged', { appSessionId: 'app-1', agents });
+    f.host.emit('fs.subagentsChanged', { appSessionId: 'app-2', agents: [] });
+    f.host.emit('fs.workflowChanged', { appSessionId: 'app-1', runId: 'run-1' });
+    f.host.emit('fs.tasksChanged', { listId: 'another-list' });
+    f.host.emit('fs.tasksChanged', { listId: 'team-list' });
+    const side = opEvent('op-side', { command: 'session.sideQuestion', outcome: { ok: true, value: { response: 'because', synthetic: false } } });
+    f.host.emit('session.operation', side);
+    await until(() => parts(a, 's1').length === 5, 'the panels’ changes');
+    expect(parts(a, 's1')).toEqual([{ subagents: { agents } }, { workflow: { runId: 'run-1' } }, { tasks: { listId: 'team-list' } }, { operation: side }, { side: { exchanges } }]);
+  });
+
+  it('carries none of them on a cards view', async () => {
+    const f = await lab();
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 'c1', { lane: 'B', id: 'app-1' }, { view: 'cards' });
+    await snapshot(a, 'c1');
+    f.host.emit('session.operation', opEvent('op-1'));
+    f.host.emit('fs.subagentsChanged', { appSessionId: 'app-1', agents: [] });
+    f.host.request('app-1', 'question', 'rq-1');
+    await until(() => snapshots(a, 'c1').length === 2, 'the cards’ change');
+    expect(snapshots(a, 'c1').every((snap) => Object.keys(snap).join() === 'pendingItems')).toBe(true);
   });
 });
