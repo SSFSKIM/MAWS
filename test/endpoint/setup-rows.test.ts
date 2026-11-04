@@ -302,6 +302,26 @@ describe('the remote setup with the machine’s own handlers', () => {
     expect(cwd.startsWith(home) || cwd.startsWith(realpathSync(home))).toBe(false);
   });
 
+  // Round 4 (the review's case): a pointer's content is a path the kernel resolves, a `..` after a link climbing from
+  // its target; the org derivation reads the common dir, and the config git is handed, where the check resolved them,
+  // never at the lexical spelling (here `~/Documents`, a protected folder nobody opened, holding a decoy config)
+  it('derive the org from the common dir the walk resolved, never a pointer’s lexical spelling', async () => {
+    const { f, home, a, index } = await real();
+    mkdirSync(join(home, 'safe/deep'), { recursive: true });
+    symlinkSync(join(home, 'safe/deep'), join(home, 'shortcut'));
+    git(home, 'init', '-q', '--bare', '-b', 'main', join(home, 'safe/Documents'));
+    const seed = join(home, 'seed');
+    repo(seed);
+    git(seed, 'push', '-q', join(home, 'safe/Documents'), 'main');
+    git(join(home, 'safe/Documents'), 'remote', 'add', 'origin', 'https://github.com/example/safe.git');
+    git(join(home, 'safe/Documents'), 'worktree', 'add', '-q', join(home, 'Developer/wt'));
+    writeFileSync(join(home, 'safe/Documents/worktrees/wt/commondir'), `${home}/shortcut/../Documents\n`);
+    writeFileSync(join(home, 'Documents/config'), '[remote "origin"]\n\turl = https://github.com/example/protected.git\n');
+    expect(await register(f, a, join(home, 'Developer/wt'))).toBe('ok');
+    const org = await eventually(() => index.projects.list({ includeHidden: true }).find((project) => project.directory === join(home, 'Developer/wt'))?.org);
+    expect(org).toMatchObject({ key: 'remote:github.com/example/safe' });
+  });
+
   // Round 3: the new project's org derivation reads a `.smns` through the walk too
   it('derive no org from a `.smns` linked into an unopened protected folder', async () => {
     const { f, home, a, index } = await real();

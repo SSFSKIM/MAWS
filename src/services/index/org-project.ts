@@ -16,7 +16,7 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import type { ProjectOrg } from '@shared/ipc/schema/session';
 import type { GitFiles } from '@shared/machine/git-reads';
 import type { Enrollment } from '@shared/machine/identity'; // P5 O3-D M2 (D16): the enrollment moved to shared
@@ -147,10 +147,11 @@ async function linkedCommonDir(at: string, dot: string, io: OrgIo): Promise<stri
     return null;
   }
   if (!line.startsWith('gitdir:')) return null;
-  const gitdir = resolve(at, line.slice('gitdir:'.length).trim()); // Python's os.path.join: an absolute part wins
+  const gitdir = await io.pointer(at, line.slice('gitdir:'.length).trim());
+  if (gitdir === null) return null;
   try {
     const common = await io.read(join(gitdir, 'commondir'));
-    return common === null ? resolve(gitdir) : resolve(gitdir, common.trim());
+    return common === null ? resolve(gitdir) : io.pointer(gitdir, common.trim());
   } catch {
     return null;
   }
@@ -172,6 +173,12 @@ interface OrgIo {
   kind(path: string): Promise<'file' | 'directory' | null>;
   read(path: string): Promise<string | null>;
   canonical(path: string): Promise<string>;
+  // the path a pointer's content names from `base`: sminos's lexical join (Python's os.path.join: an absolute part
+  // wins); under the setup, the walk's resolution (a `..` after a link climbing from its target), null when it names
+  // nowhere, so what is read from then on is what was checked
+  pointer(base: string, target: string): Promise<string | null>;
+  // the config file `config --file` is handed: under the setup, the walk's resolution of it (null: none)
+  config(common: string): Promise<string | null>;
   asksGit: boolean;
 }
 
@@ -195,6 +202,12 @@ const LOCAL_IO: OrgIo = {
   async canonical(path) {
     return canonical(path);
   },
+  async pointer(base, target) {
+    return resolve(base, target);
+  },
+  async config(common) {
+    return join(common, 'config');
+  },
   asksGit: true,
 };
 
@@ -217,6 +230,8 @@ function checkedIo(files: GitFiles): OrgIo {
     async canonical(path) {
       return (await files.real(path))?.normalize('NFC') ?? path;
     },
+    pointer: (base, target) => files.real(isAbsolute(target) ? target : `${base}${sep}${target}`),
+    config: (common) => files.real(join(common, 'config')),
     asksGit: false,
   };
 }
@@ -225,8 +240,10 @@ function checkedIo(files: GitFiles): OrgIo {
 // `git_config_remotes`, read by git's own parser with sminos's no-includes semantics. Every key of a remote section
 // counts, as it does for sminos, so a remote with only a `fetch` still makes two remotes. A config git refuses, and a
 // missing one, have no remote here (sminos derives no project from either); null when git gave no answer.
-async function configRemotes(common: string, timeoutMs: number, isolated: boolean): Promise<Map<string, string> | null> {
-  const answer = await git(['config', '--file', join(common, 'config'), '--no-includes', '-z', '--get-regexp', '^remote\\.'], timeoutMs, isolated);
+async function configRemotes(common: string, timeoutMs: number, io: OrgIo): Promise<Map<string, string> | null> {
+  const file = await io.config(common);
+  if (file === null) return new Map(); // no config: no remote, as git's exit 1 for a missing file says
+  const answer = await git(['config', '--file', file, '--no-includes', '-z', '--get-regexp', '^remote\\.'], timeoutMs, !io.asksGit);
   if (answer === null) return null;
   if (!('stdout' in answer)) return new Map(); // 1: nothing matched or no file; 128: a file git refuses
   const remotes = new Map<string, string | null>();
@@ -325,7 +342,7 @@ export async function deriveOrg(
   const smns = await smnsAt(directory, owningRepo, io);
   if (smns) return { key: `smns:${smns.project}` as OrgKey, name: smns.name, source: 'smns', smnsId: smns.project };
   if (owningRepo === '') return { key: `folder:${machine}:${projectId}` as OrgKey, name, source: 'folder', smnsId: null };
-  const remotes = await configRemotes(common, gitTimeoutMs, !io.asksGit);
+  const remotes = await configRemotes(common, gitTimeoutMs, io);
   if (remotes === null) return null;
   const remote = remotes.has('origin') ? 'origin' : remotes.size === 1 ? [...remotes.keys()][0] : undefined;
   const url = remote === undefined ? '' : remotes.get(remote)!;
