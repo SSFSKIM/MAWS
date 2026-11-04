@@ -778,6 +778,8 @@ The fixes follow in tasks grouped by layer, so that no two executors edit one fi
 - m8-4: the renderer;
 - m8-5: the contract test and the e2e cases.
 
+m8-1's first commit also pins a clock. `test/support/remote-bench.test.ts`'s "the mini's removal on this Mac…" builds its `BenchRun` with no clock, so it refuses on the real time inside the mini's 06:45–07:00Z quiet window. Any unit gate that falls in that window fails (the desk track's #464, run 41788418951 at 06:56Z). That test, and any sibling built the same way, takes a clock pinned outside the window. One added case, pinned inside the window, expects the refusal.
+
 *The sidebar row* (acceptance 4). The device keys a remote record by its app id (`RemoteSession.#readRecord`, `session.get {appSessionId}`), and `rowOfListedRecord` looks the record up in `listed` by that id (`src/renderer/src/stores/org-projects.ts`). The endpoint lists a lane B member under its `appSessionId` only once `#join` has mapped its engine id through `engine.sessions` (`src/endpoint/rl10/members.ts`, `listingId`). A member sminos reports as lane A is listed under its engine id. The sitting's listing carried the engine id (`1c155c56…`) where the record carried the app id (`edad6b82`), so the join missed. The record then fell back to `rowOfSession`, and with no project known on an RL2 machine it was filed under the machine's row.
 - **Fix at the source:** an engine id that `engine.sessions` reports is lane B, whatever sminos's lane field says, and is listed under its `appSessionId`.
 - **Fix in the renderer, as defence:** `rowOfListedRecord` and `sessionSetKey` also try `addressOf(machine, record.engineSessionId)`, and `projectList` skips a listing a record already claims.
