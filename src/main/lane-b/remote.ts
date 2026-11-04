@@ -58,8 +58,8 @@
 //   one); the sign-in by a server's name (`connectors.signInServer`) a consent's `machine` act. An operation's receipt
 //   (`{opId}`) is handed to the session's fold, which asks the machine for its completion at each opening until it comes
 //   (./remote-session.ts). A task list's read names the session it is of (`fs.tasks`' `appSessionId`: the input's, the
-//   page's, else the open session whose list it is), and an unfollow goes only for a named agent: the session-wide one
-//   would end every client's follows there, and this device's own end with its channel. A send's `uploads` go only to an
+//   page's, else the open session whose list it is). An unfollow goes for a named agent; the session-wide one, which the
+//   machine would take as every client's, goes as one per agent this device follows there (its `fs.agentEvents` reads). A send's `uploads` go only to an
 //   endpoint that lists `rl2.upload-blocks` (the act `requires` it, so a later channel's older peer refuses rather than
 //   misreads it); to any other the message goes with its `@` mention alone, as before. The machine's refusal of a send's
 //   uploads, `malformed` with no reason, is the attachment's words.
@@ -243,8 +243,11 @@ export { MACHINE_CALLS } from './remote-connectors';
 export const SUBSTITUTES: ReadonlySet<CommandName> = new Set<CommandName>(['attention.request', 'engine.models']);
 /** Reads offered as calls that the adapter makes in pages the channel carries (./remote-history.ts). */
 export const PAGED_READS: ReadonlySet<CommandName> = new Set<CommandName>(['session.events', 'files.read']); // files.read: M4's milestone review
-/** P5 O7 M8: calls the adapter gives a target before they go (`fs.tasks`' session, `fs.unfollow`'s agent). */
-export const TARGETED_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['fs.tasks', 'fs.unfollow']);
+/**
+ * P5 O7 M8: calls the adapter gives a target before they go (`fs.tasks`' session, `fs.unfollow`'s agents), and the
+ * follows it keeps track of for them (`fs.agentEvents`, m8-3's task review).
+ */
+export const TARGETED_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['fs.tasks', 'fs.unfollow', 'fs.agentEvents']);
 const SENDS: ReadonlySet<CommandName> = new Set<CommandName>(['session.send', 'session.steer']);
 const OPERATIONS: ReadonlySet<string> = new Set<string>(OPERATION_COMMANDS);
 export const NOT_OPEN = 'open the session to drive it';
@@ -308,6 +311,11 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     unfollowed: (machine, app) => sessionOf(machine, app)?.unfollowed(),
     log: deps.log,
   });
+  /**
+   * m8-3's task review (C): the agents this device follows per session, by link (each `fs.agentEvents` answered starts or
+   * holds one, held by this device's channel on the machine), so a session-wide unfollow lets go of these alone.
+   */
+  const follows = new Map<RemoteLink, Map<string, Set<string>>>();
   /** Each session's upload in flight (machine and session): the next waits for it. */
   const uploads = new Map<string, Promise<unknown>>();
   /** P5 O7 M4: each New chat tab's spawn, kept by the tab it is made from (remote-spawn.ts). */
@@ -424,6 +432,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     close,
   });
   const offRemote = deps.onRemote(() => {
+    for (const link of [...follows.keys()]) if (deps.remote(link.machine) !== link) follows.delete(link);
     spawns.linksChanged(deps.remote); // M4c fix wave 2: a spawn out on a link that ended can't be known
     ptys.linksChanged(); // P5 O7 M3: a terminal or a forward on a link that ended ends
     forwards.linksChanged();
@@ -556,11 +565,31 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     return result;
   }
 
-  /** P5 O7 M8: `fs.tasks` naming its session, `fs.unfollow` only for a named agent, each a call over the link. */
+  /**
+   * P5 O7 M8: `fs.tasks` naming its session; `fs.unfollow` for a named agent, the session-wide one (m8-3's task review)
+   * as one per agent this device follows there, since the machine stops every client's follows for it; each a call.
+   */
   async function targeted(link: RemoteLink, name: CommandName, fields: Fields, ctx: MainContext): Promise<CommandResult<CommandName>> {
+    const app = String(fields.appSessionId);
+    const followed = () => {
+      const of = follows.get(link) ?? new Map<string, Set<string>>();
+      follows.set(link, of);
+      const agents = of.get(app) ?? new Set<string>();
+      of.set(app, agents);
+      return agents;
+    };
+    if (name === 'fs.agentEvents') {
+      const result = await dispatchOverLink(link, name, fields, ctx.session);
+      if (result.ok && typeof fields.agentId === 'string') followed().add(fields.agentId);
+      return result;
+    }
     if (name === 'fs.unfollow') {
-      if (typeof fields.agentId === 'string') return dispatchOverLink(link, name, fields);
-      deps.log(`lane B: fs.unfollow of ${link.name}/${String(fields.appSessionId)} names no agent; not sent (this device's follows there end with their own unfollows or its channel)`);
+      const agents = typeof fields.agentId === 'string' ? [fields.agentId] : [...followed()];
+      for (const agentId of agents) {
+        const result = await dispatchOverLink(link, name, { appSessionId: app, agentId });
+        if (!result.ok) return result;
+        followed().delete(agentId);
+      }
       return { ok: true, value: undefined } as CommandResult<CommandName>;
     }
     const listId = String(fields.listId);
@@ -687,6 +716,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       port.stop();
       for (const { lanes } of machines.values()) for (const lane of lanes.values()) lane.session.stop();
       machines.clear();
+      follows.clear();
     },
   };
 }

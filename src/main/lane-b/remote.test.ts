@@ -432,7 +432,7 @@ describe('the checkout and the spawn (M4)', () => {
   it('takes the checkout’s writes, the spawn, the watches and `files.read` (in pages); the checkout’s other reads stay the manager’s', () => {
     const l = lab();
     for (const name of ['files.write', 'files.upload', 'scm.stage', 'scm.commit', 'scm.push', 'scm.pr.create', 'scm.remote.cancel', 'session.spawn', 'git.watch', 'git.unwatch', 'files.watch', 'files.unwatch', 'files.read'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(true);
-    for (const name of ['git.status', 'git.diff', 'files.list', 'scm.status', 'session.projects.list', 'fs.agentEvents'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(false);
+    for (const name of ['git.status', 'git.diff', 'files.list', 'scm.status', 'session.projects.list'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(false);
   });
 
   it('builds a checkout write as a `machine` act with neither a session nor a context, on a session no tab holds and with no status', async () => {
@@ -1049,13 +1049,30 @@ describe('the sitting’s failures (M8)', () => {
     expect(l.link.calls.filter((c) => c.name === 'fs.tasks')).toHaveLength(3);
   });
 
-  it('sends an unfollow of a named agent; the session-wide one, which would end every client’s follows there, never goes', async () => {
+  it('sends an unfollow of a named agent, and turns the session-wide one into one per agent this device follows there, leaving other clients’ follows alone', async () => {
     const l = lab();
+    l.link.answers.set('fs.agentEvents', () => ({ ok: true, output: { events: [], complete: true } }));
     l.link.answers.set('fs.unfollow', () => ({ ok: true, output: null }));
+    for (const agentId of ['agent-1', 'agent-2']) expect(await l.cmd('fs.agentEvents', { appSessionId: APP, agentId })).toEqual({ ok: true, value: { events: [], complete: true } });
+    await l.cmd('fs.agentEvents', { appSessionId: 'app-2', agentId: 'agent-9' }); // another session's
     expect(await l.cmd('fs.unfollow', { appSessionId: APP, agentId: 'agent-1' })).toEqual({ ok: true, value: undefined });
     expect(await l.cmd('fs.unfollow', { appSessionId: APP, agentId: null })).toEqual({ ok: true, value: undefined });
-    expect(l.link.calls.filter((c) => c.name === 'fs.unfollow').map((c) => c.input)).toEqual([{ appSessionId: APP, agentId: 'agent-1' }]);
-    expect(l.logs.some((line) => line.includes('fs.unfollow') && line.includes('names no agent'))).toBe(true);
+    expect(l.link.calls.filter((c) => c.name === 'fs.unfollow').map((c) => c.input)).toEqual([
+      { appSessionId: APP, agentId: 'agent-1' },
+      { appSessionId: APP, agentId: 'agent-2' },
+    ]);
+    // nothing followed there any more: the session-wide one has nothing to end, and sends nothing
+    expect(await l.cmd('fs.unfollow', { appSessionId: APP, agentId: null })).toEqual({ ok: true, value: undefined });
+    expect(l.link.calls.filter((c) => c.name === 'fs.unfollow')).toHaveLength(2);
+    // an unfollow the machine refused is the answer, and its follow is kept for the next
+    l.link.answers.set('fs.unfollow', () => ({ ok: false, error: { code: 'unavailable' } }));
+    expect(await l.cmd('fs.unfollow', { appSessionId: 'app-2', agentId: null })).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    l.link.answers.set('fs.unfollow', () => ({ ok: true, output: null }));
+    expect(await l.cmd('fs.unfollow', { appSessionId: 'app-2', agentId: null })).toEqual({ ok: true, value: undefined });
+    expect(l.link.calls.filter((c) => c.name === 'fs.unfollow').map((c) => c.input).slice(2)).toEqual([
+      { appSessionId: 'app-2', agentId: 'agent-9' },
+      { appSessionId: 'app-2', agentId: 'agent-9' },
+    ]);
   });
 
   it('sends a send’s uploads only to an endpoint that lists `rl2.upload-blocks`, and the mention alone to one that doesn’t', async () => {
