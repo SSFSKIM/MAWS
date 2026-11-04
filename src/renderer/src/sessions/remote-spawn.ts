@@ -31,6 +31,7 @@ import type { Serialized } from '../composer/editor/serialize';
 import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
+import { markSpawnedHere } from './spawned-here';
 
 /** A machine a New chat tab can start its session on, with the checkout of its project there. */
 export interface SpawnTarget {
@@ -266,6 +267,7 @@ export async function spawnOnMachine(request: SpawnRequest, client: MawsBridge =
   } finally {
     setSpawning(from, null);
   }
+  markSpawnedHere(spawned); // P5 O7 M8: it leads its sidebar group until its first turn ends
   if (handed || editKept) rememberRemoteDraft(spawned, doc);
   if (handed) queueFirstSend(spawned);
   useLayout.getState().retargetTab(tabId({ kind: 'session', appSessionId: from }), { kind: 'session', appSessionId: spawned });

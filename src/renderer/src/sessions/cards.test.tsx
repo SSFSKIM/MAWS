@@ -17,6 +17,7 @@ import { connectSetupDock } from './SetupCard';
 import { connectKeys } from '../keymap/dispatcher';
 import { resetDockedCards, useDockedCards } from '../composer/docked/registry';
 import { registerMessageReturn } from './message-return';
+import { resetSpawnedHere, useSpawnedHere } from './spawned-here';
 import { continueSetup, isContinuing, releaseMessage, resumeSession, startIntent } from './setup-actions';
 // P2-A start
 import { record, status } from '../../../../test/support/builders';
@@ -69,6 +70,7 @@ function withMain(auto: Parameters<typeof fakeClient>[0] = {}) {
 
 beforeEach(() => {
   resetSetupStore();
+  resetSpawnedHere(); // P5 O7 M8
   useSessions.setState({ records: new Map(), engine: new Map(), digests: new Map() }); // P2-A: a record's card is told by its record
   useNotices.setState({ notices: [] });
   returned = [];
@@ -111,6 +113,7 @@ describe('trust card', () => {
     expect(screen.queryByRole('button', { name: 'Trust and start' })).toBeNull();
     expect(dockedIds()).toBe('');
     expect(await act(() => startIntent(ID, MESSAGE))).toEqual({ ok: true });
+    expect(useSpawnedHere.getState().leading.has(ID), 'P5 O7 M8: nothing started yet').toBe(false);
     expect(dockedIds(), 'docked in the composer through C7\'s dockCard').toBe('c10:trust');
     expect(screen.getByRole('group', { name: 'Trust this folder?' }).textContent).toContain('Composer paused'); // C7's DockedCardFrame
     await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
@@ -509,6 +512,7 @@ describe('failure card', () => {
     render(<Docked />);
     expect(await act(() => startIntent(ID, MESSAGE))).toEqual({ ok: true });
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(useSpawnedHere.getState().leading.has(ID), 'P5 O7 M8: it leads its sidebar group until its first turn ends').toBe(true);
   });
 
   it('a Retry main refuses because a start still runs hands nothing back', async () => {

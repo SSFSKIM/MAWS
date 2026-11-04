@@ -24,6 +24,7 @@ import { machineName, selectOrgIndex } from '../stores/org-projects'; // P5 O6 M
 import { ProjectFilter } from './ProjectFilter';
 import type { SidebarSort } from '../overview/derive';
 import { selectGreyedNeedsYou, selectNeedsYou, useAttention } from '../stores/attention';
+import { useSpawnedHere } from '../sessions/spawned-here'; // P5 O7 M8
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
 import { openArtifacts } from '../main/artifacts'; // P3-G
@@ -77,6 +78,7 @@ function SidebarBody() {
   const digests = useSessions((s) => s.digests);
   const listedSessions = useSessions((s) => s.listed); // P5 O8 M2
   const people = usePeople((s) => s.on); // P5 O8 M5: the rows drawing other people's sessions
+  const spawned = useSpawnedHere((s) => s.leading); // P5 O7 M8: the sessions spawned here that lead their group
   const [projectFilter, setProjectFilter] = useState<ReadonlySet<ProjectKey> | null>(null);
   const allKnownProjects = useSessions(selectProjectOrder);
   const hiddenProjects = useSessions(selectHiddenProjects);
@@ -144,9 +146,9 @@ function SidebarBody() {
   const search = useRef<HTMLDivElement>(null);
 
   const rankedEntries = useMemo((): RankedEntry[] => projectList({ records, digests, projects, rows, local, machineName: (m) => machineName(machines, m, local), alsoListed: projectFilter ?? undefined, listed: listedSessions, people }).map((entry) => {
-    const sorted = projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches: () => true });
-    return { ...entry, sessions: sorted, items: projectItems({ sorted, listed: entry.listed, digests, rows, sort: sidebar.sort }) };
-  }), [records, digests, projects, rows, local, machines, projectFilter, sidebar.sort, listedSessions, people]);
+    const sorted = projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches: () => true, spawned });
+    return { ...entry, sessions: sorted, items: projectItems({ sorted, listed: entry.listed, digests, rows, sort: sidebar.sort, spawned }) };
+  }), [records, digests, projects, rows, local, machines, projectFilter, sidebar.sort, listedSessions, people, spawned]);
   // Hold ranks, not data: titles, glyphs and counts remain live. Pointer presence, keyboard focus (including
   // portalled cards/menus), or an open context menu keeps the same targets in place until the person leaves.
   // A deliberate sort change is immediate; no timer can reshuffle a row between two actions.

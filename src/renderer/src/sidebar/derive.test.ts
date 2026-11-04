@@ -382,23 +382,55 @@ describe('an expanded project’s records and listed rows in one ordering', () =
 
   // P5 O7 M8 (m8-1, red first; M8's *The sidebar row*): why the sitting's remote-spawned session had no row at all. Its
   // listing joins its project by its app id, but a group draws five rows (eight after Show more), and under the default
-  // `priority` sort pinned, waiting, unread and working local records lead while a listed row ranks by its `issued` time
-  // alone, so behind more busy local records than the cap it is never drawn. The fix is parity: the priority sort ranks
-  // a listed row by its own state, as it ranks a local record, so a just-spawned working session leads into the visible
-  // rows. (Resume… listing listed rows is the same fix's other half, red first with its own interface in m8-4.)
-  // Each case flips on its own in m8-4.
+  // `priority` sort pinned, waiting, unread and working local records led while a listed row ranked by its `issued` time
+  // alone, so behind more busy local records than the cap it was never drawn. m8-4's fix: the priority sort ranks a
+  // listed row by its own state, as it ranks a local record (parity), and a session spawned from this window leads its
+  // group until its first turn ends, on either lane (the architect's ruling; `leadsAsSpawned`, `sessions/spawned-here.ts`).
   const visible = (merged: ReturnType<typeof projectItems>) => nestItems(merged).slice(0, shownCount(nestItems(merged).length, false)).flatMap((t) => t.rows.map((r) => ('listed' in r ? `@${r.listed.session}` : r.record.appId)));
   const busy = (over: Partial<SessionRecord>) => Array.from({ length: SESSIONS_CAP + 1 }, (_, i) => rec(`b${i}`, SESSIONS_CAP - i, over)); // newest first, as `projectSessions` sorts them
   const spawned = (state: string) => ({ ...lst('spawned', SESSIONS_CAP + 2), state });
+  const SPAWNED = new Set([there('spawned') as AppSessionId]);
 
-  it.fails('a just-spawned working remote session leads into the visible rows under priority, past more unread local sessions than the cap', () => {
-    expect(visible(items(busy({ unread: true }), [spawned('working')], 'priority'))).toContain('@spawned');
+  it('a just-spawned working remote session leads into the visible rows under priority, past more unread local sessions than the cap', () => {
+    expect(visible(projectItems({ sorted: busy({ unread: true }), listed: [spawned('busy')], digests: new Map(), rows: [], sort: 'priority', spawned: SPAWNED }))).toContain('@spawned');
   });
 
-  it.fails('a just-spawned working remote session leads into the visible rows under priority, past more working local sessions than the cap', () => {
+  it('a just-spawned working remote session leads into the visible rows under priority, past more working local sessions than the cap', () => {
     const working = busy({});
     const digests = new Map(working.map((r) => [r.appId, digest(r.appId, { phase: 'working' })]));
-    expect(visible(projectItems({ sorted: working, listed: [spawned('working')], digests, rows: [], sort: 'priority' }))).toContain('@spawned');
+    expect(visible(projectItems({ sorted: working, listed: [spawned('busy')], digests, rows: [], sort: 'priority' })), 'by its state alone').toContain('@spawned');
+  });
+
+  it('after its first turn a spawned remote session ranks by its state again: an idle one sinks behind the unread', () => {
+    expect(visible(projectItems({ sorted: busy({ unread: true }), listed: [spawned('idle')], digests: new Map(), rows: [], sort: 'priority' }))).not.toContain('@spawned');
+  });
+
+  it('a just-spawned local session leads its group past more unread sessions than the cap until its first turn ends, then ranks by its state', () => {
+    const fresh = rec('fresh', 0);
+    const sessions = [...busy({ unread: true }), fresh];
+    const shown = (spawnedHere: ReadonlySet<AppSessionId>) => {
+      const sorted = projectSessions({ sessions, digests: new Map(), rows: [], sort: 'priority', matches: everyone, spawned: spawnedHere });
+      return visible(projectItems({ sorted, listed: [], digests: new Map(), rows: [], sort: 'priority', spawned: spawnedHere }));
+    };
+    expect(shown(new Set([fresh.appId]))[0]).toBe('fresh');
+    expect(shown(new Set())).not.toContain('fresh');
+  });
+
+  it('the spawned lead goes above pinned records too, and holds under recency', () => {
+    const pinned = Array.from({ length: SESSIONS_CAP + 1 }, (_, i) => rec(`p${i}`, 20 - i, { pinned: true }));
+    const sorted = projectSessions({ sessions: pinned, digests: new Map(), rows: [], sort: 'recency', matches: everyone });
+    expect(visible(projectItems({ sorted, listed: [spawned('idle')], digests: new Map(), rows: [], sort: 'recency', spawned: SPAWNED }))[0]).toBe('@spawned');
+  });
+
+  it('under priority a listed row ranks by its own state: waiting from its attention feed or its listing, working from its listing, the rest by its issue', () => {
+    const fed = lst('fed', 1);
+    const rowsFor = needsYou(new Map([[fed.appId, [item(fed.appId, 'permission', minute(1))]]]), new Map(), { listed: new Map([[fed.appId, fed]]) });
+    const unread = rec('u', 3, { unread: true });
+    const working = rec('w', 4);
+    const digests = new Map([[working.appId, digest(working.appId, { phase: 'working', turnStartedAt: minute(4) })]]);
+    const listed = [{ ...lst('asks', 2), state: 'waiting' }, { ...lst('runs', 6), state: 'busy' }, lst('rests', 9), fed];
+    expect(ids(projectItems({ sorted: [unread, working, rec('r5', 5)], listed, digests, rows: rowsFor, sort: 'priority' }))).toEqual(['@fed', '@asks', 'u', '@runs', 'w', '@rests', 'r5']);
+    expect(ids(projectItems({ sorted: [rec('r5', 5)], listed, digests: new Map(), rows: rowsFor, sort: 'recency' })), 'recency: the issue alone').toEqual(['@rests', '@runs', 'r5', '@asks', '@fed']);
   });
 });
 

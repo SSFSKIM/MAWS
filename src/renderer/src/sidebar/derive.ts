@@ -7,7 +7,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import type { NeedsYouRow } from '../attention/derive';
 import { dateFormats, formatAgo } from '@shared/app/date-format';
-import { lastActivity, sortSessions, type SidebarSort } from '../overview/derive';
+import { lastActivity, priorityRank, RANK_REST, sortSessions, type SidebarSort } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle, listedTitle } from '../sessions/title'; // E3; P5 O7 M6: listedTitle
 import { projectLabels } from './project-labels';
@@ -209,20 +209,29 @@ export const SESSIONS_CAP = 8;
 // How many of `total` sessions an expanded project shows, before and after its "Show more".
 export const shownCount = (total: number, more: boolean): number => Math.min(total, more ? SESSIONS_CAP : SESSIONS_FIRST);
 
+// P5 O7 M8, the spawned-here lead (the architect's ruling of 2026-11-04, made in the owner's place; the owner can
+// overrule it): a session spawned from this window, on any machine, leads its group, above pinned records and whatever
+// the sort, until its first turn ends (`sessions/spawned-here.ts` keeps the set and ends each lead). The one place the
+// sidebar's order reads it, so overruling it is this line.
+export const leadsAsSpawned = (id: AppSessionId, spawned: ReadonlySet<AppSessionId> | undefined): boolean => spawned?.has(id) ?? false;
+
 export interface ProjectSessionsInput {
   sessions: readonly SessionRecord[]; // the project's sessions, not archived
-  digests: Map<AppSessionId, SessionDigest>;
+  digests: ReadonlyMap<AppSessionId, SessionDigest>;
   rows: NeedsYouRow[];
   sort: SidebarSort;
   matches: (record: SessionRecord) => boolean;
+  spawned?: ReadonlySet<AppSessionId>; // P5 O7 M8: the sessions spawned here that still lead (`leadsAsSpawned`)
 }
 
-// One flat list: pinned sessions first (pin keeps a session at the top of its project), then the rest in the chosen
-// sort; worktree sessions sit among them, marked by their branch (`rowBranch`).
-export function projectSessions({ sessions, digests, rows, sort, matches }: ProjectSessionsInput): SessionRecord[] {
+// One flat list: a session spawned here that still leads first (P5 O7 M8), then pinned sessions (pin keeps a session at
+// the top of its project), then the rest in the chosen sort; worktree sessions sit among them, marked by their branch
+// (`rowBranch`).
+export function projectSessions({ sessions, digests, rows, sort, matches, spawned }: ProjectSessionsInput): SessionRecord[] {
   const order = (list: SessionRecord[]) => sortSessions(list, sort, { digests, rows });
   const shown = sessions.filter(matches);
-  return [...order(shown.filter((r) => r.pinned)), ...order(shown.filter((r) => !r.pinned))];
+  const leads = (r: SessionRecord) => leadsAsSpawned(r.appId, spawned);
+  return [...order(shown.filter(leads)), ...order(shown.filter((r) => !leads(r) && r.pinned)), ...order(shown.filter((r) => !leads(r) && !r.pinned))];
 }
 
 // E3 start: the lineage forest (E3 execution document, Design §6, M4's decisions). A project's sorted sessions become
@@ -279,10 +288,13 @@ export function lineageCaption(record: SessionRecord, nested: boolean, parentTit
 }
 // E3 end
 
-// P5 O8 M2 ("Drawing", membership): an expanded project's records and listed rows in one ordering by last activity (a
-// record's `lastActivity`, a listed row's `issued`), under the same caps and Show more. What the chosen sort puts first
-// stays first: pinned records, and under `priority` the records it ranks by attention, unread or work; the listed rows
-// carry none of those and merge among the rest by recency. Lineage nests records only; a listed row is a tree of one.
+// P5 O8 M2 ("Drawing", membership): an expanded project's records and listed rows in one ordering, under the same caps
+// and Show more. P5 O7 M8 (*The sidebar row*, parity): a listed row ranks by its own state, as a record does. First a
+// session spawned here that still leads (`leadsAsSpawned`), then pinned records; under `priority`, a Needs-you row (a
+// listed row's from its machine's attention feed, in the rows' order; then a listed row its listing says `waiting`),
+// unread records, the working (a record by its turn start, a listed row `busy` by its listing's issue: sminos re-issues
+// a listing at each change of its state), then the rest by last activity (a record's `lastActivity`, a listed row's
+// `issued`); under `recency`, all by last activity. Lineage nests records only; a listed row is a tree of one.
 export type SidebarSession = { kind: 'record'; record: SessionRecord } | { kind: 'listed'; listed: ListedSession };
 export interface ListedTreeRow {
   listed: ListedSession;
@@ -303,28 +315,46 @@ export interface ProjectItemsInput {
   digests: ReadonlyMap<AppSessionId, SessionDigest>;
   rows: NeedsYouRow[];
   sort: SidebarSort;
+  spawned?: ReadonlySet<AppSessionId>; // P5 O7 M8: as `projectSessions` was given it
 }
 
-export function projectItems({ sorted, listed, digests, rows, sort }: ProjectItemsInput): SidebarSession[] {
-  const waiting = new Set(rows.map((row) => row.appSessionId));
-  const leads = (r: SessionRecord) => r.pinned || (sort === 'priority' && (waiting.has(r.appId) || r.unread || isWorking(digests.get(r.appId))));
-  const split = sorted.findIndex((r) => !leads(r));
-  const head = split === -1 ? sorted : sorted.slice(0, split);
-  const rest = split === -1 ? [] : sorted.slice(split);
-  const remote = [...listed].sort((a, b) => issuedAt(b) - issuedAt(a) || listedTitle(a).localeCompare(listedTitle(b)));
-  const out: SidebarSession[] = head.map((record) => ({ kind: 'record', record }));
-  let i = 0;
+// An item's place: its tier (-2 the spawned lead, -1 pinned, then `priorityRank`'s groups), its key within a ranked
+// group, and its last activity, which orders the lead, the pinned and the rest.
+interface Rank { tier: number; key: number; at: number }
+const SPAWNED_TIER = -2;
+const PINNED_TIER = -1;
+const byRank = (a: Rank, b: Rank): number => a.tier - b.tier || (a.tier < 0 || a.tier === RANK_REST ? b.at - a.at : a.key - b.key);
+
+export function projectItems({ sorted, listed, digests, rows, sort, spawned }: ProjectItemsInput): SidebarSession[] {
+  const rowIndex = new Map(rows.map((row, i) => [row.appSessionId, i]));
+  const recordRank = (r: SessionRecord): Rank => {
+    const digest = digests.get(r.appId);
+    const at = lastActivity(r, digest);
+    if (leadsAsSpawned(r.appId, spawned)) return { tier: SPAWNED_TIER, key: 0, at };
+    if (r.pinned) return { tier: PINNED_TIER, key: 0, at };
+    const [tier, key] = sort === 'priority' ? priorityRank(r, digest, rowIndex.get(r.appId)) : [RANK_REST, 0];
+    return { tier, key, at };
+  };
+  const listedRank = (l: ListedSession): Rank => {
+    const at = issuedAt(l);
+    if (leadsAsSpawned(l.appId, spawned)) return { tier: SPAWNED_TIER, key: 0, at };
+    if (sort !== 'priority') return { tier: RANK_REST, key: 0, at };
+    const row = rowIndex.get(l.appId);
+    if (row !== undefined) return { tier: 0, key: row, at };
+    if (l.state === 'waiting') return { tier: 0, key: rows.length, at };
+    if (l.state === 'busy') return { tier: 2, key: -at, at };
+    return { tier: RANK_REST, key: 0, at };
+  };
+  const remote = listed.map((l) => ({ l, rank: listedRank(l) })).sort((a, b) => byRank(a.rank, b.rank) || listedTitle(a.l).localeCompare(listedTitle(b.l)));
+  // the records keep `sorted`'s order, which ranks them on the same scale; the listed rows merge in, a tie the record's
+  const out: SidebarSession[] = [];
   let j = 0;
-  while (i < rest.length || j < remote.length) {
-    const record = rest[i];
-    if (j >= remote.length || (record !== undefined && lastActivity(record, digests.get(record.appId)) >= issuedAt(remote[j]))) {
-      out.push({ kind: 'record', record });
-      i++;
-    } else {
-      out.push({ kind: 'listed', listed: remote[j] });
-      j++;
-    }
+  for (const record of sorted) {
+    const rank = recordRank(record);
+    for (; j < remote.length && byRank(remote[j].rank, rank) < 0; j++) out.push({ kind: 'listed', listed: remote[j].l });
+    out.push({ kind: 'record', record });
   }
+  for (; j < remote.length; j++) out.push({ kind: 'listed', listed: remote[j].l });
   return out;
 }
 
