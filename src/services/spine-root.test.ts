@@ -52,6 +52,7 @@ const SPINE_REFUSED_COMMANDS = [
   ...CONNECTORS_COMMANDS, // P5 O4 M2: the connectors and delivery hold no spine file either
   ...LIBRARY_CATALOG_COMMANDS, // P5 O4 M3: nor the library's reads and the catalog's machine half
   'library.fileLinkedPaths', 'library.get', 'library.list', 'library.spaces',
+  'machine.folders.list', // P5 O7 M9: the home's folders hold no spine file
   'machineSettings.get', 'machineSettings.set', // P5 O3-D M5b: read, and a set refused (the machine half is read-only)
   'session.appEvents', 'session.digests', 'session.drafts.get', 'session.drafts.set', 'session.engineStatuses', 'session.get', 'session.launchMode', 'session.list', 'session.observedFacts',
   'session.projects.add', 'session.projects.addFolder', 'session.projects.list', 'session.projects.remove', 'session.projects.update',
