@@ -185,13 +185,21 @@ function headerOf(file: ReviewFile, target: DiffTarget | null, fetched: Pick<Rev
   return load?.status === 'ok' ? (load.file?.header ?? null) : null;
 }
 
+// The kind a file's mark signs and its body draws by: its listing's, or for an untracked file the one its own read answered
+// (the listing knows only that it is untracked; a binary's patch says it is binary, and its header names the new blob)
+function shownKindOf(file: ReviewFile, target: DiffTarget | null, fetched: Pick<ReviewStore, 'files'>): ReviewFile['kind'] {
+  if (file.kind !== 'untracked' || target === null) return file.kind;
+  const load = fileDiffOf(fetched, target, file.path);
+  return load?.status === 'ok' && load.file?.kind === 'binary' ? 'binary' : file.kind;
+}
+
 function FileList({ files, selected, ui, viewedKey: key, target }: { files: readonly ReviewFile[]; selected: string | null; ui: StoreApi<ReviewUi>; viewedKey: string; target: DiffTarget | null }) {
   const marks = useStore(ui, (s) => s.viewed);
   const fetched = useReview((s) => s.files);
   return (
     <ul role="listbox" aria-label={REVIEW_COPY.title} className="max-h-[40%] shrink-0 overflow-y-auto border-b border-border py-1">
       {files.map((file) => {
-        const signed = { kind: file.kind, header: headerOf(file, target, { files: fetched }) };
+        const signed = { kind: shownKindOf(file, target, { files: fetched }), header: headerOf(file, target, { files: fetched }) };
         const viewed = isViewed(marks, key, file.path, viewedSignature(signed, hunksOf(file, target, { files: fetched })));
         return (
           <li key={file.path} role="option" aria-selected={file.path === selected}>
@@ -238,11 +246,13 @@ function FileSection({ file, files, ui, appSessionId, data, viewedKey: key }: { 
   useEffect(() => {
     if (fetch && target) useReview.getState().loadFile(target, file.path, untracked);
   }, [fetch, target, file.path, untracked, scopeDiff]);
-  const hunks = useMemo(() => (binary ? null : (file.hunks ?? (fetched?.status === 'ok' ? (fetched.file?.hunks ?? []) : null))), [binary, file.hunks, fetched]);
+  // P5 O7 M8 review: an untracked file whose read answered a binary patch is drawn and signed as the binary it is
+  const shownBinary = binary || (untracked && fetched?.status === 'ok' && fetched.file?.kind === 'binary');
+  const hunks = useMemo(() => (shownBinary ? null : (file.hunks ?? (fetched?.status === 'ok' ? (fetched.file?.hunks ?? []) : null))), [shownBinary, file.hunks, fetched]);
   const header = file.header ?? (fetched?.status === 'ok' ? (fetched.file?.header ?? null) : null);
   // Stable while the file's hunks are, so the diff body does not re-parse on every render.
   const blocks = useMemo(() => (hunks === null ? [] : blocksOf(hunks, file.hunks === null ? [hunks.length] : file.blocks)), [hunks, file.hunks, file.blocks]);
-  const signature = viewedSignature({ kind: file.kind, header }, hunks);
+  const signature = viewedSignature({ kind: shownBinary ? 'binary' : file.kind, header }, hunks);
   const large = hunks !== null && tooLarge({ hunks });
   const count = hunks === null || large ? 0 : hunks.length;
   const hunk = Math.min(current, Math.max(0, count - 1));
@@ -260,7 +270,7 @@ function FileSection({ file, files, ui, appSessionId, data, viewedKey: key }: { 
         <span data-review-file-header className="min-w-0 flex-1 truncate text-ui-sm text-fg" title={file.path}>
           {REVIEW_COPY.fileHeader(file.path, kindLabel(file))}
         </span>
-        {(binary ? header !== null : !untrackedDirectory && hunks !== null) ? (
+        {(shownBinary ? header !== null : !untrackedDirectory && hunks !== null) ? (
           <button type="button" className={toggle} aria-pressed={viewed} onClick={() => ui.setState((s) => toggleViewed(s, key, file.path, signature))}>
             {viewed ? REVIEW_COPY.viewed : REVIEW_COPY.markViewed}
           </button>
@@ -309,7 +319,7 @@ function FileSection({ file, files, ui, appSessionId, data, viewedKey: key }: { 
           {REVIEW_COPY.untrackedNote}
         </p>
       ) : hunks === null ? (
-        file.kind === 'binary' ? null : fetched?.status === 'error' ? (
+        shownBinary ? null : fetched?.status === 'error' ? (
           <p role="status" className="px-3 py-2 text-ui-sm text-fg-muted">
             {REVIEW_COPY.unavailable(fetched.message)}
           </p>

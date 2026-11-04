@@ -836,6 +836,29 @@ describe('review tool', () => {
     expect(row('logo.png').dataset.viewed).toBeUndefined();
   });
 
+  // P5 O7 M8 review: an untracked binary is read in the untracked scope like any untracked file; its read answers a binary
+  // patch, so its mark signs that header (the new blob's `index` line), and a changed blob drops it
+  it('signs an untracked binary’s mark over the header its read answers, and drops it when the blob changes', async () => {
+    const binary = (index: string) => ({
+      patch: `diff --git a/scratch.txt b/scratch.txt\nnew file mode 100644\nindex 0000000..${index}\nBinary files /dev/null and b/scratch.txt differ\n`,
+      files: [{ path: 'scratch.txt', oldPath: null, insertions: 0, deletions: 0, binary: true }],
+    });
+    main.state.perFile['scratch.txt'] = binary('9fc36a0');
+    render(<TestHost />);
+    openReview({ path: 'scratch.txt' });
+    await waitFor(() => expect(screen.getByText('Mark viewed')).toBeTruthy());
+    fireEvent.click(screen.getByText('Mark viewed'));
+    expect(row('scratch.txt').dataset.viewed).toBe('true');
+    act(() => main.emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
+    await waitFor(() => expect(main.callsOf('git.diff').filter((input) => input.path === 'scratch.txt')).toHaveLength(2));
+    await waitFor(() => expect(row('scratch.txt').dataset.viewed).toBe('true')); // the same blob: the mark stands
+    main.state.perFile['scratch.txt'] = binary('76ca49d');
+    act(() => main.emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
+    await waitFor(() => expect(main.callsOf('git.diff').filter((input) => input.path === 'scratch.txt')).toHaveLength(3));
+    await waitFor(() => expect(screen.getByText('Mark viewed')).toBeTruthy());
+    expect(row('scratch.txt').dataset.viewed).toBeUndefined();
+  });
+
   it('keeps viewed marks across unmounts and drops a mark when the file’s hunks change', async () => {
     render(<TestHost />);
     openReview();
