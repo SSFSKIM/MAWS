@@ -7,6 +7,7 @@
 // the host accepted (the unavailable-segments notice and the history append).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import type { SendUpload } from '@shared/ipc/schema/files'; // P5 O7 M8
 import { DEFAULT_MEMORY_TARGET, type MemoryTarget } from '../../stores/composer';
 import { toast, useNotices } from '../../stores/notices';
 import { runBash } from '../modes/bash';
@@ -20,7 +21,7 @@ import { beginRemoteSend, isRemoteLaneB } from '../../lane-b/remote-session'; //
 import { useTranscriptStore } from '../../stores/transcript';
 import { sendSizeRefusal } from './attachments';
 import type { Attachment } from './doc';
-import { composeRemoteSend, planRemoteSend } from './remote-uploads'; // P5 O7 M4
+import { composeRemoteSend, forgetUploads, planRemoteSend, STALE_UPLOADS } from './remote-uploads'; // P5 O7 M4; M8: forgetUploads, STALE_UPLOADS
 import type { Serialized } from './serialize';
 
 // A dispatch answers null when the host accepted the submission, else the error to show.
@@ -94,7 +95,14 @@ export function appendHistory(client: MawsBridge, appSessionId: AppSessionId, s:
 // port has handed the words to the pending-send strip, which keeps them by their key until their fate arrives.
 // P5 O7 M2: to a session on another machine, the refusal's or error's words are main's (A4's "Not sent: <machine> is
 // offline", the pending bound's "…hasn't confirmed it; check the transcript"), and Retry reads Send again.
-export async function submitHumanSerialized(controls: SessionControls, client: MawsBridge, appSessionId: AppSessionId, s: Serialized, retry?: () => void): Promise<boolean> {
+// P5 O7 M8: what a remote send with uploads adds (submitRemoteSerialized): the uploads the message names, and what a
+// failed send hears before its words are shown
+interface RemoteExtras {
+  uploads: readonly SendUpload[];
+  failed(error: unknown): void;
+}
+
+export async function submitHumanSerialized(controls: SessionControls, client: MawsBridge, appSessionId: AppSessionId, s: Serialized, retry?: () => void, remote?: RemoteExtras): Promise<boolean> {
   if (s.empty) return false;
   let tooLarge = false;
   const fits = () => {
@@ -102,7 +110,14 @@ export async function submitHumanSerialized(controls: SessionControls, client: M
     return !tooLarge;
   };
   try {
-    const result = await controls.send(s.content, { origin: 'composer', display: s.display, pastedContents: s.pastedContents, precheck: fits, ...(s.attachmentNames !== undefined && { attachmentNames: s.attachmentNames }) });
+    const result = await controls.send(s.content, {
+      origin: 'composer',
+      display: s.display,
+      pastedContents: s.pastedContents,
+      precheck: fits,
+      ...(s.attachmentNames !== undefined && { attachmentNames: s.attachmentNames }),
+      ...(remote !== undefined && remote.uploads.length > 0 && { uploads: remote.uploads }),
+    });
     if (result.disposition === 'held') return false;
     if (result.disposition === 'refused') {
       if (tooLarge) return false; // the pre-check said why
@@ -110,6 +125,7 @@ export async function submitHumanSerialized(controls: SessionControls, client: M
       return false;
     }
   } catch (error) {
+    remote?.failed(error);
     warn(error instanceof Error ? error.message : String(error), retry, undefined, retryLabel(appSessionId));
     return false;
   }
@@ -117,12 +133,19 @@ export async function submitHumanSerialized(controls: SessionControls, client: M
   return true;
 }
 
+// P5 O7 M8: a send the machine refused for its uploads (main's REMOTE_UPLOAD_REFUSED_WORDS, `issues.uploads`)
+const refusedForUploads = (error: unknown): boolean => error instanceof Error && ((error.cause as { issues?: { uploads?: unknown } } | undefined)?.issues?.uploads === 'refused');
+
 // P5 O7 M4 ("What a drop sends", "Uploads in parts"): a message to a lane B session on another machine. Its images go
 // inline while the message fits the channel; every other attachment goes up to the machine first (remote-uploads.ts),
 // counted as the send on its way ("Sending to <machine>…"), and the message then carries their paths there as mentions.
 // An upload that fails keeps the text and the attachments, with the words and Send again, and sends nothing; what went
 // up stays known, so a send again sends it once. A session that can't take the message uploads nothing: the send path
 // refuses it as for any message.
+// P5 O7 M8 ("The attachment"): the uploaded PDFs go as the send's `uploads` too, document blocks the machine reads into
+// the message. A send naming an upload that went up more than a day ago (the most the machine reads one for) says so
+// first, and goes. A send the machine refused for its uploads shows main's words as any send error, with Send again,
+// and forgets those uploads, so a send again sends them up afresh.
 export async function submitRemoteSerialized(
   controls: SessionControls,
   client: MawsBridge,
@@ -136,6 +159,7 @@ export async function submitRemoteSerialized(
   if (s.empty || upload.length === 0 || !controls.capability('send').available) return submitHumanSerialized(controls, client, appSessionId, s, retry);
   const sending = beginRemoteSend(appSessionId);
   let message: Serialized;
+  let uploads: readonly SendUpload[];
   try {
     const composed = await composeRemoteSend(client, appSessionId, s, attachments, cwd);
     if (!composed.ok) {
@@ -143,10 +167,17 @@ export async function submitRemoteSerialized(
       return false;
     }
     message = composed.message;
+    uploads = composed.uploads;
+    if (composed.stale.length > 0) warn(STALE_UPLOADS(composed.stale)); // advisory, not a block
   } finally {
     sending();
   }
-  return submitHumanSerialized(controls, client, appSessionId, message, retry);
+  return submitHumanSerialized(controls, client, appSessionId, message, retry, {
+    uploads,
+    failed: (error) => {
+      if (refusedForUploads(error)) forgetUploads(appSessionId, attachments);
+    },
+  });
 }
 
 // P2-A: a `!` or `#` submission on a record with no ready process acquires the session first. Whether it may go on: a

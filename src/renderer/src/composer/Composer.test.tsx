@@ -47,7 +47,8 @@ import { ComposerAppKeys } from './ComposerAppKeys';
 import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
 import { docOf, mentionNode, paragraph, textNode } from './editor/doc';
-import { ON_THIS_MAC } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1)
+import { ON_THIS_MAC, STALE_UPLOADS, UPLOAD_ADVISORY_MS } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1); M8: STALE_UPLOADS, UPLOAD_ADVISORY_MS
+import { REMOTE_UPLOAD_REFUSED_WORDS } from '@shared/ipc/schema/remote'; // P5 O7 M8
 import { forgetSubmissions } from './editor/controller'; // M4c re-review: a reload's fresh modules
 import { resetEffectiveEfforts } from './effective-effort'; // W3
 import { registerSlashWidget } from './mentions/widgets'; // W3
@@ -1495,6 +1496,63 @@ describe('a lane B session on another machine', () => {
     await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
     await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
     expect(takeFirstSend(R)).toBe(false);
+  });
+
+  // P5 O7 M8 ("The attachment"): a dropped PDF reaches the model as a document block, as a local drop's does: its upload
+  // is named in the send's `uploads` (main drops them for a machine that doesn't read them), its mention kept in the text
+  const dropPdf = async () => {
+    window.maws = { ...preloadOf(remote), pathForFile: () => '' } as PreloadBridge;
+    mount([{ index: 0, id: R }]);
+    await type('read');
+    queueComposerAttachment(R, { files: [new File(['%PDF-1.4'], 'paper.pdf', { type: 'application/pdf' })], text: '' });
+    await waitFor(() => expect(within(composerOf(0)).getByRole('list', { name: 'attachments' }).textContent).toContain('paper.pdf'));
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(remote.pending('files.upload')).toBe(1));
+    await act(() => remote.reply('files.upload', { status: 'ok', paths: ['/work/app-r/.claude/desk-uploads/app-r/u.0.pdf'] }));
+    await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+  };
+  const PDF_SEND = { appSessionId: 'app-r', content: 'read\n\n@.claude/desk-uploads/app-r/u.0.pdf', uploads: [{ uploadId: 'u.0.pdf', as: 'document' }] };
+  const noticesOf = () => useNotices.getState().notices.map((n) => [n.text, n.actions.map((a) => a.label)]);
+
+  it('sends a dropped PDF as a document too: its upload named in the send’s uploads, its mention kept in the text', async () => {
+    await dropPdf();
+    expect(remote.invoked('session.send')).toEqual([PDF_SEND]);
+    await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+  });
+
+  it('shows the machine’s refusal of a send for its upload as a send error with Send again, which sends the file up again', async () => {
+    await dropPdf();
+    await act(() => remote.fail('session.send', REMOTE_UPLOAD_REFUSED_WORDS, 'invalid_input', { refusal: 'malformed', uploads: 'refused' }));
+    await waitFor(() => expect(noticesOf()).toEqual([[REMOTE_UPLOAD_REFUSED_WORDS, ['Send again']]]));
+    expect(editorOf().editor.getText().trim()).toBe('read');
+    expect(within(composerOf(0)).getByRole('list', { name: 'attachments' }).textContent).toContain('paper.pdf');
+    act(() => useNotices.getState().notices[0].actions[0].run());
+    await waitFor(() => expect(remote.pending('files.upload')).toBe(1)); // the refused upload forgotten: it goes up afresh
+    await act(() => remote.reply('files.upload', { status: 'ok', paths: ['/work/app-r/.claude/desk-uploads/app-r/v.0.pdf'] }));
+    await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+    expect(remote.invoked('session.send').at(-1)).toEqual({ ...PDF_SEND, content: 'read\n\n@.claude/desk-uploads/app-r/v.0.pdf', uploads: [{ uploadId: 'v.0.pdf', as: 'document' }] });
+    await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+  });
+
+  it('warns before a send names an upload that went up more than a day ago, and sends it all the same', async () => {
+    const now = vi.spyOn(Date, 'now');
+    try {
+      await dropPdf();
+      await act(() => remote.fail('session.send', 'Not sent: mini is offline', 'host_unavailable'));
+      await waitFor(() => expect(noticesOf()).toEqual([['Not sent: mini is offline', ['Send again']]]));
+      now.mockReturnValue(Date.now() + UPLOAD_ADVISORY_MS + 1);
+      act(() => useNotices.getState().notices[0].actions[0].run());
+      await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+      expect(noticesOf()).toEqual([[STALE_UPLOADS(['paper.pdf']), []]]);
+      expect(remote.invoked('files.upload')).toHaveLength(1); // a warning, not a block
+      expect(remote.invoked('session.send')).toEqual([PDF_SEND, PDF_SEND]);
+      await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+      await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it('keeps the draft in this app’s memory, never asking the machine for it', async () => {

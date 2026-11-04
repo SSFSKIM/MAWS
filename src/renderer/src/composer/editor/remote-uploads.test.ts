@@ -9,7 +9,7 @@ import { fakeClient } from '../../../../../test/support/fake-client';
 import { OTHER_MACHINE } from '../../../../../test/support/machine';
 import type { Attachment } from './doc';
 import type { Serialized } from './serialize';
-import { classifyRemoteFile, composeRemoteSend, planRemoteSend, remoteMessage, resetRemoteUploads, uploadAttachments, uploadName, useRemoteUploads } from './remote-uploads';
+import { classifyRemoteFile, composeRemoteSend, forgetUploads, planRemoteSend, remoteMessage, resetRemoteUploads, STALE_UPLOADS, UPLOAD_ADVISORY_MS, uploadAttachments, uploadName, useRemoteUploads } from './remote-uploads';
 
 const MiB = 1024 * 1024;
 const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
@@ -141,6 +141,56 @@ describe('a send with uploads at the channel’s bound', () => {
     await fake.reply('files.upload', { status: 'ok', paths: ['/work/app-r/.claude/desk-uploads/app-r/u.1.png'] });
     const sent = await sending;
     expect(fake.invoked('files.upload').map((c) => (c as { files: { name: string }[] }).files.map((f) => f.name))).toEqual([['p1.pdf'], ['i1.png']]); // the PDF once, then the image
-    expect(sent).toEqual({ ok: true, message: expect.objectContaining({ content: 'look\n\n@.claude/desk-uploads/app-r/u.0.pdf @.claude/desk-uploads/app-r/u.1.png' }) });
+    expect(sent).toEqual({ ok: true, message: expect.objectContaining({ content: 'look\n\n@.claude/desk-uploads/app-r/u.0.pdf @.claude/desk-uploads/app-r/u.1.png' }), uploads: [{ uploadId: 'u.0.pdf', as: 'document' }], stale: [] }); // P5 O7 M8: the PDF also as a document
+  });
+});
+
+// P5 O7 M8 ("The attachment"; Interfaces §U, "The send's uploads"): an uploaded PDF reaches the model as a document block.
+// The send names it by its upload id (the last component of the path files.upload answered, UPLOAD_ID_PATTERN) beside
+// the mention, which stays in the text for a reader; the machine's endpoint reads it from the session's upload root.
+describe('a send’s uploaded PDFs, as document blocks', () => {
+  const s = { mode: 'send', text: 'read these', content: 'read these', display: 'read these', pastedContents: {}, omitted: 0, empty: false } as Serialized;
+  const ROOT = '/work/app-r/.claude/desk-uploads/app-r';
+
+  it('names each uploaded PDF by its upload id, as a document, and keeps every mention; another file is its mention alone', async () => {
+    const fake = fakeClient();
+    const sending = composeRemoteSend(fake.client, R, s, [pdf('p1', 10), file('f1', 'notes.txt', 3), pdf('p2', 20)], '/work/app-r');
+    await fake.reply('files.upload', { status: 'ok', paths: [`${ROOT}/u.0.pdf`, `${ROOT}/u.1.txt`, `${ROOT}/u.2.pdf`] });
+    await expect(sending).resolves.toEqual({
+      ok: true,
+      message: expect.objectContaining({ content: 'read these\n\n@.claude/desk-uploads/app-r/u.0.pdf @.claude/desk-uploads/app-r/u.1.txt @.claude/desk-uploads/app-r/u.2.pdf' }),
+      uploads: [
+        { uploadId: 'u.0.pdf', as: 'document' },
+        { uploadId: 'u.2.pdf', as: 'document' },
+      ],
+      stale: [],
+    });
+  });
+
+  it('names no upload whose path is no upload id (its mention alone)', async () => {
+    const fake = fakeClient();
+    const sending = composeRemoteSend(fake.client, R, s, [pdf('p1', 10)], '/work/app-r');
+    await fake.reply('files.upload', { status: 'ok', paths: ['/work/app-r/elsewhere/../p1.pdf'] });
+    await expect(sending).resolves.toMatchObject({ ok: true, uploads: [] });
+  });
+
+  it('says which uploads went up more than a day ago (the machine reads none older), and forgets uploads so they go up again', async () => {
+    let now = 1_000_000;
+    const fake = fakeClient({ 'files.upload': (input: { files: unknown[] }) => ({ status: 'ok', paths: input.files.map((_, i) => `${ROOT}/u${now}.${i}.pdf`) }) });
+    const doc = pdf('p1', 10);
+    await expect(composeRemoteSend(fake.client, R, s, [doc], '/work/app-r', () => now)).resolves.toMatchObject({ ok: true, stale: [] });
+    now += UPLOAD_ADVISORY_MS;
+    await expect(composeRemoteSend(fake.client, R, s, [doc], '/work/app-r', () => now)).resolves.toMatchObject({ ok: true, stale: [] }); // a day to the millisecond: still within it
+    now += 1;
+    await expect(composeRemoteSend(fake.client, R, s, [doc], '/work/app-r', () => now)).resolves.toMatchObject({ ok: true, stale: ['p1.pdf'], uploads: [{ uploadId: 'u1000000.0.pdf', as: 'document' }] });
+    expect(fake.invoked('files.upload')).toHaveLength(1); // a warning, not a block: the kept upload is sent
+    forgetUploads(R, [doc]);
+    await expect(composeRemoteSend(fake.client, R, s, [doc], '/work/app-r', () => now)).resolves.toMatchObject({ ok: true, stale: [], uploads: [{ uploadId: `u${now}.0.pdf`, as: 'document' }] });
+    expect(fake.invoked('files.upload')).toHaveLength(2);
+  });
+
+  it('words the advisory for one upload and for several', () => {
+    expect(STALE_UPLOADS(['a.pdf'])).toBe('a.pdf went up more than a day ago, so the machine may no longer have it. If the message isn’t sent, attach it again.');
+    expect(STALE_UPLOADS(['a.pdf', 'b.pdf'])).toBe('a.pdf and b.pdf went up more than a day ago, so the machine may no longer have them. If the message isn’t sent, attach them again.');
   });
 });

@@ -12,11 +12,17 @@
 //   nothing twice.
 // - The message carries the inline images and the text, with each uploaded path as a mention relative to the session's
 //   working directory, as a dropped local file's is.
+// - P5 O7 M8 ("The attachment"; Interfaces §U, "The send's uploads"): an uploaded PDF also reaches the model as a
+//   `document` block, as a local drop's does. The send names it in `uploads` by its upload id (the last component of the
+//   path `files.upload` answered, UPLOAD_ID_PATTERN), and the machine's endpoint reads it from the session's upload root
+//   into the message; the mention stays in the text for a reader. Main drops `uploads` for an endpoint that doesn't read
+//   them. The machine reads no upload written more than a day ago, so a send that would name one kept longer says so
+//   first (a warning, not a block), and a send the machine refused for its uploads forgets them, to go up again.
 import { create } from 'zustand';
 import type { ContentBlock } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { UPLOAD_CALL_MAX_BYTES, UPLOAD_FILE_MAX_BYTES, UPLOAD_FILES_MAX } from '@shared/ipc/schema/files';
+import { UPLOAD_CALL_MAX_BYTES, UPLOAD_FILE_MAX_BYTES, UPLOAD_FILES_MAX, UPLOAD_ID_PATTERN, type SendUpload } from '@shared/ipc/schema/files';
 import { REMOTE_INLINE_MAX_BYTES } from '@shared/ipc/schema/remote';
 import { MENTION, type Attachment, type ComposerDoc } from './doc';
 import { IMAGE_BYTE_TYPES, MAX_SOURCE_IMAGE_BYTES, mentionPath } from './paste';
@@ -92,8 +98,24 @@ export interface RemoteUploadsStore {
 export const useRemoteUploads = create<RemoteUploadsStore>()(() => ({ progress: new Map() }));
 export const useUploadProgress = (attachmentId: string): UploadProgress | null | undefined => useRemoteUploads((s) => s.progress.get(attachmentId));
 
-// Each attachment's path on its session's machine, once uploaded (by attachment id: a drop's id is its own).
-const uploaded = new Map<string, { session: AppSessionId; path: string }>();
+// Each attachment's path on its session's machine, once uploaded (by attachment id: a drop's id is its own), and when
+// `files.upload` answered it (P5 O7 M8: the machine's own clock is not this Mac's, so this is the moment this app holds).
+const uploaded = new Map<string, { session: AppSessionId; path: string; at: number }>();
+
+/** P5 O7 M8: how long the machine reads an upload for (services/files/upload.ts UPLOAD_KEPT_MS, its sweep's day). */
+export const UPLOAD_ADVISORY_MS = 24 * 3600_000;
+
+/** P5 O7 M8: the advisory before a send that names uploads kept longer than the machine reads them. */
+export const STALE_UPLOADS = (names: readonly string[]): string => {
+  const one = names.length === 1;
+  const listed = one ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `${listed} went up more than a day ago, so the machine may no longer have ${one ? 'it' : 'them'}. If the message isn’t sent, attach ${one ? 'it' : 'them'} again.`;
+};
+
+/** P5 O7 M8: the attachments' uploads forgotten (a send the machine refused for them), so a send again sends them up afresh. */
+export function forgetUploads(appSessionId: AppSessionId, attachments: readonly Attachment[]): void {
+  for (const a of attachments) if (uploaded.get(a.id)?.session === appSessionId) uploaded.delete(a.id);
+}
 export function resetRemoteUploads(): void {
   uploaded.clear();
   useRemoteUploads.setState({ progress: new Map() });
@@ -127,7 +149,7 @@ function batches(files: readonly Attachment[]): Attachment[][] {
 export type UploadOutcome = { ok: true; paths: string[] } | { ok: false; error: string };
 
 /** Uploads the attachments to the session's machine (none twice), each one's path in order; the progress meanwhile. */
-export async function uploadAttachments(client: MawsBridge, appSessionId: AppSessionId, attachments: readonly Attachment[]): Promise<UploadOutcome> {
+export async function uploadAttachments(client: MawsBridge, appSessionId: AppSessionId, attachments: readonly Attachment[], now: () => number = Date.now): Promise<UploadOutcome> {
   const known = (a: Attachment) => {
     const kept = uploaded.get(a.id);
     return kept !== undefined && kept.session === appSessionId ? kept.path : null;
@@ -146,9 +168,10 @@ export async function uploadAttachments(client: MawsBridge, appSessionId: AppSes
           if (!result.ok) return { ok: false, error: result.error.message };
           if (result.value.status !== 'ok') return { ok: false, error: `${batch.map((a) => a.name).join(', ')} didn’t go up: ${result.value.reason}` };
           const paths = result.value.paths;
+          const at = now();
           batch.forEach((a, i) => {
             const path = paths[i];
-            if (path !== undefined) uploaded.set(a.id, { session: appSessionId, path });
+            if (path !== undefined) uploaded.set(a.id, { session: appSessionId, path, at });
           });
         } finally {
           off();
@@ -162,22 +185,40 @@ export async function uploadAttachments(client: MawsBridge, appSessionId: AppSes
   return paths.every((path): path is string => path !== null) ? { ok: true, paths } : { ok: false, error: 'the machine answered no path for an upload' };
 }
 
+// P5 O7 M8: an uploaded PDF by its upload id, the last component of the path the machine answered; none for a path
+// that isn't one (the mention alone then)
+function documentUploads(upload: readonly Attachment[], paths: readonly string[]): SendUpload[] {
+  return upload.flatMap((a, i) => {
+    const uploadId = paths[i]?.slice(paths[i]!.lastIndexOf('/') + 1);
+    return a.kind === 'document' && uploadId !== undefined && UPLOAD_ID_PATTERN.test(uploadId) ? [{ uploadId, as: 'document' as const }] : [];
+  });
+}
+
+export type RemoteSend = { ok: true; message: Serialized; uploads: SendUpload[]; stale: string[] } | { ok: false; error: string };
+
 /**
  * Uploads what the plan sends up and makes the message (M4c fix wave 1): the inline fit judged again on the message as
- * sent, its path mentions with it, the last inline image going up too while it would not fit the channel.
+ * sent, its path mentions with it, the last inline image going up too while it would not fit the channel. P5 O7 M8: with
+ * the uploaded PDFs it names as document blocks (`uploads`), and the names of the uploads it sends that went up more than
+ * a day ago (`stale`).
  */
-export async function composeRemoteSend(client: MawsBridge, appSessionId: AppSessionId, s: Serialized, attachments: readonly Attachment[], cwd: string): Promise<{ ok: true; message: Serialized } | { ok: false; error: string }> {
+export async function composeRemoteSend(client: MawsBridge, appSessionId: AppSessionId, s: Serialized, attachments: readonly Attachment[], cwd: string, now: () => number = Date.now): Promise<RemoteSend> {
   let { inline, upload } = planRemoteSend(s.text, attachments);
   for (;;) {
-    const uploaded = await uploadAttachments(client, appSessionId, upload);
-    if (!uploaded.ok) return uploaded;
-    const message = remoteMessage(s, inline, uploaded.paths, cwd);
+    const sent = await uploadAttachments(client, appSessionId, upload, now);
+    if (!sent.ok) return sent;
+    const message = remoteMessage(s, inline, sent.paths, cwd);
     const content = typeof message.content === 'string' ? [{ type: 'text' as const, text: message.content }] : message.content;
-    if (inline.length === 0 || encoder.encode(JSON.stringify(content)).length <= REMOTE_INLINE_MAX_BYTES) return { ok: true, message };
+    if (inline.length === 0 || encoder.encode(JSON.stringify(content)).length <= REMOTE_INLINE_MAX_BYTES) {
+      const at = now();
+      const stale = upload.filter((a) => at - (uploaded.get(a.id)?.at ?? at) > UPLOAD_ADVISORY_MS).map((a) => a.name);
+      return { ok: true, message, uploads: documentUploads(upload, sent.paths), stale };
+    }
     upload = [...upload, inline[inline.length - 1]!];
     inline = inline.slice(0, -1);
   }
 }
+
 
 /** The message a send with uploads makes: the inline images, then the text with each path as a mention. */
 export function remoteMessage(s: Serialized, inline: readonly Attachment[], paths: readonly string[], cwd: string): Serialized {

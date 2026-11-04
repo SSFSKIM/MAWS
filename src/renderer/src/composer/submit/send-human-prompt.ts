@@ -11,6 +11,7 @@ import type { PastedContent } from '@shared/composer/history-entry';
 import type { SendContent } from '@shared/engine/session-state-store';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { CommandOutput, MawsBridge } from '@shared/ipc/schema';
+import type { SendUpload } from '@shared/ipc/schema/files';
 import { ipc } from '../../ipc/client';
 import { acquireSession, acquisitionWords, cardWords } from '../../sessions/acquire';
 import { readSessionQueue, useQueueStore } from '../../stores/queue';
@@ -37,6 +38,10 @@ export interface HumanPromptOptions {
   // P5 O9 M7: the attachments' names as the person gave them, in the order of `content`'s image and document blocks; lane
   // A names its upload's files by them (a block carries no name), lane B reads nothing of it
   attachmentNames?: readonly string[];
+  // P5 O7 M8 ("The attachment"): the PDFs uploaded to a lane B session's machine, which its endpoint reads into the
+  // message as document blocks (its mentions are in `content` already); read by the remote send alone, which then sends
+  // rather than steers, since a steer carries no uploads
+  uploads?: readonly SendUpload[];
 }
 export interface HumanPromptResult {
   // P5 O9 M5: 'unconfirmed', lane A's alone: the bridge took the words and had not said whether they entered when it
@@ -50,10 +55,10 @@ export interface HumanPromptResult {
 
 // The extracted wire dispatch, also used by the standalone editor's existing explicit send/steer API. Only the
 // shared seam below chooses the action from session state; this primitive preserves that editor API and its tests.
-export const dispatchHumanPrompt = (client: MawsBridge, appSessionId: AppSessionId, content: SendContent, how: 'send' | 'steer') =>
+export const dispatchHumanPrompt = (client: MawsBridge, appSessionId: AppSessionId, content: SendContent, how: 'send' | 'steer', uploads: readonly SendUpload[] = []) =>
   how === 'steer'
     ? client.invoke('session.steer', { appSessionId, content, priority: 'next' })
-    : client.invoke('session.send', { appSessionId, content });
+    : client.invoke('session.send', { appSessionId, content, ...(uploads.length > 0 && { uploads: [...uploads] }) });
 
 const notReady = (process: string | undefined): HumanPromptResult => ({ disposition: 'refused', started: false, reason: process === 'starting' || process === 'initializing' ? STARTING : ENDED });
 const declined = (options: HumanPromptOptions): HumanPromptResult | null =>
@@ -91,9 +96,13 @@ export async function sendWithoutAcquiring(appSessionId: AppSessionId, content: 
   if (refusal !== null) return refusal;
   const status = useSessions.getState().engine.get(appSessionId) ?? null;
   const entries = useQueueStore.getState().bySession.get(appSessionId)?.entries ?? [];
-  const how = status?.process === 'ready' && isBusy(status, entries) ? 'steer' : 'send';
-  const result = await dispatchHumanPrompt(client, appSessionId, content, how);
-  if (!result.ok) throw new Error(result.error.message); // main's words (A4's, the pending bound's), shown with Send again
+  const uploads = options.uploads ?? [];
+  // P5 O7 M8: a message naming uploads is sent (the host queues it behind a running turn): a steer carries none
+  const how = uploads.length === 0 && status?.process === 'ready' && isBusy(status, entries) ? 'steer' : 'send';
+  const result = await dispatchHumanPrompt(client, appSessionId, content, how, uploads);
+  // main's words (A4's, the pending bound's), shown with Send again; P5 O7 M8: the refusal itself kept as the cause, so a
+  // caller can tell a send refused for its uploads (`issues.uploads`)
+  if (!result.ok) throw new Error(result.error.message, { cause: result.error });
   return hostAnswer(result.value, how, false);
 }
 
