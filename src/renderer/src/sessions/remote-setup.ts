@@ -1,0 +1,169 @@
+// "+ Session" on a machine with no checkout of the org project (P5 O7 M9, docs/doperpowers/plans/2026-10-28-p5-o7-remote-
+// lane-b.md, "Remote setup"; Interfaces §U's rows). The machine menu offers every up RL2 machine: one with a checkout as
+// before (remote-spawn.ts), one without it to set the project up there, and one whose owners alone could, or that
+// predates the setup, greyed with why. The setup is the machine's owners' to make: its folder list and trust read are
+// their `list` calls, its registration their `machine-admin` act (Touch ID), so a member who is not an owner learns it
+// from the first listing's `owners-only` before any control is offered.
+//
+// The sheet (RemoteSetupSheet.tsx) asks which folder there holds the project: the paths the project's other checkouts
+// use first, then the machine's home, a page at a time. A private folder macOS protects is never read inside until the
+// person opens it, since opening one may raise a privacy prompt on that machine. The chosen folder's trust is read there;
+// an untrusted one shows that machine's trust card, whose answer travels as the spawn's `trust: 'accepted'` (the machine
+// runs the attested bootstrap; MAWS never writes trust). Then the folder is registered, and its project's directory is
+// the spawn's checkout.
+import type { AppSessionId } from '@shared/graph/ids';
+import type { IpcError } from '@shared/ipc/errors';
+import type { MawsBridge } from '@shared/ipc/schema';
+import type { FolderEntry } from '@shared/ipc/schema/machine';
+import { machineOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
+import type { TrustState } from '@shared/sessions/trust';
+import { ipc } from '../ipc/client';
+import { useMachines } from '../stores/machines';
+import { useSessions } from '../stores/sessions';
+import type { SpawnTarget } from './remote-spawn';
+
+/** What the sheet is opened for: the folder of a project not set up there yet, or the trust of a registered checkout the machine refused untrusted (`then`: the Send it answers, asked again). */
+export type SetupRequest =
+  | { kind: 'folder'; tab: AppSessionId; machine: MachineRef; name: string; key: string; home: string | null; first: FolderPage; suggestions: string[] }
+  | { kind: 'trust'; tab: AppSessionId; target: SpawnTarget; then?: () => void };
+
+export interface FolderPage {
+  entries: FolderEntry[];
+  cursor: string | null;
+}
+
+/** A machine the menu names for an org project: start there, set the project up there, or not, and why. */
+export type MachineChoice =
+  | { kind: 'ready'; target: SpawnTarget }
+  | { kind: 'setup'; machine: MachineRef; name: string; key: string; home: string | null; first: FolderPage }
+  | { kind: 'closed'; machine: MachineRef; name: string; words: string };
+
+export const SETUP_WORDS = {
+  setUp: 'Set up this project there…',
+  title: (machine: string) => `Set up this project on ${machine}`,
+  privacy: (machine: string) =>
+    `Choose the folder on ${machine} that holds this project. Private folders macOS protects (Documents, Desktop, Downloads and the like) stay closed unless you open one, and opening one may show a privacy prompt on ${machine}.`,
+  suggestions: 'Where the project’s other checkouts are',
+  home: 'Home',
+  up: 'Up',
+  more: 'Show more',
+  empty: 'No folders here',
+  loading: 'Reading the folders…',
+  private: 'private',
+  openPrivate: (folder: string, machine: string) => `Open ${folder}? macOS may show a privacy prompt on ${machine}, which someone there has to answer.`,
+  open: 'Open it',
+  back: 'Back',
+  use: 'Use this folder',
+  useHint: 'Open the folder that holds the project, then use it',
+  checking: (machine: string) => `Reading its trust on ${machine}…`,
+  registering: (machine: string) => `Registering it on ${machine}; confirm with Touch ID…`,
+  trustTitle: (machine: string) => `Trust this folder on ${machine}?`,
+  trust: 'Trust',
+  trustAndStart: 'Trust and start',
+  close: 'Close',
+  // refusals
+  notOwner: (machine: string) => `Only ${machine}’s owners can set up a project there; ask one of them, or start it on another machine`,
+  notOffered: (machine: string) => `${machine} can’t set up projects from this Mac yet; update MAWS on ${machine}`,
+  noFolder: (machine: string) => `That folder isn’t on ${machine} any more; choose it again`,
+  outsideHome: (machine: string) => `${machine} sets up only folders in its home folder`,
+  symlinkEscape: (machine: string) => `That folder links out of ${machine}’s home folder; choose the folder it points to`,
+  protected: 'That folder is inside a private folder; open the private folder first',
+  cancelled: 'Not set up: the confirmation was cancelled',
+} as const;
+
+const REASONS = ['owners-only', 'not-offered', 'no-folder', 'outside-home', 'symlink-escape', 'protected', 'step-up-cancelled'] as const;
+type Reason = (typeof REASONS)[number];
+const wordsOf = (reason: Reason, machine: string): string => {
+  switch (reason) {
+    case 'owners-only':
+      return SETUP_WORDS.notOwner(machine);
+    case 'not-offered':
+      return SETUP_WORDS.notOffered(machine);
+    case 'no-folder':
+      return SETUP_WORDS.noFolder(machine);
+    case 'outside-home':
+      return SETUP_WORDS.outsideHome(machine);
+    case 'symlink-escape':
+      return SETUP_WORDS.symlinkEscape(machine);
+    case 'protected':
+      return SETUP_WORDS.protected;
+    case 'step-up-cancelled':
+      return SETUP_WORDS.cancelled;
+  }
+};
+const isReason = (value: unknown): value is Reason => (REASONS as readonly unknown[]).includes(value);
+
+/** A setup read's or act's error in words: the machine's refusal (main's `issues.refusal`, or a listing's forwarded message, whose first word is the reason) named, anything else as main said it. */
+export function setupErrorWords(error: Pick<IpcError, 'code' | 'message' | 'issues'>, machine: string): string {
+  const refusal = (error.issues as { refusal?: unknown } | undefined)?.refusal;
+  if (isReason(refusal)) return wordsOf(refusal, machine);
+  const first = /^([a-z-]+):/.exec(error.message)?.[1];
+  if (error.code === 'invalid_input' && isReason(first)) return wordsOf(first, machine);
+  return error.message;
+}
+
+// A path under a person's home on macOS or Linux, from the home (the checkouts other machines report).
+const UNDER_A_HOME = /^\/(?:Users|home)\/[^/]+(?=\/|$)/;
+
+/** The other checkouts' paths as the same paths under this machine's home, each once; nothing without the home. */
+export function suggestionsFor(known: readonly string[], home: string | null): string[] {
+  if (home === null) return [];
+  const found = new Set<string>();
+  for (const path of known) {
+    const rest = UNDER_A_HOME.test(path) ? path.replace(UNDER_A_HOME, '') : null;
+    if (rest === null || rest === '' || rest === '/') continue;
+    found.add(`${home}${rest}`);
+  }
+  return [...found];
+}
+
+/** Whether this app reaches the machine over RL2 now (the machines the menu asks). */
+const rl2Machines = () => [...useMachines.getState().machines.values()].filter((m) => !m.local && m.state === 'up' && (m.carrier === 'direct' || m.carrier === 'relay'));
+
+/**
+ * The machines the menu offers for the org project `key`, in the roster's order, and the checkouts of it every machine
+ * reports (this Mac's included), whose paths the setup suggests. A machine whose projects can't be read is left out.
+ */
+export async function readMachines(key: string, client: MawsBridge = ipc): Promise<{ choices: MachineChoice[]; known: string[] }> {
+  const known = [...useSessions.getState().projects.values()].filter((p) => p.org?.key === key && p.discovered !== true && machineOf(p.id) === client.localMachine).map((p) => p.directory);
+  const read = await Promise.all(
+    rl2Machines().map(async (machine): Promise<MachineChoice | null> => {
+      const projects = await client.invoke('session.projects.list', undefined, { machine: machine.ref }).catch(() => null);
+      if (projects === null || !projects.ok) return null;
+      const checkouts = projects.value.projects.filter((p) => p.org?.key === key && p.discovered !== true);
+      known.push(...checkouts.map((p) => p.directory));
+      if (checkouts.length > 0) return { kind: 'ready', target: { machine: machine.ref, name: machine.name, checkout: checkouts[0].directory, key } };
+      // no checkout: the home's first page, which only the machine's owners may read, says whether the setup is offered
+      const first = await listFolders(machine.ref, machine.name, { path: null }, client);
+      if (!first.ok) return { kind: 'closed', machine: machine.ref, name: machine.name, words: first.words };
+      const home = first.page.entries.length === 0 ? null : first.page.entries[0].path.slice(0, first.page.entries[0].path.lastIndexOf('/')) || null;
+      return { kind: 'setup', machine: machine.ref, name: machine.name, key, home, first: first.page };
+    }),
+  );
+  return { choices: read.filter((choice): choice is MachineChoice => choice !== null), known: [...new Set(known)] };
+}
+
+/** One page of the folders at `path` on the machine (null: its home); `open` reads inside a private folder. */
+export async function listFolders(
+  machine: MachineRef,
+  name: string,
+  at: { path: string | null; open?: boolean; cursor?: string },
+  client: MawsBridge = ipc,
+): Promise<{ ok: true; page: FolderPage } | { ok: false; words: string }> {
+  const input = { ...(at.path !== null && { path: at.path }), ...(at.open === true && { open: true as const }), ...(at.cursor !== undefined && { cursor: at.cursor }) };
+  const result = await client.invoke('machine.folders.list', input, { machine });
+  return result.ok ? { ok: true, page: result.value } : { ok: false, words: setupErrorWords(result.error, name) };
+}
+
+/** The folder's trust as the machine reads it. */
+export async function checkTrust(machine: MachineRef, name: string, directory: string, client: MawsBridge = ipc): Promise<{ ok: true; trust: TrustState } | { ok: false; words: string }> {
+  const result = await client.invoke('session.trust.check', { directory }, { machine });
+  return result.ok ? { ok: true, trust: result.value } : { ok: false, words: setupErrorWords(result.error, name) };
+}
+
+/** Registers the folder as a project there (the owners' act: main steps it up); its project's directory is the checkout. */
+export async function registerFolder(machine: MachineRef, name: string, directory: string, client: MawsBridge = ipc): Promise<{ ok: true; checkout: string } | { ok: false; words: string }> {
+  const result = await client.invoke('session.projects.addFolder', { directory }, { machine });
+  return result.ok ? { ok: true, checkout: result.value.project.directory } : { ok: false, words: setupErrorWords(result.error, name) };
+}

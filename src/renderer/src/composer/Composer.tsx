@@ -56,6 +56,7 @@ import { serializeDraft, type Serialized } from './editor/serialize';
 import { acquireBeforeMode, precheck, submitHumanSerialized, submitRemoteSerialized, submitSerialized, warn, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts; P2-A: acquireBeforeMode; P5 O7 M4: submitRemoteSerialized
 import { fileMentionsOf, ON_THIS_MAC } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1)
 import { SPAWN_WORDS, spawnOnMachine, takeFirstSend, useSpawning, useSpawnTarget } from '../sessions/remote-spawn'; // P5 O7 M4: the machine menu's spawn
+import { openDialog } from '../sessions/dialogs'; // P5 O7 M9: the machine's trust card
 import { useEffectiveEffort } from './effective-effort'; // W3
 import { autoFallbackNotice } from '@shared/sessions/models'; // W3
 import { ResubmitLine } from './InlineEdit'; // W3 (B6)
@@ -341,6 +342,11 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
               ],
               dismissible: true,
             });
+          } else if (spawned.trust) {
+            // P5 O7 M9: the machine refused an untrusted checkout: its trust card, then this Send again (once the tab's
+            // target carries the accepted trust, after the store's change has rendered)
+            const target = spawnAt;
+            warn(spawned.words, () => openDialog({ kind: 'remoteSetup', request: { kind: 'trust', tab: appSessionId, target, then: () => setTimeout(retry, 0) } }), undefined, SPAWN_WORDS.reviewTrust);
           } else warn(spawned.words, spawned.again === null ? undefined : retry, undefined, spawned.again === 'check' ? SPAWN_WORDS.checkAgain : 'Retry');
           return false;
         } finally {

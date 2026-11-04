@@ -12,6 +12,7 @@ import { HiddenProjectsDialog } from './HiddenProjectsDialog'; // W11
 import { closeDialog, useDialogs } from './dialogs';
 import { ForkSheet } from './ForkSheet';
 import { deleteOutcomeWords, deleteSession } from './record-ops';
+import { RemoteSetupSheet } from './RemoteSetupSheet'; // P5 O7 M9
 import { RenameDialog } from './RenameDialog';
 import { Sheet, SheetForm } from './Sheet';
 import { useSetup } from './store';
@@ -43,6 +44,8 @@ export function SessionDialogs() {
     case 'worktrees':
       return <WorktreesDialog key={open.projectId} projectId={open.projectId} />;
     // C12 end
+    case 'remoteSetup': // P5 O7 M9
+      return <RemoteSetupSheet request={open.request} />;
     case 'confirm':
       return (
         <Sheet title={open.title}>

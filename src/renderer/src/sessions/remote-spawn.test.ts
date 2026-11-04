@@ -1,17 +1,13 @@
-// "+ Session" on another machine (P5 O7 M4, "The machine menu" A5, "`session.spawn`"; the M4b report's order): which
-// machines the menu offers for a project, the machine chosen per New chat tab, and the spawn itself: its fields, the tab
+// "+ Session" on another machine (P5 O7 M4, "The machine menu" A5, "`session.spawn`"; the M4b report's order): the
+// machine chosen per New chat tab (P5 O7 M9: which machines the menu offers is remote-setup.test.ts's), and the spawn itself: its fields, the tab
 // moving to the new session's address, the local intent discarded, refusals in words, and with attachments no brief,
 // the composer's document handed to the new session's composer, which uploads and sends once.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { ProjectRecord } from '@shared/ipc/schema';
+import type { AppSessionId } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
-import type { MachineState } from '@shared/ipc/schema/machines';
 import { addressOf } from '@shared/machine/address';
-import type { MachineRef } from '@shared/machine/ref';
 import type { OrgKey } from '@shared/machine/org-key';
 import type { Draft } from '@shared/ipc/schema/session';
-import { project } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { attachmentsOf, docOf, paragraph, textNode, type Attachment } from '../composer/editor/doc';
@@ -20,14 +16,10 @@ import { rememberingRemoteDrafts, resetRemoteDrafts } from '../composer/editor/d
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
 import { resetSpawnedHere, useSpawnedHere } from './spawned-here';
-import { readCandidates, resetRemoteSpawn, spawnErrorWords, spawnOnMachine, SPAWN_WORDS, restoreHeldAttempts, spawnTargetOf, spawnUnconfirmed, takeFirstSend, useRemoteSpawn, type SpawnTarget } from './remote-spawn';
+import { resetRemoteSpawn, spawnErrorWords, spawnOnMachine, SPAWN_WORDS, restoreHeldAttempts, spawnTargetOf, spawnUnconfirmed, takeFirstSend, useRemoteSpawn, type SpawnTarget } from './remote-spawn';
 
-const THIRD = 'ThirdMachineRef0000000' as MachineRef;
 const LOCAL_TAB = addressOf(TEST_MACHINE, 'new-1' as AppSessionId);
 const KEY = 'repo:github.com/acme/app' as OrgKey;
-const org = { key: KEY, name: 'app', source: 'remote' as const, smnsId: null };
-const machine = (ref: MachineRef, name: string, over: Partial<MachineState> = {}): MachineState => ({ ref, name, local: false, state: 'up', since: '2026-10-31T10:00:00Z', generation: 1, carrier: 'relay', ...over });
-const remoteProject = (ref: MachineRef, id: string, over: Partial<ProjectRecord> = {}): ProjectRecord => ({ ...project(id, 0), id: addressOf(ref, id as ProjectId), directory: `/srv/${id}`, org, ...over });
 const target: SpawnTarget = { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY };
 
 beforeEach(() => {
@@ -36,35 +28,6 @@ beforeEach(() => {
   resetSpawnedHere();
 });
 afterEach(() => useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() }));
-
-describe('the machines the menu offers', () => {
-  it('asks each up RL2 machine for its projects and offers those with a checkout of the same org project, by name', async () => {
-    useMachines.getState().applyRoster([
-      { ...machine(TEST_MACHINE, 'This Mac'), local: true, carrier: undefined },
-      machine(OTHER_MACHINE, 'mini'),
-      machine(THIRD, 'vm', { carrier: 'direct' }),
-      machine('DownMachineRef00000000' as MachineRef, 'away', { state: 'down' }),
-      machine('SocketMachineRef000000' as MachineRef, 'profile-b', { carrier: 'socket' }),
-    ]);
-    const fake = fakeClient({
-      'session.projects.list': (_input: unknown, on: MachineRef) =>
-        on === OTHER_MACHINE
-          ? { projects: [remoteProject(OTHER_MACHINE, 'app'), remoteProject(OTHER_MACHINE, 'other', { org: { ...org, key: 'repo:x' as OrgKey } })], revision: 1 }
-          : { projects: [remoteProject(THIRD, 'app', { discovered: true })], revision: 1 }, // discovered: no checkout
-    });
-    await expect(readCandidates(KEY, fake.client)).resolves.toEqual([{ machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY }]);
-    expect(fake.machines('session.projects.list').sort()).toEqual([OTHER_MACHINE, THIRD].sort());
-  });
-
-  it('offers a machine whose read fails nothing, and the others still', async () => {
-    useMachines.getState().applyRoster([machine(OTHER_MACHINE, 'mini'), machine(THIRD, 'vm')]);
-    const fake = fakeClient();
-    const read = readCandidates(KEY, fake.client);
-    await fake.fail('session.projects.list', 'unreachable', 'host_unavailable');
-    await fake.reply('session.projects.list', { projects: [remoteProject(THIRD, 'app')], revision: 1 });
-    await expect(read).resolves.toEqual([{ machine: THIRD, name: 'vm', checkout: '/srv/app', key: KEY }]);
-  });
-});
 
 describe('the machine chosen for a New chat tab', () => {
   it('is this Mac until another is chosen, and only for the project it was chosen with', () => {
@@ -128,7 +91,6 @@ describe('a spawn on another machine', () => {
 
   it('says each refusal in words a person can act on, and leaves the tab where it was', async () => {
     const answers: [unknown, string][] = [
-      [{ status: 'refused', reason: 'untrusted' }, SPAWN_WORDS.untrusted('mini')],
       [{ status: 'refused', reason: 'unknown-checkout' }, SPAWN_WORDS.unknownCheckout('mini')],
       [{ status: 'refused', reason: 'worktree-exists' }, SPAWN_WORDS.worktreeExists('mini')],
       [{ status: 'refused', reason: 'the launch profile is missing' }, 'Not started on mini: the launch profile is missing'],
@@ -148,6 +110,19 @@ describe('a spawn on another machine', () => {
     await fake.fail('session.spawn', 'Not sent: mini is offline', 'host_unavailable');
     await expect(run).resolves.toEqual({ started: false, words: 'Not sent: mini is offline', again: 'retry' }); // main's own words pass through
     expect(tabOpen(LOCAL_TAB)).toBe(true);
+  });
+
+  // P5 O7 M9 ("Remote setup"): the machine's trust card, answered here, goes as the spawn's `trust: 'accepted'`
+  it('sends the trust the person accepted on the machine’s trust card, and offers that card when the machine refuses an untrusted checkout', async () => {
+    const doc = docOf([paragraph(textNode('go'))]);
+    const ask = (to: SpawnTarget, client: ReturnType<typeof fakeClient>['client']) => spawnOnMachine({ from: LOCAL_TAB, target: to, s: serializeDraft(doc, { sessionId: null, cwd: '' }), doc, intent: { model: null, effort: null, location: null }, mode: 'default' }, client);
+    const refused = fakeClient({ 'session.spawn': { status: 'refused', reason: 'untrusted' } });
+    await expect(ask(target, refused.client)).resolves.toEqual({ started: false, words: SPAWN_WORDS.untrusted('mini'), again: null, trust: true });
+    expect(refused.invoked('session.spawn')).toEqual([{ checkout: '/srv/app', permission_mode: 'default', brief: 'go' }]);
+    resetRemoteSpawn();
+    const trusted = fakeClient({ 'session.spawn': { status: 'ok', appSessionId: addressOf(OTHER_MACHINE, 'app-new' as AppSessionId) }, 'session.intent.discard': undefined });
+    await expect(ask({ ...target, trust: 'accepted' }, trusted.client)).resolves.toEqual({ started: true });
+    expect(trusted.invoked('session.spawn')).toEqual([{ checkout: '/srv/app', permission_mode: 'default', brief: 'go', trust: 'accepted' }]);
   });
 
   it('after a timeout checks on the same start, its input as first sent whatever the text became, and starts one session', async () => {
@@ -320,7 +295,7 @@ describe('a spawn on another machine', () => {
     const again = ask('go');
     await Promise.resolve();
     await fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' });
-    await expect(again).resolves.toEqual({ started: false, words: SPAWN_WORDS.untrusted('mini'), again: 'retry' });
+    await expect(again).resolves.toEqual({ started: false, words: SPAWN_WORDS.untrusted('mini'), again: null, trust: true }); // P5 O7 M9: its trust card offered
     const fresh = ask('go now');
     await Promise.resolve();
     await fake.reply('session.spawn', ok);

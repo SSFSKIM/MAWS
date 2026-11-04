@@ -4,6 +4,7 @@
 import { create } from 'zustand';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MachineRef } from '@shared/machine/ref';
+import type { SetupRequest } from './remote-setup'; // P5 O7 M9
 
 // The worktree a cleanup is about, as the session's record names it: the repository (whose root outlives the
 // checkout), the checkout's path, and its branch, which stays reachable after the checkout was removed in an earlier
@@ -54,6 +55,7 @@ export type OpenDialog =
   | { kind: 'archived'; projectId: ProjectId | null; machine?: MachineRef } // projectId null: the sessions of no project, on `machine` (this one by default)
   | { kind: 'hiddenProjects' } // W11 (I5)
   | WorktreesDialogRef // C12
+  | { kind: 'remoteSetup'; request: SetupRequest } // P5 O7 M9: a project set up on another machine, or its trust card
   | ({ kind: 'confirm'; answer(yes: boolean): void } & ConfirmRequest);
 
 export const useDialogs = create<{ open: OpenDialog | null }>()(() => ({ open: null }));

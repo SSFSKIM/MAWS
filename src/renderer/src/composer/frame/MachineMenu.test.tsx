@@ -12,13 +12,17 @@ import type { OrgKey } from '@shared/machine/org-key';
 import { project } from '../../../../../test/support/builders';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { ipc } from '../../ipc/client';
+import { useDialogs } from '../../sessions/dialogs';
 import { resetRemoteSpawn, spawnTargetOf } from '../../sessions/remote-spawn';
+import { SETUP_WORDS } from '../../sessions/remote-setup';
+import type { MachineRef } from '@shared/machine/ref';
 import { useMachines } from '../../stores/machines';
 import { MACHINE_WORDS, MachineLine, MachineMenu } from './MachineMenu';
 
 const TAB = addressOf(TEST_MACHINE, 'new-1' as AppSessionId);
+const THIRD = 'ThirdMachineRef0000000' as MachineRef;
 const KEY = 'repo:github.com/acme/app' as OrgKey;
-const up = (ref: typeof OTHER_MACHINE, name: string, over: Partial<MachineState> = {}): MachineState => ({ ref, name, local: false, state: 'up', since: '2026-10-31T10:00:00Z', generation: 1, carrier: 'relay', ...over });
+const up = (ref: MachineRef, name: string, over: Partial<MachineState> = {}): MachineState => ({ ref, name, local: false, state: 'up', since: '2026-10-31T10:00:00Z', generation: 1, carrier: 'relay', ...over });
 const theirs = (over: Partial<ProjectRecord> = {}): ProjectRecord => ({ ...project('app', 0), id: addressOf(OTHER_MACHINE, 'app' as ProjectId), directory: '/srv/app', org: { key: KEY, name: 'app', source: 'remote', smnsId: null }, ...over });
 const view = (key: string | null = KEY) =>
   render(
@@ -59,11 +63,41 @@ describe('the machine menu', () => {
     expect(screen.queryByText(/^Lane B on /)).toBeNull();
   });
 
-  it('says when no other machine has the project', async () => {
-    vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { projects: [theirs({ org: undefined })], revision: 1 } } as never);
+  it('says when no other machine can start the project', async () => {
+    // P5 O7 M9: a machine without its checkout is offered to set it up (below); one whose projects can't be read is not
+    vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: false, error: { code: 'host_unavailable', message: 'unreachable' } } as never);
     view();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Machine This Mac' }));
     await waitFor(() => expect(screen.getByText(MACHINE_WORDS.none)).toBeTruthy());
+  });
+
+  // P5 O7 M9 ("Remote setup"): a machine without a checkout of the project is offered to set it up there, to its owners;
+  // anyone else sees why not, never a dead control
+  it('offers a machine with no checkout to set the project up there, and names why a machine it can’t set up isn’t offered', async () => {
+    useMachines.getState().applyRoster([{ ...up(TEST_MACHINE, 'This Mac'), local: true, carrier: undefined }, up(OTHER_MACHINE, 'mini'), up(THIRD, 'vm')]);
+    const page = { entries: [{ name: 'Developer', path: '/Users/mini/Developer', protected: false }], cursor: null };
+    vi.spyOn(ipc, 'invoke').mockImplementation((async (name: string, _input: unknown, opts?: { machine?: string }) => {
+      if (name === 'session.projects.list') return { ok: true, value: { projects: [theirs({ org: undefined })], revision: 1 } }; // no checkout of this project
+      if (name === 'machine.folders.list' && opts?.machine === OTHER_MACHINE) return { ok: true, value: page };
+      if (name === 'machine.folders.list') return { ok: false, error: { code: 'internal', message: 'refused owners-only', issues: { refusal: 'owners-only' } } };
+      return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+    }) as never);
+    view();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Machine This Mac' }));
+    const menu = screen.getByRole('dialog', { name: 'Choose a machine' });
+    await waitFor(() => expect(within(menu).getByRole('menuitem', { name: /^mini/ })).toBeTruthy());
+    expect(within(menu).getByRole('menuitem', { name: /^mini/ }).textContent).toBe(`mini${SETUP_WORDS.setUp}`);
+    const closed = within(menu).getByRole('menuitem', { name: /^vm/ }) as HTMLButtonElement;
+    expect(closed.disabled).toBe(true);
+    expect(closed.textContent).toBe(`vm${SETUP_WORDS.notOwner('vm')}`); // the reason shown, not only a tooltip
+    await user.click(within(menu).getByRole('menuitem', { name: /^mini/ }));
+    expect(useDialogs.getState().open).toEqual({
+      kind: 'remoteSetup',
+      request: { kind: 'folder', tab: TAB, machine: OTHER_MACHINE, name: 'mini', key: KEY, home: '/Users/mini', first: page, suggestions: [] },
+    });
+    expect(spawnTargetOf(TAB, KEY)).toBeNull(); // chosen only once it is set up
+    useDialogs.setState({ open: null });
   });
 
   it('is closed until a project is chosen, and absent with no RL2 machine up', () => {
