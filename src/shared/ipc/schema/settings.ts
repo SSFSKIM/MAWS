@@ -24,6 +24,7 @@ import { isSearchUrlTemplate } from '../../browser/url';
 // E4a end
 import { AppMcpServersSchema } from '../../engine/app-mcp-servers'; // P4-R8
 import { LaunchProfileSchema } from '../../engine/launch-profile'; // P4-A2
+import { RouteSchema } from '../../engine/route'; // P5 O7 M9
 
 export const ThemeSettingSchema = z.enum(['light', 'dark', 'system']);
 export type ThemeSetting = z.infer<typeof ThemeSettingSchema>;
@@ -199,6 +200,14 @@ export const MachineSettingsSchema = z.strictObject({
 });
 export type MachineSettings = z.infer<typeof MachineSettingsSchema>;
 // P5 O3-A end
+
+// P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M9 "The default, without a v2"; Interfaces §U): the
+// machine's default route, in `<profile>/machine-route.json` beside `machine-settings.json`, which stays at version 1
+// with no new property (an older build strict-parses it, and a changed `version` literal is a wire major). Only builds
+// from M9 on read it; `resolveDefaultRoute` (src/shared/settings/defaults.ts) resolves the default with or without it.
+export const MACHINE_ROUTE_VERSION = 1;
+export const MachineRouteSchema = z.strictObject({ version: z.literal(MACHINE_ROUTE_VERSION), defaultRoute: RouteSchema });
+export type MachineRoute = z.infer<typeof MachineRouteSchema>;
 
 // C11: a section is patched by field (each section `.partial()`), and `notifications.kinds` one level further, so one
 // kind is patched alone; `applySettingsPatch` (src/shared/settings/defaults.ts) is the one merge. The keymap is a

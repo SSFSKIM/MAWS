@@ -409,14 +409,20 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // P5 O3-D M5b (Interfaces §G; contract O3X3): the machine half as main's settings mirror reads it on the daemon shape:
   // the settings with their revision (bumped at each persisted change), a patch answered once it persisted and every
   // listener was told (refused, with nothing changed, in a run that may not write the file), and each change emitted
+  // P5 O7 M9: each answer and change with the resolved default route; a set's `defaultRoute` chosen after its patch (a
+  // set of the default alone writes no patch, so it is told once)
   let machineRevision = 0;
   const offMachineChanged = machineSettings.onChange((settings) => {
     machineRevision += 1;
-    bus.emit('machineSettings.changed', { settings });
+    bus.emit('machineSettings.changed', { settings, defaultRoute: machineSettings.defaultRoute() });
   });
   parts.push(['machine settings', offMachineChanged]);
-  bus.register('machineSettings.get', () => ({ settings: machineSettings.state(), version: machineRevision }));
-  bus.register('machineSettings.set', async ({ patch }) => ({ settings: await machineSettings.update(patch) }));
+  bus.register('machineSettings.get', () => ({ settings: machineSettings.state(), version: machineRevision, defaultRoute: machineSettings.defaultRoute() }));
+  bus.register('machineSettings.set', async ({ patch, defaultRoute }) => {
+    if (defaultRoute === undefined || Object.keys(patch).length > 0) await machineSettings.update(patch);
+    if (defaultRoute !== undefined) await machineSettings.setDefaultRoute(defaultRoute);
+    return { settings: machineSettings.state(), defaultRoute: machineSettings.defaultRoute() };
+  });
   // C12: the Settings tab's read of the configuration the spine holds for it (P5 O3-A: rejects when refused); W3
   bus.register('settings.engineApplied', () => (engineConfigure ? engineConfigure.applied() : Promise.reject(new Error(`the engine settings are not applied this run: ${data.refused}`))));
   bus.register('settings.userEngineDefaults', userDefaults);

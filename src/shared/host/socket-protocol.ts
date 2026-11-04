@@ -228,6 +228,12 @@ export const HOLDER_CAPABILITY = 'host.holder';
 // go of that client's hold alone. A host without it stops a named follow whoever asks, so `mawsd`'s endpoint sends a
 // remote device's `fs.unfollow` only to a host that lists it.
 export const FOLLOW_OWNERS_CAPABILITY = 'host.followOwners';
+// P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M9 "The route"; Interfaces §U): on the engine host's
+// welcome, that it launches `route: 'machine'` (nothing injected, nothing blanked). Main sends `machine` only to a host
+// that lists it; to any other it launches the legacy route where that reaches the same inference (the relay, or no base
+// URL), and otherwise refuses the start `route-unsupported`. In the wire's union from M9's shapes on; the engine host's
+// list below gains it with the launch itself (each peer lists only what it implements).
+export const ENGINE_ROUTE_MACHINE_CAPABILITY = 'engine.route-machine';
 // What each peer lists of itself in its hello or welcome: only what it implements. The wire's capability list
 // (WIRE_CAPABILITIES, the manifest's) is the union of every name a peer of this major may list, and no peer reads it as
 // its own. At O3-D M1 every list was the one it was; from M3 the engine host's welcome and `mawsd`'s hello to it list

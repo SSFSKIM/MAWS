@@ -432,12 +432,18 @@ describe('the spine and the checkouts composed under plain Node', () => {
     const bus = fakeBus();
     compose(data, host, bus);
     await host.ready();
-    expect(await bus.main('machineSettings.get', undefined)).toEqual({ ok: true, value: { settings: data.machineSettings.state(), version: 0 } });
+    expect(await bus.main('machineSettings.get', undefined)).toEqual({ ok: true, value: { settings: data.machineSettings.state(), version: 0, defaultRoute: 'machine' } }); // P5 O7 M9: the resolved default beside the file
     const set = await bus.main('machineSettings.set', { patch: { supervisor: { idleExitMinutes: 7 } } });
-    expect(set).toMatchObject({ ok: true, value: { settings: { supervisor: { idleExitMinutes: 7 } } } });
+    expect(set).toMatchObject({ ok: true, value: { settings: { supervisor: { idleExitMinutes: 7 } }, defaultRoute: 'machine' } });
     expect(JSON.parse(readFileSync(data.paths.machine, 'utf8'))).toMatchObject({ supervisor: { idleExitMinutes: 7 } }); // persisted before the answer
-    expect(bus.emittedOf('machineSettings.changed')).toEqual([{ settings: data.machineSettings.state() }]);
+    expect(bus.emittedOf('machineSettings.changed')).toEqual([{ settings: data.machineSettings.state(), defaultRoute: 'machine' }]);
     expect(await bus.main('machineSettings.get', undefined)).toMatchObject({ ok: true, value: { version: 1 } });
+    // P5 O7 M9: a set of the default alone writes machine-route.json and the legacy field, and is told once
+    expect(await bus.main('machineSettings.set', { patch: {}, defaultRoute: 'gateway' })).toMatchObject({ ok: true, value: { settings: { gateway: { defaultRoute: 'gateway' } }, defaultRoute: 'gateway' } });
+    expect(JSON.parse(readFileSync(join(profile, 'machine-route.json'), 'utf8'))).toEqual({ version: 1, defaultRoute: 'gateway' });
+    expect(bus.emittedOf('machineSettings.changed').at(-1)).toEqual({ settings: data.machineSettings.state(), defaultRoute: 'gateway' });
+    expect(bus.emittedOf('machineSettings.changed')).toHaveLength(2);
+    expect(await bus.main('machineSettings.get', undefined)).toMatchObject({ ok: true, value: { version: 2, defaultRoute: 'gateway' } });
 
     const id = '11111111-1111-4111-8111-111111111111';
     expect(await bus.main('session.visible', undefined)).toEqual({ ok: true, value: { sessions: [] } });

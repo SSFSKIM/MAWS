@@ -3,7 +3,8 @@
 // before the spine's data is opened, and the spine's split (src/services/settings/split.ts) writes both.
 import { join } from 'node:path';
 
-export const SETTINGS_FILES = { client: 'settings.json', machine: 'machine-settings.json' } as const;
+// P5 O7 M9: `route`, the machine's default route (machine-route.json), beside the machine file and written with it
+export const SETTINGS_FILES = { client: 'settings.json', machine: 'machine-settings.json', route: 'machine-route.json' } as const;
 export interface SettingsPaths {
   client: string;
   machine: string;
