@@ -13,7 +13,7 @@ import { project } from '../../../../../test/support/builders';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { ipc } from '../../ipc/client';
 import { useDialogs } from '../../sessions/dialogs';
-import { resetRemoteSpawn, spawnTargetOf } from '../../sessions/remote-spawn';
+import { resetRemoteSpawn, spawnTargetOf, useRemoteSpawn } from '../../sessions/remote-spawn';
 import { SETUP_WORDS } from '../../sessions/remote-setup';
 import type { MachineRef } from '@shared/machine/ref';
 import { useMachines } from '../../stores/machines';
@@ -98,6 +98,17 @@ describe('the machine menu', () => {
     });
     expect(spawnTargetOf(TAB, KEY)).toBeNull(); // chosen only once it is set up
     useDialogs.setState({ open: null });
+  });
+
+  it('keeps the trust a setup accepted when the same machine and checkout is chosen again', async () => {
+    vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { projects: [theirs()], revision: 1 } } as never);
+    useRemoteSpawn.getState().choose(TAB, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY, trust: 'accepted' });
+    view();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Machine mini' }));
+    const menu = screen.getByRole('dialog', { name: 'Choose a machine' });
+    await user.click(await within(menu).findByRole('menuitemradio', { name: 'mini' }));
+    expect(spawnTargetOf(TAB, KEY)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY, trust: 'accepted' });
   });
 
   it('is closed until a project is chosen, and absent with no RL2 machine up', () => {

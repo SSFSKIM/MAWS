@@ -67,7 +67,9 @@ export function MachineMenu({ appSessionId, projectKey, disabled }: { appSession
   if (!reaches) return null;
   const closed = disabled ?? (projectKey === null ? MACHINE_WORDS.noProject : null);
   const choose = (target: SpawnTarget | null) => {
-    useRemoteSpawn.getState().choose(appSessionId, target);
+    // P5 O7 M9: the machine already chosen on the same checkout keeps what its setup answered (an accepted trust card)
+    const kept = target !== null && chosen?.machine === target.machine && chosen.checkout === target.checkout ? chosen : target;
+    useRemoteSpawn.getState().choose(appSessionId, kept);
     setOpen(false);
   };
   const setUp = (choice: Extract<MachineChoice, { kind: 'setup' }>) => {

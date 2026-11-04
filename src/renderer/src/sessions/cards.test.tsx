@@ -234,6 +234,28 @@ describe('relay card', () => {
     }
   });
 
+  // P5 O7 M9 ("The relay check and the features"): on the machine's own route the relay check is advisory: the card offers
+  // Start anyway (`startAnyway`), and a relay answering again continues on the same route, never moved to the gateway
+  it('on the machine’s own route offers Start anyway, and a relay answering again starts on that route', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let up = false;
+      withMain({ 'session.start': answer({ status: 'relay_unreachable', appSessionId: BARE_ID, health: health() }), 'engine.relayHealth': () => health({ ok: up, status: up ? 200 : null, error: up ? null : 'timed out' }) });
+      putIntent(intent({ message: MESSAGE, gateway: 'gateway', route: 'machine' }));
+      render(<Docked />);
+      await act(() => startIntent(ID, MESSAGE));
+      expect(await screen.findByText(/this machine’s own settings send it there/)).toBeTruthy();
+      await userEvent.click(screen.getByRole('button', { name: 'Start anyway' }));
+      expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { startAnyway: true } });
+      await screen.findByRole('button', { name: 'Start anyway' }); // answered relay_unreachable again: docked again
+      up = true;
+      await act(() => vi.advanceTimersByTimeAsync(5_000));
+      await waitFor(() => expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: {} }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("under the 'wait' policy the primary is 'Open ClaudeUsage, then start'; Run direct waits for a Claude model on a gateway model", () => {
     const { rerender } = render(<RelayCard health={health()} policy="wait" now={Date.parse('2026-09-29T10:00:04.000Z')} gatewayModel={false} openClaudeUsage={null} onAccept={vi.fn()} onDecline={vi.fn()} onRecheck={vi.fn()} />);
     expect(screen.getAllByRole('button')[0]!.textContent).toBe('Open ClaudeUsage, then start');

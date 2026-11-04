@@ -20,7 +20,7 @@ type Step =
   | { kind: 'browse' }
   | { kind: 'confirmOpen'; entry: FolderEntry }
   | { kind: 'busy'; words: string }
-  | { kind: 'trust'; trust: TrustState };
+  | { kind: 'trust'; directory: string; trust: TrustState };
 
 const within = (path: string, root: string) => path === root || path.startsWith(`${root}/`);
 const parentOf = (path: string) => path.slice(0, path.lastIndexOf('/'));
@@ -109,7 +109,7 @@ function FolderSetup({ request }: { request: FolderRequest }) {
     const read = await checkTrust(machine, name, directory);
     if (!read.ok) return fail(read.words);
     if (read.trust.trusted) return register(directory, false);
-    setStep({ kind: 'trust', trust: read.trust });
+    setStep({ kind: 'trust', directory, trust: read.trust });
   };
   const register = async (directory: string, accepted: boolean) => {
     setStep({ kind: 'busy', words: SETUP_WORDS.registering(name) });
@@ -125,7 +125,7 @@ function FolderSetup({ request }: { request: FolderRequest }) {
   };
 
   if (step.kind === 'trust') {
-    const directory = path!;
+    const { directory } = step;
     return (
       <Sheet title={SETUP_WORDS.trustTitle(name)} width="w-[min(480px,90vw)]">
         <TrustCard trust={step.trust} busy={false} acceptLabel={SETUP_WORDS.trust} onAccept={() => void register(directory, true)} onDecline={() => setStep({ kind: 'browse' })} />
@@ -154,7 +154,7 @@ function FolderSetup({ request }: { request: FolderRequest }) {
               <div role="group" aria-label={SETUP_WORDS.suggestions} className="flex flex-col gap-1">
                 <p className="m-0 text-ui-sm text-fg-muted">{SETUP_WORDS.suggestions}</p>
                 {request.suggestions.map((suggestion) => (
-                  <button key={suggestion} type="button" className={`${ROW} font-mono text-ui-sm`} onClick={() => void show(suggestion)}>
+                  <button key={suggestion} type="button" className={`${ROW} font-mono text-ui-sm`} disabled={step.kind === 'busy'} onClick={() => void show(suggestion)}>
                     {label(suggestion)}
                   </button>
                 ))}
@@ -163,7 +163,7 @@ function FolderSetup({ request }: { request: FolderRequest }) {
             <div className="flex items-center gap-2">
               <span className="min-w-0 flex-1 truncate font-mono text-ui-sm">{path === null ? SETUP_WORDS.home : label(path)}</span>
               {path !== null && (
-                <button type="button" className={QUIET} onClick={up}>
+                <button type="button" className={QUIET} disabled={step.kind === 'busy'} onClick={up}>
                   {SETUP_WORDS.up}
                 </button>
               )}
