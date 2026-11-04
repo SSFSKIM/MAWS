@@ -84,6 +84,21 @@ function remoteLaneBIn(rows: Rows, states: RemoteLaneBStore['states'], appSessio
   return rows.listedMachines.has(machine) && rows.listed.get(appSessionId)?.lane !== 'A';
 }
 
+// A session on another machine this app reaches over RL2, whichever lane (P5 O7 M8): lane B's, or a lane A session of a
+// machine the org rows cover, whose adapter takes only `laneA.*` (main/lane-a/remote.ts `routeLaneA`), so every other
+// command reaches the machine as a lane B session's does. A socket-linked machine's sessions take the manager's path.
+function overRl2In(rows: Rows, states: RemoteLaneBStore['states'], appSessionId: AppSessionId, local: string): boolean {
+  if (!isAddress(appSessionId) || machineOf(appSessionId) === local) return false;
+  return states.has(appSessionId) || rows.listedMachines.has(machineOf(appSessionId));
+}
+
+export const isOverRl2 = (appSessionId: AppSessionId): boolean => overRl2In(useSessions.getState(), useRemoteLaneB.getState().states, appSessionId, ipc.localMachine);
+
+export function useIsOverRl2(appSessionId: AppSessionId): boolean {
+  const states = useRemoteLaneB((s) => s.states);
+  return useSessions((s) => overRl2In(s, states, appSessionId, ipc.localMachine));
+}
+
 export const isRemoteLaneB = (appSessionId: AppSessionId): boolean =>
   remoteLaneBIn(useSessions.getState(), useRemoteLaneB.getState().states, appSessionId, ipc.localMachine);
 

@@ -9,8 +9,8 @@
 //   refusals are heard app-wide, ../artifacts/remote-surfaces.ts) is greyed with "<machine> doesn’t offer this" until that
 //   machine's feed opens again.
 //
-// Only a lane B session on another machine is greyed (`isRemoteLaneB`): this Mac's sessions, and those of a machine whose
-// sessions take the manager's path, reach every command.
+// Only a session reached over RL2 on another machine is greyed (`isOverRl2`), lane B's or lane A's (lane A's adapter takes
+// only `laneA.*`): this Mac's sessions, and those of a machine whose sessions take the manager's path, reach every command.
 import type { AppSessionId } from '@shared/graph/ids';
 import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import type { CommandName } from '@shared/ipc/schema';
@@ -20,10 +20,10 @@ import { heardNotOffered, notOfferedRefusals, REMOTE_SURFACE_WORDS, useNotOffere
 import { ipc } from '../ipc/client';
 import { useMachines } from '../stores/machines';
 import { machineName } from '../stores/org-projects';
-import { isRemoteLaneB, useIsRemoteLaneB } from './remote-session';
+import { isOverRl2, useIsOverRl2 } from './remote-session';
 
 interface Facts {
-  remote: boolean; // a lane B session on another machine
+  remote: boolean; // a session on another machine, reached over RL2
   machine: MachineRef | null; // its machine (null: an id that names none)
   name: string; // that machine's name, for the words
   refused: ReadonlySet<string>; // the `not-offered` refusals heard
@@ -46,13 +46,13 @@ export function remoteUnavailableOf(appSessionId: AppSessionId | null, ...comman
   const id = appSessionId ?? NONE;
   const machine = machineOfSession(id);
   const name = machine === null ? '' : machineName(useMachines.getState().machines, machine, ipc.localMachine);
-  return unavailableIn({ remote: isRemoteLaneB(id), machine, name, refused: notOfferedRefusals() }, commands);
+  return unavailableIn({ remote: isOverRl2(id), machine, name, refused: notOfferedRefusals() }, commands);
 }
 
 /** The same, followed in a render. */
 export function useRemoteUnavailable(appSessionId: AppSessionId | null, ...commands: CommandName[]): string | null {
   const id = appSessionId ?? NONE;
-  const remote = useIsRemoteLaneB(id);
+  const remote = useIsOverRl2(id);
   const refused = useNotOfferedRefusals();
   const machine = machineOfSession(id);
   const name = useMachines((s) => (machine === null ? '' : machineName(s.machines, machine, ipc.localMachine)));

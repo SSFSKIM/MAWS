@@ -45,9 +45,10 @@ describe('an error notice', () => {
 
   // P5 O7 M8: `attention.acknowledge` is declared not offered on another machine (REMOTE_UNAVAILABLE): Dismiss is
   // greyed with the declared words, and nothing is acknowledged
-  it('for a session on another machine, greys Dismiss with the declared reason and acknowledges nothing', async () => {
+  // (a lane A session there too: its adapter takes only laneA.*)
+  it.each(['B', 'A'] as const)('for a lane %s session on another machine, greys Dismiss with the declared reason and acknowledges nothing', async (lane) => {
     const remote = addressOf(OTHER_MACHINE, APP);
-    useSessions.setState({ listed: new Map([[remote as never, { ...remoteRow(OTHER_MACHINE, APP), appId: remote as never }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    useSessions.setState({ listed: new Map([[remote as never, { ...remoteRow(OTHER_MACHINE, APP, { lane }), appId: remote as never }]]), listedMachines: new Set([OTHER_MACHINE]) });
     try {
       render(<NoticeBody item={error({ appSessionId: remote as never, id: addressOf(OTHER_MACHINE, `${APP}:error:e1`) as never })} seenHere />);
       const dismiss = screen.getByRole('button', { name: 'Dismiss' });

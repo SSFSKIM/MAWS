@@ -54,6 +54,16 @@ describe('remoteUnavailableOf', () => {
     expect(remoteUnavailableOf(R, 'session.mcpReconnect')).toBeNull();
   });
 
+  it('greys a lane A session on an RL2 machine too: its adapter takes only laneA.*, the rest reach the machine as lane B’s', () => {
+    const A = addressOf(OTHER_MACHINE, 'app-a' as AppSessionId);
+    useSessions.setState({ listed: new Map([[A, { ...remoteRow(OTHER_MACHINE, 'app-a', { lane: 'A' }), appId: A }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    expect(remoteUnavailableOf(A, 'session.rename')).toBe(REMOTE_UNAVAILABLE['session.rename']);
+    heardRefusal('session.mcpReconnect', NOT_OFFERED, OTHER_MACHINE, TEST_MACHINE);
+    expect(remoteUnavailableOf(A, 'session.mcpReconnect')).toBe(REMOTE_SURFACE_WORDS.notOffered('mini'));
+    const { result } = renderHook(() => useRemoteUnavailable(A, 'session.rename'));
+    expect(result.current).toBe(REMOTE_UNAVAILABLE['session.rename']);
+  });
+
   it('greys nothing for a session whose machine’s sessions take the manager’s path (no RL2 rows cover it)', () => {
     useSessions.setState({ listed: new Map(), listedMachines: new Set() });
     expect(remoteUnavailableOf(R, 'session.rename')).toBeNull();
