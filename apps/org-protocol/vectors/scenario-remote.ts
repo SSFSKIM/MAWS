@@ -297,7 +297,8 @@ export async function buildRemoteScenario(k: Keys, fixtures: Record<string, unkn
     args: { appSessionId: SESSION, requestId: 'req-1', answer: { behavior: 'allow' } },
     requestDigest: { session: 'engine-0001', request: 'req-1', tool: 'Bash', input_sha256: '9'.repeat(64) },
   });
-  const spawn = (device: string, machine = REF_MINI) => action({ device, action: 'sminos.spawn', machine, args: { checkout: '/Users/b/work', brief: 'fix the build', permission_mode: 'default' } });
+  // A spawn's args are DX6's spawn fields, lane A's (`sminos.spawn`) and the app's remote "+ Session" (`session.spawn`) alike.
+  const spawn = (device: string, machine = REF_MINI, name = 'sminos.spawn') => action({ device, action: name, machine, args: { checkout: '/Users/b/work', brief: 'fix the build', permission_mode: 'default' } });
   const actions: ActionEncoding[] = [];
   for (const [name, a] of [
     ['a lane B answer', answer],
@@ -355,6 +356,13 @@ export async function buildRemoteScenario(k: Keys, fixtures: Record<string, unkn
   await attestCase('an attested owner whose proof is from a revoked device', owned([CAROL], [spawnC]), no('revoked'), 'r4');
   await attestCase("an attested owner whose proof's step-up signature fails", owned([BOB], [{ ...spawnB, args: { ...spawnB.args, brief: 'something else' } }]), no('bad-signature'));
   await attestCase("an attested owner proven by another member's spawn", owned([BOB], [spawnC]), no('not-owner'));
+  // The app's remote spawn (`session.spawn`, the endpoint's offer row) proves its signer's member as lane A's does.
+  const appSpawn = (device: string, machine = REF_MINI) => spawn(device, machine, 'session.spawn');
+  await attestCase('an attested owner proven by their session.spawn', owned([BOB], [await signStepUp(appSpawn('dev-b1'), k.b1StepUp)]), { ok: true, owners: [BOB] });
+  await attestCase("an attested owner proven by another member's session.spawn", owned([BOB], [await signStepUp(appSpawn('dev-c1'), k.c1StepUp)]), no('not-owner'));
+  await attestCase('an attested owner whose session.spawn names another machine', owned([BOB], [await signStepUp(appSpawn('dev-b1', REF_BUILDER), k.b1StepUp)]), no('other-machine'));
+  await attestCase('an attested owner whose session.spawn is from a revoked device', owned([CAROL], [await signStepUp(appSpawn('dev-c1'), k.c1StepUp)]), no('revoked'), 'r4');
+  await attestCase('an attested owner whose session.spawn names a device the org never listed', owned([BOB], [await signStepUp(appSpawn('dev-x1'), k.stranger)]), no('unknown-signer'));
   await attestCase('owners added in a chain: Alice adds Bob, Bob adds Carol', owned([ALICE, BOB, CAROL], [addB, addCByB]), { ok: true, owners: [ALICE, BOB, CAROL] });
   await attestCase('an owner added by a member who is no owner', owned([ALICE, CAROL], [addCByB]), no('not-owner'));
   await attestCase('an attested owner of a certified VM, by its delegation', owned([BOB], []), { ok: true, owners: [BOB] }, 'r3', `vm-1/${SESSION}`, 'vm1', fixture('remote certificates'));
