@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, SessionId } from '@shared/graph/ids';
 import type { HostEmit } from '@shared/host/runtime';
+import { endableClientRef } from '@shared/ipc/client'; // P5 O7 M8
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
@@ -727,6 +728,44 @@ describe('a followed session backfills, then tails its transcript', () => {
     for (const event of child.events) expect([event.agentId, event.parentToolUseId]).toEqual([agentId, null]);
     await fixture.addSidecar(session, `${dir}/agent-${agentId}.meta.json`, readFileSync(join(WORKFLOW_DISK, `agent-${agentId}.meta.json`), 'utf8'));
     await expect.poll(() => events('fs.subagentsChanged').at(-1)?.agents[0]).toMatchObject({ agentId, runId: 'wf_7cacbb2d-902', meta: { agentType: 'workflow-subagent' } });
+  });
+
+  // P5 O7 M8 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, Decision Log "A subagent follow is owned by the
+  // client that started it"): a remote device's agents panel starts follows here as the machine's own app does, so a
+  // follow is held by each client that asked for it, ends when the last of them unfollows or ends, and is never stopped by
+  // a client that holds none of it. The session-wide unfollow (`agentId` null) is the session's own lifecycle, unchanged.
+  it('keeps an agent’s follow while any client that started it holds it: another client’s unfollow never stops it, and the last holder’s end does', async () => {
+    const session = 'bac6130b-8eb8-499e-aeb1-89e7624a52cd' as SessionId;
+    const app = 'app-workflow' as AppSessionId;
+    await fixture.addTranscript('/private/tmp/maws-probe2-1RzDNs', session, [
+      JSON.stringify({ type: 'user', uuid: 'w1', parentUuid: null, cwd: '/private/tmp/maws-probe2-1RzDNs', message: { role: 'user', content: 'run it' } }),
+    ]);
+    const fs = await start();
+    fs.bind([{ sessionId: session, appSessionId: app }]);
+    const agentId = 'a014f6be436bed86b' as AgentId;
+    await fixture.addSidecar(session, `subagents/workflows/wf_7cacbb2d-902/agent-${agentId}.jsonl`, `${JSON.stringify({ type: 'user', uuid: 'c1', parentUuid: null, isSidechain: true, agentId, cwd: '/private/tmp/maws-probe2-1RzDNs', message: { role: 'user', content: 'Reply with exactly ALPHA.' } })}\n`);
+    const followed = () => fs.state().followed.some((f) => f.appSessionId === app && f.agentId === agentId);
+    const [machine, remote, other] = ['machine-app', 'remote-device', 'another-device'].map(endableClientRef);
+
+    await fs.agentEvents(app, agentId, {}, machine!);
+    await fs.unfollow(app, agentId, remote!); // a client that started nothing stops nothing
+    expect(followed()).toBe(true);
+    remote!.end();
+    expect(followed()).toBe(true);
+
+    await fs.agentEvents(app, agentId, {}, other!); // a second holder
+    await fs.unfollow(app, agentId, machine!); // the first lets go: the second still holds it
+    expect(followed()).toBe(true);
+    other!.end(); // the last holder's channel ends
+    expect(followed()).toBe(false);
+
+    // a client that started it and unfollows it stops it when it holds it alone
+    const again = endableClientRef('machine-app-2');
+    await fs.agentEvents(app, agentId, {}, again);
+    await fs.unfollow(app, agentId, again);
+    expect(followed()).toBe(false);
+    again.end(); // its end later changes nothing
+    expect(followed()).toBe(false);
   });
 
   it('reads workflow runs, and a followed session emits one workflow.progress per snapshot change', async () => {

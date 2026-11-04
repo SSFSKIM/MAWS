@@ -43,7 +43,8 @@ export type OfferRow = {
   /**
    * The input a name outside the registry takes (P5 O7 M3: `forward.open`), held to it at authorization's step 2 as a
    * registry command's is to its schema (`malformed`). Absent for such a name: its executor reads its input (sminos's RPCs,
-   * the endpoint's signed actions).
+   * the endpoint's signed actions). P5 O7 M8: on a registry command's row, what of its schema's inputs a remote caller may
+   * send, held at step 2 after the schema (`fs.unfollow`: an agent named, never the session-wide form).
    */
   accepts?(input: unknown): boolean;
   /** P5 O7 M5b: the stream kind a `stream` row admits (its open's kind fields are the row's input). */
@@ -109,6 +110,8 @@ const isBrowserControlArgs = (input: unknown): boolean =>
 const isWindowShown = (input: unknown): boolean => isFields(input, ['shown']) && typeof input.shown === 'boolean';
 /** P5 O7 M5c: the owner's connector and grant management on the machine (`machine-admin`, a step-up each), under `machine.op`. */
 const machineAdmin: OfferRow = { kind: 'act', executor: 'machine', target: 'machine' };
+/** P5 O7 M8: `fs.unfollow` from another machine names the agent whose follow it lets go of. */
+const namesAnAgent = (input: unknown): boolean => typeof input === 'object' && input !== null && typeof (input as { agentId?: unknown }).agentId === 'string';
 /** `forward.open`'s args: exactly a port. */
 const isForwardArgs = (input: unknown): boolean =>
   typeof input === 'object' && input !== null && !Array.isArray(input) && Object.keys(input).length === 1 && Number.isInteger((input as { port?: unknown }).port) && (input as { port: number }).port >= 1 && (input as { port: number }).port <= 65535;
@@ -184,8 +187,11 @@ export const OFFERS: Offers = {
     'git.worktree.list': checkout,
     'git.worktree.status': checkout,
     'git.worktree.branch': checkout,
-    // A child agent's events, the engine host's read.
+    // A child agent's events, the engine host's read. P5 O7 M8: the follow it starts is held by the channel's client, and
+    // ends with the channel or that client's unfollow of the agent it names (the engine host lets go of its own hold
+    // alone); the session-wide unfollow (`agentId: null`) would stop every client's follow of the session and is refused.
     'fs.agentEvents': laneB('call'),
+    'fs.unfollow': { ...laneB('call'), accepts: namesAnAgent },
     // The checkout's writes, under the services' ledger (`machine.op`), placed by their session with no launch context,
     // so the editor saves to an idle session's checkout without resuming it.
     'files.write': laneBMachine('act'),

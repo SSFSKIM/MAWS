@@ -22,9 +22,10 @@ export function registerFs(on: HostOn, emit: HostEmit, env: NodeJS.ProcessEnv = 
   on('fs.bind', async ({ bindings }) => service.bind(bindings as Pick<FsScanKnown, 'sessionId' | 'appSessionId'>[]));
   on('fs.unbind', async ({ appSessionId }) => service.unbind(appSessionId as AppSessionId));
   on('fs.holders', async (query) => service.holdersNow(query as FsHoldersQuery));
-  on('fs.unfollow', async ({ appSessionId, agentId }) => service.unfollow(appSessionId as AppSessionId, agentId as AgentId | null));
+  // P5 O7 M8: an agent's follow is held by each client that asked for it, and only let go by its own unfollow or end
+  on('fs.unfollow', async ({ appSessionId, agentId }, { client }) => service.unfollow(appSessionId as AppSessionId, agentId as AgentId | null, client));
   on('fs.subagents', async ({ appSessionId }) => service.subagents(appSessionId as AppSessionId));
-  on('fs.agentEvents', async ({ appSessionId, agentId, before, seek }) => service.agentEvents(appSessionId as AppSessionId, agentId as AgentId, { before: (before ?? null) as EventId | null, seek: (seek ?? null) as MessageUuid | null }));
+  on('fs.agentEvents', async ({ appSessionId, agentId, before, seek }, { client }) => service.agentEvents(appSessionId as AppSessionId, agentId as AgentId, { before: (before ?? null) as EventId | null, seek: (seek ?? null) as MessageUuid | null }, client));
   on('fs.workflows', async ({ appSessionId }) => service.workflows(appSessionId as AppSessionId));
   on('fs.tasks', async ({ listId }) => service.tasks(listId));
   on('fs.readSpill', async (input) => service.readSpill(input));

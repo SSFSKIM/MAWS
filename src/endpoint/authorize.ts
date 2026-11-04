@@ -402,6 +402,8 @@ export class Authorizer {
     const floor = spec === null || typeof spec === 'string' ? spec : spec.floor;
     if (floor !== null && isRoutingClass(floor)) return no('grade');
     if (row.grade === undefined || this.#registered(name) ? !this.#validInput(name, input) : row.accepts?.(input) === false) return no('malformed');
+    // P5 O7 M8: a registry command's row may narrow the input it takes from another machine (`fs.unfollow` names an agent)
+    if (this.#registered(name) && row.accepts?.(input) === false) return no('malformed');
 
     // 3. The class.
     const webCards = who.clientClass === 'web-cards';
