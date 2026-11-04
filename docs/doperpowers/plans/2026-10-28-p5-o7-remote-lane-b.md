@@ -2630,6 +2630,13 @@ P5 findings of M5's re-plan, continued from F15:
   `REMOTE_UNAVAILABLE` holds 53 commands plus `mods.list`. The unit gate's four fixes include m8-2a's `remote-link.test.ts`, which was hidden while `wire.test.ts` was red. The static and unit gates passed (run 41814137865).
   Rationale: m8-2b's report (`task-3-report.md`) and the architect's rulings on its concerns.
   Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: m8-2b's review fixes (2026-11-04). The task review raised three Important findings; each is closed, and the re-review approved the range 23a4c1546..8e449ce85.
+  1. **A waiting reader holds the follow.** `FsService.awaiting` counts a reader waiting on a follow that is being started or already exists. Another client's end that would leave the follow unheld no longer stops it while a reader is about to take its hold (`7a338f61a`).
+  2. **An unfollow reaches only a host that keeps ownership.** A new engine-host capability, `host.followOwners`, means "a follow is held by each client that started it, and an unfollow lets go only of the caller's hold". The endpoint reads the live host's welcome through the seam's `engineHostLists` and sends `fs.unfollow` only to a host that lists it. An older same-major host stops a named follow whoever asks, so it is not asked (`unavailable`, logged). `WIRE_MINOR` is 26 on the branch, re-bumped at the landing (`30aa7406b`).
+  3. **Uploads fail closed where an open can't be confirmed.** `no-link.ts` names the condition `OPENS_CONFIRMED`: false off macOS when there is no `/proc/self/fd`, because there an ancestor turned into a link after the walk would lead an open out of the root unseen. `confirmOpens()` (`upload-roots.ts`) runs before `readUpload` walks and before `files.upload` writes its record, the exclude or any file. Both refuse with their existing typed refusal (`3b8ef5e22`, `8e449ce85`; the write side was added beyond the finding).
+  Lane A's `media.ts` still writes through `saveFiles` without the check. That is pre-existing: remote lane A refuses `laneA.media`, and the macOS path opens every component atomically. It stays as conditional debt (non-macOS, no `/proc`, a same-uid client), not this task's scope. The static gate passed on `8e449ce85` (run 41819631532).
+  Rationale: the task review and re-review (`task-3-report.md`, sections 1 to 4).
+  Date/Author: 2026-11-04, O7's executor (the controller).
 
 ## Outcomes & Retrospective
 
