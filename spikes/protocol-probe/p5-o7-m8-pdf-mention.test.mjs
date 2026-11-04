@@ -41,11 +41,13 @@ function pdf(){
  return out;
 }
 
-// A block in brief: a text block's size, head and markers; a document's or an image's source; a tool result's text.
+// The shape of a value: its keys, each string by its length (an attachment's content, without its bytes).
+const shape=v=>v===null||typeof v!=='object'?(typeof v==='string'?`string(${v.length})`:v):Array.isArray(v)?v.slice(0,4).map(shape):Object.fromEntries(Object.entries(v).map(([k,x])=>[k,shape(x)]));
+// A block in brief: a text block's size, head and markers (the engine's own expansion whole, up to 4000 characters); a document's or an image's source; a tool result's text.
 function brief(b){
  const markers=text=>[PDF_MARKER,TEXT_MARKER,UPLOAD,'notes.txt'].filter(m=>text.includes(m));
  if(typeof b==='string')return {type:'text',chars:b.length,head:b.slice(0,240),markers:markers(b)};
- if(b.type==='text')return {type:'text',chars:b.text.length,head:b.text.slice(0,240),markers:markers(b.text)};
+ if(b.type==='text')return {type:'text',chars:b.text.length,head:b.text.slice(0,b.text.includes('Called the Read tool')?4000:240),markers:markers(b.text)};
  if(b.type==='document'||b.type==='image')return {type:b.type,source:{type:b.source?.type,media_type:b.source?.media_type??null,bytes:typeof b.source?.data==='string'?b.source.data.length:null}};
  if(b.type==='tool_result'){const text=JSON.stringify(b.content??'');return {type:'tool_result',chars:text.length,markers:markers(text)};}
  if(b.type==='tool_use')return {type:'tool_use',name:b.name,input:b.input};
@@ -63,7 +65,7 @@ test(`p5 O7 M8: what engine ${ENGINE} attaches for an @<path> mention in a strea
  const {Probe}=await import('./harness.mjs');
  const {startStubApi,textTurn}=await import('./stub-api.mjs');
  const root=realpathSync(mkdtempSync(join(tmpdir(),'maws-m8-pdf-')));
- const stub=await startStubApi({script:ARMS.map(a=>textTurn(`ok ${a.label}`)),record:body=>({messages:messagesOf(body)})});
+ const stub=await startStubApi({script:ARMS.map(a=>textTurn(`ok ${a.label}`)),record:body=>({model:body.model,messages:messagesOf(body)})});
  let p;
  try{
   const bin=provision(join(root,'engine'));
@@ -87,12 +89,12 @@ test(`p5 O7 M8: what engine ${ENGINE} attaches for an @<path> mention in a strea
    // the turn's own messages: those after the model's last answer in its first main-loop request
    const messages=main[0]?.messages??[];
    const last=messages.findLastIndex(m=>m.role==='assistant');
-   arms.push({label:arm.label,sent:arm.content,result:{subtype:result.subtype,is_error:result.is_error},mainRequests:main.length,messages:messages.slice(last+1)});
+   arms.push({label:arm.label,sent:arm.content,result:{subtype:result.subtype,is_error:result.is_error},model:main[0]?.model??null,mainRequests:main.length,messages:messages.slice(last+1)});
   }
   // what the engine echoed of each human frame, and what its transcript keeps
   const echoed=p.frames.filter(r=>r.frame.type==='user'&&!r.frame.parent_tool_use_id).map(r=>({isReplay:r.frame.isReplay??null,isSynthetic:r.frame.isSynthetic??null,blocks:(typeof r.frame.message?.content==='string'?[r.frame.message.content]:r.frame.message?.content??[]).map(brief)}));
   const projects=join(home,'projects');
-  const kept=existsSync(projects)?readdirSync(projects).flatMap(d=>readdirSync(join(projects,d)).filter(f=>f.endsWith('.jsonl')).flatMap(f=>readFileSync(join(projects,d,f),'utf8').trim().split('\n').map(l=>JSON.parse(l)))).filter(r=>r.type==='user'||r.type==='attachment').map(r=>({type:r.type,isMeta:r.isMeta??null,attachment:r.attachment?{type:r.attachment.type,filename:r.attachment.filename??null,contentType:r.attachment.content?.type??null}:null,blocks:r.message?(typeof r.message.content==='string'?[r.message.content]:r.message.content??[]).map(brief):null})):[];
+  const kept=existsSync(projects)?readdirSync(projects).flatMap(d=>readdirSync(join(projects,d)).filter(f=>f.endsWith('.jsonl')).flatMap(f=>readFileSync(join(projects,d,f),'utf8').trim().split('\n').map(l=>JSON.parse(l)))).filter(r=>r.type==='user'||r.type==='attachment').map(r=>({type:r.type,isMeta:r.isMeta??null,attachment:r.attachment?{type:r.attachment.type,filename:r.attachment.filename??null,contentType:r.attachment.content?.type??null,...(r.attachment.type==='file'?{content:shape(r.attachment.content)}:{})}:null,blocks:r.message?(typeof r.message.content==='string'?[r.message.content]:r.message.content??[]).map(brief):null})):[];
   const summary={engine:ENGINE,arms,echoed,kept};
   // the record leaves the runner in the job's log; findings-p5-o7-m8-pdf-mention.txt copies it
   for(const line of JSON.stringify(summary,null,1).split('\n'))t.diagnostic(`m8-pdf ${line}`);
