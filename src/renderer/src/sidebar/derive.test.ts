@@ -31,6 +31,7 @@ import {
   projectSessions,
   rowBranch,
   SESSIONS_CAP,
+  SESSIONS_FIRST,
   sessionAge,
   sessionMatcher,
   shownCount,
@@ -439,6 +440,27 @@ describe('an expanded project’s records and listed rows in one ordering', () =
     }
     const unled = shownTrees(nestItems(projectItems({ sorted: pinned, listed: [spawned('idle')], digests: new Map(), rows: [], sort: 'priority' })), false, new Set());
     expect(unled.shown.map((t) => sidebarSessionId(t.root)), 'with no lead the cap is the cap').toHaveLength(5);
+  });
+
+  // m8-4a's review 2 (cap-review.test.ts): a side thread's setup can mark a child nested under an older, unmarked parent;
+  // the tree that holds a leading row is drawn past the cap, and Show more's count reads the same predicate
+  it('a spawned lead nested under an unmarked parent past the cap is drawn with its tree, under either sort, before and after Show more', () => {
+    const pinned = Array.from({ length: SESSIONS_CAP + 1 }, (_, i) => rec(`p${i}`, 20 - i, { pinned: true }));
+    const parent = rec('parent', 0);
+    const child = rec('child', 1, { lineage: { kind: 'side-thread', parentAppSessionId: parent.appId, parentEngineSessionId: null, anchor: { kind: 'file-line', locator: '/r/x.ts#L4', label: 'x.ts:4', path: '/r/x.ts', line: 4 }, openedBy: 'comment' } });
+    const lead = new Set([child.appId]);
+    for (const sort of ['priority', 'recency'] as const) {
+      const sorted = projectSessions({ sessions: [...pinned, parent, child], digests: new Map(), rows: [], sort, matches: everyone, spawned: lead });
+      const trees = nestItems(projectItems({ sorted, listed: [], digests: new Map(), rows: [], sort, spawned: lead }));
+      expect(sidebarSessionId(trees[trees.length - 1].root), `${sort}: the parent's tree sits past the pins`).toBe(parent.appId);
+      for (const more of [false, true]) {
+        const drawn = shownTrees(trees, more, lead);
+        const rows = drawn.shown.flatMap((tree) => tree.rows.map((row) => ('record' in row ? row.record.appId : row.listed.appId)));
+        expect(rows.slice(-2), `${sort}, Show more ${more}`).toEqual([parent.appId, child.appId]);
+        expect(drawn.shown, `${sort}, Show more ${more}`).toHaveLength(shownCount(SESSIONS_CAP + 2, more) + 1);
+        expect(drawn.more, `${sort}, Show more ${more}: the pins left within the cap`).toBe(more ? 0 : SESSIONS_CAP - SESSIONS_FIRST);
+      }
+    }
   });
 
   it('under priority a listed row ranks by its own state: waiting from its attention feed, working from its listing, the rest by its issue', () => {

@@ -358,12 +358,13 @@ export function projectItems({ sorted, listed, digests, rows, sort, spawned }: P
   return out;
 }
 
-// The trees an expanded project draws (search aside): the first `shownCount`, then any tree whose root still leads as
-// spawned here past them (P5 O7 M8, the architect's ruling: the lead is never cut, the cap grows by one), and how many
-// more "Show more" would draw.
+// The trees an expanded project draws (search aside): the first `shownCount`, then any tree holding a row that still
+// leads as spawned here past them, its root or a row nested under it (a side thread's child under an older parent)
+// (P5 O7 M8, the architect's ruling: the lead is never cut, the cap grows by one), and how many more "Show more" would
+// draw.
 export function shownTrees(trees: readonly SidebarTree[], more: boolean, spawned: ReadonlySet<AppSessionId> | undefined): { shown: SidebarTree[]; more: number } {
   const count = shownCount(trees.length, more);
-  const leads = (tree: SidebarTree) => leadsAsSpawned(sidebarSessionId(tree.root), spawned);
+  const leads = (tree: SidebarTree) => tree.rows.some((row) => leadsAsSpawned(isListedRow(row) ? row.listed.appId : row.record.appId, spawned));
   const past = trees.slice(count).filter(leads);
   const shown = [...trees.slice(0, count), ...past];
   const withinCap = trees.slice(count, SESSIONS_CAP).filter((tree) => !leads(tree)).length;
