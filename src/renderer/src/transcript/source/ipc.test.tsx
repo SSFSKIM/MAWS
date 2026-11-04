@@ -565,6 +565,18 @@ describe('ipcSource', () => {
       expect([...state.turns.values()].map((turn) => turn.agentsEndedAt)).toEqual([undefined]);
     });
 
+    it('a child transcript’s turn arriving after the gap is not the parent’s: the status still heals the parent’s turn', async () => {
+      const { fake } = await openRemoteTurn();
+      fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1', at: { seq: 5, idx: 0 } }, OTHER_MACHINE);
+      const child = builder();
+      child.turn('child-1');
+      child.end(['child-1']);
+      const slice = child.events.map((event) => ({ ...event, agentId: 'child-agent', parentToolUseId: null }) as SessionEvent);
+      fake.emit('session.eventBatch', batch(slice, REMOTE), OTHER_MACHINE);
+      fake.emit('session.status', idle, OTHER_MACHINE);
+      expect(working(), 'only the parent’s own turns withdraw its heal').toBe(false);
+    });
+
     // m8-4a's task review (gap-review.test.ts): the healing follows what arrived after the gap, not what a hydration
     // delivers later; main flushes the batches before it emits the re-read status (remote-session.ts)
     describe('while the source hydrates', () => {

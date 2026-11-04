@@ -358,7 +358,7 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
         pass(batch) {
           const events = batch.filter((event) => {
             if (liveForm(event)) subscription.live = true;
-            return ofParent(event) && !(subscription.live && diskForm(event));
+            return shown(event);
           });
           track(subscription, events);
           if (events.length === 0) return;
@@ -366,10 +366,13 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
           listener(events);
         },
       };
+      // what the key shows: the parent's own events and the child traffic under its tool uses, the live form once seen
+      const shown = (event: SessionEvent) => ofParent(event) && !(subscription.live && diskForm(event));
       latest = subscription;
       const off = client.on('session.eventBatch', (batch) => {
         if (batch.appSessionId !== appSessionId) return;
-        if ((subscription.gapped || heldHeal !== null) && batch.events.some(isTurnEvent)) liveTurnArrived(); // P5 O7 M8, by arrival
+        // P5 O7 M8, by arrival: only a turn of the parent's own, as the key shows it (a child's slice is not)
+        if ((subscription.gapped || heldHeal !== null) && batch.events.some((event) => isTurnEvent(event) && shown(event))) liveTurnArrived();
         subscription.batch?.();
         if (subscription.held) subscription.held.push(batch.events);
         else subscription.pass(batch.events);
