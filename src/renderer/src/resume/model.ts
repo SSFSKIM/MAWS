@@ -80,9 +80,10 @@ export const sessionBranch = (record: SessionRecord): string | null => branchLab
 // The candidates, newest first (ties by title, then id, so the order is stable while the stores change).
 //
 // P5 O7 M8: the listed sessions with no record here join them, filed as the sidebar files them (`rowOfListed`; a record
-// at a listed address whose project is not known here sits where its listing does, `rowOfListedRecord`), yours, or
-// others' under a row whose People toggle is on. A listing names no folder, worktree or branch: All worktrees keeps
-// them, Current branch none.
+// at a listed address whose project is not known here sits where its listing does, `rowOfListedRecord`). Another
+// member's session (its listing not yours), held as a listing or as a record, is listed only under a row whose People
+// toggle is on, whatever the toggles; a row nobody draws (an all-hidden project's) never lets it through. A listing
+// names no folder, worktree or branch: All worktrees keeps them, Current branch none.
 export function chooserRows({ records, digests, projects, context, toggles, branch, query, local, listed = new Map(), people = new Set() }: ChooserInput): ChooserRow[] {
   const matches = sessionMatcher(query, projects);
   const matchesListed = listedMatcher(query);
@@ -95,6 +96,8 @@ export function chooserRows({ records, digests, projects, context, toggles, bran
     return filed === undefined ? rowOfSession(index(), projects, record, shown) : filed;
   };
   const inScope = (record: SessionRecord) => (row === undefined ? record.projectId === context.projectId : recordRow(record) === row);
+  const drawsOthers = (filed: RowKey | null) => filed !== null && people.has(filed);
+  const othersRecord = (record: SessionRecord) => listed.get(record.appId)?.mine === false;
   const rows: ChooserRow[] = [];
   for (const record of records.values()) {
     if (record.appId === context.exclude) continue;
@@ -104,13 +107,15 @@ export function chooserRows({ records, digests, projects, context, toggles, bran
     if (!toggles.allWorktrees && record.worktree !== null) continue;
     if (toggles.currentBranch && (branch === null || sessionBranch(record) !== branch)) continue;
     if (!matches(record)) continue;
+    if (othersRecord(record) && !drawsOthers(recordRow(record))) continue;
     rows.push({ record, at: lastActivity(record, digests.get(record.appId)) });
   }
   if (!toggles.currentBranch) {
     for (const session of listed.values()) {
       if (records.has(session.appId) || session.appId === context.exclude) continue; // a record is listed in its place
       const filed = rowOfListed(index(), session, shown);
-      if (filed === null ? !toggles.archived : !session.mine && !people.has(filed)) continue; // an all-hidden project's; others' behind the toggle
+      if (filed === null && !toggles.archived) continue; // an all-hidden project's
+      if (!session.mine && !drawsOthers(filed)) continue; // others' behind their row's toggle
       if (!toggles.allProjects && (row === undefined || filed !== row)) continue;
       if (!matchesListed(session)) continue;
       rows.push({ listed: session, at: issuedAt(session) });

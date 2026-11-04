@@ -119,6 +119,32 @@ describe('the chooser’s rows', () => {
       expect(chooserRows(scoped({ context: { projectId: here.id, row: ROW, exclude: mine.appId } })).map(chooserRowId)).toEqual([local.appId, opened.appId]);
     });
 
+    // m8-4a's task review: another member's session stays behind its row's People toggle in whichever form it is held, and
+    // a row nobody draws (an all-hidden project's) never lets it through
+    it('keeps another member’s session out while the toggle is off, its listing or a record held at its address', () => {
+      const heldTheirs = record(theirs.appId, { projectId: null, updatedAt: at(3) });
+      const held = scoped({ records: new Map([local, heldTheirs].map((r) => [r.appId, r])) });
+      expect(chooserRows(held).map(chooserRowId)).toEqual([opened.appId, mine.appId, local.appId]);
+      expect(chooserRows({ ...held, people: new Set([ROW]) }).map(chooserRowId), 'the toggle on: the record, in its listing’s place').toEqual([opened.appId, mine.appId, local.appId, theirs.appId]);
+    });
+
+    it('never shows another member’s listing from an all-hidden project, whatever the toggles', () => {
+      const KEY = 'repo:privacy' as OrgKey;
+      const hidden = project(addressOf(TEST_MACHINE, 'p'), 0, { hidden: true, org: org('repo:privacy') });
+      const secret = listing('secret', 4, { mine: false, orgKey: KEY });
+      const every = input({
+        records: new Map(),
+        projects: new Map([[hidden.id, hidden]]),
+        context: { projectId: null, exclude: null },
+        toggles: { ...NO_TOGGLES, allProjects: true, archived: true },
+        listed: new Map([[secret.appId, secret]]),
+        people: new Set([KEY as RowKey]),
+      });
+      expect(chooserRows(every)).toEqual([]);
+      const ownSecret = listing('own-secret', 4, { orgKey: KEY });
+      expect(chooserRows({ ...every, listed: new Map([[ownSecret.appId, ownSecret]]) }).map(chooserRowId), 'yours: Archived shows a hidden project’s').toEqual([ownSecret.appId]);
+    });
+
     it('All projects takes every listed row a row files; Current branch keeps none (a listing names no branch); the search matches its title', () => {
       expect(chooserRows(scoped({ toggles: { ...NO_TOGGLES, allProjects: true } })).map(chooserRowId)).toEqual([elsewhere.appId, mine.appId, local.appId, opened.appId]);
       expect(chooserRows(scoped({ toggles: { ...NO_TOGGLES, currentBranch: true } })).map(chooserRowId)).not.toContain(mine.appId);
