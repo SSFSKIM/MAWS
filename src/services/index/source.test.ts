@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import type { HostEmit, HostOn } from '@shared/host/runtime';
+import { endableClientRef, type HandlerContext } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { SearchCheckpoint } from '@shared/ipc/schema/fs';
 import type { CommandName, CommandResult, EventName, EventPayload, HostState } from '@shared/ipc/schema';
@@ -1338,10 +1339,12 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
 // filesystem service, and C3's IPC whose session.events answers a session with no process from it): commands dispatch
 // to the registered handlers with their outputs validated, and events reach the source validated, in emitted order.
 function inProcessHost(configHome: string) {
-  const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
+  const handlers = new Map<string, (input: unknown, ctx: HandlerContext) => Promise<unknown>>();
   const listeners = new Map<string, Set<Listener>>();
   const calls: { name: CommandName; input: unknown }[] = [];
-  const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
+  const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown, ctx: HandlerContext) => Promise<unknown>);
+  // every request as the host runtime hands it, from the index's one client (P5 O7 M8: fs.* reads its asker)
+  const ctx: HandlerContext = { client: endableClientRef('index') };
   const emit: HostEmit = (name, payload) => {
     const checked = validateEventPayload(name, payload);
     if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
@@ -1354,7 +1357,7 @@ function inProcessHost(configHome: string) {
       const name = command as CommandName; // P5 O1 M5: the dispatch takes any registry's name
       calls.push({ name, input });
       try {
-        return validateCommandOutput(name, await handlers.get(name)!(input));
+        return validateCommandOutput(name, await handlers.get(name)!(input, ctx));
       } catch (error) {
         return { ok: false, error: ipcError('internal', error instanceof Error ? error.message : String(error)) };
       }
