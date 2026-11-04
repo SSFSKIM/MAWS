@@ -537,14 +537,15 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       if ('ok' in resume) return resume;
       context = resume;
     }
-    let requestDigest;
+    let requestDigest: NonNullable<ReturnType<typeof requestDigestOf>> | undefined;
     if (name === 'session.answer') {
       const read = await dispatchOverLink(link, 'session.pendingRequest', { appSessionId: app, requestId: fields.requestId });
       if (!read.ok) return read;
       const event = (read.value as { event: SessionEvent | null }).event;
       if (event === null) return { ok: true, value: { outcome: 'not_pending' } } as CommandResult<CommandName>;
-      requestDigest = requestDigestOf(app, event);
-      if (requestDigest === null) return failure('internal', `${name}: the request on ${link.name} has no digest to answer it by`);
+      const digest = requestDigestOf(app, event);
+      if (digest === null) return failure('internal', `${name}: the request on ${link.name} has no digest to answer it by`);
+      requestDigest = digest;
     }
     // One bound from the act's turn: what the resume (or the request's read) spent is not given back, so an act made at
     // the deadline is not made, and one made before it goes out by it or not at all (`sendBy`: no outbox, A4).
