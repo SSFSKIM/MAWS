@@ -238,6 +238,24 @@ describe('the stream', () => {
     expect(l.session.state.status).toEqual(newer);
   });
 
+  it('reads again once per run of unreadable events: one read out at a time, one more after it for those it missed', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    const answers: Array<() => void> = [];
+    l.link.answers.set('session.status', () => new Promise((resolve) => answers.push(() => resolve({ ok: true, output: statusOf('L1') }))) as never);
+    const reads = () => l.link.calls.filter((c) => c.name === 'session.status').length;
+    for (let seq = 5; seq < 9; seq += 1) deliver(sub, { epoch: 'L1', seq, idx: 0 }, { kind: 'turn.ended', costUsd: 'not a number' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('remote.gap')).toHaveLength(4); // each at its place
+    expect(reads()).toBe(1);
+    answers.shift()!();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads()).toBe(2);
+    answers.shift()!();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reads()).toBe(2);
+  });
+
   it('passes the link’s and the machine’s pauses on as the stream’s state', async () => {
     const l = lab();
     const sub = await opened(l);

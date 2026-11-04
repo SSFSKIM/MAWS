@@ -126,7 +126,7 @@ export const LOST_OPERATION = 'the machine lost this operation’s result; check
 /** Operations remembered past their completion, so a repeat or a late one for a settled op is told apart. */
 const OPS_KEPT = 256;
 /** An operation this session heard of: its receipt waiting, its completion said (`late` once more), or settled here. */
-type Op = { command: OperationCommand | null; state: 'waiting' | 'completed' | 'lost'; lateSaid: boolean };
+type Op = { command: OperationCommand; state: 'waiting' | 'completed' | 'lost'; lateSaid: boolean };
 
 export class RemoteSession {
   readonly state: RemoteSessionState;
@@ -155,6 +155,8 @@ export class RemoteSession {
   #ops = new Map<string, Op>();
   /** P5 O7 M8: status parts the stream delivered, so a re-read that answers after one doesn't replace it. */
   #statuses = 0;
+  /** P5 O7 M8: a re-read after a gap is out; `again`: another gap came meanwhile, so one more follows it. */
+  #rereading: { token: object; again: boolean } | null = null;
 
   constructor(deps: RemoteSessionDeps) {
     this.#deps = deps;
@@ -393,7 +395,7 @@ export class RemoteSession {
           this.#flush();
           this.#gap(at.epoch, place);
           this.publish();
-          void this.#readAgain(token);
+          this.#readAgain(token);
           return;
         }
         this.#batch.push(read.value);
@@ -514,7 +516,7 @@ export class RemoteSession {
   /** A waiter the machine doesn't know: settled as failed, and anything heard of it later dropped. */
   #lose(opId: string): void {
     const op = this.#ops.get(opId);
-    if (op?.state !== 'waiting' || op.command === null) return;
+    if (op?.state !== 'waiting') return;
     this.#remember(opId, { ...op, state: 'lost' });
     const event: OperationEvent = { appSessionId: this.state.app as OperationEvent['appSessionId'], opId, command: op.command, late: false, outcome: { ok: false, error: { code: 'engine_error', message: LOST_OPERATION, engineCode: null } } };
     this.#deps.emit(this.state.machine, 'session.operation', event);
@@ -532,8 +534,25 @@ export class RemoteSession {
 
   // ---- An event that doesn't read (P5 O7 M8) --------------------------------------------------------------------------
 
-  /** The status and record read again after a gap; a status part the stream delivered meanwhile stands. */
-  async #readAgain(token: object): Promise<void> {
+  /**
+   * The status and record read again after a gap; a status part the stream delivered meanwhile stands. One read is out
+   * at a time per subscription: gaps that come while it is make one more after it, not one each.
+   */
+  #readAgain(token: object): void {
+    if (this.#rereading?.token === token) {
+      this.#rereading.again = true;
+      return;
+    }
+    const reading = { token, again: false };
+    this.#rereading = reading;
+    void this.#reread(token).finally(() => {
+      if (this.#rereading !== reading) return;
+      this.#rereading = null;
+      if (reading.again && this.#token === token && this.#running) this.#readAgain(token);
+    });
+  }
+
+  async #reread(token: object): Promise<void> {
     const app = this.state.app;
     const statuses = this.#statuses;
     const [status, record] = await Promise.all([this.link.call('session.status', { appSessionId: app }), this.link.call('session.get', { appSessionId: app })]);
