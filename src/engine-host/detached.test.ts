@@ -125,7 +125,7 @@ describe('the detached entry', () => {
     expect(statSync(lock.socketPath).mode & 0o777).toBe(0o600);
 
     const client = await connect();
-    expect(await client.next()).toEqual({ t: 'welcome', protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, build: lock.buildId, capabilities: ['socket.ptyFrames', 'host.attachment', 'host.render', 'host.connectors', 'host.holder', 'host.browserWork', 'host.followOwners'] /* P5 O3-D: its own list, host.attachment served from M3; P5 O5 M4: host.render; P5 O4 M2: host.connectors; P5 O16 M3b: host.holder; P5 O17 M7: host.browserWork; P5 O7 M8: host.followOwners */, pid: process.pid, startedAt: lock.startedAt, liveSessions: 1, rows: 2 });
+    expect(await client.next()).toEqual({ t: 'welcome', protocol: SOCKET_PROTOCOL, minor: WIRE_MINOR, build: lock.buildId, capabilities: ['socket.ptyFrames', 'host.attachment', 'host.render', 'host.connectors', 'host.holder', 'host.browserWork', 'host.followOwners', 'engine.route-machine'] /* P5 O3-D: its own list, host.attachment served from M3; P5 O5 M4: host.render; P5 O4 M2: host.connectors; P5 O16 M3b: host.holder; P5 O17 M7: host.browserWork; P5 O7 M8: host.followOwners; P5 O7 M9: engine.route-machine */, pid: process.pid, startedAt: lock.startedAt, liveSessions: 1, rows: 2 });
     client.send({ t: 'req', id: '1', name: 'engine.ping', input: undefined });
     expect(await client.next((line) => (line as { t: string }).t === 'res')).toMatchObject({ id: '1', ok: true, value: { pid: process.pid } });
     client.send({ t: 'ready' });
@@ -405,7 +405,7 @@ describe('the detached entry', () => {
       const host = harness({ env: { MAWS_E2E: '1', MAWS_E2E_HOST_WITHOUT_HOLDER: '1' } });
       await host.start();
       const welcomed = await connect(['host.holder']);
-      expect(await welcomed.next()).toMatchObject({ t: 'welcome', capabilities: ['socket.ptyFrames', 'host.attachment', 'host.render', 'host.connectors', 'host.browserWork', 'host.followOwners'] }); // P5 O17 M7: the stand-in drops host.holder alone; this build serves host.browserWork (P5 O7 M8: and host.followOwners)
+      expect(await welcomed.next()).toMatchObject({ t: 'welcome', capabilities: ['socket.ptyFrames', 'host.attachment', 'host.render', 'host.connectors', 'host.browserWork', 'host.followOwners', 'engine.route-machine'] }); // P5 O17 M7: the stand-in drops host.holder alone; this build serves host.browserWork (P5 O7 M8: and host.followOwners; P5 O7 M9: engine.route-machine)
       welcomed.socket.destroy();
       const lock = readLock(dir)!;
       const client = await connectLines(lock.socketPath);

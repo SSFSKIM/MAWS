@@ -90,5 +90,13 @@ describe('the launch\'s rows', () => {
     expect(rows.map((r) => r.seq)).toEqual(Array.from({ length: 12 }, (_, i) => i + 1));
     expect(writer.currentPath).not.toBe(writer.path); // it did rotate
     expect(spawnRowOf(rows)).toMatchObject({ bin: '/x/claude', sessionId: 'eng-1', envKeys: ['PATH'] });
+    expect(spawnRowOf(rows)).not.toHaveProperty('route'); // P5 O7 M9: a row with none launched its legacy route
+  });
+
+  // P5 O7 M9: the machine route's spawn row names it beside its legacy route, and the adopter's plan takes `route` first
+  it('reads the machine route from the spawn row before its legacy field', () => {
+    const writer = new JournalWriter(dir, 'launch03', { maxBytes: 4_000 });
+    writer.row('meta', { event: 'spawn', bin: '/x/claude', args: ['-p'], envKeys: ['PATH'], cwd: '/w', gateway: 'gateway', route: 'machine', engineVersion: '2.1.283', launchId: 'launch03', sessionId: 'eng-3' });
+    expect(spawnRowOf(launchRows(dir, 'launch03'))).toMatchObject({ gateway: 'gateway', route: 'machine' });
   });
 });

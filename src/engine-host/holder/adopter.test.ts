@@ -108,6 +108,25 @@ describe('the launcher’s adoption', () => {
     await session.exited;
   });
 
+  // P5 O7 M9: the stored spec carries no `route` (an older strict reader's file, as launchedBy), so the adopter takes the
+  // machine route from the launch's own spawn row and rebuilds the plan under it, never under the legacy field
+  it('restores a machine-route launch on the machine route from its spawn row, the stored spec carrying none', async () => {
+    const { route: _route, ...stored } = { ...SPEC, gateway: 'direct' as const, route: 'machine' as const };
+    void _route;
+    const { entry } = launched({ ...stored, route: 'machine' });
+    let plan: Parameters<LauncherDeps['wire']>[1] | undefined;
+    const a = await adopter({ spec: stored, deps: { wire: (_session, built) => void (plan = built), captureEnv: async () => ({ PATH: '/opt/now/bin', HOME: '/Users/x', CLAUDE_CONFIG_DIR: '/Users/x/.claude-now' }) } });
+    const adopting = a.adopt(entry);
+    await until(() => a.transports.length === 1 && a.table.get(ID) !== undefined, 'the reservation');
+    caughtUp(a.transports[0]!);
+    await adopting;
+    expect(plan).toMatchObject({ route: 'machine', gateway: 'direct' });
+    expect(plan!.flagSettings).toEqual({ dialogExpiry: 'never' }); // never the legacy direct route's blanking
+    expect(a.table.get(ID)!.status().gateway).toMatchObject({ route: 'machine' });
+    a.transports[0]!.exit(0);
+    await a.table.get(ID)!.exited;
+  });
+
   // P5 O16 M3c: the stream begins at the adoption; what the launch journaled before it is the journal's to answer
   it('wires the adopted session with its journal’s last seq, through which its stream answers from the journal', async () => {
     const { entry } = launched();

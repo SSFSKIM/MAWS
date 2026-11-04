@@ -215,6 +215,42 @@ describe('EngineSession: the handshake, journal-before-normalise and the gateway
     expect(mismatch.events).toMatchObject([{ kind: 'notice.posted', level: 'warning', key: 'gateway:mismatch' }]);
   });
 
+  // P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M9 "What the machine reports"): a machine-route
+  // launch names what get_status reports and never calls it a mismatch; `mode` and `verified` carry the legacy route
+  describe('on the machine route', () => {
+    const statusOf = (pass: 'pass1' | 'pass2', name: string, seq: number) => (loadJournal(pass, name).find((r) => r.seq === seq)!.frame as { response: { response: Record<string, unknown> } }).response.response;
+    const READS = statusOf('pass1', 'reads', 78); // the relay's base URL, set in the launch's environment
+    const USER_SETTINGS = statusOf('pass2', 'routing-user-settings', 12); // the relay's base URL, set by the user settings
+    const UNROUTED = statusOf('pass2', 'auto-unrouted', 35); // no base URL: the Login and Organization rows
+    const OTHER = 'https://inference.example.invalid';
+    const HOST = { sections: (READS.sections as { title: string; rows: { label: string; value: string }[] }[]).map((section) => ({ ...section, rows: section.rows.map((row) => (row.label === 'Anthropic base URL' ? { ...row, value: OTHER } : row)) })) };
+    const machine = async (status: Record<string, unknown>, gateway: 'gateway' | 'direct') => {
+      const run = setup({ spec: { gateway, route: 'machine' }, responder: defaultResponder({ get_status: () => ({ response: status }) }) });
+      expect(run.session.status().gateway).toMatchObject({ mode: gateway, verified: 'pending', route: 'machine' }); // before the read: the spec's legacy route
+      await run.session.start();
+      expect(run.events.filter((e) => e.kind === 'notice.posted')).toEqual([]);
+      return EngineSessionStatusSchema.parse(run.session.status()).gateway;
+    };
+
+    it.each([
+      ['reads.jsonl', READS, 'direct'],
+      ['pass2/routing-user-settings.jsonl', USER_SETTINGS, 'gateway'],
+    ] as const)('names the relay ClaudeUsage, routed, over %s', async (_fixture, status, legacy) => {
+      expect(await machine(status, legacy)).toEqual({ mode: 'gateway', baseUrl: RELAY_URL, verified: 'routed', autoModeServer: expect.any(String), localLane: null, route: 'machine', observed: { kind: 'claudeusage', baseUrl: RELAY_URL } });
+    });
+
+    it('names the Anthropic login when there is no base URL (pass2/auto-unrouted.jsonl), direct', async () => {
+      expect(await machine(UNROUTED, 'gateway')).toEqual({
+        mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'enabled', localLane: null, route: 'machine',
+        observed: { kind: 'login', baseUrl: null, login: 'Expired — log in again', organization: "owner@redacted.invalid's Organization" },
+      });
+    });
+
+    it('names another host by its base URL, direct, never a mismatch', async () => {
+      expect(await machine(HOST, 'gateway')).toMatchObject({ mode: 'direct', baseUrl: OTHER, verified: 'direct', route: 'machine', observed: { kind: 'host', baseUrl: OTHER } });
+    });
+  });
+
   it('re-reads get_status after each human turn\'s result', async () => {
     const { session, transport } = setup();
     await session.start();

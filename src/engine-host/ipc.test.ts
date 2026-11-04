@@ -254,6 +254,24 @@ describe('engine host X2 surface', () => {
     await direct.ipc.table.get('app-ipc' as AppSessionId)!.exited;
   });
 
+  // P5 O7 M9 (M9 "The relay check and the features"): the machine route's check is advisory and the services' (the start
+  // guards, on the resolved base URL); the engine host never refuses it, whatever its legacy field says, and reads
+  // `route` before that field
+  it('session.launch on the machine route never asks the relay, a legacy gateway field included; a gateway route over a direct field does', async () => {
+    const down = { ...OK_RELAY, ok: false, status: null, latencyMs: null, error: 'connect ECONNREFUSED 127.0.0.1:8641' };
+    const checkRelay = vi.fn(async () => down);
+    const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
+    const machine = engineHost({ spawn: () => transport, captureEnv: async () => ({ PATH: '/usr/bin' }), binaryProbe: async () => OK_BINARY, checkRelay });
+    expect(await machine.call('session.launch', { spec: spec({ gateway: 'gateway', route: 'machine' }) })).toMatchObject({ status: 'launching', session: { gateway: { mode: 'gateway', route: 'machine' } } });
+    expect(checkRelay).not.toHaveBeenCalled();
+    transport.exit(0);
+    await machine.ipc.table.get('app-ipc' as AppSessionId)!.exited;
+    const spawn = vi.fn();
+    const gateway = engineHost({ spawn, captureEnv: async () => ({ PATH: '/usr/bin' }), binaryProbe: async () => OK_BINARY, checkRelay: async () => down });
+    expect(await gateway.call('session.launch', { spec: spec({ gateway: 'direct', route: 'gateway' }) })).toEqual({ status: 'relay_unreachable', health: down });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
   it('a replayed permission round trip through the handlers: ready and routed, the request, the answer, the turn, the snapshot, stop', async () => {
     const host = engineHost();
     const id = 'app-perm';

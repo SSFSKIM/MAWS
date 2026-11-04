@@ -232,7 +232,7 @@ export const FOLLOW_OWNERS_CAPABILITY = 'host.followOwners';
 // welcome, that it launches `route: 'machine'` (nothing injected, nothing blanked). Main sends `machine` only to a host
 // that lists it; to any other it launches the legacy route where that reaches the same inference (the relay, or no base
 // URL), and otherwise refuses the start `route-unsupported`. In the wire's union from M9's shapes on; the engine host's
-// list below gains it with the launch itself (each peer lists only what it implements).
+// list below has it from the launch itself (m9-2: launch.ts's machine route, session.ts's naming of what it reports).
 export const ENGINE_ROUTE_MACHINE_CAPABILITY = 'engine.route-machine';
 // What each peer lists of itself in its hello or welcome: only what it implements. The wire's capability list
 // (WIRE_CAPABILITIES, the manifest's) is the union of every name a peer of this major may list, and no peer reads it as
@@ -244,7 +244,7 @@ export const ENGINE_ROUTE_MACHINE_CAPABILITY = 'engine.route-machine';
 // `mawsd`'s hello to it list `host.connectors` too (`mawsd` beside `host.attachment`, under the same option), and main's
 // hellos `machine.connectors` (`mawsd` refuses, on engine-host.sock and machine.sock, an app's hello that lacks it).
 export const PEER_CAPABILITIES = {
-  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, FOLLOW_OWNERS_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment; P5 O5 M4: host.render; P5 O4 M2: it keys the connectors on a declaring client; P5 O16 M3b: it hands over; P5 O17 M7: host.browserWork; P5 O7 M8: host.followOwners)
+  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, FOLLOW_OWNERS_CAPABILITY, ENGINE_ROUTE_MACHINE_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment; P5 O5 M4: host.render; P5 O4 M2: it keys the connectors on a declaring client; P5 O16 M3b: it hands over; P5 O17 M7: host.browserWork; P5 O7 M8: host.followOwners; P5 O7 M9: it launches the machine route)
   ptyHost: [PTY_FRAMES_CAPABILITY], // the pty host's welcome
   app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, BROWSER_ENGINE_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host (P5 O3-D M5b: machine.spine; P5 O4 M2: machine.connectors; P5 O16 M3b: host.holder; P5 O17 M9b: browser.engine, the app a tab engine of its agent tabs on machine.sock)
   daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3, O4 M2: both under its permanent-client option; P5 O16 M3b: host.holder, whatever the option; P5 O17 M7 fix 2: host.browserWork, it tells browser work, under the option too)

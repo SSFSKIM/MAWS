@@ -241,6 +241,15 @@ describe('the owner channel’s launch-spec keys are not stored (P2-C)', () => {
     const file = JSON.parse(await readFile(join(userData, 'engine-host', 'state', `${ID}.json`), 'utf8')) as { launchSpec: Record<string, unknown> };
     expect(file.launchSpec).toEqual(JSON.parse(JSON.stringify(spec)));
   });
+
+  // P5 O7 M9: nor the route, beside its legacy field, which an adopter restores from the launch's spawn row
+  it('saveLaunchSpec writes no route either, and keeps the legacy field', async () => {
+    const store = new FileSessionStateStore(userData);
+    await store.saveLaunchSpec(ID, { ...spec, gateway: 'direct', route: 'machine' });
+    const file = JSON.parse(await readFile(join(userData, 'engine-host', 'state', `${ID}.json`), 'utf8')) as { launchSpec: Record<string, unknown> };
+    expect(file.launchSpec).toEqual(JSON.parse(JSON.stringify({ ...spec, gateway: 'direct' })));
+    expect(await new FileSessionStateStore(userData).loadLaunchSpec(ID)).not.toHaveProperty('route');
+  });
 });
 // P2-C end
 

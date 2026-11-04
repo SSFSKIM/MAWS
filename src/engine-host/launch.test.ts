@@ -299,6 +299,43 @@ describe('launch contract builds the X6 command line and environment', () => {
       expect(settingsOf(args)).toEqual({ dialogExpiry: 'never', env: { ANTHROPIC_BASE_URL: '', ANTHROPIC_AUTH_TOKEN: '' } });
     });
 
+    // P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M9 "The route"): the machine route injects
+    // nothing and blanks nothing, whatever the legacy field beside it says
+    it.each(['gateway', 'direct'] as const)('for a machine spec (legacy %s) passes the captured ANTHROPIC_* and CLAUDE_* keys through, sets no gateway key and adds no settings env', (gateway) => {
+      const captured = { ...CAPTURED, ANTHROPIC_AUTH_TOKEN: 'the-machines-own-token', CLAUDE_CODE_USE_BEDROCK: '1' };
+      const plan = buildLaunch(spec({ gateway, route: 'machine' }), captured, OPTS);
+      expect(plan.env).toMatchObject({
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:9999', ANTHROPIC_AUTH_TOKEN: 'the-machines-own-token', ENABLE_TOOL_SEARCH: 'false',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'gpt-5-mini', CLAUDE_CONFIG_DIR: CAPTURED.CLAUDE_CONFIG_DIR, CLAUDE_CODE_USE_BEDROCK: '1',
+      });
+      for (const key of EXCLUDED_KEYS) expect(plan.env).not.toHaveProperty(key); // a parent session's still never reach it
+      expect(settingsOf(plan.args)).toEqual({ dialogExpiry: 'never' });
+      expect(plan.flagSettings).toEqual({ dialogExpiry: 'never' });
+      expect(plan).toMatchObject({ route: 'machine', gateway });
+      expect(spawnMeta(plan, { appVersion: '0.0.0-test' })).toMatchObject({ gateway, route: 'machine' });
+    });
+
+    it('for a machine spec over a capture with no base URL sets none, and passes a caller env through unprotected', () => {
+      const { ANTHROPIC_BASE_URL: _url, ENABLE_TOOL_SEARCH: _search, ...bare } = CAPTURED;
+      void _url;
+      void _search;
+      const plan = buildLaunch(spec({ route: 'machine', extraSettings: { env: { FOO: 'bar' } } }), bare, OPTS);
+      expect(plan.env).not.toHaveProperty('ANTHROPIC_BASE_URL');
+      expect(plan.env).not.toHaveProperty('ANTHROPIC_AUTH_TOKEN');
+      expect(plan.env).not.toHaveProperty('ENABLE_TOOL_SEARCH');
+      expect(plan.flagSettings).toEqual({ env: { FOO: 'bar' }, dialogExpiry: 'never' });
+    });
+
+    it('reads `route` before the legacy field: a gateway or direct route launches as its legacy spec does, and records no route', () => {
+      expect(buildLaunch(spec({ gateway: 'direct', route: 'gateway' }), CAPTURED, OPTS).env).toMatchObject({ ANTHROPIC_BASE_URL: RELAY_URL, ANTHROPIC_AUTH_TOKEN: GATEWAY_AUTH_TOKEN });
+      const direct = buildLaunch(spec({ gateway: 'gateway', route: 'direct' }), CAPTURED, OPTS);
+      expect(direct.env).not.toHaveProperty('ANTHROPIC_BASE_URL');
+      expect(direct.gateway).toBe('direct');
+      expect(direct).not.toHaveProperty('route'); // a plan names its route only on the machine route
+      const legacy = spawnMeta(buildLaunch(spec(), CAPTURED, OPTS), { appVersion: '0.0.0-test' });
+      expect(legacy).not.toHaveProperty('route'); // the row an older adopter reads stays as it was
+    });
+
     it('is constructed, never inherited: a key process.env holds but the capture lacks is absent', () => {
       process.env.MAWS_LAUNCH_TEST_LEAK = 'leak';
       try {

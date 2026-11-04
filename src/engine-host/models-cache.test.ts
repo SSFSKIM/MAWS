@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ModelCatalogueSchema } from '@shared/sessions/models';
 import { loadJournal } from '../../test/support/fixtures';
-import { BUILTIN_MODELS, catalogueKey, ModelsCache, modelsKey } from './models-cache';
+import { BUILTIN_MODELS, catalogueKey, effectiveBaseUrl, ModelsCache, modelsKey } from './models-cache';
+import { managedSettingsDir } from './session-start-hooks'; // P5 O7 M9
 
 let userData: string;
 beforeEach(async () => {
@@ -275,5 +276,92 @@ describe('ModelsCache.answer with a fallback key', () => {
     await cache.update(keyed, directModels());
     expect(cache.answer(keyed, RELAY).models.map((m) => m.value)).toEqual(['default', 'opus', 'claude-fable-5-1[1m]', 'sonnet', 'haiku']);
     expect(cache.answer(RELAY).models.map((m) => m.value)).toContain('claude/astra'); // the route's own list untouched
+  });
+});
+
+// P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M9 "The relay check and the features"): the
+// machine route's effective base URL, over catalogueKey's precedence (spawn < global config < user < project < local <
+// flag), CLAUDE_CODE_RESTRICTED emptying the setting sources, and managed settings last through resolve-style.ts's per-OS
+// path, read here beneath a scratch system root (never the machine's own)
+describe('effectiveBaseUrl', () => {
+  const RELAY_URL = 'http://127.0.0.1:8641';
+  const OTHER = 'https://inference.example.invalid';
+  let root: string;
+  let system: string;
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'maws-base-url-'));
+    system = join(root, 'system');
+  });
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+  const settings = async (dir: string, name: string, value: unknown) => {
+    await mkdir(join(dir, '.claude'), { recursive: true });
+    await writeFile(join(dir, '.claude', name), typeof value === 'string' ? value : JSON.stringify(value));
+  };
+  const managed = async (name: string, value: unknown) => {
+    const dir = join(system, managedSettingsDir('linux'));
+    await mkdir(join(dir, 'managed-settings.d'), { recursive: true });
+    await writeFile(join(dir, name), JSON.stringify(value));
+  };
+  const resolve = (env: Record<string, string>, cwd: string | null, flagEnv?: unknown) => effectiveBaseUrl({ env, cwd, flagEnv, platform: 'linux', systemRoot: system });
+
+  it('takes the project settings over the user settings that name the relay', async () => {
+    const home = join(root, 'home');
+    const project = join(root, 'project');
+    await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: RELAY_URL } });
+    await settings(project, 'settings.json', { env: { ANTHROPIC_BASE_URL: OTHER } });
+    expect(await resolve({ HOME: home }, project)).toEqual({ kind: 'resolved', baseUrl: OTHER });
+    expect(await resolve({ HOME: home }, null)).toEqual({ kind: 'resolved', baseUrl: RELAY_URL }); // no project: the user's
+  });
+
+  it('takes the project settings naming the relay over the user settings that name another host', async () => {
+    const home = join(root, 'home');
+    const project = join(root, 'project');
+    await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: OTHER } });
+    await settings(project, 'settings.json', { env: { ANTHROPIC_BASE_URL: RELAY_URL } });
+    expect(await resolve({ HOME: home, ANTHROPIC_BASE_URL: 'https://shell.example.invalid' }, project)).toEqual({ kind: 'resolved', baseUrl: RELAY_URL });
+    await settings(project, 'settings.local.json', { env: { ANTHROPIC_BASE_URL: OTHER } }); // local over project
+    expect(await resolve({ HOME: home }, project)).toEqual({ kind: 'resolved', baseUrl: OTHER });
+    expect(await resolve({ HOME: home }, project, { ANTHROPIC_BASE_URL: RELAY_URL })).toEqual({ kind: 'resolved', baseUrl: RELAY_URL }); // flag over local
+  });
+
+  it('reads no user, project or local settings under CLAUDE_CODE_RESTRICTED: the spawn environment, the global config and the flag settings', async () => {
+    const home = join(root, 'home');
+    const project = join(root, 'project');
+    await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: OTHER } });
+    await settings(project, 'settings.local.json', { env: { ANTHROPIC_BASE_URL: OTHER } });
+    const env = { HOME: home, CLAUDE_CODE_RESTRICTED: '1', ANTHROPIC_BASE_URL: RELAY_URL };
+    expect(await resolve(env, project)).toEqual({ kind: 'resolved', baseUrl: RELAY_URL });
+    await writeFile(join(home, '.claude.json'), JSON.stringify({ env: { ANTHROPIC_BASE_URL: OTHER } }));
+    expect(await resolve(env, project)).toEqual({ kind: 'resolved', baseUrl: OTHER }); // the global config still applies
+    expect(await resolve(env, project, { ANTHROPIC_BASE_URL: RELAY_URL })).toEqual({ kind: 'resolved', baseUrl: RELAY_URL });
+  });
+
+  it('resolves without a managed file, and takes a managed value over every other source, fragments in name order', async () => {
+    const home = join(root, 'home');
+    await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: OTHER } });
+    expect(await resolve({ HOME: home }, null)).toEqual({ kind: 'resolved', baseUrl: OTHER }); // the directory itself is missing
+    await managed('managed-settings.json', { env: { ANTHROPIC_BASE_URL: RELAY_URL } });
+    expect(await resolve({ HOME: home }, null, { ANTHROPIC_BASE_URL: OTHER })).toEqual({ kind: 'resolved', baseUrl: RELAY_URL });
+    await managed('managed-settings.d/20-b.json', { env: { ANTHROPIC_BASE_URL: 'https://b.example.invalid' } });
+    await managed('managed-settings.d/10-a.json', { env: { ANTHROPIC_BASE_URL: 'https://a.example.invalid' } });
+    expect(await resolve({ HOME: home }, null)).toEqual({ kind: 'resolved', baseUrl: 'https://b.example.invalid' });
+  });
+
+  it('reads no base URL as none, and an empty value as none (the direct route blanks it so)', async () => {
+    expect(await resolve({ HOME: join(root, 'nobody') }, join(root, 'missing'))).toEqual({ kind: 'resolved', baseUrl: null });
+    const home = join(root, 'home');
+    await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: '' } });
+    expect(await resolve({ HOME: home, ANTHROPIC_BASE_URL: OTHER }, null)).toEqual({ kind: 'resolved', baseUrl: null });
+  });
+
+  it('is uncertain when a settings file that exists cannot be read as settings', async () => {
+    const home = join(root, 'home');
+    const project = join(root, 'project');
+    await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: RELAY_URL } });
+    await settings(project, 'settings.json', '{ not json');
+    expect(await resolve({ HOME: home }, project)).toEqual({ kind: 'uncertain', why: expect.stringContaining(join(project, '.claude', 'settings.json')) });
+    expect(await resolve({ HOME: home }, null)).toEqual({ kind: 'resolved', baseUrl: RELAY_URL }); // that file is not this launch's
   });
 });
