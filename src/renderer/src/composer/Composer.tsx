@@ -230,6 +230,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     driven, // P5 O9 M5
     remote: isRemoteLaneB(appSessionId), // P5 O16 M3b fix wave 2
     modeUnavailable: draft.mode === 'bash' ? bashUnavailable : draft.mode === 'memory' ? memoryUnavailable : null, // P5 O7 M8
+    // P5 O7 M8 review: a remote send naming PDFs goes as `session.send`, after the running turn (editor/remote-uploads.ts)
+    sendsDocuments: isRemoteLaneB(appSessionId) && attachmentsOf(doc).some((a) => a.kind === 'document'),
   });
 
   // ---- the docked swap ---------------------------------------------------------------------------------------------

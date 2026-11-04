@@ -37,6 +37,9 @@ export interface SubmitInput {
   // P5 O7 M8: why the mode's command (`!` session.bash, `#` session.memoryAppend) is not offered on the session's machine
   // (lane-b/remote-unavailable.ts); absent or null: it is
   modeUnavailable?: string | null;
+  // P5 O7 M8 review: the draft names documents for a session on another machine (uploaded PDFs), so its send is a
+  // `session.send` even while a turn runs (a steer carries no uploads) and waits for the turn
+  sendsDocuments?: boolean;
 }
 
 export interface SubmitDecision {
@@ -75,6 +78,7 @@ export const isBusy = (status: EngineSessionStatus | null, entries: readonly Que
 
 // What a Send does when it does not simply send (W10), and what the queue rows' own actions do (W1).
 export const SENDS_AT_NEXT_STEP = 'Sends at the next step';
+export const SENDS_AFTER_THIS_TURN = 'Sends after this turn'; // P5 O7 M8 review: a remote send naming documents, queued behind the turn
 export const SENDS_AFTER_QUEUED = 'Sends after the queued messages'; // idle with messages waiting: a send never overtakes them (C3)
 export const JOINS_PAUSED_QUEUE = 'Joins the paused queue; Resume sends it';
 export const SENDS_AT_TURN_END = 'Sends when this turn ends'; // a waiting steer's Hold
@@ -133,7 +137,8 @@ export function submitState(i: SubmitInput): SubmitDecision {
   const busy = isBusy(status, queue.entries);
   if (mode === 'bash') return decide('send', 'Run', !empty, null, busy ? RUNS_NOW : null);
   if (mode === 'memory') return decide('send', 'Save to memory', !empty);
-  if (busy) return empty ? decide('stop', 'Stop', true) : decide('send', 'Send', true, null, SENDS_AT_NEXT_STEP, true);
+  if (busy && empty) return decide('stop', 'Stop', true);
+  if (busy) return i.sendsDocuments ? decide('send', 'Send', true, null, SENDS_AFTER_THIS_TURN) : decide('send', 'Send', true, null, SENDS_AT_NEXT_STEP, true);
   // Stop holds the older queued text, not a fresh instruction. Other pauses keep new text behind the held entries.
   if (queue.paused && (!empty || queue.entries.length > 0)) return empty ? decide('resume', 'Resume', true) : decide('send', 'Send', true, null, queue.pauseReason === 'interrupt' ? SENDS_NOW : JOINS_PAUSED_QUEUE);
   if (queue.entries.length > 0) return decide('send', 'Send', !empty, null, SENDS_AFTER_QUEUED);

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { AppSessionId } from '@shared/graph/ids';
 import { humanTurn, status } from '../../../../../test/support/builders';
-import { isBusy, REATTACHING_STOP_REMOTE, steerPriority, submitState, type SubmitInput } from './submit-state';
+import { isBusy, REATTACHING_STOP_REMOTE, SENDS_AFTER_THIS_TURN, steerPriority, submitState, type SubmitInput } from './submit-state';
 
 const APP = 'app-1';
 const entry = (state: QueueEntry['state'], over: Partial<QueueEntry> = {}): QueueEntry => ({
@@ -233,5 +233,21 @@ describe('a mode not offered on the session’s machine', () => {
   it('leaves Send and the modes with no reason as they were', () => {
     expect(row({ mode: 'send', modeUnavailable: words })).toEqual(['send', 'Send', true, null, false]);
     expect(row({ mode: 'bash', modeUnavailable: null })).toEqual(['send', 'Run', true, null, false]);
+  });
+});
+
+// P5 O7 M8 review (the architect's option (a)): a remote send naming uploaded PDFs is a `session.send` even while a turn
+// runs (a steer carries no uploads), so it waits for the turn; the control says so, and is not the steer
+describe('a send carrying documents while a turn runs', () => {
+  it('reads “Sends after this turn”, not the next-step steer', () => {
+    const d = submitState(input({ status: turning, sendsDocuments: true }));
+    expect([d.primary, d.label, d.enabled, d.reason, d.detail, d.steer]).toEqual(['send', 'Send', true, null, SENDS_AFTER_THIS_TURN, false]);
+    expect(SENDS_AFTER_THIS_TURN).toBe('Sends after this turn');
+  });
+
+  it('changes nothing idle, on an empty box, or without documents', () => {
+    expect(submitState(input({ sendsDocuments: true })).detail).toBeNull();
+    expect(submitState(input({ status: turning, empty: true, sendsDocuments: true })).primary).toBe('stop');
+    expect(submitState(input({ status: turning })).steer).toBe(true);
   });
 });

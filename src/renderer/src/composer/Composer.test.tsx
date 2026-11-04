@@ -1573,6 +1573,21 @@ describe('a lane B session on another machine', () => {
     expect(editorOf().editor.getText()).not.toBe('');
   });
 
+  // P5 O7 M8 review (the architect's option (a)): a send naming a PDF is a `session.send` even while a turn runs (a steer
+  // carries no uploads), so it waits for the turn: the control says “Sends after this turn”, not the next-step steer
+  it('says a send carrying a PDF while a turn runs goes after the turn, and a plain one at the next step', async () => {
+    const s = useSessions.getState();
+    useSessions.setState({ engine: new Map(s.engine).set(R, addressing.output('engine.sessions').lift([status('app-r', { engineState: 'running', turn: humanTurn })], OTHER_MACHINE)[0]!) });
+    window.maws = { ...preloadOf(remote), pathForFile: () => '' } as PreloadBridge;
+    mount([{ index: 0, id: R }]);
+    await type('read');
+    await waitFor(() => expect(primary().getAttribute('aria-description')).toBe('Sends at the next step'));
+    queueComposerAttachment(R, { files: [new File(['%PDF-1.4'], 'paper.pdf', { type: 'application/pdf' })], text: '' });
+    await waitFor(() => expect(primary().getAttribute('aria-description')).toBe('Sends after this turn'));
+    expect(primary().title).toBe('Sends after this turn (Enter)');
+    expect(primary().disabled).toBe(false);
+  });
+
   it('keeps the draft in this app’s memory, never asking the machine for it', async () => {
     const view = mount([{ index: 0, id: R }]);
     await type('half a thought');
