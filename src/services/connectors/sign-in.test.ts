@@ -8,6 +8,7 @@ import { listenLoopback } from './oauth-callback';
 import { ALREADY_CONNECTED, createSignIn, startSignIn, type SignInDeps, type SignInHost } from './sign-in';
 import { endableClientRef } from '@shared/ipc/client'; // P5 O7 M5c
 import { createRelayedCallbacks } from './relayed-callback'; // P5 O7 M5c
+import { validateCommandInput } from '@shared/ipc/validate'; // P5 O7 M8
 
 const SESSION = 'app-session-1';
 const GLOBAL = '/cfg/.claude.json';
@@ -497,6 +498,74 @@ describe('the sign-in service', () => {
     expect(events.filter((e) => e.opId === opId).at(-1)).toMatchObject({ reason: 'other_entry', message: `that session uses the local entry in ${GLOBAL}` });
     expect(reads).toEqual([{ cwd: '/p' }]);
     expect(host.asked.map((a) => a.name)).not.toContain('session.mcpAuthenticate');
+  });
+});
+
+// P5 O7 M8 ("Sign in from the session's MCP widget"): the widget knows a server's name and scope and the session's
+// directory, but not the file its entry is in, which only the session's machine reads (`customization.serverEndpoints`,
+// main-only there). A sign-in that names no path signs in the entry the session's engine uses for the name, when it is of
+// the scope asked; any other is refused as a row's would be.
+describe('a sign-in that names no path (the session’s MCP widget)', () => {
+  function service(servers: unknown[]) {
+    const handlers = new Map<string, (input: unknown, ctx: unknown) => unknown>();
+    const events: ConnectorSignInChanged[] = [];
+    const statuses = new Set<(payload: { appSessionId: string; status: { process: string; cwd: string } }) => void>();
+    const reads: unknown[] = [];
+    const host = fakeHost();
+    const call = host.call.bind(host);
+    // the session's engine holds the entry its files say it uses, waiting for its sign-in
+    host.call = (async (name: string, input: unknown) => {
+      if (name === 'session.mcpStatus') return { ok: true, value: { mcpServers: held.map(({ name: n, scope, transport, url }) => ({ name: n, status: 'needs-auth', scope, transport, config: { type: transport, url } })) } };
+      if (name !== 'customization.serverEndpoints') return call(name as never, input as never);
+      reads.push(input);
+      return { ok: true, value: { servers } };
+    }) as never;
+    const held = (servers as Array<{ name: string; scope: string; transport: string; url: string }>).slice(-1);
+    const started = startSignIn({
+      bus: { register: ((name: string, handler: (input: unknown, ctx: unknown) => unknown) => handlers.set(name, handler)) as never, emit: ((_name: string, event: ConnectorSignInChanged) => events.push(event)) as never },
+      host,
+      onSessionStatus: (listener) => (statuses.add(listener), () => statuses.delete(listener)),
+      onHostLost: () => () => {},
+      sessions: async () => [],
+      hostStreaming: () => true,
+      onHostStreaming: () => () => {},
+      port: { openExternal: async () => ({ opened: true }) },
+      listen: listenLoopback,
+      relayed: createRelayedCallbacks(),
+      machine: 'this-mac',
+    });
+    stop = () => started.stop();
+    statuses.forEach((l) => l({ appSessionId: SESSION, status: { process: 'ready', cwd: '/p' } }));
+    const signIn = (input: Record<string, unknown>) => (handlers.get('connectors.signIn')!({ appSessionId: SESSION, ...input }, { client: null }) as { opId: string }).opId;
+    const last = (opId: string) => events.filter((e) => e.opId === opId).at(-1);
+    return { host, reads, signIn, last };
+  }
+
+  it('is a sign-in the command takes', () => {
+    expect(validateCommandInput('connectors.signIn', { name: 'linear', scope: 'user', cwd: '/p', appSessionId: SESSION }).ok).toBe(true);
+  });
+
+  it('signs in the entry the session’s engine uses for the name, read on its machine for its directory', async () => {
+    const t = service([{ name: 'linear', scope: 'project', path: '/p/.mcp.json', transport: 'http', url: 'https://p.example/mcp' }]);
+    const opId = t.signIn({ name: 'linear', scope: 'project', cwd: '/p' });
+    await vi.waitFor(() => expect(t.host.asked.map((a) => a.name)).toContain('session.mcpAuthenticate'));
+    expect(t.last(opId)?.state).not.toBe('failed');
+    expect(t.reads).toEqual([{ cwd: '/p' }]);
+  });
+
+  it('refuses when the entry the session uses is of another scope than the one asked, saying which it uses', async () => {
+    const t = service([{ name: 'linear', scope: 'user', path: GLOBAL, transport: 'http', url: 'https://u.example/mcp' }, { name: 'linear', scope: 'local', path: GLOBAL, transport: 'http', url: 'https://l.example/mcp' }]);
+    const opId = t.signIn({ name: 'linear', scope: 'user', cwd: '/p' });
+    await vi.waitFor(() => expect(t.last(opId)?.state).toBe('failed'));
+    expect(t.last(opId)).toMatchObject({ reason: 'other_entry', message: `that session uses the local entry in ${GLOBAL}` });
+    expect(t.host.asked.map((a) => a.name)).not.toContain('session.mcpAuthenticate');
+  });
+
+  it('refuses when the session has no entry of the name', async () => {
+    const t = service([]);
+    const opId = t.signIn({ name: 'linear', scope: 'user', cwd: '/p' });
+    await vi.waitFor(() => expect(t.last(opId)?.state).toBe('failed'));
+    expect(t.last(opId)).toMatchObject({ reason: 'other_entry', message: 'that session has no linear entry' });
   });
 });
 
