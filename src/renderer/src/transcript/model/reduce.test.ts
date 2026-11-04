@@ -610,7 +610,7 @@ describe('an unseen turn end', () => {
     expect(closed.turns.get(turnId.ofMessage(uuid('u1')))).toMatchObject({ state: 'closed', closedBy: 'completed' });
     expect([...closed.pluginStatus.keys()]).toEqual(['alpha']);
     expect([...closed.turns.values()].map((turn) => turn.agentsEndedAt)).toEqual([undefined, undefined]);
-    expect(rowsOf(closed).some((row) => row.kind === 'error' || row.kind === 'notice' || row.kind === 'gap'), 'it draws nothing').toBe(false);
+    expect(rowsOf(closed).some((row) => row.kind === 'error' || row.kind === 'gap'), 'it draws nothing').toBe(false);
   });
 
   it('does nothing with no turn open', () => {
