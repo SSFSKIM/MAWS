@@ -10,7 +10,7 @@ export const ROUTE = {
   directNote: 'no gateway models · usage windows from the engine',
   lastRouted: 'Last ran routed',
   lastDirect: 'Last ran direct',
-  notRecorded: (fallback: Route) => `Route not recorded · a resume uses the default route (${fallback})`,
+  notRecorded: 'Route not recorded · a resume uses the default route', // P5 O7 M9: the machine's, which the legacy field no longer names
   switchTo: { direct: 'Switch to Direct…', gateway: 'Switch to gateway…' } satisfies Record<Route, string>,
   held: (holder: string) => `Held by ${holder} · switch it there`,
   holders: { terminal: 'a terminal', background_job: 'a background job' } as Record<string, string>,
@@ -18,6 +18,18 @@ export const ROUTE = {
   // an unstarted session (D-19's per-session Direct): the intent's route, chosen before the first send
   starts: { gateway: "Starts routed through ClaudeUsage's relay", direct: "Starts direct · engine's own login" } satisfies Record<Route, string>,
   choice: { gateway: 'ClaudeUsage relay', direct: 'Direct' } satisfies Record<Route, string>,
+};
+
+// P5 O7 M9: the machine's own route (nothing injected), named by what `get_status` reported (observed-route.ts)
+export const MACHINE_ROUTE = {
+  line: (what: string) => `The machine’s own · ${what}`,
+  claudeUsage: (baseUrl: string) => (baseUrl === '' ? 'ClaudeUsage relay' : `ClaudeUsage relay · ${baseUrl}`),
+  login: (login: string | null) => (login === null ? 'Anthropic login' : `Anthropic login · ${login}`),
+  pending: 'not verified yet',
+  choice: 'Machine’s own', // the route segment's (an unstarted session's, Settings › Gateway's)
+  starts: 'Starts on the machine’s own route · its settings and login decide',
+  lastRan: (what: string) => `Last ran on the machine’s own route · ${what}`,
+  toolSearch: 'as the machine’s settings set it',
 };
 
 export const FOOTER = {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GetUsageResponse } from '@shared/wire/control';
-import { windowsFromGetUsage } from './direct-fallback';
+import { status } from '../../../../test/support/builders';
+import { readsEngineUsage, windowsFromGetUsage } from './direct-fallback';
 
 const READ_AT = '2026-09-29T08:00:00.000Z';
 const response = (rateLimits: unknown): GetUsageResponse => ({
@@ -32,5 +33,19 @@ describe('direct fallback maps get_usage rate_limits to the status line windows'
     expect(windowsFromGetUsage(response({ five_hour: null, seven_day: { utilization: null, resets_at: null } }), READ_AT)).toEqual({ fiveHour: null, sevenDay: null, scoped: [] });
     expect(windowsFromGetUsage(response(null), READ_AT)).toBeNull();
     expect(windowsFromGetUsage(response('unexpected'), READ_AT)).toBeNull();
+  });
+});
+
+// P5 O7 M9: the engine's own windows are read for a session the machine did not send through ClaudeUsage
+describe('which sessions read the engine’s own usage', () => {
+  const base = status('a');
+  const at = (gateway: Partial<typeof base.gateway>, process: typeof base.process = 'ready') => ({ ...base, process, gateway: { ...base.gateway, ...gateway } });
+  it('a ready session observed off the relay, or on the direct legacy mode without an observation', () => {
+    expect(readsEngineUsage(at({ mode: 'direct' }))).toBe(true);
+    expect(readsEngineUsage(at({ mode: 'gateway' }))).toBe(false);
+    expect(readsEngineUsage(at({ mode: 'gateway', route: 'machine', observed: { kind: 'login', baseUrl: null } }))).toBe(true);
+    expect(readsEngineUsage(at({ mode: 'direct', route: 'machine', observed: { kind: 'claudeusage', baseUrl: 'http://127.0.0.1:8641' } }))).toBe(false);
+    expect(readsEngineUsage(at({ mode: 'direct' }, 'starting'))).toBe(false);
+    expect(readsEngineUsage(null)).toBe(false);
   });
 });

@@ -21,7 +21,8 @@ import { useShownEffort } from '../composer/effective-effort';
 import { intentBindings } from '../composer/frame/bindings';
 import { aliasOf, DEFAULT_ROW, EFFORT_WORDS, modelAsk, rowFor } from '@shared/sessions/model-label';
 import { useSetupIntent } from '../composer/setup-intent';
-import { ROUTE, type Route } from '../gateway/copy';
+import { readRoute, type Route as AnyRoute } from '@shared/engine/route'; // P5 O7 M9
+import { MACHINE_ROUTE, ROUTE } from '../gateway/copy';
 import { pickDirectModel } from '../gateway/direct-model';
 import { unstartedRoute } from '../gateway/routing-facts';
 import { useCommand } from '../ipc/query';
@@ -79,7 +80,8 @@ interface Binding {
   setEffort(effort: Effort | null): Promise<ControlAnswer>;
   fast: { view: FastView; pending: boolean; set(on: boolean): Promise<ControlAnswer> } | null;
   unstarted: boolean;
-  route: { value: Route; choices: Route[]; set(patch: { gateway: Route; model?: string | null; effort?: Effort | null }): Promise<ControlAnswer> } | null;
+  // P5 O7 M9: the machine's own route beside Gateway and Direct, written as the intent's `route`
+  route: { value: AnyRoute; choices: AnyRoute[]; set(patch: { route: AnyRoute; model?: string | null; effort?: Effort | null }): Promise<ControlAnswer> } | null;
   observed?: { model: string; at: string } | null; // P2-A: a dormant session's model as the engine last reported it
   note?: string; // P5 O9 M5: the model view's footnote, in place of "For this session only"
 }
@@ -126,6 +128,7 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
   const starting = useComposerStore((s) => isStarting(s, appSessionId));
   // C10's intent carries the route C7's hook type does not name; it is read from C10's store and written by its patch
   const gateway = useSetup((s) => s.intents.get(appSessionId)?.gateway ?? null);
+  const chosen = useSetup((s) => s.intents.get(appSessionId)?.route); // P5 O7 M9: read before the legacy field
   const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V21;
   const defaults = useCommand('settings.userEngineDefaults', undefined, { enabled: setup !== null, staleTime: 30_000 }).data ?? null;
   if (!setup) return null;
@@ -156,8 +159,8 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
       gateway === null
         ? null
         : {
-            value: gateway,
-            choices: unstartedRoute({ gateway }, settings).choices,
+            value: readRoute({ route: chosen, gateway }),
+            choices: unstartedRoute({ gateway, route: chosen }, settings).choices,
             async set(patch) {
               const result = await patchIntent(appSessionId, patch);
               return result.ok ? ok : { ok: false, error: result.error, caption: null };
@@ -434,16 +437,16 @@ function SelectorBody({ name, args, binding, state, error, appSessionId }: { nam
     if (binding.current !== null && isGatewayModel(binding.current)) {
       const pick = await pickDirectModel(appSessionId);
       if (pick === null) return;
-      await run(() => route!.set({ gateway: 'direct', model: pick.model, ...(pick.effort !== null && { effort: pick.effort }) }));
+      await run(() => route!.set({ route: 'direct', model: pick.model, ...(pick.effort !== null && { effort: pick.effort }) }));
       return;
     }
-    await run(() => route!.set({ gateway: 'direct' }));
+    await run(() => route!.set({ route: 'direct' }));
   };
-  const setRoute = (next: Route) => void (next === 'direct' ? goDirect() : run(() => route!.set({ gateway: next })));
+  const setRoute = (next: AnyRoute) => void (next === 'direct' ? goDirect() : run(() => route!.set({ route: next })));
   const startOnRelay = (entry: ModelEntryView) => {
     setRelayAsk(null);
     void run(async () => {
-      const answer = await route!.set({ gateway: 'gateway', model: entry.value });
+      const answer = await route!.set({ route: 'gateway', model: entry.value });
       if (answer.ok) setView('effort');
       return answer;
     });
@@ -582,7 +585,7 @@ function SelectorBody({ name, args, binding, state, error, appSessionId }: { nam
               onClick={() => choice !== route.value && setRoute(choice)}
               className="flex-1 rounded-sm border border-border px-2 py-0.5 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint aria-checked:bg-bg-active"
             >
-              {ROUTE.choice[choice]}
+              {choice === 'machine' ? MACHINE_ROUTE.choice : ROUTE.choice[choice]}
             </button>
           ))}
         </div>

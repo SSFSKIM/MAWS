@@ -47,6 +47,19 @@ describe('usage store: windowsFor', () => {
     expect(windowsFor(usage.getState(), unrouted, null).source).toBe('direct');
   });
 
+  // P5 O7 M9: the machine route keys on what was observed, never on the route chosen or the legacy field alone
+  it('keys on what the machine was observed reaching: the engine’s windows for its login or another host, the relay’s for ClaudeUsage', () => {
+    const usage = createUsageStore();
+    usage.getState().applySnapshot(SNAP);
+    const base = status('pinned');
+    const login = { ...base, gateway: { ...base.gateway, mode: 'gateway' as const, route: 'machine' as const, observed: { kind: 'login' as const, baseUrl: null } } };
+    expect(windowsFor(usage.getState(), record('pinned'), login).source).toBe('direct');
+    const relay = { ...base, gateway: { ...base.gateway, mode: 'direct' as const, route: 'machine' as const, observed: { kind: 'claudeusage' as const, baseUrl: 'http://127.0.0.1:8641' } } };
+    expect(windowsFor(usage.getState(), record('pinned'), relay).source).toBe('pinned');
+    const host = record('pinned', { gateway: { routed: true, baseUrl: 'https://llm.example.test', autoModeServer: 'unknown', route: 'machine', observed: { kind: 'host', baseUrl: 'https://llm.example.test' } } });
+    expect(windowsFor(usage.getState(), host, null).source).toBe('direct');
+  });
+
   it('has nothing to show before the first snapshot or when ClaudeUsage is unavailable', () => {
     const usage = createUsageStore();
     expect(windowsFor(usage.getState(), record('a'), null)).toEqual({ source: 'drain', account: null, windows: null, readAt: null });

@@ -9,12 +9,16 @@ import type { Settings } from '@shared/ipc/schema';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { UsageSnapshot, UsageWindow } from '@shared/usage/types';
 import { formatClock, formatWeekdayHour } from '@shared/app/date-format';
-import { PACE, ROUTE, type Route } from './copy';
+import type { Route as AnyRoute } from '@shared/engine/route';
+import { readRoute } from '@shared/engine/route';
+import { MACHINE_ROUTE, PACE, ROUTE, type Route } from './copy';
+import { machineReached, machineRouteLine, observedOf, routeChosen, throughClaudeUsage } from './observed-route'; // P5 O7 M9
 
 export type DirectLogin = { login: string; email: string | null; organization: string | null };
 
 export interface RoutingFacts {
-  route: Route | 'unknown';
+  route: Route | 'unknown'; // P5 O7 M9: on the machine's own route, the one it was observed reaching (ClaudeUsage: gateway)
+  machine: boolean; // P5 O7 M9: launched on the machine's own route
   line: string;
   note: string | null; // a second sentence (a direct session's: no gateway models, windows from the engine)
   account: { email: string; why: 'pinned' | 'routing' } | null;
@@ -37,10 +41,13 @@ export function routingFacts(record: SessionRecord, status: EngineSessionStatus 
   let line: string;
   let note: string | null = null;
   let account: RoutingFacts['account'] = null;
+  // P5 O7 M9: the machine's own route says what the machine reached (never a mismatch), and ClaudeUsage's account goes
+  // with the observation, not with the route chosen
+  const machine = routeChosen(status, record) === 'machine';
   if (status) {
-    route = status.gateway.mode;
+    route = throughClaudeUsage(status, null) ? 'gateway' : 'direct';
     if (route === 'gateway') {
-      line = ROUTE.routed;
+      line = machine ? machineRouteLine(observedOf(status, null)) : ROUTE.routed;
       const snapshot = usage?.available ? usage : null;
       const pinned = record.engineSessionId === null ? undefined : snapshot?.pinsFor[record.engineSessionId];
       const pinnedAccount = pinned === undefined ? undefined : snapshot?.accounts.find((a) => a.uuid === pinned);
@@ -48,12 +55,16 @@ export function routingFacts(record: SessionRecord, status: EngineSessionStatus 
       if (pinnedAccount) account = { email: pinnedAccount.email, why: 'pinned' };
       else if (drain) account = { email: drain.email, why: 'routing' };
     } else {
-      line = directLogin ? ROUTE.directLogin(directLogin.login) : ROUTE.direct;
+      line = machine ? machineRouteLine(observedOf(status, null)) : directLogin ? ROUTE.directLogin(directLogin.login) : ROUTE.direct;
       note = ROUTE.directNote;
     }
+  } else if (machine) {
+    const via = throughClaudeUsage(null, record);
+    route = via === null ? 'unknown' : via ? 'gateway' : 'direct';
+    line = MACHINE_ROUTE.lastRan(machineReached(observedOf(null, record)));
   } else if (record.gateway.routed === null) {
     route = 'unknown';
-    line = ROUTE.notRecorded(settings.gateway.defaultRoute);
+    line = ROUTE.notRecorded;
   } else {
     route = record.gateway.routed ? 'gateway' : 'direct';
     line = record.gateway.routed ? ROUTE.lastRouted : ROUTE.lastDirect;
@@ -63,7 +74,7 @@ export function routingFacts(record: SessionRecord, status: EngineSessionStatus 
   // D-19: the relay is the default, so `Switch to gateway…` is always offered; `offerDirect` hides only the other.
   const offered: Route[] = route === 'gateway' ? ['direct'] : route === 'direct' ? ['gateway'] : ['gateway', 'direct'];
   const targets = refusal !== null ? [] : offered.filter((t) => t === 'gateway' || settings.gateway.offerDirect);
-  return { route, line, note, account, targets, canSwitch: targets.length > 0, switchLabel: targets.length > 0 ? ROUTE.switchTo[targets[0]] : '', refusal };
+  return { route, machine, line, note, account, targets, canSwitch: targets.length > 0, switchLabel: targets.length > 0 ? ROUTE.switchTo[targets[0]] : '', refusal };
 }
 
 // ---- an unstarted session ------------------------------------------------------------------------------------------------
@@ -72,15 +83,19 @@ export function routingFacts(record: SessionRecord, status: EngineSessionStatus 
 // the route is the setup intent's `gateway`, chosen with `session.intent.patch`, so nothing restarts. The Direct choice
 // follows `offerDirect` as the switch does; an intent already direct (the default route, or a choice made here) is
 // always offered the way back.
+// P5 O7 M9: the intent's `route` before its legacy field, and the machine's own route (every machine's default) always
+// one of the choices, so an intent moved to Gateway or Direct can always go back to it; Direct follows `offerDirect`
+// except as the way back from it.
 export interface UnstartedRoute {
-  route: Route;
+  route: AnyRoute;
   line: string;
-  choices: Route[]; // the segment's options, in order; empty when there is nothing to choose
+  choices: AnyRoute[]; // the segment's options, in order
 }
 
-export function unstartedRoute(intent: Pick<SetupIntent, 'gateway'>, settings: Settings): UnstartedRoute {
-  const choices: Route[] = settings.gateway.offerDirect || intent.gateway === 'direct' ? ['gateway', 'direct'] : [];
-  return { route: intent.gateway, line: ROUTE.starts[intent.gateway], choices };
+export function unstartedRoute(intent: Pick<SetupIntent, 'gateway' | 'route'>, settings: Settings): UnstartedRoute {
+  const route = readRoute(intent);
+  const choices: AnyRoute[] = settings.gateway.offerDirect || route === 'direct' ? ['machine', 'gateway', 'direct'] : ['machine', 'gateway'];
+  return { route, line: route === 'machine' ? MACHINE_ROUTE.starts : ROUTE.starts[route], choices };
 }
 
 // ---- the pace line ------------------------------------------------------------------------------------------------------

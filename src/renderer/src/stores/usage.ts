@@ -16,6 +16,7 @@ import { useLayout } from './layout';
 import { allTabs } from './layout-model';
 import { useSessions } from './sessions';
 import { machineOf } from '@shared/machine/address';
+import { throughClaudeUsage } from '../gateway/observed-route'; // P5 O7 M9
 // C7 end
 
 export type { UsageWindow } from '@shared/usage/types'; // C7: ClaudeUsage's shape, `recordedAt` included
@@ -115,8 +116,9 @@ const newestRecorded = (w: Windows): string | null =>
 // Whose windows a session's status line shows (D-19): a direct session's are the engine's own (`get_usage`), since
 // ClaudeUsage's relay never sees its requests; a routed session's are its pinned account's, else the drain target's,
 // where the relay would send its next request. Without a live status, the record's `routed: false` says direct.
+// P5 O7 M9: keyed on what the session was observed reaching (`observed.kind`), the legacy fields only without one.
 export function windowsFor(state: Pick<UsageState, 'windows' | 'snapshot' | 'pinsFor' | 'direct'>, record: SessionRecord, status: EngineSessionStatus | null): SessionWindows {
-  const direct = status ? status.gateway.mode === 'direct' : record.gateway.routed === false;
+  const direct = throughClaudeUsage(status, record) === false;
   if (direct) {
     const reading = state.direct.get(record.appId);
     return { source: 'direct', account: null, windows: reading?.windows ?? null, readAt: reading?.readAt ?? null };

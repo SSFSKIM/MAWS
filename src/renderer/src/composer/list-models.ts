@@ -10,6 +10,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { MachineRef } from '@shared/machine/ref';
 import type { ModelCatalogueEntry } from '@shared/sessions/models';
+import { catalogueRoute } from '../gateway/observed-route'; // P5 O7 M9
 import { useCommand } from '../ipc/query';
 import { rememberListedModels, type ListedModel } from '../stores/composer';
 
@@ -28,10 +29,10 @@ const CATALOGUE = ['maws', 'engine.models'];
 
 // The route whose catalogue names a session's models: the running process's own, else the one its record kept; null
 // when neither says (a discovered session), and `engine.models` answers the most recently updated catalogue.
+// P5 O7 M9: what the session was observed reaching (`observed.kind`) before the legacy fields, so a session on the
+// machine's own route reads the relay's catalogue only when the machine sends it through ClaudeUsage.
 export function routeOf(status: EngineSessionStatus | null, record: SessionRecord | null): Route | null {
-  if (status) return status.gateway.mode;
-  const routed = record?.gateway.routed ?? null;
-  return routed === null ? null : routed ? 'gateway' : 'direct';
+  return catalogueRoute(status, record);
 }
 
 // The route's catalogue. A launch updates its route's catalogue at `initialize`, so the read is renewed when the

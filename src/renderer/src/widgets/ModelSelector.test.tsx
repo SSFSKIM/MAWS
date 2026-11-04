@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import { SessionRecordSchema } from '@shared/graph/session';
@@ -288,6 +288,32 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
     fireEvent.click(item(/^Haiku/));
     await waitFor(() => expect(patches).toEqual([{ model: 'haiku', effort: null }]));
     expect(screen.getByText('Applies when the session starts')).toBeTruthy();
+  });
+
+  // P5 O7 M9: the machine's own route is the intent's `route`, offered beside Gateway and Direct, and always one to go back to
+  it('names the machine’s own route the intent holds, and writes each choice as the intent’s route', async () => {
+    stub();
+    const held = intent({ appSessionId: INTENT, gateway: 'direct', route: 'machine' });
+    useSetup.setState({ intents: new Map([[INTENT, held]]) });
+    const answer = async (name: string, input: unknown) => {
+      if (name !== 'session.intent.patch') return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+      const { patch } = input as { patch: { route: 'machine' | 'gateway' | 'direct' } };
+      return { ok: true, value: { ...held, route: patch.route, gateway: patch.route === 'machine' ? held.gateway : patch.route } };
+    };
+    const invoke = vi.spyOn(ipc, 'invoke').mockImplementation(answer as never);
+    mount('model', '', INTENT);
+    const segment = screen.getByRole('radiogroup', { name: 'Route' });
+    expect(within(segment).getAllByRole('radio').map((r) => [r.textContent, r.getAttribute('aria-checked')])).toEqual([
+      ['Machine’s own', 'true'],
+      ['ClaudeUsage relay', 'false'],
+      ['Direct', 'false'],
+    ]);
+    fireEvent.click(within(segment).getByRole('radio', { name: 'ClaudeUsage relay' }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('session.intent.patch', { appSessionId: INTENT, patch: { route: 'gateway' } }));
+    await waitFor(() => expect(within(segment).getByRole('radio', { name: 'ClaudeUsage relay' }).getAttribute('aria-checked')).toBe('true'));
+    fireEvent.click(within(segment).getByRole('radio', { name: 'Machine’s own' }));
+    await waitFor(() => expect(invoke).toHaveBeenLastCalledWith('session.intent.patch', { appSessionId: INTENT, patch: { route: 'machine' } }));
+    invoke.mockRestore();
   });
 
   it('Direct on a gateway model asks for a Claude model first (pickDirectModel)', async () => {

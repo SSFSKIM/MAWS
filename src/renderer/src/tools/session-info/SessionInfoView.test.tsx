@@ -219,6 +219,33 @@ describe('session info renders the six sections', () => {
     expect(screen.queryByText('Account', { selector: 'dt' })).toBeNull();
   });
 
+  // P5 O7 M9: the machine's own route names what the machine reached (ClaudeUsage, the login, the host), never a mismatch
+  it('names what a session on the machine’s own route reached: ClaudeUsage, the Anthropic login, or the host', async () => {
+    const onMachine = (observed: NonNullable<EngineSessionStatus['gateway']['observed']>, mode: 'gateway' | 'direct'): EngineSessionStatus => ({
+      ...pageStatus(),
+      gateway: { mode, baseUrl: observed.baseUrl, verified: mode === 'gateway' ? 'routed' : 'direct', autoModeServer: 'enabled', localLane: null, route: 'machine', observed },
+    });
+    useSessions.setState({ engine: new Map([[READY, onMachine({ kind: 'claudeusage', baseUrl: 'http://127.0.0.1:8641' }, 'gateway')]]) });
+    mount(ctxOf(READY));
+    expect(valueOf('Route')).toBe('The machine’s own · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…');
+    expect(valueOf('Account')).toBe('1@example.test · pinned for this session');
+    expect(valueOf('Tool search')).toBe('as the machine’s settings set it');
+    cleanup();
+
+    useSessions.setState({ engine: new Map([[READY, onMachine({ kind: 'login', baseUrl: null, login: 'Claude Max', organization: 'Acme' }, 'direct')]]) });
+    mount(ctxOf(READY));
+    expect(valueOf('Route')).toBe('The machine’s own · Anthropic login · Claude MaxSwitch to gateway…');
+    expect(valueOf('Organization')).toBe('Acme');
+    expect(screen.queryByText('Account', { selector: 'dt' })).toBeNull();
+    cleanup();
+
+    useSessions.setState({ engine: new Map([[READY, onMachine({ kind: 'host', baseUrl: 'https://llm.example.test/v1' }, 'direct')]]) });
+    mount(ctxOf(READY));
+    expect(valueOf('Route')).toBe('The machine’s own · llm.example.testSwitch to gateway…');
+    expect(valueOf('Route')).not.toMatch(/unverified|match/);
+    expect(screen.queryByText('Account', { selector: 'dt' })).toBeNull();
+  });
+
   it('reads nothing while the tab is hidden, and says what to do without a session', async () => {
     mount(ctxOf(READY, false));
     await new Promise((r) => setTimeout(r, 30));
