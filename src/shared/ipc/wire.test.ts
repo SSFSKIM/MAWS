@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import * as z from 'zod';
 import { describe, expect, it } from 'vitest';
-import { ATTACHMENT_CAPABILITY, BROWSER_ENGINE_CAPABILITY, ClientHelloV2Schema, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_DELIVERY_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, RENDER_CLIENT_CAPABILITY, ServerWelcomeV2Schema, SOCKET_PROTOCOL } from '../host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, BROWSER_ENGINE_CAPABILITY, ClientHelloV2Schema, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, FOLLOW_OWNERS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_ARTIFACTS_CAPABILITY, MACHINE_DELIVERY_CAPABILITY, MACHINE_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, PTY_FRAMES_CAPABILITY, RENDER_CLIENT_CAPABILITY, ServerWelcomeV2Schema, SOCKET_PROTOCOL } from '../host/socket-protocol';
 import { HostRequestSchema, HostRequestV2Schema } from './host-protocol';
 import { REGISTRY, type WireRegistry } from './registry';
 import { classifyWireChange, WIRE_CAPABILITIES, WIRE_MAJOR, WIRE_MINOR, wireManifestOf, type WireManifest } from './wire';
@@ -240,14 +240,14 @@ describe('the connectors’ capabilities on the wire (P5 O4 M2)', () => {
 
   it('names both, and lists them in the manifest’s union', () => {
     expect([CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY]).toEqual(['host.connectors', 'machine.connectors']);
-    expect(manifest.capabilities).toEqual(['browser.engine' /* P5 O17 M4 */, 'host.attachment', 'host.browserWork' /* P5 O17 M3 */, 'host.connectors', 'host.holder' /* P5 O16 M3b */, 'host.render', 'machine.artifacts', 'machine.connectors', 'machine.delivery' /* P5 O7 M5c */, 'machine.render', 'machine.spine', 'render.client', 'socket.ptyFrames']);
+    expect(manifest.capabilities).toEqual(['browser.engine' /* P5 O17 M4 */, 'host.attachment', 'host.browserWork' /* P5 O17 M3 */, 'host.connectors', 'host.followOwners' /* P5 O7 M8 */, 'host.holder' /* P5 O16 M3b */, 'host.render', 'machine.artifacts', 'machine.connectors', 'machine.delivery' /* P5 O7 M5c */, 'machine.render', 'machine.spine', 'render.client', 'socket.ptyFrames']);
   });
 
   // P5 O16 M3b: the engine host's welcome and both its clients' hellos list host.holder too (the handover, and the
   // adoption through a successor), mawsd's whatever its permanent-client option
   it('has each peer list only what it implements', () => {
     expect(PEER_CAPABILITIES).toEqual({
-      engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY], // P5 O17 M7
+      engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, FOLLOW_OWNERS_CAPABILITY], // P5 O17 M7; P5 O7 M8: host.followOwners
       ptyHost: [PTY_FRAMES_CAPABILITY],
       app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, BROWSER_ENGINE_CAPABILITY], // P5 O17 M9b: a tab engine of its agent tabs
       daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY], // P5 O17 M7 fix 2: it tells browser work

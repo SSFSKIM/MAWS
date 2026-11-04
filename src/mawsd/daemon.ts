@@ -1432,6 +1432,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     artifacts: { fetch: (request) => artifacts.fetch(request) }, // P5 O5 M2
     browser: browserFeed, // P5 O17 M6
     clientPort: { serve: (ref, target) => front.serveRemote(ref, target) }, // P5 O7 M5c
+    engineHostLists: (capability) => hosts.peer('engine-host')?.capabilities.includes(capability) ?? false, // P5 O7 M8
     log: (line) => log(`[endpoint] ${line}`),
   };
 

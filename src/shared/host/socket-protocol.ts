@@ -223,6 +223,11 @@ export const MACHINE_DELIVERY_CAPABILITY = 'machine.delivery';
 // running for the successor to adopt); on a client's hello, that the client will adopt through its successor, so an
 // `exit {when: 'idle'}` it writes on a *refused* link (another wire major, where no command can be sent) asks the drain.
 export const HOLDER_CAPABILITY = 'host.holder';
+// P5 O7 M8 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M8; task 3's review): on the engine host's welcome,
+// that an agent's follow (`fs.agentEvents`) is held by each client that started it and `fs.unfollow` with a client lets
+// go of that client's hold alone. A host without it stops a named follow whoever asks, so `mawsd`'s endpoint sends a
+// remote device's `fs.unfollow` only to a host that lists it.
+export const FOLLOW_OWNERS_CAPABILITY = 'host.followOwners';
 // What each peer lists of itself in its hello or welcome: only what it implements. The wire's capability list
 // (WIRE_CAPABILITIES, the manifest's) is the union of every name a peer of this major may list, and no peer reads it as
 // its own. At O3-D M1 every list was the one it was; from M3 the engine host's welcome and `mawsd`'s hello to it list
@@ -233,7 +238,7 @@ export const HOLDER_CAPABILITY = 'host.holder';
 // `mawsd`'s hello to it list `host.connectors` too (`mawsd` beside `host.attachment`, under the same option), and main's
 // hellos `machine.connectors` (`mawsd` refuses, on engine-host.sock and machine.sock, an app's hello that lacks it).
 export const PEER_CAPABILITIES = {
-  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment; P5 O5 M4: host.render; P5 O4 M2: it keys the connectors on a declaring client; P5 O16 M3b: it hands over; P5 O17 M7: host.browserWork)
+  engineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, HOST_RENDER_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, FOLLOW_OWNERS_CAPABILITY], // the engine host's welcome (P5 O3-D M3: it serves host.attachment; P5 O5 M4: host.render; P5 O4 M2: it keys the connectors on a declaring client; P5 O16 M3b: it hands over; P5 O17 M7: host.browserWork; P5 O7 M8: host.followOwners)
   ptyHost: [PTY_FRAMES_CAPABILITY], // the pty host's welcome
   app: [PTY_FRAMES_CAPABILITY, MACHINE_SPINE_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, BROWSER_ENGINE_CAPABILITY], // main's hellos, to `mawsd`'s sockets and to a direct engine host (P5 O3-D M5b: machine.spine; P5 O4 M2: machine.connectors; P5 O16 M3b: host.holder; P5 O17 M9b: browser.engine, the app a tab engine of its agent tabs on machine.sock)
   daemonToEngineHost: [PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, HOLDER_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY], // `mawsd`'s hello to the engine host (P5 O3-D M3, O4 M2: both under its permanent-client option; P5 O16 M3b: host.holder, whatever the option; P5 O17 M7 fix 2: host.browserWork, it tells browser work, under the option too)

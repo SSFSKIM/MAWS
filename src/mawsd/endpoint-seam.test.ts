@@ -37,6 +37,7 @@ function services(enrolled = false): DaemonServices & { lines: string[] } {
     artifacts: { fetch: async () => ({ status: 404, headers: {}, body: null }) }, // P5 O5 M2
     browser: { inventory: () => ({ epoch: 'e', tabs: [], selected: null, state: 'ready' }), watchInventory: () => () => {}, open: async () => Promise.reject(new Error('no browser here')) }, // P5 O17 M6
     clientPort: { serve: () => ({ answer: () => {}, close: () => {} }) }, // P5 O7 M5c
+    engineHostLists: () => false, // P5 O7 M8
     log: (line) => void lines.push(line),
     lines,
   };

@@ -4,10 +4,13 @@
 // which ends with the channel, so the follow it started ends with it; `fs.unfollow` is offered for an agent the caller
 // names, which the engine host lets go only of the caller's own hold (src/engine-host/fs/follow.test.ts proves the
 // ownership itself). The session-wide form (`agentId: null`) stops every client's follow of the session, so no remote
-// caller may send it.
+// caller may send it. An engine host older than that ownership (one that does not list `host.followOwners`, which P5's
+// retained older host may be) stops a named follow whoever asks, so the endpoint sends no remote `fs.unfollow` to it.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { FOLLOW_OWNERS_CAPABILITY } from '@shared/host/socket-protocol';
 import type { ClientRef } from '@shared/ipc/client';
 import { OFFERS } from '../../src/endpoint/offers';
+import { fakeServices } from './fake-services';
 import { drop, makeOrg, openRemote, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
@@ -28,8 +31,10 @@ async function call(r: Remote, name: string, input: unknown): Promise<Msg> {
   return waitFor(r, (m) => m.t === 'result' && m.id === id, `the result of ${name}`);
 }
 
-async function setup(): Promise<{ f: Fixture; a: Remote; b: Remote }> {
-  const f = await startEndpoint(org, started);
+async function setup(options: { hostLists?: (capability: string) => boolean } = {}): Promise<{ f: Fixture; a: Remote; b: Remote }> {
+  const services = fakeServices();
+  if (options.hostLists) services.engineHostLists = options.hostLists;
+  const f = await startEndpoint(org, started, { services });
   const s = f.host.add(APP);
   f.spine.set(APP, s.engineSessionId);
   f.records.set({ lane: 'B', session: s.engineSessionId!, owners: ['@machine'] }, APP);
@@ -80,5 +85,18 @@ describe('a remote panel’s subagent follow', () => {
     expect(ended).toBe(false);
     drop(a);
     await until(() => ended, 'the channel’s client ended');
+  });
+
+  it('sends no remote unfollow to an engine host that predates follow ownership, so a client’s unfollow cannot stop another’s follow there', async () => {
+    // an engine host of an older build: its welcome lacks `host.followOwners`, and its `fs.unfollow` stops the named
+    // follow whoever asks, the machine's own app's included
+    const { f, a } = await setup({ hostLists: (capability) => capability !== FOLLOW_OWNERS_CAPABILITY });
+    const legacy = new Set<string>(['machine-app']); // the follow the machine's own app started there
+    f.host.reads.set('fs.unfollow', () => void legacy.clear());
+    const from = f.host.calls.length;
+    expect(await call(a, 'fs.unfollow', { appSessionId: APP, agentId: AGENT })).toMatchObject({ ok: false, error: { code: 'unavailable' } });
+    expect(reached(f, 'fs.unfollow', from)).toEqual([]);
+    expect(legacy.has('machine-app')).toBe(true);
+    expect(f.services.lines.some((line) => line.includes(FOLLOW_OWNERS_CAPABILITY))).toBe(true);
   });
 });

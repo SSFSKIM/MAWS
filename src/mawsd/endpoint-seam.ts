@@ -66,6 +66,7 @@ export interface DaemonServices {
   // P5 O7 M5c (O7's §T): the client port's remote targets: the endpoint registers one per channel's ref at admission, which
   // the services front's `route` consults after its own connections; the handle answers and closes it (client-port.ts)
   clientPort: { serve(ref: ClientRef, target: PortTarget): RemotePortHandle };
+  engineHostLists(capability: string): boolean; // P5 O7 M8: the engine host's welcome on the link lists it now; false while no link is up
   log(line: string): void;
 }
 

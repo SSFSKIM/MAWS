@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import { BrowserRefused, type BrowserFeed, type BrowserFrame, type BrowserInput, type BrowserInventory, type BrowserSubscription } from '@shared/browser/screencast';
-import type { DocumentsOpen } from '@shared/host/socket-protocol';
+import { PEER_CAPABILITIES, type DocumentsOpen } from '@shared/host/socket-protocol';
 import type { MachineRef } from '@shared/machine/ref';
 import { endpointLibrary, type ContentLookup } from '../../src/services/artifacts/scheme/endpoint-library';
 import type { EndpointServices } from '../../src/endpoint/services';
@@ -49,6 +49,8 @@ export function fakeServices(options: { ref?: MachineRef; kind?: 'unit' | 'priva
       watchInventory: (_appSessionId, changed) => (changed({ epoch: 'none', tabs: [], selected: null, state: 'unavailable', reason: 'no browser here' }), () => {}),
       open: () => Promise.reject(new BrowserRefused('unavailable', 'no browser here')),
     },
+    // P5 O7 M8: an engine host of this build behind the link (a suite stands in an older one by replacing it)
+    engineHostLists: (capability) => (PEER_CAPABILITIES.engineHost as readonly string[]).includes(capability),
     log: (line) => void lines.push(line),
     lines,
     holds,

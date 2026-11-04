@@ -532,6 +532,7 @@ export class Endpoint implements EndpointModule {
       offers: authorization.offers,
       now: this.deps.now, // P5 O7 M5c review 1: an acquisition's bound, on the gate's clock
       ...(options.acquireWithinMs === undefined ? {} : { acquireWithinMs: options.acquireWithinMs }),
+      engineHostLists: (capability) => this.#services?.engineHostLists(capability) ?? false, // P5 O7 M8
       log,
     });
     this.gate.setExecutors({

@@ -3,7 +3,9 @@
 //   - Lane B's engine-host reads (`session.status`, `.events`, `.pendingRequest`, `.pendingItems`, `.queue.list`,
 //     `.catalog`, and from P5 O7 M2 a remote pane's: the context, usage, settings, models, rules, MCP and cost reads) go
 //     through `dispatch` to the engine host, and its answer is the result. A host error `host_unavailable` or `timeout`
-//     is `unavailable`; any other code passes through.
+//     is `unavailable`; any other code passes through. P5 O7 M8: `fs.unfollow` goes only to an engine host whose
+//     welcome lists `host.followOwners`, which lets go of the caller's own hold alone; an older one, which stops the
+//     named follow whoever asks, is not asked (`unavailable`).
 //   - Lane A's `sminos.rows`, `.diff`, `.output` and `.read` go down RL10 as DX2's frames on the caller's own upstream
 //     subscription (named by the caller's `sub` on that session), as the hub carried a browser's: sminos answers on that
 //     subscription, so the answer comes in its stream at its place in the sequence, and the result says it was asked.
@@ -53,6 +55,7 @@
 // bytes codec's tagged form (bytes.ts), measured so.
 import { MESSAGE_MAX_BYTES, type CallMessage, type Listing, type Signed } from 'org-protocol';
 import { ACQUIRE_WITHIN_MS, LATE, within } from './acquire';
+import { FOLLOW_OWNERS_CAPABILITY } from '@shared/host/socket-protocol';
 import { gradeOf } from '@shared/ipc/grades';
 import { remoteDaemonStatus, type DaemonStatus } from '@shared/ipc/schema/daemon';
 import { SESSION_SEARCH_LIMIT, SESSION_SEARCH_SESSIONS_MAX } from '@shared/ipc/schema/session';
@@ -98,6 +101,8 @@ export type CallsContext = {
   /** P5 O7 M5c review 1: the clock an acquisition's bound is read on (the gate's), and the bound (acquire.ts). */
   now(): number;
   acquireWithinMs?: number;
+  /** P5 O7 M8: whether the engine host's welcome lists `capability` now (EndpointServices.engineHostLists). */
+  engineHostLists(capability: string): boolean;
   log(line: string): void;
 };
 
@@ -276,6 +281,7 @@ export class Calls {
     else if (m.name === 'artifacts.holdAssets' && row?.executor === 'endpoint') run = this.ctx.assetHolds.hold(channel, m.input, by());
     else if (m.name === 'artifacts.releaseAssets' && row?.executor === 'endpoint') run = this.ctx.assetHolds.release(channel, m.input);
     else if ((row?.executor === 'engine-host' || row?.executor === 'machine') && row.target === 'artifact' && SESSION_NAMING.has(m.name)) run = this.#sessionSafe(dispatch, row.executor, channel.member, m);
+    else if (m.name === 'fs.unfollow' && row?.executor === 'engine-host' && !this.ctx.engineHostLists(FOLLOW_OWNERS_CAPABILITY)) run = Promise.resolve(this.#unownedUnfollow());
     else if (row?.executor === 'engine-host' || (row?.executor === 'machine' && m.name !== 'daemon.status')) run = this.#forward(dispatch, row.executor, m);
     else if (row?.executor === 'sminos' && Object.hasOwn(LANE_A, m.name)) run = Promise.resolve(this.#laneA(channel, m));
     else if (row?.executor === 'machine') run = this.#daemonStatus(dispatch);
@@ -285,6 +291,12 @@ export class Calls {
       this.ctx.log(`endpoint: a \`${m.name.slice(0, 64)}\` call failed: ${(error as Error).message}`);
       answer({ ok: false, code: 'unavailable' });
     });
+  }
+
+  /** P5 O7 M8: a remote unfollow an engine host without follow ownership would apply to every client's follow. */
+  #unownedUnfollow(): Result {
+    this.ctx.log(`endpoint: the engine host does not list \`${FOLLOW_OWNERS_CAPABILITY}\`: a remote \`fs.unfollow\` answered unavailable, since it would stop another client's follow`);
+    return { ok: false, code: 'unavailable' };
   }
 
   /** A read its executor answers raw: the engine host's, or the machine's services', a failure with its message (M8). */
