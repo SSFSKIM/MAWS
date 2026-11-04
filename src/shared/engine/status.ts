@@ -6,6 +6,7 @@ import { AUTO_MODE_REFUSAL_CODES, ExitCauseSchema, PermissionModeSchema } from '
 import { AppSessionIdSchema, EventIdSchema, MessageUuidSchema, SessionIdSchema, TaskIdSchema } from '../graph/ids';
 import type { SessionRecord } from '../graph/session';
 import { EffortSchema } from './launch-spec';
+import { ObservedRouteSchema, RouteSchema } from './route'; // P5 O7 M9
 
 // C12 start: what a live process holds that an exit would lose or interrupt (charter §4.4 as amended 2026-09-29; C12
 // execution document, Interfaces "X6 status"): an open turn, host work in flight without one (`busy`), background tasks
@@ -37,6 +38,10 @@ export const EngineSessionStatusSchema = z.strictObject({
     mode: z.enum(['gateway', 'direct']), baseUrl: z.string().nullable(), verified: z.enum(['pending', 'routed', 'direct', 'mismatch']),
     autoModeServer: z.enum(['enabled', 'disabled', 'unknown']),
     localLane: z.strictObject({ observedInTurn: EventIdSchema, at: z.string() }).nullable(), // C11's correction (M4): the local auto-mode lane observed in the current turn; observedInTurn is that turn's turn.started event id; cleared at the next turn.started
+    // P5 O7 M9 (Interfaces §U): on a machine-route launch, `route: 'machine'` and what get_status reported, named; `mode`
+    // and `verified` keep their enums, written with the legacy route (`verified` routed or direct, never mismatch)
+    route: RouteSchema.optional(),
+    observed: ObservedRouteSchema.optional(),
   }),
   subagentModel: z.string().nullable(), modelOverrides: z.record(z.string(), z.string()), // ANTHROPIC_DEFAULT_*_MODEL in effect (names and values from the constructed env)
   engineVersion: z.string().nullable(), fileCheckpointing: z.boolean(),
@@ -129,7 +134,10 @@ export function toSessionRecordPatch(s: EngineSessionStatus): SessionRecordPatch
     effort: s.effort,
     permissionMode: refusal === null ? { requested: effective, effective, refusal } : { ...s.permissionMode },
   };
-  if (s.gateway.verified !== 'pending') patch.gateway = { routed: s.gateway.verified === 'routed', baseUrl: s.gateway.baseUrl, autoModeServer: s.gateway.autoModeServer };
+  if (s.gateway.verified !== 'pending') {
+    const { route, observed } = s.gateway; // P5 O7 M9: carried when the host wrote them
+    patch.gateway = { routed: s.gateway.verified === 'routed', baseUrl: s.gateway.baseUrl, autoModeServer: s.gateway.autoModeServer, ...(route !== undefined && { route }), ...(observed !== undefined && { observed }) };
+  }
   if (s.process !== 'exited') patch.holder = { kind: 'self' };
   return patch;
 }

@@ -12,6 +12,7 @@ import { HistorySoughtSchema } from '../../graph/history-window';
 import { AgentIdSchema, AppSessionIdSchema, EventIdSchema, MessageUuidSchema, RequestIdSchema, TaskIdSchema } from '../../graph/ids';
 import { RequestAnswerSchema } from '../../engine/answers';
 import { EffortSchema, LaunchSpecSchema } from '../../engine/launch-spec';
+import { RouteSchema } from '../../engine/route'; // P5 O7 M9
 import { OperationEventSchema, OperationOutcomeSchema, OperationReceiptSchema, SESSION_OPERATIONS_MAX } from '../../engine/operations';
 import { RelayHealthSchema } from '../../engine/relay-health';
 import { RewindFilesOutcomeSchema, RewindOutcomeSchema } from '../../engine/rewind-outcome';
@@ -472,6 +473,7 @@ export type DeleteOutcome = z.infer<typeof DeleteOutcomeSchema>;
 // `model` and `effort` are a resume's overrides for that launch (C11's route switch); an intent's chips own them.
 export const StartOptionsSchema = z.strictObject({
   gateway: z.enum(['gateway', 'direct']).optional(),
+  route: RouteSchema.optional(), // P5 O7 M9: read before `gateway` (src/shared/engine/route.ts)
   trust: TrustDecisionSchema.optional(),
   model: z.string().nullable().optional(),
   effort: EffortSchema.nullable().optional(),

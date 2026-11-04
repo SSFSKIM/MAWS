@@ -12,6 +12,7 @@ import { ContentBlockSchema } from '../graph/events';
 import { AppSessionIdSchema, MessageUuidSchema, ProjectIdSchema, SessionIdSchema } from '../graph/ids';
 import { LaunchedBySchema, LineageSchema } from '../graph/session'; // E3; P5 O7 M4: LaunchedBySchema
 import { EffortSchema } from '../engine/launch-spec';
+import { RouteSchema } from '../engine/route';
 import { SETUP_PHASES, SetupResourcesSchema } from './setup';
 
 export const SetupDraftSchema = z.strictObject({
@@ -54,6 +55,7 @@ export const SetupIntentSchema = z.strictObject({
   effort: EffortSchema.nullable(),
   permissionMode: PermissionModeSchema.nullable(),
   gateway: z.enum(['gateway', 'direct']), // D-19 default 'gateway'
+  route: RouteSchema.optional(), // P5 O7 M9: read before `gateway`, which keeps the legacy route (src/shared/engine/route.ts)
   trust: TrustDecisionSchema,
   trustKey: z.string().nullable(), // the trust key the decision answered (null while `unanswered`)
   message: FirstMessageSchema.nullable(), // retained from `start` until the handoff or a hand-back
@@ -88,6 +90,7 @@ export const SetupIntentPatchSchema = SetupIntentSchema.pick({
   effort: true,
   permissionMode: true,
   gateway: true,
+  route: true, // P5 O7 M9
   trust: true,
   draft: true,
 })
