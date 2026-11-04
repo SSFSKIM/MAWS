@@ -31,7 +31,7 @@ import { openArtifacts } from '../main/artifacts'; // P3-G
 import { selectHiddenProjects, selectProjectOrder, useSessions } from '../stores/sessions';
 import { usePeople } from '../stores/people'; // P5 O8 M5
 import { openDialog } from '../sessions/dialogs';
-import { filterProjectList, isListedRow, listedMatcher, nestItems, projectItems, projectList, projectSessions, PROJECTS_FIRST, SESSIONS_CAP, sessionMatcher, shownCount, sidebarSessionId, type ProjectEntry, type ProjectKey, type SidebarSession, type SidebarTreeRow } from './derive';
+import { filterProjectList, isListedRow, listedMatcher, nestItems, projectItems, projectList, projectSessions, PROJECTS_FIRST, sessionMatcher, shownTrees, sidebarSessionId, type ProjectEntry, type ProjectKey, type SidebarSession, type SidebarTreeRow } from './derive';
 import type { AppSessionId } from '@shared/graph/ids';
 import { menuTargetOf, SidebarMenuContent, type MenuTarget } from './menus';
 import { ProjectRow, ShowMoreRow } from './ProjectRow';
@@ -189,10 +189,11 @@ function SidebarBody() {
         const open = searching || expanded.has(entry.key);
         if (!open) return { entry, open, sessions: [], more: 0 };
         const all = nestItems(entry.items.filter(itemMatches)); // E3: the caps count trees; rank was settled above
-        const count = searching ? all.length : shownCount(all.length, more.has(entry.key));
-        return { entry, open, sessions: all.slice(0, count).flatMap((tree) => tree.rows), more: searching ? 0 : Math.min(all.length, SESSIONS_CAP) - count };
+        if (searching) return { entry, open, sessions: all.flatMap((tree) => tree.rows), more: 0 };
+        const drawn = shownTrees(all, more.has(entry.key), spawned); // P5 O7 M8: a spawned lead is never cut
+        return { entry, open, sessions: drawn.shown.flatMap((tree) => tree.rows), more: drawn.more };
       }),
-    [listed, searching, expanded, itemMatches, more],
+    [listed, searching, expanded, itemMatches, more, spawned],
   );
   // The list's "Show more" sits after the last project row, before the machines' rows.
   const moreAt = folded > 0 ? shown.filter((p) => p.entry.machine === null).length : -1;
@@ -276,8 +277,8 @@ function SidebarBody() {
     const group = shown.find((p) => p.entry.key === key);
     if (!group) return;
     setMore(new Set(more).add(key));
-    const shownTrees = group.sessions.filter((row) => row.nestedUnder === null).length; // E3: the next tree's root
-    const next = nestItems(group.entry.items.filter(itemMatches))[shownTrees]?.root;
+    const drawn = new Set(group.sessions.filter((row) => row.nestedUnder === null).map((row) => (isListedRow(row) ? row.listed.appId : row.record.appId))); // E3: the trees' roots
+    const next = nestItems(group.entry.items.filter(itemMatches)).find((tree) => !drawn.has(sidebarSessionId(tree.root)))?.root; // P5 O7 M8: a lead past the cap is drawn already
     if (next) focusItem(sessionNodeId(sidebarSessionId(next)));
   };
 

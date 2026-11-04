@@ -34,6 +34,8 @@ import {
   sessionAge,
   sessionMatcher,
   shownCount,
+  shownTrees,
+  sidebarSessionId,
   type ProjectListInput,
   type ProjectSessionsInput,
   type SessionTree,
@@ -416,20 +418,38 @@ describe('an expanded project’s records and listed rows in one ordering', () =
     expect(shown(new Set())).not.toContain('fresh');
   });
 
-  it('the spawned lead goes above pinned records too, and holds under recency', () => {
+  // The architect's ruling (2026-11-04, on m8-4a's review): a pin is the person's own order, the lead the app's inference,
+  // so the lead sits under the pinned records; and while it holds it is always drawn, the cap growing by one past them.
+  it('the spawned lead sits under pinned records, drawn past the cap they fill (the cap grows by one), under either sort', () => {
     const pinned = Array.from({ length: SESSIONS_CAP + 1 }, (_, i) => rec(`p${i}`, 20 - i, { pinned: true }));
-    const sorted = projectSessions({ sessions: pinned, digests: new Map(), rows: [], sort: 'recency', matches: everyone });
-    expect(visible(projectItems({ sorted, listed: [spawned('idle')], digests: new Map(), rows: [], sort: 'recency', spawned: SPAWNED }))[0]).toBe('@spawned');
+    const fresh = rec('fresh', 0);
+    const lead = new Set([...SPAWNED, fresh.appId]);
+    for (const sort of ['priority', 'recency'] as const) {
+      const sorted = projectSessions({ sessions: [...pinned, fresh], digests: new Map(), rows: [], sort, matches: everyone, spawned: lead });
+      const trees = nestItems(projectItems({ sorted, listed: [spawned('idle')], digests: new Map(), rows: [], sort, spawned: lead }));
+      const drawn = (more: boolean) => shownTrees(trees, more, lead);
+      const names = (more: boolean) => drawn(more).shown.map((t) => sidebarSessionId(t.root)).map((id): string => (id === (there('spawned') as string) ? '@spawned' : id));
+      expect(trees.slice(SESSIONS_CAP + 1).map((t) => sidebarSessionId(t.root)).sort(), sort).toEqual([fresh.appId, there('spawned')].sort()); // under all nine pins
+      expect(names(false), sort).toEqual(['p0', 'p1', 'p2', 'p3', 'p4', ...names(false).slice(5)]);
+      expect(names(false).slice(5).sort(), sort).toEqual(['@spawned', 'fresh']);
+      expect(drawn(false).more, `${sort}: Show more adds the three pins left within the cap`).toBe(3);
+      expect(names(true).slice(0, SESSIONS_CAP), sort).toEqual(pinned.slice(0, SESSIONS_CAP).map((r) => r.appId));
+      expect(names(true).slice(SESSIONS_CAP).sort(), sort).toEqual(['@spawned', 'fresh']);
+      expect(drawn(true).more, sort).toBe(0);
+    }
+    const unled = shownTrees(nestItems(projectItems({ sorted: pinned, listed: [spawned('idle')], digests: new Map(), rows: [], sort: 'priority' })), false, new Set());
+    expect(unled.shown.map((t) => sidebarSessionId(t.root)), 'with no lead the cap is the cap').toHaveLength(5);
   });
 
-  it('under priority a listed row ranks by its own state: waiting from its attention feed or its listing, working from its listing, the rest by its issue', () => {
+  it('under priority a listed row ranks by its own state: waiting from its attention feed, working from its listing, the rest by its issue', () => {
     const fed = lst('fed', 1);
     const rowsFor = needsYou(new Map([[fed.appId, [item(fed.appId, 'permission', minute(1))]]]), new Map(), { listed: new Map([[fed.appId, fed]]) });
     const unread = rec('u', 3, { unread: true });
     const working = rec('w', 4);
-    const digests = new Map([[working.appId, digest(working.appId, { phase: 'working', turnStartedAt: minute(4) })]]);
+    const asking = rec('wr', 3); // its digest says waiting, and the feed has no row for it
+    const digests = new Map([[working.appId, digest(working.appId, { phase: 'working', turnStartedAt: minute(4) })], [asking.appId, digest(asking.appId, { phase: 'waiting' })]]);
     const listed = [{ ...lst('asks', 2), state: 'waiting' }, { ...lst('runs', 6), state: 'busy' }, lst('rests', 9), fed];
-    expect(ids(projectItems({ sorted: [unread, working, rec('r5', 5)], listed, digests, rows: rowsFor, sort: 'priority' }))).toEqual(['@fed', '@asks', 'u', '@runs', 'w', '@rests', 'r5']);
+    expect(ids(projectItems({ sorted: [unread, working, rec('r5', 5), asking], listed, digests, rows: rowsFor, sort: 'priority' })), 'a waiting word with no feed row is the rest’s, either way').toEqual(['@fed', 'u', '@runs', 'w', '@rests', 'r5', 'wr', '@asks']);
     expect(ids(projectItems({ sorted: [rec('r5', 5)], listed, digests: new Map(), rows: rowsFor, sort: 'recency' })), 'recency: the issue alone').toEqual(['@rests', '@runs', 'r5', '@asks', '@fed']);
   });
 });
