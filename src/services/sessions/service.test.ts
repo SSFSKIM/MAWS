@@ -1021,7 +1021,7 @@ describe('P2-C: the to-human lane on the session service’s launches', () => {
   beforeEach(async () => {
     appEnabled = true;
     h = await new SessionHarness({
-      ownerChannel: (index) => new OwnerChannelLaunches({ store: index.ownerChannel, appEnabled: () => appEnabled, managedSettingsPath: join(homedir(), 'no-such-managed-settings.json'), log: () => {} }),
+      ownerChannel: (index) => new OwnerChannelLaunches({ store: index.ownerChannel, appEnabled: () => appEnabled, systemRoot: join(homedir(), 'no-such-system-root'), log: () => {} }),
     }).start();
   });
   afterEach(() => h.dispose());

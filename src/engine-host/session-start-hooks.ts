@@ -36,7 +36,8 @@ export const SESSION_START_HOOK_MS = 600_000;
 // A timer longer than 2^31 - 1 ms fires at once in Node; a configured timeout is held no longer than this.
 const MAX_HOLD_MS = 2_147_483_647 - 600_000;
 
-// The engine's managed-settings directory for this platform.
+// The engine's managed-settings directory for this platform (its own switch: macOS, Windows, else /etc/claude-code).
+// The owner channel's style resolver reads the same directory (src/services/owner/resolve-style.ts).
 export function managedSettingsDir(platform: NodeJS.Platform = process.platform): string {
   if (platform === 'darwin') return '/Library/Application Support/ClaudeCode';
   if (platform === 'win32') return 'C:\\Program Files\\ClaudeCode';
@@ -81,8 +82,9 @@ export async function sessionStartHookMs(plan: Pick<LaunchPlan, 'env' | 'cwd' | 
   return Math.min(longest, MAX_HOLD_MS);
 }
 
-// `managed-settings.json`, then the `managed-settings.d` fragments in name order (the engine's walk).
-async function managedSettings(dir: string): Promise<unknown[]> {
+// `managed-settings.json`, then the `managed-settings.d` fragments in name order (the engine's walk); each parsed, or
+// null where it is absent or malformed.
+export async function managedSettings(dir: string): Promise<unknown[]> {
   const fragments = join(dir, 'managed-settings.d');
   const names = await readdir(fragments, { withFileTypes: true }).then(
     (entries) => entries.filter((e) => (e.isFile() || e.isSymbolicLink()) && e.name.endsWith('.json') && !e.name.startsWith('.')).map((e) => e.name).sort(),

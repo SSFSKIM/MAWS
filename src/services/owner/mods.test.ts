@@ -37,7 +37,7 @@ describe('mods.list and mods.setSessionOverride', () => {
     index = new Index(join(dir.path, 'index.sqlite'));
     a = index.sessions.upsertFromSummary(summary({ directory: join(root, 'work') })).record.appId;
     appEnabled = true;
-    deps = { store: index.ownerChannel, sessions: index.sessions, appEnabled: () => appEnabled, configHome: async () => configHome, managedSettingsPath: join(root, 'managed.json') };
+    deps = { store: index.ownerChannel, sessions: index.sessions, appEnabled: () => appEnabled, configHome: async () => configHome, systemRoot: join(root, 'system') };
   });
   afterEach(() => {
     index.close();

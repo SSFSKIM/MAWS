@@ -1,22 +1,27 @@
 // The style resolver (the P2-C document, Design §2, "The resolver"): which output style a launch's settings select,
 // read in the engine's precedence order, and whether that style declares a contract MAWS can present. Read only, over a
-// scratch config home and project.
+// scratch config home, project and file-system root (the platform's managed settings directory read beneath it).
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { installToHumanPlugin, PLUGIN_STYLE } from '../../../test/support/to-human-plugin';
+import { managedSettingsDir } from '../../engine-host/session-start-hooks';
 import { lookupStyle, resolveStyle, type StyleContext } from './resolve-style';
 
 let root: string;
 let home: string; // the config home
 let project: string;
-let managed: string;
+let system: string; // the scratch file-system root
+let managed: string; // this platform's managed-settings.json beneath it
+let linux: string; // Linux's managed settings directory beneath it, /etc/claude-code
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-style-')));
   home = join(root, 'config');
   project = join(root, 'project');
-  managed = join(root, 'managed', 'managed-settings.json');
+  system = join(root, 'system');
+  managed = join(system, managedSettingsDir(), 'managed-settings.json');
+  linux = join(system, 'etc', 'claude-code');
   mkdirSync(home, { recursive: true });
   mkdirSync(project, { recursive: true });
 });
@@ -28,7 +33,7 @@ const put = (path: string, content: string | object) => {
 };
 const style = (name: string | null, key: string | null) =>
   `---\n${name === null ? '' : `name: ${name}\n`}description: a style\n${key === null ? '' : `maws-to-human-contract: ${key}\n`}---\n\nThe body.\n`;
-const ctx = (over: Partial<StyleContext> = {}): StyleContext => ({ configHome: home, cwd: project, managedSettingsPath: managed, ...over });
+const ctx = (over: Partial<StyleContext> = {}): StyleContext => ({ configHome: home, cwd: project, systemRoot: system, ...over });
 const userSettings = (settings: object) => put(join(home, 'settings.json'), settings);
 
 describe('which style the settings select, in the engine’s precedence', () => {
@@ -44,6 +49,23 @@ describe('which style the settings select, in the engine’s precedence', () => 
     expect((await resolveStyle(ctx({ flagSettings: { outputStyle: 'flag-s' } }))).name).toBe('flag-s');
     put(managed, { outputStyle: 'managed-s' });
     expect((await resolveStyle(ctx({ flagSettings: { outputStyle: 'flag-s' } }))).name).toBe('managed-s');
+  });
+
+  // The engine's managed settings directory per OS (2.1.318): /Library/Application Support/ClaudeCode on macOS,
+  // /etc/claude-code on Linux; managed-settings.json, then each managed-settings.d/*.json (no dotfiles) in name order,
+  // a later file's value replacing an earlier one's.
+  it('managed: the platform’s managed-settings.json, then its managed-settings.d fragments in name order', async () => {
+    userSettings({ outputStyle: 'user-s' });
+    put(join(linux, 'managed-settings.json'), { outputStyle: 'base-s' });
+    expect((await resolveStyle(ctx({ platform: 'linux' }))).name).toBe('base-s');
+    expect((await resolveStyle(ctx({ platform: 'darwin' }))).name).toBe('user-s'); // nothing in macOS's directory
+    put(join(linux, 'managed-settings.d/.50-hidden.json'), { outputStyle: 'hidden-s' });
+    put(join(linux, 'managed-settings.d/60-notes.txt'), { outputStyle: 'notes-s' });
+    expect((await resolveStyle(ctx({ platform: 'linux' }))).name).toBe('base-s');
+    put(join(linux, 'managed-settings.d/20-style.json'), { outputStyle: 'fragment-20' });
+    put(join(linux, 'managed-settings.d/10-style.json'), { outputStyle: 'fragment-10' });
+    put(join(linux, 'managed-settings.d/30-other.json'), { model: 'opus' });
+    expect((await resolveStyle(ctx({ platform: 'linux', flagSettings: { outputStyle: 'flag-s' } }))).name).toBe('fragment-20');
   });
 
   it('skips a missing or malformed file, and a value that is not a name', async () => {
@@ -148,6 +170,15 @@ describe('the shape of the contract the selected style declares', () => {
       expect(await resolveStyle(ctx({ cwd: null }))).toMatchObject({ shape: 'none', unresolved: expect.stringContaining('other'), messageTool: false });
     });
 
+    // The engine records a plugin its managed settings enable at scope `managed`, and that installation applies
+    // wherever a user one does (2.1.318).
+    it('is found in an enabled plugin installed at managed scope, in a project or none', async () => {
+      install([{ ...user, scope: 'managed', installPath: installPath() }]);
+      userSettings({ outputStyle: 'myplug:to-human', enabledPlugins: { 'myplug@mkt': true } });
+      expect(await resolveStyle(ctx())).toEqual({ name: 'myplug:to-human', shape: 'marks', contract: 1, unresolved: null, messageTool: false });
+      expect(await resolveStyle(ctx({ cwd: null }))).toMatchObject({ shape: 'marks', contract: 1 });
+    });
+
     it('a project or local installation applies only in its own project (compared by real path)', async () => {
       const link = join(root, 'project-link');
       symlinkSync(project, link);
@@ -206,12 +237,39 @@ describe('whether the to-human plugin registers its message tool under the style
     expect(await resolveStyle(ctx({ flagSettings: { disableAllHooks: false } }))).toMatchObject({ messageTool: true }); // the higher source decides
   });
 
+  // dc-acceptance-bd31, 2026-11-04: devcloud's /etc/claude-code/managed-settings.json enables the plugins it seats, and
+  // the engine's startup plugin update rewrote their records to scope `managed`.
+  it('does on a Linux host whose managed settings enable the plugins, installed at managed scope', async () => {
+    installToHumanPlugin(home, { scope: 'managed' });
+    expect(await resolveStyle(ctx({ platform: 'linux' }))).toEqual({ name: PLUGIN_STYLE, shape: 'message-tool', contract: 6, unresolved: null, messageTool: true });
+    userSettings({ outputStyle: PLUGIN_STYLE, enabledPlugins: {} }); // enabled by policy alone
+    expect(await resolveStyle(ctx({ platform: 'linux' }))).toMatchObject({ shape: 'none', messageTool: false });
+    put(join(linux, 'managed-settings.json'), { enabledPlugins: { 'to-human@doperpowers': true, 'sminos@doperpowers': true, 'doperpowers@doperpowers': true }, prependPlugins: ['to-human@doperpowers', 'sminos@doperpowers', 'doperpowers@doperpowers'] });
+    expect(await resolveStyle(ctx({ platform: 'linux' }))).toEqual({ name: PLUGIN_STYLE, shape: 'message-tool', contract: 6, unresolved: null, messageTool: true });
+    expect(await lookupStyle(PLUGIN_STYLE, ctx({ platform: 'linux', cwd: null }))).toMatchObject({ messageTool: true });
+    expect(await resolveStyle(ctx({ platform: 'darwin' }))).toMatchObject({ shape: 'none', messageTool: false }); // macOS's directory enables nothing
+  });
+
+  it('managed enabledPlugins win over every other source, a later fragment over the file', async () => {
+    installToHumanPlugin(home);
+    put(join(linux, 'managed-settings.d/10-off.json'), { enabledPlugins: { 'to-human@doperpowers': false } });
+    expect(await resolveStyle(ctx({ platform: 'linux' }))).toMatchObject({ contract: 6, messageTool: false });
+    put(join(linux, 'managed-settings.d/20-on.json'), { enabledPlugins: { 'to-human@doperpowers': true } });
+    put(join(project, '.claude/settings.local.json'), { enabledPlugins: { 'to-human@doperpowers': false } });
+    expect(await resolveStyle(ctx({ platform: 'linux', flagSettings: { enabledPlugins: { 'to-human@doperpowers': false } } }))).toMatchObject({ messageTool: true });
+  });
+
   it('does not where managed settings let only managed hooks run; the key anywhere else changes nothing', async () => {
     installToHumanPlugin(home);
     userSettings({ outputStyle: PLUGIN_STYLE, enabledPlugins: { 'doperpowers@doperpowers': true, 'to-human@doperpowers': true }, allowManagedHooksOnly: true });
     expect(await resolveStyle(ctx())).toMatchObject({ messageTool: true });
     put(managed, { allowManagedHooksOnly: true });
     expect(await resolveStyle(ctx())).toMatchObject({ name: PLUGIN_STYLE, contract: 6, messageTool: false });
+    put(join(linux, 'managed-settings.json'), { allowManagedHooksOnly: true });
+    put(join(linux, 'managed-settings.d/10-hooks.json'), { allowManagedHooksOnly: false });
+    expect(await resolveStyle(ctx({ platform: 'linux' }))).toMatchObject({ messageTool: true });
+    put(join(linux, 'managed-settings.d/20-hooks.json'), { allowManagedHooksOnly: true });
+    expect(await resolveStyle(ctx({ platform: 'linux' }))).toMatchObject({ messageTool: false });
   });
 
   it('does not under any other style declaring 6: the plugin keys its tool on its own style’s name', async () => {

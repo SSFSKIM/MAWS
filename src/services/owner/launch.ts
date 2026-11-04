@@ -93,7 +93,7 @@ export interface OwnerLaunchSetup {
 export interface OwnerChannelLaunchDeps {
   store: OwnerChannelStore;
   appEnabled: () => boolean; // settings' mods.toHuman.enabled
-  managedSettingsPath?: string; // the tests' seam
+  systemRoot?: string; // the tests' seam: the file-system root the machine's managed settings are read beneath
   log: (message: string) => void;
   // the engine host's event batches, subscribed to at the first decided launch (nothing is due before one)
   subscribe?: (listener: (appSessionId: AppSessionId, events: readonly SessionEvent[]) => void) => void;
@@ -167,7 +167,7 @@ export async function ownerChannelLaunch(
     configHome: claudeConfigDir(s.env, s.env.HOME || homedir()),
     cwd: spec.cwd,
     flagSettings: spec.extraSettings,
-    managedSettingsPath: owner.deps.managedSettingsPath,
+    systemRoot: owner.deps.systemRoot,
   };
   // the settings' reading is always taken (the mismatch check compares the engine's with it); while the last observation
   // contradicted it, the engine's name decides instead

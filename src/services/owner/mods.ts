@@ -16,7 +16,7 @@ export interface ModsDeps {
   sessions: Pick<SessionStore, 'get'>;
   appEnabled: () => boolean;
   configHome: () => Promise<string>; // the engine's config home (the captured login-shell environment's)
-  managedSettingsPath?: string; // the tests' seam
+  systemRoot?: string; // the tests' seam: the file-system root the machine's managed settings are read beneath
 }
 
 export async function modsList(deps: ModsDeps, appSessionId?: AppSessionId): Promise<ModRow[]> {
@@ -42,7 +42,7 @@ export function setSessionOverride(deps: Pick<ModsDeps, 'store'>, input: { appSe
 // What a launch with the lane `on` in `directory` (null: no project) would desire.
 async function nextLaunchSource(deps: ModsDeps, on: boolean, directory: string | null): Promise<ContractSource> {
   if (!on) return 'off';
-  const style = await resolveStyle({ configHome: await deps.configHome(), cwd: directory, managedSettingsPath: deps.managedSettingsPath });
+  const style = await resolveStyle({ configHome: await deps.configHome(), cwd: directory, systemRoot: deps.systemRoot });
   return desiredSource(on, style);
 }
 
