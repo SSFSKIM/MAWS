@@ -17,7 +17,7 @@ import { OFFERS, READ_OPENS } from '../../src/endpoint/offers';
 import type { SessionRecord, SessionTarget, RecordSource } from '../../src/endpoint/sources';
 import { ENDPOINT_CAPABILITIES } from '../../src/endpoint/capabilities';
 import { fakeBrowser } from './fake-services';
-import { act, CHECKOUT, done, evs, laneAMember, makeOrg, of, openRemote, PROJECT, Records, sleep, sminos, snapshot, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote, type StartOptions } from './sub-harness';
+import { act, CHECKOUT, done, evs, laneAMember, makeOrg, openRemote, PROJECT, Records, sleep, sminos, snapshot, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote, type StartOptions } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
