@@ -23,7 +23,10 @@ import { useLayout } from '../stores/layout';
 const isRemote = (state: LaneAState): boolean => state.link !== undefined;
 
 export function connectRemoteLaneA(): () => void {
-  const offOpener = registerRemoteOpener('A', (listed) => useLayout.getState().openSession(listed.appId));
+  const offOpener = registerRemoteOpener('A', (listed, how) => {
+    if (how?.newTab) useLayout.getState().openTab({ kind: 'session', appSessionId: listed.appId }); // P5 O7 M8: Resume…'s ⌘Enter
+    else useLayout.getState().openSession(listed.appId);
+  });
   const offAgents = connectRemoteAgents(); // the agents tool reads its subagent tree from its plane
   const told = new Map<AppSessionId, string>(); // the requests last put per session, as JSON
   const firstSeen = new Map<string, string>(); // a request the bridge stamped no time to: when this page first saw it

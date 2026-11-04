@@ -42,8 +42,8 @@ export function listedMatcher(query: string): (listed: ListedSession) => boolean
   const q = query.trim().toLowerCase();
   return q === '' ? () => true : (listed) => listedTitle(listed).toLowerCase().includes(q);
 }
-// A listed row's last activity: when its listing was issued.
-const issuedAt = (listed: ListedSession): number => {
+// A listed row's last activity: when its listing was issued (sminos re-issues a listing at each change of its state).
+export const issuedAt = (listed: ListedSession): number => {
   const at = Date.parse(listed.issued);
   return Number.isFinite(at) ? at : Number.NEGATIVE_INFINITY;
 };

@@ -16,14 +16,17 @@ import { formatDateTime } from '@shared/app/date-format';
 import { formatAgo } from '@shared/app/date-format';
 import { useNow } from '../app/use-now';
 import { GlyphMark } from '../attention/GlyphMark';
-import { glyphFor } from '../attention/glyph';
+import { glyphFor, listedGlyph } from '../attention/glyph';
+import { MachineChip } from '../app/MachineChip'; // P5 O7 M8
 import { ipc } from '../ipc/client';
 import { availabilityRefusal, useAvailability } from '../sessions/availability'; // P2-A's X16, read only
-import { displayTitle } from '../sessions/title';
+import { remoteOpenerFor } from '../sessions/remote-openers'; // P5 O7 M8
+import { displayTitle, listedTitle } from '../sessions/title';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
 import { machineName, rowName, selectOrgIndex } from '../stores/org-projects';
+import { usePeople } from '../stores/people'; // P5 O7 M8
 import { useSessions } from '../stores/sessions';
 import { RESUME_COPY as COPY } from './copy';
 import {
@@ -35,7 +38,11 @@ import {
   sessionBranch,
   shortBranch,
   TOGGLE_KEYS,
+  chooserRowId,
+  isListedChooserRow,
   type ChooserContext,
+  type ChooserListedRow,
+  type ChooserRecordRow,
   type ChooserRow,
   type ChooserToggles,
   type GroupKind,
@@ -91,6 +98,8 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
   const records = useSessions((s) => s.records);
   const digests = useSessions((s) => s.digests);
   const projects = useSessions((s) => s.projects);
+  const listed = useSessions((s) => s.listed); // P5 O7 M8: other machines' listed sessions, reachable here past the cap
+  const people = usePeople((s) => s.on);
   const project = context.projectId === null ? null : (projects.get(context.projectId) ?? null);
   // the scope's name: the row's (an org project's, a machine's own, T3), else the project's
   const index = useSessions((s) => selectOrgIndex(s, ipc.localMachine));
@@ -107,14 +116,14 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
   const ids = useId();
 
   const local = ipc.localMachine;
-  const rows = useMemo(() => chooserRows({ records, digests, projects, context, toggles, branch, query, local }), [records, digests, projects, context, toggles, branch, query, local]);
+  const rows = useMemo(() => chooserRows({ records, digests, projects, context, toggles, branch, query, local, listed, people }), [records, digests, projects, context, toggles, branch, query, local, listed, people]);
   const shown = rows.slice(0, limit);
   const groups = chooserGroups(shown, now);
   // The selection stays on its session while the stores change; one that left the list falls back to the first row. The
   // row shown selected is the one kept: the opening one, a search's first row and a fallback are committed as they show,
   // so a row that becomes the newest, or the one that left coming back, takes nothing.
-  const selected = shown.find((row) => row.record.appId === picked) ?? shown[0] ?? null;
-  const selectedId = selected?.record.appId ?? null;
+  const selected = shown.find((row) => chooserRowId(row) === picked) ?? shown[0] ?? null;
+  const selectedId = selected === null ? null : chooserRowId(selected);
   if (selectedId !== picked) {
     setPicked(selectedId);
     // only the opening selection previews at once; a fallback replacing a kept one settles like a move
@@ -134,7 +143,12 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
   };
   const open = (appSessionId: AppSessionId, newTab: boolean) => {
     close('opened');
-    if (newTab) useLayout.getState().openTab({ kind: 'session', appSessionId });
+    // P5 O7 M8: a listed session with no record opens through its lane's opener, as its sidebar row does
+    const row = shown.find((r) => chooserRowId(r) === appSessionId);
+    const listed = row !== undefined && isListedChooserRow(row) ? row.listed : null;
+    const opener = listed === null ? null : remoteOpenerFor(listed.lane);
+    if (listed !== null && opener !== null) opener(listed, { newTab });
+    else if (newTab) useLayout.getState().openTab({ kind: 'session', appSessionId });
     else useLayout.getState().openSession(appSessionId);
   };
   const flip = (key: keyof ChooserToggles) => {
@@ -152,7 +166,7 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
     if (shown.length === 0) return;
     const at = selected === null ? -1 : shown.indexOf(selected);
     const next = at + by >= shown.length ? (loadMore() ?? shown[shown.length - 1]) : shown[Math.max(0, at + by)];
-    select(next.record.appId);
+    select(chooserRowId(next));
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -257,19 +271,15 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
                 <div aria-hidden className="px-2 pt-2 pb-1 text-ui-sm text-fg-faint">
                   {group.label}
                 </div>
-                {group.rows.map((row) => (
-                  <Row
-                    key={row.record.appId}
-                    id={optionId(row.record.appId)}
-                    row={row}
-                    kind={group.kind}
-                    now={now}
-                    selected={row === selected}
-                    badge={folderBadge(row.record, projects, toggles.allProjects ? null : context.projectId)}
-                    onSelect={() => select(row.record.appId)}
-                    onOpen={() => open(row.record.appId, false)}
-                  />
-                ))}
+                {group.rows.map((row) => {
+                  const appSessionId = chooserRowId(row);
+                  const common = { id: optionId(appSessionId), kind: group.kind, now, selected: row === selected, onSelect: () => select(appSessionId), onOpen: () => open(appSessionId, false) };
+                  return isListedChooserRow(row) ? (
+                    <ListedChooserRow key={appSessionId} row={row} {...common} />
+                  ) : (
+                    <Row key={appSessionId} row={row} badge={folderBadge(row.record, projects, toggles.allProjects ? null : context.projectId)} {...common} />
+                  );
+                })}
               </div>
             ))}
             {rows.length > shown.length && <p className="m-0 mt-1 px-2 text-ui-sm text-fg-faint">{COPY.more(shown.length, rows.length)}</p>}
@@ -303,7 +313,10 @@ function useRefusal(record: SessionRecord): string | null {
   return availability === 'archived' || availability === 'foreign_held' ? availabilityRefusal(availability, record.holder) : null;
 }
 
-function Row({ id, row, kind, now, selected, badge, onSelect, onOpen }: { id: string; row: ChooserRow; kind: GroupKind; now: number; selected: boolean; badge: string | null; onSelect(): void; onOpen(): void }) {
+type RowProps = { id: string; kind: GroupKind; now: number; selected: boolean; onSelect(): void; onOpen(): void };
+const ROW_CLASS = 'flex h-8 cursor-default items-center gap-1.5 rounded-sm px-2 text-fg-muted hover:bg-bg-hover data-[selected=true]:bg-bg-active data-[selected=true]:text-fg';
+
+function Row({ id, row, kind, now, selected, badge, onSelect, onOpen }: RowProps & { row: ChooserRecordRow; badge: string | null }) {
   const { record } = row;
   const digest = useSessions((s) => s.digests.get(record.appId) ?? null);
   const pending = useAttention((s) => selectPendingOf(s, record.appId));
@@ -320,7 +333,7 @@ function Row({ id, row, kind, now, selected, badge, onSelect, onOpen }: { id: st
       data-selected={selected}
       onClick={onSelect}
       onDoubleClick={onOpen}
-      className="flex h-8 cursor-default items-center gap-1.5 rounded-sm px-2 text-fg-muted hover:bg-bg-hover data-[selected=true]:bg-bg-active data-[selected=true]:text-fg"
+      className={ROW_CLASS}
     >
       <GlyphMark glyph={glyph} className="w-3 shrink-0 text-ui-sm" />
       <span data-title className="min-w-8 shrink truncate">
@@ -344,6 +357,25 @@ function Row({ id, row, kind, now, selected, badge, onSelect, onOpen }: { id: st
   );
 }
 
+// P5 O7 M8: another machine's listed session, as its sidebar row draws it: its state's glyph (its machine's attention
+// feed first), its title, `@<name>` (or offline) and its listing's time.
+function ListedChooserRow({ id, row, kind, now, selected, onSelect, onOpen }: RowProps & { row: ChooserListedRow }) {
+  const { listed } = row;
+  const pending = useAttention((s) => selectPendingOf(s, listed.appId));
+  return (
+    <div id={id} role="option" aria-selected={selected} data-selected={selected} data-kind="listed" onClick={onSelect} onDoubleClick={onOpen} className={ROW_CLASS}>
+      <GlyphMark glyph={listedGlyph(listed.state, pending)} className="w-3 shrink-0 text-ui-sm" />
+      <span data-title className="min-w-8 shrink truncate">
+        {listedTitle(listed)}
+      </span>
+      <MachineChip address={listed.appId} className="max-w-[9rem]" />
+      <span title={formatDateTime(row.at)} className="ml-auto min-w-14 shrink-0 text-right text-ui-sm text-fg-faint tabular-nums">
+        {rowTime(row.at, kind, now)}
+      </span>
+    </div>
+  );
+}
+
 function Fact({ label, children, title }: { label: string; children: ReactNode; title?: string }) {
   return (
     <>
@@ -357,7 +389,7 @@ function Fact({ label, children, title }: { label: string; children: ReactNode; 
 
 const PREVIEW_FRAME = 'flex min-h-0 min-w-0 flex-1 flex-col border-t border-border pt-3 sm:border-t-0 sm:border-l sm:pt-0 sm:pl-4';
 
-type PreviewProps = { row: ChooserRow; projects: ReadonlyMap<ProjectId, ProjectRecord>; now: number; immediate: boolean };
+type PreviewProps = { row: ChooserRecordRow; projects: ReadonlyMap<ProjectId, ProjectRecord>; now: number; immediate: boolean };
 
 // The preview pane: nothing to preview without a selection, else the selected session's (which owns the subscriptions).
 function Preview({ row, ...rest }: Omit<PreviewProps, 'row'> & { row: ChooserRow | null }) {
@@ -368,7 +400,28 @@ function Preview({ row, ...rest }: Omit<PreviewProps, 'row'> & { row: ChooserRow
       </section>
     );
   }
-  return <SessionPreview row={row} {...rest} />;
+  return isListedChooserRow(row) ? <ListedPreview row={row} now={rest.now} /> : <SessionPreview row={row} {...rest} />;
+}
+
+// P5 O7 M8: what a listing says of its session (no folder, branch or turns: those are its machine's, read once it opens).
+function ListedPreview({ row, now }: { row: ChooserListedRow; now: number }) {
+  const { listed } = row;
+  const pending = useAttention((s) => selectPendingOf(s, listed.appId));
+  const machineLabel = useMachines((s) => machineName(s.machines, listed.machine, ipc.localMachine));
+  return (
+    <section aria-label="Preview" data-testid="resume-preview" className={PREVIEW_FRAME}>
+      <h3 className="m-0 flex min-w-0 items-center gap-1.5 text-ui font-semibold text-fg">
+        <GlyphMark glyph={listedGlyph(listed.state, pending)} className="w-3 shrink-0 text-ui-sm font-normal" />
+        <span className="truncate">{listedTitle(listed)}</span>
+      </h3>
+      <dl className="m-0 mt-2 grid shrink-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-ui-sm">
+        <Fact label={COPY.facts.machine}>{machineLabel}</Fact>
+        <Fact label={COPY.facts.lastActive} title={formatDateTime(row.at)}>
+          {capitalised(formatAgo(Math.max(0, now - row.at)))}
+        </Fact>
+      </dl>
+    </section>
+  );
 }
 
 function SessionPreview({ row, projects, now, immediate }: PreviewProps) {

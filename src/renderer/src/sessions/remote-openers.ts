@@ -5,7 +5,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { useSessions, type ListedSession } from '../stores/sessions';
 
 export type RemoteLane = ListedSession['lane'];
-export type RemoteOpener = (listed: ListedSession) => void;
+// P5 O7 M8: `newTab`, the resume chooser's ⌘Enter: a tab of its own rather than the current one
+export type RemoteOpener = (listed: ListedSession, how?: { newTab: boolean }) => void;
 
 const openers = new Map<RemoteLane, RemoteOpener>();
 
