@@ -1090,6 +1090,21 @@ describe('the sitting’s failures (M8)', () => {
     expect(sent[1]).toMatchObject({ args: send, requires: 'rl2.upload-blocks' });
   });
 
+  it('carries a send’s uploads made while no channel is current, for the channel it goes on to judge; one an older peer refuses as not offered goes again with the mention alone', async () => {
+    const l = lab();
+    await live(l);
+    l.link.lose(); // within the grace: still `up`, no channel; the send waits under the link's hold
+    const settles: Array<Parameters<FakeAct['settle']>[0]> = [{ state: 'refused', reason: 'not-offered' }, { state: 'done', result: { messageUuid: null, disposition: 'sent', queueId: 'q2' } }];
+    l.link.onAct = (act) => act.settle(settles.shift()!);
+    const send = { appSessionId: APP, content: 'read @.claude/desk-uploads/app-1/u.0.pdf', uploads: [{ uploadId: 'u.0.pdf', as: 'document' }] };
+    expect(await l.cmd('session.send', send)).toEqual({ ok: true, value: { messageUuid: null, disposition: 'sent', queueId: 'q2' } });
+    const sent = l.link.acts.map((a) => a.request);
+    expect(sent[0]).toMatchObject({ args: send, requires: 'rl2.upload-blocks' });
+    expect(sent[1].args).toEqual({ appSessionId: APP, content: send.content });
+    expect(sent[1].requires).toBeUndefined();
+    expect(l.logs.some((line) => line.includes('rl2.upload-blocks'))).toBe(true);
+  });
+
   it('words a send whose uploads the machine refused (`malformed`, no reason) as the attachment’s, for the composer to show', async () => {
     const l = lab();
     await live(l);

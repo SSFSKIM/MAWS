@@ -549,17 +549,21 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     // One bound from the act's turn: what the resume (or the request's read) spent is not given back, so an act made at
     // the deadline is not made, and one made before it goes out by it or not at all (`sendBy`: no outbox, A4).
     if (now() >= deadline) return resuming ? failure('host_unavailable', `Not sent: ${link.name} didn’t resume the session in time`) : outcomeAsResult(name, link.name, { state: 'refused', reason: 'offline' });
-    // P5 O7 M8: a send's uploads only to an endpoint that reads them (judged on the channel current now), else the mention alone
+    // P5 O7 M8: a send's uploads only to an endpoint that reads them. A channel current now that lists none takes the
+    // mention alone; with none current (m8-3's task review, D) the act carries them and `requires` the capability, so the
+    // channel it goes on judges it, and one an older peer refused as not offered (nothing ran) goes again without them.
     const uploads = name === 'session.send' && fields.uploads !== undefined;
-    const blocks = uploads && peerLists(link, 'rl2.upload-blocks');
-    const args = uploads && !blocks ? withoutUploads(fields) : fields;
-    if (uploads && !blocks) {
-      deps.log(`lane B: session.send on ${link.name}/${app}: its endpoint lists no rl2.upload-blocks; the uploads go as their mentions alone`);
-    }
+    const blocks = uploads && (link.peerCapabilities() === null || peerLists(link, 'rl2.upload-blocks'));
+    if (uploads && !blocks) deps.log(`lane B: session.send on ${link.name}/${app}: its endpoint lists no rl2.upload-blocks; the uploads go as their mentions alone`);
     const since = lane.session.openings(); // the opening the act is made under: a receipt heard after a later one is asked of the machine
-    const handle = link.act({ action: name, session: app, context: { lane: 'B', ...context }, args, executor: 'engine-host', sendBy: deadline, ...(requestDigest !== undefined && { requestDigest }), ...(blocks && { requires: 'rl2.upload-blocks' }) });
-    const result = await settle(link, name, handle, deadline, app);
-    if (blocks && !result.ok && (result.error.issues as { refusal?: unknown } | undefined)?.refusal === 'malformed') return failure('invalid_input', REMOTE_UPLOAD_REFUSED_WORDS, { refusal: 'malformed', uploads: 'refused' });
+    const make = (args: Fields, requires: boolean) =>
+      settle(link, name, link.act({ action: name, session: app, context: { lane: 'B', ...context }, args, executor: 'engine-host', sendBy: deadline, ...(requestDigest !== undefined && { requestDigest }), ...(requires && { requires: 'rl2.upload-blocks' }) }), deadline, app);
+    let result = await make(blocks || !uploads ? fields : withoutUploads(fields), blocks);
+    const refusal = result.ok ? null : (result.error.issues as { refusal?: unknown } | undefined)?.refusal;
+    if (blocks && refusal === 'not-offered' && now() < deadline) {
+      deps.log(`lane B: session.send on ${link.name}/${app}: the channel it went on lists no rl2.upload-blocks; sent again with the uploads as their mentions alone`);
+      result = await make(withoutUploads(fields), false);
+    } else if (blocks && refusal === 'malformed') return failure('invalid_input', REMOTE_UPLOAD_REFUSED_WORDS, { refusal: 'malformed', uploads: 'refused' });
     const opId = result.ok && OPERATIONS.has(name) ? record(result.value)?.opId : undefined;
     if (typeof opId === 'string') lane.session.awaitOperation(opId, name as OperationCommand, since);
     return result;
