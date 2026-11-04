@@ -87,7 +87,7 @@ import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-sce
 import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M10
 import { closeSurface, mainTabById, openSurface, surface } from './support/shell';
-import { seedTranscript, SIDE_QUESTION, SideJournal, transcript } from './support/side-replay';
+import { seedTranscript, SIDE_QUESTION, SideJournal, slugOf, transcript } from './support/side-replay';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarOf } from './support/sidebar';
 import { clickRevealed } from './support/hover'; // P5 O7 M8
 import { REMOTE_UNAVAILABLE } from '../src/shared/ipc/remote-unavailable'; // P5 O7 M8
@@ -1721,14 +1721,14 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
 //   - a MAWS ask B's session raises is read and answered from A, and the card settles on A, on B and on A2;
 //   - `/btw` across a link drop: the side question is taken on B, A's link drops, B answers it, and once the link is back
 //     the operation's completion (`session.operation`, the outcome B's engine host kept, asked for at the reopening)
-//     reaches A once, with B's answer, and A's view shows it.
+//     reaches A once, with B's answer, and A's view shows it;
+//   - follow ownership: A and A2 each follow an agent of the session on B; A's unfollow, then A quitting, lets go of A's
+//     hold alone, and B keeps the follow for A2, read in B's engine host's log (its follow lines: a client's hold, its
+//     release, the follow's drop), since no client sees whether B's follow runs.
 // No wall-clock bound (e2e:remote carries none; the gate's note on the group): the row's time from B's engine running the
 // session is logged, and its 5 s bound is M10's to measure live.
-// Held below e2e level: one client's agent unfollow leaving another's follow running (follow ownership): no client sees
-// whether B's follow runs (its live events don't ride the lane B stream, and a fresh read backfills the same events from
-// disk either way), so it is the engine host's and the endpoint's units (fs/follow.test.ts, the unfollow rows) and M10's
-// sitting; Reload plugins (the replay engine records no `reload_plugins`); the operation's `pending` and `unknown` answers
-// at the reopening (remote-session.test.ts).
+// Held below e2e level: Reload plugins (the replay engine records no `reload_plugins`); the operation's `pending` and
+// `unknown` answers at the reopening (remote-session.test.ts).
 const M8_SPAWNED = 'b0c0d0e0-0000-4000-8000-0000000000b6'; // the engine session id the spawn's journal pins
 const M8_TITLE = 'B’s session started from A';
 const M8_BRIEF = 'Start the M8 session on B.';
@@ -1746,7 +1746,7 @@ const M8_PINNED = 9; // past the cap: SESSIONS_CAP (8) in src/renderer/src/sideb
 const M8_FIRST_SHOWN = 5; // SESSIONS_FIRST: a group's rows before its Show more
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // A's renderer's `session.operation` events as the raw bridge hears them (window.__operations), kept from now on
-type HeardOperation = { opId: string; command: string; outcome: { ok: boolean; value?: unknown } };
+type HeardOperation = { opId: string; command: string; late: boolean; outcome: { ok: boolean; value?: unknown } };
 async function keepOperations(page: Page): Promise<void> {
   await page.evaluate(() => {
     const heard: HeardOperation[] = [];
@@ -1794,6 +1794,9 @@ test('M8: a session spawned on B leads a busy project past its cap and comes bac
       aUserData,
       secondUserData: a2UserData,
       b: {
+        // B's profile under a realpathed root of its own: the replay writes the session's transcript (which B's index
+        // lists, and its agents' directory with it) only into a config home that is its own real path
+        root: '/tmp',
         env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: fixture, DISABLE_AUTOUPDATER: '1' },
         prepare: ({ claudeConfigDir }) => {
           writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, projects: { [checkout]: { hasTrustDialogAccepted: true } } }));
@@ -1994,7 +1997,8 @@ test('M8: a session spawned on B leads a busy project past its cap and comes bac
       const opId = (await exchangesOnB())[0]!.id; // the exchange's id is its operation's
       // a read over the link after the receipt: the channel carried what came before it, the act's answer included
       await invoke(page, 'side.question.list', { appSessionId: spawnedApp }, b.ref);
-      const completions = async () => (await heardOperations(page)).filter((event) => event.opId === opId);
+      // its completions as A hears them, the late correction §U allows left out (`late: true`, at most once more)
+      const completions = async () => (await heardOperations(page)).filter((event) => event.opId === opId && !event.late);
 
       scene!.aHub.cut();
       await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 60_000, message: `A's link to B goes down once cut\n${mainSaid(page)}` }).toBe('down');
@@ -2013,6 +2017,58 @@ test('M8: a session spawned on B leads a busy project past its cap and comes bac
       await expect(view.locator('[data-side-exchange="answered"]'), 'the answer in A’s view').toContainText(M8_SIDE_ANSWER, { timeout: 60_000 });
       await expect(view.locator('[data-side-exchange="pending"]'), 'nothing left pending').toHaveCount(0);
       expect(await completions(), 'its completion came once').toHaveLength(1);
+    });
+
+    await test.step('follow ownership: A and A2 each follow an agent of the session on B; A’s unfollow, then A quitting, lets go of A’s hold alone, and B keeps A2’s follow', async () => {
+      // a workflow agent of the session on B (a workflow's agent follows at once, its meta naming no tool use)
+      const agentId = 'a0e2e5f0110b6d8c1';
+      const agentDir = join(b.claudeConfigDir, 'projects', slugOf(checkout), M8_SPAWNED, 'subagents', 'workflows', 'wf_m8e2e00-001');
+      mkdirSync(agentDir, { recursive: true });
+      writeFileSync(join(agentDir, `agent-${agentId}.jsonl`), `${JSON.stringify({ type: 'user', uuid: 'f6e30000-0000-4000-8000-0000000000c1', parentUuid: null, isSidechain: true, agentId, cwd: checkout, message: { role: 'user', content: 'Count the files on B.' } })}\n`);
+      const follow = { appSessionId: spawnedApp, agentId };
+      // B's engine host's lines about this follow, from every log of B's (the scene's way of reading B's files)
+      const prefix = `[fs] follow ${spawnedApp}/${agentId}: `;
+      const followLines = () =>
+        (readdirSync(b.userData, { recursive: true }) as string[])
+          .filter((name) => name.endsWith('.log'))
+          .flatMap((name) => readFileSync(join(b.userData, name), 'utf8').split('\n'))
+          .map((line) => line.slice(Math.max(0, line.indexOf(prefix))))
+          .filter((line) => line.startsWith(prefix))
+          .map((line) => line.slice(prefix.length));
+      const heldBy = (n: number) => new RegExp(`^held by client ([0-9a-f]{8}) \\(${n} holding\\)$`);
+      const tagOf = (re: RegExp) => followLines().map((line) => re.exec(line)?.[1]).find((tag) => tag !== undefined) ?? null;
+      const said = async () => `B's lines for the follow:\n${followLines().join('\n') || 'none'}\n${await bSaid()}`;
+
+      // A follows (retried while B's index lists the agent), then A2
+      await expect(async () => void (await invoke(page, 'fs.agentEvents', follow, b.ref))).toPass({ timeout: 30_000 });
+      let tagA: string | null = null;
+      await quoting(expect.poll(() => (tagA = tagOf(heldBy(1))), { timeout: 30_000, message: 'B logs A’s hold' }).not.toBeNull(), said);
+      await invoke(page2, 'fs.agentEvents', follow, b.ref);
+      let tagA2: string | null = null;
+      await quoting(expect.poll(() => (tagA2 = tagOf(heldBy(2))), { timeout: 30_000, message: 'B logs A2’s hold beside it' }).not.toBeNull(), said);
+      expect(tagA2, 'two clients, two holds').not.toBe(tagA);
+
+      // A unfollows: its hold alone is let go, and the follow runs on for A2
+      await invoke(page, 'fs.unfollow', follow, b.ref);
+      await quoting(expect.poll(followLines, { timeout: 30_000, message: 'A’s hold released, A2’s kept' }).toContain(`released by client ${tagA} (1 holding)`), said);
+      expect(followLines(), 'no drop: A2 still follows').not.toContain('dropped');
+
+      // A follows again and quits: its channel's end lets go of its hold alone
+      await invoke(page, 'fs.agentEvents', follow, b.ref);
+      await quoting(expect.poll(() => followLines().filter((line) => line === `held by client ${tagA} (2 holding)`).length, { timeout: 30_000, message: 'A holds it again' }).toBe(1), said);
+      await a!.cleanup();
+      a = null;
+      await quoting(
+        expect.poll(() => followLines().filter((line) => line === `released by client ${tagA} (1 holding)`).length, { timeout: 120_000, message: 'A quit: B lets go of its hold as its channel ends' }).toBe(2),
+        said,
+      );
+      expect(followLines(), 'no drop: A2 still follows').not.toContain('dropped');
+      expect(followLines().filter((line) => line.startsWith(`released by client ${tagA2}`)), 'and A2’s hold untouched').toEqual([]);
+
+      // the log tells a drop when there is one: A2, the last holder, lets go
+      await invoke(page2, 'fs.unfollow', follow, b.ref);
+      await quoting(expect.poll(followLines, { timeout: 30_000, message: 'the last hold let go, the follow dropped' }).toEqual(expect.arrayContaining([`released by client ${tagA2} (0 holding)`, 'dropped'])), said);
+      console.log(`[e2e:remote] M8: B's follow of ${agentId}: ${followLines().join('; ')}`);
     });
   } finally {
     await a2?.cleanup();

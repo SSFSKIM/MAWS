@@ -7,6 +7,7 @@
 // first write, which it reports as `fs.foreignWrite` (main yields MAWS's process), and re-folds a follower that held a
 // branch back once the foreign holder exits.
 // Read-only: it never writes under the config home.
+import { createHash } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -87,7 +88,14 @@ export interface FsServiceOptions {
   window?: WindowBudget; // tests' smaller pages
   releaseMs?: number; // FOLLOW_RELEASE_MS
   agentRetryMs?: number; // AGENT_RETRY_MS
+  log?: (line: string) => void; // P5 O7 M8: the follows' holds and drops (stderr, the host's log, by default)
 }
+
+/**
+ * P5 O7 M8: how the service's log names a client that holds an agent's follow: a short digest of its id, the same at
+ * its hold and its release, so a diagnosis can pair them, but never the id itself, which names a remote device.
+ */
+export const followClientTag = (client: ClientId | string): string => createHash('sha256').update(client).digest('hex').slice(0, 8);
 
 // The replay runs' side of the snapshot seam (ReplayHost): null for an app id no run has.
 export interface ReplaySnapshots {
@@ -143,6 +151,7 @@ interface Contest {
 export class FsService {
   private readonly paths: StorePaths;
   private readonly emit: HostEmit;
+  private readonly log: (line: string) => void;
   private readonly bindings = new Bindings();
   private readonly discovery: Discovery;
   private readonly watcher: StoreWatcher;
@@ -199,6 +208,7 @@ export class FsService {
   constructor(options: FsServiceOptions) {
     this.paths = options.paths;
     this.emit = options.emit;
+    this.log = options.log ?? ((line) => console.error(line));
     this.openReader = options.openReader ?? ((locate) => new FsFileReader(locate));
     this.reconcileMs = options.reconcileMs ?? RECONCILE_MS;
     this.window = options.window;
@@ -473,6 +483,7 @@ export class FsService {
     }
     kept = true;
     entry.holds.set(client.id, off);
+    this.log(`[fs] follow ${followName(entry)}: held by client ${followClientTag(client.id)} (${entry.holds.size} holding)`);
   }
 
   // P5 O7 M8: `client`'s hold on the follow at `key` let go; the follow stopped once nobody holds it.
@@ -481,6 +492,7 @@ export class FsService {
     if (off === undefined) return;
     entry.holds.delete(client);
     off();
+    this.log(`[fs] follow ${followName(entry)}: released by client ${followClientTag(client)} (${entry.holds.size} holding)`);
     this.unheld(key, entry);
   }
 
@@ -491,6 +503,8 @@ export class FsService {
     entry.holds.clear();
     if (reason === undefined) entry.follow.stop();
     else entry.follow.stop(reason);
+    // the host's own stop drops every follow at once: only a drop while it runs is told
+    if (!this.stopped) this.log(`[fs] follow ${followName(entry)}: dropped${reason === undefined ? '' : ' (its session no longer open anywhere)'}`);
   }
 
   // `fs.unfollow`: stops the follower, and with agentId null every follower of the session (the session's own lifecycle:
@@ -1114,6 +1128,8 @@ function deferred<T>(): Deferred<T> {
 function followKey(appSessionId: AppSessionId, agentId: AgentId | null): string {
   return `${appSessionId}\0${agentId ?? ''}`;
 }
+// P5 O7 M8: a follow as the log names it: its app session and its agent, or `session` for the session's own.
+const followName = (entry: FollowEntry): string => `${entry.follow.appSessionId}/${entry.agentId ?? 'session'}`;
 
 // The quiet follow of a session a live process writes (eventsSnapshot), under the session's prefix so `fs.unfollow` of
 // the session stops it too; an agent id is never empty, so no agent's key is this.
