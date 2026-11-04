@@ -113,6 +113,64 @@ describe('a session spawned from this window', () => {
     expect(leading().has(other)).toBe(false);
   });
 
+  // m8-4a's review 2 (lead-review.test.ts): an attached status that never showed a turn running does not hold the lead
+  describe('an attached status that never showed a turn running', () => {
+    const rested = (process: 'ready' | 'exited' = 'ready') => useSessions.setState({ engine: new Map([[REMOTE, { ...status(REMOTE, { process, engineState: 'idle', turn: null }), appSessionId: REMOTE }]]) });
+
+    it('ends the lead when its process exits, its listing stopped', () => {
+      rested();
+      setListing('idle');
+      markSpawnedHere(REMOTE);
+      expect(leading().has(REMOTE)).toBe(true);
+      rested('exited');
+      setListing('stopped', 2);
+      expect(leading().has(REMOTE)).toBe(false);
+    });
+
+    it('ends the lead when its process exits, whatever the listing says', () => {
+      rested();
+      markSpawnedHere(REMOTE);
+      rested('exited');
+      expect(leading().has(REMOTE)).toBe(false);
+    });
+
+    it('lets a never-busy listing issued again still idle end it (a missed short turn)', () => {
+      rested();
+      setListing('idle', 1);
+      markSpawnedHere(REMOTE);
+      setListing('idle', 2);
+      expect(leading().has(REMOTE)).toBe(false);
+    });
+
+    it('lets the bound end it', () => {
+      vi.useFakeTimers();
+      rested();
+      markSpawnedHere(REMOTE);
+      vi.advanceTimersByTime(LISTING_LEAD_MS);
+      expect(leading().has(REMOTE)).toBe(false);
+    });
+
+    it('while the status shows a first turn running, the lead holds past the bound', () => {
+      vi.useFakeTimers();
+      markSpawnedHere(REMOTE);
+      useSessions.setState({ engine: new Map([[REMOTE, { ...status(REMOTE, { engineState: 'running', turn: humanTurn }), appSessionId: REMOTE }]]) });
+      vi.advanceTimersByTime(2 * LISTING_LEAD_MS);
+      expect(leading().has(REMOTE)).toBe(true);
+    });
+  });
+
+  // m8-4a's review 2: a retry's lead is its own attempt's; the failure of the attempt before it is not
+  it('a retry marked over the previous attempt’s held failure leads, and its own failure ends it', () => {
+    const failed = (message: string) => ({ appSessionId: LOCAL, phase: 'failed' as const, detail: null, outcome: { kind: 'error' as const, message, resources: { worktree: null, record: 'removed' as const, transcript: 'none' as const } } });
+    useSetup.setState({ phases: new Map([[LOCAL, failed('old failure')]]) });
+    useSetup.getState().setInvoking(LOCAL, true);
+    markSpawnedHere(LOCAL); // the retry's session.start answered starting
+    useSetup.getState().setInvoking(LOCAL, false);
+    expect(leading().has(LOCAL), 'a new accepted start, not the old failed attempt').toBe(true);
+    useSetup.setState({ phases: new Map([[LOCAL, failed('this attempt')]]) });
+    expect(leading().has(LOCAL)).toBe(false);
+  });
+
   it('a listed row that says its session ended stops leading at once', () => {
     markSpawnedHere(REMOTE);
     setListing('done');

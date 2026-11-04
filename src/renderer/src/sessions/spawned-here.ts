@@ -6,20 +6,23 @@
 // sidebar's order reads (`sidebar/derive.ts`, `leadsAsSpawned`); dropping the rule is emptying it.
 //
 // When the first turn has ended, by the most authoritative word held:
-// - attached (the session's status or digest is held here): the status, once it said a turn ran, saying none runs; the
-//   digest saying a turn ended (`lastTurnEndedAt`); or its process failed or exited;
-// - by its listing alone: once seen `busy`, a resting word (a listing may be posted `idle` before the engine took the
-//   brief, and `waiting` is a prompt inside the turn); never seen busy, a resting listing issued again (sminos issues a
-//   listing anew at each change of its state, so a short turn passed between); a word that the session ended;
-// - with nothing attached, LISTING_LEAD_MS after the spawn at the latest (the architect's review ruling: never forever;
-//   long enough to keep a just-started session in view while its first answer comes).
-// A start that failed (its setup's `failed`), or whose provisional record was removed, ends its lead at once. The marks
-// are this window's memory: a reload, or another window, ranks the session by its state alone (a known limit, ruled).
+// - attached (the session's status or digest is held here): its process exited; the status, once it said a turn ran,
+//   saying none runs; the digest saying a turn ended (`lastTurnEndedAt`), or that its process failed or exited;
+// - by its listing: once seen `busy`, a resting word (a listing may be posted `idle` before the engine took the brief,
+//   and `waiting` is a prompt inside the turn); never seen busy, a resting listing issued again (sminos issues a listing
+//   anew at each change of its state, so a short turn passed between); a word that the session ended;
+// - LISTING_LEAD_MS after the spawn at the latest (the architect's review ruling: never forever; long enough to keep a
+//   just-started session in view while its first answer comes), unless a first turn is seen running then: its status's
+//   turn, or its digest working or waiting; that turn's own end ends the lead, however long it runs.
+// A start that failed (its setup's `failed`, this attempt's: a phase already held at the mark is an earlier attempt's),
+// or whose provisional record was removed, ends its lead at once. The marks are this window's memory: a reload, or
+// another window, ranks the session by its state alone (a known limit, ruled).
 import { create } from 'zustand';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { SessionDigest } from '@shared/ipc/schema';
+import type { SetupEvent } from '@shared/sessions/setup';
 import { useSessions, type ListedSession } from '../stores/sessions';
 import { useSetup } from './store';
 
@@ -33,6 +36,7 @@ interface Mark {
   turnSeen: boolean; // its status said a turn runs
   firstRevision: number | null; // the first listing revision seen
   recordSeen: boolean;
+  priorSetup: SetupEvent | undefined; // the setup phase held at the mark: an earlier attempt's, never this one's failure
 }
 interface Held {
   records: ReadonlyMap<AppSessionId, SessionRecord>;
@@ -49,17 +53,18 @@ let offSetup: (() => void) | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 function leadEnded(id: AppSessionId, mark: Mark, held: Held, now: number): boolean {
-  if (useSetup.getState().phases.get(id)?.phase === 'failed') return true;
+  const setup = useSetup.getState().phases.get(id);
+  if (setup?.phase === 'failed' && setup !== mark.priorSetup) return true;
   if (held.records.has(id)) mark.recordSeen = true;
   else if (mark.recordSeen && !held.listed.has(id)) return true; // its provisional record was removed
   const status = held.engine.get(id);
   const digest = held.digests.get(id);
+  if (status?.process === 'exited') return true;
   if (status !== undefined) {
     if (status.turn !== null) mark.turnSeen = true;
     else if (mark.turnSeen) return true;
   }
   if (digest !== undefined && (digest.lastTurnEndedAt !== null || digest.phase === 'failed' || digest.phase === 'exited')) return true;
-  if (status !== undefined || digest !== undefined) return false; // attached: its own word will come
   const listed = held.listed.get(id);
   if (listed !== undefined) {
     if (listed.state === 'busy') mark.busySeen = true;
@@ -67,7 +72,8 @@ function leadEnded(id: AppSessionId, mark: Mark, held: Held, now: number): boole
     if (ENDED.has(listed.state)) return true;
     if (RESTING.has(listed.state) && (mark.busySeen || listed.revision > mark.firstRevision)) return true;
   }
-  return now - mark.at >= LISTING_LEAD_MS;
+  const running = (status?.turn ?? null) !== null || digest?.phase === 'working' || digest?.phase === 'waiting';
+  return !running && now - mark.at >= LISTING_LEAD_MS;
 }
 
 function settle(): void {
@@ -83,7 +89,8 @@ function settle(): void {
   schedule(now);
 }
 
-// A wake at the next mark's bound still ahead (an attached mark past its own keeps its lead, and needs none).
+// A wake at the next mark's bound still ahead (a mark past its own, its first turn running, needs none: that turn's
+// end comes as a change to the stores).
 function schedule(now: number): void {
   if (timer !== null) clearTimeout(timer);
   timer = null;
@@ -110,7 +117,7 @@ function publish(): void {
 /** A session this window just started: it leads its sidebar group until its first turn ends. */
 export function markSpawnedHere(appSessionId: AppSessionId): void {
   if (marks.has(appSessionId)) return;
-  marks.set(appSessionId, { at: Date.now(), busySeen: false, turnSeen: false, firstRevision: null, recordSeen: false });
+  marks.set(appSessionId, { at: Date.now(), busySeen: false, turnSeen: false, firstRevision: null, recordSeen: false, priorSetup: useSetup.getState().phases.get(appSessionId) });
   publish();
   settle(); // also arms its bound
 }
