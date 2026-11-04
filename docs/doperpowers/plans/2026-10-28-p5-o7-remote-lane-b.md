@@ -2589,6 +2589,31 @@ P5 findings of M5's re-plan, continued from F15:
   `WIRE_MINOR` is the landing's, by P5 Decision Log 44's rule. To keep the branch's unit gate green in between, m8-2b bumps it once to master's plus one (24 to 25) with the manifest, and the landing re-bumps if master has moved.
   Rationale: A remote client can now start a follow (M4's offered `fs.agentEvents`). The unoffered `fs.unfollow` stops every client's, so a remote panel could end the machine's own. A red `wire.test.ts` across four tasks would hold every class 1a run.
   Date/Author: 2026-11-04, O7's executor (the controller), on the architect's ruling.
+- Decision: m8-2a's build (2026-11-04, reviewed clean after one fix round).
+  - **Offered, with registry grades.**
+    - Engine-host `laneB('call')` reads: `session.getHooksListing`, `getMemoryDialog`, `getSkillsDialog`, `getSandboxDialog`, `exportConversation`, `getBinaryVersion` and `promptHistory`.
+    - Machine-services `laneBMachine('call')`: `session.observedFacts` and `session.recentTurns`.
+    - §U's rows.
+  - **Left for `REMOTE_UNAVAILABLE`:**
+    - `session.drafts.get`: per member, O8 M6;
+    - `fs.unfollow`: offered by m8-2b for the caller's own follows;
+    - the `session.ui.*` reads;
+    - `session.setVisible`, `session.intent.get`, `attention.request`, `files.openExternal`, `files.reveal`, `side.screenshot.preview`, `ownerChannel.*`, `laneA.*`.
+    The rule: offer a session's own read when it is harmless to other clients. Declare anything per member, anything that acts on the asking client, anything with cross-client effects, and anything of another lane.
+  - **The forwarded message** goes on every forwarded failure code. The artifact rule's session-naming reads keep their code alone.
+  - **Operation outcomes** are kept at emission, so `session.operations` never answers ahead of the live event. It is its own command group, `o7m8Commands`.
+  - **The `task-list` rule** checks the list after the rank. It reads the list only from a status of the engine session the request was placed on, and a session moved since is `unavailable`. The sanitiser lives in `src/shared/engine/task-list.ts`.
+  - **Panel parts** are plane B change notices. `workflow:<runId>` and `operation:<opId>` are keyed. `subagents`, `tasks` and `side` are one slot each.
+    - The `side` part is derived from `side.question.list`, read at each side question's completion, and is generation-checked.
+    - Notices are bounded both queued and held. Past the bound the stream ends `behind`.
+  - **m8-3 consumes:**
+    - `handles` for `maws.ask.answer` (resuming a released session first), `side.question.clear` and `session.reloadPlugins`;
+    - each part emitted as its event (`{side}` has no existing event, so the side store needs one or a refresh);
+    - a remote `fs.tasks` carrying `appSessionId`;
+    - on reopen, `session.operations` for its waiters;
+    - `ended('behind')` reopening from the cursor rather than ending for good. Today only `unavailable` retries (`remote-session.ts` `ended`). This is the gap rule applied to the bound.
+  Rationale: The executor's report (`task-2-report.md`) and the task review's three fixes: the task list bound to its engine session, the notices bounded, and the side read checked against its generation.
+  Date/Author: 2026-11-04, O7's executor (the controller), from m8-2a's executor.
 
 ## Outcomes & Retrospective
 
