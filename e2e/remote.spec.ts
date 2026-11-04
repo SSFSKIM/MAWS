@@ -1826,7 +1826,7 @@ test('M8: a session spawned on B leads a project past its cap and comes back thr
     await openProject(page, A_PROJECT);
     const group = projectRow(page, A_PROJECT);
     const groupKey = (await group.getAttribute('data-tree-id'))!.slice('p:'.length);
-    const shownRows = group.locator('[data-kind="session"]');
+    const shownRows = group.locator('[data-kind="session"], [data-kind="listed"]'); // a record's row, or a listing's
     const showMore = group.locator(`[data-tree-id="more:${groupKey}"]`);
     await expect(shownRows, 'the group draws its first five pinned sessions').toHaveCount(M8_FIRST_SHOWN, { timeout: 30_000 });
     await expect(showMore, 'and holds the rest behind Show more').toHaveCount(1);
@@ -1880,6 +1880,7 @@ test('M8: a session spawned on B leads a project past its cap and comes back thr
       await scene!.sminos.list({ engine: M8_SPAWNED, app: spawnedApp, owners: [scene!.member], project: PROJECT, title: M8_TITLE, cwd: checkout });
       expect(bareOf(await movedTo(page, b.ref, null, bSaid)), 'the New chat tab moved to the session B started').toBe(spawnedApp);
       await expect(main(page).getByText(M8_PARTIAL).first(), `its first turn runs in A's pane\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
+      await expect(main(page).getByText(M8_REPLY), 'held mid-reply: the turn still runs').toHaveCount(0);
       await quoting(expect(spawnedRow(), 'the spawned session within the group’s visible rows, Show more not pressed').toBeVisible({ timeout: 60_000 }), async () => `the group's rows: ${(await shownRows.allTextContents()).join(' | ')}\n${mainSaid(page)}`);
       const shownAfter = Date.now() - ranAt;
       await expect(shownRows, 'the five pinned rows and the spawned one above the cut').toHaveCount(M8_FIRST_SHOWN + 1);
