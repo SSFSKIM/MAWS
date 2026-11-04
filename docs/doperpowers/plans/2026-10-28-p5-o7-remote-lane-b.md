@@ -2585,6 +2585,10 @@ P5 findings of M5's re-plan, continued from F15:
   m8-3 to m8-5 follow as planned. m8-1 was reviewed clean after two fix rounds.
   Rationale: m8-2's scope is the machine side, too large for one executor's reliable hold. The split follows its two seams: the offer table with the stream, and the send with sign-in.
   Date/Author: 2026-11-04, O7's executor (the controller).
+- Decision: A subagent follow is owned by the client that started it (2026-11-04, the architect, on m8-2a's concern). An `fs.agentEvents` follow ends when that client's channel ends or that client unfollows, and another client never stops it. m8-2b builds it with a test, and `fs.unfollow` is offered for the caller's own follows.
+  `WIRE_MINOR` is the landing's, by P5 Decision Log 44's rule. To keep the branch's unit gate green in between, m8-2b bumps it once to master's plus one (24 to 25) with the manifest, and the landing re-bumps if master has moved.
+  Rationale: A remote client can now start a follow (M4's offered `fs.agentEvents`). The unoffered `fs.unfollow` stops every client's, so a remote panel could end the machine's own. A red `wire.test.ts` across four tasks would hold every class 1a run.
+  Date/Author: 2026-11-04, O7's executor (the controller), on the architect's ruling.
 
 ## Outcomes & Retrospective
 
