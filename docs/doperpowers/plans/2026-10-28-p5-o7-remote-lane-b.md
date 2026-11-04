@@ -35,7 +35,7 @@ O7 makes the app use it, and then brings lane B to full depth across it. Lane B 
 - [x] M5 — Artifacts, documents and the client-bound surfaces — M5c landed (PR #454, merge a4655841a, P5 Decision Log 207), built on `p5-o7-m5c` (2026-11-02, from master 242375483; RL2 1.7 and `WIRE_MINOR` 22 at its master merge) as five tasks, each reviewed clean after its fixes, plus the architect's three rulings on c5's handback (a remote dashboard's snapshot holds behind `rl2.asset-holds`, the `dashboard-live-data` :526 race fixed in the broker, Send to's skipped read accepted as residue); reviewer-high on the milestone (round 1 over 242375483..c39d940d5: three Important findings, fixed in c09646e11..3d8006045, class 1a 41552593862 and hosted 41553653036; its narrow pass found one more, fixed in 1300f2d1d, class 1a 41559318685; the loop stopped there), master 01d4488cf merged as acc0d3e9b (class 1a 41558751875), landing pending; M5b landed (PR #445, master 62a1dec05, P5 Decision Log 202), built on `p5-o7-m5b` (2026-11-02, from master 95050efd1; RL2 1.5, no manifest change) as five tasks, each reviewed clean after its fixes, and reviewer-high on the milestone (one round and a narrow re-check of its fix wave, whose three findings the controller verified), landing pending; M5c to follow; M5a landed (PR #441, master 3a183be2f, P5 Decision Log 199), built on `p5-o7-m5a` (2026-11-02, from master 2d27995f6, M6 landed as PR #439; `WIRE_MINOR` 20, RL2 1.4) as five tasks, each reviewed clean, and reviewer-high on the milestone (one round and a narrow re-check of its fix wave, whose one finding the controller verified; the standing check before every executor branch and lane A's carried as O10's code for the desk track's review), landing pending; M5b and M5c to follow; re-planned 2026-11-01 against O4's and O5's landings, executable as three landings: M5a (the artifact rule and the reads), M5b (pages and documents on the read open; O17 M9 waits on it), M5c (O4's surfaces: leases, delivery, consent and the client port); A12 to A15 answered by the owner as recommended on 2026-11-01; after M2 and M4
 - [x] M7 — Acceptance and the remote bench — the code landed (PR #451, merge 080de8f81, P5 Decision Log 204; the direct resume PR #457, P5 Decision Log 208); the measured group recorded on CI's mini (run 41573992251, every bound held) and the live runs at the owner's sitting of 2026-11-04 (the live bench voided by the runner's load; the checklist's passes, fails and skips in Outcomes, its gaps carried as residue) (2026-11-04)
 - [ ] M8 — The sitting's failures: the remote-spawned session's sidebar row and reopen, every session surface offered or greyed (the MAWS ask among them) under a contract test, operations and panel events across the channel, a turn's end, the PDF as a block, Sign in from the MCP widget, untracked files in Review, the forwarded failure's message. Planned 2026-11-04; reviewer-high; its own PR.
-- [ ] M9 — Spawn on the machine's own terms: the `machine` route as every machine's default (machine settings v2), what the machine reports named and never a mismatch, an older peer downgraded, and the remote setup path (folder and trust, owners-only acts). Planned 2026-11-04, after M8; reviewer-high; its own PR.
+- [ ] M9 — Spawn on the machine's own terms: the `machine` route as every machine's default (an additive `route`, machine settings still v1), what the machine reports named and never a mismatch, older peers on the legacy fields, and the remote setup path (folder and trust, owners-only acts). Planned 2026-11-04, after M8; reviewer-high; its own PR.
 - [ ] M10 — The live re-check: the bench's fixes, then a short sitting against the mini and a fresh acceptance VM. O7 closes when it is recorded in Outcomes. Planned 2026-11-04, after M9; reviewer-medium.
 
 ## Acceptance
@@ -754,7 +754,8 @@ The live sitting failed two of O7's own acceptance lines. Answering a question f
   - `src/main/machines/remote/dispatch.ts`: no change in behaviour, pinned by the contract test.
 - Engine host:
   - `src/engine-host/session-status.ts`: `activity` at a turn's end;
-  - the send path for an uploaded PDF (the machine's `session.send`, per the task's red-first finding).
+  - `src/engine-host/operations.ts`: completed outcomes kept by `opId`, and `session.operations`.
+- The machine's send: the endpoint's expansion of `uploads` through the files service (`src/services/files/upload.ts`'s resolver), behind `rl2.upload-blocks`.
 - Shared: `src/shared/ipc/remote-unavailable.ts` (new), the declared set with each command's reason.
 - Renderer:
   - the stores and surfaces named in §U: the sidebar join (`stores/org-projects.ts`, `sidebar/derive.ts`), the question panel, the side panels, the widgets and Session info, which grey from the declared set;
@@ -801,7 +802,7 @@ m8-1's first commit also pins a clock. `test/support/remote-bench.test.ts`'s "th
   - every unhandled call row is graded plain `list` or `view`;
   - nothing is both offered and declared.
 - **M8's rows** are §U's table: the MAWS ask, the side panels, the side question, Reload plugins and the widget reads.
-- **`fs.tasks` is offered** (P5 §5: what the panel shows for a local session works for a remote one). A task list belongs to its session: the renderer derives the list id from the session's status (`taskListId`, else its sanitised engine session id; `src/renderer/src/tools/agents/model/task-list.ts`). So the call names the session too: `fs.tasks`'s input gains `appSessionId?`, which the remote call always carries. A new target rule, `task-list`, resolves that session as the `checkout` rule does and admits the call only when `listId` is that session's own list id, at the registry's `view`; anything else is refused `no-target`. `fs.tasksChanged` crosses as the `tasks` part. The added input field is a wire change, so M8 takes `WIRE_MINOR` master's plus one at its landing (P5 Decision Log 44).
+- **`fs.tasks` is offered** (P5 §5: what the panel shows for a local session works for a remote one). A task list belongs to its session: the renderer derives the list id from the session's status (`taskListId`, else its sanitised engine session id; `src/renderer/src/tools/agents/model/task-list.ts`). So the call names the session too: `fs.tasks`'s input gains `appSessionId?`, which the remote call always carries. A new target rule, `task-list`, resolves that session as the `checkout` rule does and admits the call only when `listId` is that session's own list id, at the registry's `view`; anything else is refused `no-target`. `fs.tasksChanged` crosses as the `tasks` part. The added input field, `session.operations` and `session.send`'s `uploads?` are additive wire changes, so M8 takes `WIRE_MINOR` master's plus one at its landing (P5 Decision Log 44).
 - **`mods.list`** (machine-wide, no session target) is declared, with its reason, and gets a tracker line.
 - **The MAWS ask's grades.** `maws.asks.list` is `view`. `maws.ask.answer` is plain `converse`, the same as `session.answer`'s for a question (`src/endpoint/by-effect.ts`, `QUESTION_REQUESTS` already holds `maws.ask.opened`). The answer runs through the host as a `next` steer (`src/engine-host/session-maws.ts`), so the adapter resumes a released session first, as it does for `session.send`.
 - **An older peer.** An older peer answers `not-offered` for a new row. The renderer greys a surface for a session on that machine once it hears a refusal for it, extending `heardRefusal` (`src/renderer/src/artifacts/remote-surfaces.ts`) from the connector surfaces to every session surface.
@@ -810,10 +811,12 @@ m8-1's first commit also pins a clock. `test/support/remote-bench.test.ts`'s "th
   - offering everything unfiltered (a machine-wide read leaks other sessions).
 
 *Operations and panel events* (`/btw`, Reload plugins, MCP Reconnect). An operation answers a receipt, and its completion is the `session.operation` event (`src/renderer/src/widgets/operation.ts`). The lane B stream carries only status, queue, broker items, the catalog and event batches (`src/shared/host/stream-catchup.ts`, `partOf`), so no remote operation ever completes. That is the sitting's `/btw` at "Answering…".
-- An `operation` part joins the stream: the engine host's `session.operation` for that session, emitted by `remote-session.ts` as `session.operation` under the machine's address.
+- An `operation` part joins the stream: the engine host's `session.operation` for that session, emitted by `remote-session.ts` as `session.operation` under the machine's address. Operations are not replace-whole state: the stream keeps only the latest value per part while opening (`stream-catchup.ts`) and a wholly unsent snapshot with the same key is replaced (`src/endpoint/subscriptions.ts`, `snap`), so each completion is its own part keyed `operation:<opId>`, never one slot.
+- Outcomes survive a reconnect. `OperationTable.complete` (`src/engine-host/operations.ts`) emits and forgets, and `useOperation` waits for its own `opId` indefinitely, so the engine host keeps each completed outcome by `opId` (at most 64 per session, 10 minutes). A new `session.operations {appSessionId, opIds}` (`view`, `laneB('call')`) answers each as its event or `unknown`. At every reopen the adapter asks it for the opIds its waiters hold, emits what it finds, and settles an `unknown` one as failed with "the machine lost this operation's result; check the transcript". A late completion after that is dropped by opId.
+- Red first, beside those below: two completions while the subscription has no credit (both delivered); a completion during the opening; a disconnect between the receipt and the completion (recovered by `session.operations`, or settled `unknown`).
 - So do the panels' own change events, each a part of the same kind: `fs.subagentsChanged`, `fs.workflowChanged`, and the side question's changes.
 - `side.question.list` (call) and `side.question.clear` (act) are offered, so `refreshSide` works.
-- The parts ride the existing stream. They need no new capability, because an older device's `partOf` drops an unknown part (read, `stream-catchup.ts`); the task proves this with an older-reader case.
+- The parts ride the existing stream with no new capability. The task proves it on the device reader that matters: `remote-session.ts` at master's build given an unknown part leaves it out (or marks the gap the rule below requires); `stream-catchup.ts`'s `partOf` is the producer's classifier, not that reader.
 - Red first:
   - `src/main/lane-b/remote-session.test.ts`: an operation part emitted as `session.operation`;
   - `test/endpoint/subscriptions-b.test.ts`: the part carried;
@@ -829,8 +832,11 @@ m8-1's first commit also pins a clock. `test/support/remote-bench.test.ts`'s "th
 - Locally, a dropped PDF is a `document` content block (`composer/editor/paste.ts`, `serialize.ts`); only a file the API can't take becomes an `@path` mention.
 - Remotely, the PDF is uploaded to the machine (`files.upload`) and the message carries `@<path relative to cwd>` (`remoteMessage`, `remote-uploads.ts`, tested). Whether the engine expands an `@path` in a stream-json user frame is unrecorded (no fixture), and the agent had to read the file with a tool.
 - m8-1 adds a probe (`spikes/protocol-probe/`, run on CI's probe lane, never on this MacBook) that sends `@<pdf>` in a user frame and records what the engine attaches.
-- The fix is parity: for an uploaded file of a type the API takes as a block (PDF), the machine's send turns the upload into a `document` block read from the uploaded file. Everything else stays the `@` mention local uses.
-- Rejected: base64 over the channel (2 MiB parts already carry the bytes once).
+- The fix is parity, with a typed reference, never by parsing mentions. `session.send`'s input gains `uploads?: [{uploadId, as: 'document'}]`, an additive property behind the endpoint capability `rl2.upload-blocks`. The device sends it for an uploaded PDF, with the `@` mention kept in `text` for a reader, and without it to a machine that doesn't list the capability (today's behaviour).
+- The endpoint expands it before the act reaches the engine host, so before the durable queue accepts the message. Its resolver is the machine's files service, which owns the confined per-session upload roots and their sweep (`src/services/files/upload.ts`). An `uploadId` resolves only inside the sending session's own upload root, by its real path with no symlink, to a file that still exists. The expansion reads it as a `document` block, checks the block against the engine's size limit, and appends it to `content`. A missing, expired, foreign or oversized upload refuses the send `malformed` with its reason, and nothing is queued.
+- The queue holds the expanded blocks, so a queued send survives a restart and the upload's sweep.
+- Red first (`test/endpoint/` beside the send rows): a cross-session `uploadId`, a traversal or symlink, an expired upload, an oversized one, and a queued send across a restart.
+- Rejected: base64 over the channel (2 MiB parts already carry the bytes once), and the engine host parsing `@` mentions into reads (it would bypass the files service's confinement).
 
 *Sign in from the session's MCP widget.* `startSignIn` needs `{name, scope, cwd, path}` and the session's address (`customize/connectors/sign-in.ts`). The widget has the name, scope and status from `mcp_status` and the cwd from the session's status, but not `path`: on a remote machine `customization.serverEndpoints` is main-only and not offered.
 - `connectors.signIn` resolves the entry on the session's machine from `{name, scope, cwd}`, with `path` optional and the machine's own `customization.serverEndpoints` read there.
@@ -858,16 +864,16 @@ The owner's ruling: "We shouldn't be using ClaudeUsage, We should be just using 
 **At its end.**
 - A third route, `machine`, launches the engine with nothing injected: no gateway variables, and none of the direct route's blanking `--settings`. The engine's own user settings, managed settings, environment and login decide, as `claude` in that machine's terminal would.
 - MAWS records what `get_status` reports and names it: ClaudeUsage when the base URL is that machine's relay, the Anthropic login, or the host it names. It never calls that a mismatch.
-- `machine` is every machine's default. Existing settings files move to it, and `gateway` and `direct` stay as per-session choices.
+- `machine` is every machine's default. Existing settings files read as `machine` unless they chose `direct`, with no file rewritten, and `gateway` and `direct` stay as per-session choices.
 - ClaudeUsage's features (usage windows, accounts, gateway models) follow the observed route. Where the machine's own settings point at its relay, the pre-launch relay check and its sheet stay.
 - "+ Session" on a machine with no checkout of the org project asks which folder on that machine holds it, browsing that machine's folders, and registers it there. A folder the machine doesn't trust shows that machine's trust card. Both answers are acts only the machine's owners hold.
-- An older peer never sees `machine` where it would read it as malformed.
+- An older peer, an older retained engine host included, never sees a value it would read as malformed: every change is an additive property, and the legacy fields stay written.
 
 **Touches.**
 - Shared:
   - the route enum, one shared `RouteSchema` in `src/shared/engine/route.ts` (new), consumed by `launch-spec.ts`, `sessions/intent.ts`, `ipc/schema/session.ts` (`StartOptionsSchema`), `engine/status.ts`, `ipc/schema/engine.ts` and `ipc/schema/settings.ts`;
   - `src/shared/graph/session.ts`: `gateway.route` and `gateway.observed`, beside `routed`;
-  - `src/shared/settings/defaults.ts` and `ipc/schema/settings.ts`: `MACHINE_SETTINGS_VERSION` 2 and its migration;
+  - `src/shared/settings/defaults.ts`, `ipc/schema/settings.ts`, `src/services/settings/machine.ts` and `split.ts`: `gateway.route?` and the default's resolution, still version 1;
   - `src/shared/ipc/wire.ts` and `wire-manifest.json`: `WIRE_MINOR`.
 - Engine host:
   - `launch.ts` (`buildEnvironment`, `protectedSettings`, `LaunchPlan`);
@@ -877,55 +883,117 @@ The owner's ruling: "We shouldn't be using ClaudeUsage, We should be just using 
 - Endpoint:
   - `src/endpoint/offers.ts`: §U's M9 rows, and the `owners` row flag;
   - `authorize.ts`: the owner check;
-  - `capabilities.ts` and the device's `capabilities.ts`: `rl2.route-machine`;
-  - the status and record downgrade for an older device.
+  - `policy.ts`: `setupRefusal`, and `trust` in `spawnRefusal` for an owner only;
+- The engine host's hello: the `engine.route-machine` capability (`src/shared/ipc/wire.ts`'s capability lists).
 - Renderer:
   - `stores/usage.ts`, `composer/list-models.ts`, `gateway/*`, `settings-tab/GatewaySection.tsx`, `tools/session-info/`;
   - the spawn sheet (`sessions/remote-spawn.ts`, its sheet), with the folder picker and `TrustCard` for a remote machine.
 
-**Interfaces.** Produces `RouteSchema`, the record's `gateway.route` and `observed`, machine settings v2, §U's M9 rows, `rl2.route-machine`. Consumes D-19 as amended (P5 Decision Log 211, and its follow-up entry at M9's landing, which the architect writes).
+**Interfaces.** Produces `RouteSchema`, the additive `route?` and `observed?` properties, machine settings' `gateway.route?`, §U's M9 rows, `engine.route-machine`. Consumes D-19 as amended (P5 Decision Log 211, and its follow-up entry at M9's landing, which the architect writes).
 
 **Decisions.**
 
-*The route.* `RouteSchema = z.enum(['gateway', 'direct', 'machine'])`, one definition. Today the pair is written out in eleven places.
-- On `machine`, `buildEnvironment` passes the captured shell environment's `ANTHROPIC_*` and `CLAUDE_*` keys through unchanged: it neither sets nor deletes `GATEWAY_KEYS`. `protectedSettings` adds no `env`.
-- `verifyGateway` on `machine` records `verified: 'machine'` and `observed`:
-  - `{kind: 'claudeusage', baseUrl}` when the base URL is `RELAY_URL`;
-  - `{kind: 'login', login?, organization?}` from the `Login` and `Organization` rows when there is none;
-  - `{kind: 'host', baseUrl}` otherwise.
-  It never emits `gateway:mismatch` (the shape the fixtures `reads.jsonl`, `pass2/routing-user-settings.jsonl` and `pass2/auto-unrouted.jsonl` show).
-- The record gains `gateway.route` (the chosen route) and `gateway.observed`. It keeps `routed` (true when observed through ClaudeUsage), so an older reader resuming it picks a route that reaches the same inference. Every reader that maps `routed` to a route reads `route` first: `record-actions.ts`, `resume.ts`, `launch-mapping.ts` and `holder/restore.ts`.
+*The wire rule binds the shape.* Inside a wire major, a change has to be additive. An added enum member and a changed `const` are majors (`src/shared/ipc/wire.ts`'s header). `e2e/cross-build.spec.ts` holds two builds of one major to zero breaking changes, and `machineSettings.get`/`set`/`changed` carry `MachineSettingsSchema` over the local daemon's wire. So M9 adds no enum member and changes no `version` literal anywhere. Every existing route enum keeps `['gateway', 'direct']` and machine settings stay at version 1. The third route travels as new optional properties, and an older peer reads the legacy fields it already knows. M9's bump is `WIRE_MINOR` master's plus one, taken at its landing (P5 Decision Log 44). Rejected: a wire major for one route (every peer and retained host would need the upgrade at once).
+
+*The route.*
+- `RouteSchema = z.enum(['gateway', 'direct', 'machine'])` is one definition (`src/shared/engine/route.ts`). It is used only by the new `route?` properties. The legacy `gateway` fields keep their two-member enums and are always written too, with the value an older reader should act on, called the legacy route below.
+- The legacy route is `gateway` when the machine route's effective base URL is `RELAY_URL`, and `direct` otherwise. The effective base URL is resolved as in *The relay check and the features*.
+- Carriers of the new `route?`: `LaunchSpec` (`launch-spec.ts`), the setup intent (`sessions/intent.ts`), `StartOptionsSchema`, `engine.models`'s input, and the record's `gateway`.
+- A reader takes `route` when present, and the legacy field otherwise.
+- On `route: 'machine'`:
+  - `buildEnvironment` passes the captured shell environment's `ANTHROPIC_*` and `CLAUDE_*` keys through unchanged. It neither sets nor deletes `GATEWAY_KEYS`.
+  - `protectedSettings` adds no `env`.
+- An engine host that predates M9 ignores `route`, so it would launch on the legacy route. That is why main sends `route: 'machine'` only to an engine host whose hello lists the new capability `engine.route-machine`. Any other host gets the legacy route alone. A retained older host is the same case.
+
+*What the machine reports.*
+- On `machine`, `verifyGateway` writes the status's existing fields with existing values:
+  - `mode` is the legacy route;
+  - `verified` is `routed` when the base URL is `RELAY_URL`, and `direct` otherwise, never `mismatch`;
+  - no `gateway:mismatch` notice is emitted.
+- It also writes two new optional status properties:
+  - `gateway.route: 'machine'`;
+  - `gateway.observed`, one of:
+    - `{kind: 'claudeusage', baseUrl}` when the base URL is `RELAY_URL`;
+    - `{kind: 'login', login?, organization?}` from the `Login` and `Organization` rows when there is no base URL;
+    - `{kind: 'host', baseUrl}` otherwise.
+  The fixtures `reads.jsonl`, `pass2/routing-user-settings.jsonl` and `pass2/auto-unrouted.jsonl` show these shapes.
+- The record's `gateway` gains `route?` and `observed?`. It keeps `routed`: true when the session is observed through ClaudeUsage, false otherwise. So an older reader resuming it picks a route that reaches the same inference.
+- Every reader that maps `routed` to a route reads `route` first: `record-actions.ts`, `resume.ts`, `launch-mapping.ts`, `holder/restore.ts`.
+- All of these are additive, so RL2 needs no capability and no downgrade: an older device reads the legacy fields.
 - Rejected: a `machine` route that also sets `ANTHROPIC_BASE_URL` when the machine's settings name the relay. That would be the gateway route under another name.
 
-*The default and its migration.* `defaults.ts`'s `gateway.defaultRoute` becomes `machine`. `MachineSettingsSchema` is strict, and every written file holds its default explicitly, so v1 cannot tell the old default from a choice.
-- Machine settings v2 migrates a v1 `defaultRoute: 'gateway'` (the old default) to `machine`, and keeps `direct`, which was never a default and so is the owner's choice.
-- `migrateMachineSettings` becomes a version chain.
-- Rejected: v1 with a new value (an older reader of the file fails on it), and leaving `gateway` in place (contrary to the owner's answer).
+*The default, without a v2.* Machine settings gain `gateway.route?: Route` beside `defaultRoute`, still version 1. A reader resolves the machine's default as follows:
+- `gateway.route` when it is present;
+- `direct` when `defaultRoute` is `direct`, which was never a default and so is the owner's choice;
+- `machine` otherwise, which includes the old default `gateway` that every strict v1 file holds explicitly.
+
+This rule is the migration. It covers both legacy entry paths without rewriting a file:
+- a v1 machine file read through `machineSettingsRules.read` (`src/services/settings/machine.ts`);
+- a unified v1–20 profile split by `splitSettingsFiles` (`src/services/settings/split.ts`, through `splitSettings`), which copies the old `gateway` choice into the machine file.
+
+When a person sets the default:
+- choosing `gateway` writes `route: 'gateway'` and `defaultRoute: 'gateway'`;
+- choosing `machine` writes `route: 'machine'` and keeps `defaultRoute` as the legacy route, so an older build on the same machine keeps working;
+- choosing `direct` writes both as `direct`.
+
+Tests cover:
+- the on-disk results through the real file store: a v1 file holding `gateway`, one holding `direct`, a split unified profile, a set-then-reopen, and a refused write;
+- the pure resolution.
+
+Rejected: machine settings v2 (a changed `version` literal is a wire major), and leaving `gateway` as the default (contrary to the owner's answer).
 
 *The relay check and the features.*
-- On `machine`, the pre-launch relay check runs only when the engine's effective base URL is `RELAY_URL`. MAWS reads that read-only from the captured environment and the engine's user and managed settings files (`env.ANTHROPIC_BASE_URL`). It reads the managed settings through the per-OS managed-settings path that the desk track's resolver fix introduces in `src/services/owner/resolve-style.ts`. That fix is its own PR and a prerequisite: M9 reuses its path and adds no second one, and does not touch `resolve-style.ts` itself. When it does, `relay_unreachable` and its sheet behave as on `gateway`; otherwise there is no check. `get_status` stays authoritative after the launch.
-- Usage, accounts and the model catalogue key on `observed.kind`, not on the chosen route: `stores/usage.ts`, `statusline/direct-fallback.ts`, `composer/list-models.ts` (`routeOf`), `models-cache.ts`.
+- On `machine`, the pre-launch relay check is advisory and never refuses. The effective base URL is resolved with the precedence `models-cache.ts` already implements:
+  1. the spawn environment;
+  2. the global config's `env`;
+  3. the user, project and local settings, then the flag settings, for the launch's cwd and config home;
+  4. `CLAUDE_CODE_RESTRICTED` emptying the setting sources;
+  5. managed settings last, through the per-OS managed-settings path the desk track's `resolve-style.ts` fix introduces. That fix is its own PR and a prerequisite. M9 reuses its path, adds no second one, and does not touch `resolve-style.ts`.
+- When the resolved URL is `RELAY_URL` and the relay doesn't answer, the relay sheet shows with "Start anyway". Otherwise there is no check. A resolution that fails or is uncertain shows nothing and defers to the engine.
+- `get_status` stays authoritative after the launch.
+- Red-first cases:
+  - user settings naming the relay that project settings override to another host;
+  - the opposite override;
+  - restricted mode;
+  - a missing managed file.
+- Usage, accounts and the model catalogue key on `observed.kind`, falling back to the legacy fields, not on the chosen route. The files are `stores/usage.ts`, `statusline/direct-fallback.ts`, `composer/list-models.ts` (`routeOf`) and `models-cache.ts`.
 - A gateway model on a `machine` launch is refused only when `observed` isn't ClaudeUsage.
 
-*Crossing to peers.*
-- `WIRE_MINOR` takes master's plus one at M9's landing (P5 Decision Log 44): an added enum member is a wire change (`wire.ts`).
-- Over RL2, a device that does not list `rl2.route-machine` never sees `machine`. The endpoint downgrades a status's `gateway.mode` and a record's `route` to the observed equivalent (`gateway` when through ClaudeUsage, else `direct`), drops `observed`, and downgrades `verified: 'machine'` the same way. It does this in its output path for that device, so an older app reading a newer machine gets no `internal` (`src/main/machines/remote/dispatch.ts`'s codec).
-- A spawn on another machine still carries no route: the machine starts on its own default, which is now `machine` (`spawn.ts`).
-
 *Remote setup.* The machine refuses a spawn whose checkout isn't a registered project directory (`unknown-checkout`) or isn't trusted there (`untrusted`, `spawn.ts`).
-- When `readCandidates` (`src/renderer/src/sessions/remote-spawn.ts`) finds no registered checkout of the org project, the sheet asks for the folder on that machine:
-  - `machine.folders.list {path?}` (new, `machine` owner) lists directories under the machine's home, a page at a time, names only. It never raises a privacy prompt by itself. On macOS the TCC-protected folders (`~/Desktop`, `~/Documents`, `~/Downloads`, `~/Pictures`, `~/Movies`, `~/Music`, `~/Library` and any under `~/Library/Mobile Documents`) are listed as entries, marked `protected: true`, and never read inside unless an owner opens one explicitly (`{path, open: true}`). The sheet warns first that the machine may show a privacy prompt; on the mini such a dialog holds CI. No test or e2e opens one. The sheet lists first the paths the project's other checkouts use (for example `~/Developer/GitHub/<name>`), read from the org project's known checkouts, since that is usually the answer;
-  - `session.projects.addFolder` registers the answer.
-- When the chosen folder isn't trusted, the sheet reads `session.trust.check` and shows `TrustCard`. Its answer goes as `session.spawn`'s new optional `trust: 'accepted'`, and the machine runs the attested bootstrap launch the local path runs (`launch-mapping.ts`'s `bootstrapSpec`). MAWS still never writes trust itself.
-- The three new rows are `owners: true`: a new `OfferRow` field, checked in `authorize.ts` against `ranks.ownsMachine()`, and refused `owners-only`. A grant naming the machine does not suffice. They are graded `spawn`, which always steps up.
-- Rejected:
-  - browsing through `files.list` (it is confined to a session's roots);
-  - a grant-holder setting up another person's machine;
-  - MAWS writing `~/.claude.json` trust (only the engine records it).
+
+When `readCandidates` (`src/renderer/src/sessions/remote-spawn.ts`) finds no registered checkout of the org project, the sheet asks for the folder on that machine.
+
+The folder list:
+- `machine.folders.list {path?, open?, cursor?}` (new, `machine` owner) lists directories under the machine's home, a page at a time, names only.
+- It never raises a privacy prompt by itself. On macOS, the TCC-protected folders (`~/Desktop`, `~/Documents`, `~/Downloads`, `~/Pictures`, `~/Movies`, `~/Music`, `~/Library` and anything under `~/Library/Mobile Documents`) are listed as entries marked `protected: true`. Nothing inside one is read unless an owner opens it explicitly (`open: true`).
+- The sheet warns first that the machine may show a privacy prompt; on the mini, such a dialog holds CI. No test or e2e opens one.
+- The sheet lists first the paths the project's other checkouts use (for example `~/Developer/GitHub/<name>`), read from the org project's known checkouts, since that is usually the answer.
+
+Registering and trusting:
+- `session.projects.addFolder {directory}` registers the answer.
+- When the chosen folder isn't trusted, the sheet reads `session.trust.check {directory}` and shows `TrustCard`.
+- The answer goes as `session.spawn`'s new optional `trust: 'accepted'`. The machine runs the attested bootstrap launch the local path runs (`launch-mapping.ts`'s `bootstrapSpec`). MAWS still never writes trust itself.
+
+Authorization keeps the setup policy apart from the spawn guard:
+- The three setup rows carry a new `OfferRow` field, `owners: true`. `authorize.ts` checks it before the grade, against `ranks.ownsMachine()`, and refuses `owners-only` to anyone else, a grant-holder included.
+- `machine.folders.list` and `session.trust.check` are calls at a row grade of `list`. Owners read their own machine's folder names and trust state without a Touch ID per page. `dispatchOverLink` sends a `list` call, and step 6's guard applies to `spawn`-graded rows only, so neither meets `spawnRefusal`.
+- `session.projects.addFolder` is an act graded `machine-admin`. It always steps up, and it is named in `MACHINE_ACTS` so the adapter `handles` it. A `machine-admin` row never enters `spawnRefusal`. Its own policy, in `src/endpoint/policy.ts`'s new `setupRefusal`, requires all of:
+  - a directory that exists;
+  - its real path under the machine's home;
+  - no symlink escape;
+  - not inside a protected folder unless that folder was opened.
+- `session.spawn`'s `trust: 'accepted'` is added to `spawnRefusal`'s accepted fields only for a current machine owner (`ownsMachine()` at the decision). For anyone else it is `spec-field`, and the existing checks stay as they are for ordinary grant-holder spawns.
+- Tests through the real gate (`test/endpoint/`): each of the three setup actions for an owner, refused for a grant-holder and for a member, and `trust: 'accepted'` for an owner against a non-owner.
+
+Rejected:
+- browsing through `files.list` (it is confined to a session's roots);
+- a grant-holder setting up another person's machine;
+- MAWS writing `~/.claude.json` trust (only the engine records it);
+- the setup reads as acts (a Touch ID per folder page).
 
 **Does not touch.** The engine (D-1); ClaudeUsage itself; the local spawn sheet beyond the shared `TrustCard`; O10's attestation.
 
-**Proves.** P5 acceptance 5's spawn on a machine with no setup, in tests and `e2e:remote` (a scene machine with an unregistered checkout); the launch's environment in `src/engine-host/launch.test.ts`'s cases for `machine` (nothing injected, nothing blanked); `verifyGateway`'s naming over the three fixtures; v2's migration; an older device's downgrade; live in M10. Review: reviewer-high.
+**Proves.** P5 acceptance 5's spawn on a machine with no setup, in tests and `e2e:remote` (a scene machine with an unregistered checkout); the launch's environment in `src/engine-host/launch.test.ts`'s cases for `machine` (nothing injected, nothing blanked); `verifyGateway`'s naming over the three fixtures; the default's resolution on disk; `cross-build`'s zero breaking changes against master; an older engine host given the legacy route; the setup rows through the real gate; live in M10. Review: reviewer-high.
 
 ### M10 — The live re-check *(planned 2026-11-04)*
 
@@ -1606,9 +1674,10 @@ The link's `subscribe` takes `{feed, session?}` in place of `session` alone.
 | the session-scoped `view` reads the audit finds unoffered (`session.getHooksListing`, `getMemoryDialog`, `getSandboxDialog`, `getSkillsDialog`, `session.drafts.get`, `session.observedFacts`, …) | `laneB('call')`, or declared | `view` | M8 |
 | `fs.tasks` | `laneB('call')` under the `task-list` target rule (`listId` must be the named session's own list) | `view` | M8 |
 | `mods.list` (no session target) | declared in `REMOTE_UNAVAILABLE`, tracker line | `view` | M8 |
-| `machine.folders.list` (new) | `{call, executor 'machine', target 'machine', owners: true}` | `spawn` | M9 |
-| `session.projects.addFolder` | `{act, executor 'machine', target 'machine', owners: true}` | `spawn` | M9 |
-| `session.trust.check` | `{call, executor 'machine', target 'machine', owners: true}` | `spawn` | M9 |
+| `machine.folders.list` (new) | `{call, executor 'machine', target 'machine', owners: true}`, row grade `list` | `spawn` | M9 |
+| `session.projects.addFolder` | `{act, executor 'machine', target 'machine', owners: true}` in `MACHINE_ACTS`, row grade `machine-admin` | `spawn` | M9 |
+| `session.trust.check` | `{call, executor 'machine', target 'machine', owners: true}`, row grade `list` | `spawn` | M9 |
+| `session.operations` (new) | `laneB('call')` | `view` | M8 |
 
 - **`REMOTE_UNAVAILABLE`** (`src/shared/ipc/remote-unavailable.ts`): `Record<CommandName, string>`, each command's reason in the words its control shows ("Not on another machine yet: …"). It is read by the renderer's controls and by `test/lane-b/offer-coverage.test.ts`.
 - **The `operation` and panel parts** (`src/shared/host/stream-catchup.ts`): `{part: 'operation', body: OperationEvent}`, `{part: 'subagents', body: {agents}}`, `{part: 'workflow', body: {runId}}` and `{part: 'side', body: {exchanges}}`. Each is emitted by `remote-session.ts` as its event (`session.operation`, `fs.subagentsChanged`, `fs.workflowChanged`, the side store's change) under the machine's address. An older device drops an unknown part.
@@ -1619,10 +1688,14 @@ The link's `subscribe` takes `{feed, session?}` in place of `session` alone.
 - **The record's `gateway`** gains:
   - `route?: Route`;
   - `observed?: {kind: 'claudeusage' | 'login' | 'host', baseUrl: string | null, login?: string, organization?: string}`.
-- **The status's `gateway.verified`** gains `'machine'`.
-- **Machine settings v2**: `version: 2`, with `gateway.defaultRoute` taking `RouteSchema`. The migration maps v1 `gateway` to `machine` and keeps `direct`.
-- **`session.spawn`'s input** gains `trust?: 'accepted'`, honoured only for an owner (the row is the existing `spawn` act; the machine checks `ownsMachine` for the field).
-- **`rl2.route-machine`**: a device capability. Without it, the endpoint downgrades `machine` to its observed `gateway` or `direct` in status and record outputs, and drops `observed`.
+- **The status's `gateway`** gains `route?: Route` and `observed?` (the record's shape); `mode` and `verified` keep their enums, written with the legacy route (`verified` is `routed` or `direct` on `machine`, never `mismatch`).
+- **`LaunchSpec`, the setup intent, `StartOptions` and `engine.models`' input** gain `route?: Route` beside their legacy `gateway`.
+- **Machine settings** (version 1) gain `gateway.route?: Route`; the default resolves `route` ?? (`defaultRoute === 'direct'` ? `direct` : `machine`).
+- **`engine.route-machine`**: an engine host capability; main sends `route: 'machine'` only to a host listing it.
+- **`setupRefusal`** (`src/endpoint/policy.ts`): `addFolder`'s directory exists, its real path is under the machine's home with no symlink escape, and it is not inside a protected folder that was not opened.
+- **The operation outcomes** (M8): `OperationTable` keeps each completed outcome by `opId`, at most 64 per session for 10 minutes; `session.operations {appSessionId, opIds}` (new, `view`, `laneB('call')`) answers `{outcomes: [{opId, event} | {opId, unknown: true}]}`; the `operation` part's snapshot key is `operation:<opId>`.
+- **The send's uploads** (M8): `session.send`'s input gains `uploads?: [{uploadId, as: 'document'}]`, behind `rl2.upload-blocks`.
+- **`session.spawn`'s input** gains `trust?: 'accepted'`, accepted by `spawnRefusal` only for a current machine owner, `spec-field` for anyone else.
 - **`mawsd endpoint sync`** (M10): it runs `syncNow()` then `promoteIfListed`, and answers as `endpoint status --json`.
 
 ## Open questions for the owner
@@ -2422,10 +2495,19 @@ P5 findings of M5's re-plan, continued from F15:
     2. A local PDF is a `document` block, not an `@` mention, so M8's parity is a block.
     3. The engine host's `activity: requesting` after a turn is every turn's state, local too, and is not what draws "Working…".
     4. The bench's key read could never pass live (it parses `{key: {keyId}}` against a flat answer).
-  - M9 takes machine settings v2 (granted by the architect) and a WIRE re-bump by P5 Decision Log 44. It reuses the desk track's per-OS managed-settings path from its `resolve-style.ts` fix, which is also M10's VM prerequisite.
+  - M9 takes a WIRE re-bump by P5 Decision Log 44 and no machine settings v2: the adversarial review showed an added enum member or a changed `version` literal is a wire major (`src/shared/ipc/wire.ts`), so the third route is additive properties beside the legacy fields, and the default's resolution is the migration. It reuses the desk track's per-OS managed-settings path from its `resolve-style.ts` fix, which is also M10's VM prerequisite.
   - The A11 owners' verifier (`SPAWN_ACTIONS` lacking `session.spawn`) is the desk track's, as O10's code, not M8's.
   Rationale: The sitting failed O7's acceptance 2's question and 4's row. O7 doesn't close until they hold live.
   Date/Author: 2026-11-04, O7's executor (the re-plan), on the architect's brief and the owner's answers.
+- Decision: The adversarial review of the fix wave (2026-11-04) is folded in.
+  - M9's wire shape is additive: `route?` and `observed?` beside the legacy enums, an `engine.route-machine` host capability, and machine settings still at version 1, with the default resolved by rule.
+  - The setup rows are kept apart from the spawn guard: `list`-graded owner-only calls, and an owner-only `machine-admin` act with its own `setupRefusal`. `trust: 'accepted'` is honoured for a current owner only.
+  - Operation completions are keyed per `opId` and recoverable through `session.operations`.
+  - The PDF's parity is a typed `uploads` reference, expanded by the endpoint through the files service's confined resolver before queueing.
+  - The relay preflight is advisory, over `models-cache.ts`'s full precedence.
+  The architect's four corrections of the same day are in place too: `fs.tasks` is offered under a `task-list` rule; the folder picker never reads inside a TCC-protected folder unasked; an unreadable event is a gap that re-reads the status; and Show's Touch ID is stated.
+  Rationale: The review found M9's planned enum member and `version` literal to be wire majors that `e2e/cross-build.spec.ts` refuses within a major. It found the setup reads unsendable as `spawn`-graded calls (`dispatch.ts`, `authorize.ts`) and refused by `spawnRefusal` as acts. It found that one operation slot loses completions under backpressure, and that the PDF expansion lacked its read authority.
+  Date/Author: 2026-11-04, O7's executor (the re-plan), the architect's corrections relayed the same day.
 
 ## Outcomes & Retrospective
 
