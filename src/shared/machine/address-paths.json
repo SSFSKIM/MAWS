@@ -30,6 +30,7 @@
 "commands.connectors.observe.input":[".appSessionId AppSessionId"],
 "commands.connectors.resolve.input":[".appSessionId AppSessionId"],
 "commands.connectors.signIn.input":[".appSessionId AppSessionId"],
+"commands.connectors.signInServer.input":[".appSessionId AppSessionId"],
 "commands.connectors.start.input":[".appSessionId AppSessionId"],
 "commands.daemon.e2eBrowserView.input":[".appSessionId AppSessionId"],
 "commands.engine.budget.output":[".blocked[].appSessionId AppSessionId",".lastRelease.appSessionId AppSessionId",".releasing AppSessionId"],

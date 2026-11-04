@@ -13,7 +13,7 @@ import { usedEntry, type ConfiguredEntry } from '@shared/plugins/connector-prece
 export interface RequestedEntry {
   name: string;
   scope: 'user' | 'project' | 'local';
-  path?: string; // the file the entry is in; P5 O7 M8: absent (the session's MCP widget), whichever the session uses
+  path?: string; // the file the entry is in; P5 O7 M8: absent (`connectors.signInServer`), whichever the session uses
   cwd: string | null; // the page's directory: a local entry is that project's
 }
 

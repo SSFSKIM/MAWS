@@ -311,6 +311,8 @@ export const OFFERS: Offers = {
     'connectors.disconnect': machineAdmin,
     'connectors.signIn': machineAdmin,
     'connectors.signInCancel': machineAdmin,
+    // P5 O7 M8: Sign in from a session's MCP widget, the server named as the engine reports it (no entry file)
+    'connectors.signInServer': machineAdmin,
     'artifacts.grantConnectorTool': machineAdmin,
     'artifacts.revokeConnectorTool': machineAdmin,
     // A consent's redirect relayed from this device's loopback listener (`list`), run by the flow its own channel armed

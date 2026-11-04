@@ -444,9 +444,13 @@ export const commands = {
   'connectors.add': host(z.strictObject({ ...McpAt, url: McpServerUrlSchema, transport: z.enum(MCP_TRANSPORTS) }), OperationReceiptSchema),
   'connectors.remove': host(z.strictObject(McpAt), OperationReceiptSchema),
   // the connector is its configuration (name, scope, and the directory for a project or local one): one sign-in at a time
-  // path: the file the entry is in; P5 O7 M8: absent, the entry the session's engine uses for the name, read on its machine
-  'connectors.signIn': machine(z.strictObject({ name: McpServerNameSchema, scope: PluginsScopeSchema, cwd: PluginsCwdSchema.nullable(), path: PluginsCwdSchema.optional(), appSessionId: AppSessionIdSchema, ...Callback /* P5 O7 M5c */ }), OperationReceiptSchema),
+  'connectors.signIn': machine(z.strictObject({ name: McpServerNameSchema, scope: PluginsScopeSchema, cwd: PluginsCwdSchema.nullable(), path: PluginsCwdSchema, appSessionId: AppSessionIdSchema, ...Callback /* P5 O7 M5c */ }), OperationReceiptSchema), // path: the file the entry is in
   'connectors.signInCancel': machine(z.strictObject({ opId: z.string() }), z.strictObject({ cancelled: z.boolean() })),
+  // P5 O7 M8 ("Sign in from the session's MCP widget"): the server of the name the session's engine uses, when it is of
+  // the scope asked, its entry read on the session's machine (whose `customization.serverEndpoints` is its own): the same
+  // operation as `connectors.signIn`, for a caller that knows a server by its name and scope alone. Its own command, since
+  // a `path` made optional would be a breaking change to the wire
+  'connectors.signInServer': machine(z.strictObject({ name: McpServerNameSchema, scope: PluginsScopeSchema, cwd: PluginsCwdSchema.nullable(), appSessionId: AppSessionIdSchema, ...Callback }), OperationReceiptSchema),
   // P4-AGG M4 end
   // P5 O4 M2 start (Interfaces §C, §F; D8, D23): main's alone, never bridged.
   // The window that shows the asking page (its `ClientRef`), shown and not minimized or not, as the app reads it; a page

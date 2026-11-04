@@ -447,6 +447,8 @@ export function startSignIn(deps: SignInServiceDeps): Settling & { stop(): void 
     check,
   });
   deps.bus.register('connectors.signIn', ({ name, scope, cwd, path, appSessionId, callback }, { client }) => signIn.start({ name, scope, cwd, path, appSessionId }, client, callback));
+  // P5 O7 M8: the server the session's engine uses for the name, of the scope asked, its entry read here (`check`)
+  deps.bus.register('connectors.signInServer', ({ name, scope, cwd, appSessionId, callback }, { client }) => signIn.start({ name, scope, cwd, appSessionId }, client, callback));
   deps.bus.register('connectors.signInCancel', ({ opId }) => ({ cancelled: signIn.cancel(opId) }));
   return {
     busy: () => signIn.busy(),

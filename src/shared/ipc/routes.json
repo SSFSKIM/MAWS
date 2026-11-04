@@ -105,6 +105,7 @@
   "connectors.observe",
   "connectors.resolve",
   "connectors.signIn",
+  "connectors.signInServer",
   "connectors.start",
   "daemon.e2eBrowserView",
   "engine.observedFacts",

@@ -503,9 +503,9 @@ describe('the sign-in service', () => {
 
 // P5 O7 M8 ("Sign in from the session's MCP widget"): the widget knows a server's name and scope and the session's
 // directory, but not the file its entry is in, which only the session's machine reads (`customization.serverEndpoints`,
-// main-only there). A sign-in that names no path signs in the entry the session's engine uses for the name, when it is of
+// main-only there). `connectors.signInServer` signs in the entry the session's engine uses for the name, when it is of
 // the scope asked; any other is refused as a row's would be.
-describe('a sign-in that names no path (the session’s MCP widget)', () => {
+describe('a sign-in of a server by its name and scope (the session’s MCP widget)', () => {
   function service(servers: unknown[]) {
     const handlers = new Map<string, (input: unknown, ctx: unknown) => unknown>();
     const events: ConnectorSignInChanged[] = [];
@@ -536,13 +536,15 @@ describe('a sign-in that names no path (the session’s MCP widget)', () => {
     });
     stop = () => started.stop();
     statuses.forEach((l) => l({ appSessionId: SESSION, status: { process: 'ready', cwd: '/p' } }));
-    const signIn = (input: Record<string, unknown>) => (handlers.get('connectors.signIn')!({ appSessionId: SESSION, ...input }, { client: null }) as { opId: string }).opId;
+    const signIn = (input: Record<string, unknown>) => (handlers.get('connectors.signInServer')!({ appSessionId: SESSION, ...input }, { client: null }) as { opId: string }).opId;
     const last = (opId: string) => events.filter((e) => e.opId === opId).at(-1);
     return { host, reads, signIn, last };
   }
 
-  it('is a sign-in the command takes', () => {
-    expect(validateCommandInput('connectors.signIn', { name: 'linear', scope: 'user', cwd: '/p', appSessionId: SESSION }).ok).toBe(true);
+  it('takes no entry file, which `connectors.signIn` still requires', () => {
+    expect(validateCommandInput('connectors.signInServer', { name: 'linear', scope: 'user', cwd: '/p', appSessionId: SESSION }).ok).toBe(true);
+    expect(validateCommandInput('connectors.signInServer', { name: 'linear', scope: 'user', cwd: '/p', path: GLOBAL, appSessionId: SESSION }).ok).toBe(false);
+    expect(validateCommandInput('connectors.signIn', { name: 'linear', scope: 'user', cwd: '/p', appSessionId: SESSION }).ok).toBe(false);
   });
 
   it('signs in the entry the session’s engine uses for the name, read on its machine for its directory', async () => {
