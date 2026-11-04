@@ -668,3 +668,22 @@ describe('a reopening’s races, round 2', () => {
     expect(l.of('fs.workflowChanged')).toEqual([{ appSessionId: APP, runId: '' }]);
   });
 });
+
+// M8's reviewer-high review: a gap's re-read never rolls a newer record back.
+describe('a gap’s re-read and the record feed', () => {
+  it('drops the re-read record when the checkout feed changed the record while the reads were out', async () => {
+    const l = lab({ followed: () => true });
+    const sub = await opened(l);
+    let status!: (value: unknown) => void;
+    l.link.answers.set('session.status', () => new Promise((resolve) => (status = resolve)) as never);
+    l.link.answers.set('session.get', () => ({ ok: true, output: record(APP) })); // R1, answered at once
+    deliver(sub, { epoch: 'L1', seq: 5, idx: 0 }, { kind: 'turn.ended', costUsd: 'not a number' });
+    await vi.advanceTimersByTimeAsync(0);
+    const renamed = { ...record(APP), title: { text: 'renamed', source: 'user' as const } }; // R2, from the feed
+    l.session.recordChanged(renamed);
+    status({ ok: true, output: statusOf('L1') });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.session.state.record).toEqual(renamed);
+    expect(l.of('session.changed').at(-1)).toMatchObject({ record: renamed });
+  });
+});

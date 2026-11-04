@@ -171,6 +171,8 @@ export class RemoteSession {
   #subagentParts = 0;
   /** P5 O7 M8: the `subbed`s heard, each an opening the waiters are asked at. */
   #openings = 0;
+  /** M8 review: records the checkout feed delivered, so a gap's re-read that answers after one doesn't roll it back. */
+  #records = 0;
   /** P5 O7 M8: status parts the stream delivered, so a re-read that answers after one doesn't replace it. */
   #statuses = 0;
   /** P5 O7 M8: a re-read after a gap is out; `again`: another gap came meanwhile, so one more follows it. */
@@ -228,6 +230,7 @@ export class RemoteSession {
   recordChanged(record: SessionRecord): void {
     if (!this.#running) return;
     const before = this.state.record;
+    this.#records += 1;
     this.state.record = record;
     this.#deps.emit(this.state.machine, 'session.changed', { record, cause: 'live', revision: this.#deps.revision() });
     if (record.holder.kind !== 'self' && record.engineSessionId === before?.engineSessionId) return;
@@ -628,8 +631,9 @@ export class RemoteSession {
   // ---- An event that doesn't read (P5 O7 M8) --------------------------------------------------------------------------
 
   /**
-   * The status and record read again after a gap; a status part the stream delivered meanwhile stands. One read is out
-   * at a time per subscription: gaps that come while it is make one more after it, not one each.
+   * The status and record read again after a gap; a status part the stream, or a record the checkout feed, delivered
+   * meanwhile stands. One read is out at a time per subscription: gaps that come while it is make one more after it,
+   * not one each.
    */
   #readAgain(token: object): void {
     if (this.#rereading?.token === token) {
@@ -648,6 +652,7 @@ export class RemoteSession {
   async #reread(token: object): Promise<void> {
     const app = this.state.app;
     const statuses = this.#statuses;
+    const records = this.#records;
     const [status, record] = await Promise.all([this.link.call('session.status', { appSessionId: app }), this.link.call('session.get', { appSessionId: app })]);
     if (this.#token !== token || !this.#running) return;
     const readStatus = status.ok ? link.readCommandOutput('session.status', status.output) : null;
@@ -658,7 +663,7 @@ export class RemoteSession {
       for (const waiter of [...this.#waiters]) waiter();
     } else if (readStatus?.ok !== true) this.#deps.log(`lane B: ${this.link.name}/${app}: the status read again after a gap ${status.ok ? 'doesn’t read' : `failed (${status.error.code})`}`);
     const readRecord = record.ok ? link.readCommandOutput('session.get', record.output) : null;
-    if (readRecord?.ok === true && readRecord.value !== null) {
+    if (readRecord?.ok === true && readRecord.value !== null && this.#records === records) {
       this.state.record = readRecord.value as SessionRecord;
       this.#deps.emit(this.state.machine, 'session.changed', { record: this.state.record, cause: 'live', revision: this.#deps.revision() });
     }
