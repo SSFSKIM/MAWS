@@ -1384,11 +1384,12 @@ describe('the machine route (P5 O7 M9)', () => {
     });
     afterEach(() => repo.dispose());
 
-    const tracking = async (tracked: string, working: string) => {
-      await repo.fixture.write('.claude/settings.json', JSON.stringify({ env: { ANTHROPIC_BASE_URL: tracked } }));
-      await repo.git('add', '.claude/settings.json');
+    const url = (value: string) => JSON.stringify({ env: { ANTHROPIC_BASE_URL: value } });
+    const tracking = async (tracked: string, working: string, file = 'settings.json') => {
+      await repo.fixture.write(`.claude/${file}`, url(tracked));
+      await repo.git('add', '-f', `.claude/${file}`);
       await repo.git('commit', '-q', '-m', 'project settings');
-      await repo.fixture.write('.claude/settings.json', JSON.stringify({ env: { ANTHROPIC_BASE_URL: working } }));
+      await repo.fixture.write(`.claude/${file}`, url(working));
     };
     const createIn = async (name: string) =>
       (await h.service.create({ projectId: null, location: { kind: 'newWorktree', repoRoot: repo.root, name, branch: { kind: 'new', name: `worktree-${name}`, base: 'HEAD' } } })).appSessionId;
@@ -1409,6 +1410,33 @@ describe('the machine route (P5 O7 M9)', () => {
       await h.service.patch(id, { model: 'claude/astra' });
       expect(await h.service.startSession(id, { message: null, options: { trust: 'accepted' } })).toEqual({ status: 'invalid', appSessionId: id, field: 'model', message: machineRouteRefusal('claude/astra') });
       expect(existsSync(join(repo.root, '.claude', 'worktrees', 'other'))).toBe(false);
+    });
+
+    // round 2: the worktree reads its own `.claude/settings.local.json` beneath the main checkout's store, so a branch
+    // that tracks one is judged on it (the main checkout's own file, the store over it, is gone from its working tree)
+    it('reads a tracked local settings file naming another host: a gateway model refused', async () => {
+      await tracking(OTHER, RELAY, 'settings.local.json');
+      rmSync(repo.path('.claude/settings.local.json'));
+      userBaseUrl(RELAY);
+      const id = await createIn('local');
+      await h.service.patch(id, { model: 'claude/astra' });
+      expect(await h.service.startSession(id, { message: null, options: { trust: 'accepted' } })).toEqual({ status: 'invalid', appSessionId: id, field: 'model', message: machineRouteRefusal('claude/astra') });
+    });
+
+    // round 2: a retry whose checkout an earlier attempt made and kept is judged on that checkout as it stands
+    it('judges a retained worktree on its own settings, not the base ref’s', async () => {
+      await tracking(RELAY, RELAY);
+      userBaseUrl(RELAY);
+      h.host.script = () => ({ answer: { relay: DOWN_RELAY } }); // the host's relay answer: the worktree is kept for the retry
+      const id = await createIn('kept');
+      expect(await h.service.startSession(id, { message: null, options: { trust: 'accepted' } })).toMatchObject({ status: 'starting' });
+      expect(await h.settled(id)).toMatchObject({ phase: 'failed' });
+      const kept = join(repo.root, '.claude', 'worktrees', 'kept');
+      expect(intentFile(h, id)?.progress.worktree).toMatchObject({ createdHere: true });
+      writeFileSync(join(kept, '.claude', 'settings.json'), url(OTHER)); // the checkout's own, edited after the attempt
+      h.host.script = () => ({});
+      await h.service.patch(id, { model: 'claude/astra' });
+      expect(await h.service.startSession(id, { message: null, options: { trust: 'accepted' } })).toEqual({ status: 'invalid', appSessionId: id, field: 'model', message: machineRouteRefusal('claude/astra') });
     });
   });
 

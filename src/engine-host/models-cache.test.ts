@@ -377,16 +377,26 @@ describe('effectiveBaseUrl', () => {
     expect(await resolve({ HOME: home }, project)).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: [] });
   });
 
-  // P5 O7 M9 fix round (item 2): a launch in a worktree not yet created reads the project settings its branch tracks;
-  // the caller hands that file's text in place of the cwd's (null: the branch tracks none)
-  it('reads a project settings text handed in place of the cwd’s file', async () => {
+  // P5 O7 M9 fix round (item 2): a launch in a worktree not yet created reads what its branch tracks: the caller hands
+  // the tracked `settings.json` and `settings.local.json` texts (null: not tracked) in place of the main checkout's,
+  // and the worktree's local file sits beneath the store it reads at the main checkout, where that store moves there
+  it('reads the branch’s tracked settings texts in place of the main checkout’s files, beneath its local store', async () => {
     const home = join(root, 'home');
     const repo = join(root, 'repo');
+    const url = (value: string) => JSON.stringify({ env: { ANTHROPIC_BASE_URL: value } });
     await settings(home, 'settings.json', { env: { ANTHROPIC_BASE_URL: OTHER } });
     await settings(repo, 'settings.json', { env: { ANTHROPIC_BASE_URL: OTHER } }); // the checkout's working tree, not the branch's
-    const at = (text: string | null) => effectiveBaseUrl({ env: { HOME: home }, cwd: repo, project: { text }, platform: 'linux', systemRoot: system });
-    expect(await at(JSON.stringify({ env: { ANTHROPIC_BASE_URL: RELAY_URL } }))).toMatchObject({ kind: 'resolved', baseUrl: RELAY_URL });
-    expect(await at(null)).toMatchObject({ kind: 'resolved', baseUrl: OTHER });
-    expect(await at('{ not json')).toMatchObject({ kind: 'uncertain' });
+    const at = (project: { settings: string | null; local: string | null }) => effectiveBaseUrl({ env: { HOME: home }, cwd: repo, project, platform: 'linux', systemRoot: system });
+    expect(await at({ settings: url(RELAY_URL), local: null })).toMatchObject({ kind: 'resolved', baseUrl: RELAY_URL });
+    expect(await at({ settings: null, local: null })).toMatchObject({ kind: 'resolved', baseUrl: OTHER });
+    expect(await at({ settings: '{ not json', local: null })).toMatchObject({ kind: 'uncertain' });
+    expect(await at({ settings: url(RELAY_URL), local: url(OTHER) })).toMatchObject({ kind: 'resolved', baseUrl: OTHER }); // the branch's local over its project file
+    expect(await at({ settings: null, local: '[]' })).toMatchObject({ kind: 'uncertain' });
+    // the main checkout's own local file is the worktree's store only once the store moves there (a repository root this
+    // user owns), and then it is over the branch's local file
+    await settings(repo, 'settings.local.json', { env: { ANTHROPIC_BASE_URL: RELAY_URL } });
+    expect(await at({ settings: null, local: url(OTHER) })).toMatchObject({ kind: 'resolved', baseUrl: OTHER }); // no .git: no store
+    await mkdir(join(repo, '.git'));
+    expect(await at({ settings: null, local: url(OTHER) })).toMatchObject({ kind: 'resolved', baseUrl: RELAY_URL });
   });
 });

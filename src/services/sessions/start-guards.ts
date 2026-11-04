@@ -16,7 +16,7 @@ import type { StartOptions } from '@shared/ipc/schema/session';
 import { attachCommand } from '@shared/sessions/attach';
 import { hostCall, isDirectory, pathExists, reservationOf, transcriptPathOf } from './context';
 import { holderAuthority, type PausedHolder } from './holders';
-import { checkAdditionalDirectories, checkLocation, sessionDirectoryOf, trustDirectoryOf } from './intent-rules';
+import { checkAdditionalDirectories, checkLocation, retainedMatches, sessionDirectoryOf, trustDirectoryOf } from './intent-rules';
 import { runResume } from './resume';
 import { runIntentSetup } from './setup';
 import { resumeRouteOf } from './launch-mapping'; // P5 O7 M9
@@ -70,8 +70,10 @@ export async function guardIntentStart(s: Setup, ctx: GuardContext, intentIn: Se
   }
   // P5 O7 M9 (machine-route.ts): the machine route's refusals (an older host that would change the inference, a gateway
   // model it would not reach ClaudeUsage with) here, its advisory relay sheet with the other cards below
-  // a new worktree, not made yet, is resolved by the project settings its branch tracks
-  const site: SettingsSite = location.kind === 'newWorktree' ? await newWorktreeSettings(s, location) : { cwd: await sessionDirectoryOf(s, location) };
+  // a new worktree not made yet is resolved by the project settings its branch tracks; one an earlier attempt made and
+  // kept (a retry checkLocation accepted), where it stands
+  const projected = location.kind === 'newWorktree' && !(await retainedMatches(s, intent));
+  const site: SettingsSite = projected ? await newWorktreeSettings(s, location) : { cwd: await sessionDirectoryOf(s, location) };
   const machine = route === 'machine' ? await guardMachineRoute(s, { site, model: intent.model, flagEnv: launchProfileEnv(s), startAnyway: args.options.startAnyway === true }) : null;
   if (machine !== null && 'refused' in machine) return reject({ status: 'invalid', appSessionId, ...machine.refused });
 

@@ -147,13 +147,25 @@ async function isGitEntry(entry: string, dir: string): Promise<boolean> {
 // its `.claude` entry (when present) belong to this user; otherwise the cwd.
 async function storeBase(cwd: string, root: string, home: string | null): Promise<string> {
   if (root === cwd) return root;
-  if (home !== null && root === (await realpath(home).catch(() => resolve(home)))) return cwd;
+  return (await storeMoves(root, home)) ? root : cwd;
+}
+
+async function storeMoves(root: string, home: string | null): Promise<boolean> {
+  if (home !== null && root === (await realpath(home).catch(() => resolve(home)))) return false;
   const uid = process.geteuid?.();
-  if (uid === undefined) return cwd;
+  if (uid === undefined) return false;
   try {
     const [dir, git, claude] = await Promise.all([stat(root), lstat(join(root, '.git')), lstat(join(root, '.claude')).catch(() => null)]);
-    return dir.uid === uid && git.uid === uid && (claude === null || claude.uid === uid) ? root : cwd;
+    return dir.uid === uid && git.uid === uid && (claude === null || claude.uid === uid);
   } catch {
-    return cwd;
+    return false;
   }
+}
+
+// P5 O7 M9: the store a linked worktree of the main checkout `root` reads above its own file, before `git worktree add`
+// makes it (a new worktree judged ahead of its creation): the root's local settings file when the store moves there
+// (storeBase's checks, which depend on the root alone), else none. The worktree's link files are git's own, so the
+// canonical root's guards are taken to pass.
+export async function linkedWorktreeStore(root: string, home: string | null): Promise<string | null> {
+  return (await storeMoves(root, home)) ? join(root, '.claude', 'settings.local.json') : null;
 }

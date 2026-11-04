@@ -39,7 +39,7 @@ export const machineRouteRefusal = (model: string) =>
 
 // Where a launch's settings are read: its directory, and in place of that directory's project settings the text a
 // checkout not yet made will have (newWorktreeSettings); or why that cannot be told.
-export type SettingsSite = { cwd: string | null; project?: { text: string | null } } | { uncertain: string };
+export type SettingsSite = { cwd: string | null; project?: { settings: string | null; local: string | null } } | { uncertain: string };
 
 // The base URL a machine-route launch at `site` reaches, with `flagEnv` its `--settings` env.
 export async function machineBaseUrl(s: Pick<Setup, 'env' | 'systemRoot'>, site: SettingsSite, flagEnv?: unknown): Promise<BaseUrlResolution> {
@@ -47,18 +47,22 @@ export async function machineBaseUrl(s: Pick<Setup, 'env' | 'systemRoot'>, site:
   return effectiveBaseUrl({ env: s.env as Record<string, string>, cwd: site.cwd, project: site.project, flagEnv, systemRoot: s.systemRoot }).catch((error: unknown): BaseUrlResolution => ({ kind: 'uncertain', why: messageOf(error) }));
 }
 
-// A new worktree's settings before `git worktree add` makes it: the source checkout's directory (whose local store
-// the worktree reads too, at the repository's root) with the `.claude/settings.json` the branch tracks, read at the
-// ref the worktree will check out (a new branch's base, an existing branch's head) through the read-only git runner.
-// What a checkout hook or a filter would change is not foreseen; the launch's own resolution, in the made worktree,
-// still decides what the host is sent.
+// A new worktree's settings before `git worktree add` makes it: the main checkout's directory with, in place of its
+// own, the `.claude/settings.json` and `.claude/settings.local.json` the branch tracks, read at the ref the worktree
+// will check out (a new branch's base, an existing branch's head) through the read-only git runner; the worktree's local
+// file sits beneath the store it reads at the main checkout (models-cache.ts `project`). What a checkout hook or a
+// filter would change is not foreseen; the launch's own resolution, in the made worktree, still decides what the host
+// is sent. A checkout an earlier attempt made and kept is not projected: the guard resolves it where it stands.
 export async function newWorktreeSettings(s: Pick<Setup, 'git' | 'worktrees'>, location: Extract<Location, { kind: 'newWorktree' }>): Promise<SettingsSite> {
-  const FILE = '.claude/settings.json';
+  const SETTINGS = '.claude/settings.json';
+  const LOCAL = '.claude/settings.local.json';
   try {
     const { root } = await newWorktreeTarget(s, location);
     const rev = location.branch.kind === 'new' ? `${location.branch.base}^{commit}` : `refs/heads/${location.branch.name}`;
-    const listed = await s.git(root, ['ls-tree', '--name-only', rev, '--', FILE]);
-    return { cwd: root, project: { text: listed.trim() === '' ? null : await s.git(root, ['show', `${rev}:${FILE}`]) } };
+    const tracked = new Set((await s.git(root, ['ls-tree', '--name-only', rev, '--', SETTINGS, LOCAL])).split('\n'));
+    const text = (file: string) => (tracked.has(file) ? s.git(root, ['show', `${rev}:${file}`]) : null);
+    const [settings, local] = await Promise.all([text(SETTINGS), text(LOCAL)]);
+    return { cwd: root, project: { settings, local } };
   } catch (error) {
     return { uncertain: `the branch's project settings: ${messageOf(error)}` };
   }

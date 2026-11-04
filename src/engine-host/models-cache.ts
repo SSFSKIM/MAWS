@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import * as z from 'zod';
 import { BUILTIN_MODELS, ModelCatalogueEntrySchema, type ModelCatalogue } from '@shared/sessions/models';
 import { GATEWAY_KEYS } from './launch'; // P5 O7 M9
-import { localSettingsFiles } from './local-store'; // P2-F wave S (S-catalogue)
+import { linkedWorktreeStore, localSettingsFiles } from './local-store'; // P2-F wave S (S-catalogue); P5 O7 M9: linkedWorktreeStore
 import { managedSettings, managedSettingsDir } from './session-start-hooks'; // P5 O7 M9: resolve-style.ts's managed path
 
 // The built-in list is shared (the renderer shows it when the host cannot answer at all).
@@ -43,9 +43,10 @@ export interface ModelEnvSources {
   env: Record<string, string>; // the spawn environment (a launch plan's, or the captured shell's for a launch not yet made)
   cwd: string | null; // the project whose `.claude/settings.json` and `.claude/settings.local.json` the launch reads
   flagEnv?: unknown; // the `--settings` JSON's env
-  // P5 O7 M9: the project's `.claude/settings.json` text in place of the cwd's file (null: there is none), for a launch
-  // whose checkout does not exist yet (a new worktree, judged by what its branch tracks); the local store is the cwd's
-  project?: { text: string | null };
+  // P5 O7 M9: a launch in a linked worktree of `cwd` (the main checkout) not made yet, judged by what its branch tracks:
+  // the worktree's `.claude/settings.json` and `.claude/settings.local.json` texts (null: not tracked) in place of the
+  // cwd's, the local one beneath the store the worktree reads at the main checkout (local-store.ts linkedWorktreeStore)
+  project?: { settings: string | null; local: string | null };
 }
 
 // The key a launch's catalogue lives under. The engine applies the global config's `env` over its spawn environment,
@@ -75,7 +76,10 @@ export async function catalogueKey(engineVersion: string, gateway: 'gateway' | '
 async function layeredEnv(sources: ModelEnvSources, pick: (name: string) => boolean, unreadable: (file: string) => void): Promise<{ shared: Record<string, string>; launch: Record<string, string> }> {
   const read = (file: string) => settingsEnv(file, pick, unreadable);
   const given = sources.project;
+  // a tracked text (null: none) told as the branch's file, `unreadable` naming it under the worktree's `.claude`
+  const textEnv = (text: string | null, name: string) => (text === null ? {} : settingsTextEnv(text, `${name} at the branch's ref`, pick, unreadable));
   const home = sources.env.HOME || null;
+  const localFiles = async (dir: string) => (given === undefined ? localSettingsFiles(dir, home) : [await linkedWorktreeStore(dir, home)].filter((file) => file !== null));
   const configDir = sources.env.CLAUDE_CONFIG_DIR || (home ? join(home, '.claude') : null);
   const restricted = envFlag(sources.env.CLAUDE_CODE_RESTRICTED); // no setting source is read but the flag's
   const cwd = restricted ? null : sources.cwd;
@@ -83,8 +87,8 @@ async function layeredEnv(sources: ModelEnvSources, pick: (name: string) => bool
   const [globalEnv, user, projectEnv, localEnv] = await Promise.all([
     globalConfigEnv(configDir, sources.env.CLAUDE_CONFIG_DIR || home, read),
     configDir === null || restricted ? {} : read(join(configDir, 'settings.json')),
-    project === null ? {} : given === undefined ? read(join(project, 'settings.json')) : given.text === null ? {} : settingsTextEnv(given.text, join(project, 'settings.json'), pick, unreadable),
-    cwd === null ? {} : localSettingsFiles(cwd, home).then(async (files) => Object.assign({}, ...(await Promise.all(files.map(read)))) as Record<string, string>),
+    project === null ? {} : given === undefined ? read(join(project, 'settings.json')) : textEnv(given.settings, 'settings.json'),
+    cwd === null ? {} : localFiles(cwd).then(async (files) => Object.assign(given === undefined ? {} : textEnv(given.local, 'settings.local.json'), ...(await Promise.all(files.map(read)))) as Record<string, string>),
   ]);
   const shared = { ...envOf(sources.env, pick), ...globalEnv, ...user };
   return { shared, launch: { ...shared, ...projectEnv, ...localEnv, ...envOf(sources.flagEnv, pick) } };
