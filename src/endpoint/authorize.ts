@@ -14,7 +14,8 @@
 //      none), a machine grade among the member's rights (`grade`). Nothing of a session is read for a caller below its
 //      floor, so a refusal says nothing of whether a session exists: a lane B session whose live engine session isn't
 //      its recorded one is `unavailable` only after the caller's rank on the recorded one (P5 O7 M4, fix wave 1); then,
-//      for the `checkout` rule (P5 O7 M4), the input's path within the session's checkout (`no-target`);
+//      for the `checkout` rule (P5 O7 M4), the input's path within the session's checkout, and for the `task-list` rule
+//      (P5 O7 M8), the input's list the session's own (`no-target`);
 //   5. a by-effect command's rule gives the grade its input takes (`no-rule`), held to the floor, and the standing is
 //      checked again at it; a call is a read, so anything graded above `view` must come as an act (`act-required`);
 //   6. the machine's policy: a head too old stops every action but a delivered state (`state-too-old`), read-only
@@ -90,7 +91,7 @@ import { spawnRefusal, type Policy } from './policy';
 import { dispatchAs, type EndpointServices } from './services';
 import type { CheckoutSource, RecordSource, SessionRecord, SessionTarget } from './sources';
 import { Assertions, deviceOf, stepUpRequired, verifyDeviceStepUp } from './step-up';
-import { artifactShortCut, CheckoutBounds, placeArtifact, resolveSubscription, resolveTarget, withinCheckout, type HeldNames, type Placement, type Placing, type Resolved, type Spawner } from './targets';
+import { artifactShortCut, CheckoutBounds, ownTaskList, placeArtifact, resolveSubscription, resolveTarget, withinCheckout, type HeldNames, type Placement, type Placing, type Resolved, type Spawner } from './targets';
 
 /**
  * `session`: a call's own (P5 O7 M4, RL2's `call.session`), which the `checkout` target rule reads. A `stream` (P5 O7 M3)
@@ -423,6 +424,8 @@ export class Authorizer {
     if (resolved.kind === 'session' && resolved.unavailable === true) return no('unavailable');
     // A checkout read's path, read only for a caller who views the session: in its checkout, or no target of it.
     if (row.target === 'checkout' && !(target?.lane === 'B' && (await withinCheckout(input, target.appSessionId, placing, this.#bounds)))) return no('no-target');
+    // P5 O7 M8: a task list's read, likewise: the session's own list, or no target of it.
+    if (row.target === 'task-list' && !(target?.lane === 'B' && (await ownTaskList(input, target, placing)))) return no('no-target');
 
     // 5. The grade its input's effect takes, and the standing at it.
     const grade = await this.#effectiveGrade(name, spec, input, reads);
