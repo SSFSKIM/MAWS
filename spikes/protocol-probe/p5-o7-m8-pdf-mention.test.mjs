@@ -7,7 +7,7 @@
 // any mention here?). Recorded: each turn's first main-loop request, every message's blocks in brief, and what the
 // transcript keeps. Runs on CI's Linux probe lane only (`scripts/ci-gate.sh <worktree> --gates probes`), which
 // provisions the engine by checksum (scripts/provision-engine.sh); anywhere else it is skipped, so no engine starts on a
-// workstation. Its findings: findings-p5-o7-m8-pdf-mention.txt.
+// workstation. Its findings: findings-p5-o7-m8-pdf-mention.txt; the assertions after the record pin what it found.
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
@@ -99,6 +99,19 @@ test(`p5 O7 M8: what engine ${ENGINE} attaches for an @<path> mention in a strea
   // the record leaves the runner in the job's log; findings-p5-o7-m8-pdf-mention.txt copies it
   for(const line of JSON.stringify(summary,null,1).split('\n'))t.diagnostic(`m8-pdf ${line}`);
   for(const arm of arms){assert.equal(arm.result.subtype,'success',arm.label);assert.ok(arm.mainRequests>=1,arm.label);}
+  // What 2.1.312 does (2026-11-04, the findings): it expands the mention, a text file's with its lines, but a PDF's into a
+  // `file` attachment whose bytes it keeps empty, so the model reads only `PDF file read: <path> (<size>)`, no `document`
+  // block and none of the page's text. A change here is the engine's: record it, and M8's typed reference may be moot.
+  const blocks=arm=>arms.find(a=>a.label===arm).messages.flatMap(m=>m.blocks);
+  for(const arm of ['pdf-string','pdf-block']){
+   assert.ok(blocks(arm).some(b=>b.type==='text'&&b.head.includes('PDF file read: ')&&b.markers.includes(UPLOAD)),arm);
+   assert.deepEqual(blocks(arm).filter(b=>b.type!=='text').map(b=>b.type),[],arm);
+   assert.ok(!blocks(arm).some(b=>b.markers?.includes(PDF_MARKER)),arm);
+  }
+  assert.ok(blocks('text-control').some(b=>b.markers?.includes(TEXT_MARKER)));
+  const pdfs=kept.filter(r=>r.attachment?.type==='file'&&r.attachment.contentType==='pdf');
+  assert.equal(pdfs.length,2);
+  for(const r of pdfs)assert.deepEqual([r.attachment.content.file.base64,r.attachment.content.file.originalSize],['string(0)',pdf().length]);
  }finally{
   await p?.stop();
   await stub.close();
