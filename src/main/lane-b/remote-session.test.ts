@@ -181,6 +181,20 @@ describe('the stream', () => {
     expect(l.of('remote.gap')).toEqual([{ appSessionId: APP, launchId: 'L1' }]);
   });
 
+  // P5 O7 M8 (m8-1, red first; "What draws Working…"): an event this build can't read is left out with a log line and
+  // nothing else, so a dropped `turn.ended` leaves its turn open and the pane drawing "Working…" until a relaunch. The
+  // rule M8 binds: it is a gap at its place, and the session's status and record are read again so the turn heals.
+  // Flipped by m8-3.
+  it.fails('marks an event it can’t read as a gap at its place and reads the status and the record again', async () => {
+    const l = lab();
+    const sub = await opened(l);
+    const asked = l.link.calls.length;
+    deliver(sub, { epoch: 'L1', seq: 5, idx: 0 }, { ...notice('L1', 5, 0), kind: 'turn.ended', costUsd: 'not a number' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('remote.gap')).toEqual([{ appSessionId: APP, launchId: 'L1', at: { seq: 5, idx: 0 } }]);
+    expect(l.link.calls.slice(asked).map((c) => c.name)).toEqual(expect.arrayContaining(['session.status', 'session.get']));
+  });
+
   it('passes the link’s and the machine’s pauses on as the stream’s state', async () => {
     const l = lab();
     const sub = await opened(l);

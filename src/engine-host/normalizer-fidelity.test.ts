@@ -1,6 +1,10 @@
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SessionEventSchema } from '@shared/graph/events';
 import type { AppSessionId, SessionId, TaskId } from '@shared/graph/ids';
+import { readTolerant } from '@shared/ipc/tolerant';
+import { parseJournalRow, type JournalRow } from '@shared/wire/journal';
 import { parseTranscriptRecord } from '@shared/wire/transcript';
 import { loadJournal, loadSyntheticJournal } from '../../test/support/fixtures';
 import { applyTaskEvents, emptyGraph } from '../renderer/src/tools/agents/model/task-graph';
@@ -68,5 +72,41 @@ describe('recorded normalizer fidelity regressions', () => {
     const record = parseTranscriptRecord({ type: 'user', uuid: frame.uuid, timestamp: frame.timestamp, parentUuid: null, message: noticeFrame.message });
     const disk = recordToEvents(record, createBackfillContext({ sessionId: frame.session_id as SessionId, agent: null }));
     expect(disk.find((e) => e.kind === 'tool.result')).toMatchObject({ spillPath: path });
+  });
+});
+
+// P5 O7 M8 (m8-1; "What draws Working…"): a remote device reads each event with `readTolerant(SessionEventSchema)` and
+// leaves out one that doesn't read. The sitting's VM ran 75944744d against the MacBook's 01d4488cf, and neither the
+// normalizer, the event schema nor that reader changed between them (nor since), so the older build's `turn.ended` is
+// this one's: every event the normalizer makes from every recorded journal, each `turn.ended` among them, reads.
+describe('the remote reader over the recorded journals', () => {
+  const FIXTURES = join(__dirname, '../../spikes/protocol-probe/fixtures');
+  const files = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    return statSync(path).isDirectory() ? files(path) : path.endsWith('.jsonl') ? [path] : [];
+  });
+  const journal = (file: string): JournalRow[] | null => {
+    try {
+      return readFileSync(file, 'utf8').split('\n').filter((line) => line.length > 0).map((line) => parseJournalRow(JSON.parse(line)));
+    } catch {
+      return null; // a fixture that is not a probe journal (a transcript, a hook log)
+    }
+  };
+
+  it('reads every event the normalizer makes from them, each turn’s end included', () => {
+    const unread: string[] = [];
+    let ends = 0;
+    for (const file of files(FIXTURES)) {
+      const rows = journal(file);
+      if (rows === null) continue;
+      const n = normalizer();
+      for (const event of rows.flatMap((row) => n.push(row))) {
+        if (event.kind === 'turn.ended') ends++;
+        const read = readTolerant(SessionEventSchema, JSON.parse(JSON.stringify(event)));
+        if (!read.ok) unread.push(`${file.slice(FIXTURES.length)} seq ${event.seq} ${event.kind}`);
+      }
+    }
+    expect(ends).toBeGreaterThan(300);
+    expect(unread).toEqual([]);
   });
 });

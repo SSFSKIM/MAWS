@@ -141,3 +141,25 @@ describe('SessionStatusTracker: the Stop\'s background tasks', () => {
     expect(tracker.snapshot().backgroundTasks.map((t) => t.taskId)).toEqual(['t1']);
   });
 });
+
+// P5 O7 M8 (m8-1, red first): `activity` is set by a main-lane `system/status` and cleared only by another one, and the
+// engine sends none at a turn's end, so a finished turn keeps `requesting` (permission-roundtrip.jsonl: `requesting` at
+// seq 54, the turn's `result` at 93, the next turn's status at 99). Every local turn ends so; it is the VM's
+// `activity: requesting` after `end_turn` in M7's sitting, though no renderer reads it (not what drew "Working…").
+// Flipped by the fix that clears it at a main-lane `result`.
+describe('SessionStatusTracker: activity at a turn’s end', () => {
+  const rows = readFileSync(resolve(ROOT, 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl'), 'utf8')
+    .split('\n')
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as { seq: number; direction: string; frame: Record<string, unknown> });
+
+  it.fails('clears at the main lane’s result', () => {
+    const tracker = new SessionStatusTracker(spec, () => {});
+    for (const row of rows) {
+      if (row.seq > 93) break;
+      if (row.direction === 'in') tracker.observe(row.frame, '2026-10-06T02:52:00.000Z');
+    }
+    expect(rows.find((row) => row.seq === 93)?.frame.type).toBe('result');
+    expect(tracker.snapshot().activity).toBeNull();
+  });
+});

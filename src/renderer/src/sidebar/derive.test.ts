@@ -379,6 +379,21 @@ describe('an expanded project’s records and listed rows in one ordering', () =
     expect(trees.slice(0, shownCount(trees.length, false)).flatMap((t) => t.rows)).toHaveLength(6);
     expect(trees.slice(0, shownCount(trees.length, true)).flatMap((t) => t.rows)).toHaveLength(9);
   });
+
+  // P5 O7 M8 (m8-1, red first): why the sitting's remote-spawned session had no row at all. Its listing joined its org
+  // project (the mini's listings.json: `1c155c56…`, the appSessionId, lane B, project ebb30c31), and the record joins it
+  // by that id, so it was filed under MAWS; but a project shows eight rows at most and the Resume… picker lists records
+  // only, so a listed row past the eighth has no way back. Under the default `priority` sort every local session that is
+  // working, waiting or unread leads it, and under either sort its one `issued` (a listing re-issues only when its fields
+  // move, and the sitting's stayed `idle` from 04:01:46.999Z) falls behind every local session that moves after it.
+  // Flipped by m8-4, whose fix decides how a listed row stays reachable.
+  const drawn = (merged: ReturnType<typeof projectItems>) => nestItems(merged).slice(0, SESSIONS_CAP).flatMap((t) => t.rows.map((r) => ('listed' in r ? `@${r.listed.session}` : r.record.appId)));
+  it.fails('a session spawned here on another machine stays reachable under its project, however many local sessions lead or move after it', () => {
+    const leading = Array.from({ length: SESSIONS_CAP + 1 }, (_, i) => rec(`u${i}`, i, { unread: true }));
+    expect(drawn(items(leading, [lst('spawned', 9)], 'priority'))).toContain('@spawned');
+    const movedSince = Array.from({ length: SESSIONS_CAP }, (_, i) => rec(`r${i}`, 8 - i));
+    expect(drawn(items(movedSince, [lst('spawned', 0)], 'recency'))).toContain('@spawned');
+  });
 });
 
 // W11 (I4, as the owner corrected it): one flat list per expanded project, five rows then "Show more" to eight.
