@@ -66,7 +66,8 @@
 // log (`side.question.list`), read again at each of its completions, as `{side: {exchanges}}`. One that comes during an
 // opening goes once the opening's state went. They are change notices: the opening reads none of them (a panel lists
 // its own on mount, as a local one does), and a completion a reader missed is the engine host's `session.operations`
-// to answer. The mawsd front's streams carry none (its app hears these events itself).
+// to answer. None is ever dropped: one that would pass the backlog bound ends the stream `behind`, and the reader opens it
+// again and asks. The mawsd front's streams carry none (its app hears these events itself).
 import type { SessionEvent } from '../graph/events';
 import { sanitiseListId } from '../engine/task-list';
 import { requestDigestOf } from './request-digest';
@@ -114,8 +115,11 @@ export interface StreamSink {
   /** Live events stopped being available; `resumed` once they are again and the stream caught up. */
   paused(): void;
   resumed(): void;
-  /** A read the stream needs failed. */
-  end(reason: 'unavailable'): void;
+  /**
+   * A read the stream needs failed (`unavailable`); P5 O7 M8: or the reader fell so far behind that a notice would pass
+   * the backlog bound (`behind`), so it opens again and asks for what it missed.
+   */
+  end(reason: 'unavailable' | 'behind'): void;
 }
 
 /** A read of the engine host: its answer, or a refusal; a throw is a read that could not be made. */
@@ -176,8 +180,9 @@ class Stream implements StreamHandle {
   overflow = false;
   readonly dirty = new Set<StreamPart>();
   readonly latest = new Map<StreamPart, unknown>();
-  /** P5 O7 M8: notices that came during an opening, the latest of each key, sent once its state went. */
-  readonly notices = new Map<PanelKey, Partial<Record<PanelPart, unknown>>>();
+  /** P5 O7 M8: notices that came during an opening, the latest of each key with its size, sent once its state went. */
+  readonly notices = new Map<PanelKey, { values: Partial<Record<PanelPart, unknown>>; bytes: number }>();
+  noticeBytes = 0;
   /** P5 O7 M8: the session's task list as its status names it, sanitised (null: none yet). */
   taskList: string | null = null;
   /** P5 O7 M8: side log reads started, so an older answer never replaces a newer one. */
@@ -464,6 +469,7 @@ export class SessionStreams {
     stream.holdState = false;
     // P5 O7 M8: the notices that came while the state was read go after it.
     if (hadState) this.#flushNotices(stream);
+    if (stream.sink.ended) return; // one of them ended it `behind`
     // What it dropped past the backlog is the journal's to give: it catches up from the last event sent.
     if (overflow) stream.catching = true;
     for (const event of held) {
@@ -495,7 +501,7 @@ export class SessionStreams {
    * A read failed: the reader is told, and a stream it keeps takes no live event until it caught up from its cursor (a
    * relink, or a status of its own launch), and opens a new launch as soon as one shows.
    */
-  #fail(stream: Stream): void {
+  #fail(stream: Stream, reason: 'unavailable' | 'behind' = 'unavailable'): void {
     stream.gen++;
     stream.failed = true;
     this.#unhold(stream);
@@ -504,10 +510,11 @@ export class SessionStreams {
     stream.dirty.clear();
     stream.latest.clear();
     stream.notices.clear();
+    stream.noticeBytes = 0;
     stream.reading = false;
     stream.catching = true;
     if (!stream.answered) stream.unanswered = true;
-    stream.sink.end('unavailable');
+    stream.sink.end(reason);
   }
 
   // ---- Live ---------------------------------------------------------------------------------------------------------
@@ -573,14 +580,22 @@ export class SessionStreams {
   /**
    * P5 O7 M8: a notice of the session's operations or panels, at the stream's position, or held while an opening reads
    * its state (the latest of each key). A side question's completion has the side log read again after it.
+   *
+   * Notices are not in the journal, so none is ever dropped: one that would put the reader's unsent stream, or what an
+   * opening holds, past the backlog bound ends the stream `behind` instead (distinct opIds and runs each take a key of
+   * their own, so nothing else bounds them), and the reader opens it again and asks `session.operations` for its waiters.
    */
   #notice(stream: Stream, key: PanelKey, values: Partial<Record<PanelPart, unknown>>): void {
     if (stream.view === 'cards' || stream.closed || stream.sink.ended) return;
     if (stream.holdState) {
+      const bytes = Buffer.byteLength(JSON.stringify(values));
+      stream.noticeBytes += bytes - (stream.notices.get(key)?.bytes ?? 0);
       stream.notices.delete(key);
-      stream.notices.set(key, values);
+      stream.notices.set(key, { values, bytes });
+      if (stream.noticeBytes > this.#backlog) this.#fail(stream, 'behind');
       return;
     }
+    if (stream.sink.backlog > this.#backlog) return this.#fail(stream, 'behind');
     stream.sink.snap(this.#at(stream), values, key);
     if ((values.operation as { command?: unknown } | undefined)?.command === 'session.sideQuestion') void this.#readSide(stream);
   }
@@ -588,19 +603,25 @@ export class SessionStreams {
   #flushNotices(stream: Stream): void {
     const notices = [...stream.notices];
     stream.notices.clear();
-    for (const [key, values] of notices) this.#notice(stream, key, values);
+    stream.noticeBytes = 0;
+    for (const [key, { values }] of notices) this.#notice(stream, key, values);
   }
 
-  /** P5 O7 M8: the side question's log as the engine host holds it now; a read that fails leaves the device's own. */
+  /**
+   * P5 O7 M8: the side question's log as the engine host holds it now; a read that fails leaves the device's own. Its
+   * answer stands only for the flow that asked: a newer read, any (re)opening since (a relaunch's above all) or a failure
+   * drops it, so one launch's log is never published under another's.
+   */
   async #readSide(stream: Stream): Promise<void> {
     const n = ++stream.sideReads;
+    const gen = stream.gen;
     let response;
     try {
       response = await this.#options.read('side.question.list', { appSessionId: stream.app });
     } catch {
       return;
     }
-    if (n !== stream.sideReads || !response.ok) return;
+    if (n !== stream.sideReads || gen !== stream.gen || !response.ok) return;
     const exchanges = (response.value as { exchanges?: unknown } | null)?.exchanges;
     if (Array.isArray(exchanges)) this.#notice(stream, 'side', { side: { exchanges } });
   }
