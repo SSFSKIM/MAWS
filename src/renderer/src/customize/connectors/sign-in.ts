@@ -19,7 +19,7 @@
 //   each with its own newest operation, and a row shows the one of the machine its Sign in runs on (`signInMachineOf`).
 import { create } from 'zustand';
 import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PluginsScope } from '@shared/plugins/cli';
 import { isAddress, machineOf } from '@shared/machine/address';
@@ -101,9 +101,25 @@ const machineOfSession = (appSessionId: string): MachineRef | null => (isAddress
 export const signInMachineOf = (appSessionId: string | null): MachineRef | null => (appSessionId === null ? null : machineOfSession(appSessionId));
 
 export async function startSignIn(target: SignInTarget, fingerprint: string | null, appSessionId: string, bridge: MawsBridge = ipc): Promise<void> {
-  const machine = machineOfSession(appSessionId); // the session's address names where it goes
-  const key = signInKeyOf({ ...target, machine });
   const answer = await bridge.invoke('connectors.signIn', { name: target.name, scope: target.scope, cwd: target.cwd, path: target.path, appSessionId: appSessionId as AppSessionId });
+  bindReceipt(target, fingerprint, appSessionId, answer);
+}
+
+/**
+ * P5 O7 M8 ("Sign in from the session's MCP widget"): a server known by its name and scope alone (the session's
+ * `mcp_status`), signed in through `connectors.signInServer`, whose entry the session's machine reads itself (that
+ * machine's `customization.serverEndpoints` is its own). Its result is recorded as Customize's is, with no fingerprint:
+ * the widget shows the server the session's engine holds, not a configuration.
+ */
+export async function startSignInByName(server: Omit<SignInTarget, 'path'>, appSessionId: AppSessionId, bridge: MawsBridge = ipc): Promise<void> {
+  const answer = await bridge.invoke('connectors.signInServer', { name: server.name, scope: server.scope, cwd: server.cwd, appSessionId });
+  bindReceipt(server, null, appSessionId, answer);
+}
+
+// A sign-in's receipt bound to its server, the events heard before it applied; a refused invoke is a failed sign-in.
+function bindReceipt(target: Omit<SignInTarget, 'path'>, fingerprint: string | null, appSessionId: string, answer: CommandResult<'connectors.signIn' | 'connectors.signInServer'>): void {
+  const machine = machineOfSession(appSessionId); // the session's address names where it went
+  const key = signInKeyOf({ ...target, machine });
   if (!answer.ok) {
     newest.set(key, `refused:${key}`);
     record(key, { appSessionId, fingerprint }, { opId: `refused:${key}`, name: target.name, state: 'failed', reason: 'engine', message: transportWords(answer.error), where: null }, Date.now());
