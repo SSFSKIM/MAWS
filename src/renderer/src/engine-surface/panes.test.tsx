@@ -24,7 +24,12 @@ import { connectPluginPanes, resetPaneRosters } from './panes';
 import { pluginPaneTool } from './PaneTool';
 import { resetSurfaceRegistry } from './registry';
 import { usePaneRosters } from './pane-roster';
-import { TEST_MACHINE } from '../../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { remoteRow } from '../../../../test/support/builders';
+import { addressOf } from '@shared/machine/address';
+import type { AppSessionId } from '@shared/graph/ids';
+import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import { mainShowing } from '../test-support/panel';
 
 // The Pane answer of the fixture (seq 58).
 const PANE_ANSWER = (() => {
@@ -339,6 +344,36 @@ describe('plugin panes as panel tabs (R2)', () => {
 
 // E11 W-D (tracker row E10 "PaneTool and LogTool infer restored"): the host's restored flag, not missing params, marks a
 // tab restored from the layout; such a tab closes without asking the engine.
+// P5 O7 M8 review ("The offer audit and its contract"): a session on another machine reached over RL2 forwards its
+// `plugin.panes`, but the machine offers none of the pane commands (REMOTE_UNAVAILABLE's `session.ui.*`): its panes show
+// as tabs whose body says why, nothing is asked of the machine, and the person's close is this window's alone
+describe('plugin panes of a session on another machine', () => {
+  const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+  const UI: CommandName[] = ['session.ui.panes', 'session.ui.render', 'session.ui.paneShow', 'session.ui.paneFocus', 'session.ui.close'];
+  afterEach(() => useSessions.setState({ listed: new Map(), listedMachines: new Set() }));
+
+  it('show the declared reason in their tabs, ask the machine nothing, and close here alone', async () => {
+    useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    act(() => useLayout.setState({ main: mainShowing(R) }));
+    connect({});
+    render(<TestHost />);
+    act(() => useSessions.getState().applyStatus({ appSessionId: R, status: { ...status(R), uiSurface: { clientId: 'maws-main' } } }, OTHER_MACHINE));
+    const one = { ...roster([pane('one', 'One'), pane('two', 'Two')], 'one', { focusRequestedId: 'two' }) };
+    act(() => fake.event('session.eventBatch', { appSessionId: R, events: [{ id: `${R}:L:1:0`, sessionId: 's', at: '2026-10-02T00:00:00.000Z', seq: 1, agentId: null, parentToolUseId: null, kind: 'plugin.panes', ...one } as SessionEvent] }));
+    const tabsOfR = () => (panelOf(R)?.tabs ?? []).filter((t) => t.toolId === 'plugin-pane');
+    await waitFor(() => expect(tabsOfR()).toHaveLength(2));
+    expect(await screen.findByText(REMOTE_UNAVAILABLE['session.ui.render']!)).toBeTruthy();
+    await userEvent.click(screen.getByRole('tab', { name: /One/ }));
+    const body = document.querySelector<HTMLElement>('[data-plugin-pane]');
+    if (body) act(() => body.focus());
+    let closing!: Promise<boolean>;
+    act(() => void (closing = panelHost.closeTab(tabsOfR()[0]!.id)));
+    expect(await closing).toBe(true);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    for (const command of UI) expect(fake.invoked(command)).toEqual([]);
+  });
+});
+
 describe('the plugin pane tool reads the host’s restored flag', () => {
   it('a restored tab closes without asking the engine; an open naming a pane asks', async () => {
     connect({});

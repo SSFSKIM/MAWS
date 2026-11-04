@@ -12,14 +12,16 @@ import { useSessions } from '../stores/sessions';
 import { forgetSession, invalidateSession, resetSurfaceRegistry } from './registry';
 import { connectEngineSurface, useSurfaceSite } from './site';
 import { textOf } from './tree';
-import { TEST_MACHINE } from '../../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { remoteRow } from '../../../../test/support/builders';
+import { addressOf } from '@shared/machine/address';
 
 const ID = 'app-r2' as AppSessionId;
 const band = (presses: number) => ({ tree: { type: 'Text', children: [`MODS_PROBE_BAND presses=${presses}`] }, props: {}, rewritten: false, hooked: true });
 const UNHOOKED = { tree: { type: 'engine', ref: 0 }, props: {}, rewritten: false, hooked: false };
 
-function Band({ client, isWorking = false, instanceId = 'above-prompt' }: { client: FakeClient['client']; isWorking?: boolean; instanceId?: string }) {
-  const answer = useSurfaceSite({ appSessionId: ID, component: 'AbovePrompt', instanceId, props: { isWorking }, client });
+function Band({ client, isWorking = false, instanceId = 'above-prompt', appSessionId = ID }: { client: FakeClient['client']; isWorking?: boolean; instanceId?: string; appSessionId?: AppSessionId }) {
+  const answer = useSurfaceSite({ appSessionId, component: 'AbovePrompt', instanceId, props: { isWorking }, client });
   return <p data-testid="band">{answer ? textOf(answer.tree) || (answer.hooked ? '' : 'unhooked') : 'none'}</p>;
 }
 
@@ -151,5 +153,24 @@ describe('row registry lifecycle', () => {
     expect(screen.getByTestId('band').textContent).toBe('none');
     expect(fake.invoked('session.ui.render')).toHaveLength(1);
     act(() => forgetSession(ID));
+  });
+});
+
+// P5 O7 M8 review ("The offer audit and its contract"): `session.ui.render` is declared not offered on another machine
+// reached over RL2, so a site of such a session asks nothing and draws as no plugin hooked it (the stock rendering)
+describe('a site of a session on another machine', () => {
+  it('asks nothing and draws unhooked', async () => {
+    const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    try {
+      act(() => useSessions.getState().applyStatus({ appSessionId: R, status: { ...status(R), uiSurface: { clientId: 'maws-main' } } }, OTHER_MACHINE));
+      render(<Band client={fake.client} appSessionId={R} />);
+      invalidate(fake);
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+      expect(fake.invoked('session.ui.render')).toEqual([]);
+      expect(screen.getByTestId('band').textContent).toBe('unhooked');
+    } finally {
+      useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    }
   });
 });

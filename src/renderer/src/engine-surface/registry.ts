@@ -10,6 +10,7 @@ import { create } from 'zustand';
 import type { RenderAnswer, SurfaceGeometry, SurfaceSite, SurfaceViewport } from '@shared/engine/surface';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import { remoteUnavailableOf } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { parseTree, type SurfaceNode } from './tree';
 
 export interface SiteAddress {
@@ -72,6 +73,12 @@ async function ask(key: string): Promise<void> {
     return;
   }
   if (useSurfaceAnswers.getState().hooked.get(hookKey(entry.appSessionId, entry.component)) === false) return;
+  // P5 O7 M8: a session on another machine reached over RL2 is not offered `session.ui.render`: drawn as no plugin
+  // hooked it (the stock rendering), nothing asked
+  if (remoteUnavailableOf(entry.appSessionId, 'session.ui.render') !== null) {
+    store(key, { tree: null, hooked: false, props: entry.props, rewritten: false });
+    return;
+  }
   entry.inFlight = true;
   entry.again = false;
   const { appSessionId, component, instanceId, props, propsKey, viewport } = entry;
