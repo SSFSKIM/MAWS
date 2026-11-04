@@ -97,6 +97,13 @@ const decide = (primary: SubmitState, label: string, enabled: boolean, reason: s
   steer,
 });
 
+// P5 O7 M8 review: where a send queued behind the running turn goes, in the queue's own words: a paused queue holds it for
+// Resume (an interrupt's pause, which a fresh send goes past, aside), and messages waiting go before it
+function queuedBehindTurn(queue: SubmitInput['queue']): string {
+  if (queue.paused) return queue.pauseReason === 'interrupt' ? SENDS_AFTER_THIS_TURN : JOINS_PAUSED_QUEUE; // Stop holds the older text alone
+  return queue.entries.length > 0 ? SENDS_AFTER_QUEUED : SENDS_AFTER_THIS_TURN;
+}
+
 export function submitState(i: SubmitInput): SubmitDecision {
   const { status, intent, queue, empty, mode } = i;
   if (intent !== null) { // C10: the caller answers the intent while unstarted, even beside a failed setup's exited status
@@ -138,7 +145,8 @@ export function submitState(i: SubmitInput): SubmitDecision {
   if (mode === 'bash') return decide('send', 'Run', !empty, null, busy ? RUNS_NOW : null);
   if (mode === 'memory') return decide('send', 'Save to memory', !empty);
   if (busy && empty) return decide('stop', 'Stop', true);
-  if (busy) return i.sendsDocuments ? decide('send', 'Send', true, null, SENDS_AFTER_THIS_TURN) : decide('send', 'Send', true, null, SENDS_AT_NEXT_STEP, true);
+  if (busy && i.sendsDocuments) return decide('send', 'Send', true, null, queuedBehindTurn(queue));
+  if (busy) return decide('send', 'Send', true, null, SENDS_AT_NEXT_STEP, true);
   // Stop holds the older queued text, not a fresh instruction. Other pauses keep new text behind the held entries.
   if (queue.paused && (!empty || queue.entries.length > 0)) return empty ? decide('resume', 'Resume', true) : decide('send', 'Send', true, null, queue.pauseReason === 'interrupt' ? SENDS_NOW : JOINS_PAUSED_QUEUE);
   if (queue.entries.length > 0) return decide('send', 'Send', !empty, null, SENDS_AFTER_QUEUED);
