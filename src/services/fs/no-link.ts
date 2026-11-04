@@ -24,6 +24,10 @@ export const NO_LINK: number = DARWIN ? O_NOFOLLOW_ANY : constants.O_NOFOLLOW;
 // The open alone does not refuse a link above the last component: `walk` the ancestors first
 export const WALKED = !DARWIN;
 const PROC_FD = WALKED && existsSync('/proc/self/fd');
+// Whether an open here is held to the path it names, whole: atomically on macOS, by the descriptor's own path where
+// `/proc` is mounted. Without it (Linux with no `/proc`), an ancestor turned into a link between the walk and the open
+// is followed unseen, so a read that must stay inside its root refuses to run (P5 O7 M8: a send's upload read).
+export const OPENS_CONFIRMED: boolean = !WALKED || PROC_FD;
 
 // A component on the way that is a link or no directory (`part`, its name), or a descriptor opened somewhere other than
 // the walked path; coded as the kernel codes a link the open refused.

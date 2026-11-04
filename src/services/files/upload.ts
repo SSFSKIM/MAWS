@@ -16,7 +16,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { MAX_SEND_CONTENT_JSON_BYTES, MAX_SEND_DOCUMENT_BYTES } from '@shared/engine/session-state-store';
 import { REMOTE_UPLOAD_PART_BYTES, UPLOAD_FILE_MAX_BYTES, UPLOAD_ID_PATTERN, type FilesReadUploadsInput, type FilesReadUploadsOutput, type FilesUploadInput, type FilesUploadOutput, type UploadDocumentBlock, type UploadPart } from '@shared/ipc/schema/files';
 import type { SpineView } from '@shared/spine/view';
-import { AlreadyThere, excludeUploads, promoteStaged, readUpload, rootOf, saveFiles, stagePart, SWEEP_AFTER_MS, Unsafe, uploadId, uploadRecords, type UploadRecords } from '../fs/upload-roots';
+import { AlreadyThere, excludeUploads, promoteStaged, readUpload, rootOf, saveFiles, stagePart, SWEEP_AFTER_MS, Unconfirmed, Unsafe, uploadId, uploadRecords, type UploadRecords } from '../fs/upload-roots';
 import type { GitRun } from '../git/runner';
 import { MEDIA_TYPES, typeOf } from '../lane-a/media';
 import { allowlistOf } from './allowlist';
@@ -179,6 +179,7 @@ export function createUploadReader({ sessions, now = Date.now }: UploadReaderDep
       try {
         read = readUpload(base, id, name, MAX_SEND_DOCUMENT_BYTES);
       } catch (error) {
+        if (error instanceof Unconfirmed) return refused(error.message);
         if (error instanceof Unsafe) return refused(`${name} is a link or not a file of its own, so it was not attached`);
         return refused(`${name} could not be read (${errorText(error)})`);
       }
