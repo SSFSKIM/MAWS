@@ -126,7 +126,7 @@ describe('mcp toggle discloses persistence and reads its state back after either
 // session's directory, sent to the session's machine, which reads the entry there. Reconnect stays a restart.
 describe('mcp sign in', () => {
   const REMOTE = addressOf(OTHER_MACHINE, BARE);
-  let targets: unknown[];
+  let targets: [string, unknown][];
   beforeEach(() => {
     resetSignIns();
     targets = [];
