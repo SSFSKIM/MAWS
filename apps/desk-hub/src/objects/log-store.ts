@@ -247,14 +247,15 @@ export class LogStore {
   /**
    * Every writer's events past `have` (the suffix a machine lacks) and at or before offset `head`, each writer's in seq
    * order, in batches. Each batch is read when it is asked for, by its own query, so a caller that takes one at a time
-   * across awaits holds one at a time, and events stored meanwhile (past `head`) are not among them. A writer
-   * `readable` refuses is passed over whole (P5 O18 D6).
+   * across awaits holds one at a time, and events stored meanwhile (past `head`) are not among them. `readable` is
+   * asked before each page of a writer, since what a reader may read can change while it is paged (P5 O18 D6): the
+   * writer is passed over from the first page it refuses.
    */
   *beyond(have: Vector, head: number = this.head(), readable: (writer: string) => boolean = () => true): Generator<LogEvent[]> {
     for (const writer of Object.keys(this.vector())) {
-      if (!readable(writer)) continue;
       let after = have[writer] ?? 0;
       for (;;) {
+        if (!readable(writer)) break;
         const [batch] = batches(
           this.sql.exec<{ body: string }>('SELECT body FROM events WHERE writer = ? AND seq > ? AND offset <= ? ORDER BY seq LIMIT ?', writer, after, head, PAGE_ROWS),
           (row) => row.body,

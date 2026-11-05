@@ -12,7 +12,7 @@ import type { ProjectDown } from '../src/protocol/browser';
 import type { LogEvent } from '../src/protocol/log';
 import { BrowserClient, waitFor } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
-import { AUDIENCE, joined, lastHave, newSession, reachOrg, say, upload, type ReachOrg } from './support/reach';
+import { AUDIENCE, event, joined, lastHave, newSession, reachOrg, say, upload, type ReachOrg } from './support/reach';
 import type { Rl1Machine } from './support/rl1';
 
 let hub: LocalHub;
@@ -93,6 +93,88 @@ describe('to machines', () => {
     await waitFor(() => (seqs(mB, project, plain).length === 4 ? true : undefined));
     expect(seqs(mB, project, plain)).toEqual([1, 2, 3, 4]);
     expect(mB.log.get(project)!.get(plain)!.get(3)).toEqual({ writer: plain, seq: 3, withheld: true });
+  });
+});
+
+describe('to a machine whose owners change', () => {
+  /** A later event of A's private session P, attested, so its upload reads no org-state head. */
+  const attested = (project: string, P: string, seq: number) => event(mA, project, P, seq, { kind: 'say', to: [], text: 'later', attest: { owners: [o.A] } }, [o.A]);
+  const ownedBy = (m: Rl1Machine, owners: string[]) =>
+    o.org.accept((s) => {
+      s.machines.find((x) => x.name === m.name)!.owners = owners;
+    });
+  /** The org state changed by `change`, announced to the project, whose read of the new head is held until released. */
+  async function headHeld(project: string, change: () => Promise<void>) {
+    await hub.stateCache(project, { hold: true });
+    const { reads } = await hub.stateCache(project);
+    await change();
+    await waitFor(async () => ((await hub.stateCache(project)).reads > reads ? true : undefined));
+  }
+
+  it("is sent none of a private stream's later events once the state drops its owner, the new head still being read", async () => {
+    const mR = await o.org.machine('reads-dropped', { capabilities: AUDIENCE });
+    const project = newProject();
+    for (const m of [mA, mR]) await m.sync(project);
+    const { P, L, stream, plain } = await written(project);
+    await mR.reaches(project, { [stream]: 2, [plain]: 2 });
+    await headHeld(project, () => ownedBy(mR, [o.B]));
+    try {
+      mA.send([{ t: 'events', project, events: [attested(project, P, 3)] }]);
+      await waitFor(() => (!mR.endpoint.isOpen || seqs(mR, project, stream).includes(3) ? true : undefined));
+      expect(seqs(mR, project, stream)).toEqual([1, 2]);
+    } finally {
+      await hub.stateCache(project, { hold: false });
+    }
+    // Its next hello is told nothing of the stream, and sent none of it, live or in the backlog.
+    if (!mR.endpoint.isOpen) await mR.connect();
+    await mR.sync(project);
+    expect(Object.keys(lastHave(mR, project).have)).not.toContain(stream);
+    expect(await upload(mA, project, [attested(project, P, 4), say(mA, project, L, 3, [])])).toEqual([]);
+    await mR.reaches(project, { [stream]: 2, [plain]: 3 });
+    mR.close();
+  });
+
+  it('whose owners stay keeps the stream whole across an unrelated change: ended where it would miss an event, it re-syncs with no hole', async () => {
+    const mK = await o.org.machine('reads-kept', { capabilities: AUDIENCE });
+    const project = newProject();
+    for (const m of [mA, mK]) await m.sync(project);
+    const { P, stream, plain } = await written(project);
+    await mK.reaches(project, { [stream]: 2, [plain]: 2 });
+    await headHeld(project, () => ownedBy(mOld, [o.A, o.B]));
+    try {
+      mA.send([{ t: 'events', project, events: [attested(project, P, 3)] }]);
+      await waitFor(() => (!mK.endpoint.isOpen || seqs(mK, project, stream).includes(3) ? true : undefined));
+    } finally {
+      await hub.stateCache(project, { hold: false });
+    }
+    if (!mK.endpoint.isOpen) await mK.connect();
+    await mK.sync(project);
+    expect(await upload(mA, project, [attested(project, P, 4)])).toEqual([]);
+    await mK.reaches(project, { [stream]: 4, [plain]: 2 });
+    expect(seqs(mK, project, stream)).toEqual([1, 2, 3, 4]);
+    mK.close();
+  });
+
+  it("ends a hello's backlog, and its connection, at a page of a stream its owners no longer reach", async () => {
+    const mR = await o.org.machine('reads-paged', { capabilities: AUDIENCE });
+    const project = newProject();
+    await mA.sync(project);
+    const P = newSession();
+    const stream = streamWriter(`${mA.name}/${P}`, [o.A]);
+    const big = 'x'.repeat(100_000);
+    expect(await upload(mA, project, [joined(mA, project, P, 1, [o.A], 1), ...[2, 3, 4, 5].map((seq) => say(mA, project, P, seq, [], [o.A], big))])).toEqual([]);
+    // The backlog's first page waits at the machine's object while the state drops the machine's owner.
+    await hub.holdSend(mR.name, 'events');
+    await mR.sync(project);
+    const { reads } = await hub.stateCache(project);
+    await ownedBy(mR, [o.B]);
+    await waitFor(async () => ((await hub.stateCache(project)).reads > reads ? true : undefined));
+    await hub.releaseSend(mR.name);
+    await waitFor(() => (!mR.endpoint.isOpen || seqs(mR, project, stream).length === 5 ? true : undefined));
+    const held = seqs(mR, project, stream);
+    expect(held.length).toBeLessThan(5);
+    expect(held).toEqual(held.map((_, i) => i + 1));
+    mR.close();
   });
 });
 

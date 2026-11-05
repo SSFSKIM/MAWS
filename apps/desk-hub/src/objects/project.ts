@@ -96,6 +96,17 @@ export type MachineContext = { org: string; project: string; machine: string; cl
  */
 export type Reader = { machine: string; owners: string[]; streams: boolean } | { member: string };
 
+/** A machine's fan-out row (P5 O18 D6): its owners as its hello resolved them, and those it holds now (null while an
+ * announced org state is resolved). */
+type MachineRow = { name: string; generation: number; owners: string | null; current: string | null; streams: number };
+
+/** The reader a machine's connection is now, and the one it was at its hello. */
+function readersOf(row: MachineRow): { now: Reader; atHello: Reader } {
+  const streams = row.streams === 1;
+  const parse = (owners: string | null) => (owners === null ? [] : (JSON.parse(owners) as string[]));
+  return { now: { machine: row.name, owners: parse(row.current), streams }, atHello: { machine: row.name, owners: parse(row.owners), streams } };
+}
+
 /** The `kv` key of the newest org state announced to this project and the member ids it holds (`stateAdvanced`). */
 const STATE_MEMBERS = 'state-members';
 type StateMembers = { version: number; members: string[] };
@@ -146,6 +157,9 @@ export class Project extends DurableObject<Env> {
   private readonly signatures: SignedEvents;
   /** Each member's `human`s, taken one at a time in arrival order: a signed one waits for its check (`human`). */
   private readonly humans = new Map<string, Promise<void>>();
+  /** How many org-state announcements this instance has begun (`stateAdvanced`): owners resolved across one are
+   * resolved again (`hello`), and a narrowing an announcement overtook leaves the rows to the newer one's. */
+  private stateEpoch = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -158,11 +172,13 @@ export class Project extends DurableObject<Env> {
       () => this.stateReadTimeoutMs(),
     );
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS machines (name TEXT PRIMARY KEY, generation INTEGER NOT NULL)');
-    // A machine's reader (P5 O18 D6): its owners as its hello resolved them (narrowed by each org state since), and
+    // A machine's reader (P5 O18 D6): its owners as its hello resolved them (`owners`), those of them the newest org
+    // state still gives it (`current`, null while an announced state is resolved, so it reads no stream meanwhile), and
     // whether its connection advertised `audience`.
     const columns = ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(machines)').toArray().map((c) => c.name);
     if (!columns.includes('owners')) ctx.storage.sql.exec('ALTER TABLE machines ADD COLUMN owners TEXT');
     if (!columns.includes('streams')) ctx.storage.sql.exec('ALTER TABLE machines ADD COLUMN streams INTEGER NOT NULL DEFAULT 0');
+    if (!columns.includes('current')) ctx.storage.sql.exec('ALTER TABLE machines ADD COLUMN current TEXT');
     // Each session's latest policy this project has seen from the registry or admitted from a snapshot (P5 O18 D5),
     // what its session-plane rows are read against.
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS known_policies (session TEXT PRIMARY KEY, audience TEXT, policy_rev INTEGER NOT NULL, created TEXT NOT NULL)');
@@ -402,6 +418,10 @@ export class Project extends DurableObject<Env> {
    * `version` (M5, signed-events.ts).
    */
   async stateAdvanced(version: number, members?: string[]): Promise<void> {
+    // Before anything here waits, every stream-reading machine reads no stream until its owners are resolved against
+    // the new head (`narrowReaders`), so nothing reaches an owner the state dropped while the head is read.
+    this.stateEpoch++;
+    this.ctx.storage.sql.exec('UPDATE machines SET current = NULL WHERE streams = 1');
     // Called first, so the cached head counts as old before anything here waits.
     const refreshed = this.signatures.advanced(version);
     if (members !== undefined) await this.keepMembers(version, members);
@@ -410,18 +430,28 @@ export class Project extends DurableObject<Env> {
   }
 
   /**
-   * Each stream-reading machine's owners narrowed to those the new head still gives it (P5 O18 D6): an owner the state
-   * dropped reads no more of a stream from now on, while one it added waits for the machine's next hello, so a reader
-   * never begins a stream midway, with the hole that would leave. A head that can't be read narrows them to none.
+   * Each stream-reading machine's current owners: those of its hello the new head still gives it (P5 O18 D6). An owner
+   * the state dropped reads no more of a stream from now on, while one it added waits for the machine's next hello, so
+   * a reader never begins a stream midway, with the hole that would leave. A head that can't be read gives none. Every
+   * row is set in one step, once each machine's owners are resolved, a row a hello added meanwhile included; a newer
+   * announcement begun meanwhile sets them itself.
    */
   private async narrowReaders(): Promise<void> {
-    const rows = this.ctx.storage.sql.exec<{ name: string; owners: string | null }>('SELECT name, owners FROM machines WHERE streams = 1').toArray();
-    for (const { name, owners } of rows) {
-      const held = owners === null ? [] : (JSON.parse(owners) as string[]);
-      if (held.length === 0) continue;
-      const fresh = await this.machineOwnersOf(name);
-      const kept = held.filter((o) => fresh?.includes(o) === true);
-      if (kept.length !== held.length) this.ctx.storage.sql.exec('UPDATE machines SET owners = ? WHERE name = ?', JSON.stringify(kept), name);
+    const epoch = this.stateEpoch;
+    const fresh = new Map<string, string[] | null>();
+    for (;;) {
+      const rows = this.ctx.storage.sql.exec<{ name: string; owners: string | null }>('SELECT name, owners FROM machines WHERE streams = 1').toArray();
+      const unresolved = rows.filter((r) => !fresh.has(r.name));
+      if (unresolved.length > 0) {
+        for (const { name } of unresolved) fresh.set(name, await this.machineOwnersOf(name));
+        continue;
+      }
+      if (this.stateEpoch !== epoch) return;
+      for (const { name, owners } of rows) {
+        const kept = (owners === null ? [] : (JSON.parse(owners) as string[])).filter((o) => fresh.get(name)?.includes(o) === true);
+        this.ctx.storage.sql.exec('UPDATE machines SET current = ? WHERE name = ?', JSON.stringify(kept), name);
+      }
+      return;
     }
   }
 
@@ -474,13 +504,21 @@ export class Project extends DurableObject<Env> {
       const refusal: Refusal = { reason: 'bad-shape', message: 'hello is {project, name, have: {writer: seq}, follow?: boolean}' };
       return { owed: [this.refusal(ctx, refusal)], refused: refusal };
     }
-    // A connection that reads streams is resolved its owners now, fixed for the connection but for narrowing.
-    const [record, owners] = await Promise.all([this.register(ctx.project, frame.name, ctx.machine), ctx.streams === true ? this.machineOwnersOf(ctx.machine) : Promise.resolve(null)]);
+    // A connection that reads streams is resolved its owners now, fixed for the connection but for narrowing; resolved
+    // again when an org state was announced meanwhile, since they may be the older head's.
+    let epoch = this.stateEpoch;
+    const [record, resolved] = await Promise.all([this.register(ctx.project, frame.name, ctx.machine), ctx.streams === true ? this.machineOwnersOf(ctx.machine) : Promise.resolve(null)]);
+    let owners = resolved;
+    while (ctx.streams === true && epoch !== this.stateEpoch) {
+      epoch = this.stateEpoch;
+      owners = await this.machineOwnersOf(ctx.machine);
+    }
     // A newer stream of this machine may have opened the project while the registry answered: it keeps its place.
     this.ctx.storage.sql.exec(
-      'INSERT INTO machines (name, generation, owners, streams) VALUES (?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET generation = excluded.generation, owners = excluded.owners, streams = excluded.streams WHERE excluded.generation > machines.generation',
+      'INSERT INTO machines (name, generation, owners, current, streams) VALUES (?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET generation = excluded.generation, owners = excluded.owners, current = excluded.current, streams = excluded.streams WHERE excluded.generation > machines.generation',
       ctx.machine,
       ctx.generation,
+      JSON.stringify(owners ?? []),
       JSON.stringify(owners ?? []),
       ctx.streams === true ? 1 : 0,
     );
@@ -500,8 +538,8 @@ export class Project extends DurableObject<Env> {
     // The backlog is the log as of now, read a page at a time as the stream takes it: a page is read once the page
     // before it is written, so a long log is never held whole. An event stored from now on goes out live, queued
     // behind the whole backlog. The hello's POST waits for its `have` alone: a page that cannot be written ends the
-    // stream through the send's own failure.
-    const pages = this.log.beyond(have as Vector, this.log.head(), (writer) => this.mayRead(reader, writer));
+    // stream through the send's own failure. Each page is read as the machine's reader stands then (`backlogReads`).
+    const pages = this.log.beyond(have as Vector, this.log.head(), (writer) => this.backlogReads(ctx, writer));
     void this.toMachineAll(ctx.machine, ctx.generation, mapped(pages, (events): DownFrame => ({ t: 'events', project: ctx.project, events })), 'replies');
     return { owed: [owed] };
   }
@@ -785,10 +823,24 @@ export class Project extends DurableObject<Env> {
     return this.maySeeSession(member, delivery.session) && this.mayRead({ member }, delivery.event.writer);
   }
 
-  /** The reader a machine's live connection to this project is: its fan-out row. */
+  /** The reader a machine's live connection to this project is now: its fan-out row. */
   private machineReader(name: string): Reader {
-    const row = this.ctx.storage.sql.exec<{ owners: string | null; streams: number }>('SELECT owners, streams FROM machines WHERE name = ?', name).toArray()[0];
-    return { machine: name, owners: row?.owners ? (JSON.parse(row.owners) as string[]) : [], streams: row?.streams === 1 };
+    const row = this.ctx.storage.sql.exec<MachineRow>('SELECT name, generation, owners, current, streams FROM machines WHERE name = ?', name).toArray()[0];
+    return row ? readersOf(row).now : { machine: name, owners: [], streams: false };
+  }
+
+  /**
+   * Whether a hello's backlog sends the next page of `writer` (`LogStore.beyond` asks before each): yes when the
+   * connection's reader reads it now. A writer it read at its hello but no longer does would be left with a hole, so
+   * the connection ends instead (`endStream`), and with it the backlog; its next hello gives it a coherent view.
+   */
+  private backlogReads(ctx: MachineContext, writer: string): boolean {
+    const row = this.ctx.storage.sql.exec<MachineRow>('SELECT name, generation, owners, current, streams FROM machines WHERE name = ?', ctx.machine).toArray()[0];
+    if (row?.generation !== ctx.generation) return false;
+    const { now, atHello } = readersOf(row);
+    if (this.mayRead(now, writer)) return true;
+    if (this.mayRead(atHello, writer)) this.endStream(ctx.machine, ctx.generation);
+    return false;
   }
 
   /** A machine asking over HTTP: no stream is served there, but its own writers. */
@@ -1531,11 +1583,18 @@ export class Project extends DurableObject<Env> {
       const readable = accepted.filter((s) => this.mayRead({ member }, s.event.writer));
       if (readable.length > 0) this.toSocket(socket, { t: 'log', events: readable });
     }
-    const rows = this.ctx.storage.sql.exec<{ name: string; generation: number; owners: string | null; streams: number }>('SELECT name, generation, owners, streams FROM machines').toArray();
-    for (const { name, generation, owners, streams } of rows) {
+    // A machine is sent what it reads now. An event it read at its hello but no longer does would leave it a hole, so
+    // its connection ends instead, and its next hello gives it a coherent view.
+    const rows = this.ctx.storage.sql.exec<MachineRow>('SELECT name, generation, owners, current, streams FROM machines').toArray();
+    for (const row of rows) {
+      const { name, generation } = row;
       if (name === except) continue;
-      const reader: Reader = { machine: name, owners: owners ? (JSON.parse(owners) as string[]) : [], streams: streams === 1 };
-      const events = accepted.filter((s) => this.mayRead(reader, s.event.writer)).map((s) => s.event);
+      const { now, atHello } = readersOf(row);
+      if (accepted.some((s) => !this.mayRead(now, s.event.writer) && this.mayRead(atHello, s.event.writer))) {
+        this.endStream(name, generation);
+        continue;
+      }
+      const events = accepted.filter((s) => this.mayRead(now, s.event.writer)).map((s) => s.event);
       if (events.length > 0) this.toMachine(name, generation, { t: 'events', project: this.projectId, events }, 'replies');
     }
   }
@@ -1672,7 +1731,7 @@ export class Project extends DurableObject<Env> {
       const queued = parseQueueKey(other);
       if (queued?.machine === name && queued.generation < generation) this.queues.delete(other);
     }
-    const machine = this.env.MACHINE.get(this.env.MACHINE.idFromName(`${this.orgId}:${name}`));
+    const machine = this.machineObject(name);
     const sent = (this.queues.get(key) ?? Promise.resolve()).then(async () => {
       let result: Sent = 'written';
       let frame: DownFrame | undefined;
@@ -1698,6 +1757,17 @@ export class Project extends DurableObject<Env> {
 
   private leaveFanOut(name: string, generation: number): void {
     this.ctx.storage.sql.exec('DELETE FROM machines WHERE name = ? AND generation = ?', name, generation);
+  }
+
+  /** Ends the machine's stream of this generation, as a send that failed does: it leaves the fan-out, and its next
+   * `hello` heals what it missed. */
+  private endStream(name: string, generation: number): void {
+    this.leaveFanOut(name, generation);
+    void this.machineObject(name).close(generation).catch(() => {});
+  }
+
+  private machineObject(name: string) {
+    return this.env.MACHINE.get(this.env.MACHINE.idFromName(`${this.orgId}:${name}`));
   }
 
   private isOpen(ctx: MachineContext): boolean {
