@@ -867,6 +867,13 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
 - Decision (M1): the first `policies` call waits up to 10 s for the fill before refusing `state-unavailable`. Until the fill completes, every upload that names a session is refused that way.
   Rationale: one bounded wait means fewer refusals than answering at once, and a `state-unavailable` refusal is retried (D5). Until M2's endpoint lands, a `state-unavailable` position waits for the next reconnect or write, as a signature check's does today.
   Date/Author: 2026-11-05, p5-desk-track-owner (M1).
+- Decision (M1, from the first review): a machine reader's owners are re-resolved fail-closed. Each machine row keeps the owners its hello resolved and a `current` set. Every org-state announcement nulls `current` synchronously, before anything awaits, so the reader reads no stream while its owners are re-resolved. `current` then becomes the hello-owners intersected with the fresh set, so a reader never widens mid-connection. A stream event the reader could read at its hello but can't now ends its connection: it re-hellos and gets a coherent view instead of a hole. A hello's backlog asks the current row before every page.
+  Rationale: the review found an upload fanning out to a revoked owner while the head was read, and a backlog running on the Reader it captured at hello.
+  Cost: an org-state change can reconnect the machines whose stream reads it interrupts, and only those.
+  Rejected: narrowing after the head read (the first build), which leaves that window open; and blanking reads with no reconnect, which leaves a hole.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M1), approved by the architect.
+- Decision (M1, from the first review): a device's words take their sender from the authenticated member alone, never from the event body (an `attest` on it is ignored). An `unlisted` notice carries no session reference.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M1).
 - Decision (M1): the read-surface tests live in a new `apps/desk-hub/test/audience-reads.test.ts`, beside `policies.test.ts`, rather than in `log.test.ts`. Both files need an org with a second member and machines that advertise `audience`, which the org `log.test.ts` shares doesn't have. `log.test.ts` and `signed-log.test.ts` run unchanged, as the regression check.
   Date/Author: 2026-11-05, p5-desk-track-owner (M1).
 
