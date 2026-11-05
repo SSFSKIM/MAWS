@@ -57,18 +57,18 @@ export class TestOrg {
   }
 
   /** A machine enrolled the v2 way and listed in the state, as RL1 needs. */
-  async listed(name: string): Promise<V2Machine> {
+  async listed(name: string, owners: string[] = [this.admin]): Promise<V2Machine> {
     const machine = await this.enroll(name);
     await this.accept((s) => {
-      s.machines.push({ name, ref: machine.ref, pub: machine.key.pub, owners: [this.admin] });
+      s.machines.push({ name, ref: machine.ref, pub: machine.key.pub, owners });
       s.machineNames.push({ name, ref: machine.ref });
     });
     return machine;
   }
 
-  /** A listed machine on RL1, its endpoint socket open. */
-  async machine(name: string): Promise<Rl1Machine> {
-    const machine = new Rl1Machine(this.hub, await this.listed(name));
+  /** A listed machine on RL1, its endpoint socket open; its hello advertising `capabilities` when given. */
+  async machine(name: string, options: { capabilities?: string[]; owners?: string[] } = {}): Promise<Rl1Machine> {
+    const machine = new Rl1Machine(this.hub, await this.listed(name, options.owners), { capabilities: options.capabilities });
     await machine.connect();
     return machine;
   }
@@ -84,8 +84,9 @@ export class Rl1Machine {
   constructor(
     hub: LocalHub,
     readonly machine: V2Machine,
+    options: { capabilities?: string[] } = {},
   ) {
-    this.endpoint = new FakeEndpoint({ hub: hub.url, credentials: machine.credentials, ref: machine.ref });
+    this.endpoint = new FakeEndpoint({ hub: hub.url, credentials: machine.credentials, ref: machine.ref, ...options });
   }
 
   get name(): string {

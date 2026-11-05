@@ -55,7 +55,7 @@ function client(options: { beforeFrame?: () => boolean; held?: () => number; fra
       caughtUp: (offset) => caughtUp.push(offset),
       session: (message) => sessions.push(message),
       status: (s) => statuses.push(s),
-      refused: (r) => refusals.push(r.message),
+      refused: (r) => refusals.push(r.message ?? r.reason),
     },
   });
   clients.push(c);

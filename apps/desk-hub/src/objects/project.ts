@@ -24,7 +24,28 @@
 // before its event is stored, by the protocol package against the org-state head this object caches from its Registry
 // (signed-events.ts); a `mac` is still never checked here.
 import { DurableObject } from 'cloudflare:workers';
-import { HISTORY_PAGE_BYTES, isHistoryAttestation, isSigned, machineNameKey, verifyHistorySigner, type HistoryAttestation, type HistoryLogPage, type LogEventV2, type Signed } from 'org-protocol';
+import {
+  audienceDigest,
+  HISTORY_PAGE_BYTES,
+  isAudience,
+  isHistoryAttestation,
+  isSigned,
+  isUnlistedNotice,
+  machineNameKey,
+  machineOwners,
+  ownerMembers,
+  refOfName,
+  sessionRefs,
+  streamOf,
+  streamWriter,
+  verifyHistorySigner,
+  writerSession,
+  type HistoryAttestation,
+  type HistoryLogPage,
+  type LogEventV2,
+  type EventSessionRef,
+  type Signed,
+} from 'org-protocol';
 import { MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from '../env';
 import { isBase64urlOf } from '../protocol/base64url';
 import { BROWSER_SET_LIMIT, BROWSER_SET_PARTS, isOutputTail, isTaskId, OUTPUT_TAIL_MAX, readShapeError, type AuditEntry, type PendingRequest, type ProjectDown, type PushNotice, type RetiredRefusal } from '../protocol/browser';
@@ -37,7 +58,8 @@ import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from 
 import { SESSION_WIDE_KINDS, SUBSCRIPTION_KINDS, SUGGESTION_BYTES_MAX, SUGGESTIONS_MAX, type Delivery, type MachinePresence, type Raised, type SessionKind, type SessionMessage, type Settled } from '../protocol/session';
 import type { Sent } from './machine';
 import { HistoryStore } from './history-store';
-import { BATCH_BYTES, eventShapeError, LogStore, resendNonce, sameEvent, type AuditRow, type Stored } from './log-store';
+import { BATCH_BYTES, bodyHash, eventShapeError, LogStore, resendNonce, sameEvent, type AuditRow, type NewestSnapshot, type Stored } from './log-store';
+import { newer, type PoliciesAnswer, type Policy, type Snapshot } from './policies';
 import type { Result, SummaryReport } from './registry';
 import { RETRY_ATTEMPTS, RETRY_BASE_MS, retryDelay } from './retry';
 import { pendingKey, SessionStore, type Lease, type Route } from './session-store';
@@ -64,7 +86,26 @@ export const VISIBLE_MS = 90_000;
  * with, the stream the POST belongs to, how long a renewal on that stream keeps the machine online, and how long the
  * lease holds after that stream closes (`graceMs`; absent from a `Machine` of an older deploy, whose closes lapse at
  * once as before). `transport` is `rl1` for a frame off a machine's RL1 socket (O11 M6), absent for DX2's stream. */
-export type MachineContext = { org: string; project: string; machine: string; client: string; generation: number; leaseMs: number; graceMs?: number; transport?: 'rl1' };
+export type MachineContext = { org: string; project: string; machine: string; client: string; generation: number; leaseMs: number; graceMs?: number; transport?: 'rl1'; streams?: boolean };
+
+/**
+ * A reader of what this object stores (P5 O18 D6): a machine, with its owners and whether its RL1 hello advertised
+ * `audience` (`streams`: false on DX2's stream and over HTTP), or a browser's member. Every surface that returns
+ * stored events, writer names, vectors, audit rows or session-plane rows asks `mayRead` (or, for a session-plane row,
+ * `maySeeSession`) for its reader first.
+ */
+export type Reader = { machine: string; owners: string[]; streams: boolean } | { member: string };
+
+/** A machine's fan-out row (P5 O18 D6): its owners as its hello resolved them, and those it holds now (null while an
+ * announced org state is resolved). */
+type MachineRow = { name: string; generation: number; owners: string | null; current: string | null; streams: number };
+
+/** The reader a machine's connection is now, and the one it was at its hello. */
+function readersOf(row: MachineRow): { now: Reader; atHello: Reader } {
+  const streams = row.streams === 1;
+  const parse = (owners: string | null) => (owners === null ? [] : (JSON.parse(owners) as string[]));
+  return { now: { machine: row.name, owners: parse(row.current), streams }, atHello: { machine: row.name, owners: parse(row.owners), streams } };
+}
 
 /** The `kv` key of the newest org state announced to this project and the member ids it holds (`stateAdvanced`). */
 const STATE_MEMBERS = 'state-members';
@@ -116,6 +157,9 @@ export class Project extends DurableObject<Env> {
   private readonly signatures: SignedEvents;
   /** Each member's `human`s, taken one at a time in arrival order: a signed one waits for its check (`human`). */
   private readonly humans = new Map<string, Promise<void>>();
+  /** How many org-state announcements this instance has begun (`stateAdvanced`): owners resolved across one are
+   * resolved again (`hello`), and a narrowing an announcement overtook leaves the rows to the newer one's. */
+  private stateEpoch = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -128,6 +172,16 @@ export class Project extends DurableObject<Env> {
       () => this.stateReadTimeoutMs(),
     );
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS machines (name TEXT PRIMARY KEY, generation INTEGER NOT NULL)');
+    // A machine's reader (P5 O18 D6): its owners as its hello resolved them (`owners`), those of them the newest org
+    // state still gives it (`current`, null while an announced state is resolved, so it reads no stream meanwhile), and
+    // whether its connection advertised `audience`.
+    const columns = ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(machines)').toArray().map((c) => c.name);
+    if (!columns.includes('owners')) ctx.storage.sql.exec('ALTER TABLE machines ADD COLUMN owners TEXT');
+    if (!columns.includes('streams')) ctx.storage.sql.exec('ALTER TABLE machines ADD COLUMN streams INTEGER NOT NULL DEFAULT 0');
+    if (!columns.includes('current')) ctx.storage.sql.exec('ALTER TABLE machines ADD COLUMN current TEXT');
+    // Each session's latest policy this project has seen from the registry or admitted from a snapshot (P5 O18 D5),
+    // what its session-plane rows are read against.
+    ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS known_policies (session TEXT PRIMARY KEY, audience TEXT, policy_rev INTEGER NOT NULL, created TEXT NOT NULL)');
     // A route whose socket is gone (a restart drops every connection, and a socket's close may not have reached a
     // restarted object) is dropped; its machine's stream went with the restart too.
     for (const route of this.plane.routes()) {
@@ -155,12 +209,14 @@ export class Project extends DurableObject<Env> {
     this.toSocket(server, { t: 'welcome', project: this.projectId, member, head: this.log.head() });
     this.toSocket(server, this.machinesFrame());
     // Each session's latest presence, but never a lapsed machine's as current: its sessions' presence is unknown.
-    for (const { machine, message } of this.plane.presence()) if (this.isOnline(machine)) this.toSocket(server, { t: 'session', message });
-    this.toSocket(server, this.pendingFrame());
+    // Each session-plane row only of a session the member may see (P5 O18 D6).
+    for (const { machine, message } of this.plane.presence()) if (this.isOnline(machine) && this.maySeeSession(member, message.session)) this.toSocket(server, { t: 'session', message });
+    this.toSocket(server, this.pendingFrame(member));
     // Outcomes stay useful when their machine is offline. They are receipts, not fresh presence.
-    for (const message of this.plane.ops(Date.now())) this.toSocket(server, { t: 'session', message });
-    for (const deliveries of batched(this.plane.deliveries())) this.toSocket(server, { t: 'deliveries', deliveries });
-    if (this.plane.deliveries().length === 0) this.toSocket(server, { t: 'deliveries', deliveries: [] });
+    for (const message of this.plane.ops(Date.now())) if (this.maySeeSession(member, message.session)) this.toSocket(server, { t: 'session', message });
+    const deliveries = this.plane.deliveries().filter((d) => this.maySeeDelivery(member, d));
+    for (const batch of batched(deliveries)) this.toSocket(server, { t: 'deliveries', deliveries: batch });
+    if (deliveries.length === 0) this.toSocket(server, { t: 'deliveries', deliveries: [] });
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -362,10 +418,41 @@ export class Project extends DurableObject<Env> {
    * `version` (M5, signed-events.ts).
    */
   async stateAdvanced(version: number, members?: string[]): Promise<void> {
+    // Before anything here waits, every stream-reading machine reads no stream until its owners are resolved against
+    // the new head (`narrowReaders`), so nothing reaches an owner the state dropped while the head is read.
+    this.stateEpoch++;
+    this.ctx.storage.sql.exec('UPDATE machines SET current = NULL WHERE streams = 1');
     // Called first, so the cached head counts as old before anything here waits.
     const refreshed = this.signatures.advanced(version);
     if (members !== undefined) await this.keepMembers(version, members);
     await refreshed;
+    await this.narrowReaders();
+  }
+
+  /**
+   * Each stream-reading machine's current owners: those of its hello the new head still gives it (P5 O18 D6). An owner
+   * the state dropped reads no more of a stream from now on, while one it added waits for the machine's next hello, so
+   * a reader never begins a stream midway, with the hole that would leave. A head that can't be read gives none. Every
+   * row is set in one step, once each machine's owners are resolved, a row a hello added meanwhile included; a newer
+   * announcement begun meanwhile sets them itself.
+   */
+  private async narrowReaders(): Promise<void> {
+    const epoch = this.stateEpoch;
+    const fresh = new Map<string, string[] | null>();
+    for (;;) {
+      const rows = this.ctx.storage.sql.exec<{ name: string; owners: string | null }>('SELECT name, owners FROM machines WHERE streams = 1').toArray();
+      const unresolved = rows.filter((r) => !fresh.has(r.name));
+      if (unresolved.length > 0) {
+        for (const { name } of unresolved) fresh.set(name, await this.machineOwnersOf(name));
+        continue;
+      }
+      if (this.stateEpoch !== epoch) return;
+      for (const { name, owners } of rows) {
+        const kept = (owners === null ? [] : (JSON.parse(owners) as string[])).filter((o) => fresh.get(name)?.includes(o) === true);
+        this.ctx.storage.sql.exec('UPDATE machines SET current = ? WHERE name = ?', JSON.stringify(kept), name);
+      }
+      return;
+    }
   }
 
   private async keepMembers(version: number, members: string[]): Promise<void> {
@@ -417,21 +504,42 @@ export class Project extends DurableObject<Env> {
       const refusal: Refusal = { reason: 'bad-shape', message: 'hello is {project, name, have: {writer: seq}, follow?: boolean}' };
       return { owed: [this.refusal(ctx, refusal)], refused: refusal };
     }
-    const record = await this.register(ctx.project, frame.name, ctx.machine);
+    // A connection that reads streams is resolved its owners now, fixed for the connection but for narrowing; resolved
+    // again when an org state was announced meanwhile, since they may be the older head's.
+    let epoch = this.stateEpoch;
+    const [record, resolved] = await Promise.all([this.register(ctx.project, frame.name, ctx.machine), ctx.streams === true ? this.machineOwnersOf(ctx.machine) : Promise.resolve(null)]);
+    let owners = resolved;
+    while (ctx.streams === true && epoch !== this.stateEpoch) {
+      epoch = this.stateEpoch;
+      owners = await this.machineOwnersOf(ctx.machine);
+    }
     // A newer stream of this machine may have opened the project while the registry answered: it keeps its place.
     this.ctx.storage.sql.exec(
-      'INSERT INTO machines (name, generation) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET generation = excluded.generation WHERE excluded.generation > machines.generation',
+      'INSERT INTO machines (name, generation, owners, current, streams) VALUES (?, ?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET generation = excluded.generation, owners = excluded.owners, current = excluded.current, streams = excluded.streams WHERE excluded.generation > machines.generation',
       ctx.machine,
       ctx.generation,
+      JSON.stringify(owners ?? []),
+      JSON.stringify(owners ?? []),
+      ctx.streams === true ? 1 : 0,
     );
     if (!this.isOpen(ctx)) return { owed: [] };
     this.startLease(ctx, frame.follow === true);
-    const owed = this.toMachine(ctx.machine, ctx.generation, { t: 'have', project: ctx.project, have: this.log.vector(), archive: record.archive_machine === ctx.machine }, 'replies');
+    // The vector and the backlog of what this machine may read alone; and its own writers' withheld positions (P5 O18
+    // D6), which name nothing it doesn't hold.
+    const reader = this.machineReader(ctx.machine);
+    const vector = Object.fromEntries(Object.entries(this.log.vector()).filter(([writer]) => this.mayRead(reader, writer)));
+    const withheld = this.log.withheldOf(ctx.machine);
+    const owed = this.toMachine(
+      ctx.machine,
+      ctx.generation,
+      { t: 'have', project: ctx.project, have: vector, archive: record.archive_machine === ctx.machine, ...(Object.keys(withheld).length > 0 ? { withheld } : {}) },
+      'replies',
+    );
     // The backlog is the log as of now, read a page at a time as the stream takes it: a page is read once the page
     // before it is written, so a long log is never held whole. An event stored from now on goes out live, queued
     // behind the whole backlog. The hello's POST waits for its `have` alone: a page that cannot be written ends the
-    // stream through the send's own failure.
-    const pages = this.log.beyond(have as Vector, this.log.head());
+    // stream through the send's own failure. Each page is read as the machine's reader stands then (`backlogReads`).
+    const pages = this.log.beyond(have as Vector, this.log.head(), (writer) => this.backlogReads(ctx, writer));
     void this.toMachineAll(ctx.machine, ctx.generation, mapped(pages, (events): DownFrame => ({ t: 'events', project: ctx.project, events })), 'replies');
     return { owed: [owed] };
   }
@@ -442,13 +550,19 @@ export class Project extends DurableObject<Env> {
   // org state does not verify, refused, reported, and recorded. A writer stops at its first refusal or gap in a batch.
   // The v2 signatures are checked first, every one that may be stored, so the batch is then stored in one step with no
   // wait inside it.
+  //
+  // Message reach (P5 O18 D5): an event whose `audience` its writer stream does not name is refused `audience`; then
+  // each event that may be stored is judged against the policy registry, read once for the batch (`reachOf`) and
+  // replayed in order as the batch's own snapshots move it (`judge`). One out of reach is withheld: refused
+  // `not-reachable` with no message, a tombstone stored at its position, and the writer goes on at the next seq. One the
+  // registry could not be read for is refused `state-unavailable` and stores nothing, its writer stopped there. The hub
+  // only refuses: what it admits still meets the receiving endpoint's `reach?`.
   private async upload(ctx: MachineContext, events: unknown): Promise<'stale' | Taken> {
     if (!Array.isArray(events)) {
       const refusal: Refusal = { reason: 'bad-shape', message: 'events is a list' };
       return { owed: [this.refusal(ctx, refusal)], refused: refusal };
     }
     const owed: Promise<Sent>[] = [];
-    const refuse = (refusal: Refusal) => void owed.push(this.refusal(ctx, refusal));
     let archive: string | null | undefined;
     if (events.some((e) => typeof e?.writer === 'string' && e.writer.startsWith(LEGACY_WRITER_PREFIX))) {
       archive = await this.archiveMachine(ctx.project);
@@ -459,7 +573,10 @@ export class Project extends DurableObject<Env> {
     const checked = await this.checkSignatures(ctx, events, archive);
     // As above, and a revocation of this stream (DX7's `forget`) that came while the head was read: either way the
     // upload is the retired stream's.
-    if (checked.size > 0 && ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation || !this.isOpen(ctx) || this.isRevoked(ctx.machine, ctx.generation))) return 'stale';
+    if (checked.size > 0 && this.retiredStream(ctx)) return 'stale';
+    const reach = await this.reachOf(ctx, events as LogEvent[], archive, checked);
+    if (reach !== null && this.retiredStream(ctx)) return 'stale';
+    const refuse = (refusal: Refusal, senders?: string[]) => void owed.push(this.refusal(ctx, refusal, 'replies', senders));
     const accepted: Stored[] = [];
     const stopped = new Set<string>();
     for (const event of events as LogEvent[]) {
@@ -483,7 +600,15 @@ export class Project extends DurableObject<Env> {
       }
       const last = this.log.last(writer);
       if (seq <= last) {
-        if (!sameEvent(this.log.at(writer, seq)!.event, event)) {
+        const withheld = this.log.refusedAt(writer, seq);
+        if (withheld !== null) {
+          // A withheld position's resend: the same body is withheld again, another is a conflict.
+          if (withheld === bodyHash(event)) refuse({ reason: 'not-reachable', writer, seq });
+          else {
+            stopped.add(writer);
+            refuse({ reason: 'conflict', writer, seq, message: 'a different payload was withheld at this position' });
+          }
+        } else if (!sameEvent(this.log.at(writer, seq)!.event, event)) {
           stopped.add(writer);
           refuse({ reason: 'conflict', writer, seq, message: 'a different payload is stored at this position' });
         }
@@ -494,20 +619,42 @@ export class Project extends DurableObject<Env> {
           refuse({ reason: signature.reason, writer, seq, message: signature.message });
           continue;
         }
+        const mismatch = audienceError(event);
+        if (mismatch !== null) {
+          stopped.add(writer);
+          refuse({ reason: 'audience', writer, seq, message: mismatch });
+          continue;
+        }
+        const verdict = judge(event, reach, reach?.owners ?? null);
+        if (verdict.kind === 'unavailable') {
+          stopped.add(writer);
+          refuse({ reason: 'state-unavailable', writer, seq, message: 'the policy registry or the org state could not be read to check what this event names; send it again' });
+          continue;
+        }
+        const audience = isAudience(event.audience) ? event.audience : null;
+        if (audience !== null) this.keepStream(writer, audience);
+        if (verdict.kind === 'withhold') {
+          accepted.push(this.log.withhold(writer, seq, bodyHash(event)));
+          refuse({ reason: 'not-reachable', writer, seq }, verdict.senders);
+          continue;
+        }
         accepted.push(this.log.append(event));
       } else {
         stopped.add(writer);
         owed.push(this.toMachine(ctx.machine, ctx.generation, { t: 'resend', project: ctx.project, writer, from: last + 1 }, 'replies'));
       }
     }
+    if (reach !== null) this.keepPolicies(reach.rows);
     this.fanOut(accepted, ctx.machine);
     // An async question opened, answered, or ended with its session: the grid's `waiting` may move (owner, 2026-10-18).
     if (accepted.some(({ event }) => questionEffect(event) !== null)) this.reportSummary();
     const now = Date.now();
     // A machine on RL1 pushes through its own `notify` (O11 M6): it knows a private session from a listed one, and its
-    // requests wait in channels the log never sees. The log plane pushes nothing for it, so nothing is pushed twice.
+    // requests wait in channels the log never sees. The log plane pushes nothing for it, so nothing is pushed twice. An
+    // event of an audience stream is never pushed: a push names its session to every member (P5 O18 D6).
     for (const { event } of ctx.transport === 'rl1' ? [] : accepted) {
       if ((event.kind !== 'message' && event.kind !== 'question') || !(now - Date.parse(event.ts) <= PUSH_FRESH_MS)) continue;
+      if (streamOf(event.writer).digest !== null) continue;
       const session = event.writer.slice(event.writer.indexOf('/') + 1);
       // An async ask (2026-10-18): its `question` event is the one signal of an ask nothing raises (MAWS's own), and a
       // second report of one a bridge raised as well (`src` its call's id), which pushes once, whichever came first.
@@ -516,6 +663,189 @@ export class Project extends DurableObject<Env> {
       this.push({ v: 1, project: this.projectId, session, alias: typeof event.from === 'string' ? event.from : null, kind: event.kind, event: { writer: event.writer, seq: event.seq } }, this.waitingSessions().size, event.writer.slice(0, event.writer.indexOf('/')));
     }
     return { owed };
+  }
+
+  /** Whether a newer stream of the machine opened the project, or this one closed or was revoked, while it waited. */
+  private retiredStream(ctx: MachineContext): boolean {
+    return (this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation || !this.isOpen(ctx) || this.isRevoked(ctx.machine, ctx.generation);
+  }
+
+  /**
+   * What the reach check of an upload needs (P5 O18 D5), read once for the batch: the registry's rows of every session
+   * the events that may be stored name, with the batch's snapshots recorded, and the uploading machine's owners when an
+   * event with an audience carries no attestation. Null when no event needs either. Which events may be stored is
+   * judged as `upload` will (shape, writer, position, signature, audience), so no snapshot the batch refuses for those
+   * reaches the registry.
+   */
+  private async reachOf(ctx: MachineContext, events: LogEvent[], archive: string | null | undefined, checked: Map<unknown, SignatureCheck>): Promise<Reach | null> {
+    const next = new Map<string, number>();
+    // The batch's own events by position, for a later one sent again at a seq the batch already holds.
+    const batched = new Map<string, LogEvent>();
+    const stopped = new Set<string>();
+    const snapshots: Snapshot[] = [];
+    const sessions = new Set<string>();
+    let registry = false;
+    let owners = false;
+    for (const event of events) {
+      if (eventShapeError(event) !== null) {
+        if (typeof event?.writer === 'string') stopped.add(event.writer);
+        continue;
+      }
+      const { writer, seq } = event;
+      if (stopped.has(writer)) continue;
+      if (!(writerMachine(writer) === ctx.machine || (writer.startsWith(LEGACY_WRITER_PREFIX) && archive === ctx.machine))) {
+        stopped.add(writer);
+        continue;
+      }
+      const at = next.get(writer) ?? this.log.last(writer) + 1;
+      // A position held already stops its writer, as `upload` will, when it is sent again with another body: against
+      // the stored event or the withheld one's hash, or against the batch's own earlier event at that seq.
+      if (seq < at) {
+        if (seq <= this.log.last(writer)) {
+          const withheld = this.log.refusedAt(writer, seq);
+          if (withheld !== null ? withheld !== bodyHash(event) : !sameEvent(this.log.at(writer, seq)!.event, event)) stopped.add(writer);
+        } else if (!sameEvent(batched.get(`${seq}:${writer}`)!, event)) stopped.add(writer);
+        continue;
+      }
+      const signature = event.sig === undefined ? undefined : (checked.get(event) ?? STATE_UNAVAILABLE);
+      if (seq > at || (signature && !signature.ok) || audienceError(event) !== null) {
+        stopped.add(writer);
+        continue;
+      }
+      next.set(writer, at + 1);
+      batched.set(`${seq}:${writer}`, event);
+      const facts = factsOf(event);
+      for (const ref of facts.refs) sessions.add(ref.session);
+      if (facts.snapshot !== null) snapshots.push(facts.snapshot);
+      if (facts.notice !== null) sessions.add(facts.notice);
+      registry ||= facts.needsRegistry;
+      owners ||= facts.audience !== null && facts.attested === null;
+    }
+    if (!registry && !owners) return null;
+    const held = owners ? await this.machineOwnersOf(ctx.machine) : [];
+    if (!registry) return { available: true, rows: {}, mine: {}, owners: held };
+    const answer = await this.askPolicies({ machine: ctx.machine, snapshots, sessions: [...sessions] });
+    return answer === null ? { available: false, rows: {}, mine: {}, owners: held } : { available: true, rows: answer.rows, mine: answer.mine, owners: held };
+  }
+
+  /** The registry's answer for one batch (`Registry.policies`), or null when it can't be had: the batch's events that
+   * need it are refused `state-unavailable`. */
+  protected async askPolicies(request: { machine?: string; snapshots: Snapshot[]; sessions: string[] }): Promise<PoliciesAnswer | null> {
+    try {
+      const answer = await this.registry().policies(request);
+      return answer.ok ? answer.value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The policies an upload read and replayed, kept as this project's knowledge of each session (`maySeeSession`): a
+   * row replaces the one held only when it is newer. */
+  private keepPolicies(rows: Record<string, Policy | null>): void {
+    for (const [session, policy] of Object.entries(rows)) {
+      if (policy === null || !newer(policy, this.knownPolicy(session))) continue;
+      this.ctx.storage.sql.exec(
+        'INSERT OR REPLACE INTO known_policies (session, audience, policy_rev, created) VALUES (?, ?, ?, ?)',
+        session,
+        policy.audience === null ? null : JSON.stringify(policy.audience),
+        policy.policyRev,
+        policy.created,
+      );
+    }
+  }
+
+  private knownPolicy(session: string): Policy | null {
+    const row = this.ctx.storage.sql.exec<{ audience: string | null; policy_rev: number; created: string }>('SELECT audience, policy_rev, created FROM known_policies WHERE session = ?', session).toArray()[0];
+    return row ? { audience: row.audience === null ? null : (JSON.parse(row.audience) as string[]), policyRev: row.policy_rev, created: row.created } : null;
+  }
+
+  /** The members owning the machine named `name` in the cached head (its entry's owners, the admins for an org-owned
+   * machine, or its certificate's delegation's), or null when no head can be had. */
+  private async machineOwnersOf(name: string): Promise<string[] | null> {
+    try {
+      const head = await this.signatures.head();
+      if (head === undefined) return null;
+      if (head.state === null) return [];
+      const key = machineNameKey(name);
+      const ref = refOfName(head.state, name) ?? head.certificates.certs.find((c) => machineNameKey(c.body.name) === key)?.body.machine;
+      if (ref === undefined) return [];
+      const owners = await machineOwners(head.state, ref, head.certificates, new Date(this.now()));
+      return owners === null ? [] : ownerMembers(head.state, owners);
+    } catch {
+      return null;
+    }
+  }
+
+  // ---- Readers (P5 O18 D6) ----------------------------------------------------------------------------------------
+
+  /** Each stream writer's audience, as this log recorded it at the stream's first position. */
+  private readonly audiences = new Map<string, string[]>();
+
+  private keepStream(writer: string, audience: readonly string[]): void {
+    if (streamOf(writer).digest === null || this.audiences.has(writer)) return;
+    this.log.keepStream(writer, audience);
+    this.audiences.set(writer, [...audience]);
+  }
+
+  private streamAudience(writer: string): string[] | null {
+    const held = this.audiences.get(writer);
+    if (held) return held;
+    const stored = this.log.streamAudience(writer);
+    if (stored) this.audiences.set(writer, stored);
+    return stored;
+  }
+
+  /**
+   * The one reader check of every read surface (P5 O18 D6, Interfaces §A): a plain writer is everyone's; a stream is
+   * its audience's members', and a machine's whose owners meet it on a connection that advertised `audience`; a
+   * machine's own writers are its own, whatever they are, since it holds them already.
+   */
+  mayRead(reader: Reader, writer: string): boolean {
+    const { base, digest } = streamOf(writer);
+    if (digest === null) return true;
+    const machine = writerMachine(base);
+    if ('machine' in reader && machine !== null && machineNameKey(machine) === machineNameKey(reader.machine)) return true;
+    const audience = this.streamAudience(writer);
+    if (audience === null) return false;
+    if ('member' in reader) return audience.includes(reader.member);
+    return reader.streams && reader.owners.some((owner) => audience.includes(owner));
+  }
+
+  /** Whether `member` may see a session-plane row of `session`: read against the session's latest policy this project
+   * knows, a private one's audience alone. */
+  private maySeeSession(member: string, session: string): boolean {
+    const audience = this.knownPolicy(session)?.audience ?? null;
+    return audience === null || audience.includes(member);
+  }
+
+  /** A delivery outcome names its recipient session and the event delivered: both must be the member's to see. */
+  private maySeeDelivery(member: string, delivery: Delivery): boolean {
+    return this.maySeeSession(member, delivery.session) && this.mayRead({ member }, delivery.event.writer);
+  }
+
+  /** The reader a machine's live connection to this project is now: its fan-out row. */
+  private machineReader(name: string): Reader {
+    const row = this.ctx.storage.sql.exec<MachineRow>('SELECT name, generation, owners, current, streams FROM machines WHERE name = ?', name).toArray()[0];
+    return row ? readersOf(row).now : { machine: name, owners: [], streams: false };
+  }
+
+  /**
+   * Whether a hello's backlog sends the next page of `writer` (`LogStore.beyond` asks before each): yes when the
+   * connection's reader reads it now. A writer it read at its hello but no longer does would be left with a hole, so
+   * the connection ends instead (`endStream`), and with it the backlog; its next hello gives it a coherent view.
+   */
+  private backlogReads(ctx: MachineContext, writer: string): boolean {
+    const row = this.ctx.storage.sql.exec<MachineRow>('SELECT name, generation, owners, current, streams FROM machines WHERE name = ?', ctx.machine).toArray()[0];
+    if (row?.generation !== ctx.generation) return false;
+    const { now, atHello } = readersOf(row);
+    if (this.mayRead(now, writer)) return true;
+    if (this.mayRead(atHello, writer)) this.endStream(ctx.machine, ctx.generation);
+    return false;
+  }
+
+  /** A machine asking over HTTP: no stream is served there, but its own writers. */
+  private httpReader(machine: string): Reader {
+    return { machine, owners: [], streams: false };
   }
 
   /**
@@ -550,24 +880,35 @@ export class Project extends DurableObject<Env> {
       reason: frame.reason,
       ...(frame.message === undefined ? {} : { message: frame.message }),
     };
-    this.broadcast(this.audited(this.log.record('rejected', rejection)));
+    this.broadcastAudit(this.log.record('rejected', rejection, { writer: rejection.event?.writer ?? null }));
   }
 
   // ---- History re-attestation (O14 M4, Interfaces §D) -----------------------------------------------------------
 
-  /** This log's DX1 writers under `names` with their highest DX1 seq, for the Registry's inventory. */
-  historyWriters(names: string[]): Array<{ writer: string; upTo: number }> {
-    return this.log.dx1Writers(new Set(names.map(machineNameKey)));
+  /** This log's DX1 writers under `names` with their highest DX1 seq, for the Registry's inventory: those the asking
+   * machine (`reader`, by name) may read (P5 O18 D6). */
+  historyWriters(names: string[], reader = ''): Array<{ writer: string; upTo: number }> {
+    const asking = this.httpReader(reader);
+    return this.log.dx1Writers(new Set(names.map(machineNameKey))).filter((w) => this.mayRead(asking, w.writer));
   }
 
-  /** A writer's stored events after `after`, about a page of them, as a machine reads its own history. */
-  historyPage(writer: string, after: number): HistoryLogPage {
+  /** A writer's stored events after `after`, about a page of them, as a machine reads its own history; none of a
+   * writer the asking machine may not read, as of one this log does not hold (P5 O18 D6). */
+  historyPage(writer: string, after: number, reader = ''): HistoryLogPage {
+    if (!this.mayRead(this.httpReader(reader), writer)) return { events: [], more: false };
     return this.log.writerPage(writer, after, HISTORY_PAGE_BYTES);
   }
 
-  /** The attestations this log keeps, the newest per writer. */
-  attestations(): Signed<HistoryAttestation>[] {
-    return this.history.records();
+  /** The attestations this log keeps, the newest per writer, of the writers the reader may read (a member's, or a
+   * machine's by name over HTTP). */
+  attestations(reader: { member: string } | { machine: string } = { machine: '' }): Signed<HistoryAttestation>[] {
+    const asking: Reader = 'member' in reader ? reader : this.httpReader(reader.machine);
+    return this.history.records().filter((record) => this.mayRead(asking, record.body.writer));
+  }
+
+  /** Each session's newest plain snapshot in this log, for the policy registry's fill (P5 O18 D5). */
+  newestSnapshots(): NewestSnapshot[] {
+    return this.log.newestSnapshots();
   }
 
   /**
@@ -621,7 +962,7 @@ export class Project extends DurableObject<Env> {
       this.plane.putOp(kept as SessionMessage<'op'>, Date.now());
       void this.schedule();
     }
-    this.broadcast({ t: 'session', message: kept });
+    this.broadcast({ t: 'session', message: kept }, (member) => this.maySeeSession(member, session));
   }
 
   /** A session's presence: the latest kept per session, for browsers that connect later, and sent to every browser. */
@@ -634,7 +975,7 @@ export class Project extends DurableObject<Env> {
     // Kept either way; shown only while this stream's lease is fresh. A lapsed machine's presence is not current, and
     // it is shown when the lease is renewed.
     if (!this.streamOnline(ctx)) return;
-    this.broadcast({ t: 'session', message });
+    this.broadcast({ t: 'session', message }, (member) => this.maySeeSession(member, message.session));
     this.reportSummary();
   }
 
@@ -672,7 +1013,7 @@ export class Project extends DurableObject<Env> {
     const problem = raisedShapeError(message.body);
     if (problem || message.body.session !== message.session) return this.refuseMachine(ctx, { reason: 'bad-shape', message: problem ?? 'raised names the session its envelope names' });
     const fresh = this.plane.raise(ctx.machine, message.body, deadlineOf(message.body));
-    this.broadcast({ t: 'session', message });
+    this.broadcast({ t: 'session', message }, (member) => this.maySeeSession(member, message.session));
     this.pendingChanged();
     if (fresh) this.pushRaised(ctx.machine, message.body);
     void this.schedule();
@@ -713,8 +1054,8 @@ export class Project extends DurableObject<Env> {
     const first = this.plane.markSettled(ctx.machine, message.session, settled.request, Date.now());
     if (!first && !this.plane.pendingOf(ctx.machine, message.session, settled.request)) return;
     const raised = this.plane.settle(ctx.machine, message.session, settled.request);
-    this.broadcast({ t: 'session', message });
-    this.broadcast(this.audited(this.log.record('decided', { machine: ctx.machine, session: message.session, settled, raised: raised ?? null })));
+    this.broadcast({ t: 'session', message }, (member) => this.maySeeSession(member, message.session));
+    this.broadcastAudit(this.log.record('decided', { machine: ctx.machine, session: message.session, settled, raised: raised ?? null }));
     if (raised) this.pendingChanged();
     // A settlement of a request this hub did not hold still settles the log's question for it.
     else this.reportSummary();
@@ -735,7 +1076,7 @@ export class Project extends DurableObject<Env> {
       isMac(d.mac);
     if (!valid) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'delivery is {event: {writer, seq}, session, outcome, reason, mac}' });
     this.plane.putDelivery(ctx.machine, message.body as Delivery);
-    this.broadcast({ t: 'session', message });
+    this.broadcast({ t: 'session', message }, (member) => this.maySeeDelivery(member, message.body as Delivery));
   }
 
   /** A subscription's message, to the one browser that holds the sub; a message for a sub nobody holds unsubscribes it
@@ -922,7 +1263,7 @@ export class Project extends DurableObject<Env> {
   /** A machine back online: browsers learn it, and see its sessions' presence as it was kept meanwhile. */
   private cameOnline(machine: string): void {
     this.machinesChanged();
-    for (const kept of this.plane.presence()) if (kept.machine === machine) this.broadcast({ t: 'session', message: kept.message });
+    for (const kept of this.plane.presence()) if (kept.machine === machine) this.broadcast({ t: 'session', message: kept.message }, (member) => this.maySeeSession(member, kept.message.session));
     this.reportSummary();
   }
 
@@ -973,15 +1314,19 @@ export class Project extends DurableObject<Env> {
     this.reportSummary();
   }
 
-  private pendingFrame(): ProjectDown {
+  /** The pending set as `member` may see it: the requests of sessions it may see (P5 O18 D6). */
+  private pendingFrame(member: string): ProjectDown {
     const now = Date.now();
-    const requests: PendingRequest[] = this.plane.pending().map(({ machine, raised, deadline }) => ({ machine, raised, terminal_only: deadline !== null && deadline <= now }));
+    const requests: PendingRequest[] = this.plane
+      .pending()
+      .filter(({ raised }) => this.maySeeSession(member, raised.session))
+      .map(({ machine, raised, deadline }) => ({ machine, raised, terminal_only: deadline !== null && deadline <= now }));
     return { t: 'pending', requests };
   }
 
   /** The pending set moved: every browser is sent it, and the grid's `waiting` may move with an async question. */
   private pendingChanged(): void {
-    this.broadcast(this.pendingFrame());
+    for (const socket of this.ctx.getWebSockets()) this.toSocket(socket, this.pendingFrame(this.attachment(socket).member));
     this.reportSummary();
   }
 
@@ -1133,8 +1478,12 @@ export class Project extends DurableObject<Env> {
     if (!Number.isSafeInteger(after) || (after as number) < 0) return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'resume is {after: offset}' });
     let last = after as number;
     let frames = 0;
+    const reader: Reader = { member: this.attachment(socket).member };
+    // A page is the log's, its events the member may read alone (P5 O18 D6): a page of streams it is outside sends
+    // nothing, and the next one starts past it.
     for (const events of this.log.after(last)) {
-      this.toSocket(socket, { t: 'log', events });
+      const readable = events.filter((e) => this.mayRead(reader, e.event.writer));
+      if (readable.length > 0) this.toSocket(socket, { t: 'log', events: readable });
       last = events[events.length - 1].offset;
       if (++frames === RESUME_PAGE_FRAMES) break;
     }
@@ -1145,7 +1494,10 @@ export class Project extends DurableObject<Env> {
     }
     this.attach(socket, (a) => ({ ...a, log: true }));
     this.toSocket(socket, { t: 'caught-up', offset: head });
-    for (const row of this.log.audit(AUDIT_REPLAY)) this.toSocket(socket, this.audited(row));
+    for (const row of this.log.audit(AUDIT_REPLAY)) {
+      const shown = this.auditFor(row, reader.member);
+      if (shown) this.toSocket(socket, shown);
+    }
   }
 
   /**
@@ -1182,7 +1534,8 @@ export class Project extends DurableObject<Env> {
     if (draft.member !== member) {
       return this.refuseBrowser(socket, { reason: 'writer-not-yours', nonce, message: 'a web human is written by the member signed in' });
     }
-    const writer = hubWriter(member);
+    // Words that carry an audience go into the member's stream of it (P5 O18 D8).
+    const writer = isAudience(draft.audience) ? streamWriter(hubWriter(member), draft.audience) : hubWriter(member);
     const sent = this.log.byNonce(writer, nonce!);
     if (sent) {
       if (!sameEvent(withoutPosition(sent.event), draft)) return this.refuseBrowser(socket, { reason: 'conflict', writer, seq: sent.event.seq, nonce, message: 'this nonce was sent with another payload' });
@@ -1195,8 +1548,26 @@ export class Project extends DurableObject<Env> {
       // Or during the check.
       if (!this.stateHolds(member)) return;
     }
+    // D5's checks with the member as the sender, whatever `attest` the words carry, against the registry: words naming a
+    // session they may not reach are refused `not-reachable`, and nothing is stored (the hub positions a human, so no
+    // position is spent).
+    const facts = factsOf(positioned());
+    if (facts.needsRegistry) {
+      const answer = await this.askPolicies({ snapshots: [], sessions: facts.refs.map((r) => r.session) });
+      if (!this.stateHolds(member)) return;
+      const verdict = judge(positioned(), answer === null ? { available: false, rows: {}, mine: {}, owners: [member] } : { available: true, rows: answer.rows, mine: answer.mine, owners: [member] }, [member], true);
+      if (verdict.kind === 'unavailable') return this.refuseBrowser(socket, { reason: 'state-unavailable', writer, nonce, message: 'the policy registry could not be read to check whom these words name; send them again' });
+      if (verdict.kind === 'withhold') return this.refuseBrowser(socket, { reason: 'not-reachable', writer, nonce });
+      if (answer !== null) this.keepPolicies(answer.rows);
+      // A turn of another of the member's humans may have stored at this writer meanwhile: the position is taken anew.
+      const again = this.log.byNonce(writer, nonce!);
+      if (again) return this.toSocket(socket, { t: 'human-ack', nonce: nonce!, offset: again.offset, writer, seq: again.event.seq });
+    } else if (facts.audience !== null && !facts.audience.includes(member)) {
+      return this.refuseBrowser(socket, { reason: 'not-reachable', writer, nonce });
+    }
     const stored = positioned();
     if (!isHubPosition(stored)) throw new Error('the hub assigned a position DX1 refuses');
+    if (facts.audience !== null) this.keepStream(writer, facts.audience);
     const appended = this.log.append(stored);
     this.toSocket(socket, { t: 'human-ack', nonce: nonce!, offset: appended.offset, writer, seq: stored.seq });
     this.fanOut([appended]);
@@ -1205,12 +1576,26 @@ export class Project extends DurableObject<Env> {
   /** New events to every browser that follows the log and to every machine syncing the project, but the sender. */
   private fanOut(accepted: Stored[], except?: string): void {
     if (accepted.length === 0) return;
+    // Each reader is sent what it may read alone (P5 O18 D6): whole writers, so no reader ever holds a hole.
     for (const socket of this.ctx.getWebSockets()) {
-      if (this.attachment(socket).log) this.toSocket(socket, { t: 'log', events: accepted });
+      const { log, member } = this.attachment(socket);
+      if (!log) continue;
+      const readable = accepted.filter((s) => this.mayRead({ member }, s.event.writer));
+      if (readable.length > 0) this.toSocket(socket, { t: 'log', events: readable });
     }
-    const events = accepted.map((s) => s.event);
-    for (const { name, generation } of this.ctx.storage.sql.exec<{ name: string; generation: number }>('SELECT name, generation FROM machines')) {
-      if (name !== except) this.toMachine(name, generation, { t: 'events', project: this.projectId, events }, 'replies');
+    // A machine is sent what it reads now. An event it read at its hello but no longer does would leave it a hole, so
+    // its connection ends instead, and its next hello gives it a coherent view.
+    const rows = this.ctx.storage.sql.exec<MachineRow>('SELECT name, generation, owners, current, streams FROM machines').toArray();
+    for (const row of rows) {
+      const { name, generation } = row;
+      if (name === except) continue;
+      const { now, atHello } = readersOf(row);
+      if (accepted.some((s) => !this.mayRead(now, s.event.writer) && this.mayRead(atHello, s.event.writer))) {
+        this.endStream(name, generation);
+        continue;
+      }
+      const events = accepted.filter((s) => this.mayRead(now, s.event.writer)).map((s) => s.event);
+      if (events.length > 0) this.toMachine(name, generation, { t: 'events', project: this.projectId, events }, 'replies');
     }
   }
 
@@ -1222,15 +1607,40 @@ export class Project extends DurableObject<Env> {
   }
 
   /** A refusal sent to the machine and recorded; by default one a log frame's POST owes the machine (the replies lane). */
-  private refusal(ctx: MachineContext, refusal: Refusal, lane: Lane = 'replies'): Promise<Sent> {
+  private refusal(ctx: MachineContext, refusal: Refusal, lane: Lane = 'replies', senders?: string[]): Promise<Sent> {
     const sent = this.toMachine(ctx.machine, ctx.generation, { t: 'refused', project: ctx.project, refusal }, lane);
-    this.broadcast(this.audited(this.log.record('refused', { ...refusal, machine: ctx.machine })));
+    this.broadcastAudit(this.log.record('refused', { ...refusal, machine: ctx.machine }, { writer: refusal.writer ?? null, senders }));
     return sent;
   }
 
   private refuseBrowser(socket: WebSocket, refusal: Refusal & { nonce?: string }): void {
     const { member } = this.attachment(socket);
-    this.broadcast(this.audited(this.log.record('refused', { ...refusal, member })));
+    this.broadcastAudit(this.log.record('refused', { ...refusal, member }, { writer: refusal.writer ?? null, senders: [member] }));
+  }
+
+  /**
+   * An audit row as `member` is shown it, or null (P5 O18 D6): a row of a writer the member may read, whole; one of a
+   * stream outside it, only to a member whose own send it refused, its message dropped; a decision, as its session's
+   * session-plane rows are.
+   */
+  private auditFor(row: AuditRow, member: string): ProjectDown | null {
+    if (row.kind === 'decided') {
+      const session = row.entry.session;
+      return typeof session !== 'string' || this.maySeeSession(member, session) ? this.audited(row) : null;
+    }
+    if (row.writer === null || this.mayRead({ member }, row.writer)) return this.audited(row);
+    if (!row.senders.includes(member)) return null;
+    const entry = { ...row.entry };
+    delete entry.message;
+    return this.audited({ ...row, entry });
+  }
+
+  /** An audit row to every browser of the project that may be shown it (`auditFor`). */
+  private broadcastAudit(row: AuditRow): void {
+    for (const socket of this.ctx.getWebSockets()) {
+      const shown = this.auditFor(row, this.attachment(socket).member);
+      if (shown) this.toSocket(socket, shown);
+    }
   }
 
   private audited(row: AuditRow): ProjectDown {
@@ -1240,9 +1650,9 @@ export class Project extends DurableObject<Env> {
     return { t: 'refused', refusal: entry } as ProjectDown;
   }
 
-  /** A frame to every browser of the project, following the log or not. */
-  private broadcast(frame: ProjectDown): void {
-    for (const socket of this.ctx.getWebSockets()) this.toSocket(socket, frame);
+  /** A frame to every browser of the project, following the log or not; to those whose member `may` passes alone. */
+  private broadcast(frame: ProjectDown, may?: (member: string) => boolean): void {
+    for (const socket of this.ctx.getWebSockets()) if (may === undefined || may(this.attachment(socket).member)) this.toSocket(socket, frame);
   }
 
   private toSocket(socket: WebSocket, frame: ProjectDown | RetiredRefusal): void {
@@ -1321,12 +1731,18 @@ export class Project extends DurableObject<Env> {
       const queued = parseQueueKey(other);
       if (queued?.machine === name && queued.generation < generation) this.queues.delete(other);
     }
-    const machine = this.env.MACHINE.get(this.env.MACHINE.idFromName(`${this.orgId}:${name}`));
+    const machine = this.machineObject(name);
     const sent = (this.queues.get(key) ?? Promise.resolve()).then(async () => {
       let result: Sent = 'written';
       let frame: DownFrame | undefined;
       try {
-        for (frame of frames) if ((result = await machine.send(frame, generation)) !== 'written') break;
+        for (frame of frames) {
+          if (!this.stillReads(name, generation, frame)) {
+            result = 'offline';
+            break;
+          }
+          if ((result = await machine.send(frame, generation)) !== 'written') break;
+        }
       } catch (error) {
         logged({ event: 'send-failed', machine: name, generation, lane, frame: frame?.t ?? null, error: described(error) });
         this.leaveFanOut(name, generation);
@@ -1345,8 +1761,38 @@ export class Project extends DurableObject<Env> {
     return sent;
   }
 
+  /**
+   * Whether a frame leaving the queue may still go (P5 O18 D6): one that carries another machine's stream event was
+   * authorized when it was queued, and the machine's owners may have changed since. It goes when the connection's
+   * reader reads every such event now; when one it read at its hello no longer is, the connection ends (`endStream`)
+   * rather than hold a hole; when the connection is gone or retired, nothing more goes. Other frames pass.
+   */
+  private stillReads(name: string, generation: number, frame: DownFrame): boolean {
+    if (frame.t !== 'events') return true;
+    const streams = frame.events.filter((e) => streamOf(e.writer).digest !== null && machineNameKey(writerMachine(e.writer) ?? '') !== machineNameKey(name));
+    if (streams.length === 0) return true;
+    const row = this.ctx.storage.sql.exec<MachineRow>('SELECT name, generation, owners, current, streams FROM machines WHERE name = ?', name).toArray()[0];
+    if (row?.generation !== generation) return false;
+    const { now, atHello } = readersOf(row);
+    const lost = streams.filter((e) => !this.mayRead(now, e.writer));
+    if (lost.length === 0) return true;
+    if (lost.some((e) => this.mayRead(atHello, e.writer))) this.endStream(name, generation);
+    return false;
+  }
+
   private leaveFanOut(name: string, generation: number): void {
     this.ctx.storage.sql.exec('DELETE FROM machines WHERE name = ? AND generation = ?', name, generation);
+  }
+
+  /** Ends the machine's stream of this generation, as a send that failed does: it leaves the fan-out, and its next
+   * `hello` heals what it missed. */
+  private endStream(name: string, generation: number): void {
+    this.leaveFanOut(name, generation);
+    void this.machineObject(name).close(generation).catch(() => {});
+  }
+
+  private machineObject(name: string) {
+    return this.env.MACHINE.get(this.env.MACHINE.idFromName(`${this.orgId}:${name}`));
   }
 
   private isOpen(ctx: MachineContext): boolean {
@@ -1520,6 +1966,7 @@ function humanShapeError(event: unknown): string | null {
   const to = e.to;
   const recipients = Array.isArray(to) && to.every((r) => typeof r?.session === 'string' && typeof r?.alias === 'string');
   if (to !== '*' && !recipients) return 'to is "*" or [{session, alias}]';
+  if (e.audience !== undefined && !isAudience(e.audience)) return 'audience is the sorted, distinct member ids the words are for';
   const mac = e.mac as { nonce?: unknown; value?: unknown } | undefined;
   if (mac === undefined && e.sig === undefined) return 'a human carries a mac, a sig, or both';
   if (mac !== undefined && (typeof mac !== 'object' || mac === null || typeof mac.nonce !== 'string' || mac.nonce === '' || typeof mac.value !== 'string')) return 'mac is {nonce, value}';
@@ -1528,4 +1975,86 @@ function humanShapeError(event: unknown): string | null {
   if (shape) return shape;
   if (encoder.encode(JSON.stringify(e)).length > FRAME_LIMIT) return 'too-large';
   return null;
+}
+
+// ---- Message reach (P5 O18 D5) ---------------------------------------------------------------------------------------
+
+/** What an upload's reach check read for its batch (`Project.reachOf`): whether the registry answered, its rows (as
+ * they stood before the batch, replayed as `judge` takes the batch's snapshots) and bindings, and the uploading
+ * machine's owners, null when they could not be resolved. */
+type Reach = { available: boolean; rows: Record<string, Policy | null>; mine: Record<string, boolean>; owners: string[] | null };
+
+/** What an event states of reach: its writing session, its audience, the sessions it names, the snapshot it is (a
+ * `joined` or `state` under its session's own writer), the session of an `unlisted` notice, and its attested owners. */
+type Facts = { own: string | null; audience: string[] | null; refs: EventSessionRef[]; snapshot: Snapshot | null; notice: string | null; attested: string[] | null; needsRegistry: boolean };
+
+function factsOf(event: Record<string, unknown>): Facts {
+  const own = writerSession(event.writer);
+  const audience = isAudience(event.audience) ? event.audience : null;
+  const refs = sessionRefs(event);
+  const policyRev = Number.isSafeInteger(event.policyRev) && (event.policyRev as number) >= 0 ? (event.policyRev as number) : 0;
+  const created = typeof event.created === 'string' ? event.created : typeof event.ts === 'string' ? event.ts : '';
+  const snapshot = own !== null && (event.kind === 'joined' || event.kind === 'state') && event.session === own ? { session: own, audience, policyRev, created } : null;
+  const notice = event.kind === 'unlisted' && typeof event.session === 'string' ? event.session : null;
+  const attest = event.attest as { owners?: unknown } | undefined;
+  const attested = typeof attest === 'object' && attest !== null && Array.isArray(attest.owners) && attest.owners.every((o) => typeof o === 'string') ? (attest.owners as string[]) : null;
+  return { own, audience, refs, snapshot, notice, attested, needsRegistry: refs.length > 0 || snapshot !== null || notice !== null };
+}
+
+const subset = (inner: readonly string[], outer: readonly string[]) => inner.every((m) => outer.includes(m));
+
+/** Why an event's `audience` and its writer disagree (refused `audience`, D6), or null: an event with an audience sits
+ * under the stream its digest names, and an event under a stream carries its audience. */
+function audienceError(event: Record<string, unknown>): string | null {
+  const { digest } = streamOf(event.writer as string);
+  if (event.policyRev !== undefined && !(Number.isSafeInteger(event.policyRev) && (event.policyRev as number) >= 0)) return 'policyRev is a whole number';
+  if (event.audience === undefined) return digest === null ? null : 'an event under a stream writer carries the audience its digest names';
+  if (!isAudience(event.audience)) return 'audience is the sorted, distinct member ids the event is for';
+  if (digest === null) return 'an event with an audience is written under its stream, <writer>~<digest>';
+  return audienceDigest(event.audience) === digest ? null : "the writer's digest is not its audience's";
+}
+
+/**
+ * One event judged against the registry (D5), `reach.rows` replayed as its snapshots are taken: withheld when it names
+ * a session the registry doesn't know (an addressing reference; an unknown provenance reference is no one's private
+ * session yet, its own machine uploading its snapshot first), when its audience is not within each named private
+ * session's, when its senders are not all inside its audience, or when it is a snapshot of a session bound to another
+ * machine; an `unlisted` notice by its own rule instead of the sender's, and only when it names no session at all, since
+ * it is served to the very members its change withdraws. `senders`: the members whose send it is. `owners` are the
+ * uploading machine's, taken when the event carries no attestation; or, `given`, the sender as authenticated (a device's
+ * member), taken whatever attestation the event carries, since nothing signed it for them.
+ */
+function judge(event: Record<string, unknown>, reach: Reach | null, owners: string[] | null, given = false): { kind: 'admit' } | { kind: 'withhold'; senders: string[] } | { kind: 'unavailable' } {
+  const f = factsOf(event);
+  const sender = given ? owners : (f.attested ?? owners);
+  const senders = sender ?? [];
+  if (f.needsRegistry && (reach === null || !reach.available)) return { kind: 'unavailable' };
+  const rows = reach?.rows ?? {};
+  const mine = reach?.mine ?? {};
+  const withhold = { kind: 'withhold' as const, senders };
+  if (event.kind === 'unlisted') {
+    // Its audience is the members the change withdraws, its sender outside it by construction (D5).
+    if (!isUnlistedNotice(event) || f.refs.length > 0 || f.own === null || event.session !== f.own || streamOf(event.writer as string).digest === null || !mine[f.own]) return withhold;
+    const row = rows[f.own] ?? null;
+    if (row === null || !(event.policyRev > row.policyRev)) return withhold;
+    return row.audience === null || subset(event.audience, row.audience) ? { kind: 'admit' } : withhold;
+  }
+  if (f.snapshot !== null) {
+    if (!mine[f.snapshot.session]) return withhold;
+    const { session, ...policy } = f.snapshot;
+    if (newer(policy, rows[session] ?? null)) rows[session] = policy;
+  }
+  for (const ref of f.refs) {
+    const row = rows[ref.session] ?? null;
+    if (row === null) {
+      if (ref.role === 'addressing') return withhold;
+      continue;
+    }
+    if (row.audience !== null && (f.audience === null || !subset(f.audience, row.audience))) return withhold;
+  }
+  if (f.audience !== null) {
+    if (sender === null) return { kind: 'unavailable' };
+    if (sender.length === 0 || !subset(sender, f.audience)) return withhold;
+  }
+  return { kind: 'admit' };
 }

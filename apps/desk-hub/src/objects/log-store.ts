@@ -3,7 +3,7 @@
 // and the project's audit record. Events are kept as received (a `hub/` event with the `writer`, `seq`, and `ts` the hub
 // assigned) and compared by their canonical form, so a second copy of an event differs from the first only if its
 // canonical form does.
-import { isSig, machineNameKey, type HistoryLogPage, type StoredEvent } from 'org-protocol';
+import { isSig, machineNameKey, sha256Hex, streamOf, writerSession, type HistoryLogPage, type StoredEvent } from 'org-protocol';
 import { isBase64urlOf } from '../protocol/base64url';
 import { canonicalize } from '../protocol/canonical';
 import { isHubWriter, isLogSeq, LEGACY_WRITER_PREFIX, questionEffect, writerMachine, type LogEvent, type Vector } from '../protocol/log';
@@ -18,7 +18,12 @@ CREATE INDEX IF NOT EXISTS events_by_nonce ON events (nonce) WHERE nonce IS NOT 
 CREATE TABLE IF NOT EXISTS writers (writer TEXT PRIMARY KEY, last INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS open_questions (session TEXT NOT NULL, ask TEXT NOT NULL, machine TEXT NOT NULL, PRIMARY KEY (session, ask));
 CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL, entry TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS streams (writer TEXT PRIMARY KEY, audience TEXT NOT NULL);
 `;
+
+// Columns a log stored before P5 O18 gains: a withheld position's refused body hash (`events.refused`), and the writer an
+// audit row names with the members whose own send it refused (`audit.writer`, `audit.senders`), for the reader check.
+const ADDED_COLUMNS: Record<string, string[]> = { events: ['refused TEXT'], audit: ['writer TEXT', 'senders TEXT'] };
 
 /** Bytes of event JSON per frame the hub sends; a larger batch is split across frames, a larger frame into parts. */
 export const BATCH_BYTES = 256 * 1024;
@@ -33,7 +38,16 @@ export type Stored = { offset: number; event: LogEvent };
 export type OpenQuestion = { machine: string; session: string; ask: string };
 /** The hub's own refusals, daemons' rejections, and decisions on pending requests (from `settled`). */
 export type AuditKind = 'refused' | 'rejected' | 'decided';
-export type AuditRow = { id: number; at: string; kind: AuditKind; entry: Record<string, unknown> };
+/** `writer`: the writer the row names, for the reader check (P5 O18 D6); `senders`: the members whose own send it
+ * refused, who are shown it whatever the writer, its message dropped. Neither is part of the entry a browser is sent. */
+export type AuditRow = { id: number; at: string; kind: AuditKind; entry: Record<string, unknown>; writer: string | null; senders: string[] };
+/** Who an audit row is scoped to (`AuditRow`). */
+export type AuditScope = { writer?: string | null; senders?: string[] };
+/** A session's newest `joined` or `state` under its own plain writer, for the policy registry's fill. */
+export type NewestSnapshot = { session: string; machine: string; created: string };
+
+/** A refused event's body as a withheld position keeps it: the hash of its canonical form (P5 O18 D5). */
+export const bodyHash = (event: object): string => sha256Hex(canonicalize(event));
 
 /**
  * Why an event is not one the hub can store, or null when it can: a writer of the form `<prefix>/<rest>` without
@@ -72,6 +86,10 @@ export function eventShapeError(event: unknown): string | null {
 export class LogStore {
   constructor(private readonly storage: DurableObjectStorage) {
     storage.sql.exec(SCHEMA);
+    for (const [table, added] of Object.entries(ADDED_COLUMNS)) {
+      const columns = storage.sql.exec<{ name: string }>(`PRAGMA table_info(${table})`).toArray().map((c) => c.name);
+      for (const column of added) if (!columns.includes(column.split(' ')[0])) storage.sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column}`);
+    }
   }
 
   private get sql() {
@@ -130,6 +148,71 @@ export class LogStore {
   }
 
   /**
+   * A content-free tombstone at `last(writer) + 1` in place of an event the hub withheld (P5 O18 D5), served in the
+   * writer's stream as `{writer, seq, withheld: true}`, with the refused body's hash beside it, so a byte-identical
+   * resend is withheld again and another body is a conflict.
+   */
+  withhold(writer: string, seq: number, refused: string): Stored {
+    const tombstone = { writer, seq, withheld: true };
+    let offset = 0;
+    this.storage.transactionSync(() => {
+      offset = this.sql.exec<{ offset: number }>('INSERT INTO events (writer, seq, body, refused) VALUES (?, ?, ?, ?) RETURNING offset', writer, seq, JSON.stringify(tombstone), refused).one().offset;
+      this.sql.exec('INSERT INTO writers (writer, last) VALUES (?, ?) ON CONFLICT (writer) DO UPDATE SET last = excluded.last', writer, seq);
+    });
+    return { offset, event: tombstone as unknown as LogEvent };
+  }
+
+  /** The refused body's hash at a withheld position, or null for a stored event (or none). */
+  refusedAt(writer: string, seq: number): string | null {
+    return this.sql.exec<{ refused: string | null }>('SELECT refused FROM events WHERE writer = ? AND seq = ?', writer, seq).toArray()[0]?.refused ?? null;
+  }
+
+  /** The withheld positions of `machine`'s writers, each writer's as ascending seqs and `[from, to]` runs. */
+  withheldOf(machine: string): Record<string, Array<number | [number, number]>> {
+    const out: Record<string, Array<number | [number, number]>> = {};
+    const rows = this.sql.exec<{ writer: string; seq: number }>('SELECT writer, seq FROM events WHERE refused IS NOT NULL ORDER BY writer, seq');
+    for (const { writer, seq } of rows) {
+      if (writerMachine(writer) !== machine) continue;
+      const runs = (out[writer] ??= []);
+      const last = runs.at(-1);
+      const end = last === undefined ? undefined : typeof last === 'number' ? last : last[1];
+      if (end !== undefined && seq === end + 1) runs[runs.length - 1] = [typeof last === 'number' ? last : last![0], seq];
+      else runs.push(seq);
+    }
+    return out;
+  }
+
+  /** Records a stream writer's audience at its first position (P5 O18 D6); a stream's audience never changes. */
+  keepStream(writer: string, audience: readonly string[]): void {
+    this.sql.exec('INSERT OR IGNORE INTO streams (writer, audience) VALUES (?, ?)', writer, JSON.stringify(audience));
+  }
+
+  /** A stream writer's audience, or null for one this log holds nothing of. */
+  streamAudience(writer: string): string[] | null {
+    const row = this.sql.exec<{ audience: string }>('SELECT audience FROM streams WHERE writer = ?', writer).toArray()[0];
+    return row ? (JSON.parse(row.audience) as string[]) : null;
+  }
+
+  /**
+   * Each session's newest `joined` or `state` under its own plain writer (`<machine>/<session>`), by its `created`
+   * (else its `ts`), for the policy registry's fill (P5 O18 D5).
+   */
+  newestSnapshots(): NewestSnapshot[] {
+    const newest = new Map<string, NewestSnapshot>();
+    const rows = this.sql.exec<{ writer: string; session: SqlStorageValue; created: SqlStorageValue; ts: SqlStorageValue }>(
+      "SELECT writer, json_extract(body, '$.session') AS session, json_extract(body, '$.created') AS created, json_extract(body, '$.ts') AS ts FROM events WHERE json_extract(body, '$.kind') IN ('joined', 'state')",
+    );
+    for (const { writer, session, created, ts } of rows) {
+      if (streamOf(writer).digest !== null || typeof session !== 'string' || writerSession(writer) !== session) continue;
+      const machine = writerMachine(writer)!;
+      const at = typeof created === 'string' ? created : typeof ts === 'string' ? ts : '';
+      const held = newest.get(session);
+      if (!held || at > held.created) newest.set(session, { session, machine, created: at });
+    }
+    return [...newest.values()];
+  }
+
+  /**
    * The open questions as this event leaves them, applied in the transaction that stores it, so they follow the log's
    * order: each feed's in its seq order, a machine's backlog included, which is the order a session wrote its ask, its
    * answer, and its retirement. A question is keyed by its session and id, so its answer closes it under whichever name
@@ -164,12 +247,15 @@ export class LogStore {
   /**
    * Every writer's events past `have` (the suffix a machine lacks) and at or before offset `head`, each writer's in seq
    * order, in batches. Each batch is read when it is asked for, by its own query, so a caller that takes one at a time
-   * across awaits holds one at a time, and events stored meanwhile (past `head`) are not among them.
+   * across awaits holds one at a time, and events stored meanwhile (past `head`) are not among them. `readable` is
+   * asked before each page of a writer, since what a reader may read can change while it is paged (P5 O18 D6): the
+   * writer is passed over from the first page it refuses.
    */
-  *beyond(have: Vector, head: number = this.head()): Generator<LogEvent[]> {
+  *beyond(have: Vector, head: number = this.head(), readable: (writer: string) => boolean = () => true): Generator<LogEvent[]> {
     for (const writer of Object.keys(this.vector())) {
       let after = have[writer] ?? 0;
       for (;;) {
+        if (!readable(writer)) break;
         const [batch] = batches(
           this.sql.exec<{ body: string }>('SELECT body FROM events WHERE writer = ? AND seq > ? AND offset <= ? ORDER BY seq LIMIT ?', writer, after, head, PAGE_ROWS),
           (row) => row.body,
@@ -209,19 +295,23 @@ export class LogStore {
     return { events, more: false };
   }
 
-  record(kind: AuditKind, entry: Record<string, unknown>): AuditRow {
+  record(kind: AuditKind, entry: Record<string, unknown>, scope: AuditScope = {}): AuditRow {
     const at = new Date().toISOString();
-    const id = this.sql.exec<{ id: number }>('INSERT INTO audit (at, kind, entry) VALUES (?, ?, ?) RETURNING id', at, kind, JSON.stringify(entry)).one().id;
-    return { id, at, kind, entry };
+    const writer = scope.writer ?? null;
+    const senders = scope.senders ?? [];
+    const id = this.sql
+      .exec<{ id: number }>('INSERT INTO audit (at, kind, entry, writer, senders) VALUES (?, ?, ?, ?, ?) RETURNING id', at, kind, JSON.stringify(entry), writer, senders.length === 0 ? null : JSON.stringify(senders))
+      .one().id;
+    return { id, at, kind, entry, writer, senders };
   }
 
   /** The audit record's latest `limit` entries, oldest first. */
   audit(limit: number): AuditRow[] {
     return this.sql
-      .exec<{ id: number; at: string; kind: AuditKind; entry: string }>('SELECT id, at, kind, entry FROM audit ORDER BY id DESC LIMIT ?', limit)
+      .exec<{ id: number; at: string; kind: AuditKind; entry: string; writer: string | null; senders: string | null }>('SELECT id, at, kind, entry, writer, senders FROM audit ORDER BY id DESC LIMIT ?', limit)
       .toArray()
       .reverse()
-      .map((row) => ({ ...row, entry: JSON.parse(row.entry) as Record<string, unknown> }));
+      .map((row) => ({ ...row, entry: JSON.parse(row.entry) as Record<string, unknown>, senders: row.senders === null ? [] : (JSON.parse(row.senders) as string[]) }));
   }
 }
 

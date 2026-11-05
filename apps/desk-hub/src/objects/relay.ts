@@ -43,17 +43,20 @@ import {
   CHANNEL_CLOSE,
   decodeChannelFrame,
   encodeChannelFrame,
+  HUB_CAPABILITIES,
   isEndpointHello,
   isNotify,
   isRl1Heartbeat,
   MAX_CHANNELS_PER_SOCKET,
   RL1_MESSAGE_LIMIT,
+  RL1_CAPABILITIES,
   RL1_PROTOCOL,
   tagBytes,
   type ChannelCloseReason,
   type NotifyFrame,
   type RelayPresence,
   type Rl1Refusal,
+  type Rl1Welcome,
 } from 'org-protocol';
 import { CLIENT_HEADER, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, REF_HEADER, type Env } from '../env';
 import { NOT_ON_RL1, RL1_LOG_DOWN, type DownFrame, type UpFrame } from '../protocol/machine';
@@ -67,7 +70,8 @@ import { lacksMethod } from './retry';
 export const relayObjectName = (org: string, ref: string) => `${org}:ref:${ref}`;
 
 /** The current endpoint connection: `conn` is this object's number for it, `generation` its name's. */
-type Current = { conn: number; generation: number; org: string; name: string; client: string; welcomed: boolean };
+/** `capabilities`: what its hello advertised (P5 O18 D9), absent before its hello and from an endpoint of an older build. */
+type Current = { conn: number; generation: number; org: string; name: string; client: string; welcomed: boolean; capabilities?: string[] };
 type EndpointAttachment = { kind: 'endpoint'; conn: number };
 type AppAttachment = { kind: 'app'; member: string; device?: string; channels: number[] };
 type Attachment = EndpointAttachment | AppAttachment;
@@ -296,9 +300,9 @@ export class Relay {
     if (!isEndpointHello(frame)) return this.closeSocket(ws, CLOSE.protocol, 'hello-first');
     if (frame.machine !== this.ref) return this.closeSocket(ws, CLOSE.protocol, 'wrong-machine');
     if (frame.protocol.major !== RL1_PROTOCOL.major) return this.closeSocket(ws, CLOSE.protocol, 'unsupported-protocol');
-    this.kv.put('endpoint', { ...current, welcomed: true } satisfies Current);
-    note({ event: 'hello', machine: current.name, generation: current.generation, build: frame.build, leaseGeneration: frame.leaseGeneration ?? null });
-    this.sendTo(ws, JSON.stringify({ t: 'welcome', generation: current.generation, heartbeat_ms: this.timing().heartbeatMs }));
+    this.kv.put('endpoint', { ...current, welcomed: true, capabilities: frame.capabilities ?? [] } satisfies Current);
+    note({ event: 'hello', machine: current.name, generation: current.generation, build: frame.build, leaseGeneration: frame.leaseGeneration ?? null, capabilities: frame.capabilities ?? [] });
+    this.sendTo(ws, JSON.stringify({ t: 'welcome', generation: current.generation, heartbeat_ms: this.timing().heartbeatMs, capabilities: [...HUB_CAPABILITIES] } satisfies Rl1Welcome));
     this.broadcastPresence();
     let version: number | null = null;
     try {
@@ -666,7 +670,9 @@ export class Relay {
 
   private context(current: Current, project: string): MachineContext {
     const { leaseMs, graceMs } = this.timing();
-    return { org: current.org, project, machine: current.name, client: current.client, generation: current.generation, leaseMs, graceMs, transport: 'rl1' };
+    // The project serves this connection audience streams only when its hello advertised `audience` (P5 O18 D9).
+    const streams = current.capabilities?.includes(RL1_CAPABILITIES.audience) === true;
+    return { org: current.org, project, machine: current.name, client: current.client, generation: current.generation, leaseMs, graceMs, transport: 'rl1', streams };
   }
 
   private named(org: string, name: string): DurableObjectStub<Machine> {

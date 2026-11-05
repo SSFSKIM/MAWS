@@ -46,11 +46,15 @@ export type Refusal = {
     | 'stale-generation'
     | 'not-open' // any frame but `hello` for a project this stream has not opened with `hello`
     | 'bad-signature' // a v2 event whose `sig` the org state does not verify for its writer (the message names the verdict)
-    | 'state-unavailable' // a v2 event the hub could not check, the org state unreadable: send it again
+    | 'state-unavailable' // a v2 event the hub could not check, the org state or the policy registry unreadable: send it again
+    | 'not-reachable' // an event naming a session it may not reach (P5 O18 D5): its position holds a `withheld` tombstone,
+    //                   and the writer goes on at the next seq; it never carries a message
+    | 'audience' // an event whose `audience` and writer stream disagree (O18 D6)
     | 'retired'; // a browser's DX6 `rpc`, answered so since O14 M5b retired RPCs through the hub (`RetiredRefusal`)
   writer?: string;
   seq?: number;
-  message: string;
+  /** Absent from a `not-reachable` refusal, which says nothing of the session it names (P5 O18 D5). */
+  message?: string;
 };
 
 /**
@@ -67,6 +71,12 @@ export type RefusedFrame = { index: number; reason: Refusal['reason'] };
  */
 export type PostAnswer = { ok: true; frames: number; refused: RefusedFrame[] };
 
+/**
+ * The positions of the hello's own machine's writers the hub withheld (P5 O18 D6): per writer, each seq or `[from, to]`
+ * run, ascending. Never another machine's writers.
+ */
+export type WithheldPositions = Record<string, Array<number | [number, number]>>;
+
 /** Hub → machine, one per SSE event (`event: <t>`, `data: <the frame's JSON>`). */
 export type DownFrame =
   /**
@@ -78,7 +88,7 @@ export type DownFrame =
   | { t: 'welcome'; org: string; machine: string; generation: number; heartbeat_ms: number; kinds?: string[] }
   | { t: 'hb'; at: string }
   /** The answer to `hello`: the hub's vector for the project, and whether this machine writes its archive. */
-  | { t: 'have'; project: string; have: Vector; archive: boolean }
+  | { t: 'have'; project: string; have: Vector; archive: boolean; withheld?: WithheldPositions }
   /** Events the machine lacks, each writer's in seq order, then live as they arrive. */
   | { t: 'events'; project: string; events: LogEvent[] }
   | { t: 'resend'; project: string; writer: string; from: number }

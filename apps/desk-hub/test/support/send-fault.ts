@@ -33,6 +33,8 @@ export const ORG_ROW_PATH = '/__test/org-row';
 export const SEND_HOLD_PATH = '/__test/send-hold';
 /** Where the suites' `Project` lists its `machines` rows (`[{name, generation}]`): the streams it fans out to. */
 export const PROJECT_MACHINES_PATH = '/__test/machines';
+/** A machine's frames handed to the project as its `Machine` object hands them (`fromMachine`), with the context named. */
+export const PROJECT_FRAMES_PATH = '/__test/frames';
 /** Where the suites' `Machine` releases a held send: answers `released`, or `none` while no send is held. */
 export const SEND_RELEASE_PATH = '/__test/send-release';
 /** Where the suites' `Project` holds, or releases, its lookups of the archive machine (`{hold: boolean}`). */

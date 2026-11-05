@@ -1,7 +1,7 @@
 // DX1 — log events (docs/doperpowers/specs/2026-10-15-desk-design.md): smns §3's events, carried by the hub exactly as
 // received. The hub reads `writer`, `seq`, `kind`, `to`, and `member`; every other field passes through, which is why an
 // event is typed as an open object.
-import { isHubPosition, isHubWriter, isIsoMillis, isLogSeq, hubWriter, HUB_WRITER_PREFIX, LEGACY_WRITER_PREFIX, writerMachine, type Sig } from 'org-protocol';
+import { isHubPosition, isHubWriter, isIsoMillis, isLogSeq, hubWriter, HUB_WRITER_PREFIX, LEGACY_WRITER_PREFIX, streamOf, writerMachine, type Sig } from 'org-protocol';
 import type { JsonObject } from './json';
 
 // The writer grammar and the ISO time rule live in the protocol package (apps/org-protocol), which the v2 writer-to-
@@ -84,7 +84,8 @@ export type QuestionEffect = { kind: 'question' | 'answered'; machine: string; s
  */
 export function questionEffect(event: LogEvent): QuestionEffect | null {
   const machine = writerMachine(event.writer);
-  const session = machine === null ? 'human' : event.writer.slice(machine.length + 1);
+  // A session's stream (`<machine>/<session>~<digest>`, P5 O18) is its feed as its plain writer is.
+  const session = machine === null ? 'human' : streamOf(event.writer).base.slice(machine.length + 1);
   if (machine === null || session === 'human') return null;
   if (event.kind === 'retired') return event.session === session ? { kind: 'retired', session } : null;
   // An ask's id is a request's when a bridge raised it too (DX4 `raised.request`, at most 512 characters).

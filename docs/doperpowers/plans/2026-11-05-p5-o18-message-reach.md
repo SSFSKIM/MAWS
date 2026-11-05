@@ -34,7 +34,7 @@ Then `sminos share <session> <member> list` (run by the owner at a terminal): th
 - [x] (2026-11-05) A third adversarial review found nine holes; this revision folds each with the resolution the architect decided: one reader check for every hub read surface, an archive of the admitted projection, the session's machine bound at first exposure, `unlisted` as a validated notice, redacted provenance references, the reach gate at the push primitive, an unreadable record failing closed, a bounded retry after `state-unavailable`, and a complete `snapshots?` rebuild.
 - [x] (2026-11-05) The round-3 review found four more holes; this revision folds each with the architect's resolution: the archive's own-writer frontier is the hub's `have`, not socket handoff; an old sminos or endpoint never receives an audience stream; a split `say` carries only its own recipients' leading tags; a valid `unlisted` notice is admitted by its own rule.
 - [ ] The execution section's buildability review.
-- [ ] M1: the hub's policy registry, upload backstop and audience filter (MAWS).
+- [x] (2026-11-05 22:50Z) M1: the hub's policy registry, upload backstop and audience filter (MAWS). Branch `p5-o18-m1`, `49dd6b262..`; static and unit GREEN on `a091ce1cb` (run 42120533710); reviewer-high with a security lens converged on the third pass.
 - [ ] M2: the endpoint: the `list` grade, `reach?`, audiences and the policy cache (MAWS).
 - [ ] M2b: devices: the audience from the listing (MAWS).
 - [ ] M3: sminos's visibility frames, records and audience streams (doperpowers).
@@ -563,24 +563,39 @@ The gates run on GitHub Actions; the MacBook runs no MAWS Electron e2e.
     // event (optional fields, inside the v2 signature, and inside a device's seal):
     audience?: string[]          // sorted member ids
     policyRev?: number           // on joined and state snapshots
-    sessionRefs(event): Array<{ session: string; role: 'addressing' | 'provenance'; path: string }>
-      // every structured session reference an event carries (D4); `path` names the field, for redaction
+    sessionRefs(event): EventSessionRef[]   // EventSessionRef = { session: string; role: 'addressing' | 'provenance'; path: string }
+      // every structured session reference an event carries (D4), the writing session's own aside; `path` names the
+      // field, dot-separated (`to.0.session`), for redaction. The type is EventSessionRef, not SessionRef: the package
+      // already exports RL3's SessionRef ({lane, id}, messages.ts). A null or absent reference is none.
+    writerSession(writer): string | null          // the session a writer (plain or stream) is the feed of
+    isAudience(v): v is string[]                   // member ids, at least one, sorted, distinct
+    streamWriter(base, audience): string           // `${base}~${audienceDigest(audience)}`
+    isUnlistedNotice(event), isWithheldTombstone(value)
     // the transition notice (sminos log event), content-free:
     { kind: 'unlisted', session: string, policyRev: number, audience: string[] /* the withdrawn members */ }
     // the hub's refusal of an out-of-reach upload, and what it stores in the position's place:
-    { t: 'refused', project, refusal: { reason: 'not-reachable', writer, seq } }     // no message
+    { t: 'refused', project, refusal: { reason: 'not-reachable', writer, seq } }     // no message: the hub's
+      // machine-protocol `Refusal.message` is optional from M1 on (apps/desk-hub/src/protocol/machine.ts)
+    { t: 'refused', project, refusal: { reason: 'audience', writer, seq, message } } // audience and writer disagree
     { writer, seq, withheld: true }                                                 // served in the writer's stream
     // the registry (Registry DO, Policies table):
-    Registry.policies({ snapshots: Snapshot[], sessions: string[] }): Promise<Result<Record<string, Policy | null>>>
-      // Snapshot = { session, machine, audience: string[] | null, policyRev, created }
-      // Policy   = { machine, audience: string[] | null, policyRev, created }   // machine: bound at first exposure,
-      //            by a snapshot here or a listing in Registry.storeListing; never moved
+    Registry.policies({ machine?, snapshots: Snapshot[], sessions: string[] }): Promise<Result<{ rows, mine }>>
+      // machine: the uploader's name (absent for a device's words); every snapshot is that machine's own
+      // Snapshot = { session, audience: string[] | null, policyRev, created }
+      // rows: Record<session, Policy | null>, each as it stood BEFORE the batch; the Project replays the batch in order
+      // mine: Record<session, boolean>, bound to `machine` AFTER the batch (a binding never moves)
+      // Policy   = { audience: string[] | null, policyRev, created }
+      // The binding (held inside the Registry): the machine's ref, by a snapshot here or a listing in
+      // Registry.storeListing; `name:<key>` for a machine with no ref, taken as its ref once it has one. A live listing
+      // of a session no snapshot set stands as listed at policyRev -1. `503 state-unavailable` until the fill is done.
     // the one reader check, in the Project, before any read surface returns (D6):
     mayRead(reader: { machine: string; owners: string[]; streams: boolean } | { member: string }, writer: string): boolean
       // streams: the machine's RL1 hello advertised 'audience'; false on a DX2 stream
     // RL1:
-    Rl1Welcome.capabilities?: string[]       // 'audience'
+    Rl1Welcome.capabilities?: string[]       // 'audience' (HUB_CAPABILITIES)
     EndpointHello.capabilities?: string[]    // 'audience': this endpoint withholds streams from an sminos without it
+    RL1_CAPABILITIES.audience, isCapabilities(v)   // at most 32 names of at most 64 characters
+    // a machine's own writers (its name the writer's prefix) are always its to read, whatever their audience
 
 sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dumps(sorted(set(m)), separators=(',', ':')).encode())`, and a shared vector in `vectors.test.ts` and `sminos/tests/` pins the two together. Use the same JSON separators on both sides.
 
@@ -664,6 +679,37 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Evidence: `sminos.py:4655-4674` (`leading_tags`), `:5218` (`"text": a.text`).
 - Observation: D5's sender-inside-audience check refuses every valid `unlisted` notice, since the notice's audience is exactly the members its sender's change withdraws.
   Evidence: review, round 3; D5's refusal list against D6's notice.
+
+- Observation (M1, the inventory of the hub's read surfaces, on master `49dd6b262`): these are every route and frame that returns stored events, writer names, vectors, audit rows or session-plane rows. Each now asks `Project.mayRead` for its reader first; session-plane rows ask `maySeeSession`.
+  - To machines:
+    - the live fan-out (`fanOut`);
+    - a hello's `have`, its new `withheld` and its backlog (`hello` → `LogStore.beyond`);
+    - the `refused` and `resend` frames, which go only to the uploading machine and name its own writers.
+  - Over HTTP:
+    - the history page (`historyPage`);
+    - the inventory (`historyWriters`, through `Registry.historyInventory`);
+    - the attestations, on both the machine route and the member route (`/api/projects/<p>/attestations`, `worker.ts:280-284`). The first list missed the member route.
+  - To browsers:
+    - the live fan-out, and `resume`'s pages;
+    - the audit record, live (`refusal`, `refuseBrowser`, `rejected`, and `settled`'s `decided` row) and replayed;
+    - the session plane at connect (presence, pending, ops, deliveries) and as it changes (`session` for `op`, `presence`, `raised`, `settled` and `delivery`; `cameOnline`; `pendingChanged`).
+  - Web Push: the push the log plane sends for a DX2 machine's `message` or `question` names its session to every member, so an audience stream's event is never pushed. The grid summary carries counts only.
+  - Not surfaces:
+    - `subscribe`, `rows`, `read` and `output` go to the session's machine, and its endpoint grades them.
+    - Session-plane frames: the DX2 stream has been gone from the hub since O14 M5b, so such a frame reaches a Project only through the suites' seam. M1 filters the rows the Project holds all the same.
+  Evidence: `apps/desk-hub/src/objects/project.ts` (every `broadcast`, `toSocket` and `toMachine` call site), `worker.ts:280-331`.
+- Observation (M1): a browser still sees the project-wide offsets (`welcome.head`, `caught-up`, `more`), so a stream's hidden events show up as gaps in the offset counter. That leaks volume, but never a session or a writer. The architect accepted it as residue (2026-11-05).
+  Evidence: `LogStore.after` numbers every event; `Project.resume` sends the last offset it scanned.
+- Observation (M1): a `continued` retirement's successor is often written before the successor's `joined` reaches the hub. Refusing every unknown provenance reference would therefore tombstone continuations for every session, private or not.
+  Evidence: `sminos.py:3669` writes the retirement right after `ensure_record` makes the new record, and the uplink uploads writers in no fixed order.
+- Observation (M1): an `unlisted` notice and the snapshot after it usually travel in one upload batch. A registry that applied the batch's snapshots before judging its events would refuse every valid notice, since its `policyRev` would no longer be newer.
+  Evidence: D6 writes the notice "just before the new snapshot", and one upload carries a writer's whole suffix.
+- Observation (M1): the hub's sender check reads `attest.owners` as the machine's signed claim, and the hub verifies no attestation, so a machine can claim owners that pass the check. That fits the rule that the hub only refuses: the receiving endpoint verifies the attestation before it answers `reach?`.
+  Evidence: `project.ts` `factsOf`; `apps/org-protocol/src/attest.ts` `verifyAttestation` runs only at the endpoint.
+- Observation (M1, second review): a reader check at enqueue isn't enough. A live frame waits in the Machine's queue, and an owner change can come in between, so `toMachineAll` checks each stream frame against the reader again when it leaves the queue (`stillReads`).
+  Evidence: `project.ts` `toMachineAll`; the second review's P1.
+- Observation (M1, third review): a frame already handed to `Machine.send` and `Relay.relaySend` is checked against the connection's generation, not its audience (`relay.ts:584`). An owner change that lands in that window can't stop a socket write already underway. The window predates O18 and is as wide as one socket write. It's left as review debt, because closing it would mean an audience check inside the relay's send path.
+  Evidence: `apps/desk-hub/src/objects/relay.ts:584`; the third review, 2026-11-05.
 
 ## Decision Log
 
@@ -797,6 +843,55 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Rejected: applying the general rule to it, which refuses every valid notice.
   Date/Author: 2026-11-05, p5-desk-track-owner, decided by the architect from the round-3 review.
 
+- Decision (M1): `Registry.policies` answers two things for each named session: its policy as it stood before the batch, and whether it is bound to the uploader after the batch. The Project replays the batch in order and takes each snapshot by the same rule the Registry uses (`newer`). The Registry records the batch's snapshots in the same synchronous step, so no other project's batch can move a row between the read and the record.
+  Rationale: an `unlisted` notice and its snapshot share a batch. If the snapshot were applied first, every valid notice would be stale. A binding never moves, so reading it after the batch gives the same answer whatever the order.
+  Cost: a snapshot the Project then withholds for another reason (an unredacted provenance reference, or a sender outside its audience) has still moved the row. The row stays right, because the snapshot is its own bound machine's statement of its policy.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M1), approved by the architect.
+- Decision (M1): an unknown provenance reference is admitted. Only an unknown addressing reference is refused.
+  Rationale: refusing a `continued` retirement whose successor the hub hasn't seen yet would tombstone continuations for every session (Surprises, M1). That breaks the promise that nothing visible changes while the org is the owner alone. Admitting is safe: a spawner existed before its child, and a private session's own machine uploads its snapshot before any event that names it. A session the registry doesn't know is therefore no one's private session yet. A known provenance session still gets the redaction check.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M1), approved by the architect.
+- Decision (M1): the writing session is not a named session. The hub doesn't refuse a plain-writer event because its own session is unknown, or private at the registry.
+  Rationale: the session's own endpoint checks the digest at signing, and that check is the authority for the session's own audience (D7). A session can only be private behind an M2 endpoint. The hub's backstop is for the remote sessions a sender can be stale about.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M1), approved by the architect.
+- Decision (M1): `mayRead` also gives a machine every writer of its own machine, whatever the writer's audience.
+  Rationale: a session another person spawned on my machine has an audience that may not include my machine's owners, and the endpoint's resend logic reads its own writers in `have`. The machine holds those writers already, so nothing leaks.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M1), approved by the architect.
+- Decision (M1): a live RL6 listing of a session the registry holds no policy for binds the session and records it as listed at `policyRev` -1. A `gone` listing only binds. The fill takes the log's snapshot over a row that only a listing made.
+  Rationale: a session's listing reaches the hub before its first upload (D5), and a listed session is open to the whole org's messages. Any snapshot overrides the listing's row.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M1), approved by the architect.
+- Decision (M1): a machine reader's owners are resolved at its hello and fixed for the connection, with one exception: each org state the project is told of narrows them, so an owner the state dropped reads no more. An owner the state adds waits for the machine's next hello. An unreadable head narrows the owners to none. HTTP readers and DX2 get no stream except their own.
+  Rationale: a stream that became readable mid-connection would start, for that reader, at a seq past 1: the hole the streams exist to prevent. A stream that becomes unreadable just stops. Either way the reader fails closed.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M1).
+- Decision (M1): who is shown which audit and session-plane rows.
+  - The audit row of a withheld position goes to its stream's audience and to the members whose send it was: its attested owners, else the uploading machine's owners, or the member for a device's words.
+  - Any other refusal of a stream's position goes to the stream's audience alone.
+  - Session-plane rows and `decided` rows are read against the session's latest policy the project has seen. That is `known_policies`, kept from the registry rows each upload reads and replays.
+  Rationale: the sender learns of a refusal over its own upload path anyway (D5). A refusal other than `not-reachable` concerns a stream whose sender was inside its audience when its earlier positions were admitted.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M1).
+- Decision (M1): the first `policies` call waits up to 10 s for the fill before refusing `state-unavailable`. Until the fill completes, every upload that names a session is refused that way.
+  Rationale: one bounded wait means fewer refusals than answering at once, and a `state-unavailable` refusal is retried (D5). Until M2's endpoint lands, a `state-unavailable` position waits for the next reconnect or write, as a signature check's does today.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M1).
+- Decision (M1, from the first review): a machine reader's owners are re-resolved fail-closed. Each machine row keeps the owners its hello resolved and a `current` set. Every org-state announcement nulls `current` synchronously, before anything awaits, so the reader reads no stream while its owners are re-resolved. `current` then becomes the hello-owners intersected with the fresh set, so a reader never widens mid-connection. A stream event the reader could read at its hello but can't now ends its connection: it re-hellos and gets a coherent view instead of a hole. A hello's backlog asks the current row before every page.
+  Rationale: the review found an upload fanning out to a revoked owner while the head was read, and a backlog running on the Reader it captured at hello.
+  Cost: an org-state change can reconnect the machines whose stream reads it interrupts, and only those.
+  Rejected: narrowing after the head read (the first build), which leaves that window open; and blanking reads with no reconnect, which leaves a hole.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M1), approved by the architect.
+- Decision (M1, from the first review): a device's words take their sender from the authenticated member alone, never from the event body (an `attest` on it is ignored). An `unlisted` notice carries no session reference.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M1).
+- Decision (M1): the read-surface tests live in a new `apps/desk-hub/test/audience-reads.test.ts`, beside `policies.test.ts`, rather than in `log.test.ts`. Both files need an org with a second member and machines that advertise `audience`, which the org `log.test.ts` shares doesn't have. `log.test.ts` and `signed-log.test.ts` run unchanged, as the regression check.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M1).
+
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+- M1 (2026-11-05). The hub now does everything Interfaces §A gives it:
+  - It keeps a policy registry, bound at first exposure. The registry is filled once from every project's newest snapshots, with a bounded 10 s wait before `state-unavailable`.
+  - It refuses at upload, in batch order with replay. Out of reach gives a tombstone and `not-reachable`, a digest mismatch gives `audience`, and when the state is unavailable nothing is stored.
+  - Every read surface (machines, HTTP, browsers, Web Push) asks `mayRead` or `maySeeSession` first.
+  - RL1 hellos carry `capabilities` and the welcome answers `audience`.
+
+  The diff is 28 files, +2007/−115 over seven commits. There are two new test files, `policies.test.ts` (15 tests) and `audience-reads.test.ts` (11 tests). The existing log, signed-log, relay, org and push suites run unchanged. Static and unit are GREEN on `a091ce1cb`.
+- What the reviews caught. The first review (five findings) and the second (one) found reader-side races: owners narrowed after the head read, a backlog on the Reader captured at hello, and a queued frame never rechecked. They also found two places where the sender's identity came from the event body. Each fix fails closed, re-resolves the reader and ends a connection it would otherwise leave holed. The lesson for M2 and M3: a reader's authority is checked where data leaves, not where it's chosen.
+- Left for later:
+  - the browser offset counter shows a stream's volume (accepted residue);
+  - the send-path window in the relay (Surprises, third review);
+  - today's endpoints and desk-web read a tombstone as malformed, until M2 and M2b.

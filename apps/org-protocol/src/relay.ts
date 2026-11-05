@@ -96,10 +96,24 @@ export function tagBytes(tag: number): Uint8Array<ArrayBuffer> {
  * The endpoint's first message on its socket. `machine` is its ref (RL DL 19), which the hub matches against the
  * credential's own. `leaseGeneration` is the generation it held before, when it held one.
  */
-export type EndpointHello = { t: 'hello'; protocol: { major: number; minor: number }; build: string; machine: string; leaseGeneration?: number };
+export type EndpointHello = { t: 'hello'; protocol: { major: number; minor: number }; build: string; machine: string; leaseGeneration?: number; capabilities?: string[] };
 /** The hub's answer to `hello`: this connection's generation (one counter with DX2's streams), and how often the
  * endpoint sends `hb`. */
-export type Rl1Welcome = { t: 'welcome'; generation: number; heartbeat_ms: number };
+export type Rl1Welcome = { t: 'welcome'; generation: number; heartbeat_ms: number; capabilities?: string[] };
+
+/**
+ * What either end of RL1 can do beyond the major it speaks (OX1), in the optional `capabilities` of the endpoint's hello
+ * and the hub's welcome. `audience` (P5 O18 D9): on the welcome, the hub filters audience streams per reader and refuses
+ * at upload what is out of reach, so the endpoint may upload a private session's events; on the hello, the endpoint
+ * passes no audience stream down to an sminos that does not advertise it, so the hub may serve it streams.
+ */
+export const RL1_CAPABILITIES = { audience: 'audience' } as const;
+/** The capabilities this hub's welcome advertises. */
+export const HUB_CAPABILITIES: readonly string[] = [RL1_CAPABILITIES.audience];
+
+/** A `capabilities` list as either end sends it: at most 32 names of at most 64 characters. */
+export const isCapabilities = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.length <= 32 && value.every((c) => typeof c === 'string' && c.length > 0 && c.length <= 64);
 /** The endpoint's heartbeat, every `heartbeat_ms`: the hub renews the machine's lease in every project this connection
  * opened and answers `hb-ack`. */
 export type Rl1Heartbeat = { t: 'hb'; generation: number };
@@ -135,7 +149,8 @@ export function isEndpointHello(frame: unknown): frame is EndpointHello {
     isCount(protocol.minor, 0) &&
     isText(frame.build, 256) &&
     isMachineRef(frame.machine) &&
-    (frame.leaseGeneration === undefined || isCount(frame.leaseGeneration, 1))
+    (frame.leaseGeneration === undefined || isCount(frame.leaseGeneration, 1)) &&
+    (frame.capabilities === undefined || isCapabilities(frame.capabilities))
   );
 }
 
