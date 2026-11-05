@@ -20,9 +20,9 @@ export function Shimmer({ children, warmth = 0 }: { children: ReactNode; warmth?
   );
 }
 
-export function LiveThinkingLabel({ startedAt, text = '' }: { startedAt: string; text?: string }) {
+export function LiveThinkingLabel({ startedAt, text = '', clock = 'events' }: { startedAt: string; text?: string; clock?: 'events' | 'wall' }) {
   const { storeKey, effort } = useTranscriptContext();
-  const elapsedMs = useWorkingMs(storeKey, startedAt);
+  const elapsedMs = useWorkingMs(storeKey, startedAt, clock);
   const latest = text.trim().split(/\r?\n/).filter((line) => line.trim()).at(-1);
   return <span className="transcript-thinking-summary"><Shimmer warmth={thinkingWarmth(elapsedMs)}>{latest || liveThinkingLabel(elapsedMs, effort ?? null)}</Shimmer></span>;
 }
