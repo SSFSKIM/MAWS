@@ -34,7 +34,7 @@ Then `sminos share <session> <member> list` (run by the owner at a terminal): th
 - [x] (2026-11-05) A third adversarial review found nine holes; this revision folds each with the resolution the architect decided: one reader check for every hub read surface, an archive of the admitted projection, the session's machine bound at first exposure, `unlisted` as a validated notice, redacted provenance references, the reach gate at the push primitive, an unreadable record failing closed, a bounded retry after `state-unavailable`, and a complete `snapshots?` rebuild.
 - [x] (2026-11-05) The round-3 review found four more holes; this revision folds each with the architect's resolution: the archive's own-writer frontier is the hub's `have`, not socket handoff; an old sminos or endpoint never receives an audience stream; a split `say` carries only its own recipients' leading tags; a valid `unlisted` notice is admitted by its own rule.
 - [ ] The execution section's buildability review.
-- [ ] M1: the hub's policy registry, upload backstop and audience filter (MAWS).
+- [x] (2026-11-05 22:50Z) M1: the hub's policy registry, upload backstop and audience filter (MAWS). Branch `p5-o18-m1`, `49dd6b262..`; static and unit GREEN on `a091ce1cb` (run 42120533710); reviewer-high with a security lens converged on the third pass.
 - [ ] M2: the endpoint: the `list` grade, `reach?`, audiences and the policy cache (MAWS).
 - [ ] M2b: devices: the audience from the listing (MAWS).
 - [ ] M3: sminos's visibility frames, records and audience streams (doperpowers).
@@ -706,6 +706,10 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Evidence: D6 writes the notice "just before the new snapshot", and one upload carries a writer's whole suffix.
 - Observation (M1): the hub's sender check reads `attest.owners` as the machine's signed claim, and the hub verifies no attestation, so a machine can claim owners that pass the check. That fits the rule that the hub only refuses: the receiving endpoint verifies the attestation before it answers `reach?`.
   Evidence: `project.ts` `factsOf`; `apps/org-protocol/src/attest.ts` `verifyAttestation` runs only at the endpoint.
+- Observation (M1, second review): a reader check at enqueue isn't enough. A live frame waits in the Machine's queue, and an owner change can come in between, so `toMachineAll` checks each stream frame against the reader again when it leaves the queue (`stillReads`).
+  Evidence: `project.ts` `toMachineAll`; the second review's P1.
+- Observation (M1, third review): a frame already handed to `Machine.send` and `Relay.relaySend` is checked against the connection's generation, not its audience (`relay.ts:584`). An owner change that lands in that window can't stop a socket write already underway. The window predates O18 and is as wide as one socket write. It's left as review debt, because closing it would mean an audience check inside the relay's send path.
+  Evidence: `apps/desk-hub/src/objects/relay.ts:584`; the third review, 2026-11-05.
 
 ## Decision Log
 
@@ -879,4 +883,15 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+- M1 (2026-11-05). The hub now does everything Interfaces §A gives it:
+  - It keeps a policy registry, bound at first exposure. The registry is filled once from every project's newest snapshots, with a bounded 10 s wait before `state-unavailable`.
+  - It refuses at upload, in batch order with replay. Out of reach gives a tombstone and `not-reachable`, a digest mismatch gives `audience`, and when the state is unavailable nothing is stored.
+  - Every read surface (machines, HTTP, browsers, Web Push) asks `mayRead` or `maySeeSession` first.
+  - RL1 hellos carry `capabilities` and the welcome answers `audience`.
+
+  The diff is 28 files, +2007/−115 over seven commits. There are two new test files, `policies.test.ts` (15 tests) and `audience-reads.test.ts` (11 tests). The existing log, signed-log, relay, org and push suites run unchanged. Static and unit are GREEN on `a091ce1cb`.
+- What the reviews caught. The first review (five findings) and the second (one) found reader-side races: owners narrowed after the head read, a backlog on the Reader captured at hello, and a queued frame never rechecked. They also found two places where the sender's identity came from the event body. Each fix fails closed, re-resolves the reader and ends a connection it would otherwise leave holed. The lesson for M2 and M3: a reader's authority is checked where data leaves, not where it's chosen.
+- Left for later:
+  - the browser offset counter shows a stream's volume (accepted residue);
+  - the send-path window in the relay (Surprises, third review);
+  - today's endpoints and desk-web read a tombstone as malformed, until M2 and M2b.
