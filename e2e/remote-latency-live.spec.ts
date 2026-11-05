@@ -267,8 +267,10 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
   const { config, machine } = benchMachine();
   const bench = new BenchRun(machine, { runner: processRunner(), engineVersion: FIXTURE_ENGINE_VERSION, say });
   // the precheck, before anything starts: a loaded runner or mini refuses the run, recorded
-  const precheckLoads = { mac: loadavg()[0], machine: await bench.load1() };
-  const refused = loadPrecheck({ mac: precheckLoads.mac, machine: precheckLoads.machine === null ? null : { name: machine.name, load: precheckLoads.machine } });
+  const macLoad = loadavg()[0];
+  const machineLoad = await bench.load1();
+  const precheckLoads = { mac: macLoad, machine: machineLoad };
+  const refused = loadPrecheck({ mac: macLoad, machine: machineLoad === null ? null : { name: machine.name, load: machineLoad } });
   if (refused !== null) {
     const info = test.info();
     mkdirSync(info.project.outputDir, { recursive: true });
@@ -279,7 +281,7 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
     test.skip(true, `the precheck refused the run: ${refused}`);
     return;
   }
-  say(`[bench] ${machine.name}: the precheck passed (this Mac’s load1 ${precheckLoads.mac.toFixed(2)}${typeof precheckLoads.machine === 'number' ? `, ${machine.name}’s ${precheckLoads.machine.toFixed(2)}` : ''})`);
+  say(`[bench] ${machine.name}: the precheck passed (this Mac’s load1 ${macLoad.toFixed(2)}${typeof machineLoad === 'number' ? `, ${machine.name}’s ${machineLoad.toFixed(2)}` : ''})`);
   const loads = [loadavg()[0]];
   const sampler = setInterval(() => loads.push(loadavg()[0]), 30_000);
   let terminalLoad: number | undefined;

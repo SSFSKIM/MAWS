@@ -1031,10 +1031,11 @@ export function loadOf(answer: string): number | null {
  */
 export function loadPrecheck(loads: { mac: number; machine: { name: string; load: number | string } | null }): string | null {
   const { mac, machine } = loads;
-  if (machine !== null && typeof machine.load === 'string') return `${machine.name}: ${machine.load}`;
+  const remote = machine?.load ?? null;
+  if (machine !== null && typeof remote === 'string') return `${machine.name}: ${remote}`;
   const over: string[] = [];
   if (mac >= IDLE_RUN.maxLoad) over.push(`this Mac’s load1 is ${mac.toFixed(2)}`);
-  if (machine !== null && machine.load >= IDLE_RUN.maxLoad) over.push(`${machine.name}’s${over.length > 0 ? '' : ' load1'} is ${machine.load.toFixed(2)}`);
+  if (machine !== null && typeof remote === 'number' && remote >= IDLE_RUN.maxLoad) over.push(`${machine.name}’s${over.length > 0 ? '' : ' load1'} is ${remote.toFixed(2)}`);
   return over.length === 0 ? null : `${over.join(' and ')}, at or over Rule B’s ${IDLE_RUN.maxLoad}`;
 }
 
