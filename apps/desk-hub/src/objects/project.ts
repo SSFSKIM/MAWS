@@ -1736,7 +1736,13 @@ export class Project extends DurableObject<Env> {
       let result: Sent = 'written';
       let frame: DownFrame | undefined;
       try {
-        for (frame of frames) if ((result = await machine.send(frame, generation)) !== 'written') break;
+        for (frame of frames) {
+          if (!this.stillReads(name, generation, frame)) {
+            result = 'offline';
+            break;
+          }
+          if ((result = await machine.send(frame, generation)) !== 'written') break;
+        }
       } catch (error) {
         logged({ event: 'send-failed', machine: name, generation, lane, frame: frame?.t ?? null, error: described(error) });
         this.leaveFanOut(name, generation);
@@ -1753,6 +1759,25 @@ export class Project extends DurableObject<Env> {
     tail.catch(() => {});
     this.queues.set(key, tail);
     return sent;
+  }
+
+  /**
+   * Whether a frame leaving the queue may still go (P5 O18 D6): one that carries another machine's stream event was
+   * authorized when it was queued, and the machine's owners may have changed since. It goes when the connection's
+   * reader reads every such event now; when one it read at its hello no longer is, the connection ends (`endStream`)
+   * rather than hold a hole; when the connection is gone or retired, nothing more goes. Other frames pass.
+   */
+  private stillReads(name: string, generation: number, frame: DownFrame): boolean {
+    if (frame.t !== 'events') return true;
+    const streams = frame.events.filter((e) => streamOf(e.writer).digest !== null && machineNameKey(writerMachine(e.writer) ?? '') !== machineNameKey(name));
+    if (streams.length === 0) return true;
+    const row = this.ctx.storage.sql.exec<MachineRow>('SELECT name, generation, owners, current, streams FROM machines WHERE name = ?', name).toArray()[0];
+    if (row?.generation !== generation) return false;
+    const { now, atHello } = readersOf(row);
+    const lost = streams.filter((e) => !this.mayRead(now, e.writer));
+    if (lost.length === 0) return true;
+    if (lost.some((e) => this.mayRead(atHello, e.writer))) this.endStream(name, generation);
+    return false;
   }
 
   private leaveFanOut(name: string, generation: number): void {

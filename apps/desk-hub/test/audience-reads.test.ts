@@ -155,6 +155,25 @@ describe('to a machine whose owners change', () => {
     mK.close();
   });
 
+  it("is sent no private event queued behind a held send once the state drops its owner", async () => {
+    const mR = await o.org.machine('reads-queued', { capabilities: AUDIENCE });
+    const project = newProject();
+    for (const m of [mA, mR]) await m.sync(project);
+    const { P, L, stream, plain } = await written(project);
+    await mR.reaches(project, { [stream]: 2, [plain]: 2 });
+    // A plain event's send waits at the machine's object; the private one queues behind it, read as A's then.
+    await hub.holdSend(mR.name, 'events');
+    expect(await upload(mA, project, [say(mA, project, L, 3, [])])).toEqual([]);
+    expect(await upload(mA, project, [attested(project, P, 3)])).toEqual([]);
+    const { reads } = await hub.stateCache(project);
+    await ownedBy(mR, [o.B]);
+    await waitFor(async () => ((await hub.stateCache(project)).reads > reads ? true : undefined));
+    await hub.releaseSend(mR.name);
+    await waitFor(() => (!mR.endpoint.isOpen || seqs(mR, project, stream).includes(3) ? true : undefined));
+    expect(seqs(mR, project, stream)).toEqual([1, 2]);
+    mR.close();
+  });
+
   it("ends a hello's backlog, and its connection, at a page of a stream its owners no longer reach", async () => {
     const mR = await o.org.machine('reads-paged', { capabilities: AUDIENCE });
     const project = newProject();
