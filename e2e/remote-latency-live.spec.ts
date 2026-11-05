@@ -5,6 +5,9 @@
 // judged over the clock offset's whole interval (test/support/remote-latency.ts's live clock), from 100 exchanges at
 // each carrier's start and 50 at its end; round trip and open to first row are this Mac's clock alone.
 //
+//   0. the precheck (M10): this Mac's load1 and, on the mini, its own (`sysctl -n vm.loadavg` through the run), each under
+//      Rule B's 5, or the run refuses to start: the refusal and both loads written to the run's JSON and annotated, the
+//      test skipped with its reason, a recorded outcome rather than a failure (attempt 2 measured on a runner at 97.7);
 //   1. local: this Mac's own case, the latency stub as a scratch profile's engine (the same run's local numbers);
 //   2. the bench app: a scratch profile (the config's, kept between runs) launched with the mock keychain (MAWS_E2E),
 //      signed in from a pairing code read from its file and the file removed, the owner comparing the fingerprint and
@@ -49,7 +52,7 @@ import type { MachineRef } from '../src/shared/machine/ref';
 import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 import { BENCH, summarize } from '../test/support/local-latency';
 import { benchSignIn } from '../test/support/bench-sign-in';
-import { appProfileProblems, BenchRun, buildHeadBundle, buildSourceArchive, processRunner, type BenchMachine } from '../test/support/remote-bench';
+import { appProfileProblems, BenchRun, buildHeadBundle, buildSourceArchive, loadPrecheck, processRunner, type BenchMachine } from '../test/support/remote-bench';
 import { carrierSwitch, CARRIERS, invalidReasons, LIVE_BENCH, liveClock, liveJudgement, loadVerdict, measureResume, REMOTE_BENCH, remoteLine, rttStats, signedStats, type CaseRun, type Carrier, type Exchange, type LinkTransition, type LiveJudgement, type LiveMeasures } from '../test/support/remote-latency';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { markerOf } from '../test/support/latency-engine';
@@ -262,6 +265,21 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
     expect(mode === undefined || mode === 'off', `Playwright's ${what} is off, so the pairing step is in no artifact`).toBe(true);
   }
   const { config, machine } = benchMachine();
+  const bench = new BenchRun(machine, { runner: processRunner(), engineVersion: FIXTURE_ENGINE_VERSION, say });
+  // the precheck, before anything starts: a loaded runner or mini refuses the run, recorded
+  const precheckLoads = { mac: loadavg()[0], machine: await bench.load1() };
+  const refused = loadPrecheck({ mac: precheckLoads.mac, machine: precheckLoads.machine === null ? null : { name: machine.name, load: precheckLoads.machine } });
+  if (refused !== null) {
+    const info = test.info();
+    mkdirSync(info.project.outputDir, { recursive: true });
+    writeFileSync(join(info.project.outputDir, 'remote-latency-live.json'), `${JSON.stringify({ machine: machine.name, transport: machine.transport.kind, commit: machine.commit, valid: false, precheck: { refused, loads: precheckLoads } }, null, 2)}\n`);
+    const line = `[remote-latency-live] ${machine.name}: the precheck refused the run: ${refused}`;
+    console.log(line);
+    info.annotations.push({ type: 'remote-latency-live', description: line });
+    test.skip(true, `the precheck refused the run: ${refused}`);
+    return;
+  }
+  say(`[bench] ${machine.name}: the precheck passed (this Mac’s load1 ${precheckLoads.mac.toFixed(2)}${typeof precheckLoads.machine === 'number' ? `, ${machine.name}’s ${precheckLoads.machine.toFixed(2)}` : ''})`);
   const loads = [loadavg()[0]];
   const sampler = setInterval(() => loads.push(loadavg()[0]), 30_000);
   let terminalLoad: number | undefined;
@@ -270,7 +288,6 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
   expect(appProblems, 'the bench app’s profile is a scratch profile').toEqual([]);
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-rll-')));
   mkdirSync(config.app.profile, { recursive: true });
-  const bench = new BenchRun(machine, { runner: processRunner(), engineVersion: FIXTURE_ENGINE_VERSION, say });
   const stream = served();
   let a: MawsLaunch | null = null;
   const cases: Record<'local' | Carrier, CaseRun | null> = { local: null, direct: null, relay: null };
@@ -352,7 +369,7 @@ test('remote latency, live: delta to frame across two clocks, round trip and ope
     direct: live.direct === undefined ? null : { measures: live.direct.measures, void: live.direct.void, judgement: judged.direct ?? null },
     relay: live.relay === undefined ? null : { measures: live.relay.measures, void: live.relay.void, judgement: judged.relay ?? null },
     invalidReasons: all, budgetMisses: misses, inconclusive,
-    load: { samples: loads, terminal: terminalLoad ?? null, peak: load.peak, pair: load.pair },
+    load: { samples: loads, terminal: terminalLoad ?? null, peak: load.peak, pair: load.pair, precheck: precheckLoads },
     machineEngineStartMs: stream.ready?.engineStartMs ?? null,
     roundTripsMs: { local: local?.roundTripsMs ?? [], direct: live.direct?.roundTripsMs ?? [], relay: live.relay?.roundTripsMs ?? [] },
     exchanges: { direct: live.direct?.exchanges ?? null, relay: live.relay?.exchanges ?? null },

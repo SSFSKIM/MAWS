@@ -57,6 +57,7 @@
 import { spawn } from 'node:child_process';
 import { closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, posix } from 'node:path';
+import { IDLE_RUN } from './daemon-idle';
 
 export type Transport = { kind: 'ssh'; host: string } | { kind: 'devcloud'; vm: string };
 
@@ -848,6 +849,17 @@ export class BenchRun {
   }
 
   /**
+   * The mini's 1-minute load for the bench's precheck (M10): `sysctl -n vm.loadavg` through its transport, read-only,
+   * with its deadline and quiet window; the reason when it is unread. Null on the VM, whose load the precheck doesn't read.
+   */
+  async load1(): Promise<number | string | null> {
+    if (this.#m.transport.kind !== 'ssh') return null;
+    const read = await this.#remote('sysctl -n vm.loadavg');
+    const load = read.code === 0 ? loadOf(read.stdout) : null;
+    return load ?? `its load could not be read (sysctl exit ${read.code})`;
+  }
+
+  /**
    * The agent's `serve`: the stub's session started, listed once `list` names the owners; its lines to `onLine`. Started
    * only when the quiet window is SERVE_SPAN_MS off, and ended with its cleanup QUIET_MARGIN_MS before the window however
    * long it has run.
@@ -1005,6 +1017,26 @@ export class BenchRun {
 }
 
 const mib = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
+
+/** The 1-minute load from macOS's `sysctl -n vm.loadavg` (`{ 1.23 1.45 1.67 }`); null when unreadable. */
+export function loadOf(answer: string): number | null {
+  const load = /^\{\s*(\d+(?:\.\d+)?)\s/.exec(answer.trim())?.[1];
+  return load === undefined ? null : Number(load);
+}
+
+/**
+ * The live bench's precheck (M10, before its local case): why it refuses to start, or null. Rule B's ceiling on a
+ * 1-minute load (IDLE_RUN.maxLoad, 5) applies to this Mac, the runner, and to the mini it measures; the mini's load
+ * unread (`load` a reason) refuses too. A refusal is a recorded outcome of the run, not a failure.
+ */
+export function loadPrecheck(loads: { mac: number; machine: { name: string; load: number | string } | null }): string | null {
+  const { mac, machine } = loads;
+  if (machine !== null && typeof machine.load === 'string') return `${machine.name}: ${machine.load}`;
+  const over: string[] = [];
+  if (mac >= IDLE_RUN.maxLoad) over.push(`this Mac’s load1 is ${mac.toFixed(2)}`);
+  if (machine !== null && machine.load >= IDLE_RUN.maxLoad) over.push(`${machine.name}’s${over.length > 0 ? '' : ' load1'} is ${machine.load.toFixed(2)}`);
+  return over.length === 0 ? null : `${over.join(' and ')}, at or over Rule B’s ${IDLE_RUN.maxLoad}`;
+}
 
 /** `keyId` from `mawsd keys --json`'s flat answer (`keysAnswer`); null when it is absent or the answer unreadable. */
 export function keyIdOf(answer: string): string | null {

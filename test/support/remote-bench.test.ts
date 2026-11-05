@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { keysAnswer, statusAnswer } from '../../src/endpoint/presence';
 import type { MachineRef } from '../../src/shared/machine/ref';
-import { appProfileProblems, archiveProblems, BenchRun, buildHeadBundle, buildSourceArchive, copyLine, deadlined, ENROLL_WAIT_S, envLine, guardedLine, keyIdOf, makeScratchDirs, reapLine, SCRATCH_DIRS, scratchDaemonLine, SERVE_MAX_MS, INHERITED_OVERRIDES, machineProblems, meetsQuiet, processRunner, productionProblem, profileEnv, QUIET_MARGIN_MS, quote, startLine, stopLine, stubFixtures, transportArgv, untilQuiet, type BenchMachine, type CommandRunner, type HeadBundle, type RunResult, type Started } from './remote-bench';
+import { appProfileProblems, archiveProblems, BenchRun, buildHeadBundle, buildSourceArchive, copyLine, deadlined, ENROLL_WAIT_S, envLine, guardedLine, keyIdOf, loadOf, loadPrecheck, makeScratchDirs, reapLine, SCRATCH_DIRS, scratchDaemonLine, SERVE_MAX_MS, INHERITED_OVERRIDES, machineProblems, meetsQuiet, processRunner, productionProblem, profileEnv, QUIET_MARGIN_MS, quote, startLine, stopLine, stubFixtures, transportArgv, untilQuiet, type BenchMachine, type CommandRunner, type HeadBundle, type RunResult, type Started } from './remote-bench';
 
 const CODE = 'smns-enroll-v1.SECRET-0123456789abcdefghij';
 const COMMIT = 'a'.repeat(40);
@@ -1154,6 +1154,28 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     await expect.poll(() => fake.watches[0]!.ended).toBe(true);
     expect(said).toContain('[bench] mini-bench: its quiet window is 2 minutes off: the status watch is ended now');
     await expect(run.enroll()).rejects.toThrow(/the status watch has ended/);
+  });
+
+  it('the precheck: this Mac’s load1 and the mini’s (`sysctl -n vm.loadavg`, read through the run) under Rule B’s 5, else a refusal with its reason; an unread load refuses', async () => {
+    expect(loadOf('{ 4.99 3.20 2.10 }\n')).toBe(4.99);
+    expect(loadOf('{ 12,5 3 2 }')).toBeNull();
+    expect(loadOf('')).toBeNull();
+    expect(loadPrecheck({ mac: 4.99, machine: { name: 'mini-bench', load: 4.2 } })).toBeNull();
+    expect(loadPrecheck({ mac: 3.1, machine: null })).toBeNull(); // the VM's is not read
+    expect(loadPrecheck({ mac: 5, machine: { name: 'mini-bench', load: 1 } })).toBe('this Mac’s load1 is 5.00, at or over Rule B’s 5');
+    expect(loadPrecheck({ mac: 20.4, machine: { name: 'mini-bench', load: 7.25 } })).toBe('this Mac’s load1 is 20.40 and mini-bench’s is 7.25, at or over Rule B’s 5');
+    expect(loadPrecheck({ mac: 1, machine: { name: 'mini-bench', load: 'its load could not be read (sysctl exit 255)' } })).toBe('mini-bench: its load could not be read (sysctl exit 255)');
+    // the mini's read: one read-only command through its transport, with its deadline and quiet window
+    const mini = fakeRunner((command) => (command === 'sysctl -n vm.loadavg' ? ok('{ 3.87 3.10 2.90 }\n') : undefined));
+    expect(await new BenchRun(MINI('/tmp/code'), benchDeps(mini, at('2026-11-03T12:00:00Z')).deps).load1()).toBe(3.87);
+    expect(mini.calls.map((c) => c.argv.at(-1))).toEqual(['sysctl -n vm.loadavg']);
+    expect(mini.calls[0]!.argv.slice(0, 5)).toEqual(['ssh', '-T', '-o', 'BatchMode=yes', 'mini']);
+    const lost = fakeRunner((command) => (command === 'sysctl -n vm.loadavg' ? { code: 255, stdout: '', stderr: '' } : undefined));
+    expect(await new BenchRun(MINI('/tmp/code'), benchDeps(lost, at('2026-11-03T12:00:00Z')).deps).load1()).toBe('its load could not be read (sysctl exit 255)');
+    await expect(new BenchRun(MINI('/tmp/code'), benchDeps(fakeRunner(() => undefined), at('2026-11-03T06:50:00Z')).deps).load1()).rejects.toThrow(/refused: nothing reaches it from 06:45/);
+    const vm = fakeRunner(() => undefined);
+    expect(await new BenchRun(VM('/tmp/code'), benchDeps(vm, 0).deps).load1()).toBeNull();
+    expect(vm.calls).toEqual([]);
   });
 });
 
