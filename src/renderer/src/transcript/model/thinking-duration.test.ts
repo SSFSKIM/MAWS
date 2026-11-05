@@ -6,9 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
-import { emptyDigest, foldEvents } from '../../../../services/sessions/digest';
 import { journalToEvents } from '../dev/journal';
 import { thinkingLabel } from './copy';
 import { rowsOf, withAllExpanded } from './derive';
@@ -38,13 +36,9 @@ describe('a thinking block’s duration on a session MAWS runs (claude-opus-5-5)
     expect(thinkingLabels(rowsUpTo(rows, 198))).toEqual(['Thought']); // the textless block closed: only the first block's row stays
   });
 
-  it('moves nothing else: the block sits where it did, before the answer, and the session reads Thinking from its start', () => {
+  it('moves nothing else: the block sits where it did, before the answer', () => {
     const rows = journal('p4-tool-summaries-thinking-edits');
     const tail = rowsUpTo(rows).filter((row) => row.kind === 'thinking' || row.kind === 'assistant_text').slice(-2);
     expect(tail.map((row) => row.kind)).toEqual(['thinking', 'assistant_text']);
-    const stages = journal('p4-r7-loss-stages');
-    const activity = (seq: number) => foldEvents(emptyDigest('a' as AppSessionId), new Set(), journalToEvents(stages.filter((row) => row.seq <= seq))).activity;
-    expect(activity(193), 'its message started, after a tool’s result').toBe('Working');
-    expect(activity(194), 'at the block’s start (seq 194), not its first words (seq 195, 2.46 s on)').toBe('Thinking');
   });
 });

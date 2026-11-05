@@ -68,8 +68,8 @@
     "turnId": "turn:u-agents-and-messages-002"
   },
   {
-    "at": "2026-09-28T10:20:00.161Z",
-    "durationMs": 24,
+    "at": "2026-09-28T10:20:00.153Z",
+    "durationMs": 32,
     "id": "think:msg_agentsandmessages_007:0",
     "kind": "thinking",
     "live": false,

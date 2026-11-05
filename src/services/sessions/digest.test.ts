@@ -72,6 +72,20 @@ describe('digest fold', () => {
     expect(run([ev('turn.started', {}), ev('turn.ended', { isError: true, terminalReason: 'api_error' }), ev('session.state', { state: 'idle' })]).phase).toBe('idle');
   });
 
+  // P5 O7 M10's follow-up: a thinking block's start is an empty thinking delta at its `content_block_start` (the normaliser),
+  // so the session reads Thinking from the block's start, not from its first words. claude-opus-5-5's recorded frames
+  // (p4/p4-r7-loss-stages.jsonl): its message starts after a tool's result (seq 193), its thinking block starts at seq 194,
+  // its only delta comes 2.46 s on (seq 195).
+  it('reads Thinking from a thinking block’s start (the recorded opus-5-5 frames), not from its first delta', () => {
+    const rows = readFileSync(join(FIXTURE_DIR, 'p4/p4-r7-loss-stages.jsonl'), 'utf8').trim().split('\n').map((line) => parseJournalRow(JSON.parse(line)));
+    const activity = (seq: number) => {
+      const normalizer = new Normalizer({ appSessionId: APP, launchId: 'LAUNCH01', sessionId: null });
+      return run(rows.filter((row) => row.seq <= seq).flatMap((row) => normalizer.push(row))).activity;
+    };
+    expect(activity(193), 'its message started, after a tool’s result').toBe('Working');
+    expect(activity(194), 'at the block’s start').toBe('Thinking');
+  });
+
   // Debt wave 5 (C5 · C6): an interrupt while a tool runs ends the turn `error_during_execution` with `aborted_tools`
   // (pass2/per-task-stop-off.jsonl: the foreground `sleep 20` interrupted at seq 67, its result at seq 72), which is the
   // human's stop, not a failure: the row and tab read idle, as the transcript's divider reads Stopped.

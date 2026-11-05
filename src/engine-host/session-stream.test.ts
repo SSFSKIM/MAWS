@@ -154,7 +154,12 @@ describe('session event stream: batches, the ring and the reload snapshot', () =
     // the first page stopped at the row that opens the second, not at the end of the journal
     expect(firstReads).toBe(pages[1]!.events[0]!.seq);
     expect(firstReads).toBeLessThan(rows);
-    expect(push.mock.calls.length).toBe(rows); // every row normalised once over all the pages
+    // every row normalised at most once over all the pages: the journal's pages read up to the rows the ring still holds,
+    // which the last pages serve from the ring (P5 O7 M10's follow-up: where that boundary falls moves with the events a
+    // row yields, a thinking block's start among them)
+    const read = push.mock.calls.map(([row]) => row.seq);
+    expect(new Set(read).size).toBe(read.length);
+    expect(read.length).toBeLessThanOrEqual(rows);
   });
 
   it('a paging cursor follows the journal as it grows, and a page from the start rebuilds from the first row', async () => {

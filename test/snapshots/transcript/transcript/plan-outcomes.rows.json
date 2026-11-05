@@ -68,8 +68,8 @@
     "turnId": "turn:u-plan-outcomes-002"
   },
   {
-    "at": "2026-09-28T10:10:00.161Z",
-    "durationMs": 24,
+    "at": "2026-09-28T10:10:00.153Z",
+    "durationMs": 32,
     "id": "think:msg_planoutcomes_007:0",
     "kind": "thinking",
     "live": false,
@@ -161,8 +161,8 @@
     "turnId": "turn:u-plan-outcomes-035"
   },
   {
-    "at": "2026-09-28T10:10:03.771Z",
-    "durationMs": 24,
+    "at": "2026-09-28T10:10:03.763Z",
+    "durationMs": 32,
     "id": "think:msg_planoutcomes_040:0",
     "kind": "thinking",
     "live": false,
@@ -253,8 +253,8 @@
     "turnId": "turn:u-plan-outcomes-060"
   },
   {
-    "at": "2026-09-28T10:10:07.310Z",
-    "durationMs": 24,
+    "at": "2026-09-28T10:10:07.302Z",
+    "durationMs": 32,
     "id": "think:msg_planoutcomes_065:0",
     "kind": "thinking",
     "live": false,

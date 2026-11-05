@@ -68,8 +68,8 @@
     "turnId": "turn:80b33e70-4035-49f6-9853-d2d8a0028d9d"
   },
   {
-    "at": "2026-09-28T09:24:33.186Z",
-    "durationMs": 186,
+    "at": "2026-09-28T09:24:33.185Z",
+    "durationMs": 187,
     "id": "think:msg_011CfVbWEPujAG1ZSSaiAeLT:0",
     "kind": "thinking",
     "live": false,

@@ -77,8 +77,8 @@
     "turnId": "turn:u-attachments-and-images-002"
   },
   {
-    "at": "2026-09-28T10:50:00.161Z",
-    "durationMs": 24,
+    "at": "2026-09-28T10:50:00.153Z",
+    "durationMs": 32,
     "id": "think:msg_attachmentsandimages_007:0",
     "kind": "thinking",
     "live": false,
