@@ -14,6 +14,11 @@
 // states this device signs as a root are signed here too, behind the same confirmation (`createStateSigner`, P5-O8 M3).
 // The key never leaves this module (P5 Decision Log 53): the org signer composes the state and its words and hands both
 // in, and gets back only the signed state.
+//
+// One act is signed without asking (P5 O7 M10 B, the owner's ruling "Not on my machines"): a `session.spawn` on a machine
+// whose owners, in the org state main holds, include the member this step-up key belongs to (`signsUnasked`). Its
+// signature is the one a confirmed act gets, so the machines that verify it, and the ownership proof it makes (attest.ts's
+// `SPAWN_ACTIONS`), don't change. The exemption is judged here, on the action as built, and on nothing a caller says.
 import { systemPreferences, type SystemPreferences } from 'electron';
 import {
   base64urlEncode,
@@ -21,11 +26,14 @@ import {
   endorseDevice,
   isAction,
   keyId,
+  machineOwners,
   NONCE_BYTES,
+  ownerMembers,
   signOrgState,
   signStepUp,
   type Action,
   type OrgState,
+  type OrgView,
   type SignedOrgState,
   type SigningKey,
 } from '../../../apps/org-protocol/src/index.ts';
@@ -60,8 +68,47 @@ export function promptTouchIDConfirmation(prefs: Pick<SystemPreferences, 'prompt
   };
 }
 
-/** `confirm` defaults to `promptTouchIDConfirmation(systemPreferences)`, main's confirmation. */
-export function createStepUp(deps: { device: { org: string; device: string }; key: SigningKey; confirm?: Confirm; now?: () => Date }): { sign(request: StepUpRequest): Promise<StepUpResult> } {
+/** The org view main holds for this device's session (`SignedIn.view`), read at each signature: null while signed out. */
+export type HeldOrgView = () => Pick<OrgView, 'head' | 'certificates'> | null;
+
+/** The one action name signed without a prompt, and only on an owned machine (see `signsUnasked`). */
+const OWNED_SPAWN = 'session.spawn';
+
+/**
+ * Whether `action` is signed without asking the person (P5 O7 M10 B): a `session.spawn` on a machine whose owners in the
+ * held head include the member this step-up key belongs to. The trust boundary sits here:
+ * - `action` is the private canonical copy main built from typed fields, the very object that is sealed and signed, so
+ *   the name and machine judged are the ones signed; nothing else a request carries (a flag, a claim in its args) is read.
+ * - The member is the one the head lists this device under with this step-up key (as attest.ts's `proofSigner` finds the
+ *   signer), never a member a caller names; the owners are the head's (`machineOwners` and `ownerMembers`, as the
+ *   endpoint's `machineOwnerMembers` reads them: an org-owned machine's are the admins), read when the act is signed, so
+ *   an owner removed by a newer head is asked again.
+ * - Only the shape the app's spawn has: no session, launch context or request digest. Anything else, or any doubt (no
+ *   view, another org, the device or key unlisted, the machine unplaced, an error) asks.
+ */
+async function signsUnasked(action: Action, held: HeldOrgView | undefined, pub: string, now: Date): Promise<boolean> {
+  if (action.action !== OWNED_SPAWN || action.session !== undefined || action.context !== undefined || action.requestDigest !== undefined) return false;
+  try {
+    const view = held?.() ?? null;
+    if (view === null) return false;
+    const state = view.head().state;
+    if (state.org !== action.org) return false;
+    const member = state.members.find((m) => m.devices.some((d) => d.id === action.device && d.stepUpPub === pub));
+    if (member === undefined) return false;
+    const owners = await machineOwners(state, action.machine, view.certificates(), now);
+    return owners !== null && ownerMembers(state, owners).includes(member.id);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `confirm` defaults to `promptTouchIDConfirmation(systemPreferences)`, main's confirmation. `org`: the session's held
+ * view, by which a spawn on a machine the member owns is signed unasked; without it every action is confirmed.
+ */
+export function createStepUp(deps: { device: { org: string; device: string }; key: SigningKey; confirm?: Confirm; now?: () => Date; org?: HeldOrgView }): {
+  sign(request: StepUpRequest): Promise<StepUpResult>;
+} {
   const now = deps.now ?? (() => new Date());
   const confirm = deps.confirm ?? promptTouchIDConfirmation(systemPreferences);
   return {
@@ -89,12 +136,14 @@ export function createStepUp(deps: { device: { org: string; device: string }; ke
       // is shown: the caller keeps references to its args, context and digest, and to the device identity, and may change
       // them while the person decides. What is shown is what is signed.
       const shown = JSON.parse(canonicalize(built)) as Action;
-      const prompt = renderAction(shown);
-      let answer: Confirmation;
-      try {
-        answer = await confirm(prompt);
-      } catch {
-        answer = { ok: false, reason: 'failed' };
+      // Judged on `shown`, the copy that is sealed below, never on the request: what is exempted is what is signed.
+      let answer: Confirmation = { ok: true };
+      if (!(await signsUnasked(shown, deps.org, deps.key.pub, now()))) {
+        try {
+          answer = await confirm(renderAction(shown));
+        } catch {
+          answer = { ok: false, reason: 'failed' };
+        }
       }
       if (!answer.ok) return answer;
       // Stamped when the person confirmed, so time spent at the prompt doesn't make it stale (RL4's 60 s). Only the
