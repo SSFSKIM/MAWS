@@ -160,8 +160,8 @@ describe('sidebar sort', () => {
 
   it('fresh unread first: Needs-you and working are unchanged, a stale unread working session ranking as working', () => {
     const needs = needsYou(new Map([['n' as AppSessionId, [item('n', 'permission', hoursBefore(100))]]]), new Map([['n' as AppSessionId, record('n', { unread: true })]]));
-    expect(order([['read', 1], ['n', 100, { unread: true }], ['stale-working', 30, { unread: true, working: 0.1 }], ['unread', 3, { unread: true }]], needs))
-      .toEqual(['n', 'unread', 'stale-working', 'read']);
+    expect(order([['read', 1], ['n', 100, { unread: true }], ['stale-working', 30, { unread: true, working: 0.1 }], ['unread', 3, { unread: true }], ['stale-idle', 40, { unread: true }]], needs))
+      .toEqual(['n', 'unread', 'stale-working', 'read', 'stale-idle']);
   });
 });
 
