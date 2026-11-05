@@ -9,6 +9,8 @@
 //   starting     C10's session.start with options { gateway, model?, effort? }, then a ready status on the new route
 //   advising     P5 O7 M9: back to the machine's own, main's launch check found the relay its settings name dead: the
 //                person's Switch anyway starts past it (`startAnyway`), Cancel leaves the session stopped
+//                P5 O7 M9: and where it refused the model (a gateway alias the machine's resolution can't reach), the sheet
+//                asks again for a Claude model, as a Direct switch's does, and the start goes again with it
 //   done         a toast, and the queue resumed when the switch's own interrupt paused it
 //   failed       at any phase: the session left where that phase reached, said in words, never retried by itself
 // Each dependency is injected, so the machine runs the same over the app's IPC and over a scripted store.
@@ -235,8 +237,23 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
       });
       try {
         let started = await start.start(id, options);
-        // P5 O7 M9: the machine's own route is held to its launch's relay check, which the renderer cannot run before the
-        // stop (only main reads whether the machine's settings name the relay): asked now, and passed only on Switch anyway
+        // P5 O7 M9: the machine's own route is held to its launch's model and relay checks, which the renderer cannot run
+        // before the stop (only main resolves where the machine's settings send it). A model it refused: a Claude model is
+        // asked for, as a Direct switch asks, and the start goes again with it.
+        if (started.status === 'model_refused' && target === 'machine') {
+          confirm = { ...confirm, backgroundTasks: [], requiresModel: true, model: null, effort: null };
+          state = { ...state, phase: 'confirming', confirm, error: started.reason };
+          const picked = await ask(id, state);
+          if (picked === null || picked.model === null) return fail(SWITCH.notSwitched(started.reason));
+          answer = picked;
+          confirm = { ...confirm, model: picked.model, effort: picked.effort };
+          state = { ...state, phase: 'starting', confirm, error: null };
+          put(id, state);
+          options.model = picked.model;
+          if (picked.effort !== null) options.effort = picked.effort;
+          started = await start.start(id, options);
+        }
+        // and the relay its settings name not answering: asked now, and passed only on Switch anyway
         if (started.status === 'relay_unreachable' && target === 'machine') {
           state = { ...state, phase: 'advising', error: null };
           put(id, state);

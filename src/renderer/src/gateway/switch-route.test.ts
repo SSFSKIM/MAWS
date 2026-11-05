@@ -550,6 +550,44 @@ describe('back to the machine’s own route', () => {
     expect(s.switcher.advise(ID, true), 'nothing asks any more').toBe(false);
   });
 
+  // A gateway alias the machine's own route can't reach (its settings resolve to a login or another host): main's guard
+  // refuses the model (`field: 'model'`), which the switch can't foresee; it asks for a Claude model, as Direct's does,
+  // and starts on the machine's own with it
+  it('a gateway alias against a machine that resolves elsewhere: asks for a Claude model after the refusal, then starts on the machine’s own', async () => {
+    const WORDS = 'claude/sol is a ClaudeUsage alias; this machine’s own route reaches llm.example.test';
+    const s = setup({ model: 'claude/sol' });
+    s.backend.script('session.start', (input) => {
+      const { appSessionId, options } = input as { appSessionId: AppSessionId; options: StartOptions };
+      return options.model === 'opus' ? { status: 'starting', appSessionId } : { status: 'invalid', appSessionId, field: 'model', message: WORDS };
+    });
+    const run = s.switcher.switchRoute(ID, 'machine');
+    const first = await confirming(s);
+    expect(first.confirm!.requiresModel, 'the resolution is main’s: nothing asked up front').toBe(false);
+    s.switcher.answer(ID, CONFIRM);
+    await vi.waitFor(() => expect(stateOf(s)).toMatchObject({ phase: 'confirming', error: WORDS, confirm: { target: 'machine', requiresModel: true, backgroundTasks: [] } }));
+    expect(s.starts).toEqual([{ appSessionId: READY, options: { route: 'machine' } }]);
+    expect(s.switcher.answer(ID, CONFIRM), 'a model is required').toBe(false);
+    s.switcher.answer(ID, { model: 'opus', displayName: 'Opus 5.5', effort: null });
+    await vi.waitFor(() => expect(s.starts).toHaveLength(2));
+    expect(s.starts[1]!.options).toEqual({ route: 'machine', model: 'opus' });
+    s.backend.emitStatus(READY, { process: 'ready', launchId: 'launch-2', exit: null, gateway: onMachine({ kind: 'host', baseUrl: 'https://llm.example.test/v1' }, 'direct') });
+    expect(await run).toBe('done');
+    expect(s.toasts.at(-1)).toBe('Settings idle probe restarted · now on this machine’s own setup (llm.example.test) · on Opus 5.5');
+  });
+
+  it('a refused gateway alias, then Cancel: the session stays stopped, to resume on its route', async () => {
+    const s = setup({ model: 'claude/sol' });
+    s.backend.script('session.start', (input) => ({ status: 'invalid', appSessionId: (input as { appSessionId: AppSessionId }).appSessionId, field: 'model', message: 'not reachable' }));
+    const run = s.switcher.switchRoute(ID, 'machine');
+    await confirming(s);
+    s.switcher.answer(ID, CONFIRM);
+    await vi.waitFor(() => expect(stateOf(s)).toMatchObject({ phase: 'confirming', confirm: { requiresModel: true } }));
+    s.switcher.answer(ID, null);
+    expect(await run).toBe('failed');
+    expect(stateOf(s)?.error).toBe('Stopped, not switched: not reachable · Resume from the sidebar to restart it on the route it was on');
+    expect(s.starts).toHaveLength(1);
+  });
+
   it('with the relay up, or no relay named, main starts it at once: straight through, with no startAnyway', async () => {
     const s = setup({ start: 'no_ready' }); // main's guard passed: `starting`
     const run = s.switcher.switchRoute(ID, 'machine');

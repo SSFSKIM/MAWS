@@ -90,6 +90,8 @@ export const SWITCH = {
     submit: 'Switch anyway',
     cancelled: 'Stopped, not switched: this machine’s relay isn’t answering · Resume from the sidebar to restart it on the route it was on',
   },
+  // P5 O7 M9: a model the machine's own route can't reach, refused at the restart, and the Claude model pick then cancelled
+  notSwitched: (why: string) => `Stopped, not switched: ${why} · Resume from the sidebar to restart it on the route it was on`,
   // P5 O7 M9: back on the machine's own route, named by what get_status reported it reaching
   toastMachine: (title: string, reached: string, model: string | null) => `${title} restarted · now on this machine’s own setup (${reached})${model === null ? '' : ` · on ${model}`}`,
 };
