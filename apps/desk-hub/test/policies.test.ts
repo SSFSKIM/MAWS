@@ -8,7 +8,6 @@ import { listing } from '../fake-machine/org';
 import { importOrgKey, seal } from '../src/protocol/codes';
 import type { ProjectDown } from '../src/protocol/browser';
 import type { HumanDraft, HumanEvent, LogEvent } from '../src/protocol/log';
-import type { PoliciesAnswer } from '../src/objects/policies';
 import { BrowserClient, waitFor } from './support/clients';
 import { ADMIN, startLocalHub, type LocalHub } from './support/local';
 import { memberId } from './support/org';
@@ -42,6 +41,9 @@ async function opened(): Promise<string> {
   await mB.sync(project);
   return project;
 }
+
+/** `Registry.policies`'s answer (src/objects/policies.ts, which the suites' typecheck leaves to the Worker's). */
+type PoliciesAnswer = { rows: Record<string, { audience: string[] | null; policyRev: number; created: string } | null>; mine: Record<string, boolean> };
 
 /** The registry's row of `session`, as a Project reads it before a batch. */
 async function row(session: string) {

@@ -400,7 +400,7 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
 
 | Grade | Allows | Default holder |
 |---|---|---|
-| `list` | See the session in listings (§6.2) | Every org member, unless the session's access is `private` |
+| `list` | See the session in listings (§6.2), and message the session's agent (§5.8; P5 O18 D1, 2026-11-05) | Every org member, unless the session's access is `private`; shares at any grade, `list` ("Can message") the lowest |
 | `view` | Subscribe to the session's plane: transcript, subagents, diff | Owners; shares at view or above; every member when access is `org-view` or `org-converse` |
 | `converse` | Send, steer, interrupt, answer a question, side question | Owners; shares at converse or above; every member when access is `org-converse`. The restriction to the route's principal on personal routes is deferred (§6.4). |
 | `approve` | Answer permission requests and dialogs that execute | Owners; shares at approve. Never org-wide. Deferred like `converse` (§6.4). |
@@ -443,7 +443,7 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
 - **Delivery is today's `sminos say`, unchanged** (owner, 2026-10-26: "the same mechanism as today's sminos say, only with each session labelled with who owns it").
   - Agents in one org message each other as they do now, and a message may wake its recipient.
   - The only addition is the owner label, carried with the sending session and signed so that it can be trusted.
-  - There is no recipient policy, narrowing or off switch in this initiative.
+  - ~~There is no recipient policy, narrowing or off switch in this initiative.~~ Amended 2026-11-05 (P5 Decision Log 223; O18, `docs/doperpowers/plans/2026-11-05-p5-o18-message-reach.md`): **reach is visibility.** A member's agents may message a session when the member's rank on it is at least `list`, and a person's own sessions are never restricted among themselves (O18 D1, D2). The receiving machine's endpoint decides each delivery (`reach?`, RL10; O18 D3), failing closed. The hub refuses at upload what it can see is out of reach (`not-reachable`, RL1; O18 D5): it can only refuse, never admit.
   - As today, a peer message never counts as a person's words and never approves anything. Human words come through the bridge and peer messages through the inbox, so the two can't be confused (§5.7).
 - **The label is an attestation.** The hosting machine signs `{machine, session, owners, ownersProof, origin, orgStateVersion}` into the event (RL9). A receiving machine accepts it only if the sending machine is in the current org state, and each claimed owner is one of:
   - one of the machine's owners, per the org state or its delegation certificate. For this check, an org-owned machine's owners are the org's admins (the `@machine` token, below);
@@ -472,7 +472,8 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
 
 It can:
 - see routing metadata: org, member ids, machine refs and names, project ids, session ids, sizes, timing;
-- see the listing fields of sessions that aren't `private`, and the log plane's contents, which are org-readable by design (§5.7, §6.2);
+- see the listing fields of sessions that aren't `private`, and the log plane's contents, which are org-readable by design (§5.7, §6.2) except audience streams, which it serves only to their audience (O18 D6; amended 2026-11-05);
+- hold each session's audience and `policyRev` in its policy registry, and refuse at upload an event out of reach (O18 D5); a refusal confers nothing, since the receiving endpoint still authorizes every delivery;
 - delay or drop frames, or deny service;
 - delay a revocation, but only visibly to the admin (§5.2);
 - report presence and pending counts, which the app labels as hub-reported.
@@ -532,21 +533,21 @@ All of this section's choices are decided (owner, 2026-10-26).
 | `org-view` | Every org member | Every member may `view`; owners and shares as granted |
 | `org-converse` | Every org member | Every member may `view` and `converse`; `approve` and `manage` stay with owners and shares |
 
-- **Individual shares** add a member at `view`, `converse` or `approve` (§5.5), whatever the general level.
+- **Individual shares** add a member at `list` ("Can message": see and message the session, no transcript; O18 D1, amended 2026-11-05), `view`, `converse` or `approve` (§5.5), whatever the general level.
 - **The sidebar.** It shows the member's own sessions first. Other people's sessions sit behind a per-project toggle, each with its owner and machine (owner, 2026-10-26).
 - **Where listings come from.**
   - The machine publishes the listing fields of every session that isn't `private` to the hub, which serves them to org members.
   - Each listing record is signed by the machine: `{session, revision, issued, fields}` (RL6). The app verifies it, and labels a cached one with its age when the machine is offline.
-  - A `private` session's listing goes only over channels, to its owners' and shares' devices. The hub learns nothing about a private session except the traffic its machine sends.
+  - A `private` session's listing goes only over channels, to its owners' and shares' devices, with its `audience` and `policyRev` (RL6; O18 D7). ~~The hub learns nothing about a private session except the traffic its machine sends.~~ Amended 2026-11-05: the hub holds each session's audience and `policyRev` in its policy registry (O18 D5), and a private session's traffic reaches only its audience.
 
-**What travels where.** The hub can't keep content private by filtering the log plane: each writer's seqs are contiguous, so a withheld event becomes a permanent gap. The log plane is therefore org-readable by design, which fits `sminos say` staying as it is (§5.8).
+**What travels where.** The hub can't keep content private by filtering the log plane event by event: each writer's seqs are contiguous, so a withheld event becomes a permanent gap. ~~The log plane is therefore org-readable by design, which fits `sminos say` staying as it is (§5.8).~~ Amended 2026-11-05 (O18 D6): it filters whole writers instead. An event with an audience (the members who may read it: the intersection of the private sessions it names, O18 D4) is written under a writer stream of its own, `<machine>/<session>~<digest>` or `hub/<member>~<digest>`, and the hub serves a stream only to its audience, on every surface it reads through one check; every other writer stays org-readable.
 - **Channels only, sealed to members whose grade allows them:**
   - transcripts;
   - pending requests with their tool input;
   - usage and settings reads;
   - what a session says to its own person (desk's project chat of `<message>`s).
 - **The log plane:** inter-agent `say` traffic and project-level events.
-- **What this means for `private`.** A `private` session's `say` messages to other agents are still org-readable. The app says so where `private` is set.
+- **What this means for `private`.** ~~A `private` session's `say` messages to other agents are still org-readable.~~ Amended 2026-11-05 (O18 D6): a private session's events, and every event naming it, reach only its audience; history already fanned out before it went private is not taken back, and the app says so where `private` is set.
 - **Today, with the org as the owner alone,** nothing visible changes. The split matters once a second member joins.
 
 #### 6.3 Machine owners and grants
@@ -742,6 +743,12 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - The hub multiplexes channel frames as `{channel, seq, bytes}` opaque to the hub.
   - Lease and `hb`/`hb-ack` as in DX2. Frames are under 1 MiB.
   - An `endpoint {record}` frame carries the machine's endpoint record (RL6) up to the hub, which stores it and serves it to the org's apps (O11 M4). Its signature domain is `smns-endpoint-v1`. The app verifies it against `machines[].pub` and keeps the newest `issued`; the hub refuses a record older than the one it holds.
+  - **Message reach (P5 O18, amended 2026-11-05; Decision Log 31).**
+    - The hello and the hub's welcome carry an optional `capabilities: string[]` (OX1). `audience` on the welcome: the hub filters audience streams and refuses at upload what is out of reach. `audience` on the hello: the endpoint passes no stream down to an sminos without it. The hub serves a stream only to a connection whose hello advertised it (DX2's stream, and HTTP, get none).
+    - A `not-reachable` refusal (`refused {project, refusal: {reason: 'not-reachable', writer, seq}}`, no message) leaves a content-free tombstone `{writer, seq, withheld: true}` at the position, served in the writer's stream; the writer goes on at the next seq. A byte-identical resend is refused the same way, another body `conflict`. A `have` carries, for the hello's own machine's writers only, the positions withheld (`withheld: {writer: [seq | [from, to]]}`).
+    - `state-unavailable` (the org state or the policy registry unreadable) stores nothing and is retried at its position.
+    - An event whose `audience` its writer's digest does not name is refused `audience`.
+    - Every surface that returns stored events, writer names, vectors, audit rows or session-plane rows (the fan-out, a hello's `have` and backlog, a browser's resume, the audit record, the session plane, and the HTTP history routes) passes one reader check, `mayRead`, so no reader outside a stream's audience is told of it.
 - **RL2, Channel.** It is carried either in RL1's multiplex or over a direct WebSocket to the endpoint module (§4.1). The bytes and handshake are the same on both.
   - The SIGMA-I handshake over P-256, carrying `{deviceId, machine, clientClass, orgStateVersion}`.
   - HKDF-SHA-256 per direction.
@@ -799,6 +806,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
     - It leaves gone records out of the listings it serves, except in a feed of changes since a member's cursor, so an app that cached the session drops it.
     - Listing the session again is a new, higher revision.
   - The machine's endpoint record is `{machine, addresses[], issued}`, signed by the machine key. It carries the direct RL2 addresses (§4.1).
+  - **Message reach (P5 O18, amended 2026-11-05).** A share's grade may be `list` ("Can message"). The record gains `policyRev`, a per-session counter bumped by each access, share or owner change and written into every `joined` and `state`. A private session's channel listing gains `audience` and `policyRev`.
 - **RL7, Capabilities.**
   - Per session: lane-b-control-map's `ControlCapabilities`.
   - Per device: `{grades granted, clientClass}`.
@@ -813,6 +821,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - Signatures are made once and reused on every resend (§5.7).
   - The operator path: a machine-signed `human` event attests its owner's words from the owner's own terminal `sminos say`, outside any session (§5.7).
   - It replaces DX1's HMAC for the merged product.
+  - **Message reach (P5 O18, amended 2026-11-05).** An event may carry `audience` (the sorted member ids who may read it) and, on a `joined` or `state`, `policyRev`, both inside the signature. An event with an audience sits under a writer stream: `<machine>/<session>~<digest>`, or `hub/<member>~<digest>` for a device's words (signed by the member's devices like `hub/<member>`), the digest the first 16 hex characters of SHA-256 over the JSON of the sorted, distinct member ids. The content-free `unlisted {session, policyRev, audience}` notice tells the members a change withdraws. A provenance reference to a session whose audience does not contain the event's is redacted (written null in a sminos field, left out of the attestation).
 - **RL9, Attestation of a session's owners** on a say.
   - `{machine, session, owners, ownersProof, origin, orgStateVersion}`, signed by the machine key, inside the log event. `owners` are member ids, with `@machine` resolved at `orgStateVersion` (§5.8).
   - `ownersProof` is a list of device-signed actions: the requester's spawn action, and `manage` add-owner actions. Each names the machine. A proof verifies by RL8's key rule, against the action's signed `created`: its device key is current, or retired at a `notAfter` no earlier than `created`, and never revoked. So replacing a device doesn't strip its member from the sessions it spawned or joined.
@@ -824,6 +833,7 @@ These are named here with their binding fields. Byte-level schemas and test vect
   - `query {opId}` and `not-received` tombstones come down to sminos's ledger.
   - Revocations come down, and sminos applies them to owed deliveries (§5.2).
   - The socket's presence tells sminos to stay local-only (§2.1).
+  - **Message reach (P5 O18, amended 2026-11-05).** `reach?`/`reach` before every peer push; the `audience` frame for each session whose audience the endpoint knows; paged `snapshots?`/`snapshots` to rebuild its policy cache; `spent` with reason `withheld` for a hub tombstone; `capabilities` on both hellos. No stream goes down to an sminos whose hello lacks `audience`. Shapes: O18's Interfaces §B.
 
 ## Decision Log
 
@@ -983,3 +993,5 @@ These are named here with their binding fields. Byte-level schemas and test vect
    - OX9, O10 and O8 already grade `shell`, and O7's remote terminals and port forwards are graded by it. §5.5's table, §5.6 and §6.3 now say so.
    - `shell` is machine-level execution outside any session, so it isn't part of `spawn`, and `spawn` isn't part of it. The per-machine grades are granted one by one, as the endpoint does (`src/endpoint/grants.ts`, `machineRights`), and none ranks against a session grade.
    - A `shell` request by a member who isn't an owner carries a step-up signature (`src/endpoint/step-up.ts`). An owner's own terminal needs none.
+31. **2026-11-05, message reach: who may message a session's agent** (p5-desk-track-owner, P5 O18, `docs/doperpowers/plans/2026-11-05-p5-o18-message-reach.md`; the owner's ruling, P5 Decision Log 223; the document's landing, 224). Amends §5.5, §5.8, §5.9, §6.2, RL1, RL6, RL8, RL9 and RL10, each marked "amended 2026-11-05" in place. Reach is visibility: a member's agents may message a session when the member's rank on it is at least `list`, a new lowest share grade shown as "Can message". The receiving endpoint decides each delivery. The log plane is org-readable except audience streams, which the hub filters whole, so no reader holds a hole. The hub keeps an org-wide policy registry and refuses at upload what it can see is out of reach, leaving a tombstone; it can only refuse, never admit. Every field is optional within RL's major (OX1), and capabilities on both RL1 hellos order the deploy.
+   - Rejected: a separate reach setting (the owner declined it), filtering single events with stubs (it names private writers to outsiders), a private project per person, and hiding sessions in the UI only. O18's Decision Log holds the rest.
