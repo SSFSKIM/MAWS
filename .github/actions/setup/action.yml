@@ -32,12 +32,14 @@ runs:
     # size to 982 points of content (settings' 1512x982) was clamped short of it. The line names the desktop as the app
     # sees it (the main screen's points and backing scale, the Dock, the visible frame), and any other display fails the
     # job. displayplacer is its release's arm64 binary (macos-26 is Apple silicon), pinned by digest: brew's install of
-    # the same 1.4.0 took about 11 s of every hosted job.
+    # the same 1.4.0 took about 11 s of every hosted job. Its download retries over about 50 s: GitHub's release
+    # downloads answered 504 for a minute at a time on 2026-11-05 (run 41995538110), and with curl's default backoff the
+    # step gave up 11 s in.
     - if: runner.environment == 'github-hosted' && runner.os == 'macOS'
       shell: bash
       run: |
         displayplacer=$RUNNER_TEMP/displayplacer
-        curl -fsSL --retry 3 -o "$displayplacer" https://github.com/jakehilborn/displayplacer/releases/download/v1.4.0/displayplacer-apple-v140
+        curl -fsSL --retry 5 --retry-delay 10 -o "$displayplacer" https://github.com/jakehilborn/displayplacer/releases/download/v1.4.0/displayplacer-apple-v140
         echo "0572c3d2918e47c7e0b9d7723907864e2ea2b53b9d3b02379769fffcf44f7ea0  $displayplacer" | shasum -a 256 -c --quiet
         chmod +x "$displayplacer"
         id=$("$displayplacer" list | sed -n 's/^Persistent screen id: //p' | head -1)
