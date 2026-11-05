@@ -3039,6 +3039,16 @@ P5 findings of M5's re-plan, continued from F15:
   - Closes the tracker row "a read session behind stale unread ones", removed from `docs/tech-debt-tracker.md`.
   Rationale: the reviewer's report; the runs named.
   Date/Author: 2026-11-05, O7's M10 executor.
+- Decision: C at the re-check, "Thought for 0s" (2026-11-05, after #480; the owner's MacBook on master 01c0b239c). The owner's session was MAWS-run (lane B, the remote session spawned on the mini), and its live label counted up; three closed thinking cells under "Internal activity" read "Thought for 0s", later ones 5 s, 4 s and 7 s.
+  - **The cause, from the fixtures.** On claude-opus-5-5 a thinking block's `content_block_start` comes 0.2 to 2.9 s before its text. The text then arrives as one delta, or a burst of them, just before `content_block_stop`: within 1 to 23 ms in 10 of the 15 opus-5-5 blocks in `spikes/protocol-probe/fixtures/`. The normaliser emitted nothing at the start, so the row's marker and `at` were its first delta. `derive.ts`'s `completedAt - at` measured the burst, and `duration()` floors that to "0s". The live row appeared only at that delta. Replay was not the cause: RL2 carries B's engine-host `at` unchanged, and disk or reseeded history has no deltas, so it reads "Thought". W1 holds for lane B: the cells had text, since `CellLine` always draws its chevron.
+  - **The fix (the architect's ruling).**
+    1. The normaliser tells a thinking block's start as an `assistant.block.delta` with `thinkingDelta: ''` at its `content_block_start`. That is the existing shape, so the wire and RL2 are unchanged. A redacted block and every other kind start silently; hook-made and reseeded messages are skipped, as their deltas are. The row is drawn and measured from the block's own start, as the CLI's timer is. A textless block draws a plain live label while it streams and has no row after it closes (W1). The digest reads Thinking from the start.
+    2. `thinkingLabel` shows no figure under 1 s ("Thought"), by the turn divider's threshold (`SHORTEST_FIGURE_MS`). This covers peers on older engine hosts and lane A.
+  - **Lane A** gets part 2 only. The engine's hook contract hands `content_block_start` to a hook as an opaque engine chunk with no block type, so the sminos bridge first sees a thinking block at its first thinking delta (the desk track's reading). Residue: lane A's live thinking label starts at the bridge's first thinking chunk; it closes when the engine's hook contract types a block's start.
+  - **Proof.** `transcript/model/thinking-duration.test.ts` runs the recorded opus-5-5 frames through the normaliser, the reducer and derive. `p4-tool-summaries-thinking-edits` reads "Thought for 2s" (it read 0s). `p4-r7-loss-stages` reads "Thought", with its textless block live from seq 194 and gone at its close. The digest reads Thinking at seq 194, not at seq 195. `normalizer.test.ts` and `copy.test.ts` hold the shape and the threshold. All were red first.
+  - **The re-check** rides on a later swap: the MacBook's and the mini's engine hosts get part 1 only from a new build.
+  Rationale: the fixtures' timings; the owner's two screenshots and answers; the architect's ruling.
+  Date/Author: 2026-11-05, O7's M10 executor.
 
 ## Outcomes & Retrospective
 
