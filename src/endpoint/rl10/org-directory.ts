@@ -8,7 +8,9 @@
 // A machine the head doesn't enroll and no certificate stands for any more (each retired, revoked or expired:
 // `standingCertNames`) has retired, such as a deleted devcloud VM: its project goes `retired: true` and its `machines`
 // entry carries `retired: true`, an optional field an older sminos passes by. Its name stays listed, so sminos can tell a
-// retired machine from one it was never told of; one that is only offline is not retired.
+// retired machine from one it was never told of; one that is only offline is not retired. An enrolled machine goes by
+// each name `machineNames` binds to its ref, its former names too: the ref still signs under them (`machineSigners`), so
+// a certificate bearing one, forged or not, never retires it.
 //
 // The revocation set, whole each time, never a delta, so it survives a restart on either side: `keys`, every key id the
 // head revokes and every certificate's under a revoked delegation; `devices`, the ids of devices whose revoked keys they
@@ -41,7 +43,8 @@ function machineNames(head: OrgState, certificates: Certificates, now: Date): st
 /** DX2's `org` frame from the head; `seen` gives each machine name's newest relayed event time. */
 export async function orgDirectory(head: OrgState, certificates: Certificates, now: Date, seen: (name: string) => string | null): Promise<OrgDirectory> {
   const names = machineNames(head, certificates, now);
-  const enrolled = new Set(head.machines.map((m) => machineNameKey(m.name)));
+  const refs = new Set(head.machines.map((m) => m.ref));
+  const enrolled = new Set([...head.machines, ...head.machineNames.filter((p) => refs.has(p.ref))].map((m) => machineNameKey(m.name)));
   const standing = await standingCertNames(head, certificates, now);
   const retired = (name: string) => !enrolled.has(machineNameKey(name)) && !standing.has(machineNameKey(name));
   return {
