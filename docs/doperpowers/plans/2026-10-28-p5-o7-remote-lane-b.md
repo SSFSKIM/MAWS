@@ -1044,7 +1044,41 @@ O7 closes when M10 is recorded in Outcomes.
 - the bench, after its precheck.
 Prerequisite for the VM's re-check: the desk track's fix that lets lane B sessions on a devcloud host keep `mcp__to-human__message` after the engine's first plugin update (`resolve-style.ts` counting the `managed` scope, per OS). The owner keeps the network and the lid; the sleep and wake items stay with the measured group.
 
-**Proves.** O7's acceptance live; M10's bench fixes in `remote-bench.test.ts`. Review: reviewer-medium.
+*The sitting's three defects* (added 2026-11-05 by the architect, from M10's live sitting; three tasks on `p5-o7-m10` after the bench fixes, each red first).
+
+*A. A remote session ranks by a stale activity time* (a bug; acceptance 5 still fails live).
+- **Evidence (2026-11-05).** A session spawned from the MacBook on the mini (app id cb9e796a, first turn ended 05:29:09Z) never shows under the MAWS row, not even after Show more. Neither does one spawned on the VM (cf463a17, 05:42Z). Show more's 8 rows include sessions last active 1 and 2 weeks ago, and the two appear only in Resume….
+- **The architect's diagnosis**, from the code at 5f2bc8964 (the task verifies it and records what it finds in the Decision Log):
+  - No lane B module emits `session.digest`, so a remote record's `lastActivity` falls back to `record.updatedAt` (`src/renderer/src/overview/derive.ts`).
+  - The record hides its listing, so the listing's fresher `issued` is never used.
+  - Once the spawned-here lead ends (`spawned-here.ts`), the session drops past `SESSIONS_CAP` (`derive.ts`, `shownTrees`).
+  - M8's e2e (`e2e/remote.spec.ts`) used nine pinned sessions, which always outrank, so activity ranking never decided. It even asserts that the row goes below the cut after the first turn.
+- **The fix is parity.** A remote session's activity time is its true latest activity: the newest of the record's `updatedAt` as this Mac last received it, the listing's `issued`, and the turn events the app saw on its stream. It then ranks among local sessions by the same recency rule. The task checks that this Mac actually receives the remote record's `updatedAt` bump at a turn's end after the tab has closed.
+- **Red first:**
+  - a unit case in the sidebar's derive tests: eight or more older idle local sessions, no pins, and one remote session whose turn just ended;
+  - M8's e2e case changed, so that after the first turn the remote row stays visible when it is the most recent activity.
+
+*B. No Touch ID for a spawn on a machine the member owns.* The owner's ruling (2026-11-05, about 05:5xZ): "Not on my machines (Recommended)".
+- **Today.** `src/main/lane-b/remote-spawn.ts` acts with `stepUp: 'required'`, and main's step-up (`src/main/device/step-up.ts`) asks Touch ID for every execution-grade act.
+- **The ruling.** A `session.spawn` on a machine whose owners include the signed-in member is signed with the same step-up key, with no confirmation prompt.
+- **The machines don't change.** The signature is the same, and owners still verify (`attest.ts`'s `SPAWN_ACTIONS`).
+- **Touch ID stays for:**
+  - a spawn on a machine the member doesn't own;
+  - an approval on a session the member doesn't own;
+  - owner and share changes;
+  - machine admin;
+  - org state signing (root);
+  - a non-owner's shell.
+- **Who decides.** Main decides ownership from the org state, never from the renderer's word. The renderer can't ask for an unconfirmed signature of any other act.
+- **Tests.** The skip case, and one refusal case per act that keeps Touch ID.
+- **Review.** reviewer-high with a security lens: this moves the step-up's trust boundary.
+
+*C. "Thinking · 0s" never counts up* (the owner's screenshot, a local session on the MacBook, engine 2.1.318, model claude-opus-5-5).
+- **The symptom.** While the agent thinks for more than 5 s, the transcript row stays "Thinking · 0s". The likely cause is a duration computed from thinking deltas that this model doesn't stream; the task finds the cause in the renderer's thinking row.
+- **The fix.** While the block is open, the row ticks from the block's start with a live clock. Once it closes, it shows the final duration.
+- **Red first.** A unit test.
+
+**Proves.** O7's acceptance live; M10's bench fixes in `remote-bench.test.ts`; A, B and C in their red-first tests and `e2e:remote`. Review: reviewer-medium for the bench fixes and C, reviewer-high (security lens) for A and B together.
 
 ### Concrete Steps
 
