@@ -1590,6 +1590,31 @@ describe('a lane B session on another machine', () => {
     expect(editorOf().editor.getText()).not.toBe('');
   });
 
+  // P5 O7 M8 (the e2e's first run): the refused Enter went read-only for its flight, which in Chromium drops the focus
+  // to the page, and a refusal never took it back: the person's next keys (select-all, Backspace) reached nothing and
+  // the box stayed in its greyed mode. The keyboard comes back to the box, and clearing it is a plain Send again.
+  it('gives the keyboard back to the box after the greyed Enter, so clearing the text leaves `!`', async () => {
+    mount([{ index: 0, id: R }]);
+    const box = editorOf();
+    // Chromium's blur of a contenteditable that stops being editable (jsdom keeps the focus there)
+    const chromium = new MutationObserver(() => { if (box.getAttribute('contenteditable') === 'false') box.blur(); });
+    chromium.observe(box, { attributes: true, attributeFilter: ['contenteditable'] });
+    try {
+      box.focus();
+      await type('!ls');
+      await waitFor(() => expect(primary().textContent).toBe('Run'));
+      await key(box, { key: 'Enter' });
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+      expect(remote.invoked('session.bash')).toEqual([]);
+      expect(box.editor.isFocused).toBe(true);
+      expect(box.editor.getText()).toBe('!ls');
+      act(() => void box.editor.commands.clearContent());
+      await waitFor(() => expect(primary().textContent).toBe('Send'));
+    } finally {
+      chromium.disconnect();
+    }
+  });
+
   // P5 O7 M8 review (the architect's option (a)): a send naming a PDF is a `session.send` even while a turn runs (a steer
   // carries no uploads), so it waits for the turn: the control says “Sends after this turn”, not the next-step steer
   it('says a send carrying a PDF while a turn runs goes after the turn, and a plain one at the next step', async () => {

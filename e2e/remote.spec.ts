@@ -1950,9 +1950,12 @@ test('M8: a session spawned on B leads a busy project past its cap and comes bac
       await page.keyboard.press('Enter');
       await expect(composerOf(page), 'Enter kept the text').toContainText('ls');
       expect((await writtenOn(spawnedApp)).length, 'nothing reached B').toBe(before);
+      // the refused Enter's flight went read-only, which drops the focus to the page; the box takes it back, so clearing
+      // the text by the keyboard leaves the greyed `!` for a plain Send
+      await expect(composerOf(page), 'the box has the keyboard back').toBeFocused({ timeout: 5_000 });
       await page.keyboard.press('ControlOrMeta+a');
       await page.keyboard.press('Backspace');
-      await expect(run).not.toHaveText('Run');
+      await expect(run, 'the cleared box, out of `!`').toHaveText('Send');
     });
 
     await test.step('acceptances 2, 5 and 9: a MAWS ask B’s session raises is read and answered from A, and the card settles on A, on B and on A2', async () => {

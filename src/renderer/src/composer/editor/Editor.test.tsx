@@ -153,6 +153,25 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     expect(content.contains(document.activeElement)).toBe(true);
   });
 
+  // P5 O7 M8: a refused send keeps its text, and the keyboard with it (a greyed `!` left the person typing into nothing)
+  it('takes the focus back when a refused send left it on the page, its text kept', async () => {
+    let answer!: (accepted: boolean) => void;
+    const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+    const { port } = drafts({ doc: docOf([paragraph(textNode('hello'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('hello'));
+    content.focus();
+    await act(async () => {
+      content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    content.blur();
+    await act(async () => answer(false));
+    await waitFor(() => expect(content.contains(document.activeElement)).toBe(true));
+    expect(content.textContent).toBe('hello');
+  });
+
   // The hosted Macs' sequence: the caret came back at once, and Tiptap's deferred focus, a frame that came 223 ms later,
   // took the focus back from the Copy the person had focused in between.
   it('leaves a focus moved in the frame after the caret came back where it is', async () => {

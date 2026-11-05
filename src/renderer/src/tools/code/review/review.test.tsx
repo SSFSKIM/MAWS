@@ -836,6 +836,29 @@ describe('review tool', () => {
     expect(row('logo.png').dataset.viewed).toBeUndefined();
   });
 
+  // P5 O7 M8 (e2e/code-tools.spec.ts's untracked rows): an untracked symlink reads as git shows one (services/git
+  // service.ts `untrackedDiff`: mode 120000, its one added line the target's path), so Review draws that line, never the
+  // target's content; an untracked file whose one hunk is past the file cap says it is too large, with Open the file
+  it('draws an untracked symlink as its target’s path, and an untracked file past the cap as too large', async () => {
+    main.state.perFile['scratch.txt'] = {
+      patch: ['diff --git a/scratch.txt b/scratch.txt', 'new file mode 120000', 'index 0000000..ce01362', '--- /dev/null', '+++ b/scratch.txt', '@@ -0,0 +1 @@', '+/outside/secret.txt', '\\ No newline at end of file', ''].join('\n'),
+      files: [{ path: 'scratch.txt', oldPath: null, insertions: 1, deletions: 0, binary: false }],
+    };
+    render(<TestHost />);
+    openReview({ path: 'scratch.txt' });
+    await waitFor(() => expect(hunkLabel()).toBe('Showing hunk 1 of 1'));
+    await waitFor(() => expect(bodyText()).toContain('/outside/secret.txt'));
+    expect(document.querySelector('[data-review-note]')).toBeNull();
+    const lines = Array.from({ length: REVIEW_FILE_LINES_CAP + 1 }, (_, i) => `+line ${i}`);
+    main.state.perFile['scratch.txt'] = {
+      patch: ['diff --git a/scratch.txt b/scratch.txt', 'new file mode 100644', 'index 0000000..ce01363', '--- /dev/null', '+++ b/scratch.txt', `@@ -0,0 +1,${lines.length} @@`, ...lines, ''].join('\n'),
+      files: [{ path: 'scratch.txt', oldPath: null, insertions: lines.length, deletions: 0, binary: false }],
+    };
+    act(() => main.emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
+    await waitFor(() => expect(document.querySelector('[data-review-too-large]')?.textContent).toBe('Diff too large to display. Open the file'));
+    expect(document.querySelector('[data-review-body]')).toBeNull();
+  });
+
   // P5 O7 M8 review: an untracked binary is read in the untracked scope like any untracked file; its read answers a binary
   // patch, so its mark signs that header (the new blob's `index` line), and a changed blob drops it
   it('signs an untracked binary’s mark over the header its read answers, and drops it when the blob changes', async () => {
