@@ -36,7 +36,7 @@ O7 makes the app use it, and then brings lane B to full depth across it. Lane B 
 - [x] M7 — Acceptance and the remote bench — the code landed (PR #451, merge 080de8f81, P5 Decision Log 204; the direct resume PR #457, P5 Decision Log 208); the measured group recorded on CI's mini (run 41573992251, every bound held) and the live runs at the owner's sitting of 2026-11-04 (the live bench voided by the runner's load; the checklist's passes, fails and skips in Outcomes, its gaps carried as residue) (2026-11-04)
 - [x] M8 — The sitting's failures: the remote-spawned session's sidebar row and reopen, every session surface offered or greyed (the MAWS ask among them) under a contract test, operations and panel events across the channel, a turn's end, the PDF as a block, Sign in from the MCP widget, untracked files in Review, the forwarded failure's message. Planned 2026-11-04; reviewer-high; its own PR. Built on `p5-o7-m8` (2026-11-04): seven tasks, each task-reviewed, then reviewer-high on the whole; master merged before the final gate; the PR carries the gate.
 - [x] M9 — Spawn on the machine's own terms: the `machine` route as every machine's default (an additive `route`, machine settings still v1), what the machine reports named and never a mismatch, older peers on the legacy fields, and the remote setup path (folder and trust, owners-only acts). Planned 2026-11-04, after M8; reviewer-high; its own PR. Built on `p5-o7-m9` (2026-11-04 to 2026-11-05, stacked on M8, master merged after M8 landed and again at 113f98484; `WIRE_MINOR` 27, RL2 1.9): five tasks, each task-reviewed (m9-5 by reviewer-high with the whole), then reviewer-high on the whole (six Important findings, fixed) and one bounded re-review of the fixes (its last seam fixed and verified by the controller); the PR carries the final gate (2026-11-05).
-- [ ] M10 — The live re-check: the bench's fixes, then a short sitting against the mini and a fresh acceptance VM. O7 closes when it is recorded in Outcomes. Planned 2026-11-04, after M9; reviewer-medium.
+- [ ] M10 — The live re-check: the bench's fixes, then a short sitting against the mini and a fresh acceptance VM. O7 closes when it is recorded in Outcomes. Planned 2026-11-04, after M9; reviewer-medium. The bench's fixes (the code half) built on `p5-o7-m10` (2026-11-05, from master 5f2bc8964): the key read, `mawsd endpoint sync`, the agent's `watch`, the mini's hosts, the load precheck; reviewer-medium on the branch; its own PR. The sitting is the architect's with the owner.
 
 ## Acceptance
 
@@ -1760,7 +1760,13 @@ The link's `subscribe` takes `{feed, session?}` in place of `session` alone.
 - **The route switch** (M9, m9-4; the architect's ruling, 2026-11-04) reaches all three routes: on `machine`, gateway and Direct; on gateway or Direct, the other, then "Back to the machine’s own…". The switch back is verified as a launch is: what `get_status` reports is recorded as `observed`, never a mismatch, and the toast names it ("now on this machine’s own setup (ClaudeUsage)"). It starts with `{route: 'machine'}` under the launch's relay check; when the machine's own settings name a relay that isn't answering, the switch asks "This machine’s relay isn’t answering. Switch anyway?" and only Switch anyway sends `startAnyway`. *Known limit:* the question comes after the old launch has stopped, since only main's guard knows whether the settings name the relay; Cancel leaves the session stopped and resumable on its old route. A tracker line carries a dry run before the stop.
 - **The remote setup sheet** (M9, m9-4). The machine menu offers a machine with no checkout of the org project as "Set up this project there…"; a non-owner sees it disabled with its reason (ownership learned from the home's first `machine.folders.list` answer). The order is the folder, its trust read, the TrustCard ("Trust", or "Trust and start" at Send), then `addFolder`, so nothing is registered and no Touch ID is asked before the trust answer. Other checkouts' paths are suggested under the target's home and not probed; a private folder opens only after its confirmation, and `open: true` goes only with listings inside it. A request answering after the sheet is gone applies nothing and closes nothing. An `untrusted` refusal at Send offers the same card ("Review trust…") and sends again.
   - *A deliberate difference (2026-11-04):* the remote TrustCard has no "Start without trusting". Locally that is the decision `declined` (no attestation, no trust bootstrap); `session.spawn`'s `trust` carries only `'accepted'`. A tracker line carries a remote `declined`, owners-only exactly as `accepted` is (`acceptsTrust`, `spawnRefusal`), its exit when the spawn input carries it.
-- **`mawsd endpoint sync`** (M10): it runs `syncNow()` then `promoteIfListed`, and answers as `endpoint status --json`.
+- **`mawsd endpoint sync [--json]`** (M10; `src/endpoint/cli.ts`). It waits for a read of the org state that begins after the call (`Endpoint.syncAfter`, the existing `#syncAfter`), then runs `promoteIfListed`, and answers as `endpoint status`. Exit 0 when org-listed, 4 while hub-confirmed, 1 when not enrolled. `mawsd`'s client waits up to 90 s for it (`SYNC_TIMEOUT_MS`), past the 10 s every other endpoint command keeps.
+- **The bench agent's `watch`** (M10; `test/support/remote-bench-agent.ts`, `BenchWatch`). It holds one machine.sock link to the scratch daemon for the run. It reads id'd asks on stdin, one JSON line each: `{id, ask}` with `ask` one of `up`, `status`, `keys`, `sync`. It answers each with one line:
+  - `up` is answered `{id, answer: {up: true}}`, or `{up: false, why}` while the daemon doesn't answer;
+  - `status`, `keys` and `sync` are the endpoint's commands with `--json` through `daemon.endpoint`, answered `{id, answer: {code, out}}`, or `{id, error}` when the daemon doesn't answer.
+
+  It reaches the daemon when asked and holds no link, and drops a link that fails, to reach it again at the next ask. It ends with its transport, as `serve` does. The runner (`BenchRun`) starts it at the stage's start and reads through it the daemon's answer, the rerun's check, the key and the listing. It ends it before the daemon's stop.
+- **`BenchRun.load1()` and `loadPrecheck`** (M10; `test/support/remote-bench.ts`). `load1()` gives the mini's 1-minute load from `sysctl -n vm.loadavg` over its transport, or the reason it is unread; on the VM it gives null. `loadPrecheck({mac, machine})` gives the refusal's reason, or null when this Mac and the mini are both under Rule B's 5.
 
 ## Open questions for the owner
 
@@ -1969,6 +1975,11 @@ Added at M5's re-plan (2026-11-01). Each changes what a person may do on another
   Evidence: attempt 1's run log (04:26:56Z `hub-confirmed`, then "the machine posted no key to compare within 60 s"); `src/endpoint/cli.ts` `keys()`.
 - Observation (M10's re-plan, 2026-11-04): attempt 1's key step was settled from the code, correcting M7's "not settled". `#keyId()` (`test/support/remote-bench.ts`) parses `{key: {keyId}}`, and `mawsd keys --json` answers flat, so a real machine always read no key. The bench's fakes carried the same shape.
   Evidence: `src/endpoint/answers.ts` (`keysAnswer`); `src/mawsd/process-endpoint.test.ts`; `test/support/remote-bench.test.ts`.
+
+- Observation (M10's build, 2026-11-05): an endpoint read of the org state already in flight can predate the member's listing. A sync verb built on `syncNow()` alone would join that read and answer `hub-confirmed` once more. test/endpoint/enroll.test.ts says the same of `--replace` ("A read already in flight may predate the listing; the one after it doesn't").
+  Evidence: `src/endpoint/endpoint.ts` (`syncNow` returns the read in flight; `#syncAfter`); `test/endpoint/enroll.test.ts`.
+- Observation (M10's build): `test/endpoint/enroll.test.ts`, where `endpoint sync`'s red-first case lives, is in the `node-timing` project, not `node` (it starts the local hub), so Concrete Steps' `--project node` finds no file there.
+  Evidence: `vitest.config.ts` (`TIMING_NODE_TESTS`).
 
 ## Decision Log
 
@@ -2873,6 +2884,33 @@ P5 findings of M5's re-plan, continued from F15:
   Date/Author: 2026-11-05, O7's executor (the controller).
 - Decision: master 113f98484 (#471, tracker docs) merged as 18fa36fe3 before the final gate (2026-11-05).
   Date/Author: 2026-11-05, O7's executor (the controller).
+
+- Decision: M10's key read takes `mawsd keys --json`'s flat answer (2026-11-05). `keyIdOf` reads its top-level `keyId`. The bench's fakes for `keys` and `endpoint status` are rendered by the endpoint's own `keysAnswer` and `statusAnswer`, so they can't drift from the CLI. eslint admits only the module's two entries from outside `src/endpoint/`, so `presence.ts`, the entry for the pure renderers, re-exports the two. Red first: the regenerated fakes alone failed four cases with "posted no key to compare within 60 s", attempt 1's failure.
+  Rationale: M10's *The key read*; `src/endpoint/answers.ts`; eslint.config.js's `ENDPOINT_PATTERNS`.
+  Date/Author: 2026-11-05, O7's M10 executor.
+- Decision: `mawsd endpoint sync` waits for a read that begins after the call, not `syncNow()` alone (2026-11-05; M10's *The listing on demand* revised in Interfaces). `Endpoint.syncAfter` exposes the existing `#syncAfter`. If a read is in flight, it waits for that read and then reads again, so the answer reflects the hub as of the call. `promoteIfListed` follows, as planned. Exit codes are those of `enroll`: 0 listed, 4 hub-confirmed, and 1 when not enrolled. `mawsd`'s client gives it 90 s, since a read in flight and its own each have pages bounded by the hub client's 30 s.
+  Rationale: Surprises (M10's build), the read in flight.
+  Date/Author: 2026-11-05, O7's M10 executor.
+- Decision: the watch reaches the daemon lazily and is ended before the daemon's stop (2026-11-05; M10's *One status client*).
+  - **Reaching.** The agent keeps no background reach loop. Each ask reaches the daemon when no link is held, and the runner polls `up` every 5 s until the daemon answers, up to the stage's 10 minutes. That is "retries `reachMachine` until the daemon answers", with no timer on the machine. A link whose request fails is dropped and reached again at the next ask.
+  - **What goes through it.** `stage`'s wait, the rerun's check (`status`), `#keyId` (`keys`) and the listing's wait (`sync`). The listing is now read by `sync` every 5 s from the key's showing, within the code's TTL. So the owner's y is seen within a poll, and the hub link opens at once.
+  - **What stays outside it.** The enroll itself stays a process of its own (the code on its stdin). The VM's daemon start stays one too.
+  - **The quiet window.** The watch takes serve's deadline before the next quiet window, and an `after` ends it there.
+  - **Teardown order.** The watch's teardown is registered after the daemon's steps, so it runs before them: its own command line names the profile, and the reap would end it, and the process check would count it.
+  Rationale: M10's *One status client*; attempt 2's 25 `machine.sock` clients in five minutes.
+  Date/Author: 2026-11-05, O7's M10 executor.
+- Decision: the mini's teardown ends its hosts once its daemon is gone (2026-11-05; M10's *The mini's hosts*).
+  - **The wait.** After mini-ops' stop line, the runner polls `scratchDaemonLine` (a pgrep over ssh, no MAWS runtime) every 5 s, up to `STOP_WITHIN_MS` (10 minutes).
+  - **The hosts' end.** It is the VM's step: `stop-hosts`, the reap, the process check. It is now registered for both machines at the stage.
+  - **A daemon still running.** When it outlives the wait, teardown fails on both steps, no host is told, and the profile is kept.
+  Rationale: M10's *The mini's hosts*; supervisor 41388 after attempt 1's teardown.
+  Date/Author: 2026-11-05, O7's M10 executor.
+- Decision: the precheck reads the mini, not the VM, and an unread mini load refuses (2026-11-05; M10's *The precheck*).
+  - **The reads.** `BenchRun.load1()` runs `sysctl -n vm.loadavg` through the mini's transport, with its deadline and quiet window, and gives null on a devcloud VM, as the decision names the mini.
+  - **The rule.** `loadPrecheck` refuses at or over `IDLE_RUN.maxLoad` (5) on this Mac or the mini. A mini load it can't read refuses too (fail closed).
+  - **A refusal.** The live spec writes `remote-latency-live.json` with the reason and both loads, annotates the run, and skips the test with the reason, so the run reads as skipped, never failed. Both loads also go into a measured run's JSON (`load.precheck`).
+  Rationale: M10's *The precheck*; Rule B (test/support/daemon-idle.ts).
+  Date/Author: 2026-11-05, O7's M10 executor.
 
 ## Outcomes & Retrospective
 
