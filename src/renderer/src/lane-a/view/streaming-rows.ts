@@ -33,7 +33,8 @@ export function latestTurn(rows: readonly Row[]): TurnId | null {
 /**
  * `since`: when the overlay first drew each block, on this window's clock, so a live thinking label ticks from it
  * (`clock: 'wall'`). `closedAt` (P5 O7 M10): when it saw a block close, undefined while it streams, null when it first
- * saw it already closed: a closed thinking block reads its final duration, or none it never saw.
+ * saw it already closed: a closed thinking block with text reads its final duration, or none it never saw; one without
+ * text leaves, as lane B's does (W1), rather than reading a duration it loses when the engine's row lands.
  * `turn`: the turn the blocks belong to (the report's bridge); absent, they belong to none. `kept` (P5 O9): the blocks
  * of a step that ended before the engine wrote them (an interrupt cut it), settled: the words of an answer and of a
  * message as far as they came; thinking, which streams no words, none. The engine keeps an assistant block only once
@@ -50,9 +51,9 @@ export function streamingRows(blocks: readonly StreamBlock[], since: (block: Str
       if (live) rows.push({ id: rowId(block), turnId, at: since(block), kind: 'assistant_text', messageUuid: null, blockIndex: block.index, markdown: block.text, live, phase: 'answer', model: null });
       else if (block.text.trim() !== '') rows.push(cut(block, block.text));
     } else if (block.kind === 'thinking') {
-      if (!live) continue;
-      const at = since(block);
       const closed = options.closedAt?.(block);
+      if (!live || (closed !== undefined && block.text.trim() === '')) continue; // W1, as lane B: a closed textless block has no row
+      const at = since(block);
       const durationMs = typeof closed === 'string' ? Date.parse(closed) - Date.parse(at) : null;
       rows.push({ id: rowId(block), turnId, at, kind: 'thinking', messageUuid: null, text: '', live: closed === undefined, durationMs, clock: 'wall' });
     } else if (isMessageTool(block.toolName) && block.toolUseId !== null) {

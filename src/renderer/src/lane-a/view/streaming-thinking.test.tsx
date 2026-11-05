@@ -4,7 +4,8 @@
 // the time it has run. That time is the block's own, on this window's clock from when the block was first drawn: never
 // the transcript store's clock, which follows the rows on disk (none arrive while a reply streams) and the digest's word
 // on the process (`foreign` while the bridge is still starting). Once the block closes (the next block of its message
-// starts, or the engine writes its row), it reads its final duration.
+// starts, or the engine writes its row), a textless one leaves, as lane B's does (W1), and one with text reads its
+// final duration.
 import { act, cleanup, screen } from '@testing-library/react';
 import type { SessionMessage } from 'desk-hub/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,7 +18,7 @@ import { LaneAOverlay } from '../stream/overlay';
 const msg = (kind: string, body: unknown, n = 1) => ({ project: '', machine: 'm', session: 'eng-1', kind, sub: 'w-1', n, body }) as unknown as SessionMessage;
 const step = { turnId: 'turn-1', agentId: null, step: 0 };
 const snapshot = (streaming: unknown[] = []) => msg('snapshot', { streaming, usage: null }, 0);
-const thinking = (chunkIndex: number, index = 0) => msg('chunk', { ...step, chunkIndex, chunk: { kind: 'thinking', index, text: '' } });
+const thinking = (chunkIndex: number, index = 0, text = '') => msg('chunk', { ...step, chunkIndex, chunk: { kind: 'thinking', index, text } });
 const tool = (chunkIndex: number, index: number) => msg('chunk', { ...step, chunkIndex, chunk: { kind: 'tool', index, id: 'toolu_1', name: 'Bash' } });
 const ROW = '0d4c4001-0000-4000-8000-000000000009';
 
@@ -78,9 +79,25 @@ describe('a streamed thinking block’s time', () => {
     expect(label()).toBe('Thinking · 6s');
   });
 
-  it('reads its final duration once the next block of its message starts, or once the engine writes its row', async () => {
-    const store = await transcript();
+  // W1, as lane B: a closed block with no text has nothing to disclose, so its row goes at close, never flashing a
+  // duration it then loses when the engine's row lands (which derives no row either).
+  it('a textless block leaves at close: once the next block of its message starts, or once the engine writes its row', () => {
     overlay.receive({ kind: 'messages', messages: [snapshot(), thinking(0)] });
+    vi.advanceTimersByTime(8_000);
+    overlay.receive({ kind: 'messages', messages: [tool(1, 1)] });
+    expect(drawn.some((row) => row.kind === 'thinking')).toBe(false);
+
+    overlay.dispose();
+    watch();
+    overlay.receive({ kind: 'messages', messages: [snapshot(), thinking(0)] });
+    vi.advanceTimersByTime(5_000);
+    overlay.receive({ kind: 'messages', messages: [msg('block-row', { ...step, uuid: ROW, index: 0 })] });
+    expect(drawn.some((row) => row.kind === 'thinking')).toBe(false);
+  });
+
+  it('a block with text reads its final duration at close; first seen already closed, Thought with no time it never saw', async () => {
+    const store = await transcript();
+    overlay.receive({ kind: 'messages', messages: [snapshot(), thinking(0, 0, 'Weigh it.')] });
     vi.advanceTimersByTime(8_000);
     overlay.receive({ kind: 'messages', messages: [tool(1, 1)] });
     expect(thinkingRow()).toMatchObject({ live: false, durationMs: 8_000 });
@@ -91,15 +108,7 @@ describe('a streamed thinking block’s time', () => {
     cleanup();
     overlay.dispose();
     watch();
-    overlay.receive({ kind: 'messages', messages: [snapshot(), thinking(0)] });
-    vi.advanceTimersByTime(5_000);
-    overlay.receive({ kind: 'messages', messages: [msg('block-row', { ...step, uuid: ROW, index: 0 })] });
-    expect(thinkingRow()).toMatchObject({ live: false, durationMs: 5_000 });
-  });
-
-  it('a block first seen already closed (a pane opened after it) reads Thought, with no time it never saw', async () => {
-    const store = await transcript();
-    overlay.receive({ kind: 'messages', messages: [snapshot([{ ...step, upTo: 1, blocks: [{ index: 0, kind: 'thinking', text: '', upTo: 0 }, { index: 1, kind: 'tool', text: '', upTo: 1, id: 'toolu_1', name: 'Bash' }] }])] });
+    overlay.receive({ kind: 'messages', messages: [snapshot([{ ...step, upTo: 1, blocks: [{ index: 0, kind: 'thinking', text: 'Weigh it.', upTo: 0 }, { index: 1, kind: 'tool', text: '', upTo: 1, id: 'toolu_1', name: 'Bash' }] }])] });
     expect(thinkingRow()).toMatchObject({ live: false, durationMs: null });
     renderRow(thinkingRow(), { storeKey: store.key });
     expect(screen.getByText('Thought')).toBeTruthy();
