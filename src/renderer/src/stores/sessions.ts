@@ -357,16 +357,16 @@ export function selectSessionsOf(state: SessionsState, projectId: ProjectId | nu
   );
 }
 
-type SortKey = { records: number; digests: number; sort: SidebarSort; rows: NeedsYouRow[] }; // `rows` comes memoised from selectNeedsYou
+type SortKey = { records: number; digests: number; sort: SidebarSort; rows: NeedsYouRow[]; now: number }; // `rows` comes memoised from selectNeedsYou
 const sortedMemo = new Map<string, ReturnType<typeof memo<SortKey, SessionRecord[]>>>();
-export function selectSortedSessions(state: SessionsState, projectId: ProjectId | null, sort: SidebarSort, rows: NeedsYouRow[]): SessionRecord[] {
+export function selectSortedSessions(state: SessionsState, projectId: ProjectId | null, sort: SidebarSort, rows: NeedsYouRow[], now: number): SessionRecord[] {
   const id = projectId ?? '\u0000none';
   let m = sortedMemo.get(id);
   if (!m) sortedMemo.set(id, (m = memo<SortKey, SessionRecord[]>()));
   return m(
     state.records,
-    { records: state.recordsVersion, digests: state.digestsVersion, sort, rows },
-    () => sortSessions(selectSessionsOf(state, projectId), sort, { digests: state.digests, rows }),
-    (a, b) => a.records === b.records && a.digests === b.digests && a.sort === b.sort && a.rows === b.rows,
+    { records: state.recordsVersion, digests: state.digestsVersion, sort, rows, now },
+    () => sortSessions(selectSessionsOf(state, projectId), sort, { digests: state.digests, rows, now }),
+    (a, b) => a.records === b.records && a.digests === b.digests && a.sort === b.sort && a.rows === b.rows && a.now === b.now,
   );
 }

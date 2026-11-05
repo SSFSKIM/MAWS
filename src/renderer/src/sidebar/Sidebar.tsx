@@ -23,6 +23,7 @@ import { useMachines } from '../stores/machines';
 import { machineName, selectOrgIndex } from '../stores/org-projects'; // P5 O6 M5
 import { ProjectFilter } from './ProjectFilter';
 import { seenActivity, type SidebarSort } from '../overview/derive';
+import { useNowEvery } from '../app/use-now';
 import { selectGreyedNeedsYou, selectNeedsYou, useAttention } from '../stores/attention';
 import { useSpawnedHere } from '../sessions/spawned-here'; // P5 O7 M8
 import { useLayout } from '../stores/layout';
@@ -70,6 +71,8 @@ interface ShownProject {
 }
 
 const MORE_PROJECTS = moreNodeId(null);
+/** How coarse the sidebar's ranking clock is (P5 O7 M10's follow-up): a row whose unread passes 24 h moves within it. */
+const RANK_CLOCK_MS = 5 * 60_000;
 
 function SidebarBody() {
   const searchChord = useChordHint('palette.open');
@@ -79,6 +82,9 @@ function SidebarBody() {
   const listedSessions = useSessions((s) => s.listed); // P5 O8 M2
   const turnsSeen = useSessions((s) => s.turnsSeen); // P5 O7 M10
   const seen = useMemo(() => seenActivity(listedSessions, turnsSeen), [listedSessions, turnsSeen]); // P5 O7 M10: a remote record's activity
+  // P5 O7 M10's follow-up: the clock an unread session's 24 h freshness is judged at, rounded to RANK_CLOCK_MS, so a row
+  // past its window moves within that much of crossing it (or at the next store change), with no timer per row
+  const now = useNowEvery(RANK_CLOCK_MS);
   const people = usePeople((s) => s.on); // P5 O8 M5: the rows drawing other people's sessions
   const spawned = useSpawnedHere((s) => s.leading); // P5 O7 M8: the sessions spawned here that lead their group
   const [projectFilter, setProjectFilter] = useState<ReadonlySet<ProjectKey> | null>(null);
@@ -148,9 +154,9 @@ function SidebarBody() {
   const search = useRef<HTMLDivElement>(null);
 
   const rankedEntries = useMemo((): RankedEntry[] => projectList({ records, digests, projects, rows, local, machineName: (m) => machineName(machines, m, local), alsoListed: projectFilter ?? undefined, listed: listedSessions, people, seen }).map((entry) => {
-    const sorted = projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches: () => true, spawned, seen });
-    return { ...entry, sessions: sorted, items: projectItems({ sorted, listed: entry.listed, digests, rows, sort: sidebar.sort, spawned, seen }) };
-  }), [records, digests, projects, rows, local, machines, projectFilter, sidebar.sort, listedSessions, people, spawned, seen]);
+    const sorted = projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches: () => true, spawned, seen, now });
+    return { ...entry, sessions: sorted, items: projectItems({ sorted, listed: entry.listed, digests, rows, sort: sidebar.sort, spawned, seen, now }) };
+  }), [records, digests, projects, rows, local, machines, projectFilter, sidebar.sort, listedSessions, people, spawned, seen, now]);
   // Hold ranks, not data: titles, glyphs and counts remain live. Pointer presence, keyboard focus (including
   // portalled cards/menus), or an open context menu keeps the same targets in place until the person leaves.
   // A deliberate sort change is immediate; no timer can reshuffle a row between two actions.

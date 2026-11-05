@@ -144,32 +144,49 @@ export function lastActivity(record: SessionRecord, digest: SessionDigest | null
   return turn === Number.NEGATIVE_INFINITY ? Math.max(time(record.updatedAt), seen) : turn;
 }
 
+// How long an unread session keeps the unread tier after the turn that made it unread. The owner's ruling of
+// 2026-11-05, "Fresh unread first (Recommended)": "An unread session ranks ahead only for 24 h after the turn that made
+// it unread. Older unread rows keep their dot but rank by last activity with the rest, so a session you just used stays
+// in view. Needs-you and working still rank first."
+export const UNREAD_FRESH_MS = 24 * 60 * 60_000;
+
+// When a session became unread, the time its unread tier keys on: its digest's last turn end, else (a record with no
+// digest, another machine's lane B record, P5 O7 M10) its last activity, `seen` included, the nearest it has to a turn
+// end. An unread digest with no turn end has no such time, and so is never fresh.
+export const unreadAt = (record: SessionRecord, digest: SessionDigest | undefined, seen?: number): number =>
+  digest === undefined ? lastActivity(record, undefined, seen) : time(digest.lastTurnEndedAt);
+
 // A record's place under `priority`: its group (0 a Needs-you row, 1 unread, 2 working, 3 the rest) and its key within
 // the group (the row's index, then the latest turn end or turn start first); the rest go by recency. P5 O7 M8: the
-// sidebar ranks a listed row on the same scale (`sidebar/derive.ts`, `projectItems`). P5 O7 M10: an unread record with no
-// digest (another machine's lane B record) by its last activity, `seen` included, the nearest it has to a turn end.
+// sidebar ranks a listed row on the same scale (`sidebar/derive.ts`, `projectItems`). P5 O7 M10's follow-up (the owner's
+// "Fresh unread first"): the unread group holds an unread session only while it is fresh, `now` less its `unreadAt`
+// under UNREAD_FRESH_MS; an older one falls through to working or the rest and keeps its dot. `now` is the caller's
+// clock, so this stays pure: the sidebar's comes from a coarse shared tick, never a timer per row.
 export const RANK_REST = 3;
-export function priorityRank(record: SessionRecord, digest: SessionDigest | undefined, row: number | undefined, seen?: number): [group: number, key: number] {
+export function priorityRank(record: SessionRecord, digest: SessionDigest | undefined, row: number | undefined, now: number, seen?: number): [group: number, key: number] {
   if (row !== undefined) return [0, row];
-  if (record.unread) return [1, -(digest === undefined ? lastActivity(record, undefined, seen) : time(digest.lastTurnEndedAt))];
+  if (record.unread) {
+    const at = unreadAt(record, digest, seen);
+    if (now - at < UNREAD_FRESH_MS) return [1, -at];
+  }
   if (digest?.phase === 'working' || digest?.phase === 'starting') return [2, -time(digest.turnStartedAt)];
   return [RANK_REST, 0];
 }
 
-// Within a project. `priority`: sessions with a Needs-you row (in row order), then unread by last turn end, then working
-// by turn start, then the rest by recency. `recency`: `lastActivity`. Ties by title. P5 O7 M10: `seen`, what this window
-// saw of a remote record (`seenActivity`).
+// Within a project. `priority`: sessions with a Needs-you row (in row order), then fresh unread by last turn end
+// (`UNREAD_FRESH_MS` before `now`), then working by turn start, then the rest by recency. `recency`: `lastActivity`. Ties
+// by title. P5 O7 M10: `seen`, what this window saw of a remote record (`seenActivity`).
 export function sortSessions(
   sessions: SessionRecord[],
   sort: SidebarSort,
-  { digests, rows, seen }: { digests: ReadonlyMap<AppSessionId, SessionDigest>; rows: NeedsYouRow[]; seen?: SeenActivity },
+  { digests, rows, seen, now }: { digests: ReadonlyMap<AppSessionId, SessionDigest>; rows: NeedsYouRow[]; seen?: SeenActivity; now: number },
 ): SessionRecord[] {
   const rowIndex = new Map(rows.map((row, i) => [row.appSessionId, i]));
   // Each session's keys are computed once, not per comparison (debt wave 5: a cold index sorts thousands per render).
   const keyed = sessions.map((r) => {
     const d = digests.get(r.appId);
     const at = seen?.get(r.appId);
-    const [group, key] = sort === 'recency' ? [RANK_REST, 0] : priorityRank(r, d, rowIndex.get(r.appId), at);
+    const [group, key] = sort === 'recency' ? [RANK_REST, 0] : priorityRank(r, d, rowIndex.get(r.appId), now, at);
     return { r, group, key, recency: lastActivity(r, d, at) };
   });
   return keyed

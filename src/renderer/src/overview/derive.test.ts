@@ -10,7 +10,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { needsYou } from '../attention/derive';
 import { pageScenario } from '../test-support/shell-stores';
-import { cardActivity, cardFooter, orderProjects, overviewCards, overviewGroups, sortSessions } from './derive';
+import { cardActivity, cardFooter, orderProjects, overviewCards, overviewGroups, priorityRank, sortSessions } from './derive';
 
 const scenario = pageScenario(loadScenario(join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json'))); // P5 O6 M2: the page's ids
 const records = new Map(scenario.sessions.map((r) => [r.appId, r]));
@@ -104,8 +104,10 @@ describe('sidebar sort', () => {
   ]);
   const waiting = needsYou(new Map([['needs' as AppSessionId, [item('needs', 'permission', '2026-09-28T10:00:00Z')]]]), recs);
 
+  // the clock these fixtures are judged at: their day, so their unread turn is fresh (P5 O7 M10's follow-up)
+  const NOW = Date.parse('2026-09-28T12:00:00Z');
   it('priority: Needs-you rows, then unread, then working, then the rest by recency', () => {
-    expect(sortSessions([...recs.values()], 'priority', { digests: ds, rows: waiting }).map((r) => r.appId)).toEqual([
+    expect(sortSessions([...recs.values()], 'priority', { digests: ds, rows: waiting, now: NOW }).map((r) => r.appId)).toEqual([
       'needs', 'unread', 'working', 'idle-new', 'idle-old',
     ]);
   });
@@ -114,9 +116,52 @@ describe('sidebar sort', () => {
     // A record's updatedAt is when the index last wrote it (discovery included), so it stands in for activity only when
     // the digest has no turn time: needs at T0 and idle-new at 09:30 (updatedAt), working 03:00, idle-old 02:00, unread
     // 01:00 (their turns).
-    expect(sortSessions([...recs.values()], 'recency', { digests: ds, rows: waiting }).map((r) => r.appId)).toEqual([
+    expect(sortSessions([...recs.values()], 'recency', { digests: ds, rows: waiting, now: NOW }).map((r) => r.appId)).toEqual([
       'needs', 'idle-new', 'working', 'idle-old', 'unread',
     ]);
+  });
+
+  // P5 O7 M10's follow-up, the owner's ruling "Fresh unread first (Recommended)": an unread session ranks ahead only for
+  // 24 h after the turn that made it unread; older unread rows keep their dot but rank by last activity with the rest;
+  // Needs-you and working still rank first.
+  const hoursBefore = (h: number) => new Date(NOW - h * 3_600_000).toISOString();
+  // a session: its last turn end `ended` hours before NOW, unread or read, idle or working (a turn started `working` h ago)
+  type Seat = [id: string, ended: number, over?: { unread?: boolean; working?: number }];
+  const order = (seats: Seat[], rows: typeof waiting = []) =>
+    sortSessions(
+      seats.map(([id, , o]) => record(id, { unread: o?.unread ?? false })),
+      'priority',
+      {
+        digests: new Map(seats.map(([id, ended, o]) => [id as AppSessionId, digest(id, {
+          phase: o?.working === undefined ? 'idle' : 'working',
+          lastTurnEndedAt: hoursBefore(ended),
+          ...(o?.working === undefined ? {} : { turnStartedAt: hoursBefore(o.working) }),
+        })])),
+        rows,
+        now: NOW,
+      },
+    ).map((r) => r.appId);
+
+  it('fresh unread first: a stale unread session (its turn over 24 h ago) ranks below a fresh read one, by activity', () => {
+    expect(order([['stale-unread', 25, { unread: true }], ['read', 1]])).toEqual(['read', 'stale-unread']);
+    // with the rest by its activity: newer than an older read one, older than a fresher one
+    expect(order([['old-read', 200], ['stale-unread', 48, { unread: true }], ['read', 2]])).toEqual(['read', 'stale-unread', 'old-read']);
+  });
+
+  it('fresh unread first: a fresh unread session still ranks above a fresher read one; the window ends at exactly 24 h', () => {
+    expect(order([['read', 0.5], ['unread', 23, { unread: true }]])).toEqual(['unread', 'read']);
+    const unread = record('u', { unread: true });
+    const at = (h: number) => priorityRank(unread, digest('u', { phase: 'idle', lastTurnEndedAt: hoursBefore(h) }), undefined, NOW);
+    expect(at(24 - 1 / 3600)[0]).toBe(1);
+    expect(at(24)[0]).toBe(3);
+    // an unread digest with no turn end has no time it became unread: never fresh
+    expect(priorityRank(unread, digest('u', { phase: 'idle' }), undefined, NOW)[0]).toBe(3);
+  });
+
+  it('fresh unread first: Needs-you and working are unchanged, a stale unread working session ranking as working', () => {
+    const needs = needsYou(new Map([['n' as AppSessionId, [item('n', 'permission', hoursBefore(100))]]]), new Map([['n' as AppSessionId, record('n', { unread: true })]]));
+    expect(order([['read', 1], ['n', 100, { unread: true }], ['stale-working', 30, { unread: true, working: 0.1 }], ['unread', 3, { unread: true }]], needs))
+      .toEqual(['n', 'unread', 'stale-working', 'read']);
   });
 });
 
