@@ -185,7 +185,7 @@ describe('sessions selectors', () => {
   });
 
   it('sorts a project’s sessions for the sidebar', () => {
-    expect(selectSortedSessions(store.getState(), null, 'priority', []).map((r) => r.appId)).toEqual(['z']);
+    expect(selectSortedSessions(store.getState(), null, 'priority', [], Date.parse('2026-09-28T12:00:00.000Z')).map((r) => r.appId)).toEqual(['z']);
   });
 });
 

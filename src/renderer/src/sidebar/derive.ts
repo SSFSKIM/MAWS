@@ -222,13 +222,14 @@ export interface ProjectSessionsInput {
   matches: (record: SessionRecord) => boolean;
   spawned?: ReadonlySet<AppSessionId>; // P5 O7 M8: the sessions spawned here that still lead (`leadsAsSpawned`)
   seen?: SeenActivity; // P5 O7 M10: a remote record's activity beyond the record (`seenActivity`)
+  now: number; // P5 O7 M10's follow-up: the clock an unread session's freshness is judged at (`priorityRank`)
 }
 
 // One flat list: pinned sessions first (pin keeps a session at the top of its project), then a session spawned here
 // that still leads (P5 O7 M8), then the rest in the chosen sort; worktree sessions sit among them, marked by their branch
 // (`rowBranch`).
-export function projectSessions({ sessions, digests, rows, sort, matches, spawned, seen }: ProjectSessionsInput): SessionRecord[] {
-  const order = (list: SessionRecord[]) => sortSessions(list, sort, { digests, rows, seen });
+export function projectSessions({ sessions, digests, rows, sort, matches, spawned, seen, now }: ProjectSessionsInput): SessionRecord[] {
+  const order = (list: SessionRecord[]) => sortSessions(list, sort, { digests, rows, seen, now });
   const shown = sessions.filter(matches);
   const leads = (r: SessionRecord) => !r.pinned && leadsAsSpawned(r.appId, spawned);
   return [...order(shown.filter((r) => r.pinned)), ...order(shown.filter(leads)), ...order(shown.filter((r) => !r.pinned && !leads(r)))];
@@ -317,6 +318,7 @@ export interface ProjectItemsInput {
   sort: SidebarSort;
   spawned?: ReadonlySet<AppSessionId>; // P5 O7 M8: as `projectSessions` was given it
   seen?: SeenActivity; // P5 O7 M10: as `projectSessions` was given it
+  now: number; // as `projectSessions` was given it
 }
 
 // An item's place: its tier (-2 pinned, -1 the spawned lead, then `priorityRank`'s groups), its key within a ranked
@@ -326,14 +328,14 @@ const PINNED_TIER = -2;
 const SPAWNED_TIER = -1;
 const byRank = (a: Rank, b: Rank): number => a.tier - b.tier || (a.tier < 0 || a.tier === RANK_REST ? b.at - a.at : a.key - b.key);
 
-export function projectItems({ sorted, listed, digests, rows, sort, spawned, seen }: ProjectItemsInput): SidebarSession[] {
+export function projectItems({ sorted, listed, digests, rows, sort, spawned, seen, now }: ProjectItemsInput): SidebarSession[] {
   const rowIndex = new Map(rows.map((row, i) => [row.appSessionId, i]));
   const recordRank = (r: SessionRecord): Rank => {
     const digest = digests.get(r.appId);
     const at = lastActivity(r, digest, seen?.get(r.appId));
     if (r.pinned) return { tier: PINNED_TIER, key: 0, at };
     if (leadsAsSpawned(r.appId, spawned)) return { tier: SPAWNED_TIER, key: 0, at };
-    const [tier, key] = sort === 'priority' ? priorityRank(r, digest, rowIndex.get(r.appId), seen?.get(r.appId)) : [RANK_REST, 0];
+    const [tier, key] = sort === 'priority' ? priorityRank(r, digest, rowIndex.get(r.appId), now, seen?.get(r.appId)) : [RANK_REST, 0];
     return { tier, key, at };
   };
   const listedRank = (l: ListedSession): Rank => {

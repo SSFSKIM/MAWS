@@ -1714,12 +1714,13 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
 // 2026-11-01, before anything the run does), more than the group's cap of eight; and A2, a second device with a checkout
 // of its own. Then, in order:
 //   - "+ Session" on B from A, in that project: its row leads A's group's visible rows (with no Show more) while its
-//     first turn runs, from A's spawn mark; its tab goes to the background and the turn ends there, so A marks it unread
-//     (lane-b/read-marks.ts: `session.setVisible` isn't offered over RL2, and a turn ending off screen marks it here); its
-//     tab closes, and past the stream's linger the row stays first within the visible rows, the group's latest unread
-//     activity (P5 O7 M10, A: the live failure. With no digest its unread key was a missing turn end, so it ranked last
-//     among the unread and fell below the cut; M8's case pinned the nine, which outrank any activity, and asserted that
-//     fall); and Resume… in the project opens it again;
+//     first turn runs, from A's spawn mark; the turn ends on screen, as the owner watched it at M10's sitting, so the
+//     session is read (lane-b/read-marks.ts marks only a turn ending off screen); its tab closes, and past the stream's
+//     linger the row stays first within the visible rows, above the nine stale unread ones (P5 O7 M10's follow-up, the
+//     owner's "Fresh unread first": an unread session ranks ahead only within 24 h of the turn that made it unread, and
+//     the nine's turns are days old. Live, the read row fell behind eight or more stale unread rows; A's fix before it
+//     covered a turn ending off screen, which the unit tests keep, sidebar/derive.test.ts); and Resume… in the project
+//     opens it again;
 //   - A2, which has no mark, has it as a listed row and opens it through Resume…, the row naming `@B`;
 //   - the composer's `!` on it, a command declared not offered on another machine, greys Run with its declared reason and
 //     Enter sends nothing;
@@ -1856,7 +1857,7 @@ test('M8: a session spawned on B leads a full project past its cap and stays amo
         message: 'A indexes its nine local sessions in its checkout',
       })
       .toBe(M8_IDLE);
-    // unread, as the owner's group held them live (P5 O7 M10): the tier a remote session unread here ranks in
+    // unread, as the owner's group held them live (P5 O7 M10), their dots stale: last active days before any run
     for (const id of idle) await invoke(page, 'session.update', { appSessionId: id, patch: { unread: true } });
 
     // Each app's group of the org project, its drawn rows (a record's or a listing's) and its Show more (never pressed)
@@ -1896,7 +1897,7 @@ test('M8: a session spawned on B leads a full project past its cap and stays amo
       await expect(main(on).getByText(M8_REPLY).first(), 'with its history').toBeVisible({ timeout: 60_000 });
     };
 
-    await test.step('acceptance 4: the session spawned on B leads the full group’s visible rows while its first turn runs, stays first within them after it as the group’s latest unread activity, and comes back through Resume…', async () => {
+    await test.step('acceptance 4: the session spawned on B leads the full group’s visible rows while its first turn runs, stays first within them after it ends on screen, above the stale unread rows, and comes back through Resume…', async () => {
       await newChat(page, A_PROJECT);
       await chooseMachine(page, B_NAME);
       await composerOf(page).click();
@@ -1928,30 +1929,29 @@ test('M8: a session spawned on B leads a full project past its cap and stays amo
       await expect(await showMoreOf(page), 'the idle rest behind Show more').toHaveCount(1);
       console.log(`[e2e:remote] M8: the spawned row (${address}) within the visible rows ${shownAfter} ms after B's engine host ran it`);
 
-      // its tab to the background (a New chat in the same pane, focused there, the pointer off the sidebar so its ranks
-      // aren't held): the session is off screen, its stream still held
-      await newChatIn(page, A_PROJECT);
-      await composerOf(page).click();
+      // the first turn ends on screen, the session's tab selected and the pointer off the sidebar (so its ranks aren't
+      // held), as the owner watched it end: the session is read, and with the lead over the row ranks by its activity
       await page.mouse.move(700, 400);
-      await expect(mainTabById(page, `session:${address}`), 'the session’s tab in the background').toHaveAttribute('aria-selected', 'false');
-      // the first turn ends there: the lead with it, and A marks the session unread (a turn ended off screen), so the row
-      // ranks among the unread by its latest activity, newer than the nine idle sessions'
       await b.request('session.getContextUsage', { appSessionId: spawnedApp, detail: 'summary' }); // lets B's engine go on
       await expect.poll(turnOverOnB, { timeout: 30_000 }).toBe(true);
-      // the background tab closed by a middle click, which doesn't bring it on screen (a click on it would read it); then
-      // the New chat
-      await mainTabById(page, `session:${address}`).click({ button: 'middle' });
-      await expect(mainTabById(page, `session:${address}`), 'the session’s tab closed').toHaveCount(0, { timeout: 30_000 });
+      await expect(main(page).getByText(M8_REPLY).first(), 'the turn’s end on screen').toBeVisible({ timeout: 60_000 });
+      // A's own status has the turn over (the reply's text arrives before it): the composer's Stop, which reads the status
+      // the read marks watch (lane-b/read-marks.ts), is Send again, so no turn end can reach A after the tab closes
+      await expect(main(page).locator('[data-submit-state]'), 'A has the turn over, on screen').toHaveAttribute('data-submit-state', 'send', { timeout: 30_000 });
+      await expect(mainTabById(page, `session:${address}`), 'the session’s tab selected').toHaveAttribute('aria-selected', 'true');
+      await expect(spawnedRowOf(page).getByRole('img', { name: 'Unread', exact: true }), 'read: its turn ended on screen').toHaveCount(0);
+      // its tab closed, which reads nothing more
       await menu(aApp, 'tab.close');
-      await expect(composerOf(page), 'the New chat closed').toHaveCount(0, { timeout: 30_000 });
+      await expect(mainTabById(page, `session:${address}`), 'the session’s tab closed').toHaveCount(0, { timeout: 30_000 });
       await page.mouse.move(700, 400);
       // past the stream's linger (REMOTE_LANE_B_TIMING.unsubscribeLingerMs, 10 s, src/main/lane-b/remote.ts) main has let
       // the session go, which it tells the page nothing of: A's record of it stays as last received, and its listing and
       // the turns A saw on its stream stand for its activity from then on
       await page.waitForTimeout(12_000);
       await quoting(expect(spawnedRowOf(page), 'its first turn over and its tab closed, the row still within the visible rows, Show more not pressed').toBeVisible({ timeout: 30_000 }), async () => `the group's rows: ${(await shownRowsOf(page).allTextContents()).join(' | ')}\n${mainSaid(page)}`);
-      await expect(spawnedRowOf(page).getByRole('img', { name: 'Unread', exact: true }), 'unread here: its turn ended off screen').toHaveCount(1);
-      await expect(shownRowsOf(page).first(), 'the group’s latest unread activity, first').toHaveAttribute('data-tree-id', `s:${address}`);
+      await expect(spawnedRowOf(page).getByRole('img', { name: 'Unread', exact: true }), 'still read').toHaveCount(0);
+      await expect(shownRowsOf(page).first(), 'first: the group’s latest activity, the stale unread rows behind it').toHaveAttribute('data-tree-id', `s:${address}`);
+      await expect(shownRowsOf(page).getByRole('img', { name: 'Unread', exact: true }), 'the four stale rows drawn under it keep their dots').toHaveCount(M8_FIRST_SHOWN - 1);
       await expect(shownRowsOf(page), 'five drawn').toHaveCount(M8_FIRST_SHOWN);
       await expect(await showMoreOf(page), 'the idle rest behind Show more').toHaveCount(1);
       // A still holds the record main read for the tab, which Resume… lists in the listing's place, by the record's title:

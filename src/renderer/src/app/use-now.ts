@@ -26,3 +26,10 @@ function subscribe(listener: () => void): () => void {
 }
 
 export const useNow = (): number => useSyncExternalStore(subscribe, () => now);
+
+/**
+ * The same clock rounded down to a multiple of `ms` (a multiple of the 30 s tick): a reader renders again only when the
+ * rounded time changes, so an order that depends on the time (the sidebar's fresh-unread window, P5 O7 M10's follow-up)
+ * is recomputed at most once per `ms`, not on every tick, and never by a timer of its own.
+ */
+export const useNowEvery = (ms: number): number => useSyncExternalStore(subscribe, () => Math.floor(now / ms) * ms);

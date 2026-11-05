@@ -353,11 +353,12 @@ describe('other people’s sessions and the People toggle', () => {
 
 describe('an expanded project’s records and listed rows in one ordering', () => {
   const minute = (m: number) => `2026-10-28T10:${String(m).padStart(2, '0')}:00.000Z`;
+  const NOW = Date.parse('2026-10-28T11:00:00.000Z'); // within a day of every fixture: each unread one is fresh
   const rec = (id: string, m: number, over: Partial<SessionRecord> = {}) => record(id, { updatedAt: minute(m), ...over });
   const lst = (id: string, m: number): ListedSession => ({ ...remoteRow(OTHER_MACHINE, id, { issued: minute(m) }), appId: there(id) as AppSessionId });
   const ids = (items: ReturnType<typeof projectItems>) => items.map((i) => (i.kind === 'record' ? i.record.appId : `@${i.listed.session}`));
   const items = (sorted: SessionRecord[], listed: ListedSession[], sort: 'priority' | 'recency' = 'recency', over: { rows?: NeedsYouRow[] } = {}) =>
-    projectItems({ sorted, listed, digests: new Map(), rows: over.rows ?? [], sort });
+    projectItems({ now: NOW, sorted, listed, digests: new Map(), rows: over.rows ?? [], sort });
 
   it('merges by last activity, records by `lastActivity`, listed rows by `issued`; pinned records stay on top', () => {
     expect(ids(items([rec('r9', 9), rec('r5', 5), rec('r1', 1)], [lst('l7', 7), lst('l3', 3), lst('l0', 0)]))).toEqual(['r9', '@l7', 'r5', '@l3', 'r1', '@l0']);
@@ -395,25 +396,25 @@ describe('an expanded project’s records and listed rows in one ordering', () =
   const SPAWNED = new Set([there('spawned') as AppSessionId]);
 
   it('a just-spawned working remote session leads into the visible rows under priority, past more unread local sessions than the cap', () => {
-    expect(visible(projectItems({ sorted: busy({ unread: true }), listed: [spawned('busy')], digests: new Map(), rows: [], sort: 'priority', spawned: SPAWNED }))).toContain('@spawned');
+    expect(visible(projectItems({ now: NOW, sorted: busy({ unread: true }), listed: [spawned('busy')], digests: new Map(), rows: [], sort: 'priority', spawned: SPAWNED }))).toContain('@spawned');
   });
 
   it('a just-spawned working remote session leads into the visible rows under priority, past more working local sessions than the cap', () => {
     const working = busy({});
     const digests = new Map(working.map((r) => [r.appId, digest(r.appId, { phase: 'working' })]));
-    expect(visible(projectItems({ sorted: working, listed: [spawned('busy')], digests, rows: [], sort: 'priority' })), 'by its state alone').toContain('@spawned');
+    expect(visible(projectItems({ now: NOW, sorted: working, listed: [spawned('busy')], digests, rows: [], sort: 'priority' })), 'by its state alone').toContain('@spawned');
   });
 
   it('after its first turn a spawned remote session ranks by its state again: an idle one sinks behind the unread', () => {
-    expect(visible(projectItems({ sorted: busy({ unread: true }), listed: [spawned('idle')], digests: new Map(), rows: [], sort: 'priority' }))).not.toContain('@spawned');
+    expect(visible(projectItems({ now: NOW, sorted: busy({ unread: true }), listed: [spawned('idle')], digests: new Map(), rows: [], sort: 'priority' }))).not.toContain('@spawned');
   });
 
   it('a just-spawned local session leads its group past more unread sessions than the cap until its first turn ends, then ranks by its state', () => {
     const fresh = rec('fresh', 0);
     const sessions = [...busy({ unread: true }), fresh];
     const shown = (spawnedHere: ReadonlySet<AppSessionId>) => {
-      const sorted = projectSessions({ sessions, digests: new Map(), rows: [], sort: 'priority', matches: everyone, spawned: spawnedHere });
-      return visible(projectItems({ sorted, listed: [], digests: new Map(), rows: [], sort: 'priority', spawned: spawnedHere }));
+      const sorted = projectSessions({ now: NOW, sessions, digests: new Map(), rows: [], sort: 'priority', matches: everyone, spawned: spawnedHere });
+      return visible(projectItems({ now: NOW, sorted, listed: [], digests: new Map(), rows: [], sort: 'priority', spawned: spawnedHere }));
     };
     expect(shown(new Set([fresh.appId]))[0]).toBe('fresh');
     expect(shown(new Set())).not.toContain('fresh');
@@ -426,8 +427,8 @@ describe('an expanded project’s records and listed rows in one ordering', () =
     const fresh = rec('fresh', 0);
     const lead = new Set([...SPAWNED, fresh.appId]);
     for (const sort of ['priority', 'recency'] as const) {
-      const sorted = projectSessions({ sessions: [...pinned, fresh], digests: new Map(), rows: [], sort, matches: everyone, spawned: lead });
-      const trees = nestItems(projectItems({ sorted, listed: [spawned('idle')], digests: new Map(), rows: [], sort, spawned: lead }));
+      const sorted = projectSessions({ now: NOW, sessions: [...pinned, fresh], digests: new Map(), rows: [], sort, matches: everyone, spawned: lead });
+      const trees = nestItems(projectItems({ now: NOW, sorted, listed: [spawned('idle')], digests: new Map(), rows: [], sort, spawned: lead }));
       const drawn = (more: boolean) => shownTrees(trees, more, lead);
       const names = (more: boolean) => drawn(more).shown.map((t) => sidebarSessionId(t.root)).map((id): string => (id === (there('spawned') as string) ? '@spawned' : id));
       expect(trees.slice(SESSIONS_CAP + 1).map((t) => sidebarSessionId(t.root)).sort(), sort).toEqual([fresh.appId, there('spawned')].sort()); // under all nine pins
@@ -438,7 +439,7 @@ describe('an expanded project’s records and listed rows in one ordering', () =
       expect(names(true).slice(SESSIONS_CAP).sort(), sort).toEqual(['@spawned', 'fresh']);
       expect(drawn(true).more, sort).toBe(0);
     }
-    const unled = shownTrees(nestItems(projectItems({ sorted: pinned, listed: [spawned('idle')], digests: new Map(), rows: [], sort: 'priority' })), false, new Set());
+    const unled = shownTrees(nestItems(projectItems({ now: NOW, sorted: pinned, listed: [spawned('idle')], digests: new Map(), rows: [], sort: 'priority' })), false, new Set());
     expect(unled.shown.map((t) => sidebarSessionId(t.root)), 'with no lead the cap is the cap').toHaveLength(5);
   });
 
@@ -450,8 +451,8 @@ describe('an expanded project’s records and listed rows in one ordering', () =
     const child = rec('child', 1, { lineage: { kind: 'side-thread', parentAppSessionId: parent.appId, parentEngineSessionId: null, anchor: { kind: 'file-line', locator: '/r/x.ts#L4', label: 'x.ts:4', path: '/r/x.ts', line: 4 }, openedBy: 'comment' } });
     const lead = new Set([child.appId]);
     for (const sort of ['priority', 'recency'] as const) {
-      const sorted = projectSessions({ sessions: [...pinned, parent, child], digests: new Map(), rows: [], sort, matches: everyone, spawned: lead });
-      const trees = nestItems(projectItems({ sorted, listed: [], digests: new Map(), rows: [], sort, spawned: lead }));
+      const sorted = projectSessions({ now: NOW, sessions: [...pinned, parent, child], digests: new Map(), rows: [], sort, matches: everyone, spawned: lead });
+      const trees = nestItems(projectItems({ now: NOW, sorted, listed: [], digests: new Map(), rows: [], sort, spawned: lead }));
       expect(sidebarSessionId(trees[trees.length - 1].root), `${sort}: the parent's tree sits past the pins`).toBe(parent.appId);
       for (const more of [false, true]) {
         const drawn = shownTrees(trees, more, lead);
@@ -471,8 +472,8 @@ describe('an expanded project’s records and listed rows in one ordering', () =
     const asking = rec('wr', 3); // its digest says waiting, and the feed has no row for it
     const digests = new Map([[working.appId, digest(working.appId, { phase: 'working', turnStartedAt: minute(4) })], [asking.appId, digest(asking.appId, { phase: 'waiting' })]]);
     const listed = [{ ...lst('asks', 2), state: 'waiting' }, { ...lst('runs', 6), state: 'busy' }, lst('rests', 9), fed];
-    expect(ids(projectItems({ sorted: [unread, working, rec('r5', 5), asking], listed, digests, rows: rowsFor, sort: 'priority' })), 'a waiting word with no feed row is the rest’s, either way').toEqual(['@fed', 'u', '@runs', 'w', '@rests', 'r5', 'wr', '@asks']);
-    expect(ids(projectItems({ sorted: [rec('r5', 5)], listed, digests: new Map(), rows: rowsFor, sort: 'recency' })), 'recency: the issue alone').toEqual(['@rests', '@runs', 'r5', '@asks', '@fed']);
+    expect(ids(projectItems({ now: NOW, sorted: [unread, working, rec('r5', 5), asking], listed, digests, rows: rowsFor, sort: 'priority' })), 'a waiting word with no feed row is the rest’s, either way').toEqual(['@fed', 'u', '@runs', 'w', '@rests', 'r5', 'wr', '@asks']);
+    expect(ids(projectItems({ now: NOW, sorted: [rec('r5', 5)], listed, digests: new Map(), rows: rowsFor, sort: 'recency' })), 'recency: the issue alone').toEqual(['@rests', '@runs', 'r5', '@asks', '@fed']);
   });
 });
 
@@ -483,6 +484,7 @@ describe('an expanded project’s records and listed rows in one ordering', () =
 // three, and it ranks among local sessions by the same rule.
 describe('a remote session’s activity', () => {
   const hour = (h: number) => `2026-11-05T${String(h).padStart(2, '0')}:00:00.000Z`;
+  const NOW = Date.parse(hour(12)); // within a day of every fixture: each unread one is fresh
   const REMOTE = there('spawned') as AppSessionId;
   // the record as this Mac last received it: at the spawn, 00:00, before its tab let it go
   const remote = (over: Partial<SessionRecord> = {}) => record(REMOTE, { updatedAt: hour(0), ...over });
@@ -492,8 +494,8 @@ describe('a remote session’s activity', () => {
   const older = (over: Partial<SessionRecord> = {}) => Array.from({ length: SESSIONS_CAP + 1 }, (_, i) => record(`idle${i}`, { updatedAt: hour(0), ...over }));
   const digestsOf = (locals: SessionRecord[]) => new Map(locals.map((r, i) => [r.appId, digest(r.appId, { phase: 'idle', lastTurnEndedAt: hour(9 - i) })]));
   const drawn = (sessions: SessionRecord[], digests: ReadonlyMap<AppSessionId, SessionDigest>, seen: SeenActivity, sort: 'priority' | 'recency') => {
-    const sorted = projectSessions({ sessions, digests, rows: [], sort, matches: everyone, seen });
-    const trees = nestItems(projectItems({ sorted, listed: [], digests, rows: [], sort, seen }));
+    const sorted = projectSessions({ now: NOW, sessions, digests, rows: [], sort, matches: everyone, seen });
+    const trees = nestItems(projectItems({ now: NOW, sorted, listed: [], digests, rows: [], sort, seen }));
     return shownTrees(trees, false, new Set()).shown.map((tree) => sidebarSessionId(tree.root));
   };
 
@@ -523,6 +525,21 @@ describe('a remote session’s activity', () => {
     expect(lastActivity(local, digest('local', { lastTurnEndedAt: hour(3) }), Date.parse(hour(12)))).toBe(Date.parse(hour(3)));
   });
 
+  // M10's follow-up, the owner's ruling "Fresh unread first (Recommended)" (tracker row "a read session behind stale
+  // unread ones"): live, the session the owner watched end its turn, and so read, sat behind more stale unread idle
+  // sessions than the cap; an unread session now ranks ahead only within 24 h of the turn that made it unread
+  it('a read session whose turn just ended shows among the visible rows above more stale unread idle sessions than the cap, remote or local', () => {
+    const stale = Array.from({ length: SESSIONS_CAP + 1 }, (_, i) => record(`stale${i}`, { updatedAt: '2026-11-01T00:00:00.000Z', unread: true }));
+    const staleDigests = stale.map((r, i) => [r.appId, digest(r.appId, { phase: 'idle', lastTurnEndedAt: `2026-11-01T0${i}:00:00.000Z` })] as const);
+    const seen = seenActivity(new Map([[REMOTE, listing]]), new Map());
+    for (const sort of ['priority', 'recency'] as const) expect(drawn([...stale, remote()], new Map(staleDigests), seen, sort)[0], `remote, ${sort}`).toBe(REMOTE);
+    const read = record('read', { updatedAt: hour(0) });
+    const digests = new Map([...staleDigests, [read.appId, digest(read.appId, { phase: 'idle', lastTurnEndedAt: hour(10) })] as const]);
+    expect(drawn([...stale, read], digests, new Map(), 'priority')[0], 'local').toBe(read.appId);
+    // the stale rows follow it by their activity
+    expect(drawn([...stale, read], digests, new Map(), 'priority').slice(1)).toEqual(['stale8', 'stale7', 'stale6', 'stale5']);
+  });
+
   it('its row’s age reads the same activity', () => {
     expect(sessionAge(remote(), undefined, Date.parse(hour(10)) + 8 * 60_000, Date.parse(hour(10)))).toBe(REL.amount(8, 'minute'));
   });
@@ -530,15 +547,16 @@ describe('a remote session’s activity', () => {
 
 // W11 (I4, as the owner corrected it): one flat list per expanded project, five rows then "Show more" to eight.
 describe('an expanded project’s sessions', () => {
+  const NOW = Date.parse('2026-09-28T12:00:00.000Z'); // the scenario's day
   const maws = () => projectList(base).find((e) => e.key === addr('proj-maws'))!;
-  const list = (over: Partial<ProjectSessionsInput> = {}) => projectSessions({ sessions: maws().sessions, digests, rows, sort: 'priority', matches: everyone, ...over });
+  const list = (over: Partial<ProjectSessionsInput> = {}) => projectSessions({ now: NOW, sessions: maws().sessions, digests, rows, sort: 'priority', matches: everyone, ...over });
 
   it('puts pinned sessions on top, then the rest in the chosen sort, worktree sessions among them', () => {
     expect(titles(list())).toEqual(['Workstation north star', 'Fix sidebar drag', 'Sidebar interaction pass', 'Charter + research']);
     const usage = projectList(base).find((e) => e.key === addr('proj-claude-usage-menubar'))!;
-    expect(titles(projectSessions({ sessions: usage.sessions, digests, rows, sort: 'recency', matches: everyone }))).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
+    expect(titles(projectSessions({ now: NOW, sessions: usage.sessions, digests, rows, sort: 'recency', matches: everyone }))).toEqual(['Usage reset countdown', 'Settings idle probe', 'SDK wire inventory']);
     const recs = [record('m', { projectId: 'p' as never }), record('w', { projectId: 'p' as never, worktree: { path: '/r/.claude/worktrees/w', branch: 'worktree-w' } })];
-    expect(projectSessions({ sessions: recs, digests: new Map(), rows: [], sort: 'priority', matches: everyone }).map((r) => r.appId).sort()).toEqual(['m', 'w']);
+    expect(projectSessions({ now: NOW, sessions: recs, digests: new Map(), rows: [], sort: 'priority', matches: everyone }).map((r) => r.appId).sort()).toEqual(['m', 'w']);
   });
 
   it('filters by the search, pinned sessions included', () => {
