@@ -64,20 +64,31 @@ export class SideJournal {
   private initialised = false;
 
   // `sessionId` is what the seam pins (the spawn row) and the engine reports (`system/init`); `cwd` the init's directory.
+  // P5 O7 M9: `sessionRows`, rows every `get_status` answer adds to its Session section (an Anthropic login's `Login` and
+  // `Organization`, as `pass2/auto-unrouted` records them), so a machine-route session names what its machine reports.
   constructor(
     readonly sessionId: string,
     private readonly cwd: string,
+    private readonly sessionRows: readonly { label: string; value: string }[] = [],
   ) {
     // the prelude, its `get_status` answered as a direct session's (no custom base URL), so the session verifies
     // `direct`: no mismatch notice, and a fork of it is direct too, never meeting the relay pre-check
-    for (const row of rowsOf('test/fixtures/engine/replay-handshake.jsonl')) this.push(row.direction, row.seq === PRELUDE_STATUS_ANSWER ? directStatus(row.frame) : row.frame);
+    for (const row of rowsOf('test/fixtures/engine/replay-handshake.jsonl')) this.push(row.direction, row.seq === PRELUDE_STATUS_ANSWER ? this.statusAnswer(row.frame) : row.frame);
     this.push('meta', { event: 'spawn', args: ['--session-id', sessionId], note: 'E3 M5: the pin the replay seam reads' });
+  }
+
+  private statusAnswer(frame: Frame): Frame {
+    type Status = { response: { response: { sections: { title: string; rows: { label: string; value: string }[] }[] } } };
+    const status = directStatus(frame) as unknown as Status;
+    const session = status.response.response.sections.find((section) => section.title === 'Session')!;
+    session.rows.push(...this.sessionRows);
+    return status as unknown as Frame;
   }
 
   // The host reads `get_status` again after each human turn's result (its gateway check), answered the same way.
   private status(): void {
     const requestId = this.uuid();
-    const answer = directStatus(rowsOf('test/fixtures/engine/replay-handshake.jsonl').find((r) => r.seq === PRELUDE_STATUS_ANSWER)!.frame) as { response: Frame };
+    const answer = this.statusAnswer(rowsOf('test/fixtures/engine/replay-handshake.jsonl').find((r) => r.seq === PRELUDE_STATUS_ANSWER)!.frame) as { response: Frame };
     this.push('out', { type: 'control_request', request_id: requestId, request: { subtype: 'get_status' } });
     this.push('in', { ...answer, response: { ...answer.response, request_id: requestId } });
   }

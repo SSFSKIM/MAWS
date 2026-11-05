@@ -780,7 +780,7 @@ test.describe('interactive', () => {
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     const info = page.locator(`[data-session-info="${await addressed(page, READY)}"]`);
     for (const title of ['Engine', 'Model', 'Gateway', 'Permissions', 'Context, usage, cost', 'Hooks and MCP']) await expect(info.getByRole('region', { name: title })).toBeVisible();
-    await expect(valueOf(info, 'Route')).toHaveText('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…'); // W2: with its switch
+    await expect(valueOf(info, 'Route')).toHaveText('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…Back to the machine’s own…'); // W2: with its switch; P5 O7 M9: and back
     await expect(valueOf(info, 'Context')).toHaveText('21,508 of 200,000 · 11% · autocompact at 167,000');
     const lane = valueOf(info, 'Auto-mode lane');
     const SERVER = 'Server · reviews ride on the main request · no charge · model chosen server-side';

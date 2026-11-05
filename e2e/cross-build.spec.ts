@@ -109,7 +109,7 @@
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 import { randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
@@ -118,6 +118,7 @@ import type { HostStatus } from '@shared/ipc/schema/host';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import { classifyWireChange, type WireManifest } from '@shared/ipc/wire';
 import { daemonPaths } from '@shared/daemon/files';
+import { RELAY_URL } from '../src/engine-host/launch'; // P5 O7 M9
 import { CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
 import { DEFAULT_IDLE_EXIT_MS } from '../src/mawsd/clocks';
 import { reachMachine } from '../src/mawsd/machine-client';
@@ -324,7 +325,9 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
 
   // the other build's app attaches, and is served as another build until the kept sessions are idle
   const idleMs = shapes.attacher === 'daemon' ? REATTACH_IDLE_MS : IDLE_MS;
-  const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(idleMs), ...steps.env }, attacher.root);
+  // P5 O7 M9: the journal the service's legacy launch on the older host plays (its replay seam hands it to that start)
+  const legacyRoute = routesMachine(attacher) && !routesMachine(keeper) ? turnsJournal(s.root, 'machine-legacy', 1) : null;
+  const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(idleMs), ...(legacyRoute !== null && { MAWS_E2E_REPLAY_FIXTURES: legacyRoute }), ...steps.env }, attacher.root);
   let second = await attach();
   const attacherRuns: Run[] = [second]; // P5 O3-D M6: the attacher's launches (acceptance 9 quits and reattaches it)
   const served = await s.ready(second.page, (st) => st.supervisor!.exitWhenIdle && onShape(shapes.attacher)(st));
@@ -398,6 +401,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   value(await invoke(second.page, 'session.send', { appSessionId: launched, content: 'turn 1' }));
   await turnEnded(second.page, launched, 30_000);
   await s.ready(second.page, (st) => st.supervisor!.pid === kept.pid && st.supervisor!.liveSessions === 2); // the launch ran on the kept supervisor
+  if (legacyRoute !== null) said.push(...(await machineRouteOnOlderHost(s, second.page, keeper))); // P5 O7 M9
 
   // the kept request answered through this app: the kept supervisor plays on, its rows arriving live
   await second.page.evaluate(() => {
@@ -530,6 +534,9 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
   await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the request raised while away, once' }).toBe(1);
   if (attacherDaemon !== null) said.push(await artifactPage(s, second, attacher.label, servesArtifacts(attacher)));
   said.push('  gap: not probed: the older supervisor never served this app (its session was handed over at the attach)');
+  // P5 O7 M9: likewise the machine route on an older engine host (machineRouteOnOlderHost), which a peer from before
+  // host.holder reaches
+  if (routesMachine(attacher) && !routesMachine(keeper)) said.push(`  machine route on ${keeper.label}'s engine host: not driven, it never served this app (a peer before host.holder drives it)`);
 
   // a launch on the successor plays a turn; the kept request answered there, the adopted session plays on
   const launched = `xb-launch-${Date.now()}` as AppSessionId;
@@ -685,6 +692,76 @@ async function refreshWithNoApp(agent: AgentSeam, session: string, host: string,
   if (noClient) expect(answer.text, `${host}, keyed on the app's attachment: the refresh settles noClient`).toContain(NO_CLIENT);
   else expect(answer.text, `${host}, keyed on mawsd's connection: mawsd answers the refresh`).not.toMatch(ENDED_BY_HOST);
   return [`  refresh with no app (acceptance 3), ${host}: ${noClient ? 'settled noClient' : 'answered by mawsd'}: ${answer.text}`];
+}
+
+// P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M9 "The route"; its Proves, "an older engine host
+// given the legacy route"): the machine's own route started by the attacher's session service (this build's) on the kept
+// engine host of a build before M9, whose welcome lists no engine.route-machine. The machine's user settings (the
+// profile's config home, which the service resolves the base URL over) are set per case and put back after:
+// - none of the gateway keys and no base URL: the start goes, and the older host launches the legacy direct route (its
+//   spawn row's settings blank the base URL), sent no `route`; the record keeps the route chosen, `machine`;
+// - another host's base URL, or a token the machine sets with none: refused `route-unsupported`, nothing launched;
+// - the relay's own URL with the relay down: refused with ROUTE_RELAY_UNSUPPORTED, Start anyway included (the older host
+//   checks the relay on the legacy gateway route, so nothing could start past it).
+// m9-2's service tests hold the same rules against a fake host (src/services/sessions/service.test.ts, "a host that
+// predates the machine route"); this holds them against a real older engine host and this build's real wiring of its
+// welcome. It runs where the older host serves the attacher, which a peer from before host.holder gives (--peer 95050efd1):
+// a holder peer hands over at the attach, so the older host never serves this build's app.
+const ROUTE_MACHINE_CAPABILITY = 'engine.route-machine';
+const routesMachine = (build: Build) => build.manifest.capabilities.includes(ROUTE_MACHINE_CAPABILITY);
+const ROUTE_UNSUPPORTED = "This machine's engine host predates the machine route; restart MAWS there, or choose gateway or direct for this session.";
+const ROUTE_RELAY_UNSUPPORTED =
+  "ClaudeUsage's relay isn't answering, and this machine's engine host predates the machine route, so it can't start past the relay check; wait for the relay, restart MAWS there, or choose direct for this session.";
+async function machineRouteOnOlderHost(s: Scratch, page: Page, older: Build): Promise<string[]> {
+  const said: string[] = [];
+  const settings = join(s.userData, 'claude-config', 'settings.json');
+  const before = existsSync(settings) ? readFileSync(settings, 'utf8') : null;
+  const userEnv = (env: Record<string, string> | null) => writeFileSync(settings, JSON.stringify({ ...(before === null ? {} : (JSON.parse(before) as Record<string, unknown>)), ...(env !== null && { env }) }));
+  const create = async () => value(await invoke(page, 'session.create', { projectId: null, location: { kind: 'directory', path: s.repo } })).appSessionId;
+  const start = async (id: AppSessionId, options: { startAnyway?: true } = {}) => value(await invoke(page, 'session.start', { appSessionId: id, message: null, options: { route: 'machine', trust: 'declined', ...options } }));
+  const refused = (id: AppSessionId, message: string) => ({ status: 'invalid', appSessionId: id, field: 'route', message });
+  try {
+    userEnv(null);
+    const legacy = await create();
+    expect(await start(legacy), 'no base URL and no gateway key: the start goes').toMatchObject({ status: 'starting' });
+    await expect.poll(async () => { const st = await invoke(page, 'session.status', { appSessionId: legacy }); return st.ok ? st.value.process : null; }, { timeout: 60_000, message: `${older.label}'s engine host launches it` }).toBe('ready');
+    const spawn = s.journal(legacy).find((r) => r.direction === 'meta' && r.frame.event === 'spawn')?.frame as { args?: string[] } | undefined;
+    const args = spawn?.args ?? [];
+    const blanked = (JSON.parse(args[args.indexOf('--settings') + 1] ?? '{}') as { env?: Record<string, string> }).env;
+    expect(blanked?.ANTHROPIC_BASE_URL, `${older.label}'s engine host launched the legacy direct route (its spawn row: ${JSON.stringify(args)})`).toBe('');
+    const status = await statusOf(page, legacy);
+    expect(status.gateway.mode, 'the older host verified the legacy direct route').toBe('direct');
+    expect(status.gateway, 'which carries no route of its own').not.toHaveProperty('route');
+    expect(value(await invoke(page, 'session.get', { appSessionId: legacy }))?.gateway.route, 'the record keeps the route chosen').toBe('machine');
+    value(await invoke(page, 'session.stop', { appSessionId: legacy, reason: 'stop' }));
+    await expect.poll(async () => { const st = await invoke(page, 'session.status', { appSessionId: legacy }); return st.ok ? st.value.process : 'released'; }, { timeout: 60_000 }).not.toBe('ready');
+    said.push(`  machine route on ${older.label}'s engine host (no engine.route-machine): no base URL and no gateway key launched the legacy direct route, no route sent`);
+
+    for (const [what, env] of [['another host’s base URL', { ANTHROPIC_BASE_URL: 'https://inference.example.invalid' }], ['a token the machine sets, with no base URL', { ANTHROPIC_AUTH_TOKEN: 'machine-token' }]] as const) {
+      userEnv(env);
+      const id = await create();
+      expect(await start(id), `${what}: route-unsupported`).toEqual(refused(id, ROUTE_UNSUPPORTED));
+      expect(s.journal(id), `${what}: nothing launched`).toEqual([]);
+      said.push(`  machine route, ${what}: refused route-unsupported, nothing launched`);
+    }
+
+    userEnv({ ANTHROPIC_BASE_URL: RELAY_URL });
+    const relay = value(await invoke(page, 'engine.relayHealth', { force: true }));
+    if (relay.ok) {
+      test.info().annotations.push({ type: 'skipped check', description: `the dead relay's refusal: a relay answers at ${relay.url} on this runner` });
+      said.push(`  machine route at the relay: not checked, a relay answers at ${relay.url}`);
+    } else {
+      const id = await create();
+      expect(await start(id), 'the relay down: refused, with no sheet').toEqual(refused(id, ROUTE_RELAY_UNSUPPORTED));
+      expect(await start(id, { startAnyway: true }), 'and Start anyway cannot pass it').toEqual(refused(id, ROUTE_RELAY_UNSUPPORTED));
+      expect(s.journal(id)).toEqual([]);
+      said.push(`  machine route at the relay, the relay down (${relay.url}): refused ROUTE_RELAY_UNSUPPORTED, Start anyway too`);
+    }
+  } finally {
+    if (before === null) rmSync(settings, { force: true });
+    else writeFileSync(settings, before);
+  }
+  return said;
 }
 
 // P5 O5 M2: whether a build's `mawsd` serves the artifact endpoint (its manifest's capabilities, the union its peers list)
