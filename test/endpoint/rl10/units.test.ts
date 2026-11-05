@@ -115,7 +115,8 @@ describe('the revocation set', () => {
 });
 
 describe("the directory's retired machines", () => {
-  // A head with one `dc-` delegation, its certificate set, and how to add a certificate to it or retire one.
+  // A head with one `dc-` delegation, its certificate set, and how to add a certificate to it (its delegation signing,
+  // unless another key is given) or retire one.
   async function delegated() {
     const a1 = await newDevice('a1');
     const A = memberId();
@@ -126,10 +127,10 @@ describe("the directory's retired machines", () => {
     });
     const certificates: Certificates = { certs: [], retirements: [] };
     let use = 0;
-    const certify = async (name: string): Promise<SigningKey> => {
+    const certify = async (name: string, signer: SigningKey = delegation.key): Promise<SigningKey> => {
       const key = await generateSigningKey();
       const body = { org: 'org-d', machine: mintRef(delegation.id), name, pub: key.pub, delegation: delegation.id, use: ++use, issued: new Date().toISOString() };
-      certificates.certs.push(await signRecord(SIGNING_DOMAINS.machineCert, body, delegation.key.privateKey, delegation.key.pub));
+      certificates.certs.push(await signRecord(SIGNING_DOMAINS.machineCert, body, signer.privateKey, signer.pub));
       return key;
     };
     const retire = async (key: SigningKey, notAfter: string) => {
@@ -175,6 +176,22 @@ describe("the directory's retired machines", () => {
     expect(entries(d, 'mini')).toEqual({
       project: expect.objectContaining({ kind: 'machine', machine: 'mini', retired: false }),
       machine: { name: 'mini', online: false, seen: '2026-11-05T00:00:00.000Z' },
+    });
+  });
+
+  it('never retires an enrolled machine under a name it went by, though a certificate its delegation did not sign bears it', async () => {
+    const { a1, A, certificates, certify, head: before } = await delegated();
+    const ref = mintRef();
+    const head = await successor(before, [a1], (s) => {
+      s.machines.push({ name: 'studio', ref, pub: base64urlEncode(new Uint8Array(32).fill(7)), owners: [A] });
+      s.machineNames.push({ name: 'mini', ref }, { name: 'studio', ref });
+    });
+    // The ref still speaks under its former name (`machineSigners`); a forged certificate bearing it lists the name.
+    await certify('mini', await generateSigningKey());
+    const d = await orgDirectory(head.state, certificates, now(), () => null);
+    expect(entries(d, 'mini')).toEqual({
+      project: expect.objectContaining({ kind: 'machine', machine: 'mini', retired: false }),
+      machine: { name: 'mini', online: false, seen: null },
     });
   });
 
