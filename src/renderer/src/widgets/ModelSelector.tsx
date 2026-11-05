@@ -134,7 +134,7 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
   const chosen = useSetup((s) => s.intents.get(appSessionId)?.route); // P5 O7 M9: read before the legacy field
   const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V21;
   const defaults = useCommand('settings.userEngineDefaults', undefined, { enabled: setup !== null, staleTime: 30_000 }).data ?? null;
-  const machineHonoured = useMachineRouteHonoured(); // P5 O7 M9
+  const machineHonoured = useMachineRouteHonoured(machineOf(appSessionId)); // P5 O7 M9: the tab's machine's daemon
   if (!setup) return null;
   const bound = intentBindings(setup, { starting }, defaults).model;
   const { model, effort } = bound.value;

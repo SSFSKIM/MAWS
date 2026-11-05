@@ -6,6 +6,7 @@
 // tab and a record's resume alike (C7's composer shows a session's docked card whether or not it has started).
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import { machineOf } from '@shared/machine/address';
 import { isGatewayModel } from '@shared/sessions/models';
 import { readRecordedRoute, readRoute, type Route } from '@shared/engine/route'; // P5 O7 M9
 import { useResolvedDefaultRoute } from '../settings-tab/default-route'; // P5 O7 M9: a discovered session's route
@@ -128,7 +129,7 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
     return gateway === undefined ? null : readRecordedRoute(gateway);
   });
   // a session nothing records the route of resumes on the machine's default (main's resumeRouteOf): read here the same way
-  const machineDefault = useResolvedDefaultRoute();
+  const machineDefault = useResolvedDefaultRoute(machineOf(appSessionId)); // the session's machine's, not this one's
   const route = intentRoute ?? recordRoute ?? machineDefault ?? null;
   const machine = route === 'machine';
   // C11 start: settings v3's relayUnreachable (wait → 'wait'; ask and direct → 'ask'), and C11's hand-off action
