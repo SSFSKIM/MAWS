@@ -7,7 +7,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import type { NeedsYouRow } from '../attention/derive';
 import { dateFormats, formatAgo } from '@shared/app/date-format';
-import { lastActivity, priorityRank, RANK_REST, sortSessions, type SidebarSort } from '../overview/derive';
+import { issuedAt, lastActivity, priorityRank, RANK_REST, sortSessions, type SeenActivity, type SidebarSort } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle, listedTitle } from '../sessions/title'; // E3; P5 O7 M6: listedTitle
 import { projectLabels } from './project-labels';
@@ -42,11 +42,8 @@ export function listedMatcher(query: string): (listed: ListedSession) => boolean
   const q = query.trim().toLowerCase();
   return q === '' ? () => true : (listed) => listedTitle(listed).toLowerCase().includes(q);
 }
-// A listed row's last activity: when its listing was issued (sminos re-issues a listing at each change of its state).
-export const issuedAt = (listed: ListedSession): number => {
-  const at = Date.parse(listed.issued);
-  return Number.isFinite(at) ? at : Number.NEGATIVE_INFINITY;
-};
+// A listed row's last activity (`overview/derive.ts`, beside a record's).
+export { issuedAt };
 
 // ---- the project list --------------------------------------------------------------------------------------------------
 
@@ -60,6 +57,7 @@ export interface ProjectListInput {
   alsoListed?: ReadonlySet<ProjectKey>; // keys listed for the moment though no checkout lists them (the project filter's)
   listed?: ReadonlyMap<AppSessionId, ListedSession>; // P5 O8 M2: other machines' listed sessions (the sessions store's)
   people?: ReadonlySet<ProjectKey>; // P5 O8 M5: the rows whose People toggle is on (`stores/people.ts`)
+  seen?: SeenActivity; // P5 O7 M10: a remote record's activity beyond the record (`seenActivity`), for its row's order
 }
 
 export interface ProjectEntry {
@@ -91,7 +89,7 @@ export interface ProjectEntry {
 // drawn only under a row whose People toggle is on (`people`), else counted in its `others`, so a record a lane opened of
 // someone else's session leaves the list with the toggle. Drawn, they count as activity but never in the rollups, which
 // say what needs you; a machine's row with others' sessions alone is kept, so its "+N others" and toggle stay reachable.
-export function projectList({ records, digests, projects, rows, local, machineName, alsoListed, listed: remoteSessions = new Map(), people = new Set() }: ProjectListInput): ProjectEntry[] {
+export function projectList({ records, digests, projects, rows, local, machineName, alsoListed, listed: remoteSessions = new Map(), people = new Set(), seen }: ProjectListInput): ProjectEntry[] {
   const index = orgIndex(projects.values(), local);
   const waiting = new Set(rows.map((row) => row.appSessionId));
   const grouped = new Map<ProjectKey, { live: SessionRecord[]; listed: ListedSession[]; activity: number; theirs: Set<AppSessionId>; others: number }>();
@@ -113,7 +111,7 @@ export function projectList({ records, digests, projects, rows, local, machineNa
       }
       entry.theirs.add(record.appId);
     }
-    entry.activity = Math.max(entry.activity, lastActivity(record, digests.get(record.appId)));
+    entry.activity = Math.max(entry.activity, lastActivity(record, digests.get(record.appId), seen?.get(record.appId)));
     if (!record.archived) entry.live.push(record);
   }
   for (const session of remoteSessions.values()) {
@@ -223,13 +221,14 @@ export interface ProjectSessionsInput {
   sort: SidebarSort;
   matches: (record: SessionRecord) => boolean;
   spawned?: ReadonlySet<AppSessionId>; // P5 O7 M8: the sessions spawned here that still lead (`leadsAsSpawned`)
+  seen?: SeenActivity; // P5 O7 M10: a remote record's activity beyond the record (`seenActivity`)
 }
 
 // One flat list: pinned sessions first (pin keeps a session at the top of its project), then a session spawned here
 // that still leads (P5 O7 M8), then the rest in the chosen sort; worktree sessions sit among them, marked by their branch
 // (`rowBranch`).
-export function projectSessions({ sessions, digests, rows, sort, matches, spawned }: ProjectSessionsInput): SessionRecord[] {
-  const order = (list: SessionRecord[]) => sortSessions(list, sort, { digests, rows });
+export function projectSessions({ sessions, digests, rows, sort, matches, spawned, seen }: ProjectSessionsInput): SessionRecord[] {
+  const order = (list: SessionRecord[]) => sortSessions(list, sort, { digests, rows, seen });
   const shown = sessions.filter(matches);
   const leads = (r: SessionRecord) => !r.pinned && leadsAsSpawned(r.appId, spawned);
   return [...order(shown.filter((r) => r.pinned)), ...order(shown.filter(leads)), ...order(shown.filter((r) => !r.pinned && !leads(r)))];
@@ -317,6 +316,7 @@ export interface ProjectItemsInput {
   rows: NeedsYouRow[];
   sort: SidebarSort;
   spawned?: ReadonlySet<AppSessionId>; // P5 O7 M8: as `projectSessions` was given it
+  seen?: SeenActivity; // P5 O7 M10: as `projectSessions` was given it
 }
 
 // An item's place: its tier (-2 pinned, -1 the spawned lead, then `priorityRank`'s groups), its key within a ranked
@@ -326,14 +326,14 @@ const PINNED_TIER = -2;
 const SPAWNED_TIER = -1;
 const byRank = (a: Rank, b: Rank): number => a.tier - b.tier || (a.tier < 0 || a.tier === RANK_REST ? b.at - a.at : a.key - b.key);
 
-export function projectItems({ sorted, listed, digests, rows, sort, spawned }: ProjectItemsInput): SidebarSession[] {
+export function projectItems({ sorted, listed, digests, rows, sort, spawned, seen }: ProjectItemsInput): SidebarSession[] {
   const rowIndex = new Map(rows.map((row, i) => [row.appSessionId, i]));
   const recordRank = (r: SessionRecord): Rank => {
     const digest = digests.get(r.appId);
-    const at = lastActivity(r, digest);
+    const at = lastActivity(r, digest, seen?.get(r.appId));
     if (r.pinned) return { tier: PINNED_TIER, key: 0, at };
     if (leadsAsSpawned(r.appId, spawned)) return { tier: SPAWNED_TIER, key: 0, at };
-    const [tier, key] = sort === 'priority' ? priorityRank(r, digest, rowIndex.get(r.appId)) : [RANK_REST, 0];
+    const [tier, key] = sort === 'priority' ? priorityRank(r, digest, rowIndex.get(r.appId), seen?.get(r.appId)) : [RANK_REST, 0];
     return { tier, key, at };
   };
   const listedRank = (l: ListedSession): Rank => {
@@ -395,10 +395,10 @@ export function rowBranch(record: SessionRecord): string | null {
 // A row's age, compact in the display locale (`@shared/app/date-format`): now, 2m, 2h, 3d, 1w.
 export const formatAge = (ms: number): string => dateFormats().age(ms);
 
-// A working session is "now"; otherwise the age of its last activity.
-export function sessionAge(record: SessionRecord, digest: SessionDigest | null | undefined, now: number): string {
+// A working session is "now"; otherwise the age of its last activity (P5 O7 M10: `seen` included, a remote record's).
+export function sessionAge(record: SessionRecord, digest: SessionDigest | null | undefined, now: number, seen?: number): string {
   if (isWorking(digest ?? undefined)) return formatAge(0);
-  return formatAge(now - lastActivity(record, digest));
+  return formatAge(now - lastActivity(record, digest, seen));
 }
 
 // A waiting request shows how long its item has waited (the request preview, C7's card).

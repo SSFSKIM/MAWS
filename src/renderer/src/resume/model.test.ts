@@ -95,7 +95,7 @@ describe('the chooser’s rows', () => {
     const mine = listing('spawned', 6);
     const elsewhere = listing('other-project', 7, { orgKey: 'repo:usage' as OrgKey });
     const theirs = listing('theirs', 8, { mine: false });
-    const opened = listing('opened', 9); // a lane B tab holds its record: the record's row is listed in its place
+    const opened = listing('opened', 9); // a lane B tab held its record: the record's row is listed in its place, by its listing's issue (P5 O7 M10)
     const listed = new Map([mine, elsewhere, theirs, opened].map((l) => [l.appId, l]));
     const local = record(addressOf(TEST_MACHINE, 'a'), { projectId: here.id, updatedAt: at(5) });
     const openedRecord = record(opened.appId, { projectId: null, updatedAt: at(2) }); // its project is not known here
@@ -109,14 +109,21 @@ describe('the chooser’s rows', () => {
 
     it('lists yours as the sidebar files them under the row, by their listing’s issue among the records; a held record in its listing’s place', () => {
       const rows = chooserRows(scoped());
-      expect(rows.map(chooserRowId)).toEqual([mine.appId, local.appId, opened.appId]);
-      expect(rows[0]).toEqual({ listed: mine, at: Date.parse(at(6)) });
-      expect(isListedChooserRow(rows[2]), 'the record, not its listing').toBe(false);
+      expect(rows.map(chooserRowId)).toEqual([opened.appId, mine.appId, local.appId]);
+      expect(rows[1]).toEqual({ listed: mine, at: Date.parse(at(6)) });
+      expect(isListedChooserRow(rows[0]), 'the record, not its listing').toBe(false);
+    });
+
+    // P5 O7 M10 (A): the record a tab held stopped at the tab's let-go; its listing and the turns its stream delivered here
+    // say its later activity, as the sidebar ranks it
+    it('places a held record by its latest activity: its listing’s issue or a turn its stream delivered here, over the record as last received', () => {
+      expect(chooserRows(scoped())[0]).toEqual({ record: openedRecord, at: Date.parse(at(9)) });
+      expect(chooserRows(scoped({ turnsSeen: new Map([[opened.appId, Date.parse(at(10))]]) }))[0]).toEqual({ record: openedRecord, at: Date.parse(at(10)) });
     });
 
     it('lists others’ only while the row’s People toggle is on, and never the session it opened from', () => {
-      expect(chooserRows(scoped({ people: new Set([ROW]) })).map(chooserRowId)).toEqual([theirs.appId, mine.appId, local.appId, opened.appId]);
-      expect(chooserRows(scoped({ context: { projectId: here.id, row: ROW, exclude: mine.appId } })).map(chooserRowId)).toEqual([local.appId, opened.appId]);
+      expect(chooserRows(scoped({ people: new Set([ROW]) })).map(chooserRowId)).toEqual([opened.appId, theirs.appId, mine.appId, local.appId]);
+      expect(chooserRows(scoped({ context: { projectId: here.id, row: ROW, exclude: mine.appId } })).map(chooserRowId)).toEqual([opened.appId, local.appId]);
     });
 
     // m8-4a's task review: another member's session stays behind its row's People toggle in whichever form it is held, and
@@ -125,7 +132,7 @@ describe('the chooser’s rows', () => {
       const heldTheirs = record(theirs.appId, { projectId: null, updatedAt: at(3) });
       const held = scoped({ records: new Map([local, heldTheirs].map((r) => [r.appId, r])) });
       expect(chooserRows(held).map(chooserRowId)).toEqual([opened.appId, mine.appId, local.appId]);
-      expect(chooserRows({ ...held, people: new Set([ROW]) }).map(chooserRowId), 'the toggle on: the record, in its listing’s place').toEqual([opened.appId, mine.appId, local.appId, theirs.appId]);
+      expect(chooserRows({ ...held, people: new Set([ROW]) }).map(chooserRowId), 'the toggle on: the record, in its listing’s place').toEqual([opened.appId, theirs.appId, mine.appId, local.appId]);
     });
 
     it('never shows another member’s listing from an all-hidden project, whatever the toggles', () => {
@@ -146,7 +153,7 @@ describe('the chooser’s rows', () => {
     });
 
     it('All projects takes every listed row a row files; Current branch keeps none (a listing names no branch); the search matches its title', () => {
-      expect(chooserRows(scoped({ toggles: { ...NO_TOGGLES, allProjects: true } })).map(chooserRowId)).toEqual([elsewhere.appId, mine.appId, local.appId, opened.appId]);
+      expect(chooserRows(scoped({ toggles: { ...NO_TOGGLES, allProjects: true } })).map(chooserRowId)).toEqual([opened.appId, elsewhere.appId, mine.appId, local.appId]);
       expect(chooserRows(scoped({ toggles: { ...NO_TOGGLES, currentBranch: true } })).map(chooserRowId)).not.toContain(mine.appId);
       expect(chooserRows(scoped({ query: 'SPAWN' })).map(chooserRowId)).toEqual([mine.appId]);
     });

@@ -15,7 +15,7 @@ import { holderLine, needsYou, waitingItem, type NeedsYouRow } from '../attentio
 import { listedGlyph } from '../attention/glyph';
 import type { ListedSession } from '../stores/sessions';
 import type { RowKey } from '../stores/org-projects';
-import { orderProjects } from '../overview/derive';
+import { lastActivity, orderProjects, seenActivity, type SeenActivity } from '../overview/derive';
 import { pageScenario } from '../test-support/shell-stores';
 import {
   filterProjectList,
@@ -473,6 +473,58 @@ describe('an expanded project’s records and listed rows in one ordering', () =
     const listed = [{ ...lst('asks', 2), state: 'waiting' }, { ...lst('runs', 6), state: 'busy' }, lst('rests', 9), fed];
     expect(ids(projectItems({ sorted: [unread, working, rec('r5', 5), asking], listed, digests, rows: rowsFor, sort: 'priority' })), 'a waiting word with no feed row is the rest’s, either way').toEqual(['@fed', 'u', '@runs', 'w', '@rests', 'r5', 'wr', '@asks']);
     expect(ids(projectItems({ sorted: [rec('r5', 5)], listed, digests: new Map(), rows: rowsFor, sort: 'recency' })), 'recency: the issue alone').toEqual(['@rests', '@runs', 'r5', '@asks', '@fed']);
+  });
+});
+
+// P5 O7 M10 (A, red first; M10's *A remote session ranks by a stale activity time*): live, a session spawned from this
+// Mac on another machine fell past the cap once its first turn ended. Its record (lane B, which no lane B module digests)
+// ranked by `updatedAt` as this Mac last received it, frozen once its tab let it go; the record hid its listing, whose
+// `issued` is fresher; and nothing read the turn events its stream delivered here. Its activity is now the newest of the
+// three, and it ranks among local sessions by the same rule.
+describe('a remote session’s activity', () => {
+  const hour = (h: number) => `2026-11-05T${String(h).padStart(2, '0')}:00:00.000Z`;
+  const REMOTE = there('spawned') as AppSessionId;
+  // the record as this Mac last received it: at the spawn, 00:00, before its tab let it go
+  const remote = (over: Partial<SessionRecord> = {}) => record(REMOTE, { updatedAt: hour(0), ...over });
+  // its first turn ended at 10:00, which its listing was issued again for
+  const listing: ListedSession = { ...remoteRow(OTHER_MACHINE, 'spawned', { issued: hour(10) }), appId: REMOTE };
+  // more idle local sessions than the cap, none pinned, each last active between the spawn and the turn's end
+  const older = (over: Partial<SessionRecord> = {}) => Array.from({ length: SESSIONS_CAP + 1 }, (_, i) => record(`idle${i}`, { updatedAt: hour(0), ...over }));
+  const digestsOf = (locals: SessionRecord[]) => new Map(locals.map((r, i) => [r.appId, digest(r.appId, { phase: 'idle', lastTurnEndedAt: hour(9 - i) })]));
+  const drawn = (sessions: SessionRecord[], digests: ReadonlyMap<AppSessionId, SessionDigest>, seen: SeenActivity, sort: 'priority' | 'recency') => {
+    const sorted = projectSessions({ sessions, digests, rows: [], sort, matches: everyone, seen });
+    const trees = nestItems(projectItems({ sorted, listed: [], digests, rows: [], sort, seen }));
+    return shownTrees(trees, false, new Set()).shown.map((tree) => sidebarSessionId(tree.root));
+  };
+
+  it('a remote session whose turn just ended shows first among older idle local sessions, by its listing’s issue, under either sort', () => {
+    const locals = older();
+    const seen = seenActivity(new Map([[REMOTE, listing]]), new Map());
+    for (const sort of ['priority', 'recency'] as const) expect(drawn([...locals, remote()], digestsOf(locals), seen, sort)[0], sort).toBe(REMOTE);
+  });
+
+  it('the turn events its stream delivered here count the same, its listing aside', () => {
+    const locals = older();
+    const seen = seenActivity(new Map(), new Map([[REMOTE, Date.parse(hour(10))]]));
+    for (const sort of ['priority', 'recency'] as const) expect(drawn([...locals, remote()], digestsOf(locals), seen, sort)[0], sort).toBe(REMOTE);
+  });
+
+  it('an unread remote session ranks among the unread by its latest activity, where it ranked last', () => {
+    const locals = older({ unread: true });
+    const seen = seenActivity(new Map([[REMOTE, listing]]), new Map());
+    expect(drawn([...locals, remote({ unread: true })], digestsOf(locals), seen, 'priority')[0]).toBe(REMOTE);
+  });
+
+  it('its activity is the newest of the record as received, its listing’s issue and its turns seen; a session with turn times of its own keeps them', () => {
+    expect(lastActivity(remote({ updatedAt: hour(11) }), undefined, seenActivity(new Map([[REMOTE, listing]]), new Map()).get(REMOTE))).toBe(Date.parse(hour(11)));
+    expect(seenActivity(new Map([[REMOTE, listing]]), new Map([[REMOTE, Date.parse(hour(12))]])).get(REMOTE)).toBe(Date.parse(hour(12)));
+    expect(seenActivity(new Map([[REMOTE, listing]]), new Map([[REMOTE, Date.parse(hour(1))]])).get(REMOTE)).toBe(Date.parse(hour(10)));
+    const local = record('local', { updatedAt: hour(0) });
+    expect(lastActivity(local, digest('local', { lastTurnEndedAt: hour(3) }), Date.parse(hour(12)))).toBe(Date.parse(hour(3)));
+  });
+
+  it('its row’s age reads the same activity', () => {
+    expect(sessionAge(remote(), undefined, Date.parse(hour(10)) + 8 * 60_000, Date.parse(hour(10)))).toBe(REL.amount(8, 'minute'));
   });
 });
 

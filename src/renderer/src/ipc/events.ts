@@ -177,6 +177,8 @@ export function connectShell(
     on('session.digest', (d, { machine: m }) => enqueue({ t: 'digest', d, m })),
     on('fs.scanProgress', (e, { machine: m }) => enqueue({ t: 'progress', e, m })),
     on('session.status', (e, { machine }) => sessions().applyStatus(e, machine)),
+    // P5 O7 M10 (A): the turns another machine's session streams here, which no digest says (this machine's do)
+    on('session.eventBatch', (e, { machine }) => machine !== local && sessions().applyTurnsSeen(e)),
     on('attention.changed', (e, { machine }) => attention().applyChanged(e, machine)),
     on('attention.notified', (e) => attention().applyNotified(e)),
     // P5 O7 M6: another machine's attention feed as main holds it, the whole partition and whether it is greyed (main's

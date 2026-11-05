@@ -13,7 +13,7 @@ import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor } from '../attention/glyph';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
-import { useSessions } from '../stores/sessions';
+import { selectSeenAt, useSessions } from '../stores/sessions';
 import { lineageCaption, sessionAge } from './derive';
 import { SessionHoverCard } from './HoverCard';
 import { ReleasedMark } from '../budget/ReleasedMark'; // C12
@@ -28,6 +28,7 @@ export const SESSION_DRAG_TYPE = 'application/x-maws-session';
 export function SessionRow({ record, level }: { record: SessionRecord; level: number }) {
   const id = record.appId;
   const digest = useSessions((s) => s.digests.get(id));
+  const seenAt = useSessions((s) => selectSeenAt(s, id)); // P5 O7 M10: a remote record's activity past the record
   // E3 start: a side thread or fork nested under its parent (level 3 and deeper, its real depth for assistive tech) is
   // indented one step whatever its depth, marked `↳` and captioned by its anchor's label; one listed as a root says
   // whose it is (the parent's title when the store holds it)
@@ -97,7 +98,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
         <GlyphMark glyph={glyph} className="w-[12px] shrink-0" />
         {/* Approved mockup: overflow replaces age in one fixed slot, never the title or unread target. */}
         <span className="relative flex h-[22px] w-[26px] shrink-0 items-center justify-end [&:has([data-state=open])>[data-session-age]]:invisible">
-          <span data-session-age className={`text-ui-sm text-fg-muted tabular-nums ${hasActions ? 'group-hover/session:invisible group-focus-within/session:invisible' : ''}`}>{sessionAge(record, digest, now)}</span>
+          <span data-session-age className={`text-ui-sm text-fg-muted tabular-nums ${hasActions ? 'group-hover/session:invisible group-focus-within/session:invisible' : ''}`}>{sessionAge(record, digest, now, seenAt)}</span>
           {hasActions && <span className="absolute inset-0 flex items-center justify-end"><SessionOverflow appSessionId={id} title={title} /></span>}
         </span>
         <button type="button" tabIndex={-1} aria-label={record.unread ? 'Mark read' : 'Mark unread'}

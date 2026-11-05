@@ -22,7 +22,7 @@ import { ipc } from '../ipc/client';
 import { useMachines } from '../stores/machines';
 import { machineName, selectOrgIndex } from '../stores/org-projects'; // P5 O6 M5
 import { ProjectFilter } from './ProjectFilter';
-import type { SidebarSort } from '../overview/derive';
+import { seenActivity, type SidebarSort } from '../overview/derive';
 import { selectGreyedNeedsYou, selectNeedsYou, useAttention } from '../stores/attention';
 import { useSpawnedHere } from '../sessions/spawned-here'; // P5 O7 M8
 import { useLayout } from '../stores/layout';
@@ -77,6 +77,8 @@ function SidebarBody() {
   const recordsVersion = useSessions((s) => s.recordsVersion);
   const digests = useSessions((s) => s.digests);
   const listedSessions = useSessions((s) => s.listed); // P5 O8 M2
+  const turnsSeen = useSessions((s) => s.turnsSeen); // P5 O7 M10
+  const seen = useMemo(() => seenActivity(listedSessions, turnsSeen), [listedSessions, turnsSeen]); // P5 O7 M10: a remote record's activity
   const people = usePeople((s) => s.on); // P5 O8 M5: the rows drawing other people's sessions
   const spawned = useSpawnedHere((s) => s.leading); // P5 O7 M8: the sessions spawned here that lead their group
   const [projectFilter, setProjectFilter] = useState<ReadonlySet<ProjectKey> | null>(null);
@@ -145,10 +147,10 @@ function SidebarBody() {
   const scroller = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLDivElement>(null);
 
-  const rankedEntries = useMemo((): RankedEntry[] => projectList({ records, digests, projects, rows, local, machineName: (m) => machineName(machines, m, local), alsoListed: projectFilter ?? undefined, listed: listedSessions, people }).map((entry) => {
-    const sorted = projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches: () => true, spawned });
-    return { ...entry, sessions: sorted, items: projectItems({ sorted, listed: entry.listed, digests, rows, sort: sidebar.sort, spawned }) };
-  }), [records, digests, projects, rows, local, machines, projectFilter, sidebar.sort, listedSessions, people, spawned]);
+  const rankedEntries = useMemo((): RankedEntry[] => projectList({ records, digests, projects, rows, local, machineName: (m) => machineName(machines, m, local), alsoListed: projectFilter ?? undefined, listed: listedSessions, people, seen }).map((entry) => {
+    const sorted = projectSessions({ sessions: entry.sessions, digests, rows, sort: sidebar.sort, matches: () => true, spawned, seen });
+    return { ...entry, sessions: sorted, items: projectItems({ sorted, listed: entry.listed, digests, rows, sort: sidebar.sort, spawned, seen }) };
+  }), [records, digests, projects, rows, local, machines, projectFilter, sidebar.sort, listedSessions, people, spawned, seen]);
   // Hold ranks, not data: titles, glyphs and counts remain live. Pointer presence, keyboard focus (including
   // portalled cards/menus), or an open context menu keeps the same targets in place until the person leaves.
   // A deliberate sort change is immediate; no timer can reshuffle a row between two actions.
