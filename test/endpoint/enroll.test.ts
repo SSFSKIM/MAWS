@@ -98,6 +98,31 @@ describe('attended enrollment', () => {
     expect(text.out).toMatch(/^enrollment: org-listed \(synced in local\)/);
   });
 
+  it('`endpoint sync` that outlives its enrollment (unenrolled while its read is held) answers exit 1, not enrolled', async () => {
+    let hold: Promise<void> | null = null;
+    let release = () => {};
+    let held = false;
+    const holding: typeof fetch = async (input, init) => {
+      if (hold !== null && String(input).includes('/org/state')) {
+        held = true;
+        await hold;
+      }
+      return fetch(input, init);
+    };
+    const { endpoint } = await endpointOn({ fetch: holding });
+    const issued = await member.code();
+    expect((await endpoint.cli('enroll', ['--name', 'outlived', '--json'], issued.code)).code).toBe(4);
+    hold = new Promise<void>((done) => (release = done));
+    const syncing = endpoint.cli('sync', ['--json']);
+    await expect.poll(() => held, { timeout: 10_000 }).toBe(true);
+    const unenrolling = endpoint.cli('unenroll', ['--json']);
+    release();
+    expect((await unenrolling).code).toBe(0);
+    const answer = await syncing;
+    expect(json(answer.out)).toMatchObject({ enrollment: 'none' });
+    expect(answer.code).toBe(1);
+  });
+
   it('is never listed when the hub substitutes its key: the member’s MAC check refuses it', async () => {
     const attacker = await generateSigningKey();
     const substituting: typeof fetch = async (input, init) => {

@@ -215,8 +215,10 @@ async function sync(endpoint: Endpoint, args: readonly string[]): Promise<Out> {
   if (!endpoint.parts!.state.enrolled) return { code: EXIT.failed, out: 'not enrolled: there is no org state to read' };
   await endpoint.syncAfter();
   await promoteIfListed(endpoint.enrollContext());
+  // judged on the state after the read: an unenrollment or retirement while it was held leaves none
   const now = endpoint.status();
-  return { code: now.enrollment === 'org-listed' ? EXIT.done : EXIT.notListed, out: statusAnswer(now, values.json === true) };
+  const code = now.enrollment === 'org-listed' ? EXIT.done : now.enrollment === 'hub-confirmed' ? EXIT.notListed : EXIT.failed;
+  return { code, out: statusAnswer(now, values.json === true) };
 }
 
 /** The content of `<file|->`: a path read here, or `-` for the request's `secret`. */
