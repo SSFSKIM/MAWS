@@ -151,8 +151,8 @@
     "turnId": "turn:66cfb780-b906-4f92-af32-02b7c17fec7b"
   },
   {
-    "at": "2026-09-29T19:00:52.960Z",
-    "durationMs": 507,
+    "at": "2026-09-29T19:00:52.959Z",
+    "durationMs": 508,
     "id": "think:msg_011CfYFGEokUKYt8gWcixQMc:0",
     "kind": "thinking",
     "live": false,

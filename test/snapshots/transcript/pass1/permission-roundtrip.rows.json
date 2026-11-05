@@ -68,8 +68,8 @@
     "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
   },
   {
-    "at": "2026-09-28T09:21:50.809Z",
-    "durationMs": 462,
+    "at": "2026-09-28T09:21:50.808Z",
+    "durationMs": 463,
     "id": "think:msg_011CfVbJKTBQYfwR82Y76xFE:0",
     "kind": "thinking",
     "live": false,
@@ -261,8 +261,8 @@
     "turnId": "turn:bfb5b35a-a854-4ee2-84e6-4da03b4d8442"
   },
   {
-    "at": "2026-09-28T09:21:55.489Z",
-    "durationMs": 417,
+    "at": "2026-09-28T09:21:55.488Z",
+    "durationMs": 418,
     "id": "think:msg_011CfVbJfzCndALdthQYjkCU:0",
     "kind": "thinking",
     "live": false,

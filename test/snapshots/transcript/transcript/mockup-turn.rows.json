@@ -98,7 +98,7 @@
   },
   {
     "activeLabel": null,
-    "at": "2026-09-28T11:20:00.161Z",
+    "at": "2026-09-28T11:20:00.153Z",
     "cells": [
       {
         "agent": null,
@@ -114,16 +114,16 @@
           "subagentLifecycle": null
         },
         "detail": {
-          "durationMs": 56,
+          "durationMs": 64,
           "kind": "thinking",
           "text": "Jitter on drag usually means the layout store writes before the pointer settles. Read the drag hook and search for the store write."
         },
-        "endedAt": "2026-09-28T11:20:00.161Z",
+        "endedAt": "2026-09-28T11:20:00.153Z",
         "expanded": true,
         "id": "cell:think:msg_mockupturn_007:0",
-        "label": "Thought for 0s",
+        "label": "Thought",
         "paths": [],
-        "startedAt": "2026-09-28T11:20:00.161Z",
+        "startedAt": "2026-09-28T11:20:00.153Z",
         "status": "done",
         "toolName": "thinking",
         "toolUseId": null

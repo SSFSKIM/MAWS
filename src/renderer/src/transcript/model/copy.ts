@@ -40,10 +40,14 @@ export interface DividerCopyInput {
   autoDenied: number;
 }
 
+// The shortest span drawn as a figure: under it `duration` reads "0s", which says nothing (a running turn's Working, a
+// thinking block's Thought; P5 O7 M10's follow-up)
+const SHORTEST_FIGURE_MS = 1000;
+
 function verb(state: DividerCopyInput['state'], origin: DividerCopyInput['origin'], durationMs: number, cause: DividerCopyInput['cause'] = null): string {
   const t = duration(durationMs);
   switch (state) {
-    case 'working': return durationMs < 1000 ? 'Working' : `Working for ${t}`;
+    case 'working': return durationMs < SHORTEST_FIGURE_MS ? 'Working' : `Working for ${t}`;
     case 'completed': return origin === 'engine' ? `Continued for ${t}` : origin === 'peer' ? `Peer session worked for ${t}` : `Worked for ${t}`;
     case 'stopped': return cause === 'crash' ? `Stopped after ${t} (engine process exited)` : `You stopped after ${t}`;
     case 'failed': return `Failed after ${t}`;
@@ -213,8 +217,9 @@ export const shellFooter = (status: 'done' | 'error' | 'stopped', exitCode: numb
   return exitCode === 0 ? `✓ Exit code 0 · ${t}` : `✕ Exit code ${exitCode} · ${t}`;
 };
 
-// A block that never streamed (disk history) has no duration: `Thought`, never a live-looking `Thinking`.
-export const thinkingLabel = (live: boolean, durationMs: number | null) => (live ? 'Thinking' : durationMs === null ? 'Thought' : `Thought for ${duration(durationMs)}`);
+// A block that never streamed (disk history) has no duration: `Thought`, never a live-looking `Thinking`; nor does one
+// measured under a second (P5 O7 M10's follow-up: its start and end read together).
+export const thinkingLabel = (live: boolean, durationMs: number | null) => (live ? 'Thinking' : durationMs === null || durationMs < SHORTEST_FIGURE_MS ? 'Thought' : `Thought for ${duration(durationMs)}`);
 
 // W8 (T1): a streaming block's label in the CLI's words (Claude Code 2.1.283, `cli.pretty.js`): the tier by how long the
 // block has run, from 10, 20, 30 and 45 s (`Mo`, `Co`, `Io`, `_o` at :521212, chosen by `Lo` at :521223-521233), then

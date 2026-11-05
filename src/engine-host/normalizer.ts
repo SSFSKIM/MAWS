@@ -295,6 +295,16 @@ export class Normalizer {
         const toolName = type === 'tool_use' && typeof block?.name === 'string' ? block.name : null;
         current.started.push({ index: Number(event.index), type, toolUseId, toolName });
         this.state.streaming.set(lane, current);
+        // P5 O7 M10's follow-up: a thinking block starts here. On claude-opus-5-5 its text arrives in one burst just before
+        // its end, seconds later (p4-tool-summaries-thinking-edits, seq 108 to 153), so its first delta is no start: the
+        // block's start is told as an empty thinking delta, the shape a delta has, so a reader draws it from now and
+        // measures it from now, as the CLI's own timer does. A redacted block, and every other kind, starts silently.
+        if (type === 'thinking' && !isHookMadeMessageId(current.apiMessageId) && !(current.apiMessageId !== null && this.state.reseededMessages.has(current.apiMessageId))) {
+          out.emit({
+            kind: 'assistant.block.delta', apiMessageId: current.apiMessageId, blockIndex: Number(event.index), blockType: 'thinking',
+            textDelta: null, thinkingDelta: '', inputJsonDelta: null, userMessageUuid: current.userMessageUuid, toolUseId: null, toolName: null,
+          }, attribution);
+        }
         return;
       }
       case 'content_block_delta': {

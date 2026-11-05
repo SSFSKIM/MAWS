@@ -133,6 +133,10 @@ describe('cell lines', () => {
     expect(thinkingLabel(true, null)).toBe('Thinking');
     expect(thinkingLabel(false, 12_000)).toBe('Thought for 12s');
     expect(thinkingLabel(false, null)).toBe('Thought'); // never streamed: no duration to show
+    // P5 O7 M10's follow-up: under a second a figure says nothing ("0s"), as the divider's Working reads
+    expect(thinkingLabel(false, 0)).toBe('Thought');
+    expect(thinkingLabel(false, 999)).toBe('Thought');
+    expect(thinkingLabel(false, 1000)).toBe('Thought for 1s');
   });
 
   // W8 (T1): the CLI's tiers at 10, 20, 30 and 45 s, each from its threshold on.

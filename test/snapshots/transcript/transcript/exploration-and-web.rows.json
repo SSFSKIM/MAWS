@@ -69,7 +69,7 @@
   },
   {
     "activeLabel": null,
-    "at": "2026-09-28T10:30:00.161Z",
+    "at": "2026-09-28T10:30:00.153Z",
     "cells": [
       {
         "agent": null,
@@ -85,16 +85,16 @@
           "subagentLifecycle": null
         },
         "detail": {
-          "durationMs": 24,
+          "durationMs": 32,
           "kind": "thinking",
           "text": "Search first, then read what turns up."
         },
-        "endedAt": "2026-09-28T10:30:00.161Z",
+        "endedAt": "2026-09-28T10:30:00.153Z",
         "expanded": true,
         "id": "cell:think:msg_explorationandweb_007:0",
-        "label": "Thought for 0s",
+        "label": "Thought",
         "paths": [],
-        "startedAt": "2026-09-28T10:30:00.161Z",
+        "startedAt": "2026-09-28T10:30:00.153Z",
         "status": "done",
         "toolName": "thinking",
         "toolUseId": null

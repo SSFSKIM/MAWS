@@ -225,15 +225,31 @@ describe('normaliser: tools, blocks and safeguards', () => {
       assistant('msg_1', [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { c: 1 } }]),
     ]);
     const deltas = only(events, 'assistant.block.delta');
-    expect(deltas).toHaveLength(2);
-    expect(deltas[0]).toMatchObject({ apiMessageId: 'msg_1', blockIndex: 0, blockType: 'thinking', thinkingDelta: 'hm', textDelta: null, inputJsonDelta: null, userMessageUuid: 'u-1', toolUseId: null, toolName: null });
+    expect(deltas).toHaveLength(3);
+    // P5 O7 M10's follow-up: the thinking block's start is an empty thinking delta (below)
+    expect(deltas[0]).toMatchObject({ apiMessageId: 'msg_1', blockIndex: 0, blockType: 'thinking', thinkingDelta: '' });
+    expect(deltas[1]).toMatchObject({ apiMessageId: 'msg_1', blockIndex: 0, blockType: 'thinking', thinkingDelta: 'hm', textDelta: null, inputJsonDelta: null, userMessageUuid: 'u-1', toolUseId: null, toolName: null });
     // P4-A2 (X1 amendment, X35): a tool_use block's deltas carry the id and name its content_block_start announced, so the
     // host can join them to the `tools/call` that follows (its `claudecode/toolUseId`) and read the call as it streams
-    expect(deltas[1]).toMatchObject({ apiMessageId: 'msg_1', blockIndex: 1, blockType: 'tool_use', inputJsonDelta: '{"c":1}', toolUseId: 'toolu_1', toolName: 'Bash' });
+    expect(deltas[2]).toMatchObject({ apiMessageId: 'msg_1', blockIndex: 1, blockType: 'tool_use', inputJsonDelta: '{"c":1}', toolUseId: 'toolu_1', toolName: 'Bash' });
     const completes = only(events, 'assistant.block.complete');
     expect(completes.map((c) => [c.apiMessageId, c.blockIndex, c.block.type])).toEqual([['msg_1', 0, 'thinking'], ['msg_1', 1, 'tool_use']]);
     expect(completes[0]).toMatchObject({ messageUuid: 'a-1', model: 'm', supersedes: [], aborted: false, userMessageUuids: ['u-1'] });
     expect(only(events, 'tool.use')[0]).toMatchObject({ toolUseId: 'toolu_1', toolName: 'Bash', input: { c: 1 }, apiMessageId: 'msg_1', messageUuid: 'a-1' });
+  });
+
+  // P5 O7 M10's follow-up: on claude-opus-5-5 a thinking block's text arrives in one burst just before its end, seconds
+  // after its `content_block_start` (p4-tool-summaries-thinking-edits seq 108, then seq 110 to 150 within 9 ms of the
+  // whole block), so the block's start is told as an empty thinking delta at its start, the shape a delta already has
+  it('a thinking block’s start is an empty thinking delta at its start row; a redacted, text or tool block’s start yields nothing', () => {
+    const n = make();
+    const AT = '2026-10-24T22:38:06.320Z';
+    const thinkingStart = inRow({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } }, session_id: 'sess-1', parent_tool_use_id: null, uuid: 's-0' }, AT);
+    const events = feed(n, [outRow(userOut('u-1')), startedIn('u-1'), messageStart, thinkingStart, start(1, 'redacted_thinking', { data: 'x' }), start(2, 'text', { text: '' }), start(3, 'tool_use', { id: 'toolu_1', name: 'Bash', input: {} })]);
+    const deltas = only(events, 'assistant.block.delta');
+    expect(deltas).toHaveLength(1);
+    expect(deltas[0]).toMatchObject({ apiMessageId: 'msg_1', blockIndex: 0, blockType: 'thinking', thinkingDelta: '', textDelta: null, inputJsonDelta: null, userMessageUuid: 'u-1', toolUseId: null, toolName: null });
+    expect(deltas[0]!.at, 'stamped at the start row').toBe(AT);
   });
 
   it('a message with no stream events counts block indices per message id; a type mismatch warns and still assigns', () => {
