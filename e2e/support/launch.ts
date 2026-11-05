@@ -5,7 +5,7 @@
 // owner's does, the daemon's with a private `mawsd` on the scratch profile, unless MAWS_HOST_MODE or the profile's
 // settings name another (P5 O3-B), and a launch's cleanup ends every process the profile's launch left.
 // Later children's end-to-end tests start from here, through the `maws` fixture of `test`.
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -19,6 +19,8 @@ import { realEngine, type RealEngine } from './real-engine'; // P4-AGG M1
 import { assertEngineKeychainEnv, assertNoKeychainPrompt, killTree, loginShellEnvironment, watchKeychainPrompt } from './keychain-guard'; // fixB
 import { launchEnvironment } from './scratch-env';
 import { launchMode } from '@shared/sessions/select-source';
+import { SETTINGS_FILES } from '@shared/settings/paths'; // P5 O7 M9
+import type { Route } from '@shared/engine/route'; // P5 O7 M9
 import { captureAllowed, processEvidence } from './process-evidence.mjs';
 import { cornerOrigin, windowCorner } from './window-origin';
 
@@ -104,6 +106,14 @@ export interface ShellLaunchOptions extends MawsLaunchOptions {
   // app's entry, where Chromium takes neither for the app's path), e.g. `{ AppleShowScrollBars: 'Always' }` for classic
   // scrollbars whatever the desktop's setting. Nothing is written to any defaults domain.
   appKitDefaults?: Record<string, string>;
+  // P5 O7 M9 (m9-5, the architect's ruling): the profile's default route for new sessions, written as its
+  // `machine-route.json` before the app starts unless the profile already has one (a relaunch's, or the spec's own
+  // `prepare`). A live spec names `gateway`: it verifies MAWS against a real engine through ClaudeUsage, as every session
+  // did before M9, and its scratch home has no machine login for the machine's own route to reach. Unset, the build's
+  // default stands (the machine's own route).
+  defaultRoute?: Route;
+  // P5 O7 M9 (m9-5): the runner's ANTHROPIC_* variables the launch keeps, by name (launchEnvironment drops the rest)
+  runnerEnv?: readonly string[];
 }
 // C5 end
 
@@ -156,7 +166,7 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
   // switches, with the e2e mark, the profile, the empty engine store (C4) and no ClaudeUsage data (C7):
   // scratch-env.ts's launchEnvironment, pinned by its unit test. A test's `env` may name a CLAUDE* variable on purpose.
   const sminosHome = mkdtempSync('/tmp/mws-'); // P5 O9 M5: short, so a bridge's socket path fits 103 bytes
-  const env = launchEnvironment(process.env, userData, sminosHome);
+  const env = launchEnvironment(process.env, userData, sminosHome, opts.runnerEnv);
   if (engine) env.MAWS_E2E_ENGINE_BIN = engine.bin; // P4-AGG M1: the real engine, never the replay stub
   // FX4: replay launch gates need a version, not an installed engine. Live specs explicitly pass ENGINE_BIN;
   // an environment override or the Engine setting can still name another binary. The scratch owns this stub.
@@ -235,6 +245,8 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
       if (opts.realEngine?.home === 'runner') assertEngineKeychainEnv(loginShellEnvironment(env), env.CLAUDE_CONFIG_DIR!, 'the login shell the engine host captures');
     }
     opts.prepare?.({ userData, shellHome: shellHome.dir, claudeConfigDir: env.CLAUDE_CONFIG_DIR }); // E6: inside, so a throw still cleans up
+    const routeFile = join(userData, SETTINGS_FILES.route); // P5 O7 M9: beside machine-settings.json
+    if (opts.defaultRoute !== undefined && !existsSync(routeFile)) writeFileSync(routeFile, JSON.stringify({ version: 1, defaultRoute: opts.defaultRoute }));
     // A prepared/reused profile may configure a real engine ahead of the environment's replay stub. Check after
     // preparation, and again at finish so a later unknown override cannot leave raw logs in public test-results.
     evidence = canKeepEvidence() ? processEvidence(info.outputPath(), userData, canKeepEvidence, env) : null;

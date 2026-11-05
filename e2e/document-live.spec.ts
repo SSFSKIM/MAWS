@@ -439,7 +439,7 @@ test('the live run: the agent creates, reads and edits a document in one batch w
   note(`app: the product build (MAWS_HARNESS=0) over a scratch CLAUDE_CONFIG_DIR ${sc.config} (settings.json {}, .claude.json trusting ${sc.repo})`);
   note(`A-15 before the launch: ${before.keys.length} keys, sha1 ${before.digest}`);
 
-  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config } });
+  const maws = await launchMaws({ defaultRoute: 'gateway', env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config } });
   let live: Live | null = null;
   let completed = false; // every step ran (P3-F: a passing run has a receipt for each turn)
   try {

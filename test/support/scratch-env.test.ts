@@ -20,10 +20,19 @@ describe('launchEnvironment', () => {
   it("drops the runner's CLAUDE* variables and the dev and Node switches, and sets the profile's scratch config home", () => {
     const env = launchEnvironment({ ...RUNNER, ELECTRON_RENDERER_URL: 'http://localhost:5173', ELECTRON_RUN_AS_NODE: '1' }, '/tmp/maws-e2e-x');
     expect(env).toEqual({
-      PATH: '/usr/bin', HOME: '/Users/owner', LANG: 'en_GB.UTF-8', ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-haiku',
+      PATH: '/usr/bin', HOME: '/Users/owner', LANG: 'en_GB.UTF-8',
       MAWS_E2E: '1', MAWS_USER_DATA: '/tmp/maws-e2e-x', CLAUDE_CONFIG_DIR: '/tmp/maws-e2e-x/claude-config', MAWS_CLAUDE_USAGE_DIR: '/tmp/maws-e2e-x/claude-usage',
       MAWS_MACHINE_ROLE: 'laptop', // P5 O2 M2: the idle release keeps main's idle time on every runner
     });
+  });
+
+  // P5 O7 M9 (m9-5, the architect's ruling): the machine route reads whatever the machine's environment names, so the
+  // hermetic launch names no runner's inference: no ANTHROPIC_* variable unless the spec keeps one by name
+  it("drops the runner's ANTHROPIC_* variables, keeping only those the spec names", () => {
+    const runner = { ...RUNNER, ANTHROPIC_BASE_URL: 'http://127.0.0.1:8641', ANTHROPIC_AUTH_TOKEN: 'runner-token', ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet' };
+    expect(Object.keys(launchEnvironment(runner, '/tmp/maws-e2e-x')).filter((key) => key.startsWith('ANTHROPIC'))).toEqual([]);
+    const kept = launchEnvironment(runner, '/tmp/maws-e2e-x', undefined, ['ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_MISSING']);
+    expect(Object.entries(kept).filter(([key]) => key.startsWith('ANTHROPIC'))).toEqual([['ANTHROPIC_DEFAULT_SONNET_MODEL', 'claude-sonnet']]);
   });
 
   it('names a scratch sminos home in place of the runner’s (P5 O9 M5)', () => {

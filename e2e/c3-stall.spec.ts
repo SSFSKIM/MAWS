@@ -71,7 +71,7 @@ async function rowOf(page: Page, id: string): Promise<Locator> {
 
 async function open(label: string): Promise<MawsLaunch> {
   console.info(`[live engine] ${ENGINE_BIN} (${ENGINE_VERSION})`);
-  const maws = await launchMaws({ userData, env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
+  const maws = await launchMaws({ defaultRoute: 'gateway', userData, env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
   const child = maws.app.process();
   const appLog = out(`app-${label}.log`);
   child.stdout?.on('data', (c: Buffer) => appendFileSync(appLog, c));

@@ -142,7 +142,7 @@ test('S5: a keep-quit mid-turn on the packaged build; the relaunch lists the ses
   const sockets = new Set<string>();
   const launch = async (extra: Record<string, string> = {}): Promise<Run> => {
     // the embedded shape's supervisor keeping a real turn across the quit is what this run records (E11's S5)
-    const maws = await launchMaws({ userData, env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached', CLAUDE_CONFIG_DIR: config, ...extra } });
+    const maws = await launchMaws({ defaultRoute: 'gateway', userData, env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached', CLAUDE_CONFIG_DIR: config, ...extra } });
     const child = maws.app.process(); // Playwright drops app.process() once the app closes; the cleanup still needs it
     let text = '';
     child.stdout?.on('data', (chunk) => (text += String(chunk)));

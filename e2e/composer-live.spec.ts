@@ -58,7 +58,7 @@ interface Live {
 }
 
 async function withApp(label: string, fn: (live: Live) => Promise<void>): Promise<void> {
-  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config, MAWS_CLAUDE_USAGE_DIR: CLAUDE_USAGE_DIR } });
+  const maws = await launchMaws({ defaultRoute: 'gateway', env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config, MAWS_CLAUDE_USAGE_DIR: CLAUDE_USAGE_DIR } });
   const live: Live = { maws, page: maws.page, launches: [] };
   try {
     await fn(live);

@@ -251,7 +251,7 @@ test('live: a turn that edits a file opens Review on Last turn and the viewer at
   expect(lineNo, 'the line the turn edits').toBeGreaterThan(0);
   const edited = `${before[lineNo - 1]} (C8c live)`;
 
-  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, CLAUDE_CONFIG_DIR: config, MAWS_HARNESS: '0' } });
+  const maws = await launchMaws({ defaultRoute: 'gateway', env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, CLAUDE_CONFIG_DIR: config, MAWS_HARNESS: '0' } });
   try {
     await hideWindow(maws);
     const { page } = maws;

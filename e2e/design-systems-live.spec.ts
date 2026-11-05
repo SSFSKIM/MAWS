@@ -178,7 +178,7 @@ test('an agent asked to make a design system from a project creates a Design Sys
   const allowed: string[] = [];
   let failure: unknown = null;
   try {
-    maws = await launchMaws({ userData, env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
+    maws = await launchMaws({ defaultRoute: 'gateway', userData, env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
     const { page } = maws;
     const pane = page.locator('[data-region="main"] [data-pane="0"]');
     await recordEvents(page);

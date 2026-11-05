@@ -307,7 +307,7 @@ test('the live run: the agent’s edit on a 200-page document is seen as it is w
   // it closes, so a 790-character edit arrived in one 5 ms burst 7 ms before the `tools/call` (this spec's run of
   // 2026-10-20 00:59Z, before launch.ts set it). The run sets nothing itself, so a multi-delta stream here is MAWS's
   // own doing; the launching shell may even unset the variable.
-  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config, MAWS_DOCUMENT_PERF: '1' } });
+  const maws = await launchMaws({ defaultRoute: 'gateway', env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config, MAWS_DOCUMENT_PERF: '1' } });
   let live: Live | null = null;
   let completed = false;
   try {

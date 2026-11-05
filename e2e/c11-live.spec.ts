@@ -54,7 +54,7 @@ interface Live {
 }
 
 async function withApp(label: string, env: Record<string, string>, fn: (live: Live) => Promise<void>): Promise<void> {
-  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config, MAWS_CLAUDE_USAGE_DIR: CLAUDE_USAGE_DIR, ...env } });
+  const maws = await launchMaws({ defaultRoute: 'gateway', env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config, MAWS_CLAUDE_USAGE_DIR: CLAUDE_USAGE_DIR, ...env } });
   const { page } = maws;
   const failures: string[] = [];
   const observe = (key: string, v: unknown) => scratch.observe(`${label}.${key}`, v);
@@ -154,9 +154,6 @@ async function plusSession(live: Live, repo: string, first: string, opts: { mode
   await newChatIn(page, name); // W11: the "+" on the project's row, on hover
   await expect(page.getByRole('heading', { name: `New chat in ${name}` })).toBeVisible();
   const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
-  // P5 O7 M9: a new session's default is the machine's own route, which reaches whatever the runner's settings name; C11
-  // verifies ClaudeUsage's gateway (its catalogue, the relay card, the direct policy, the banner), so its sessions take it
-  value(await invoke(page, 'session.intent.patch', { appSessionId: id, patch: { route: 'gateway' } }));
   const w = await openWidget(live, 'model'); // W3: the model selector, a pick applies at once
   await w.getByRole('menuitemradio', { name: SONNET }).click();
   await expect.poll(async () => value(await invoke(page, 'session.intent.list', undefined)).intents.find((i) => i.appSessionId === id)?.model).toBe('sonnet');

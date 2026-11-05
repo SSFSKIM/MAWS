@@ -114,7 +114,7 @@ test('live: the real sources counted twice; a directory plugin installed and uni
     await info.attach('catalog-summary.json', { path: out, contentType: 'application/json' });
   });
 
-  maws = await launchMaws({ realEngine: { projects: 1, live: true } });
+  maws = await launchMaws({ defaultRoute: 'gateway', realEngine: { projects: 1, live: true } });
   const { page } = maws;
   expect(maws.realEngine!.version).toBe(REAL_ENGINE_VERSION);
 

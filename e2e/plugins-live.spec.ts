@@ -246,7 +246,7 @@ test('E8 live: marketplaces and plugins managed from /plugins and the panel thro
   const engine = await cappedEngine({ root: scratch.root, real: ENGINE_BIN });
   scratch.log(`engine cap: ${capWords(engine)}`);
   console.log(`E8 live: engine ${ENGINE_VERSION} (${ENGINE_BIN}), cap ${capWords(engine)}, log ${join(scratch.root, 'live-run.txt')}`);
-  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config } });
+  const maws = await launchMaws({ defaultRoute: 'gateway', env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config } });
   const { page } = maws;
   reads = await trackPluginReads(maws.app); // before the page issues any CLI read
   const failures: string[] = [];

@@ -228,7 +228,7 @@ const toolUses = (rows: JournalRow[]) =>
 // ---- the run -------------------------------------------------------------------------------------------------------
 
 test('nine sessions under a memory budget: releases, the released surfaces, Send-to-resume with the grant, and the banner with the per-session stop', async () => {
-  const maws: MawsLaunch = await launchMaws({ userData: scratch.userData, env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config } });
+  const maws: MawsLaunch = await launchMaws({ defaultRoute: 'gateway', userData: scratch.userData, env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config } });
   const { page, app } = maws;
   const labels = new Map<string, string>(); // appSessionId → A1 … B7
   const ids: Record<string, string> = {};
