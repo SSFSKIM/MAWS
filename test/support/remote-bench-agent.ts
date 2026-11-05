@@ -367,6 +367,15 @@ export interface WatchDeps {
   out(message: object): void;
 }
 
+/** A line read as an ask's shape, unchecked; null when it is not JSON. */
+function parsedAsk(line: string): { id?: unknown; ask?: unknown } | null {
+  try {
+    return JSON.parse(line) as { id?: unknown; ask?: unknown } | null;
+  } catch {
+    return null;
+  }
+}
+
 /** The watch: the run's one link to the scratch daemon, and every status read the runner makes, answered on it. */
 export class BenchWatch {
   readonly #deps: WatchDeps;
@@ -411,12 +420,7 @@ export class BenchWatch {
   }
 
   async #input(line: string): Promise<void> {
-    let message: { id?: unknown; ask?: unknown } | null = null;
-    try {
-      message = JSON.parse(line) as typeof message;
-    } catch {
-      // answered below as not an ask
-    }
+    const message = parsedAsk(line);
     const id = typeof message?.id === 'number' ? { id: message.id } : {};
     const ask = message?.ask;
     if (typeof ask !== 'string' || !(WATCH_ASKS as readonly string[]).includes(ask)) return this.#deps.out({ ...id, error: `not a watch ask: ${line.slice(0, 200)}` });
