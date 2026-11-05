@@ -76,6 +76,28 @@ describe('attended enrollment', () => {
     expect(again.out).toMatch(/--replace/);
   });
 
+  // P5 O7 M10: the bench's "listing on demand". An enrollment returns `hub-confirmed` once its key is posted, and the
+  // endpoint's own reads come every 10 minutes (SYNC_EVERY_MS), so the member's listing is read now only when asked.
+  it('`endpoint sync` reads the org state now and promotes a hub-confirmed enrollment the member has listed, answering as `status`', async () => {
+    const { endpoint } = await endpointOn();
+    const unenrolled = await endpoint.cli('sync', ['--json']);
+    expect(unenrolled.code).toBe(1);
+    expect(unenrolled.out).toMatch(/not enrolled/);
+    const issued = await member.code();
+    expect((await endpoint.cli('enroll', ['--name', 'synced', '--json'], issued.code)).code).toBe(4);
+    const before = await endpoint.cli('sync', ['--json']);
+    expect(before.code).toBe(4);
+    expect(json(before.out)).toMatchObject({ enrollment: 'hub-confirmed', name: 'synced' });
+    await member.awaitPosted(issued.enrollment);
+    await member.list(issued.enrollment, issued.k);
+    const after = await endpoint.cli('sync', ['--json']);
+    expect(after.code).toBe(0);
+    expect(json(after.out)).toEqual(JSON.parse(JSON.stringify(endpoint.status())));
+    expect(json(after.out)).toMatchObject({ enrollment: 'org-listed', name: 'synced', org: 'local', stateVersion: (await member.head()).state.version });
+    const text = await endpoint.cli('sync', []);
+    expect(text.out).toMatch(/^enrollment: org-listed \(synced in local\)/);
+  });
+
   it('is never listed when the hub substitutes its key: the member’s MAC check refuses it', async () => {
     const attacker = await generateSigningKey();
     const substituting: typeof fetch = async (input, init) => {

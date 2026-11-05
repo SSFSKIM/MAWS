@@ -781,6 +781,11 @@ export class Endpoint implements EndpointModule {
     return this.#syncing;
   }
 
+  /** A read of the hub's org state that begins after this call (`#syncAfter`): `mawsd endpoint sync`'s (P5 O7 M10). */
+  syncAfter(): Promise<unknown> {
+    return this.#syncAfter();
+  }
+
   /**
    * A read that begins after this call, for RL10's held events (`Rl10Context.behind`): one in flight may have begun
    * before the certificate they wait on was stored, so another follows it. Asks while it waits share that one.

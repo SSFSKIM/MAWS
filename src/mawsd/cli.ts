@@ -45,6 +45,9 @@ const WAIT_DEFAULT_S = 300; // a bare `--wait`'s seconds, and `provision`'s wait
 // to its end in mawsd whether or not this command still waits for it (one at a time; its outcome in mawsd's log), so this
 // bound only decides how long the caller sees the outcome itself, and ends the wait on a daemon that never answers.
 const ATTEST_HISTORY_TIMEOUT_MS = 60 * 60_000;
+// `endpoint sync`'s deadline (P5 O7 M10): it waits for a read of the org state already in flight, then reads again, each
+// page bounded by the hub client's own 30 s (src/endpoint/hub-http.ts, REQUEST_MS)
+const SYNC_TIMEOUT_MS = 90_000;
 const FOLLOW_INTERVAL_MS = 500;
 // P5 O16 M3b: `restart --engine-host` waits through daemon.ts's waits (the host's drain grace, 10 s; its successor's
 // welcome, 30 s; its adoptions, 60 s), with room for the answer's way back
@@ -62,6 +65,7 @@ export const USAGE = `usage: mawsd <command> [--profile <dir>] [--label <label>]
   endpoint provision [--name <name>] [--wait [<seconds>]] [--json]
                                    the provisioning code is read from stdin or a prompt (P5 O14)
   endpoint revoke|grant <file|->   a signed org state or grant, from a file or on stdin
+  endpoint sync [--json]           the org state read from the hub now, a listed enrollment promoted (P5 O7 M10)
   install [--delegation-id <id>] [--runtime <node>] [--entry <mawsd.js>]
                                    on Linux the default profile's unit installs the pack it runs from (pnpm mawsd:pack)
   uninstall
@@ -471,7 +475,7 @@ async function endpoint(context: Context, args: readonly string[]): Promise<numb
   if (command === undefined) throw new Usage('mawsd endpoint needs a command');
   if (Object.hasOwn(SECRET_COMMANDS, command)) return withSecret(context, command as SecretCommand, rest);
   if (command === 'keys') return keys(context, rest);
-  const timeoutMs = command === 'attest-history' ? ATTEST_HISTORY_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+  const timeoutMs = command === 'attest-history' ? ATTEST_HISTORY_TIMEOUT_MS : command === 'sync' ? SYNC_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
   return withDaemon(context, async (link) => answered(context.deps, await link.request('daemon.endpoint', { command, args: [...rest] }, timeoutMs)));
 }
 
