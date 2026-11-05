@@ -43,7 +43,7 @@ Then `sminos share <session> <member> list` (run by the owner at a terminal): th
 
 ## Today (what this child changes)
 
-Read on sminos 1.34.0 and MAWS master `b7e7d9594`/`a168273fc`.
+Read on MAWS master `b7e7d9594`/`a168273fc`. sminos line numbers are at doperpowers `76132b84` (sminos 1.33.0); sminos 1.34.0 (`386c4b07`) shifts some `sminos.py` lines, so find each by its function name.
 
 1. **A peer message is never checked for reach.**
    - `deliver_next` (doperpowers `sminos/skills/sminos/scripts/sminos.py:4099`) checks the holder receipt gate, revocations and the read-only policy, then pushes to the recipient's inbox. The sender's CLI (`:5066`) and the retry loop (`:10115`) reach it too.
