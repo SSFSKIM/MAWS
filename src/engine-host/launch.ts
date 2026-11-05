@@ -8,20 +8,12 @@ import { isAbsolute } from 'node:path';
 import { canonicalize } from 'org-protocol';
 import { appInitialize } from '@shared/engine/initialize';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
-import { readRoute, type LegacyRoute, type Route } from '@shared/engine/route'; // P5 O7 M9
+import { GATEWAY_KEYS, readRoute, type LegacyRoute, type Route } from '@shared/engine/route'; // P5 O7 M9
 import type { SessionId } from '@shared/graph/ids';
 
-// C11 start: the dev-only relay override (C11 execution document, M6; ruled 2026-09-29). The relay-down live cases point
-// the host at a loopback forwarder they stop and start, so ClaudeUsage itself is never quit. Read once, when this module
-// loads in the host, and only as `http://127.0.0.1:<port>`; any other value is ignored. Main deletes the variable before
-// forking a packaged app's hosts (`main/hosts/supervisor.ts`), and terminals never carry `MAWS_*`.
-export function relayUrlFrom(env: Record<string, string | undefined>): string {
-  const override = env.MAWS_RELAY_URL;
-  const port = override ? /^http:\/\/127\.0\.0\.1:([0-9]{1,5})$/.exec(override)?.[1] : undefined;
-  return port !== undefined && Number(port) >= 1 && Number(port) <= 65_535 ? override! : 'http://127.0.0.1:8641';
-}
-// C11 end
-export const RELAY_URL = relayUrlFrom(process.env); // ClaudeUsage's relay, http://127.0.0.1:8641, unless C11's dev override names a loopback port
+// C11: the relay's URL and its dev-only override live in relay-url.ts (P5 O7 M9: off launch.ts, so mawsd reads it
+// without this module's graph); re-exported for this module's readers.
+export { RELAY_URL, relayUrlFrom } from './relay-url';
 
 // The host's one binary configuration (C11's ask, M5): the binary path the owner chose in Settings, sent by main through
 // `engine.configure`; null, the installed Claude Code (W13: binary-info.ts resolves it at every launch). The binary
@@ -111,9 +103,7 @@ const EXCLUDED_KEYS = new Set([
 ]);
 const EXCLUDED_PREFIXES = ['CMUX_', 'ELECTRON_'];
 
-// The keys the gateway route sets and the direct route deletes (P5 O7 M9: effectiveBaseUrl reports which of them a
-// machine sets, so a legacy direct launch is equivalent to the machine route only where it sets none)
-export const GATEWAY_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ENABLE_TOOL_SEARCH'] as const;
+
 
 function isAllowed(key: string): boolean {
   if (EXCLUDED_KEYS.has(key) || EXCLUDED_PREFIXES.some((p) => key.startsWith(p))) return false;

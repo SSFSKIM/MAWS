@@ -43,3 +43,8 @@ export function readRoute(carrier: { route?: Route; gateway?: LegacyRoute }): Ro
 export function readRecordedRoute(gateway: { route?: Route; routed: boolean | null }): Route | null {
   return gateway.route ?? (gateway.routed === true ? 'gateway' : gateway.routed === false ? 'direct' : null);
 }
+
+// The keys the gateway route sets and the direct route deletes (engine-host/launch.ts buildEnvironment). P5 O7 M9:
+// effectiveBaseUrl (engine-host/models-cache.ts) reports which of them a machine sets, so a legacy direct launch is
+// equivalent to the machine route only where it sets none.
+export const GATEWAY_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ENABLE_TOOL_SEARCH'] as const;

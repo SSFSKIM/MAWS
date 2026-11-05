@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { configFilePath } from '@shared/engine/config-dir'; // P5 O7 M9: the engine's global-config selection, the trust reader's
 import * as z from 'zod';
 import { BUILTIN_MODELS, ModelCatalogueEntrySchema, type ModelCatalogue } from '@shared/sessions/models';
-import { GATEWAY_KEYS } from './launch'; // P5 O7 M9
+import { GATEWAY_KEYS } from '@shared/engine/route'; // P5 O7 M9
 import { linkedWorktreeStore, localSettingsFiles } from './local-store'; // P2-F wave S (S-catalogue); P5 O7 M9: linkedWorktreeStore
 import { managedSettings, managedSettingsDir } from './session-start-hooks'; // P5 O7 M9: resolve-style.ts's managed path
 

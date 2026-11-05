@@ -105,7 +105,7 @@ import { PrivatePathError } from '@shared/host/private-path';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 import { writeToken } from '@shared/host/socket-host';
 import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
-import { ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen, type ServerRefuse } from '@shared/host/socket-protocol';
+import { ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, ENGINE_ROUTE_MACHINE_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen, type ServerRefuse } from '@shared/host/socket-protocol';
 import { serveSocketClients, type SocketClients, type SupervisorIdentity } from '@shared/host/socket-server';
 import type { AppSessionId } from '@shared/graph/ids';
 import { endableClientRef, type ClientRef } from '@shared/ipc/client';
@@ -124,6 +124,10 @@ import type { MachineRef } from '@shared/machine/ref';
 import { readMachineRole, type MachineRole } from '../engine-host/role';
 import { buildIdOf, currentBuildIdOf, isAlive, procStartOf, readLock, START_EXIT_HELD, takeLock } from '../engine-host/supervisor-files';
 import { ENGINE_HOST_SPAWNER_ENV } from '../engine-host/spawner'; // P5 O17 M7 fix 4
+import { RELAY_URL } from '../engine-host/relay-url'; // P5 O7 M9: engine.models to an older host (not launch.ts, whose graph is off mawsd's run path)
+import { effectiveBaseUrl, type BaseUrlResolution } from '../engine-host/models-cache'; // P5 O7 M9
+import { legacyRouteOf } from '@shared/engine/route'; // P5 O7 M9
+import { isGatewayModel, type ModelCatalogue } from '@shared/sessions/models'; // P5 O7 M9
 import { LOG_ROTATE_BYTES, openSupervisorLog } from '../engine-host/supervisor-log';
 import { ptyHostFiles } from '../pty-host/files';
 import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
@@ -212,6 +216,9 @@ export interface DaemonOptions {
   // P5 O5 M6: the render cache the Linux watch follows (a test's own; else the user's), and the watch itself (a double)
   render?: { load?(): Promise<RenderChunk>; spawn?(): RenderChild; runtime?(): RenderRuntime; cacheRoot?: string; watchCache?: typeof watchRenderCache };
   cua?: { loadAddon?: () => PeerAddon | null; relayConnectWaitMs?: number }; // P5 O5 M5: the peer identity addon's load (a double), the relay's wait
+  // P5 O7 M9: the machine route's resolution for engine.models to an older engine host: the engine's environment (the
+  // login-shell capture unless a test brings one) and the managed settings' root (a test's; else `/`)
+  routeResolution?: { env?(): Promise<Record<string, string>>; systemRoot?: string };
 }
 
 export interface RunningDaemon {
@@ -752,12 +759,41 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       }
       case 'host.exitWhenIdle':
         return exitWhenIdle(request);
+      case 'engine.models':
+        return legacyModels(request, input);
       case 'host.attachment': // P5 O3-D M3: mawsd's own signal; the relay's welcome lists the upstream's capability, never for an app to use
       case 'host.browserWork': // P5 O17 M3: as host.attachment
         return Promise.resolve({ t: 'res', id: request.id, ok: false, error: ipcError('forbidden_sender', `${request.name} is mawsd’s own signal to the engine host`) });
       default:
         return null;
     }
+  }
+
+  // P5 O7 M9 (reviewer-high fix wave): `engine.models` to an engine host not known to list engine.route-machine (a
+  // retained older one; one not welcomed yet, for which the legacy key answers the same catalogue), whose strict input
+  // has no `route`: the legacy key alone, as specForHost sends a launch. A non-machine route is its own legacy key; the
+  // machine route's is the one its resolved base URL reaches (models-cache.ts effectiveBaseUrl over the engine's
+  // environment and the request's cwd, the start guard's resolution), and while that cannot be resolved the request's
+  // held legacy value, its answer without a gateway model (engine-host/ipc.ts answers a capable host's the same way).
+  function legacyModels(request: RelayRequest, input: Record<string, unknown>): Promise<HostResponse> | null {
+    if (input.route === undefined || hosts.peer('engine-host')?.capabilities.includes(ENGINE_ROUTE_MACHINE_CAPABILITY) === true) return null;
+    return (async () => {
+      const { route, ...legacy } = input;
+      let uncertain = false;
+      if (route === 'machine') {
+        const env = await (options.routeResolution?.env ?? (() => captureShellEnvironment()))();
+        const cwd = typeof input.cwd === 'string' ? input.cwd : null;
+        const resolution = await effectiveBaseUrl({ env, cwd, platform, systemRoot: options.routeResolution?.systemRoot }).catch((): BaseUrlResolution => ({ kind: 'uncertain', why: 'unresolved' }));
+        if (resolution.kind === 'resolved') legacy.gateway = legacyRouteOf(resolution.baseUrl, RELAY_URL);
+        else uncertain = true;
+      } else {
+        legacy.gateway = route;
+      }
+      const response = await hosts.forward('engine-host', { name: request.name, input: legacy, ...(request.client !== undefined && { client: request.client }) });
+      if (!uncertain || !response.ok) return response;
+      const catalogue = response.value as ModelCatalogue;
+      return { ...response, value: { ...catalogue, models: catalogue.models.filter((model) => !isGatewayModel(model.value)) } };
+    })();
   }
 
   // --- the pty host's relay, and its output credit -------------------------------------------------------------------
