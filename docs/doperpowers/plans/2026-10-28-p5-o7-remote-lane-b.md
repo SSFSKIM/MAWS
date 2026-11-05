@@ -3033,6 +3033,12 @@ P5 findings of M5's re-plan, continued from F15:
   - Closes the tracker row "a read session behind stale unread ones".
   Rationale: the owner's ruling; the coordinator's brief for the follow-up.
   Date/Author: 2026-11-05, O7's M10 executor.
+- Decision: D's review and proofs (2026-11-05).
+  - **reviewer-medium** on 45ab09895..c28a2f9fa: incorrect, on one Important finding in the e2e. The reply's text reaches A before A's own status ends the turn, so closing the tab once the text showed could let the turn end arrive off screen and mark the session unread on a correct build. The fix waits for the composer's Send, which reads the status the read marks watch (dabb67a04). The reviewer found the rule, its boundary and missing-time cases, the clock, the memo key and the pinned, spawned and listed tiers sound. The loop stopped there: the fix is one wait on the state the finding named.
+  - **Red first.** Locally, with the window reverted, three `overview/derive.test.ts` cases and the owner's-flow case in `sidebar/derive.test.ts` failed; the Needs-you-and-working case was sharpened (97f86f73b) after it passed reverted. On CI, a probe with the window reverted and the tests kept (c4c022eb1, never merged; run 41994264716) failed unit shards 2 and 3 and `e2e:remote`'s M8 at "its first turn over and its tab closed, the row still within the visible rows", on its try and its retry. On the fix (c28a2f9fa, run 41994337185) unit and `e2e:remote` passed, M8 on its first try.
+  - Closes the tracker row "a read session behind stale unread ones", removed from `docs/tech-debt-tracker.md`.
+  Rationale: the reviewer's report; the runs named.
+  Date/Author: 2026-11-05, O7's M10 executor.
 
 ## Outcomes & Retrospective
 
