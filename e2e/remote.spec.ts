@@ -1935,6 +1935,9 @@ test('M8: a session spawned on B leads a full project past its cap and stays amo
       await b.request('session.getContextUsage', { appSessionId: spawnedApp, detail: 'summary' }); // lets B's engine go on
       await expect.poll(turnOverOnB, { timeout: 30_000 }).toBe(true);
       await expect(main(page).getByText(M8_REPLY).first(), 'the turn’s end on screen').toBeVisible({ timeout: 60_000 });
+      // A's own status has the turn over (the reply's text arrives before it): the composer's Stop, which reads the status
+      // the read marks watch (lane-b/read-marks.ts), is Send again, so no turn end can reach A after the tab closes
+      await expect(main(page).locator('[data-submit-state]'), 'A has the turn over, on screen').toHaveAttribute('data-submit-state', 'send', { timeout: 30_000 });
       await expect(mainTabById(page, `session:${address}`), 'the session’s tab selected').toHaveAttribute('aria-selected', 'true');
       await expect(spawnedRowOf(page).getByRole('img', { name: 'Unread', exact: true }), 'read: its turn ended on screen').toHaveCount(0);
       // its tab closed, which reads nothing more
