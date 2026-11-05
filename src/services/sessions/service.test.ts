@@ -1329,6 +1329,15 @@ describe('the machine route (P5 O7 M9)', () => {
       }
     });
 
+    // the architect's fail-closed rule: a source the resolver does not model (here the server-delivered settings) leaves
+    // the inference unknown, so an older host is refused rather than sent legacy direct
+    it('refuses route-unsupported when server-delivered settings exist, with no base URL seen', async () => {
+      writeFileSync(join(h.trust.configHome, 'remote-settings.json'), '{}');
+      const id = await create();
+      expect(await h.service.startSession(id, { message: null, options: {} })).toEqual({ status: 'invalid', appSessionId: id, field: 'route', message: ROUTE_UNSUPPORTED });
+      expect(h.host.launches).toEqual([]);
+    });
+
     // fix round, item 3: an older host checks the relay on the legacy gateway route it is sent, so a start past the sheet
     // cannot work there and is not offered
     it('answers a dead relay with the refusal an older host would give, not a sheet it cannot pass', async () => {

@@ -8,9 +8,9 @@
 // environment of its own keeps its list apart from its route's (`catalogueKey`, debt wave 5). Before any catalogue for a
 // key it answers the built-in list.
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { configFilePath } from '@shared/engine/config-dir'; // P5 O7 M9: the engine's global-config selection, the trust reader's
+import { configFilePath, legacyConfigPath } from '@shared/engine/config-dir'; // P5 O7 M9: the engine's global-config selection, the trust reader's
 import * as z from 'zod';
 import { BUILTIN_MODELS, ModelCatalogueEntrySchema, type ModelCatalogue } from '@shared/sessions/models';
 import { GATEWAY_KEYS } from '@shared/engine/route'; // P5 O7 M9
@@ -107,20 +107,48 @@ async function layeredEnv(sources: ModelEnvSources, pick: (name: string) => bool
 // `gatewayKeys`: which of the keys the legacy routes set or delete (launch.ts GATEWAY_KEYS, the base URL among them)
 // resolve non-empty by the same precedence, in that order: the legacy direct route deletes them all, so it reaches what
 // the machine route reaches only where the machine sets none (fix round, item 5).
+// The architect's fail-closed rule (reviewer-high re-review): a source this resolver does not model could set a gateway
+// key unseen, so its presence alone is `uncertain` (`unmodelledSource`, existence checks only: nothing is executed and no
+// further format parsed): the server-delivered `remote-settings.json` in the config directory (where
+// session-start-hooks.ts reads it), a `policyHelper` or `policyHelpers` key in a settings file read here, the cowork
+// plugins switch (CLAUDE_CODE_USE_COWORK_PLUGINS, which moves the user settings to `cowork_settings.json`), and a
+// gateway key in the global config file the engine does not select where both it and the legacy `.config.json` exist.
+// A plugin's `settings.read` overlay is not told: its presence is a loaded plugin module's hook, not a file.
 export type BaseUrlResolution = { kind: 'resolved'; baseUrl: string | null; gatewayKeys: string[] } | { kind: 'uncertain'; why: string };
 
 export async function effectiveBaseUrl(sources: ModelEnvSources & { platform?: NodeJS.Platform; systemRoot?: string }): Promise<BaseUrlResolution> {
   const unreadable: string[] = [];
-  const pick = (name: string) => (GATEWAY_KEYS as readonly string[]).includes(name);
+  const pick = (name: string) => (GATEWAY_KEYS as readonly string[]).includes(name) || name === COWORK;
   const directory = sources.systemRoot === undefined ? managedSettingsDir(sources.platform) : join(sources.systemRoot, managedSettingsDir(sources.platform));
-  const [{ launch }, managed] = await Promise.all([layeredEnv(sources, pick, (file) => unreadable.push(file)), managedSettings(directory)]);
+  const [{ launch }, managed, unmodelled] = await Promise.all([layeredEnv(sources, pick, (file) => unreadable.push(file)), managedSettings(directory), unmodelledSource(sources.env)]);
   if (unreadable.length > 0) return { kind: 'uncertain', why: `not read as settings: ${unreadable.join(', ')}` };
+  if (unmodelled !== null) return { kind: 'uncertain', why: unmodelled };
+  if (managed.some(namesPolicyHelper)) return { kind: 'uncertain', why: 'a managed settings file names a policy helper' };
   const merged: Record<string, string | undefined> = Object.assign({}, launch, ...managed.map((file) => envOf(isRecord(file) ? file.env : undefined, pick)));
+  if (envFlag(merged[COWORK])) return { kind: 'uncertain', why: `${COWORK} moves the user settings` };
   const value = (key: string) => merged[key] || null; // an empty value is none
   return { kind: 'resolved', baseUrl: value(BASE_URL), gatewayKeys: GATEWAY_KEYS.filter((key) => value(key) !== null) };
 }
 
 const BASE_URL = 'ANTHROPIC_BASE_URL';
+const COWORK = 'CLAUDE_CODE_USE_COWORK_PLUGINS';
+const namesPolicyHelper = (settings: unknown): boolean => isRecord(settings) && (Object.hasOwn(settings, 'policyHelper') || Object.hasOwn(settings, 'policyHelpers'));
+
+// The sources by the environment alone that the resolution does not model (effectiveBaseUrl's fail-closed rule): why,
+// or null. Existence checks, and the one global config file read the way the selected one is.
+async function unmodelledSource(env: Record<string, string>): Promise<string | null> {
+  if (!env.HOME && !env.CLAUDE_CONFIG_DIR) return null; // no home to read them in (never this process's)
+  const configDir = env.CLAUDE_CONFIG_DIR || join(env.HOME!, '.claude');
+  const exists = (file: string) => access(file).then(() => true, () => false);
+  if (await exists(join(configDir, 'remote-settings.json'))) return 'server-delivered settings (remote-settings.json) are not read here';
+  const legacy = legacyConfigPath(env);
+  const other = configFilePath(env, () => false); // the modern file the legacy one displaces
+  if ((await exists(legacy)) && (await exists(other))) {
+    const unselected = await settingsEnv(other, (name) => (GATEWAY_KEYS as readonly string[]).includes(name), () => {});
+    if (Object.values(unselected).some((value) => value !== '')) return `${other} sets a gateway key beside the legacy ${legacy}`;
+  }
+  return null;
+}
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 // P5 O7 M9 end
 
@@ -164,6 +192,7 @@ function settingsTextEnv(text: string, file: string, pick: (name: string) => boo
   try {
     const parsed = JSON.parse(text) as unknown;
     if (parsed !== null && !isRecord(parsed)) throw new Error('not an object');
+    if (namesPolicyHelper(parsed)) unreadable(`${file} (names a policy helper)`); // P5 O7 M9: effectiveBaseUrl's fail-closed rule
     return envOf(isRecord(parsed) ? parsed.env : undefined, pick);
   } catch {
     unreadable(file);

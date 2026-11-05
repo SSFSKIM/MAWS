@@ -377,6 +377,48 @@ describe('effectiveBaseUrl', () => {
     expect(await resolve({ HOME: home }, project)).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: [] });
   });
 
+  // P5 O7 M9 (the architect's fail-closed rule): a source the resolver does not model could set a gateway key unseen, so
+  // its presence makes the resolution uncertain (an older host then refuses route-unsupported rather than taking legacy
+  // direct); existence checks only, nothing executed and no new format parsed
+  describe('fails closed on a settings source it does not model', () => {
+    const home = () => join(root, 'home');
+    const at = (env: Record<string, string> = {}, cwd: string | null = null) => effectiveBaseUrl({ env: { HOME: home(), ...env }, cwd, platform: 'linux', systemRoot: system });
+
+    it('the server-delivered settings file (remote-settings.json in the config directory)', async () => {
+      await settings(home(), 'settings.json', {});
+      expect(await at()).toMatchObject({ kind: 'resolved' });
+      await settings(home(), 'remote-settings.json', {});
+      expect(await at()).toMatchObject({ kind: 'uncertain' });
+    });
+
+    it('a policy helper named in a settings file it reads (policyHelper, policyHelpers)', async () => {
+      const project = join(root, 'project');
+      await settings(project, 'settings.json', { policyHelper: '/opt/helpers/policy' });
+      expect(await at({}, project)).toMatchObject({ kind: 'uncertain' });
+      await settings(project, 'settings.json', {});
+      expect(await at({}, project)).toMatchObject({ kind: 'resolved' });
+      await managed('managed-settings.json', { policyHelpers: ['/opt/helpers/policy'] });
+      expect(await at({}, project)).toMatchObject({ kind: 'uncertain' });
+    });
+
+    it('the cowork plugins switch (CLAUDE_CODE_USE_COWORK_PLUGINS), in the environment or a settings env', async () => {
+      expect(await at({ CLAUDE_CODE_USE_COWORK_PLUGINS: '1' })).toMatchObject({ kind: 'uncertain' });
+      await settings(home(), 'settings.json', { env: { CLAUDE_CODE_USE_COWORK_PLUGINS: 'true' } });
+      expect(await at()).toMatchObject({ kind: 'uncertain' });
+      await settings(home(), 'settings.json', { env: { CLAUDE_CODE_USE_COWORK_PLUGINS: '0' } });
+      expect(await at()).toMatchObject({ kind: 'resolved' });
+    });
+
+    it('a gateway key in the global config file the engine does not select, where both exist', async () => {
+      await mkdir(join(home(), '.claude'), { recursive: true });
+      await writeFile(join(home(), '.claude', '.config.json'), JSON.stringify({ env: {} })); // the legacy file, selected
+      await writeFile(join(home(), '.claude.json'), JSON.stringify({ env: { MAX_THINKING_TOKENS: '8000' } }));
+      expect(await at()).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: [] });
+      await writeFile(join(home(), '.claude.json'), JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'modern-token' } }));
+      expect(await at()).toMatchObject({ kind: 'uncertain' });
+    });
+  });
+
   // P5 O7 M9 reviewer-high fix wave: the global config is the file the engine reads (config-dir.ts configFilePath):
   // the custom-OAuth one under CLAUDE_CODE_CUSTOM_OAUTH_URL, unless the legacy `.config.json` exists
   it('reads the global config the engine selects, the custom-OAuth one included', async () => {
@@ -388,6 +430,9 @@ describe('effectiveBaseUrl', () => {
     expect(await at({})).toEqual({ kind: 'resolved', baseUrl: OTHER, gatewayKeys: ['ANTHROPIC_BASE_URL'] });
     expect(await at({ CLAUDE_CODE_CUSTOM_OAUTH_URL: 'https://oauth.example.invalid' })).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: ['ANTHROPIC_AUTH_TOKEN'] });
     await writeFile(join(home, '.claude', '.config.json'), JSON.stringify({ env: { ENABLE_TOOL_SEARCH: 'true' } }));
+    // the legacy file is selected, and the custom-OAuth one beside it sets a gateway key: not known which counts
+    expect(await at({ CLAUDE_CODE_CUSTOM_OAUTH_URL: 'https://oauth.example.invalid' })).toMatchObject({ kind: 'uncertain' });
+    await writeFile(join(home, '.claude-custom-oauth.json'), JSON.stringify({ env: {} })); // none there: the legacy file's alone
     expect(await at({ CLAUDE_CODE_CUSTOM_OAUTH_URL: 'https://oauth.example.invalid' })).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: ['ENABLE_TOOL_SEARCH'] });
   });
 
