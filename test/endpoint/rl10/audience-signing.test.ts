@@ -9,7 +9,7 @@
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateSigningKey, signEvent, streamWriter, verifyEvent, type Certificates, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { generateSigningKey, signEvent, streamWriter, verifyEvent, type Certificates, type SignedOrgState } from 'org-protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { InboundIndex } from '../../../src/endpoint/rl10/inbound-index';
 import { LegacyKey } from '../../../src/endpoint/rl10/legacy';

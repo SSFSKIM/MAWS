@@ -102,6 +102,19 @@ describe('listings', () => {
     expect(w.listings().map((l) => l.record.body.session)).toEqual(['elsewhere']);
   });
 
+  it('states a private session’s audience and policyRev in the listing signed for a member alone (P5 O18 D7), and a listed one’s neither', async () => {
+    const w = await world();
+    const listings = new Listings(w.ctx);
+    const secret = await listings.recordFor({ ...report, session: 'secret', access: 'private', shares: [w.other, w.other], policyRev: 3 });
+    expect(secret?.body.fields).toMatchObject({ owners: [w.admin], audience: [w.admin, w.other].sort(), policyRev: 3 });
+    expect(await verifyListing(w.head.state, secret!, NO_CERTIFICATES, new Date())).toEqual({ ok: true });
+    const open = await listings.recordFor({ ...report, shares: [w.other], policyRev: 3 });
+    expect(open?.body.fields.audience).toBeUndefined();
+    expect(open?.body.fields.policyRev).toBeUndefined();
+    // Nothing of the private one went to the hub.
+    expect(w.sent).toEqual([]);
+  });
+
   it('re-issues an @machine listing when the machine’s owners or the org’s admins change, and keeps an explicit owner', async () => {
     const w = await world();
     const listings = new Listings(w.ctx);

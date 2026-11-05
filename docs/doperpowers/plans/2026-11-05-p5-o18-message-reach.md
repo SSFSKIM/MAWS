@@ -35,7 +35,7 @@ Then `sminos share <session> <member> list` (run by the owner at a terminal): th
 - [x] (2026-11-05) The round-3 review found four more holes; this revision folds each with the architect's resolution: the archive's own-writer frontier is the hub's `have`, not socket handoff; an old sminos or endpoint never receives an audience stream; a split `say` carries only its own recipients' leading tags; a valid `unlisted` notice is admitted by its own rule.
 - [ ] The execution section's buildability review.
 - [x] (2026-11-05 22:50Z) M1: the hub's policy registry, upload backstop and audience filter (MAWS). Branch `p5-o18-m1`, `49dd6b262..`; static and unit GREEN on `a091ce1cb` (run 42120533710); reviewer-high with a security lens converged on the third pass.
-- [ ] M2: the endpoint: the `list` grade, `reach?`, audiences and the policy cache (MAWS).
+- [ ] M2: the endpoint: the `list` grade, `reach?`, audiences and the policy cache (MAWS). Branch `p5-o18-m2` from `9f49f8fbc`; built at `062e061a0` (2026-11-06 00:00Z), each new suite seen red against the base sources; gates and review next.
 - [ ] M2b: devices: the audience from the listing (MAWS).
 - [ ] M3: sminos's visibility frames, records and audience streams (doperpowers).
 - [ ] M4: sminos's send boundary, the setters, refusals and unlisting (doperpowers).
@@ -711,6 +711,23 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
 - Observation (M1, third review): a frame already handed to `Machine.send` and `Relay.relaySend` is checked against the connection's generation, not its audience (`relay.ts:584`). An owner change that lands in that window can't stop a socket write already underway. The window predates O18 and is as wide as one socket write. It's left as review debt, because closing it would mean an audience check inside the relay's send path.
   Evidence: `apps/desk-hub/src/objects/relay.ts:584`; the third review, 2026-11-05.
 
+- Observation (M2): sminos keeps the endpoint's verdict (`verified`) inside each event it stores, and the v2 signature
+  covers every field but `sig` and `mac`. So an event sminos hands back (`reach?`'s, a `snapshots` page's) verifies only
+  once `verified` is taken out.
+  Evidence: `sminos_hublog.py:940` (`e["verified"] = verified`); `apps/org-protocol/src/events.ts` `coveredV2`.
+- Observation (M2): a refusal at signing leaves its position unsigned, and the hub's copy of the writer then has a gap
+  that every later upload of the writer meets as a `resend`. Refusing `audience` from a stale view without a way back
+  would stall the writer for as long as the mismatch held, the stall the design forbids. It led to the coordinator's
+  ruling below (the stop and the `void`).
+  Evidence: `uplink.ts` (`refused`, `resend`); the hub's `upload` (`project.ts`, a gap answered by `resend`).
+- Observation (M2): `isListing` (`apps/org-protocol/src/shapes.ts`) checks a listing's fields exactly, so a desk-web
+  built before this change refuses a private session's channel listing that carries `audience` and `policyRev`, and
+  shows its owner nothing of that session until desk-web is updated (M2b). A listed session's listing gains neither.
+  Evidence: `shapes.ts` `isListing`; `records.ts` `verifyListing`.
+- Observation (M2): the RL1 link sends each project's hello before its welcome hook runs, so what the endpoint learns
+  from the welcome (`capabilities`) is in place for the first upload of the connection but not for the hellos.
+  Evidence: `src/endpoint/hub-link.ts` `#welcomed`.
+
 ## Decision Log
 
 - Decision: the verification. One independent spec review (`doperpowers:adversarial-reviewer`, security lens) and its buildability review of this execution section. Each landing that touches `reach?`, an audience, the registry or the hub's fan-out gets reviewer-high with a security lens. M6 is the end-to-end proof.
@@ -880,6 +897,71 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Date/Author: 2026-11-05, p5-desk-track-owner (M1).
 - Decision (M1): the read-surface tests live in a new `apps/desk-hub/test/audience-reads.test.ts`, beside `policies.test.ts`, rather than in `log.test.ts`. Both files need an org with a second member and machines that advertise `audience`, which the org `log.test.ts` shares doesn't have. `log.test.ts` and `signed-log.test.ts` run unchanged, as the regression check.
   Date/Author: 2026-11-05, p5-desk-track-owner (M1).
+
+- Decision (M2, the coordinator's ruling): `audience` is a stop on both sides. The uplink's STOPS gains it, and sminos's
+  stops gain it (M3). The refused position is never signed with its body. A stream writer refused for a stale digest is
+  dead while its digest isn't the session's current audience, and sminos writes later events under the new stream. If
+  the digest becomes current again, sminos first uploads a content-free `{ts, writer, seq: p, kind: 'void', of: p,
+  audience?}` at each refused position, and the writer continues.
+  Rationale: a refusal at signing leaves a gap at the hub (Surprises, M2), so a stop without a way back would stall
+  the writer.
+  Date/Author: 2026-11-05, the coordinator (p5-desk-track-owner), for M2 and M3.
+- Decision (M2, the coordinator's ruling): a `void` carries `audience`, sminos's claim of its writer's audience. The
+  endpoint signs it exactly when `audienceDigest(audience)` equals the writer's digest, for any kind of stream (a
+  session's, a human's, an addressed one). Under a plain writer a void carries none. Any other shape is refused
+  `malformed`.
+  Rationale: a void is content-free, so who may read it isn't a confidentiality question. The digest alone binds the
+  claim to its writer, and a human stream whose first position was refused has nothing in the ledger to check against.
+  Rejected: taking the audience from the ledger's earlier positions of the writer, which can't revive such a stream.
+  Date/Author: 2026-11-05, the coordinator (p5-desk-track-owner).
+- Decision (M2, from M3): sminos never stores `audience` or `policyRev` in its events. The endpoint adds both at
+  signing: `policyRev` from the session's member frame (on `joined`, `state` and `unlisted`), the audience from its
+  own computation. One sminos sends anyway is left out (`ENDPOINT_ADDS`), so it is never what is signed. A terminal
+  `say` to a private session goes under `<machine>/human~<digest>`, whose audience is the intersection of its
+  recipients'. M1's writer grammar, `streamOf` and the hub's sender rule (the machine's owners) already admit it.
+  Date/Author: 2026-11-05, the coordinator from M3; checked in M2.
+- Decision (M2): `reach?` judges the sender itself and reads nothing of sminos's `verified`:
+  - an own writer's sender is its session's resolved owners (or the ledger's attestation), and the machine's owners
+    for an operator's writer;
+  - a device's words are their member;
+  - another machine's event counts only once its v2 signature verifies now. Its attestation's owners are the sender,
+    and an attestation that fails makes the sender unverified. With no attestation, the signing machine's owners are
+    the sender, as the hub reads it.
+  Members the head no longer holds are no one's sender. Every sender must hold `list` unless one shares an owner with
+  the recipient. A recipient the endpoint holds no record of gets no answer, so the delivery stays owed through
+  sminos's restatement.
+  Rationale: the verdict authorizes delivery (D5's invariant), so it rests on the endpoint's own verification, as
+  `words?` does. Refusing a recipient that has no record would drop a message for good during a restatement.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M2).
+- Decision (M2): the policy cache's rebuild runs only with an sminos whose hello advertises `audience`, the release
+  that holds the `snapshots?` responder.
+  - Completeness: every project sminos has opened is `done`. A project, once read back, stays done, its later
+    snapshots arriving live. A project first opened later is read back then.
+  - An old sminos: nothing waits on the rebuild, an unknown session counts as having no audience, and the hub is the
+    backstop.
+  - A hold: the position stays unsigned, parked as an uplink hole and released when the rebuild completes, a project
+    finishes, a snapshot arrives, or the hub's welcome advertises `audience`. Released, it is asked of sminos again.
+  Rationale: a rebuild with no responder never completes, and holding on it would stall every machine on an old
+  sminos.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M2).
+- Decision (M2): local history and redaction.
+  - Local history: each local session's audience at its `policyRev` is remembered in the cache (`policy/cache.json`,
+    newest 16 revs) on every member frame and every new head. A local session whose record has gone is read at the
+    newest remembered audience, so its last events still sign under its stream.
+  - Redaction: a narrower provenance reference is written null in the signed body, and the ledger keeps the paths it
+    redacted and the hash of the redacted form. A resend is then rebuilt byte for byte, and an echo compares against
+    what was signed. The attestation's spawner is left out.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M2).
+- Decision (M2): the D9 down-filter (no stream writer to an sminos without `audience`) also leaves out `resend`
+  frames naming a stream, and the `have`'s `withheld` entries for streams.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M2).
+- Decision (M2): where the tests live.
+  - The signing and hub-side cases are in a new `test/endpoint/rl10/audience-signing.test.ts`, on a `LogRelay` with
+    a stand-in hub, rather than in `uplink.test.ts`, whose scene is a 24 MiB burst against a paused socket.
+  - The private-session replay is a second test in `conversation.local.test.ts` against the M1 hub, with B's
+    machine on RL1 as the reader. It is not in `conversation.json`, whose cases sminos's conformance replay plays too.
+  - `EndpointOptions.uplink` is a suites' seam for the ask wait, so a `state-unavailable` lands within the test.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M2).
 
 ## Outcomes & Retrospective
 
