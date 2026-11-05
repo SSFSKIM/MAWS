@@ -64,6 +64,10 @@ export type SessionReport = {
   owners: readonly string[];
   /** Absent means `listed` (O12); `private` is never listed. */
   access?: string;
+  /** P5 O18: the members the session is shared with, at any grade, and its record's `policyRev`: a private session's
+   * channel listing states its audience from them (D7). */
+  shares?: readonly string[];
+  policyRev?: number;
 };
 
 /** What the records are made from and sent through. */
@@ -178,14 +182,24 @@ export class Listings {
    * The signed listing of a session as it stands now, for a member's `endpoint.listings` (M8): the one held and sent to
    * the hub when it is current, else one signed for the asker alone (a private session's, one in a project the endpoint
    * doesn't relay, one not listed yet), kept nowhere and sent nowhere, at a revision past any held. Null with no key or
-   * head.
+   * head. A private session's states its `audience` (its owners and every member it is shared with, sorted) and its
+   * `policyRev` (P5 O18 D7): the one machine-signed source a device takes a private session's audience from.
    */
   async recordFor(report: SessionReport): Promise<Signed<Listing> | null> {
     const key = this.#ctx.key();
     const head = this.#ctx.head();
     if (key === null || head === null) return null;
     const owners = await resolveOwners(report.owners, head.state, this.#ctx.ref(), head.certificates, new Date(this.#ctx.now()));
-    const fields: Listing['fields'] = { owners, project: report.project, lane: report.lane, state: report.state, title: report.title };
+    const audience = report.access === 'private' ? [...new Set([...owners, ...(report.shares ?? [])])].sort() : [];
+    const fields: Listing['fields'] = {
+      owners,
+      project: report.project,
+      lane: report.lane,
+      state: report.state,
+      title: report.title,
+      ...(audience.length > 0 ? { audience } : {}),
+      ...(report.access === 'private' && report.policyRev !== undefined ? { policyRev: report.policyRev } : {}),
+    };
     const held = this.#ctx.store.read()[report.session];
     if (held !== undefined && !isListingGone(held.record.body) && held.hash === hashOf(fields) && this.#current(held.record)) return held.record;
     const now = this.#ctx.now();

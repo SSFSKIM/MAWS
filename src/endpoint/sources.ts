@@ -11,8 +11,11 @@ export type SessionTarget = { lane: 'A'; session: string } | { lane: 'B'; sessio
 
 /** RL §6.2's general access level; absent means `listed`. */
 export type Access = 'private' | 'listed' | 'org-view' | 'org-converse';
-/** An individual share (RL §6.2): a member at `view`, `converse` or `approve`. */
-export type Share = { member: string; grade: 'view' | 'converse' | 'approve' };
+/**
+ * An individual share (RL §6.2): a member at `list` (shown as "Can message": the member's agents see and message the
+ * session, and the member reads nothing of it; P5 O18 D1), `view`, `converse` or `approve`.
+ */
+export type Share = { member: string; grade: 'list' | 'view' | 'converse' | 'approve' };
 
 /**
  * A session's machine-held record (RL6), as far as authorization reads it. `owners` are member ids and `@machine`, which

@@ -5,7 +5,7 @@
 import { isBase64urlOf } from './base64url.ts';
 import { canonicalize } from './canonical.ts';
 import { isPublicKey, isSig } from './keys.ts';
-import { isIsoMillis, isMachineName, isMachineRef, isMemberId, type MemberId } from './names.ts';
+import { isAudience, isIsoMillis, isMachineName, isMachineRef, isMemberId, type MemberId } from './names.ts';
 import type {
   Delegation,
   Device,
@@ -227,7 +227,9 @@ export function isListing(value: unknown): value is Listing {
     isText(value.session) &&
     isCount(value.revision, 1) &&
     isIsoMillis(value.issued) &&
-    fields(f, ['owners', 'project', 'lane', 'state', 'title']) &&
+    fields(f, ['owners', 'project', 'lane', 'state', 'title'], ['audience', 'policyRev']) &&
+    (f.audience === undefined || isAudience(f.audience)) &&
+    (f.policyRev === undefined || isCount(f.policyRev, 0)) &&
     // Owners are member ids: `@machine` never leaves the machine and `'org'` is never an owner (RL §5.8).
     isList(f.owners, isMemberIdText) &&
     unique(f.owners) &&

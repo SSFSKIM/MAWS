@@ -116,7 +116,8 @@ export type Listing = {
   session: string;
   revision: number;
   issued: string;
-  fields: { owners: MemberId[]; project: string | null; lane: 'A' | 'B'; state: string; title: string };
+  /** `audience` and `policyRev` (P5 O18 D7): a private session's channel listing only, never one sent to the hub. */
+  fields: { owners: MemberId[]; project: string | null; lane: 'A' | 'B'; state: string; title: string; audience?: MemberId[]; policyRev?: number };
 };
 /**
  * The `state` of a withdrawn listing (RL6; the remote layer's Decision Log 27): a session that becomes `private` or

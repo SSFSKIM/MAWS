@@ -47,18 +47,20 @@ export type Member = {
   inference?: unknown;
   access?: Access;
   shares?: Share[];
+  /** P5 O18: the record's policy revision, bumped by sminos on each access, share or owner change. */
+  policyRev?: number;
   controller?: unknown;
 };
 
 const ACCESS: ReadonlySet<string> = new Set(['private', 'listed', 'org-view', 'org-converse']);
-const SHARE_GRADES: ReadonlySet<string> = new Set(['view', 'converse', 'approve']);
+const SHARE_GRADES: ReadonlySet<string> = new Set(['list', 'view', 'converse', 'approve']);
 const isText = (v: unknown, max = 4096): v is string => typeof v === 'string' && v.length <= max;
 const isId = (v: unknown): v is string => typeof v === 'string' && v !== '' && v.length <= 512;
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /** A `member` frame read for what the endpoint relies on, or null when it doesn't hold its shape. */
 export function readMember(frame: Record<string, unknown>): Member | null {
-  const { session, alias, project, lane, state, title, cwd, worktree, launch, owners, ownersProof, origin, access, shares } = frame;
+  const { session, alias, project, lane, state, title, cwd, worktree, launch, owners, ownersProof, origin, access, shares, policyRev } = frame;
   if (!isId(session) || !isText(alias) || !isId(project) || (lane !== 'A' && lane !== 'B') || !isText(state, 256) || !isText(cwd)) return null;
   if (title !== undefined && !isText(title)) return null;
   if (worktree !== undefined && !isText(worktree)) return null;
@@ -68,6 +70,7 @@ export function readMember(frame: Record<string, unknown>): Member | null {
   if (!isObject(origin) || !isText(origin.kind, 256)) return null;
   if (access !== undefined && !(typeof access === 'string' && ACCESS.has(access))) return null;
   if (shares !== undefined && !(Array.isArray(shares) && shares.every((s) => isObject(s) && isId(s.member) && typeof s.grade === 'string' && SHARE_GRADES.has(s.grade)))) return null;
+  if (policyRev !== undefined && !(Number.isSafeInteger(policyRev) && (policyRev as number) >= 0)) return null;
   return frame as unknown as Member;
 }
 

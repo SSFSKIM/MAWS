@@ -33,6 +33,8 @@ import {
   closeReasonName,
   decodeChannelFrame,
   encodeChannelFrame,
+  isCapabilities,
+  RL1_CAPABILITIES,
   RL1_MESSAGE_LIMIT,
   RL1_PROTOCOL,
   type ChannelCloseReason,
@@ -56,8 +58,8 @@ export type HubTarget = { hub: string; credentials: Credentials; ref: string };
 
 /** What the rest of the module hears from the link, each call made in the link's own order. */
 export type HubLinkHooks = {
-  /** A connection was welcomed: its generation and the heartbeat it keeps. */
-  welcome?(welcome: { generation: number; heartbeatMs: number }): void;
+  /** A connection was welcomed: its generation, the heartbeat it keeps, and what the hub advertised (RL1 `capabilities`). */
+  welcome?(welcome: { generation: number; heartbeatMs: number; capabilities: readonly string[] }): void;
   /** The connection ended (it may be opened again). */
   ended?(): void;
   /** The org state advanced to `version` at the hub. */
@@ -130,6 +132,8 @@ type Attempt = {
   ending: Ending | null;
   welcomed: boolean;
   welcomedAt: number;
+  /** What the hub's welcome advertised (RL1 `capabilities`, OX1); none before it. */
+  capabilities: string[];
   generation: number;
   heartbeatMs: number;
   lastHeard: number;
@@ -188,6 +192,11 @@ export class HubLink {
   /** The welcomed connection's generation. */
   get generation(): number | undefined {
     return this.#attempt?.welcomed ? this.#attempt.generation : undefined;
+  }
+
+  /** What the welcomed connection's hub advertised (none while none is welcomed). */
+  get capabilities(): readonly string[] {
+    return this.#attempt?.welcomed ? this.#attempt.capabilities : [];
   }
 
   get running(): boolean {
@@ -331,6 +340,7 @@ export class HubLink {
       ending: null,
       welcomed: false,
       welcomedAt: 0,
+      capabilities: [],
       generation: 0,
       heartbeatMs: DEFAULT_HEARTBEAT_MS,
       lastHeard: this.#now(),
@@ -352,7 +362,8 @@ export class HubLink {
     attempt.timers.push(setTimeout(() => this.#end(attempt, { kind: 'dead', why: `no welcome within ${OPEN_MS} ms` }), OPEN_MS));
     socket.on('unexpected-response', (request, response) => void this.#refused(attempt, request, response));
     socket.on('open', () => {
-      this.#sendText(attempt, { t: 'hello', protocol: RL1_PROTOCOL, build: this.#options.build, machine: target.ref, ...(this.#lastGeneration > 0 ? { leaseGeneration: this.#lastGeneration } : {}) });
+      // `audience` (P5 O18 D9): this endpoint passes no audience stream down to an sminos that doesn't advertise it.
+      this.#sendText(attempt, { t: 'hello', protocol: RL1_PROTOCOL, build: this.#options.build, machine: target.ref, ...(this.#lastGeneration > 0 ? { leaseGeneration: this.#lastGeneration } : {}), capabilities: [RL1_CAPABILITIES.audience] });
     });
     socket.on('message', (data, isBinary) => this.#message(attempt, data, isBinary));
     socket.on('ping', (data: Buffer) => attempt.buffer.pong(data));
@@ -442,8 +453,9 @@ export class HubLink {
     this.#retriedAtOnce = false;
     attempt.beat = setInterval(() => this.#beat(attempt), attempt.heartbeatMs);
     this.#options.log(`endpoint: connected to the hub (generation ${attempt.generation})`);
+    attempt.capabilities = isCapabilities(frame.capabilities) ? [...frame.capabilities] : [];
     for (const [project, handler] of this.#projects) this.#hello(project, handler);
-    this.#hooks.welcome?.({ generation: attempt.generation, heartbeatMs: attempt.heartbeatMs });
+    this.#hooks.welcome?.({ generation: attempt.generation, heartbeatMs: attempt.heartbeatMs, capabilities: attempt.capabilities });
   }
 
   /** One heartbeat: the connection is dead after two unanswered `hb`s or three heartbeats with nothing heard. */

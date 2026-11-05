@@ -89,6 +89,7 @@ import { completeProvisioning, provisionInto, type DelegatedInput } from './prov
 import { retireInto, type Retired } from './retire';
 import { Queries } from './queries';
 import { Rl10 } from './rl10/link';
+import type { RelayContext } from './rl10/log-relay';
 import type { EndpointModule, EndpointServices } from './services';
 import { SessionSafe } from './session-safe';
 import { anyCheckout, type CheckoutSource, type RecordSource, type SessionTarget } from './sources';
@@ -123,6 +124,8 @@ export type EndpointOptions = {
   subscriptions?: { resumeMs?: number; ringBytes?: number; backlogBytes?: number; recheckRetryMs?: readonly number[]; transmitDeadlineMs?: number };
   /** P5 O7 M5c review 1: the suites' seam for a remote acquisition's bound (acquire.ts' ACQUIRE_WITHIN_MS). */
   acquireWithinMs?: number;
+  /** P5 O18 M2: the suites' seam for the log plane's uplink (uplink.ts' cap, reserve and ask wait). */
+  uplink?: RelayContext['uplink'];
 };
 
 /** The whole handshake of a direct connection is this long at most (M4). */
@@ -312,6 +315,7 @@ export class Endpoint implements EndpointModule {
       behind: () => void this.#syncAfter(),
       now: this.deps.now,
       log,
+      ...(options.uplink === undefined ? {} : { uplink: options.uplink }),
     });
     this.channels = new Channels({
       identity: () => this.#identity(),

@@ -9,7 +9,7 @@
 // whose `ts` is neither form, has no upload form (`malformed`). Signing, the ledger's body hash, a resend's rebuild,
 // `words?`'s comparison and the echo check all use the upload form, so one body has one hash wherever it is met.
 //
-// One line per signed position: `{writer, seq, hash, sig, attest?, mac?}`, appended and fsynced before the event leaves.
+// One line per signed position: `{writer, seq, hash, sig, attest?, mac?, audience?, policyRev?, redacted?}`, appended and fsynced before the event leaves.
 // A torn last line is left out on reading, which only means the position is signed again (it never left).
 import { createHash } from 'node:crypto';
 import { canonicalize, isSig, type Sig } from 'org-protocol';
@@ -27,8 +27,12 @@ export function createdOf(ts: unknown): string | null {
   return null;
 }
 
-/** What the endpoint adds to an own event as it goes up, and what an echo of it carries back beside the upload form. */
-export const ENDPOINT_ADDS = ['sig', 'attest', 'mac'] as const;
+/**
+ * What the endpoint adds to an own event as it goes up, and what an echo of it carries back beside the upload form.
+ * `audience` and `policyRev` (P5 O18 D7) are the endpoint's to state, from its own records: one sminos sends is left out,
+ * so the ledger's hash is of what sminos wrote and the audience is frozen at first signing.
+ */
+export const ENDPOINT_ADDS = ['sig', 'attest', 'mac', 'audience', 'policyRev'] as const;
 
 export type Event = Record<string, unknown> & { writer: string; seq: number };
 
@@ -50,7 +54,20 @@ export function bodyHash(form: Record<string, unknown>): string {
   return createHash('sha256').update(canonicalize(form)).digest('base64url');
 }
 
-export type Signature = { hash: string; sig: Sig; attest?: Attest; mac?: { nonce: string; value: string } };
+/**
+ * What was signed at a position. `audience` and `policyRev` as the endpoint stated them (P5 O18); `redacted`, the
+ * provenance references it wrote null before signing (their dot paths) and the hash of the upload form so redacted,
+ * which an echo of it carries.
+ */
+export type Signature = {
+  hash: string;
+  sig: Sig;
+  attest?: Attest;
+  mac?: { nonce: string; value: string };
+  audience?: string[];
+  policyRev?: number;
+  redacted?: { paths: string[]; hash: string };
+};
 type Line = Signature & { writer: string; seq: number };
 
 /** A project id as a file name: what sminos and the hub use (a UUID, a machine project's), nothing that leaves the directory. */
@@ -106,7 +123,15 @@ export class SignatureLedger {
       if (typeof line?.writer !== 'string' || !Number.isSafeInteger(line.seq) || typeof line.hash !== 'string' || !isSig(line.sig)) continue;
       // The first signature at a position is the one that went up; a later line there (none is written) is ignored.
       if (!held.has(key(line.writer, line.seq as number))) {
-        held.set(key(line.writer, line.seq as number), { hash: line.hash, sig: line.sig, ...(line.attest === undefined ? {} : { attest: line.attest }), ...(line.mac === undefined ? {} : { mac: line.mac }) });
+        held.set(key(line.writer, line.seq as number), {
+          hash: line.hash,
+          sig: line.sig,
+          ...(line.attest === undefined ? {} : { attest: line.attest }),
+          ...(line.mac === undefined ? {} : { mac: line.mac }),
+          ...(line.audience === undefined ? {} : { audience: line.audience }),
+          ...(line.policyRev === undefined ? {} : { policyRev: line.policyRev }),
+          ...(line.redacted === undefined ? {} : { redacted: line.redacted }),
+        });
       }
     }
     this.#projects.set(project, held);
