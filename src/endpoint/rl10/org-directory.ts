@@ -2,9 +2,15 @@
 // org's directory in DX2's `org` shape, and the head's revocation set.
 //
 // The directory. RL1 carries no `org` frame, so the endpoint builds DX2's from the head: a hub project for each of the
-// state's `projects`, and for each machine name (enrolled machines, and live certificates, by name) the machine's own
-// project, as the hub's directory lists them; `machines` the same names. A machine's `online` is unknown on RL1 and goes
-// as `false`, with `seen` the newest event time the endpoint has relayed from that machine's writers.
+// state's `projects`, and for each machine name (enrolled machines, and certificates under a live delegation, by name)
+// the machine's own project, as the hub's directory lists them; `machines` the same names. A machine's `online` is unknown
+// on RL1 and goes as `false`, with `seen` the newest event time the endpoint has relayed from that machine's writers.
+// A machine the head doesn't enroll and no certificate stands for any more (each retired, revoked or expired:
+// `standingCertNames`) has retired, such as a deleted devcloud VM: its project goes `retired: true` and its `machines`
+// entry carries `retired: true`, an optional field an older sminos passes by. Its name stays listed, so sminos can tell a
+// retired machine from one it was never told of; one that is only offline is not retired. An enrolled machine goes by
+// each name `machineNames` binds to its ref, its former names too: the ref still signs under them (`machineSigners`), so
+// a certificate bearing one, forged or not, never retires it.
 //
 // The revocation set, whole each time, never a delta, so it survives a restart on either side: `keys`, every key id the
 // head revokes and every certificate's under a revoked delegation; `devices`, the ids of devices whose revoked keys they
@@ -12,17 +18,17 @@
 // sminos matches a stored signer by any of the three (`signer_revoked`), so a device id or member id still in the head is
 // never named: one member's revoked device must not revoke their other device's words.
 import { machineProjectId } from 'desk-hub/protocol';
-import { isMachineCert, isSigned, keyId, machineNameKey, type Certificates, type OrgState } from 'org-protocol';
+import { isMachineCert, isSigned, keyId, machineNameKey, standingCertNames, type Certificates, type OrgState } from 'org-protocol';
 
 export type OrgDirectory = {
   t: 'org';
   projects: Array<{ id: string; name: string; kind: 'hub' | 'machine'; machine?: string; retired: boolean }>;
-  machines: Array<{ name: string; online: boolean; seen: string | null }>;
+  machines: Array<{ name: string; online: boolean; seen: string | null; retired?: true }>;
 };
 
 export type RevocationSet = { version: number; devices: string[]; members: string[]; keys: string[] };
 
-/** The names the machines of the head go by: enrolled machines', and live certificates' (as `machineSigners` reads them). */
+/** The names the machines of the head go by: enrolled machines', and those of certificates under a live delegation. */
 function machineNames(head: OrgState, certificates: Certificates, now: Date): string[] {
   const names = new Map<string, string>();
   for (const m of head.machines) names.set(machineNameKey(m.name), m.name);
@@ -35,15 +41,19 @@ function machineNames(head: OrgState, certificates: Certificates, now: Date): st
 }
 
 /** DX2's `org` frame from the head; `seen` gives each machine name's newest relayed event time. */
-export function orgDirectory(head: OrgState, certificates: Certificates, now: Date, seen: (name: string) => string | null): OrgDirectory {
+export async function orgDirectory(head: OrgState, certificates: Certificates, now: Date, seen: (name: string) => string | null): Promise<OrgDirectory> {
   const names = machineNames(head, certificates, now);
+  const refs = new Set(head.machines.map((m) => m.ref));
+  const enrolled = new Set([...head.machines, ...head.machineNames.filter((p) => refs.has(p.ref))].map((m) => machineNameKey(m.name)));
+  const standing = await standingCertNames(head, certificates, now);
+  const retired = (name: string) => !enrolled.has(machineNameKey(name)) && !standing.has(machineNameKey(name));
   return {
     t: 'org',
     projects: [
       ...head.projects.map((p) => ({ id: p.id, name: p.name, kind: 'hub' as const, retired: false })),
-      ...names.map((name) => ({ id: machineProjectId(head.org, name), name, kind: 'machine' as const, machine: name, retired: false })),
+      ...names.map((name) => ({ id: machineProjectId(head.org, name), name, kind: 'machine' as const, machine: name, retired: retired(name) })),
     ],
-    machines: names.map((name) => ({ name, online: false, seen: seen(name) })),
+    machines: names.map((name) => ({ name, online: false, seen: seen(name), ...(retired(name) ? { retired: true as const } : {}) })),
   };
 }
 

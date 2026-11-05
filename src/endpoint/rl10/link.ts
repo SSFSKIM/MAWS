@@ -108,6 +108,8 @@ export class Rl10 {
   readonly #said = new Set<string>();
   /** What this connection was last told of the head (a restatement goes only when it changed). */
   #told: { revoked: string; org: string } | null = null;
+  /** The last restatement queued (`#restate`). */
+  #restating: Promise<void> = Promise.resolve();
   #welcomed = false;
   #wanted = false;
   #changing: Promise<void> = Promise.resolve();
@@ -422,16 +424,24 @@ export class Rl10 {
     }
   }
 
-  /** The revocation set and the directory, sent when `always` or when they changed since this connection was told. */
-  async #restate(always: boolean): Promise<void> {
-    const head = this.#ctx.head();
-    if (head === null) return;
-    const revoked: RevocationSet = await revocationSet(head.state, head.certificates);
-    const org = orgDirectory(head.state, head.certificates, new Date(this.#ctx.now()), (name) => this.relay.seen(name));
-    const told = { revoked: JSON.stringify(revoked), org: JSON.stringify(org) };
-    if (always || this.#told?.revoked !== told.revoked) this.send({ t: 'revoked', ...revoked });
-    if (always || this.#told?.org !== told.org) this.send(org);
-    this.#told = told;
+  /**
+   * The revocation set and the directory, sent when `always` or when they changed since this connection was told. One
+   * restatement at a time, each reading the head as it starts: the head's listeners don't await `adopted`, and one begun
+   * on an older head that finished last would leave sminos told of it. A failed one leaves the next to run.
+   */
+  #restate(always: boolean): Promise<void> {
+    const run = this.#restating.then(async () => {
+      const head = this.#ctx.head();
+      if (head === null) return;
+      const revoked: RevocationSet = await revocationSet(head.state, head.certificates);
+      const org = await orgDirectory(head.state, head.certificates, new Date(this.#ctx.now()), (name) => this.relay.seen(name));
+      const told = { revoked: JSON.stringify(revoked), org: JSON.stringify(org) };
+      if (always || this.#told?.revoked !== told.revoked) this.send({ t: 'revoked', ...revoked });
+      if (always || this.#told?.org !== told.org) this.send(org);
+      this.#told = told;
+    });
+    this.#restating = run.catch(() => {});
+    return run;
   }
 
   async #frame(connection: Rl10Connection, frame: Frame): Promise<void> {

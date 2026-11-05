@@ -239,6 +239,17 @@ export async function machineKeys(state: OrgState, ref: string, set: Certificate
 }
 
 /**
+ * The names (`machineNameKey`) a certificate still stands for at `now`: one authentic, its key not revoked, and its
+ * `notAfter` (its delegation's `expires`, or its retirement's if sooner) still ahead. A machine the state doesn't enroll
+ * and none of these names has retired; the endpoint's RL10 directory says so to sminos (O10).
+ */
+export async function standingCertNames(state: OrgState, set: Certificates, now: Date): Promise<Set<string>> {
+  if (!isCertificates(set)) return new Set();
+  const views = await certViews(state, set, now);
+  return new Set(views.filter((v) => now.getTime() < Date.parse(v.notAfter)).map((v) => machineNameKey(v.body.name)));
+}
+
+/**
  * The keys allowed to sign as a machine writer `<name>/…` (RL8): those of the ref `machineNames` gives the name — its
  * entry's current key unless the ref is contested, and its retired keys — and those of every certificate bearing the
  * name, live and uncontested, or retired or expired, each bound to its own ref by its own certificate.
