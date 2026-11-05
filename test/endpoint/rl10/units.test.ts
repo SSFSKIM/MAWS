@@ -1,18 +1,20 @@
 // RL10's parts the conversation replay (conversation.local.test.ts) can't reach on one run (O10 M6): the upload form and
 // its derived `created`, the signature ledger and the inbound index across a restart (a torn last line, the 30-day
-// window), the head's revocation set, and the socket itself (its token, its modes, its long-path fallback).
+// window), the head's revocation set and the directory's retired machines, and the socket itself (its token, its modes,
+// its long-path fallback).
 import * as fs from 'node:fs';
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { revocationSet } from '../../../src/endpoint/rl10/org-directory';
+import { orgDirectory, revocationSet, type OrgDirectory } from '../../../src/endpoint/rl10/org-directory';
 import { InboundIndex, INBOUND_KEPT_MS } from '../../../src/endpoint/rl10/inbound-index';
 import { HOLD_MAX, HOLD_MS, LogRelay, type RelayContext } from '../../../src/endpoint/rl10/log-relay';
 import { Rl10Server, socketPath, type Frame } from '../../../src/endpoint/rl10/server';
 import { createdOf, SignatureLedger, uploadForm } from '../../../src/endpoint/rl10/signature-ledger';
+import { mintRef } from '../fake-services';
 import { genesis, memberId, newDevice, revokedDevice, successor } from '../org-fixtures';
-import { base64urlEncode, generateSigningKey } from 'org-protocol';
+import { base64urlEncode, generateSigningKey, keyId, signRecord, SIGNING_DOMAINS, type Certificates, type SigningKey } from 'org-protocol';
 
 const dirs: string[] = [];
 const scratch = (prefix = 'rl10-') => {
@@ -109,6 +111,105 @@ describe('the revocation set', () => {
     // B keeps b2: naming B would revoke b2's words too.
     expect(set.members).toEqual([C]);
     expect(set.keys).toEqual([...revokedB1, ...revokedC1].map((r) => r.keyId).sort());
+  });
+});
+
+describe("the directory's retired machines", () => {
+  // A head with one `dc-` delegation, its certificate set, and how to add a certificate to it (its delegation signing,
+  // unless another key is given) or retire one.
+  async function delegated() {
+    const a1 = await newDevice('a1');
+    const A = memberId();
+    const delegation = { id: memberId(), key: await generateSigningKey() };
+    let head = await genesis('org-d', A, a1, await generateSigningKey());
+    head = await successor(head, [a1], (s) => {
+      s.delegations.push({ id: delegation.id, pub: delegation.key.pub, prefix: 'dc-', expires: new Date(Date.now() + 86_400_000).toISOString(), maxUses: 10, offlineRevokeS: 0, owners: [A] });
+    });
+    const certificates: Certificates = { certs: [], retirements: [] };
+    let use = 0;
+    const certify = async (name: string, signer: SigningKey = delegation.key): Promise<SigningKey> => {
+      const key = await generateSigningKey();
+      const body = { org: 'org-d', machine: mintRef(delegation.id), name, pub: key.pub, delegation: delegation.id, use: ++use, issued: new Date().toISOString() };
+      certificates.certs.push(await signRecord(SIGNING_DOMAINS.machineCert, body, signer.privateKey, signer.pub));
+      return key;
+    };
+    const retire = async (key: SigningKey, notAfter: string) => {
+      const body = { org: 'org-d', keyId: await keyId(key.pub), notAfter };
+      certificates.retirements.push(await signRecord(SIGNING_DOMAINS.certRetire, body, delegation.key.privateKey, delegation.key.pub));
+    };
+    return { A, a1, head, certificates, certify, retire };
+  }
+  const now = () => new Date();
+  const entries = (d: OrgDirectory, name: string) => ({ project: d.projects.find((p) => p.name === name), machine: d.machines.find((m) => m.name === name) });
+
+  it('marks a certificate-only machine whose only certificate retired, on its project and its machines entry', async () => {
+    const { head, certificates, certify, retire } = await delegated();
+    await retire(await certify('dc-gone'), new Date(Date.now() - 60_000).toISOString());
+    await certify('dc-up');
+    const d = await orgDirectory(head.state, certificates, now(), () => null);
+    expect(entries(d, 'dc-gone')).toEqual({
+      project: expect.objectContaining({ kind: 'machine', machine: 'dc-gone', retired: true }),
+      machine: { name: 'dc-gone', online: false, seen: null, retired: true },
+    });
+    // One that is only offline is not retired, and its entry carries no field.
+    expect(entries(d, 'dc-up')).toEqual({
+      project: expect.objectContaining({ kind: 'machine', machine: 'dc-up', retired: false }),
+      machine: { name: 'dc-up', online: false, seen: null },
+    });
+  });
+
+  it('keeps a machine one of whose certificates still stands', async () => {
+    const { head, certificates, certify, retire } = await delegated();
+    await retire(await certify('dc-twice'), new Date(Date.now() - 60_000).toISOString());
+    await certify('dc-twice');
+    const d = await orgDirectory(head.state, certificates, now(), () => null);
+    expect(entries(d, 'dc-twice').project?.retired).toBe(false);
+    expect(entries(d, 'dc-twice').machine).not.toHaveProperty('retired');
+  });
+
+  it('never retires an enrolled machine, which holds no certificate', async () => {
+    const { a1, A, certificates, head: before } = await delegated();
+    const head = await successor(before, [a1], (s) => {
+      s.machines.push({ name: 'mini', ref: mintRef(), pub: base64urlEncode(new Uint8Array(32).fill(7)), owners: [A] });
+    });
+    const d = await orgDirectory(head.state, certificates, now(), () => '2026-11-05T00:00:00.000Z');
+    expect(entries(d, 'mini')).toEqual({
+      project: expect.objectContaining({ kind: 'machine', machine: 'mini', retired: false }),
+      machine: { name: 'mini', online: false, seen: '2026-11-05T00:00:00.000Z' },
+    });
+  });
+
+  it('never retires an enrolled machine under a name it went by, though a certificate its delegation did not sign bears it', async () => {
+    const { a1, A, certificates, certify, head: before } = await delegated();
+    const ref = mintRef();
+    const head = await successor(before, [a1], (s) => {
+      s.machines.push({ name: 'studio', ref, pub: base64urlEncode(new Uint8Array(32).fill(7)), owners: [A] });
+      s.machineNames.push({ name: 'mini', ref }, { name: 'studio', ref });
+    });
+    // The ref still speaks under its former name (`machineSigners`); a forged certificate bearing it lists the name.
+    await certify('mini', await generateSigningKey());
+    const d = await orgDirectory(head.state, certificates, now(), () => null);
+    expect(entries(d, 'mini')).toEqual({
+      project: expect.objectContaining({ kind: 'machine', machine: 'mini', retired: false }),
+      machine: { name: 'mini', online: false, seen: null },
+    });
+  });
+
+  it('does not retire a machine before its retirement takes effect, and does once it has', async () => {
+    const { head, certificates, certify, retire } = await delegated();
+    const at = Date.now() + 3_600_000;
+    await retire(await certify('dc-soon'), new Date(at).toISOString());
+    expect(entries(await orgDirectory(head.state, certificates, now(), () => null), 'dc-soon').project?.retired).toBe(false);
+    expect(entries(await orgDirectory(head.state, certificates, new Date(at), () => null), 'dc-soon').project?.retired).toBe(true);
+  });
+
+  it('takes no retirement its delegation did not sign', async () => {
+    const { head, certificates, certify } = await delegated();
+    const key = await certify('dc-forged');
+    const other = await generateSigningKey();
+    const body = { org: 'org-d', keyId: await keyId(key.pub), notAfter: new Date(Date.now() - 60_000).toISOString() };
+    certificates.retirements.push(await signRecord(SIGNING_DOMAINS.certRetire, body, other.privateKey, other.pub));
+    expect(entries(await orgDirectory(head.state, certificates, now(), () => null), 'dc-forged').project?.retired).toBe(false);
   });
 });
 

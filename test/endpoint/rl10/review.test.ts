@@ -2,7 +2,8 @@
 // left, words past the head's backstop, words decided across a head that moved, an upload signed twice across a
 // connection's replacement, a torn ledger line that swallows the next, another org's legacy key, a departure that
 // never withdraws, a withdrawal that forgets before it settles, a host mark moved before its `wrote` went, and a
-// delegated machine's signer named by another certificate's ref.
+// delegated machine's signer named by another certificate's ref. From MAWS #474's review: a restatement begun on an
+// older head landing after a newer one's.
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -423,5 +424,40 @@ describe('round 2', () => {
       expect(up).toEqual([]);
       expect(r.holding).toBe(1);
     });
+  });
+});
+
+describe("the directory's restatements (MAWS #474's review)", () => {
+  it('lands a restatement begun on an older head before the next one, never after it', async () => {
+    const { a1, head } = await org();
+    const d = await generateSigningKey();
+    const delegation = memberId();
+    const later = await successor(head, [a1], (s) => {
+      s.delegations.push({ id: delegation, pub: d.pub, prefix: 'vm-', expires: iso(Date.now() + 86_400_000), maxUses: 5, offlineRevokeS: 0, owners: [s.members[0].id] });
+    });
+    const body = { org: ORG, machine: `${delegation}_${'c'.repeat(22)}`, name: 'vm-one', pub: (await generateSigningKey()).pub, delegation, use: 1, issued: iso(Date.now() - 60_000) };
+    const certificates: Certificates = { certs: [await signRecord(SIGNING_DOMAINS.machineCert, body, d.privateKey, d.pub)], retirements: [] };
+    const [certified, bare] = [{ state: later.state, certificates }, { state: later.state, certificates: NO_CERTS }];
+    let current = bare;
+    let read = () => {};
+    const { rl10, sminos } = await served({
+      head: () => {
+        read();
+        return current;
+      },
+    });
+    await sminos.next((f) => f.t === 'org', "the welcome's directory");
+    // The first restatement reads a head whose directory takes a signature check to build, and the head moves on while it
+    // builds, to one whose directory takes none: the endpoint's head listeners call `adopted` without awaiting it.
+    current = certified;
+    const reading = new Promise<void>((resolve) => (read = () => resolve()));
+    const first = rl10.adopted();
+    await reading;
+    current = bare;
+    await Promise.all([first, rl10.adopted()]);
+    rl10.send({ t: 'mark' });
+    await sminos.next((f) => f.t === 'mark', 'the mark');
+    const told = sminos.received.filter((f) => f.t === 'org').map((f) => (f.machines as Array<{ name: string }>).map((m) => m.name));
+    expect(told).toEqual([['host'], ['host', 'vm-one'], ['host']]);
   });
 });
