@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { IDENTITY_HEADER } from '../../../apps/desk-hub/local/standin';
 import { genesis, memberId, newDevice, successor, type TestDevice } from '../../../test/endpoint/org-fixtures';
 import { loadDeviceKeys } from '../device/keys';
+import type { HeldOrgView } from '../device/step-up';
 import { DEVICE_CAPABILITIES } from '../machines/remote/capabilities';
 import { createDevOrgSession, STANDIN_HEADER } from './dev-session';
 
@@ -48,8 +49,8 @@ async function setup(options: { listKey?: 'mine' | 'other'; hub?: { url: string;
   );
   writeFileSync(join(dir, 'chain.json'), JSON.stringify({ chain, transitions: [] }));
   const logs: string[] = [];
-  const made = (packaged = false) =>
-    createDevOrgSession({ dir, userData, packaged, build: 'dev', stepUp: () => ({ sign: async () => ({ ok: false, reason: 'cancelled' }) }), loadKeys, log: (l) => void logs.push(l) });
+  const refusing: Parameters<typeof createDevOrgSession>[0]['stepUp'] = () => ({ sign: async () => ({ ok: false, reason: 'cancelled' }) });
+  const made = (packaged = false, stepUp = refusing) => createDevOrgSession({ dir, userData, packaged, build: 'dev', stepUp, loadKeys, log: (l) => void logs.push(l) });
   return { made, logs, keys, A };
 }
 
@@ -80,6 +81,16 @@ describe('the development org session', () => {
     expect(signedIn.view.head().state.version).toBe(2);
     expect(signedIn.hub!.url).toBe('http://127.0.0.1:8787');
     expect(await signedIn.hub!.headers()).toEqual({ [IDENTITY_HEADER]: 'owner@example.com' });
+  });
+
+  // P5 O7 M10 B: the step-up judges an owned machine's spawn on the head the session holds
+  it('hands the step-up the view it holds', async () => {
+    const s = await setup();
+    const held: HeldOrgView[] = [];
+    const session = s.made(false, (_keys, _device, org) => (held.push(org), { sign: async () => ({ ok: false, reason: 'cancelled' }) }));
+    await session.loaded;
+    expect(held).toHaveLength(1);
+    expect(held[0]!()).toBe(session.current()!.view);
   });
 
   it('stays signed out, saying why, for a chain that doesn’t verify', async () => {

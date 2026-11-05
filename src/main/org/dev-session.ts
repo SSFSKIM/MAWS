@@ -18,6 +18,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isCertificates, keyId, memoryOrgView, NO_CERTIFICATES, verifyPinnedChain, type OrgView } from '../../../apps/org-protocol/src/index.ts';
 import { loadDeviceKeys, type DeviceKeys } from '../device/keys';
+import type { HeldOrgView } from '../device/step-up';
 import { DEVICE_CAPABILITIES } from '../machines/remote/capabilities';
 import { watchedView, type OrgSession, type SignedIn } from './session';
 
@@ -59,7 +60,7 @@ export function createDevOrgSession(input: {
   userData: string;
   packaged: boolean;
   build: string;
-  stepUp: (keys: DeviceKeys, device: { org: string; device: string }) => SignedIn['stepUp'];
+  stepUp: (keys: DeviceKeys, device: { org: string; device: string }, org: HeldOrgView) => SignedIn['stepUp'];
   loadKeys?: typeof loadDeviceKeys;
   log(line: string): void;
 }): OrgSession & { loaded: Promise<void>; directMap(): Readonly<Record<string, string>> } {
@@ -122,7 +123,7 @@ export function createDevOrgSession(input: {
     held = {
       identity: { org: file.org, member: file.member, device: file.device, clientClass: 'native-mac', channelKey: keys.channel, build: input.build, capabilities: [...DEVICE_CAPABILITIES] },
       view,
-      stepUp: input.stepUp(keys, { org: file.org, device: file.device }),
+      stepUp: input.stepUp(keys, { org: file.org, device: file.device }, () => view),
       hub:
         hub === null
           ? null

@@ -77,7 +77,7 @@ import {
   type DeviceKeys,
   type DeviceKeysDeps,
 } from '../device/keys';
-import type { StateSigner } from '../device/step-up';
+import type { HeldOrgView, StateSigner } from '../device/step-up';
 import { DEVICE_CAPABILITIES } from '../machines/remote/capabilities';
 import { cloudflareLoginTransfer, hubAdmission, hubHeaders, standinLogin, tokenClaims, AccessLoginError, type AccessLogin, type HubCredential } from './access-login';
 import {
@@ -180,7 +180,8 @@ export interface OrgSessionDeps {
   env: NodeJS.ProcessEnv;
   /** main's openExternalUrl. */
   openExternal(url: string): boolean;
-  stepUp(keys: DeviceKeys, device: { org: string; device: string }): SignedIn['stepUp'];
+  /** `org`: the head the session holds, read at each signature (P5 O7 M10 B: an owned machine's spawn is signed unasked). */
+  stepUp(keys: DeviceKeys, device: { org: string; device: string }, org: HeldOrgView): SignedIn['stepUp'];
   /** Tests inject one with excludeFromBackup stubbed. */
   loadKeys?: typeof loadDeviceKeys;
   excludeFromBackup?(path: string): Promise<boolean>;
@@ -388,7 +389,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       value = {
         identity: { org: reg.org, member: reg.member.id, device: reg.device, clientClass: 'native-mac', channelKey: k.channel, build: deps.build, capabilities: [...DEVICE_CAPABILITIES] },
         view: held!,
-        stepUp: deps.stepUp(k, { org: reg.org, device: reg.device }),
+        // read at each signature, never captured: the session may hold another view by then
+        stepUp: deps.stepUp(k, { org: reg.org, device: reg.device }, () => (held !== null && held.ready() ? held : null)),
         hub: live ? hubAccessFor(credential!, reg.hub) : null,
       };
     }
