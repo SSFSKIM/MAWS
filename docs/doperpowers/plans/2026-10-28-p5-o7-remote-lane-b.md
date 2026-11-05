@@ -2954,6 +2954,25 @@ P5 findings of M5's re-plan, continued from F15:
   - **A refusal.** The live spec writes `remote-latency-live.json` with the reason and both loads, annotates the run, and skips the test with the reason, so the run reads as skipped, never failed. Both loads also go into a measured run's JSON (`load.precheck`).
   Rationale: M10's *The precheck*; Rule B (test/support/daemon-idle.ts).
   Date/Author: 2026-11-05, O7's M10 executor.
+- Decision: A, a remote session's activity time, verified and built to parity (2026-11-05; c97335a52, c0a81e1d2). All four of the architect's points hold.
+  - **No digest.** Only `spine-mirror.ts` emits `session.digest`, so a lane B record's `lastActivity` fell back to its `updatedAt`.
+  - **The listing hidden.** The record hides its listing's `issued`.
+  - **The cut.** After the spawned-here lead the cap cuts the session. And an unread record with no digest was keyed `-time(undefined)` = +Infinity, last among the unread.
+  - **The old e2e.** M8's e2e pinned nine sessions, so recency never decided.
+  - **The record freezes once its tab closes.** It reaches the renderer only through the lane B fold, while a tab holds the address plus the 10 s linger. After that only the listing (re-issued at each state change) and the attention feed arrive. So the activity time is built from what does arrive.
+  - **The fix.**
+    - A remote record with no turn times of its own takes the newest of the received `updatedAt`, the listing's `issued`, and the turns this window saw on its stream (`turnsSeen`, fed only by other machines' event batches; turns are counted as the digest counts them, never move backwards, and are forgotten with the record).
+    - An unread record with no digest ranks among the unread by that time.
+    - Local and digested sessions rank as before.
+    - The time is read by the sidebar's and the project rows' order, the row's age, the hover card, the palette and Resume….
+  - **Unread or read: which the live session was.** The live failure's mechanism was most likely the unread one. A lane B record's `unread` is this window's own mark (`lane-b/read-marks.ts`; `session.setVisible` isn't offered over RL2). It turns unread when a turn ends off screen while the stream is held, so a session whose turn ended while the owner looked away was unread and sank to tenth place.
+    - **The read case stays by parity.** A remote session read on screen when its turn ended still ranks behind unread local sessions, as a local one does. This is a known limit.
+  - **The e2e.** M8's e2e now reproduces the unread case: nine older unread idle local fillers, the remote tab put in the background before the turn ends, then closed by a middle click. It asserts the remote row is visible, unread, first, and one of five drawn. `e2e:remote` runs on CI both on a probe with A's ranking reverted and on the fix.
+  - **Left as parity gaps:**
+    - a busy remote record ranks by recency, not as working (the record hides the listing's `busy`);
+    - the Overview cards and the New chat project picker are unchanged.
+  Rationale: A's two reports; `src/renderer/src/overview/derive.ts`, `lane-b/read-marks.ts`, `src/main/lane-b/remote-session.ts`.
+  Date/Author: 2026-11-05, O7's M10 executor (the controller).
 - Decision: B, an owned-machine spawn without Touch ID, built in main's signer (2026-11-05; b1d9b193c).
   - **Where it is decided.** The exemption is decided in `createStepUp.sign` on the frozen action it signs, the place where the action's name and machine are bound. So no flag reaches the signer's interface, and the renderer has no lever. The renderer cases are tested: flags on the request, claims in the args, name lookalikes, and a spawn with a session or context.
   - **Who owns the machine.** It is decided as the endpoint and `attest.ts` decide it: `ownerMembers(machineOwners(...))` on the held head, read through a getter at signing time. The member is the one the head lists this device id and this step-up key under, never `identity.member`. With no getter, every act prompts. A judgment that fails prompts.
