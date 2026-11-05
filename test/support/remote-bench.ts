@@ -22,16 +22,22 @@
 //      harness's fake sminos on the scratch RL10 socket (e2e:remote's pattern), streaming the stub's samples back;
 //   3. enroll: the code file streamed by its descriptor into `<transport> '<mawsd> enroll --profile … --label … --name
 //      <name> --json'` (mawsd reads stdin without a TTY; no `--wait`, so it returns once the machine has posted its key),
-//      the code file removed whatever the outcome; the machine's key id shown as soon as `mawsd keys` reads it, for the
-//      owner to compare with their terminal's before they type y; exit 4 then waited out by polling `endpoint status`
-//      until org-listed, within the code's TTL of the key shown;
+//      the code file removed whatever the outcome; the machine's key id shown as soon as `keys` reads it (its flat
+//      answer's `keyId`), for the owner to compare with their terminal's before they type y; exit 4 then waited out by
+//      asking `endpoint sync` (the org state read now, the listing promoted) until org-listed, within the code's TTL of
+//      the key shown;
 //   4. teardown, on every path: the agent ended (its stdin's end stops its session and ends its stubs; killed when it
-//      outlives that, its exit waited for); on the VM the daemon stopped by its pid once that pid is shown to be the
-//      daemon's (registered before its launch: no pid recorded is unverified), then its hosts told to exit through their
-//      own sockets, any process still naming the profile ended by its pid and start time, and the process check; every
-//      step attempted, the first failure thrown; the profile kept until the bench is done (`removeProfile`), so a rerun
+//      outlives that, its exit waited for), then the watch; on the VM the daemon stopped by its pid once that pid is
+//      shown to be the daemon's (registered before its launch: no pid recorded is unverified), on the mini mini-ops'
+//      stop said and the daemon's absence waited for; then, on both, its hosts told to exit through their own sockets,
+//      any process still naming the profile ended by its pid and start time, and the process check; every step
+//      attempted, the first failure thrown; the profile kept until the bench is done (`removeProfile`), so a rerun
 //      reuses the enrollment, and then removed only once the same end leaves no process on the machine naming it (pgrep,
 //      failing closed; on the mini, once mini-ops has stopped its daemon), else refused and kept.
+//
+// One status client per run (M10): from the stage's start, every read of the daemon's state (whether it answers, its
+// enrollment, its key, the listing) is a line to the agent's `watch`, one runtime holding one machine.sock link for the
+// run, rather than a fresh ssh and a fresh MAWS runtime per poll (attempt 2's 25 machine.sock clients in five minutes).
 //
 // The machine's bounds (the desk track's conditions of 2026-11-02): every command writes and opens only under the
 // scratch profile (normalized and strictly under the machine's scratch root, its path checked for symlinks before any
@@ -51,6 +57,7 @@
 import { spawn } from 'node:child_process';
 import { closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, posix } from 'node:path';
+import { IDLE_RUN } from './daemon-idle';
 
 export type Transport = { kind: 'ssh'; host: string } | { kind: 'devcloud'; vm: string };
 
@@ -144,6 +151,11 @@ export const ENROLL_WAIT_S = 900; // the code's TTL
 const KEY_WITHIN_MS = 60_000;
 const STATUS_EVERY_MS = 5_000;
 const START_WITHIN_MS = 10 * 60_000; // mini-ops' start, or the VM's pack's mawsd, answering
+/** How long the mini's teardown waits for its scratch mawsd's absence once mini-ops' stop is said. */
+export const STOP_WITHIN_MS = 10 * 60_000;
+/** The watch's own deadline for an ask (src/mawsd's: 10 s a request, 90 s a sync), and this side's grace beyond it. */
+const WATCH_ASK_MS = { up: 10_000, status: 10_000, keys: 10_000, sync: 90_000 } as const;
+type WatchAsk = keyof typeof WATCH_ASK_MS;
 /** Variables the runner never passes on: sminos picks its endpoint from them, so they belong to the fake and the scratch daemon. */
 export const WITHHELD_ENV = ['SMINOS_RL10', 'MAWS_USER_DATA'] as const;
 
@@ -273,7 +285,7 @@ const mawsdEntry = (m: BenchMachine) => (m.stage === 'runner' ? `"$(cat ${quote(
 /** A command of the scratch daemon's (status, keys, enroll), in the profile's scratch environment. */
 const mawsd = (m: BenchMachine) => `${scratchEnv(m)} ${mawsdEntry(m)}`;
 /** The bench agent's command, on the machine's runtime. */
-const agent = (m: BenchMachine, command: 'prepare' | 'serve' | 'stop-hosts', engineVersion: string, deadline?: number) => `${scratchEnv(m)} ${runtimeWords(m)} ${quote(`${benchDir(m)}/bench-agent.cjs`)} ${command} ${quote(agentArgs(m, engineVersion, deadline))}`;
+const agent = (m: BenchMachine, command: 'prepare' | 'serve' | 'watch' | 'stop-hosts', engineVersion: string, deadline?: number) => `${scratchEnv(m)} ${runtimeWords(m)} ${quote(`${benchDir(m)}/bench-agent.cjs`)} ${command} ${quote(agentArgs(m, engineVersion, deadline))}`;
 const scoped = (m: BenchMachine) => `--profile ${quote(m.profile)} --label ${quote(m.label)}`;
 
 /**
@@ -429,6 +441,18 @@ const afterFor = (ms: number, fn: () => void) => {
   return () => clearTimeout(timer);
 };
 
+/** A watch's answer to one ask: its value, or the error it said (the daemon not answering it). */
+type WatchReply = { answer: unknown } | { error: string };
+
+/** The run's one status client: the agent's `watch`, its asks in flight by id. */
+interface Watch {
+  started: Started;
+  pending: Map<number, (reply: WatchReply | 'gone') => void>;
+  next: number;
+  exited: boolean;
+  ending: Promise<void> | null;
+}
+
 /** The bench's hold on one machine: each step, and the teardown its steps registered, last first. */
 export class BenchRun {
   readonly #m: BenchMachine;
@@ -436,6 +460,7 @@ export class BenchRun {
   readonly #teardown: { what: string; step: () => Promise<void> }[] = [];
   #agent: Started | null = null;
   #ending: Promise<void> | null = null;
+  #watch: Watch | null = null;
 
   constructor(machine: BenchMachine, deps: BenchDeps) {
     const problems = machineProblems(machine);
@@ -480,6 +505,9 @@ export class BenchRun {
   }
   #sleep(ms: number) {
     return (this.#deps.sleep ?? sleepFor)(ms);
+  }
+  #after(ms: number, fn: () => void) {
+    return (this.#deps.after ?? afterFor)(ms, fn);
   }
   #now() {
     return (this.#deps.now ?? Date.now)();
@@ -546,34 +574,35 @@ export class BenchRun {
   async stage(archive?: HeadBundle): Promise<void> {
     const m = this.#m;
     await this.#scratchReady();
-    if (m.stage === 'runner') {
-      if (!(await this.#prepared())) throw new Error(`${m.name}: not prepared at ${m.commit.slice(0, 9)}: run prepare-vm before the sitting (MAWS_REMOTE_BENCH_PREPARE=1)`);
-      // before the launch, so a launch whose answer is lost is still stopped, or its stop fails as unverified; the hosts'
-      // end runs after the daemon's (the last registered first), once nothing can wake them again
-      this.#teardown.push({
-        what: 'the scratch hosts and every process naming the profile',
-        step: async () => {
-          const left = await this.#endScratchProcesses();
-          if (left === 'daemon') throw new Error(`${m.name}: the scratch mawsd still runs, so its hosts are not ended`);
-          if (left.length > 0) throw new Error(`${m.name}: ${left.length} process${left.length === 1 ? '' : 'es'} naming the scratch profile still run${left.length === 1 ? 's' : ''} (pid${left.length === 1 ? '' : 's'} ${left.join(', ')})`);
-        },
-      });
-      this.#teardown.push({ what: 'the scratch mawsd', step: () => this.#stopDaemon() });
-      await this.#must(startLine(m, mawsdEntry(m)), 'starting the scratch mawsd');
-    } else {
-      if (stageHeadOf(m) === 'copy') {
-        if (archive === undefined) throw new Error(`${m.name}: its head is copied (stageHead copy), and no head bundle was built`);
-        await this.#copyHead(archive);
-      }
+    if (m.stage === 'runner' && !(await this.#prepared())) throw new Error(`${m.name}: not prepared at ${m.commit.slice(0, 9)}: run prepare-vm before the sitting (MAWS_REMOTE_BENCH_PREPARE=1)`);
+    if (m.stage === 'mini-ops' && stageHeadOf(m) === 'copy') {
+      if (archive === undefined) throw new Error(`${m.name}: its head is copied (stageHead copy), and no head bundle was built`);
+      await this.#copyHead(archive);
+    }
+    // The hosts' end, on both machines, runs after the daemon's (the last registered first), once nothing can wake them
+    // again: on the mini too (M10), whose detached scratch engine host outlived mini-ops' stop in attempt 2.
+    this.#teardown.push({
+      what: 'the scratch hosts and every process naming the profile',
+      step: async () => {
+        const left = await this.#endScratchProcesses();
+        if (left === 'daemon') throw new Error(`${m.name}: the scratch mawsd still runs, so its hosts are not ended`);
+        if (left.length > 0) throw new Error(`${m.name}: ${left.length} process${left.length === 1 ? '' : 'es'} naming the scratch profile still run${left.length === 1 ? 's' : ''} (pid${left.length === 1 ? '' : 's'} ${left.join(', ')})`);
+      },
+    });
+    // the VM's before the launch, so a launch whose answer is lost is still stopped, or its stop fails as unverified
+    this.#teardown.push(m.stage === 'runner' ? { what: 'the scratch mawsd', step: () => this.#stopDaemon() } : { what: 'the scratch mawsd', step: () => this.#miniOpsStop() });
+    // the watch after both, so it is ended before the daemon's stop and the reap (its own command line names the profile)
+    this.#startWatch();
+    if (m.stage === 'runner') await this.#must(startLine(m, mawsdEntry(m)), 'starting the scratch mawsd');
+    else {
       this.#deps.say(`[bench] ${m.name}: mini-ops starts the scratch mawsd from ${m.head} at ${m.commit.slice(0, 9)} under the production mawsd's runtime, with:`);
       this.#deps.say(`[bench]   ${startLine(m, mawsdEntry(m))}`);
       this.#deps.say(`[bench] ${m.name}: waiting for it to answer on ${m.profile}`);
-      this.#teardown.push({ what: 'the scratch mawsd', step: async () => this.#deps.say(`[bench] ${m.name}: mini-ops stops the scratch mawsd, with: ${stopLine(m)}`) });
     }
     const deadline = this.#now() + START_WITHIN_MS;
     for (;;) {
-      const status = await this.#remote(`${mawsd(m)} status ${scoped(m)} --json`);
-      if (status.code === 0) break;
+      const up = (await this.#ask('up')) as { up?: unknown } | null;
+      if (up?.up === true) break;
       if (this.#now() > deadline) throw new Error(`${m.name}: the scratch mawsd did not answer within ${START_WITHIN_MS / 60_000} minutes`);
       await this.#sleep(STATUS_EVERY_MS);
     }
@@ -583,6 +612,108 @@ export class BenchRun {
       if (!args.stdout.includes(`--dir ${m.profile}/mawsd`)) throw new Error(`${m.name}: the recorded pid is not the scratch mawsd's (its command line names no --dir ${m.profile}/mawsd)`);
     }
     this.#deps.say(`[bench] ${m.name}: the scratch mawsd answers`);
+  }
+
+  /**
+   * The mini's daemon stop: mini-ops' stop line said, then the scratch mawsd's absence waited for (`scratchDaemonLine`,
+   * a pgrep, no runtime) up to STOP_WITHIN_MS, so the hosts' end that follows runs on a profile nothing can wake again.
+   */
+  async #miniOpsStop(): Promise<void> {
+    const m = this.#m;
+    this.#deps.say(`[bench] ${m.name}: mini-ops stops the scratch mawsd, with: ${stopLine(m)}`);
+    this.#deps.say(`[bench] ${m.name}: waiting for it to be gone, then its hosts are ended`);
+    const deadline = this.#now() + STOP_WITHIN_MS;
+    for (;;) {
+      const daemon = await this.#remote(scratchDaemonLine(m));
+      if (daemon.code === 0) return;
+      if (daemon.code !== 6) throw new Error(`${m.name}: reading whether the scratch mawsd runs failed (exit ${daemon.code}): whether it is gone is unknown`);
+      if (this.#now() > deadline) throw new Error(`${m.name}: the scratch mawsd still runs ${STOP_WITHIN_MS / 60_000} minutes after mini-ops' stop was asked`);
+      await this.#sleep(STATUS_EVERY_MS);
+    }
+  }
+
+  /**
+   * The run's one status client, the agent's `watch`, started at the stage's start and kept to the run's end: its own
+   * deadline before the next quiet window (as serve's), and ended there with its link however long it has run.
+   */
+  #startWatch(): void {
+    const m = this.#m;
+    this.#quiet(REMOTE_CALL_MS);
+    const until = untilQuiet(quietWindows(m), this.#now());
+    const line = agent(m, 'watch', this.#deps.engineVersion, this.#now() + Math.min(SERVE_MAX_MS, until - QUIET_MARGIN_MS));
+    this.#scratchOnly(line);
+    const started = this.#deps.runner.start(transportArgv(m.transport, line));
+    const watch: Watch = { started, pending: new Map(), next: 0, exited: false, ending: null };
+    this.#watch = watch;
+    started.onLine((text) => {
+      let reply: { id?: unknown; answer?: unknown; error?: unknown };
+      try {
+        reply = JSON.parse(text) as typeof reply;
+      } catch {
+        return;
+      }
+      const settle = typeof reply.id === 'number' ? watch.pending.get(reply.id) : undefined;
+      if (settle === undefined) return;
+      watch.pending.delete(reply.id as number);
+      settle(typeof reply.error === 'string' ? { error: reply.error } : { answer: reply.answer });
+    });
+    void started.exited.then(() => {
+      watch.exited = true;
+      for (const settle of watch.pending.values()) settle('gone');
+      watch.pending.clear();
+    });
+    const cancel = Number.isFinite(until)
+      ? this.#after(Math.max(0, until - QUIET_MARGIN_MS), () => {
+          this.#deps.say(`[bench] ${m.name}: its quiet window is ${QUIET_MARGIN_MS / 60_000} minutes off: the status watch is ended now`);
+          this.#endWatch().catch((error: unknown) => this.#deps.say(`[bench] ${m.name}: ending the status watch failed: ${(error as Error).message}`));
+        })
+      : () => undefined;
+    this.#teardown.push({
+      what: 'the status watch',
+      step: async () => {
+        cancel();
+        await this.#endWatch();
+      },
+    });
+  }
+
+  #endWatch(): Promise<void> {
+    const watch = this.#watch;
+    if (watch === null) return Promise.resolve();
+    watch.ending ??= this.#endStarted(watch.started, 'the status watch');
+    return watch.ending;
+  }
+
+  /**
+   * One ask of the watch: its answer, or null when the watch said the daemon did not answer it; throws when there is no
+   * watch, it has ended or exited, or it says nothing within the ask's own deadline and REMOTE_GRACE_MS.
+   */
+  #ask(ask: WatchAsk): Promise<unknown> {
+    const m = this.#m;
+    const watch = this.#watch;
+    if (watch === null) return Promise.reject(new Error(`${m.name}: no status watch runs (the stage starts it)`));
+    if (watch.ending !== null || watch.exited) return Promise.reject(new Error(`${m.name}: the status watch has ended`));
+    const waitMs = WATCH_ASK_MS[ask] + REMOTE_GRACE_MS;
+    this.#quiet(waitMs);
+    const id = ++watch.next;
+    return new Promise((resolve, reject) => {
+      const cancel = this.#after(waitMs, () => {
+        watch.pending.delete(id);
+        reject(new Error(`${m.name}: the status watch did not answer ${ask} within ${waitMs / 1000} s`));
+      });
+      watch.pending.set(id, (reply) => {
+        cancel();
+        if (reply === 'gone') reject(new Error(`${m.name}: the status watch exited before it answered ${ask}`));
+        else resolve('error' in reply ? null : reply.answer);
+      });
+      watch.started.write(JSON.stringify({ id, ask }));
+    });
+  }
+
+  /** An endpoint command's `--json` answer through the watch, parsed when its exit is one of `codes`; null otherwise. */
+  async #endpointAnswer(ask: 'status' | 'keys' | 'sync', codes: readonly number[] = [0]): Promise<string | null> {
+    const answer = (await this.#ask(ask)) as { code?: unknown; out?: unknown } | null;
+    return answer !== null && typeof answer.code === 'number' && codes.includes(answer.code) && typeof answer.out === 'string' ? answer.out : null;
   }
 
   /**
@@ -631,12 +762,15 @@ export class BenchRun {
     if (stopped.code !== 0) throw new Error(`${m.name}: stopping the scratch mawsd failed (exit ${stopped.code})`);
   }
 
-  async #enrollment(): Promise<{ enrollment: string; name?: string; org?: string } | null> {
-    const m = this.#m;
-    const status = await this.#remote(`${mawsd(m)} endpoint status ${scoped(m)} --json`);
-    if (status.code !== 0) return null;
+  /**
+   * The endpoint's enrollment through the watch: `status`, or `sync` (the org state read now and a listing promoted,
+   * exit 4 while hub-confirmed); null when unread.
+   */
+  async #enrollment(ask: 'status' | 'sync' = 'status'): Promise<{ enrollment: string; name?: string; org?: string } | null> {
+    const out = await this.#endpointAnswer(ask, ask === 'sync' ? [0, 4] : [0]);
+    if (out === null) return null;
     try {
-      const { enrollment, name, org } = JSON.parse(status.stdout) as { enrollment: string; name?: string; org?: string };
+      const { enrollment, name, org } = JSON.parse(out) as { enrollment: string; name?: string; org?: string };
       return { enrollment, ...(name === undefined ? {} : { name }), ...(org === undefined ? {} : { org }) };
     } catch {
       return null;
@@ -693,8 +827,8 @@ export class BenchRun {
     if (code === 0) return;
     const deadline = this.#now() + ENROLL_WAIT_S * 1000; // the code's TTL, from the key shown
     for (;;) {
-      // after every wait the decision is asked again: listed now, under this name
-      const now = await this.#enrollment();
+      // after every wait the decision is asked again, by a read of the org state now: listed, under this name
+      const now = await this.#enrollment('sync');
       if (now?.enrollment === 'org-listed' && now.name === m.name) {
         this.#deps.say(`[bench] ${m.name}: listed in ${now.org ?? 'the org'}`);
         return;
@@ -704,15 +838,25 @@ export class BenchRun {
     }
   }
 
-  /** The machine's key id from `mawsd keys`, null before it is posted (or unreadable). */
+  /**
+   * The machine's key id from `mawsd keys --json`, null before it is posted (or unreadable). Its answer is flat
+   * (`keysAnswer`, src/endpoint/answers.ts: `{enrollment, name, org, ref, delegated, keyId, heldKeys}`, `keyId` there once
+   * the machine is enrolled), so the key is its top-level `keyId` (M10: attempt 1 read `{key: {keyId}}`, never there).
+   */
   async #keyId(): Promise<string | null> {
-    const m = this.#m;
-    const keys = await this.#remote(`${mawsd(m)} keys ${scoped(m)} --json`);
-    try {
-      return (JSON.parse(keys.stdout) as { key?: { keyId?: string } | null }).key?.keyId ?? null;
-    } catch {
-      return null;
-    }
+    const keys = await this.#endpointAnswer('keys');
+    return keys === null ? null : keyIdOf(keys);
+  }
+
+  /**
+   * The mini's 1-minute load for the bench's precheck (M10): `sysctl -n vm.loadavg` through its transport, read-only,
+   * with its deadline and quiet window; the reason when it is unread. Null on the VM, whose load the precheck doesn't read.
+   */
+  async load1(): Promise<number | string | null> {
+    if (this.#m.transport.kind !== 'ssh') return null;
+    const read = await this.#remote('sysctl -n vm.loadavg');
+    const load = read.code === 0 ? loadOf(read.stdout) : null;
+    return load ?? `its load could not be read (sysctl exit ${read.code})`;
   }
 
   /**
@@ -755,20 +899,23 @@ export class BenchRun {
   #endAgent(): Promise<void> {
     const serving = this.#agent;
     if (serving === null) return Promise.resolve();
-    this.#ending ??= (async () => {
-      const name = this.#m.name;
-      const exited = serving.exited.then((code) => ({ code }));
-      serving.end();
-      const first = await Promise.race([exited, this.#sleep(AGENT_END_MS).then(() => 'late' as const)]);
-      if (first !== 'late') {
-        if (first.code !== 0) throw new Error(`${name}: the bench agent exited ${first.code ?? 'by a signal'}: its cleanup on the machine is unverified`);
-        return;
-      }
-      serving.kill();
-      if ((await Promise.race([exited, this.#sleep(AGENT_KILLED_MS).then(() => 'late' as const)])) === 'late') throw new Error(`${name}: the bench agent's transport did not exit ${AGENT_KILLED_MS / 1000} s after it was killed`);
-      throw new Error(`${name}: the bench agent was killed: its cleanup on the machine is unverified`);
-    })();
+    this.#ending ??= this.#endStarted(serving, 'the bench agent');
     return this.#ending;
+  }
+
+  /** A started agent process (`what`) ended: its stdin's end, killed when it outlives AGENT_END_MS, its exit waited for. */
+  async #endStarted(serving: Started, what: string): Promise<void> {
+    const name = this.#m.name;
+    const exited = serving.exited.then((code) => ({ code }));
+    serving.end();
+    const first = await Promise.race([exited, this.#sleep(AGENT_END_MS).then(() => 'late' as const)]);
+    if (first !== 'late') {
+      if (first.code !== 0) throw new Error(`${name}: ${what} exited ${first.code ?? 'by a signal'}: its cleanup on the machine is unverified`);
+      return;
+    }
+    serving.kill();
+    if ((await Promise.race([exited, this.#sleep(AGENT_KILLED_MS).then(() => 'late' as const)])) === 'late') throw new Error(`${name}: ${what}'s transport did not exit ${AGENT_KILLED_MS / 1000} s after it was killed`);
+    throw new Error(`${name}: ${what} was killed: its cleanup on the machine is unverified`);
   }
 
   /** Tells the agent the owner's member, so its fake sminos lists the session. */
@@ -870,6 +1017,37 @@ export class BenchRun {
 }
 
 const mib = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
+
+/** The 1-minute load from macOS's `sysctl -n vm.loadavg` (`{ 1.23 1.45 1.67 }`); null when unreadable. */
+export function loadOf(answer: string): number | null {
+  const load = /^\{\s*(\d+(?:\.\d+)?)\s/.exec(answer.trim())?.[1];
+  return load === undefined ? null : Number(load);
+}
+
+/**
+ * The live bench's precheck (M10, before its local case): why it refuses to start, or null. Rule B's ceiling on a
+ * 1-minute load (IDLE_RUN.maxLoad, 5) applies to this Mac, the runner, and to the mini it measures; the mini's load
+ * unread (`load` a reason) refuses too. A refusal is a recorded outcome of the run, not a failure.
+ */
+export function loadPrecheck(loads: { mac: number; machine: { name: string; load: number | string } | null }): string | null {
+  const { mac, machine } = loads;
+  const remote = machine?.load ?? null;
+  if (machine !== null && typeof remote === 'string') return `${machine.name}: ${remote}`;
+  const over: string[] = [];
+  if (mac >= IDLE_RUN.maxLoad) over.push(`this Mac’s load1 is ${mac.toFixed(2)}`);
+  if (machine !== null && typeof remote === 'number' && remote >= IDLE_RUN.maxLoad) over.push(`${machine.name}’s${over.length > 0 ? '' : ' load1'} is ${remote.toFixed(2)}`);
+  return over.length === 0 ? null : `${over.join(' and ')}, at or over Rule B’s ${IDLE_RUN.maxLoad}`;
+}
+
+/** `keyId` from `mawsd keys --json`'s flat answer (`keysAnswer`); null when it is absent or the answer unreadable. */
+export function keyIdOf(answer: string): string | null {
+  try {
+    const { keyId } = JSON.parse(answer) as { keyId?: unknown };
+    return typeof keyId === 'string' && keyId !== '' ? keyId : null;
+  } catch {
+    return null;
+  }
+}
 
 /** A tarball of M7's head from this Mac: the mini's head bundle (its Electron the pin's), or the VM's source (none). */
 export interface HeadBundle {

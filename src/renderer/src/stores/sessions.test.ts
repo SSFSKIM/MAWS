@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { addressOf } from '@shared/machine/address';
-import { digest, humanTurn, project, record, status } from '../../../../test/support/builders';
+import { digest, humanTurn, project, record, remoteRow, status } from '../../../../test/support/builders';
+import { ev } from '../../../../test/support/events';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { createSessionsStore, selectProjectOrder, selectSessionsOf, selectSortedSessions } from './sessions';
+import { createSessionsStore, selectProjectOrder, selectSeenAt, selectSessionsOf, selectSortedSessions } from './sessions';
 
 // The store does not read machines from ids (membership is recorded from the call that wrote it), so the one-machine
 // cases keep bare ids; the two-machine cases use addresses, as the shell writes them.
@@ -118,6 +119,48 @@ describe('sessions store reconciles snapshots with events by revision', () => {
     store.getState().applyChanged({ record: record('a'), cause: 'update', revision: 1 }, M);
     store.getState().applyDigest(digest('a'), M);
     expect(store.getState().recordsVersion).toBe(v0 + 1);
+  });
+});
+
+// P5 O7 M10 (A; M10's *A remote session ranks by a stale activity time*): another machine's lane B session has no digest,
+// so the turns its stream delivered here are kept, the latest start or end per session, for its activity in the sidebar.
+describe('turns seen on a session’s stream', () => {
+  const T = (minute: number) => `2026-11-05T10:${String(minute).padStart(2, '0')}:00.000Z`;
+  const turnsOf = (store: ReturnType<typeof createSessionsStore>) => store.getState().turnsSeen.get(A);
+
+  it('keeps the latest turn start or end, never an earlier one; a child agent’s turn, an echo receipt and other events say nothing', () => {
+    const store = createSessionsStore();
+    store.getState().applyTurnsSeen({ appSessionId: A, events: [ev('turn.started', { at: T(1) }), ev('session.state', { at: T(9) })] });
+    expect(turnsOf(store)).toBe(Date.parse(T(1)));
+    store.getState().applyTurnsSeen({ appSessionId: A, events: [ev('turn.ended', { at: T(4) }), ev('turn.ended', { at: T(8), isEchoReceipt: true }), ev('turn.started', { at: T(7), agentId: 'agent-1' })] });
+    expect(turnsOf(store)).toBe(Date.parse(T(4)));
+    store.getState().applyTurnsSeen({ appSessionId: A, events: [ev('turn.ended', { at: T(2) })] }); // a replay of an earlier turn
+    expect(turnsOf(store)).toBe(Date.parse(T(4)));
+  });
+
+  it('writes nothing for a batch with no turn in it', () => {
+    const store = createSessionsStore();
+    const before = store.getState().turnsSeen;
+    store.getState().applyTurnsSeen({ appSessionId: A, events: [ev('session.state', { at: T(3) })] });
+    expect(store.getState().turnsSeen).toBe(before);
+  });
+
+  it('a session’s seen activity is the newer of its listing’s issue and its turns seen, none with neither (its row’s age)', () => {
+    const store = createSessionsStore();
+    const B1 = addressOf(OTHER_MACHINE, 'b1' as AppSessionId);
+    expect(selectSeenAt(store.getState(), B1)).toBeUndefined();
+    store.getState().applyRows({ machines: [OTHER_MACHINE], rows: [remoteRow(OTHER_MACHINE, 'b1', { issued: T(5) })], complete: true, pending: [], members: [], member: 'member-1' });
+    expect(selectSeenAt(store.getState(), B1)).toBe(Date.parse(T(5)));
+    store.getState().applyTurnsSeen({ appSessionId: B1, events: [ev('turn.ended', { at: T(6) })] });
+    expect(selectSeenAt(store.getState(), B1)).toBe(Date.parse(T(6)));
+  });
+
+  it('forgets a removed session’s turns with its record', () => {
+    const store = createSessionsStore();
+    store.getState().applyChanged({ record: record('a'), cause: 'live', revision: 1 }, M);
+    store.getState().applyTurnsSeen({ appSessionId: A, events: [ev('turn.ended', { at: T(4) })] });
+    store.getState().applyRemoved({ appSessionId: A, revision: 2 }, M);
+    expect(store.getState().turnsSeen.has(A)).toBe(false);
   });
 });
 

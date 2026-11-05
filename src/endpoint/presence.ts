@@ -11,6 +11,9 @@ import type { MachineRef } from '@shared/machine/ref';
 import { DEFAULT_POLICY, keysAnswer, policyAnswer, statusAnswer } from './answers';
 import { endpointStatus, NO_LINKS, type EndpointStatus } from './status';
 
+/** The read-only answers' renderers, for whoever must say what the module says (P5 O7 M10: the live bench's fakes). */
+export { keysAnswer, statusAnswer };
+
 /**
  * The state files that hold, or are the start of, an enrollment (state/store.ts's names): the machine key, the grant
  * ledger, the enrollment and the org state; a delegation, a pending provisioning and a retirement (O14). Any of them, a

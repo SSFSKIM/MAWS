@@ -94,11 +94,15 @@ function turnAt(state: TranscriptState | undefined, at: number | null): TurnId |
   return later && running !== null ? running.id : null;
 }
 
+const closed = (block: StreamBlock, blocks: readonly StreamBlock[]) =>
+  block.settledBy !== null || blocks.some((b) => b.index > block.index && b.turnId === block.turnId && b.agentId === block.agentId && b.step === block.step);
+
 export class LaneAOverlay {
   private layer = new StreamingLayer();
   private loaded = false;
   private resuming = false;
   private readonly since = new Map<string, string>(); // when each block was first drawn: its row's time
+  private readonly closedAt = new Map<string, string | null>(); // when a drawn block was seen to close; null: drawn closed
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(
@@ -156,14 +160,23 @@ export class LaneAOverlay {
     return changed;
   }
 
-  // The main loop's blocks as tail rows, under `turn` (the turn the model is answering, for the report's bridge).
+  // The main loop's blocks as tail rows, under `turn` (the turn the model is answering, for the report's bridge). P5 O7
+  // M10: a block has closed once the engine wrote its row, or once a later block of its message started (a message
+  // streams its blocks one after another); a thinking block reads its time from first drawn to then.
   rows(turn: TurnId | null): Row[] {
     const blocks = this.layer.blocks(null);
     const now = new Date().toISOString();
     const drawn = new Set(blocks.map(blockKey));
     for (const key of this.since.keys()) if (!drawn.has(key)) this.since.delete(key);
-    for (const key of drawn) if (!this.since.has(key)) this.since.set(key, now);
-    return streamingRows(blocks, (block) => this.since.get(blockKey(block)) ?? now, { turn });
+    for (const key of this.closedAt.keys()) if (!drawn.has(key)) this.closedAt.delete(key);
+    for (const block of blocks) {
+      const key = blockKey(block);
+      const first = !this.since.has(key);
+      if (first) this.since.set(key, now);
+      if (this.closedAt.has(key) || !closed(block, blocks)) continue;
+      this.closedAt.set(key, first ? null : now);
+    }
+    return streamingRows(blocks, (block) => this.since.get(blockKey(block)) ?? now, { turn, closedAt: (block) => this.closedAt.get(blockKey(block)) });
   }
 
   // The main loop's blocks of the step `end` closes that no row named: kept, settled, with the time the step ended.

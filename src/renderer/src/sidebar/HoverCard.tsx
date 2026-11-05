@@ -30,7 +30,7 @@ import { glyphFor, listedGlyph } from '../attention/glyph';
 import { ipc } from '../ipc/client';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { selectPendingOf, useAttention } from '../stores/attention';
-import { useSessions } from '../stores/sessions';
+import { selectSeenAt, useSessions } from '../stores/sessions';
 import { listedTitle, rowBranch, sessionAge } from './derive';
 import { ownerEntries, ownersLabel } from './owners'; // P5 O8 M5
 import { displayTitle } from '../sessions/title';
@@ -161,6 +161,7 @@ function placeOf(record: SessionRecord): { text: string; title: string | null } 
 function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: QuickReplyState }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   const digest = useSessions((s) => s.digests.get(appSessionId) ?? null);
+  const seenAt = useSessions((s) => selectSeenAt(s, appSessionId)); // P5 O7 M10
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
   const parentTitle = useSessions((s) => { // E3
     const parentId = s.records.get(appSessionId)?.lineage?.parentAppSessionId;
@@ -179,7 +180,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
   const held = holderLine(record);
   // P5 O9 M5 (the owner's Q1): a foreign session MAWS drives through its bridge says so
   const doing = (held !== null && bridged ? BRIDGED_LINE(record.holder.kind === 'terminal' ? null : held) : held) ?? (working ? digest?.activity : null) ?? null;
-  const meta = [glyph.label, sessionAge(record, digest, now), digest?.context ? `ctx ${Math.round(digest.context.percent)}%` : null].filter(Boolean).join(' · ');
+  const meta = [glyph.label, sessionAge(record, digest, now, seenAt), digest?.context ? `ctx ${Math.round(digest.context.percent)}%` : null].filter(Boolean).join(' · ');
 
   return (
     <div className="flex flex-col gap-2 text-ui-sm text-fg">

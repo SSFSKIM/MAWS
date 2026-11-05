@@ -76,12 +76,12 @@ describe('LaneAOverlay', () => {
     const input = (chunkIndex: number, index: number, json: string) => msg('chunk', { ...step, chunkIndex, chunk: { kind: 'input', index, json } });
     overlay.receive({
       kind: 'messages',
-      messages: [snapshot(), chunk(0, 0, '', 'thinking'), msg('block-row', { ...step, uuid: ROW, index: 0 }), tool(1, 1, 'mcp__to-human__message', 'toolu_1'), input(2, 1, '{"text": "1\\n2'), input(3, 1, '\\n3'), tool(4, 2, 'Bash', 'toolu_2'), input(5, 2, '{"command": "ls')],
+      messages: [snapshot(), chunk(0, 0, 'Weigh it.', 'thinking'), msg('block-row', { ...step, uuid: ROW, index: 0 }), tool(1, 1, 'mcp__to-human__message', 'toolu_1'), input(2, 1, '{"text": "1\\n2'), input(3, 1, '\\n3'), tool(4, 2, 'Bash', 'toolu_2'), input(5, 2, '{"command": "ls')],
     });
     expect(overlay.rows(null).map((row) => row.kind)).toEqual(['thinking', 'to_human']);
     overlay.receive({ kind: 'messages', messages: [msg('step-end', step)] });
     expect(kept()).toEqual([expect.objectContaining({ kind: 'assistant_text', markdown: '1\n2\n3', cut: true })]); // never sent: no message row
-    expect(overlay.rows(null).map((row) => row.kind)).toEqual(['thinking']); // the named block waits for its row
+    expect(overlay.rows(null).map((row) => row.kind)).toEqual(['thinking']); // the named block waits for its row (one with text: a textless one leaves at close)
   });
 
   it('keeps nothing of a step whose blocks were all named', () => {

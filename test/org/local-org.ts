@@ -158,7 +158,7 @@ export function orgSession(deps: Pick<OrgSessionDeps, 'userData' | 'build' | 'lo
     openExternal: () => {
       throw new Error('the stand-in opens no browser');
     },
-    stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp, confirm: async () => ({ ok: true }) }),
+    stepUp: (keys, device, org) => createStepUp({ device, key: keys.stepUp, confirm: async () => ({ ok: true }), org }),
     loadKeys: (profile) => loadDeviceKeys(profile, { excludeFromBackup: async () => true }),
     excludeFromBackup: async () => true,
     ...deps,

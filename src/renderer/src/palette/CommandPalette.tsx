@@ -23,7 +23,7 @@ import { sessionMatcher } from '../sidebar/derive';
 import { revealProject } from '../sidebar/reveal';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
-import { useSessions, type ListedSession } from '../stores/sessions';
+import { selectSeenAt, useSessions, type ListedSession } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
 import { ipc } from '../ipc/client';
 import { useNow } from '../app/use-now';
@@ -255,13 +255,14 @@ function Palette({ run }: { run(id: ActionId): void }) {
 function SessionItem({ record, project, snippet, onOpen }: { snippet?: string | null; record: SessionRecord; project: ProjectRecord | null; onOpen(id: AppSessionId, split: boolean): void }) {
   const now = useNow();
   const digest = useSessions((s) => s.digests.get(record.appId) ?? null);
+  const seenAt = useSessions((s) => selectSeenAt(s, record.appId)); // P5 O7 M10
   const pending = useAttention((s) => selectPendingOf(s, record.appId));
   return (
     <Command.Item value={`session:${record.appId}`} onSelect={() => onOpen(record.appId, false)} className={`${ITEM} ${snippet ? "h-auto min-h-(--row-h) py-1.5" : ""}`}>
       <GlyphMark glyph={glyphFor(record, digest, pending)} className="w-4 shrink-0" />
       <span className="min-w-0 flex-1"><span className="block truncate">{displayTitle(record)}</span>{snippet && <span className="line-clamp-2 block text-ui-sm text-fg-muted">{conversationSnippet(snippet)}</span>}</span>
       {project && <span className="ml-auto max-w-[30%] shrink-0 truncate text-ui-sm text-fg-muted">{project.name}</span>}
-      <span className="shrink-0 text-ui-sm text-fg-faint">{sessionAge(record, digest ?? undefined, now)}</span>
+      <span className="shrink-0 text-ui-sm text-fg-faint">{sessionAge(record, digest ?? undefined, now, seenAt)}</span>
     </Command.Item>
   );
 }

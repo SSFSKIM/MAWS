@@ -6,6 +6,8 @@
 //   retire [--not-after ISO] [--json]   a delegated machine retires its certificate, frees its hub row, destroys its keys
 //   unenroll [--json]      back to `enrollment: none` on this machine alone: RL10 unserved, the keys destroyed
 //   keys [--json] | status [--json]
+//   sync [--json]          the org state read from the hub now and a listed enrollment promoted, answered as `status`
+//                          (P5 O7 M10: a member's listing is seen at once, not at the next periodic read)
 //   revoke <file|->        a signed org state (or {states, transitions}) delivered by hand, adopted as from the hub
 //   grant <file|->         a signed grant, kept by the ledger's rule (grants.ts)
 //   policy [--read-only on|off] [--ceiling MODE|settings] [--json]
@@ -22,7 +24,7 @@ import { basename } from 'node:path';
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 import { decodeProvisioningCodeV2, isIsoMillis, keyId, stateHash, type ProvisioningCodeV2, type SignedOrgState } from 'org-protocol';
 import { keysAnswer, policyAnswer, statusAnswer } from './answers';
-import { EnrollError, enrollAttended } from './enroll';
+import { EnrollError, enrollAttended, promoteIfListed } from './enroll';
 import { attestHistory, checkHistory, historyNames, type Attested, type Checked } from './history';
 import { defaultMachineName, provisionInto } from './provision';
 import type { Endpoint } from './endpoint';
@@ -34,7 +36,7 @@ export const EXIT = { done: 0, failed: 1, notHere: 2, notRunning: 3, notListed: 
 type Out = { code: number; out: string };
 
 const USAGE = `usage: mawsd endpoint enroll [--name N] [--replace] [--wait [s]] [--json] | provision [--name N] [--wait [s]] [--json]
-                     | retire [--not-after ISO] [--json] | unenroll [--json] | keys [--json] | status [--json]
+                     | retire [--not-after ISO] [--json] | unenroll [--json] | keys [--json] | status [--json] | sync [--json]
                      | revoke <file|-> | grant <file|-> | policy [--read-only on|off] [--ceiling MODE|settings] | legacy status | legacy purge
                      | attest-history [--former NAME]… [--project ID] [--check] [--json]`;
 /** `--wait` with no number waits this long (O2 M6). */
@@ -56,6 +58,8 @@ export async function runCli(endpoint: Endpoint, command: string, args: readonly
         return await keys(endpoint, args);
       case 'status':
         return status(endpoint, args);
+      case 'sync':
+        return await sync(endpoint, args);
       case 'revoke':
         return await revoke(endpoint, args, secret);
       case 'grant':
@@ -197,6 +201,24 @@ async function keys(endpoint: Endpoint, args: readonly string[]): Promise<Out> {
 function status(endpoint: Endpoint, args: readonly string[]): Out {
   const { values } = parse(args, { json: { type: 'boolean' } });
   return { code: EXIT.done, out: statusAnswer(endpoint.status(), values.json === true) };
+}
+
+/**
+ * `sync` (P5 O7 M10): the hub's org state read by a read that begins after this call (one in flight may predate the
+ * member's listing), then `promoteIfListed`, so an enrollment the member has listed is `org-listed` now and its hub link
+ * opens, not at the next periodic read (SYNC_EVERY_MS). A read that fails is logged, as every sync's is, and the answer
+ * says the state as it stands. Answered as `status`; exit 0 listed, 4 enrolled with the hub but not yet listed, 1 not
+ * enrolled.
+ */
+async function sync(endpoint: Endpoint, args: readonly string[]): Promise<Out> {
+  const { values } = parse(args, { json: { type: 'boolean' } });
+  if (!endpoint.parts!.state.enrolled) return { code: EXIT.failed, out: 'not enrolled: there is no org state to read' };
+  await endpoint.syncAfter();
+  await promoteIfListed(endpoint.enrollContext());
+  // judged on the state after the read: an unenrollment or retirement while it was held leaves none
+  const now = endpoint.status();
+  const code = now.enrollment === 'org-listed' ? EXIT.done : now.enrollment === 'hub-confirmed' ? EXIT.notListed : EXIT.failed;
+  return { code, out: statusAnswer(now, values.json === true) };
 }
 
 /** The content of `<file|->`: a path read here, or `-` for the request's `secret`. */

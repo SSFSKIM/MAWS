@@ -455,22 +455,28 @@ describe('mawsd enroll, keys and endpoint, through an endpoint module', () => {
   // `endpoint attest-history` (P5 O14 M4) reads every inventory writer's events from the hub, minutes on a machine with
   // hundreds of writers: its request waits past the 10 s every other endpoint command keeps. Both are held past that
   // default at once, so one wait covers both.
-  it('endpoint attest-history waits for the module past the request’s 10 s default; another endpoint command still gives up at 10 s', async () => {
+  // P5 O7 M10: `endpoint sync` waits for a read in flight and then its own, each page bounded by the hub client's 30 s,
+  // so it waits past the default too.
+  it('endpoint attest-history and sync wait for the module past the request’s 10 s default; another endpoint command still gives up at 10 s', async () => {
     const endpoint = new FakeEndpoint();
     let release = () => {};
     endpoint.held = new Promise<void>((done) => (release = done));
     endpoint.answer = { code: 0, out: 'verified p/w through 3\n1 verified under mini' };
     await scene.start({ endpoint });
     let attestEnded = false;
+    let syncEnded = false;
     const attesting = cli(['endpoint', 'attest-history', '--check']).finally(() => (attestEnded = true));
+    const syncing = cli(['endpoint', 'sync', '--json']).finally(() => (syncEnded = true));
     const status = cli(['endpoint', 'status']);
-    await until(() => endpoint.calls.length === 2, 5_000, 'both commands to reach the module');
+    await until(() => endpoint.calls.length === 3, 5_000, 'the three commands to reach the module');
     await sleep(REQUEST_TIMEOUT_MS + 1_500);
     expect(await status).toEqual({ code: 1, out: '', err: `mawsd did not answer daemon.endpoint within ${REQUEST_TIMEOUT_MS / 1000} s\n` });
     expect(attestEnded).toBe(false);
+    expect(syncEnded).toBe(false);
     release();
     expect(await attesting).toEqual({ code: 0, out: 'verified p/w through 3\n1 verified under mini\n', err: '' });
-    expect(endpoint.calls).toEqual(expect.arrayContaining([['attest-history', ['--check'], undefined], ['status', [], undefined]]));
+    expect((await syncing).code).toBe(0);
+    expect(endpoint.calls).toEqual(expect.arrayContaining([['attest-history', ['--check'], undefined], ['sync', ['--json'], undefined], ['status', [], undefined]]));
   }, 30_000);
 
   it('endpoint revoke and grant refuse nothing on stdin, and more than one source, sending nothing', async () => {

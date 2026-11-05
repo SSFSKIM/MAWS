@@ -1710,11 +1710,16 @@ test('O17 M10: the agent’s tab on B, which runs no app, seen and driven from A
 // 2's and 9's MAWS ask answered from this Mac, an operation across a link drop, 6's greying with its reason): the sitting's
 // failures, on e2e:remote's scene over the relay (A's way to the hub is then its only carrier to B, so the scene's cut drops
 // the link). Two apps of the member's are attached to B at once: A, whose own checkout of the org project holds nine
-// pinned local sessions (seeded transcripts its engine host indexes; pinned is among the "busy" a project's cut ranks
-// first), more than the group's cap of eight; and A2, a second device with a checkout of its own. Then, in order:
-//   - "+ Session" on B from A, in that project: its row shows within A's group's visible rows (above the cut, with no
-//     Show more) while its first turn runs, from A's spawn mark; the turn ends and the tab closes, its row falls below the
-//     cut, and Resume… in the project opens it again;
+// idle local sessions (seeded transcripts its engine host indexes, unpinned and marked unread, each last active on
+// 2026-11-01, before anything the run does), more than the group's cap of eight; and A2, a second device with a checkout
+// of its own. Then, in order:
+//   - "+ Session" on B from A, in that project: its row leads A's group's visible rows (with no Show more) while its
+//     first turn runs, from A's spawn mark; its tab goes to the background and the turn ends there, so A marks it unread
+//     (lane-b/read-marks.ts: `session.setVisible` isn't offered over RL2, and a turn ending off screen marks it here); its
+//     tab closes, and past the stream's linger the row stays first within the visible rows, the group's latest unread
+//     activity (P5 O7 M10, A: the live failure. With no digest its unread key was a missing turn end, so it ranked last
+//     among the unread and fell below the cut; M8's case pinned the nine, which outrank any activity, and asserted that
+//     fall); and Resume… in the project opens it again;
 //   - A2, which has no mark, has it as a listed row and opens it through Resume…, the row naming `@B`;
 //   - the composer's `!` on it, a command declared not offered on another machine, greys Run with its declared reason and
 //     Enter sends nothing;
@@ -1742,7 +1747,7 @@ const M8_QUESTION = 'Go on with the plan on B?';
 const M8_ASK = { questions: [{ id: 'q1', question: M8_QUESTION, modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] }] };
 const M8_ASK_REPLY = 'Going on, as A answered.';
 const M8_SIDE_ANSWER = 'ZEBRA'; // p1-side-question-session seq 92's
-const M8_PINNED = 9; // past the cap: SESSIONS_CAP (8) in src/renderer/src/sidebar/derive.ts
+const M8_IDLE = 9; // past the cap: SESSIONS_CAP (8) in src/renderer/src/sidebar/derive.ts
 const M8_FIRST_SHOWN = 5; // SESSIONS_FIRST: a group's rows before its Show more
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // A's renderer's `session.operation` events as the raw bridge hears them (window.__operations), kept from now on
@@ -1756,7 +1761,7 @@ async function keepOperations(page: Page): Promise<void> {
 }
 const heardOperations = (page: Page) => page.evaluate(() => (window as unknown as { __operations: HeardOperation[] }).__operations);
 
-test('M8: a session spawned on B leads a busy project past its cap and comes back through Resume…, a second app has it by parity; a declared control greys with its reason; a MAWS ask answered on one app settles on the other; /btw’s completion crosses a link drop', async () => {
+test('M8: a session spawned on B leads a full project past its cap and stays among its visible rows by its activity, Resume… opens it, a second app has it by parity; a declared control greys with its reason; a MAWS ask answered on one app settles on the other; /btw’s completion crosses a link drop', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-m8-')));
   const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-m8-'));
   const a2UserData = mkdtempSync(join(tmpdir(), 'maws-ra2-m8-'));
@@ -1808,15 +1813,16 @@ test('M8: a session spawned on B leads a busy project past its cap and comes bac
     await b.request('machineSettings.set', { patch: { gateway: { defaultRoute: 'direct' } } });
     await b.request('session.projects.add', { directory: checkout }); // B's checkout of the org project, which "+ Session" offers
 
-    // A's nine local sessions of the org project, in A's own checkout: transcripts its engine host indexes at its start
-    const pinnedIds = Array.from({ length: M8_PINNED }, (_, i) => `a0c0d0e0-0000-4000-8000-0000000000${String(i + 10)}`);
+    // A's nine idle local sessions of the org project, in A's own checkout: transcripts its engine host indexes at its
+    // start, each last active on 2026-11-01, older than anything the run does
+    const idleIds = Array.from({ length: M8_IDLE }, (_, i) => `a0c0d0e0-0000-4000-8000-0000000000${String(i + 10)}`);
     a = await launchMaws({
       userData: aUserData,
       env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A', MAWS_E2E_STEP_UP: 'accept' }, // the step-up a spawn always asks, accepted
       prepare: ({ claudeConfigDir }) => {
-        pinnedIds.forEach((sessionId, i) => {
+        idleIds.forEach((sessionId, i) => {
           const t = transcript({ sessionId, cwd: aCheckout, start: Date.UTC(2026, 10, 1, 9, i, 0) });
-          t.user(`a1c0d0e0-0000-4000-8000-0000000000${String(i + 10)}`, `Local pinned session ${i + 1}`);
+          t.user(`a1c0d0e0-0000-4000-8000-0000000000${String(i + 10)}`, `Local idle session ${i + 1}`);
           t.text(`a2c0d0e0-0000-4000-8000-0000000000${String(i + 10)}`, `Answered on A, ${i + 1}.`);
           t.turnEnd(`a3c0d0e0-0000-4000-8000-0000000000${String(i + 10)}`);
           seedTranscript(claudeConfigDir, aCheckout, sessionId, t.records);
@@ -1843,21 +1849,23 @@ test('M8: a session spawned on B leads a busy project past its cap and comes bac
     const project = await attach(page, aCheckout);
     await attach(page2, a2Checkout);
     type Records = { sessions: { appId: string; engineSessionId: string | null; projectId: string | null }[] };
-    let pinned: string[] = [];
+    let idle: string[] = [];
     await expect
-      .poll(async () => (pinned = (await invoke<Records>(page, 'session.list', { includeArchived: true })).sessions.filter((r) => r.engineSessionId !== null && pinnedIds.includes(r.engineSessionId) && r.projectId === project).map((r) => r.appId)).length, {
+      .poll(async () => (idle = (await invoke<Records>(page, 'session.list', { includeArchived: true })).sessions.filter((r) => r.engineSessionId !== null && idleIds.includes(r.engineSessionId) && r.projectId === project).map((r) => r.appId)).length, {
         timeout: 60_000,
         message: 'A indexes its nine local sessions in its checkout',
       })
-      .toBe(M8_PINNED);
-    for (const id of pinned) await invoke(page, 'session.update', { appSessionId: id, patch: { pinned: true } });
+      .toBe(M8_IDLE);
+    // unread, as the owner's group held them live (P5 O7 M10): the tier a remote session unread here ranks in
+    for (const id of idle) await invoke(page, 'session.update', { appSessionId: id, patch: { unread: true } });
 
     // Each app's group of the org project, its drawn rows (a record's or a listing's) and its Show more (never pressed)
     const groupOf = (on: Page) => projectRow(on, A_PROJECT);
     const shownRowsOf = (on: Page) => groupOf(on).locator('[data-kind="session"], [data-kind="listed"]');
     const showMoreOf = async (on: Page) => groupOf(on).locator(`[data-tree-id="more:${(await groupOf(on).getAttribute('data-tree-id'))!.slice('p:'.length)}"]`);
     await openProject(page, A_PROJECT);
-    await expect(shownRowsOf(page), 'A’s group draws its first five pinned sessions').toHaveCount(M8_FIRST_SHOWN, { timeout: 30_000 });
+    await expect(shownRowsOf(page), 'A’s group draws five of its nine idle sessions').toHaveCount(M8_FIRST_SHOWN, { timeout: 30_000 });
+    await expect(shownRowsOf(page).getByRole('img', { name: 'Unread', exact: true }), 'each unread').toHaveCount(M8_FIRST_SHOWN);
     await expect(await showMoreOf(page), 'and holds the rest behind Show more').toHaveCount(1);
 
     // B's own lines about the spawn, for a failure
@@ -1888,7 +1896,7 @@ test('M8: a session spawned on B leads a busy project past its cap and comes bac
       await expect(main(on).getByText(M8_REPLY).first(), 'with its history').toBeVisible({ timeout: 60_000 });
     };
 
-    await test.step('acceptance 4: the session spawned on B shows within the busy group’s visible rows while its first turn runs, falls below the cut after it, and comes back through Resume…', async () => {
+    await test.step('acceptance 4: the session spawned on B leads the full group’s visible rows while its first turn runs, stays first within them after it as the group’s latest unread activity, and comes back through Resume…', async () => {
       await newChat(page, A_PROJECT);
       await chooseMachine(page, B_NAME);
       await composerOf(page).click();
@@ -1915,18 +1923,37 @@ test('M8: a session spawned on B leads a busy project past its cap and comes bac
       await expect(main(page).getByText(M8_REPLY), 'held mid-reply: the turn still runs').toHaveCount(0);
       await quoting(expect(spawnedRowOf(page), 'the spawned session within the group’s visible rows, Show more not pressed').toBeVisible({ timeout: 60_000 }), async () => `the group's rows: ${(await shownRowsOf(page).allTextContents()).join(' | ')}\n${mainSaid(page)}`);
       const shownAfter = Date.now() - ranAt;
-      await expect(shownRowsOf(page), 'the five pinned rows and the spawned one above the cut').toHaveCount(M8_FIRST_SHOWN + 1);
-      await expect(await showMoreOf(page), 'the pinned rest still behind Show more').toHaveCount(1);
+      await expect(shownRowsOf(page).first(), 'the spawned row leads the group').toHaveAttribute('data-tree-id', `s:${address}`);
+      await expect(shownRowsOf(page), 'within the five drawn: the lead takes no extra row when it is inside the cut').toHaveCount(M8_FIRST_SHOWN);
+      await expect(await showMoreOf(page), 'the idle rest behind Show more').toHaveCount(1);
       console.log(`[e2e:remote] M8: the spawned row (${address}) within the visible rows ${shownAfter} ms after B's engine host ran it`);
 
-      // the first turn ends: the lead with it, so the row ranks by its state below the nine pinned
+      // its tab to the background (a New chat in the same pane, focused there, the pointer off the sidebar so its ranks
+      // aren't held): the session is off screen, its stream still held
+      await newChatIn(page, A_PROJECT);
+      await composerOf(page).click();
+      await page.mouse.move(700, 400);
+      await expect(mainTabById(page, `session:${address}`), 'the session’s tab in the background').toHaveAttribute('aria-selected', 'false');
+      // the first turn ends there: the lead with it, and A marks the session unread (a turn ended off screen), so the row
+      // ranks among the unread by its latest activity, newer than the nine idle sessions'
       await b.request('session.getContextUsage', { appSessionId: spawnedApp, detail: 'summary' }); // lets B's engine go on
-      await expect(main(page).getByText(M8_REPLY).first(), 'the first turn’s whole reply in A’s pane').toBeVisible({ timeout: 60_000 });
       await expect.poll(turnOverOnB, { timeout: 30_000 }).toBe(true);
-      await mainTabById(page, `session:${address}`).click();
+      // the background tab closed by a middle click, which doesn't bring it on screen (a click on it would read it); then
+      // the New chat
+      await mainTabById(page, `session:${address}`).click({ button: 'middle' });
+      await expect(mainTabById(page, `session:${address}`), 'the session’s tab closed').toHaveCount(0, { timeout: 30_000 });
       await menu(aApp, 'tab.close');
-      await expect(composerOn(page), 'the session’s tab closed').toHaveCount(0, { timeout: 30_000 });
-      await expect(spawnedRowOf(page), 'its first turn over and its tab closed, the row below the cut').toHaveCount(0, { timeout: 30_000 });
+      await expect(composerOf(page), 'the New chat closed').toHaveCount(0, { timeout: 30_000 });
+      await page.mouse.move(700, 400);
+      // past the stream's linger (REMOTE_LANE_B_TIMING.unsubscribeLingerMs, 10 s, src/main/lane-b/remote.ts) main has let
+      // the session go, which it tells the page nothing of: A's record of it stays as last received, and its listing and
+      // the turns A saw on its stream stand for its activity from then on
+      await page.waitForTimeout(12_000);
+      await quoting(expect(spawnedRowOf(page), 'its first turn over and its tab closed, the row still within the visible rows, Show more not pressed').toBeVisible({ timeout: 30_000 }), async () => `the group's rows: ${(await shownRowsOf(page).allTextContents()).join(' | ')}\n${mainSaid(page)}`);
+      await expect(spawnedRowOf(page).getByRole('img', { name: 'Unread', exact: true }), 'unread here: its turn ended off screen').toHaveCount(1);
+      await expect(shownRowsOf(page).first(), 'the group’s latest unread activity, first').toHaveAttribute('data-tree-id', `s:${address}`);
+      await expect(shownRowsOf(page), 'five drawn').toHaveCount(M8_FIRST_SHOWN);
+      await expect(await showMoreOf(page), 'the idle rest behind Show more').toHaveCount(1);
       // A still holds the record main read for the tab, which Resume… lists in the listing's place, by the record's title:
       // B's owner's, or the brief's if the rename hadn't reached the record when the tab let it go
       await resumeOn(page, new RegExp(`${escaped(M8_TITLE)}|${escaped(M8_BRIEF)}`), 'its record’s row naming its machine');

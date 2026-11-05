@@ -44,7 +44,7 @@ import {
 } from '../../../apps/org-protocol/src/index.ts';
 import { OrgStatusSchema, type OrgStatus } from '@shared/ipc/schema/org';
 import { createNextDeviceKeys, deviceKeyIds, DeviceKeysError, loadDeviceKeys, promoteNextDeviceKeys, type DeviceKeys } from '../device/keys';
-import type { StepUpPrompt } from '../device/step-up';
+import type { HeldOrgView, StepUpPrompt } from '../device/step-up';
 import { DEVICE_CAPABILITIES } from '../machines/remote/capabilities';
 import { AccessLoginError, type AccessLogin, type HubCredential } from './access-login';
 import { ACCESS_FILE, CHAIN_FILE, orgFiles, REGISTRATION_FILE, SIGNING_FILE, type OrgFiles, type RegistrationFile, type SigningFile } from './files';
@@ -540,6 +540,15 @@ describe('registration', () => {
     const { session, entry } = await signedIn();
     expect(hub.count('/api/devices/pending')).toBe(0);
     expect(session.current()?.identity.device).toBe(entry.id);
+  });
+
+  // P5 O7 M10 B: the step-up judges an owned machine's spawn on the head the session holds, read when it signs
+  it('hands the step-up the view it holds, read at each signature', async () => {
+    const held: Array<HeldOrgView> = [];
+    const { session } = await signedIn({ stepUp: (_keys, _device, org) => (held.push(org), { sign: () => Promise.reject(new Error('no step-up in these tests')) }) });
+    expect(held.length).toBeGreaterThan(0);
+    expect(held.at(-1)!()).toBe(session.current()!.view);
+    expect(held.at(-1)!()!.head().state.version).toBe(session.current()!.view.head().state.version);
   });
 
   it('reads the chain from genesis in every page', async () => {

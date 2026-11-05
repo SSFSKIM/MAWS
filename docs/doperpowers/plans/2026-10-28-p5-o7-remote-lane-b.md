@@ -36,7 +36,7 @@ O7 makes the app use it, and then brings lane B to full depth across it. Lane B 
 - [x] M7 — Acceptance and the remote bench — the code landed (PR #451, merge 080de8f81, P5 Decision Log 204; the direct resume PR #457, P5 Decision Log 208); the measured group recorded on CI's mini (run 41573992251, every bound held) and the live runs at the owner's sitting of 2026-11-04 (the live bench voided by the runner's load; the checklist's passes, fails and skips in Outcomes, its gaps carried as residue) (2026-11-04)
 - [x] M8 — The sitting's failures: the remote-spawned session's sidebar row and reopen, every session surface offered or greyed (the MAWS ask among them) under a contract test, operations and panel events across the channel, a turn's end, the PDF as a block, Sign in from the MCP widget, untracked files in Review, the forwarded failure's message. Planned 2026-11-04; reviewer-high; its own PR. Built on `p5-o7-m8` (2026-11-04): seven tasks, each task-reviewed, then reviewer-high on the whole; master merged before the final gate; the PR carries the gate.
 - [x] M9 — Spawn on the machine's own terms: the `machine` route as every machine's default (an additive `route`, machine settings still v1), what the machine reports named and never a mismatch, older peers on the legacy fields, and the remote setup path (folder and trust, owners-only acts). Planned 2026-11-04, after M8; reviewer-high; its own PR. Built on `p5-o7-m9` (2026-11-04 to 2026-11-05, stacked on M8, master merged after M8 landed and again at 113f98484; `WIRE_MINOR` 27, RL2 1.9): five tasks, each task-reviewed (m9-5 by reviewer-high with the whole), then reviewer-high on the whole (six Important findings, fixed) and one bounded re-review of the fixes (its last seam fixed and verified by the controller); the PR carries the final gate (2026-11-05).
-- [ ] M10 — The live re-check: the bench's fixes, then a short sitting against the mini and a fresh acceptance VM. O7 closes when it is recorded in Outcomes. Planned 2026-11-04, after M9; reviewer-medium.
+- [ ] M10 — The live re-check: the bench's fixes, then a short sitting against the mini and a fresh acceptance VM. O7 closes when it is recorded in Outcomes. Planned 2026-11-04, after M9; reviewer-medium. The bench's fixes (the code half) built on `p5-o7-m10` (2026-11-05, from master 5f2bc8964): the key read, `mawsd endpoint sync`, the agent's `watch`, the mini's hosts, the load precheck; reviewer-medium on the branch; its own PR. The sitting is the architect's with the owner.
 
 ## Acceptance
 
@@ -1044,7 +1044,41 @@ O7 closes when M10 is recorded in Outcomes.
 - the bench, after its precheck.
 Prerequisite for the VM's re-check: the desk track's fix that lets lane B sessions on a devcloud host keep `mcp__to-human__message` after the engine's first plugin update (`resolve-style.ts` counting the `managed` scope, per OS). The owner keeps the network and the lid; the sleep and wake items stay with the measured group.
 
-**Proves.** O7's acceptance live; M10's bench fixes in `remote-bench.test.ts`. Review: reviewer-medium.
+*The sitting's three defects* (added 2026-11-05 by the architect, from M10's live sitting; three tasks on `p5-o7-m10` after the bench fixes, each red first).
+
+*A. A remote session ranks by a stale activity time* (a bug; acceptance 5 still fails live).
+- **Evidence (2026-11-05).** A session spawned from the MacBook on the mini (app id cb9e796a, first turn ended 05:29:09Z) never shows under the MAWS row, not even after Show more. Neither does one spawned on the VM (cf463a17, 05:42Z). Show more's 8 rows include sessions last active 1 and 2 weeks ago, and the two appear only in Resume….
+- **The architect's diagnosis**, from the code at 5f2bc8964 (the task verifies it and records what it finds in the Decision Log):
+  - No lane B module emits `session.digest`, so a remote record's `lastActivity` falls back to `record.updatedAt` (`src/renderer/src/overview/derive.ts`).
+  - The record hides its listing, so the listing's fresher `issued` is never used.
+  - Once the spawned-here lead ends (`spawned-here.ts`), the session drops past `SESSIONS_CAP` (`derive.ts`, `shownTrees`).
+  - M8's e2e (`e2e/remote.spec.ts`) used nine pinned sessions, which always outrank, so activity ranking never decided. It even asserts that the row goes below the cut after the first turn.
+- **The fix is parity.** A remote session's activity time is its true latest activity: the newest of the record's `updatedAt` as this Mac last received it, the listing's `issued`, and the turn events the app saw on its stream. It then ranks among local sessions by the same recency rule. The task checks that this Mac actually receives the remote record's `updatedAt` bump at a turn's end after the tab has closed.
+- **Red first:**
+  - a unit case in the sidebar's derive tests: eight or more older idle local sessions, no pins, and one remote session whose turn just ended;
+  - M8's e2e case changed, so that after the first turn the remote row stays visible when it is the most recent activity.
+
+*B. No Touch ID for a spawn on a machine the member owns.* The owner's ruling (2026-11-05, about 05:5xZ): "Not on my machines (Recommended)".
+- **Today.** `src/main/lane-b/remote-spawn.ts` acts with `stepUp: 'required'`, and main's step-up (`src/main/device/step-up.ts`) asks Touch ID for every execution-grade act.
+- **The ruling.** A `session.spawn` on a machine whose owners include the signed-in member is signed with the same step-up key, with no confirmation prompt.
+- **The machines don't change.** The signature is the same, and owners still verify (`attest.ts`'s `SPAWN_ACTIONS`).
+- **Touch ID stays for:**
+  - a spawn on a machine the member doesn't own;
+  - an approval on a session the member doesn't own;
+  - owner and share changes;
+  - machine admin;
+  - org state signing (root);
+  - a non-owner's shell.
+- **Who decides.** Main decides ownership from the org state, never from the renderer's word. The renderer can't ask for an unconfirmed signature of any other act.
+- **Tests.** The skip case, and one refusal case per act that keeps Touch ID.
+- **Review.** reviewer-high with a security lens: this moves the step-up's trust boundary.
+
+*C. "Thinking · 0s" never counts up* (the owner's screenshot, a local session on the MacBook, engine 2.1.318, model claude-opus-5-5).
+- **The symptom.** While the agent thinks for more than 5 s, the transcript row stays "Thinking · 0s". The likely cause is a duration computed from thinking deltas that this model doesn't stream; the task finds the cause in the renderer's thinking row.
+- **The fix.** While the block is open, the row ticks from the block's start with a live clock. Once it closes, it shows the final duration.
+- **Red first.** A unit test.
+
+**Proves.** O7's acceptance live; M10's bench fixes in `remote-bench.test.ts`; A, B and C in their red-first tests and `e2e:remote`. Review: reviewer-medium for the bench fixes and C, reviewer-high (security lens) for A and B together.
 
 ### Concrete Steps
 
@@ -1760,7 +1794,22 @@ The link's `subscribe` takes `{feed, session?}` in place of `session` alone.
 - **The route switch** (M9, m9-4; the architect's ruling, 2026-11-04) reaches all three routes: on `machine`, gateway and Direct; on gateway or Direct, the other, then "Back to the machine’s own…". The switch back is verified as a launch is: what `get_status` reports is recorded as `observed`, never a mismatch, and the toast names it ("now on this machine’s own setup (ClaudeUsage)"). It starts with `{route: 'machine'}` under the launch's relay check; when the machine's own settings name a relay that isn't answering, the switch asks "This machine’s relay isn’t answering. Switch anyway?" and only Switch anyway sends `startAnyway`. *Known limit:* the question comes after the old launch has stopped, since only main's guard knows whether the settings name the relay; Cancel leaves the session stopped and resumable on its old route. A tracker line carries a dry run before the stop.
 - **The remote setup sheet** (M9, m9-4). The machine menu offers a machine with no checkout of the org project as "Set up this project there…"; a non-owner sees it disabled with its reason (ownership learned from the home's first `machine.folders.list` answer). The order is the folder, its trust read, the TrustCard ("Trust", or "Trust and start" at Send), then `addFolder`, so nothing is registered and no Touch ID is asked before the trust answer. Other checkouts' paths are suggested under the target's home and not probed; a private folder opens only after its confirmation, and `open: true` goes only with listings inside it. A request answering after the sheet is gone applies nothing and closes nothing. An `untrusted` refusal at Send offers the same card ("Review trust…") and sends again.
   - *A deliberate difference (2026-11-04):* the remote TrustCard has no "Start without trusting". Locally that is the decision `declined` (no attestation, no trust bootstrap); `session.spawn`'s `trust` carries only `'accepted'`. A tracker line carries a remote `declined`, owners-only exactly as `accepted` is (`acceptsTrust`, `spawnRefusal`), its exit when the spawn input carries it.
-- **`mawsd endpoint sync`** (M10): it runs `syncNow()` then `promoteIfListed`, and answers as `endpoint status --json`.
+- **The owned-machine spawn's step-up** (M10, B; `src/main/device/step-up.ts`, `signsUnasked`). Main's signer judges it on the frozen action it then signs, against the held org head, never on a caller's word.
+  - **No prompt.** An owned-machine spawn, trust acceptance included, signs without a prompt. The conditions are all of these:
+    - the action is exactly `session.spawn`, with no session, context or digest;
+    - the head lists this device and this step-up key under a member;
+    - that member is among the machine's owners (`ownerMembers(machineOwners(...))`).
+
+    The trust card's click is the confirmation (local parity). A renderer compromise already holds a promptless owner terminal on that machine, so a prompt there would not be a boundary.
+  - **Unchanged.** The signature, the act's args (signed exactly as the person saw them) and `spawnRefusal`'s cap.
+  - **Still prompts:** a spawn on a machine the member doesn't own (or one the head doesn't place), every approval, owner and share changes, machine admin, a non-owner's shell, `sminos.spawn` and `session.launch`, and org-state signing. Any doubt prompts too.
+- **`mawsd endpoint sync [--json]`** (M10; `src/endpoint/cli.ts`). It waits for a read of the org state that begins after the call (`Endpoint.syncAfter`, the existing `#syncAfter`), then runs `promoteIfListed`, and answers as `endpoint status`. Exit 0 when org-listed, 4 while hub-confirmed, 1 when not enrolled, judged on the state after the read (an unenrollment while it was held answers 1). `mawsd`'s client waits up to 90 s for it (`SYNC_TIMEOUT_MS`), past the 10 s every other endpoint command keeps.
+- **The bench agent's `watch`** (M10; `test/support/remote-bench-agent.ts`, `BenchWatch`). It holds one machine.sock link to the scratch daemon for the run. It reads id'd asks on stdin, one JSON line each: `{id, ask}` with `ask` one of `up`, `status`, `keys`, `sync`. It answers each with one line:
+  - `up` is answered `{id, answer: {up: true}}`, or `{up: false, why}` while the daemon doesn't answer;
+  - `status`, `keys` and `sync` are the endpoint's commands with `--json` through `daemon.endpoint`, answered `{id, answer: {code, out}}`, or `{id, error}` when the daemon doesn't answer.
+
+  It reaches the daemon when asked and holds no link, and drops a link that fails, to reach it again at the next ask. It ends with its transport, as `serve` does. The runner (`BenchRun`) starts it at the stage's start and reads through it the daemon's answer, the rerun's check, the key and the listing. It ends it before the daemon's stop.
+- **`BenchRun.load1()` and `loadPrecheck`** (M10; `test/support/remote-bench.ts`). `load1()` gives the mini's 1-minute load from `sysctl -n vm.loadavg` over its transport, or the reason it is unread; on the VM it gives null. `loadPrecheck({mac, machine})` gives the refusal's reason, or null when this Mac and the mini are both under Rule B's 5.
 
 ## Open questions for the owner
 
@@ -1969,6 +2018,11 @@ Added at M5's re-plan (2026-11-01). Each changes what a person may do on another
   Evidence: attempt 1's run log (04:26:56Z `hub-confirmed`, then "the machine posted no key to compare within 60 s"); `src/endpoint/cli.ts` `keys()`.
 - Observation (M10's re-plan, 2026-11-04): attempt 1's key step was settled from the code, correcting M7's "not settled". `#keyId()` (`test/support/remote-bench.ts`) parses `{key: {keyId}}`, and `mawsd keys --json` answers flat, so a real machine always read no key. The bench's fakes carried the same shape.
   Evidence: `src/endpoint/answers.ts` (`keysAnswer`); `src/mawsd/process-endpoint.test.ts`; `test/support/remote-bench.test.ts`.
+
+- Observation (M10's build, 2026-11-05): an endpoint read of the org state already in flight can predate the member's listing. A sync verb built on `syncNow()` alone would join that read and answer `hub-confirmed` once more. test/endpoint/enroll.test.ts says the same of `--replace` ("A read already in flight may predate the listing; the one after it doesn't").
+  Evidence: `src/endpoint/endpoint.ts` (`syncNow` returns the read in flight; `#syncAfter`); `test/endpoint/enroll.test.ts`.
+- Observation (M10's build): `test/endpoint/enroll.test.ts`, where `endpoint sync`'s red-first case lives, is in the `node-timing` project, not `node` (it starts the local hub), so Concrete Steps' `--project node` finds no file there.
+  Evidence: `vitest.config.ts` (`TIMING_NODE_TESTS`).
 
 ## Decision Log
 
@@ -2874,6 +2928,96 @@ P5 findings of M5's re-plan, continued from F15:
 - Decision: master 113f98484 (#471, tracker docs) merged as 18fa36fe3 before the final gate (2026-11-05).
   Date/Author: 2026-11-05, O7's executor (the controller).
 
+- Decision: M10's key read takes `mawsd keys --json`'s flat answer (2026-11-05). `keyIdOf` reads its top-level `keyId`. The bench's fakes for `keys` and `endpoint status` are rendered by the endpoint's own `keysAnswer` and `statusAnswer`, so they can't drift from the CLI. eslint admits only the module's two entries from outside `src/endpoint/`, so `presence.ts`, the entry for the pure renderers, re-exports the two. Red first: the regenerated fakes alone failed four cases with "posted no key to compare within 60 s", attempt 1's failure.
+  Rationale: M10's *The key read*; `src/endpoint/answers.ts`; eslint.config.js's `ENDPOINT_PATTERNS`.
+  Date/Author: 2026-11-05, O7's M10 executor.
+- Decision: `mawsd endpoint sync` waits for a read that begins after the call, not `syncNow()` alone (2026-11-05; M10's *The listing on demand* revised in Interfaces). `Endpoint.syncAfter` exposes the existing `#syncAfter`. If a read is in flight, it waits for that read and then reads again, so the answer reflects the hub as of the call. `promoteIfListed` follows, as planned. Exit codes are those of `enroll`: 0 listed, 4 hub-confirmed, and 1 when not enrolled. `mawsd`'s client gives it 90 s, since a read in flight and its own each have pages bounded by the hub client's 30 s.
+  Rationale: Surprises (M10's build), the read in flight.
+  Date/Author: 2026-11-05, O7's M10 executor.
+- Decision: the watch reaches the daemon lazily and is ended before the daemon's stop (2026-11-05; M10's *One status client*).
+  - **Reaching.** The agent keeps no background reach loop. Each ask reaches the daemon when no link is held, and the runner polls `up` every 5 s until the daemon answers, up to the stage's 10 minutes. That is "retries `reachMachine` until the daemon answers", with no timer on the machine. A link whose request fails is dropped and reached again at the next ask.
+  - **What goes through it.** `stage`'s wait, the rerun's check (`status`), `#keyId` (`keys`) and the listing's wait (`sync`). The listing is now read by `sync` every 5 s from the key's showing, within the code's TTL. So the owner's y is seen within a poll, and the hub link opens at once.
+  - **What stays outside it.** The enroll itself stays a process of its own (the code on its stdin). The VM's daemon start stays one too.
+  - **The quiet window.** The watch takes serve's deadline before the next quiet window, and an `after` ends it there.
+  - **Teardown order.** The watch's teardown is registered after the daemon's steps, so it runs before them: its own command line names the profile, and the reap would end it, and the process check would count it.
+  Rationale: M10's *One status client*; attempt 2's 25 `machine.sock` clients in five minutes.
+  Date/Author: 2026-11-05, O7's M10 executor.
+- Decision: the mini's teardown ends its hosts once its daemon is gone (2026-11-05; M10's *The mini's hosts*).
+  - **The wait.** After mini-ops' stop line, the runner polls `scratchDaemonLine` (a pgrep over ssh, no MAWS runtime) every 5 s, up to `STOP_WITHIN_MS` (10 minutes).
+  - **The hosts' end.** It is the VM's step: `stop-hosts`, the reap, the process check. It is now registered for both machines at the stage.
+  - **A daemon still running.** When it outlives the wait, teardown fails on both steps, no host is told, and the profile is kept.
+  Rationale: M10's *The mini's hosts*; supervisor 41388 after attempt 1's teardown.
+  Date/Author: 2026-11-05, O7's M10 executor.
+- Decision: the precheck reads the mini, not the VM, and an unread mini load refuses (2026-11-05; M10's *The precheck*).
+  - **The reads.** `BenchRun.load1()` runs `sysctl -n vm.loadavg` through the mini's transport, with its deadline and quiet window, and gives null on a devcloud VM, as the decision names the mini.
+  - **The rule.** `loadPrecheck` refuses at or over `IDLE_RUN.maxLoad` (5) on this Mac or the mini. A mini load it can't read refuses too (fail closed).
+  - **A refusal.** The live spec writes `remote-latency-live.json` with the reason and both loads, annotates the run, and skips the test with the reason, so the run reads as skipped, never failed. Both loads also go into a measured run's JSON (`load.precheck`).
+  Rationale: M10's *The precheck*; Rule B (test/support/daemon-idle.ts).
+  Date/Author: 2026-11-05, O7's M10 executor.
+- Decision: A, a remote session's activity time, verified and built to parity (2026-11-05; c97335a52, c0a81e1d2). All four of the architect's points hold.
+  - **No digest.** Only `spine-mirror.ts` emits `session.digest`, so a lane B record's `lastActivity` fell back to its `updatedAt`.
+  - **The listing hidden.** The record hides its listing's `issued`.
+  - **The cut.** After the spawned-here lead the cap cuts the session. And an unread record with no digest was keyed `-time(undefined)` = +Infinity, last among the unread.
+  - **The old e2e.** M8's e2e pinned nine sessions, so recency never decided.
+  - **The record freezes once its tab closes.** It reaches the renderer only through the lane B fold, while a tab holds the address plus the 10 s linger. After that only the listing (re-issued at each state change) and the attention feed arrive. So the activity time is built from what does arrive.
+  - **The fix.**
+    - A remote record with no turn times of its own takes the newest of the received `updatedAt`, the listing's `issued`, and the turns this window saw on its stream (`turnsSeen`, fed only by other machines' event batches; turns are counted as the digest counts them, never move backwards, and are forgotten with the record).
+    - An unread record with no digest ranks among the unread by that time.
+    - Local and digested sessions rank as before.
+    - The time is read by the sidebar's and the project rows' order, the row's age, the hover card, the palette and Resume….
+  - **Unread or read: which the live session was.** The live failure's mechanism was most likely the unread one. A lane B record's `unread` is this window's own mark (`lane-b/read-marks.ts`; `session.setVisible` isn't offered over RL2). It turns unread when a turn ends off screen while the stream is held, so a session whose turn ended while the owner looked away was unread and sank to tenth place.
+    - **The read case stays by parity.** A remote session read on screen when its turn ended still ranks behind unread local sessions, as a local one does. This is a known limit.
+  - **The e2e.** M8's e2e now reproduces the unread case: nine older unread idle local fillers, the remote tab put in the background before the turn ends, then closed by a middle click. It asserts the remote row is visible, unread, first, and one of five drawn. `e2e:remote` runs on CI both on a probe with A's ranking reverted and on the fix.
+  - **Left as parity gaps:**
+    - a busy remote record ranks by recency, not as working (the record hides the listing's `busy`);
+    - the Overview cards and the New chat project picker are unchanged.
+  Rationale: A's two reports; `src/renderer/src/overview/derive.ts`, `lane-b/read-marks.ts`, `src/main/lane-b/remote-session.ts`.
+  Date/Author: 2026-11-05, O7's M10 executor (the controller).
+- Decision: B, an owned-machine spawn without Touch ID, built in main's signer (2026-11-05; b1d9b193c).
+  - **Where it is decided.** The exemption is decided in `createStepUp.sign` on the frozen action it signs, the place where the action's name and machine are bound. So no flag reaches the signer's interface, and the renderer has no lever. The renderer cases are tested: flags on the request, claims in the args, name lookalikes, and a spawn with a session or context.
+  - **Who owns the machine.** It is decided as the endpoint and `attest.ts` decide it: `ownerMembers(machineOwners(...))` on the held head, read through a getter at signing time. The member is the one the head lists this device id and this step-up key under, never `identity.member`. With no getter, every act prompts. A judgment that fails prompts.
+  - **Its scope.** It is `session.spawn` alone: `sminos.spawn`, `session.launch` and the shell keep their behaviour, since the ruling names only the spawn.
+  - **The architect's ruling.** Trust acceptance (`trust: 'accepted'`) rides the exemption, not narrowed out, for three reasons:
+    - the trust card is the confirmation, as it is locally;
+    - an owner's remote shell already opens with no prompt (`pty.spawn` is `if-asked`, and the endpoint's `stepUpRequired` asks a `shell` grade only of a non-owner, `src/endpoint/step-up.ts`), so a prompt here is no boundary against a compromised renderer;
+    - the owner's ruling covers spawns on their own machines.
+
+    The controller verified the shell premise in the code before the review.
+  Rationale: the owner's ruling at the sitting; the architect's ruling of 2026-11-05; B's report (20 cases in `step-up-owned-spawn.test.ts`, each guard shown load-bearing by removing it).
+  Date/Author: 2026-11-05, O7's M10 executor (the controller).
+- Decision: C's cause is the lane A tail row's clock, not missing deltas (2026-11-05; d3175ca56, be0f10fc1).
+  - **What opus-5-5 streams.** Its thinking blocks carry no text: 1 to 4 empty `thinking_delta`s with `estimated_tokens`, then a `signature_delta` (`p4/p4-r7-loss-dialog.jsonl`).
+  - **The store-derived row already ticks.** A MAWS-run row ticks on the store's event clock while its process is live, with no further deltas; `rows.test.tsx` shows 12 s and 48 s.
+  - **The broken path.** A terminal session's streamed thinking row (`lane-a/stream/overlay.ts`) is stamped on the window's wall clock, but it was timed on the store's disk-event clock and gated on the digest's liveness. The digest says `foreign` while the bridge is `starting`, so the row froze at "0s". While live it lagged the disk follow, by up to 30 s on a dropped FSEvents event.
+  - **The fix.** Lane A thinking rows carry `clock: 'wall'` and tick on a live clock, and the overlay is their liveness. A closed textless block leaves at close, as W1 has a lane B one do (the architect: keep W1, no row for a closed textless block). Store-derived rows are unchanged.
+  - **Which session the screenshot was** (settled from code). Its "Do anything" placeholder and its effortless label fit a terminal-held seat driven by agent messages and task notifications:
+    - a MAWS-run session replays the owner's prompt as a user row (`--replay-user-messages`; `derive.ts`);
+    - a MAWS-run session's label names its effort from `get_settings`;
+    - a terminal session has no effort to name.
+
+    A lane B session whose loaded window holds only engine- or peer-opened turns would show the same placeholder. The effort clue rests on `get_settings` reporting a non-null effort for opus-5-5, which no fixture shows.
+  - **Residue:** a textless thinking block's final duration (W1 shows none), for the owner's UX wave.
+  Rationale: C's two reports; the architect's answers of 2026-11-05.
+  Date/Author: 2026-11-05, O7's M10 executor (the controller).
+- Decision: A, B and C's reviews and proofs (2026-11-05).
+  - **reviewer-high on A and B together** (security lens on B; head 92a712dc5): correct, with no material findings. It found sound:
+    - the exact action and shape match, judged on the private canonical copy that is then signed;
+    - the device-and-key lookup against main's verified held view;
+    - the shared ownership resolution;
+    - the fallback to a prompt on any failed judgement;
+    - the receivers unchanged, and the signing domains keeping the unasked signature out of other uses.
+
+    It noted that the e2e's fixed 12 s wait past the linger assumes main has processed the tab's close under hosted load, rather than observing it (a tracker line).
+  - **reviewer-medium on C:** correct, with no material findings.
+  - **A's e2e proved red.** `e2e:remote` on a probe with A's ranking reverted and the new e2e kept (acc90f6e2, never merged; run 41980345401) failed at "its first turn over and its tab closed, the row still within the visible rows", on the first try and its retry. On the fix (92a712dc5, run 41980345499) it passed.
+  - **Gates.** `--gates static,unit` was green on the merged A, B and C (1c7e02747, run 41979836501). Master bf2dce3f4 (#475) was merged as a0cc151ba before the final `--gates all`.
+  Rationale: the two reviewers' verdicts; the runs named.
+  Date/Author: 2026-11-05, O7's M10 executor (the controller).
+- Decision: reviewer-medium on the whole branch (2026-11-05, over 5f2bc8964..7692b289a). Verdict: incorrect, on one Important finding. A sync whose read was held while the machine unenrolled answered exit 4 with `enrollment: none`. The fix maps the three final states explicitly (a07adc17b), red first with a held org-state read and `unenroll` beside it. The reviewer found the rest sound: the teardown order and the daemon-alive guard, the quiet-window checks, the code's transport, and how the watch's asks settle on a reply, an exit or a timeout. The loop stopped there. The fix is one mapping, proved by its test, and the controller verified it rather than taking a second round.
+  Also fixed on the way: static's typecheck found two narrowings the local single-file runs can't see (fba341f23, 7e1fd4d22).
+  Rationale: the reviewer's report; static runs 41970289264 and 41970477689 (red), then 41970939499 and 41971463848 (green).
+  Date/Author: 2026-11-05, O7's M10 executor.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28).** Acceptance 1 is met in tests, and nothing changes for the owner until O8's sign-in provides a production `OrgSession`.
@@ -3007,6 +3151,44 @@ P5 findings of M5's re-plan, continued from F15:
   - The lessons of M5a and M5b bound every brief, and the reviews still found the same class each round: a resource a peer can hold that one path forgets (a late acquisition, a cancel before its send, a stalled event loop past a deadline). Naming that class as a review lens found each before it shipped; writing every acquisition as one decision on one clock is what closed it.
   - The scene's first observer was a replay that could not verify a source, and a correct product refusal looked like a test failure; asking which layer is right before fixing the test saved a wrong fix.
   - A flaky line in an unrelated-looking spec was a product race older than this work; treating it as red until explained found it.
+
+**M10's code (2026-11-05).** The bench is fit for a live run, and the sitting's three defects are fixed in tests and `e2e:remote` on CI. Their live re-check is the owner's minute after the PR lands.
+- **The bench.** It reads the key's flat answer. It sees the listing on demand (`mawsd endpoint sync`). It holds one status client per run (the agent's `watch`). It ends the mini's hosts after mini-ops' stop. It refuses a loaded runner or mini as a recorded outcome.
+- **The defects.**
+  - A: a remote session ranks by its latest activity.
+  - B: a spawn on a machine the member owns signs without Touch ID.
+  - C: a terminal session's thinking row ticks.
+- **Not proved here.**
+  - The live bench run, which is carried.
+  - The read-on-screen case of A: a read remote session ranks behind unread local ones, by parity.
+  - A textless thinking block's final duration, which is residue.
+
+**M10's sitting (2026-11-05).** M8's items and M9's spawn held live on both machines, with one failure, acceptance 5's row. Its cause is fixed by A below, and so is the "Thinking · 0s" the owner found (C). O7 closes on the owner's one-minute live re-check of A and C after M10's PR lands, recorded as an addendum here.
+- **Setup.**
+  - About 05:24Z to 06:00Z, from the MacBook against the mini and the fresh VM dc-acceptance-e071 (GCE us-west1-b). The VM was certified at boot under devcloud's `dc-` delegation, so it took no enrollment code.
+  - All three machines ran master 5f2bc8964 (wire 3.27). The desk track swapped the MacBook and mini-ops swapped the mini, both on the owner's "Swap now".
+  - The mini kept its MAWS project registered and trusted. On the VM the project was unregistered, and a detached worktree at `~/m10/MAWS` was left untrusted for the trust card; the original checkout was trusted at boot.
+- **Passed:**
+  - **Route naming.** The mini: "The machine's own · ClaudeUsage relay · http://127.0.0.1:8641". The VM: "The machine's own · mac-mini.tail112c3f.ts.net:8641", since its managed settings route through the mini's gateway.
+  - **A MAWS ask answered from the MacBook:** opened 05:28:57.825Z, answered 05:29:05.214Z.
+  - **Working cleared after a tool-using turn** (`turn.ended` 05:29:09.675Z).
+  - **`/btw` answered.**
+  - **The Subagents, Workflows and Tasks panels loaded,** each "none" rather than an error.
+  - **A PDF read directly as a document.**
+  - **An untracked file shown as added in Review.**
+  - **The VM's remote folder sheet registered the project** (78c24e64).
+  - **The to-human message tool worked in a VM session** (#466's managed scope).
+  - **The MCP panel's Sign in on Notion (the VM) completed.** A Notion search returned the owner's page, and Settings › Connectors showed Notion connected.
+- **Failed: acceptance 5's row.** Both spawned sessions (cb9e796a on the mini, cf463a17 on the VM) were absent from the MAWS row even with Show more, which listed rows 1 and 2 weeks old. Both were in Resume…. The cause is a remote session ranked by a stale activity time; fix A in M10's Decisions.
+- **Not reached live:**
+  - the trust card: the owner picked the already-trusted original checkout, so it is covered in e2e only;
+  - Touch ID on Connectors' Show: not reported;
+  - the concurrent second client: e2e only;
+  - the live bench: carried, since its fixes were not landed at the sitting.
+- **Observations:**
+  - The VM's spawn took about 5 s to start, because its engine host woke from parked (05:40:54Z).
+  - The owner found "Thinking · 0s" not ticking (fix C).
+  - The owner's rulings at the sitting: no Touch ID for a spawn on the member's own machines (fix B); message reach as board #477; connectors switchable as board #476.
 
 **M9 (2026-11-05).** Every machine spawns on its own terms, in tests, `e2e:remote` and `cross-build` on CI. The live proof is M10's sitting on real machines.
 - **The machine route.** A machine's sessions default to `machine`: nothing injected or blanked, the machine's own settings decide the inference, and what it reaches is named (ClaudeUsage, the Anthropic login, or a host), never a mismatch. Proved in `launch.test.ts` and `session.test.ts` over the three fixtures, and in `e2e:remote`'s M9 case, whose machine reports its login.

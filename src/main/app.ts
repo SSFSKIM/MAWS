@@ -295,6 +295,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // hands the production session its notices; org.* answers the Org section.
   // P5 O7 M2: every step-up signature (the org sessions' acts and M3's state signer) is confirmed on the step-up sheet,
   // the action's summary and fields on the window, then Touch ID; an e2e harness build injects its own answer instead.
+  // P5 O7 M10 B: but a spawn on a machine the member owns, which step-up.ts signs unasked on the session's held head.
   const confirm =
     harnessConfirmation(process.env, app.isPackaged) ??
     sheetConfirmation({ window: () => BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null, dialog, prompt: promptTouchIDConfirmation(systemPreferences) });
@@ -305,7 +306,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
           userData: app.getPath('userData'),
           packaged: app.isPackaged,
           build: `${MAIN_BUILD.version}+${MAIN_BUILD.commit}`,
-          stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp, confirm }),
+          stepUp: (keys, device, org) => createStepUp({ device, key: keys.stepUp, confirm, org }),
           log: (line) => console.log(line),
         })
       : null;
@@ -320,7 +321,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
           packaged: app.isPackaged,
           env: process.env,
           openExternal: (url) => openExternalUrl(url),
-          stepUp: (keys, device) => createStepUp({ device, key: keys.stepUp, confirm }),
+          stepUp: (keys, device, org) => createStepUp({ device, key: keys.stepUp, confirm, org }),
           // `<userData>/org/` stays out of Time Machine, as the device keys do: a restored token or chain is no one's
           excludeFromBackup: (path) => excludeFromBackup(path),
           // M3: the app as the org's signer. Org states are signed with the device's step-up key behind Touch ID (the

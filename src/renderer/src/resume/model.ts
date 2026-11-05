@@ -14,7 +14,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import { dateFormats, formatClock, formatShortDate, formatWeekdayClock } from '@shared/app/date-format';
-import { lastActivity } from '../overview/derive';
+import { lastActivity, seenActivity } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle, listedTitle } from '../sessions/title';
 import { issuedAt, listedMatcher, sessionMatcher } from '../sidebar/derive';
@@ -57,6 +57,7 @@ export interface ChooserInput {
   local: MachineRef; // this machine, for the org index a row's scope reads
   listed?: ReadonlyMap<AppSessionId, ListedSession>; // P5 O7 M8: other machines' listed sessions (the sessions store's)
   people?: ReadonlySet<RowKey>; // P5 O7 M8: the rows whose People toggle is on, which draw others' listed sessions
+  turnsSeen?: ReadonlyMap<AppSessionId, number>; // P5 O7 M10: the turns other machines' sessions streamed here (the sessions store's)
 }
 
 // A row is a record's, or (P5 O7 M8) another machine's listed session with no record here, opened through its lane's
@@ -84,8 +85,9 @@ export const sessionBranch = (record: SessionRecord): string | null => branchLab
 // member's session (its listing not yours), held as a listing or as a record, is listed only under a row whose People
 // toggle is on, whatever the toggles; a row nobody draws (an all-hidden project's) never lets it through. A listing
 // names no folder, worktree or branch: All worktrees keeps them, Current branch none.
-export function chooserRows({ records, digests, projects, context, toggles, branch, query, local, listed = new Map(), people = new Set() }: ChooserInput): ChooserRow[] {
+export function chooserRows({ records, digests, projects, context, toggles, branch, query, local, listed = new Map(), people = new Set(), turnsSeen = new Map() }: ChooserInput): ChooserRow[] {
   const matches = sessionMatcher(query, projects);
+  const seen = seenActivity(listed, turnsSeen); // P5 O7 M10: a held remote record's activity past the record, as the sidebar ranks it
   const matchesListed = listedMatcher(query);
   let held: OrgIndex | null = null; // built when a row or a listing asks for it
   const index = () => (held ??= orgIndex(projects.values(), local));
@@ -108,7 +110,7 @@ export function chooserRows({ records, digests, projects, context, toggles, bran
     if (toggles.currentBranch && (branch === null || sessionBranch(record) !== branch)) continue;
     if (!matches(record)) continue;
     if (othersRecord(record) && !drawsOthers(recordRow(record))) continue;
-    rows.push({ record, at: lastActivity(record, digests.get(record.appId)) });
+    rows.push({ record, at: lastActivity(record, digests.get(record.appId), seen.get(record.appId)) });
   }
   if (!toggles.currentBranch) {
     for (const session of listed.values()) {
