@@ -427,7 +427,7 @@ export class Rl10 {
     const head = this.#ctx.head();
     if (head === null) return;
     const revoked: RevocationSet = await revocationSet(head.state, head.certificates);
-    const org = orgDirectory(head.state, head.certificates, new Date(this.#ctx.now()), (name) => this.relay.seen(name));
+    const org = await orgDirectory(head.state, head.certificates, new Date(this.#ctx.now()), (name) => this.relay.seen(name));
     const told = { revoked: JSON.stringify(revoked), org: JSON.stringify(org) };
     if (always || this.#told?.revoked !== told.revoked) this.send({ t: 'revoked', ...revoked });
     if (always || this.#told?.org !== told.org) this.send(org);
