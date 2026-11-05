@@ -24,6 +24,7 @@ import { effortLevelsOf, resetModelRequests } from './model';
 import { modelSelector } from './ModelSelector';
 import { emptyObservedFacts } from '@shared/engine/observed-facts';
 import type { SetupIntent } from '@shared/sessions/intent';
+import { machineSettingsDefaults } from '@shared/settings/defaults';
 import { GATEWAY } from '../settings-tab/copy';
 import { REL } from '../test-support/relative-time';
 
@@ -252,7 +253,7 @@ describe('a session with a record and no ready process', () => {
 // main's answers for the route segment: the machine's default route (`null`: its daemon predates the machine route, and
 // answers none), and the intent as a patch leaves it
 const routeAnswers = (held: SetupIntent, defaultRoute: 'machine' | null) => async (name: string, input: unknown) => {
-  if (name === 'machineSettings.get') return { ok: true, value: { settings: {}, version: 1, ...(defaultRoute !== null && { defaultRoute }) } };
+  if (name === 'machineSettings.get') return { ok: true, value: { settings: machineSettingsDefaults(), version: 1, ...(defaultRoute !== null && { defaultRoute }) } };
   if (name !== 'session.intent.patch') return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
   const { patch } = input as { patch: { route: 'machine' | 'gateway' | 'direct' } };
   return { ok: true, value: { ...held, route: patch.route, gateway: patch.route === 'machine' ? held.gateway : patch.route } };

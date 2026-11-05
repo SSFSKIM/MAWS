@@ -21,18 +21,25 @@ export async function readDefaultRoute(client: MawsBridge = ipc): Promise<Route 
   return result.value.defaultRoute ?? null;
 }
 
-/** Whether this machine's daemon honours the machine route (its `machineSettings.get` answers a `defaultRoute`); null
- *  until the read answers. False is the legacy control's signal too: an older daemon, or a read that failed. */
-export function useMachineRouteHonoured(client: MawsBridge = ipc): boolean | null {
-  const [honoured, setHonoured] = useState<boolean | null>(null);
+/** The machine's resolved default route, read once per mount: undefined until the read answers, null when its daemon
+ *  predates the machine route or the read failed (the legacy control's signal). */
+export function useResolvedDefaultRoute(client: MawsBridge = ipc): Route | null | undefined {
+  const [route, setRoute] = useState<Route | null | undefined>(undefined);
   useEffect(() => {
     let live = true;
-    void readDefaultRoute(client).then((route) => live && setHonoured(route !== null));
+    void readDefaultRoute(client).then((read) => live && setRoute(read));
     return () => {
       live = false;
     };
   }, [client]);
-  return honoured;
+  return route;
+}
+
+/** Whether this machine's daemon honours the machine route (its `machineSettings.get` answers a `defaultRoute`); null
+ *  until the read answers. */
+export function useMachineRouteHonoured(client: MawsBridge = ipc): boolean | null {
+  const route = useResolvedDefaultRoute(client);
+  return route === undefined ? null : route !== null;
 }
 
 /** Chooses the machine's default route; a daemon that answers without one dropped the choice. */

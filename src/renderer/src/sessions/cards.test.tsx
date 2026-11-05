@@ -34,7 +34,7 @@ import { TrustCard } from './TrustCard';
 // C11 start
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BUILTIN_MODELS } from '@shared/sessions/models';
-import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { GatewayDialogs } from '../gateway/SwitchSheet';
 import { registerAction } from '../keymap/actions-runtime';
 import { useSettings } from '../stores/settings';
@@ -251,6 +251,32 @@ describe('relay card', () => {
       up = true;
       await act(() => vi.advanceTimersByTimeAsync(5_000));
       await waitFor(() => expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: {} }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // A discovered session (no route recorded, nor whether it was routed) resumes on the machine's default: on the machine's
+  // own, its card is that route's (Start anyway), and a relay answering again keeps it there (no `gateway` option)
+  it('a discovered session resuming on the machine’s own default: Start anyway, and the relay answering again keeps the route', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let up = false;
+      withMain({
+        'session.acquire': () => ({ status: 'relay_unreachable', appSessionId: BARE_ID, health: health() }),
+        'engine.relayHealth': () => health({ ok: up, status: up ? 200 : null, error: up ? null : 'timed out' }),
+        'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1, defaultRoute: 'machine' }),
+      });
+      const discovered = record(ID);
+      useSessions.setState({ records: new Map([[ID, { ...discovered, gateway: { ...discovered.gateway, routed: null } }]]) });
+      render(<Docked />);
+      expect(await act(() => resumeSession(ID))).toBe(true);
+      expect(await screen.findByText(/this machine’s own settings send it there/)).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Start anyway' })).toBeTruthy();
+      up = true;
+      await act(() => vi.advanceTimersByTimeAsync(5_000));
+      await waitFor(() => expect(fake.invoked('session.acquire')).toHaveLength(2));
+      expect(fake.invoked('session.acquire').at(-1)).not.toHaveProperty('options.gateway');
     } finally {
       vi.useRealTimers();
     }
