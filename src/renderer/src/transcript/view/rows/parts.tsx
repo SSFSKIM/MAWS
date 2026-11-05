@@ -77,9 +77,11 @@ export function TickingStatus({ line, elapsed, ...rest }: { line: (elapsed: stri
 
 // How long something that started at `startedAt` has been working (W8: a streaming thinking block), re-read once a
 // second while the key's process is live; without one it is the latest event's time, following the events and never
-// the wall clock (the divider's rule).
-export function useWorkingMs(storeKey: string, startedAt: string): number {
-  const frozen = useTranscriptStore((state) => (ticks(state, storeKey) ? null : workingDurationMs(state.entries[storeKey], startedAt, 0, false)));
+// the wall clock (the divider's rule). P5 O7 M10: a `wall` start is this window's own time (lane A's streamed block,
+// drawn while its bridge streams it), so it ticks from it directly, whatever the store's events and liveness say.
+export function useWorkingMs(storeKey: string, startedAt: string, clock: 'events' | 'wall' = 'events'): number {
+  const frozen = useTranscriptStore((state) => (clock === 'wall' || ticks(state, storeKey) ? null : workingDurationMs(state.entries[storeKey], startedAt, 0, false)));
   const now = useTicker(frozen === null);
-  return frozen ?? workingDurationMs(useTranscriptStore.getState().entries[storeKey], startedAt, now);
+  if (frozen !== null) return frozen;
+  return clock === 'wall' ? Math.max(0, now - Date.parse(startedAt)) : workingDurationMs(useTranscriptStore.getState().entries[storeKey], startedAt, now);
 }

@@ -74,7 +74,7 @@ export type Row = RowBase &
         peer?: PeerMessage; report?: string; // E7: a message between sessions (`between`); an in-process agent's hand-back report
         body?: string; // E7: an in-process agent's whole message, when the text shows only its preview
       }
-    | { kind: 'thinking'; messageUuid: MessageUuid | null; text: string; live: boolean; durationMs: number | null }
+    | { kind: 'thinking'; messageUuid: MessageUuid | null; text: string; live: boolean; durationMs: number | null; clock?: 'wall' } // clock (P5 O7 M10): a terminal session's streamed block (lane A's overlay), its `at` this window's time when first drawn, not an event's
     | { kind: 'plan'; toolUseId: ToolUseId; plan: string; outcome: (typeof PLAN_OUTCOMES)[number] | null; feedback: string | null }
     | { kind: 'question'; toolUseId: ToolUseId; questions: Question[]; answers: Record<string, string> | null; error: string | null } // E1 (A-17): error, the engine's refusal of the call, tags stripped
     | {
