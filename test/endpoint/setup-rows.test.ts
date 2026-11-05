@@ -302,6 +302,46 @@ describe('the remote setup with the machine’s own handlers', () => {
     expect(cwd.startsWith(home) || cwd.startsWith(realpathSync(home))).toBe(false);
   });
 
+  // m9-5, the architect's property (2026-11-04): a remote `session.projects.addFolder` needs no trust first (a folder is
+  // registered, and trusted later), so on a folder the machine does not trust it spawns no git but the org derivation's
+  // one isolated read (`git config --file <the checked config> --no-includes`, from outside the folder, with neither the
+  // system's nor the global config), and reads nothing outside the checked resolver: the folder's config includes a file
+  // in an unopened protected folder that would name another remote, and the global config includes one there git cannot
+  // parse; neither is read. The index is production's, its org refresh installed; the folder's fsmonitor never runs.
+  it('register an untrusted folder with no git but the isolated config read, reading nothing outside the checked resolver', async () => {
+    const bin = tempDir('setup-rows-bin-');
+    const ran = join(tempDir('setup-rows-ran-'), 'git-ran');
+    const isolation = `${ran}-env`;
+    process.env.MAWS_GIT = script(join(bin, 'git'), ran, `echo "NOSYSTEM=$GIT_CONFIG_NOSYSTEM GLOBAL=$GIT_CONFIG_GLOBAL DIR=$GIT_DIR WORK_TREE=$GIT_WORK_TREE" >> '${isolation}'\nexec /usr/bin/git "$@"\n`);
+    const { f, home, a, index } = await real();
+    const main = join(home, 'Developer/GitHub/project');
+    repo(main);
+    git(main, 'remote', 'add', 'origin', 'https://github.com/example/project.git');
+    const fsmonitorRan = join(home, 'fsmonitor-ran');
+    git(main, 'config', 'core.fsmonitor', script(join(bin, 'fsmonitor'), fsmonitorRan));
+    writeFileSync(join(home, 'Documents/decoy'), '[remote "origin"]\n\turl = https://github.com/example/decoy.git\n');
+    git(main, 'config', 'include.path', join(home, 'Documents/decoy'));
+    writeFileSync(join(home, 'Documents/global-included'), 'not a config line [[[\n');
+    writeFileSync(join(home, '.gitconfig'), `[include]\n\tpath = ${join(home, 'Documents/global-included')}\n`);
+    process.env.HOME = home; // the machine's git would find that global config
+
+    expect(await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: main }))).toMatchObject({ state: 'done', result: { project: { directory: main }, location: { kind: 'directory', path: main } } });
+    const org = await eventually(() => index.projects.list({ includeHidden: true }).find((project) => project.directory === main)?.org);
+    expect(org, 'the folder’s own remote: the protected include was never followed').toMatchObject({ key: 'remote:github.com/example/project', source: 'remote' });
+
+    const calls = readFileSync(ran, 'utf8').trim().split('\n');
+    expect(calls, 'one git process for the registration').toHaveLength(1);
+    const [cwd, ...args] = calls[0].split(' ');
+    expect(args.join(' ')).toBe(`config --file ${join(main, '.git/config')} --no-includes -z --get-regexp ^remote\\.`);
+    expect(cwd.startsWith(home) || cwd.startsWith(realpathSync(home)), `run from outside the machine's home (${cwd})`).toBe(false);
+    expect(readFileSync(isolation, 'utf8').trim(), 'no system or global config, and no repository named to git').toBe('NOSYSTEM=1 GLOBAL=/dev/null DIR= WORK_TREE=');
+    expect(existsSync(fsmonitorRan), 'the folder’s fsmonitor never ran').toBe(false);
+
+    // the folder was untrusted throughout: its trust read, after the registration, says so and runs no git either
+    expect(await call(a, 'session.trust.check', { directory: main })).toMatchObject({ ok: true, output: { directory: main, trustKey: main, keyKind: 'repo', trusted: false } });
+    expect(readFileSync(ran, 'utf8').trim().split('\n')).toHaveLength(1);
+  });
+
   // Round 4 (the review's case): a pointer's content is a path the kernel resolves, a `..` after a link climbing from
   // its target; the org derivation reads the common dir, and the config git is handed, where the check resolved them,
   // never at the lexical spelling (here `~/Documents`, a protected folder nobody opened, holding a decoy config)
