@@ -1354,6 +1354,42 @@ describe('the machine route (P5 O7 M9)', () => {
       expect(h.host.launches.map((spec) => spec.route)).toEqual(['machine', 'machine', 'machine']);
     });
 
+    // m9-5 (the architect's condition on m9-4's switch back, 3d768c25b): the switch stops the session, then starts it on
+    // `{route: 'machine'}`; at a dead relay the start answers the sheet, and on Cancel nothing more is sent. The record's
+    // route and observation are then exactly what they were before the switch (a gateway or Direct record observes
+    // nothing: `observed` is the machine route's alone, so it stays absent), and a resume launches on the route it was on.
+    it.each(['gateway', 'direct'] as const)('leaves a %s record as it was when the switch back meets a dead relay and is cancelled; a resume takes its route again', async (route) => {
+      userBaseUrl(RELAY); // the machine's own settings name the relay
+      const id = await create();
+      await started(id, { route, trust: 'accepted' });
+      // the engine verified it on that route: the host's status, as its gateway check writes it
+      const live = h.host.table.get(id)!;
+      h.host.table.set(id, { ...live, gateway: { ...live.gateway, mode: route, verified: route === 'gateway' ? 'routed' : 'direct', baseUrl: route === 'gateway' ? RELAY : null } });
+      h.host.readyNow(id);
+      await vi.waitFor(() => expect(h.index.sessions.get(id)?.gateway.routed).toBe(route === 'gateway'));
+      const before = h.index.sessions.get(id)!.gateway;
+      expect(before).toMatchObject({ route });
+      expect(before).not.toHaveProperty('observed');
+
+      // the switch: the stop, then the start on the machine's own route, which the dead relay answers with the sheet
+      expect(await h.host.dispatch('engine-host', 'session.stop', { appSessionId: id, reason: 'stop' })).toMatchObject({ ok: true, value: { exited: true } });
+      h.host.relay = DOWN_RELAY;
+      const launched = h.host.launches.length;
+      expect(await h.service.startSession(id, { message: null, options: { route: 'machine' } })).toMatchObject({ status: 'relay_unreachable', health: { ok: false } });
+      await new Promise((resolve) => setTimeout(resolve, 50)); // the stop's status folded, whatever it would change
+      expect(h.host.launches).toHaveLength(launched);
+      expect(h.index.sessions.get(id)!.gateway, 'Cancel: the route and the observation as before the switch').toEqual(before);
+
+      // Resume from the sidebar: no route asked, the record's own
+      h.host.relay = OK_RELAY;
+      expect(await h.service.startSession(id, { message: null, options: {} })).toMatchObject({ status: 'starting' });
+      expect(await h.settled(id, 2)).toMatchObject({ phase: 'ready' });
+      const resumed = h.host.launches.at(-1)!;
+      expect(resumed).toMatchObject({ gateway: route, resume: { fork: false } });
+      expect(resumed).not.toHaveProperty('route');
+      expect(h.index.sessions.get(id)!.gateway.route).toBe(route);
+    });
+
     it('resumes a machine record past the sheet too', async () => {
       userBaseUrl(RELAY);
       h.host.relay = DOWN_RELAY;
