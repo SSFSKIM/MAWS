@@ -377,6 +377,20 @@ describe('effectiveBaseUrl', () => {
     expect(await resolve({ HOME: home }, project)).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: [] });
   });
 
+  // P5 O7 M9 reviewer-high fix wave: the global config is the file the engine reads (config-dir.ts configFilePath):
+  // the custom-OAuth one under CLAUDE_CODE_CUSTOM_OAUTH_URL, unless the legacy `.config.json` exists
+  it('reads the global config the engine selects, the custom-OAuth one included', async () => {
+    const home = join(root, 'home');
+    await mkdir(join(home, '.claude'), { recursive: true });
+    await writeFile(join(home, '.claude-custom-oauth.json'), JSON.stringify({ env: { ANTHROPIC_AUTH_TOKEN: 'oauth-token' } }));
+    await writeFile(join(home, '.claude.json'), JSON.stringify({ env: { ANTHROPIC_BASE_URL: OTHER } }));
+    const at = (env: Record<string, string>) => effectiveBaseUrl({ env: { HOME: home, ...env }, cwd: null, platform: 'linux', systemRoot: system });
+    expect(await at({})).toEqual({ kind: 'resolved', baseUrl: OTHER, gatewayKeys: ['ANTHROPIC_BASE_URL'] });
+    expect(await at({ CLAUDE_CODE_CUSTOM_OAUTH_URL: 'https://oauth.example.invalid' })).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: ['ANTHROPIC_AUTH_TOKEN'] });
+    await writeFile(join(home, '.claude', '.config.json'), JSON.stringify({ env: { ENABLE_TOOL_SEARCH: 'true' } }));
+    expect(await at({ CLAUDE_CODE_CUSTOM_OAUTH_URL: 'https://oauth.example.invalid' })).toEqual({ kind: 'resolved', baseUrl: null, gatewayKeys: ['ENABLE_TOOL_SEARCH'] });
+  });
+
   // P5 O7 M9 fix round (item 2): a launch in a worktree not yet created reads what its branch tracks: the caller hands
   // the tracked `settings.json` and `settings.local.json` texts (null: not tracked) in place of the main checkout's,
   // and the worktree's local file sits beneath the store it reads at the main checkout, where that store moves there

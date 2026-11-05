@@ -8,8 +8,9 @@
 // environment of its own keeps its list apart from its route's (`catalogueKey`, debt wave 5). Before any catalogue for a
 // key it answers the built-in list.
 import { createHash } from 'node:crypto';
-import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { configFilePath } from '@shared/engine/config-dir'; // P5 O7 M9: the engine's global-config selection, the trust reader's
 import * as z from 'zod';
 import { BUILTIN_MODELS, ModelCatalogueEntrySchema, type ModelCatalogue } from '@shared/sessions/models';
 import { GATEWAY_KEYS } from './launch'; // P5 O7 M9
@@ -85,7 +86,7 @@ async function layeredEnv(sources: ModelEnvSources, pick: (name: string) => bool
   const cwd = restricted ? null : sources.cwd;
   const project = cwd === null ? null : join(cwd, '.claude');
   const [globalEnv, user, projectEnv, localEnv] = await Promise.all([
-    globalConfigEnv(configDir, sources.env.CLAUDE_CONFIG_DIR || home, read),
+    globalConfigEnv(sources.env, read),
     configDir === null || restricted ? {} : read(join(configDir, 'settings.json')),
     project === null ? {} : given === undefined ? read(join(project, 'settings.json')) : textEnv(given.settings, 'settings.json'),
     cwd === null ? {} : localFiles(cwd).then(async (files) => Object.assign(given === undefined ? {} : textEnv(given.local, 'settings.local.json'), ...(await Promise.all(files.map(read)))) as Record<string, string>),
@@ -138,12 +139,12 @@ function envFlag(value: string | undefined): boolean {
   return value !== undefined && ['1', 'true', 'yes', 'on'].includes(value.toLowerCase().trim());
 }
 
-// The global config's env: `<config dir>/.config.json` while that legacy file exists, else `.claude.json` in the
-// config directory when CLAUDE_CONFIG_DIR names one, else in the home directory (SPEC 03 §2, the global config).
-async function globalConfigEnv(configDir: string | null, configHome: string | null, read: (file: string) => Promise<Record<string, string>>): Promise<Record<string, string>> {
-  const legacy = configDir === null ? null : join(configDir, '.config.json');
-  if (legacy !== null && (await access(legacy).then(() => true, () => false))) return read(legacy);
-  return configHome === null ? {} : read(join(configHome, '.claude.json'));
+// The global config's env, from the file the engine reads (config-dir.ts configFilePath, shared with the trust reader:
+// the legacy `.config.json` while it exists, else `.claude.json`, or `.claude-custom-oauth.json` under
+// CLAUDE_CODE_CUSTOM_OAUTH_URL, in CLAUDE_CONFIG_DIR or the home directory; SPEC 03 §2, the global config).
+async function globalConfigEnv(env: Record<string, string>, read: (file: string) => Promise<Record<string, string>>): Promise<Record<string, string>> {
+  if (!env.HOME && !env.CLAUDE_CONFIG_DIR) return {}; // no home to read it in (never this process's)
+  return read(configFilePath(env));
 }
 
 // A settings file's picked env; a missing file sets none, and so does one that is unreadable or malformed (told).

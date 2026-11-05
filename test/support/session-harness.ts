@@ -42,6 +42,7 @@ export interface HarnessOptions {
   takeOver?: SessionServiceDeps['takeOver']; // P2-A: the take-over's seams (`claude stop`, the registry wait)
   readModel?: SessionReadModel; // P2-A M3: main's read model, fed by the index source and the service's acquisition memory (its digests carry availability)
   port?: SessionServiceDeps['port']; // P5 O1 M3: the client port's reveal (default: revealed)
+  env?: Record<string, string>; // P5 O7 M9: more of the engine's environment (e.g. CLAUDE_CODE_CUSTOM_OAUTH_URL)
 }
 
 export class SessionHarness {
@@ -91,7 +92,7 @@ export class SessionHarness {
   }
 
   get env(): NodeJS.ProcessEnv {
-    return { PATH: process.env.PATH, HOME: this.home, CLAUDE_CONFIG_DIR: this.trust.configHome };
+    return { PATH: process.env.PATH, HOME: this.home, CLAUDE_CONFIG_DIR: this.trust.configHome, ...this.opts.env };
   }
 
   private boot(): void {

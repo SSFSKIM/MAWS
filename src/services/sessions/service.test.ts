@@ -1311,6 +1311,24 @@ describe('the machine route (P5 O7 M9)', () => {
       expect(await started(id)).toMatchObject({ gateway: 'direct' });
     });
 
+    // reviewer-high fix wave: the global config the engine reads is the custom-OAuth one while
+    // CLAUDE_CODE_CUSTOM_OAUTH_URL is set (and no legacy `.config.json` exists); its env sets a token or a base URL too
+    it('reads the custom-OAuth global config: a token or a base URL there refuses route-unsupported', async () => {
+      const oauth = await new SessionHarness({ settings: () => MACHINE, env: { CLAUDE_CODE_CUSTOM_OAUTH_URL: 'https://oauth.example.invalid' } }).start();
+      try {
+        oauth.host.capabilities = OLDER_HOST;
+        const file = join(oauth.trust.configHome, '.claude-custom-oauth.json');
+        const id = (await oauth.service.create({ projectId: null, location: { kind: 'directory', path: oauth.work } })).appSessionId;
+        for (const env of [{ ANTHROPIC_AUTH_TOKEN: 'oauth-token' }, { ANTHROPIC_BASE_URL: OTHER }]) {
+          writeFileSync(file, JSON.stringify({ env }));
+          expect(await oauth.service.startSession(id, { message: null, options: {} })).toEqual({ status: 'invalid', appSessionId: id, field: 'route', message: ROUTE_UNSUPPORTED });
+        }
+        expect(oauth.host.launches).toEqual([]);
+      } finally {
+        oauth.dispose();
+      }
+    });
+
     // fix round, item 3: an older host checks the relay on the legacy gateway route it is sent, so a start past the sheet
     // cannot work there and is not offered
     it('answers a dead relay with the refusal an older host would give, not a sheet it cannot pass', async () => {

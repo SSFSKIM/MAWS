@@ -9,6 +9,7 @@ import { readFile, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { SetupReadRefused } from '@shared/machine/git-reads';
+import { configFilePath, legacyConfigPath } from '@shared/engine/config-dir'; // P5 O7 M9: the one global-config selection
 import { normalizePath, type TrustState } from '@shared/sessions/trust';
 import { NotARepositoryError, type GitRun } from '../git/runner';
 
@@ -18,23 +19,6 @@ const TORN_READ_RETRY_MS = 50;
 
 function homeOf(env: NodeJS.ProcessEnv): string {
   return env.HOME || homedir();
-}
-
-// The engine's `Lo()` (SPEC §3 16.1): the legacy `<configHome>/.config.json` wins outright when it exists, where the
-// config home is CLAUDE_CONFIG_DIR or `~/.claude`; otherwise `${CLAUDE_CONFIG_DIR || homedir}/.claude<suffix>.json`.
-// The suffix is the OAuth environment's (`w3()`, cli.pretty.js 525522-525533): 2.1.283 compiles its environment
-// switch to the constant "prod", so `-staging-oauth` and `-local-oauth` are unreachable and only
-// CLAUDE_CODE_CUSTOM_OAUTH_URL selects one, `-custom-oauth`.
-export function configFilePath(env: NodeJS.ProcessEnv, exists: (path: string) => boolean = existsSync): string {
-  const home = homeOf(env);
-  const legacy = legacyConfigPath(env);
-  if (exists(legacy)) return legacy;
-  const suffix = env.CLAUDE_CODE_CUSTOM_OAUTH_URL ? '-custom-oauth' : '';
-  return join(env.CLAUDE_CONFIG_DIR || home, `.claude${suffix}.json`);
-}
-
-function legacyConfigPath(env: NodeJS.ProcessEnv): string {
-  return join(env.CLAUDE_CONFIG_DIR || join(homeOf(env), '.claude'), '.config.json');
 }
 
 async function realOrSelf(path: string): Promise<{ path: string; exists: boolean }> {
