@@ -52,6 +52,7 @@ import {
   TIMING_PATH,
   UNREGISTER_PATH,
   PROJECT_MACHINES_PATH,
+  PROJECT_FRAMES_PATH,
   PROJECTION_PATH,
   PROJECT_STATE_FAULT_PATH,
   MISSING_METHOD_PATH,
@@ -321,6 +322,10 @@ export async function startLocalHub(options: { script?: string } = {}) {
     async holdSend(machine: string, kind: string) {
       await seam('MACHINE', machine, `${SEND_HOLD_PATH}?kind=${kind}`);
     },
+    /** Hands `frames` to the project as the machine's object would, under `ctx` (a frame RL1 never carries, say). */
+    async projectFrames(project: string, ctx: Record<string, unknown>, frames: unknown[]): Promise<unknown> {
+      return JSON.parse(await seam('PROJECT', project, PROJECT_FRAMES_PATH, { ctx, frames }));
+    },
     /** The machine streams a project fans out to: its `machines` rows. */
     async projectMachines(project: string): Promise<Array<{ name: string; generation: number }>> {
       return JSON.parse(await seam('PROJECT', project, PROJECT_MACHINES_PATH)) as Array<{ name: string; generation: number }>;
@@ -470,7 +475,7 @@ export async function startLocalHub(options: { script?: string } = {}) {
     },
     /** Calls one of the Registry's RPC methods as another object would (M6's Machine DO; a `Project`'s push), and
      * answers its result (the suites' Worker only). */
-    async registryRpc<T>(method: 'storeListing' | 'storeEndpoint' | 'notify' | 'ownersOf' | 'push', ...args: unknown[]): Promise<T> {
+    async registryRpc<T>(method: 'storeListing' | 'storeEndpoint' | 'notify' | 'ownersOf' | 'push' | 'policies', ...args: unknown[]): Promise<T> {
       return JSON.parse(await seam('REGISTRY', ORG, REGISTRY_RPC_PATH, { method, args })) as T;
     },
     /** Calls the Registry's RPC methods all at once, as several objects would, and answers each one's result in order. */

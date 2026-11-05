@@ -7,6 +7,7 @@ import {
   closeReasonName,
   decodeChannelFrame,
   encodeChannelFrame,
+  HUB_CAPABILITIES,
   isEndpointHello,
   isNotify,
   isRl1Heartbeat,
@@ -71,6 +72,14 @@ describe("the endpoint's text frames", () => {
     expect(isEndpointHello({ t: 'hello', protocol: { major: 1 }, build: 'x', machine: ref })).toBe(false);
     expect(isEndpointHello({ t: 'hello', protocol: RL1_PROTOCOL, build: 'x', machine: 'not a ref' })).toBe(false);
     expect(isEndpointHello({ t: 'hello', protocol: RL1_PROTOCOL, build: 'x', machine: ref, leaseGeneration: -1 })).toBe(false);
+  });
+
+  it('takes the optional capabilities a hello advertises (P5 O18 D9), and refuses a malformed list', () => {
+    expect(isEndpointHello({ t: 'hello', protocol: RL1_PROTOCOL, build: 'x', machine: ref, capabilities: ['audience'] })).toBe(true);
+    expect(isEndpointHello({ t: 'hello', protocol: RL1_PROTOCOL, build: 'x', machine: ref, capabilities: [] })).toBe(true);
+    expect(isEndpointHello({ t: 'hello', protocol: RL1_PROTOCOL, build: 'x', machine: ref, capabilities: 'audience' })).toBe(false);
+    expect(isEndpointHello({ t: 'hello', protocol: RL1_PROTOCOL, build: 'x', machine: ref, capabilities: [7] })).toBe(false);
+    expect(HUB_CAPABILITIES).toContain('audience');
   });
 
   it('reads a heartbeat by its generation', () => {

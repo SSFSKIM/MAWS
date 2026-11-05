@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { isUnlistedNotice, isWithheldTombstone, sessionRefs, writerSession } from '../src/audience.ts';
+import { audienceDigest, isAudience, isHubPosition, streamOf, streamWriter } from '../src/names.ts';
 import { generateSigningKey, importSigningKey, keyId } from '../src/keys.ts';
 import { buildScenario, type Keys } from '../vectors/scenario.ts';
 import { KEY_NAMES, replayVectors, VECTOR_KEYS, VECTORS } from '../vectors/index.ts';
@@ -180,5 +182,73 @@ describe('the scenario', () => {
     const set = await buildScenario(keys);
     expect(set.cases.length).toBe(VECTORS.cases.length);
     expect(await replayVectors(set)).toEqual([]);
+  });
+});
+
+// P5 O18, Interfaces §A: the audience digest that names a writer stream, pinned with sminos's Python
+// (`hashlib.sha256(json.dumps(sorted(set(m)), separators=(',', ':')).encode()).hexdigest()[:16]`), which
+// sminos/tests/ pins to the same values.
+describe('audience streams', () => {
+  const a = 'a'.repeat(32);
+  const b = 'b'.repeat(32);
+
+  it("digest the sorted, distinct members as sminos's Python does", () => {
+    expect(audienceDigest([b, a, a])).toBe('fe20b390ff62eb18');
+    expect(audienceDigest(['0123456789abcdef0123456789abcdef'])).toBe('6cdc3a581db65fa5');
+    expect(audienceDigest([a, b])).toBe(audienceDigest([b, a]));
+  });
+
+  it('read a stream writer as its plain writer and digest, and a plain writer as itself', () => {
+    const session = 'e0ad139c-18bc-45bd-9489-be8653145f80';
+    expect(streamOf(`mac-1/${session}~fe20b390ff62eb18`)).toEqual({ base: `mac-1/${session}`, digest: 'fe20b390ff62eb18' });
+    expect(streamOf(`hub/${a}~fe20b390ff62eb18`)).toEqual({ base: `hub/${a}`, digest: 'fe20b390ff62eb18' });
+    expect(streamOf(`mac-1/${session}`)).toEqual({ base: `mac-1/${session}`, digest: null });
+    expect(streamOf(`mac-1/${session}~FE20B390FF62EB18`).digest).toBeNull();
+    expect(streamOf(`mac-1/${session}~fe20b390`).digest).toBeNull();
+    expect(streamWriter(`mac-1/${session}`, [b, a])).toBe(`mac-1/${session}~fe20b390ff62eb18`);
+    expect(writerSession(`mac-1/${session}~fe20b390ff62eb18`)).toBe(session);
+    expect(writerSession('mac-1/human')).toBeNull();
+    expect(writerSession(`hub/${a}`)).toBeNull();
+  });
+
+  it('take an audience only sorted, distinct and of member ids', () => {
+    expect(isAudience([a, b])).toBe(true);
+    expect(isAudience([b, a])).toBe(false);
+    expect(isAudience([a, a])).toBe(false);
+    expect(isAudience([])).toBe(false);
+    expect(isAudience(['not-a-member'])).toBe(false);
+  });
+
+  it("place a device's words in its stream exactly when the digest is the event's audience's", () => {
+    const ts = '2026-11-05T12:00:00.000Z';
+    expect(isHubPosition({ member: a, writer: `hub/${a}`, seq: 1, ts })).toBe(true);
+    expect(isHubPosition({ member: a, writer: streamWriter(`hub/${a}`, [a, b]), seq: 1, ts, audience: [a, b] })).toBe(true);
+    expect(isHubPosition({ member: a, writer: `hub/${a}`, seq: 1, ts, audience: [a, b] })).toBe(false);
+    expect(isHubPosition({ member: a, writer: streamWriter(`hub/${a}`, [a]), seq: 1, ts, audience: [a, b] })).toBe(false);
+    expect(isHubPosition({ member: a, writer: streamWriter(`hub/${a}`, [a, b]), seq: 1, ts })).toBe(false);
+    expect(isHubPosition({ member: a, writer: streamWriter(`hub/${b}`, [a, b]), seq: 1, ts, audience: [a, b] })).toBe(false);
+  });
+
+  it('list every session an event names, its own feed aside, each by its role and field', () => {
+    const own = 'e0ad139c-18bc-45bd-9489-be8653145f80';
+    const r = '11111111-2222-4333-8444-555555555555';
+    const p = '99999999-2222-4333-8444-555555555555';
+    expect(sessionRefs({ writer: `m/${own}`, kind: 'say', to: [{ session: r, alias: 'r' }], session: own })).toEqual([{ session: r, role: 'addressing', path: 'to.0.session' }]);
+    expect(sessionRefs({ writer: 'm/human', kind: 'in-charge', session: r })).toEqual([{ session: r, role: 'addressing', path: 'session' }]);
+    expect(sessionRefs({ writer: `m/${own}~fe20b390ff62eb18`, kind: 'joined', session: own, origin: { kind: 'sminos-spawn', spawnerSession: p }, attest: { origin: { kind: 'spawn', spawnerSession: p } } })).toEqual([
+      { session: p, role: 'provenance', path: 'origin.spawnerSession' },
+      { session: p, role: 'provenance', path: 'attest.origin.spawnerSession' },
+    ]);
+    expect(sessionRefs({ writer: `m/${own}`, kind: 'retired', session: own, reason: 'continued', to: r })).toEqual([{ session: r, role: 'provenance', path: 'to' }]);
+    // Redacted: a null spawner, an attestation without one, and a broadcast's `*`.
+    expect(sessionRefs({ writer: `m/${own}`, kind: 'joined', session: own, origin: { kind: 'sminos-spawn', spawnerSession: null }, to: '*' })).toEqual([]);
+  });
+
+  it('shape the unlisted notice and the tombstone', () => {
+    expect(isUnlistedNotice({ kind: 'unlisted', session: 's', policyRev: 2, audience: [a] })).toBe(true);
+    expect(isUnlistedNotice({ kind: 'unlisted', session: 's', policyRev: 0, audience: [a] })).toBe(false);
+    expect(isUnlistedNotice({ kind: 'unlisted', session: 's', policyRev: 2, audience: [a], text: 'words' })).toBe(false);
+    expect(isWithheldTombstone({ writer: 'm/s', seq: 3, withheld: true })).toBe(true);
+    expect(isWithheldTombstone({ writer: 'm/s', seq: 3, withheld: true, text: 'x' })).toBe(false);
   });
 });

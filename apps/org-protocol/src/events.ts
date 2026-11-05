@@ -25,7 +25,7 @@
 // value), so old sminos and desk-web verify the event unchanged. `signEvent` refuses an event that already has a `mac`.
 import { canonicalize } from './canonical.ts';
 import { isSig, keyId, signInput, utf8, verifyInput, type B64, type Sig } from './keys.ts';
-import { HUB_WRITER_PREFIX, isHubPosition, isHubWriter, isIsoMillis, LEGACY_WRITER_PREFIX, writerMachine } from './names.ts';
+import { HUB_WRITER_PREFIX, isHubPosition, isHubWriter, isIsoMillis, LEGACY_WRITER_PREFIX, streamOf, writerMachine } from './names.ts';
 import { machineSigners } from './records.ts';
 import { isCertificates, isMachineCert, isSigned } from './shapes.ts';
 import { SIGNING_DOMAINS, type Certificates, type EventContext, type LogEventV2, type OrgState, type Signer } from './types.ts';
@@ -70,7 +70,8 @@ export async function signEvent<T extends object>(ctx: EventContext, event: T, k
 export async function signerFor(state: OrgState, writer: string, certs: Certificates, now: Date): Promise<Signer[]> {
   if (typeof writer !== 'string' || !isCertificates(certs)) return [];
   if (isHubWriter(writer)) {
-    const id = writer.slice(HUB_WRITER_PREFIX.length);
+    // A stream of the member's (`hub/<member>~<digest>`, O18) is signed by the same devices.
+    const id = streamOf(writer).base.slice(HUB_WRITER_PREFIX.length);
     const devices = state.members.find((m) => m.id === id)?.devices ?? [];
     const current = devices.filter((d) => d.class !== 'web-cards').map((d) => ({ pub: d.channelPub, notAfter: null }));
     const retired = state.retired.flatMap((r) =>

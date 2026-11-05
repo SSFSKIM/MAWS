@@ -280,7 +280,7 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
   const attested = MEMBER_ATTESTATIONS_ROUTE.exec(pathname);
   if (attested && method === 'GET') {
     const stub = await projectStub(env, registry, principal.org.id, attested[1]);
-    return stub instanceof Response ? stub : json(200, { records: await stub.attestations() });
+    return stub instanceof Response ? stub : json(200, { records: await stub.attestations({ member: you.id }) });
   }
   const socket = PROJECT_SOCKET.exec(pathname);
   if (socket && method === 'GET') {
@@ -314,20 +314,20 @@ async function machine(request: Request, url: URL, env: Env, registry: DurableOb
   if (url.pathname === HISTORY_INVENTORY_PATH && request.method === 'GET') {
     const names = historyNames(url.searchParams.get('names'));
     if (names === null) return json(400, { error: 'bad-shape', message: `?names= is one to ${HISTORY_NAMES_MAX} machine names, comma-separated` });
-    return json(200, await registry.historyInventory(names));
+    return json(200, await registry.historyInventory(names, principal.machine.name));
   }
   const historyLog = HISTORY_LOG_ROUTE.exec(url.pathname);
   if (historyLog && request.method === 'GET') {
     const query = historyQuery(url);
     if (query === null) return json(400, { error: 'bad-shape', message: '?writer= is <machine>/<feed> and ?after= a seq from 0' });
     const stub = await projectStub(env, registry, principal.org.id, historyLog[1]);
-    return stub instanceof Response ? stub : json(200, await stub.historyPage(query.writer, query.after));
+    return stub instanceof Response ? stub : json(200, await stub.historyPage(query.writer, query.after, principal.machine.name));
   }
   const attestations = HISTORY_ATTESTATIONS_ROUTE.exec(url.pathname);
   if (attestations && (request.method === 'GET' || request.method === 'POST')) {
     const stub = await projectStub(env, registry, principal.org.id, attestations[1]);
     if (stub instanceof Response) return stub;
-    if (request.method === 'GET') return json(200, { records: await stub.attestations() });
+    if (request.method === 'GET') return json(200, { records: await stub.attestations({ machine: principal.machine.name }) });
     const posted = (await body(request)) as { record?: unknown } | undefined;
     return kept(await stub.keepAttestation(principal.org.id, attestations[1], typeof posted === 'object' && posted !== null ? posted.record : undefined));
   }

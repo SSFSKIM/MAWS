@@ -8,6 +8,7 @@
 export * from './action.ts';
 export * from './app-hub.ts';
 export * from './attest.ts';
+export * from './audience.ts';
 export * from './base64url.ts';
 export * from './canonical.ts';
 export * from './channel.ts';
@@ -25,6 +26,7 @@ export * from './provisioning.ts';
 export * from './records.ts';
 export * from './relay.ts';
 export * from './screencast.ts';
+export { sha256Hex } from './sha256.ts';
 export { isCertRetirement, isCertificates, isDevice, isEndpointRecord, isGrant, isListing, isMachineCert, isOrgState, isRootTransition, isSigned, isSignedOrgState } from './shapes.ts';
 export * from './types.ts';
 export * from './verdict.ts';

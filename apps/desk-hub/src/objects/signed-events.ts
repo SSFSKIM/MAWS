@@ -66,6 +66,13 @@ export class SignedEvents {
     await this.fresh().catch(() => {});
   }
 
+  /** The cached head's state and certificates, read afresh when it is too old (as a check reads it), or undefined when
+   * none can be had: what a Project resolves machines' owners against (P5 O18 D5, D6). */
+  async head(): Promise<{ state: OrgState | null; certificates: Certificates } | undefined> {
+    const held = await this.usable();
+    return held && { state: held.state, certificates: held.certificates };
+  }
+
   /** `event`, positioned as stored, checked for `ctx` against the cached head. */
   async check(ctx: EventContext, event: LogEventV2): Promise<SignatureCheck> {
     return (await this.checkAll(ctx, [event]))[0];

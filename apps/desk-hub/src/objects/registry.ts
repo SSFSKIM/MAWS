@@ -80,6 +80,7 @@ import {
 } from '../protocol/identity';
 import { OrgChain } from './org-chain';
 import { OrgRecords } from './org-records';
+import { Policies, type PoliciesAnswer, type Snapshot } from './policies';
 import { OrgKeys, type StoredKey } from './org-keys';
 import { described } from './project';
 import { relayObjectName } from './relay';
@@ -169,6 +170,15 @@ type ProjectRow = Omit<ProjectRecord, 'retired'> & { retired: number };
 const projectOf = (row: ProjectRow): ProjectRecord => ({ ...row, retired: row.retired === 1 });
 /** How soon a failed orphan deletion, or a revocation a project has not taken, is tried again. */
 const RETRY_MS = 60_000;
+/** How long an upload's policy call waits for the registry's fill before it is refused `state-unavailable`. */
+const POLICY_FILL_WAIT_MS = 10_000;
+
+/** `promise`, or a rejection once `ms` have passed (the promise itself runs on). */
+function bounded<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error(`over ${ms} ms`)), ms)));
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 /** An announcement owed to a relay's object (O11 M6) is kept under `ref:<ref>` in `announcements` beside the projects'
  * (keyed by their ids, which hold no `:`). */
 const RELAY_TARGET = 'ref:';
@@ -193,6 +203,10 @@ export class Registry extends DurableObject<Env> {
   private readonly provisioning: ProvisioningKeys;
   private readonly chain: OrgChain;
   private readonly records: OrgRecords;
+  /** The session policy registry (P5 O18 D5, policies.ts). */
+  private readonly sessionPolicies: Policies;
+  /** The fill of `sessionPolicies` in flight in this object's life (an object restart starts it again). */
+  private filling: Promise<void> | undefined;
   /** Per enrollment, an offline revocation the sweep began and has not seen complete, and when it last began: its fence
    * may be placed, so it is tried again until it completes, whatever the machine's online state or offline deadline
    * reads since (an object restart forgets it). */
@@ -211,6 +225,7 @@ export class Registry extends DurableObject<Env> {
     this.provisioning = new ProvisioningKeys(ctx.storage);
     this.chain = new OrgChain(ctx.storage);
     this.records = new OrgRecords(ctx.storage, this.chain);
+    this.sessionPolicies = new Policies(ctx.storage);
   }
 
   private get config(): HubConfig {
@@ -629,11 +644,13 @@ export class Registry extends DurableObject<Env> {
    * History re-attestation's inventory (O14 M4, Interfaces §D): every project of the directory, retired ones included,
    * whose log holds a DX1 writer under one of `names`, with each such writer's highest DX1 seq, asked of each Project.
    * The names are the machine's own claim (its current and its phase-1 names): the directory records no former names.
+   * `reader`, the asking machine's name, is passed on for each project's reader check (P5 O18 D6): a stream writer
+   * outside what it may read is never listed.
    */
-  async historyInventory(names: string[]): Promise<HistoryInventory> {
+  async historyInventory(names: string[], reader?: string): Promise<HistoryInventory> {
     const org = this.ensureOrg().id;
     const ids = this.sql.exec<{ id: string }>('SELECT id FROM projects ORDER BY created, id').toArray().map((p) => p.id);
-    const projects = await Promise.all(ids.map(async (id) => ({ id, writers: await this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org}:${id}`)).historyWriters(names) })));
+    const projects = await Promise.all(ids.map(async (id) => ({ id, writers: await this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org}:${id}`)).historyWriters(names, reader) })));
     return { projects: projects.filter((p) => p.writers.length > 0) };
   }
 
@@ -1447,16 +1464,66 @@ export class Registry extends DurableObject<Env> {
     return this.records.storeRetirement(body, () => this.enrolled(machine));
   }
 
-  /** A machine-signed listing (RL1's `listing`, through M6's Machine DO). */
+  /** A machine-signed listing (RL1's `listing`, through M6's Machine DO). It binds its session to its machine when no
+   * listing or snapshot did first (P5 O18 D5), a live one as listed while no snapshot set its policy. */
   async storeListing(record: unknown): Promise<Result<{ stored: boolean }>> {
     const kept = await this.records.storeListing(record);
     if (!kept.ok) return kept;
+    const body = (record as Signed<Listing>).body;
+    this.sessionPolicies.listed(body.session, body.machine, !isListingGone(body));
     // Relayed to the members' app sockets as it is stored (OX8; O11 M7); one held already is not. A withdrawn one
     // (`LISTING_GONE`) goes to the apps that could see the revision it replaced: every app, since every member sees
     // every live listing, when that revision was live; none when the session was withdrawn already or never listed.
     const listing = record as Signed<Listing>;
     if (kept.value.stored && (!isListingGone(listing.body) || kept.value.replacedLive)) this.toApps({ t: 'listing', record: listing });
     return { ok: true, value: { stored: kept.value.stored } };
+  }
+
+  // ---- Session policies (P5 O18 D5, policies.ts) ------------------------------------------------------------
+
+  /**
+   * One upload batch's call: `snapshots`, the `joined` and `state` snapshots of `machine`'s own sessions the batch
+   * would store, in batch order, each taken by the binding rule; answered with the policy each of `sessions` and of the
+   * snapshots' sessions held before the batch, and for each of them whether it is bound to `machine` after it. One
+   * synchronous step once the fill is done, so no other project's batch moves a row between the read and the record.
+   * `503 state-unavailable` until the fill is done, the uploader then retrying.
+   */
+  async policies(request: { machine?: string; snapshots: Snapshot[]; sessions: string[] }): Promise<Result<PoliciesAnswer>> {
+    if (!this.sessionPolicies.filled) {
+      try {
+        await bounded((this.filling ??= this.fillPolicies()), POLICY_FILL_WAIT_MS);
+      } catch {
+        return fail(503, 'state-unavailable', 'the policy registry is being filled: send it again');
+      }
+    }
+    // A device's words (`takeHuman`) name no machine and carry no snapshot.
+    const machine = request.machine === undefined ? null : { ref: this.records.refOf(request.machine), name: request.machine };
+    const rows: PoliciesAnswer['rows'] = {};
+    for (const session of [...request.sessions, ...request.snapshots.map((s) => s.session)]) if (!(session in rows)) rows[session] = this.sessionPolicies.policy(session);
+    if (machine !== null) for (const snapshot of request.snapshots) this.sessionPolicies.apply(machine, snapshot);
+    const mine: PoliciesAnswer['mine'] = {};
+    if (machine !== null) for (const session of Object.keys(rows)) mine[session] = this.sessionPolicies.boundTo(session, machine);
+    return ok({ rows, mine });
+  }
+
+  /** The fill: every project's newest plain snapshot per session (`Project.newestSnapshots`), the newest across
+   * projects kept, each bound to its machine. A failure leaves it unfilled, for the next call to start again. */
+  private async fillPolicies(): Promise<void> {
+    try {
+      const org = this.ensureOrg().id;
+      const ids = this.sql.exec<{ id: string }>('SELECT id FROM projects ORDER BY created, id').toArray().map((p) => p.id);
+      const newest = new Map<string, { machine: string; created: string }>();
+      for (const id of ids) {
+        const found = await this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org}:${id}`)).newestSnapshots();
+        for (const s of found) {
+          const held = newest.get(s.session);
+          if (!held || s.created > held.created) newest.set(s.session, { machine: s.machine, created: s.created });
+        }
+      }
+      this.sessionPolicies.fill([...newest].map(([session, { machine, created }]) => ({ session, machine: { ref: this.records.refOf(machine), name: machine }, created })));
+    } finally {
+      this.filling = undefined;
+    }
   }
 
   /** A machine-signed endpoint record (RL1's `endpoint`, through M6's Machine DO). */

@@ -86,6 +86,7 @@ import {
   TIMING_PATH,
   UNREGISTER_PATH,
   PROJECT_MACHINES_PATH,
+  PROJECT_FRAMES_PATH,
   PROJECTION_PATH,
   PROJECT_STATE_FAULT_PATH,
   MISSING_METHOD_PATH,
@@ -116,7 +117,7 @@ type Fault = { remaining: number; calls: number };
 type StateFault = Fault & { missing?: boolean };
 
 /** The Registry's RPC methods a suite calls as an object would (REGISTRY_RPC_PATH). */
-const REGISTRY_RPCS = ['storeListing', 'storeEndpoint', 'notify', 'ownersOf', 'push'] as const;
+const REGISTRY_RPCS = ['storeListing', 'storeEndpoint', 'notify', 'ownersOf', 'push', 'policies'] as const;
 
 /** The org's registry, which can also take a member (the hub has no endpoint for that before the org phase). */
 export class Registry extends DeployedRegistry {
@@ -163,6 +164,12 @@ export class Registry extends DeployedRegistry {
   pendingDevicesOf(member: MemberRecord, of: string): ReturnType<DeployedRegistry['pendingDevicesOf']> {
     if (this.ctx.storage.kv.get<string>('lacks') === 'pendingDevicesOf') throw new TypeError('The RPC receiver does not implement the method "pendingDevicesOf".');
     return super.pendingDevicesOf(member, of);
+  }
+
+  /** Armed, refused as a Registry on the code before the policy registry (P5 O18), as an unreadable one fails. */
+  policies(request: Parameters<DeployedRegistry['policies']>[0]): ReturnType<DeployedRegistry['policies']> {
+    if (this.ctx.storage.kv.get<string>('lacks') === 'policies') throw new TypeError('The RPC receiver does not implement the method "policies".');
+    return super.policies(request);
   }
 
   /** Armed, refused as a Registry on the code before the relay's binding check would refuse it. */
@@ -622,6 +629,10 @@ export class Project extends DeployedProject {
     }
     if (url.pathname === PROJECT_QUEUES_PATH) return Response.json([...this.queues.keys()]);
     if (url.pathname === PROJECT_MACHINES_PATH) return Response.json(this.ctx.storage.sql.exec('SELECT name, generation FROM machines').toArray());
+    if (url.pathname === PROJECT_FRAMES_PATH) {
+      const { ctx, frames } = (await request.json()) as { ctx: MachineContext; frames: UpFrame[] };
+      return Response.json(await this.fromMachine(ctx, frames));
+    }
     if (url.pathname === PROJECT_SEND_PATH) {
       const { machine, generation, frame } = (await request.json()) as { machine: string; generation: number; frame: DownFrame };
       void this.toMachine(machine, generation, frame, 'replies').catch(() => {});

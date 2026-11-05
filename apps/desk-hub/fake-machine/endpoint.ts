@@ -22,6 +22,8 @@ export type FakeEndpointOptions = {
   /** The machine's ref (RL DL 19), as its hello names it. */
   ref: string;
   build?: string;
+  /** What the hello advertises (`capabilities`, P5 O18 D9); none is sent when unset. */
+  capabilities?: string[];
   /** Open the socket again when it drops (the default is not to). */
   reconnect?: boolean;
   /** Channels handled by the caller; unset, each channel's data is echoed. */
@@ -96,7 +98,7 @@ export class FakeEndpoint {
     });
     await ready;
     this.socket = socket;
-    socket.send(JSON.stringify({ t: 'hello', protocol: RL1_PROTOCOL, build: this.options.build ?? 'fake-endpoint', machine: this.options.ref, ...(this.generation ? { leaseGeneration: this.generation } : {}) }));
+    socket.send(JSON.stringify({ t: 'hello', protocol: RL1_PROTOCOL, build: this.options.build ?? 'fake-endpoint', machine: this.options.ref, ...(this.generation ? { leaseGeneration: this.generation } : {}), ...(this.options.capabilities ? { capabilities: this.options.capabilities } : {}) }));
     const welcome = (await this.next((f) => f.t === 'welcome', 'welcome', from)) as unknown as Rl1Welcome;
     welcomed = true;
     this.generation = welcome.generation;

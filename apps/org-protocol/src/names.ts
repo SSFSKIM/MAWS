@@ -1,3 +1,5 @@
+import { sha256Hex } from './sha256.ts';
+
 // The names and times every signed shape carries, moved here from desk-hub's protocol module (DX1, DX7), which
 // re-exports them unchanged: one rule for a member id, a machine name, a log writer and an ISO time, for the hub, the
 // machines and the apps alike.
@@ -70,14 +72,43 @@ export function isLogSeq(seq: unknown): seq is number {
  * positive integer, the time ISO 8601 UTC with milliseconds. sminos's delivery writes the writer into the frame a
  * session reads, so an unchecked writer could carry text no code covers. `verify` applies it to every `hub/` event.
  */
-export function isHubPosition(event: { writer?: unknown; seq?: unknown; ts?: unknown; member?: unknown }): boolean {
-  return (
-    typeof event.member === 'string' &&
-    isMemberId(event.member) &&
-    event.writer === hubWriter(event.member) &&
-    isLogSeq(event.seq) &&
-    isIsoMillis(event.ts)
-  );
+export function isHubPosition(event: { writer?: unknown; seq?: unknown; ts?: unknown; member?: unknown; audience?: unknown }): boolean {
+  if (typeof event.member !== 'string' || !isMemberId(event.member)) return false;
+  // A device's words toward a private session carry their audience, signed, and sit in its stream (P5 O18 D8): the
+  // writer is `hub/<member>~<digest>` exactly when the digest is the event's own audience's.
+  const writer = event.audience === undefined ? hubWriter(event.member) : isAudience(event.audience) ? streamWriter(hubWriter(event.member), event.audience) : null;
+  return writer !== null && event.writer === writer && isLogSeq(event.seq) && isIsoMillis(event.ts);
+}
+
+// Audience streams (P5 O18 D6, docs/doperpowers/plans/2026-11-05-p5-o18-message-reach.md Interfaces §A). An event with
+// an audience (the sorted member ids who may read it) is written under a writer stream of its own,
+// `<machine>/<session>~<digest>` or `hub/<member>~<digest>`, every event of one stream carrying the one audience its
+// digest names, so a reader outside it is given the whole stream or none of it and never a hole.
+
+/** The most members one audience lists. */
+export const AUDIENCE_MAX = 1024;
+
+/** An audience as an event carries it: member ids, at least one, sorted and without repeats. */
+export function isAudience(value: unknown): value is string[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > AUDIENCE_MAX) return false;
+  return value.every((m, i) => typeof m === 'string' && isMemberId(m) && (i === 0 || (value[i - 1] as string) < m));
+}
+
+/** The digest a stream's writer ends in: SHA-256 over the JSON of the sorted, distinct member ids, its first 16 hex
+ * characters, lowercase. sminos computes it alike (`json.dumps(sorted(set(m)), separators=(',', ':'))`). */
+export function audienceDigest(members: readonly string[]): string {
+  return sha256Hex(JSON.stringify([...new Set(members)].sort())).slice(0, 16);
+}
+
+/** The stream of `base` (a plain writer) for `audience`. */
+export const streamWriter = (base: string, audience: readonly string[]) => `${base}~${audienceDigest(audience)}`;
+
+const STREAM = /^([^/]+\/[^~]+)~([0-9a-f]{16})$/;
+
+/** A writer read as a stream: its plain writer (`base`) and its audience's digest, null for a plain writer. */
+export function streamOf(writer: string): { base: string; digest: string | null } {
+  const m = typeof writer === 'string' ? STREAM.exec(writer) : null;
+  return m ? { base: m[1], digest: m[2] } : { base: writer, digest: null };
 }
 
 /** The machine a writer belongs to (`<machine>/<session uuid>` or `<machine>/human`), or null for `hub/` and `legacy/`. */
