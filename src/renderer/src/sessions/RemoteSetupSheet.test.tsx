@@ -154,9 +154,10 @@ describe('setting a project up on another machine', () => {
     const then = vi.fn();
     const target = { machine: OTHER_MACHINE, name: 'mini', checkout: APP, key: KEY };
     act(() => openDialog({ kind: 'remoteSetup', request: { kind: 'trust', tab: TAB, target, then } }));
-    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Trust this folder on mini?' })).toBeTruthy());
+    // the sheet opens on its "Reading its trust" line, under the same title; the card follows once the read answers
+    const trustAndStart = await within(await screen.findByRole('dialog', { name: 'Trust this folder on mini?' })).findByRole('button', { name: SETUP_WORDS.trustAndStart });
     expect(fake.invoked('session.trust.check')).toEqual([{ directory: APP }]);
-    fireEvent.click(screen.getByRole('button', { name: SETUP_WORDS.trustAndStart }));
+    fireEvent.click(trustAndStart);
     await waitFor(() => expect(useDialogs.getState().open).toBeNull());
     expect(spawnTargetOf(TAB, KEY)).toEqual({ ...target, trust: 'accepted' });
     expect(then).toHaveBeenCalledOnce();
