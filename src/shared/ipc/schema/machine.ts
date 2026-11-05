@@ -9,7 +9,7 @@
 import * as z from 'zod';
 import { MachineRefSchema } from '../../machine/ref';
 import { TrustStateSchema } from '../../sessions/trust';
-import { JsonValueSchema, type CommandSpec } from './common';
+import { JsonValueSchema, SetupOpenedSchema, type CommandSpec } from './common';
 import { HostOpOutputSchema, HostOpQueryOutputSchema, OpBindingShape, OpIdSchema, OpTargetSchema } from './host';
 
 // The machine's own project, where its sessions with no checkout sit (OX3). `key` is `machine:<ref>`; `smnsId` is
@@ -48,7 +48,9 @@ export const commands = {
   'machine.folders.list': { input: FoldersListInputSchema, output: z.strictObject({ entries: z.array(FolderEntrySchema), cursor: z.string().nullable() }), owner: 'machine' }, // P5 O7 M9
   // P5 O7 M9 (the task review's findings 2 and 3): main-only, the endpoint's: a remote `session.trust.check` read on the
   // directory its setup policy resolved and checked, guarded again on the machine (src/services/machine/setup.ts)
-  'machine.setupTrust': { input: z.strictObject({ directory: z.string().min(1) }), output: TrustStateSchema, owner: 'machine' },
+  // directory; `opened`, the asking member's opens (the endpoint's record, `SetupOpenedSchema`), never another member's
+  // (absent: none but the folders the directory itself is in)
+  'machine.setupTrust': { input: z.strictObject({ directory: z.string().min(1), opened: SetupOpenedSchema.optional() }), output: TrustStateSchema, owner: 'machine' },
 } as const satisfies Record<`machine.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {} as const satisfies Record<`machine.${string}`, z.ZodType>;

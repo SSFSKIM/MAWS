@@ -59,7 +59,7 @@ import { startLibrary } from './library';
 import { registerLibraryReads } from './library/files';
 import { registerMachineOps } from './machine-ops';
 import { registerFolders } from './machine/folders'; // P5 O7 M9
-import { registerSetupTrust, SetupOpens, type SetupGuard } from './machine/setup'; // P5 O7 M9
+import { registerSetupTrust, type SetupGuard } from './machine/setup'; // P5 O7 M9
 import { startOwnerChannel } from './owner/register';
 import { startEngineConfigure } from './settings/engine-configure';
 import { startHostConfigure } from './settings/host-configure';
@@ -178,7 +178,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   const index = new Index(join(profile, 'index.sqlite'), { refused: data.refused });
   void index.refreshOrgProjects({ machine: deps.machine, enrollment: deps.enrollment }); // P5 O6 M5: each project's org project, derived again at every start (OX3)
   // P5 O7 M9: a remote setup's home and what the folder list opened, which its handlers check again on this machine
-  const setupGuard: SetupGuard = { where: { home: deps.home, platform: process.platform }, opens: new SetupOpens() };
+  const setupGuard: SetupGuard = { where: { home: deps.home, platform: process.platform } };
   registerIndexHandlers(index, bus, setupGuard);
   registerFolders(bus.register, setupGuard); // P5 O7 M9: "+ Session"'s folder list on this machine
   const indexSource = new IndexSessionSource(index, hosts, { emit: bus.emit });

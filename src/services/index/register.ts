@@ -26,7 +26,7 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
   // New chat: "Open folder…"; P5 O7 M9: another machine's owner's, claimed under `machine.op`, on the directory the
   // endpoint checked, checked again here before anything reads in it
   // (its linked-worktree answer read from git's files beforehand, so `setupLocate` asks no git: a miss would not fold)
-  register('session.projects.addFolder', ({ directory }, context) => (context.op === undefined ? addFolder(index.projects, directory) : setupAddFolder(directory, setup, (checked, files) => addFolder(index.projects, checked, setupLocate, files))));
+  register('session.projects.addFolder', ({ directory, opened }, context) => (context.op === undefined ? addFolder(index.projects, directory) : setupAddFolder(directory, opened ?? [], setup, (checked, files) => addFolder(index.projects, checked, setupLocate, files))));
   register('session.projects.update', ({ id, patch }) => index.projects.update(id as ProjectId, patch));
   register('session.projects.remove', ({ id }) => index.projects.hide(id as ProjectId));
   register('session.drafts.get', ({ appSessionId }) => index.drafts.get(appSessionId as AppSessionId));

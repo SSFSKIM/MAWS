@@ -22,7 +22,7 @@ import { createGitRunner } from '../../src/services/git/runner';
 import { Index } from '../../src/services/index/index';
 import { registerIndexHandlers } from '../../src/services/index/register';
 import { registerFolders } from '../../src/services/machine/folders';
-import { registerSetupTrust, SetupOpens, type SetupGuard } from '../../src/services/machine/setup';
+import { registerSetupTrust, type SetupGuard } from '../../src/services/machine/setup';
 import { trustStateOf } from '../../src/services/sessions/trust';
 import { iso } from './org-fixtures';
 import { act, CHECKOUT, makeOrg, openRemote, ORG, sminos, startEndpoint, stopAll, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
@@ -49,11 +49,11 @@ const tempDir = (prefix: string) => {
 };
 
 /** The machine with a fake macOS home, the folder list the services' own, the registration and trust read answering what they were asked. */
-async function setup(): Promise<{ f: Fixture; home: string; a: Remote; b: Remote; guard: SetupGuard }> {
+async function setup(owners?: string[]): Promise<{ f: Fixture; home: string; a: Remote; b: Remote; guard: SetupGuard }> {
   const home = tempDir('setup-rows-home-');
   for (const dir of ['Developer/GitHub/maws', 'Documents/proj']) mkdirSync(join(home, dir), { recursive: true });
-  const f = await startEndpoint(org, started, { setup: { home, platform: 'darwin' } });
-  const guard: SetupGuard = { where: { home, platform: 'darwin' }, opens: new SetupOpens() };
+  const f = await startEndpoint(org, started, { setup: { home, platform: 'darwin' }, ...(owners === undefined ? {} : { owners }) });
+  const guard: SetupGuard = { where: { home, platform: 'darwin' } };
   registerFolders(f.spine.bus.register as never, guard);
   f.spine.handle('session.projects.addFolder', (input) => ({ registered: (input as { directory: string }).directory }));
   f.spine.handle('machine.setupTrust', (input) => ({ trustKey: (input as { directory: string }).directory, trusted: false })); // the endpoint's remote trust read
@@ -219,8 +219,8 @@ describe('the remote setup with the machine’s own handlers', () => {
   };
 
   /** The machine's own handlers over a fake home, the index built as production builds it (its org refresh started). */
-  async function real(configDir = '.claude-config'): Promise<{ f: Fixture; home: string; a: Remote; index: Index }> {
-    const { f, home, a, guard } = await setup();
+  async function real(configDir = '.claude-config', owners?: string[]): Promise<{ f: Fixture; home: string; a: Remote; b: Remote; index: Index }> {
+    const { f, home, a, b, guard } = await setup(owners);
     const index = new Index(join(tempDir('setup-rows-index-'), 'index.sqlite'));
     indexes.push(index);
     void index.refreshOrgProjects({ machine: 'machine-test' as never, enrollment: () => null });
@@ -228,7 +228,7 @@ describe('the remote setup with the machine’s own handlers', () => {
     const env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: join(home, configDir) };
     const runGit = createGitRunner({ env });
     registerSetupTrust(f.spine.bus.register as never, { trustCheck: (directory, guarded) => trustStateOf(directory, { git: runGit, env, ...guarded }) }, guard);
-    return { f, home, a, index };
+    return { f, home, a, b, index };
   }
   const register = async (f: Fixture, a: Remote, directory: string) => act(a, await stepped(f, a, 'session.projects.addFolder', { directory }));
   const open = async (a: Remote, path: string) => expect(await call(a, 'machine.folders.list', { path, open: true })).toMatchObject({ ok: true });
@@ -380,10 +380,11 @@ describe('the remote setup with the machine’s own handlers', () => {
     }
   });
 
-  // Round 3: the trust read's store (the engine's global config) is read through the same guard
-  it('refuse a trust read whose trust store lies in, or links into, an unopened protected folder, until it is opened', async () => {
+  // Round 3: the trust read's store (the engine's global config) is read through the same guard. The review: an open is
+  // the member's who listed it, so a second owner who opened nothing is still refused after the first opened it.
+  it('refuse a trust read whose trust store lies in, or links into, a protected folder the asking owner did not open', async () => {
     for (const [configDir, linked] of [['Documents/cfg', false], ['cfg', true]] as const) {
-      const { home, a } = await real(configDir);
+      const { home, a, b } = await real(configDir, [org.A, org.B]);
       mkdirSync(join(home, 'Documents/cfg'), { recursive: true });
       mkdirSync(join(home, 'cfg'), { recursive: true });
       mkdirSync(join(home, 'Developer/proj'), { recursive: true });
@@ -394,6 +395,10 @@ describe('the remote setup with the machine’s own handlers', () => {
       expect([configDir, (refused.error as { message?: string } | undefined)?.message]).toEqual([configDir, expect.stringMatching(/^protected: .*\.c(laude|onfig)\.json/)]);
       await open(a, '~/Documents');
       expect(await call(a, 'session.trust.check', { directory: join(home, 'Developer/proj') })).toMatchObject({ ok: true, output: { trusted: true } });
+      const other = await call(b, 'session.trust.check', { directory: join(home, 'Developer/proj') }); // B opened nothing
+      expect([configDir, (other.error as { message?: string } | undefined)?.message]).toEqual([configDir, expect.stringMatching(/^protected: .*\.c(laude|onfig)\.json/)]);
+      await open(b, '~/Documents');
+      expect(await call(b, 'session.trust.check', { directory: join(home, 'Developer/proj') })).toMatchObject({ ok: true, output: { trusted: true } });
     }
   });
 

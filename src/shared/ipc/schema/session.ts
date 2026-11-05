@@ -54,7 +54,7 @@ import { FirstMessageSchema, ForkTargetSchema, LocationSchema, SetupIntentPatchS
 import { AcquireOutcomeSchema, SetupEventSchema, SetupResourcesSchema, StartOutcomeSchema } from '../../sessions/setup'; // P2-A: AcquireOutcomeSchema
 import { TrustStateSchema } from '../../sessions/trust';
 // C10 end
-import type { CommandSpec } from './common';
+import { SetupOpenedSchema, type CommandSpec } from './common';
 import { SendUploadsSchema } from './files'; // P5 O7 M8: a send's uploads
 import { PtyIdSchema } from './pty'; // P5 O6 M1: takeOverPane's ptyId, branded for the address codec (loose, so its JSON Schema is the plain string's)
 // P2-C start (2026-10-09)
@@ -577,7 +577,8 @@ const c10Events = {
 // visible as `session.projects.add` does), answered with where a session there starts. Owner main.
 const newChatCommands = {
   'session.projects.addFolder': {
-    input: z.strictObject({ directory: z.string() }),
+    // `opened` (P5 O7 M9's review): the endpoint's, under `machine.op` only, never a client's: the asking member's opens
+    input: z.strictObject({ directory: z.string(), opened: SetupOpenedSchema.optional() }),
     output: z.strictObject({ project: ProjectRecordSchema, location: LocationSchema }),
     owner: 'machine',
   },

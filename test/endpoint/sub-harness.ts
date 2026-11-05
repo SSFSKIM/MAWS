@@ -667,6 +667,8 @@ export type StartOptions = {
   acquireWithinMs?: number;
   /** P5 O7 M9: the home and platform the setup policy reads (a fake home: no suite reads a real protected folder). */
   setup?: Home;
+  /** P5 O7 M9's review: the machine's owners in the org's chain (`org.A` alone by default). */
+  owners?: string[];
 };
 
 export async function startEndpoint(org: Org, started: Fixture[], options: StartOptions = {}): Promise<Fixture> {
@@ -688,7 +690,7 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
     const s2 = await successor(s1, [org.a1], (s) => {
       s.members.push({ id: org.B, email: 'b@example.com', role: 'member', devices: [org.b1.device] });
       s.members.push({ id: org.C, email: 'c@example.com', role: 'member', devices: [org.c1.device] });
-      s.machines.push({ name: 'mini', ref, pub: key.pub, owners: [org.A] });
+      s.machines.push({ name: 'mini', ref, pub: key.pub, owners: options.owners ?? [org.A] });
       s.machineNames.push({ name: 'mini', ref });
     });
     chain = [s1, s2];

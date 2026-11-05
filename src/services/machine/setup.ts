@@ -12,10 +12,10 @@
 // followed (src/shared/machine/git-reads.ts). Each first checks the directory again, here, before any read: it is
 // still its own real path (a folder swapped for a link since the endpoint's check is refused), and every pointer git or
 // the trust read follows from it touches no protected folder but the ones the directory itself is in (which the endpoint
-// held to the member's opens) and the ones this machine's folder list read with `open: true` (`SetupOpens`,
-// src/services/machine/folders.ts). The endpoint's per-member record is the authorization; this one only keeps a change
-// made between its check and the run from reading anywhere nobody opened. The trust read's files, and each of git's, are
-// guarded again at each read.
+// held to the member's opens) and the ones the asking member opened (`opened`, the endpoint's per-member record, sent
+// with the call; M9's review: another member's opens are never this one's). The endpoint's record is the authorization;
+// this check keeps a change made between its check and the run from reading anywhere that member didn't open. The trust
+// read's files, its store, and each of git's files are guarded again at each read.
 import { homedir } from 'node:os';
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
@@ -29,7 +29,7 @@ import { warmLinkedWorktreeRead } from '../index/projects';
 import type { RepoDirs, TrustDeps } from '../sessions/trust';
 
 /** This process's home, for a registration with no guard given. */
-export const thisGuard = (): SetupGuard => ({ where: { home: homedir(), platform: process.platform }, opens: new SetupOpens() });
+export const thisGuard = (): SetupGuard => ({ where: { home: homedir(), platform: process.platform } });
 
 const WORDS: Record<HomeRefusal | 'changed', string> = {
   'no-folder': 'there is no folder there',
@@ -40,32 +40,19 @@ const WORDS: Record<HomeRefusal | 'changed', string> = {
 };
 const refuse = (reason: HomeRefusal | 'changed', path: string) => new HostCommandError(ipcError('invalid_input', `${reason === 'changed' ? 'no-folder' : reason}: ${path}: ${WORDS[reason]}`));
 
-/** The latest protected folders this machine's folder list read inside with `open: true`. */
-export const SETUP_OPENS_MAX = 64;
+/** Where a remote setup is checked again: the machine's home. */
+export type SetupGuard = { where: Home };
 
-/** The protected folders (real paths) this machine's folder list read inside with `open: true`, the latest SETUP_OPENS_MAX. */
-export class SetupOpens {
-  #folders: string[] = [];
+/**
+ * The protected folders a run may read in: the ones the checked directory is, or lies in, and the ones the asking member
+ * opened (`opened`, the endpoint's record of their listings with `open: true`, real paths, sent with the call): a folder
+ * that is, or holds, one of those. Another member's opens are never this member's (the review of M9).
+ */
+const openedFor = (directory: string, opened: readonly string[]) => (folder: string) => within(directory, folder) || opened.some((listed) => within(listed, folder));
 
-  open(folder: string): void {
-    this.#folders = [...this.#folders.filter((held) => held !== folder), folder].slice(-SETUP_OPENS_MAX);
-  }
-
-  /** Whether `folder` is, or holds, one the list opened. */
-  opened(folder: string): boolean {
-    return this.#folders.some((held) => within(held, folder));
-  }
-}
-
-/** Where a remote setup is checked again: the machine's home, and what its folder list opened. */
-export type SetupGuard = { where: Home; opens: SetupOpens };
-
-/** The protected folders a run may read in: the ones the checked directory is, or lies in, and the ones the list opened. */
-const openedFor = (directory: string, opens: SetupOpens) => (folder: string) => within(directory, folder) || opens.opened(folder);
-
-/** The checked directory, checked again before anything reads in it or past it; throws the refusal. */
-export async function checkSetupDirectory(directory: string, { where, opens }: SetupGuard, options: { trustFiles: boolean }): Promise<void> {
-  const opened = openedFor(directory, opens);
+/** The checked directory, checked again before anything reads in it or past it, by the asking member's opens; throws the refusal. */
+export async function checkSetupDirectory(directory: string, asking: readonly string[], { where }: SetupGuard, options: { trustFiles: boolean }): Promise<void> {
+  const opened = openedFor(directory, asking);
   const resolved = await walk(directory, where, { opened });
   if (!resolved.ok) throw refuse(resolved.reason, directory);
   if (resolved.real !== directory) throw refuse('changed', directory);
@@ -74,7 +61,7 @@ export async function checkSetupDirectory(directory: string, { where, opens }: S
 }
 
 /** git's files as a run on the checked `directory` may read them (round 2: no git runs before trust; git-reads.ts). */
-const setupFiles = (directory: string, { where, opens }: SetupGuard): GitFiles => guardedFiles(where, openedFor(directory, opens));
+const setupFiles = (directory: string, asking: readonly string[], { where }: SetupGuard): GitFiles => guardedFiles(where, openedFor(directory, asking));
 
 /** A refused read as the handler's refusal; anything else as it is. */
 async function refusing<T>(run: () => Promise<T>): Promise<T> {
@@ -104,9 +91,9 @@ export const setupRepoDirs =
  * (no git run in it), then `register` (the index's `addFolder`) on it with the checked reader, which the new project's
  * org derivation reads through.
  */
-export async function setupAddFolder<T>(directory: string, guard: SetupGuard, register: (directory: string, files: GitFiles) => T): Promise<T> {
-  await checkSetupDirectory(directory, guard, { trustFiles: false });
-  const files = setupFiles(directory, guard);
+export async function setupAddFolder<T>(directory: string, asking: readonly string[], guard: SetupGuard, register: (directory: string, files: GitFiles) => T): Promise<T> {
+  await checkSetupDirectory(directory, asking, guard, { trustFiles: false });
+  const files = setupFiles(directory, asking, guard);
   await refusing(() => warmLinkedWorktreeRead(directory, files));
   return register(directory, files);
 }
@@ -120,9 +107,9 @@ export function registerSetupTrust(
   sessions: { trustCheck(directory: string, guarded?: Pick<TrustDeps, 'guard' | 'repo'>): Promise<TrustState> },
   guard: SetupGuard,
 ): void {
-  register('machine.setupTrust', async ({ directory }) => {
-    await checkSetupDirectory(directory, guard, { trustFiles: true });
-    const repo = setupRepoDirs(setupFiles(directory, guard));
-    return refusing(() => sessions.trustCheck(directory, { guard: (path) => readable(path, guard.where, openedFor(directory, guard.opens)), repo }));
+  register('machine.setupTrust', async ({ directory, opened: asking = [] }) => {
+    await checkSetupDirectory(directory, asking, guard, { trustFiles: true });
+    const repo = setupRepoDirs(setupFiles(directory, asking, guard));
+    return refusing(() => sessions.trustCheck(directory, { guard: (path) => readable(path, guard.where, openedFor(directory, asking)), repo }));
   });
 }

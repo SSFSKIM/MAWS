@@ -115,7 +115,8 @@ export type Who = { member: string; device: string; clientClass: DeviceClass; cl
  */
 export type Decision = { ok: true; target?: SessionTarget; artifact?: ArtifactTarget; setup?: SetupTarget; stands?: () => boolean } | { ok: false; reason: RefusalReason };
 /** P5 O7 M9: a setup row's directory as the setup policy resolved and checked it, which its executor acts on (never the input's spelling). */
-export type SetupTarget = { directory: string };
+// `opened`: the asking member's opens, which the machine's guard reads by (never another member's; M9's review)
+export type SetupTarget = { directory: string; opened: string[] };
 export type ArtifactTarget = { artifactId: string | null };
 /**
  * What an executing side stored for an operation (M7): a query's `input`, its `name` the operation's. P5 O12 M11:
@@ -473,7 +474,7 @@ export class Authorizer {
     if (SETUP_DIRECTORY_COMMANDS.has(name)) {
       const checked = await this.#setup.check(who.member, name, input);
       if (!checked.ok) return no(checked.reason);
-      setup = { directory: checked.directory };
+      setup = { directory: checked.directory, opened: this.#setup.openedBy(who.member) };
     }
 
     // 7. A web-cards answer on its member's own session, taking or refusing only what is pending.

@@ -12,9 +12,9 @@ import { join } from 'node:path';
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
-import { expandHome, isProtected, readableInside, walk, type Home, type HomeRefusal } from '@shared/machine/home-folders';
+import { expandHome, isProtected, walk, type Home, type HomeRefusal } from '@shared/machine/home-folders';
 import type { ServiceHandler } from '@shared/spine/bus';
-import type { SetupGuard, SetupOpens } from './setup';
+import type { SetupGuard } from './setup';
 
 /** The entries one page holds. */
 export const FOLDERS_PAGE = 200;
@@ -30,8 +30,7 @@ const refuse = (reason: HomeRefusal, path: string) => new HostCommandError(ipcEr
 /** Hidden folders after the rest, each part by name. */
 const order = (a: string, b: string): number => Number(a.startsWith('.')) - Number(b.startsWith('.')) || (a < b ? -1 : a > b ? 1 : 0);
 
-/** `opens` (P5 O7 M9's review): told each protected folder a listing with `open: true` read inside (a remote setup's re-check). */
-export async function listFolders(input: CommandInput<'machine.folders.list'>, where: Home, page = FOLDERS_PAGE, opens?: SetupOpens): Promise<CommandOutput<'machine.folders.list'>> {
+export async function listFolders(input: CommandInput<'machine.folders.list'>, where: Home, page = FOLDERS_PAGE): Promise<CommandOutput<'machine.folders.list'>> {
   const asked = input.path ?? '~';
   const named = expandHome(asked, where.home);
   if (named === null) throw refuse('outside-home', asked);
@@ -45,7 +44,6 @@ export async function listFolders(input: CommandInput<'machine.folders.list'>, w
     throw refuse('no-folder', asked);
   }
   names.sort(order);
-  if (input.open === true && !readableInside(resolved.real, where, () => false)) opens?.open(resolved.real);
   const cursor = input.cursor;
   const start = cursor === undefined ? 0 : names.filter((name) => order(name, cursor) <= 0).length;
   const shown = names.slice(start, start + page);
@@ -55,7 +53,7 @@ export async function listFolders(input: CommandInput<'machine.folders.list'>, w
   };
 }
 
-/** Registers the handler with the machine's home and platform, and the record of what it opened. */
+/** Registers the handler with the machine's home and platform. Who opened what is the endpoint's record, per member. */
 export function registerFolders(register: <N extends CommandName>(name: N, handler: ServiceHandler<N>) => void, guard: SetupGuard): void {
-  register('machine.folders.list', (input) => listFolders(input, guard.where, FOLDERS_PAGE, guard.opens));
+  register('machine.folders.list', (input) => listFolders(input, guard.where, FOLDERS_PAGE));
 }

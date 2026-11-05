@@ -138,6 +138,11 @@ export class MachineSetup {
     this.#opened.set(member, kept.slice(-FOLDERS_OPENED_MAX));
   }
 
+  /** The protected folders `member` opened (real paths), sent with their setup's machine calls (P5 O7 M9's review). */
+  openedBy(member: string): string[] {
+    return [...(this.#opened.get(member) ?? [])];
+  }
+
   /** `setupRefusal` of setup row `name`'s input, asked by `member`. */
   check(member: string, name: string, input: unknown): Promise<SetupCheck> {
     return setupRefusal(input, this.where(), (folder) => this.opened(member, folder), { trustFiles: name === 'session.trust.check' });

@@ -318,7 +318,7 @@ export class Calls {
   /** P5 O7 M9: a remote trust read, on the directory the setup policy checked (`machine.setupTrust`, guarded again there). */
   #setupTrust(dispatch: EndpointServices['dispatch'], m: CallMessage, decision: Granted): Promise<Result> {
     if (decision.setup === undefined) return Promise.resolve({ ok: false, code: 'unavailable' });
-    return this.#forward(dispatch, 'machine', { ...m, name: 'machine.setupTrust', input: { directory: decision.setup.directory } });
+    return this.#forward(dispatch, 'machine', { ...m, name: 'machine.setupTrust', input: { directory: decision.setup.directory, opened: decision.setup.opened } });
   }
 
   /** A read its executor answers raw: the engine host's, or the machine's services', a failure with its message (M8). */
