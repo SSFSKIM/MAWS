@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AGENT_CLEANUP_MS, agentPaths, askExit, BenchAgent, BENCH_PROJECT, bindLifetime, hostDeps, openSminos, parseAgentArgs, prepare, scratchHosts, stopHosts, type AgentArgs, type MachineClient, type ServeDeps } from './remote-bench-agent';
+import { AGENT_CLEANUP_MS, agentPaths, askExit, BenchAgent, BenchWatch, BENCH_PROJECT, bindLifetime, hostDeps, openSminos, parseAgentArgs, prepare, scratchHosts, stopHosts, type AgentArgs, type MachineClient, type ServeDeps, type WatchDeps } from './remote-bench-agent';
 import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
 
 const scratch: string[] = [];
@@ -386,4 +386,98 @@ describe('the live bench’s agent (P5 O7 M7)', () => {
       for (const child of children) if (alive(child)) child.kill('SIGKILL');
     }
   }, 30_000);
+
+  // ---- M10: the run's one status client --------------------------------------------------------------------------
+
+  /** A watch over a daemon that answers once `upAfter` reaches have failed, its link lost when `lose` says. */
+  function watchDeps(options: { upAfter?: number } = {}) {
+    const out: { id?: number; answer?: unknown; error?: string }[] = [];
+    const reaches: number[] = [];
+    const requests: { name: string; input: unknown; timeoutMs?: number }[] = [];
+    const closed: number[] = [];
+    let lose = false;
+    let links = 0;
+    const deps: WatchDeps = {
+      async reach() {
+        reaches.push(reaches.length + 1);
+        if (reaches.length <= (options.upAfter ?? 0)) return { ok: false, why: 'down: no daemon has served this profile, or it has exited' };
+        const link = ++links;
+        return {
+          ok: true,
+          client: {
+            async request<T>(name: string, input?: unknown, timeoutMs?: number) {
+              requests.push({ name, input, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
+              if (lose) throw new Error('mawsd closed the connection');
+              const { command } = input as { command: string };
+              return { code: command === 'sync' ? 4 : 0, out: JSON.stringify({ command, link }) } as T;
+            },
+            close: () => void closed.push(link),
+          },
+        };
+      },
+      out: (message) => void out.push(message as (typeof out)[number]),
+    };
+    return { deps, out, reaches, requests, closed, lose: () => void (lose = true), heal: () => void (lose = false) };
+  }
+
+  it('watch: one link to the scratch daemon, reached until it answers, then `status`, `keys` and `sync` answered on it, each a line with its id', async () => {
+    const fake = watchDeps({ upAfter: 2 });
+    const watch = new BenchWatch(fake.deps);
+    for (let id = 1; id <= 3; id += 1) await watch.input(JSON.stringify({ id, ask: 'up' }));
+    expect(fake.out).toEqual([
+      { id: 1, answer: { up: false, why: 'down: no daemon has served this profile, or it has exited' } },
+      { id: 2, answer: { up: false, why: 'down: no daemon has served this profile, or it has exited' } },
+      { id: 3, answer: { up: true } },
+    ]);
+    await watch.input(JSON.stringify({ id: 4, ask: 'status' }));
+    await watch.input(JSON.stringify({ id: 5, ask: 'keys' }));
+    await watch.input(JSON.stringify({ id: 6, ask: 'sync' }));
+    expect(fake.out.slice(3)).toEqual([
+      { id: 4, answer: { code: 0, out: JSON.stringify({ command: 'status', link: 1 }) } },
+      { id: 5, answer: { code: 0, out: JSON.stringify({ command: 'keys', link: 1 }) } },
+      { id: 6, answer: { code: 4, out: JSON.stringify({ command: 'sync', link: 1 }) } },
+    ]);
+    // one link for every ask once up: no reach after the third, each command `--json` through daemon.endpoint
+    expect(fake.reaches).toEqual([1, 2, 3]);
+    expect(fake.requests.map(({ name, input }) => [name, input])).toEqual(['status', 'keys', 'sync'].map((command) => ['daemon.endpoint', { command, args: ['--json'] }]));
+    expect(fake.requests[2]!.timeoutMs).toBe(90_000); // sync waits as `mawsd endpoint sync` does
+    await watch.end();
+    expect(fake.closed).toEqual([1]);
+  });
+
+  it('watch: a lost link is answered as an error, dropped, and reached again at the next ask; a malformed ask is refused; nothing is asked once ending', async () => {
+    const fake = watchDeps();
+    const watch = new BenchWatch(fake.deps);
+    await watch.input(JSON.stringify({ id: 1, ask: 'keys' }));
+    fake.lose();
+    await watch.input(JSON.stringify({ id: 2, ask: 'keys' }));
+    expect(fake.out[1]).toEqual({ id: 2, error: 'mawsd closed the connection' });
+    expect(fake.closed).toEqual([1]);
+    fake.heal();
+    await watch.input(JSON.stringify({ id: 3, ask: 'keys' }));
+    expect(fake.out[2]).toEqual({ id: 3, answer: { code: 0, out: JSON.stringify({ command: 'keys', link: 2 }) } });
+    await watch.input(JSON.stringify({ id: 4, ask: 'enroll' }));
+    await watch.input('not json');
+    expect(fake.out.slice(3)).toEqual([{ id: 4, error: 'not a watch ask: {"id":4,"ask":"enroll"}' }, { error: 'not a watch ask: not json' }]);
+    const ending = watch.end();
+    await watch.input(JSON.stringify({ id: 5, ask: 'status' }));
+    await ending;
+    expect(fake.out.at(-1)).toEqual({ id: 5, error: 'the watch is ending' });
+    expect(fake.requests).toHaveLength(3);
+    expect(fake.closed).toEqual([1, 2]);
+  });
+
+  it('watch: lives as long as its transport, ending on its stdin’s end with exit 0', async () => {
+    const fake = watchDeps();
+    const watch = new BenchWatch(fake.deps);
+    const stdin = new EventEmitter();
+    const exits: number[] = [];
+    bindLifetime(watch, { stdin, parent: () => 4242, every: () => () => undefined, exit: (code) => void exits.push(code), error: () => undefined });
+    stdin.emit('data', `${JSON.stringify({ id: 1, ask: 'up' })}\n`);
+    await expect.poll(() => fake.out).toEqual([{ id: 1, answer: { up: true } }]);
+    stdin.emit('end');
+    await expect.poll(() => exits).toEqual([0]);
+    expect(fake.closed).toEqual([1]);
+  });
 });
+

@@ -17,6 +17,11 @@
 //            and for any input in hand, stops the session (recorded once it is created, so a start cut short at any step
 //            still stops it), closes the fake sminos and ends any stub of this bench still running (killed when it
 //            outlives that, then checked), then exits;
+//   watch    the run's one status client (M10): one link to the scratch daemon's machine.sock, reached when asked until
+//            the daemon answers (`{id, ask: 'up'}`), then `status`, `keys` and `sync` (the endpoint's commands, `--json`)
+//            answered on that link, each `{id, answer}` or `{id, error}`; a lost link is reached again at the next ask.
+//            It ends with its transport, as serve does, so the runner's every read of the machine's status is a line here
+//            rather than a fresh ssh and a fresh runtime;
 //   stop-hosts  the scratch daemon's engine host and pty host, as their own locks name them, told to exit now through
 //            their own sockets under the profile (the hello with the host's token, its answer, `{t: 'exit', when: 'now'}`),
 //            each waited for; `{hostsLeft}` printed, exit 1 when one is left (the runner then ends it by its pid and start
@@ -346,6 +351,104 @@ export function bindLifetime(agent: { end(): Promise<void>; input(line: string):
   };
 }
 
+// --- watch -------------------------------------------------------------------------------------------------------------
+
+/** What a watch is asked: `up`, whether the daemon answers; the rest, the endpoint's command of that name with `--json`. */
+export const WATCH_ASKS = ['up', 'status', 'keys', 'sync'] as const;
+export type WatchAsk = (typeof WATCH_ASKS)[number];
+/** A request's deadline on the held link: the CLI's own (src/mawsd/machine-client.ts, src/mawsd/cli.ts). */
+const WATCH_REQUEST_MS = 10_000;
+export const WATCH_SYNC_MS = 90_000;
+
+export interface WatchDeps {
+  /** The scratch daemon's machine.sock reached once: its client, or why it does not answer. */
+  reach(): Promise<{ ok: true; client: MachineClient } | { ok: false; why: string }>;
+  /** One line to the bench, on stdout. */
+  out(message: object): void;
+}
+
+/** The watch: the run's one link to the scratch daemon, and every status read the runner makes, answered on it. */
+export class BenchWatch {
+  readonly #deps: WatchDeps;
+  #client: MachineClient | null = null;
+  #reaching: Promise<MachineClient | string> | null = null;
+  readonly #inputs = new Set<Promise<void>>();
+  #ending = false;
+  #ended: Promise<void> | null = null;
+
+  constructor(deps: WatchDeps) {
+    this.#deps = deps;
+  }
+
+  /** The held link, reached now when there is none (one reach at a time); why the daemon does not answer, else. */
+  #link(): Promise<MachineClient | string> {
+    if (this.#client !== null) return Promise.resolve(this.#client);
+    this.#reaching ??= this.#deps.reach().then(
+      (reached) => {
+        this.#reaching = null;
+        if (!reached.ok) return reached.why;
+        if (this.#ending) {
+          reached.client.close();
+          return 'the watch is ending';
+        }
+        this.#client = reached.client;
+        return reached.client;
+      },
+      (error: unknown) => {
+        this.#reaching = null;
+        return (error as Error).message;
+      },
+    );
+    return this.#reaching;
+  }
+
+  /** One ask from the bench, answered as one line; never rejects. Each is waited for by the end. */
+  input(line: string): Promise<void> {
+    const handled = this.#input(line);
+    this.#inputs.add(handled);
+    void handled.finally(() => this.#inputs.delete(handled));
+    return handled;
+  }
+
+  async #input(line: string): Promise<void> {
+    let message: { id?: unknown; ask?: unknown } | null = null;
+    try {
+      message = JSON.parse(line) as typeof message;
+    } catch {
+      // answered below as not an ask
+    }
+    const id = typeof message?.id === 'number' ? { id: message.id } : {};
+    const ask = message?.ask;
+    if (typeof ask !== 'string' || !(WATCH_ASKS as readonly string[]).includes(ask)) return this.#deps.out({ ...id, error: `not a watch ask: ${line.slice(0, 200)}` });
+    if (this.#ending) return this.#deps.out({ ...id, error: 'the watch is ending' });
+    const link = await this.#link();
+    if (ask === 'up') return this.#deps.out({ ...id, answer: typeof link === 'string' ? { up: false, why: link } : { up: true } });
+    if (typeof link === 'string') return this.#deps.out({ ...id, error: `the scratch mawsd does not answer: ${link}` });
+    try {
+      const answer = await link.request<{ code: number; out: string }>('daemon.endpoint', { command: ask, args: ['--json'] }, ask === 'sync' ? WATCH_SYNC_MS : WATCH_REQUEST_MS);
+      this.#deps.out({ ...id, answer });
+    } catch (error) {
+      // the link lost (the daemon restarted or stopped) or the ask refused: the link dropped, reached again at the next ask
+      if (this.#client === link) {
+        this.#client = null;
+        link.close();
+      }
+      this.#deps.out({ ...id, error: (error as Error).message });
+    }
+  }
+
+  /** Its end, once: no ask taken from here, those in hand answered, the link closed. */
+  end(): Promise<void> {
+    this.#ended ??= (async () => {
+      this.#ending = true;
+      await Promise.allSettled([...this.#inputs, this.#reaching]);
+      this.#client?.close();
+      this.#client = null;
+    })();
+    return this.#ended;
+  }
+}
+
 // --- stop-hosts ----------------------------------------------------------------------------------------------------------
 
 /** A detached host of the scratch daemon's as its lock names it (src/engine-host/supervisor-files.ts's LockFile). */
@@ -511,47 +614,27 @@ export function openSminos(info: { socket: string; token: string }): Promise<Smi
   });
 }
 
-/** The bundle's entry: `prepare <args>`, `serve <args>` or `stop-hosts <args>`. */
-export async function main(argv: readonly string[]): Promise<void> {
-  const [command, word] = argv;
-  const a = parseAgentArgs(word);
-  const out = (message: object) => void process.stdout.write(`${JSON.stringify(message)}\n`);
-  if (command === 'prepare') return prepare(a, process.execPath, process.versions.electron !== undefined);
-  if (command === 'stop-hosts') {
-    const left = await stopHosts(a, hostDeps());
-    out({ hostsLeft: left });
-    process.exitCode = left.length === 0 ? 0 : 1;
-    return;
-  }
-  if (command !== 'serve') throw new Error(`the agent has no command ${command}`);
-  const agent = new BenchAgent(a, {
-    async machine() {
-      const reached = await reachMachine(daemonPaths(a.profile, agentPaths(a).tmp), { build: 'remote-bench-agent' });
-      if (!reached.ok) throw new Error(`the scratch machine.sock: ${reached.state}: ${reached.why}`);
-      const link = reached.link;
-      return {
-        async request<T>(name: string, input?: unknown, timeoutMs?: number) {
-          const answer = await link.request(name, input, timeoutMs);
-          if (!answer.ok) throw new Error(`${name}: ${answer.error.code}: ${answer.error.message}`);
-          return answer.value as T;
-        },
-        close: () => link.close(),
-      };
+/** The scratch daemon's machine.sock, reached once under this build's name: a client whose refused answer throws. */
+async function reachScratch(a: AgentArgs, build: string): Promise<{ ok: true; client: MachineClient } | { ok: false; why: string }> {
+  const reached = await reachMachine(daemonPaths(a.profile, agentPaths(a).tmp), { build });
+  if (!reached.ok) return { ok: false, why: `${reached.state}: ${reached.why}` };
+  const link = reached.link;
+  return {
+    ok: true,
+    client: {
+      async request<T>(name: string, input?: unknown, timeoutMs?: number) {
+        const answer = await link.request(name, input, timeoutMs);
+        if (!answer.ok) throw new Error(`${name}: ${answer.error.code}: ${answer.error.message}`);
+        return answer.value as T;
+      },
+      close: () => link.close(),
     },
-    sminos: openSminos,
-    readFile: (path) => readFileSync(path, 'utf8'),
-    out,
-    endStubs: (samples, signal = 'SIGTERM') => void spawnSync('pkill', [signal === 'SIGKILL' ? '-KILL' : '-TERM', '-f', '--', escapeRegex(samples)], { stdio: 'ignore' }),
-    stubsLeft: (samples) => {
-      // pgrep's exit 1 is no match; anything else is no answer, counted as one left so the end does not pass it
-      const found = spawnSync('pgrep', ['-f', '--', escapeRegex(samples)], { encoding: 'utf8' });
-      if (found.status === 1) return 0;
-      return found.status === 0 ? found.stdout.split('\n').filter((line) => /^\d+$/.test(line.trim())).length : 1;
-    },
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-    tail: tailFile,
-  });
-  bindLifetime(agent, {
+  };
+}
+
+/** The process's side of `bindLifetime`: its stdin, its parent, its timers, its exit and its stderr. */
+function processIo(a: AgentArgs): Parameters<typeof bindLifetime>[1] {
+  return {
     stdin: process.stdin,
     parent: () => process.ppid,
     every: (ms, run) => {
@@ -566,7 +649,46 @@ export async function main(argv: readonly string[]): Promise<void> {
       const timer = setTimeout(run, ms);
       return () => clearTimeout(timer);
     },
+  };
+}
+
+/** The bundle's entry: `prepare <args>`, `serve <args>`, `watch <args>` or `stop-hosts <args>`. */
+export async function main(argv: readonly string[]): Promise<void> {
+  const [command, word] = argv;
+  const a = parseAgentArgs(word);
+  const out = (message: object) => void process.stdout.write(`${JSON.stringify(message)}\n`);
+  if (command === 'prepare') return prepare(a, process.execPath, process.versions.electron !== undefined);
+  if (command === 'stop-hosts') {
+    const left = await stopHosts(a, hostDeps());
+    out({ hostsLeft: left });
+    process.exitCode = left.length === 0 ? 0 : 1;
+    return;
+  }
+  if (command === 'watch') {
+    bindLifetime(new BenchWatch({ reach: () => reachScratch(a, 'remote-bench-watch'), out }), processIo(a));
+    return;
+  }
+  if (command !== 'serve') throw new Error(`the agent has no command ${command}`);
+  const agent = new BenchAgent(a, {
+    async machine() {
+      const reached = await reachScratch(a, 'remote-bench-agent');
+      if (!reached.ok) throw new Error(`the scratch machine.sock: ${reached.why}`);
+      return reached.client;
+    },
+    sminos: openSminos,
+    readFile: (path) => readFileSync(path, 'utf8'),
+    out,
+    endStubs: (samples, signal = 'SIGTERM') => void spawnSync('pkill', [signal === 'SIGKILL' ? '-KILL' : '-TERM', '-f', '--', escapeRegex(samples)], { stdio: 'ignore' }),
+    stubsLeft: (samples) => {
+      // pgrep's exit 1 is no match; anything else is no answer, counted as one left so the end does not pass it
+      const found = spawnSync('pgrep', ['-f', '--', escapeRegex(samples)], { encoding: 'utf8' });
+      if (found.status === 1) return 0;
+      return found.status === 0 ? found.stdout.split('\n').filter((line) => /^\d+$/.test(line.trim())).length : 1;
+    },
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    tail: tailFile,
   });
+  bindLifetime(agent, processIo(a));
   try {
     await agent.start();
   } catch (error) {

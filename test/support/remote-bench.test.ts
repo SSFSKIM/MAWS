@@ -70,13 +70,21 @@ function unwrap(line: string): string {
   return word.startsWith("'") ? word.slice(1, -1).replaceAll("'\\''", "'") : word;
 }
 
+type StartedRecord = { argv: readonly string[]; written: string[]; ended: boolean; killed: boolean };
+
 /**
  * A command runner that records every call (and reads a stdin file as a child would, to check what crossed), answering by
- * `script`, then as a sound machine. A started agent exits on its stdin's end, or on a kill when `endless`.
+ * `script`, then as a sound machine. A started agent exits on its stdin's end, or on a kill when `endless`. A started
+ * watch (the agent's `watch`) answers each ask at once by `script` with `watch <ask> <machine>` (`up`: exit 0 is up; the rest:
+ * the endpoint command's exit and stdout, or the watch's error when the exit is null), then as a sound machine; its asks
+ * are recorded in `asks` and its end, beside every call, in `events`.
  */
 function fakeRunner(script: Script, options: { endless?: boolean } = {}) {
   const calls: Call[] = [];
-  const started: { argv: readonly string[]; written: string[]; ended: boolean; killed: boolean }[] = [];
+  const started: StartedRecord[] = [];
+  const watches: StartedRecord[] = [];
+  const asks: string[] = [];
+  const events: string[] = [];
   const runner: CommandRunner = {
     async run(transport, runOptions = {}) {
       // the machine's own deadline around each command (`deadlined`): recorded, and the command inside it scripted
@@ -84,19 +92,31 @@ function fakeRunner(script: Script, options: { endless?: boolean } = {}) {
       const argv = [...transport.slice(0, -1), unwrap(wrapped)];
       const call: Call = { argv, wrapped, ...(runOptions.timeoutMs !== undefined && { timeoutMs: runOptions.timeoutMs }), ...(runOptions.stdinFile !== undefined && { stdinFile: runOptions.stdinFile, stdin: runOptions.stdinFile === BUNDLE.tar || runOptions.stdinFile === SOURCE.tar ? '(an archive)' : readFileSync(runOptions.stdinFile, 'utf8') }) };
       calls.push(call);
+      events.push(`run ${argv.at(-1)!}`);
       return script(argv.at(-1)!, call) ?? soundMachine(argv.at(-1)!) ?? ok();
     },
     start(argv) {
-      const record = { argv, written: [] as string[], ended: false, killed: false };
-      started.push(record);
+      const isWatch = /bench-agent\.cjs'? watch /.test(argv.at(-1)!);
+      const record: StartedRecord = { argv, written: [], ended: false, killed: false };
+      (isWatch ? watches : started).push(record);
+      const listeners: ((line: string) => void)[] = [];
       let exit!: (code: number | null) => void;
       const exited = new Promise<number | null>((resolve) => (exit = resolve));
       const handle: Started = {
-        onLine: () => undefined,
-        write: (line) => void record.written.push(line),
+        onLine: (listener) => void listeners.push(listener),
+        write: (line) => {
+          record.written.push(line);
+          if (!isWatch) return;
+          const { id, ask } = JSON.parse(line) as { id: number; ask: string };
+          asks.push(ask);
+          const result = script(`watch ${ask} ${/"name":"([\w-]+)"/.exec(argv.at(-1)!)![1]}`, { argv: [] }) ?? ok(ask === 'up' ? '' : '{}');
+          const reply = ask === 'up' ? { id, answer: result.code === 0 ? { up: true } : { up: false, why: 'down' } } : result.code === null ? { id, error: 'the scratch mawsd does not answer' } : { id, answer: { code: result.code, out: result.stdout } };
+          for (const listener of listeners) listener(JSON.stringify(reply));
+        },
         end: () => {
           record.ended = true;
-          if (options.endless !== true) exit(0);
+          events.push(isWatch ? 'end watch' : 'end agent');
+          if (options.endless !== true || isWatch) exit(0);
         },
         kill: () => {
           record.killed = true;
@@ -107,20 +127,25 @@ function fakeRunner(script: Script, options: { endless?: boolean } = {}) {
       return handle;
     },
   };
-  return { runner, calls, started };
+  return { runner, calls, started, watches, asks, events };
 }
 
-/** The machine's answers: enroll exits `enrollExit`; `endpoint status` reads hub-confirmed until `listedAfter` reads. */
+/**
+ * The machine's answers, its watch's included (`name`, the machine's): enroll exits `enrollExit`; the enrollment reads
+ * (`status`, `sync`) say hub-confirmed until `listedAfter` reads.
+ */
 function machineScript(options: { enrollExit?: number; listedAfter?: number; already?: boolean } = {}): Script {
   let reads = 0;
   return (command) => {
+    const name = command.includes('vm-bench') ? 'vm-bench' : 'mini-bench';
     if (/ enroll /.test(command)) return { code: options.enrollExit ?? 4, stdout: JSON.stringify({ enrollment: 'hub-confirmed', name: 'x', org: 'org-1', ref: 'r' }), stderr: '' };
-    if (/ endpoint status /.test(command)) {
+    if (/^watch (status|sync) /.test(command)) {
       reads += 1;
       const listed = options.already === true || (options.listedAfter !== undefined && reads > options.listedAfter);
-      return { code: 0, stdout: statusOut(listed ? 'org-listed' : options.already === false ? 'none' : 'hub-confirmed', command.includes('vm-bench') ? 'vm-bench' : 'mini-bench'), stderr: '' };
+      const state = listed ? 'org-listed' : options.already === false ? 'none' : 'hub-confirmed';
+      return { code: command.startsWith('watch sync') && !listed ? 4 : 0, stdout: statusOut(state, name), stderr: '' };
     }
-    if (/ keys /.test(command)) return { code: 0, stdout: keysOut('KEYID-for-compare', 'hub-confirmed', command.includes('vm-bench') ? 'vm-bench' : 'mini-bench'), stderr: '' };
+    if (/^watch keys /.test(command)) return { code: 0, stdout: keysOut('KEYID-for-compare', 'hub-confirmed', name), stderr: '' };
     if (/mawsd-pack\.mjs/.test(command)) return { code: 0, stdout: '/home/dev/maws-bench/vm-bench/bench/pack/0.0.0-aaaaaaaa-1234\n', stderr: '' };
     if (/ -p process\.versions\.electron$/.test(command)) return { code: 0, stdout: '44.4.5\n', stderr: '' };
     if (/^df -Pk /.test(command)) return { code: 0, stdout: DF(200 * 1024 * 1024), stderr: '' };
@@ -233,9 +258,9 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     it(`${label}: the code goes to the enroll alone by its file, is never in an argv, an environment or a line said, and its file is removed`, async () => {
       const file = codeFile();
       const m = machine(file);
-        const { calls, started, said, failure } = await fullRun(m, machineScript({ listedAfter: 2 }));
+        const { calls, started, watches, said, failure } = await fullRun(m, machineScript({ listedAfter: 2 }));
       expect(failure).toBeNull();
-      expect(leaks(calls, started, said)).toEqual([]);
+      expect(leaks(calls, [...started, ...watches], said)).toEqual([]);
       const enrolls = calls.filter((c) => / enroll /.test(c.argv.at(-1)!));
       expect(enrolls).toHaveLength(1);
       expect(enrolls[0]!.stdinFile).toBe(file);
@@ -251,13 +276,13 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
 
     it(`${label}: runs no sminos, never sets SMINOS_RL10, and sets MAWS_USER_DATA only in the scratch daemon’s start, unsetting both everywhere else`, async () => {
       const file = codeFile();
-      const { calls, started, said } = await fullRun(machine(file), machineScript({ listedAfter: 0 }));
-      const commands = [...calls.map((c) => c.argv), ...started.map((s) => s.argv)].map((argv) => argv.join(' '));
+      const { calls, started, watches, said } = await fullRun(machine(file), machineScript({ listedAfter: 0 }));
+      const commands = [...calls.map((c) => c.argv), ...[...started, ...watches].map((s) => s.argv)].map((argv) => argv.join(' '));
       expect(commands.filter((c) => /(^|[\s;&|])sminos(\s|$)/.test(c))).toEqual([]);
       expect([...commands, ...said].filter((c) => c.includes('SMINOS_RL10='))).toEqual([]);
       const named = [...commands, ...said].filter((c) => c.includes('MAWS_USER_DATA='));
       for (const line of named) expect(line).toMatch(/nohup .* run --private --dir /);
-      for (const line of [...commands, ...said].filter((c) => /bench-agent\.cjs'? (prepare|serve)|mawsd\.js"? (status|keys|endpoint|enroll)/.test(c))) expect(line).toMatch(/-u MAWS_USER_DATA .*-u SMINOS_RL10 /);
+      for (const line of [...commands, ...said].filter((c) => /bench-agent\.cjs'? (prepare|serve|watch)|mawsd\.js"? (status|keys|endpoint|enroll)/.test(c))) expect(line).toMatch(/-u MAWS_USER_DATA .*-u SMINOS_RL10 /);
       expect(commands.filter((c) => /mawsd(\.js)?"? install\b|dev\.maws\.mawsd|\.local\/bin\/mawsd/.test(c))).toEqual([]);
     });
   }
@@ -308,16 +333,18 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     expect(String(stranger.failure)).toMatch(/the recorded pid is not the scratch mawsd's/);
   });
 
-  it('the mini: says mini-ops’ start and waits for it, never starts or stops a daemon itself', async () => {
+  it('the mini: says mini-ops’ start and waits for it through the watch, never starts or stops a daemon itself', async () => {
     const file = codeFile();
-    let statusReads = 0;
+    let upAsks = 0;
     const base = machineScript({ listedAfter: 0 });
-    const { calls, said } = await fullRun(MINI(file), (command, call) => {
-      if (/ status --profile/.test(command) && !/endpoint status/.test(command)) return { code: ++statusReads < 3 ? 3 : 0, stdout: '', stderr: '' };
+    const { calls, said, failure } = await fullRun(MINI(file), (command, call) => {
+      if (command.startsWith('watch up ')) return { code: ++upAsks < 3 ? 3 : 0, stdout: '', stderr: '' };
       return base(command, call);
     });
-    expect(statusReads).toBe(3);
-    expect(calls.some((c) => /nohup|kill /.test(c.argv.at(-1)!))).toBe(false);
+    expect(failure).toBeNull();
+    expect(upAsks).toBe(3);
+    // the daemon is never started or signalled here: no launch, no stop by its pid (the reap ends its hosts alone)
+    expect(calls.some((c) => /nohup/.test(c.argv.at(-1)!) || c.argv.at(-1) === stopLine(MINI(file)))).toBe(false);
     expect(said.some((line) => line.includes('mini-ops starts the scratch mawsd'))).toBe(true);
     expect(said.some((line) => line.includes('mini-ops stops the scratch mawsd'))).toBe(true);
   });
@@ -333,10 +360,10 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
 
   it('a failed enroll: its output never said, the file removed, the daemon stopped', async () => {
     const file = codeFile();
-    const { failure, calls, said, started } = await fullRun(VM(file), (command, call) => (/ enroll /.test(command) ? { code: 1, stdout: '', stderr: `refused: ${CODE}` } : machineScript({})(command, call)));
+    const { failure, calls, said, started, watches } = await fullRun(VM(file), (command, call) => (/ enroll /.test(command) ? { code: 1, stdout: '', stderr: `refused: ${CODE}` } : machineScript({})(command, call)));
     expect(String(failure)).toMatch(/enroll failed \(exit 1\); its own output is not shown/);
     expect(String(failure)).not.toContain('SECRET');
-    expect(leaks(calls, started, said)).toEqual([]);
+    expect(leaks(calls, [...started, ...watches], said)).toEqual([]);
     expect(existsSync(file)).toBe(false);
     expect(scratchEnd(calls, VM(file))).toEqual(SCRATCH_END);
     expect(started).toHaveLength(0); // the agent's serve never started, so nothing of it to end
@@ -360,14 +387,14 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     it(`${label}: every path a command names is under the scratch profile, but the runtime it runs, which nothing writes`, async () => {
       const file = codeFile();
         const m = machine(file);
-      const { calls, started } = await fullRun(m, machineScript({ listedAfter: 0 }));
-      const commands = [...calls.map((c) => c.argv.at(-1)!), ...started.map((s) => s.argv.at(-1)!)];
+      const { calls, started, watches } = await fullRun(m, machineScript({ listedAfter: 0 }));
+      const commands = [...calls.map((c) => c.argv.at(-1)!), ...[...started, ...watches].map((s) => s.argv.at(-1)!)];
       const outside = commands.flatMap(pathsOf).filter((path) => path !== m.profile && !path.startsWith(`${m.profile}/`) && path !== m.scratchRoot && path !== `${m.scratchRoot}/*` && path !== m.node && !(allowed as readonly string[]).includes(path));
       expect(outside).toEqual([]);
       // the runtime only ever runs: never a redirection's target, a copy's, or a directory made
       for (const command of commands) expect(command).not.toMatch(new RegExp(`(>|cat >|mkdir -p|rm -rf|cp) *'?${m.node.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}`));
       // each command's own home and temporary directory are the profile's
-      for (const command of commands.filter((c) => /mawsd\.js"? (status|keys|endpoint|enroll|run)|bench-agent\.cjs'? (prepare|serve)/.test(c))) expect(command).toContain(`HOME=${m.profile}/home TMPDIR=${m.profile}/tmp`);
+      for (const command of commands.filter((c) => /mawsd\.js"? (status|keys|endpoint|enroll|run)|bench-agent\.cjs'? (prepare|serve|watch)/.test(c))) expect(command).toContain(`HOME=${m.profile}/home TMPDIR=${m.profile}/tmp`);
     });
   }
 
@@ -590,12 +617,12 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
   for (const [label, machine] of [['the mini', MINI], ['the VM', VM]] as const) {
     it(`${label}: every program a command runs carries the profile’s whole scratch environment, every inherited override unset, and every remote command a timeout`, async () => {
       const m = machine(codeFile());
-      const run = await fullRun(m, machineScript({ listedAfter: 0 }));
+      const run = await fullRun(m, machineScript({ listedAfter: 1 })); // enrolled here, so its enroll is one of them
       const prep = m.stage === 'runner' ? await prepareRun(m, (command) => (/prepared-commit 2>\/dev\/null\)" = /.test(command) ? { code: 1, stdout: '', stderr: '' } : machineScript({})(command, { argv: [] }))) : null;
       expect(run.failure).toBeNull();
       const calls = [...run.calls, ...(prep?.calls ?? [])];
-      const programs = [...calls.map((c) => c.argv.at(-1)!), ...run.started.map((s) => s.argv.at(-1)!)].filter((c) => /pnpm install|mawsd-pack|bench-agent\.cjs'? (prepare|serve)|mawsd\.js"? (status|keys|endpoint|enroll|run)|process\.versions/.test(c));
-      expect(programs.length).toBeGreaterThanOrEqual(m.stage === 'runner' ? 7 : 5);
+      const programs = [...calls.map((c) => c.argv.at(-1)!), ...[...run.started, ...run.watches].map((s) => s.argv.at(-1)!)].filter((c) => /pnpm install|mawsd-pack|bench-agent\.cjs'? (prepare|serve|watch|stop-hosts)|mawsd\.js"? (status|keys|endpoint|enroll|run)|process\.versions/.test(c));
+      expect(programs.length).toBeGreaterThanOrEqual(m.stage === 'runner' ? 8 : 6);
       for (const command of programs) {
         for (const [name, value] of Object.entries(profileEnv(m))) expect(command).toContain(`${name}=${quote(value)}`);
         for (const name of INHERITED_OVERRIDES.filter((n) => !/nohup/.test(command) || !['MAWS_USER_DATA', 'MAWS_MAWSD_LABEL', 'MAWS_ENDPOINT_DIRECT', 'MAWS_ENDPOINT_PORT', 'MAWS_MACHINE_NAME', 'MAWS_E2E', 'MAWS_E2E_ENGINE_BIN', 'MAWS_CLAUDE_USAGE_DIR', 'CLAUDE_CONFIG_DIR', 'SMINOS_HOME', 'ZDOTDIR', 'HISTFILE'].includes(n))) expect(command).toContain(`-u ${name} `);
@@ -893,33 +920,38 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
         clock += 100_000; // the enroll's own round trip, which the listing's wait no longer spends
         return { code: 4, stdout: JSON.stringify({ enrollment: 'hub-confirmed', name: 'vm-bench', org: 'org-1' }), stderr: '' };
       }
-      if (/ keys /.test(command)) {
+      if (command.startsWith('watch keys ')) {
         order.push('keys');
         keyReads += 1;
         if (keyReads < 3) return ok(keysOut(null, 'none')); // not posted yet
         keyShownAt ??= clock;
         return ok(keysOut('KEYID-for-compare'));
       }
-      if (/ endpoint status /.test(command)) {
-        order.push('status');
+      if (/^watch (status|sync) /.test(command)) {
+        order.push(command.split(' ')[1]!);
         const listed = keyShownAt !== null && clock >= keyShownAt + (ENROLL_WAIT_S - 10) * 1000; // the owner types y late
-        return ok(statusOut(listed ? 'org-listed' : order.includes('enroll') ? 'hub-confirmed' : 'none', 'vm-bench'));
+        return { code: listed || command.startsWith('watch status') ? 0 : 4, stdout: statusOut(listed ? 'org-listed' : order.includes('enroll') ? 'hub-confirmed' : 'none', 'vm-bench'), stderr: '' };
       }
       return undefined;
     });
     const said: string[] = [];
-    const run = new BenchRun(VM(codeFile()), { runner: fake.runner, engineVersion: ENGINE_VERSION, say: (line) => void said.push(line), sleep: async (ms) => void (clock += ms), now: () => clock });
+    const run = new BenchRun(VM(codeFile()), { runner: fake.runner, engineVersion: ENGINE_VERSION, say: (line) => void said.push(line), sleep: async (ms) => void (clock += ms), now: () => clock, after: () => () => undefined });
+    await run.stage();
     await run.enroll();
     const afterEnroll = order.slice(order.indexOf('enroll') + 1);
+    expect(order.slice(0, order.indexOf('enroll'))).toEqual(['status']); // a rerun's check: not listed yet
     expect(afterEnroll.slice(0, 3)).toEqual(['keys', 'keys', 'keys']); // the key read until posted, before any listing read
-    expect(afterEnroll.slice(3).every((step) => step === 'status')).toBe(true);
+    expect(afterEnroll.length).toBeGreaterThan(3);
+    expect(afterEnroll.slice(3).every((step) => step === 'sync')).toBe(true); // the listing read by a sync, on demand
     const shown = said.indexOf('[bench] vm-bench: the machine\'s key id, to compare: KEYID-for-compare');
     expect(shown).toBeGreaterThan(said.findIndex((line) => /enroll exited 4/.test(line)));
     expect(said.at(-1)).toBe('[bench] vm-bench: listed in org-1');
     // a key never posted: the owner has nothing to compare, so nothing waits for their y
-    const silent = fakeRunner((command) => (/ keys /.test(command) ? ok(keysOut(null, 'none')) : machineScript({})(command, { argv: [] })));
-    await expect(new BenchRun(VM(codeFile()), benchDeps(silent, 0).deps).enroll()).rejects.toThrow(/posted no key to compare within 60 s/);
-    expect(silent.calls.some((c) => / endpoint status /.test(c.argv.at(-1)!) && c !== silent.calls[0])).toBe(false);
+    const silent = fakeRunner((command) => (command.startsWith('watch keys ') ? ok(keysOut(null, 'none')) : machineScript({})(command, { argv: [] })));
+    const quiet = new BenchRun(VM(codeFile()), benchDeps(silent, 0).deps);
+    await quiet.stage();
+    await expect(quiet.enroll()).rejects.toThrow(/posted no key to compare within 60 s/);
+    expect(silent.asks.filter((ask) => ask === 'status' || ask === 'sync')).toEqual(['status']); // no listing waited for
   });
 
   it('reads the key from `mawsd keys --json`’s flat answer, as the endpoint renders it, and nothing from the shape attempt 1 read', () => {
@@ -1038,4 +1070,90 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
       for (const child of children) if (alive(child)) child.kill('SIGKILL');
     }
   }, 60_000);
+
+  // ---- M10: the live re-check's bench fixes ------------------------------------------------------------------------
+
+  for (const [label, machine] of [['the mini', MINI], ['the VM', VM]] as const) {
+    it(`${label}: one status client per run, the agent’s watch, started at the stage and ended before the daemon’s stop; no status, keys or sync is a process of its own`, async () => {
+      const m = machine(codeFile());
+      const { calls, watches, asks, events, failure, teardownFailure } = await fullRun(m, machineScript({ listedAfter: 2 }));
+      expect(failure).toBeNull();
+      expect(teardownFailure).toBeNull();
+      expect(watches).toHaveLength(1);
+      expect(watches[0]!.argv.at(-1)).toMatch(/bench-agent\.cjs'? watch '\{.*"deadline":\d+\}'$/);
+      // the daemon answering, the rerun's check, the key, then the listing by a read of the org state now
+      expect(asks[0]).toBe('up');
+      expect(asks.slice(asks.lastIndexOf('up') + 1)).toEqual(['status', 'keys', 'sync', 'sync']);
+      // the only mawsd process the run starts on the machine is its enroll (and the VM's daemon)
+      const mawsdCommands = calls.map((c) => c.argv.at(-1)!).filter((line) => /mawsd\.js"? [a-z]/.test(line)).map((line) => /mawsd\.js"? ([a-z]+)/.exec(line)![1]);
+      expect(mawsdCommands).toEqual(m.stage === 'runner' ? ['run', 'enroll'] : ['enroll']);
+      // its end: after the agent's, before anything stops the daemon or ends a host
+      const watchEnd = events.indexOf('end watch');
+      expect(events.indexOf('end agent')).toBeLessThan(watchEnd);
+      const firstStop = events.findIndex((e, i) => i > watchEnd && (e === `run ${stopLine(m)}` || e === `run ${scratchDaemonLine(m)}`));
+      expect(firstStop).toBeGreaterThan(watchEnd);
+      expect(events.slice(0, watchEnd).some((e) => e === `run ${reapLine(m)}` || /stop-hosts/.test(e))).toBe(false);
+    });
+  }
+
+  it('the mini: its hosts ended once mini-ops has stopped the scratch mawsd, its absence waited for as the VM’s stop is', async () => {
+    const m = MINI(codeFile());
+    let polls = 0;
+    const { calls, said, teardownFailure } = await fullRun(m, (command, call) => {
+      if (command === scratchDaemonLine(m) && polls < 3) return { code: ++polls < 3 ? 6 : 0, stdout: '', stderr: '' };
+      return machineScript({ listedAfter: 0 })(command, call);
+    });
+    expect(teardownFailure).toBeNull();
+    const told = said.findIndex((line) => line === `[bench] mini-bench: mini-ops stops the scratch mawsd, with: ${stopLine(m)}`);
+    expect(told).toBeGreaterThanOrEqual(0);
+    expect(said.at(-1)).toMatch(/torn down;/);
+    const lines = calls.map((c) => c.argv.at(-1)!);
+    const first = lines.indexOf(scratchDaemonLine(m));
+    const steps = lines.slice(first).map((line) => (line === scratchDaemonLine(m) ? 'daemon' : /bench-agent\.cjs'? stop-hosts /.test(line) ? 'stop-hosts' : line === reapLine(m) ? 'reap' : /^pgrep -f -- /.test(line) ? 'check' : line));
+    expect(steps).toEqual(['daemon', 'daemon', 'daemon', 'daemon', 'stop-hosts', 'reap', 'check']); // three waits, then the VM's end
+  });
+
+  it('the mini: a scratch mawsd mini-ops never stopped fails teardown, its hosts not told, the profile kept', async () => {
+    const m = MINI(codeFile());
+    const { calls, said, teardownFailure } = await fullRun(m, (command, call) => (command === scratchDaemonLine(m) ? { code: 6, stdout: '', stderr: '' } : machineScript({ listedAfter: 0 })(command, call)));
+    expect(String(teardownFailure)).toMatch(/mini-bench: teardown: ending the scratch mawsd failed: mini-bench: the scratch mawsd still runs 10 minutes after mini-ops' stop was asked/);
+    expect(said).toContain('[bench] mini-bench: ending the scratch hosts and every process naming the profile failed: mini-bench: the scratch mawsd still runs, so its hosts are not ended');
+    expect(calls.some((c) => /stop-hosts/.test(c.argv.at(-1)!) || c.argv.at(-1)!.endsWith(`rm -rf ${m.profile}`) || c.argv.at(-1) === reapLine(m))).toBe(false);
+    expect(said.some((line) => /torn down;/.test(line))).toBe(false);
+  });
+
+  it('a watch that exits fails the read it was asked, and one that never answers fails at its deadline; the run never waits on it', async () => {
+    const gone = fakeRunner(machineScript({}));
+    const original = gone.runner.start;
+    gone.runner.start = (argv) => {
+      const handle = original(argv);
+      let exit!: (code: number | null) => void;
+      const exited = new Promise<number | null>((resolve) => (exit = resolve));
+      return { ...handle, write: () => exit(255), exited }; // the transport lost at the first ask
+    };
+    await expect(new BenchRun(VM(codeFile()), benchDeps(gone, 0).deps).stage()).rejects.toThrow(/vm-bench: the status watch exited before it answered up/);
+    const silent = fakeRunner(machineScript({}));
+    const start = silent.runner.start;
+    silent.runner.start = (argv) => ({ ...start(argv), write: () => undefined });
+    const { deps, deadlines } = benchDeps(silent, 0);
+    const staging = new BenchRun(VM(codeFile()), deps).stage();
+    await expect.poll(() => deadlines.length).toBe(1);
+    expect(deadlines[0]!.ms).toBe(25_000); // the watch's 10 s and this side's 15 s grace
+    deadlines[0]!.fire();
+    await expect(staging).rejects.toThrow(/the status watch did not answer up within 25 s/);
+  });
+
+  it('the mini’s watch is ended with the margin before its quiet window, as a serve is, and asks nothing after', async () => {
+    const fake = fakeRunner(machineScript({ already: true }));
+    const { deps, said, deadlines } = benchDeps(fake, at('2026-11-03T05:00:00Z'));
+    const run = new BenchRun({ ...MINI(codeFile()), stageHead: 'present' }, deps);
+    await run.stage();
+    const window = deadlines.find((d) => d.ms === 105 * 60_000 - QUIET_MARGIN_MS)!;
+    expect(JSON.parse(/watch '(\{.*\})'$/.exec(fake.watches[0]!.argv.at(-1)!)![1]!).deadline).toBe(at('2026-11-03T06:45:00Z') - QUIET_MARGIN_MS);
+    window.fire();
+    await expect.poll(() => fake.watches[0]!.ended).toBe(true);
+    expect(said).toContain('[bench] mini-bench: its quiet window is 2 minutes off: the status watch is ended now');
+    await expect(run.enroll()).rejects.toThrow(/the status watch has ended/);
+  });
 });
+
