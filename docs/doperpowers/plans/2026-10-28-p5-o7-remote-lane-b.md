@@ -2849,6 +2849,18 @@ P5 findings of M5's re-plan, continued from F15:
   Date/Author: 2026-11-04, O7's executor (the controller).
 - Decision: M9 merged origin/master (176a159fd, M8 landed) as 8367d96fa, a clean merge, and collapsed `WIRE_MINOR` to master's plus one, 27, regenerating the manifest from master's 26 (2026-11-05, bfce6aa2e). RL2 stays 1.9: `engine.route-machine` is an engine host's hello capability, and the setup rows carry no `requires`; the RL2 capability lists are unchanged against master.
   Date/Author: 2026-11-05, O7's executor (the controller).
+- Decision: m9-5's proofs and the architect's rulings (2026-11-05). The task's commits are a254eadc6, 36bf62738, 9637d0eb1 and e5cfbe6a2 (tests and e2e only). No separate task review; reviewer-high reviews them with the whole.
+  - **What proves M9:**
+    - P5 acceptance 5's spawn on a machine with no setup: `e2e/remote.spec.ts`, 'M9: "+ Session" on B with no registered checkout sets its folder up there…'. B's checkout is neither registered nor trusted; the owner sets it up through the sheet, trusts it, and Send spawns there with `trust: 'accepted'`; B's status carries `route: 'machine'` and `observed: {kind: 'login'}`, and A's Route row names it.
+    - Zero breaking changes: `e2e/cross-build.spec.ts` against master's 3.26 and against 3.20 (`--peer 95050efd1`).
+    - An older engine host given the legacy route: `machineRouteOnOlderHost` in `e2e/cross-build.spec.ts`, against the real 3.20 host in both the embedded and the daemon shapes: legacy direct when no base URL and no gateway key resolve; `route-unsupported` for another host's URL or a machine-set token; `ROUTE_RELAY_UNSUPPORTED` at a dead relay, Start anyway too. It runs only with a peer from before `host.holder` (the default peer hands over and records "not driven"); a tracker line carries a pinned older-host peer in the cross-build plan.
+    - The remote `addFolder` on an untrusted folder (the architect's property): `test/endpoint/setup-rows.test.ts`, 'register an untrusted folder with no git but the isolated config read…', through production's Index callback in a fake home: one git process, the isolated config read; the decoy include never followed; the fsmonitor marker untouched.
+    - The switch back's Cancel at a dead relay: `src/services/sessions/service.test.ts` (the record's `gateway` equal to its snapshot; a resume takes the old route) and `switch-route.test.ts` (the cancelled line).
+    - Non-owner greying is proved in unit only (`MachineMenu.test.tsx`, setup-rows' owners-only case): the scene's org has one member, who owns B.
+  - **The architect's rulings on the e2e fixtures:** every live spec that runs a real engine is pinned to the gateway route through `launchMaws({defaultRoute: 'gateway'})` (24 specs, unrun: live and paid), since their fake homes hold no machine login and before M9 they ran on gateway; the machine route's live proof is M10's sitting. The hermetic launch environment (`e2e/support/scratch-env.ts` `launchEnvironment`) drops every `ANTHROPIC_*`, as it drops `CLAUDE*`, so the machine route in e2e reads only the scene's settings; a spec opts a runner variable back in by name (`runnerEnv`), and none does today.
+  - **Expectations the default changed:** `widgets.spec.ts:783` and `panel.spec.ts:501` take the Route row's new suffix.
+  Rationale: `task-5-report.md`; runs 41943508951, 41943509480, 41944083264 and 41946476120.
+  Date/Author: 2026-11-05, O7's executor (the controller).
 
 ## Outcomes & Retrospective
 
