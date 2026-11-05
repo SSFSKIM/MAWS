@@ -7,6 +7,8 @@
 //   rechecking   one more session.status; a background task the confirm did not name returns to confirming
 //   stopping     session.stop { reason: 'stop' }, then the exit (C3's ladder; the queue and grants stay in its state file)
 //   starting     C10's session.start with options { gateway, model?, effort? }, then a ready status on the new route
+//   advising     P5 O7 M9: back to the machine's own, main's launch check found the relay its settings name dead: the
+//                person's Switch anyway starts past it (`startAnyway`), Cancel leaves the session stopped
 //   done         a toast, and the queue resumed when the switch's own interrupt paused it
 //   failed       at any phase: the session left where that phase reached, said in words, never retried by itself
 // Each dependency is injected, so the machine runs the same over the app's IPC and over a scripted store.
@@ -60,6 +62,7 @@ class Failed extends Error {}
 export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
   const timeouts = { ...TIMEOUTS, ...deps.timeouts };
   const asks = new Map<AppSessionId, (answer: SwitchAnswer | null) => void>();
+  const advisories = new Map<AppSessionId, (go: boolean) => void>(); // P5 O7 M9
 
   const put = (id: AppSessionId, state: SwitchState) => store.setState((s) => ({ switching: new Map(s.switching).set(id, state) }));
   const clear = (id: AppSessionId) =>
@@ -218,7 +221,7 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
 
       state = { ...state, phase: 'starting', error: null };
       put(id, state);
-      const options: StartOptions = target === 'machine' ? { route: 'machine', startAnyway: true } : { gateway: target }; // P5 O7 M9
+      const options: StartOptions = target === 'machine' ? { route: 'machine' } : { gateway: target }; // P5 O7 M9
       if (answer.model !== null) options.model = answer.model;
       if (answer.effort !== null) options.effort = answer.effort;
       // Subscribed before the start, so a setup failure that follows at once is heard.
@@ -231,7 +234,18 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
         });
       });
       try {
-        const started = await start.start(id, options);
+        let started = await start.start(id, options);
+        // P5 O7 M9: the machine's own route is held to its launch's relay check, which the renderer cannot run before the
+        // stop (only main reads whether the machine's settings name the relay): asked now, and passed only on Switch anyway
+        if (started.status === 'relay_unreachable' && target === 'machine') {
+          state = { ...state, phase: 'advising', error: null };
+          put(id, state);
+          const go = await new Promise<boolean>((resolve) => advisories.set(id, resolve));
+          if (!go) return fail(SWITCH.relayAdvisory.cancelled);
+          state = { ...state, phase: 'starting', error: null };
+          put(id, state);
+          started = await start.start(id, { ...options, startAnyway: true });
+        }
         if (started.status !== 'starting') return fail(SWITCH.refused(started.reason));
         const verdict = await awaitStatus<'ready' | 'mismatch'>(
           id,
@@ -267,7 +281,17 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
       return fail(error instanceof Error ? error.message : String(error));
     } finally {
       asks.delete(id);
+      advisories.delete(id);
     }
+  }
+
+  // P5 O7 M9: the relay advisory's answer (Switch anyway: true); false when nothing is asking.
+  function advise(id: AppSessionId, go: boolean): boolean {
+    const resolve = advisories.get(id);
+    if (!resolve) return false;
+    advisories.delete(id);
+    resolve(go);
+    return true;
   }
 
   // The sheet's answer; refused (false) while a required model is missing, or when nothing is asking.
@@ -281,7 +305,7 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
     return true;
   }
 
-  return { switchRoute, answer };
+  return { switchRoute, answer, advise };
 }
 
 // The app's switcher: the IPC client, C5's sessions store, C10's start, C5's toasts.
@@ -298,3 +322,4 @@ const app = createRouteSwitcher(
 
 export const switchRoute = (appSessionId: AppSessionId, target: SwitchTarget): Promise<SwitchOutcome> => app.switchRoute(appSessionId, target);
 export const answerSwitch = (appSessionId: AppSessionId, reply: SwitchAnswer | null): boolean => app.answer(appSessionId, reply);
+export const answerRelayAdvisory = (appSessionId: AppSessionId, go: boolean): boolean => app.advise(appSessionId, go); // P5 O7 M9

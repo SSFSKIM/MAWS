@@ -65,6 +65,7 @@ export const SWITCH = {
     rechecking: 'Checking for background work…',
     stopping: 'Stopping the process…',
     starting: 'Restarting…',
+    advising: 'Waiting for your answer', // P5 O7 M9: the machine's relay isn't answering
     done: 'Restarted',
     failed: 'The switch failed',
   },
@@ -81,6 +82,14 @@ export const SWITCH = {
   mismatch: (target: Route) => `Restarted, but the route reads unverified (asked for ${target === 'direct' ? 'Direct' : 'the gateway'}) · check Session info`,
   retry: 'Retry',
   toast: (title: string, target: Route, model: string | null) => `${title} restarted ${target === 'direct' ? 'direct' : 'routed'}${model === null ? '' : ` · on ${model}`}`,
+  // P5 O7 M9: the machine's own settings name ClaudeUsage's relay and it isn't answering (main's launch check, heard at
+  // the restart, after the stop); Cancel leaves the session stopped on the route its record keeps
+  relayAdvisory: {
+    title: 'This machine’s relay isn’t answering. Switch anyway?',
+    body: 'This machine’s own settings send its requests to ClaudeUsage’s relay, which isn’t answering, so the first turn may fail. The session is stopped: Cancel leaves it so, to resume on the route it was on.',
+    submit: 'Switch anyway',
+    cancelled: 'Stopped, not switched: this machine’s relay isn’t answering · Resume from the sidebar to restart it on the route it was on',
+  },
   // P5 O7 M9: back on the machine's own route, named by what get_status reported it reaching
   toastMachine: (title: string, reached: string, model: string | null) => `${title} restarted · now on this machine’s own setup (${reached})${model === null ? '' : ` · on ${model}`}`,
 };

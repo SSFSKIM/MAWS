@@ -13,7 +13,7 @@ import { ipc } from '../ipc/client';
 import type { SwitchTarget } from './copy'; // P5 O7 M9
 
 export type SwitchConfirm = { target: SwitchTarget; backgroundTasks: EngineSessionStatus['backgroundTasks']; requiresModel: boolean; model: string | null; effort: Effort | null };
-export type SwitchState = { target: SwitchTarget; phase: 'confirming' | 'interrupting' | 'rechecking' | 'stopping' | 'starting' | 'done' | 'failed'; confirm: SwitchConfirm | null; error: string | null };
+export type SwitchState = { target: SwitchTarget; phase: 'confirming' | 'interrupting' | 'rechecking' | 'stopping' | 'starting' | 'advising' | 'done' | 'failed'; confirm: SwitchConfirm | null; error: string | null };
 
 export interface GatewayState {
   relay: RelayHealth | null; // carries its own checkedAt

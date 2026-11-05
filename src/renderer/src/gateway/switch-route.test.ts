@@ -474,8 +474,8 @@ describe('back to the machine’s own route', () => {
     expect(switchButtonLabel(sheet.confirm!)).toBe('Restart on the machine’s own');
     s.switcher.answer(ID, CONFIRM);
     await vi.waitFor(() => expect(s.starts).toHaveLength(2));
-    // the person chose it: the machine route's advisory relay check is passed, and get_status says what it reached
-    expect(s.starts[1]!.options).toEqual({ route: 'machine', startAnyway: true });
+    // the machine route's relay check is main's, as at a launch: nothing passes it unasked
+    expect(s.starts[1]!.options).toEqual({ route: 'machine' });
     s.backend.emitStatus(READY, { process: 'ready', launchId: 'launch-3', exit: null, gateway: onMachine(undefined, 'pending') });
     expect(stateOf(s)?.phase).toBe('starting'); // not verified yet
     s.backend.emitStatus(READY, { gateway: onMachine({ kind: 'claudeusage', baseUrl: RELAY }, 'routed') });
@@ -507,5 +507,58 @@ describe('back to the machine’s own route', () => {
       expect(s.toasts.at(-1)).toBe(`Settings idle probe restarted · now on this machine’s own setup (${words})`);
       expect(features(s)).toMatchObject({ claudeUsage: false, catalogue: 'direct', engineUsage: true, relayBanner: false, windows: 'direct' });
     }
+  });
+
+  // The launch's preflight is main's (machine-route.ts guardMachineRoute at session.start): only there is it known whether
+  // the machine's own settings name the relay, so the switch hears a dead one as the start's `relay_unreachable`, after the
+  // stop, and asks then; only Switch anyway sends `startAnyway`, on the machine route still.
+  const DOWN: StartOutcome = { status: 'relay_unreachable', appSessionId: READY, health: { url: RELAY, ok: false, status: null, latencyMs: null, checkedAt: '2026-11-04T23:00:00.000Z', error: 'timed out' } };
+  const relayNamedAndDown = (s: Setup) =>
+    s.backend.script('session.start', (input) => {
+      const { appSessionId, options } = input as { appSessionId: AppSessionId; options: StartOptions };
+      return 'startAnyway' in options && options.startAnyway ? { status: 'starting', appSessionId } : DOWN;
+    });
+  const advising = async (s: Setup) => vi.waitFor(() => expect(stateOf(s)?.phase).toBe('advising'));
+
+  it('with the relay the machine names down: asks before restarting, and only Switch anyway starts, past the check, on the machine route', async () => {
+    const s = setup();
+    relayNamedAndDown(s);
+    const run = s.switcher.switchRoute(ID, 'machine');
+    await confirming(s);
+    s.switcher.answer(ID, CONFIRM);
+    await advising(s);
+    expect(s.starts).toEqual([{ appSessionId: READY, options: { route: 'machine' } }]); // asked as a launch is: refused, nothing started
+    expect(s.switcher.advise(ID, true)).toBe(true);
+    await vi.waitFor(() => expect(s.starts).toHaveLength(2));
+    expect(s.starts[1]!.options).toEqual({ route: 'machine', startAnyway: true });
+    s.backend.emitStatus(READY, { process: 'ready', launchId: 'launch-2', exit: null, gateway: onMachine({ kind: 'claudeusage', baseUrl: RELAY }, 'routed') });
+    expect(await run).toBe('done');
+    expect(s.toasts.at(-1)).toBe('Settings idle probe restarted · now on this machine’s own setup (ClaudeUsage)');
+  });
+
+  it('with the relay the machine names down, Cancel starts nothing more and leaves the session stopped, to resume on its route', async () => {
+    const s = setup();
+    relayNamedAndDown(s);
+    const run = s.switcher.switchRoute(ID, 'machine');
+    await confirming(s);
+    s.switcher.answer(ID, CONFIRM);
+    await advising(s);
+    expect(s.switcher.advise(ID, false)).toBe(true);
+    expect(await run).toBe('failed');
+    expect(s.starts).toHaveLength(1);
+    expect(stateOf(s)).toMatchObject({ phase: 'failed', error: 'Stopped, not switched: this machine’s relay isn’t answering · Resume from the sidebar to restart it on the route it was on' });
+    expect(s.switcher.advise(ID, true), 'nothing asks any more').toBe(false);
+  });
+
+  it('with the relay up, or no relay named, main starts it at once: straight through, with no startAnyway', async () => {
+    const s = setup({ start: 'no_ready' }); // main's guard passed: `starting`
+    const run = s.switcher.switchRoute(ID, 'machine');
+    await confirming(s);
+    s.switcher.answer(ID, CONFIRM);
+    await vi.waitFor(() => expect(s.starts).toHaveLength(1));
+    expect(stateOf(s)?.phase).toBe('starting');
+    s.backend.emitStatus(READY, { process: 'ready', launchId: 'launch-2', exit: null, gateway: onMachine({ kind: 'login', baseUrl: null, login: 'Claude Max' }, 'direct') });
+    expect(await run).toBe('done');
+    expect(s.starts).toEqual([{ appSessionId: READY, options: { route: 'machine' } }]);
   });
 });

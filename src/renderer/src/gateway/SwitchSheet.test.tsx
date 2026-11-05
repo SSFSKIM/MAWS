@@ -21,8 +21,8 @@ import { useSetup } from '../sessions/store';
 import { useSessions } from '../stores/sessions';
 import { intent } from '../test-support/setup-intents';
 import { directChoice, pickDirectModel } from './direct-model';
-import { GatewayDialogs, SwitchSheet } from './SwitchSheet';
-import type { SwitchConfirm } from './store';
+import { GatewayDialogs, RelayAdvisorySheet, SwitchSheet } from './SwitchSheet';
+import { useGateway, type SwitchConfirm } from './store';
 
 const ROOT = join(__dirname, '../../../..');
 // P5 O6 M2: the backend (`window.maws`) is main, over the bare `READY`; the stores and the sheets hold the page's `ID`.
@@ -108,6 +108,31 @@ describe('the switch sheet', () => {
     expect(within(sheet).getByText('Gateway models become available')).toBeTruthy();
     fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
     expect(answer).toHaveBeenCalledWith(ID, null);
+  });
+});
+
+// P5 O7 M9: back to the machine's own route, the relay its settings name not answering at the restart
+describe('the relay advisory', () => {
+  it('the dialog host shows it for a switch that is advising; Switch anyway answers yes, Cancel and Escape no', async () => {
+    useGateway.setState({ switching: new Map([[ID, { target: 'machine', phase: 'advising', confirm: null, error: null }]]) });
+    try {
+      wrap(<GatewayDialogs />);
+      expect(await screen.findByRole('dialog', { name: 'This machine’s relay isn’t answering. Switch anyway?' })).toBeTruthy();
+    } finally {
+      useGateway.setState({ switching: new Map() });
+    }
+    cleanup();
+    const answer = vi.fn(() => true);
+    wrap(<RelayAdvisorySheet appSessionId={ID} answer={answer} />);
+    const sheet = await screen.findByRole('dialog', { name: 'This machine’s relay isn’t answering. Switch anyway?' });
+    expect(within(sheet).getByText(/Cancel leaves it so, to resume on the route it was on/)).toBeTruthy();
+    fireEvent.submit(within(sheet).getByRole('button', { name: 'Switch anyway' }).closest('form')!);
+    expect(answer).toHaveBeenLastCalledWith(ID, true);
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+    expect(answer).toHaveBeenLastCalledWith(ID, false);
+    fireEvent.keyDown(sheet, { key: 'Escape' });
+    await waitFor(() => expect(answer).toHaveBeenCalledTimes(3));
+    expect(answer).toHaveBeenLastCalledWith(ID, false);
   });
 });
 
