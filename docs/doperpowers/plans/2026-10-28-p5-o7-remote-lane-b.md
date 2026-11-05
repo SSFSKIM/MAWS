@@ -2966,6 +2966,20 @@ P5 findings of M5's re-plan, continued from F15:
     The controller verified the shell premise in the code before the review.
   Rationale: the owner's ruling at the sitting; the architect's ruling of 2026-11-05; B's report (20 cases in `step-up-owned-spawn.test.ts`, each guard shown load-bearing by removing it).
   Date/Author: 2026-11-05, O7's M10 executor (the controller).
+- Decision: C's cause is the lane A tail row's clock, not missing deltas (2026-11-05; d3175ca56, be0f10fc1).
+  - **What opus-5-5 streams.** Its thinking blocks carry no text: 1 to 4 empty `thinking_delta`s with `estimated_tokens`, then a `signature_delta` (`p4/p4-r7-loss-dialog.jsonl`).
+  - **The store-derived row already ticks.** A MAWS-run row ticks on the store's event clock while its process is live, with no further deltas; `rows.test.tsx` shows 12 s and 48 s.
+  - **The broken path.** A terminal session's streamed thinking row (`lane-a/stream/overlay.ts`) is stamped on the window's wall clock, but it was timed on the store's disk-event clock and gated on the digest's liveness. The digest says `foreign` while the bridge is `starting`, so the row froze at "0s". While live it lagged the disk follow, by up to 30 s on a dropped FSEvents event.
+  - **The fix.** Lane A thinking rows carry `clock: 'wall'` and tick on a live clock, and the overlay is their liveness. A closed textless block leaves at close, as W1 has a lane B one do (the architect: keep W1, no row for a closed textless block). Store-derived rows are unchanged.
+  - **Which session the screenshot was** (settled from code). Its "Do anything" placeholder and its effortless label fit a terminal-held seat driven by agent messages and task notifications:
+    - a MAWS-run session replays the owner's prompt as a user row (`--replay-user-messages`; `derive.ts`);
+    - a MAWS-run session's label names its effort from `get_settings`;
+    - a terminal session has no effort to name.
+
+    A lane B session whose loaded window holds only engine- or peer-opened turns would show the same placeholder. The effort clue rests on `get_settings` reporting a non-null effort for opus-5-5, which no fixture shows.
+  - **Residue:** a textless thinking block's final duration (W1 shows none), for the owner's UX wave.
+  Rationale: C's two reports; the architect's answers of 2026-11-05.
+  Date/Author: 2026-11-05, O7's M10 executor (the controller).
 - Decision: reviewer-medium on the whole branch (2026-11-05, over 5f2bc8964..7692b289a). Verdict: incorrect, on one Important finding. A sync whose read was held while the machine unenrolled answered exit 4 with `enrollment: none`. The fix maps the three final states explicitly (a07adc17b), red first with a held org-state read and `unenroll` beside it. The reviewer found the rest sound: the teardown order and the daemon-alive guard, the quiet-window checks, the code's transport, and how the watch's asks settle on a reply, an exit or a timeout. The loop stopped there. The fix is one mapping, proved by its test, and the controller verified it rather than taking a second round.
   Also fixed on the way: static's typecheck found two narrowings the local single-file runs can't see (fba341f23, 7e1fd4d22).
   Rationale: the reviewer's report; static runs 41970289264 and 41970477689 (red), then 41970939499 and 41971463848 (green).
