@@ -10,7 +10,9 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { appProfileProblems, archiveProblems, BenchRun, buildHeadBundle, buildSourceArchive, copyLine, deadlined, ENROLL_WAIT_S, envLine, guardedLine, makeScratchDirs, reapLine, SCRATCH_DIRS, scratchDaemonLine, SERVE_MAX_MS, INHERITED_OVERRIDES, machineProblems, meetsQuiet, processRunner, productionProblem, profileEnv, QUIET_MARGIN_MS, quote, startLine, stopLine, stubFixtures, transportArgv, untilQuiet, type BenchMachine, type CommandRunner, type HeadBundle, type RunResult, type Started } from './remote-bench';
+import { keysAnswer, statusAnswer } from '../../src/endpoint/presence';
+import type { MachineRef } from '../../src/shared/machine/ref';
+import { appProfileProblems, archiveProblems, BenchRun, buildHeadBundle, buildSourceArchive, copyLine, deadlined, ENROLL_WAIT_S, envLine, guardedLine, keyIdOf, makeScratchDirs, reapLine, SCRATCH_DIRS, scratchDaemonLine, SERVE_MAX_MS, INHERITED_OVERRIDES, machineProblems, meetsQuiet, processRunner, productionProblem, profileEnv, QUIET_MARGIN_MS, quote, startLine, stopLine, stubFixtures, transportArgv, untilQuiet, type BenchMachine, type CommandRunner, type HeadBundle, type RunResult, type Started } from './remote-bench';
 
 const CODE = 'smns-enroll-v1.SECRET-0123456789abcdefghij';
 const COMMIT = 'a'.repeat(40);
@@ -36,6 +38,14 @@ const BUNDLE: HeadBundle = { tar: '/tmp/bench-local/head.tar', tarBytes: 40 * 10
 const SOURCE: HeadBundle = { tar: '/tmp/bench-local/source.tar', tarBytes: 12 * 1024 * 1024, unpackedBytes: 12 * 1024 * 1024, electron: null, commit: COMMIT };
 const DF = (availableKb: number) => `Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s5 970000000 400000000 ${availableKb} 42% /System/Volumes/Data\n`;
 const at = (iso: string) => Date.parse(iso);
+const REF = 'bench-machine-ref-0001' as MachineRef;
+type Enrollment = 'none' | 'hub-confirmed' | 'org-listed';
+/** What `mawsd keys --json` prints, from the endpoint's own renderer (src/endpoint/answers.ts), so the fakes cannot drift from it. */
+const keysOut = (keyId: string | null, enrollment: Enrollment = 'hub-confirmed', name = 'vm-bench') =>
+  keysAnswer({ ref: REF, enrollment: enrollment === 'none' ? null : { state: enrollment, name, org: 'org-1' }, pending: null, delegation: null, key: keyId === null ? null : { keyId, heldKeys: 1 }, refusing: null }, true);
+/** What `mawsd endpoint status --json` prints, from the same renderer. */
+const statusOut = (enrollment: Enrollment, name: string) =>
+  statusAnswer({ enrollment, ...(enrollment === 'none' ? {} : { name, org: 'org-1' }), hub: { connected: false }, channels: { relayed: 0, direct: 0 }, rl10: { connected: false }, listener: { bound: false }, legacyKey: false, legacyRetired: false, delegated: false }, true);
 
 type Call = { argv: readonly string[]; stdinFile?: string; stdin?: string; timeoutMs?: number; wrapped?: string };
 type Script = (command: string, call: Call) => RunResult | undefined;
@@ -108,9 +118,9 @@ function machineScript(options: { enrollExit?: number; listedAfter?: number; alr
     if (/ endpoint status /.test(command)) {
       reads += 1;
       const listed = options.already === true || (options.listedAfter !== undefined && reads > options.listedAfter);
-      return { code: 0, stdout: JSON.stringify({ enrollment: listed ? 'org-listed' : options.already === false ? 'none' : 'hub-confirmed', name: command.includes('vm-bench') ? 'vm-bench' : 'mini-bench', org: 'org-1' }), stderr: '' };
+      return { code: 0, stdout: statusOut(listed ? 'org-listed' : options.already === false ? 'none' : 'hub-confirmed', command.includes('vm-bench') ? 'vm-bench' : 'mini-bench'), stderr: '' };
     }
-    if (/ keys /.test(command)) return { code: 0, stdout: JSON.stringify({ key: { keyId: 'KEYID-for-compare', heldKeys: 1 } }), stderr: '' };
+    if (/ keys /.test(command)) return { code: 0, stdout: keysOut('KEYID-for-compare', 'hub-confirmed', command.includes('vm-bench') ? 'vm-bench' : 'mini-bench'), stderr: '' };
     if (/mawsd-pack\.mjs/.test(command)) return { code: 0, stdout: '/home/dev/maws-bench/vm-bench/bench/pack/0.0.0-aaaaaaaa-1234\n', stderr: '' };
     if (/ -p process\.versions\.electron$/.test(command)) return { code: 0, stdout: '44.4.5\n', stderr: '' };
     if (/^df -Pk /.test(command)) return { code: 0, stdout: DF(200 * 1024 * 1024), stderr: '' };
@@ -886,14 +896,14 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
       if (/ keys /.test(command)) {
         order.push('keys');
         keyReads += 1;
-        if (keyReads < 3) return ok(JSON.stringify({ key: null })); // not posted yet
+        if (keyReads < 3) return ok(keysOut(null, 'none')); // not posted yet
         keyShownAt ??= clock;
-        return ok(JSON.stringify({ key: { keyId: 'KEYID-for-compare' } }));
+        return ok(keysOut('KEYID-for-compare'));
       }
       if (/ endpoint status /.test(command)) {
         order.push('status');
         const listed = keyShownAt !== null && clock >= keyShownAt + (ENROLL_WAIT_S - 10) * 1000; // the owner types y late
-        return ok(JSON.stringify({ enrollment: listed ? 'org-listed' : order.includes('enroll') ? 'hub-confirmed' : 'none', name: 'vm-bench', org: 'org-1' }));
+        return ok(statusOut(listed ? 'org-listed' : order.includes('enroll') ? 'hub-confirmed' : 'none', 'vm-bench'));
       }
       return undefined;
     });
@@ -907,9 +917,17 @@ describe('the live bench’s runner (P5 O7 M7)', () => {
     expect(shown).toBeGreaterThan(said.findIndex((line) => /enroll exited 4/.test(line)));
     expect(said.at(-1)).toBe('[bench] vm-bench: listed in org-1');
     // a key never posted: the owner has nothing to compare, so nothing waits for their y
-    const silent = fakeRunner((command) => (/ keys /.test(command) ? ok(JSON.stringify({ key: null })) : machineScript({})(command, { argv: [] })));
+    const silent = fakeRunner((command) => (/ keys /.test(command) ? ok(keysOut(null, 'none')) : machineScript({})(command, { argv: [] })));
     await expect(new BenchRun(VM(codeFile()), benchDeps(silent, 0).deps).enroll()).rejects.toThrow(/posted no key to compare within 60 s/);
     expect(silent.calls.some((c) => / endpoint status /.test(c.argv.at(-1)!) && c !== silent.calls[0])).toBe(false);
+  });
+
+  it('reads the key from `mawsd keys --json`’s flat answer, as the endpoint renders it, and nothing from the shape attempt 1 read', () => {
+    expect(keyIdOf(keysOut('KEYID-flat'))).toBe('KEYID-flat');
+    expect(keyIdOf(keysOut('KEYID-listed', 'org-listed'))).toBe('KEYID-listed');
+    expect(keyIdOf(keysOut(null, 'none'))).toBeNull(); // not enrolled: no key shown
+    expect(keyIdOf(JSON.stringify({ key: { keyId: 'KEYID-nested' } }))).toBeNull(); // M7's reader's shape, never answered
+    expect(keyIdOf('not json')).toBeNull();
   });
 
   it('removes the profile only once its hosts are ended: told through their own sockets, then by pid and start time where they name the profile, then checked', async () => {

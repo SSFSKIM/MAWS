@@ -704,15 +704,15 @@ export class BenchRun {
     }
   }
 
-  /** The machine's key id from `mawsd keys`, null before it is posted (or unreadable). */
+  /**
+   * The machine's key id from `mawsd keys --json`, null before it is posted (or unreadable). Its answer is flat
+   * (`keysAnswer`, src/endpoint/answers.ts: `{enrollment, name, org, ref, delegated, keyId, heldKeys}`, `keyId` there once
+   * the machine is enrolled), so the key is its top-level `keyId` (M10: attempt 1 read `{key: {keyId}}`, never there).
+   */
   async #keyId(): Promise<string | null> {
     const m = this.#m;
     const keys = await this.#remote(`${mawsd(m)} keys ${scoped(m)} --json`);
-    try {
-      return (JSON.parse(keys.stdout) as { key?: { keyId?: string } | null }).key?.keyId ?? null;
-    } catch {
-      return null;
-    }
+    return keyIdOf(keys.stdout);
   }
 
   /**
@@ -870,6 +870,16 @@ export class BenchRun {
 }
 
 const mib = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
+
+/** `keyId` from `mawsd keys --json`'s flat answer (`keysAnswer`); null when it is absent or the answer unreadable. */
+export function keyIdOf(answer: string): string | null {
+  try {
+    const { keyId } = JSON.parse(answer) as { keyId?: unknown };
+    return typeof keyId === 'string' && keyId !== '' ? keyId : null;
+  } catch {
+    return null;
+  }
+}
 
 /** A tarball of M7's head from this Mac: the mini's head bundle (its Electron the pin's), or the VM's source (none). */
 export interface HeadBundle {
