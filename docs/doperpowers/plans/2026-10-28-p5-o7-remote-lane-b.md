@@ -3084,6 +3084,33 @@ P5 findings of M5's re-plan, continued from F15:
   - The scene's first observer was a replay that could not verify a source, and a correct product refusal looked like a test failure; asking which layer is right before fixing the test saved a wrong fix.
   - A flaky line in an unrelated-looking spec was a product race older than this work; treating it as red until explained found it.
 
+**M10's sitting (2026-11-05).** M8's items and M9's spawn held live on both machines, with one failure, acceptance 5's row. Its cause is fixed by A below, and so is the "Thinking · 0s" the owner found (C). O7 closes on the owner's one-minute live re-check of A and C after M10's PR lands, recorded as an addendum here.
+- **Setup.**
+  - About 05:24Z to 06:00Z, from the MacBook against the mini and the fresh VM dc-acceptance-e071 (GCE us-west1-b). The VM was certified at boot under devcloud's `dc-` delegation, so it took no enrollment code.
+  - All three machines ran master 5f2bc8964 (wire 3.27). The desk track swapped the MacBook and mini-ops swapped the mini, both on the owner's "Swap now".
+  - The mini kept its MAWS project registered and trusted. On the VM the project was unregistered, and a detached worktree at `~/m10/MAWS` was left untrusted for the trust card; the original checkout was trusted at boot.
+- **Passed:**
+  - **Route naming.** The mini: "The machine's own · ClaudeUsage relay · http://127.0.0.1:8641". The VM: "The machine's own · mac-mini.tail112c3f.ts.net:8641", since its managed settings route through the mini's gateway.
+  - **A MAWS ask answered from the MacBook:** opened 05:28:57.825Z, answered 05:29:05.214Z.
+  - **Working cleared after a tool-using turn** (`turn.ended` 05:29:09.675Z).
+  - **`/btw` answered.**
+  - **The Subagents, Workflows and Tasks panels loaded,** each "none" rather than an error.
+  - **A PDF read directly as a document.**
+  - **An untracked file shown as added in Review.**
+  - **The VM's remote folder sheet registered the project** (78c24e64).
+  - **The to-human message tool worked in a VM session** (#466's managed scope).
+  - **The MCP panel's Sign in on Notion (the VM) completed.** A Notion search returned the owner's page, and Settings › Connectors showed Notion connected.
+- **Failed: acceptance 5's row.** Both spawned sessions (cb9e796a on the mini, cf463a17 on the VM) were absent from the MAWS row even with Show more, which listed rows 1 and 2 weeks old. Both were in Resume…. The cause is a remote session ranked by a stale activity time; fix A in M10's Decisions.
+- **Not reached live:**
+  - the trust card: the owner picked the already-trusted original checkout, so it is covered in e2e only;
+  - Touch ID on Connectors' Show: not reported;
+  - the concurrent second client: e2e only;
+  - the live bench: carried, since its fixes were not landed at the sitting.
+- **Observations:**
+  - The VM's spawn took about 5 s to start, because its engine host woke from parked (05:40:54Z).
+  - The owner found "Thinking · 0s" not ticking (fix C).
+  - The owner's rulings at the sitting: no Touch ID for a spawn on the member's own machines (fix B); message reach as board #477; connectors switchable as board #476.
+
 **M9 (2026-11-05).** Every machine spawns on its own terms, in tests, `e2e:remote` and `cross-build` on CI. The live proof is M10's sitting on real machines.
 - **The machine route.** A machine's sessions default to `machine`: nothing injected or blanked, the machine's own settings decide the inference, and what it reaches is named (ClaudeUsage, the Anthropic login, or a host), never a mismatch. Proved in `launch.test.ts` and `session.test.ts` over the three fixtures, and in `e2e:remote`'s M9 case, whose machine reports its login.
 - **Older peers.** The route travels as additive properties beside the legacy fields (`WIRE_MINOR` 27; RL2 unchanged at 1.9; `cross-build` finds no breaking change against 3.26 or 3.20). An older engine host gets the legacy route only where it is provably the same inference, and otherwise refuses `route-unsupported`; the resolution fails closed on any settings source it does not model. Proved against the real 3.20 host by `machineRouteOnOlderHost` (with `--peer 95050efd1`).
