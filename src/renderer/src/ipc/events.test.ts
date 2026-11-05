@@ -6,6 +6,7 @@ import type { MachineState } from '@shared/ipc/schema/machines';
 import { addressOf } from '@shared/machine/address';
 import type { OrgKey } from '@shared/machine/org-key';
 import { digest, humanTurn, item, project, record, remoteRow, status } from '../../../../test/support/builders';
+import { ev } from '../../../../test/support/events';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { hostStatus } from '../test-support/host-status';
@@ -64,7 +65,7 @@ describe('shell event subscription', () => {
     const subscriptions = fake.calls.slice(0, firstInvoke);
     expect(subscriptions.sort()).toEqual(
       [
-        'attention.changed', 'attention.notified', 'engine.hostState', 'fs.scanProgress', 'host.status', 'machines.changed', 'org.rows.changed', 'remote.attention', 'remote.session', 'session.changed', 'session.digest', 'session.projects.changed', 'session.removed', 'session.status',
+        'attention.changed', 'attention.notified', 'engine.hostState', 'fs.scanProgress', 'host.status', 'machines.changed', 'org.rows.changed', 'remote.attention', 'remote.session', 'session.changed', 'session.digest', 'session.eventBatch', 'session.projects.changed', 'session.removed', 'session.status',
       ].map((n) => `on ${n}`),
     );
     expect(fake.calls.slice(firstInvoke).filter((c) => c.startsWith('on'))).toEqual([]);
@@ -576,6 +577,17 @@ describe('the shell per machine', () => {
     fake.event('remote.session', remoteSessionState('b1' as AppSessionId, { stream: 'idle' }), OTHER_MACHINE);
     expect(stores.sessions.getState().engine.has(onB('b1'))).toBe(false);
     resetRemoteLaneBStore();
+  });
+
+  // P5 O7 M10 (A): a lane B session on B has no digest, so the turns its stream delivers are kept for its activity; this
+  // machine's sessions have digests, which say theirs
+  it('keeps the turns another machine’s session streams here, and none of this machine’s', async () => {
+    const { fake, stores } = setup(0, { machines: [LOCAL_ENTRY, other('up', 1)] });
+    await answerSnapshots(fake);
+    await answerOther(fake, [record('b1')], 5);
+    fake.event('session.eventBatch', { appSessionId: 'b1', events: [ev('turn.ended', { at: '2026-11-05T10:04:00.000Z' })] }, OTHER_MACHINE);
+    fake.event('session.eventBatch', { appSessionId: 'a', events: [ev('turn.ended', { at: '2026-11-05T10:05:00.000Z' })] });
+    expect([...stores.sessions.getState().turnsSeen]).toEqual([[onB('b1'), Date.parse('2026-11-05T10:04:00.000Z')]]);
   });
 
   // M4's review: events heard before the first roster belong to no generation the page has reconciled.

@@ -14,12 +14,13 @@ import { create } from 'zustand';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EngineSessionStatus } from '@shared/engine/status';
+import type { SessionEvent } from '@shared/graph/events';
 import type { EventPayload, ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import type { OrgMember, OrgRows, RemoteRow } from '@shared/ipc/schema/org';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import type { NeedsYouRow } from '../attention/derive';
-import { orderProjects, sortSessions, type SidebarSort } from '../overview/derive';
+import { orderProjects, seenAt, sortSessions, type SidebarSort } from '../overview/derive';
 
 export interface SessionsState {
   loaded: boolean;
@@ -64,6 +65,13 @@ export interface SessionsState {
   members: ReadonlyMap<string, OrgMember>;
   member: string | null;
   applyRows(rows: OrgRows): void;
+  // P5 O7 M10 (A; docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M10's *A remote session ranks by a stale
+  // activity time*): another machine's lane B session has no digest (no lane B module emits one), so the latest turn
+  // start or end its stream delivered to this window is kept per session, as the digest's fold reads them (a child
+  // agent's turn and an echo receipt are none), for the sidebar's activity (`overview/derive.ts`, `seenActivity`). Fed
+  // with other machines' batches only (`connectShell`); a removed record's goes with it.
+  turnsSeen: ReadonlyMap<AppSessionId, number>;
+  applyTurnsSeen(batch: EventPayload<'session.eventBatch'>): void;
   addUnstarted(appSessionId: AppSessionId, entry: UnstartedSession): void;
   dropUnstarted(appSessionId: AppSessionId): void;
 }
@@ -71,6 +79,11 @@ export interface SessionsState {
 // P5 O8 M2: a listed session is a `RemoteRow` with its address, never a `SessionRecord`: a listing has no directory, model,
 // mode, holder or lineage, and a record built from one would plant made-up values in their readers.
 export type ListedSession = RemoteRow & { appId: AppSessionId };
+
+// A turn's start or end as the digest's fold reads it (src/services/sessions/digest.ts): the session's own, never a child
+// agent's, and an echo receipt is no turn.
+const isTurn = (event: SessionEvent): boolean =>
+  event.agentId === null && event.parentToolUseId === null && (event.kind === 'turn.started' || (event.kind === 'turn.ended' && !event.isEchoReceipt));
 
 export interface UnstartedSession {
   projectId: ProjectId | null;
@@ -119,16 +132,17 @@ export function createSessionsStore() {
         p.records.delete(id);
         p.statuses.delete(id);
       }
-      const { digests, engine } = get();
+      const { digests, engine, turnsSeen } = get();
+      const seen = removed.some((id) => turnsSeen.has(id)) ? { turnsSeen: new Map([...turnsSeen].filter(([id]) => !removed.includes(id))) } : {};
       const gone = removed.filter((id) => digests.has(id) || engine.has(id));
-      if (gone.length === 0) return {};
+      if (gone.length === 0) return seen;
       const nextDigests = new Map(digests);
       const nextEngine = new Map(engine);
       for (const id of gone) {
         nextDigests.delete(id);
         nextEngine.delete(id);
       }
-      return { digests: nextDigests, engine: nextEngine, digestsVersion: get().digestsVersion + 1 };
+      return { digests: nextDigests, engine: nextEngine, digestsVersion: get().digestsVersion + 1, ...seen };
     };
     const writeRecords = (p: Partition, records: Map<AppSessionId, SessionRecord>, revision: number, removed: AppSessionId[]) => {
       set({
@@ -182,6 +196,12 @@ export function createSessionsStore() {
       listedMachines: new Set(),
       members: new Map(),
       member: null,
+      turnsSeen: new Map(),
+      applyTurnsSeen({ appSessionId, events }) {
+        const held = get().turnsSeen.get(appSessionId) ?? Number.NEGATIVE_INFINITY;
+        const latest = Math.max(held, ...events.filter(isTurn).map((event) => Date.parse(event.at)).filter(Number.isFinite));
+        if (latest > held) set({ turnsSeen: new Map(get().turnsSeen).set(appSessionId, latest) });
+      },
       applyRows({ machines, rows, members, member }) {
         const listed = new Map<AppSessionId, ListedSession>();
         for (const row of rows) {
@@ -318,6 +338,11 @@ const hiddenProjectsMemo = memo<number, ProjectRecord[]>();
 export function selectHiddenProjects(state: SessionsState): ProjectRecord[] {
   return hiddenProjectsMemo(state.projects, state.projectsVersion, () => [...state.projects.values()].filter((p) => p.hidden).sort((a, b) => a.name.localeCompare(b.name)), (a, b) => a === b);
 }
+
+// P5 O7 M10 (A): one session's activity this window saw beyond its record (`seenActivity`'s entry: its listing's issue, the
+// turns its stream delivered here), for its row's age; undefined with neither.
+export const selectSeenAt = (state: Pick<SessionsState, 'listed' | 'turnsSeen'>, appSessionId: AppSessionId): number | undefined =>
+  seenAt(state.listed.get(appSessionId), state.turnsSeen.get(appSessionId));
 
 const sessionsOfMemo = new Map<string, ReturnType<typeof memo<number, SessionRecord[]>>>();
 export function selectSessionsOf(state: SessionsState, projectId: ProjectId | null): SessionRecord[] {

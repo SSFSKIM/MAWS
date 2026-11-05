@@ -99,6 +99,7 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
   const digests = useSessions((s) => s.digests);
   const projects = useSessions((s) => s.projects);
   const listed = useSessions((s) => s.listed); // P5 O7 M8: other machines' listed sessions, reachable here past the cap
+  const turnsSeen = useSessions((s) => s.turnsSeen); // P5 O7 M10
   const people = usePeople((s) => s.on);
   const project = context.projectId === null ? null : (projects.get(context.projectId) ?? null);
   // the scope's name: the row's (an org project's, a machine's own, T3), else the project's
@@ -116,7 +117,7 @@ export function ResumeChooser({ context, close }: ResumeChooserProps) {
   const ids = useId();
 
   const local = ipc.localMachine;
-  const rows = useMemo(() => chooserRows({ records, digests, projects, context, toggles, branch, query, local, listed, people }), [records, digests, projects, context, toggles, branch, query, local, listed, people]);
+  const rows = useMemo(() => chooserRows({ records, digests, projects, context, toggles, branch, query, local, listed, people, turnsSeen }), [records, digests, projects, context, toggles, branch, query, local, listed, people, turnsSeen]);
   const shown = rows.slice(0, limit);
   const groups = chooserGroups(shown, now);
   // The selection stays on its session while the stores change; one that left the list falls back to the first row. The
