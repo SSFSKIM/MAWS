@@ -62,6 +62,8 @@ import {
   type ModelRow,
 } from './model';
 import { useEngineRead } from './read';
+import { GATEWAY } from '../settings-tab/copy'; // P5 O7 M9: the mirror's words for a daemon predating the machine route
+import { useMachineRouteHonoured } from '../settings-tab/default-route';
 
 type Name = 'model' | 'effort' | 'fast';
 type View = 'effort' | 'model';
@@ -80,8 +82,9 @@ interface Binding {
   setEffort(effort: Effort | null): Promise<ControlAnswer>;
   fast: { view: FastView; pending: boolean; set(on: boolean): Promise<ControlAnswer> } | null;
   unstarted: boolean;
-  // P5 O7 M9: the machine's own route beside Gateway and Direct, written as the intent's `route`
-  route: { value: AnyRoute; choices: AnyRoute[]; set(patch: { route: AnyRoute; model?: string | null; effort?: Effort | null }): Promise<ControlAnswer> } | null;
+  // P5 O7 M9: the machine's own route beside Gateway and Direct, written as the intent's `route`; `machineRefusal`: why the
+  // machine's own can't be chosen (its daemon predates it), else null
+  route: { value: AnyRoute; choices: AnyRoute[]; machineRefusal: string | null; set(patch: { route: AnyRoute; model?: string | null; effort?: Effort | null }): Promise<ControlAnswer> } | null;
   observed?: { model: string; at: string } | null; // P2-A: a dormant session's model as the engine last reported it
   note?: string; // P5 O9 M5: the model view's footnote, in place of "For this session only"
 }
@@ -131,6 +134,7 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
   const chosen = useSetup((s) => s.intents.get(appSessionId)?.route); // P5 O7 M9: read before the legacy field
   const settings = useSettings((s) => s.state?.settings) ?? SETTINGS_DEFAULTS_V21;
   const defaults = useCommand('settings.userEngineDefaults', undefined, { enabled: setup !== null, staleTime: 30_000 }).data ?? null;
+  const machineHonoured = useMachineRouteHonoured(); // P5 O7 M9
   if (!setup) return null;
   const bound = intentBindings(setup, { starting }, defaults).model;
   const { model, effort } = bound.value;
@@ -161,8 +165,11 @@ function useIntentBinding(appSessionId: AppSessionId): Binding | null {
         : {
             value: readRoute({ route: chosen, gateway }),
             choices: unstartedRoute({ gateway, route: chosen }, settings).choices,
+            machineRefusal: machineHonoured === false ? GATEWAY.routeDropped : null,
             async set(patch) {
-              const result = await patchIntent(appSessionId, patch);
+              // Gateway and Direct carry the legacy field too: a daemon that predates the machine route drops `route` and
+              // applies `gateway`; a current one reads `route` first (the services' route patch)
+              const result = await patchIntent(appSessionId, patch.route === 'machine' ? patch : { ...patch, gateway: patch.route });
               return result.ok ? ok : { ok: false, error: result.error, caption: null };
             },
           },
@@ -581,7 +588,8 @@ function SelectorBody({ name, args, binding, state, error, appSessionId }: { nam
               type="button"
               role="radio"
               aria-checked={choice === route.value}
-              disabled={locked}
+              disabled={locked || (choice === 'machine' && route.machineRefusal !== null)}
+              title={choice === 'machine' ? (route.machineRefusal ?? undefined) : undefined}
               onClick={() => choice !== route.value && setRoute(choice)}
               className="flex-1 rounded-sm border border-border px-2 py-0.5 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint aria-checked:bg-bg-active"
             >

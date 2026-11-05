@@ -5,6 +5,7 @@
 // predates the machine route and acts on the legacy field alone, which the legacy control still writes. Choosing a route
 // writes `machine-route.json` and the legacy field together on the daemon (an older build there keeps reading a valid
 // file); this page never writes the legacy field for it.
+import { useEffect, useState } from 'react';
 import type { Route } from '@shared/engine/route';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
@@ -18,6 +19,20 @@ export async function readDefaultRoute(client: MawsBridge = ipc): Promise<Route 
     return null;
   }
   return result.value.defaultRoute ?? null;
+}
+
+/** Whether this machine's daemon honours the machine route (its `machineSettings.get` answers a `defaultRoute`); null
+ *  until the read answers. False is the legacy control's signal too: an older daemon, or a read that failed. */
+export function useMachineRouteHonoured(client: MawsBridge = ipc): boolean | null {
+  const [honoured, setHonoured] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    void readDefaultRoute(client).then((route) => live && setHonoured(route !== null));
+    return () => {
+      live = false;
+    };
+  }, [client]);
+  return honoured;
 }
 
 /** Chooses the machine's default route; a daemon that answers without one dropped the choice. */

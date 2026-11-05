@@ -23,6 +23,8 @@ import { ID as INTENT_ID, intent } from '../test-support/setup-intents';
 import { effortLevelsOf, resetModelRequests } from './model';
 import { modelSelector } from './ModelSelector';
 import { emptyObservedFacts } from '@shared/engine/observed-facts';
+import type { SetupIntent } from '@shared/sessions/intent';
+import { GATEWAY } from '../settings-tab/copy';
 import { REL } from '../test-support/relative-time';
 
 const SELECTOR_BACK = 'Back to effort';
@@ -247,6 +249,15 @@ describe('a session with a record and no ready process', () => {
   });
 });
 
+// main's answers for the route segment: the machine's default route (`null`: its daemon predates the machine route, and
+// answers none), and the intent as a patch leaves it
+const routeAnswers = (held: SetupIntent, defaultRoute: 'machine' | null) => async (name: string, input: unknown) => {
+  if (name === 'machineSettings.get') return { ok: true, value: { settings: {}, version: 1, ...(defaultRoute !== null && { defaultRoute }) } };
+  if (name !== 'session.intent.patch') return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+  const { patch } = input as { patch: { route: 'machine' | 'gateway' | 'direct' } };
+  return { ok: true, value: { ...held, route: patch.route, gateway: patch.route === 'machine' ? held.gateway : patch.route } };
+};
+
 describe('an unstarted session writes its intent, with D-19’s route', () => {
   let offHook: () => void;
   afterEach(() => {
@@ -295,12 +306,7 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
     stub();
     const held = intent({ appSessionId: INTENT, gateway: 'direct', route: 'machine' });
     useSetup.setState({ intents: new Map([[INTENT, held]]) });
-    const answer = async (name: string, input: unknown) => {
-      if (name !== 'session.intent.patch') return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
-      const { patch } = input as { patch: { route: 'machine' | 'gateway' | 'direct' } };
-      return { ok: true, value: { ...held, route: patch.route, gateway: patch.route === 'machine' ? held.gateway : patch.route } };
-    };
-    const invoke = vi.spyOn(ipc, 'invoke').mockImplementation(answer as never);
+    const invoke = vi.spyOn(ipc, 'invoke').mockImplementation(routeAnswers(held, 'machine') as never);
     mount('model', '', INTENT);
     const segment = screen.getByRole('radiogroup', { name: 'Route' });
     expect(within(segment).getAllByRole('radio').map((r) => [r.textContent, r.getAttribute('aria-checked')])).toEqual([
@@ -308,11 +314,27 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
       ['ClaudeUsage relay', 'false'],
       ['Direct', 'false'],
     ]);
+    // the legacy field beside `route` for the two legacy choices: a daemon that predates the machine route still applies it
     fireEvent.click(within(segment).getByRole('radio', { name: 'ClaudeUsage relay' }));
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith('session.intent.patch', { appSessionId: INTENT, patch: { route: 'gateway' } }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('session.intent.patch', { appSessionId: INTENT, patch: { route: 'gateway', gateway: 'gateway' } }));
     await waitFor(() => expect(within(segment).getByRole('radio', { name: 'ClaudeUsage relay' }).getAttribute('aria-checked')).toBe('true'));
     fireEvent.click(within(segment).getByRole('radio', { name: 'Machine’s own' }));
     await waitFor(() => expect(invoke).toHaveBeenLastCalledWith('session.intent.patch', { appSessionId: INTENT, patch: { route: 'machine' } }));
+    invoke.mockRestore();
+  });
+
+  it('on a daemon that predates the machine route: Machine’s own greyed with the mirror’s words, and Gateway and Direct still applied through the legacy field', async () => {
+    stub();
+    const held = intent({ appSessionId: INTENT, gateway: 'gateway' });
+    useSetup.setState({ intents: new Map([[INTENT, held]]) });
+    const invoke = vi.spyOn(ipc, 'invoke').mockImplementation(routeAnswers(held, null) as never);
+    mount('model', '', INTENT);
+    const segment = screen.getByRole('radiogroup', { name: 'Route' });
+    const machine = within(segment).getByRole('radio', { name: 'Machine’s own' }) as HTMLButtonElement;
+    await waitFor(() => expect(machine.disabled).toBe(true));
+    expect(machine.title).toBe(GATEWAY.routeDropped);
+    fireEvent.click(within(segment).getByRole('radio', { name: 'Direct' }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('session.intent.patch', { appSessionId: INTENT, patch: { route: 'direct', gateway: 'direct' } }));
     invoke.mockRestore();
   });
 
