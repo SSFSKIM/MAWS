@@ -32,6 +32,7 @@ Then `sminos share <session> <member> list` (run by the owner at a terminal): th
 - [x] (2026-11-05 20:40Z) Document written from the desk track's draft (`notes/477-message-reach-design.md`), the architect's amendments (sminos chat 1128, 1131) and two read-only mappings of today's code.
 - [x] (2026-11-05 ~21:00Z) Two adversarial reviews ran. This revision folds their P1 and P2 findings, with the resolutions the architect approved (chat 1131–1132); each course change is in the Decision Log.
 - [x] (2026-11-05) A third adversarial review found nine holes; this revision folds each with the resolution the architect decided: one reader check for every hub read surface, an archive of the admitted projection, the session's machine bound at first exposure, `unlisted` as a validated notice, redacted provenance references, the reach gate at the push primitive, an unreadable record failing closed, a bounded retry after `state-unavailable`, and a complete `snapshots?` rebuild.
+- [x] (2026-11-05) The round-3 review found four more holes; this revision folds each with the architect's resolution: the archive's own-writer frontier is the hub's `have`, not socket handoff; an old sminos or endpoint never receives an audience stream; a split `say` carries only its own recipients' leading tags; a valid `unlisted` notice is admitted by its own rule.
 - [ ] The execution section's buildability review.
 - [ ] M1: the hub's policy registry, upload backstop and audience filter (MAWS).
 - [ ] M2: the endpoint: the `list` grade, `reach?`, audiences and the policy cache (MAWS).
@@ -62,7 +63,7 @@ Read on MAWS master `b7e7d9594`/`a168273fc`. sminos line numbers are at doperpow
    - The audit record goes to every browser of the project: a refusal with its writer, seq and message (`refusal`, `:1225-1229`; `refuseBrowser`, `:1231-1234`), a daemon's `rejected` (`:538-554`), and the replay on a browser's resume (`:1148`).
    - Any enrolled machine reads any writer's stored events over HTTP: `GET /machine/projects/<project>/log?writer=…&after=…` (`apps/desk-hub/src/worker.ts:319-324` → `historyPage`, `project.ts:564` → `LogStore.writerPage`, `log-store.ts:201-210`), beside the history inventory (`historyWriters`, `project.ts:559`) and the attestations route (`project.ts:569`).
    - The session plane names sessions to every browser of the project: each session's presence (`plane.presence()`, `project.ts:158`, `:925`), the pending set (`pendingFrame`, `:976-980`), delivery outcomes (`plane.deliveries()`, `:162`) and op outcomes (`plane.ops`, `:161`).
-   - sminos's archive copies every writer file of a project's `log/` to the project's shared git remote (`copy_log`, `sminos_archive.py:109-140`), own events the hub hasn't taken yet included.
+   - sminos's archive copies every writer file of a project's `log/` to the project's shared git remote (`copy_log`, `sminos_archive.py:109-140`), own events the hub hasn't admitted yet included.
    - Only the hub listing (RL6) honours `private`.
 4. **A hidden event would stall the log.**
    - sminos imports each writer strictly by seq (`sminos_hublog.py:249-270`): an event past a hole is held back until the hole is filled.
@@ -121,6 +122,7 @@ A member's agents may message a session when the member's rank on it is at least
 - **Delivery needs the recipient inside.** An event is sent only when every recipient's resolved owners are inside its audience, and the writing session's owners are too. The sender's CLI refuses before anything is written: `<alias> can't be reached from this session: this session is unlisted; share it as Can message with <person> first` when the writing session is private and the recipient's owners fall outside its audience. This generalizes the architect's ruling (b): messaging out never grants an implicit reach back.
 - **What the sender sees.** A sender's projection of the logs holds only the sessions its person may see (D6), so a tag naming a private session it isn't shared on fails as `no member named …`, the same words as for a session that doesn't exist. A broadcast (`@all`, `--org`, `--project`) wakes only what it sees.
 - **Splitting.** A `say` to several sessions is split into one event per resulting audience, each with the recipients that produce it. A cross-project copy (`record_copy`, `sminos.py:5025`) carries the same audience as the original it copies, and is split the same way: one copy per distinct audience among the delivering events.
+  - **Each split carries only its own recipients' tags.** `cmd_say` stores the whole `a.text` (`sminos.py:5218`), and its opening run of `@name#short` tags (`leading_tags`, `:4655`) is the addressing itself: unchanged, the public event of `@private#12345678 @public hello` would name the private alias and its short. Each split's `text` is rebuilt as the raw tags of its own recipients, in their original order, then the body after the run unchanged; each tag resolves to exactly one member (`resolve_tags`, `:4881-4910`), and `@all` stands alone and names no session. A copy's text is its own split's. This rewrites the CLI's addressing syntax only, never prose: an `@` after the leading run is text and stays as written.
 - **Who computes it.** sminos computes the intersection from the audiences its endpoint sends (D7) so it can choose the writer stream before the event is signed. The endpoint computes it again at signing and refuses a mismatch.
 
 ### D5. The hub refuses at upload; it can only refuse
@@ -139,9 +141,11 @@ A member's agents may message a session when the member's rank on it is at least
 - it names a session the registry doesn't know;
 - its audience isn't a subset of each addressed session's latest audience;
 - it carries, unredacted, a provenance reference whose session's latest audience doesn't contain the event's audience;
-- its sender's attested owners (`attest.owners`, or the machine's owners for an event with no attest) aren't inside its audience;
+- its sender's attested owners (`attest.owners`, or the machine's owners for an event with no attest) aren't inside its audience (a transition notice aside, below);
 - it is a snapshot or a transition notice for a session bound to another machine;
 - or it is an `unlisted` notice (D6) that breaks the notice's rule: it must sit under its session's own writer namespace on the bound machine, with a `policyRev` newer than the registry row's and an audience that is a subset of the row's audience (the previous one; the whole org for a listed row). The notice doesn't move the row; the snapshot after it does. That its audience also excludes the new audience is checked at signing (D7), where the new one is known.
+
+**A transition notice has its own admission rule.** A notice's audience is the members the change withdraws, so its sender's owners are outside it by construction, and the sender-inside-audience check would refuse every valid one. A content-free `unlisted` notice that passes the last item (bound machine, newer `policyRev`, audience within the previous one) is admitted by that rule in place of the sender check; the signer's notice rule (D7) likewise stands in place of D4's at signing. Every other check still holds for it: the signature, the writer's digest, the binding. No other kind is exempt.
 
 A hidden session and a nonexistent one get the same reason, so a refusal never confirms more than the sender already knew. A snapshot in the same upload moves the registry before the events after it are checked. A withheld own snapshot counts as unpublished, so `publish_owners` (`sminos.py:2984`) writes the session's snapshot again.
 
@@ -169,7 +173,7 @@ A hidden session and a nonexistent one get the same reason, so a refusal never c
 - It is still the machine's own writer (the hub takes from a machine only `<machine>/…`), and every event in one stream has one audience.
 - A device's events follow the same rule under `hub/<member>~<digest>` (D8).
 - **What the hub filters:** whole writers, never single events. A reader outside a stream's audience gets none of its events, no entry for it in `hello`'s `have`, and no stub.
-- **One reader check for every read surface.** Every route or frame of the hub that returns stored events, writer names, vectors, audit rows or session-plane rows passes the authenticated reader into the Project and through one function, `mayRead(reader, writer)` (Interfaces §A), before it returns anything. A reader is a machine with its owners or a browser's member. `mayRead` is true for a plain writer and, for a stream, exactly when the reader's members meet the stream's audience. A session-plane row names a session rather than a writer, and is read against that session's current stream in the registry. The surfaces today are listed in Today 3 and M1's Work. No surface filters on its own, so a new route can't skip the check and still return what it stores.
+- **One reader check for every read surface.** Every route or frame of the hub that returns stored events, writer names, vectors, audit rows or session-plane rows passes the authenticated reader into the Project and through one function, `mayRead(reader, writer)` (Interfaces §A), before it returns anything. A reader is a machine with its owners and whether its RL1 hello advertised `audience` (D9), or a browser's member. `mayRead` is true for a plain writer and, for a stream, exactly when the reader's members meet the stream's audience and, for a machine, it advertised `audience`. A session-plane row names a session rather than a writer, and is read against that session's current stream in the registry. The surfaces today are listed in Today 3 and M1's Work. No surface filters on its own, so a new route can't skip the check and still return what it stores.
 - **Why it can't stall:** no writer a reader can see ever has a hole. A withheld position (D5) is a tombstone in its own writer's stream, seen only by that stream's readers.
 
 **Rejected alternatives:**
@@ -190,7 +194,8 @@ So a session's stream count is bounded by its policy changes plus the distinct a
 - **A new share or a raised grade** writes a fresh snapshot (`joined` and `state`) into the new stream, so the new audience learns of the session.
 - **Going listed** again writes the session's next snapshot, and its later events, under its plain writer, `<machine>/<session>`, at the next `policyRev`.
 - **History already fanned out is not taken back.** The app says so where `private` is set (M5).
-- **The git archive copies only the hub-admitted public projection.** Previously public history stays in it. It holds a plain writer's positions the hub admitted: for another machine's writer, what was imported from the hub; for this machine's own, positions up to what the hub has taken (`HubLog.taken`, `sminos_hublog.py:560`), each withheld one as its tombstone. A local event whose admission isn't confirmed is never copied: a `say` written under the plain writer from a stale view of a now-private recipient sits in the writer file until the hub refuses it, and today's `copy_log` would copy it in that window. Audience streams never enter the archive (M3).
+- **The git archive copies only the hub-admitted public projection.** Previously public history stays in it. It holds a plain writer's positions the hub admitted: for another machine's writer, what was imported from the hub; for this machine's own, positions up to the hub's vector in the `have` that confirmed the run, each withheld one as its tombstone. A local event whose admission isn't confirmed is never copied: a `say` written under the plain writer from a stale view of a now-private recipient sits in the writer file until the hub refuses it, and today's `copy_log` would copy it in that window. Audience streams never enter the archive (M3).
+  - **The frontier is the hub's `have`, not `taken`.** `HubLog.taken` (`sminos_hublog.py:560`) moves when an upload is answered, and on RL10 that is when the endpoint's socket takes the frame (`Link.uploaded`, `sminos_uplink.py:2096`; `SocketLane`, `:1155`), before the hub has admitted or refused anything. The hub's `have` is its own vector, tombstones included. Every archive run already waits for one: the uplink says `hello` every `ARCHIVE_EVERY` (`sminos_archive.py:10-14`, `:44`) and runs on the `have` that answers it (`HubLog.on_have`, `sminos_hublog.py:708-739`). That `have` comes on the same stream as any refusal before it, so a position it covers is either admitted or already withheld. `on_have` saves the vector's own-writer entries beside `archive_at`, as `archive_have`, and `copy_log` copies this machine's writers up to it.
 - **The audit record.** Beyond `mayRead`, a refusal of an audience stream's position also goes to the member whose own send it refuses, live and on resume, with its message dropped. A `not-reachable` refusal never carries a message.
 
 ### D7. Who knows which audience
@@ -224,7 +229,11 @@ sminos has one authorization and stream-selection boundary, used by every path t
 - **The hub advertises it.** The hub's RL1 welcome gains an optional `capabilities: ['audience']`.
 - **An endpoint without it upstream** keeps a private session's events owed instead of uploading them. The session goes quiet to its own other machines until the hub is updated, which fails closed.
 - **The endpoint lands before sminos sends visibility.** Its RL10 hello gains `capabilities: ['access', 'reach']`. sminos sends `access`, `shares`, `policyRev` and the `list` grade, makes the `reach?` ask, and writes audience streams only when its endpoint advertises them. That matters because an old endpoint rejects a whole member frame on an unknown grade (Today 2).
-- **An old sminos on a reader's machine** gets only what the hub serves it. The filter sits at the hub, so it needs no change.
+- **An old sminos never receives an audience stream.** It copies every log file into the shared git archive (`copy_log`, `sminos_archive.py:109-140`), so a stream it imported would reach the org-readable remote whenever its machine is the project's archiver. Two hellos close this:
+  - sminos's RL10 hello (`hello_frame`, `sminos_rl10.py:290-296`, today `capabilities: []`) advertises `audience` only in a release whose archive copies the admitted public projection (D6, M3). The endpoint passes down no frame naming a stream writer (`events`, `have` entries, `spent`, `refused`) to an sminos without it;
+  - the endpoint's RL1 hello (`EndpointHello`, `apps/org-protocol/src/relay.ts:99`) advertises `audience` once it applies that rule. `mayRead` (D6) serves a stream to a machine only on an RL1 connection that advertised it, so an old endpoint, and a machine on a direct DX2 stream, gets no stream either.
+
+  Either way the old side doesn't see private sessions, and has no hole to stall on. The cost: an owner's own machine running an old sminos or endpoint doesn't show their private sessions until it is updated.
 - **An old endpoint upstream** stamps no audience; the hub refuses its events toward a private session (D5).
 - **An old browser** sends no audience; the hub refuses its humans toward a private session (D8).
 - **A session can be private only on a machine running an O18 sminos**, since the setters (D10) and the `access` field live there. So the recipient's side of `reach?` is always new where it matters. An old sminos elsewhere is only ever a sender or a reader, and the points above cover both.
@@ -257,11 +266,11 @@ Written into `docs/doperpowers/specs/2026-10-26-remote-layer-design.md` in M1. E
 | §5.8 (:446) | "There is no recipient policy, narrowing or off switch" | reach is visibility (D1–D3); the receiving endpoint decides, and the hub refuses at upload what it can see is out of reach (D5) |
 | §5.9 (:475) | the log plane is "org-readable by design" | org-readable except audience streams (D6) |
 | §6.2 (:524-550) | shares `view`/`converse`/`approve`; log filtering ruled out; a private `say` stays org-readable; the hub learns nothing of a private session but its traffic | the `list` share ("Can message"); audience streams filtered per writer; a private session's traffic reaches only its audience; the hub holds each session's audience and `policyRev` in its policy registry (D5) |
-| RL1 welcome (`apps/org-protocol/src/relay.ts:102`) | `{t, generation, heartbeat_ms}` | optional `capabilities` (D9) |
+| RL1 welcome and endpoint hello (`apps/org-protocol/src/relay.ts:99-102`) | `{t, generation, heartbeat_ms}`; the hello carries none | optional `capabilities` on both; a stream is served only to an endpoint whose hello advertises `audience` (D9) |
 | RL1 log plane | a refused position stops its writer; any enrolled machine reads any writer over the history route | `not-reachable` refusals leave a `withheld` tombstone the writer continues past; `state-unavailable` is retried at its position; every read surface passes `mayRead` (D5, D6) |
 | RL6 (:793) | `shares[{member, grade}]` | grade `list` added; record gains `policyRev`; a private session's channel listing gains `audience` and `policyRev` (D7) |
 | RL8/RL9 (:805, :816) | attestation only | optional signed `audience` and `policyRev`; writer streams `<machine>/<session>~<digest>` and `hub/<member>~<digest>`; the `unlisted` transition notice; provenance references redacted when narrower (D4) |
-| RL10 (:819) | no reach | `reach?`/`reach`, the `audience` frame, paged `snapshots?`/`snapshots`, `spent` reason `withheld`, `capabilities` on the hello |
+| RL10 (:819) | no reach | `reach?`/`reach`, the `audience` frame, paged `snapshots?`/`snapshots`, `spent` reason `withheld`, `capabilities` on both hellos; no stream goes down to an sminos without `audience` |
 
 ## Acceptance
 
@@ -271,9 +280,9 @@ On the staging org `staging-ssfskim` with a second member, added for the run and
 2. The second member's agent resolves and messages a `listed` session. The message arrives as a peer message with its owner label and counts as nobody's words.
 3. Once a session goes `private` with no shares:
    - **Nothing new reaches the second machine or member.** That machine and the member's browser receive none of its later events. `sminos list --org`, `find` and `@short` don't name it, the machine's log files and `uplink.json` carry none of its writers, the second machine asking the hub's HTTP history route for its writer by name gets nothing, and the project's git archive holds none of its streams.
-   - **Nothing else names it.** A session it spawned that stays listed doesn't name it as its spawner to the second member.
+   - **Nothing else names it.** A session it spawned that stays listed doesn't name it as its spawner to the second member. A `say` from one of the owner's listed sessions tagging it and a listed session together reaches the second machine only as the listed session's event, whose text names neither the private session's alias nor its short.
    - **A forged `say`** sent to it is refused at the hub's upload, and the sending session gets the `not-reachable` notice.
-   - **A share removed, then a stale `say`.** The second member is shared, the share is removed, and their session then sends a `say` from a view that still holds the session. The hub refuses it at upload, and the sender gets the notice; the session never receives it.
+   - **A share removed, then a stale `say`.** The second member is shared, the share is removed, and their session then sends a `say` from a view that still holds the session. The hub refuses it at upload, and the sender gets the notice; the session never receives it, and the project's git archive holds it only as its tombstone.
    - **A share removed after admission.** A message the hub admitted while the share stood, still undelivered when the share is removed, is never delivered.
 
    P5's acceptance 3 reads "refused at the recipient's machine"; O18 meets it as "refused before delivery: at the hub's upload, with the recipient's endpoint as defense in depth" (Decision Log, 2026-11-05).
@@ -285,7 +294,8 @@ On the staging org `staging-ssfskim` with a second member, added for the run and
    - an old hub (the endpoint holds the events);
    - an old endpoint upstream (the hub refuses);
    - an old reader (the hub filters);
-   - an old browser (the hub refuses its humans toward the session).
+   - an old browser (the hub refuses its humans toward the session);
+   - an owner's own second machine on an old sminos, designated the project's archiver: it never receives the private stream (its endpoint withholds it), and the archive it writes holds none of it.
 7. A private session's agent messaging a session outside its audience is refused at its own CLI with the unlisted message (D4), and nothing is written.
 8. From an agent's shell, `sminos share <s> <person> view` and `sminos access <s> listed` are refused. `sminos access <s> private` from the same shell succeeds.
 
@@ -318,17 +328,17 @@ On the staging org `staging-ssfskim` with a second member, added for the run and
   - over HTTP: the history log page (`worker.ts:319-324` → `historyPage`, `project.ts:564`), the history inventory (`worker.ts:314-318` → `historyWriters`, `project.ts:559`) and the attestations, each naming its writer (`worker.ts:326-331` → `project.ts:569`);
   - to browsers: live fan-out, `resume`'s pages and `after` offset (`:1132-1150`), the audit record live (`refusal`, `refuseBrowser`, `rejected`, `:1225-1234`, `:538-554`) and replayed (`:1148`), and the session plane's presence, pending set, deliveries and op outcomes at connect and as they change (`:155-163`, `:925`, `:976-985`).
   The browsers' `subscribe`, `rows`, `read` and `output` go to the session's machine, whose endpoint grades them, and stay as they are.
-- **`mayRead(reader, writer)`** (Interfaces §A) in the Project, and each surface above passing it the authenticated reader (a machine's owners; a browser's `attachment.member`) before it returns anything. The HTTP routes pass the machine principal into the Project's call.
+- **`mayRead(reader, writer)`** (Interfaces §A) in the Project, and each surface above passing it the authenticated reader (a machine's owners and its RL1 hello's `audience` capability, false on a DX2 stream; a browser's `attachment.member`) before it returns anything. The HTTP routes pass the machine principal into the Project's call.
 - **`apps/org-protocol`:**
   - `audienceDigest(members)`, `streamOf(writer)` and `sessionRefs(event)` (Interfaces §A), used wherever a session is read from a writer or an event, the hub's push included (`project.ts:511`);
   - the optional `audience` and `policyRev` on the event types, the `withheld` tombstone and the `unlisted` notice;
   - `isHubPosition` (`names.ts:73-81`) accepting `hub/<member>~<digest>` when the digest is the event's audience's, and the device signing and verification rules covering `audience`;
-  - `capabilities` on `Rl1Welcome`;
+  - `capabilities` on `Rl1Welcome` and on `EndpointHello`;
   - vectors in `apps/org-protocol/test/vectors.test.ts`.
 - **The registry:** `apps/desk-hub/src/objects/policies.ts` (new), kept by the Registry like `OrgRecords`, with `Registry.policies({snapshots, sessions})` (Interfaces §A): one bounded call per upload batch that records the batch's snapshots and answers the rows of the sessions it names. The binding at first exposure: `Registry.storeListing` (`registry.ts:1451`) binds an unbound session id to the listing's machine, as a first snapshot does. The one-time backfill from every project's newest plain snapshots.
 - **`upload` (`project.ts:445-525`):**
   - An event with an `audience` must sit under a writer whose digest matches; otherwise it is refused `audience`.
-  - D5's checks against the registry, the `sessionRefs` of each event included: the binding, the redaction of narrower provenance references and the `unlisted` notice's rule; the tombstone with the refused body's hash; a byte-identical resend refused the same way.
+  - D5's checks against the registry, the `sessionRefs` of each event included: the binding, the redaction of narrower provenance references, and the `unlisted` notice's rule, which admits a valid notice in place of the sender-inside-audience check; the tombstone with the refused body's hash; a byte-identical resend refused the same way.
   - `state-unavailable` while the registry can't be read or hasn't been filled, storing nothing at the position.
 - **`takeHuman` (`:1174-1203`):** the same checks with the member as the sender; the writer `hub/<member>~<digest>` for an event with an audience; an event with no audience toward a session with one refused `not-reachable`.
 - **The machine's owners** for `mayRead`: `machineOwners` with the `SignedEvents` head, which needs a read accessor on its `held`.
@@ -341,9 +351,10 @@ On the staging org `staging-ssfskim` with a second member, added for the run and
 **Proof.** Red first, in `apps/desk-hub/test/log.test.ts`, `signed-log.test.ts` and a new `policies.test.ts`:
 - **Every read surface:** one test per surface in the inventory, a stream with audience {A} served to A's machine or browser and to no one else: live fan-out, `hello`'s `have` and backlog, browser resume, the audit record live and replayed, each session-plane frame, the history inventory and attestations, and a non-audience machine fetching a known private writer by name over `GET /machine/projects/<project>/log?writer=…`, which returns no events.
 - **Reader position:** a reader outside the audience sees the plain writer of the same session continue with no hole.
+- **Old endpoints:** a machine whose owners are in the audience gets none of the stream, live, in `have` or over HTTP, when its RL1 hello lacks `audience` or it syncs over DX2.
 - **The registry:** a higher `policyRev` wins whatever the order of arrival; a tie goes to the newer `created`; an addressed copy or `titled` never moves it; a plain-writer snapshot clears the audience.
 - **The binding:** a session listed by machine M, then a second machine racing a snapshot for the freshly listed id, is refused `not-reachable`, and M's own snapshot is then accepted; a snapshot binds an id never listed; a transition notice from a machine other than the bound one is refused.
-- **`unlisted`:** a notice forged by another machine is refused; one whose `policyRev` isn't newer than the row's, or whose audience leaves the row's previous audience, is refused; a real removed-member notice from the bound machine is admitted and served only to that member.
+- **`unlisted`:** a notice forged by another machine is refused; one whose `policyRev` isn't newer than the row's, or whose audience leaves the row's previous audience, is refused; a real removed-member notice from the bound machine is admitted, though its sender's owners are outside its audience, and served only to that member; a `say` of the same shape, its sender outside its audience, is still refused.
 - **Provenance:** an event carrying an unredacted spawner reference to a session whose audience doesn't contain the event's is refused; the same event redacted is admitted.
 - **`state-unavailable`:** with the registry unreadable, an upload is refused `state-unavailable` and nothing, no tombstone either, is stored at its position.
 - **The backstop:** an event naming an unknown session, an event whose audience isn't a subset of a named session's, and an event whose sender's owners fall outside its audience are each refused `not-reachable`; after a share removal, an event carrying the old audience is refused; two same-owner private sessions with different shares exchange messages only under their intersection; the S→R example of D4 is admitted with audience {A} and refused with {A, B}.
@@ -384,7 +395,8 @@ Gates `static,unit` (`scripts/ci-gate.sh <wt> --gates static,unit`), then a stag
 - **From the hub:** a `withheld` tombstone goes down as `spent {reason: 'withheld'}` in stream order; a `not-reachable` refusal goes down as today and settles the position rather than stopping the writer (`uplink.ts:156`); a `state-unavailable` refusal of a position the endpoint signed opens a hole at that seq, due after `ASK_MS`, in `refused` (`uplink.ts:155-166`), so the position is asked of sminos again with no reconnect and no further writes (D5).
 - **The listing:** `recordFor` (`listings.ts:183-195`) adds `audience` and `policyRev` to a private session's channel listing.
 - **Hold:** while the RL1 welcome lacks `audience`, keep stream events owed.
-- **The hello:** RL10's endpoint hello gains `capabilities: ['access', 'reach']`.
+- **Down to an old sminos:** while sminos's RL10 hello lacks `audience`, no frame naming a stream writer goes down to it: stream events, their `have` entries, `spent` and `refused`. The policy cache still takes their snapshots (D9).
+- **The hellos:** RL10's endpoint hello gains `capabilities: ['access', 'reach']`; the RL1 `EndpointHello` gains `capabilities: ['audience']`.
 
 **Result.** An endpoint that answers `reach?` by D1 and D2, signs only well-formed audience streams, and never uploads a private stream to a hub that can't filter it.
 
@@ -406,11 +418,13 @@ Gates `static,unit` (`scripts/ci-gate.sh <wt> --gates static,unit`), then a stag
   - a stream writer's event attested;
   - the ledger keeping the audience across a resend;
   - the hold without the capability;
+  - an sminos whose hello lacks `audience`, its machine's owner in a stream's audience and its machine the archiver: no stream event, `have` entry, `spent` or `refused` naming the stream goes down, the plain writers continue, and the policy cache still takes the stream's snapshot;
   - a tombstone passed down as `spent`, and a `not-reachable` refusal leaving the writer uploading;
   - an `unlisted` notice whose audience differs from the withdrawn set refused, the right one signed;
   - a listed child's snapshot and attest signed with a private parent's `spawnerSession` redacted.
 - **`conversation.local.test.ts`** replays a private session against a local hub (Miniflare) built from M1, and:
-  - a share removed, its notice through the real signer admitted and served only to the removed member;
+  - owner A removes B's share: the notice, audience {B}, goes through the real signer, is admitted and is served to B only;
+  - A makes a listed session private: the notice, audience every other member of the org, is admitted;
   - private parent, child later listed: the child's new snapshots and attests don't name the parent;
   - the registry down, then recovered, with no further writes and no reconnect: the refused event lands.
 
@@ -443,12 +457,13 @@ Gates `static,unit`. Review: reviewer-high, security lens.
 - **The `audience` frame:** keep each session's audience, owners and `policyRev` from it (in the uplink state).
 - **Streams:**
   - a writer is `<machine>/<session>` or `<machine>/<session>~<digest>`; the allocator learns the suffix (`HubLog.allocated_here`, `sminos_hublog.py:979-988`, and `writer_id`/`writer_path`, `sminos.py:1810`, `:1838`);
-  - `stream_for` (Interfaces §C) chooses the writer by D4 for `lifecycle`, `publish_state`, the title and rename paths, `cmd_say`, `record_message` and `record_copy`, splitting per audience;
+  - `stream_for` (Interfaces §C) chooses the writer by D4 for `lifecycle`, `publish_state`, the title and rename paths, `cmd_say`, `record_message` and `record_copy`, splitting per audience, each split's `text` its own recipients' leading tags and the unchanged body (D4);
   - snapshots carry `policyRev`;
   - projections, `addressed_to` and `match_members` map every stream of a session to that one session.
 - **The private sender's refusal (D4)** in `stream_for`, before any append.
 - **`sessionRefs`** in Python, pinned to the TypeScript one by a shared vector, used by projections, `addressed_to` and `stream_for`; a provenance reference narrower than the event's audience written null (`spawn_provenance`'s `spawnerSession`, `sminos.py:9365`, as `published_provenance` publishes it, `:2813-2827`; a continuation's `to`).
-- **The archive copies the admitted public projection (D6):** `copy_log` (`sminos_archive.py:109-140`) writes, per plain writer, the positions the hub admitted: another machine's as imported, this machine's up to `HubLog.taken()` (`sminos_hublog.py:560`), each withheld position as its tombstone, nothing past what the hub has taken. No stream file.
+- **The archive copies the admitted public projection (D6):** `HubLog.on_have` (`sminos_hublog.py:708-739`) saves the `have`'s own-writer entries as `archive_have` in `uplink.json`, beside `archive_at`. `copy_log` (`sminos_archive.py:109-140`) writes, per plain writer, the positions the hub admitted: another machine's as imported, this machine's up to `archive_have`, each withheld position as its tombstone. No stream file.
+- **The hello:** `hello_frame` (`sminos_rl10.py:290-296`) advertises `capabilities: ['audience']`, in the same release as the archive's admitted projection (D9).
 - **The `snapshots?` responder:** for each `snapshots?`, one project's newest stored `joined` and `state` per remote session writer, plain and stream, in pages of a bounded size, each answer naming the cursor of the next page and the last one marked `done: true` (Interfaces §B).
 - **`state-unavailable` on a direct stream** (`HubLog.coded`; on RL10 the endpoint rewinds): `HubLog.on_refused` (`sminos_hublog.py:796-813`) sets `sent[writer]` back to `seq - 1`, due after the same wait as the endpoint's, so the position goes up again without a reconnect (D5).
 - **The test stand-in:** `sminos/tests/hub_standin.py` filters by audience and refuses by the registry rule as M1's hub does (`fan_out`, `:430`; its hello and upload), with the tombstone, so sminos's suites run against the same rule. `sminos/tests/endpoint_standin.py` sends `audience` frames.
@@ -457,11 +472,11 @@ Gates `static,unit`. Review: reviewer-high, security lens.
 
 **Proof.** Red first, in `sminos/tests/`:
 - **Streams:** every event of a private session lands in its stream; a policy change starts a new stream with a higher `policyRev`; going listed returns to the plain writer.
-- **Addressed events:** D4's S→R example writes under audience {A}; two private recipients with different audiences make two events; a cross-project copy carries its original's audience and splits the same way.
+- **Addressed events:** D4's S→R example writes under audience {A}; two private recipients with different audiences make two events; a cross-project copy carries its original's audience and splits the same way. From a listed sender, `@private#12345678 @public hello` makes a public event whose text is `@public hello`, naming neither the private alias nor `12345678`, and a private one whose text is `@private#12345678 hello`; the same split across projects gives copies with the same texts; an `@` after the leading run is kept as written.
 - **Refusal:** a private sender to a recipient whose owners fall outside its audience is refused with nothing written (acceptance 7).
 - **Projection:** a member reading only the plain writers never names the private session, through the stand-in's filter.
 - **Records** (`test_records.py`): a provenance replacement, a continuation (background copy and resume) and a spawn keep `access`, `shares` and `policyRev`; a setter-shaped record write racing a reconciliation keeps both.
-- **Archive** (`test-archive.sh`): the archive's commit holds the plain writer files and no stream file. On the archive machine, with a stale listed view of a now-private recipient, a `say` written under the plain writer is not in an archive made before the hub's answer, and is a tombstone in one made after its refusal.
+- **Archive** (`test-archive.sh`): the archive's commit holds the plain writer files and no stream file. On the archive machine, connected to its endpoint stand-in, with a stale listed view of a now-private recipient: a `say` written under the plain writer and taken by the endpoint's socket, while the stand-in hub holds back its admission, is not in an archive made then, though `taken` already covers it; after the hub's refusal and the next `have`, the archive holds its tombstone.
 - **Snapshots:** a `snapshots?` over a project with more snapshots than a page answers every page and marks the last `done`; a project with none answers one empty page marked `done`.
 - **Unreadable record:** an established private session's record corrupted: no member frame and no listing for it, and nothing written under any of its writers; once the record reads again, both resume. A session with no record file still restates with the defaults.
 - **`state-unavailable`, direct stream:** the stand-in hub refuses it once, then recovers; with no further writes and no reconnect, the event lands.
@@ -561,9 +576,11 @@ The gates run on GitHub Actions; the MacBook runs no MAWS Electron e2e.
       // Policy   = { machine, audience: string[] | null, policyRev, created }   // machine: bound at first exposure,
       //            by a snapshot here or a listing in Registry.storeListing; never moved
     // the one reader check, in the Project, before any read surface returns (D6):
-    mayRead(reader: { machine: string; owners: string[] } | { member: string }, writer: string): boolean
+    mayRead(reader: { machine: string; owners: string[]; streams: boolean } | { member: string }, writer: string): boolean
+      // streams: the machine's RL1 hello advertised 'audience'; false on a DX2 stream
     // RL1:
     Rl1Welcome.capabilities?: string[]       // 'audience'
+    EndpointHello.capabilities?: string[]    // 'audience': this endpoint withholds streams from an sminos without it
 
 sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dumps(sorted(set(m)), separators=(',', ':')).encode())`, and a shared vector in `vectors.test.ts` and `sminos/tests/` pins the two together. Use the same JSON separators on both sides.
 
@@ -578,6 +595,7 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
                           // newest stored joined/state per remote writer, a bounded page; `done` on the project's last
     endpoint → sminos:  {t: 'spent', project, writer, seq, reason: 'withheld'}   // a hub tombstone, in stream order
     endpoint hello:     capabilities?: string[]   // 'access', 'reach'
+    sminos hello:       capabilities?: string[]   // 'audience': streams may come down; its archive copies only the admitted public projection
     member frame:       access?: 'private' | 'listed' | 'org-view' | 'org-converse'; shares?: [{member, grade: 'list'|'view'|'converse'|'approve'}]; policyRev?: number
     Listing.fields:     audience?: string[]; policyRev?: number     // a private session's channel listing only
 
@@ -586,10 +604,11 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
 ### C. sminos (M3, M4)
 
 - `sminos access <member> <level>` and `sminos share <member> <person> <grade|none>` (D10), both through `set_visibility(sid, *, access=None, share=None, operator)`: the record change under the records lock, `policyRev` bumped, the `unlisted` notice (when members are withdrawn) and the snapshot written, the endpoint told. M5's executor calls it with the act's proof.
-- `stream_for(project, writer_session, recipients) → [(writer, audience, recipients)]` or the D4 refusal: the one stream choice every append path uses.
+- `stream_for(project, writer_session, recipients, text) → [(writer, audience, recipients, text)]` or the D4 refusal: the one stream choice every append path uses; each split's `text` carries only its recipients' leading tags.
 - `ReachGate(project).held(event, session) → None | 'refused' | 'owed'`: the one push check, called inside `push_live` and `resume_session`, so every deliverer reaches it.
 - `sessionRefs(event)` in Python, the same list as §A's, pinned by a shared vector.
 - `HubLog.withhold_own(writer, seq)`: an own position the hub withheld.
+- `uplink.json` `archive_have: {writer: seq}`: the own-writer entries of the `have` that last confirmed the archive, `copy_log`'s frontier for this machine's writers.
 - Outcome `refused-reach`. `REACH_WAIT = 10`.
 
 ### D. M5 (O8 M6, the architect)
@@ -636,6 +655,14 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Evidence: `sminos.py:9365`, `:2813-2827`; `src/endpoint/rl10/attest.ts:27-37`.
 - Observation: every live peer push ends in `push_live`, whichever caller started it, so the gate belongs there, not in five callers.
   Evidence: `sminos_control.py:183`; its callers at `sminos.py:4308`, `:4960`, `:4985`, `:9855`, `:10120`.
+- Observation: `taken` isn't admission. On RL10 it moves when the endpoint's socket takes the frame. No echo of an own event comes back live to show admission either: the hub's fan-out skips the sender, and a hello's backlog starts past the machine's own `have`, so the endpoint's echo check sees an own event only after its machine lost it. The one hub-confirmed frontier the sender gets is the vector in each `have`, which the archive already waits for.
+  Evidence: `sminos_uplink.py:1155-1166`, `:2096-2102`; `apps/desk-hub/src/objects/project.ts:503`, `:1205-1215`, `:434`; `src/endpoint/rl10/log-relay.ts:455-466`; `sminos_archive.py:10-14`, `sminos_hublog.py:708-739`.
+- Observation: an old sminos inside a stream's audience would put the stream on the org-readable archive if its machine archives the project, and the hub's audience filter can't tell, since the machine's owners are inside.
+  Evidence: `sminos_archive.py:109-140`; `sminos_rl10.py:295` and `src/endpoint/rl10/link.ts:397` advertise no capabilities; `EndpointHello` has none (`apps/org-protocol/src/relay.ts:99`).
+- Observation: a `say`'s text opens with its addressing tags, so splitting by audience without rewriting the text would leave the private recipient's alias and short in the public event.
+  Evidence: `sminos.py:4655-4674` (`leading_tags`), `:5218` (`"text": a.text`).
+- Observation: D5's sender-inside-audience check refuses every valid `unlisted` notice, since the notice's audience is exactly the members its sender's change withdraws.
+  Evidence: review, round 3; D5's refusal list against D6's notice.
 
 ## Decision Log
 
@@ -713,7 +740,7 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Rationale: the third review found the HTTP history route serving any writer to any machine, a surface the fan-out filter never saw; a single check is what keeps the next such route from being missed.
   Rejected: filtering each surface as it is found, which is how the history route was missed.
   Date/Author: 2026-11-05, p5-desk-track-owner, decided by the architect from the third adversarial review.
-- Decision: the archive copies only the hub-admitted public projection: plain writers' admitted positions, withheld ones as tombstones, never a local event before its admission is confirmed.
+- Decision (its own-writer frontier set below by the hub's `have`): the archive copies only the hub-admitted public projection: plain writers' admitted positions, withheld ones as tombstones, never a local event before its admission is confirmed.
   Rationale: a `say` written under a plain writer from a stale view can be refused after it is written; copying the writer file whole puts that body on the org-readable remote in the window.
   Rejected: copying plain writer files whole (the second revision), which has that race.
   Date/Author: 2026-11-05, p5-desk-track-owner, decided by the architect from the third adversarial review.
@@ -749,6 +776,24 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Rationale: a rebuild with no producer and no end could never tell an empty answer from an unfinished one, and an upload signed meanwhile would take a private session for listed.
   Rejected: signing meanwhile as "no audience" with the hub as backstop, which tombstones messages that should simply wait.
   Date/Author: 2026-11-05, p5-desk-track-owner, decided by the architect from the third adversarial review.
+- Decision: the archive's frontier for this machine's own writers is the hub's vector in the `have` that confirms the run (saved as `archive_have`), withheld positions written as their tombstones; never `taken`.
+  Rationale: `taken` moves on RL10 when the socket takes the frame, before the hub admits or refuses it. The `have` is the hub's own vector, it follows any refusal on the same stream, and every run already waits for one.
+  Rejected: `taken` (the third revision), which copies an event the hub may still refuse; and the endpoint's echo comparison, which the architect proposed: the hub's fan-out skips the sender, so no echo comes back live and it yields no frontier.
+  Choice made in this revision, by the desk track: the `have` rather than a new admission frame carried over RL10, since the `have` already exists and the archive already runs on it.
+  Date/Author: 2026-11-05, p5-desk-track-owner, decided by the architect from the round-3 review.
+- Decision: an audience stream goes down only to an sminos whose RL10 hello advertises `audience`, which it does only once its archive copies the admitted public projection; the hub serves a stream only to an endpoint whose RL1 hello advertises `audience`. An old sminos or endpoint, even its owner's own, sees no private session until updated.
+  Rationale: an old sminos copies every log file into the shared archive, and the hub's audience filter passes a machine whose owners are inside.
+  Rejected: serving streams to every machine inside the audience, which archives them on an owner's old machine.
+  Choice made in this revision, by the desk track: the hub-side gate, beyond the endpoint rule the architect set, because an old endpoint passes every stream down to its old sminos and only the hub can stop it.
+  Date/Author: 2026-11-05, p5-desk-track-owner, decided by the architect from the round-3 review.
+- Decision: splitting a `say` per audience rebuilds each split's text from its own recipients' leading tags and the unchanged body, cross-project copies included.
+  Rationale: the leading tag run is the addressing, and stored whole it names a private recipient's alias and short in the public event.
+  Rejected: keeping `a.text` whole in every split (the third revision).
+  Date/Author: 2026-11-05, p5-desk-track-owner, decided by the architect from the round-3 review.
+- Decision: a validated content-free `unlisted` notice is admitted by its own rule (bound machine, newer `policyRev`, audience within the previous one) in place of the sender-inside-audience check, every other check kept; no other kind is exempt.
+  Rationale: the notice's audience is the withdrawn members, outside which its sender sits by construction.
+  Rejected: applying the general rule to it, which refuses every valid notice.
+  Date/Author: 2026-11-05, p5-desk-track-owner, decided by the architect from the round-3 review.
 
 ## Outcomes & Retrospective
 
