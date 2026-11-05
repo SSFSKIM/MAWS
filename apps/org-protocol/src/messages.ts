@@ -13,6 +13,8 @@ export const REFUSAL_REASONS = [
   'stale', 'malformed', 'expired', 'replayed', 'context', 'digest-mismatch', 'op-conflict', 'no-ledger', 'not-offered', 'ungraded', 'no-rule',
   'no-target', 'grade', 'step-up', 'class', 'read-only', 'ceiling', 'unknown-checkout', 'spec-field', 'state-too-old', 'act-required',
   'unavailable', 'removed', 'restart', 'busy', 'behind',
+  // P5 O7 M9: a setup row asked by anyone but the machine's owners, and the setup policy's refusals of a folder
+  'owners-only', 'no-folder', 'outside-home', 'symlink-escape', 'protected',
 ] as const;
 export type RefusalReason = (typeof REFUSAL_REASONS)[number];
 export const isRefusalReason = (value: unknown): value is RefusalReason => typeof value === 'string' && (REFUSAL_REASONS as readonly string[]).includes(value);

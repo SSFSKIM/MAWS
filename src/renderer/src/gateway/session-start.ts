@@ -10,8 +10,12 @@ import type { SetupEvent, StartOutcome } from '@shared/sessions/setup';
 import { holderWords } from '../sessions/holder-words';
 import { START, type Route } from './copy';
 
-export type StartOptions = { gateway: Route; model?: string | null; effort?: Effort | null };
-export type StartAnswer = { status: 'starting' } | { status: 'refused'; reason: string };
+// P5 O7 M9: back to the machine's own route is `route: 'machine'` (the services' route patch writes the legacy field),
+// held to its launch's relay check, which only the person's Switch anyway passes (`startAnyway`). A dead relay the
+// machine's own settings name answers `relay_unreachable`, and a model its resolution can't reach (a gateway alias on a
+// machine whose settings name a login or another host) `model_refused`, apart from the refusals, so the switch can ask.
+export type StartOptions = ({ gateway: Route } | { route: 'machine'; startAnyway?: true }) & { model?: string | null; effort?: Effort | null };
+export type StartAnswer = { status: 'starting' } | { status: 'relay_unreachable' | 'model_refused' | 'refused'; reason: string };
 
 export interface SessionStart {
   start(appSessionId: AppSessionId, options: StartOptions): Promise<StartAnswer>;
@@ -61,7 +65,10 @@ export function sessionStartOver(client: MawsBridge): SessionStart {
       const result = await client.invoke('session.start', { appSessionId, message: null, options });
       if (!result.ok) return { status: 'refused', reason: result.error.message };
       const refusal = startRefusal(result.value);
-      return refusal === null ? { status: 'starting' } : { status: 'refused', reason: refusal };
+      if (refusal === null) return { status: 'starting' };
+      const outcome = result.value;
+      const status = outcome.status === 'relay_unreachable' ? 'relay_unreachable' : outcome.status === 'invalid' && outcome.field === 'model' ? 'model_refused' : 'refused';
+      return { status, reason: refusal };
     },
     onSetupFailure(appSessionId, listener) {
       return client.on('session.setup', (event) => {

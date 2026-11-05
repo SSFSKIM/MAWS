@@ -5,6 +5,8 @@
 // is the quiet secondary (owner's decision, §19).
 // P3-F F4 (fix wave, review B 1): what the card says of the folder is `TrustDetails`, which the comment's trust notice
 // (tools/document/comment-session.tsx) shows too, so an answer given there consents to the same words.
+// P5 O7 M9 ("Remote setup"): another machine's trust card, answered for a spawn there, names its own accept and offers no
+// start without trusting (the machine refuses an untrusted checkout), so `onStartWithoutTrusting` is optional.
 import { TRUST_GATES, type TrustState } from '@shared/sessions/trust';
 import { PRIMARY, QUIET, SECONDARY } from './ui';
 
@@ -21,23 +23,27 @@ export function TrustCard({
   onAccept,
   onDecline,
   onStartWithoutTrusting,
+  acceptLabel = 'Trust and start',
 }: {
   trust: TrustState;
   busy: boolean;
   onAccept(): void;
   onDecline(): void;
-  onStartWithoutTrusting(): void;
+  onStartWithoutTrusting?(): void;
+  acceptLabel?: string;
 }) {
   return (
     <div className="flex flex-col gap-2.5 text-ui text-fg">
       <TrustDetails trust={trust} />
       <div className="flex items-center gap-2">
         <button type="button" disabled={busy} onClick={onAccept} className={PRIMARY}>
-          Trust and start
+          {acceptLabel}
         </button>
-        <button type="button" disabled={busy} onClick={onStartWithoutTrusting} className={QUIET}>
-          Start without trusting
-        </button>
+        {onStartWithoutTrusting && (
+          <button type="button" disabled={busy} onClick={onStartWithoutTrusting} className={QUIET}>
+            Start without trusting
+          </button>
+        )}
         <button type="button" onClick={onDecline} className={`${SECONDARY} ml-auto`}>
           Cancel
         </button>

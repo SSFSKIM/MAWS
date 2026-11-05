@@ -15,8 +15,10 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import type { ProjectOrg } from '@shared/ipc/schema/session';
+import type { GitFiles } from '@shared/machine/git-reads';
 import type { Enrollment } from '@shared/machine/identity'; // P5 O3-D M2 (D16): the enrollment moved to shared
 import type { OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
@@ -95,9 +97,15 @@ export const ORG_GIT_TIMEOUT_MS = 2_000;
 // run), which decides nothing, and is logged with its cause.
 type GitAnswer = { code: 0; stdout: string } | { code: number } | null;
 
-function git(args: string[], timeoutMs: number): Promise<GitAnswer> {
+// `isolated` (P5 O7 M9 round 3, a remote setup's registration before trust): git reads no configuration of its own at
+// start either (`config --file` still reads the system and global files, following their includes, before the one it
+// is asked for). In every call the cwd is no checkout's, so its repository discovery reads no folder's config.
+const ISOLATED = { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
+
+function git(args: string[], timeoutMs: number, isolated = false): Promise<GitAnswer> {
   return new Promise((done) => {
-    execFile(gitBinary(process.env), args, { env: gitEnv(process.env), encoding: 'utf8', timeout: timeoutMs }, (error, stdout) => {
+    const env = { ...gitEnv(process.env), ...(isolated ? ISOLATED : {}) };
+    execFile(gitBinary(process.env), args, { cwd: tmpdir(), env, encoding: 'utf8', timeout: timeoutMs }, (error, stdout) => {
       if (!error) return done({ code: 0, stdout });
       if (typeof error.code === 'number' && !error.killed) return done({ code: error.code });
       const why = error.killed ? `timed out after ${timeoutMs} ms`
@@ -114,33 +122,38 @@ function git(args: string[], timeoutMs: number): Promise<GitAnswer> {
 // the nearest `.git` upward; a directory is it, a file (a linked worktree's) points at its gitdir, whose `commondir`
 // leads to the main checkout's. '' outside git. A layout that is neither asks git, as sminos does; null when git gave
 // no answer.
-async function commonGitDir(directory: string, timeoutMs: number): Promise<string | null> {
+async function commonGitDir(directory: string, timeoutMs: number, io: OrgIo): Promise<string | null> {
   let d = resolve(directory);
-  while (!isDirectory(d)) {
+  while ((await io.kind(d)) !== 'directory') {
     if (dirname(d) === d) return '';
     d = dirname(d);
   }
   for (let at = d; ; at = dirname(at)) {
     const dot = join(at, '.git');
-    if (isDirectory(dot)) return dot;
-    if (isFile(dot)) return linkedCommonDir(at, dot) ?? (await askedCommonDir(d, timeoutMs));
+    const kind = await io.kind(dot);
+    if (kind === 'directory') return dot;
+    if (kind === 'file') return (await linkedCommonDir(at, dot, io)) ?? (io.asksGit ? await askedCommonDir(d, timeoutMs) : null);
     if (dirname(at) === at) return '';
   }
 }
 
-function linkedCommonDir(at: string, dot: string): string | null {
+async function linkedCommonDir(at: string, dot: string, io: OrgIo): Promise<string | null> {
   let line: string;
   try {
-    line = readFileSync(dot, 'utf8').split('\n')[0].trim();
+    const text = await io.read(dot);
+    if (text === null) return null;
+    line = text.split('\n')[0].trim();
   } catch {
     return null;
   }
   if (!line.startsWith('gitdir:')) return null;
-  const gitdir = resolve(at, line.slice('gitdir:'.length).trim()); // Python's os.path.join: an absolute part wins
+  const gitdir = await io.pointer(at, line.slice('gitdir:'.length).trim());
+  if (gitdir === null) return null;
   try {
-    return resolve(gitdir, readFileSync(join(gitdir, 'commondir'), 'utf8').trim());
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? resolve(gitdir) : null;
+    const common = await io.read(join(gitdir, 'commondir'));
+    return common === null ? resolve(gitdir) : io.pointer(gitdir, common.trim());
+  } catch {
+    return null;
   }
 }
 
@@ -151,20 +164,86 @@ async function askedCommonDir(directory: string, timeoutMs: number): Promise<str
   return common === '' ? '' : resolve(isAbsolute(common) ? common : join(directory, common));
 }
 
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
+// How a derivation reads the checkout: the file system as it stands (every start's refresh), or, for a remote setup's
+// registration before the folder's trust is accepted (P5 O7 M9 round 3), its checked reader: each read through the
+// home's walk (src/shared/machine/git-reads.ts), a link followed only where it may be, and no git asked for a layout the
+// files don't answer (no org then; the next start's refresh derives it). `read` answers null when there is no file and
+// throws when there is one it can't read.
+interface OrgIo {
+  kind(path: string): Promise<'file' | 'directory' | null>;
+  read(path: string): Promise<string | null>;
+  canonical(path: string): Promise<string>;
+  // the path a pointer's content names from `base`: sminos's lexical join (Python's os.path.join: an absolute part
+  // wins); under the setup, the walk's resolution (a `..` after a link climbing from its target), null when it names
+  // nowhere, so what is read from then on is what was checked
+  pointer(base: string, target: string): Promise<string | null>;
+  // the config file `config --file` is handed: under the setup, the walk's resolution of it (null: none)
+  config(common: string): Promise<string | null>;
+  asksGit: boolean;
+}
+
+const LOCAL_IO: OrgIo = {
+  async kind(path) {
+    try {
+      const stat = statSync(path);
+      return stat.isFile() ? 'file' : stat.isDirectory() ? 'directory' : null;
+    } catch {
+      return null;
+    }
+  },
+  async read(path) {
+    try {
+      return readFileSync(path, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
+    }
+  },
+  async canonical(path) {
+    return canonical(path);
+  },
+  async pointer(base, target) {
+    return resolve(base, target);
+  },
+  async config(common) {
+    return join(common, 'config');
+  },
+  asksGit: true,
+};
+
+/** A pointer or a `.smns` is small; a larger file is no read here. */
+const CHECKED_READ_MAX = 1024 * 1024;
+
+function checkedIo(files: GitFiles): OrgIo {
+  return {
+    async kind(path) {
+      const at = await files.real(path);
+      const kind = at === null ? null : await files.entry(at);
+      return kind === 'file' || kind === 'directory' ? kind : null;
+    },
+    async read(path) {
+      if ((await files.real(path)) === null) return null;
+      const bytes = await files.read(path, CHECKED_READ_MAX);
+      if (bytes === null) throw new Error(`${path} is no file to read`);
+      return bytes.toString('utf8');
+    },
+    async canonical(path) {
+      return (await files.real(path))?.normalize('NFC') ?? path;
+    },
+    pointer: (base, target) => files.real(isAbsolute(target) ? target : `${base}${sep}${target}`),
+    config: (common) => files.real(join(common, 'config')),
+    asksGit: false,
+  };
 }
 
 // The remotes of a repository's config, in the order it names them, each with its first `url` ('' for none): sminos's
 // `git_config_remotes`, read by git's own parser with sminos's no-includes semantics. Every key of a remote section
 // counts, as it does for sminos, so a remote with only a `fetch` still makes two remotes. A config git refuses, and a
 // missing one, have no remote here (sminos derives no project from either); null when git gave no answer.
-async function configRemotes(common: string, timeoutMs: number): Promise<Map<string, string> | null> {
-  const answer = await git(['config', '--file', join(common, 'config'), '--no-includes', '-z', '--get-regexp', '^remote\\.'], timeoutMs);
+async function configRemotes(common: string, timeoutMs: number, io: OrgIo): Promise<Map<string, string> | null> {
+  const file = await io.config(common);
+  if (file === null) return new Map(); // no config: no remote, as git's exit 1 for a missing file says
+  const answer = await git(['config', '--file', file, '--no-includes', '-z', '--get-regexp', '^remote\\.'], timeoutMs, !io.asksGit);
   if (answer === null) return null;
   if (!('stdout' in answer)) return new Map(); // 1: nothing matched or no file; 128: a file git refuses
   const remotes = new Map<string, string | null>();
@@ -181,21 +260,14 @@ async function configRemotes(common: string, timeoutMs: number): Promise<Map<str
   return new Map([...remotes].map(([remote, url]) => [remote, url ?? '']));
 }
 
-function isFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
-}
 
 // sminos's `read_smns`: the file's `project` (a valid name) and `name` (else the project), or null for one that is
 // unreadable or names no valid project, which sminos passes over with a warning.
-function readSmns(path: string): { project: string; name: string } | null {
-  if (!isFile(path)) return null;
+async function readSmns(path: string, io: OrgIo): Promise<{ project: string; name: string } | null> {
+  if ((await io.kind(path)) !== 'file') return null;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(path, 'utf8'));
+    parsed = JSON.parse((await io.read(path)) ?? '');
   } catch {
     console.warn(`[index] ignoring unreadable ${path}`);
     return null;
@@ -229,13 +301,13 @@ function pyRepr(value: unknown): string {
 
 // sminos's `smns_at`: the first `.smns` walking up from the directory; else, for a linked worktree at a head that
 // predates the file, its owning repository's, so an old branch never splits the repository into two projects.
-function smnsAt(directory: string, owningRepo: string): { project: string; name: string } | null {
+async function smnsAt(directory: string, owningRepo: string, io: OrgIo): Promise<{ project: string; name: string } | null> {
   for (let d = resolve(directory); ; d = dirname(d)) {
-    const found = readSmns(join(d, '.smns'));
+    const found = await readSmns(join(d, '.smns'), io);
     if (found) return found;
     if (dirname(d) === d) break;
   }
-  return owningRepo === '' ? null : readSmns(join(owningRepo, '.smns'));
+  return owningRepo === '' ? null : readSmns(join(owningRepo, '.smns'), io);
 }
 
 const canonical = (path: string) => {
@@ -253,27 +325,29 @@ export interface OrgSubject {
   machine: MachineRef; // this machine, which rules 3 and 4 key by
   projectId: string; // the project's bare id, which rule 4 keys by
   name: string; // the project's name, which rule 4 takes
+  files?: GitFiles; // P5 O7 M9 round 3: a remote setup's registration's checked reader, before trust (`OrgIo`)
 }
 
 // The directory's org project; null when git gave no answer within `gitTimeoutMs` (a timeout), which decides nothing:
 // the row keeps what it had, and is asked again, so a slow git never moves a project's key.
 export async function deriveOrg(
-  { directory, machine, projectId, name }: OrgSubject,
+  { directory, machine, projectId, name, files }: OrgSubject,
   enrollment: Enrollment | null,
   gitTimeoutMs: number = ORG_GIT_TIMEOUT_MS,
 ): Promise<ProjectOrg | null> {
-  const common = await commonGitDir(directory, gitTimeoutMs);
+  const io = files === undefined ? LOCAL_IO : checkedIo(files);
+  const common = await commonGitDir(directory, gitTimeoutMs, io);
   if (common === null) return null;
   const owningRepo = common === '' ? '' : dirname(common);
-  const smns = smnsAt(directory, owningRepo);
+  const smns = await smnsAt(directory, owningRepo, io);
   if (smns) return { key: `smns:${smns.project}` as OrgKey, name: smns.name, source: 'smns', smnsId: smns.project };
   if (owningRepo === '') return { key: `folder:${machine}:${projectId}` as OrgKey, name, source: 'folder', smnsId: null };
-  const remotes = await configRemotes(common, gitTimeoutMs);
+  const remotes = await configRemotes(common, gitTimeoutMs, io);
   if (remotes === null) return null;
   const remote = remotes.has('origin') ? 'origin' : remotes.size === 1 ? [...remotes.keys()][0] : undefined;
   const url = remote === undefined ? '' : remotes.get(remote)!;
   const key = remoteKey(url);
   if (key !== '') return { key: `remote:${key}` as OrgKey, name: remoteName(url), source: 'remote', smnsId: enrollment ? repoProjectId(enrollment.org, key) : null };
-  const repo = canonical(owningRepo);
+  const repo = await io.canonical(owningRepo);
   return { key: `repo:${machine}:${createHash('sha256').update(repo).digest('hex').slice(0, 16)}` as OrgKey, name: basename(repo), source: 'repository', smnsId: null };
 }

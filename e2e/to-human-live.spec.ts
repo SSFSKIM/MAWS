@@ -364,7 +364,7 @@ const snapshotWords = (s: ReturnType<typeof snapshots>) => `${s.snapshots.length
 
 // ---- the page ----------------------------------------------------------------------------------------------------------
 
-const launch = () => launchMaws({ userData, requireFirst: notifyHook, env: { MAWS_E2E_ENGINE_BIN: engineScript, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
+const launch = () => launchMaws({ defaultRoute: 'gateway', userData, requireFirst: notifyHook, env: { MAWS_E2E_ENGINE_BIN: engineScript, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
 const pane = (page: Page) => page.locator('[data-region="main"] [data-pane="0"]');
 const composer = (page: Page) => pane(page).getByRole('textbox', { name: 'Message' });
 const status = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id as AppSessionId }));

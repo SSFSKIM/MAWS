@@ -30,9 +30,10 @@ import type { HostResponse } from '@shared/ipc/host-protocol';
 import { HOST_EVENTS, type CommandName, type CommandResult, type EventName, type EventPayload, type HostState } from '@shared/ipc/schema';
 import type { SpineHosts } from '../services/spine-root';
 import type { RelayRequest } from './relay';
+import type { WirePeer } from '@shared/ipc/wire'; // P5 O7 M9
 
 // What the seam reads of the daemon's supervisor: the engine host's link.
-export type EngineLink = Pick<HostSupervisor, 'onEvent' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot' | 'dispatch'> & Partial<Pick<HostSupervisor, 'handoverState'>>; // O16 panel 1: handoverState
+export type EngineLink = Pick<HostSupervisor, 'onEvent' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot' | 'dispatch'> & Partial<Pick<HostSupervisor, 'handoverState' | 'peer'>>; // O16 panel 1: handoverState; P5 O7 M9: peer
 export type EngineIntercept = (request: RelayRequest) => Promise<HostResponse> | null;
 
 export const COALESCED_EVENTS: ReadonlySet<string> = new Set(['session.status', 'session.queue', 'session.brokerItems', 'session.catalogChanged', 'engine.budget']);
@@ -324,6 +325,10 @@ export class SpineHostsAdapter implements SpineHosts {
   }
   snapshot(owner: HostOwner): HostState {
     return this.options.link.snapshot(owner);
+  }
+  // P5 O7 M9: the welcome the link holds now (the session service reads the engine host's capabilities from it)
+  peer(owner: HostOwner): WirePeer | null {
+    return this.options.link.peer?.(owner) ?? null;
   }
   // O16 panel 1 (scalpel-2#1): the daemon's handover, read by the spine's attention as the link leaves ready
   handoverState(owner: HostOwner): EngineHandoverState | null {

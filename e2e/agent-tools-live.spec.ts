@@ -473,7 +473,7 @@ test('live: the agent tools over a real session (acceptance item 4, steps i to x
   };
 
   const open = async (env: Record<string, string>) => {
-    const launch = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, CLAUDE_CONFIG_DIR: config, MAWS_HARNESS: '0', CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...env } });
+    const launch = await launchMaws({ defaultRoute: 'gateway', env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, CLAUDE_CONFIG_DIR: config, MAWS_HARNESS: '0', CLAUDE_CODE_ENABLE_TODO_TOOLS: '1', ...env } });
     await launch.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide());
     const page = launch.page;
     const invoke: Invoke = (name, input) => page.evaluate(([n, i]) => window.maws.invoke(n as never, i as never), [name, input] as const);

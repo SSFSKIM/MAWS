@@ -3,6 +3,8 @@
 // `gateway.openClaudeUsage`, disabled with no further words until C11 registers it; the host polls the relay while the card is docked and
 // starts routed by itself once it answers), "Run direct" (`onAccept`), Retry and Cancel (`onDecline`). Under C11's
 // `relayUnreachable: 'wait'` the primary is the ClaudeUsage path; under `ask` both are offered.
+// P5 O7 M9 ("The relay check and the features"): on the machine's own route the check is advisory, because the machine's
+// settings, not MAWS, chose the relay: `onStartAnyway` offers Start anyway, the primary under `ask`.
 import type { RelayHealth } from '@shared/engine/relay-health';
 import { formatAgo } from '@shared/app/date-format';
 import { PRIMARY, QUIET, SECONDARY } from './ui';
@@ -19,6 +21,7 @@ export function RelayCard({
   onAccept,
   onDecline,
   onRecheck,
+  onStartAnyway,
 }: {
   health: RelayHealth;
   policy: RelayPolicy;
@@ -28,6 +31,7 @@ export function RelayCard({
   onAccept(): void;
   onDecline(): void;
   onRecheck(): void;
+  onStartAnyway?: () => void; // P5 O7 M9: the machine's own route
 }) {
   const age = formatAgo(Math.max(0, now - Date.parse(health.checkedAt)), { seconds: true });
   const reason = health.error ?? (health.status === null ? 'no answer' : `HTTP ${health.status}`);
@@ -37,8 +41,13 @@ export function RelayCard({
     </button>
   );
   const direct = (
-    <button key="direct" type="button" disabled={gatewayModel} title={gatewayModel ? 'Pick a Claude model first' : undefined} onClick={onAccept} className={policy === 'wait' ? SECONDARY : PRIMARY}>
+    <button key="direct" type="button" disabled={gatewayModel} title={gatewayModel ? 'Pick a Claude model first' : undefined} onClick={onAccept} className={policy === 'wait' || onStartAnyway ? SECONDARY : PRIMARY}>
       Run direct
+    </button>
+  );
+  const anyway = onStartAnyway && (
+    <button key="anyway" type="button" onClick={onStartAnyway} className={policy === 'wait' ? SECONDARY : PRIMARY}>
+      Start anyway
     </button>
   );
   return (
@@ -48,11 +57,12 @@ export function RelayCard({
         {policy === 'wait' ? `Waiting for the relay · checked ${age}` : `Checked ${age}`} · <span className="font-mono">{health.url}/api/hello</span> · {reason}
       </p>
       <ul className="m-0 flex list-none flex-col gap-1 p-0 text-ui-sm text-fg-muted">
-        <li>Open ClaudeUsage, then start: starts routed as soon as the relay answers.</li>
+        {onStartAnyway && <li>Start anyway: this machine’s own settings send it there; the session starts and says what it reached.</li>}
+        <li>Open ClaudeUsage, then start: starts {onStartAnyway ? 'on this route' : 'routed'} as soon as the relay answers.</li>
         <li>Run direct: the engine’s own login for this session; no gateway models, and switching back later restarts the session.</li>
       </ul>
       <div className="flex items-center gap-2">
-        {policy === 'wait' ? [open, direct] : [direct, open]}
+        {policy === 'wait' ? [open, anyway, direct] : [anyway, direct, open]}
         <button type="button" onClick={onRecheck} className={QUIET}>
           Retry
         </button>

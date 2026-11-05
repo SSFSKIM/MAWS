@@ -37,6 +37,8 @@ import { trustStateOf } from './trust';
 import { openedEvent, sideThreadTitle } from '../side/side-threads'; // E3
 import { inheritOwnerOverride, ownerChannelLaunch, ownerChannelLaunched } from '../owner/launch'; // P2-C (2026-10-09)
 import { launchScopeOf } from './artifact-scope'; // P2-E1
+import { launchOnHost } from './machine-route'; // P5 O7 M9
+import type { Route } from '@shared/engine/route'; // P5 O7 M9
 
 export { SetupFailure, type Setup } from './setup-steps';
 
@@ -61,13 +63,13 @@ export interface BootstrapNote {
 export async function runBootstrap(
   s: Setup,
   appSessionId: AppSessionId,
-  input: { cwd: string; additionalDirectories: readonly string[]; gateway: 'gateway' | 'direct'; trustKey: string; note: BootstrapNote },
+  input: { cwd: string; additionalDirectories: readonly string[]; gateway: 'gateway' | 'direct'; route?: Route /* P5 O7 M9 */; trustKey: string; note: BootstrapNote },
 ): Promise<void> {
   const bootstrapId = randomUUID() as AppSessionId;
   await input.note.put(bootstrapId, s.now());
   setupEvent(s, appSessionId, 'trusting', `Trusting ${input.trustKey}`);
   const fixture = takeReplay(s, 'trusting');
-  const spec = bootstrapSpec({ bootstrapId, cwd: input.cwd, additionalDirectories: input.additionalDirectories, gateway: input.gateway, trustKey: input.trustKey, replay: fixture?.path ?? null }, s.settings());
+  const spec = bootstrapSpec({ bootstrapId, cwd: input.cwd, additionalDirectories: input.additionalDirectories, gateway: input.gateway, ...(input.route !== undefined && { route: input.route }), trustKey: input.trustKey, replay: fixture?.path ?? null }, s.settings());
   if (fixture) spec.sessionId = fixture.sessionId; // under replay every launch carries its fixture's pin
   const watch = new LaunchWatch(s, bootstrapId);
   const forget = async () => {
@@ -79,7 +81,7 @@ export async function runBootstrap(
     }
   };
   try {
-    const answer = await hostCall(s.dispatch, 'session.launch', { spec });
+    const answer = await launchOnHost(s, 'trusting', { spec });
     if (answer.status === 'relay_unreachable') {
       await forget();
       throw new RelayFailure(answer.health);
@@ -142,9 +144,13 @@ class IntentRun {
 }
 
 export interface IntentAttempt {
-  gateway: 'gateway' | 'direct'; // the intent's, or `direct` for this attempt when the relay was down and settings say so
+  route: Route; // the intent's (P5 O7 M9: `route` before the legacy field), or `direct` for this attempt when the relay was down and settings say so
   directFallback: boolean;
 }
+
+// P5 O7 M9: an attempt's route as a launch's fields; a machine route keeps the intent's legacy field, which the launch
+// rewrites from the resolved base URL (machine-route.ts)
+const attemptRoute = (intent: SetupIntent, attempt: IntentAttempt): { route: Route; gateway: 'gateway' | 'direct' } => ({ route: attempt.route, gateway: attempt.route === 'machine' ? intent.gateway : attempt.route });
 
 export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attempt: IntentAttempt): Promise<void> {
   const run = new IntentRun(s, appSessionId);
@@ -197,7 +203,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
       await runBootstrap(s, appSessionId, {
         cwd,
         additionalDirectories: intent.additionalDirectories,
-        gateway: attempt.gateway,
+        ...attemptRoute(intent, attempt), // P5 O7 M9
         trustKey: trust.trustKey,
         note: { put: async (id, at) => void (await run.progress({ bootstrap: { appSessionId: id, at } })), clear: async () => void (await run.progress({ bootstrap: null })) },
       });
@@ -232,14 +238,14 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
     // P2-C start (2026-10-09): the owner channel's decision for this launch (the contract, the flag, the advertisement)
     const decided = await ownerChannelLaunch(
       s,
-      intentLaunchSpec({ ...run.intent, permissionMode: mode, gateway: attempt.gateway }, { cwd, trust: mapping.attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId), proofFile: s.spawnerProofs.pathOf(appSessionId) /* P5 O12 M11 */ }, s.settings()),
+      intentLaunchSpec({ ...run.intent, permissionMode: mode, ...attemptRoute(run.intent, attempt) }, { cwd, trust: mapping.attestation, replay: fixture?.path ?? null, browserBackend: s.browserBackend(appSessionId), proofFile: s.spawnerProofs.pathOf(appSessionId) /* P5 O12 M11 */ }, s.settings()),
       { kind: parent !== null ? 'fork' : 'new', transcriptOf: parent },
     );
     const spec = decided.spec;
     // P2-C end
     await writeSpawnerProof(s, appSessionId, run.intent.launchedBy); // P5 O12 M11: before the launch that names it
     watch = new LaunchWatch(s, appSessionId);
-    const answer = await hostCall(s.dispatch, 'session.launch', { spec, ...launchScopeOf(s.sessions, intent.lineage ?? null) /* P2-E1: a side thread's ancestors' artifacts */ });
+    const answer = await launchOnHost(s, 'launching', { spec, ...launchScopeOf(s.sessions, intent.lineage ?? null) /* P2-E1: a side thread's ancestors' artifacts */ });
     if (answer.status === 'relay_unreachable') throw new RelayFailure(answer.health);
     if (answer.status === 'refused') throw new SetupFailure('launching', `${answer.reason}: ${answer.message}`);
     ownerChannelLaunched(s, decided.record, { launchId: answer.session.launchId, at: s.now() }); // P2-C (2026-10-09): before any event of the launch

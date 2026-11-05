@@ -1,11 +1,13 @@
 // The machine half of the settings over the services front (P5 O3-D M5b; docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md,
 // Interfaces §G; D20, D25): main's mirror of `mawsd`'s, over a fake `machine` host.
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MachineSettings } from '@shared/ipc/schema/settings';
-import { machineSettingsDefaults } from '@shared/settings/defaults';
+import * as z from 'zod';
+import { readTolerant } from '@shared/ipc/tolerant';
+import { MachineSettingsPatchSchema, type MachineSettings } from '@shared/ipc/schema/settings';
+import { applyMachinePatch, machineSettingsDefaults } from '@shared/settings/defaults';
 import { createMachineSettingsMirror } from './machine-settings-mirror';
 
 type Answer = { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } };
@@ -167,5 +169,121 @@ describe('the machine settings mirror (Interfaces §G)', () => {
     await expect(mirror.update({ supervisor: { idleExitMinutes: 5 } })).rejects.toThrow('spine.lock is held by pid 4242');
     expect(mirror.state()).toEqual(withIdle(30));
     expect(told).toEqual([30]);
+  });
+
+  // P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M9 "The default, without a v2"): the default route
+  describe('the default route (P5 O7 M9)', () => {
+    const withRoute = (defaultRoute: 'gateway' | 'direct'): MachineSettings => ({ ...machineSettingsDefaults(), gateway: { ...machineSettingsDefaults().gateway, defaultRoute } });
+
+    it('starts from the files by the rule, reading machine-route.json and writing nothing', () => {
+      const host = machineHost();
+      expect(createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} }).defaultRoute()).toBe('machine'); // a first run
+      expect(readdirSync(dir)).toEqual([]);
+      writeFileSync(file, JSON.stringify(withRoute('direct')));
+      expect(createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} }).defaultRoute()).toBe('direct');
+      writeFileSync(join(dir, 'machine-route.json'), JSON.stringify({ version: 1, defaultRoute: 'gateway' }));
+      expect(createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} }).defaultRoute()).toBe('gateway');
+      writeFileSync(join(dir, 'machine-route.json'), '{"version":1,');
+      expect(createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} }).defaultRoute()).toBe('direct'); // unreadable: the rule
+    });
+
+    it('takes mawsd’s resolved default from its answers and changes, telling its listeners when the route alone changed', async () => {
+      const host = machineHost();
+      host.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings: withRoute('gateway'), version: 1, defaultRoute: 'machine' } }));
+      writeFileSync(join(dir, 'machine-route.json'), JSON.stringify({ version: 1, defaultRoute: 'gateway' })); // what the files said at the start
+      const mirror = createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} });
+      expect(mirror.defaultRoute()).toBe('gateway');
+      const told: string[] = [];
+      mirror.onChange(() => void told.push(mirror.defaultRoute()));
+      host.stream();
+      await mirror.answered();
+      expect(mirror.defaultRoute()).toBe('machine');
+      expect(told).toEqual(['machine']); // the settings are the defaults it started from: the route moved alone
+      host.fire('machineSettings.changed', { settings: withRoute('gateway'), defaultRoute: 'machine' });
+      expect(told).toEqual(['machine']); // nothing moved: nothing told
+      host.fire('machineSettings.changed', { settings: withRoute('gateway'), defaultRoute: 'gateway' });
+      expect(mirror.defaultRoute()).toBe('gateway');
+      expect(told).toEqual(['machine', 'gateway']);
+    });
+
+    it('reads a mawsd that predates M9 by its legacy field, which is what its launches act on', async () => {
+      const host = machineHost();
+      host.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings: withRoute('gateway'), version: 1 } }));
+      const mirror = createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} });
+      host.stream();
+      await mirror.answered();
+      expect(mirror.defaultRoute()).toBe('gateway'); // not the rule's machine: that mawsd's sessions start on gateway
+    });
+
+    it('sets the default as machineSettings.set’s defaultRoute and resolves with mawsd’s answer', async () => {
+      const host = machineHost();
+      host.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings: withRoute('gateway'), version: 1, defaultRoute: 'gateway' } }));
+      host.answers.set('machineSettings.set', async () => ({ ok: true, value: { settings: withRoute('gateway'), defaultRoute: 'machine' } }));
+      const mirror = createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} });
+      host.stream();
+      await mirror.answered();
+      expect(await mirror.setDefaultRoute('machine')).toBe('machine');
+      expect(host.asked.at(-1)).toEqual({ name: 'machineSettings.set', input: { patch: {}, defaultRoute: 'machine' } });
+      expect(mirror.defaultRoute()).toBe('machine');
+      host.answers.set('machineSettings.set', async () => ({ ok: false, error: { code: 'host_unavailable', message: 'spine.lock is held by pid 4242' } }));
+      await expect(mirror.setDefaultRoute('direct')).rejects.toThrow('spine.lock is held by pid 4242');
+      expect(mirror.defaultRoute()).toBe('machine');
+    });
+
+    // A mawsd that predates M9, answering as its front does: `machineSettings.set`'s input read by the real tolerant
+    // reader against that build's schema (an unknown key dropped, never refused), and no `defaultRoute` in any answer
+    const OLDER_SET_INPUT = z.strictObject({ patch: MachineSettingsPatchSchema });
+    function olderMawsd(host: ReturnType<typeof machineHost>, start: MachineSettings) {
+      let settings = start;
+      const read: unknown[] = [];
+      host.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings, version: 1 } }));
+      host.answers.set('machineSettings.set', async () => {
+        const input = readTolerant(OLDER_SET_INPUT, host.asked.at(-1)!.input);
+        if (!input.ok) return { ok: false, error: { code: 'invalid_input', message: input.error.message } };
+        read.push(input.value);
+        settings = applyMachinePatch(settings, input.value.patch);
+        return { ok: true, value: { settings } };
+      });
+      return read;
+    }
+
+    it('learns whether mawsd carries the route before its first route write, and never takes a dropped write for done', async () => {
+      const host = machineHost();
+      const read = olderMawsd(host, withRoute('gateway'));
+      const mirror = createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} }); // not streaming: no answer yet
+      await expect(mirror.setDefaultRoute('machine')).rejects.toThrow('predates the machine route');
+      expect(host.asked.map(({ name }) => name)).toEqual(['machineSettings.get']); // asked first; nothing written
+      expect(read).toEqual([]);
+      expect(mirror.defaultRoute()).toBe('gateway'); // what that mawsd's sessions start on
+
+      const unanswered = createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} });
+      expect(await unanswered.setDefaultRoute('direct')).toBe('direct');
+      expect(read).toEqual([{ patch: { gateway: { defaultRoute: 'direct' } } }]);
+
+      // a mawsd replaced by an older one between its read and the write: the write is dropped, and the set rejects
+      const swapped = machineHost();
+      swapped.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings: withRoute('gateway'), version: 1, defaultRoute: 'machine' } }));
+      const mirrored = createMachineSettingsMirror({ file, hosts: swapped.hosts, log: () => {} });
+      swapped.stream();
+      await mirrored.answered();
+      const dropped = olderMawsd(swapped, withRoute('gateway'));
+      await expect(mirrored.setDefaultRoute('direct')).rejects.toThrow('predates the machine route');
+      expect(dropped).toEqual([{ patch: {} }]); // the route was dropped by that build's reader
+    });
+
+    it('sets gateway or direct on a mawsd that predates M9 through the legacy field, and refuses machine there', async () => {
+      const host = machineHost();
+      host.answers.set('machineSettings.get', async () => ({ ok: true, value: { settings: withRoute('gateway'), version: 1 } }));
+      host.answers.set('machineSettings.set', async () => ({ ok: true, value: { settings: withRoute('direct') } }));
+      const mirror = createMachineSettingsMirror({ file, hosts: host.hosts, log: () => {} });
+      host.stream();
+      await mirror.answered();
+      expect(await mirror.setDefaultRoute('direct')).toBe('direct');
+      expect(host.asked.at(-1)).toEqual({ name: 'machineSettings.set', input: { patch: { gateway: { defaultRoute: 'direct' } } } });
+      const asked = host.asked.length;
+      await expect(mirror.setDefaultRoute('machine')).rejects.toThrow('predates the machine route');
+      expect(host.asked).toHaveLength(asked); // nothing sent
+      expect(mirror.defaultRoute()).toBe('direct');
+    });
   });
 });

@@ -436,6 +436,29 @@ describe('session records in the index', () => {
     expect(bindings).toEqual([[record.appId, engineId]]);
   });
 
+  // P5 O7 M9 (Interfaces §U): the record's gateway keeps the route it launched on and what get_status reported of it, in
+  // two added columns an older build leaves alone. The route is the one the launch chose (setRoute, at the launch),
+  // which an older host's status, carrying none, leaves standing (fix round, item 1); what was observed is the status's
+  // alone, cleared by one without it
+  it('keeps the gateway’s route and observed across a reopen; a status carrying neither clears only what was observed', () => {
+    const { record } = index.sessions.createForLaunch(LAUNCH);
+    const machine = { routed: false, baseUrl: 'https://inference.example.invalid', autoModeServer: 'unknown', route: 'machine', observed: { kind: 'host', baseUrl: 'https://inference.example.invalid' } } as const;
+    expect(index.sessions.applyEngineStatus(record.appId, { gateway: machine }).gateway).toEqual(machine);
+    index.close();
+    index = new Index(join(dir.path, 'index.sqlite'));
+    expect(index.sessions.get(record.appId)!.gateway).toEqual(machine);
+    expect(SessionRecordSchema.parse(index.sessions.get(record.appId)).gateway).toEqual(machine);
+    expect(index.sessions.applyEngineStatus(record.appId, { gateway: { routed: false, baseUrl: null, autoModeServer: 'unknown' } }).gateway).toEqual({ routed: false, baseUrl: null, autoModeServer: 'unknown', route: 'machine' });
+  });
+
+  it('setRoute records the route a launch chose, and a later one replaces it; an unknown id is no write', () => {
+    const { record } = index.sessions.createForLaunch(LAUNCH);
+    expect(index.sessions.setRoute(record.appId, 'machine')?.gateway.route).toBe('machine');
+    expect(index.sessions.setRoute(record.appId, 'direct')?.gateway.route).toBe('direct');
+    expect(index.sessions.get(record.appId)!.gateway.route).toBe('direct');
+    expect(index.sessions.setRoute(randomUUID() as AppSessionId, 'gateway')).toBeNull();
+  });
+
   // C3's ask (gateway filled for disk sessions): the transcript records no base URL or auto-mode server, so a session
   // discovered on disk carries null and 'unknown' until a verified status of a live process fills them, and what a
   // status filled stays through later summaries (and restarts: they are columns).

@@ -123,7 +123,8 @@ async function ready() {
 describe('what crosses, as what', () => {
   it('takes the six lease reads by name as calls, and every M5c act as a `machine` act', () => {
     const l = lab();
-    expect([...MACHINE_CALLS]).toEqual(['connectors.open', 'connectors.declare', 'connectors.watch', 'connectors.unwatch', 'connectors.visibility', 'connectors.close']);
+    // P5 O7 M9: and the remote setup's two reads (./remote.test.ts' "the remote setup (M9)")
+    expect([...MACHINE_CALLS]).toEqual(['connectors.open', 'connectors.declare', 'connectors.watch', 'connectors.unwatch', 'connectors.visibility', 'connectors.close', 'machine.folders.list', 'session.trust.check']);
     for (const name of [...MACHINE_CALLS, ...MACHINE_ACTS]) expect([name, l.adapter.handles(name)]).toEqual([name, true]);
     for (const name of ['connectors.call', 'connectors.refresh', 'delivery.send', 'delivery.cancel', 'connectors.connect', 'connectors.signIn', 'connectors.signInServer', 'artifacts.grantConnectorTool'] as CommandName[]) expect(MACHINE_ACTS.has(name)).toBe(true);
     // nothing else is widened: the plainly graded reads keep the manager's path

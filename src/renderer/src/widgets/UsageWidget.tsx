@@ -12,6 +12,7 @@ import * as z from 'zod';
 import { windowsFromGetUsage } from '../statusline/direct-fallback';
 import { resetsIn, windowShown } from '../statusline/format';
 import { POPOVER_TICK_MS, useNow } from '../statusline/use-now';
+import { throughClaudeUsage } from '../gateway/observed-route'; // P5 O7 M9
 import { useSessions } from '../stores/sessions';
 import { useSessionWindows, useUsage, type Windows } from '../stores/usage';
 import { USAGE, WIDGET_TITLE } from './copy';
@@ -118,7 +119,7 @@ export function UsageBody({ view, answer, appSessionId }: { view: UsageView; ans
 
 export function UsageWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const read = useEngineRead('session.getUsage', { appSessionId });
-  const route = useSessions((s) => (s.engine.get(appSessionId)?.gateway.mode === 'direct' ? 'direct' : 'gateway'));
+  const route = useSessions((s) => (throughClaudeUsage(s.engine.get(appSessionId) ?? null, null) === false ? 'direct' : 'gateway')); // P5 O7 M9: what it was observed reaching
   return (
     <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.usage} command="usage" state={read.state} error={read.error} readAt={read.readAt} close={close}>
       {read.data && <UsageBody view={present(read.data, route)} answer={read.data} appSessionId={appSessionId} />}

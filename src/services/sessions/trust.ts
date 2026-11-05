@@ -8,6 +8,8 @@ import { existsSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { SetupReadRefused } from '@shared/machine/git-reads';
+import { configFilePath, legacyConfigPath } from '@shared/engine/config-dir'; // P5 O7 M9: the one global-config selection
 import { normalizePath, type TrustState } from '@shared/sessions/trust';
 import { NotARepositoryError, type GitRun } from '../git/runner';
 
@@ -19,20 +21,6 @@ function homeOf(env: NodeJS.ProcessEnv): string {
   return env.HOME || homedir();
 }
 
-// The engine's `Lo()` (SPEC §3 16.1): the legacy `<configHome>/.config.json` wins outright when it exists, where the
-// config home is CLAUDE_CONFIG_DIR or `~/.claude`; otherwise `${CLAUDE_CONFIG_DIR || homedir}/.claude<suffix>.json`.
-// The suffix is the OAuth environment's (`w3()`, cli.pretty.js 525522-525533): 2.1.283 compiles its environment
-// switch to the constant "prod", so `-staging-oauth` and `-local-oauth` are unreachable and only
-// CLAUDE_CODE_CUSTOM_OAUTH_URL selects one, `-custom-oauth`.
-export function configFilePath(env: NodeJS.ProcessEnv, exists: (path: string) => boolean = existsSync): string {
-  const home = homeOf(env);
-  const configHome = env.CLAUDE_CONFIG_DIR || join(home, '.claude');
-  const legacy = join(configHome, '.config.json');
-  if (exists(legacy)) return legacy;
-  const suffix = env.CLAUDE_CODE_CUSTOM_OAUTH_URL ? '-custom-oauth' : '';
-  return join(env.CLAUDE_CONFIG_DIR || home, `.claude${suffix}.json`);
-}
-
 async function realOrSelf(path: string): Promise<{ path: string; exists: boolean }> {
   try {
     return { path: normalizePath(await realpath(path)), exists: true };
@@ -41,21 +29,36 @@ async function realOrSelf(path: string): Promise<{ path: string; exists: boolean
   }
 }
 
+// The repository a directory is in, as `git rev-parse --show-toplevel --git-common-dir --git-dir` answers it: null
+// when it is in none; throws where git fails otherwise (a bare repository has no toplevel).
+export type RepoDirs = (directory: string) => Promise<{ toplevel: string; commonDir: string; gitDir: string } | null>;
+
+export const revParsed =
+  (git: GitRun): RepoDirs =>
+  async (directory) => {
+    let out: string;
+    try {
+      out = await git(directory, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir', '--git-dir']);
+    } catch (error) {
+      if (error instanceof NotARepositoryError) return null;
+      throw error;
+    }
+    const [toplevel, commonDir, gitDir] = out.split('\n').map((line) => line.trim());
+    if (!toplevel || !commonDir || !gitDir) throw new Error(`git rev-parse answered no toplevel, common dir and git dir for ${directory}`);
+    return { toplevel, commonDir, gitDir };
+  };
+
 // The trust key (SPEC §3 15.1-15.4): the main worktree's root when the directory is inside a repository (linked
 // worktrees share it), else the directory's own NFC realpath. A missing directory answers its own spelling, never
-// throws; any other git failure does, because a wrong key would ask about, and attest, the wrong directory.
-export async function trustKeyOf(directory: string, git: GitRun): Promise<{ trustKey: string; keyKind: 'repo' | 'directory'; directory: string }> {
+// throws; any other git failure does, because a wrong key would ask about, and attest, the wrong directory. `repoOf`
+// is git's answer by default; a remote setup's trust read, before trust, reads git's files instead (P5 O7 M9 round 2,
+// src/services/machine/setup.ts), the same key for the same folder.
+export async function trustKeyOf(directory: string, git: GitRun, repoOf: RepoDirs = revParsed(git)): Promise<{ trustKey: string; keyKind: 'repo' | 'directory'; directory: string }> {
   const resolved = await realOrSelf(directory);
   if (!resolved.exists) return { trustKey: resolved.path, keyKind: 'directory', directory: resolved.path };
-  let out: string;
-  try {
-    out = await git(resolved.path, ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir', '--git-dir']);
-  } catch (error) {
-    if (error instanceof NotARepositoryError) return { trustKey: resolved.path, keyKind: 'directory', directory: resolved.path };
-    throw error;
-  }
-  const [toplevel, commonDir, gitDir] = out.split('\n').map((line) => line.trim());
-  if (!toplevel || !commonDir || !gitDir) throw new Error(`git rev-parse answered no toplevel, common dir and git dir for ${resolved.path}`);
+  const repo = await repoOf(resolved.path);
+  if (repo === null) return { trustKey: resolved.path, keyKind: 'directory', directory: resolved.path };
+  const { toplevel, commonDir, gitDir } = repo;
   let root: string;
   if (basename(commonDir) === '.git') root = dirname(commonDir);
   else {
@@ -103,6 +106,11 @@ export interface TrustDeps {
   git: GitRun;
   env: NodeJS.ProcessEnv;
   warn?: (message: string) => void;
+  // P5 O7 M9: a remote setup's guarded read (src/services/machine/setup.ts): asked before each file of what trust would
+  // load is read, its link followed only where it may be; a file it refuses fails the read rather than being skipped
+  guard?: (path: string) => Promise<boolean>;
+  // P5 O7 M9 round 2: the same run's repository, read from git's files rather than by git (`trustKeyOf`'s `repoOf`)
+  repo?: RepoDirs;
 }
 
 // E11 (tracker row E6 "small per-call costs in scm.*"): the key and whether the store trusts it, reading nothing of what
@@ -110,8 +118,12 @@ export interface TrustDeps {
 export type TrustedKey = Pick<TrustState, 'directory' | 'trustKey' | 'keyKind' | 'configPath' | 'trusted'>;
 
 export async function trustedKeyOf(directory: string, deps: TrustDeps): Promise<TrustedKey> {
-  const key = await trustKeyOf(directory, deps.git);
+  const key = await trustKeyOf(directory, deps.git, deps.repo);
+  // P5 O7 M9 round 3: under a remote setup's guard the store is a file of what is read too: the legacy file looked for,
+  // then the store, each through the guard first
+  if (deps.guard !== undefined) await guarded(legacyConfigPath(deps.env), deps.guard);
   const configPath = configFilePath(deps.env);
+  if (deps.guard !== undefined) await guarded(configPath, deps.guard);
   const projects = await readTrustStore(configPath, { warn: deps.warn });
   return { ...key, configPath, trusted: projects[key.trustKey]?.hasTrustDialogAccepted === true };
 }
@@ -127,7 +139,7 @@ export async function trustStateOf(directory: string, deps: TrustDeps): Promise<
     trusted: key.trusted,
     source: key.trusted ? 'trustKey' : null,
     isHome: key.directory === home,
-    found: await gatedFiles(key.directory),
+    found: await gatedFiles(key.directory, deps.guard),
   };
 }
 
@@ -136,7 +148,7 @@ export async function trustStateOf(directory: string, deps: TrustDeps): Promise<
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-async function readJson(path: string): Promise<Record<string, unknown> | null> {
+async function readJsonAt(path: string): Promise<Record<string, unknown> | null> {
   try {
     const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
     return isObject(parsed) ? parsed : null;
@@ -165,7 +177,15 @@ function settingsSummary(settings: Record<string, unknown>): string {
   return parts.join(', ');
 }
 
-async function gatedFiles(directory: string): Promise<TrustState['found']> {
+async function guarded(path: string, guard: NonNullable<TrustDeps['guard']>): Promise<void> {
+  if (!(await guard(path))) throw new SetupReadRefused('protected', path); // the setup's handler answers it as its refusal
+}
+
+async function gatedFiles(directory: string, guard?: TrustDeps['guard']): Promise<TrustState['found']> {
+  const readJson = async (path: string) => {
+    if (guard !== undefined) await guarded(path, guard);
+    return readJsonAt(path);
+  };
   const found: TrustState['found'] = [];
   for (const file of ['.claude/settings.json', '.claude/settings.local.json']) {
     const settings = await readJson(join(directory, file));

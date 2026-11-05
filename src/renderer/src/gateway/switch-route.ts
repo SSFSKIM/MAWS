@@ -7,6 +7,10 @@
 //   rechecking   one more session.status; a background task the confirm did not name returns to confirming
 //   stopping     session.stop { reason: 'stop' }, then the exit (C3's ladder; the queue and grants stay in its state file)
 //   starting     C10's session.start with options { gateway, model?, effort? }, then a ready status on the new route
+//   advising     P5 O7 M9: back to the machine's own, main's launch check found the relay its settings name dead: the
+//                person's Switch anyway starts past it (`startAnyway`), Cancel leaves the session stopped
+//                P5 O7 M9: and where it refused the model (a gateway alias the machine's resolution can't reach), the sheet
+//                asks again for a Claude model, as a Direct switch's does, and the start goes again with it
 //   done         a toast, and the queue resumed when the switch's own interrupt paused it
 //   failed       at any phase: the session left where that phase reached, said in words, never retried by itself
 // Each dependency is injected, so the machine runs the same over the app's IPC and over a scripted store.
@@ -20,7 +24,8 @@ import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { isGatewayModel } from '@shared/sessions/models';
 import { runAction } from '../keymap/actions-runtime';
-import { FOOTER, SWITCH, type Route } from './copy';
+import { FOOTER, SWITCH, type SwitchTarget } from './copy';
+import { machineReachedBriefly } from './observed-route'; // P5 O7 M9
 import { switchRefusal } from './routing-facts';
 import { sessionStartOver, type SessionStart, type StartOptions } from './session-start';
 import { useGateway, type GatewayStore, type SwitchConfirm, type SwitchState } from './store';
@@ -59,6 +64,7 @@ class Failed extends Error {}
 export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
   const timeouts = { ...TIMEOUTS, ...deps.timeouts };
   const asks = new Map<AppSessionId, (answer: SwitchAnswer | null) => void>();
+  const advisories = new Map<AppSessionId, (go: boolean) => void>(); // P5 O7 M9
 
   const put = (id: AppSessionId, state: SwitchState) => store.setState((s) => ({ switching: new Map(s.switching).set(id, state) }));
   const clear = (id: AppSessionId) =>
@@ -116,7 +122,7 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
     return new Promise((resolve) => asks.set(id, resolve));
   }
 
-  async function switchRoute(id: AppSessionId, target: Route): Promise<SwitchOutcome> {
+  async function switchRoute(id: AppSessionId, target: SwitchTarget): Promise<SwitchOutcome> {
     const current = store.getState().switching.get(id);
     if (current && current.phase !== 'done' && current.phase !== 'failed') {
       deps.toast(SWITCH.alreadySwitching);
@@ -217,7 +223,7 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
 
       state = { ...state, phase: 'starting', error: null };
       put(id, state);
-      const options: StartOptions = { gateway: target };
+      const options: StartOptions = target === 'machine' ? { route: 'machine' } : { gateway: target }; // P5 O7 M9
       if (answer.model !== null) options.model = answer.model;
       if (answer.effort !== null) options.effort = answer.effort;
       // Subscribed before the start, so a setup failure that follows at once is heard.
@@ -230,13 +236,42 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
         });
       });
       try {
-        const started = await start.start(id, options);
+        let started = await start.start(id, options);
+        // P5 O7 M9: the machine's own route is held to its launch's model and relay checks, which the renderer cannot run
+        // before the stop (only main resolves where the machine's settings send it). A model it refused: a Claude model is
+        // asked for, as a Direct switch asks, and the start goes again with it.
+        if (started.status === 'model_refused' && target === 'machine') {
+          confirm = { ...confirm, backgroundTasks: [], requiresModel: true, model: null, effort: null };
+          state = { ...state, phase: 'confirming', confirm, error: started.reason };
+          const picked = await ask(id, state);
+          if (picked === null || picked.model === null) return fail(SWITCH.notSwitched(started.reason));
+          answer = picked;
+          confirm = { ...confirm, model: picked.model, effort: picked.effort };
+          state = { ...state, phase: 'starting', confirm, error: null };
+          put(id, state);
+          options.model = picked.model;
+          if (picked.effort !== null) options.effort = picked.effort;
+          started = await start.start(id, options);
+        }
+        // and the relay its settings name not answering: asked now, and passed only on Switch anyway
+        if (started.status === 'relay_unreachable' && target === 'machine') {
+          state = { ...state, phase: 'advising', error: null };
+          put(id, state);
+          const go = await new Promise<boolean>((resolve) => advisories.set(id, resolve));
+          if (!go) return fail(SWITCH.relayAdvisory.cancelled);
+          state = { ...state, phase: 'starting', error: null };
+          put(id, state);
+          started = await start.start(id, { ...options, startAnyway: true });
+        }
         if (started.status !== 'starting') return fail(SWITCH.refused(started.reason));
         const verdict = await awaitStatus<'ready' | 'mismatch'>(
           id,
           (s) => {
             if (s.launchId === beforeLaunch || s.process !== 'ready' || s.gateway.verified === 'pending') return undefined;
             // verified on the route asked for; a mismatch, or a verified launch on the other route, fails at once
+            // P5 O7 M9: back on the machine's own route, verified as a launch is: whatever get_status reported is what the
+            // machine reached (`observed`), never a mismatch
+            if (target === 'machine') return 'ready';
             const verified = s.gateway.verified === 'routed' || s.gateway.verified === 'direct';
             return verified && s.gateway.mode === target ? 'ready' : 'mismatch';
           },
@@ -247,7 +282,7 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
           },
         );
         if (failure !== null) return fail(SWITCH.refused(failure));
-        if (verdict === 'mismatch') return fail(SWITCH.mismatch(target));
+        if (verdict === 'mismatch' && target !== 'machine') return fail(SWITCH.mismatch(target));
         if (verdict === null) return fail(SWITCH.notReady);
       } finally {
         (offFailure as (() => void) | null)?.();
@@ -255,7 +290,7 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
 
       await resumeQueue();
       put(id, { ...state, phase: 'done', error: null });
-      deps.toast(SWITCH.toast(displayTitle(record), target, answer.displayName));
+      deps.toast(target === 'machine' ? SWITCH.toastMachine(displayTitle(record), machineReachedBriefly(deps.status(id)?.gateway.observed ?? null), answer.displayName) : SWITCH.toast(displayTitle(record), target, answer.displayName));
       return 'done';
     } catch (error) {
       if (error instanceof Failed) return fail(error.message);
@@ -263,7 +298,17 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
       return fail(error instanceof Error ? error.message : String(error));
     } finally {
       asks.delete(id);
+      advisories.delete(id);
     }
+  }
+
+  // P5 O7 M9: the relay advisory's answer (Switch anyway: true); false when nothing is asking.
+  function advise(id: AppSessionId, go: boolean): boolean {
+    const resolve = advisories.get(id);
+    if (!resolve) return false;
+    advisories.delete(id);
+    resolve(go);
+    return true;
   }
 
   // The sheet's answer; refused (false) while a required model is missing, or when nothing is asking.
@@ -277,7 +322,7 @@ export function createRouteSwitcher(deps: SwitchDeps, store: GatewayStore) {
     return true;
   }
 
-  return { switchRoute, answer };
+  return { switchRoute, answer, advise };
 }
 
 // The app's switcher: the IPC client, C5's sessions store, C10's start, C5's toasts.
@@ -292,5 +337,6 @@ const app = createRouteSwitcher(
   useGateway,
 );
 
-export const switchRoute = (appSessionId: AppSessionId, target: Route): Promise<SwitchOutcome> => app.switchRoute(appSessionId, target);
+export const switchRoute = (appSessionId: AppSessionId, target: SwitchTarget): Promise<SwitchOutcome> => app.switchRoute(appSessionId, target);
 export const answerSwitch = (appSessionId: AppSessionId, reply: SwitchAnswer | null): boolean => app.answer(appSessionId, reply);
+export const answerRelayAdvisory = (appSessionId: AppSessionId, go: boolean): boolean => app.advise(appSessionId, go); // P5 O7 M9

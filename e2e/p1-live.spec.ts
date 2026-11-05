@@ -253,7 +253,7 @@ const sceneOf = (live: Live) => ({ maws: live.maws, page: live.page, pane: live.
 // The product app over the case's profile with the installed engine, its window's event log recording, once the seeded
 // sessions are listed. `a15First` is the case's first reading (taken before the first launch when not given).
 async function openLive(sc: CaseScratch, note: (line: string) => void, a15First: A15Reading = a15Reading()): Promise<Live> {
-  const maws = await launchMaws({ userData: sc.userData, env: { MAWS_E2E_ENGINE_BIN: theEngine().bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config, MAWS_E2E_OPEN_LOG: join(sc.root, 'open.txt') } });
+  const maws = await launchMaws({ defaultRoute: 'gateway', userData: sc.userData, env: { MAWS_E2E_ENGINE_BIN: theEngine().bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config, MAWS_E2E_OPEN_LOG: join(sc.root, 'open.txt') } });
   const live: Live = {
     note, sc, maws, page: maws.page, a15First,
     pane: maws.page.locator('[data-region="main"] [data-pane="0"]'),

@@ -10,7 +10,7 @@ import { SWITCH } from './copy';
 import { DirectModelDialog, DirectModelList, useDirectChoice } from './DirectModelSheet';
 import { GatewaySheet } from './GatewaySheet';
 import { useGateway, type SwitchConfirm } from './store';
-import { answerSwitch, switchButtonLabel, type SwitchAnswer } from './switch-route';
+import { answerRelayAdvisory, answerSwitch, switchButtonLabel, type SwitchAnswer } from './switch-route';
 
 const NO_MODEL: SwitchAnswer = { model: null, displayName: null, effort: null };
 
@@ -52,17 +52,40 @@ export function SwitchSheet({ appSessionId, confirm, error, answer = answerSwitc
   );
 }
 
-// The gateway's dialogs, mounted once by the app: the switch that is asking (one at a time) and `pickDirectModel`'s.
+// P5 O7 M9: back to the machine's own route, the relay its settings name not answering at the restart (the session is
+// stopped by then): Switch anyway starts it past the check, Cancel leaves it stopped.
+export function RelayAdvisorySheet({ appSessionId, answer = answerRelayAdvisory }: { appSessionId: AppSessionId; answer?: typeof answerRelayAdvisory }) {
+  return (
+    <GatewaySheet
+      data-relay-advisory={appSessionId}
+      title={SWITCH.relayAdvisory.title}
+      onClose={() => answer(appSessionId, false)}
+      canSubmit
+      onSubmit={() => answer(appSessionId, true)}
+      submitLabel={SWITCH.relayAdvisory.submit}
+      cancelLabel={SWITCH.cancel}
+    >
+      <p className="m-0 text-fg-muted">{SWITCH.relayAdvisory.body}</p>
+    </GatewaySheet>
+  );
+}
+
+// The gateway's dialogs, mounted once by the app: the switch that is asking (one at a time: its confirm, or the machine
+// route's relay advisory) and `pickDirectModel`'s.
 export function GatewayDialogs() {
   const asking = useGateway(
     useShallow((s) => {
-      for (const [appSessionId, state] of s.switching) if (state.phase === 'confirming' && state.confirm) return { appSessionId, confirm: state.confirm, error: state.error };
-      return { appSessionId: null, confirm: null, error: null };
+      for (const [appSessionId, state] of s.switching) {
+        if (state.phase === 'confirming' && state.confirm) return { appSessionId, confirm: state.confirm, error: state.error, advising: false };
+        if (state.phase === 'advising') return { appSessionId, confirm: null, error: null, advising: true };
+      }
+      return { appSessionId: null, confirm: null, error: null, advising: false };
     }),
   );
   return (
     <>
       {asking.appSessionId !== null && asking.confirm !== null && <SwitchSheet key={`${asking.appSessionId}:${asking.confirm.backgroundTasks.map((t) => t.taskId).join(',')}`} appSessionId={asking.appSessionId} confirm={asking.confirm} error={asking.error} />}
+      {asking.appSessionId !== null && asking.advising && <RelayAdvisorySheet key={asking.appSessionId} appSessionId={asking.appSessionId} />}
       <DirectModelDialog />
     </>
   );

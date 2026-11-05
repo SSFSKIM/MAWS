@@ -12,6 +12,7 @@ import { HistorySoughtSchema } from '../../graph/history-window';
 import { AgentIdSchema, AppSessionIdSchema, EventIdSchema, MessageUuidSchema, RequestIdSchema, TaskIdSchema } from '../../graph/ids';
 import { RequestAnswerSchema } from '../../engine/answers';
 import { EffortSchema, LaunchSpecSchema } from '../../engine/launch-spec';
+import { RouteSchema } from '../../engine/route'; // P5 O7 M9
 import { OperationEventSchema, OperationOutcomeSchema, OperationReceiptSchema, SESSION_OPERATIONS_MAX } from '../../engine/operations';
 import { RelayHealthSchema } from '../../engine/relay-health';
 import { RewindFilesOutcomeSchema, RewindOutcomeSchema } from '../../engine/rewind-outcome';
@@ -53,7 +54,7 @@ import { FirstMessageSchema, ForkTargetSchema, LocationSchema, SetupIntentPatchS
 import { AcquireOutcomeSchema, SetupEventSchema, SetupResourcesSchema, StartOutcomeSchema } from '../../sessions/setup'; // P2-A: AcquireOutcomeSchema
 import { TrustStateSchema } from '../../sessions/trust';
 // C10 end
-import type { CommandSpec } from './common';
+import { SetupOpenedSchema, type CommandSpec } from './common';
 import { SendUploadsSchema } from './files'; // P5 O7 M8: a send's uploads
 import { PtyIdSchema } from './pty'; // P5 O6 M1: takeOverPane's ptyId, branded for the address codec (loose, so its JSON Schema is the plain string's)
 // P2-C start (2026-10-09)
@@ -472,6 +473,7 @@ export type DeleteOutcome = z.infer<typeof DeleteOutcomeSchema>;
 // `model` and `effort` are a resume's overrides for that launch (C11's route switch); an intent's chips own them.
 export const StartOptionsSchema = z.strictObject({
   gateway: z.enum(['gateway', 'direct']).optional(),
+  route: RouteSchema.optional(), // P5 O7 M9: read before `gateway` (src/shared/engine/route.ts)
   trust: TrustDecisionSchema.optional(),
   model: z.string().nullable().optional(),
   effort: EffortSchema.nullable().optional(),
@@ -479,6 +481,9 @@ export const StartOptionsSchema = z.strictObject({
   // nothing, while a first message is in the request or retained for the session (an intent's, or a resume's behind a
   // card); absent, a start keeps and sends a retained message as it always has.
   requireEmptyMessage: z.literal(true).optional(),
+  // P5 O7 M9 (M9 "The relay check and the features"): the relay sheet's "Start anyway" on the machine route, whose relay
+  // check is advisory: a start past it, the machine's own settings left to decide; read by nothing else
+  startAnyway: z.literal(true).optional(),
 });
 export type StartOptions = z.infer<typeof StartOptionsSchema>;
 
@@ -572,7 +577,8 @@ const c10Events = {
 // visible as `session.projects.add` does), answered with where a session there starts. Owner main.
 const newChatCommands = {
   'session.projects.addFolder': {
-    input: z.strictObject({ directory: z.string() }),
+    // `opened` (P5 O7 M9's review): the endpoint's, under `machine.op` only, never a client's: the asking member's opens
+    input: z.strictObject({ directory: z.string(), opened: SetupOpenedSchema.optional() }),
     output: z.strictObject({ project: ProjectRecordSchema, location: LocationSchema }),
     owner: 'machine',
   },
@@ -754,6 +760,9 @@ export const SessionSpawnInputSchema = z.strictObject({
   model: z.string().min(1).optional(),
   effort: z.string().min(1).optional(),
   permission_mode: z.string().min(1),
+  // P5 O7 M9 (Interfaces §U): the asker accepted the checkout's trust card, so the machine runs the attested bootstrap the
+  // local start runs; the endpoint admits it for a machine owner only (src/endpoint/policy.ts' `spawnRefusal`)
+  trust: z.literal('accepted').optional(),
 });
 export type SessionSpawnInput = z.infer<typeof SessionSpawnInputSchema>;
 export const SPAWN_REFUSALS = ['untrusted', 'unknown-checkout', 'worktree-exists'] as const; // the reasons a caller words; any other is a sentence

@@ -43,3 +43,10 @@ export const HostStateSchema = z.strictObject({
   revision: z.number().int(), // increments on every transition of that host since app start; a consumer keeps the higher of snapshot and event
 });
 export type HostState = z.infer<typeof HostStateSchema>;
+
+/**
+ * P5 O7 M9's review: the protected folders (real paths) a remote setup's asking member opened, the endpoint's per-member
+ * record of their `machine.folders.list` calls with `open: true` (FOLDERS_OPENED_MAX of them), sent with the setup's
+ * machine calls so the machine's guard reads by that member's opens alone.
+ */
+export const SetupOpenedSchema = z.array(z.string().min(1).max(4096)).max(32);

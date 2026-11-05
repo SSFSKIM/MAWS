@@ -9,6 +9,7 @@ import { formatAgo } from '@shared/app/date-format';
 import { runAction as runShellAction } from '../keymap/actions-runtime';
 import { useNotices, type NoticesState } from '../stores/notices';
 import { useSessions, type SessionsState } from '../stores/sessions';
+import { throughClaudeUsage } from './observed-route';
 import { useGateway, type GatewayStore } from './store';
 
 export const RELAY_POLL_MS = 30_000;
@@ -16,7 +17,7 @@ export const RELAY_BANNER_ID = 'relay:down';
 
 const LIVE = new Set(['starting', 'initializing', 'ready']);
 const liveGatewaySessions = (state: SessionsState): number =>
-  [...state.engine.values()].filter((s) => s.gateway.mode === 'gateway' && LIVE.has(s.process)).length;
+  [...state.engine.values()].filter((s) => throughClaudeUsage(s, null) === true && LIVE.has(s.process)).length; // P5 O7 M9: what it was observed reaching
 
 export const hasLiveGatewaySession = (state: SessionsState): boolean => liveGatewaySessions(state) > 0;
 

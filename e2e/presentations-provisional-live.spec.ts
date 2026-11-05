@@ -271,7 +271,7 @@ test('the live run: the agent’s publish of a slide is seen as it is written, i
   let prompted = false; // a paid turn was asked for: from here an absent receipt is spend at the whole cap
   let failure: unknown = null;
   try {
-    maws = await launchMaws({ userData: sc.userData, env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config } });
+    maws = await launchMaws({ defaultRoute: 'gateway', userData: sc.userData, env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config } });
     await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1600, 1000)); // room for the panel's stage
     const { page } = maws;
     await recordEvents(page);

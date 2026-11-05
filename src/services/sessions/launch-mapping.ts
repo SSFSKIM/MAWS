@@ -5,6 +5,7 @@ import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { PermissionMode } from '@shared/graph/enums';
 import type { LaunchedBy, SessionRecord } from '@shared/graph/session';
 import { EffortSchema, type Effort, type LaunchedBySpec, type LaunchSpec } from '@shared/engine/launch-spec';
+import { readRecordedRoute, type Route } from '@shared/engine/route'; // P5 O7 M9
 import type { SetupIntent, TrustDecision } from '@shared/sessions/intent';
 import type { TrustState } from '@shared/sessions/trust';
 import { appMcpConfig, type AppMcpServer } from '@shared/engine/app-mcp-servers'; // P4-R8
@@ -16,8 +17,10 @@ type Gateway = LaunchSpec['gateway'];
 
 // ---- the settings seam (Consumed asks of C11) ---------------------------------------------------------------------
 // Settings v3 is C11's; until it lands C10 reads these defaults here, so nothing changes when C11 lands but the source.
+// P5 O7 M9: `gateway.route`, the machine's default route resolved (machine-route.json's choice, else the rule over
+// `defaultRoute`, which stays the legacy field); absent, the legacy field alone says it, as before M9.
 export interface C10Settings {
-  gateway: { defaultRoute: Gateway; relayUnreachable: 'ask' | 'direct' | 'wait' };
+  gateway: { defaultRoute: Gateway; relayUnreachable: 'ask' | 'direct' | 'wait'; route?: Route };
   // P4-R8: the app's MCP servers (settings v16); P4-A2: the launch profile every launch runs under (settings v17)
   engine: { subagentModel: string | null; mcpServers: readonly AppMcpServer[]; launchProfile: LaunchProfile };
   permissions: { autoFallback: PermissionMode }; // W3: settings v6, the mode a refused auto falls back to
@@ -36,6 +39,11 @@ export function readSettings(): C10Settings {
   return C10_SETTING_DEFAULTS;
 }
 
+// P5 O7 M9: the machine's default route as a carrier's `route`, only when the settings carry one (a new intent's, a fork
+// of a session never verified), and the default route itself, `route` read before the legacy field
+export const routeOfSettings = (settings: C10Settings): { route?: Route } => (settings.gateway.route === undefined ? {} : { route: settings.gateway.route });
+export const defaultRouteOf = (settings: C10Settings): Route => settings.gateway.route ?? settings.gateway.defaultRoute;
+
 // ---- the base mapping ---------------------------------------------------------------------------------------------
 export interface LaunchInput {
   appSessionId: AppSessionId;
@@ -45,6 +53,7 @@ export interface LaunchInput {
   effort: Effort | null;
   permissionMode: PermissionMode | null;
   gateway: Gateway;
+  route?: Route; // P5 O7 M9: read before `gateway`; the service writes the spec each host is sent (machine-route.ts)
   trust: Attestation | null;
   resume: { sessionId: SessionId; fork: boolean } | null;
   sessionId: SessionId | null;
@@ -68,6 +77,7 @@ export function toLaunchSpec(input: LaunchInput, settings: C10Settings = readSet
     permissionMode: input.permissionMode,
     permissionFallback: input.permissionMode === 'auto' ? settings.permissions.autoFallback : null, // W3
     gateway: input.gateway,
+    ...(input.route !== undefined && { route: input.route }), // P5 O7 M9
     subagentModel: settings.engine.subagentModel,
     resume: input.resume,
     sessionId: input.sessionId,
@@ -158,6 +168,7 @@ export function intentLaunchSpec(intent: SetupIntent, ctx: { cwd: string; trust:
       effort: intent.effort,
       permissionMode: intent.permissionMode,
       gateway: intent.gateway,
+      ...(intent.route !== undefined && { route: intent.route }), // P5 O7 M9
       trust: ctx.trust,
       resume: fork ? { sessionId: fork.engineSessionId, fork: true } : null,
       sessionId: intent.progress.engineSessionId,
@@ -170,7 +181,17 @@ export function intentLaunchSpec(intent: SetupIntent, ctx: { cwd: string; trust:
   );
 }
 
-export type ResumeOptions = Partial<{ gateway: Gateway; model: string | null; effort: Effort | null }>;
+export type ResumeOptions = Partial<{ gateway: Gateway; route: Route; model: string | null; effort: Effort | null }>;
+
+// P5 O7 M9: a resume's route: the caller's (`route`, else an older caller's `gateway`), else the record's last one
+// (`route` before `routed`), else, for a record never verified, the machine's default; and the legacy field beside it
+// (the service writes a machine route's from the resolved base URL before the launch, machine-route.ts)
+export function resumeRouteOf(record: Pick<SessionRecord, 'gateway'>, options: Pick<ResumeOptions, 'gateway' | 'route'>, settings: C10Settings): { route: Route; gateway: Gateway } {
+  const route = options.route ?? options.gateway ?? readRecordedRoute(record.gateway) ?? defaultRouteOf(settings);
+  if (route !== 'machine') return { route, gateway: route };
+  const routed = record.gateway.routed;
+  return { route, gateway: routed === true ? 'gateway' : routed === false ? 'direct' : settings.gateway.defaultRoute };
+}
 
 // A record's resume: a non-fork `--resume` of the engine id the record is bound to now (after a `/clear`, the new
 // transcript), else a fresh session C3 pins; `--add-dir` is not persisted by the engine, so the record's directories
@@ -179,7 +200,7 @@ export type ResumeOptions = Partial<{ gateway: Gateway; model: string | null; ef
 // and `effort` are C11's route-switch overrides for this launch; C3 re-applies the session's own grants by app id.
 // P5 O12 M11: the record's spawner, as at its start, with `ctx.proofFile`.
 export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, ctx: { trust: Attestation | null; replay: string | null; browserBackend?: string | null; proofFile?: string | null }, settings: C10Settings = readSettings()): LaunchSpec {
-  const routed = record.gateway.routed;
+  const route = resumeRouteOf(record, options, settings); // P5 O7 M9
   const recordEffort = EffortSchema.safeParse(record.effort);
   return toLaunchSpec(
     {
@@ -189,7 +210,7 @@ export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, 
       model: 'model' in options ? (options.model ?? null) : record.model.requested,
       effort: 'effort' in options ? (options.effort ?? null) : recordEffort.success ? recordEffort.data : null,
       permissionMode: record.permissionMode.requested,
-      gateway: options.gateway ?? (routed === true ? 'gateway' : routed === false ? 'direct' : settings.gateway.defaultRoute),
+      ...route,
       trust: ctx.trust,
       resume: record.engineSessionId ? { sessionId: record.engineSessionId, fork: false } : null,
       sessionId: null,
@@ -207,7 +228,7 @@ export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, 
 // P4-R8: it serves no turn, so it connects none of the app's MCP servers. P5 O12 M11: nor does it name a spawner, whatever
 // its conversation's record carries: it is no session of anyone's.
 export function bootstrapSpec(
-  input: { bootstrapId: AppSessionId; cwd: string; additionalDirectories: readonly string[]; gateway: Gateway; trustKey: string; replay: string | null },
+  input: { bootstrapId: AppSessionId; cwd: string; additionalDirectories: readonly string[]; gateway: Gateway; route?: Route /* P5 O7 M9 */; trustKey: string; replay: string | null },
   settings: C10Settings = readSettings(),
 ): LaunchSpec {
   return toLaunchSpec(
@@ -219,6 +240,7 @@ export function bootstrapSpec(
       effort: null,
       permissionMode: null,
       gateway: input.gateway,
+      ...(input.route !== undefined && { route: input.route }), // P5 O7 M9
       trust: { accepted: true, directory: input.trustKey },
       resume: null,
       sessionId: null,

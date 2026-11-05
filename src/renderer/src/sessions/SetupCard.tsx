@@ -6,7 +6,11 @@
 // tab and a record's resume alike (C7's composer shows a session's docked card whether or not it has started).
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import { machineOf } from '@shared/machine/address';
 import { isGatewayModel } from '@shared/sessions/models';
+import { readRecordedRoute, readRoute, type Route } from '@shared/engine/route'; // P5 O7 M9
+import { useResolvedDefaultRoute } from '../settings-tab/default-route'; // P5 O7 M9: a discovered session's route
+import type { StartOptions } from '@shared/ipc/schema/session';
 import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
 import { dockCard } from '../composer/docked/registry';
 // C11 start: the card's policy, its hand-off and Run direct on a gateway model (C11's Asks of C10 (2) and (7))
@@ -102,6 +106,11 @@ function FailureHost({ appSessionId, failure, busy }: { appSessionId: AppSession
 // is no longer the docked one, and the wait ends with it.
 const stillDocked = (appSessionId: AppSessionId, card: WaitingCard) => useSetup.getState().cards.get(appSessionId) === card;
 
+// P5 O7 M9: the start once the relay answers again: on the gateway route, routed; on any other, or a route nothing
+// records (a discovered session, which main resumes on the machine's default), the same start, its route kept: a
+// `gateway` option would move it to the gateway's
+const relayAnswered = (route: Route | null): StartOptions => (route === 'gateway' ? { gateway: 'gateway' } : {});
+
 // The relay card polls the relay while it is docked and starts routed by itself once the relay answers.
 function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; card: Extract<WaitingCard, { kind: 'relay' }>; busy: boolean }) {
   const [health, setHealth] = useState(card.health);
@@ -109,6 +118,20 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
   const model = useSetup((s) => s.intents.get(appSessionId)?.model ?? null);
   const recordModel = useSessions((s) => s.records.get(appSessionId)?.model.requested ?? null);
   const gatewayModel = isGatewayModel(model ?? recordModel ?? '');
+  // P5 O7 M9: the route the start was asked on, the intent's or the record's (`route` before the legacy field); on the
+  // machine's own the check is advisory, and a relay answering again continues on that route rather than the gateway's
+  const intentRoute = useSetup((s) => {
+    const intent = s.intents.get(appSessionId);
+    return intent === undefined ? undefined : readRoute(intent);
+  });
+  const recordRoute = useSessions((s) => {
+    const gateway = s.records.get(appSessionId)?.gateway;
+    return gateway === undefined ? null : readRecordedRoute(gateway);
+  });
+  // a session nothing records the route of resumes on the machine's default (main's resumeRouteOf): read here the same way
+  const machineDefault = useResolvedDefaultRoute(machineOf(appSessionId)); // the session's machine's, not this one's
+  const route = intentRoute ?? recordRoute ?? machineDefault ?? null;
+  const machine = route === 'machine';
   // C11 start: settings v3's relayUnreachable (wait → 'wait'; ask and direct → 'ask'), and C11's hand-off action
   const policy = useRelayPolicy();
   const openClaudeUsage = useOpenClaudeUsage();
@@ -127,7 +150,7 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
       if (isContinuing(appSessionId)) return; // P2-A: a continuation of this card is in flight; it answers for the card
       if (result.value.ok) {
         live = false;
-        void continueSetup(appSessionId, { gateway: 'gateway' }, card.message);
+        void continueSetup(appSessionId, relayAnswered(route), card.message);
       }
     };
     const timer = setInterval(() => void check(), RELAY_POLL_MS);
@@ -135,7 +158,7 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
       live = false;
       clearInterval(timer);
     };
-  }, [appSessionId, card, picking /* C11 */]);
+  }, [appSessionId, card, picking /* C11 */, route /* P5 O7 M9 */]);
 
   const recheck = async () => {
     const result = await ipc.invoke('engine.relayHealth', { force: true });
@@ -143,19 +166,21 @@ function RelayHost({ appSessionId, card, busy }: { appSessionId: AppSessionId; c
     setNow(Date.now());
     if (!result.ok) return;
     setHealth(result.value);
-    if (result.value.ok) void continueSetup(appSessionId, { gateway: 'gateway' }, card.message);
+    if (result.value.ok) void continueSetup(appSessionId, relayAnswered(route), card.message);
   };
+  const anyway = machine ? () => void continueSetup(appSessionId, { startAnyway: true }, card.message) : undefined; // P5 O7 M9
   const direct = () => void runDirect(appSessionId, card.message, gatewayModel, undefined, () => stillDocked(appSessionId, card)); // C11: a gateway model takes a Claude model first (pickDirectModel); P2-A: the card still docked
   const decline = () => void releaseMessage(appSessionId, card.message);
   // C11 start: Enter runs Run direct on a gateway model too (C10 refused it there, `busy || gatewayModel`): it asks for a
   // Claude model first
-  const accept = busy ? null : direct;
+  // P5 O7 M9: on the machine's own route Enter takes the card's primary, Start anyway, which keeps the route
+  const accept = busy ? null : (anyway ?? direct);
   // C11 end
 
   return (
     <DockedCardFrame appSessionId={appSessionId} title={RELAY_CARD_TITLE} onAccept={accept} onDecline={busy ? null : decline}>
       {/* C11: gatewayModel={false}: with pickDirectModel in place a gateway model no longer blocks Run direct, it asks for a Claude model first */}
-      <RelayCard health={health} policy={policy} now={now} gatewayModel={false} openClaudeUsage={openClaudeUsage} onAccept={direct} onDecline={decline} onRecheck={() => void recheck()} />
+      <RelayCard health={health} policy={policy} now={now} gatewayModel={false} openClaudeUsage={openClaudeUsage} onAccept={direct} onDecline={decline} onRecheck={() => void recheck()} onStartAnyway={anyway} />
     </DockedCardFrame>
   );
 }

@@ -59,8 +59,9 @@ import type { commands as SideCommands } from '@shared/ipc/schema/side';
 import type { commands as HostCommands } from '@shared/ipc/schema/host'; // E11
 // E3 end
 // C10 start
-import type { ModelCatalogue } from '@shared/sessions/models';
-import { catalogueKey, ModelsCache, modelsKey } from './models-cache';
+import { isGatewayModel, type ModelCatalogue } from '@shared/sessions/models';
+import { catalogueKey, effectiveBaseUrl, ModelsCache, modelsKey } from './models-cache';
+import { legacyRouteOf } from '@shared/engine/route'; // P5 O7 M9
 // C10 end
 // E8 start
 import { homedir } from 'node:os';
@@ -169,6 +170,7 @@ export interface EngineIpcDeps {
   binaryProbe?: () => Promise<BinaryCheck>;
   checkRelay?: (force: boolean) => Promise<RelayHealth>;
   captureEnv?: () => Promise<Record<string, string>>;
+  systemRoot?: string; // P5 O7 M9: the managed settings' root for the machine route's resolution (tests' seam; absent, `/`)
   spawn?: (plan: LaunchPlan) => EngineTransport;
   log?: (message: string) => void;
   // C4 start: the history of an app session with no stream in this host, from its transcript on disk (C4's
@@ -696,8 +698,17 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // would launch in (whose settings may key it apart, debt wave 5; before that key's first list, the route's): with
   // `refresh`, the most recently launched ready session's list_models among that key's (a failure falls back to what
   // is cached, logged); otherwise the cache, else the built-in list. Bounded: its one control round trip runs under
-  // `bounded`.
-  handleC10('engine.models', async ({ refresh, gateway, cwd }): Promise<ModelCatalogue> => {
+  // `bounded`. P5 O7 M9: `route` before `gateway`; the machine route's catalogue is the legacy route's its resolved base
+  // URL reaches (models-cache.ts effectiveBaseUrl, the start guard's resolution: the relay's, else the direct one, as
+  // its launch is keyed), and while that cannot be resolved the direct one without a gateway model (no gateway list).
+  handleC10('engine.models', async (input): Promise<ModelCatalogue> => {
+    const { refresh, cwd } = input;
+    const machine = input.route === 'machine' ? await effectiveBaseUrl({ env: await captureEnv(), cwd: cwd ?? null, systemRoot: deps.systemRoot }).catch(() => null) : null;
+    const gateway = input.route === undefined ? input.gateway : input.route !== 'machine' ? input.route : machine?.kind === 'resolved' ? legacyRouteOf(machine.baseUrl, RELAY_URL) : 'direct';
+    const catalogue = await answerModels(refresh, gateway, cwd);
+    return input.route === 'machine' && machine?.kind !== 'resolved' ? { ...catalogue, models: catalogue.models.filter((model) => !isGatewayModel(model.value)) } : catalogue;
+  });
+  const answerModels = async (refresh: boolean, gateway: 'gateway' | 'direct' | undefined, cwd: string | undefined): Promise<ModelCatalogue> => {
     await modelsLoaded;
     // W13: the version the next launch would run, as the binary probe answers it (the tested one while none answers)
     const version = gateway === undefined ? TESTED_ENGINE_VERSION : ((await binaryProbe()).version ?? TESTED_ENGINE_VERSION);
@@ -721,7 +732,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
       }
     }
     return models.answer(key, route);
-  });
+  };
 
   // The whole erase behind delete conversation: the state file and the journal directory, then `session.forgotten` so
   // main's attention service retires the id. Refused while a process is reserved; the host keeps nothing afterwards.

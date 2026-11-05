@@ -39,6 +39,17 @@ describe('toSessionRecordPatch', () => {
     expect(toSessionRecordPatch(status({ gateway: { mode: 'direct', baseUrl: null, verified: 'direct', autoModeServer: 'disabled', localLane: null } })).gateway).toEqual({ routed: false, baseUrl: null, autoModeServer: 'disabled' });
   });
 
+  // P5 O7 M9: a machine-route status writes its legacy fields with legacy values and names what the machine reported
+  it("records a machine route's route and observation beside `routed`, which says whether ClaudeUsage carried it", () => {
+    const relay = status({ gateway: { mode: 'gateway', baseUrl: 'http://127.0.0.1:8641', verified: 'routed', autoModeServer: 'enabled', localLane: null, route: 'machine', observed: { kind: 'claudeusage', baseUrl: 'http://127.0.0.1:8641' } } });
+    expect(toSessionRecordPatch(relay).gateway).toEqual({ routed: true, baseUrl: 'http://127.0.0.1:8641', autoModeServer: 'enabled', route: 'machine', observed: { kind: 'claudeusage', baseUrl: 'http://127.0.0.1:8641' } });
+    const host = status({ gateway: { mode: 'direct', baseUrl: 'https://llm.example.com', verified: 'direct', autoModeServer: 'unknown', localLane: null, route: 'machine', observed: { kind: 'host', baseUrl: 'https://llm.example.com' } } });
+    const patch = toSessionRecordPatch(host);
+    expect(patch.gateway).toEqual({ routed: false, baseUrl: 'https://llm.example.com', autoModeServer: 'unknown', route: 'machine', observed: { kind: 'host', baseUrl: 'https://llm.example.com' } });
+    expect(SessionRecordSchema.parse({ ...record(), ...patch }).gateway).toEqual(patch.gateway);
+    expect(toSessionRecordPatch(status()).gateway).not.toHaveProperty('route'); // a pre-M9 host's status: nothing added
+  });
+
   it('a mode the engine moved to without a refusal reads as the requested mode, so the record\'s refusal rule holds', () => {
     const patch = toSessionRecordPatch(status({ permissionMode: { requested: 'auto', effective: 'plan', refusal: null } }));
     expect(patch.permissionMode).toEqual({ requested: 'plan', effective: 'plan', refusal: null });

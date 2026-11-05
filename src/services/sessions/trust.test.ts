@@ -6,7 +6,8 @@ import { createGitRunner } from '../git/runner';
 import { runGit } from '../../../test/support/git-fixture';
 import { ScratchRepo } from '../../../test/support/scratch-repo';
 import { TrustStoreFixture } from '../../../test/support/trust-store';
-import { configFilePath, readTrustStore, trustKeyOf, trustStateOf } from './trust';
+import { configFilePath } from '@shared/engine/config-dir'; // P5 O7 M9: moved from the trust reader
+import { readTrustStore, trustKeyOf, trustStateOf } from './trust';
 
 const none = () => false;
 

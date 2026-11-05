@@ -4,10 +4,15 @@
 // (sessions/remote-spawn.ts), by name. Another machine chosen, one line under the row says the session is lane B there
 // and runs on that machine's inference route (its route is the machine's settings, which no read of the menu carries),
 // and Send starts it there (`session.spawn`). An app that reaches no RL2 machine shows no menu.
+// P5 O7 M9 ("Remote setup"): a machine with no checkout of the project is offered too, to set it up there (the sheet,
+// RemoteSetupSheet.tsx, chooses the machine once the folder is registered); one whose owners alone could, or that predates
+// the setup, is listed greyed with why (sessions/remote-setup.ts).
 import { Popover } from 'radix-ui';
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { readCandidates, useRemoteSpawn, useSpawnTarget, type SpawnTarget } from '../../sessions/remote-spawn';
+import { openDialog } from '../../sessions/dialogs';
+import { useRemoteSpawn, useSpawnTarget, type SpawnTarget } from '../../sessions/remote-spawn';
+import { readMachines, SETUP_WORDS, suggestionsFor, type MachineChoice } from '../../sessions/remote-setup';
 import { useMachines } from '../../stores/machines';
 import { CHIP, NOTE, POPOVER } from './chip-style';
 
@@ -16,7 +21,7 @@ export const MACHINE_WORDS = {
   title: 'Where this chat runs',
   noProject: 'Choose a project to start it on another machine',
   looking: 'Looking for this project on other machines…',
-  none: 'No other machine has a checkout of this project',
+  none: 'No other machine can start this project', // P5 O7 M9: one without a checkout is offered to set it up
   line: (machine: string) => `Lane B on ${machine} · ${machine}’s inference route`,
 } as const;
 
@@ -36,15 +41,25 @@ function Item({ label, checked, onSelect }: { label: string; checked: boolean; o
   );
 }
 
+// P5 O7 M9: a machine to set the project up on (`onSelect`), or one that can't be, its reason in the item itself
+function SetupItem({ label, line, onSelect }: { label: string; line: string; onSelect: (() => void) | null }) {
+  return (
+    <button type="button" role="menuitem" disabled={onSelect === null} className={`${ITEM} h-auto flex-col items-start gap-0 py-1 disabled:hover:bg-transparent`} onClick={onSelect ?? undefined}>
+      <span className={`min-w-0 truncate ${onSelect === null ? 'text-fg-muted' : ''}`}>{label}</span>
+      <span className="text-ui-sm whitespace-normal text-fg-muted">{line}</span>
+    </button>
+  );
+}
+
 export function MachineMenu({ appSessionId, projectKey, disabled }: { appSessionId: AppSessionId; projectKey: string | null; disabled: string | null }) {
   const reaches = useReachesRl2();
   const chosen = useSpawnTarget(appSessionId, projectKey);
   const [open, setOpen] = useState(false);
-  const [candidates, setCandidates] = useState<SpawnTarget[] | null>(null); // null while asked
+  const [candidates, setCandidates] = useState<{ choices: MachineChoice[]; known: string[] } | null>(null); // null while asked
   useEffect(() => {
     if (!open || projectKey === null) return;
     let live = true;
-    void readCandidates(projectKey).then((found) => live && setCandidates(found));
+    void readMachines(projectKey).then((found) => live && setCandidates(found));
     return () => {
       live = false;
     };
@@ -52,8 +67,15 @@ export function MachineMenu({ appSessionId, projectKey, disabled }: { appSession
   if (!reaches) return null;
   const closed = disabled ?? (projectKey === null ? MACHINE_WORDS.noProject : null);
   const choose = (target: SpawnTarget | null) => {
-    useRemoteSpawn.getState().choose(appSessionId, target);
+    // P5 O7 M9: the machine already chosen on the same checkout keeps what its setup answered (an accepted trust card)
+    const kept = target !== null && chosen?.machine === target.machine && chosen.checkout === target.checkout ? chosen : target;
+    useRemoteSpawn.getState().choose(appSessionId, kept);
     setOpen(false);
+  };
+  const setUp = (choice: Extract<MachineChoice, { kind: 'setup' }>) => {
+    setOpen(false);
+    const { machine, name, key, home, first } = choice;
+    openDialog({ kind: 'remoteSetup', request: { kind: 'folder', tab: appSessionId, machine, name, key, home, first, suggestions: suggestionsFor(candidates?.known ?? [], home) } });
   };
   const label = chosen?.name ?? MACHINE_WORDS.local;
   return (
@@ -72,12 +94,22 @@ export function MachineMenu({ appSessionId, projectKey, disabled }: { appSession
         <Popover.Content aria-label="Choose a machine" side="top" align="start" sideOffset={6} collisionPadding={8} className={`${POPOVER} w-60`}>
           <div role="menu" aria-label="Machines" className="flex flex-col">
             <Item label={MACHINE_WORDS.local} checked={chosen === null} onSelect={() => choose(null)} />
-            {(candidates ?? []).map((target) => (
-              <Item key={target.machine} label={target.name} checked={chosen?.machine === target.machine} onSelect={() => choose(target)} />
-            ))}
+            {(candidates?.choices ?? []).map((choice) =>
+              choice.kind === 'ready' ? (
+                <Item key={choice.target.machine} label={choice.target.name} checked={chosen?.machine === choice.target.machine} onSelect={() => choose(choice.target)} />
+              ) : choice.kind === 'setup' ? (
+                chosen?.machine === choice.machine ? (
+                  <Item key={choice.machine} label={choice.name} checked onSelect={() => choose(chosen)} />
+                ) : (
+                  <SetupItem key={choice.machine} label={choice.name} line={SETUP_WORDS.setUp} onSelect={() => setUp(choice)} />
+                )
+              ) : (
+                <SetupItem key={choice.machine} label={choice.name} line={choice.words} onSelect={null} />
+              ),
+            )}
           </div>
           {candidates === null && <p className={`${NOTE} m-0`}>{MACHINE_WORDS.looking}</p>}
-          {candidates !== null && candidates.length === 0 && <p className={`${NOTE} m-0`}>{MACHINE_WORDS.none}</p>}
+          {candidates !== null && candidates.choices.length === 0 && <p className={`${NOTE} m-0`}>{MACHINE_WORDS.none}</p>}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

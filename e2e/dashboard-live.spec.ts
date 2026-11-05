@@ -140,7 +140,7 @@ test('the agent creates a dashboard from markdown, binds the CSV it wrote in one
   const allowed: string[] = [];
   let failure: unknown = null;
   try {
-    maws = await launchMaws({ userData, env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config, MAWS_DASHBOARD_E2E: '1' } });
+    maws = await launchMaws({ defaultRoute: 'gateway', userData, env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config, MAWS_DASHBOARD_E2E: '1' } });
     const { page } = maws;
     const other = new AgentSeam(join(userData, 'dashboard-e2e'));
     const pane = page.locator('[data-region="main"] [data-pane="0"]');

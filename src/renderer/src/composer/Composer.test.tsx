@@ -26,6 +26,7 @@ import { resetRemoteDrafts } from './editor/drafts'; // P5 O7 M2
 import { resetRemoteUploads } from './editor/remote-uploads'; // P5 O7 M4
 import { rememberRemoteDraft } from './editor/drafts'; // P5 O7 M4
 import { queueFirstSend, resetRemoteSpawn, restoreHeldAttempts, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
+import { useDialogs } from '../sessions/dialogs'; // P5 O7 M9
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
 import { itemFor, permission } from '../request-card/test-requests';
@@ -881,10 +882,25 @@ describe('a New chat tab started on another machine', () => {
     expect(stub.start).not.toHaveBeenCalled();
     expect(within(composerOf(0)).getByRole('status', { name: 'Starting' }).textContent).toBe('Starting on mini…');
     await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' }));
-    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['This project isn’t trusted on mini yet; open it there and trust it first']));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['This project isn’t trusted on mini yet; review its trust there to start it']));
     expect(editorOf().editor.getText()).toBe('build it');
     expect(within(composerOf(0)).queryByRole('status', { name: 'Starting' })).toBeNull();
     expect(invoked('session.history.append')).toEqual([]);
+    // P5 O7 M9: the refusal offers that machine's trust card; accepted, the same Send goes again with the trust
+    const notice = useNotices.getState().notices[0];
+    const review = notice.kind === 'toast' ? notice.actions.find((a) => a.label === 'Review trust…') : undefined;
+    act(() => review!.run());
+    const open = useDialogs.getState().open;
+    expect(open).toMatchObject({ kind: 'remoteSetup', request: { kind: 'trust', tab: A, target: { machine: OTHER_MACHINE, checkout: '/srv/app' } } });
+    act(() => {
+      useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY, trust: 'accepted' });
+      if (open?.kind === 'remoteSetup' && open.request.kind === 'trust') open.request.then?.();
+      useDialogs.setState({ open: null });
+    });
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(1));
+    expect(invoked('session.spawn').at(-1)).toEqual({ checkout: '/srv/app', permission_mode: 'acceptEdits', brief: 'build it', trust: 'accepted' });
+    await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'unknown-checkout' })); // settled, so nothing is left starting
+    await waitFor(() => expect(within(composerOf(0)).queryByRole('status', { name: 'Starting' })).toBeNull());
   });
 
   it('after a timeout offers Check again, which asks after the same start rather than starting another', async () => {

@@ -16,6 +16,7 @@ import { HardReasonSchema } from '../../engine/status';
 import { AbsolutePathSchema } from './settings';
 // C11 end
 import { ObservedFactsAnswerSchema } from '../../engine/observed-facts'; // P2-A
+import { RouteSchema } from '../../engine/route'; // P5 O7 M9
 
 // C3 start: the engine host level (C3 execution document, Interfaces "X2 — commands and events"): the binary, the
 // relay, the process table and shutdown. Owner engine-host.
@@ -47,8 +48,9 @@ export const C3_ENGINE_EVENTS: string[] = []; // the engine host's events are pe
 // "Catalogue cache"). Owner engine-host: `refresh` asks the most recently launched ready session's `list_models`;
 // `gateway` (debt wave 3, optional) names the route the caller will launch under, whose catalogue is answered; `cwd`
 // (debt wave 5, optional, read only with `gateway`) the directory, whose settings may set a model environment of its own.
+// `route` (P5 O7 M9, optional) is read before `gateway` (src/shared/engine/route.ts), which keeps the legacy route.
 const c10Commands = {
-  'engine.models': { input: z.strictObject({ refresh: z.boolean(), gateway: z.enum(['gateway', 'direct']).optional(), cwd: AbsolutePathSchema.optional() }), output: ModelCatalogueSchema, owner: 'engine-host' },
+  'engine.models': { input: z.strictObject({ refresh: z.boolean(), gateway: z.enum(['gateway', 'direct']).optional(), route: RouteSchema.optional(), cwd: AbsolutePathSchema.optional() }), output: ModelCatalogueSchema, owner: 'engine-host' },
 } as const;
 // C10 end
 // C11 start: the host's binary configuration (C11 execution document, Interfaces "X2 additions"; C3's BinaryConfig in

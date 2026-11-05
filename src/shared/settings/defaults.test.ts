@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
 import { ClientSettingsSchema, MachineSettingsSchema, SettingsPatchSchema, SettingsSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
-import { applyClientPatch, applyMachinePatch, applySettingsPatch, clientSettingsDefaults, isUnifiedSettings, machineSettingsDefaults, mergeSettings, migrateClientSettings, migrateMachineSettings, migrateSettings, SETTINGS_DEFAULTS_V21, splitSettings, splitSettingsPatch } from './defaults';
+import { applyClientPatch, applyMachinePatch, applySettingsPatch, clientSettingsDefaults, isUnifiedSettings, legacyDefaultRoute, machineSettingsDefaults, mergeSettings, migrateClientSettings, migrateMachineRoute, migrateMachineSettings, migrateSettings, resolveDefaultRoute, SETTINGS_DEFAULTS_V21, splitSettings, splitSettingsPatch } from './defaults';
 
 // P3-D: design-system and Space ids (host UUIDs)
 const DS_A = '6f1c1d2e-0b7a-4c55-9a3e-2f1b0c9d8e71';
@@ -909,3 +909,28 @@ describe('the settings split by owner (P5 O3-A)', () => {
   });
 });
 // P5 O3-A end
+
+// P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M9 "The default, without a v2"): the machine's
+// default route, chosen in `machine-route.json` beside an unchanged `machine-settings.json`; the rule is the migration
+describe("the machine's default route (P5 O7 M9)", () => {
+  it('is machine-route.json’s when the file is present, else direct when the legacy field says direct, else machine', () => {
+    for (const legacy of ['gateway', 'direct'] as const) for (const chosen of ['gateway', 'direct', 'machine'] as const) expect(resolveDefaultRoute({ version: 1, defaultRoute: chosen }, legacy)).toBe(chosen);
+    expect(resolveDefaultRoute(null, 'direct')).toBe('direct'); // never a default before M9, so the owner's choice
+    expect(resolveDefaultRoute(null, 'gateway')).toBe('machine'); // the old default every strict v1 file holds
+    expect(resolveDefaultRoute(null, machineSettingsDefaults().gateway.defaultRoute)).toBe('machine'); // a first run's
+  });
+
+  it('writes the legacy field with the nearest route an older build knows', () => {
+    expect(legacyDefaultRoute('gateway', 'direct')).toBe('gateway');
+    expect(legacyDefaultRoute('direct', 'gateway')).toBe('direct');
+    expect(legacyDefaultRoute('machine', 'gateway')).toBe('gateway'); // the machine's own settings name the relay
+    expect(legacyDefaultRoute('machine', 'direct')).toBe('direct');
+  });
+
+  it('reads machine-route.json at version 1 alone, strictly', () => {
+    expect(migrateMachineRoute({ version: 1, defaultRoute: 'machine' })).toEqual({ version: 1, defaultRoute: 'machine' });
+    expect(() => migrateMachineRoute({ version: 2, defaultRoute: 'machine' })).toThrow();
+    expect(() => migrateMachineRoute({ version: 1, defaultRoute: 'relay' })).toThrow();
+    expect(() => migrateMachineRoute({ version: 1, defaultRoute: 'machine', extra: true })).toThrow();
+  });
+});

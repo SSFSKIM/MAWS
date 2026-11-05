@@ -19,8 +19,12 @@ type Env = Record<string, string | undefined>;
 // P5 O9 M5: `sminosHome`, a scratch sminos home, so lane A looks for terminal sessions' bridges there and never under
 // the owner's ~/.claude/sminos (main refuses that home under a test runner, and lane A is off without one). Short, as a
 // bridge's socket path must fit 103 bytes; launchMaws makes it under /tmp.
-export function launchEnvironment(runner: Env, userData: string, sminosHome?: string): Record<string, string> {
+// P5 O7 M9 (m9-5, the architect's ruling): nor the runner's ANTHROPIC_* variables (a parent session's or the owner's
+// shell's base URL, token and model aliases), which the machine route would read as the machine's own inference, so a
+// scene's settings alone decide it; `keep` names any a spec needs from the runner, kept as the runner has them.
+export function launchEnvironment(runner: Env, userData: string, sminosHome?: string, keep: readonly string[] = []): Record<string, string> {
   const env = withoutClaudeVariables(runner);
+  for (const key of Object.keys(env)) if (key.startsWith('ANTHROPIC_') && !keep.includes(key)) delete env[key];
   delete env.ELECTRON_RENDERER_URL;
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.SMINOS_HOME; // P5 O9 M5: the runner's, which may be the owner's

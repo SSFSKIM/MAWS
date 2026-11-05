@@ -6,6 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { aliasOf, chipLabel } from '@shared/sessions/model-label';
 import { useMachineMark } from '../../app/machine-mark';
+import { catalogueRoute } from '../../gateway/observed-route'; // P5 O7 M9
 import { checkoutKey, machineFor } from '../../ipc/machine';
 import { useCommand } from '../../ipc/query';
 import { NOT_A_REPOSITORY } from '../../sessions/branch-label'; // C4's message (W9: one constant for every reader)
@@ -51,7 +52,7 @@ export function Environment({ appSessionId, record, directory }: { appSessionId:
 // W9 (H4): the model as the composer's chip names it, `<alias> <effort>` over the route's catalogue (the same
 // `engine.models` read the chip makes), with the exact id the engine reported in the tooltip; Session info has the rest.
 function ModelLine({ record, directory }: { record: SessionRecord; directory: string }) {
-  const route = record.gateway.routed === null ? null : record.gateway.routed ? 'gateway' : 'direct';
+  const route = catalogueRoute(null, record); // P5 O7 M9: the catalogue of what the session was observed reaching
   const catalogue = useCommand('engine.models', route === null ? { refresh: false } : { refresh: false, gateway: route, cwd: directory }, { staleTime: 60_000 }, { machine: machineFor(record.appId) });
   const id = record.model.resolved ?? record.model.requested;
   const alias = aliasOf(id, catalogue.data?.models ?? []);

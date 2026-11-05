@@ -58,10 +58,14 @@ import { createLaneADriver, registerLaneA } from './lane-a/driver';
 import { startLibrary } from './library';
 import { registerLibraryReads } from './library/files';
 import { registerMachineOps } from './machine-ops';
+import { registerFolders } from './machine/folders'; // P5 O7 M9
+import { registerSetupTrust, type SetupGuard } from './machine/setup'; // P5 O7 M9
 import { startOwnerChannel } from './owner/register';
 import { startEngineConfigure } from './settings/engine-configure';
 import { startHostConfigure } from './settings/host-configure';
 import { startMachineSettings } from './settings/machine';
+import type { LegacyRoute } from '@shared/engine/route'; // P5 O7 M9
+import { legacyOfResolution, machineBaseUrl } from './sessions/machine-route'; // P5 O7 M9
 import { sessionSettingsOf } from './settings/session-settings';
 import { takeSpineLock, type SpineLock } from './settings/spine-lock';
 import { splitSettingsFiles } from './settings/split';
@@ -89,6 +93,10 @@ export interface SpineData {
   readonly refused: string | null; // why this run may not write the spine's files; null: it holds spine.lock
   readonly machineSettings: MachineSettingsService; // the machine half (O3X3), from which main composes the client half
   readonly paths: { client: string; machine: string };
+  // P5 O7 M9: the engine's environment the machine route's legacy route is resolved under, told by startSpine (its
+  // deps' login-shell capture); until then, setting the machine route as the default is refused
+  bindEngineEnv?(env: Promise<Record<string, string>>): void;
+  readonly systemRoot?: string; // P5 O7 M9: the tests' seam, the root the machine's managed settings are read beneath
 }
 
 // O3-A's data start (O3 §2, §3; contracts O3X2, O3X3): `spine.lock` before either settings file is migrated or written
@@ -99,18 +107,26 @@ export interface SpineData {
 // P5 O3-D M2 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §A, D26): a process that loads the spine
 // more than once (`mawsd`) takes the lock once itself (`takeSpineLock`) and opens each load's data under it (`lock`),
 // since the lock refuses this very process's second take; with none given, the one-shot form above (main's).
-export async function openSpineData(profile: string, { build, lock: given }: { build: string; lock?: SpineLock }): Promise<SpineData> {
+export async function openSpineData(profile: string, { build, lock: given, systemRoot }: { build: string; lock?: SpineLock; systemRoot?: string }): Promise<SpineData> {
   const paths = settingsPaths(profile);
   const lock = given ?? (await takeSpineLock(profile, { build }));
   if (!given) process.once('exit', lock.release);
   const split = lock.refused === null ? splitSettingsFiles(paths) : null;
-  const machineSettings = startMachineSettings(paths.machine, { refused: lock.refused ?? split?.machineRefused ?? null, unsplit: split?.unsplit });
-  return { lock, refused: lock.refused, machineSettings, paths };
+  // P5 O7 M9: choosing `machine` writes, as the legacy field an older build here reads, the legacy route of the machine's
+  // base URL resolved with no project (the user and managed settings, the global config, the engine's environment);
+  // an uncertain resolution keeps the field as it is
+  let engineEnv: Promise<Record<string, string>> | null = null;
+  const legacyOfMachine = async (): Promise<LegacyRoute> => {
+    if (engineEnv === null) throw new Error('The machine route is not set as the default yet: the engine’s environment is still being read.');
+    return legacyOfResolution(await machineBaseUrl({ env: await engineEnv, systemRoot }, { cwd: null }), machineSettings.state().gateway.defaultRoute);
+  };
+  const machineSettings = startMachineSettings(paths.machine, { refused: lock.refused ?? split?.machineRefused ?? null, unsplit: split?.unsplit, legacyOfMachine });
+  return { lock, refused: lock.refused, machineSettings, paths, bindEngineEnv: (env) => void (engineEnv = env), ...(systemRoot !== undefined && { systemRoot }) };
 }
 
 // P5 O3-D M2: `replay`, a host adapter that replays what it held while the spine loaded (mawsd's; sessions/index.ts).
 // P5: `need`, a command waits on the engine host (mawsd wakes a parked one for it; main's host is never parked).
-export type SpineHosts = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot' | 'setResync'> & { replay?: HeldReplay; need?(): void; handoverState?: HostSupervisor['handoverState'] /* O16 panel 1 */ };
+export type SpineHosts = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot' | 'setResync'> & { replay?: HeldReplay; need?(): void; handoverState?: HostSupervisor['handoverState'] /* O16 panel 1 */; peer?: HostSupervisor['peer'] /* P5 O7 M9: the engine host's welcome, for its capabilities */ };
 
 export interface SpineDeps {
   profile: string; // <userData>, the daemon's profile (O3 §1)
@@ -148,6 +164,7 @@ export interface SpineRoot {
 export function startSpine(deps: SpineDeps): SpineRoot {
   const { profile, data, hosts, engineEnv } = deps;
   const machineSettings = data.machineSettings;
+  data.bindEngineEnv?.(engineEnv); // P5 O7 M9: the machine route's legacy route resolves under the engine's environment
   const spineRuns = data.refused === null;
   const parts: Part[] = []; // in today's shutdown order (D21), each stopped whatever an earlier one threw
   // P5 O3-D M2: every command and intercept the parts register counted while it runs, and what each part has in flight
@@ -160,7 +177,10 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // launch mode scenario) and stops it. P5 O3-A: unavailable, its file never opened, in a run refused the spine.
   const index = new Index(join(profile, 'index.sqlite'), { refused: data.refused });
   void index.refreshOrgProjects({ machine: deps.machine, enrollment: deps.enrollment }); // P5 O6 M5: each project's org project, derived again at every start (OX3)
-  registerIndexHandlers(index, bus);
+  // P5 O7 M9: a remote setup's home and what the folder list opened, which its handlers check again on this machine
+  const setupGuard: SetupGuard = { where: { home: deps.home, platform: process.platform } };
+  registerIndexHandlers(index, bus, setupGuard);
+  registerFolders(bus.register, setupGuard); // P5 O7 M9: "+ Session"'s folder list on this machine
   const indexSource = new IndexSessionSource(index, hosts, { emit: bus.emit });
   // C3's attention service over the index (its fallback file only when the index cannot be read); none when refused
   const attention = spineRuns
@@ -327,6 +347,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
         ready: () => engineHostSettled(hosts),
         onReady: (listener) => hosts.onStreaming('engine-host', listener), // E10: a recovery deferred while the host was unreachable
         need: () => hosts.need?.(),
+        capabilities: () => hosts.peer?.('engine-host')?.capabilities ?? null, // P5 O7 M9: engine.route-machine
       },
       git: createGitRunner(),
       worktrees,
@@ -338,15 +359,17 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       trash: trashFor(deps.env, deps.trash), // the e2e seam (MAWS_E2E_TRASH_DIR) or the OS trash
       port: deps.clientPort, // session.revealPath
       replay: ReplaySeam.fromEnv(deps.env, deps.devRoot), // the e2e seam (MAWS_E2E_REPLAY_FIXTURES)
-      settings: () => sessionSettingsOf(machineSettings.state()), // C11: the route, the relay policy and the subagent model
+      settings: () => sessionSettingsOf(machineSettings.state(), machineSettings.defaultRoute()), // C11: the route, the relay policy and the subagent model; P5 O7 M9: the machine's default route
       userDefaults, // W3: the user's defaultMode seeds a new intent's mode (read only)
       launchGate: () => engineConfigure!.launchGate(), // C12: a launch waits for the host to hold the binary settings name
       browserBackend: deps.browserSocket, // E13
       ownerChannel: ownerChannel.launches, // P2-C
       acquisitions: sessions.model, // P2-A (X16): the digest's availability follows each acquisition
+      systemRoot: data.systemRoot, // P5 O7 M9: the machine route's managed settings (the tests' seam)
     });
     const unintercept = registerSessionServiceHandlers(service, bus, sessions.mode); // P5 O3-D M4: the rewind repair's intercepts in launch mode index only
     registerSpawn(bus, { sessions: service, projects: () => index.projects.list({ includeHidden: true }) }); // P5 O7 M4: a spawn from another device
+    registerSetupTrust(bus.register, service, setupGuard); // P5 O7 M9: a remote setup's trust read, guarded
     sessionService = service;
     settling.push(service.work);
     // The sweep keeps the machine's interest union (D11): on the embedded shape main's interest report's set
@@ -409,14 +432,20 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // P5 O3-D M5b (Interfaces §G; contract O3X3): the machine half as main's settings mirror reads it on the daemon shape:
   // the settings with their revision (bumped at each persisted change), a patch answered once it persisted and every
   // listener was told (refused, with nothing changed, in a run that may not write the file), and each change emitted
+  // P5 O7 M9: each answer and change with the resolved default route; a set's `defaultRoute` chosen after its patch (a
+  // set of the default alone writes no patch, so it is told once)
   let machineRevision = 0;
   const offMachineChanged = machineSettings.onChange((settings) => {
     machineRevision += 1;
-    bus.emit('machineSettings.changed', { settings });
+    bus.emit('machineSettings.changed', { settings, defaultRoute: machineSettings.defaultRoute() });
   });
   parts.push(['machine settings', offMachineChanged]);
-  bus.register('machineSettings.get', () => ({ settings: machineSettings.state(), version: machineRevision }));
-  bus.register('machineSettings.set', async ({ patch }) => ({ settings: await machineSettings.update(patch) }));
+  bus.register('machineSettings.get', () => ({ settings: machineSettings.state(), version: machineRevision, defaultRoute: machineSettings.defaultRoute() }));
+  bus.register('machineSettings.set', async ({ patch, defaultRoute }) => {
+    if (defaultRoute === undefined || Object.keys(patch).length > 0) await machineSettings.update(patch);
+    if (defaultRoute !== undefined) await machineSettings.setDefaultRoute(defaultRoute);
+    return { settings: machineSettings.state(), defaultRoute: machineSettings.defaultRoute() };
+  });
   // C12: the Settings tab's read of the configuration the spine holds for it (P5 O3-A: rejects when refused); W3
   bus.register('settings.engineApplied', () => (engineConfigure ? engineConfigure.applied() : Promise.reject(new Error(`the engine settings are not applied this run: ${data.refused}`))));
   bus.register('settings.userEngineDefaults', userDefaults);

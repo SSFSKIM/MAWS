@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PreloadBridge, Settings } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useGateway } from '../gateway/store';
 import { useAttention } from '../stores/attention';
 import { useNotices } from '../stores/notices';
@@ -103,8 +103,8 @@ describe('settings tab writes one field per row', () => {
     await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'settings.engineApplied', input: undefined })); // C12
     expect(await within(row('Binary')).findByText('/opt/claude/2.1.290/claude')).toBeTruthy();
     expect(within(row('Binary')).queryByText(/re-pin|refuse/)).toBeNull(); // W13: a version never refuses
-    // C12; P4-A2: the launch profile's rows read the plugin list on their own schedule, which is no part of this write
-    const afterWrite = () => b.calls.slice(b.calls.findLastIndex((c) => c.name === 'settings.set') + 1).map((c) => c.name).filter((name) => name !== 'plugins.list' && name !== 'fs.state');
+    // C12; P4-A2: the launch profile's rows read the plugin list on their own schedule, which is no part of this write (P5 O7 M9: and Gateway its default route)
+    const afterWrite = () => b.calls.slice(b.calls.findLastIndex((c) => c.name === 'settings.set') + 1).map((c) => c.name).filter((name) => name !== 'plugins.list' && name !== 'fs.state' && name !== 'machineSettings.get'); // P5 O7 M9: Gateway's default route, read again at each settings change
     await vi.waitFor(() => expect(afterWrite().slice(0, 2)).toEqual(['settings.engineApplied', 'engine.binaryInfo'])); // C12
     expect(b.calls.map((c) => c.name)).not.toContain('engine.configure'); // C12: main is its only sender
 
@@ -130,6 +130,52 @@ describe('settings tab writes one field per row', () => {
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ gateway: { offerDirect: false } }));
     expect(b.sets).toHaveLength(3);
     expect(settings().gateway).toEqual({ defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false });
+  });
+
+  // P5 O7 M9 ("The default, without a v2"): the machine's default route, read and chosen through `machineSettings.*` on this
+  // machine, where `defaultRoute` is the resolved default (machine-route.json's, else the rule); the legacy field is the
+  // daemon's to write
+  it('Gateway: the default route offers the machine’s own route and round-trips through the machine’s settings', async () => {
+    let held: 'gateway' | 'direct' | 'machine' = 'machine';
+    const answers = {
+      'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1, defaultRoute: held }),
+      'machineSettings.set': (input: unknown) => {
+        held = (input as { defaultRoute: typeof held }).defaultRoute;
+        return { settings: machineSettingsDefaults(), defaultRoute: held };
+      },
+    };
+    const { unmount } = renderView(SETTINGS_DEFAULTS_V21, null, answers);
+    const radio = (name: string) => within(row('Default route')).getByRole<HTMLInputElement>('radio', { name });
+    await vi.waitFor(() => expect(radio('Machine’s own').checked).toBe(true));
+    expect(within(row('Default route')).getAllByRole('radio').map((r) => r.parentElement?.textContent)).toEqual(['Machine’s own', 'ClaudeUsage relay', 'Direct']);
+    expect(row('Default route').textContent).toContain('the machine’s own settings, environment and login decide');
+    fireEvent.click(radio('ClaudeUsage relay'));
+    await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'machineSettings.set', input: { patch: {}, defaultRoute: 'gateway' } }));
+    await vi.waitFor(() => expect(radio('ClaudeUsage relay').checked).toBe(true));
+    expect(b.sets).toEqual([]); // the legacy field is the daemon's to write, from the route chosen
+    unmount();
+    renderView(SETTINGS_DEFAULTS_V21, null, answers); // reopened: read back from the machine
+    await vi.waitFor(() => expect(within(row('Default route')).getAllByRole('radio')).toHaveLength(3));
+    expect(within(row('Default route')).getByRole<HTMLInputElement>('radio', { name: 'ClaudeUsage relay' }).checked).toBe(true);
+    fireEvent.click(within(row('Default route')).getByRole('radio', { name: 'Machine’s own' }));
+    await vi.waitFor(() => expect(held).toBe('machine'));
+  });
+
+  it('Gateway: a machine whose daemon predates the machine route keeps the two legacy routes, and a dropped choice is said', async () => {
+    renderView(SETTINGS_DEFAULTS_V21, null, { 'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1 }) });
+    await vi.waitFor(() => expect(within(row('Default route')).getAllByRole('radio').map((r) => r.parentElement?.textContent)).toEqual(['ClaudeUsage relay', 'Direct']));
+    fireEvent.click(within(row('Default route')).getByRole('radio', { name: 'Direct' }));
+    await vi.waitFor(() => expect(b.sets).toEqual([{ gateway: { defaultRoute: 'direct' } }])); // the legacy patch, as before
+    cleanup();
+    // read as this build's, then answered by an older one: the choice did not take, and the words say why
+    renderView(SETTINGS_DEFAULTS_V21, null, {
+      'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1, defaultRoute: 'machine' }),
+      'machineSettings.set': () => ({ settings: machineSettingsDefaults() }),
+    });
+    await vi.waitFor(() => expect(within(row('Default route')).getByRole<HTMLInputElement>('radio', { name: 'Machine’s own' }).checked).toBe(true));
+    fireEvent.click(within(row('Default route')).getByRole('radio', { name: 'Direct' }));
+    await vi.waitFor(() => expect(useNotices.getState().notices.map((n) => n.kind === 'toast' && n.text)).toContain('This machine’s mawsd predates the machine route; choose gateway or direct until it runs this build.'));
+    expect(within(row('Default route')).getByRole<HTMLInputElement>('radio', { name: 'Machine’s own' }).checked).toBe(true);
   });
 
   it("Gateway: the direct login the engine last reported, the sign-in command to copy, and the relay's line", async () => {

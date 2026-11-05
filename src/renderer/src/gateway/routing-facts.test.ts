@@ -34,7 +34,7 @@ describe('routingFacts names the account and the switch', () => {
   it('a routed session: the relay sentence, the pinned account when pinsFor names it, Switch to Direct…', () => {
     const facts = routingFacts(record, routed, snapshot({ [record.engineSessionId!]: 'u1' }), settings(), null);
     expect(facts).toMatchObject({ route: 'gateway', line: "Routed through ClaudeUsage's relay", account: { email: '1@example.test', why: 'pinned' }, canSwitch: true, switchLabel: 'Switch to Direct…' });
-    expect(facts.targets).toEqual(['direct']);
+    expect(facts.targets).toEqual(['direct', 'machine']); // P5 O7 M9: and back to the machine's own
   });
 
   it('the drain target when the session is not pinned', () => {
@@ -44,7 +44,7 @@ describe('routingFacts names the account and the switch', () => {
 
   it('offerDirect false hides Switch to Direct… only', () => {
     const facts = routingFacts(record, routed, snapshot(), settings({ offerDirect: false }), null);
-    expect(facts).toMatchObject({ canSwitch: false, targets: [] });
+    expect(facts).toMatchObject({ canSwitch: true, targets: ['machine'], switchLabel: 'Back to the machine’s own…' }); // P5 O7 M9
     expect(routingFacts(record, direct, snapshot(), settings({ offerDirect: false }), null)).toMatchObject({ canSwitch: true, switchLabel: 'Switch to gateway…' });
   });
 
@@ -57,26 +57,49 @@ describe('routingFacts names the account and the switch', () => {
       account: null,
       canSwitch: true,
       switchLabel: 'Switch to gateway…',
-      targets: ['gateway'],
+      targets: ['gateway', 'machine'],
     });
     expect(routingFacts(record, direct, snapshot(), settings(), null).line).toBe("Direct · engine's own login");
   });
 
   it('a session without a status states the last route; one not held elsewhere can be started on the other route', () => {
-    expect(routingFacts({ ...record, gateway: { ...record.gateway, routed: true } }, null, snapshot(), settings(), null)).toMatchObject({ route: 'gateway', line: 'Last ran routed', account: null, targets: ['direct'] });
-    expect(routingFacts({ ...record, gateway: { ...record.gateway, routed: false } }, null, snapshot(), settings(), null)).toMatchObject({ route: 'direct', line: 'Last ran direct', targets: ['gateway'] });
+    expect(routingFacts({ ...record, gateway: { ...record.gateway, routed: true } }, null, snapshot(), settings(), null)).toMatchObject({ route: 'gateway', line: 'Last ran routed', account: null, targets: ['direct', 'machine'] });
+    expect(routingFacts({ ...record, gateway: { ...record.gateway, routed: false } }, null, snapshot(), settings(), null)).toMatchObject({ route: 'direct', line: 'Last ran direct', targets: ['gateway', 'machine'] });
   });
 
   it('an unknown recorded route is never a routing fact: route unknown, the default named, both targets offered', () => {
     const unknown = { ...record, gateway: { ...record.gateway, routed: null } };
     expect(routingFacts(unknown, null, snapshot(), settings(), null)).toMatchObject({
       route: 'unknown',
-      line: 'Route not recorded · a resume uses the default route (gateway)',
+      line: 'Route not recorded · a resume uses the default route', // P5 O7 M9: the machine's default, which the legacy field no longer names
       account: null,
       canSwitch: true,
-      targets: ['gateway', 'direct'],
+      targets: ['gateway', 'direct', 'machine'],
     });
-    expect(routingFacts(unknown, null, snapshot(), settings({ defaultRoute: 'direct' }), null).line).toBe('Route not recorded · a resume uses the default route (direct)');
+  });
+
+  // P5 O7 M9: the machine's own route is named by what the machine reached, and ClaudeUsage's account only through it
+  it('a session on the machine’s own route: what it reached named, the account only through ClaudeUsage, never a mismatch', () => {
+    const machine = (observed: NonNullable<EngineSessionStatus['gateway']['observed']>, mode: 'gateway' | 'direct'): EngineSessionStatus => ({
+      ...routed,
+      gateway: { ...routed.gateway, mode, verified: mode === 'gateway' ? 'routed' : 'direct', route: 'machine', observed, baseUrl: observed.baseUrl },
+    });
+    const relay = routingFacts(record, machine({ kind: 'claudeusage', baseUrl: 'http://127.0.0.1:8641' }, 'gateway'), snapshot(), settings(), null);
+    expect(relay).toMatchObject({ route: 'gateway', machine: true, line: 'The machine’s own · ClaudeUsage relay · http://127.0.0.1:8641', account: { email: '3@example.test', why: 'routing' }, targets: ['gateway', 'direct'] }); // the other two routes
+    const login = routingFacts(record, machine({ kind: 'login', baseUrl: null, login: 'Claude Max' }, 'direct'), snapshot(), settings(), null);
+    expect(login).toMatchObject({ route: 'direct', machine: true, line: 'The machine’s own · Anthropic login · Claude Max', account: null, note: "no gateway models · usage windows from the engine", targets: ['gateway', 'direct'] });
+    const host = routingFacts(record, machine({ kind: 'host', baseUrl: 'https://llm.example.test' }, 'direct'), snapshot(), settings(), null);
+    expect(host).toMatchObject({ route: 'direct', line: 'The machine’s own · llm.example.test', account: null });
+    // the host's launch reports `route: 'machine'` before its check: not verified yet, the legacy mode standing in
+    const pending: EngineSessionStatus = { ...routed, gateway: { ...routed.gateway, mode: 'direct', verified: 'pending', route: 'machine' } };
+    expect(routingFacts(record, pending, snapshot(), settings(), null)).toMatchObject({ route: 'direct', line: 'The machine’s own · not verified yet' });
+  });
+
+  it('a stopped session that last ran on the machine’s own route says so, with what it reached then', () => {
+    const kept = { ...record, gateway: { ...record.gateway, routed: false, route: 'machine' as const, observed: { kind: 'login' as const, baseUrl: null, login: 'Claude Max' } } };
+    expect(routingFacts(kept, null, snapshot(), settings(), null)).toMatchObject({ route: 'direct', machine: true, line: 'Last ran on the machine’s own route · Anthropic login · Claude Max', targets: ['gateway', 'direct'] });
+    const unverified = { ...record, gateway: { ...record.gateway, routed: null, route: 'machine' as const } };
+    expect(routingFacts(unverified, null, snapshot(), settings(), null)).toMatchObject({ route: 'unknown', line: 'Last ran on the machine’s own route · not verified yet' });
   });
 
   it('no switch for a session held elsewhere or archived, with the reason', () => {
@@ -90,19 +113,22 @@ describe('routingFacts names the account and the switch', () => {
 // session is a choice of the intent's route (`session.intent.patch { gateway }`), restarting nothing. The footer reads it
 // before routingFacts, which would call such a session's unrecorded route unknown and offer a restart.
 describe('an unstarted session chooses its route and restarts nothing', () => {
-  it('names the route the intent starts on and offers both', () => {
-    expect(unstartedRoute({ gateway: 'gateway' }, settings())).toEqual({ route: 'gateway', line: "Starts routed through ClaudeUsage's relay", choices: ['gateway', 'direct'] });
+  it('names the route the intent starts on and offers all three', () => {
+    // P5 O7 M9: the machine's own route first, every machine's default; `route` read before the legacy field
+    expect(unstartedRoute({ gateway: 'gateway' }, settings())).toEqual({ route: 'gateway', line: "Starts routed through ClaudeUsage's relay", choices: ['machine', 'gateway', 'direct'] });
     expect(unstartedRoute({ gateway: 'direct' }, settings())).toMatchObject({ route: 'direct', line: "Starts direct · engine's own login" });
+    expect(unstartedRoute({ gateway: 'direct', route: 'machine' }, settings())).toEqual({ route: 'machine', line: 'Starts on the machine’s own route · its settings and login decide', choices: ['machine', 'gateway', 'direct'] });
   });
 
-  it('offerDirect false offers no choice on a routed intent, and the way back on a direct one', () => {
-    expect(unstartedRoute({ gateway: 'gateway' }, settings({ offerDirect: false })).choices).toEqual([]);
-    expect(unstartedRoute({ gateway: 'direct' }, settings({ offerDirect: false })).choices).toEqual(['gateway', 'direct']);
+  it('offerDirect false leaves out Direct, except as the way back from it; the machine’s own route is always one to go back to', () => {
+    expect(unstartedRoute({ gateway: 'gateway' }, settings({ offerDirect: false })).choices).toEqual(['machine', 'gateway']);
+    expect(unstartedRoute({ gateway: 'direct', route: 'machine' }, settings({ offerDirect: false })).choices).toEqual(['machine', 'gateway']);
+    expect(unstartedRoute({ gateway: 'direct' }, settings({ offerDirect: false })).choices).toEqual(['machine', 'gateway', 'direct']);
   });
 
   it('what routingFacts would say of the same session, which is why the footer branches first', () => {
     const unstarted = { ...record, gateway: { ...record.gateway, routed: null } }; // a provisional record: no status, no route yet
-    expect(routingFacts(unstarted, null, null, settings(), null)).toMatchObject({ route: 'unknown', targets: ['gateway', 'direct'] });
+    expect(routingFacts(unstarted, null, null, settings(), null)).toMatchObject({ route: 'unknown', targets: ['gateway', 'direct', 'machine'] });
   });
 });
 

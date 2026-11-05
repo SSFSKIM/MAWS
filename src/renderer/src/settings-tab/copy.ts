@@ -160,8 +160,11 @@ export const SUPERVISOR = {
 
 export const GATEWAY = {
   defaultRoute: 'Default route',
-  routes: { gateway: 'ClaudeUsage relay', direct: 'Direct' },
+  routes: { machine: 'Machine’s own', gateway: 'ClaudeUsage relay', direct: 'Direct' }, // P5 O7 M9: machine
   defaultRouteNote: 'New sessions start on this route; a session can be switched from its Session info.', // W2: no status line
+  // P5 O7 M9: the machine's own route, every machine's default; and a choice an older daemon dropped (main's mirror's words)
+  machineRouteNote: 'Machine’s own: MAWS injects nothing; the machine’s own settings, environment and login decide, as claude in its terminal would.',
+  routeDropped: 'This machine’s mawsd predates the machine route; choose gateway or direct until it runs this build.',
   policy: 'Relay unreachable at launch',
   policies: { ask: 'Ask each time', wait: 'Wait for the relay', direct: 'Run direct' },
   policyDirectNote: 'A session on a gateway model (claude/…) is asked instead: Direct cannot serve it.',

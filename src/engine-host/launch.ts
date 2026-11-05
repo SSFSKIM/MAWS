@@ -8,19 +8,12 @@ import { isAbsolute } from 'node:path';
 import { canonicalize } from 'org-protocol';
 import { appInitialize } from '@shared/engine/initialize';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
+import { GATEWAY_KEYS, readRoute, type LegacyRoute, type Route } from '@shared/engine/route'; // P5 O7 M9
 import type { SessionId } from '@shared/graph/ids';
 
-// C11 start: the dev-only relay override (C11 execution document, M6; ruled 2026-09-29). The relay-down live cases point
-// the host at a loopback forwarder they stop and start, so ClaudeUsage itself is never quit. Read once, when this module
-// loads in the host, and only as `http://127.0.0.1:<port>`; any other value is ignored. Main deletes the variable before
-// forking a packaged app's hosts (`main/hosts/supervisor.ts`), and terminals never carry `MAWS_*`.
-export function relayUrlFrom(env: Record<string, string | undefined>): string {
-  const override = env.MAWS_RELAY_URL;
-  const port = override ? /^http:\/\/127\.0\.0\.1:([0-9]{1,5})$/.exec(override)?.[1] : undefined;
-  return port !== undefined && Number(port) >= 1 && Number(port) <= 65_535 ? override! : 'http://127.0.0.1:8641';
-}
-// C11 end
-export const RELAY_URL = relayUrlFrom(process.env); // ClaudeUsage's relay, http://127.0.0.1:8641, unless C11's dev override names a loopback port
+// C11: the relay's URL and its dev-only override live in relay-url.ts (P5 O7 M9: off launch.ts, so mawsd reads it
+// without this module's graph); re-exported for this module's readers.
+export { RELAY_URL, relayUrlFrom } from './relay-url';
 
 // The host's one binary configuration (C11's ask, M5): the binary path the owner chose in Settings, sent by main through
 // `engine.configure`; null, the installed Claude Code (W13: binary-info.ts resolves it at every launch). The binary
@@ -71,6 +64,9 @@ export interface LaunchPlan {
   launchId: string;
   sessionId: SessionId;
   gateway: 'gateway' | 'direct'; // additive to the X6 shape: the spawn meta row and the status read it without re-deriving it from env
+  // P5 O7 M9: present on a machine-route launch alone (`gateway` is then the spec's legacy route, what an older reader of
+  // the spawn row acts on); the session's status, its gateway check and an adopter's plan read it
+  route?: Extract<Route, 'machine'>;
   engineVersion: string; // the binary's `--version` at this launch (W13); the spawn meta row records it per session
   // P5 O16 M3a fix wave 1 (D58): an adopter's plan, whose `env` was rebuilt as this build would build it now (the spawn
   // row names only its keys): never the engine's real environment, so nothing attests or resolves against it
@@ -107,7 +103,7 @@ const EXCLUDED_KEYS = new Set([
 ]);
 const EXCLUDED_PREFIXES = ['CMUX_', 'ELECTRON_'];
 
-const GATEWAY_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ENABLE_TOOL_SEARCH'] as const;
+
 
 function isAllowed(key: string): boolean {
   if (EXCLUDED_KEYS.has(key) || EXCLUDED_PREFIXES.some((p) => key.startsWith(p))) return false;
@@ -159,11 +155,14 @@ export function buildEnvironment(spec: LaunchSpec, captured: Record<string, stri
   env.TERM = 'dumb';
   env.DISABLE_AUTOUPDATER = '1'; // W13: MAWS's processes never race the user's own updater; Settings › Engine offers the update
   if (spec.subagentModel !== null) env.CLAUDE_CODE_SUBAGENT_MODEL = spec.subagentModel;
-  if (spec.gateway === 'gateway') {
+  // P5 O7 M9 (M9 "The route"): `route` before the legacy field; the machine route sets and deletes nothing of the gateway
+  // keys, so the captured ANTHROPIC_* and CLAUDE_* keys reach the engine as the allowlist passed them, as in the terminal
+  const route = readRoute(spec);
+  if (route === 'gateway') {
     env.ANTHROPIC_BASE_URL = relayUrl;
     env.ANTHROPIC_AUTH_TOKEN = GATEWAY_AUTH_TOKEN;
     env.ENABLE_TOOL_SEARCH = 'true';
-  } else {
+  } else if (route === 'direct') {
     for (const key of GATEWAY_KEYS) delete env[key]; // the `--settings` env override does the rest (pass 2 verified)
   }
   return env;
@@ -175,15 +174,26 @@ export function buildEnvironment(spec: LaunchSpec, captured: Record<string, stri
 // The host's keys, applied after `extraSettings` so nothing a caller passes can displace them. A caller value that
 // differs from the host's is a conflict, never an override; an equal value is accepted. `env.ANTHROPIC_*` is protected
 // under both gateway modes (a settings-level base URL would silently re-route a gateway launch too), so under
-// `gateway` the host's value for those two is "absent" and any caller value conflicts.
+// `gateway` the host's value for those two is "absent" and any caller value conflicts. P5 O7 M9: the machine route
+// protects no env key and adds none, so the machine's own settings decide the inference, as in the terminal.
 function protectedSettings(spec: LaunchSpec): { top: Record<string, unknown>; env: Record<string, string | undefined> } {
   const top: Record<string, unknown> = { dialogExpiry: 'never' };
   if (spec.effort !== null) top.effortLevel = spec.effort;
+  const route = readRoute(spec);
   const env: Record<string, string | undefined> =
-    spec.gateway === 'direct'
-      ? { ANTHROPIC_BASE_URL: '', ANTHROPIC_AUTH_TOKEN: '' }
-      : { ANTHROPIC_BASE_URL: undefined, ANTHROPIC_AUTH_TOKEN: undefined };
+    route === 'machine'
+      ? {}
+      : route === 'direct'
+        ? { ANTHROPIC_BASE_URL: '', ANTHROPIC_AUTH_TOKEN: '' }
+        : { ANTHROPIC_BASE_URL: undefined, ANTHROPIC_AUTH_TOKEN: undefined };
   return { top, env };
+}
+
+// P5 O7 M9: the legacy route a plan records (the spawn row's `gateway`): the route itself for gateway and direct, the
+// spec's legacy field for the machine route
+function legacyOf(spec: LaunchSpec): LegacyRoute {
+  const route = readRoute(spec);
+  return route === 'machine' ? spec.gateway : route;
 }
 
 export function mergeFlagSettings(spec: LaunchSpec): Record<string, unknown> {
@@ -287,7 +297,8 @@ export function buildLaunch(
     flagSettings,
     launchId: mintLaunchId(),
     sessionId,
-    gateway: spec.gateway,
+    gateway: legacyOf(spec),
+    ...(readRoute(spec) === 'machine' && { route: 'machine' as const }), // P5 O7 M9
     engineVersion: opts.engineVersion,
   };
 }
@@ -302,6 +313,7 @@ export function spawnMeta(plan: LaunchPlan, opts: { appVersion: string; holder?:
   envKeys: string[];
   cwd: string;
   gateway: 'gateway' | 'direct';
+  route?: 'machine'; // P5 O7 M9: a machine-route launch's; an older adopter reads `gateway`, the legacy route
   engineVersion: string;
   appVersion: string;
   charterPin: string;
@@ -316,6 +328,7 @@ export function spawnMeta(plan: LaunchPlan, opts: { appVersion: string; holder?:
     envKeys: Object.keys(plan.env).sort(),
     cwd: plan.cwd,
     gateway: plan.gateway,
+    ...(plan.route && { route: plan.route }), // P5 O7 M9
     engineVersion: plan.engineVersion,
     appVersion: opts.appVersion,
     charterPin: CHARTER_PIN,

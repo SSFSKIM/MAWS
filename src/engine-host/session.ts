@@ -20,6 +20,7 @@ import type { Effort, LaunchSpec } from '@shared/engine/launch-spec';
 import type { CronRecord, QueueEntry, QueueState, SendContent, SessionStateStore } from '@shared/engine/session-state-store';
 import type { RelayHealth } from '@shared/engine/relay-health';
 import type { EngineSessionStatus } from '@shared/engine/status';
+import { legacyRouteOf, type ObservedRoute } from '@shared/engine/route'; // P5 O7 M9
 import type { SurfaceAnswer } from '@shared/engine/surface'; // R2
 import { HookCallbackRequestSchema, type GetStatusResponse, type InterruptResponse, type ReloadPluginsResponse } from '@shared/wire/control';
 import type { ControlRequestFrame } from '@shared/wire/frames';
@@ -50,7 +51,7 @@ import { hardReasons } from './budget';
 import { ControlClient, ControlError, ControlTimeout } from './rpc';
 import { ClearAndImplementSequence } from './session-clear';
 import { LADDER_MS, TerminationLadder, type ExitReason, type ExitSummary, type StopResult } from './session-ladder';
-import { isPermissionMode, SessionStatusTracker, type Catalog } from './session-status';
+import { isPermissionMode, SessionStatusTracker, type Catalog, type TrackedStatus } from './session-status';
 import { SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks';
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { SessionSurface } from './surface'; // R2
@@ -964,7 +965,7 @@ export class EngineSession {
       turn: turn && turnId ? { id: turnId, origin: turn.origin, startedAt: turn.startedAt, acceptedAt: turn.acceptedAt, userMessageUuids: [...turn.userMessageUuids] } : null,
       model: { requested: this.requestedModel, resolved: tracked.resolvedModel }, effort: this.requestedEffort,
       permissionMode: tracked.permissionMode, prePlanMode: tracked.prePlanMode,
-      gateway: { mode: this.plan.gateway, ...tracked.gateway },
+      gateway: this.gatewayStatus(tracked.gateway),
       subagentModel: env.CLAUDE_CODE_SUBAGENT_MODEL ?? null,
       modelOverrides: Object.fromEntries(Object.entries(env).filter(([key]) => /^ANTHROPIC_DEFAULT_[A-Z0-9_]+_MODEL$/.test(key))),
       engineVersion: tracked.engineVersion ?? this.plan.engineVersion, fileCheckpointing: env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING === '1',
@@ -1990,6 +1991,14 @@ export class EngineSession {
     }
   }
 
+  // The status's gateway: `mode` is the plan's legacy route, and on the machine route (P5 O7 M9) the legacy route the
+  // engine was observed on once get_status verified it, with `route: 'machine'` from the reservation onward.
+  private gatewayStatus(tracked: TrackedStatus['gateway']): EngineSessionStatus['gateway'] {
+    if (this.plan.route !== 'machine') return { mode: this.plan.gateway, ...tracked };
+    const mode = tracked.verified === 'routed' ? 'gateway' : tracked.verified === 'direct' ? 'direct' : this.plan.gateway;
+    return { mode, ...tracked, route: 'machine' };
+  }
+
   // "Verified routed by get_status" (Interfaces, Process table): the Session section's `Anthropic base URL` row and
   // the Environment section's `Auto mode server` row; read at startup and after each human turn's result.
   private async verifyGateway(): Promise<void> {
@@ -2008,6 +2017,16 @@ export class EngineSession {
     const server = rows('Environment').find((r) => r.label === 'Auto mode server')?.value;
     // the row follows the current mode (it reads Disabled in `default`: M6 live 3.9), so it names the lane only in auto
     const autoModeServer = this.tracker.effectiveMode !== 'auto' ? this.tracker.gateway.autoModeServer : server === 'Enabled' ? 'enabled' : server === 'Disabled' ? 'disabled' : 'unknown';
+    if (this.plan.route === 'machine') {
+      // P5 O7 M9 (M9 "What the machine reports"): the machine route expects nothing, so nothing is a mismatch; what the
+      // engine reports is named, and `verified` carries the legacy route (`routed` exactly when it is ClaudeUsage's relay)
+      const verified = legacyRouteOf(baseUrl, RELAY_URL) === 'gateway' ? 'routed' : 'direct';
+      const observed = observedRoute(baseUrl, rows('Session'));
+      this.tracker.gateway = { ...this.tracker.gateway, baseUrl, autoModeServer, verified, route: 'machine', observed };
+      this.record('meta', { event: 'status_check', baseUrl, autoModeServer, verified, observed });
+      this.touch();
+      return;
+    }
     const expected = this.plan.env.ANTHROPIC_BASE_URL ?? RELAY_URL;
     const verified = this.plan.gateway === 'gateway' ? (baseUrl === expected ? 'routed' : 'mismatch') : baseUrl === null ? 'direct' : 'mismatch';
     const wasMismatch = this.tracker.gateway.verified === 'mismatch';
@@ -2239,4 +2258,15 @@ const NO_SERVERS: ReadonlySet<string> = new Set(); // C12
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+// P5 O7 M9 (M9 "What the machine reports"; Interfaces §U): what a machine-route session's get_status reports, named:
+// ClaudeUsage when the base URL is this machine's relay, the Anthropic login (its `Login` and `Organization` rows) when
+// there is none, else the host the base URL names.
+function observedRoute(baseUrl: string | null, session: readonly { label?: string; value: string }[]): ObservedRoute {
+  if (baseUrl === RELAY_URL) return { kind: 'claudeusage', baseUrl };
+  if (baseUrl !== null) return { kind: 'host', baseUrl };
+  const login = session.find((row) => row.label === 'Login')?.value;
+  const organization = session.find((row) => row.label === 'Organization')?.value;
+  return { kind: 'login', baseUrl: null, ...(login !== undefined && { login }), ...(organization !== undefined && { organization }) };
 }

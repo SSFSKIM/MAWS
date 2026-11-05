@@ -5,9 +5,13 @@ import type { CommandGrades } from '../grades';
 
 export const grades = {
   'machine.identity': 'list',
+  // P5 O7 M9: the folders under the machine's home, a spawn's setup read; the endpoint's row reads it at `list` for the
+  // machine's owners alone (src/endpoint/offers.ts)
+  'machine.folders.list': 'spawn',
   // main-only (P5 O3-D): the attached app's browser socket, and the services' ledger, which a remote caller reaches only
   // through an `act`, as `host.op`
   'machine.client': 'internal',
   'machine.op': 'internal',
   'machine.opQuery': 'internal',
+  'machine.setupTrust': 'internal', // P5 O7 M9: the endpoint's guarded trust read for a remote setup
 } as const satisfies CommandGrades<'machine'>;

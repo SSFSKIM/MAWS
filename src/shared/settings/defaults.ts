@@ -14,16 +14,19 @@ import {
   CLIENT_SETTINGS_VERSION,
   ClientSettingsSchema,
   MACHINE_SETTINGS_VERSION,
+  MachineRouteSchema,
   MachineSettingsSchema,
   SettingsSchema,
   SupervisorSettingsSchema,
   ThemeSettingSchema,
   type ClientSettings,
+  type MachineRoute,
   type MachineSettings,
   type Settings,
   type SettingsPatch,
 } from '../ipc/schema/settings';
 import { LaunchProfileSchema, userScopeProfile } from '../engine/launch-profile'; // P4-A2
+import type { LegacyRoute, Route } from '../engine/route'; // P5 O7 M9
 
 export const SETTINGS_DEFAULTS_V21: Settings = {
   version: 21, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14; P4-B1: 15; P4-R8: 16; P4-A2: 17; UX1: 18; the launch profile's style removed: 19; P5 O2: 20; P5 O3-A: 21 (the client file's)
@@ -333,6 +336,26 @@ export function migrateClientSettings(input: unknown): ClientSettings {
 // `machine-settings.json`: version 1 is validated and returned; anything else throws.
 export function migrateMachineSettings(input: unknown): MachineSettings {
   return MachineSettingsSchema.parse(input);
+}
+
+// P5 O7 M9 (M9 "The default, without a v2"): `machine-route.json`: version 1 is validated and returned; anything else
+// throws, which its store reads as a file it cannot own (the rule below in memory, writes refused).
+export function migrateMachineRoute(input: unknown): MachineRoute {
+  return MachineRouteSchema.parse(input);
+}
+
+// The machine's default route, and the migration itself, with no file rewritten: `machine-route.json`'s choice when the
+// file is there; else `direct` when `machine-settings.json` says so, which was never a default and so is the owner's
+// choice; else `machine`, the owner's ruling for every machine, over the old default `gateway` every strict v1 file holds.
+export function resolveDefaultRoute(chosen: MachineRoute | null, legacy: LegacyRoute): Route {
+  return chosen?.defaultRoute ?? (legacy === 'direct' ? 'direct' : 'machine');
+}
+
+// What `machine-settings.json`'s `gateway.defaultRoute` holds for a chosen default, so an older build on the machine
+// reads a valid file with the nearest route it knows: the route itself, or for `machine` its legacy route
+// (src/shared/engine/route.ts's legacyRouteOf over the machine's effective base URL).
+export function legacyDefaultRoute(route: Route, machineLegacy: LegacyRoute): LegacyRoute {
+  return route === 'machine' ? machineLegacy : route;
 }
 
 // A patch cut by owner, field by field (`supervisor` and `artifacts` have both kinds): each half holds only its own

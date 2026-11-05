@@ -167,4 +167,16 @@ describe('hasLiveGatewaySession', () => {
       expect(hasLiveGatewaySession(one.getState()), process).toBe(true);
     }
   });
+
+  // P5 O7 M9: a session on the machine's own route counts when the machine was observed sending it through ClaudeUsage
+  it('counts a machine-route session by what it was observed reaching, not by its legacy mode', () => {
+    const put = (s: EngineSessionStatus) => {
+      const sessions = createSessionsStore();
+      sessions.getState().applyStatus({ appSessionId: s.appSessionId, status: s }, TEST_MACHINE);
+      return hasLiveGatewaySession(sessions.getState());
+    };
+    const base = directStatus('m');
+    expect(put({ ...base, gateway: { ...base.gateway, mode: 'direct', route: 'machine', observed: { kind: 'claudeusage', baseUrl: URL } } })).toBe(true);
+    expect(put({ ...base, gateway: { ...base.gateway, mode: 'gateway', route: 'machine', observed: { kind: 'host', baseUrl: 'https://llm.example.test' } } })).toBe(false);
+  });
 });

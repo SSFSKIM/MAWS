@@ -4,6 +4,7 @@ import { AnchorSchema } from '../anchor/anchor'; // E3: X10, carried by a side t
 import { AutoModeRefusalCodeSchema, PermissionModeSchema, TITLE_SOURCES } from './enums';
 import { AppSessionIdSchema, MessageUuidSchema, ProjectIdSchema, SessionIdSchema } from './ids';
 import { JsonValueSchema } from '../ipc/schema/common'; // P5 O7 M4: `launchedBy.action`, a JSON value
+import { ObservedRouteSchema, RouteSchema } from '../engine/route'; // P5 O7 M9
 
 // Requested versus effective permission mode with the refusal code when they differ (D-18): `refusal` is null exactly
 // when the request was honoured, and one of AUTO_MODE_REFUSAL_CODES exactly when it was not. Both the silent downgrade
@@ -69,7 +70,10 @@ export const SessionRecordSchema = z.strictObject({
   // coordinator): `baseUrl` from get_status's `Anthropic base URL` row, `autoModeServer` from its `Auto mode server` row.
   // `routed` is C3's verification (`get_status`'s base URL against the relay's) and null until one ran: the state of every
   // session MAWS discovered on disk and did not launch (X1 amended, wave 1). C4 fills `null` / `null` / `unknown` for those.
-  gateway: z.strictObject({ routed: z.boolean().nullable(), baseUrl: z.string().nullable(), autoModeServer: z.enum(['enabled', 'disabled', 'unknown']) }),
+  // P5 O7 M9 (Interfaces §U): `route`, the route the session launched on, read before `routed` (src/shared/engine/route.ts's
+  // readRecordedRoute), and `observed`, what get_status reported of its inference, named. `routed` stays written: true
+  // when the session was observed through ClaudeUsage, so an older reader resuming it reaches the same inference.
+  gateway: z.strictObject({ routed: z.boolean().nullable(), baseUrl: z.string().nullable(), autoModeServer: z.enum(['enabled', 'disabled', 'unknown']), route: RouteSchema.optional(), observed: ObservedRouteSchema.optional() }),
   // C3 end
   model: z.strictObject({ requested: z.string().nullable(), resolved: z.string().nullable() }),
   effort: z.string().nullable(),

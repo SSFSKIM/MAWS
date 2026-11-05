@@ -282,7 +282,7 @@ test.beforeAll(async () => {
   mkdirSync(PROFILE, { recursive: true });
   const configHome = SCOPE === 'owner' ? join(homedir(), '.claude') : mirrorConfigHome();
   note(`==== P4-A1 MAWS arm, ${new Date().toISOString()} on ${hostname()}: scope ${SCOPE} (${SCOPE === 'owner' ? "the owner's ~/.claude, no CLAUDE_CONFIG_DIR" : configHome}), engine ${engine.bin.replace(homedir(), '~')} ${engine.version}, relay ${RELAY_URL}, cwd ${CWD}, profile ${PROFILE}, pin ${PIN ? `${PIN.model}:${PIN.effort} (measurement-only)` : "none (the owner's settings)"}, variant ${VARIANT ?? 'none'} in a checkout at ${CHECKOUT ?? 'an unknown commit'}, tasks ${TASKS.join(',')} x ${REPS} from repetition ${REP_FROM}`);
-  const maws = await launchMaws({
+  const maws = await launchMaws({ defaultRoute: 'gateway',
     userData: PROFILE,
     ownerConfigHome: SCOPE === 'owner',
     env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', ...(SCOPE === 'mirror' ? { CLAUDE_CONFIG_DIR: configHome } : {}) },

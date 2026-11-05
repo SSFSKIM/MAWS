@@ -153,14 +153,15 @@ function* fileRows(path: string): Generator<JournalRow> {
 }
 
 // The launch's `spawn` meta row (launch.ts spawnMeta), from which an adopter rebuilds the plan; null when none was written.
-export interface SpawnRow { bin: string; args: string[]; envKeys: string[]; cwd: string; gateway: 'gateway' | 'direct'; engineVersion: string; launchId: string; sessionId: string }
+// P5 O7 M9: `route`, present on a machine-route launch's row (its `gateway` the legacy route an older adopter reads).
+export interface SpawnRow { bin: string; args: string[]; envKeys: string[]; cwd: string; gateway: 'gateway' | 'direct'; route?: 'machine'; engineVersion: string; launchId: string; sessionId: string }
 
 export function spawnRowOf(rows: Iterable<JournalRow>): SpawnRow | null {
   for (const row of rows) {
     const f = row.frame as Partial<SpawnRow> & { event?: unknown };
     if (row.direction !== 'meta' || f.event !== 'spawn') continue;
     if (typeof f.bin !== 'string' || !Array.isArray(f.args) || !Array.isArray(f.envKeys) || typeof f.cwd !== 'string' || typeof f.launchId !== 'string' || typeof f.sessionId !== 'string') return null;
-    return { bin: f.bin, args: f.args, envKeys: f.envKeys, cwd: f.cwd, gateway: f.gateway === 'gateway' ? 'gateway' : 'direct', engineVersion: String(f.engineVersion ?? ''), launchId: f.launchId, sessionId: f.sessionId };
+    return { bin: f.bin, args: f.args, envKeys: f.envKeys, cwd: f.cwd, gateway: f.gateway === 'gateway' ? 'gateway' : 'direct', ...(f.route === 'machine' && { route: 'machine' as const }), engineVersion: String(f.engineVersion ?? ''), launchId: f.launchId, sessionId: f.sessionId };
   }
   return null;
 }

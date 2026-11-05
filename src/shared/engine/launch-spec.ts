@@ -4,6 +4,7 @@
 import * as z from 'zod';
 import { PermissionModeSchema } from '../graph/enums';
 import { AppSessionIdSchema, SessionIdSchema } from '../graph/ids';
+import { RouteSchema } from './route';
 
 export const EffortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
 export type Effort = z.infer<typeof EffortSchema>;
@@ -24,6 +25,10 @@ export const LaunchSpecSchema = z.strictObject({
   // pass2/auto-haiku.jsonl seq 4); absent or null: the refusal stands as the engine left it.
   permissionFallback: PermissionModeSchema.nullable().optional(),
   gateway: z.enum(['gateway', 'direct']), // D-19 default is 'gateway'; the caller decides the fallback
+  // P5 O7 M9 (Interfaces §U): the route the host launches, read before `gateway` (src/shared/engine/route.ts's
+  // readRoute); `gateway` stays written with the legacy route, which a host that predates M9 launches. Main sends
+  // `machine` only to a host whose hello lists `engine.route-machine`.
+  route: RouteSchema.optional(),
   subagentModel: z.string().nullable(), // CLAUDE_CODE_SUBAGENT_MODEL; null = the captured shell/settings value
   resume: z.strictObject({ sessionId: SessionIdSchema, fork: z.boolean() }).nullable(),
   sessionId: SessionIdSchema.nullable(), // --session-id for a new session; the host mints one when null

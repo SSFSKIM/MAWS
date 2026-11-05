@@ -14,6 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import { assertSafeAppSessionId } from '@shared/engine/app-session-id';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
+import { readRoute } from '@shared/engine/route'; // P5 O7 M9
 import type { RelayHealth } from '@shared/engine/relay-health';
 import { HostCommandError } from '@shared/host/runtime'; // P5 O16 M2
 import type { SessionStateStore } from '@shared/engine/session-state-store';
@@ -124,7 +125,8 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
       engine = { bin: fixture, engineVersion: TESTED_ENGINE_VERSION };
     } else {
       const [binary, relay, env, localKey] = await Promise.all([
-        deps.binaryProbe(), spec.gateway === 'gateway' ? deps.checkRelay(false) : Promise.resolve(null), deps.captureEnv(),
+        // P5 O7 M9: `route` before the legacy field; the machine route's relay check is the start guards' advisory one
+        deps.binaryProbe(), readRoute(spec) === 'gateway' ? deps.checkRelay(false) : Promise.resolve(null), deps.captureEnv(),
         (deps.captureLocalKey ?? captureLocalKey)(spec.cwd).catch((): ConnectorLocalKey => ({ kind: 'unidentified', why: 'unreadable' })), // P3-HD
       ]);
       // W13: a missing binary and one that printed no version refuse; a version other than the tested one never does
@@ -260,10 +262,12 @@ export function createAdopter(deps: LauncherDeps, adoptMs = ADOPT_MS): (entry: R
     assertSafeAppSessionId(appSessionId);
     const launchId = entry.holderId;
     const dir = journalDir(deps.userData, appSessionId);
-    const spec = await deps.store.loadLaunchSpec(appSessionId);
-    if (spec === null) throw new HostAdoptFailed('the session has no stored launch spec');
+    const stored = await deps.store.loadLaunchSpec(appSessionId);
+    if (stored === null) throw new HostAdoptFailed('the session has no stored launch spec');
     const spawned = spawnRowOf(launchRows(dir, launchId));
     if (spawned === null) throw new HostAdoptFailed(`launch ${launchId} has no spawn row`);
+    // P5 O7 M9: the stored spec keeps no `route` (an older strict reader's file); the launch's spawn row names it
+    const spec: LaunchSpec = spawned.route === 'machine' ? { ...stored, route: 'machine' } : stored;
     const [captured, owedInterrupt, observerLaunch, infrastructure] = await Promise.all([
       deps.captureEnv(),
       deps.store.loadOwedInterrupt(appSessionId).catch(() => false),

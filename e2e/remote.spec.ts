@@ -81,7 +81,7 @@ import { BOARD, drawsRows, labelOf, liveBlock, liveViews, NOT_FETCHED, openSheet
 import { installedEngine } from './support/p1-live';
 import { isAlive, tcpListeners } from './support/processes';
 import { DATASET_STATES } from '../src/artifacts/dashboard/states';
-import { launchMaws, type MawsLaunch } from './support/launch';
+import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-scene';
 import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
@@ -2079,6 +2079,160 @@ test('M8: a session spawned on B leads a busy project past its cap and comes bac
     await scene?.stop();
     rmSync(aUserData, { recursive: true, force: true });
     rmSync(a2UserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M9's Proves: P5 acceptance 5's spawn on a machine
+// with no setup), on e2e:remote's scene over the relay. B holds a checkout of the org project that nobody registered there,
+// under a home of the scene's own (B's HOME, a folder in the scene's root: nothing on B lists the runner's), untrusted on
+// B; B keeps its own default route, the machine's own, and its engine (a replay) reports an Anthropic login. From A, in
+// order: the machine menu offers B's setup to its owner (A's member, who enrolled B); the sheet lists B's home, a private
+// folder there marked and never opened (no e2e opens one), and is walked to the checkout; its trust is read on B and B's
+// trust card shows, with no start without trusting; Trust, then the registration (its Touch ID accepted by the harness),
+// and B registers the folder; the brief's Send spawns there with `trust: 'accepted'`, so B runs its trust bootstrap (the
+// first launch on B's replay list) and then the session (the second), the tab moves to it and its row shows in A's
+// group; B's status names the login its machine route reached, and A's Session info names it in the Route row.
+// Not driven: a non-owner's greyed item. The scene's org has one member, who owns B; a non-owner is a second member
+// signed in on an app of their own, which the local org does not stage. sessions/MachineMenu.test.tsx holds the greyed
+// item and its reason, test/endpoint/setup-rows.test.ts the endpoint's `owners-only` for a member and a grant-holder.
+const M9_SPAWNED = 'b0c0d0e0-0000-4000-8000-0000000000b7'; // the engine session id the session's journal pins
+const M9_TITLE = 'B’s session set up from A';
+const M9_BRIEF = 'Start the M9 session on B.';
+const M9_REPLY = 'Started on B in the folder A set up.';
+const M9_LOGIN = 'Claude Max account'; // what B's engine reports (`Login`, `Organization`: pass2/auto-unrouted's rows)
+const M9_ORGANIZATION = 'B owner’s organization';
+const M9_BOOTSTRAP = join(REPO_ROOT, 'spikes/protocol-probe/fixtures/pass3/trust-bootstrap-recorded.jsonl'); // e2e/sessions.spec.ts's
+const SET_UP = 'Set up this project there…';
+
+test('M9: "+ Session" on B with no registered checkout sets its folder up there: browsed, trusted on B, registered and spawned, and Session info names the route B’s own settings reached', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-m9-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-m9-'));
+  const journals = join(root, 'journals');
+  const hooks = join(root, 'no-hooks');
+  const aCheckout = join(root, A_PROJECT);
+  const bHome = join(root, 'b-home');
+  const bCheckout = join(bHome, 'Developer', 'GitHub', A_PROJECT);
+  for (const dir of [journals, hooks, aCheckout, bHome]) mkdirSync(dir);
+  mkdirSync(bCheckout, { recursive: true });
+  mkdirSync(join(bHome, 'Documents')); // a protected folder's name in B's home: listed, marked, never opened
+  checkoutRepository(bCheckout, hooks);
+  checkoutRepository(aCheckout, hooks);
+  let scene: RemoteScene | null = null;
+  let a: MawsLaunch | null = null;
+  try {
+    const journal = new SideJournal(M9_SPAWNED, bCheckout, [{ label: 'Login', value: M9_LOGIN }, { label: 'Organization', value: M9_ORGANIZATION }]);
+    journal.turn(M9_REPLY);
+    const fixture = journal.write(journals, 'b-m9');
+    scene = await startRemoteScene({
+      scratch: join(root, 'scene'),
+      aUserData,
+      b: {
+        root: '/tmp', // as M8's: the replay writes the session's transcript only into a config home that is its own real path
+        // B's launches in order: the trust bootstrap the accepted trust runs, then the session
+        env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: [M9_BOOTSTRAP, fixture].join(','), HOME: bHome, DISABLE_AUTOUPDATER: '1' },
+        // onboarding done and the journal's mode; no folder trusted, so the trust card is B's own
+        prepare: ({ claudeConfigDir }) => {
+          writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, projects: {} }));
+          writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
+        },
+      },
+    });
+    const { b } = scene;
+    const bProjects = async () => (await b.request<{ projects: { directory: string }[] }>('session.projects.list')).projects.map((p) => p.directory);
+    expect(await bProjects(), 'B’s checkout is registered nowhere on B').not.toContain(bCheckout);
+
+    a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A', MAWS_E2E_STEP_UP: 'accept' } }); // the registration's and the spawn's step-ups, accepted
+    keepMainLines(a);
+    const { page } = a;
+    await expect.poll(async () => (await machineOf(page, b.ref))?.state ?? null, { timeout: 60_000, message: `A's link to B comes up over the relay\n${mainSaid(page)}` }).toBe('up');
+    type Projects = { projects: { directory: string; org?: { key: string } }[] };
+    await invoke(page, 'session.projects.add', { directory: aCheckout });
+    await expect
+      .poll(async () => (await invoke<Projects>(page, 'session.projects.list', undefined)).projects.find((p) => p.directory === aCheckout)?.org?.key ?? null, { timeout: 30_000 })
+      .toBe(`smns:${PROJECT}`);
+    const bSaid = async () => {
+      const engines = await b.request<unknown[]>('engine.sessions').catch((error: unknown) => String(error));
+      const lines = b.log().split('\n').filter((line) => /spawn|session\.(create|start|intent|projects|trust)|machine\.(op|folders|setupTrust)|step-up|refus|setup|trust|replay|endpoint|route/i.test(line));
+      return `B's engine sessions: ${JSON.stringify(engines)}\nB's log:\n${lines.slice(-40).join('\n')}`;
+    };
+
+    const sheet = page.getByRole('dialog', { name: `Set up this project on ${B_NAME}` });
+    await test.step('the machine menu offers B’s setup to its owner; the sheet lists B’s home, a private folder marked and never opened, and is walked to the checkout', async () => {
+      await newChat(page, A_PROJECT);
+      const trigger = page.getByRole('button', { name: 'Machine This Mac', exact: true });
+      await expect(trigger, 'the machine menu, once the project’s org project is known').toBeEnabled({ timeout: 30_000 });
+      await trigger.click();
+      const menuOf = page.getByRole('dialog', { name: 'Choose a machine' });
+      const setUp = menuOf.getByRole('menuitem').filter({ hasText: SET_UP });
+      await quoting(expect(setUp, 'B, which has no registered checkout of the project, offered for setup').toBeEnabled({ timeout: 30_000 }), async () => `the menu: ${await menuOf.innerText().catch(() => '')}\n${mainSaid(page)}`);
+      await expect(setUp).toContainText(B_NAME);
+      await setUp.click();
+      await expect(sheet).toBeVisible();
+      await expect(sheet, 'the privacy warning first').toContainText('Private folders macOS protects');
+      const folders = sheet.getByRole('list', { name: `Folders on ${B_NAME}` });
+      await expect(folders.getByRole('button').filter({ hasText: 'Documents' }), 'a protected folder, listed and marked').toContainText('private');
+      const use = sheet.getByRole('button', { name: 'Use this folder', exact: true });
+      await expect(use, 'not at the home').toBeDisabled();
+      for (const name of ['Developer', 'GitHub', A_PROJECT]) await folders.getByRole('button', { name, exact: true }).click();
+      await expect(sheet.getByText(`~/Developer/GitHub/${A_PROJECT}`, { exact: true }), 'the checkout shown').toBeVisible();
+      await use.click();
+    });
+
+    await test.step('B reads the folder’s trust and shows its card; Trust registers it on B, and the tab targets B', async () => {
+      const card = page.getByRole('dialog', { name: `Trust this folder on ${B_NAME}?` });
+      await quoting(expect(card, 'B’s trust card: the folder isn’t trusted there').toBeVisible({ timeout: 60_000 }), async () => `the sheet: ${await sheet.innerText().catch(() => 'gone')}\n${mainSaid(page)}\n${await bSaid()}`);
+      await expect(card).toContainText(bCheckout);
+      await expect(card.getByRole('button', { name: 'Start without trusting' }), 'no start without trusting on another machine').toHaveCount(0);
+      await card.getByRole('button', { name: 'Trust', exact: true }).click();
+      await quoting(expect(page.getByRole('dialog', { name: /^(Set up this project|Trust this folder) on / }), 'the sheet closes once B registered the folder').toHaveCount(0, { timeout: 60_000 }), async () => `${mainSaid(page)}\n${await bSaid()}`);
+      await expect.poll(bProjects, { timeout: 30_000, message: 'B registered the folder' }).toContain(bCheckout);
+      await expect(page.getByRole('button', { name: `Machine ${B_NAME}`, exact: true })).toBeVisible();
+      await expect(main(page).getByText(`Lane B on ${B_NAME} · ${B_NAME}’s inference route`)).toBeVisible();
+    });
+
+    let spawnedApp = '';
+    let address = '';
+    await test.step('the brief’s Send spawns on B with the trust accepted: B runs its trust bootstrap, then the session, which opens in A’s pane and shows as a row in A’s group', async () => {
+      await composerOf(page).click();
+      await page.keyboard.type(M9_BRIEF);
+      await page.keyboard.press('Enter');
+      type Live = { appSessionId: string; engineSessionId: string | null };
+      // the session's pin is the replay list's second launch: the first, the trust bootstrap, ran before it
+      await expect
+        .poll(async () => (spawnedApp = (await b.request<Live[]>('engine.sessions')).find((s) => s.engineSessionId === M9_SPAWNED)?.appSessionId ?? ''), {
+          timeout: 120_000,
+          intervals: [100],
+          message: 'B’s engine host runs the spawned session, after its trust bootstrap',
+        })
+        .not.toBe('')
+        .catch(async (error: unknown) => {
+          throw new Error(`${error instanceof Error ? error.message : String(error)}\n${await paneSaid(page)}\n${mainSaid(page)}\n${await bSaid()}`);
+        });
+      address = addressOf(b.ref, spawnedApp);
+      await scene!.sminos.list({ engine: M9_SPAWNED, app: spawnedApp, owners: [scene!.member], project: PROJECT, title: M9_TITLE, cwd: bCheckout });
+      expect(bareOf(await movedTo(page, b.ref, null, bSaid)), 'the New chat tab moved to the session B started').toBe(spawnedApp);
+      await expect(main(page).getByText(M9_REPLY).first(), `its turn in A's pane\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
+      expect((await b.request<{ directory: string } | null>('session.get', { appSessionId: spawnedApp }))?.directory, 'it runs in the folder set up on B').toBe(bCheckout);
+      await openProject(page, A_PROJECT);
+      const row = projectRow(page, A_PROJECT).locator(`[role="treeitem"][data-tree-id="s:${address}"]`);
+      await quoting(expect(row, 'its row in A’s group').toBeVisible({ timeout: 60_000 }), async () => `the group's rows: ${(await projectRow(page, A_PROJECT).locator('[data-kind="session"], [data-kind="listed"]').allTextContents()).join(' | ')}\n${mainSaid(page)}`);
+    });
+
+    await test.step('B started it on its own default route, the machine’s own: B’s status names the login it reached, and A’s Session info names it in the Route row', async () => {
+      type Gateway = { mode: string; verified: string; route?: string; observed?: { kind: string; login?: string; organization?: string } };
+      await expect
+        .poll(async () => (await b.request<{ gateway: Gateway }>('session.status', { appSessionId: spawnedApp })).gateway, { timeout: 30_000, message: 'B’s status of the session' })
+        .toMatchObject({ mode: 'direct', verified: 'direct', route: 'machine', observed: { kind: 'login', login: M9_LOGIN, organization: M9_ORGANIZATION } });
+      await openSurface(page, 'Session info');
+      const route = surface(page, 'session-info').locator('[data-session-info]').getByRole('term').filter({ hasText: /^Route$/ }).locator('xpath=following-sibling::dd[1]');
+      await quoting(expect(route, 'the Route row names what B reports').toContainText(`The machine’s own · Anthropic login · ${M9_LOGIN}`, { timeout: 30_000 }), async () => `Session info: ${await surface(page, 'session-info').innerText().catch(() => 'none')}\n${mainSaid(page)}`);
+      console.log(`[e2e:remote] M9: ${address} on B's own route; Session info's Route row: ${await route.innerText()}`);
+    });
+  } finally {
+    await a?.cleanup();
+    await scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
 });

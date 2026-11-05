@@ -98,13 +98,15 @@ export class FileSessionStateStore implements SessionStateStore {
 
   // P2-C: the owner channel's two keys are left out (the P2-C document, Design §2, R5): no production code reads the
   // stored spec back, and a key an older build's strict reader does not know would move its whole state file aside.
-  // P5 O12 M11: and the spawner, likewise, which each launch takes from the session's record.
+  // P5 O12 M11: and the spawner, likewise, which each launch takes from the session's record. P5 O7 M9: and the route
+  // (its legacy field is kept): an adopter takes a machine-route launch's from the launch's spawn row (launcher.ts).
   saveLaunchSpec(id: AppSessionId, spec: LaunchSpec): Promise<void> {
     return this.update(id, (file) => {
-      const { appendSystemPrompt: _append, systemPromptSnapshot: _snapshot, launchedBy: _launchedBy, ...stored } = LaunchSpecSchema.parse(spec); // P2-C; P5 O12 M11
+      const { appendSystemPrompt: _append, systemPromptSnapshot: _snapshot, launchedBy: _launchedBy, route: _route, ...stored } = LaunchSpecSchema.parse(spec); // P2-C; P5 O12 M11; P5 O7 M9
       void _append;
       void _snapshot;
       void _launchedBy;
+      void _route;
       return { ...file, launchSpec: stored };
     });
   }

@@ -168,6 +168,21 @@ describe('setup intent hook', () => {
     ]);
   });
 
+  // P5 O7 M9: the machine's own route has a catalogue of its own (what the machine resolves to, which the host answers):
+  // asked by `route`, again on each route change, and no other route's catalogue stands in while it is read
+  it('asks the machine’s own route’s catalogue by `route`, refetching on Gateway → Machine’s own, with no gateway catalogue meanwhile', async () => {
+    withMain({ 'engine.models': (input: { route?: string }) => (input.route === 'machine' ? undefined : CATALOGUE) });
+    putIntent(pageIntent({ gateway: 'gateway' }));
+    const { result } = renderHook(() => useSetupIntent(A));
+    await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
+    act(() => putIntent(pageIntent({ gateway: 'gateway', route: 'machine' })));
+    await waitFor(() => expect(fake.invoked('engine.models').at(-1)).toEqual({ refresh: false, gateway: 'gateway', route: 'machine', cwd: REPO }));
+    expect(result.current!.options.models.map((m) => m.value), 'the gateway’s aliases are not the machine’s').toEqual(['default', 'opus', 'fable', 'sonnet', 'haiku']);
+    act(() => putIntent(pageIntent({ gateway: 'gateway', route: 'gateway' })));
+    await waitFor(() => expect(result.current!.options.models.map((m) => m.value)).toEqual(['default', 'haiku', 'claude/astra']));
+    expect(fake.invoked('engine.models').at(-1)).toEqual({ refresh: false, gateway: 'gateway', cwd: REPO });
+  });
+
   // Debt wave 5: the host keys a launch whose settings set model env apart, so the tab names the directory it would
   // launch in: an existing worktree itself, a worktree not yet made by its repository
   it('names the directory whose settings the launch would read: an existing worktree’s own path, a new worktree’s repository', async () => {

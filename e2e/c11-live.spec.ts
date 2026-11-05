@@ -54,7 +54,7 @@ interface Live {
 }
 
 async function withApp(label: string, env: Record<string, string>, fn: (live: Live) => Promise<void>): Promise<void> {
-  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config, MAWS_CLAUDE_USAGE_DIR: CLAUDE_USAGE_DIR, ...env } });
+  const maws = await launchMaws({ defaultRoute: 'gateway', env: { MAWS_E2E_ENGINE_BIN: ENGINE_BIN, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config, MAWS_CLAUDE_USAGE_DIR: CLAUDE_USAGE_DIR, ...env } });
   const { page } = maws;
   const failures: string[] = [];
   const observe = (key: string, v: unknown) => scratch.observe(`${label}.${key}`, v);

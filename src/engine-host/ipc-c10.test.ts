@@ -12,6 +12,7 @@ import { type CommandInput, type CommandName, type CommandOutput, type EventName
 import { validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import { registerEngineIpc, type EngineIpcDeps } from './ipc';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
+import { RELAY_URL } from './launch'; // P5 O7 M9
 import { FileSessionStateStore } from './store/file-session-state-store';
 import { ProcessTable } from './process-table'; // P5 O16 panel fix wave 1 follow-up
 
@@ -126,6 +127,36 @@ describe('engine.models', () => {
     expect(await values({ refresh: false, gateway: 'gateway', cwd: home })).toEqual(['default', 'opus', 'claude-fable-5-1[1m]', 'sonnet', 'haiku']);
     expect(await values({ refresh: false, gateway: 'gateway' })).toContain('claude/astra'); // the route's list was not overwritten
     expect(await values({ refresh: false, gateway: 'gateway', cwd: plain })).toContain('claude/astra');
+    await host.ipc.table.shutdown({ graceMs: 0 });
+  });
+});
+
+// P5 O7 M9 (reviewer-high fix wave): the machine route's catalogue is the one its resolved base URL reaches: the
+// relay's for the relay, the direct one for a login or another host; and no gateway model while it cannot be resolved,
+// as the start guard refuses one anywhere but at the relay
+describe('engine.models on the machine route', () => {
+  it('answers the catalogue the machine reaches, and no gateway list while that is unknown', async () => {
+    const home = join(userData, 'home');
+    const work = join(userData, 'work');
+    await mkdir(join(home, '.claude'), { recursive: true });
+    await mkdir(join(work, '.claude'), { recursive: true });
+    const host = engineHost({ captureEnv: () => Promise.resolve({ HOME: home }), systemRoot: join(userData, 'system') });
+    const values = async () => (await host.call('engine.models', { refresh: false, route: 'machine', cwd: work })).models.map((m) => m.value);
+    const userBaseUrl = (value: string) => writeFile(join(home, '.claude', 'settings.json'), JSON.stringify({ env: { ANTHROPIC_BASE_URL: value } }));
+
+    const relay = 'app-models-machine-relay' as AppSessionId;
+    await host.call('session.launch', { spec: { ...spec(relay, 'spikes/protocol-probe/fixtures/reads.jsonl'), cwd: work } });
+    await until(() => host.ipc.table.get(relay)?.lifecycle === 'ready', 'ready');
+    await userBaseUrl(RELAY_URL);
+    for (let i = 0; i < 100 && !(await values()).includes('claude/astra'); i++) await new Promise((r) => setTimeout(r, 5));
+    expect(await values()).toContain('claude/astra'); // the relay: the gateway catalogue
+    await userBaseUrl('https://inference.example.invalid');
+    expect((await values()).filter((value) => value.startsWith('claude/'))).toEqual([]); // another host: none of the gateway's
+    await writeFile(join(home, '.claude', 'settings.json'), '{}');
+    expect((await values()).filter((value) => value.startsWith('claude/'))).toEqual([]); // the login
+    await userBaseUrl(RELAY_URL);
+    await writeFile(join(work, '.claude', 'settings.json'), '{ not json'); // what the engine makes of it is unknown
+    expect((await values()).filter((value) => value.startsWith('claude/'))).toEqual([]);
     await host.ipc.table.shutdown({ graceMs: 0 });
   });
 });

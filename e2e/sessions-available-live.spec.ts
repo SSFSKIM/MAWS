@@ -120,7 +120,7 @@ function prepare(): void {
 let engine: CappedEngine; // the installed engine, or its capped forwarding script under MAWS_LIVE_MAX_USD (set at the run's start)
 const launch = () => {
   engine.budget(spentUnder(userData));
-  return launchMaws({ userData, env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
+  return launchMaws({ defaultRoute: 'gateway', userData, env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
 };
 const main = (page: Page) => page.locator('[data-region="main"]');
 const status = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id as AppSessionId }));

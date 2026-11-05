@@ -6,7 +6,9 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, st
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { createConnection } from 'node:net';
-import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import { ENGINE_ROUTE_MACHINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL } from '@shared/host/socket-protocol';
+import * as z from 'zod';
+import { RELAY_URL } from '../engine-host/relay-url'; // P5 O7 M9
 import { WIRE_MINOR } from '@shared/ipc/wire';
 import type { AppSessionId } from '@shared/graph/ids';
 import { readOrMintMachineRef } from '@shared/machine/identity-file';
@@ -346,6 +348,47 @@ describe('requests and events pass raw', () => {
 });
 
 describe('the interceptions', () => {
+  // P5 O7 M9 (reviewer-high fix wave): an engine host that predates the machine route reads `engine.models` with its
+  // strict input, which has no `route`: the daemon sends it the legacy key alone, the machine route's from its resolution
+  describe('engine.models to a host that predates the machine route', () => {
+    const OLDER = PEER_CAPABILITIES.engineHost.filter((name) => name !== ENGINE_ROUTE_MACHINE_CAPABILITY);
+    const STRICT = z.strictObject({ refresh: z.boolean(), gateway: z.enum(['gateway', 'direct']).optional(), cwd: z.string().optional() });
+    const CATALOGUE = { models: [{ value: 'claude/astra', displayName: 'Astra', description: '' }, { value: 'sonnet', displayName: 'Sonnet', description: '' }], source: 'cached', at: null };
+    const OTHER = 'https://inference.example.invalid';
+
+    it('strips `route`, sends the machine route as the legacy key its resolution reaches, and filters an uncertain one', async () => {
+      const home = join(scene.root, 'route-home');
+      mkdirSync(join(home, '.claude'), { recursive: true });
+      const userBaseUrl = (value: string) => writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ env: { ANTHROPIC_BASE_URL: value } }));
+      scene.engineSpawn = { capabilities: OLDER, answers: { 'engine.models': (input) => (STRICT.parse(input), CATALOGUE) } };
+      await scene.start({ routeResolution: { env: async () => ({ HOME: home }), systemRoot: join(scene.root, 'route-system') } });
+      const app = await scene.app();
+      const models = async (input: Record<string, unknown>) => {
+        const answer = await app.request('engine.models', input);
+        expect(answer).toMatchObject({ ok: true });
+        return { sent: scene.lastEngine().named('engine.models').at(-1), values: ((answer.value as typeof CATALOGUE).models).map((m) => m.value) };
+      };
+      expect(await models({ refresh: false, route: 'direct' })).toEqual({ sent: { refresh: false, gateway: 'direct' }, values: ['claude/astra', 'sonnet'] });
+      userBaseUrl(RELAY_URL);
+      expect((await models({ refresh: false, route: 'machine', gateway: 'direct' })).sent).toEqual({ refresh: false, gateway: 'gateway' });
+      userBaseUrl(OTHER);
+      expect((await models({ refresh: true, route: 'machine', gateway: 'gateway' })).sent).toEqual({ refresh: true, gateway: 'direct' });
+      writeFileSync(join(home, '.claude', 'settings.json'), '{ not json'); // uncertain: the held legacy value, no gateway model
+      expect(await models({ refresh: false, route: 'machine', gateway: 'gateway' })).toEqual({ sent: { refresh: false, gateway: 'gateway' }, values: ['sonnet'] });
+      expect(await models({ refresh: false })).toEqual({ sent: { refresh: false }, values: ['claude/astra', 'sonnet'] }); // no route: as it is
+    });
+
+    it('sends a host that lists the machine route the request unchanged', async () => {
+      scene.engineSpawn = { answers: { 'engine.models': () => CATALOGUE } };
+      const daemon = await scene.start({ routeResolution: { env: async () => ({ HOME: join(scene.root, 'route-home') }), systemRoot: join(scene.root, 'route-system') } });
+      const app = await scene.app();
+      await app.request('engine.ping', {}); // the host's welcome, its capabilities with it, is read once it is linked
+      await until(() => daemon.hosts.peer('engine-host') !== null);
+      expect(await app.request('engine.models', { refresh: false, route: 'machine', gateway: 'gateway' })).toMatchObject({ ok: true });
+      expect(scene.lastEngine().named('engine.models')).toEqual([{ refresh: false, route: 'machine', gateway: 'gateway' }]);
+    });
+  });
+
   it('host.interest: the union across two attachments, a remote viewer and a recycle goes upstream', async () => {
     const daemon = await scene.start();
     const first = await scene.app();

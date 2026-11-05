@@ -195,7 +195,7 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
   const engine = await cappedEngine({ root: scratch.root, real: ENGINE_BIN });
   scratch.log(`engine cap: ${capWords(engine)}`);
   console.log(`P2-B live: engine ${ENGINE_VERSION} (${ENGINE_BIN}), cap ${capWords(engine)}, log ${join(scratch.root, 'live-run.txt')}`);
-  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config } });
+  const maws = await launchMaws({ defaultRoute: 'gateway', env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: scratch.config } });
   const { page, app } = maws;
   const invokes = await trackInvokes(app);
   const starts = () => invokes(['session.start', 'session.acquire']);

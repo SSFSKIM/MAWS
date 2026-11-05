@@ -31,11 +31,13 @@ import { CONSENT_COMMANDS, type RemotePort } from './remote-port';
 import type { RemoteWindows, WindowReport } from './remote-windows';
 
 /**
- * The six lease reads, graded by effect on the artifact (`view`), which §L offers as calls: sent through `link.call` by
- * name (`callOverLink`), since `dispatchOverLink` refuses every grade but a plain `list` or `view`. A by-effect command
- * crosses as a call only when it is here.
+ * The calls whose row grade the endpoint reads otherwise than the registry's, sent through `link.call` by name
+ * (`callOverLink`), since `dispatchOverLink` refuses every grade but a plain `list` or `view`: the six lease reads, graded
+ * by effect on the artifact (`view`), which §L offers as calls (a by-effect command crosses as a call only when it is
+ * here); and (P5 O7 M9) the remote setup's folder list and trust read, graded `spawn` in the registry and offered to the
+ * machine's owners at `list` (./remote.ts sends them).
  */
-export const MACHINE_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['connectors.open', 'connectors.declare', 'connectors.watch', 'connectors.unwatch', 'connectors.visibility', 'connectors.close']);
+export const MACHINE_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['connectors.open', 'connectors.declare', 'connectors.watch', 'connectors.unwatch', 'connectors.visibility', 'connectors.close', 'machine.folders.list', 'session.trust.check']);
 const LEASES: ReadonlySet<CommandName> = new Set<CommandName>(LEASE_COMMANDS);
 
 /** Options of the adapter's `machine` act (./remote.ts). */

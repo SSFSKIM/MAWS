@@ -253,7 +253,7 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
   note(`A-15 before the first launch: ${before.keys.length} keys, sha1 ${before.digest}`);
 
   let sitting: Sitting | null = null;
-  const maws = await launchMaws({ env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config, MAWS_E2E_OPEN_LOG: openLog } });
+  const maws = await launchMaws({ defaultRoute: 'gateway', env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: sc.config, MAWS_E2E_OPEN_LOG: openLog } });
   try {
     const { page } = maws;
     await recordEvents(page);

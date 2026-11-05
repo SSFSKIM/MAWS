@@ -13,7 +13,7 @@ import type { SessionWindows } from '../../stores/usage';
 import { MODE_REFUSAL_WORDS, modeReported } from '../../statusline/mode-menu';
 import { resetsIn, windowShown } from '../../statusline/format';
 import { directLoginOf } from '../../gateway/direct-login';
-import type { Route } from '../../gateway/copy';
+import { MACHINE_ROUTE, type SwitchTarget } from '../../gateway/copy'; // P5 O7 M9: MACHINE_ROUTE, SwitchTarget
 import { paceLine, type DirectLogin, type RoutingFacts } from '../../gateway/routing-facts';
 import { present as presentContext } from '../../widgets/ContextWidget';
 import { present as presentMcp } from '../../widgets/McpWidget';
@@ -37,7 +37,7 @@ import { FRESHNESS } from '../../sessions/observed';
 // P2-A end
 
 // W2: `route` is the Direct⇄gateway switch, offering `targets` (the routing facts' own)
-export type InfoRow = { label: string; value: string; note?: string; action?: 'permissions' | 'route'; targets?: Route[] };
+export type InfoRow = { label: string; value: string; note?: string; action?: 'permissions' | 'route'; targets?: SwitchTarget[] };
 export type InfoSection = { title: string; rows: InfoRow[] };
 
 export interface SessionInfoInput {
@@ -183,21 +183,28 @@ function gatewaySection({ status, facts, directLogin, reads }: SessionInfoInput)
   const login = (reads.status && directLoginOf(reads.status)) ?? directLogin;
   const rows: InfoRow[] = [];
   let route: InfoRow;
-  if (!status) route = { label: INFO.route, value: facts.line };
+  // P5 O7 M9: the machine's own route says what the machine reached (the routing facts' line), never unverified or a
+  // mismatch; the login's organization is the one get_status named for it
+  const observed = status?.gateway.observed ?? null;
+  const machineLogin = observed?.kind === 'login' ? { login: observed.login ?? '', email: login?.email ?? null, organization: observed.organization ?? login?.organization ?? null } : null;
+  if (!status || facts.machine) route = { label: INFO.route, value: facts.line };
   else if (status.gateway.verified === 'routed') route = { label: INFO.route, value: INFO.routed(status.gateway.baseUrl ?? NONE) };
   else if (status.gateway.verified === 'direct') route = { label: INFO.route, value: login ? INFO.directLogin(login.login) : INFO.direct };
   else route = { label: INFO.route, value: INFO.unverified, note: status.gateway.verified === 'mismatch' ? INFO.mismatch(status.gateway.mode) : INFO.pending };
   // W2: the switch the usage popover's footer offered, or why there is none (held elsewhere, archived)
   const note = [route.note, facts.refusal].filter((n): n is string => typeof n === 'string').join(' · ');
   rows.push({ ...route, note: note || undefined, ...(facts.targets.length > 0 ? { action: 'route' as const, targets: facts.targets } : {}) });
-  const direct = status ? status.gateway.mode === 'direct' : facts.route === 'direct';
+  const direct = facts.route === 'direct'; // P5 O7 M9: the routing facts' route is what the session was observed reaching
+  const named = facts.machine ? (machineLogin ?? (observed === null ? null : login)) : login; // a host the machine names has no login
   if (direct) {
-    if (login?.organization) rows.push({ label: INFO.organization, value: login.organization });
-    if (login?.email) rows.push({ label: INFO.email, value: login.email });
+    if (named?.organization) rows.push({ label: INFO.organization, value: named.organization });
+    if (named?.email) rows.push({ label: INFO.email, value: named.email });
   } else {
     rows.push({ label: INFO.account, value: facts.account?.email ?? INFO.noAccount, note: facts.account ? (facts.account.why === 'pinned' ? INFO.pinnedHere : INFO.routingNow) : undefined });
   }
-  rows.push({ label: INFO.toolSearch, value: status || facts.route !== 'unknown' ? (direct ? INFO.toolSearchOff : INFO.toolSearchOn) : NONE });
+  // MAWS sets ENABLE_TOOL_SEARCH only on the routes it injects; on the machine's own, the machine's settings decide
+  const toolSearch = facts.machine ? MACHINE_ROUTE.toolSearch : direct ? INFO.toolSearchOff : INFO.toolSearchOn;
+  rows.push({ label: INFO.toolSearch, value: status || facts.route !== 'unknown' ? toolSearch : NONE });
   return { title: INFO.sections.gateway, rows };
 }
 

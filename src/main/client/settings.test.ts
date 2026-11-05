@@ -279,6 +279,8 @@ describe('settings.set over a machine half that answers later (the daemon shapeâ
         listeners.add(listener);
         return () => void listeners.delete(listener);
       },
+      defaultRoute: () => 'machine', // P5 O7 M9: not read by these cases
+      setDefaultRoute: async (route) => route,
     };
     return { service, pending };
   };

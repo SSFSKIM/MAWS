@@ -9,6 +9,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GetUsageResponse } from '@shared/wire/control';
 import type { UsageWindow } from '@shared/usage/types';
+import { throughClaudeUsage } from '../gateway/observed-route'; // P5 O7 M9
 import { ipc } from '../ipc/client';
 import { useUsage, type Windows } from '../stores/usage';
 
@@ -38,10 +39,14 @@ export function windowsFromGetUsage(response: GetUsageResponse, readAt: string):
   };
 }
 
+// Whether a session's windows are the engine's own: a ready process whose requests ClaudeUsage's relay never sees (P5 O7
+// M9: keyed on what the machine was observed reaching, the legacy mode only without an observation).
+export const readsEngineUsage = (status: EngineSessionStatus | null): boolean => status !== null && status.process === 'ready' && throughClaudeUsage(status, null) === false;
+
 // Polls while given a status (Session info passes one only while its tab is shown) for a direct session with a ready
 // process, and reads once more whenever a turn ends; a failed read leaves the last reading.
 export function useDirectFallback(appSessionId: AppSessionId, status: EngineSessionStatus | null): void {
-  const polling = status !== null && status.gateway.mode === 'direct' && status.process === 'ready';
+  const polling = readsEngineUsage(status);
   const turnOpen = status !== null && status.turn !== null;
   const [turnsEnded, setTurnsEnded] = useState(0);
   const [wasOpen, setWasOpen] = useState(turnOpen);

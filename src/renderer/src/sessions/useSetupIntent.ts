@@ -17,6 +17,7 @@ import { useSettings } from '../stores/settings'; // W3
 import { patchIntent, startIntent, type HookResult } from './setup-actions';
 import { useSetup } from './store';
 import { machineOf } from '@shared/machine/address';
+import { readRoute, type Route } from '@shared/engine/route'; // P5 O7 M9
 import type { MachineRef } from '@shared/machine/ref';
 
 // C7's `ModelInfo`: the catalogue fills `value`, `displayName`, the two capability flags and `supportedEffortLevels`
@@ -193,8 +194,11 @@ async function readRepository(machine: MachineRef, directory: string): Promise<R
 // so each new tab sees what the host knows now for the route it would launch on, not the most recently updated route's.
 // A failed read shows the built-in list the host itself answers before any launch. The directory it names is the one
 // the launch would read settings from, which may set a model environment of its own (debt wave 5).
-async function readCatalogue(machine: MachineRef, gateway: SetupIntent['gateway'], cwd: string | null): Promise<ModelCatalogue> {
-  const result = await ipc.invoke('engine.models', cwd === null ? { refresh: false, gateway } : { refresh: false, gateway, cwd }, { machine });
+// P5 O7 M9: the machine's own route is asked by `route` (with the legacy field the intent holds beside it), whose
+// catalogue the host answers from what the machine resolves to; Gateway and Direct by the legacy field alone, as before.
+async function readCatalogue(machine: MachineRef, route: Route, gateway: SetupIntent['gateway'], cwd: string | null): Promise<ModelCatalogue> {
+  const asked = route === 'machine' ? { refresh: false, gateway, route } : { refresh: false, gateway: route };
+  const result = await ipc.invoke('engine.models', cwd === null ? asked : { ...asked, cwd }, { machine });
   if (result.ok) return result.value;
   console.warn('[sessions] engine.models unavailable', result.error);
   return BUILTIN_FALLBACK;
@@ -207,21 +211,25 @@ function useSetupOptions(
   const location = intent?.location ?? null; // New chat: none until a project is chosen, and nothing to read
   const base = location ? baseDirectoryOf(location) : null;
   const [facts, setFacts] = useState<RepositoryFacts | null>(null);
-  const [catalogue, setCatalogue] = useState<ModelCatalogue>(BUILTIN_FALLBACK);
+  const [read, setRead] = useState<{ route: Route; catalogue: ModelCatalogue } | null>(null); // P5 O7 M9: the route it answers
   const fallback = useSettings((s) => s.state?.settings.permissions.autoFallback) ?? 'acceptEdits'; // W3
   const machine = machineOf(appSessionId);
 
   // Only an unstarted session reads it: C7 calls this hook from every composer, and a started session's has no intent.
-  const route = intent?.gateway ?? null;
+  // P5 O7 M9: the route the launch would take (`route` before the legacy field), each one's catalogue its own: until the
+  // new route's answers, the built-in list stands rather than another route's (a gateway alias the machine can't reach)
+  const gateway = intent?.gateway ?? null;
+  const route = intent === null ? null : readRoute(intent);
   const settingsDirectory = location ? settingsDirectoryOf(location) : null;
   useEffect(() => {
-    if (route === null) return;
+    if (route === null || gateway === null) return;
     let live = true;
-    void readCatalogue(machine, route, settingsDirectory).then((c) => live && setCatalogue(c));
+    void readCatalogue(machine, route, gateway, settingsDirectory).then((catalogue) => live && setRead({ route, catalogue }));
     return () => {
       live = false;
     };
-  }, [machine, route, settingsDirectory]);
+  }, [machine, route, gateway, settingsDirectory]);
+  const catalogue = read !== null && read.route === route ? read.catalogue : BUILTIN_FALLBACK;
 
   // The repository is read again only when the base directory moves to another repository or out of one; a move
   // between two locations of one repository keeps what was read.

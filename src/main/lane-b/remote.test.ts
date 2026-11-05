@@ -13,7 +13,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MachineRef } from '@shared/machine/ref';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { BUILTIN_MODELS } from '@shared/sessions/models';
-import { record, status } from '../../../test/support/builders';
+import { project, record, status } from '../../../test/support/builders';
 import { FakeLink, MINI, type FakeAct } from '../../../test/lane-b/fake-link';
 import type { MainContext } from '../ipc/router';
 import { createRemoteLaneB, routeLaneB, type RemoteLaneB } from './remote';
@@ -1173,5 +1173,45 @@ describe('the sitting’s failures (M8)', () => {
     expect(REMOTE_UPLOAD_REFUSED_WORDS).toBe('The message wasn’t sent. If its attachment is more than a day old or isn’t a supported file, attach it again.');
     // a send without uploads keeps the machine's word
     expect(await l.cmd('session.send', { appSessionId: APP, content: 'plain' })).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'malformed' } } });
+  });
+});
+
+// P5 O7 M9 ("Remote setup"): the adapter's half of the setup rows (§U). The folder list and the trust read are the
+// endpoint's `list` calls for the machine's owners, graded `spawn` in the registry, which `dispatchOverLink` refuses
+// act-required before sending: they go by name (`callOverLink`). The registration is a `machine` act, stepped up as the
+// spawn is (the endpoint always asks it of a `machine-admin` act).
+describe('the remote setup (M9)', () => {
+  it('takes the folder list, the trust read and the registration', () => {
+    const l = lab();
+    for (const name of ['machine.folders.list', 'session.trust.check', 'session.projects.addFolder'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(true);
+  });
+
+  it('sends the folder list and the trust read as calls by name, with no session, and answers what the machine said', async () => {
+    const l = lab();
+    const entries = [{ name: 'GitHub', path: '/Users/o/Developer/GitHub', protected: false }];
+    l.link.answers.set('machine.folders.list', () => ({ ok: true, output: { entries, cursor: null } }));
+    const trust = (directory: string) => ({ directory, trustKey: directory, keyKind: 'directory', configPath: '/Users/o/.claude.json', trusted: true, source: 'trustKey', isHome: false, found: [] });
+    l.link.answers.set('session.trust.check', (input) => ({ ok: true, output: trust(String(input.directory)) }));
+    expect(await l.cmd('machine.folders.list', { path: '~/Developer' })).toEqual({ ok: true, value: { entries, cursor: null } });
+    expect(await l.cmd('session.trust.check', { directory: '/Users/o/Developer/GitHub/maws' })).toEqual({ ok: true, value: trust('/Users/o/Developer/GitHub/maws') });
+    expect(l.link.calls.filter((c) => c.name !== 'session.get')).toEqual([
+      { name: 'machine.folders.list', input: { path: '~/Developer' } },
+      { name: 'session.trust.check', input: { directory: '/Users/o/Developer/GitHub/maws' } },
+    ]);
+    // the endpoint's refusal is the machine's word
+    l.link.answers.set('machine.folders.list', () => ({ ok: false, error: { code: 'owners-only' } }));
+    expect(await l.cmd('machine.folders.list', {})).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'owners-only' } } });
+    expect(l.base).toEqual([]);
+  });
+
+  it('builds the registration as a `machine` act, stepped up, and answers its outcome or its refusal', async () => {
+    const l = lab();
+    const location = { kind: 'directory', path: '/Users/o/Documents/proj' };
+    const answer = { project: project('p-1', 0, { directory: '/Users/o/Documents/proj' }), location };
+    l.link.onAct = settleWith({ state: 'done', result: answer });
+    expect(await l.cmd('session.projects.addFolder', { directory: '/Users/o/Documents/proj' })).toEqual({ ok: true, value: answer });
+    expect(l.link.acts.map((a) => a.request)).toEqual([{ action: 'session.projects.addFolder', args: { directory: '/Users/o/Documents/proj' }, executor: 'machine', sendBy: expect.any(Number), stepUp: 'required' }]);
+    l.link.onAct = settleWith({ state: 'refused', reason: 'protected' });
+    expect(await l.cmd('session.projects.addFolder', { directory: '/Users/o/Documents/other' })).toMatchObject({ ok: false, error: { issues: { refusal: 'protected' } } });
   });
 });

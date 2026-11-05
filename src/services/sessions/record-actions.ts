@@ -174,6 +174,8 @@ export async function forkIntentOf(
   }
   const effort = EffortSchema.safeParse(source.effort);
   const routed = source.gateway.routed;
+  // P5 O7 M9: the source's route, `route` before `routed`; a source never verified takes the machine's default
+  const route = source.gateway.route ?? (routed === null ? s.settings().gateway.route : undefined);
   const now = s.now();
   return {
     appSessionId: randomUUID() as AppSessionId,
@@ -188,6 +190,7 @@ export async function forkIntentOf(
     effort: effort.success ? effort.data : null,
     permissionMode: source.permissionMode.requested,
     gateway: routed === true ? 'gateway' : routed === false ? 'direct' : s.settings().gateway.defaultRoute,
+    ...(route !== undefined && { route }), // P5 O7 M9
     trust: 'unanswered',
     trustKey: null,
     message: args.message,

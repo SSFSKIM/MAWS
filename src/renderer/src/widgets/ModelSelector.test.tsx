@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import { SessionRecordSchema } from '@shared/graph/session';
@@ -23,6 +23,9 @@ import { ID as INTENT_ID, intent } from '../test-support/setup-intents';
 import { effortLevelsOf, resetModelRequests } from './model';
 import { modelSelector } from './ModelSelector';
 import { emptyObservedFacts } from '@shared/engine/observed-facts';
+import type { SetupIntent } from '@shared/sessions/intent';
+import { machineSettingsDefaults } from '@shared/settings/defaults';
+import { GATEWAY } from '../settings-tab/copy';
 import { REL } from '../test-support/relative-time';
 
 const SELECTOR_BACK = 'Back to effort';
@@ -247,6 +250,15 @@ describe('a session with a record and no ready process', () => {
   });
 });
 
+// main's answers for the route segment: the machine's default route (`null`: its daemon predates the machine route, and
+// answers none), and the intent as a patch leaves it
+const routeAnswers = (held: SetupIntent, defaultRoute: 'machine' | 'gateway' | null) => async (name: string, input: unknown) => {
+  if (name === 'machineSettings.get') return { ok: true, value: { settings: machineSettingsDefaults(), version: 1, ...(defaultRoute !== null && { defaultRoute }) } };
+  if (name !== 'session.intent.patch') return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+  const { patch } = input as { patch: { route: 'machine' | 'gateway' | 'direct' } };
+  return { ok: true, value: { ...held, route: patch.route, gateway: patch.route === 'machine' ? held.gateway : patch.route } };
+};
+
 describe('an unstarted session writes its intent, with D-19’s route', () => {
   let offHook: () => void;
   afterEach(() => {
@@ -254,7 +266,7 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
     useSetup.setState({ intents: new Map() });
   });
 
-  function stub(over: Partial<SetupIntentHook['intent']> = {}) {
+  function stub(over: Partial<SetupIntentHook['intent']> = {}, tab: AppSessionId = INTENT) {
     const patches: unknown[] = [];
     let current: SetupIntentHook['intent'] = { location: { kind: 'directory', path: '/repo' }, additionalDirectories: [], model: null, effort: null, permissionMode: null, message: null, draft: null, ...over };
     const models = [
@@ -264,7 +276,7 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
       { value: 'claude/sol', resolvedModel: 'claude/sol', displayName: 'sol', description: 'From gateway', supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
     ];
     offHook = registerSetupIntentHook((id) =>
-      id === INTENT
+      id === tab
         ? {
             intent: current,
             options: { models, autoModeNote: null },
@@ -288,6 +300,60 @@ describe('an unstarted session writes its intent, with D-19’s route', () => {
     fireEvent.click(item(/^Haiku/));
     await waitFor(() => expect(patches).toEqual([{ model: 'haiku', effort: null }]));
     expect(screen.getByText('Applies when the session starts')).toBeTruthy();
+  });
+
+  // P5 O7 M9: the machine's own route is the intent's `route`, offered beside Gateway and Direct, and always one to go back to
+  it('names the machine’s own route the intent holds, and writes each choice as the intent’s route', async () => {
+    stub();
+    const held = intent({ appSessionId: INTENT, gateway: 'direct', route: 'machine' });
+    useSetup.setState({ intents: new Map([[INTENT, held]]) });
+    const invoke = vi.spyOn(ipc, 'invoke').mockImplementation(routeAnswers(held, 'machine') as never);
+    mount('model', '', INTENT);
+    const segment = screen.getByRole('radiogroup', { name: 'Route' });
+    expect(within(segment).getAllByRole('radio').map((r) => [r.textContent, r.getAttribute('aria-checked')])).toEqual([
+      ['Machine’s own', 'true'],
+      ['ClaudeUsage relay', 'false'],
+      ['Direct', 'false'],
+    ]);
+    // the legacy field beside `route` for the two legacy choices: a daemon that predates the machine route still applies it
+    fireEvent.click(within(segment).getByRole('radio', { name: 'ClaudeUsage relay' }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('session.intent.patch', { appSessionId: INTENT, patch: { route: 'gateway', gateway: 'gateway' } }));
+    await waitFor(() => expect(within(segment).getByRole('radio', { name: 'ClaudeUsage relay' }).getAttribute('aria-checked')).toBe('true'));
+    fireEvent.click(within(segment).getByRole('radio', { name: 'Machine’s own' }));
+    await waitFor(() => expect(invoke).toHaveBeenLastCalledWith('session.intent.patch', { appSessionId: INTENT, patch: { route: 'machine' } }));
+    invoke.mockRestore();
+  });
+
+  // the intent's own machine answers for it: a tab on another machine (its project's) is read there, not here
+  it('greys Machine’s own for a tab whose machine’s daemon predates it, though this machine’s is current', async () => {
+    const TARGET = addressOf(OTHER_MACHINE, INTENT_ID);
+    stub({}, TARGET);
+    const held = intent({ appSessionId: TARGET, gateway: 'gateway' });
+    useSetup.setState({ intents: new Map([[TARGET, held]]) });
+    const local = routeAnswers(held, 'gateway');
+    const older = routeAnswers(held, null);
+    const invoke = vi.spyOn(ipc, 'invoke').mockImplementation(((name: string, input: unknown, opts?: { machine?: string }) => (opts?.machine === OTHER_MACHINE ? older : local)(name, input)) as never);
+    mount('model', '', TARGET);
+    const machine = within(screen.getByRole('radiogroup', { name: 'Route' })).getByRole('radio', { name: 'Machine’s own' }) as HTMLButtonElement;
+    await waitFor(() => expect(machine.disabled).toBe(true));
+    expect(machine.title).toBe(GATEWAY.routeDropped);
+    expect(invoke.mock.calls.filter(([name]) => name === 'machineSettings.get').map(([, , opts]) => (opts as { machine?: string }).machine)).toEqual([OTHER_MACHINE]);
+    invoke.mockRestore();
+  });
+
+  it('on a daemon that predates the machine route: Machine’s own greyed with the mirror’s words, and Gateway and Direct still applied through the legacy field', async () => {
+    stub();
+    const held = intent({ appSessionId: INTENT, gateway: 'gateway' });
+    useSetup.setState({ intents: new Map([[INTENT, held]]) });
+    const invoke = vi.spyOn(ipc, 'invoke').mockImplementation(routeAnswers(held, null) as never);
+    mount('model', '', INTENT);
+    const segment = screen.getByRole('radiogroup', { name: 'Route' });
+    const machine = within(segment).getByRole('radio', { name: 'Machine’s own' }) as HTMLButtonElement;
+    await waitFor(() => expect(machine.disabled).toBe(true));
+    expect(machine.title).toBe(GATEWAY.routeDropped);
+    fireEvent.click(within(segment).getByRole('radio', { name: 'Direct' }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith('session.intent.patch', { appSessionId: INTENT, patch: { route: 'direct', gateway: 'direct' } }));
+    invoke.mockRestore();
   });
 
   it('Direct on a gateway model asks for a Claude model first (pickDirectModel)', async () => {

@@ -5,14 +5,15 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import type { StartOutcome } from '@shared/sessions/setup';
 import { TRUST_GATES } from '@shared/sessions/trust';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
 import { ipc } from '../ipc/client';
 import { useNotices } from '../stores/notices';
 import { closeDialog, useDialogs } from './dialogs';
 import { health, ID as BARE_ID, intent as mainIntent, MESSAGE, putIntent, REPO, resetSetupStore, resources, trustState } from '../test-support/setup-intents';
 import { FailureCard } from './FailureCard';
 import { NewSessionEmptyState } from './NewSessionEmptyState';
-import { RelayCard } from './RelayCard';
+import { RELAY_CARD_TITLE, RelayCard } from './RelayCard';
 import { connectSetupDock } from './SetupCard';
 import { connectKeys } from '../keymap/dispatcher';
 import { resetDockedCards, useDockedCards } from '../composer/docked/registry';
@@ -34,7 +35,7 @@ import { TrustCard } from './TrustCard';
 // C11 start
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BUILTIN_MODELS } from '@shared/sessions/models';
-import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { GatewayDialogs } from '../gateway/SwitchSheet';
 import { registerAction } from '../keymap/actions-runtime';
 import { useSettings } from '../stores/settings';
@@ -53,8 +54,8 @@ let offReturn: () => void;
 let offDock: () => void;
 
 // Where C7's composer shows a docked card: the oldest one, in the composer's place (M4b docks every setup card there).
-function Docked() {
-  const cards = useDockedCards(ID);
+function Docked({ id = ID }: { id?: typeof ID }) {
+  const cards = useDockedCards(id);
   return (
     <div data-testid="docked" data-cards={cards.map((c) => c.id).join(' ')}>
       {cards[0]?.render() ?? null}
@@ -231,6 +232,97 @@ describe('relay card', () => {
       await waitFor(() => expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { gateway: 'gateway' } }));
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  // P5 O7 M9 ("The relay check and the features"): on the machine's own route the relay check is advisory: the card offers
+  // Start anyway (`startAnyway`), and a relay answering again continues on the same route, never moved to the gateway
+  it('on the machine’s own route offers Start anyway, and a relay answering again starts on that route', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let up = false;
+      withMain({ 'session.start': answer({ status: 'relay_unreachable', appSessionId: BARE_ID, health: health() }), 'engine.relayHealth': () => health({ ok: up, status: up ? 200 : null, error: up ? null : 'timed out' }) });
+      putIntent(intent({ message: MESSAGE, gateway: 'gateway', route: 'machine' }));
+      render(<Docked />);
+      await act(() => startIntent(ID, MESSAGE));
+      expect(await screen.findByText(/this machine’s own settings send it there/)).toBeTruthy();
+      await userEvent.click(screen.getByRole('button', { name: 'Start anyway' }));
+      expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { startAnyway: true } });
+      await screen.findByRole('button', { name: 'Start anyway' }); // answered relay_unreachable again: docked again
+      up = true;
+      await act(() => vi.advanceTimersByTimeAsync(5_000));
+      await waitFor(() => expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: {} }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // A discovered session (no route recorded, nor whether it was routed) resumes on the machine's default: on the machine's
+  // own, its card is that route's (Start anyway), and a relay answering again keeps it there (no `gateway` option)
+  it('a discovered session resuming on the machine’s own default: Start anyway, and the relay answering again keeps the route', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let up = false;
+      withMain({
+        'session.acquire': () => ({ status: 'relay_unreachable', appSessionId: BARE_ID, health: health() }),
+        'engine.relayHealth': () => health({ ok: up, status: up ? 200 : null, error: up ? null : 'timed out' }),
+        'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1, defaultRoute: 'machine' }),
+      });
+      const discovered = record(ID);
+      useSessions.setState({ records: new Map([[ID, { ...discovered, gateway: { ...discovered.gateway, routed: null } }]]) });
+      render(<Docked />);
+      expect(await act(() => resumeSession(ID))).toBe(true);
+      expect(await screen.findByText(/this machine’s own settings send it there/)).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Start anyway' })).toBeTruthy();
+      up = true;
+      await act(() => vi.advanceTimersByTimeAsync(5_000));
+      await waitFor(() => expect(fake.invoked('session.acquire')).toHaveLength(2));
+      expect(fake.invoked('session.acquire').at(-1)).not.toHaveProperty('options.gateway');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // a discovered session on another machine resumes on that machine's default, which its own daemon answers: this
+  // machine's gateway default says nothing of it
+  it('a discovered session on another machine takes that machine’s default: Start anyway there, and recovery keeps its route', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let up = false;
+      const TARGET = addressOf(OTHER_MACHINE, BARE_ID);
+      withMain({
+        'session.acquire': (_input: unknown, machine: unknown) => (machine === OTHER_MACHINE ? { status: 'starting', appSessionId: BARE_ID } : null),
+        'engine.relayHealth': () => health({ ok: up, status: up ? 200 : null, error: up ? null : 'timed out' }),
+        'machineSettings.get': (_input: unknown, machine: unknown) => ({ settings: machineSettingsDefaults(), version: 1, defaultRoute: machine === OTHER_MACHINE ? 'machine' : 'gateway' }),
+      });
+      const discovered = record(TARGET);
+      useSessions.setState({ records: new Map([[TARGET, { ...discovered, gateway: { ...discovered.gateway, routed: null } }]]) });
+      act(() => useSetup.getState().dock(TARGET, { kind: 'relay', health: health(), message: null }));
+      render(<Docked id={TARGET} />);
+      expect(await screen.findByRole('button', { name: 'Start anyway' })).toBeTruthy();
+      expect(fake.machines('machineSettings.get')).toEqual([OTHER_MACHINE]);
+      up = true;
+      await act(() => vi.advanceTimersByTimeAsync(5_000));
+      await waitFor(() => expect(fake.invoked('session.acquire')).toHaveLength(1));
+      expect(fake.invoked('session.acquire')[0]).not.toHaveProperty('options.gateway');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('on the machine’s own route Enter takes Start anyway, never MAWS’s Direct route', async () => {
+    const disconnect = connectKeys();
+    try {
+      withMain({ 'session.start': answer({ status: 'relay_unreachable', appSessionId: BARE_ID, health: health() }), 'engine.relayHealth': () => health() });
+      putIntent(intent({ message: MESSAGE, gateway: 'gateway', route: 'machine' }));
+      render(<Docked />);
+      await act(() => startIntent(ID, MESSAGE));
+      await screen.findByRole('button', { name: 'Start anyway' });
+      act(() => screen.getByRole('group', { name: RELAY_CARD_TITLE }).focus());
+      await userEvent.keyboard('{Enter}');
+      expect(fake.invoked('session.start').at(-1)).toEqual({ appSessionId: BARE_ID, message: null, options: { startAnyway: true } });
+    } finally {
+      disconnect();
     }
   });
 
