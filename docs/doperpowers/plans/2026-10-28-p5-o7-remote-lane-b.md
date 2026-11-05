@@ -2999,6 +2999,20 @@ P5 findings of M5's re-plan, continued from F15:
   - **Residue:** a textless thinking block's final duration (W1 shows none), for the owner's UX wave.
   Rationale: C's two reports; the architect's answers of 2026-11-05.
   Date/Author: 2026-11-05, O7's M10 executor (the controller).
+- Decision: A, B and C's reviews and proofs (2026-11-05).
+  - **reviewer-high on A and B together** (security lens on B; head 92a712dc5): correct, with no material findings. It found sound:
+    - the exact action and shape match, judged on the private canonical copy that is then signed;
+    - the device-and-key lookup against main's verified held view;
+    - the shared ownership resolution;
+    - the fallback to a prompt on any failed judgement;
+    - the receivers unchanged, and the signing domains keeping the unasked signature out of other uses.
+
+    It noted that the e2e's fixed 12 s wait past the linger assumes main has processed the tab's close under hosted load, rather than observing it (a tracker line).
+  - **reviewer-medium on C:** correct, with no material findings.
+  - **A's e2e proved red.** `e2e:remote` on a probe with A's ranking reverted and the new e2e kept (acc90f6e2, never merged; run 41980345401) failed at "its first turn over and its tab closed, the row still within the visible rows", on the first try and its retry. On the fix (92a712dc5, run 41980345499) it passed.
+  - **Gates.** `--gates static,unit` was green on the merged A, B and C (1c7e02747, run 41979836501). Master bf2dce3f4 (#475) was merged as a0cc151ba before the final `--gates all`.
+  Rationale: the two reviewers' verdicts; the runs named.
+  Date/Author: 2026-11-05, O7's M10 executor (the controller).
 - Decision: reviewer-medium on the whole branch (2026-11-05, over 5f2bc8964..7692b289a). Verdict: incorrect, on one Important finding. A sync whose read was held while the machine unenrolled answered exit 4 with `enrollment: none`. The fix maps the three final states explicitly (a07adc17b), red first with a held org-state read and `unenroll` beside it. The reviewer found the rest sound: the teardown order and the daemon-alive guard, the quiet-window checks, the code's transport, and how the watch's asks settle on a reply, an exit or a timeout. The loop stopped there. The fix is one mapping, proved by its test, and the controller verified it rather than taking a second round.
   Also fixed on the way: static's typecheck found two narrowings the local single-file runs can't see (fba341f23, 7e1fd4d22).
   Rationale: the reviewer's report; static runs 41970289264 and 41970477689 (red), then 41970939499 and 41971463848 (green).
