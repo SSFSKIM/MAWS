@@ -3152,6 +3152,17 @@ P5 findings of M5's re-plan, continued from F15:
   - The scene's first observer was a replay that could not verify a source, and a correct product refusal looked like a test failure; asking which layer is right before fixing the test saved a wrong fix.
   - A flaky line in an unrelated-looking spec was a product race older than this work; treating it as red until explained found it.
 
+**M10's code (2026-11-05).** The bench is fit for a live run, and the sitting's three defects are fixed in tests and `e2e:remote` on CI. Their live re-check is the owner's minute after the PR lands.
+- **The bench.** It reads the key's flat answer. It sees the listing on demand (`mawsd endpoint sync`). It holds one status client per run (the agent's `watch`). It ends the mini's hosts after mini-ops' stop. It refuses a loaded runner or mini as a recorded outcome.
+- **The defects.**
+  - A: a remote session ranks by its latest activity.
+  - B: a spawn on a machine the member owns signs without Touch ID.
+  - C: a terminal session's thinking row ticks.
+- **Not proved here.**
+  - The live bench run, which is carried.
+  - The read-on-screen case of A: a read remote session ranks behind unread local ones, by parity.
+  - A textless thinking block's final duration, which is residue.
+
 **M10's sitting (2026-11-05).** M8's items and M9's spawn held live on both machines, with one failure, acceptance 5's row. Its cause is fixed by A below, and so is the "Thinking · 0s" the owner found (C). O7 closes on the owner's one-minute live re-check of A and C after M10's PR lands, recorded as an addendum here.
 - **Setup.**
   - About 05:24Z to 06:00Z, from the MacBook against the mini and the fresh VM dc-acceptance-e071 (GCE us-west1-b). The VM was certified at boot under devcloud's `dc-` delegation, so it took no enrollment code.
