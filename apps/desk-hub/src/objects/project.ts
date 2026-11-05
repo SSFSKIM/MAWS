@@ -641,6 +641,8 @@ export class Project extends DurableObject<Env> {
    */
   private async reachOf(ctx: MachineContext, events: LogEvent[], archive: string | null | undefined, checked: Map<unknown, SignatureCheck>): Promise<Reach | null> {
     const next = new Map<string, number>();
+    // The batch's own events by position, for a later one sent again at a seq the batch already holds.
+    const batched = new Map<string, LogEvent>();
     const stopped = new Set<string>();
     const snapshots: Snapshot[] = [];
     const sessions = new Set<string>();
@@ -658,13 +660,22 @@ export class Project extends DurableObject<Env> {
         continue;
       }
       const at = next.get(writer) ?? this.log.last(writer) + 1;
-      if (seq < at) continue;
+      // A position held already stops its writer, as `upload` will, when it is sent again with another body: against
+      // the stored event or the withheld one's hash, or against the batch's own earlier event at that seq.
+      if (seq < at) {
+        if (seq <= this.log.last(writer)) {
+          const withheld = this.log.refusedAt(writer, seq);
+          if (withheld !== null ? withheld !== bodyHash(event) : !sameEvent(this.log.at(writer, seq)!.event, event)) stopped.add(writer);
+        } else if (!sameEvent(batched.get(`${seq}:${writer}`)!, event)) stopped.add(writer);
+        continue;
+      }
       const signature = event.sig === undefined ? undefined : (checked.get(event) ?? STATE_UNAVAILABLE);
       if (seq > at || (signature && !signature.ok) || audienceError(event) !== null) {
         stopped.add(writer);
         continue;
       }
       next.set(writer, at + 1);
+      batched.set(`${seq}:${writer}`, event);
       const facts = factsOf(event);
       for (const ref of facts.refs) sessions.add(ref.session);
       if (facts.snapshot !== null) snapshots.push(facts.snapshot);
@@ -1485,13 +1496,14 @@ export class Project extends DurableObject<Env> {
       // Or during the check.
       if (!this.stateHolds(member)) return;
     }
-    // D5's checks with the member as the sender, against the registry: words naming a session they may not reach are
-    // refused `not-reachable`, and nothing is stored (the hub positions a human, so no position is spent).
+    // D5's checks with the member as the sender, whatever `attest` the words carry, against the registry: words naming a
+    // session they may not reach are refused `not-reachable`, and nothing is stored (the hub positions a human, so no
+    // position is spent).
     const facts = factsOf(positioned());
     if (facts.needsRegistry) {
       const answer = await this.askPolicies({ snapshots: [], sessions: facts.refs.map((r) => r.session) });
       if (!this.stateHolds(member)) return;
-      const verdict = judge(positioned(), answer === null ? { available: false, rows: {}, mine: {}, owners: [member] } : { available: true, rows: answer.rows, mine: answer.mine, owners: [member] }, [member]);
+      const verdict = judge(positioned(), answer === null ? { available: false, rows: {}, mine: {}, owners: [member] } : { available: true, rows: answer.rows, mine: answer.mine, owners: [member] }, [member], true);
       if (verdict.kind === 'unavailable') return this.refuseBrowser(socket, { reason: 'state-unavailable', writer, nonce, message: 'the policy registry could not be read to check whom these words name; send them again' });
       if (verdict.kind === 'withhold') return this.refuseBrowser(socket, { reason: 'not-reachable', writer, nonce });
       if (answer !== null) this.keepPolicies(answer.rows);
@@ -1912,18 +1924,22 @@ function audienceError(event: Record<string, unknown>): string | null {
  * a session the registry doesn't know (an addressing reference; an unknown provenance reference is no one's private
  * session yet, its own machine uploading its snapshot first), when its audience is not within each named private
  * session's, when its senders are not all inside its audience, or when it is a snapshot of a session bound to another
- * machine; an `unlisted` notice by its own rule instead of the sender's. `senders`: the members whose send it is.
+ * machine; an `unlisted` notice by its own rule instead of the sender's, and only when it names no session at all, since
+ * it is served to the very members its change withdraws. `senders`: the members whose send it is. `owners` are the
+ * uploading machine's, taken when the event carries no attestation; or, `given`, the sender as authenticated (a device's
+ * member), taken whatever attestation the event carries, since nothing signed it for them.
  */
-function judge(event: Record<string, unknown>, reach: Reach | null, machineOwners: string[] | null): { kind: 'admit' } | { kind: 'withhold'; senders: string[] } | { kind: 'unavailable' } {
+function judge(event: Record<string, unknown>, reach: Reach | null, owners: string[] | null, given = false): { kind: 'admit' } | { kind: 'withhold'; senders: string[] } | { kind: 'unavailable' } {
   const f = factsOf(event);
-  const senders = f.attested ?? machineOwners ?? [];
+  const sender = given ? owners : (f.attested ?? owners);
+  const senders = sender ?? [];
   if (f.needsRegistry && (reach === null || !reach.available)) return { kind: 'unavailable' };
   const rows = reach?.rows ?? {};
   const mine = reach?.mine ?? {};
   const withhold = { kind: 'withhold' as const, senders };
   if (event.kind === 'unlisted') {
     // Its audience is the members the change withdraws, its sender outside it by construction (D5).
-    if (!isUnlistedNotice(event) || f.own === null || event.session !== f.own || streamOf(event.writer as string).digest === null || !mine[f.own]) return withhold;
+    if (!isUnlistedNotice(event) || f.refs.length > 0 || f.own === null || event.session !== f.own || streamOf(event.writer as string).digest === null || !mine[f.own]) return withhold;
     const row = rows[f.own] ?? null;
     if (row === null || !(event.policyRev > row.policyRev)) return withhold;
     return row.audience === null || subset(event.audience, row.audience) ? { kind: 'admit' } : withhold;
@@ -1942,9 +1958,8 @@ function judge(event: Record<string, unknown>, reach: Reach | null, machineOwner
     if (row.audience !== null && (f.audience === null || !subset(f.audience, row.audience))) return withhold;
   }
   if (f.audience !== null) {
-    const owners = f.attested ?? machineOwners;
-    if (owners === null) return { kind: 'unavailable' };
-    if (owners.length === 0 || !subset(owners, f.audience)) return withhold;
+    if (sender === null) return { kind: 'unavailable' };
+    if (sender.length === 0 || !subset(sender, f.audience)) return withhold;
   }
   return { kind: 'admit' };
 }

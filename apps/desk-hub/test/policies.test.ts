@@ -129,6 +129,17 @@ describe('an unlisted notice', () => {
     theirs.close();
     mine.close();
   });
+
+  it('carries no session reference: one naming a private parent would be served to the members it withdraws', async () => {
+    const project = await opened();
+    const P = newSession();
+    const Q = newSession();
+    const { A, B } = o;
+    expect(await upload(mA, project, [joined(mA, project, P, 1, [A, B], 1), joined(mA, project, Q, 1, [A], 1)])).toEqual([]);
+    const notice = { ...unlisted(mA, project, P, 1, 2, [B]), origin: { kind: 'sminos-spawn', spawnerSession: Q } } as LogEvent;
+    expect(reasons(await upload(mA, project, [notice]))).toEqual(['not-reachable@1']);
+    expect(await row(P)).toMatchObject({ policyRev: 1 });
+  });
 });
 
 describe('provenance', () => {
@@ -211,6 +222,30 @@ describe('a withheld position', () => {
   });
 });
 
+describe('the preflight', () => {
+  it("sends the registry no snapshot past a position upload stops its writer at: a conflicting resend, stored, withheld or earlier in the batch", async () => {
+    const project = await opened();
+    const { A } = o;
+    // A stored position resent with another body, then a snapshot of a higher rev.
+    const S = newSession();
+    const first = joined(mA, project, S, 1, [A], 1);
+    expect(await upload(mA, project, [first])).toEqual([]);
+    expect(reasons(await upload(mA, project, [{ ...first, alias: 'another' } as LogEvent, joined(mA, project, S, 2, [A], 2)]))).toEqual(['conflict@1']);
+    expect(await row(S)).toMatchObject({ policyRev: 1 });
+    // A withheld position resent with another body.
+    const T = newSession();
+    const refused = say(mA, project, T, 1, [newSession()]);
+    expect(reasons(await upload(mA, project, [refused]))).toEqual(['not-reachable@1']);
+    expect(reasons(await upload(mA, project, [{ ...refused, text: 'another' } as LogEvent, joined(mA, project, T, 2, undefined, 5)]))).toEqual(['conflict@1']);
+    expect(await row(T)).toBeNull();
+    // A position the batch itself holds, sent again in it with another body.
+    const U = newSession();
+    const own = joined(mA, project, U, 1, [A], 1);
+    expect(reasons(await upload(mA, project, [own, { ...own, alias: 'another' } as LogEvent, joined(mA, project, U, 2, [A], 2)]))).toEqual(['conflict@1']);
+    expect(await row(U)).toMatchObject({ policyRev: 1 });
+  });
+});
+
 describe('state-unavailable', () => {
   it('refuses while the registry cannot be read, storing nothing at the position, and takes the resend once it can', async () => {
     const project = await opened();
@@ -256,6 +291,9 @@ describe("a device's words", () => {
     expect(await send(mine, await words(project, A, [P]))).toMatchObject({ t: 'refused', refusal: { reason: 'not-reachable' } });
     expect(await send(theirs, await words(project, B, [P], [A]))).toMatchObject({ t: 'refused', refusal: { reason: 'not-reachable' } });
     expect(await send(theirs, await words(project, B, [P], [B]))).toMatchObject({ t: 'refused', refusal: { reason: 'not-reachable' } });
+    // The member signed in is the sender, whatever owners the words claim.
+    const forged = { kind: 'human', from: 'human', member: B, to: [{ session: P, alias: 'p' }], text: 'as A', created: new Date().toISOString(), audience: [A], attest: { owners: [A] } } as unknown as HumanDraft;
+    expect(await send(theirs, await seal(await KEY, 'log', project, forged))).toMatchObject({ t: 'refused', refusal: { reason: 'not-reachable' } });
     expect(theirs.logged.some((l) => l.event.writer.startsWith(`hub/${A}~`))).toBe(false);
     mine.close();
     theirs.close();
