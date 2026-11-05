@@ -4,6 +4,7 @@ import type { LaunchedBySpec, LaunchSpec } from '@shared/engine/launch-spec';
 import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import { parseJournalRow } from '@shared/wire/journal';
+import { GATEWAY_KEYS } from '@shared/engine/route'; // P5 O7 M9
 import {
   buildLaunch,
   CHARTER_PIN,
@@ -297,6 +298,28 @@ describe('launch contract builds the X6 command line and environment', () => {
       expect(env).not.toHaveProperty('ENABLE_TOOL_SEARCH');
       expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('gpt-5-mini');
       expect(settingsOf(args)).toEqual({ dialogExpiry: 'never', env: { ANTHROPIC_BASE_URL: '', ANTHROPIC_AUTH_TOKEN: '' } });
+    });
+
+    // P5 O7 M9 (reviewer-high re-review, the architect's rule): an older host gets legacy direct only where the credential
+    // source and the endpoint are the machine route's, so legacy direct changes nothing but GATEWAY_KEYS: the provider
+    // switches (CLAUDE_CODE_USE_BEDROCK, CLAUDE_CODE_USE_VERTEX) and the credential helpers (apiKeyHelper, awsAuthRefresh,
+    // awsCredentialExport) reach the engine as on the machine route, which is what makes them no equivalence key
+    it('for a direct spec changes only the gateway keys: the provider switches and credential helpers stand as on the machine route', () => {
+      const captured = { ...CAPTURED, CLAUDE_CODE_USE_BEDROCK: '1', CLAUDE_CODE_USE_VERTEX: '1' };
+      const helpers = { apiKeyHelper: '/opt/helpers/api-key', awsAuthRefresh: 'aws sso login --profile work', awsCredentialExport: '/opt/helpers/aws-credentials' };
+      const extraSettings = { ...helpers, env: { CLAUDE_CODE_USE_BEDROCK: '1', CLAUDE_CODE_USE_VERTEX: '1' } };
+      const direct = buildLaunch(spec({ gateway: 'direct', extraSettings }), captured, OPTS);
+      const machine = buildLaunch(spec({ gateway: 'direct', route: 'machine', extraSettings }), captured, OPTS);
+      expect(direct.env).toMatchObject({ CLAUDE_CODE_USE_BEDROCK: '1', CLAUDE_CODE_USE_VERTEX: '1' });
+      for (const key of GATEWAY_KEYS) expect(direct.env).not.toHaveProperty(key);
+      const { ANTHROPIC_BASE_URL: _url, ANTHROPIC_AUTH_TOKEN: _token, ENABLE_TOOL_SEARCH: _search, ...ungated } = machine.env;
+      void _url;
+      void _token;
+      void _search;
+      expect(direct.env).toEqual(ungated); // nothing else of the environment differs
+      expect(direct.flagSettings).toEqual({ ...helpers, env: { CLAUDE_CODE_USE_BEDROCK: '1', CLAUDE_CODE_USE_VERTEX: '1', ANTHROPIC_BASE_URL: '', ANTHROPIC_AUTH_TOKEN: '' }, dialogExpiry: 'never' });
+      expect(machine.flagSettings).toEqual({ ...extraSettings, dialogExpiry: 'never' });
+      expect(settingsOf(direct.args)).toEqual(direct.flagSettings);
     });
 
     // P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M9 "The route"): the machine route injects
