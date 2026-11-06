@@ -17,7 +17,8 @@ import { startChannel, type ProjectChannel } from '../../src/services/channel/re
 import { Index } from '../../src/services/index/index';
 import { tempDir } from '../support/index-fixture';
 import { fakeServices } from './fake-services';
-import { laneAMember, makeOrg, openRemote, plane, PROJECT, sminos, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
+import { successor } from './org-fixtures';
+import { evs, laneAMember, makeOrg, of, openRemote, plane, PROJECT, sminos, snapshot, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -84,6 +85,25 @@ async function call(r: Remote, name: string, input: unknown): Promise<Msg> {
   await r.channel.send({ t: 'call', id, name, input });
   return waitFor(r, (m) => m.t === 'result' && m.id === id, `the result of ${name}`);
 }
+
+const OTHER = 'proj-other';
+/** The org's hub projects: the channel's, and another. */
+const PROJECTS = [
+  { id: PROJECT, name: 'm8' },
+  { id: OTHER, name: 'other' },
+];
+const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+/** The `channel` feed of `project` opened (its `subbed`, or its `ended`). */
+async function channelFeed(r: Remote, sub: string, project: string, credit = 4 * 1024 * 1024): Promise<Msg> {
+  const from = r.inbox.length;
+  await r.channel.send({ t: 'sub', sub, feed: 'channel', project, cursor: null, credit });
+  return waitFor(r, (m) => m.sub === sub && (m.t === 'subbed' || m.t === 'ended'), `the answer to channel feed ${sub}`, from);
+}
+/** The texts of the entries each `changed` frame of the feed carried, in order. */
+const changed = (r: Remote, sub: string) => evs(r, sub).map((e) => (e.body as { entry: HostEntry }).entry.text);
+/** Waits until the journal holds `n` entries of `project`. */
+const journaled = (channel: ReturnType<typeof journal>, n: number, project = PROJECT) => until(() => channel.index.channel.history({ project, limit: 200 }, Date.now()).entries.length >= n, `${n} entries of ${project}`);
 
 const texts = (answer: Msg) => ((answer.output as { entries: HostEntry[] }).entries ?? []).map((entry) => entry.text);
 
@@ -182,5 +202,104 @@ describe('channel.history, view-filtered lane by lane', () => {
     const second = await call(b, 'channel.history', { project: PROJECT, limit: 2, before: last });
     expect(second).toMatchObject({ ok: true, output: { more: false } });
     expect(texts(second)).toEqual(['mine 1']);
+  });
+});
+
+describe('the channel feed: a project’s entries, live', () => {
+  it('opens as a snapshot of the project’s newest entries the member views, then carries each of its new entries they view, and no other project’s', async () => {
+    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const channel = journal(f);
+    const s = await sminos(f, laneAMembers());
+    shared(f, 'app-1', 'view');
+    shared(f, 'app-2', null);
+    channel.record(laneB('app-1', 1, 'before B'));
+    channel.record(laneB('app-2', 2, 'before hidden'));
+    s.send(host('la-2', 3, { kind: 'message', to: 'host', text: 'before A' }));
+    await journaled(channel, 3);
+    const [b, idle] = [await openRemote(f, org.b1, org.B), await openRemote(f, org.a1, org.A)];
+
+    expect(await channelFeed(b, 'ch', PROJECT)).toMatchObject({ t: 'subbed', mode: 'snapshot', seq: 0 });
+    const snap = await snapshot(b, 'ch');
+    expect(snap.body).toMatchObject({ more: false });
+    expect((snap.body.entries as HostEntry[]).map((e) => e.text)).toEqual(['before A', 'before B']);
+
+    s.send(host('la-1', 10, { kind: 'message', to: 'host', text: 'A listed' }));
+    s.send(host('la-2', 11, { kind: 'question', to: 'host', text: ['A shared?'], choices: ['yes', 'no'] }));
+    s.send(host('la-2', 12, { kind: 'message', to: 'host', text: 'A elsewhere' }, OTHER));
+    await journaled(channel, 5);
+    await journaled(channel, 1, OTHER);
+    channel.record(laneB('app-2', 13, 'B listed'));
+    channel.record(laneB('app-1', 14, 'B shared'));
+    channel.record({ ...laneB('app-1', 15, 'B elsewhere'), project: OTHER, src: `${OTHER}/lane-b/app-1/call/t15` });
+    await until(() => changed(b, 'ch').length >= 2, 'the two changes');
+    await settle();
+    expect(changed(b, 'ch')).toEqual(['A shared?', 'B shared']);
+    expect(evs(b, 'ch').map((e) => e.seq)).toEqual([1, 2]);
+    expect((evs(b, 'ch')[0].body as { entry: HostEntry }).entry).toMatchObject({ lane: 'A', kind: 'question', choices: ['yes', 'no'], engineSessionId: 'la-2', appSessionId: null, project: PROJECT });
+    // An older device, or one that holds no feed, hears nothing pushed: it reads `channel.history`.
+    expect(idle.inbox.filter((m) => (m as Msg).t === 'ev' || (m as Msg).t === 'snap')).toEqual([]);
+  });
+
+  it('takes back an entry queued while the device read nothing once its share goes, on either lane, and goes on', async () => {
+    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const channel = journal(f);
+    const s = await sminos(f, laneAMembers());
+    shared(f, 'app-1', 'view');
+    const b = await openRemote(f, org.b1, org.B);
+    await channelFeed(b, 'ch', PROJECT, 1);
+    await snapshot(b, 'ch'); // the snapshot spends the credit: what follows is queued, not taken
+    s.send(host('la-2', 1, { kind: 'message', to: 'host', text: 'queued A' }));
+    await journaled(channel, 1);
+    await settle();
+    expect(changed(b, 'ch')).toEqual([]);
+    s.send({ t: 'member', ...second(null) }); // la-2's share goes before the device takes its entry
+    await until(() => f.endpoint.rl10.members.get('la-2')?.shares === undefined, 'la-2’s share withdrawn');
+    await settle();
+    channel.record(laneB('app-1', 2, 'B kept'));
+    await b.channel.send({ t: 'credit', sub: 'ch', bytes: 1024 * 1024 });
+    await until(() => changed(b, 'ch').length >= 1, 'the next change');
+    await settle();
+    expect(changed(b, 'ch')).toEqual(['B kept']);
+
+    // Lane B's share goes: its next entry stops, and the feed lives on.
+    shared(f, 'app-1', null);
+    channel.record(laneB('app-1', 3, 'B after'));
+    s.send({ t: 'member', ...second('view') });
+    await until(() => f.endpoint.rl10.members.get('la-2')?.shares !== undefined, 'la-2 shared again');
+    s.send(host('la-2', 4, { kind: 'message', to: 'host', text: 'A again' }));
+    await until(() => changed(b, 'ch').length >= 2, 'lane A’s entry');
+    await settle();
+    expect(changed(b, 'ch')).toEqual(['B kept', 'A again']);
+    expect(of(b, 'ch').filter((m) => m.t === 'ended')).toEqual([]);
+  });
+
+  it('ends `removed` once the project leaves the org’s head, and is refused for a project the org has none of', async () => {
+    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    journal(f);
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await channelFeed(b, 'none', 'proj-unknown')).toMatchObject({ t: 'ended', reason: 'no-target' });
+    expect(await channelFeed(b, 'ch', PROJECT)).toMatchObject({ t: 'subbed' });
+    await snapshot(b, 'ch');
+    const next = await successor(f.chain[f.chain.length - 1], [org.a1], (st) => void (st.projects = st.projects.filter((p) => p.id !== PROJECT)));
+    const out = await f.endpoint.cli('revoke', ['-'], JSON.stringify(next));
+    expect(out.code, out.out).toBe(0);
+    f.chain.push(next);
+    expect(await waitFor(b, (m) => m.sub === 'ch' && m.t === 'ended', 'the feed’s end')).toMatchObject({ reason: 'removed' });
+  });
+
+  it('is offered behind `rl2.channel`, refused to a web-cards device, and a sub that names no project closes the channel `malformed`', async () => {
+    const { ENDPOINT_CAPABILITIES } = await import('../../src/endpoint/capabilities');
+    expect(ENDPOINT_CAPABILITIES).toContain('rl2.channel');
+    expect(OFFERS.feeds).toContain('channel');
+    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    journal(f);
+    const c = await openRemote(f, org.c1, org.C, { passkey: org.passkey });
+    expect(await channelFeed(c, 'ch', PROJECT)).toMatchObject({ t: 'ended', reason: 'class' });
+    const b = await openRemote(f, org.b1, org.B);
+    let closed: string | null = null;
+    b.channel.onClose((reason) => void (closed = reason));
+    await b.channel.send({ t: 'sub', sub: 'bare', feed: 'channel', cursor: null, credit: 1024 });
+    await until(() => closed, 'the channel’s close');
+    expect(closed).toBe('malformed');
   });
 });
