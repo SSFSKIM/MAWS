@@ -297,7 +297,9 @@ describe('the checkout rule', () => {
       session(f, 'app-1', { directory: decomposed });
       const a = await openRemote(f, org.a1, org.A);
       expect(code(await call(a, 'git.status', { directory: composed }, B('app-1')))).toBe('no-target');
-      expect(code(await call(a, 'git.status', { directory: decomposed }, B('app-1')))).toBe('ok');
+      // the root's own read is refused too (round 4): the worktree service runs git at the composed spelling, here the
+      // sibling, so no repository answer is the root's, and a root git can't place bounds nothing of git's
+      expect(code(await call(a, 'git.status', { directory: decomposed }, B('app-1')))).toBe('no-target');
     } finally {
       rmSync(parent, { recursive: true, force: true });
     }
