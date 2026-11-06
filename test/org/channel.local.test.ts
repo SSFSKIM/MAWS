@@ -8,10 +8,12 @@
 // 1. `mini`'s listed key signs v2 events into the project log: two sessions join, and three `say`s pass between them.
 //    `oldmini`, the same Mac before the move, left a DX1 writer of four events, and `mini` attests its first three
 //    (a history attestation naming its former name). `studio` signs a `say` too, and the org then revokes its key: the
-//    hub keeps an event that no longer verifies against the head, as a hub that forged one would serve it.
+//    hub keeps an event that no longer verifies against the head. A hostile hub that alters what it serves is played on
+//    A's own transport (the channel's socket seam): one of `mini`'s says reaches A with its text changed, its signer
+//    still listed.
 // 2. A's channel draws the exchange folded under the sessions' aliases and machine, the attested DX1 events "attested
-//    at migration by mini" and the one past `upTo` unverified from before the move; `studio`'s event draws nothing and is
-//    counted.
+//    at migration by mini" and the one past `upTo` unverified from before the move; `studio`'s revoked event and the
+//    forged say draw nothing and are counted.
 // 3. A sends words. B's second socket (`ProjectSocket`) receives them signed (`sig`) with no `mac`, and A's own channel
 //    draws them back from the log as verified words by A; B's device's words, sent through `deviceHuman`, draw as B's.
 // 4. The hub stops: the channel is no longer live, and a relaunch over the same profile draws the cache "as of" its last
@@ -30,7 +32,7 @@ import { encodeEnrollmentCodeV2 } from '../../apps/desk-hub/src/protocol/identit
 import type { LogEvent } from '../../apps/desk-hub/src/protocol/log';
 import { enroll } from '../../apps/desk-hub/test/support/clients';
 import type { OrgSessionService } from '../../src/main/org/org-session';
-import { createRegistryFeed, type RegistryFeed } from '../../src/main/org/registry-feed';
+import { createRegistryFeed, wsSocket, type RegistryFeed } from '../../src/main/org/registry-feed';
 import { CHANNEL } from '../../src/renderer/src/channel/copy';
 import { channelEntries, type ChannelEntry, type ExchangeEntry, type SayEntry, type WordsEntry } from '../../src/renderer/src/channel/project';
 import { applyChange, held, openedWith, tailOf, type ChannelHeld, type OpenHeld } from '../../src/renderer/src/channel/state';
@@ -46,6 +48,9 @@ const S2 = 'f1be24ad-29cd-46ce-a59a-cf9764256091'; // ci-opt
 const S3 = 'a2cf35be-3ade-46ce-a59a-df0875367102'; // oldmini's phase-1 session
 const S4 = 'b3d046cf-4bef-47df-b6ab-e01986478213'; // studio's
 const B_EMAIL = 'ana@example.com';
+/** `mini`'s say that A's transport alters on the way in, and what A is served in its place. */
+const ORIGINAL = 'Shard 3 of 8 is green; merging.';
+const FORGED = 'Shard 3 of 8 failed; reverting the merge.';
 
 const scratch = scratchDir('maws-o8-channel-');
 const profile = scratch.dir('a');
@@ -65,6 +70,34 @@ const endpoints: FakeEndpoint[] = [];
 /** B's Project socket, caught up before the seeding: every event the hub stores reaches it. */
 let watcher: ProjectSocket;
 const sessions: OrgSessionService[] = [];
+/** The offsets whose event A's transport altered. */
+const forged = new Set<number>();
+
+/**
+ * A's channel socket, a hostile hub's: `ws` as main's default, every `log` frame passed on with the say reading ORIGINAL
+ * altered to read FORGED, its signature and signer as stored.
+ */
+function forgingSocket(url: string, headers: Record<string, string>): ReturnType<typeof wsSocket> {
+  const socket = wsSocket(url, headers);
+  const forge = (text: string): string => {
+    const frame = JSON.parse(text) as { t?: string; events?: { offset: number; event: { text?: string } }[] };
+    if (frame.t !== 'log' || !frame.events?.some((e) => e.event.text === ORIGINAL)) return text;
+    for (const e of frame.events) {
+      if (e.event.text !== ORIGINAL) continue;
+      e.event.text = FORGED;
+      forged.add(e.offset);
+    }
+    return JSON.stringify(frame);
+  };
+  return {
+    on(event: string, listener: (...args: never[]) => void) {
+      if (event === 'message') socket.on('message', (text: string) => (listener as (text: string) => void)(forge(text)));
+      else socket.on(event as 'open', listener as () => void);
+    },
+    send: (text: string) => socket.send(text),
+    close: () => socket.close(),
+  } as ReturnType<typeof wsSocket>;
+}
 
 /** A v2 machine enrolled and listed in the head, owned by A, its RL1 connection open with the project said hello to. */
 async function machine(name: string): Promise<{ machine: V2Machine; endpoint: FakeEndpoint }> {
@@ -155,7 +188,7 @@ const entriesOf = (h: OpenHeld): ChannelEntry[] => channelEntries({ events: h.ev
 beforeAll(async () => {
   org = await startLocalOrg(scratch);
   A = org.member;
-  a = orgSession({ userData: profile, build: 'o8-m7a-local', log });
+  a = orgSession({ userData: profile, build: 'o8-m7a-local', log, channelSocket: forgingSocket });
   sessions.push(a);
   await registerThroughPair(org, a);
   feed = createRegistryFeed({ session: a, log });
@@ -192,16 +225,17 @@ beforeAll(async () => {
   await stored(`oldmini/${S3}`, 4);
 
   // `mini`'s two sessions join, and three says pass between them, in one upload (the joins are the sessions' snapshots
-  // the hub's reach check reads the addressed session from).
+  // the hub's reach check reads the addressed session from); a fourth, ORIGINAL, is the one A's transport forges.
   m.endpoint.upload(PROJECT, [
     await joined(mini, S1, 'maws-45'),
     await joined(mini, S2, 'ci-opt'),
     await say(mini, S1, 2, { session: S2, alias: 'ci-opt' }, 'The cache bound evicts the prefix; can you rerun the shard?'),
     await say(mini, S2, 2, { session: S1, alias: 'maws-45' }, 'Rerunning shard 3 of 8 now.'),
     await say(mini, S1, 3, { session: S2, alias: 'ci-opt' }, 'Thanks, I will hold the merge until it lands.'),
+    await say(mini, S2, 3, { session: S1, alias: 'maws-45' }, ORIGINAL),
   ]);
   await stored(`mini/${S1}`, 3, m.endpoint);
-  await stored(`mini/${S2}`, 2, m.endpoint);
+  await stored(`mini/${S2}`, 3, m.endpoint);
 
   // `studio`'s say, stored while its key verified; then the org revokes the key.
   s.endpoint.upload(PROJECT, [await say(studio, S4, 1, '*', 'studio says what the org no longer vouches for')]);
@@ -233,7 +267,7 @@ afterAll(async () => {
 
 describe('the project channel on the local hub', { timeout: 120_000 }, () => {
   let channel: ReturnType<typeof tab>;
-  /** The live channel with every stored event judged: the log's events, `studio`'s counted and not drawn. */
+  /** The live channel with every stored event judged: the log's events, `studio`'s and the forged one counted and not drawn. */
   const settled = () =>
     until(() => {
       const h = channel.open();
@@ -254,13 +288,18 @@ describe('the project channel on the local hub', { timeout: 120_000 }, () => {
     expect(records.map((r) => r.body)).toEqual([expect.objectContaining({ writer: `oldmini/${S3}`, names: ['mini', 'oldmini'], upTo: 3 })]);
   });
 
-  it('draws the exchange folded, the attested DX1 events "attested at migration by mini", and the revoked key’s event uncounted in the stream', async () => {
+  it('draws the exchange folded, the attested DX1 events "attested at migration by mini", and neither the revoked key’s event nor the forged one in the stream', async () => {
     channel = tab(a, PROJECT);
     await channel.opened;
     const h = await settled();
-    expect(h.unverified).toBe(1);
+    // The forgery is the stored say, altered on A's transport alone: B's socket holds it as mini signed it.
+    const original = watcher.log.filter((e) => e.event.text === ORIGINAL).map((e) => e.offset);
+    expect([...forged]).toEqual(original);
+    expect(original).toHaveLength(1);
+    expect(h.unverified).toBe(2);
     const studioOffsets = watcher.log.filter((e) => e.event.writer === `studio/${S4}`).map((e) => e.offset);
-    expect(h.events.map((e) => e.offset)).not.toEqual(expect.arrayContaining(studioOffsets));
+    for (const offset of [...studioOffsets, ...original]) expect(h.events.map((e) => e.offset)).not.toContain(offset);
+    expect(JSON.stringify(h.events)).not.toContain(FORGED);
 
     const entries = entriesOf(h);
     const exchange = entries.find((e): e is ExchangeEntry => e.kind === 'exchange' && e.label === 'verified')!;
@@ -274,7 +313,8 @@ describe('the project channel on the local hub', { timeout: 120_000 }, () => {
     expect(CHANNEL.migrated(migrated.by!)).toBe('attested at migration by mini');
     const legacy = entries.filter((e): e is SayEntry => e.kind === 'say' && e.label === 'legacy');
     expect(legacy.map((e) => e.text)).toEqual(['oldmini, before the move: 4']);
-    // Nothing else draws: the joins give the parties their aliases and machine, and studio's say is held back.
+    // Nothing else draws: the joins give the parties their aliases and machine, and studio's say and the forged one are
+    // held back.
     expect(entries.map((e) => [e.kind, e.label])).toEqual([
       ['exchange', 'migrated'],
       ['say', 'legacy'],
@@ -323,19 +363,20 @@ describe('the project channel on the local hub', { timeout: 120_000 }, () => {
     hubStopped = true;
     await org.stop();
     await until(() => channel.open()?.live === false, 'the channel no longer live');
-    expect(channel.open()).toMatchObject({ asOf: before.asOf, unverified: 1 });
+    expect(channel.open()).toMatchObject({ asOf: before.asOf, unverified: 2 });
     channel.close();
     feed.close();
     await a.close();
 
-    // A relaunch over the same profile, the hub away: the cache, verified again at load, "as of" the same catch-up.
+    // A relaunch over the same profile, the hub away: the cache, verified again at load, "as of" the same catch-up; the
+    // forged bytes it holds still fail.
     const again = orgSession({ userData: profile, build: 'o8-m7a-local', log });
     sessions.push(again);
     await again.loaded;
     const reopened = tab(again, PROJECT);
     await reopened.opened;
     const h = reopened.open();
-    expect(h).toMatchObject({ live: false, asOf: before.asOf, unverified: 1 });
+    expect(h).toMatchObject({ live: false, asOf: before.asOf, unverified: 2 });
     expect(entriesOf(h!)).toEqual(drawn);
     expect(CHANNEL.asOf('x')).toBe('As of x');
     reopened.close();
