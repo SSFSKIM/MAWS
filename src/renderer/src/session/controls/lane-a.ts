@@ -35,7 +35,7 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { CommandName, CommandResult, IpcError, MawsBridge } from '@shared/ipc/schema';
 import { ipcError } from '@shared/ipc/errors';
-import type { ControlResult, LaneAAct, LaneARaised, LaneAState } from '@shared/ipc/schema/lane-a';
+import { AGENT_SCOPE_CAPABILITY, type ControlResult, type LaneAAct, type LaneARaised, type LaneAState } from '@shared/ipc/schema/lane-a';
 import { aliasOf, chipLabel } from '@shared/sessions/model-label';
 import type { HookResult, ModelInfo } from '../../composer/setup-intent';
 import type { FrameBindings } from '../../composer/frame/bindings';
@@ -79,8 +79,14 @@ export const LANE_A_WORDS = {
   unknownAsk: 'It may have been asked: its answer shows here if it was',
   unknownAnswer: 'The answer may have been taken: the card settles if it was',
   unknown: 'It may have run: the transcript shows it if it did',
-  // M9: a session on another machine (Q2's words where it gives them)
-  remoteSubagentRows: 'A subagent’s own transcript on another machine isn’t shown yet',
+  // M9: a session on another machine (Q2's words where it gives them). 2026-11-06: a subagent's own transcript crosses
+  // from a machine whose endpoint lists `rl2.agent-scope`; an older one is named to update
+  remoteSubagentRows: (machine: string) => `${machine} can’t send a subagent’s own transcript to this Mac yet; update MAWS on ${machine}`,
+  // the remote drill-in's words where the machine gives nothing of the agent's transcript (2026-11-06)
+  agentReading: (machine: string) => `Reading this agent’s transcript from ${machine}…`,
+  agentNoRows: (machine: string) => `${machine} holds no rows of this agent’s transcript yet`,
+  agentOffline: (machine: string) => `${machine} isn’t reachable: this agent’s transcript shows once it is`,
+  agentUnserved: (machine: string) => `${machine} isn’t giving this agent’s transcript now; asking again`,
   // an older page the link could not carry (fix wave 2): the reason main gave, and a way to ask again
   olderFailed: (reason: string) => `Older messages didn’t load: ${reason}`,
   retry: 'Retry',
@@ -96,8 +102,8 @@ export const LANE_A_WORDS = {
 // What the machine is called in a route's reason (`<machine>`): a local session's is this Mac, a remote one's its name.
 const HERE = 'this Mac';
 // M9: the gaps of a session on another machine, closed whatever its bridge says (Interfaces §C's "remote never").
+// 2026-11-06: `subagent-rows` is the machine's endpoint's to lift (`rl2.agent-scope`), so it is no longer among them.
 const REMOTE_GAPS: Partial<Record<ControlKey, string>> = {
-  'subagent-rows': LANE_A_WORDS.remoteSubagentRows,
   'stop-task': LANE_A_WORDS.remoteStopTask,
   'take-over': LANE_A_WORDS.remoteTakeOver,
   reopen: LANE_A_WORDS.remoteReopen,
@@ -207,7 +213,9 @@ export function laneAAnswerCapability(raised: LaneARaised | null, answer: Reques
 export interface LaneAInputs {
   appSessionId: AppSessionId;
   client: MawsBridge;
-  remote?: { machine: string }; // M9: the session runs on another machine, by its name
+  // M9: the session runs on another machine, by its name; 2026-11-06: what its endpoint listed (MachineState's
+  // `capabilities`), null while no channel says
+  remote?: { machine: string; capabilities?: readonly string[] | null };
 }
 
 export function laneAControls(state: LaneAState, record: SessionRecord | null, { appSessionId, client, remote }: LaneAInputs): SessionControls {
@@ -232,6 +240,9 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
   function capability(key: ControlKey): Capability {
     const gap = remote === undefined ? undefined : REMOTE_GAPS[key]; // a remote gap first: its words name the machine
     if (gap !== undefined) return closed(gap);
+    // a subagent's own transcript crosses from an endpoint that lists rl2.agent-scope; while its list isn't known (no
+    // channel up), the drill-in reads on and says why nothing comes
+    if (key === 'subagent-rows' && remote?.capabilities != null && !remote.capabilities.includes(AGENT_SCOPE_CAPABILITY)) return closed(LANE_A_WORDS.remoteSubagentRows(here));
     const own = OWN_WORDS[key];
     if (own !== undefined) return closed(own);
     if (key === 'subagent-rows') return AVAILABLE;

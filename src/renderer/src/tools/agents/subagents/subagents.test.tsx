@@ -3,7 +3,7 @@
 // summary section and the `openSubagent` adapter. The stores are the product singletons over the fake agent-work
 // client (`setAgentWorkClient`); C5's sessions and attention stores are seeded directly.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
@@ -40,6 +40,7 @@ import type { LaneAState } from '@shared/ipc/schema/lane-a'; // P5 O9 M9
 import { remoteRow } from '../../../../../../test/support/builders'; // P5 O9 M9
 import { OTHER_MACHINE } from '../../../../../../test/support/machine'; // P5 O9 M9
 import { LANE_A_WORDS } from '../../../session/controls/lane-a'; // P5 O9 M9
+import { useMachines } from '../../../stores/machines'; // 2026-11-06
 
 const M3 = REL.agoNarrow(3, 'minute'); // 3m ago, 3분 전
 
@@ -612,22 +613,45 @@ describe('drill-in', () => {
       expect(screen.getByRole('button', { name: 'stopping…' })).toBeTruthy();
     });
 
-    // P5 O9 M9 (landing fix wave): another machine's terminal session withholds a subagent's own rows (its port's
-    // `subagent-rows` gap), so the drill-in reached from its tree says so with the reason in place of the transcript, and
-    // asks this machine's `session.events` nothing; Stop and Tell stay, through its port.
-    it('shows a remote session’s subagent rows as unavailable with the reason, building no child source, and keeps Stop and Tell', async () => {
-      const remote = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+    // P5 O9 M9 (landing fix wave): another machine's terminal session withholds a subagent's own rows where its machine's
+    // endpoint can't carry them (2026-11-06: one listing no `rl2.agent-scope`, its port's `subagent-rows` gap), so the
+    // drill-in reached from its tree says so with the reason in place of the transcript, and asks this machine's
+    // `session.events` nothing; Stop and Tell stay, through its port.
+    const remote = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+    const remoteSession = (capabilities: string[]) => {
       const link: NonNullable<LaneAState['link']> = { state: 'up', refusal: null, carrier: 'direct', member: 'm', clientClass: 'native-mac', rights: [], reason: null };
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: T, generation: 1, carrier: 'direct', capabilities }]);
       useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: remote }]]) });
       applyLaneAState(remote, laneAState(remote, { engineSessionId: 'eng-r', link, acts: [], turn: { running: true, unknown: false } }));
       ipcSourceSpy.mockClear();
+      onTestFinished(() => {
+        useSessions.setState({ listed: new Map() });
+        useMachines.getState().applyRoster([]);
+      });
+    };
+
+    it('shows a remote session’s subagent rows as unavailable with the reason where its endpoint can’t carry them, building no child source, and keeps Stop and Tell', async () => {
+      remoteSession(['rl2.feeds']);
       render(<Mounted state={create({ agentId: 'a1' as AgentId }, remote)} appSessionId={remote} />);
-      expect(screen.getByTestId('subagent-rows-gap').textContent).toBe(LANE_A_WORDS.remoteSubagentRows);
+      expect(screen.getByTestId('subagent-rows-gap').textContent).toBe(LANE_A_WORDS.remoteSubagentRows('mini'));
       expect(ipcSourceSpy).not.toHaveBeenCalled();
       expect(invoked.filter(([name]) => name === 'session.events')).toEqual([]);
+      expect(invoked.filter(([name]) => name === 'laneA.watch')).toEqual([]);
       expect((screen.getByRole('button', { name: 'Stop agent' }) as HTMLButtonElement).disabled).toBe(false);
       expect(screen.getByRole('textbox')).toBeTruthy(); // Tell, the relay composer
-      useSessions.setState({ listed: new Map() });
+    });
+
+    // 2026-11-06 (the remote drill-in): where it can, the drill-in draws the agent's own transcript from that machine's
+    // plane, a watch naming the agent, and builds no child source of this machine's
+    it('draws a remote session’s subagent from its machine’s plane where its endpoint carries it: a watch naming the agent, no child source', async () => {
+      remoteSession(['rl2.feeds', 'rl2.agent-scope']);
+      render(<Mounted state={create({ agentId: 'a1' as AgentId }, remote)} appSessionId={remote} />);
+      expect(screen.queryByTestId('subagent-rows-gap')).toBeNull();
+      await waitFor(() => expect(invoked.filter(([name]) => name === 'laneA.watch')).toEqual([['laneA.watch', { appSessionId: 'eng-r', agentId: 'a1' }]])); // the bare id, routed to its machine
+      await waitFor(() => expect(screen.getByTestId('subagent-rows-status').textContent).toBe('unexpected laneA.watch')); // main's refusal, said in place
+      expect(ipcSourceSpy).not.toHaveBeenCalled();
+      expect(invoked.filter(([name]) => name === 'session.events')).toEqual([]);
+      expect(screen.getByRole('textbox')).toBeTruthy();
     });
 
     it('says a stop with an unknown outcome may not have stopped, and offers Stop again after the wait', async () => {

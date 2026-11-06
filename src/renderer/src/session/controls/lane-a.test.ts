@@ -340,18 +340,19 @@ const asking = (requestId: string) => item(APP, 'permission', T0, { request: { r
 const ALLOW: RequestAnswer = { kind: 'permission', decision: 'allow', scope: 'once' };
 const AT = '2026-10-29T08:00:00.000Z';
 
-function remotePort(over: Partial<LaneAState> = {}, given: Parameters<typeof fakeClient>[0] = {}) {
+// `capabilities`: what the machine's endpoint listed, an endpoint before `rl2.agent-scope` unless a case says otherwise
+function remotePort(over: Partial<LaneAState> = {}, given: Parameters<typeof fakeClient>[0] = {}, capabilities: readonly string[] | null = ['rl2.feeds']) {
   const state = laneAState(APP, { link: LINK, acts: [], ...over });
   applyLaneAState(APP, state);
   useLaneA.setState((s) => ({ catalogs: new Map(s.catalogs).set(APP, laneACatalog()) }));
   const fake = fakeClient({ 'laneA.catalog': laneACatalog(), ...given });
-  return { fake, controls: laneAControls(state, null, { appSessionId: APP, client: fake.client, remote: { machine: 'mini' } }) };
+  return { fake, controls: laneAControls(state, null, { appSessionId: APP, client: fake.client, remote: { machine: 'mini', capabilities } }) };
 }
 
 describe('a session on another machine', () => {
   it('closes the remote gaps in place with their reasons, whatever the bridge offers', () => {
     const { controls } = remotePort();
-    expect(controls.capability('subagent-rows')).toEqual({ available: false, reason: LANE_A_WORDS.remoteSubagentRows });
+    expect(controls.capability('subagent-rows')).toEqual({ available: false, reason: LANE_A_WORDS.remoteSubagentRows('mini') });
     expect(controls.capability('stop-task')).toEqual({ available: false, reason: LANE_A_WORDS.remoteStopTask });
     expect(controls.capability('take-over')).toEqual({ available: false, reason: LANE_A_WORDS.remoteTakeOver });
     expect(controls.capability('reopen')).toEqual({ available: false, reason: LANE_A_WORDS.remoteReopen }); // the remote gap before the local words
@@ -386,7 +387,17 @@ describe('a session on another machine', () => {
     const { controls } = remotePort({ link: { ...LINK, state: 'down', carrier: null, reason: 'mini isn’t reachable' } });
     for (const key of ['send', 'interrupt', 'command', 'model', 'btw', 'compact', 'answer'] as const) expect(controls.capability(key), key).toEqual({ available: false, reason: 'Mini isn’t reachable' });
     expect(controls.answerCapability(asking('toolu_1'), ALLOW)).toEqual({ available: false, reason: 'Mini isn’t reachable' });
-    expect(controls.capability('subagent-rows')).toEqual({ available: false, reason: LANE_A_WORDS.remoteSubagentRows }); // a gap keeps its own words
+    expect(controls.capability('subagent-rows')).toEqual({ available: false, reason: LANE_A_WORDS.remoteSubagentRows('mini') }); // a gap keeps its own words
+  });
+
+  // 2026-11-06 (the remote lane A drill-in): a subagent's own rows cross from a machine whose endpoint lists
+  // `rl2.agent-scope`; one that lists its capabilities without it keeps the gap, naming the machine to update. While its
+  // list isn't known (no channel up), the drill-in reads on: the link's own state says why nothing comes.
+  it('lifts the subagent-rows gap where the machine’s endpoint lists rl2.agent-scope, and while its list isn’t known', () => {
+    expect(remotePort({}, {}, ['rl2.feeds', 'rl2.agent-scope']).controls.capability('subagent-rows')).toEqual({ available: true });
+    expect(remotePort({}, {}, null).controls.capability('subagent-rows')).toEqual({ available: true });
+    expect(remotePort({}, {}, []).controls.capability('subagent-rows')).toEqual({ available: false, reason: 'mini can’t send a subagent’s own transcript to this Mac yet; update MAWS on mini' });
+    expect(remotePort({ link: { ...LINK, state: 'down', carrier: null, reason: 'mini isn’t reachable' } }, {}, ['rl2.agent-scope']).controls.capability('subagent-rows')).toEqual({ available: true });
   });
 
   it('shows a control’s act on its way by its progress, and opens the control again at its outcome', () => {

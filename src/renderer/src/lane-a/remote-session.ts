@@ -17,6 +17,12 @@ export const useRemoteLaneA = (appSessionId: AppSessionId | null): boolean => us
 /** What the session's machine is called, as its rows name it. */
 export const remoteMachineName = (appSessionId: AppSessionId): string => machineName(useMachines.getState().machines, machineOf(appSessionId), ipc.localMachine);
 
+/** 2026-11-06: what the session's machine's endpoint listed in its handshake (MachineState's `capabilities`); null while no channel says. */
+export const remoteMachineCapabilities = (appSessionId: AppSessionId): readonly string[] | null => useMachines.getState().machines.get(machineOf(appSessionId))?.capabilities ?? null;
+/** The same, for a component: subscribed, so a channel's coming up (its list known) renders again. */
+export const useRemoteMachineCapabilities = (appSessionId: AppSessionId): string =>
+  useMachines((s) => (s.machines.get(machineOf(appSessionId))?.capabilities ?? null)?.join(',') ?? '');
+
 /** The state a remote session reads as before its watch's first: starting, every control closed with why. */
 export function startingRemoteState(appSessionId: AppSessionId): LaneAState {
   return {
