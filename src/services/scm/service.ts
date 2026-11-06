@@ -291,14 +291,24 @@ export class ScmService {
 
   /**
    * 2026-11-06 (the home-root rule, src/shared/machine/machine-home.ts): whether the session's checkout is a home of the
-   * machine (`homes`) or above one, by its realpath or by its repository's (its trust key: the main worktree's root,
-   * which every scm command acts on), a checkout another machine's caller reaches nothing of. A checkout that doesn't
-   * resolve is one too: nothing of it is known to lie below a home.
+   * machine (`homes`) or above one, by its realpath, by git's top level there, or by its repository's trust key (the main
+   * worktree's root), a checkout another machine's caller reaches nothing of. A checkout that doesn't resolve, or whose
+   * top level git doesn't answer, is one too: nothing of it is known to lie below a home.
    */
   async coversHome(appSessionId: AppSessionId, homes: readonly string[]): Promise<boolean> {
     const checkout = this.checkout(appSessionId);
     const real = await realpath(checkout).catch(() => null);
     if (real === null || coversHome(real, homes)) return true;
+    // the final review: git's own top level there, the work tree every command acts on (a home that is a linked worktree
+    // of a repository kept elsewhere, a `core.worktree`), as well as the trust key; a git answer that isn't one is no
+    let top: string | null;
+    try {
+      top = (await this.deps.read(checkout, ['rev-parse', '--path-format=absolute', '--show-toplevel'])).trim() || null;
+    } catch (error) {
+      if (!(error instanceof NotARepositoryError)) return true;
+      top = null;
+    }
+    if (top !== null && coversHome((await realpath(top).catch(() => null)) ?? top, homes)) return true;
     const key = await this.trust(checkout);
     return key.keyKind === 'repo' && coversHome(key.trustKey, homes);
   }

@@ -103,7 +103,7 @@ async function setup(): Promise<{ f: Fixture; dir: string; a: Remote; b: Remote 
   f.records.set({ lane: 'B', session: s.engineSessionId!, owners: ['@machine'] }, APP);
   // The services answer each name with what it was asked (git.worktree.list, which the bounds read a root's repository
   // by, with the repository its directory is in).
-  const listed = { repoRoot: dir, commonDir: join(dir, '.git'), worktrees: [{ repoRoot: dir, path: dir, branch: 'main', head: 'h', isMain: true, locked: false, prunable: false, managed: false }] };
+  const listed = { repoRoot: dir, commonDir: join(dir, '.git'), worktrees: [{ repoRoot: dir, path: dir, branch: 'main', head: 'h', isMain: true, locked: false, prunable: false, managed: false }], toplevel: dir };
   for (const name of [...Object.keys(SESSION_CALLS), ...Object.keys(gitCalls(dir)), ...Object.keys(ACTS), 'session.spawn', 'session.projects.list']) {
     f.spine.handle(name, (input) => (name === 'git.worktree.list' ? listed : name === 'session.spawn' ? { status: 'ok', appSessionId: 'app-new' } : { asked: name, input }));
   }

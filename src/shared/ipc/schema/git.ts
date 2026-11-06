@@ -103,7 +103,9 @@ const c7Commands = {
 // the identity the dialog captured as `expect`) and `deleteBranch` (with its head as `expect`), each answering a
 // refusal rather than acting when the fresh read disagrees.
 const RepoRootSchema = z.strictObject({ repoRoot: z.string() });
-export const GitWorktreeListSchema = z.strictObject({ repoRoot: z.string(), commonDir: z.string(), worktrees: z.array(WorktreeInfoSchema) });
+// `toplevel` (2026-11-06): git's own top level at the path asked (`rev-parse --show-toplevel`, a `core.worktree`'s work tree
+// included), which the endpoint's home-root rule reads with no work-tree scan; absent from an older build's answer
+export const GitWorktreeListSchema = z.strictObject({ repoRoot: z.string(), commonDir: z.string(), worktrees: z.array(WorktreeInfoSchema), toplevel: z.string().optional() });
 export type GitWorktreeList = z.infer<typeof GitWorktreeListSchema>;
 export const GitWorktreeAddInputSchema = z.strictObject({ repoRoot: z.string(), name: z.string(), branch: BranchChoiceSchema });
 export type GitWorktreeAddInput = z.infer<typeof GitWorktreeAddInputSchema>;

@@ -73,7 +73,7 @@ async function call(r: Remote, name: string, input: unknown): Promise<Msg> {
 
 const status = (repoRoot: string) => ({ repoRoot, branch: 'main', files: [] });
 /** `git.worktree.list`'s answer for a repository whose main worktree is `repoRoot`: the bounds' probe of a root in it. */
-const listed = (repoRoot: string) => ({ repoRoot, commonDir: join(repoRoot, '.git'), worktrees: [{ repoRoot, path: repoRoot, branch: 'main', head: 'h', isMain: true, locked: false, prunable: false, managed: false }] });
+const listed = (repoRoot: string) => ({ repoRoot, commonDir: join(repoRoot, '.git'), worktrees: [{ repoRoot, path: repoRoot, branch: 'main', head: 'h', isMain: true, locked: false, prunable: false, managed: false }], toplevel: repoRoot });
 /** The probe's answer for a root in no repository (the worktree service's NotARepositoryError). */
 const notARepository = (): never => {
   throw new Error('not a git repository');

@@ -400,11 +400,12 @@ const NOT_A_REPOSITORY = 'not a git repository';
 
 /**
  * The repository `root` (a realpath) is in, as `git.worktree.list` answers it: rev-parse and the worktree list, no read of
- * the work tree (a home kept in git answers at once, where a status would scan the whole home past git's bound). Its own
- * worktree's root (git's toplevel: the nearest of `root` and its ancestors the list names, so a native spelling of the
- * root's own, the service naming its paths in NFC) and its main checkout's (the list's `repoRoot`, from the common dir,
- * for a comparison with the homes alone); null when git says it is in none; `unknown` for any other answer (the spine
- * or git away, a timeout, a failure, a list naming nothing that holds it), which bounds nothing of git's and is never kept.
+ * the work tree (a home kept in git answers at once, where a status would scan the whole home past git's bound). Its top
+ * level as git reads it there (the list's `toplevel`, `core.worktree` included; the final review), which must be the
+ * root or one of its ancestors, taken in the root's own spelling (the service names its paths in NFC), and its main
+ * checkout's root (the list's `repoRoot`, from the common dir, for a comparison with the homes alone); null when git says
+ * it is in none; `unknown` for any other answer (the spine or git away, a timeout, a failure, a top level elsewhere or
+ * none), which bounds nothing of git's and is never kept.
  */
 async function repositoryOf(root: string, dispatch: EndpointServices['dispatch']): Promise<{ toplevel: string; main: string } | null | 'unknown'> {
   // round 4: the service folds the path to NFC before git runs (holders.ts' canonicalPath), so its answer is the NFC
@@ -416,10 +417,9 @@ async function repositoryOf(root: string, dispatch: EndpointServices['dispatch']
   if (listed === null) return 'unknown';
   if (!listed.ok) return listed.error.code === 'internal' && listed.error.message === NOT_A_REPOSITORY ? null : 'unknown';
   const main = field(listed.value, 'repoRoot');
-  const worktrees = field(listed.value, 'worktrees');
-  if (typeof main !== 'string' || !isAbsolute(main) || !Array.isArray(worktrees)) return 'unknown';
-  const named = new Set(worktrees.map((w) => field(w, 'path')).filter((path): path is string => typeof path === 'string' && isAbsolute(path)).map((path) => path.normalize('NFC')));
-  const toplevel = ancestorsOf(root).find((path) => named.has(path.normalize('NFC')));
+  const top = field(listed.value, 'toplevel');
+  if (typeof main !== 'string' || !isAbsolute(main) || typeof top !== 'string' || !isAbsolute(top)) return 'unknown';
+  const toplevel = ancestorsOf(root).find((path) => path.normalize('NFC') === top.normalize('NFC'));
   return toplevel === undefined ? 'unknown' : { toplevel, main };
 }
 

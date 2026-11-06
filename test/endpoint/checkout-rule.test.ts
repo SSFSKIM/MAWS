@@ -358,6 +358,37 @@ describe('the checkout rule', () => {
     expect(code(await call(b, 'git.log', { directory: decomposed, limit: 5 }, B('app-2')))).toBe('no-target');
   });
 
+  // The final review (P1): git's top level is git's own reading at the path (`core.worktree` sends a repository's work tree
+  // elsewhere), never a worktree list's entry: a project whose work tree is the home reads the home, and one whose work
+  // tree is anywhere but the project or above it is no repository the bounds can place.
+  it('refuses a git read of a repository whose work tree (core.worktree) is the home, or anywhere but the root or above it', async () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'checkout-core-worktree-')));
+    try {
+      const home = join(parent, 'home');
+      mkdirSync(home);
+      writeFileSync(join(home, 'secret.txt'), 'the home’s own\n');
+      const inside = join(home, 'proj');
+      const beside = join(parent, 'proj');
+      for (const dir of [inside, beside]) {
+        mkdirSync(dir);
+        await runGit(dir, ['init', '-q', '-b', 'main']);
+        await runGit(dir, ['config', 'core.worktree', home]);
+      }
+      const f = await machine({ PATH: process.env.PATH, HOME: home }, home);
+      session(f, 'app-in', { directory: inside });
+      session(f, 'app-beside', { directory: beside });
+      const a = await openRemote(f, org.a1, org.A);
+      const asked = f.host.calls.length;
+      for (const [app, dir] of [['app-in', inside], ['app-beside', beside]] as const) {
+        expect([app, code(await call(a, 'git.diff', { directory: dir, scope: 'untracked', path: 'secret.txt' }, B(app)))]).toEqual([app, 'no-target']);
+        expect([app, code(await call(a, 'git.status', { directory: dir }, B(app)))]).toEqual([app, 'no-target']);
+      }
+      expect(f.host.calls.slice(asked).filter((c) => c.name === 'git.diff' || c.name === 'git.status')).toEqual([]);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
   it('reads the bounds again when the session’s roots change', async () => {
     const one = await repo();
     const two = await repo();

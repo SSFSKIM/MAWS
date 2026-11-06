@@ -228,6 +228,23 @@ describe('scm service stages, unstages, discards and commits against a real repo
     }
   });
 
+  // The final review (P1): a home that is a linked worktree of a repository kept elsewhere has that repository's main
+  // checkout as its trust key; git's own top level at the checkout is the home, which scm acts on
+  it('says a checkout covers a home by git’s top level there: a home that is a linked worktree of a repository kept elsewhere', async () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'scm-wt-home-')));
+    try {
+      const home = join(parent, 'home');
+      await repo.git('worktree', 'add', '-q', home, '-b', 'home');
+      mkdirSync(join(home, 'project'));
+      const id = 'd1111111-1111-4111-8111-111111111111' as AppSessionId;
+      view = fakeSpineView({ records: [at(id, join(home, 'project'))] });
+      expect(await service().coversHome(id, [home])).toBe(true);
+      expect(await service().coversHome(id, [join(parent, 'elsewhere')])).toBe(false);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
   it('refuses an untrusted checkout and an unlisted path, running nothing', async () => {
     await repo.write('a.txt', 'a\n');
     expect(await service().stage({ appSessionId: ID, paths: ['nope.txt'] })).toMatchObject({ refused: 'changed' });
