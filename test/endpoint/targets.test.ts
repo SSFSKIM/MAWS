@@ -685,11 +685,11 @@ describe('a record the join can’t place under its app session, placed by its s
     expect(reports.at(-1)).toMatchObject({ session: 'app-s', owners: [org.B], access: 'listed' });
   });
 
-  // the review's round 2: the record joined by its spawn may be the successor (the host away at the `/clear`), so the
-  // listing a departing predecessor leaves is reported again from the record that stays
+  // the review's round 2: the record joined by its spawn may be the successor (the host away at the `/clear`, the index
+  // lagging it), so the listing a departing predecessor leaves is reported again from the record that stays
   it('reports the listing from the record that stays once the predecessor it deferred to leaves', async () => {
     let live: Array<{ appSessionId: string; engineSessionId: string }> = [{ appSessionId: 'app-s', engineSessionId: 'eng-old' }];
-    const { members, reports } = membersOf({ live: () => live, records: () => [{ appId: 'app-s', engineSessionId: 'eng-new', launchedBy: launchedBy(org.B, 'op-s') }] });
+    const { members, reports } = membersOf({ live: () => live, records: () => [{ appId: 'app-s', engineSessionId: 'eng-old', launchedBy: launchedBy(org.B, 'op-s') }] });
     await members.member(laneBMember('eng-old', [org.B], { access: 'listed', ownersProof: [spawnProof('op-s')] }));
     live = []; // the engine host away at the `/clear`
     await members.member(laneBMember('eng-new', [org.C], { access: 'private', ownersProof: [spawnProof('op-s')] }));
@@ -705,6 +705,17 @@ describe('a record the join can’t place under its app session, placed by its s
     const { members, reports } = membersOf({ live: () => live, records: () => [{ appId: 'app-s', engineSessionId: 'eng-new', launchedBy: launchedBy(org.B, 'op-s') }] });
     await members.member(laneBMember('eng-new', [org.C], { access: 'private', ownersProof: [spawnProof('op-s')] })); // the host away
     live = [{ appSessionId: 'app-s', engineSessionId: 'eng-new' }]; // and back
+    await members.member(laneBMember('eng-old', [org.B], { access: 'listed', ownersProof: [spawnProof('op-s')] }));
+    expect(members.appSessionId('eng-old')).toBe('app-s');
+    expect(reports.at(-1)).toMatchObject({ session: 'app-s', owners: [org.C], access: 'private' });
+  });
+
+  // the review's round 4: with both records joined by their spawn (the host away), the spine names the current one, so
+  // whichever lookup finishes last, the predecessor never replaces its successor's listing
+  it('lists the record the spine names current when both were joined by their spawn, whichever lookup ends last', async () => {
+    const { members, reports } = membersOf({ live: () => [], records: () => [{ appId: 'app-s', engineSessionId: 'eng-new', launchedBy: launchedBy(org.B, 'op-s') }] });
+    await members.member(laneBMember('eng-new', [org.C], { access: 'private', ownersProof: [spawnProof('op-s')] }));
+    expect(reports.at(-1)).toMatchObject({ session: 'app-s', owners: [org.C], access: 'private' });
     await members.member(laneBMember('eng-old', [org.B], { access: 'listed', ownersProof: [spawnProof('op-s')] }));
     expect(members.appSessionId('eng-old')).toBe('app-s');
     expect(reports.at(-1)).toMatchObject({ session: 'app-s', owners: [org.C], access: 'private' });
