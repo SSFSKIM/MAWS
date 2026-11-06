@@ -39,7 +39,7 @@ import { AttentionFeeds, type AttentionFeedsContext } from './attention-feed';
 import { InventoryFeeds, type InventoryFeedsContext } from './inventory-feed';
 import { dispatchAs, type EndpointServices } from './services';
 import { namesSession, type Plane, type SessionSubscription, type Subscription } from './subscriptions';
-import { inNfc, withinBounds, type Bounds, type CheckoutBounds } from './targets';
+import { withinBounds, type Bounds, type CheckoutBounds } from './targets';
 
 export type PlaneFeedsContext = {
   dispatch: EndpointServices['dispatch'];
@@ -90,7 +90,7 @@ const isObject = (value: unknown): value is Record<string, unknown> => typeof va
  * services emit. An scm run's output reaches them unless the session's checkout is a home's (scm.ts' rule, the same).
  */
 const reached = (bounds: Bounds, name: string, payload: Record<string, unknown>): boolean =>
-  name === 'scm.remote.output' ? !bounds.checkoutCovers : typeof payload.path === 'string' && (withinBounds(bounds.roots, inNfc(payload.path)) || !withinBounds(bounds.dropped, inNfc(payload.path)));
+  name === 'scm.remote.output' ? !bounds.checkoutCovers : typeof payload.path === 'string' && (withinBounds(bounds.roots, payload.path) || !withinBounds(bounds.dropped, payload.path));
 
 export class PlaneFeeds implements Plane {
   readonly #ctx: PlaneFeedsContext;
@@ -166,7 +166,7 @@ export class PlaneFeeds implements Plane {
       const repoRoot = payload.repoRoot;
       for (const open of this.#open.values()) {
         if (open.bounds !== null) {
-          if (withinBounds(open.bounds, inNfc(repoRoot))) this.#send(open, name, payload);
+          if (withinBounds(open.bounds, repoRoot)) this.#send(open, name, payload);
         } else {
           open.held.delete(repoRoot);
           if (open.held.size >= HELD_REPOSITORIES) open.held.delete(open.held.keys().next().value!);
@@ -207,7 +207,7 @@ export class PlaneFeeds implements Plane {
     open.files = bounds;
     const held = [...open.held.entries()];
     open.held.clear();
-    for (const [repoRoot, payload] of held) if (withinBounds(open.bounds, inNfc(repoRoot))) this.#send(open, 'git.changed', payload);
+    for (const [repoRoot, payload] of held) if (withinBounds(open.bounds, repoRoot)) this.#send(open, 'git.changed', payload);
     if (bounds === null) return;
     const heldFiles = open.heldFiles.splice(0);
     for (const { name, payload } of heldFiles) if (reached(bounds, name, payload)) this.#send(open, name, payload);

@@ -170,7 +170,8 @@ describe('the checkout’s offer rows (M4)', () => {
       from = f.host.calls.length;
       const answered = await call(a, name, input, { session: SESSION });
       expect([name, code(answered)]).toEqual([name, 'ok']);
-      expect([name, reached(f, from, 'machine', name, input).length]).toEqual([name, 1]);
+      // the request's own probe of its path (round 3) is a worktree list of it: that call's count holds both
+      expect([name, reached(f, from, 'machine', name, input).length]).toEqual([name, name === 'git.worktree.list' ? 2 : 1]);
     }
   });
 

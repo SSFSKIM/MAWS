@@ -4,7 +4,7 @@
 // the path must lie in one of the session's roots or the repository a root belongs to, so the boundary a reader gets is
 // the repository with its worktrees; what a worktree read names beyond that the service bounds itself. A spawn's args
 // hold to the registry's schema (step 2), then to the machine's policy (step 6's guard, as `sminos.spawn`'s).
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -24,7 +24,7 @@ import { WorktreeService } from '../../src/services/git/worktrees';
 import { registerWorktreeHandlers } from '../../src/services/git/worktrees-register';
 import { record as sessionRecord } from '../support/builders';
 import { fakeSpineView } from '../support/fake-spine-view';
-import { GitFixture } from '../support/git-fixture';
+import { GitFixture, runGit } from '../support/git-fixture';
 import { iso } from './org-fixtures';
 import { act, CHECKOUT, makeOrg, openRemote, ORG, sminos, startEndpoint, stopAll, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
@@ -251,6 +251,57 @@ describe('the checkout rule', () => {
     expect(bounds).toMatchObject({ within: [], roots: [worktree], checkoutCovers: true });
   });
 
+  // Round 3 (P2): a project root of its own repository can hold, below it, a linked worktree of a home kept in git; the
+  // root's repository says nothing of it, so each remote git read's own path is asked at its request.
+  it('refuses a git read at a home’s linked worktree checked out below a project root of its own repository', async () => {
+    const home = realpathSync(mkdtempSync(join(tmpdir(), 'checkout-nested-home-')));
+    try {
+      await runGit(home, ['init', '-q', '-b', 'main']);
+      writeFileSync(join(home, 'dotfile'), 'the home’s own\n');
+      await runGit(home, ['add', 'dotfile']);
+      await runGit(home, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'home']);
+      const proj = join(home, 'proj');
+      mkdirSync(proj);
+      await runGit(proj, ['init', '-q', '-b', 'main']);
+      await runGit(proj, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'proj']);
+      await runGit(home, ['worktree', 'add', '-q', join(proj, 'hw'), '-b', 'hw']); // the home's linked worktree, inside the project
+      const f = await machine({ PATH: process.env.PATH, HOME: home }, home);
+      session(f, 'app-1', { directory: proj });
+      const a = await openRemote(f, org.a1, org.A);
+      const asked = f.host.calls.length;
+      expect(code(await call(a, 'git.worktree.status', { repoRoot: join(proj, 'hw'), path: home }, B('app-1')))).toBe('no-target');
+      expect(code(await call(a, 'git.log', { directory: join(proj, 'hw'), limit: 5 }, B('app-1')))).toBe('no-target');
+      expect(code(await call(a, 'git.worktree.list', { repoRoot: join(proj, 'hw') }, B('app-1')))).toBe('no-target');
+      expect(f.host.calls.slice(asked).filter((c) => c.name === 'git.log' || c.name === 'git.worktree.status')).toEqual([]);
+      expect(code(await call(a, 'git.log', { directory: proj, limit: 5 }, B('app-1')))).toBe('ok'); // the project's own
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  // Round 3 (P2): a filesystem that tells Unicode forms apart (ext4) holds `café` composed and decomposed as two
+  // directories; the bounds compare and dispatch on the realpath as named, so a root at one is never its sibling.
+  it('keeps a root and its sibling differing only in Unicode form apart', async (ctx) => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'checkout-nfc-')));
+    try {
+      const [decomposed, composed] = [join(parent, 'cafe\u0301'), join(parent, 'caf\u00e9')];
+      mkdirSync(decomposed);
+      try {
+        mkdirSync(composed);
+      } catch {
+        ctx.skip(); // a filesystem that folds the forms (APFS): one directory, nothing to keep apart
+      }
+      for (const dir of [decomposed, composed]) await runGit(dir, ['init', '-q', '-b', 'main']);
+      const f = await machine({ PATH: process.env.PATH, HOME: parent });
+      session(f, 'app-1', { directory: decomposed });
+      const a = await openRemote(f, org.a1, org.A);
+      expect(code(await call(a, 'git.status', { directory: composed }, B('app-1')))).toBe('no-target');
+      expect(code(await call(a, 'git.status', { directory: decomposed }, B('app-1')))).toBe('ok');
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
   it('reads the bounds again when the session’s roots change', async () => {
     const one = await repo();
     const two = await repo();
@@ -271,13 +322,15 @@ describe('the checkout rule', () => {
     const f = await machine(one.serviceEnv());
     session(f, 'app-1', { directory: current });
     const a = await openRemote(f, org.a1, org.A);
-    const boundsReads = () => f.host.calls.filter((c) => c.name === 'git.status' && (c.input as { directory: string }).directory === one.root).length;
+    // the bounds' probe of the root, the request's own probe of its path (round 3) and the call: each a worktree list
+    const lists = () => f.host.calls.filter((c) => c.name === 'git.worktree.list' && (c.input as { repoRoot: string }).repoRoot === one.root).length;
     try {
-      // Warm: every root resolves and its repository answers, so the bounds are kept; the second read asks git nothing more.
+      // Warm: every root resolves and its repository answers, so the bounds are kept; the second read probes the root no more.
       expect(code(await call(a, 'git.worktree.list', { repoRoot: one.root }, B('app-1')))).toBe('ok');
-      const warmed = boundsReads();
+      expect(lists()).toBe(3);
+      const warmed = lists();
       expect(code(await call(a, 'git.worktree.list', { repoRoot: one.root }, B('app-1')))).toBe('ok');
-      expect(boundsReads()).toBe(warmed);
+      expect(lists() - warmed).toBe(2); // the request's probe and the call alone
       // `current` now points at another repository: the kept bounds are the old target's, and no longer the session's.
       rmSync(current);
       symlinkSync(two.root, current);
