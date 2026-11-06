@@ -67,7 +67,10 @@ const firstSends = new Set<AppSessionId>(); // the spawned sessions whose compos
 // tab's next ask is a check on it under the same key, with the input first sent; a definitive refusal closes it, and the
 // next Send is a new start under the same key. `unknown`: its last answer was unknown (main keeps it unresolved).
 const UNCONFIRMED = 'maws.spawn.unconfirmed:';
-type Unconfirmed = { target: SpawnTarget; input: SessionSpawnInput; attempt: number; open: boolean; unknown: boolean };
+// `left` (the final review): the person chose another place (or machine) while it was held: the attempt is theirs no more
+// (no reload restores its place, no Send asks after it), but its number is kept, so the next start takes the next key and
+// main, which answers a key it still holds with that key's own attempt, never takes it for the old one.
+type Unconfirmed = { target: SpawnTarget; input: SessionSpawnInput; attempt: number; open: boolean; unknown: boolean; left?: true };
 const unconfirmed = {
   get(tab: AppSessionId): Unconfirmed | null {
     const kept = sessionStorage.getItem(UNCONFIRMED + tab);
@@ -87,7 +90,7 @@ const heldTargets = (): Map<AppSessionId, SpawnTarget> => {
     if (!key.startsWith(UNCONFIRMED)) continue;
     const tab = key.slice(UNCONFIRMED.length) as AppSessionId;
     const held = unconfirmed.get(tab);
-    if (held !== null) chosen.set(tab, held.target);
+    if (held !== null && held.left !== true) chosen.set(tab, held.target);
   }
   return chosen;
 };
@@ -102,7 +105,7 @@ export const useRemoteSpawn = create<RemoteSpawnStore>()((set) => ({
     // another machine chosen (or this Mac), or 2026-11-06 another place there: the held attempt is the person's to leave,
     // so a reload restores, and the next Send asks after, only the place the chip names
     const held = unconfirmed.get(tab);
-    if (held !== null && !samePlace(held.target, target)) unconfirmed.delete(tab);
+    if (held !== null && held.left !== true && !samePlace(held.target, target)) unconfirmed.set(tab, { ...held, open: false, left: true });
     set((s) => {
       const chosen = new Map(s.chosen);
       if (target === null) chosen.delete(tab);
@@ -233,9 +236,10 @@ export async function spawnOnMachine(request: SpawnRequest, client: MawsBridge =
   if (checkout === null) return { started: false, words: SPAWN_WORDS.noPlace(target.name), again: null }; // 2026-11-06
   const home = checkout === HOME_CHECKOUT;
   const held = unconfirmed.get(from);
-  const asked = held !== null && samePlace(held.target, target) ? held : null;
-  // a check on the start the machine took, under its attempt key; "Start a new session": the next key, a new start
-  const attempt = request.fresh === true ? (held?.attempt ?? 0) + 1 : (asked?.attempt ?? 0);
+  const asked = held !== null && held.left !== true && samePlace(held.target, target) ? held : null;
+  // a check on the start the machine took, under its attempt key; "Start a new session", or an attempt the person left
+  // for another place: the next key, a new start
+  const attempt = request.fresh === true || held?.left === true ? (held?.attempt ?? 0) + 1 : (asked?.attempt ?? 0);
   const again = request.fresh === true || asked?.open !== true ? null : asked.input;
   const wasUnknown = request.fresh !== true && asked?.unknown === true;
   const key = attempt === 0 ? from : addressOf(machineOf(from), `${bareOf(from)}~${attempt}` as AppSessionId); // an attempt key only

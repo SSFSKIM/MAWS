@@ -323,6 +323,8 @@ describe('a spawn on another machine', () => {
     const next = ask(notes, 'go to the notes');
     await Promise.resolve();
     expect(fake.invoked('session.spawn').at(-1)).toEqual({ checkout: '/Users/mini/notes', permission_mode: 'default', brief: 'go to the notes' }); // a new start there
+    // the final review: under the next attempt key, never the left one's, which main still answers with the home's attempt
+    expect(fake.sessions('session.spawn')).toEqual([LOCAL_TAB, addressOf(TEST_MACHINE, 'new-1~1' as AppSessionId)]);
     await fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' });
     await next;
     // a refused attempt's place, left for another: a reload restores none of it either
