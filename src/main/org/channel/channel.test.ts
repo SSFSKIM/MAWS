@@ -84,7 +84,7 @@ afterEach(async () => {
   channels = null;
 });
 
-async function harness(options: { seed?: (o: ChannelOrg) => Promise<ChannelCacheFile>; records?: Signed<HistoryAttestation>[]; signedIn?: boolean; hub?: boolean; events?: number; reading?: Promise<void> } = {}) {
+async function harness(options: { seed?: (o: ChannelOrg) => Promise<ChannelCacheFile>; records?: Signed<HistoryAttestation>[]; signedIn?: boolean; hub?: boolean; events?: number; reading?: Promise<void>; coalesce?: number } = {}) {
   const o = await ChannelOrg.make();
   const cache = options.seed === undefined ? undefined : await options.seed(o);
   const view: OrgView = { head: () => o.head(), certificates: () => NO_CERTIFICATES, since: () => ({ states: [], transitions: [] }), advance: async () => {} };
@@ -133,7 +133,7 @@ async function harness(options: { seed?: (o: ChannelOrg) => Promise<ChannelCache
       return socket;
     },
     now: () => NOW,
-    timing: { CHANNEL_RELEASE_MS: 60, CHANNEL_WRITE_MS: 5, CHANNEL_COALESCE_MS: 5, ...(options.events === undefined ? {} : { CHANNEL_CACHE_EVENTS: options.events }) },
+    timing: { CHANNEL_RELEASE_MS: 60, CHANNEL_WRITE_MS: 5, CHANNEL_COALESCE_MS: options.coalesce ?? 5, ...(options.events === undefined ? {} : { CHANNEL_CACHE_EVENTS: options.events }) },
     random: () => 0.5,
     log: () => {},
   });
@@ -386,6 +386,24 @@ describe('a project channel', () => {
     await sleep(30);
     expect(opened(h.latest()).events.map((e) => e.offset)).toEqual([2, 3]);
     expect(opened(h.latest()).events).toEqual(opened(await h.channels.open(PROJECT)).events);
+  });
+
+  it('removes an offset a later open exposed, when the bound lets it go before the next change is told', async () => {
+    const h = await harness({ events: 1, coalesce: 200 });
+    opened(await h.channels.open(PROJECT));
+    const socket = await until(() => h.last(), 'a socket');
+    socket.welcome();
+    socket.frame({ t: 'log', events: [{ offset: 1, event: await h.o.say(h.o.mini, 1, 'one') }] });
+    await until(() => opened(h.latest()).events.length === 1, 'offset 1 told');
+    const [two, three] = await Promise.all([h.o.say(h.o.mini, 2, 'two'), h.o.say(h.o.mini, 3, 'three')]);
+    socket.frame({ t: 'log', events: [{ offset: 2, event: two }] });
+    await sleep(30); // 2 is held (and 1 let go); the change isn't told yet
+    // a second tab mounts and draws 2
+    expect(opened(await h.channels.open(PROJECT)).events.map((e) => e.offset)).toEqual([2]);
+    socket.frame({ t: 'log', events: [{ offset: 3, event: three }] }); // lets 2 go, within the same coalesced change
+    await until(() => opened(h.latest()).events.some((e) => e.offset === 3), 'offset 3 told');
+    expect(delta(h.told()).removed).toEqual(expect.arrayContaining([2]));
+    expect(opened(h.latest()).events.map((e) => e.offset)).toEqual([3]);
   });
 
   it("drops another org's log at its sign-in, told as a reset, and reads that org's log afresh", async () => {

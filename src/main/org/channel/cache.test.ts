@@ -4,7 +4,7 @@
 // checkpoint, whose record's signer is checked again at load; and other bytes at a covered position never `migrated`,
 // whatever offset served them and however often the cache is reloaded.
 import { describe, expect, it } from 'vitest';
-import { ChannelOrg, ORG, PROJECT, S1, type Event } from '../../../../test/org/channel-world';
+import { ChannelOrg, ORG, PROJECT, S1, S2, type Event } from '../../../../test/org/channel-world';
 import { emptyLog, loadLog, type ChannelLimits, type Ground } from './cache';
 
 const LIMITS: ChannelLimits = { events: 5000, bytes: 8 * 1024 * 1024 };
@@ -97,6 +97,24 @@ describe("the project's sessions", () => {
     });
     await reloaded.rejudge(ground(o));
     expect(reloaded.sessions()).toEqual([]);
+  });
+
+  it('takes a lifecycle event into the sessions once a later head verifies it', async () => {
+    const o = await ChannelOrg.make();
+    const studio = await o.machine('studio'); // not in the head yet
+    const log = emptyLog(ORG, PROJECT, LIMITS);
+    await log.add(at([await o.joined(o.mini, 1, 'maws-45'), await o.lifecycle(studio, 1, 'joined', { alias: 'studio-1', machine: 'studio' }, S2)]), ground(o));
+    await log.add(at([await o.lifecycle(studio, 2, 'renamed', { alias: 'studio-2' }, S2)], 3), ground(o));
+    expect(log.sessions().map((s) => s.alias)).toEqual(['maws-45']);
+    await o.adopt((s) => {
+      s.machines.push({ name: 'studio', ref: studio.ref, pub: studio.key.pub, owners: [o.A] });
+      s.machineNames.push({ name: 'studio', ref: studio.ref });
+    });
+    await log.rejudge(ground(o));
+    expect(log.sessions()).toEqual([
+      { session: S1, alias: 'maws-45', machine: 'mini', title: null, member: true },
+      { session: S2, alias: 'studio-2', machine: 'studio', title: null, member: true },
+    ]);
   });
 
   it("keeps a session's verified lifecycle when a later one of the same kind fails", async () => {
@@ -229,6 +247,18 @@ describe('migrated history past the bound', () => {
     const seqs = partial.file().events.map((e) => e.event.seq);
     expect(seqs).toHaveLength(10);
     expect(seqs.slice(0, 4)).toEqual([2, 3, 4, 5]); // spared up to upTo, the newest kept after them
+  });
+
+  it('spares one copy of a seq an authentic attestation covers: replayed copies at new offsets are bounded', async () => {
+    const o = await ChannelOrg.make();
+    const history = [o.dx1('oldmini', 1), o.dx1('oldmini', 2)];
+    const log = emptyLog(ORG, PROJECT, { events: 2, bytes: LIMITS.bytes });
+    await log.attest([await o.attest(history)], ground(o));
+    await log.add(
+      Array.from({ length: 10 }, (_, i) => ({ offset: i + 1, event: history[0] })),
+      ground(o),
+    );
+    expect(log.file().events.map((e) => e.offset)).toEqual([1, 10]); // the first copy spared, the newest kept
   });
 
   it('names the DX1 writers whose events pass every attestation it holds, once each time they pass', async () => {
