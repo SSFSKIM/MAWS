@@ -47,6 +47,7 @@ import { registerOrgHandlers, registerRowsHandler } from './org/register'; // P5
 import { orgFiles } from './org/files'; // P5 O8 M1
 import { createRemoteRows } from './org/rows'; // P5 O8 M2
 import { installOrgPageFixture } from './org/page-fixture'; // P5 O8 M4a Task 8: a harness build's only
+import { installChannelFixture } from './org/channel-fixture'; // P5 O8 M7a Task 3: a harness build's only
 import { createRemoteLaneA, routeLaneA } from './lane-a/remote'; // P5 O9 M9
 import { createRemoteLaneB, routeLaneB } from './lane-b/remote'; // P5 O7 M2
 import { ArtifactMachines } from './artifacts/machines'; // P5 O7 M5a
@@ -363,6 +364,8 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // session's org.changed. The guard folds to false outside a harness build, which then carries none of it.
   if (typeof __MAWS_HARNESS_BUILD__ !== 'undefined' && __MAWS_HARNESS_BUILD__) {
     installOrgPageFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus });
+    // P5 O8 M7a Task 3: the Channel tab's e2e look seeds org.status and a project's org.channel.open (org/channel-fixture.ts)
+    installChannelFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus });
   }
   powerMonitor.on('resume', () => orgFeed.probe());
   powerMonitor.on('unlock-screen', () => orgFeed.probe());
