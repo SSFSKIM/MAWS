@@ -323,7 +323,23 @@ export const ChannelSendResultSchema = z.union([
 export type ChannelSendResult = z.infer<typeof ChannelSendResultSchema>;
 /** The most text one word carries; the hub's frame (1 MiB) holds it in any script. */
 export const CHANNEL_TEXT_MAX = 100_000;
-export const ChannelChangedSchema = z.union([ChannelOpenSchema.extend({ project: z.string() }), ChannelClosedSchema.extend({ project: z.string() })]);
+/**
+ * A change since the last: `upserts` are the events new or judged again since, by offset, each replacing what a tab holds
+ * at its offset; the pending words, `unverified`, `asOf` and `live` are whole. `reset` replaces everything a tab holds
+ * with `upserts`: told when a judgment at a new head or certificate set changed verdicts, when another org's log was
+ * dropped, and for the first change after a closed one. An event main's bound lets go is not told: a tab keeps it.
+ */
+const ChannelDeltaSchema = z.strictObject({
+  project: z.string(),
+  ok: z.literal(true),
+  upserts: z.array(ChannelEventSchema), // oldest first, by offset
+  pending: z.array(ChannelWordSchema),
+  unverified: z.number().int().nonnegative(),
+  asOf: z.string().nullable(),
+  live: z.boolean(),
+  reset: z.literal(true).optional(),
+});
+export const ChannelChangedSchema = z.union([ChannelDeltaSchema, ChannelClosedSchema.extend({ project: z.string() })]);
 export type ChannelChanged = z.infer<typeof ChannelChangedSchema>;
 
 export const commands = {
@@ -353,5 +369,5 @@ export const commands = {
 export const events = {
   'org.changed': OrgStatusSchema, // at every change of the status, the whole status
   'org.rows.changed': OrgRowsSchema, // M2: coalesced, the whole list
-  'org.channel.changed': ChannelChangedSchema, // M7a: an open channel's whole answer, coalesced
+  'org.channel.changed': ChannelChangedSchema, // M7a: an open channel's change since the last, coalesced
 } as const satisfies Record<`org.${string}`, z.ZodType>;

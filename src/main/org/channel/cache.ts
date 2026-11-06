@@ -51,6 +51,8 @@ export interface HeldLog {
   attestationsDue(): boolean;
   /** The events that draw, oldest first. */
   events(): ChannelEvent[];
+  /** The lowest offset held, drawn or not: an event told below it was let go by the bound; null when nothing is held. */
+  floor(): number | null;
   unverified(): number;
   file(): ChannelCacheFile;
 }
@@ -234,6 +236,11 @@ function makeLog(org: string, project: string, limits: ChannelLimits, held: Chan
         .sort((a, b) => a.offset - b.offset)
         .map(drawn)
         .filter((e): e is ChannelEvent => e !== null),
+    floor() {
+      let lowest: number | null = null;
+      for (const offset of entries.keys()) if (lowest === null || offset < lowest) lowest = offset;
+      return lowest;
+    },
     unverified: () => [...entries.values()].filter((e) => 'failed' in e.verdict).length,
     file: () => ({ version: 1, org, project, after, asOf, events: [...entries.values()].sort((a, b) => a.offset - b.offset), checkpoints: [...checkpoints.values()] }),
   };

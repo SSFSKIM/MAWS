@@ -2564,7 +2564,9 @@ describe('M7a: the project channels', () => {
     sockets[0].deliver({ t: 'log', events: [{ offset: 1, event: words }] });
     sockets[0].deliver({ t: 'caught-up', offset: 1 });
     await until(() => changes.length > 0 && (changes.at(-1) as { live?: boolean }).live === true, 'the channel live');
-    expect(changes.at(-1)).toMatchObject({ project: PROJECT, ok: true, live: true, events: [{ offset: 1, label: 'verified', author: { id: A, email: OWNER } }] });
+    expect(changes.at(-1)).toMatchObject({ project: PROJECT, ok: true, live: true });
+    // told as deltas after the open's answer: the one event, once
+    expect(changes.flatMap((c) => (c as { upserts?: unknown[] }).upserts ?? [])).toMatchObject([{ offset: 1, label: 'verified', author: { id: A, email: OWNER } }]);
     expect(await session.channelSend(PROJECT, 'hello')).toMatchObject({ ok: true });
     expect(sockets[0].sent.at(-1)).toMatchObject({ t: 'human', event: { member: A, text: 'hello' } });
     await session.close();

@@ -202,7 +202,7 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'events.session.capabilitiesChanged.capabilities': SESSION_TOOLS, // P5 O5 M5
   'events.laneA.changed.state.pending[].input': TOOL_ARGUMENTS,
   'events.machineSettings.changed.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS, // P5 O3-D M1
-  'events.org.channel.changed.events[].event': LOG_EVENT, // P5 O8 M7a
+  'events.org.channel.changed.upserts[].event': LOG_EVENT, // P5 O8 M7a
   'events.plugins.operation.outcome.result': ENGINE_JSON,
   // P5 O5 M4: a Word comment's author session, by the appSessionId its actor carries in the document → that session's title;
   // mawsd posts render.request to its own machine's render host alone, so the keys are the store's, never addressed

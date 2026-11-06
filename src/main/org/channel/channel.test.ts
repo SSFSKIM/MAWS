@@ -4,10 +4,13 @@
 // attestations are read, `live` after `caught-up`, every event judged again at each adopted head, the owner's words
 // addressed and answered, the hub's refusal of the project, signed out drawn "as of", and the cache written through the
 // commit queue, last at `close()`. A fake socket and an in-memory store, over real signed states and events.
+//
+// `org.channel.changed` is a delta: the harness folds the open answer and each change after it as a renderer does
+// (`latest()`), so every case checks what a tab would draw; `told()` is the last change as sent.
 import { afterEach, describe, expect, it } from 'vitest';
 import { NO_CERTIFICATES, type HistoryAttestation, type OrgView, type Signed } from '../../../../apps/org-protocol/src/index.ts';
 import { ChannelOrg, NOW, ORG, PROJECT, S1 } from '../../../../test/org/channel-world';
-import type { ChannelAnswer, ChannelChanged } from '@shared/ipc/schema/org';
+import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelWord } from '@shared/ipc/schema/org';
 import { BUILD_HEADER } from '../hub-client';
 import type { WebSocketLike } from '../registry-feed';
 import { heldOrgSession, type SignedIn } from '../session';
@@ -53,9 +56,25 @@ async function until<T>(check: () => T | null | undefined | false, what: string,
   }
 }
 
-const opened = (answer: ChannelAnswer | ChannelChanged | undefined) => {
+/** What a tab draws: the open answer, each change folded onto it by offset, `reset` replacing it. */
+type Drawn = { project: string; ok: true; events: ChannelEvent[]; pending: ChannelWord[]; unverified: number; asOf: string | null; live: boolean } | { project: string; ok: false; reason: string };
+
+function fold(base: Drawn | undefined, change: ChannelChanged): Drawn | undefined {
+  if (!change.ok) return change;
+  if (change.reset !== true && (base === undefined || !base.ok)) throw new Error(`a delta onto nothing drawn: ${JSON.stringify(change)}`);
+  const byOffset = new Map((change.reset === true || base === undefined || !base.ok ? [] : base.events).map((e) => [e.offset, e]));
+  for (const event of change.upserts) byOffset.set(event.offset, event);
+  const { project, pending, unverified, asOf, live } = change;
+  return { project, ok: true, events: [...byOffset.values()].sort((a, b) => a.offset - b.offset), pending, unverified, asOf, live };
+}
+
+const opened = (answer: ChannelAnswer | Drawn | undefined) => {
   if (answer === undefined || !answer.ok) throw new Error(`not open: ${JSON.stringify(answer)}`);
   return answer;
+};
+const delta = (change: ChannelChanged | undefined) => {
+  if (change === undefined || !change.ok) throw new Error(`not a delta: ${JSON.stringify(change)}`);
+  return change;
 };
 
 let channels: Channels | null = null;
@@ -64,7 +83,7 @@ afterEach(async () => {
   channels = null;
 });
 
-async function harness(options: { seed?: (o: ChannelOrg) => Promise<ChannelCacheFile>; records?: Signed<HistoryAttestation>[]; signedIn?: boolean; hub?: boolean } = {}) {
+async function harness(options: { seed?: (o: ChannelOrg) => Promise<ChannelCacheFile>; records?: Signed<HistoryAttestation>[]; signedIn?: boolean; hub?: boolean; events?: number } = {}) {
   const o = await ChannelOrg.make();
   const cache = options.seed === undefined ? undefined : await options.seed(o);
   const view: OrgView = { head: () => o.head(), certificates: () => NO_CERTIFICATES, since: () => ({ states: [], transitions: [] }), advance: async () => {} };
@@ -109,14 +128,29 @@ async function harness(options: { seed?: (o: ChannelOrg) => Promise<ChannelCache
       return socket;
     },
     now: () => NOW,
-    timing: { CHANNEL_RELEASE_MS: 60, CHANNEL_WRITE_MS: 5, CHANNEL_COALESCE_MS: 5 },
+    timing: { CHANNEL_RELEASE_MS: 60, CHANNEL_WRITE_MS: 5, CHANNEL_COALESCE_MS: 5, ...(options.events === undefined ? {} : { CHANNEL_CACHE_EVENTS: options.events }) },
     random: () => 0.5,
     log: () => {},
   });
-  channels.onChanged((changed) => changes.push(changed));
+  // the tab: its open answers and the changes after the first, folded in arrival order
+  let drawn: Drawn | undefined;
+  channels.onChanged((changed) => {
+    changes.push(changed);
+    if (changed.project === PROJECT && drawn !== undefined) drawn = fold(drawn, changed);
+  });
+  const created = channels;
+  const tab: Channels = {
+    ...created,
+    async open(project) {
+      const answer = await created.open(project);
+      if (project === PROJECT) drawn = { project, ...answer }; // a tab mounting draws the answer whole
+      return answer;
+    },
+  };
   const last = () => sockets[sockets.length - 1];
-  const latest = () => changes.filter((c) => c.project === PROJECT).at(-1);
-  return { o, session, signedIn, files, writes, commits, sockets, changes, last, latest, reads: () => reads, channels: channels! };
+  const latest = () => drawn;
+  const told = () => changes.filter((c) => c.project === PROJECT).at(-1);
+  return { o, session, signedIn, files, writes, commits, sockets, changes, last, latest, told, reads: () => reads, channels: tab };
 }
 
 describe('a project channel', () => {
@@ -192,6 +226,8 @@ describe('a project channel', () => {
     expect(h.latest()).toEqual({ project: PROJECT, ok: false, reason: 'unknown-project' });
     expect(await h.channels.open(PROJECT)).toMatchObject({ ok: true, live: false });
     await until(() => h.sockets.length === 2, 'a second socket');
+    // a tab that drew the refusal holds nothing: what follows it is told whole
+    expect(await until(() => h.told()?.ok && h.told(), 'a change after the refusal')).toMatchObject({ reset: true });
   });
 
   it('sends words addressed by a leading @alias among the log\'s sessions, sending until the ack, a refusal kept', async () => {
@@ -243,6 +279,15 @@ describe('a project channel', () => {
     socket.frame({ t: 'caught-up', offset: 1 });
     await until(() => opened(h.latest()).unverified === 1, 'the failed event counted');
     expect(opened(h.latest()).events).toEqual([]);
+    const spare = await h.o.machine('spare');
+    await h.o.adopt((s) => {
+      s.machines.push({ name: 'spare', ref: spare.ref, pub: spare.key.pub, owners: [h.o.A] });
+      s.machineNames.push({ name: 'spare', ref: spare.ref });
+    });
+    const before = h.changes.length;
+    h.session.changed();
+    await sleep(30);
+    expect(h.changes.slice(before).some((c) => c.ok && c.reset === true)).toBe(false); // no verdict changed
     await h.o.adopt((s) => {
       s.machines.push({ name: 'studio', ref: studio.ref, pub: studio.key.pub, owners: [h.o.A] });
       s.machineNames.push({ name: 'studio', ref: studio.ref });
@@ -250,6 +295,60 @@ describe('a project channel', () => {
     h.session.changed();
     await until(() => opened(h.latest()).unverified === 0, 'the event verified');
     expect(opened(h.latest()).events.map((e) => e.event.text)).toEqual(['early']);
+    expect(delta(h.told())).toMatchObject({ reset: true, upserts: [{ offset: 1, label: 'verified' }] });
+  });
+
+  it('tells each change as a delta: a page or a live event sends only its events, and the tab draws what a new open would', async () => {
+    const h = await harness();
+    opened(await h.channels.open(PROJECT));
+    const socket = await until(() => h.last(), 'a socket');
+    socket.welcome();
+    const says = await Promise.all([1, 2, 3].map((n) => h.o.say(h.o.mini, n, `say ${n}`)));
+    socket.frame({ t: 'log', events: [{ offset: 1, event: says[0] }, { offset: 2, event: says[1] }] });
+    socket.frame({ t: 'caught-up', offset: 2 });
+    await until(() => opened(h.latest()).live, 'live');
+    socket.frame({ t: 'log', events: [{ offset: 3, event: says[2] }] });
+    await until(() => opened(h.latest()).events.length === 3, 'the live event');
+    expect(delta(h.told()).upserts.map((e) => e.offset)).toEqual([3]);
+    expect(h.changes.some((c) => c.ok && (c.reset === true || c.upserts.length > 2))).toBe(false);
+    const drawn = opened(h.latest());
+    const fresh = opened(await h.channels.open(PROJECT));
+    expect(drawn.events).toEqual(fresh.events);
+    expect(drawn).toMatchObject({ pending: fresh.pending, unverified: fresh.unverified, asOf: fresh.asOf, live: fresh.live });
+  });
+
+  it("tells no eviction: a tab keeps what main's bound let go, and the delta carries only the new event", async () => {
+    const h = await harness({ events: 2 });
+    opened(await h.channels.open(PROJECT));
+    const socket = await until(() => h.last(), 'a socket');
+    socket.welcome();
+    const says = await Promise.all([1, 2, 3].map((n) => h.o.say(h.o.mini, n, `say ${n}`)));
+    socket.frame({ t: 'log', events: [{ offset: 1, event: says[0] }, { offset: 2, event: says[1] }] });
+    socket.frame({ t: 'caught-up', offset: 2 });
+    await until(() => opened(h.latest()).live, 'live');
+    socket.frame({ t: 'log', events: [{ offset: 3, event: says[2] }] });
+    await until(() => opened(h.latest()).events.length === 3, 'the live event');
+    expect(delta(h.told())).toMatchObject({ upserts: [{ offset: 3 }] });
+    expect(delta(h.told()).reset).toBeUndefined();
+    expect(opened(await h.channels.open(PROJECT)).events.map((e) => e.offset)).toEqual([2, 3]);
+  });
+
+  it("drops another org's log at its sign-in, told as a reset, and reads that org's log afresh", async () => {
+    const h = await harness();
+    opened(await h.channels.open(PROJECT));
+    const socket = await until(() => h.last(), 'a socket');
+    socket.welcome();
+    socket.frame({ t: 'log', events: [{ offset: 1, event: await h.o.say(h.o.mini, 1, 'ours') }] });
+    socket.frame({ t: 'caught-up', offset: 1 });
+    await until(() => opened(h.latest()).live, 'live');
+    const ours = h.signedIn();
+    h.session.set({ ...ours, identity: { ...ours.identity, org: 'another-org' } });
+    await until(() => opened(h.latest()).events.length === 0, 'the log dropped');
+    expect(h.changes.some((c) => c.ok && c.reset === true && c.upserts.length === 0)).toBe(true);
+    const next = await until(() => (h.sockets.length === 2 ? h.last() : null), "the other org's socket");
+    expect(socket.closed).toBe(true);
+    next.welcome();
+    expect(next.sent).toEqual([{ t: 'resume', after: 0 }]);
   });
 
   it('reads the attestations again when a DX1 writer passes every one it holds', async () => {

@@ -1,8 +1,12 @@
 // A project's channel in main (P5 O8 M7a, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M7a and Interfaces
 // §N): the app's one reader of the log plane. One per project while a tab shows it (`open`), released
 // CHANNEL_RELEASE_MS after its last tab closes (`release`). Each holds the project's log (cache.ts), the hub's Project
-// socket (project-socket.ts) and the owner's words (words.ts), and tells `org.channel.changed` its whole answer,
-// coalesced: main's verified events, the words not yet in the log, the count that didn't verify, "as of" and `live`.
+// socket (project-socket.ts) and the owner's words (words.ts). `open` answers whole: main's verified events, the words
+// not yet in the log, the count that didn't verify, "as of" and `live`. `org.channel.changed` tells, coalesced, what
+// changed since the last it told (or since the first open's answer): the events new or judged again (`upserts`), the
+// rest whole. It tells everything (`reset`) when a judgment at a new head or certificate set changed verdicts, when
+// another org's log is dropped, when an event told inside the held range is gone, and after a closed answer. An event the
+// bound lets go is not told.
 //
 // - Opening draws the cache at once, judged again against the held head (signed out, as it was judged). The socket
 //   opens only while the session has a hub, after the project's history attestations are read once, so a DX1 writer's
@@ -18,7 +22,7 @@
 //
 // Electron-free.
 import type { HistoryAttestation, Signed } from '../../../../apps/org-protocol/src/index.ts';
-import type { ChannelAnswer, ChannelChanged, ChannelSendResult } from '@shared/ipc/schema/org';
+import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelSendResult } from '@shared/ipc/schema/org';
 import { hubClient } from '../hub-client';
 import type { HubAccess, OrgSession, SignedIn } from '../session';
 import { orgTiming, type OrgTiming } from '../timing';
@@ -29,6 +33,11 @@ import { createWords } from './words';
 
 /** A hub project: the sminos project id (`smnsId`), a UUID. */
 const PROJECT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Each drawn event's verdict, by offset: an event's bytes at an offset never change, so this is all a change can be. */
+const verdictsOf = (events: readonly ChannelEvent[]): Map<number, string> =>
+  new Map(events.map((e) => [e.offset, JSON.stringify([e.label, e.by, e.author, e.owners])]));
+const sameVerdicts = (a: Map<number, string>, b: Map<number, string>): boolean => a.size === b.size && [...a].every(([offset, v]) => b.get(offset) === v);
 
 export interface ChannelsDeps {
   session: OrgSession;
@@ -46,7 +55,7 @@ export interface ChannelsDeps {
 }
 
 export interface Channels {
-  /** A tab shows the project: its channel, opened or kept, and its answer once its cache is read. */
+  /** A tab shows the project: its channel, opened or kept, and its whole answer once its cache is read. */
   open(project: string): Promise<ChannelAnswer>;
   /** A tab no longer shows it: released CHANNEL_RELEASE_MS after the last. */
   release(project: string): void;
@@ -60,7 +69,8 @@ interface Channel {
   readonly loaded: Promise<void>;
   /** The tabs showing it. */
   refs(): number;
-  answer(): ChannelAnswer;
+  /** The whole answer for a tab that opens it; the first is what the next change is told against. */
+  opened(): ChannelAnswer;
   send(text: string): Promise<ChannelSendResult>;
   /** The session changed, or (`reopened`) a tab opened it again: what was parked may open again. */
   reconcile(reopened?: boolean): void;
@@ -113,7 +123,13 @@ export function createChannels(deps: ChannelsDeps): Channels {
     let dirty = false;
     let writeTimer: ReturnType<typeof setTimeout> | null = null;
     let emitTimer: ReturnType<typeof setTimeout> | null = null;
-    let lastEmitted = '';
+    // what tabs were last told: each event's verdict by offset (null: nothing yet, or a closed answer), the rest whole
+    let told: Map<number, string> | null = null;
+    let toldRest = '';
+    let toldClosed = '';
+    let baselined = false;
+    /** The next change tells everything. */
+    let resetDue = false;
 
     const words = createWords({
       project,
@@ -162,14 +178,51 @@ export function createChannels(deps: ChannelsDeps): Channels {
       if (stopped || emitTimer !== null) return;
       emitTimer = setTimeout(() => {
         emitTimer = null;
-        if (stopped) return;
-        const changed: ChannelChanged = { project, ...answer() };
-        const text = JSON.stringify(changed);
-        if (text === lastEmitted) return;
-        lastEmitted = text;
-        for (const listener of [...listeners]) listener(changed);
+        if (!stopped) tell();
       }, timing.CHANNEL_COALESCE_MS);
       (emitTimer as { unref?: () => void }).unref?.();
+    }
+
+    const restOf = (a: ChannelAnswer & { ok: true }) => JSON.stringify([a.pending, a.unverified, a.asOf, a.live]);
+
+    /** The change since what was last told, if any. */
+    function tell(): void {
+      const now = answer();
+      let change: ChannelChanged;
+      if (!now.ok) {
+        told = null;
+        const text = JSON.stringify(now);
+        if (text === toldClosed) return;
+        toldClosed = text;
+        change = { project, ...now };
+      } else {
+        toldClosed = '';
+        const verdicts = verdictsOf(now.events);
+        const floor = held?.floor() ?? null;
+        const before = told;
+        const reset = resetDue || before === null || [...before.keys()].some((offset) => floor !== null && offset >= floor && !verdicts.has(offset));
+        const upserts = reset || before === null ? now.events : now.events.filter((e) => before.get(e.offset) !== verdicts.get(e.offset));
+        const rest = restOf(now);
+        resetDue = false;
+        told = verdicts;
+        if (!reset && upserts.length === 0 && rest === toldRest) return;
+        toldRest = rest;
+        const { pending, unverified, asOf, live } = now;
+        change = { project, ok: true, upserts, pending, unverified, asOf, live, ...(reset ? { reset: true as const } : {}) };
+      }
+      for (const listener of [...listeners]) listener(change);
+    }
+
+    function opened(): ChannelAnswer {
+      const whole = answer();
+      if (!baselined) {
+        baselined = true;
+        if (whole.ok) {
+          told = verdictsOf(whole.events);
+          toldRest = restOf(whole);
+        } else toldClosed = JSON.stringify(whole);
+      }
+      return whole;
     }
 
     function changed(): void {
@@ -306,14 +359,18 @@ export function createChannels(deps: ChannelsDeps): Channels {
           held = emptyLog(current.identity.org, project, limits);
           judged = null;
           attested = false;
+          resetDue = true;
           dropSocket();
           changed();
+          if (current.hub !== null && ended === null) void connect(current.hub); // that org's log, from offset 0
         }
         const head = current.view.head();
         const certificates = current.view.certificates();
         if (judged === null || judged.head !== head || judged.certificates !== certificates) {
           judged = { head, certificates };
+          const before = verdictsOf(held.events());
           await held.rejudge(groundOf(current, project));
+          if (!sameVerdicts(before, verdictsOf(held.events()))) resetDue = true;
           changed();
         }
       });
@@ -373,7 +430,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
       return write();
     }
 
-    const channel: Channel = { loaded, refs: () => refs, answer, send, reconcile, retain, release, close };
+    const channel: Channel = { loaded, refs: () => refs, opened, send, reconcile, retain, release, close };
     return channel;
   }
 
@@ -389,7 +446,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
       else channel.reconcile(true);
       channel.retain();
       await channel.loaded;
-      return channel.answer();
+      return channel.opened();
     },
     release(project) {
       channels.get(project)?.release();
