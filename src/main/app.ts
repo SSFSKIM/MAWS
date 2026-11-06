@@ -350,7 +350,15 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   const session = devOrg ?? orgSession!;
   const orgFeed = createRegistryFeed({ session, log: (line) => console.log(line) });
   orgSession?.attach(orgFeed);
-  const unpublishOrgStatus = registerOrgHandlers({ register: registerMainHandler, emit: (name, status) => void emit(name, status), service: orgSession, development: devOrg });
+  // P5 O8 M7a: the project channels (org/channel/), composed in the production session; org.channel.changed forwarded
+  // for the app's life
+  const unpublishOrgStatus = registerOrgHandlers({
+    register: registerMainHandler,
+    emit: (name, status) => void emit(name, status),
+    emitChannel: (changed) => void emit('org.channel.changed', changed),
+    service: orgSession,
+    development: devOrg,
+  });
   // P5 O8 M4a Task 8: the Org page's e2e look seeds org.* from a fixture (org/page-fixture.ts), which also stops the
   // session's org.changed. The guard folds to false outside a harness build, which then carries none of it.
   if (typeof __MAWS_HARNESS_BUILD__ !== 'undefined' && __MAWS_HARNESS_BUILD__) {

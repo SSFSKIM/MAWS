@@ -5,10 +5,13 @@
 //
 // M2 adds `org.rows` (registerRowsHandler). M3 adds the signer's acts: `org.resign`, `org.revokeSuperseded`, `org.rekey`,
 // `org.discardPending` and `org.resetSigning`, each refused under `MAWS_DEV_ORG` as the rest are. M4a adds the Org page's
-// `org.view`, `org.preview`, `org.change` and `org.pair.*` (under `MAWS_DEV_ORG`: no view, and every act refused).
+// `org.view`, `org.preview`, `org.change` and `org.pair.*` (under `MAWS_DEV_ORG`: no view, and every act refused). M7a
+// adds the project channel's `org.channel.open`, `.close` and `.send`, and forwards `org.channel.changed` through
+// `emitChannel` for the app's life, apart from the status's forwarding, which the Org page's e2e fixture stops (under
+// `MAWS_DEV_ORG` a channel reads signed out).
 //
 // Electron-free: main injects its `registerMainHandler` and `emit`.
-import type { DiscardResult, OrgAttempt, OrgRows, OrgStatus, PairStartResult, PreviewResult, SignResult } from '@shared/ipc/schema/org';
+import type { ChannelChanged, DiscardResult, OrgAttempt, OrgRows, OrgStatus, PairStartResult, PreviewResult, SignResult } from '@shared/ipc/schema/org';
 import type { MainHandler } from '../ipc/router';
 import type { OrgSessionService } from './org-session';
 import type { OrgSession } from './session';
@@ -30,11 +33,16 @@ type OrgCommand =
   | 'org.change'
   | 'org.pair.start'
   | 'org.pair.approve'
-  | 'org.pair.cancel';
+  | 'org.pair.cancel'
+  | 'org.channel.open'
+  | 'org.channel.close'
+  | 'org.channel.send';
 
 export function registerOrgHandlers(deps: {
   register<N extends OrgCommand>(name: N, handler: MainHandler<N>): void;
   emit(name: 'org.changed', status: OrgStatus): void;
+  /** M7a: `org.channel.changed`. */
+  emitChannel(changed: ChannelChanged): void;
   /** The production session; null under `MAWS_DEV_ORG`. */
   service: OrgSessionService | null;
   /** O7's development session, when it is the one main runs. */
@@ -68,6 +76,9 @@ export function registerOrgHandlers(deps: {
     deps.register('org.pair.start', () => unpaired);
     deps.register('org.pair.approve', () => unsigned);
     deps.register('org.pair.cancel', () => {});
+    deps.register('org.channel.open', () => ({ ok: false, reason: 'signed-out' }));
+    deps.register('org.channel.close', () => {});
+    deps.register('org.channel.send', () => ({ ok: false, reason: 'signed-out' }));
     return development?.onChanged(() => deps.emit('org.changed', status())) ?? (() => {});
   }
   deps.register('org.status', () => service.status());
@@ -87,6 +98,10 @@ export function registerOrgHandlers(deps: {
   deps.register('org.pair.start', (input) => service.pairStart(input));
   deps.register('org.pair.approve', (input) => service.pairApprove(input));
   deps.register('org.pair.cancel', () => service.pairCancel());
+  deps.register('org.channel.open', ({ project }) => service.channelOpen(project));
+  deps.register('org.channel.close', ({ project }) => service.channelRelease(project));
+  deps.register('org.channel.send', ({ project, text }) => service.channelSend(project, text));
+  service.onChannel((changed) => deps.emitChannel(changed));
   return service.onStatus((status) => deps.emit('org.changed', status));
 }
 
