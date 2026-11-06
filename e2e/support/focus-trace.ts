@@ -19,7 +19,7 @@ export async function traceFocus(page: Page, watch: string): Promise<{ stop(): P
     const t0 = performance.now();
     const describe = (n: unknown): string => {
       if (!(n instanceof Element)) return n === document ? 'document' : String(n ?? null);
-      const attrs = [...n.attributes].filter((a) => /^(data-|class$|aria-label$|aria-expanded$|role$|tabindex$)/.test(a.name)).map((a) => `${a.name}=${a.value.slice(0, 32)}`);
+      const attrs = Array.from(n.attributes as ArrayLike<Attr>).filter((a) => /^(data-|class$|aria-label$|aria-expanded$|role$|tabindex$)/.test(a.name)).map((a) => `${a.name}=${a.value.slice(0, 32)}`);
       return `<${n.tagName.toLowerCase()}${attrs.length ? ` ${attrs.join(' ')}` : ''}>${n.isConnected ? '' : ' (detached)'}`;
     };
     const note = (line: string) => log.push(`${(performance.now() - t0).toFixed(1)} ms ${line}`);
@@ -74,7 +74,7 @@ export function elementAt(page: Page, point: { x: number; y: number }, within: s
   return page.evaluate(
     ([{ x, y }, selector]) => {
       const n = document.elementFromPoint(x, y);
-      const attrs = n ? [...n.attributes].filter((a) => /^(data-|class$|aria-label$|role$)/.test(a.name)).map((a) => `${a.name}=${a.value.slice(0, 32)}`).join(' ') : '';
+      const attrs = n ? Array.from(n.attributes as ArrayLike<Attr>).filter((a) => /^(data-|class$|aria-label$|role$)/.test(a.name)).map((a) => `${a.name}=${a.value.slice(0, 32)}`).join(' ') : '';
       return `at ${x.toFixed(0)},${y.toFixed(0)}: <${n?.tagName.toLowerCase() ?? 'nothing'} ${attrs}>, ${n?.closest(selector) ? 'inside' : 'outside'} ${selector}`;
     },
     [point, within] as const,
