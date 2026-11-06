@@ -19,7 +19,7 @@ import { builder, tool, uuid } from '../model/test-events';
 import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../view/context';
 import { RowView } from '../view/rows/Row';
 import { Transcript } from '../view/Transcript';
-import { ipcLoadSpillOver, ipcOpenExternalOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS, REMOTE_ADOPTIONS_POLL_MS } from './ipc';
+import { ipcLoadSpillOver, ipcOpenExternalOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS, REMOTE_ADOPTIONS_POLL_MS, REMOTE_FOLLOW_POLL_MS } from './ipc';
 import type { TranscriptSource } from './types';
 import { HISTORY_GAP, HISTORY_OMITTED, HISTORY_TOO_LARGE } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED
 import { useMachines } from '../../stores/machines'; // P5 O7 M2
@@ -875,6 +875,33 @@ describe('child source provenance', () => {
     expect(fake.calls.filter((call) => call.name === 'fs.agentEvents')).toHaveLength(1);
     off();
     expect(fake.listeners.get('fs.followState')?.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // The remote drill-in (2026-11-06): no follow state of another machine's reaches this page (its session's stream carries
+  // the journal's events and the panels' notices), so a read of a child there that waits on one, the parent's slice still
+  // backfilling or the child's own, is asked again at REMOTE_FOLLOW_POLL_MS instead, under the same bound.
+  it('on another machine: a parent read still backfilling and an incomplete child backfill are each asked again with no follow state', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const done = finish(AGENT, '2026-09-28T10:00:08.000Z', 'completed');
+    const fake = fakeClient();
+    const source = ipcSourceOver(fake.client, REMOTE, AGENT);
+    const off = source.subscribe(() => {});
+    onTestFinished(off);
+    const snapshot = source.snapshot();
+    answer(fake, 'session.events', { events: [], lastSeq: 0, complete: false });
+    await vi.advanceTimersByTimeAsync(REMOTE_FOLLOW_POLL_MS);
+    answer(fake, 'session.events', { events: [...parent, ...child, done], lastSeq: 9, complete: true });
+    await vi.advanceTimersByTimeAsync(0);
+    answer(fake, 'fs.agentEvents', { events: [], complete: false });
+    await vi.advanceTimersByTimeAsync(REMOTE_FOLLOW_POLL_MS);
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await expect(snapshot).resolves.toEqual([...disk, done]);
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'session.events', 'fs.agentEvents', 'fs.agentEvents']);
     expect(vi.getTimerCount()).toBe(0);
   });
 

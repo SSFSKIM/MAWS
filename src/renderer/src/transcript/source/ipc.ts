@@ -529,7 +529,13 @@ interface Subscriber {
   ended: AbortController;
 }
 
+// The remote drill-in (2026-11-06): no follow state of another machine's reaches this page (its session's stream carries
+// the journal's events and the panels' notices, never `fs.followState`), so a read of a child there that waits on one is
+// asked again this often instead, within the same bound.
+export const REMOTE_FOLLOW_POLL_MS = 1_000;
+
 function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: AgentId): TranscriptSource {
+  const followPollMs = machineOf(appSessionId) === client.localMachine ? null : REMOTE_FOLLOW_POLL_MS;
   let provenance: 'undecided' | 'live' | 'disk' = 'undecided';
   // The long-transcript window: the disk snapshot whose `fs.agentEvents` answer is on its way. The child's events that
   // batches carry meanwhile are held until it completes, then those older than the window it answered are dropped
@@ -626,8 +632,8 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
   // The parent's events for this child. A disk-backed parent whose follow is still reading its transcript through
   // answers an empty, incomplete page, which says nothing of the child's lifecycle, and since the parent then
   // broadcasts only its newest window, an old finish would never arrive later: a completed child would read working.
-  // Such a page is asked again once the parent's follow reports its next state, or once BACKFILL_WAIT_MS pass, unless
-  // the child's subscribers all detach.
+  // Such a page is asked again once the parent's follow reports its next state (another machine's: at each
+  // REMOTE_FOLLOW_POLL_MS), or once BACKFILL_WAIT_MS pass, unless the child's subscribers all detach.
   const parentEvents = async (attached: Subscriber[], detached: () => boolean): Promise<SessionEvent[]> => {
     let signalled: boolean; // a state heard since the latest read was asked
     let wake: (() => void) | null = null;
@@ -647,7 +653,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
           let timer: ReturnType<typeof setTimeout> | undefined;
           await new Promise<void>((resolve) => {
             wake = resolve;
-            timer = setTimeout(resolve, deadline - Date.now());
+            timer = setTimeout(resolve, Math.min(deadline - Date.now(), followPollMs ?? Infinity));
           });
           clearTimeout(timer);
           wake = null;
@@ -744,7 +750,8 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       reading = token;
       if (!onDisk()) decide('disk');
       // An incomplete snapshot is not terminal history. Listen before reading so a completed backfill during the
-      // round trip is not missed; re-read on its following state, never spin on a reloading/error follower.
+      // round trip is not missed; re-read on its following state (another machine's: at each REMOTE_FOLLOW_POLL_MS),
+      // never spin on a reloading/error follower.
       let changed: boolean;
       let failure: string | null = null;
       let wake: (() => void) | null = null;
@@ -774,7 +781,12 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
             return history; // the held batches pass on as this returns (finally), so the hydration drains them after it
           }
           if (failure !== null) throw new Error(failure);
-          if (!changed) await new Promise<void>((resolve) => { wake = resolve; });
+          let poll: ReturnType<typeof setTimeout> | undefined;
+          if (!changed) await new Promise<void>((resolve) => {
+            wake = resolve;
+            if (followPollMs !== null) poll = setTimeout(resolve, followPollMs);
+          });
+          clearTimeout(poll);
           wake = null;
           if (detached()) return [];
           if (failure !== null) throw new Error(failure);
