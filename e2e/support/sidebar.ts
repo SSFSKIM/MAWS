@@ -7,6 +7,7 @@ import { addressOf } from '../../src/shared/machine/address';
 import type { MachineRef } from '../../src/shared/machine/ref';
 import { addressed, localRef } from './address';
 import { clickRevealed } from './hover';
+import { activeMainTab, mainTabs } from './shell';
 
 export const sidebarOf = (page: Page) => page.locator('[data-region="sidebar"]');
 
@@ -75,12 +76,21 @@ export async function closeProject(page: Page, name: string): Promise<void> {
   await page.mouse.move(700, 400);
 }
 
-// The "+" on a project's row, revealed on hover: New chat in that project.
+// The "+" on a project's row, revealed on hover: New chat in that project. The click makes the session first (a round
+// trip to main) and only then opens its tab, selected, so this returns once that tab is the selected one: a step taken
+// before it would lose its own tab to it (the library's, presentations-comments.spec.ts:248 on 2026-10-30).
 export async function newChatIn(page: Page, name: string): Promise<void> {
   await selectDiscoveredProject(page, name);
   await showProjectList(page);
   const row = projectRow(page, name);
+  const before = new Set(await mainTabs(page).getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id'))));
   await clickRevealed(projectLine(row), row.getByRole('button', { name: `New chat in ${name}`, exact: true }));
+  await expect
+    .poll(async () => {
+      const id = await activeMainTab(page).evaluateAll((tabs) => tabs[0]?.getAttribute('data-tab-id') ?? null);
+      return id !== null && id.startsWith('session:') && !before.has(id);
+    }, { message: `the new chat in ${name} is the selected tab` })
+    .toBe(true);
 }
 
 export type SessionMatch = string | { appSessionId: string };
