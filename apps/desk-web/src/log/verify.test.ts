@@ -37,4 +37,12 @@ describe('verifyLogEvent', () => {
       expect(await verifyLogEvent(k, VECTOR_PROJECT, bad)).toEqual({ ok: false, reason: 'malformed' });
     }
   });
+
+  // P5 O18 D5: the hub keeps a content-free tombstone at a position it withheld, and serves it in its writer's stream
+  // so readers continue past it. It is no event and no forgery: neither drawn nor reported.
+  it('reads a withheld tombstone as withheld, and one with anything more as malformed', async () => {
+    const k = await key();
+    expect(await verifyLogEvent(k, VECTOR_PROJECT, { writer: 'mini/s1', seq: 3, withheld: true })).toEqual({ ok: false, reason: 'withheld' });
+    expect(await verifyLogEvent(k, VECTOR_PROJECT, { writer: 'mini/s1', seq: 3, withheld: true, text: 'hi' })).toEqual({ ok: false, reason: 'malformed' });
+  });
 });

@@ -9,6 +9,8 @@ import { VECTOR_KEY, VECTOR_PROJECT as PROJECT } from '../../test/vectors';
 import { cardState } from '../conversation/card-state';
 import { memoryLogRecord } from '../log/record';
 import { latency } from '../latency/latency';
+import { streamWriter } from 'org-protocol';
+import { clearPolicyRows, takePolicies } from '../state/policies';
 import { ProjectConnection } from './connection';
 import { Conversation, requestKey } from './conversation';
 
@@ -404,6 +406,65 @@ describe('a web human', () => {
     const event = c.log.drawable()[0].event;
     expect(event).toMatchObject({ kind: 'human', from: 'human', member: M, to: [{ session: S1, alias: 'maws-45' }], text: '@maws-45 keep user_id' });
     expect(await verify(key, 'log', PROJECT, event)).toBe(true);
+  });
+
+  // P5 O18 M2b: toward a private session, the member's policy row's audience is sealed into the words, which the hub
+  // then keeps in the member's stream of it.
+  describe('toward a private session', () => {
+    const P = '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a';
+    const priv = { session: P, alias: 'priv' };
+    const pub = { session: S1, alias: 'maws-45' };
+    const OTHER = 'c'.repeat(32);
+    afterEach(() => clearPolicyRows());
+    const writers = () => hub.logOf(PROJECT).filter((e) => e.event.kind === 'human').map((e) => e.event.writer);
+
+    it('alternating with a listed one, goes under the stream of its row’s audience, the listed one’s plain', async () => {
+      takePolicies({ t: 'policies', rows: [{ session: P, audience: [M], policyRev: 1 }] });
+      const c = await connect();
+      for (const to of [pub, priv, pub, priv]) await c.say(M, [to], `@${to.alias} hi`, false);
+      await until(() => writers().length === 4);
+      const stream = streamWriter(`hub/${M}`, [M]);
+      expect(writers()).toEqual([`hub/${M}`, stream, `hub/${M}`, stream]);
+      await until(() => c.log.drawable().filter((e) => e.event.kind === 'human').length === 4);
+      for (const { event } of c.log.drawable()) expect(await verify(key, 'log', PROJECT, event)).toBe(true);
+      expect(c.log.drawable().find((e) => e.event.writer === stream)?.event).toMatchObject({ audience: [M], to: [priv], text: '@priv hi' });
+    });
+
+    it('seals the newest row: a policyRev that rises changes the audience of the next message', async () => {
+      const c = await connect();
+      takePolicies({ t: 'policies', rows: [{ session: P, audience: [M], policyRev: 1 }] });
+      await c.say(M, [priv], '@priv one', false);
+      takePolicies({ t: 'policy', session: P, policy: { audience: [M, OTHER].sort(), policyRev: 2 } });
+      await c.say(M, [priv], '@priv two', false);
+      await until(() => writers().length === 2);
+      expect(writers()).toEqual([streamWriter(`hub/${M}`, [M]), streamWriter(`hub/${M}`, [M, OTHER])]);
+    });
+
+    it('splits a say naming both into one event each, each with its own tags', async () => {
+      takePolicies({ t: 'policies', rows: [{ session: P, audience: [M], policyRev: 1 }] });
+      const c = await connect();
+      const outboxed = new Set<string>();
+      const off = c.conversation.store.subscribe((s) => Object.values(s.outbox).forEach((o) => outboxed.add(o.text)));
+      await c.say(M, [priv, pub], '@priv @maws-45 look', false);
+      off();
+      expect([...outboxed].sort()).toEqual(['@maws-45 look', '@priv look']);
+      await until(() => writers().length === 2);
+      const texts = hub.logOf(PROJECT).map((e) => [e.event.writer, e.event.text]);
+      expect(texts).toEqual([
+        [streamWriter(`hub/${M}`, [M]), '@priv look'],
+        [`hub/${M}`, '@maws-45 look'],
+      ]);
+    });
+
+    it('is refused here, with nothing sent, when the log says it is private and the member holds no row of it', async () => {
+      await hub.append(PROJECT, { writer: streamWriter(`mini/${P}`, [OTHER]), kind: 'joined', session: P, alias: 'priv', machine: 'mini', audience: [OTHER] });
+      const c = await connect();
+      await until(() => c.log.drawable().length === 1);
+      const nonce = await c.say(M, [pub, priv], '@maws-45 @priv hi', false);
+      expect(conv(c).outbox[nonce]).toMatchObject({ state: 'refused', reason: "@priv can't be reached from here: it is private, and not shared with you" });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(writers()).toEqual([]);
+    });
   });
 
   it('stays in the outbox as refused when the hub refuses it', async () => {

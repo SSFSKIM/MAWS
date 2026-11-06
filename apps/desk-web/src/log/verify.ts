@@ -2,9 +2,12 @@
 // protocol module's `verify`: the code, its canonical spelling, and for a `hub/` event the shape of the position the
 // code leaves out (writer, seq, ts). This adds only the reading guard the projection needs (an object with a string
 // writer and kind, an integer seq, a mac), so a malformed event is refused as such instead of throwing in a view.
+import { isWithheldTombstone } from 'org-protocol';
 import { verify, type LogEvent, type OrgKey } from 'desk-hub/protocol';
 
-export type Verdict = { ok: true } | { ok: false; reason: 'bad-code' | 'malformed' };
+/** `withheld`: the hub's tombstone at a position it refused (P5 O18 D5), `{writer, seq, withheld: true}`, which its
+ * stream carries so its readers continue past it; it is neither drawn nor reported. */
+export type Verdict = { ok: true } | { ok: false; reason: 'bad-code' | 'malformed' | 'withheld' };
 
 export function isLogEvent(value: unknown): value is LogEvent {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -13,6 +16,7 @@ export function isLogEvent(value: unknown): value is LogEvent {
 }
 
 export async function verifyLogEvent(key: OrgKey, project: string, event: unknown): Promise<Verdict> {
+  if (isWithheldTombstone(event)) return { ok: false, reason: 'withheld' };
   if (!isLogEvent(event)) return { ok: false, reason: 'malformed' };
   return (await verify(key, 'log', project, event)) ? { ok: true } : { ok: false, reason: 'bad-code' };
 }

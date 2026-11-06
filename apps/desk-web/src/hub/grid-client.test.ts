@@ -126,3 +126,27 @@ describe("the app's socket (P5 O13 M3, OX8)", () => {
     }
   });
 });
+
+it("hands on the member's policy rows (P5 O18 M2b) whether or not the socket is an app's", async () => {
+  const hub = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+  await new Promise<void>((resolve) => hub.once('listening', () => resolve()));
+  hub.on('connection', (ws) => {
+    ws.send(JSON.stringify({ t: 'grid', projects: [] }));
+    ws.send(JSON.stringify({ t: 'policies', rows: [{ session: 's1', audience: ['a'.repeat(32)], policyRev: 1 }] }));
+    ws.send(JSON.stringify({ t: 'policy', session: 's1', policy: null }));
+  });
+  try {
+    const told: unknown[] = [];
+    client = new GridClient({ base: `ws://127.0.0.1:${(hub.address() as AddressInfo).port}`, delay: () => 20, projects: () => {}, policies: (frame) => told.push(frame) });
+    client.start();
+    await until(() => told.length === 2);
+    expect(told).toEqual([
+      { t: 'policies', rows: [{ session: 's1', audience: ['a'.repeat(32)], policyRev: 1 }] },
+      { t: 'policy', session: 's1', policy: null },
+    ]);
+  } finally {
+    client?.stop();
+    client = null;
+    await new Promise((r) => hub.close(r));
+  }
+});

@@ -47,6 +47,9 @@ export type HumanDraft = {
   text: string;
   created: string;
   wake?: boolean;
+  /** The sorted member ids the words are for, toward a private session (P5 O18 D8): the hub keeps them in the
+   * member's stream of it, `hub/<member>~<digest>`. */
+  audience?: string[];
 };
 
 export type HumanEvent = HumanDraft & { mac: Mac };
