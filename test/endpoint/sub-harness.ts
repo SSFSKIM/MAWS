@@ -818,9 +818,9 @@ export async function waitFor(r: Remote, match: (m: Msg) => boolean, what: strin
   return until(() => r.inbox.slice(from).find((m) => match(m as Msg)) as Msg | undefined, what, ms);
 }
 
-export async function subscribe(r: Remote, sub: string, session: { lane: 'A' | 'B'; id: string }, options: { view?: 'full' | 'cards'; cursor?: { epoch: string; seq: number; idx?: number } | null; credit?: number } = {}): Promise<Msg> {
+export async function subscribe(r: Remote, sub: string, session: { lane: 'A' | 'B'; id: string }, options: { view?: 'full' | 'cards'; cursor?: { epoch: string; seq: number; idx?: number } | null; credit?: number; agentId?: string } = {}): Promise<Msg> {
   const from = r.inbox.length;
-  await r.channel.send({ t: 'sub', sub, session, ...(options.view === undefined ? {} : { view: options.view }), cursor: options.cursor ?? null, credit: options.credit ?? 4 * 1024 * 1024 });
+  await r.channel.send({ t: 'sub', sub, session, ...(options.view === undefined ? {} : { view: options.view }), ...(options.agentId === undefined ? {} : { agentId: options.agentId }), cursor: options.cursor ?? null, credit: options.credit ?? 4 * 1024 * 1024 });
   return waitFor(r, (m) => m.sub === sub && (m.t === 'subbed' || m.t === 'ended'), `the answer to sub ${sub}`, from);
 }
 

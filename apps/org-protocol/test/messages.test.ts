@@ -82,6 +82,27 @@ describe('call.session and sub.feed', () => {
 
 });
 
+// 2026-11-06 (`rl2.agent-scope`, RL2 1.11): a lane A session's `full` stream may name one subagent's transcript
+// (`agentId`, as sminos spells an agent id) in place of the main one; nothing else names an agent.
+describe('sub.agentId', () => {
+  const sub = (fields: Record<string, unknown>) => ({ t: 'sub', sub: 's1', cursor: null, credit: 1024, ...fields });
+  const A = { lane: 'A', id: 'la-1' };
+
+  it('reads a lane A stream naming a subagent, with or without its view, from a snapshot or an (epoch, seq) cursor', () => {
+    expect(readMessage('device', sub({ session: A, agentId: 'ab5e2e00000000001' })).kind).toBe('message');
+    expect(readMessage('device', sub({ session: A, view: 'full', agentId: 'a_b-1', cursor: { epoch: 'up-1', seq: 4 } })).kind).toBe('message');
+    expect(readMessage('device', sub({ session: A, agentId: 'x'.repeat(128) })).kind).toBe('message');
+  });
+
+  it('refuses an agent of a lane B session, of a cards view or a feed, and an id sminos would not take', () => {
+    expect(readMessage('device', sub({ session: { lane: 'B', id: 'app-1' }, agentId: 'a1' })).kind).toBe('malformed');
+    expect(readMessage('device', sub({ session: A, view: 'cards', agentId: 'a1' })).kind).toBe('malformed');
+    expect(readMessage('device', sub({ session: { lane: 'B', id: 'app-1' }, feed: 'checkout', agentId: 'a1' })).kind).toBe('malformed');
+    expect(readMessage('device', sub({ feed: 'attention', agentId: 'a1' })).kind).toBe('malformed');
+    for (const agentId of [null, '', 'a/b', 'a b', 'x'.repeat(129), 7]) expect(readMessage('device', sub({ session: A, agentId })).kind, String(agentId)).toBe('malformed');
+  });
+});
+
 // P5 O7 M3 (`rl2.streams`, `rl2.executor.pty-host`; RL2 1.3): the stream kinds, each read whole.
 describe('streams', () => {
   const ID = 'AAAAAAAAAAAAAAAAAAAAAA';
@@ -163,8 +184,8 @@ describe('the pong clock', () => {
     }
   });
 
-  it('is at minor 10 of major 1 (the New chat’s machine first: `rl2.spawn-home`, after P5 O7 M8’s `rl2.upload-blocks` at 9)', () => {
-    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 10 });
+  it('is at minor 11 of major 1 (the remote lane A drill-in: `rl2.agent-scope`, after the New chat’s `rl2.spawn-home` at 10)', () => {
+    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 11 });
   });
 });
 
