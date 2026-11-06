@@ -255,18 +255,6 @@ const holds = (build: Build) => build.manifest.capabilities.includes(HOLDER_CAPA
 const appObeysConnectors = (build: Build) => build.manifest.capabilities.includes(CONNECTORS_CLIENT_CAPABILITY);
 // P5 O3-D M6: whether a build's app takes `spine.lock` (O3-A on): one before it runs its spine with no lock at all
 const takesSpineLock = (build: Build) => ['src/main/settings/spine-lock.ts', 'src/services/settings/spine-lock.ts'].some((file) => existsSync(join(build.root ?? REPO_ROOT, file)));
-// P5 O8 M7b: the index version a build's source knows, its last migration (src/services/index/migrations.ts): an app
-// that meets an index another build migrated past it finds the index unavailable for its run (db.ts)
-const indexVersionOf = (build: Build) => Math.max(...[...readFileSync(join(build.root ?? REPO_ROOT, 'src/services/index/migrations.ts'), 'utf8').matchAll(/\bversion: (\d+),/g)].map((m) => Number(m[1])));
-// O3 DL 5(1)'s gap, generalized (P5 O8 M7b): with the keeper on the daemon shape, its mawsd takes the tail while no app
-// runs and derives the failure's item into the index; an attacher that cannot read that index (one from before O3-A, or
-// one whose build knows an older index than the keeper's) never sees the item. Why, or null when the attacher reads it.
-function tailIndexUnreadable(keeper: Build, attacher: Build, shapes: Shapes): string | null {
-  if (shapes.keeper !== 'daemon') return null;
-  if (!takesSpineLock(attacher)) return 'is from before O3-A, which knows the index at 13';
-  const [knows, migrated] = [indexVersionOf(attacher), indexVersionOf(keeper)];
-  return knows < migrated ? `knows the index at ${knows}, and the keeper's mawsd migrated it to ${migrated}` : null;
-}
 // The profile's spine.lock as takeLock writes it, or null when no process holds it
 function spineLockOf(userData: string): { pid: number; buildId: string } | null {
   try {
@@ -391,12 +379,10 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   // `republish`) and its spine derived the item into the index at 14, which a pre-A app cannot read (its 13): so neither
   // the item nor the events reach the old app. Every other check of the scene runs. Without the daemon no client takes
   // the tail while away, and the burst brings it to the old app, which derives the item live.
-  // P5 O8 M7b: the same gap for any attacher whose build knows an older index than the keeper's (`tailIndexUnreadable`).
-  const why = tailIndexUnreadable(keeper, attacher, shapes);
-  const derivedUnreadable = why !== null;
+  const derivedUnreadable = shapes.keeper === 'daemon' && !takesSpineLock(attacher);
   if (derivedUnreadable) {
-    test.info().annotations.push({ type: 'skipped check', description: `the failure's Needs-you item, derived from the tail: ${attacher.label} (wire ${wireOf(attacher)}) ${why}; this build's mawsd took the tail while away and derived the item into an index it cannot read (O3 DL 5(1))` });
-    said.push(`  tail: the failure's Needs-you item not checked: ${attacher.label} ${why}, so it cannot read the index where mawsd derived it (O3 DL 5(1))`);
+    test.info().annotations.push({ type: 'skipped check', description: `the failure's Needs-you item, derived from the tail: ${attacher.label} (wire ${wireOf(attacher)}) is from before O3-A; this build's mawsd took the tail while away and derived the item into the index at 14, which it cannot read (O3 DL 5(1))` });
+    said.push(`  tail: the failure's Needs-you item not checked: ${attacher.label} is from before O3-A and cannot read the index at 14 where mawsd derived it (O3 DL 5(1))`);
   } else {
     await expect.poll(async () => (await attentionOf(second.page, id, 'error')).map((i) => i.summary), { message: 'the failure’s Needs-you item, derived from the tail' }).toEqual([`Background task failed: ${TASK_FAILED}`]);
   }
@@ -544,11 +530,7 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
   const atAttach = await eventsOf(second.page, id);
   const seqOf = (e: SessionEvent) => Number(suffix(e.id).split(':')[0]);
   expect(atAttach.filter((e) => seqOf(e) > seqAtQuit).length, 'events from rows journaled after the keeper had exited').toBeGreaterThan(0);
-  const unreadable = tailIndexUnreadable(keeper, attacher, shapes); // P5 O8 M7b: O3 DL 5(1)'s gap, generalized
-  if (unreadable !== null) {
-    test.info().annotations.push({ type: 'skipped check', description: `the failure's Needs-you item, derived from the tail: ${attacher.label} (wire ${wireOf(attacher)}) ${unreadable}; the keeper's mawsd derived the item into an index it cannot read (O3 DL 5(1))` });
-    said.push(`  tail: the failure's Needs-you item not checked: ${attacher.label} ${unreadable}, so it cannot read the index where the keeper's mawsd derived it (O3 DL 5(1))`);
-  } else await expect.poll(async () => (await attentionOf(second.page, id, 'error')).map((i) => i.summary), { message: 'the failure’s Needs-you item, derived from the tail' }).toEqual([`Background task failed: ${TASK_FAILED}`]);
+  await expect.poll(async () => (await attentionOf(second.page, id, 'error')).map((i) => i.summary), { message: 'the failure’s Needs-you item, derived from the tail' }).toEqual([`Background task failed: ${TASK_FAILED}`]);
   await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the request raised while away, once' }).toBe(1);
   if (attacherDaemon !== null) said.push(await artifactPage(s, second, attacher.label, servesArtifacts(attacher)));
   said.push('  gap: not probed: the older supervisor never served this app (its session was handed over at the attach)');
