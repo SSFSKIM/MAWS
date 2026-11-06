@@ -80,9 +80,29 @@ describe('words', () => {
     if (!first.ok || !second.ok) throw new Error('unsent');
     s.words.answered({ t: 'human-ack', nonce: first.nonce, offset: 4, writer: `hub/${s.A}`, seq: 1 });
     s.words.logged([{ offset: 5, event: { writer: `hub/${s.A}`, seq: 2, member: s.A, nonce: second.nonce } }]);
-    expect(s.words.pending()).toEqual([]);
+    expect(s.words.pending()).toEqual([{ nonce: first.nonce, text: 'one', to: '*', state: 'sent' }]); // acknowledged, not yet logged
     s.words.resend();
     expect(s.sent).toHaveLength(4);
+  });
+
+  // Task 2's fix wave: an ack may come before any publication listed the word (the changes are coalesced), so main says
+  // `sent` itself, until the log holds the word; the renderer never infers it
+  it('keeps an acknowledged word, read sent, until the log holds it; a refusal or another sign-in never touches it', async () => {
+    const s = await setup();
+    const said = await s.words.say('acked', '*');
+    if (!said.ok) throw new Error('unsent');
+    s.words.answered({ t: 'human-ack', nonce: said.nonce, offset: 4, writer: `hub/${s.A}`, seq: 1 });
+    expect(s.words.pending()).toEqual([{ nonce: said.nonce, text: 'acked', to: '*', state: 'sent' }]);
+    s.words.answered({ t: 'refused', refusal: { reason: 'not-reachable', nonce: said.nonce } });
+    s.words.answered({ t: 'human-ack', nonce: said.nonce, offset: 4, writer: `hub/${s.A}`, seq: 1 });
+    s.signIn({ ...s.mine, member: 'someone-else' });
+    s.words.reconcile();
+    expect(s.words.pending()).toEqual([{ nonce: said.nonce, text: 'acked', to: '*', state: 'sent' }]);
+    s.signIn(s.mine);
+    s.words.resend();
+    expect(s.sent).toHaveLength(1);
+    s.words.logged([{ offset: 4, event: { writer: `hub/${s.A}`, seq: 1, member: s.A, nonce: said.nonce } }]);
+    expect(s.words.pending()).toEqual([]);
   });
 
   it("keeps the hub's refusal under the words, and sends a refused word no more", async () => {

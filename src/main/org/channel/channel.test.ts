@@ -194,10 +194,10 @@ describe('a project channel', () => {
 
   it('answers signed-out or no-hub with nothing cached, unknown-project for an id that is no project, and draws a cache offline', async () => {
     const out = await harness({ signedIn: false });
-    expect(await out.channels.open(PROJECT)).toEqual({ ok: false, reason: 'signed-out' });
-    expect(await out.channels.open('../../etc/passwd')).toEqual({ ok: false, reason: 'unknown-project' });
+    expect(await out.channels.open(PROJECT)).toEqual({ ok: false, reason: 'signed-out', rev: expect.any(Number) });
+    expect(await out.channels.open('../../etc/passwd')).toEqual({ ok: false, reason: 'unknown-project', rev: expect.any(Number) });
     const nohub = await harness({ hub: false });
-    expect(await nohub.channels.open(PROJECT)).toEqual({ ok: false, reason: 'no-hub' });
+    expect(await nohub.channels.open(PROJECT)).toEqual({ ok: false, reason: 'no-hub', rev: expect.any(Number) });
     expect(nohub.sockets).toHaveLength(0);
 
     const h = await harness();
@@ -217,18 +217,36 @@ describe('a project channel', () => {
     expect(offline.asOf).toBe(new Date(NOW).toISOString());
   });
 
+  // Task 2's fix wave: a tab applies only the changes numbered past its open answer
+  it('numbers each change past the last, across channels, and each open answer with the count as it stands', async () => {
+    const h = await harness();
+    const first = opened(await h.channels.open(PROJECT));
+    const socket = await until(() => h.last(), 'a socket');
+    socket.welcome();
+    socket.frame({ t: 'log', events: [{ offset: 1, event: await h.o.say(h.o.mini, 1, 'one') }] });
+    const one = delta(await until(() => h.told(), 'a change'));
+    expect(one.rev).toBeGreaterThan(first.rev);
+    const again = opened(await h.channels.open(PROJECT));
+    expect(again.rev).toBe(one.rev);
+    socket.frame({ t: 'log', events: [{ offset: 2, event: await h.o.say(h.o.mini, 2, 'two') }] });
+    const two = delta(await until(() => (h.told()?.rev ?? 0) > one.rev && h.told(), 'a later change'));
+    expect(two.rev).toBe(one.rev + 1);
+    const other = await h.channels.open('2f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0'); // another channel shares the count
+    expect(other.rev).toBe(two.rev);
+  });
+
   it("ends unknown-project when the hub doesn't hold the project, kept through a head, and opens again at the tab's next open", async () => {
     const h = await harness();
     opened(await h.channels.open(PROJECT));
     const socket = await until(() => h.last(), 'a socket');
     socket.emit('refused', 404, { [BUILD_HEADER]: 'b' });
     await until(() => h.latest()?.ok === false, 'the refusal');
-    expect(h.latest()).toEqual({ project: PROJECT, ok: false, reason: 'unknown-project' });
+    expect(h.latest()).toEqual({ project: PROJECT, ok: false, reason: 'unknown-project', rev: expect.any(Number) });
     expect(await h.channels.send(PROJECT, 'hello')).toMatchObject({ ok: false, reason: 'unreadable' });
     h.session.changed(); // a new head keeps the hub: no new socket, the refusal stands
     await sleep(30);
     expect(h.sockets).toHaveLength(1);
-    expect(h.latest()).toEqual({ project: PROJECT, ok: false, reason: 'unknown-project' });
+    expect(h.latest()).toEqual({ project: PROJECT, ok: false, reason: 'unknown-project', rev: expect.any(Number) });
     expect(await h.channels.open(PROJECT)).toMatchObject({ ok: true, live: false });
     await until(() => h.sockets.length === 2, 'a second socket');
     // a tab that drew the refusal holds nothing: what follows it is told whole
@@ -252,7 +270,10 @@ describe('a project channel', () => {
     await until(() => opened(h.latest()).pending.length === 1, 'the word pending');
     expect(opened(h.latest()).pending[0]).toMatchObject({ nonce: sent.nonce, state: 'sending' });
     socket.frame({ t: 'human-ack', nonce: sent.nonce, offset: 2, writer: `hub/${h.o.A}`, seq: 1 });
-    await until(() => opened(h.latest()).pending.length === 0, 'the word acknowledged');
+    await until(() => opened(h.latest()).pending[0]?.state === 'sent', 'the word acknowledged');
+    const echo = { ts: new Date(NOW).toISOString(), writer: `hub/${h.o.A}`, seq: 1, ...frame.event };
+    socket.frame({ t: 'log', events: [{ offset: 2, event: echo }] });
+    await until(() => opened(h.latest()).pending.length === 0, 'the word logged');
     const hidden = await h.channels.send(PROJECT, 'to someone hidden');
     if (!hidden.ok) throw new Error('unsent');
     socket.frame({ t: 'refused', refusal: { reason: 'not-reachable', nonce: hidden.nonce } });

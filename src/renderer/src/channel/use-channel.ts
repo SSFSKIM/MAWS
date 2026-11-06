@@ -1,8 +1,8 @@
 // One tab's hold on a project's channel (P5 O8 M7a, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M7a; the
 // Decision Log's "M7a Task 1 … settles these points"). The mount opens it (`org.channel.open`) and the unmount closes it
 // (`org.channel.close`): main keeps a channel per project while any tab holds it, released 30 s after the last, and lets
-// a reloaded page's holds go itself. A change heard before the open's answer is applied over it (its upserts are by
-// offset, so replaying one the answer already holds changes nothing). `send` speaks in it, and remembers the word for
+// a reloaded page's holds go itself. A change heard before the open's answer is applied over it only when main numbered
+// it past the answer (state.ts's `rev`): one told before it describes an older state. `send` speaks in it, and remembers the word for
 // "Not sent" (state.ts): the memory is the page's, outliving the tab, so a tab opened again still knows what it sent.
 import { useCallback, useEffect, useState } from 'react';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
@@ -75,7 +75,7 @@ export function useChannel(project: string, client: MawsBridge = ipc): ChannelHo
     async (text: string) => {
       const result = await client.invoke('org.channel.send', { project, text });
       if (result.ok && result.value.ok) {
-        sentWords.set(project, [...(sentWords.get(project) ?? []), { nonce: result.value.nonce, text, to: null, seen: false, acked: false }]);
+        sentWords.set(project, [...(sentWords.get(project) ?? []), { nonce: result.value.nonce, text, to: null, acked: false }]);
         setShown((s) => ({ ...s, sent: sentWords.get(project) ?? [] }));
       }
       return result;

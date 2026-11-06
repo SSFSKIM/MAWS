@@ -23,13 +23,15 @@ const OWNER: OrgMember = { id: 'owner0000000000000000000000000000', email: 'sam.
 const ANA: OrgMember = { id: 'ana00000000000000000000000000000', email: 'ana@example.com', name: 'Ana' };
 
 let offset = 0;
+/** An event as main sends it: a machine writer's `session` named, as cache.ts names it (an audience stream's suffix off). */
 const ev = (event: Record<string, unknown>, extra: Partial<ChannelEvent> = {}): ChannelEvent => {
   offset += 1;
   const writer = String(event.writer);
-  return { offset, writer, seq: offset, event: { seq: offset, ...event }, label: 'verified', ...extra };
+  const session = writer.startsWith('hub/') ? undefined : writer.slice(writer.indexOf('/') + 1).replace(/~[0-9a-f]{16}$/, '');
+  return { offset, writer, seq: offset, ...(session === undefined ? {} : { session }), event: { seq: offset, ...event }, label: 'verified', ...extra };
 };
-const say = (from: string, to: '*' | string[], minute: number, text = `from ${from.slice(0, 1)} at ${minute}`, extra: Partial<ChannelEvent> = {}) =>
-  ev({ kind: 'say', writer: `mini/${from}`, from: from.slice(0, 1), to: to === '*' ? '*' : to.map((s) => ({ session: s, alias: `alias-${s.slice(0, 1)}` })), text, ts: T(minute) }, { owners: [OWNER], ...extra });
+const say = (from: string, to: '*' | string[], minute: number, text = `from ${from.slice(0, 1)} at ${minute}`, extra: Partial<ChannelEvent> = {}, writer = `mini/${from}`) =>
+  ev({ kind: 'say', writer, from: from.slice(0, 1), to: to === '*' ? '*' : to.map((s) => ({ session: s, alias: `alias-${s.slice(0, 1)}` })), text, ts: T(minute) }, { owners: [OWNER], ...extra });
 const human = (member: OrgMember, minute: number, text: string, extra: Record<string, unknown> = {}) =>
   ev({ kind: 'human', writer: `hub/${member.id}`, from: 'human', member: member.id, to: '*', text, ts: T(minute), ...extra }, { author: member });
 const sessions: ChannelSession[] = [
@@ -61,9 +63,18 @@ describe('channelEntries: folding', () => {
     expect(entry).toMatchObject({ kind: 'say', text: 'hello', from: { alias: 'maws-45' }, to: [{ alias: 'ci-opt' }], owners: [OWNER], label: 'verified' });
   });
 
-  it('a third session’s say ends the exchange, as does a gap past ten minutes', () => {
+  it('a third session’s say ends the exchange, as does a gap past ten minutes either way', () => {
     expect(kinds(project([say(A, [B], 0), say(A, [B], 1), say(C, [A], 2), say(A, [B], 3), say(B, [A], 4)]))).toEqual(['exchange:2', 'say', 'exchange:2']);
     expect(kinds(project([say(A, [B], 0), say(B, [A], 10), say(A, [B], 21)]))).toEqual(['exchange:2', 'say']);
+    // the log's order is the hub's; a timestamp far behind the last (a machine's skewed clock) is no part of its run
+    expect(kinds(project([say(A, [B], 30), say(B, [A], 25), say(A, [B], 5)]))).toEqual(['exchange:2', 'say']);
+  });
+
+  it('reads an audience stream’s writer as its session: their exchange folds, each party named with its title', () => {
+    const DIGEST = '0123456789abcdef';
+    const entries = project([say(A, [B], 0, 'scoped one', {}, `mini/${A}~${DIGEST}`), say(B, [A], 1, 'scoped two', {}, `build-vm/${B}~fedcba9876543210`), say(A, [B], 2, 'plain', {}, `mini/${A}`)]);
+    expect(kinds(entries)).toEqual(['exchange:3']);
+    expect(entries[0]).toMatchObject({ between: [{ session: A, alias: 'maws-45', title: 'Fix the relay' }, { session: B, alias: 'ci-opt', machine: 'build-vm' }] });
   });
 
   it('folds a session’s broadcasts in the window as messages to everyone, apart from its exchanges', () => {

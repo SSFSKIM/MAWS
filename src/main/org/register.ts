@@ -78,7 +78,7 @@ export function registerOrgHandlers(deps: {
     deps.register('org.pair.start', () => unpaired);
     deps.register('org.pair.approve', () => unsigned);
     deps.register('org.pair.cancel', () => {});
-    deps.register('org.channel.open', () => ({ ok: false, reason: 'signed-out' }));
+    deps.register('org.channel.open', () => ({ ok: false, reason: 'signed-out', rev: 0 }));
     deps.register('org.channel.close', () => {});
     deps.register('org.channel.send', () => ({ ok: false, reason: 'signed-out' }));
     return development?.onChanged(() => deps.emit('org.changed', status())) ?? (() => {});

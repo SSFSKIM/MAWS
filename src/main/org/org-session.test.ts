@@ -2550,7 +2550,7 @@ describe('M7a: the project channels', () => {
   it("opens a project's channel on the session's hub, draws a member's words verified, and close() joins its cache write", async () => {
     const { sockets, socket } = channelSockets();
     const { session } = await signedIn({ channelSocket: socket, timing: { CHANNEL_WRITE_MS: 3_600_000 } });
-    expect(await session.channelOpen(PROJECT)).toEqual({ ok: true, events: [], sessions: [], pending: [], unverified: 0, asOf: null, live: false });
+    expect(await session.channelOpen(PROJECT)).toEqual({ ok: true, rev: expect.any(Number), events: [], sessions: [], pending: [], unverified: 0, asOf: null, live: false });
     await until(() => sockets.length === 1, 'a channel socket');
     expect(sockets[0].url).toBe(`wss://hub.example.test/api/projects/${PROJECT}/socket`);
     expect(Object.keys(sockets[0].headers)).toContain('cf-access-token');
@@ -2581,7 +2581,7 @@ describe('M7a: the project channels', () => {
     const { sockets, socket } = channelSockets();
     const { session } = make({ channelSocket: socket });
     await session.loaded;
-    expect(await session.channelOpen(PROJECT)).toEqual({ ok: false, reason: 'signed-out' });
+    expect(await session.channelOpen(PROJECT)).toEqual({ ok: false, reason: 'signed-out', rev: expect.any(Number) });
     expect(await session.channelSend(PROJECT, 'hi')).toEqual({ ok: false, reason: 'signed-out' });
     expect(sockets).toEqual([]);
     await session.close();

@@ -5,7 +5,8 @@
 // What draws, oldest first by offset:
 // - people's words (`human`): by their member as main named them (`author`), you as You;
 // - agent-to-agent traffic (`say`), folded: a run of says between the same two sessions (writer and its one recipient),
-//   each within ten minutes of the last, is one exchange; a session's broadcasts (`to: '*'`) in the window fold as
+//   each within ten minutes of the last (either way: the order is the log's), is one exchange; an audience stream's
+//   writer is its session's (main names the session, `ChannelEvent.session`); a session's broadcasts (`to: '*'`) in the window fold as
 //   messages to everyone; a third session's say, a gap, or any other drawn entry ends a run, and a run of one draws as
 //   the message itself. A run holds events of one label only, so every entry carries exactly one;
 // - earlier to-human entries in the log (a pre-cutover machine's `message`, `question` and `answered`);
@@ -69,7 +70,8 @@ const recipients = (to: unknown): { session: string; alias: string }[] =>
   Array.isArray(to) ? to.flatMap((r) => (typeof r === 'object' && r !== null && typeof (r as { session?: unknown }).session === 'string' ? [{ session: (r as { session: string }).session, alias: str((r as { alias?: unknown }).alias) }] : [])) : [];
 /** The machine a session's writer names (`<machine>/<session>`); none for `hub/` and `legacy/`. */
 const writerMachine = (writer: string): string | null => (writer.startsWith('hub/') || writer.startsWith('legacy/') || writer.indexOf('/') <= 0 ? null : writer.slice(0, writer.indexOf('/')));
-const writerSession = (writer: string): string => writer.slice(writer.indexOf('/') + 1);
+/** The session an event's writer is, as main read it (`session`: a machine writer, its audience stream included). */
+const sessionOf = (e: ChannelEvent): string => e.session ?? e.writer;
 const labelOf = (e: ChannelEvent): Pick<Labelled, 'label' | 'by'> => (e.by === undefined ? { label: e.label } : { label: e.label, by: e.by });
 
 export function channelEntries(input: { events: readonly ChannelEvent[]; sessions: readonly ChannelSession[]; tail: readonly TailWord[]; me: string | null }): ChannelEntry[] {
@@ -111,14 +113,14 @@ export function channelEntries(input: { events: readonly ChannelEvent[]; session
     const at = str(event.ts);
     switch (event.kind) {
       case 'say': {
-        const from = party(writerSession(e.writer), { alias: str(event.from), writer: e.writer });
+        const from = party(sessionOf(e), { alias: str(event.from), writer: e.writer });
         const to = event.to === '*' ? ('*' as const) : recipients(event.to).map((r) => party(r.session, { alias: r.alias }));
         const entry: SayEntry = { kind: 'say', key: `s:${e.offset}`, ...labelOf(e), offset: e.offset, from, to, text: str(event.text), at, owners: e.owners ?? [] };
         // the run this say may join: its two sessions, or its session's broadcasts; a say to several folds with none
         const fold = to === '*' ? `*:${from.session}` : to.length === 1 && to[0].session !== from.session ? `2:${[from.session, to[0].session].sort().join(':')}` : null;
         const label = `${entry.label}:${entry.by ?? ''}`;
         const last = run?.says[run.says.length - 1];
-        const near = last !== undefined && Number.isFinite(Date.parse(at)) && Date.parse(at) - Date.parse(last.at) <= EXCHANGE_WINDOW_MS;
+        const near = last !== undefined && Math.abs(Date.parse(at) - Date.parse(last.at)) <= EXCHANGE_WINDOW_MS; // NaN: never near
         if (run !== null && fold !== null && run.fold === fold && run.label === label && near) {
           run.says.push(entry);
           break;
@@ -148,7 +150,7 @@ export function channelEntries(input: { events: readonly ChannelEvent[]; session
           key: `h:${e.offset}`,
           ...labelOf(e),
           offset: e.offset,
-          party: party(writerSession(e.writer), { alias: str(event.from), writer: e.writer }),
+          party: party(sessionOf(e), { alias: str(event.from), writer: e.writer }),
           host,
           text: host === 'question' ? questionText(event.text) : str(event.text),
           ...(choices.length > 0 ? { choices } : {}),

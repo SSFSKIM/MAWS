@@ -1,7 +1,8 @@
 // The channel's composer (P5 O8 M7a, "People's words, sent"): a plain text field at the stream's foot, in the composer's
 // frame. Enter sends and Shift+Enter keeps the newline. A leading `@alias` addresses that session, and untagged words go to
 // everyone: main reads the tags (channel/address.ts) and signs the word, so a refusal of its own (an alias nobody answers
-// to, one naming two sessions) comes straight back, said under the field, with the text kept to mend.
+// to, one naming two sessions) comes straight back, said under the field, with the text kept to mend. A sent word
+// clears the field only if it still holds what was sent: an edit made while the send was out is kept.
 import { useState, type KeyboardEvent } from 'react';
 import type { CommandResult } from '@shared/ipc/schema';
 import { CHANNEL_TEXT_MAX } from '@shared/ipc/schema/org';
@@ -14,13 +15,14 @@ export function Composer({ send }: { send(text: string): Promise<CommandResult<'
   const ready = !busy && text.trim() !== '';
   const submit = async () => {
     if (!ready) return;
+    const submitted = text;
     setBusy(true);
     setRefusal(null);
-    const result = await send(text);
+    const result = await send(submitted);
     setBusy(false);
     if (!result.ok) return setRefusal(`${CHANNEL.sendFailed} · ${result.error.message}`);
     if (!result.value.ok) return setRefusal(CHANNEL.sendRefused(result.value));
-    setText('');
+    setText((now) => (now === submitted ? '' : now)); // what was typed while it went out stays
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;

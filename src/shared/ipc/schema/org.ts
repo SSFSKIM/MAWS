@@ -262,13 +262,16 @@ export type OrgRows = z.infer<typeof OrgRowsSchema>;
  * attestation covers; `by` names that machine) or `legacy` (a DX1 event nothing covers, drawn faint). `author`: a
  * device's `human`, its member as the held head names them; `owners`: a machine's v2 event whose owner attestation (RL9)
  * verified, named from the held head, never from the event. Withheld tombstones and events that don't verify are not
- * sent; `unverified` counts the latter.
+ * sent; `unverified` counts the latter. `session`: the session a machine's writer is (`<machine>/<session>`, or its
+ * audience stream `<machine>/<session>~<digest>`, read by the protocol's `streamOf`); absent for a `hub/` or `legacy/`
+ * writer.
  */
 export const CHANNEL_LABELS = ['verified', 'migrated', 'legacy'] as const;
 export const ChannelEventSchema = z.strictObject({
   offset: z.number().int().nonnegative(),
   writer: z.string(),
   seq: z.number().int().positive(),
+  session: z.string().optional(),
   event: z.record(z.string(), z.unknown()),
   label: z.enum(CHANNEL_LABELS),
   by: z.string().optional(),
@@ -287,16 +290,16 @@ export type ChannelSession = z.infer<typeof ChannelSessionSchema>;
 export const ChannelRecipientsSchema = z.union([z.literal('*'), z.array(z.strictObject({ session: z.string(), alias: z.string() }))]);
 export type ChannelRecipients = z.infer<typeof ChannelRecipientsSchema>;
 /**
- * The owner's words this channel sent and the log doesn't hold yet: `sending` until the hub's `human-ack`, or the hub's
- * refusal (`not-reachable` for a session hidden from you, P5 Decision Log 224), or main's `context-changed` once another
- * org, member or device signs in. Kept in main's memory only: words still here when the channel is released are dropped,
+ * The owner's words this channel sent and the log doesn't hold yet: `sending` until the hub's `human-ack`, then `sent`
+ * until the log holds the word, or the hub's refusal (`not-reachable` for a session hidden from you, P5 Decision Log
+ * 224), or main's `context-changed` once another org, member or device signs in while it is still sending. Kept in main's memory only: words still here when the channel is released are dropped,
  * never sent later.
  */
 export const ChannelWordSchema = z.strictObject({
   nonce: z.string(),
   text: z.string(),
   to: ChannelRecipientsSchema,
-  state: z.union([z.literal('sending'), z.strictObject({ refused: z.string() })]),
+  state: z.union([z.literal('sending'), z.literal('sent'), z.strictObject({ refused: z.string() })]),
 });
 export type ChannelWord = z.infer<typeof ChannelWordSchema>;
 /**
@@ -305,8 +308,15 @@ export type ChannelWord = z.infer<typeof ChannelWordSchema>;
  * offline answers it, `live: false` and `asOf` its last `caught-up`.
  */
 export const CHANNEL_CLOSED_REASONS = ['signed-out', 'no-hub', 'unknown-project'] as const;
+/**
+ * `rev`: main's count of the changes it has told, across every channel of this run, never going back. An open answer
+ * carries the count as it stands and each change the count it took, so a tab applies only the changes numbered past its
+ * answer: one told before it describes an older state than the answer does.
+ */
+const RevSchema = z.number().int().nonnegative();
 const ChannelOpenSchema = z.strictObject({
   ok: z.literal(true),
+  rev: RevSchema,
   events: z.array(ChannelEventSchema), // oldest first, by offset
   sessions: z.array(ChannelSessionSchema),
   pending: z.array(ChannelWordSchema),
@@ -314,7 +324,7 @@ const ChannelOpenSchema = z.strictObject({
   asOf: z.string().nullable(), // the last `caught-up`'s time; null until one
   live: z.boolean(), // the socket is open and caught up
 });
-const ChannelClosedSchema = z.strictObject({ ok: z.literal(false), reason: z.enum(CHANNEL_CLOSED_REASONS) });
+const ChannelClosedSchema = z.strictObject({ ok: z.literal(false), reason: z.enum(CHANNEL_CLOSED_REASONS), rev: RevSchema });
 export const ChannelAnswerSchema = z.union([ChannelOpenSchema, ChannelClosedSchema]);
 export type ChannelAnswer = z.infer<typeof ChannelAnswerSchema>;
 /** The project's sminos id (its `smnsId`); any other string answers `unknown-project`. */
@@ -343,6 +353,7 @@ export const CHANNEL_TEXT_MAX = 100_000;
 const ChannelDeltaSchema = z.strictObject({
   project: z.string(),
   ok: z.literal(true),
+  rev: RevSchema,
   upserts: z.array(ChannelEventSchema), // oldest first, by offset
   removed: z.array(z.number().int().nonnegative()), // offsets; empty with `reset`
   sessions: z.array(ChannelSessionSchema), // whole

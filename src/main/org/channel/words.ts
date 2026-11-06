@@ -3,8 +3,9 @@
 // nonce}` is signed once with this device's channel key under the org and the project (`signEvent`, as RL2's handshake
 // signs with it through the protocol package), carries no `mac`, and goes over the project's socket. ECDSA is
 // randomized, so a resend reuses the stored signature: every word not yet answered is sent again, the same bytes, at
-// each welcome, and the hub dedupes by the nonce. A `human-ack` (or the word itself in the log) ends it; a `refused`
-// keeps it, with the hub's reason, and it is sent no more.
+// each welcome, and the hub dedupes by the nonce. A `human-ack` makes it `sent`, kept until the word itself is in the
+// log (so a tab reads the ack from main, however the changes it is told were coalesced); a `refused` keeps it, with the
+// hub's reason, and it is sent no more.
 //
 // The words live in main's memory: words still unanswered when the channel is released are dropped, never sent later.
 // Nothing is signed or sent while signed out. Each word belongs to the org, member and device that signed it: it is sent
@@ -97,7 +98,7 @@ export function createWords(deps: {
       const nonce = answer.t === 'human-ack' ? answer.nonce : answer.refusal.nonce;
       const word = words.get(nonce);
       if (word === undefined || word.state !== 'sending') return;
-      if (answer.t === 'human-ack') words.delete(nonce);
+      if (answer.t === 'human-ack') word.state = 'sent';
       else word.state = { refused: REASON.test(answer.refusal.reason) ? answer.refusal.reason : 'unrecognized' };
       changed();
     },

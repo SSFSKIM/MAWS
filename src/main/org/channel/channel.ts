@@ -7,7 +7,8 @@
 // offsets any tab was sent (a later open's answer included) that main no longer draws (`removed`: let go by the bound,
 // or failing now), the rest whole. It tells everything (`reset`)
 // when a judgment at a new head or certificate set changed verdicts, when another org's log is dropped, and after a
-// closed answer.
+// closed answer. Each change takes the next `rev` of a count shared by every channel of the run, and each open answer
+// carries the count as it stands, so a tab drops a change told before its answer (it describes an older state).
 //
 // - Opening draws the cache at once, judged again against the held head (signed out, as it was judged). The socket
 //   opens only while the session has a hub, after the project's history attestations are read once, so a DX1 writer's
@@ -99,6 +100,8 @@ export function createChannels(deps: ChannelsDeps): Channels {
   const closing = new Set<Promise<void>>();
   const listeners = new Set<(changed: ChannelChanged) => void>();
   let closed = false;
+  /** The changes told so far, every channel's: an open answer's `rev`, and the last change's. */
+  let revision = 0;
 
   const groundOf = (current: SignedIn, project: string): Ground => ({
     ctx: { org: current.identity.org, project },
@@ -168,7 +171,8 @@ export function createChannels(deps: ChannelsDeps): Channels {
     };
 
     function answer(): ChannelAnswer {
-      if (ended === 'unknown-project') return { ok: false, reason: 'unknown-project' };
+      const rev = revision;
+      if (ended === 'unknown-project') return { ok: false, reason: 'unknown-project', rev };
       const current = deps.session.current();
       const events = held?.events() ?? [];
       const sessions = held?.sessions() ?? [];
@@ -176,11 +180,11 @@ export function createChannels(deps: ChannelsDeps): Channels {
       const asOf = held?.asOf() ?? null;
       const pending = words.pending();
       if (events.length === 0 && sessions.length === 0 && unverified === 0 && asOf === null && pending.length === 0) {
-        if (current === null) return { ok: false, reason: 'signed-out' };
-        if (current.hub === null) return { ok: false, reason: 'no-hub' };
+        if (current === null) return { ok: false, reason: 'signed-out', rev };
+        if (current.hub === null) return { ok: false, reason: 'no-hub', rev };
       }
       const live = socket !== null && welcomed && caughtUp && current !== null && current.hub === socketHub;
-      return { ok: true, events, sessions, pending, unverified, asOf, live };
+      return { ok: true, rev, events, sessions, pending, unverified, asOf, live };
     }
 
     function scheduleEmit(): void {
@@ -201,10 +205,10 @@ export function createChannels(deps: ChannelsDeps): Channels {
       if (!now.ok) {
         told = null;
         exposed = new Set(); // a tab drawing a closed answer holds no event
-        const text = JSON.stringify(now);
+        const text = now.reason;
         if (text === toldClosed) return;
         toldClosed = text;
-        change = { project, ...now };
+        change = { project, ...now, rev: (revision += 1) };
       } else {
         toldClosed = '';
         const verdicts = verdictsOf(now.events);
@@ -220,7 +224,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
         if (!reset && upserts.length === 0 && removed.length === 0 && rest === toldRest) return;
         toldRest = rest;
         const { sessions, pending, unverified, asOf, live } = now;
-        change = { project, ok: true, upserts, removed, sessions, pending, unverified, asOf, live, ...(reset ? { reset: true as const } : {}) };
+        change = { project, ok: true, rev: (revision += 1), upserts, removed, sessions, pending, unverified, asOf, live, ...(reset ? { reset: true as const } : {}) };
       }
       for (const listener of [...listeners]) listener(change);
     }
@@ -233,7 +237,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
         if (whole.ok) {
           told = verdictsOf(whole.events);
           toldRest = restOf(whole);
-        } else toldClosed = JSON.stringify(whole);
+        } else toldClosed = whole.reason;
       }
       return whole;
     }
@@ -461,7 +465,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
 
   return {
     async open(project) {
-      if (closed || !PROJECT_ID.test(project)) return { ok: false, reason: 'unknown-project' };
+      if (closed || !PROJECT_ID.test(project)) return { ok: false, reason: 'unknown-project', rev: revision };
       let channel = channels.get(project);
       if (channel === undefined) channels.set(project, (channel = createChannel(project)));
       else channel.reconcile(true);

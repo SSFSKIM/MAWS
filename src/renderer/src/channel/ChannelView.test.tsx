@@ -39,15 +39,16 @@ const SESSIONS: ChannelSession[] = [
   { session: S2, alias: 'ci-opt', machine: 'mini', title: null, member: true },
 ];
 const say = (offset: number, from: string, to: string, minute: number, extra: Partial<ChannelEvent> = {}): ChannelEvent => ({
-  offset, writer: `mini/${from}`, seq: offset, label: 'verified', owners: [ME],
+  offset, writer: `mini/${from}`, seq: offset, session: from, label: 'verified', owners: [ME],
   event: { kind: 'say', writer: `mini/${from}`, seq: offset, from: 'x', to: [{ session: to, alias: 'y' }], text: `say ${offset}`, ts: T(minute) }, ...extra,
 });
 const human = (offset: number, member: OrgMember, text: string, extra: Record<string, unknown> = {}): ChannelEvent => ({
   offset, writer: `hub/${member.id}`, seq: offset, label: 'verified', author: member,
   event: { kind: 'human', writer: `hub/${member.id}`, seq: offset, from: 'human', member: member.id, to: '*', text, ts: T(offset), ...extra },
 });
-const opened = (over: Partial<Extract<ChannelAnswer, { ok: true }>> = {}): ChannelAnswer => ({ ok: true, events: [], sessions: SESSIONS, pending: [], unverified: 0, asOf: T(30), live: true, ...over });
-const change = (over: Partial<Extract<ChannelChanged, { ok: true }>> = {}): ChannelChanged => ({ project: SMNS, ok: true, upserts: [], removed: [], sessions: SESSIONS, pending: [], unverified: 0, asOf: T(30), live: true, ...over });
+const opened = (over: Partial<Extract<ChannelAnswer, { ok: true }>> = {}): ChannelAnswer => ({ ok: true, rev: 10, events: [], sessions: SESSIONS, pending: [], unverified: 0, asOf: T(30), live: true, ...over });
+let rev = 10; // main's count: each change numbered past the open answers' 10
+const change = (over: Partial<Extract<ChannelChanged, { ok: true }>> = {}): ChannelChanged => ({ project: SMNS, ok: true, rev: (rev += 1), upserts: [], removed: [], sessions: SESSIONS, pending: [], unverified: 0, asOf: T(30), live: true, ...over });
 
 let fake: FakeClient;
 const install = (given: Parameters<typeof fakeClient>[0] = {}) => {
@@ -82,10 +83,13 @@ describe('the tab’s hold', () => {
   it('draws the open answer, then each delta over it; a change heard before the answer applies on top of it', async () => {
     install();
     render(<ChannelView project={SMNS} />);
-    tell(change({ upserts: [human(9, ANA, 'early')] })); // before the answer: held for it
+    tell({ ...change({ upserts: [human(2, ANA, 'stale')], reset: true, unverified: 7, live: false }), rev: 4 }); // told before the answer: older than it
+    tell(change({ upserts: [human(9, ANA, 'early')] })); // told after the answer, heard before it: applied on top
     tell({ ...change({ upserts: [human(50, ANA, 'another project')] }), project: 'other' });
     await act(() => fake.reply('org.channel.open', opened({ events: [say(1, S1, S2, 0), say(2, S2, S1, 1), human(3, ANA, 'hi all')] })));
     expect(entries()).toEqual(['exchange:1', 'words:3', 'words:9']);
+    expect(screen.queryByText(/didn’t verify/)).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Message the project' })).toBeTruthy();
     tell(change({ upserts: [human(4, ME, 'mine')], removed: [3], unverified: 2 }));
     expect(entries()).toEqual(['exchange:1', 'words:4', 'words:9']);
     expect(screen.getByText('2 events didn’t verify')).toBeTruthy();
@@ -111,7 +115,7 @@ describe('the tab’s hold', () => {
   it('says why there is nothing to draw', async () => {
     install();
     render(<ChannelView project={SMNS} />);
-    await act(() => fake.reply('org.channel.open', { ok: false, reason: 'unknown-project' }));
+    await act(() => fake.reply('org.channel.open', { ok: false, reason: 'unknown-project', rev: 10 }));
     expect(stream().querySelector('[data-channel-closed="unknown-project"]')).toBeTruthy();
   });
 });
@@ -167,10 +171,37 @@ describe('people’s words', () => {
     const words = () => [...stream().querySelectorAll<HTMLElement>('[data-channel-entry="words"]')].map((e) => [e.textContent?.includes('status?') ? 'status?' : 'hidden', e.dataset.wordState]);
     expect(words()).toEqual([['status?', 'sending'], ['hidden', 'refused']]);
     expect(screen.getByText('Not reachable')).toBeTruthy();
-    tell(change({ pending: [{ nonce: 'n0', text: 'hidden', to: [{ session: S2, alias: 'ci-opt' }], state: { refused: 'not-reachable' } }] })); // acknowledged
-    expect(words()).toEqual([['hidden', 'refused'], ['status?', 'sent']]);
+    tell(change({ pending: [{ nonce: 'n1', text: 'status?', to: '*', state: 'sent' }, { nonce: 'n0', text: 'hidden', to: [{ session: S2, alias: 'ci-opt' }], state: { refused: 'not-reachable' } }] })); // acknowledged
+    expect(words()).toEqual([['status?', 'sent'], ['hidden', 'refused']]);
     tell(change({ upserts: [human(5, ME, 'status?', { nonce: 'n1' })], pending: [] }));
     expect(entries()).toEqual(['words:5']);
+  });
+
+  it('a word acknowledged before main first published it is never called Not sent', async () => {
+    install({ 'org.channel.send': { ok: true, nonce: 'n1' } });
+    await mount();
+    await userEvent.type(composer(), 'quick{Enter}');
+    await waitFor(() => expect(fake.invoked('org.channel.send')).toHaveLength(1));
+    tell(change({ pending: [{ nonce: 'n1', text: 'quick', to: '*', state: 'sent' }] })); // main's first word of it: already acked
+    cleanup();
+    install();
+    await mount(opened()); // let go with its channel before the log held it
+    expect(stream().querySelector('[data-word-state="not-sent"]')).toBeNull();
+  });
+
+  it('keeps what is typed while a send is in flight, clearing only the text it sent', async () => {
+    install(); // each send answered when the test says
+    await mount();
+    await userEvent.type(composer(), 'first{Enter}');
+    await waitFor(() => expect(fake.invoked('org.channel.send')).toHaveLength(1));
+    await userEvent.type(composer(), ' and more');
+    await act(() => fake.reply('org.channel.send', { ok: true, nonce: 'n1' }));
+    expect(composer().value).toBe('first and more');
+    await userEvent.clear(composer());
+    await userEvent.type(composer(), 'second{Enter}');
+    await waitFor(() => expect(fake.invoked('org.channel.send')).toHaveLength(2));
+    await act(() => fake.reply('org.channel.send', { ok: true, nonce: 'n2' }));
+    expect(composer().value).toBe('');
   });
 
   it('a word main let go with its channel, never acknowledged nor logged, reads Not sent when the tab opens again', async () => {

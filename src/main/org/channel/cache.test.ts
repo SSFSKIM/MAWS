@@ -17,6 +17,24 @@ const withoutSig = (event: Event) => Object.fromEntries(Object.entries(event).fi
 /** The file as written and read back. */
 const roundTrip = (file: unknown): unknown => JSON.parse(JSON.stringify(file));
 
+describe('the session a machine event is about', () => {
+  // P5 O8 M7a Task 2's fix wave: an audience stream (`<machine>/<session>~<digest>`, P5 O18) is the session's writer too,
+  // so the renderer reads one session from either, by the protocol's own parse (`streamOf`)
+  it('names it from the writer, its audience stream included, and none for a device\'s words', async () => {
+    const o = await ChannelOrg.make();
+    const log = emptyLog(ORG, PROJECT, LIMITS);
+    const plain = await o.say(o.mini, 1, 'plain');
+    const scoped = await o.say(o.mini, 1, 'scoped', [o.A], `${S2}~0123456789abcdef`);
+    const words = await o.human(o.B, o.bDevice, 1, 'hi');
+    await log.add(at([plain, scoped, words]), ground(o));
+    expect(log.events().map((e) => [e.writer, e.session])).toEqual([
+      [`mini/${S1}`, S1],
+      [`mini/${S2}~0123456789abcdef`, S2],
+      [`hub/${o.B}`, undefined],
+    ]);
+  });
+});
+
 describe('the bound', () => {
   it('keeps the newest events by offset, at most the count and the bytes, and resumes after the last offset given', async () => {
     const o = await ChannelOrg.make();
@@ -54,7 +72,7 @@ describe('the bound', () => {
     const unsigned = withoutSig(say);
     const unsignedWords = withoutSig(words);
     expect(log.events()).toEqual([
-      { offset: 1, writer: say.writer, seq: 1, event: unsigned, label: 'verified', owners: [{ id: o.A, email: 'sam.owner@example.com', name: 'Sam' }] },
+      { offset: 1, writer: say.writer, seq: 1, session: S1, event: unsigned, label: 'verified', owners: [{ id: o.A, email: 'sam.owner@example.com', name: 'Sam' }] },
       { offset: 2, writer: words.writer, seq: 1, event: unsignedWords, label: 'verified', author: { id: o.B, email: 'ana@example.com', name: 'Ana' } },
     ]);
     expect(log.after()).toBe(3);

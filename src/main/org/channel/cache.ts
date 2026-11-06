@@ -22,7 +22,7 @@
 //
 // Electron-free.
 import { join } from 'node:path';
-import { isHistoryAttestation, isLogSeq, isSigned, type HistoryAttestation, type Signed, type StoredEvent } from '../../../../apps/org-protocol/src/index.ts';
+import { isHistoryAttestation, isLogSeq, isSigned, streamOf, writerMachine, type HistoryAttestation, type Signed, type StoredEvent } from '../../../../apps/org-protocol/src/index.ts';
 import type { ChannelEvent, ChannelSession, OrgMember } from '@shared/ipc/schema/org';
 import { lifecycleOf, projectSessions } from './address';
 import { privateFiles, type OrgFiles } from '../files';
@@ -104,6 +104,13 @@ function isCacheFile(value: unknown, project: string): value is ChannelCacheFile
 /** The bytes an entry takes in the file (UTF-8), near enough to bound it. */
 const sizeOf = (entry: CachedEvent): number => Buffer.byteLength(JSON.stringify(entry), 'utf8');
 
+/** The session a machine's writer is: `<machine>/<session>`, or its audience stream (`streamOf`); null for `hub/`, `legacy/`. */
+function sessionOf(writer: string): string | null {
+  if (writerMachine(writer) === null) return null;
+  const { base } = streamOf(writer);
+  return base.slice(base.indexOf('/') + 1);
+}
+
 function drawn(entry: CachedEvent): ChannelEvent | null {
   const { verdict } = entry;
   if ('failed' in verdict) return null;
@@ -111,6 +118,8 @@ function drawn(entry: CachedEvent): ChannelEvent | null {
   delete event.mac;
   delete event.sig;
   const out: ChannelEvent = { offset: entry.offset, writer: entry.event.writer, seq: entry.event.seq, event, label: verdict.label };
+  const session = sessionOf(entry.event.writer);
+  if (session !== null) out.session = session;
   if (verdict.label === 'migrated') out.by = verdict.by;
   if (verdict.label === 'verified' && verdict.author !== undefined) out.author = verdict.author;
   if (verdict.label === 'verified' && verdict.owners !== undefined) out.owners = verdict.owners;
