@@ -122,6 +122,13 @@ export async function checkpointOf(record: Signed<HistoryAttestation>, events: r
   return { writer, upTo: record.body.upTo, by: verdict.by, record, hashes: Object.fromEntries(prefix.map((e) => [String(e.seq), eventHash(e)])) };
 }
 
+/** Whether `record`'s signer and binding (this project, its writer) verify against the held head: before its writer is trusted with anything. */
+export async function attestationSigned(record: Signed<HistoryAttestation>, judging: Judging): Promise<boolean> {
+  const writer = record.body?.writer;
+  if (typeof writer !== 'string') return false;
+  return (await verifyHistorySigner(record, judging.state, judging.certificates, { project: judging.ctx.project, writer }, judging.now)).ok;
+}
+
 /** Whether a kept checkpoint's record still verifies its signer and binding against the held head (at each load). */
 export async function recheckCheckpoint(checkpoint: Checkpoint, judging: Judging): Promise<boolean> {
   const verdict = await verifyHistorySigner(checkpoint.record, judging.state, judging.certificates, { project: judging.ctx.project, writer: checkpoint.writer }, judging.now);

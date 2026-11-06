@@ -181,6 +181,24 @@ describe('migrated history past the bound', () => {
     expect(tampered.unverified()).toBe(1);
   });
 
+  it("spares a writer's events from the bound only for an attestation whose signer verifies, and only up to its upTo", async () => {
+    const o = await ChannelOrg.make();
+    const history = Array.from({ length: 30 }, (_, i) => o.dx1('oldmini', i + 1));
+    const whole = await o.attest(history);
+    const forged = { ...whole, sig: { ...whole.sig, value: `${whole.sig.value.slice(0, -6)}AAAAAA` } };
+    // seq 1 has not arrived, so nothing checkpoints yet: the log is still waiting on the writer
+    const unsigned = emptyLog(ORG, PROJECT, { events: 10, bytes: LIMITS.bytes });
+    await unsigned.attest([forged], ground(o));
+    await unsigned.add(at(history.slice(1), 2), ground(o));
+    expect(unsigned.file().events.length).toBe(10);
+    const partial = emptyLog(ORG, PROJECT, { events: 10, bytes: LIMITS.bytes });
+    await partial.attest([await o.attest(history, 5)], ground(o));
+    await partial.add(at(history.slice(1), 2), ground(o));
+    const seqs = partial.file().events.map((e) => e.event.seq);
+    expect(seqs).toHaveLength(10);
+    expect(seqs.slice(0, 4)).toEqual([2, 3, 4, 5]); // spared up to upTo, the newest kept after them
+  });
+
   it('names the DX1 writers whose events pass every attestation it holds, once each time they pass', async () => {
     const { o, log } = await migrated(2, LIMITS);
     expect(log.attestationsDue()).toBe(false);

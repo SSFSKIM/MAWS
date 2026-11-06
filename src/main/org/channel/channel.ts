@@ -10,8 +10,8 @@
 //
 // - Opening draws the cache at once, judged again against the held head (signed out, as it was judged). The socket
 //   opens only while the session has a hub, after the project's history attestations are read once, so a DX1 writer's
-//   attestation is held before its events arrive (cache.ts keeps an awaited writer's events past the bound); they are
-//   read again when a DX1 writer's events pass every attestation held.
+//   attestation is held before its events arrive (cache.ts keeps the events an authenticated attestation covers past the
+//   bound); they are read again when a DX1 writer's events pass every attestation held.
 // - Every event is judged again at each adopted head or certificate set; another org's log is dropped at sign-in.
 // - A socket the hub refuses the project (404) ends the channel `unknown-project` until the tab's next open or another
 //   hub; one that ends `removed` or with the hub sign-in waits, as the Registry feed does, for the session's next change.

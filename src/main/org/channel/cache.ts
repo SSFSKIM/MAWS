@@ -22,7 +22,7 @@ import { isHistoryAttestation, isLogSeq, isSigned, type HistoryAttestation, type
 import type { ChannelEvent, OrgMember } from '@shared/ipc/schema/org';
 import { privateFiles, type OrgFiles } from '../files';
 import type { LoggedEvent } from './project-socket';
-import { checkpointOf, isDx1, judgeEvent, recheckCheckpoint, type Checkpoint, type Judging, type Verdict } from './verify';
+import { attestationSigned, checkpointOf, isDx1, judgeEvent, recheckCheckpoint, type Checkpoint, type Judging, type Verdict } from './verify';
 
 /** What a judgment reads besides the log's own checkpoints. */
 export type Ground = Omit<Judging, 'checkpoints'>;
@@ -106,7 +106,7 @@ function makeLog(org: string, project: string, limits: ChannelLimits, held: Chan
   const checkpoints = new Map<string, Checkpoint>((held?.checkpoints ?? []).map((c) => [c.writer, c]));
   let after = held?.after ?? 0;
   let asOf = held?.asOf ?? null;
-  /** The last attestations read, newest per writer by `upTo`, tried again as a writer's events arrive. */
+  /** The last attestations read whose signer verified, newest per writer by `upTo`, tried again as a writer's events arrive. */
   let records = new Map<string, Signed<HistoryAttestation>>();
   /** Each DX1 writer's highest seq when the attestations were last read. */
   const asked = new Map<string, number>();
@@ -121,20 +121,22 @@ function makeLog(org: string, project: string, limits: ChannelLimits, held: Chan
     entries.set(entry.offset, entry);
   };
   /**
-   * A DX1 writer an attestation covers past its checkpoint, before the log has caught up: its events stay past the bound,
-   * since `verifyHistoryAttestation` needs every one from seq 1, which an evicted prefix no longer gives.
+   * A DX1 event an authenticated attestation covers past its writer's checkpoint, before the log has caught up: it stays
+   * past the bound, since `verifyHistoryAttestation` needs every one from seq 1, which an evicted prefix no longer gives.
+   * Only up to the record's `upTo`: the writer's later events are bounded as any others.
    */
-  const awaiting = (writer: string) => {
-    const record = records.get(writer);
-    return !settled && record !== undefined && (checkpoints.get(writer)?.upTo ?? 0) < record.body.upTo;
+  const awaited = (event: StoredEvent) => {
+    const record = records.get(event.writer);
+    return !settled && record !== undefined && event.seq <= record.body.upTo && (checkpoints.get(event.writer)?.upTo ?? 0) < record.body.upTo;
   };
-  /** Evicts the oldest entries while either bound is passed, but an awaiting writer's; the newest always stays. */
+  /** Evicts the oldest entries while either bound is passed, but an awaited DX1 event; the newest always stays. */
   const bound = () => {
     if (entries.size <= limits.events && bytes <= limits.bytes) return;
     const offsets = [...entries.keys()].sort((a, b) => a - b);
     for (const offset of offsets) {
       if (entries.size <= 1 || (entries.size <= limits.events && bytes <= limits.bytes)) break;
-      if (isDx1(entries.get(offset)!.event) && awaiting(entries.get(offset)!.event.writer)) continue;
+      const { event } = entries.get(offset)!;
+      if (isDx1(event) && awaited(event)) continue;
       entries.delete(offset);
       bytes -= sizes.get(offset) ?? 0;
       sizes.delete(offset);
@@ -203,6 +205,7 @@ function makeLog(org: string, project: string, limits: ChannelLimits, held: Chan
       const next = new Map<string, Signed<HistoryAttestation>>();
       for (const record of list) {
         if (!isSigned(record, isHistoryAttestation) || record.body.project !== project) continue;
+        if (!(await attestationSigned(record, judging(ground)))) continue; // the hub's word alone spares nothing
         const prior = next.get(record.body.writer);
         if (prior === undefined || record.body.upTo > prior.body.upTo) next.set(record.body.writer, record);
       }
