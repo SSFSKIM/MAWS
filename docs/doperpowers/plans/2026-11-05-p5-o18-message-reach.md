@@ -36,7 +36,7 @@ Then `sminos share <session> <member> list` (run by the owner at a terminal): th
 - [ ] The execution section's buildability review.
 - [x] (2026-11-05 22:50Z) M1: the hub's policy registry, upload backstop and audience filter (MAWS). Branch `p5-o18-m1`, `49dd6b262..`; static and unit GREEN on `a091ce1cb` (run 42120533710); reviewer-high with a security lens converged on the third pass.
 - [x] M2: the endpoint: the `list` grade, `reach?`, audiences and the policy cache (MAWS). Branch `p5-o18-m2` from `9f49f8fbc`; built at `062e061a0` (2026-11-06 00:00Z); M1's same-batch reference fix at `bf194ee8c`; the review's fix wave at `c100ab45f`; high-rung re-review clean (2026-11-06).
-- [ ] M2b: devices: the audience from the listing (MAWS).
+- [ ] M2b: devices: the audience from the member's policy row (MAWS). Branch `p5-o18-m2b` from `b30f810fb`; hub rows at `7c57f8cf0`, desk-web at `50d47bb9f` (2026-11-05).
 - [ ] M3: sminos's visibility frames, records and audience streams (doperpowers).
 - [ ] M4: sminos's send boundary, the setters, refusals and unlisting (doperpowers).
 - [ ] M6: live acceptance on the staging org.
@@ -738,6 +738,23 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   by a void. The ledger holds the signed body there, so the void would be refused `conflict`. The endpoint never signs an
   audience whose digest disagrees with its writer, so the hub has no ground to refuse one. That stop stays terminal,
   and a test holds it there.
+- Observation (M2b): desk-web never holds a private session's listing. Its listings store is fed only by the hub's
+  registry socket, and a private listing never reaches the hub (`Listings.welcome` withdraws it). The one place it
+  exists is `endpoint.listings` over a device channel (`src/endpoint/calls.ts`), which desk-web never calls. O13's
+  binding constraint "Nothing but cards" (`2026-10-27-p5-o13-web-cards.md:53`, pinned by `cards/client.test.ts`)
+  rules out a `call` on its channel, even though the endpoint grants one to a web-cards device (`authorize.ts` step 3).
+  A lane B session is also listed under its appSessionId, not the sminos session id the log addresses, so desk-web
+  couldn't have matched a listing to a recipient anyway.
+  Evidence: `apps/desk-web/src/cards/listings-store.ts`, `cards/client.ts:1-8`; `src/endpoint/listings.ts` `welcome`,
+  `recordFor`; `src/endpoint/rl10/members.ts` `listingId`.
+- Observation (M2b): no `hub/` human is composed anywhere in the MAWS app. Desk-web's `ProjectConnection.say` is the
+  one composer. The RL8 device-signed human exists only in `apps/org-protocol/test-support` (`deviceHuman`), whose
+  `signEvent` covers every field, `audience` included, and whose hub check M1 already applies.
+  Evidence: a grep for `kind: 'human'` and `t: 'human'` over `src/` and `apps/*/src`.
+- Observation (M2b): `isListing` accepts `audience` and `policyRev` since M2, so desk-web built from this branch takes
+  a private listing. M2's residue is only the deployed desk-web, which the next hub deploy replaces (desk-web is
+  served by the hub's Worker).
+  Evidence: `apps/org-protocol/src/shapes.ts` `isListing`.
 
 ## Decision Log
 
@@ -983,6 +1000,50 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Consequence, accepted by the coordinator: a say in a batch that also takes its session private is judged against
   the private policy even when the say comes first. That fails closed.
   Date/Author: 2026-11-05, p5-desk-track-owner (M2), ruled by the coordinator.
+
+- Decision (M2b, the coordinator's ruling): a browser takes a private session's audience from its member's policy row,
+  which the hub's registry sends on the registry socket, not from the session's channel listing (D7's "A device").
+  - What the hub sends: after the grid, on every registry socket (an app's or not), `{t: 'policies', rows}`, one row
+    `{session, audience, policyRev}` per private session whose audience holds the socket's member. Then, whenever a
+    snapshot moves a row (`Registry.policies`), `{t: 'policy', session, policy}` goes to each member of the row's old
+    or new audience: the new row while it holds them, else null. A listed session has no row. A member outside a
+    row's audience is never sent it.
+  - What desk-web does: `say` seals the row's audience. A recipient with no row goes plain, the hub being the
+    backstop. A recipient the log shows private (its newest own snapshot is in a stream, or an `unlisted` notice
+    reached this reader) with no row, or a row the member is outside, is refused locally and nothing is sent.
+  Rationale:
+  - It needs no `call` on the cards channel, so O13's "Nothing but cards" stands.
+  - The row is keyed by the sminos session id the log addresses, so lane B sessions are covered.
+  - It is the registry `takeHuman` judges the words against, so a stale row is the hub's own to refuse.
+  - It adds no trust. The hub already decides who is served a stream, and a device verifies log events only by the
+    org MAC. The sealed audience chooses which stream the words go into, never who may receive them, and the
+    recipient's endpoint still answers `reach?` on its own verification (D3, D5).
+  - The rows a member is sent name only sessions whose audience holds them, so they show nothing the member's
+    browser isn't served anyway.
+  Rejected: an `endpoint.listings` call on desk-web's channel to the session's machine. It would widen O13's pin,
+  need a listed device and a channel per machine, and leave lane B sessions unmatched.
+  The machine-signed private listing keeps its `audience` and `policyRev` (M2) for a native device.
+  Date/Author: 2026-11-05, the coordinator (p5-desk-track-owner), for M2b.
+- Decision (M2b): a say naming sessions of different audiences becomes one event per audience, in the order each
+  group's first recipient was named. Each split's text is its own recipients' raw leading tags, in order, then the
+  body after the run (D4). `@all` names no session and stays in every split. A say with one audience keeps its text as
+  typed. The outbox holds one entry per split. A local refusal is one refused outbox entry for the whole say.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M2b).
+- Decision (M2b): where the proofs live.
+  - The hub side is in `apps/desk-hub/test/policies.test.ts` ("a member's policy rows"), on the M1 local hub: the
+    rows per audience member and none for an outsider, a share removed and restored, listed again; and one browser
+    alternating listed and private sessions, each message under its writer and reaching only that writer's readers,
+    with an old client's words refused toward the private session and delivered toward the listed one.
+  - The browser side is in desk-web's unit suites against the DX3 double, which now places an audience's words in
+    the member's stream as the hub does: `project/audience.test.ts`, the `say` cases in `conversation.test.ts`, and
+    `state/policies.test.ts`.
+  - The local-hub world desk-web's `.local.test.ts` suites run (wrangler dev and MAWS's endpoint in process) would
+    need a fake sminos to make a session private through the M2 signer, which M2's `conversation.local.test.ts`
+    already covers. So M2b doesn't repeat it there.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M2b).
+- Decision (M2b): desk-web reads the hub's `withheld` tombstone as its own verdict, neither drawn nor reported as a
+  forgery, closing M1's "desk-web reads a tombstone as malformed" residue.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M2b).
 
 ## Outcomes & Retrospective
 
