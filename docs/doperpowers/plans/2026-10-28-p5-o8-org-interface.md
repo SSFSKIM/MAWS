@@ -2461,6 +2461,8 @@ Each is built as its recommendation when its milestone is re-planned, unless the
 - Observation (the re-plan): no record shows M3's root-add sitting on staging or production. The prepared steps are in the report, and Outcomes still owes it.
   Evidence: `2026-10-28-p5-o8-report.md:195-237`; this document's M3 Outcomes; P5 Decision Log 155 ("dormant until the owner's `root add` sitting").
 - Observation (M6a's design): two members who both own a machine share its owners' reader state, because the index can't tell which owner sits at a device.
+- Observation (M7a Task 1): the hub's `fanOut` sends a member's own `human` back to the socket that sent it, so words come back through the log after their `human-ack`. `words.logged` also clears a word whose nonce appears in the log.
+  Evidence: `apps/desk-hub/src/objects/project.ts:1577-1586`.
 
 ## Decision Log
 
@@ -3068,6 +3070,22 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   - DL190 (b) as built places an unplaced lane B record by the `ownersProof` entry that is the spawn's act (`session.spawn`), not by `ownersProof[0]`. Once `record.owners` exists, a record with an empty `ownersProof` can hold an owner-add act at index 0. M5b's wait is corrected to match.
   - MAWS #496 (master bdd6cb7db) gives `test/endpoint/rl10/conversation.json`'s three sminos hello lines `capabilities: ["audience", "record"]`, the blob sminos 1.38.0's conformance replay compares exactly (bc2593f1). An M6b change to that fixture starts from master's copy, and the architect is told, since the desk track's sminos gate pins it.
   Date/Author: 2026-11-06, the desk track through the architect, recorded by O8's executor.
+
+- Decision: M7a Task 1, main and the shared schema (221c6daaf..64d278151; fixes 4fe3fac85..2d145630e), settles these points.
+  1. `open` answers main's verified events whole. `changed` is a delta: `upserts` by offset, the words, `unverified`, `asOf` and `live`, with `reset: true` only after a judgment that changed verdicts in bulk, another org's log, or a closed answer. Coalescing is at 100 ms. (The controller's fix, which replaced a whole-log resend.)
+  2. `author` and `owners` are M5's `OrgMember` objects, named from the held head, so a cached verdict still draws names signed out. `by` is the attesting machine's name. `mac` and `sig` are stripped before the renderer.
+  3. `open` answers `ok: true` with `live: false` whenever a cache exists, so "as of" draws offline. `signed-out` and `no-hub` come only when there is nothing to draw, and `unknown-project` for a non-project id or the hub's 404. A refused project stays refused through later heads, until the tab's next open or another hub.
+  4. (A gap the spec missed.) A DX1 writer larger than the cache's bound could never verify, since the bound evicted its prefix while pages arrived. The channel reads the project's attestations before it opens the socket, and spares an awaited writer's events past the bound until `caught-up`.
+  5. Every cached event is judged again at each new head or certificate set, not only failed ones. A failed owner attestation leaves a machine event verified with no owners.
+  6. `@alias` follows `sminos say`'s leading-tag grammar, in `channel/address.ts`. Words unanswered at release are dropped. The "Not sent" line after a relaunch is the renderer's.
+  7. §N's socket signature gains `onWelcome`, a boolean from `send()`, and the client's own close codes 4401 (credentials) and 4404 (unknown project).
+  8. `attestations` sits on `ProjectReads` beside `HubClient`, so the signer's, the pairing's and the deliveries' clients need no channel read.
+  9. `close()`'s join: `shut()` first enters the channels' last cache writes into the commit queue, then fences.
+  10. The cache's 8 MiB bound counts UTF-8 bytes.
+  11. A renderer frame that reloads or is destroyed releases the channel references it held (`holds.ts`).
+  12. Words are signed with `identity.channelKey` through `org-protocol`'s `signEvent`, as O7's links already sign RL2 handshakes with it. P5 Decision Log 53's rule covers step-up and state signing, and this reading is recorded rather than widened.
+  13. `src/shared/machine/coverage.test.ts` reviews `ChannelEvent.event`'s string-keyed record: a log event's own fields, sminos's ids, no MAWS address.
+  Date/Author: 2026-11-06, O8's executor (controller), from Task 1's report.
 
 ## Outcomes & Retrospective
 
