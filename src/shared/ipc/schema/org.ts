@@ -290,16 +290,16 @@ export type ChannelSession = z.infer<typeof ChannelSessionSchema>;
 export const ChannelRecipientsSchema = z.union([z.literal('*'), z.array(z.strictObject({ session: z.string(), alias: z.string() }))]);
 export type ChannelRecipients = z.infer<typeof ChannelRecipientsSchema>;
 /**
- * The owner's words this channel sent and the log doesn't hold yet: `sending` until the hub's `human-ack`, then `sent`
- * until the log holds the word, or the hub's refusal (`not-reachable` for a session hidden from you, P5 Decision Log
- * 224), or main's `context-changed` once another org, member or device signs in while it is still sending. Kept in main's memory only: words still here when the channel is released are dropped,
- * never sent later.
+ * The signed-in member's words on this device that the log doesn't hold yet, and only theirs: `sending` until the hub's
+ * `human-ack`, then `sent` until the log holds the word, or the hub's refusal (`not-reachable` for a session hidden from
+ * you, P5 Decision Log 224). `not-sent`: a word the project's last channel let go unacknowledged, shown for this
+ * channel's life and never sent again. Kept in main's memory only, nothing on disk.
  */
 export const ChannelWordSchema = z.strictObject({
   nonce: z.string(),
   text: z.string(),
   to: ChannelRecipientsSchema,
-  state: z.union([z.literal('sending'), z.literal('sent'), z.strictObject({ refused: z.string() })]),
+  state: z.union([z.literal('sending'), z.literal('sent'), z.literal('not-sent'), z.strictObject({ refused: z.string() })]),
 });
 export type ChannelWord = z.infer<typeof ChannelWordSchema>;
 /**

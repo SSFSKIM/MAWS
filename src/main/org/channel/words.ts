@@ -7,10 +7,15 @@
 // log (so a tab reads the ack from main, however the changes it is told were coalesced); a `refused` keeps it, with the
 // hub's reason, and it is sent no more.
 //
-// The words live in main's memory: words still unanswered when the channel is released are dropped, never sent later.
-// Nothing is signed or sent while signed out. Each word belongs to the org, member and device that signed it: it is sent
-// only while that signer is the one signed in, and once another signs in (`reconcile`) it is refused `context-changed`
-// and sent no more; a sign-out alone keeps it. A word whose signing outlives a change of signer is sent nowhere.
+// Main is the one source of a word's state (Task 2's fix round 2). Each word stays bound to the org, member and device
+// that signed it: `pending` shows only the signed-in signer's words (none signed out), and a word is sent only while its
+// signer is the one signed in. Another signer's words are kept as they are, neither sent nor refused, and show again
+// when their signer is back. A word whose signing outlives a change of signer is sent nowhere.
+//
+// The words live in main's memory, nothing on disk. At the channel's release (`release`) a word acknowledged is done
+// (the log has it) and dropped; one never acknowledged goes to the not-sent list (`NotSent`, the newest NOT_SENT_KEPT of
+// the run, every project's), from which its signer's next open of the project takes it (`recall`), shown `not-sent` for
+// that channel's life and dropped at its release. A not-sent word is never sent again; the log holding it ends it.
 //
 // Electron-free.
 import { base64urlEncode, isHubWriter, signEvent, type SigningKey } from '../../../../apps/org-protocol/src/index.ts';
@@ -24,19 +29,50 @@ export type SaidResult = { ok: true; nonce: string } | { ok: false; reason: 'sig
 /** The signer a word belongs to. */
 const contextOf = (signer: WordsSigner): string => JSON.stringify([signer.org, signer.member, signer.device]);
 
-/** The refusal a word gets when another signer signs in. */
+/** Why a word isn't said: the signer changed while it was being signed. */
 export const CONTEXT_CHANGED = 'context-changed';
+
+/** A word its channel let go unacknowledged, for its signer's next open of the project. */
+export type UnsentWord = { project: string; context: string; member: string; nonce: string; text: string; to: ChannelRecipients };
+
+/** How many unacknowledged words the run keeps, every project's and signer's, the newest. */
+export const NOT_SENT_KEPT = 50;
+
+/** The run's not-sent list, one for every channel. */
+export interface NotSent {
+  put(word: UnsentWord): void;
+  /** The project's words that signer let go, taken: none are kept after. */
+  take(project: string, context: string): UnsentWord[];
+}
+
+export function createNotSent(kept = NOT_SENT_KEPT): NotSent {
+  let list: UnsentWord[] = [];
+  return {
+    put(word) {
+      list = [...list, word].slice(-kept);
+    },
+    take(project, context) {
+      const mine = (w: UnsentWord) => w.project === project && w.context === context;
+      const taken = list.filter(mine);
+      list = list.filter((w) => !mine(w));
+      return taken;
+    },
+  };
+}
 
 export interface Words {
   /** Signs `text` for `to`, keeps it, and sends it now if the socket can take it. */
   say(text: string, to: ChannelRecipients): Promise<SaidResult>;
   /** At each welcome: every word not yet answered that the signer in now signed, the same signed bytes. */
   resend(): void;
-  /** At each change of the session: words another signer signed are refused `context-changed`. */
-  reconcile(): void;
+  /** At each open and change of the session: the not-sent words the signed-in signer let go here before, `not-sent`. */
+  recall(): void;
+  /** The channel is released: the acknowledged dropped, the rest not sent (`NotSent`). */
+  release(): void;
   answered(answer: HumanAck | HumanRefused): void;
   /** Logged events: a word of this member's that the log now holds needs no answer. */
   logged(events: readonly LoggedEvent[]): void;
+  /** The signed-in signer's words, in the order said; none signed out. */
   pending(): ChannelWord[];
   onChanged(listener: () => void): () => void;
 }
@@ -48,11 +84,13 @@ export function createWords(deps: {
   project: string;
   signer(): WordsSigner | null;
   send(human: DeviceHuman): boolean;
+  notSent: NotSent;
   now?(): number;
 }): Words {
   const now = deps.now ?? Date.now;
-  /** By nonce, in the order said. */
-  const words = new Map<string, { human: DeviceHuman; context: string; state: ChannelWord['state'] }>();
+  /** By nonce, in the order said (a recalled word: in the order taken). The signed bytes while it may be sent. */
+  type Word = { nonce: string; text: string; to: ChannelRecipients; member: string; context: string; state: ChannelWord['state']; human: DeviceHuman | null };
+  const words = new Map<string, Word>();
   const current = (): string | null => {
     const signer = deps.signer();
     return signer === null ? null : contextOf(signer);
@@ -74,25 +112,32 @@ export function createWords(deps: {
       const after = current(); // the signer in once the signature is made
       if (after === null) return { ok: false, reason: 'signed-out' };
       if (after !== context) return { ok: false, reason: CONTEXT_CHANGED };
-      words.set(nonce, { human, context, state: 'sending' });
+      words.set(nonce, { nonce, text, to, member: signer.member, context, state: 'sending', human });
       deps.send(human);
       changed();
       return { ok: true, nonce };
     },
     resend() {
       const signedIn = current();
-      for (const { human, context, state } of words.values()) if (state === 'sending' && context === signedIn) deps.send(human);
+      for (const { human, context, state } of words.values()) if (state === 'sending' && context === signedIn && human !== null) deps.send(human);
     },
-    reconcile() {
+    recall() {
       const signedIn = current();
       if (signedIn === null) return;
       let any = false;
-      for (const word of words.values()) {
-        if (word.state !== 'sending' || word.context === signedIn) continue;
-        word.state = { refused: CONTEXT_CHANGED };
+      for (const { nonce, text, to, member, context } of deps.notSent.take(deps.project, signedIn)) {
+        if (words.has(nonce)) continue;
+        words.set(nonce, { nonce, text, to, member, context, state: 'not-sent', human: null });
         any = true;
       }
       if (any) changed();
+    },
+    release() {
+      for (const { nonce, text, to, member, context, state } of words.values()) {
+        if (state === 'sent' || state === 'not-sent') continue; // delivered; or shown not sent for this channel's life
+        deps.notSent.put({ project: deps.project, context, member, nonce, text, to });
+      }
+      words.clear();
     },
     answered(answer) {
       const nonce = answer.t === 'human-ack' ? answer.nonce : answer.refusal.nonce;
@@ -107,13 +152,16 @@ export function createWords(deps: {
       for (const { event } of events) {
         if (!isHubWriter(event.writer) || typeof event.nonce !== 'string') continue;
         const word = words.get(event.nonce);
-        if (word === undefined || word.human.member !== event.member) continue;
+        if (word === undefined || word.member !== event.member) continue;
         words.delete(event.nonce);
         any = true;
       }
       if (any) changed();
     },
-    pending: () => [...words.values()].map(({ human, state }) => ({ nonce: human.nonce, text: human.text, to: human.to, state })),
+    pending() {
+      const signedIn = current();
+      return [...words.values()].filter((w) => w.context === signedIn).map(({ nonce, text, to, state }) => ({ nonce, text, to, state }));
+    },
     onChanged(listener) {
       listeners.add(listener);
       return () => void listeners.delete(listener);

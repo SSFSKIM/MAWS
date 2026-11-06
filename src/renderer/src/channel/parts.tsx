@@ -68,7 +68,7 @@ export function LabelLine({ entry }: { entry: Pick<ChannelEntry, 'label' | 'by'>
 }
 
 /** Whom a message went to, beside its sender: "to @a, @b", nothing for everyone. */
-export function Recipients({ to }: { to: '*' | readonly { alias: string }[] | null }) {
-  if (to === null || to === '*' || to.length === 0) return null;
+export function Recipients({ to }: { to: '*' | readonly { alias: string }[] }) {
+  if (to === '*' || to.length === 0) return null;
   return <span className="min-w-0 truncate text-ui-sm text-fg-muted">{`${CHANNEL.to} ${to.map((r) => `@${r.alias}`).join(', ')}`}</span>;
 }

@@ -19,7 +19,9 @@
 //   hub; one that ends `removed` or with the hub sign-in waits, as the Registry feed does, for the session's next change.
 // - The owner's words: a leading `@alias` addresses a session the log's lifecycle names, held past the bound (address.ts,
 //   cache.ts), and untagged words go to everyone. Nothing is sent signed out, with no hub, or to a project the hub
-//   refused; words another org, member or device signed are refused `context-changed` at the session's change (words.ts).
+//   refused. Main is the one source of a word's state: a channel shows only the signed-in org's, member's and device's
+//   words (words.ts), another signer's kept as they are, unsent. At release an acknowledged word is dropped and the rest
+//   go to the run's not-sent list, which that signer's next open of the project shows `not-sent` (`NotSent`).
 // - The cache is written CHANNEL_WRITE_MS after a change, and last at `close()`: once the channel's own work has run
 //   (joined outside the org session's commit queue), a finished snapshot is entered in that queue, and the queued write
 //   awaits nothing of the channel's (M4a's rule). `close()` resolves once every final write is entered.
@@ -33,7 +35,7 @@ import { orgTiming, type OrgTiming } from '../timing';
 import { addressOf } from './address';
 import { emptyLog, loadLog, type ChannelLimits, type ChannelStore, type Ground, type HeldLog } from './cache';
 import { CLOSE_CREDENTIALS, CLOSE_REMOVED, CLOSE_UNKNOWN_PROJECT, openProjectSocket, type ProjectSocket, type ProjectSocketDeps } from './project-socket';
-import { createWords } from './words';
+import { createNotSent, createWords } from './words';
 
 /** A hub project: the sminos project id (`smnsId`), a UUID. */
 const PROJECT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -102,6 +104,8 @@ export function createChannels(deps: ChannelsDeps): Channels {
   let closed = false;
   /** The changes told so far, every channel's: an open answer's `rev`, and the last change's. */
   let revision = 0;
+  /** The words channels let go unacknowledged, for their signer's next open of the project. */
+  const notSent = createNotSent();
 
   const groundOf = (current: SignedIn, project: string): Ground => ({
     ctx: { org: current.identity.org, project },
@@ -148,6 +152,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
         return current === null ? null : { org: current.identity.org, member: current.identity.member, device: current.identity.device, key: current.identity.channelKey };
       },
       send: (human) => socket?.send(human) ?? false,
+      notSent,
       now,
     });
     words.onChanged(() => scheduleEmit());
@@ -362,7 +367,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
 
     function reconcile(reopened = false): void {
       if (stopped) return;
-      words.reconcile(); // words another org, member or device signed are refused
+      words.recall(); // the signer's words the project's last channel let go
       const current = deps.session.current();
       // a parked socket opens again at any change, as the Registry feed does; a project the hub refused, only at the
       // tab's next open or with another hub
@@ -435,6 +440,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
         releaseTimer = null;
         if (refs > 0) return;
         if (channels.get(project) === channel) channels.delete(project);
+        words.release();
         const done = close();
         closing.add(done); // `Channels.close` joins a released channel's last write too
         void done.finally(() => closing.delete(done));

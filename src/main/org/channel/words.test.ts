@@ -6,9 +6,9 @@ import { describe, expect, it } from 'vitest';
 import { NO_CERTIFICATES, verifyEvent, type LogEventV2 } from '../../../../apps/org-protocol/src/index.ts';
 import { ChannelOrg, ORG, PROJECT } from '../../../../test/org/channel-world';
 import type { DeviceHuman } from './project-socket';
-import { createWords, type WordsSigner } from './words';
+import { createNotSent, createWords, type NotSent, type WordsSigner } from './words';
 
-async function setup() {
+async function setup(notSent: NotSent = createNotSent()) {
   const o = await ChannelOrg.make();
   const A = o.A;
   const head = o.head();
@@ -18,15 +18,13 @@ async function setup() {
   let signer: WordsSigner | null = mine;
   let signers: Array<WordsSigner | null> = []; // the signer each next call reads, then `signer`
   const changes: number[] = [];
-  const words = createWords({
-    project: PROJECT,
-    signer: () => (signers.length > 0 ? signers.shift()! : signer),
-    send: (human) => {
-      if (!open) return false;
-      sent.push(human);
-      return true;
-    },
-  });
+  const signerNow = () => (signers.length > 0 ? signers.shift()! : signer);
+  const send = (human: DeviceHuman) => {
+    if (!open) return false;
+    sent.push(human);
+    return true;
+  };
+  const words = createWords({ project: PROJECT, signer: signerNow, send, notSent });
   words.onChanged(() => changes.push(1));
   return {
     A,
@@ -40,6 +38,8 @@ async function setup() {
     signOut: () => void (signer = null),
     signIn: (next: WordsSigner) => void (signer = next),
     reads: (next: Array<WordsSigner | null>) => void (signers = next),
+    /** The project's next channel, after this one's release: the same signer, the same not-sent list. */
+    next: () => createWords({ project: PROJECT, signer: signerNow, send, notSent }),
   };
 }
 
@@ -96,9 +96,9 @@ describe('words', () => {
     s.words.answered({ t: 'refused', refusal: { reason: 'not-reachable', nonce: said.nonce } });
     s.words.answered({ t: 'human-ack', nonce: said.nonce, offset: 4, writer: `hub/${s.A}`, seq: 1 });
     s.signIn({ ...s.mine, member: 'someone-else' });
-    s.words.reconcile();
-    expect(s.words.pending()).toEqual([{ nonce: said.nonce, text: 'acked', to: '*', state: 'sent' }]);
+    expect(s.words.pending()).toEqual([]);
     s.signIn(s.mine);
+    expect(s.words.pending()).toEqual([{ nonce: said.nonce, text: 'acked', to: '*', state: 'sent' }]);
     s.words.resend();
     expect(s.sent).toHaveLength(1);
     s.words.logged([{ offset: 4, event: { writer: `hub/${s.A}`, seq: 1, member: s.A, nonce: said.nonce } }]);
@@ -126,26 +126,88 @@ describe('words', () => {
     expect(s.words.pending()[0].state).toEqual({ refused: 'unrecognized' });
   });
 
-  it('refuses each word not yet answered, context-changed, when another org, member or device signs in; a sign-out alone keeps it', async () => {
+  // Task 2's fix round 2: main is the one source of a word's state, and shows only the signed-in context's words, so a
+  // tab never draws another member's (or another org's) word as this one's
+  it("shows only the signed-in signer's words: another org, member or device sees none, and nothing is resent or refused", async () => {
     for (const other of [{ org: 'another-org' }, { member: 'someone-else' }, { device: 'another-device' }]) {
       const s = await setup();
       s.setOpen(false);
       const said = await s.words.say('before', '*');
-      if (!said.ok) throw new Error('unsent');
+      const acked = await s.words.say('acked', '*');
+      if (!said.ok || !acked.ok) throw new Error('unsent');
+      s.words.answered({ t: 'human-ack', nonce: acked.nonce, offset: 4, writer: `hub/${s.A}`, seq: 1 });
+      const mine = [
+        { nonce: said.nonce, text: 'before', to: '*', state: 'sending' },
+        { nonce: acked.nonce, text: 'acked', to: '*', state: 'sent' },
+      ];
       s.signOut();
-      s.words.reconcile();
-      s.signIn(s.mine);
-      s.words.reconcile();
-      expect(s.words.pending()[0].state).toBe('sending');
+      expect(s.words.pending()).toEqual([]);
       s.signIn({ ...s.mine, ...other });
-      s.words.reconcile();
-      expect(s.words.pending()).toEqual([{ nonce: said.nonce, text: 'before', to: '*', state: { refused: 'context-changed' } }]);
+      expect(s.words.pending()).toEqual([]);
       s.setOpen(true);
       s.words.resend();
-      s.signIn(s.mine);
-      s.words.resend();
       expect(s.sent).toEqual([]);
+      s.signIn(s.mine); // its signer is back: its words as they were
+      expect(s.words.pending()).toEqual(mine);
+      s.words.resend();
+      expect(s.sent.map((h) => h.text)).toEqual(['before']);
     }
+  });
+
+  it('at release drops what was acknowledged, and keeps the rest for its signer’s next open of the project, Not sent', async () => {
+    const notSent = createNotSent();
+    const s = await setup(notSent);
+    const unacked = await s.words.say('unacked', '*');
+    const acked = await s.words.say('acked', '*');
+    const refused = await s.words.say('refused', '*');
+    if (!unacked.ok || !acked.ok || !refused.ok) throw new Error('unsent');
+    s.words.answered({ t: 'human-ack', nonce: acked.nonce, offset: 4, writer: `hub/${s.A}`, seq: 1 });
+    s.words.answered({ t: 'refused', refusal: { reason: 'not-reachable', nonce: refused.nonce } });
+    s.words.release();
+    expect(s.words.pending()).toEqual([]);
+    const lost = [
+      { nonce: unacked.nonce, text: 'unacked', to: '*', state: 'not-sent' },
+      { nonce: refused.nonce, text: 'refused', to: '*', state: 'not-sent' },
+    ];
+    // another signer's open takes none of them
+    s.signIn({ ...s.mine, member: 'someone-else' });
+    const theirs = s.next();
+    theirs.recall();
+    expect(theirs.pending()).toEqual([]);
+    theirs.release();
+    s.signIn(s.mine);
+    const next = s.next();
+    next.recall();
+    expect(next.pending()).toEqual(lost);
+    next.resend();
+    expect(s.sent.map((h) => h.text)).toEqual(['unacked', 'acked', 'refused']); // a lost word is never sent again
+    next.recall(); // taken once
+    expect(next.pending()).toEqual(lost);
+    next.release(); // shown for that channel's life: gone for good at its release
+    const after = s.next();
+    after.recall();
+    expect(after.pending()).toEqual([]);
+  });
+
+  it('a word Not sent that the log turns out to hold is gone', async () => {
+    const s = await setup();
+    const said = await s.words.say('delivered after all', '*');
+    if (!said.ok) throw new Error('unsent');
+    s.words.release();
+    const next = s.next();
+    next.recall();
+    next.logged([{ offset: 9, event: { writer: `hub/${s.A}`, seq: 3, member: s.A, nonce: said.nonce } }]);
+    expect(next.pending()).toEqual([]);
+  });
+
+  it('keeps the newest NOT_SENT_KEPT words not sent', () => {
+    const notSent = createNotSent(2);
+    const word = (nonce: string) => ({ project: PROJECT, context: 'c', member: 'm', nonce, text: nonce, to: '*' as const });
+    for (const nonce of ['a', 'b', 'c']) notSent.put(word(nonce));
+    expect(notSent.take(PROJECT, 'other')).toEqual([]);
+    expect(notSent.take('another-project', 'c')).toEqual([]);
+    expect(notSent.take(PROJECT, 'c').map((w) => w.nonce)).toEqual(['b', 'c']);
+    expect(notSent.take(PROJECT, 'c')).toEqual([]);
   });
 
   it('resends a word only under the signer that signed it', async () => {
@@ -153,7 +215,7 @@ describe('words', () => {
     s.setOpen(false);
     await s.words.say('mine', '*');
     s.setOpen(true);
-    s.signIn({ ...s.mine, member: 'someone-else' }); // not yet reconciled: the welcome came first
+    s.signIn({ ...s.mine, member: 'someone-else' });
     s.words.resend();
     expect(s.sent).toEqual([]);
   });

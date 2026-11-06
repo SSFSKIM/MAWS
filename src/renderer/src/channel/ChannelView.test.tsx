@@ -1,7 +1,7 @@
 // The Channel tab (P5 O8 M7a, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M7a's Proves, "The renderer":
 // the tab opens once per project; Channel shows only with a smnsId; the composer is withdrawn offline; the inline native
 // ask answers), with the tab's hold paired with its mount, main's deltas over the open answer, words sent and refused,
-// and "Not sent" for a word main let go.
+// and "Not sent" where main says a word wasn't (each word's state is main's alone).
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -25,7 +25,6 @@ import { fillStores, resetShellStores } from '../test-support/shell-stores';
 import { resetAskSheets } from '../tools/maws/ask/store';
 import { ChannelView } from './ChannelView';
 import { useChannelTitle } from './title';
-import { forgetSentWords } from './use-channel';
 
 const SMNS = '1f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
 const KEY = `smns:${SMNS}` as OrgKey;
@@ -61,7 +60,6 @@ const tell = (payload: ChannelChanged) => act(() => fake.event('org.channel.chan
 
 beforeEach(() => {
   resetShellStores();
-  forgetSentWords();
   useHubAccess.setState({ access: 'connected', member: ME.id });
 });
 afterEach(() => {
@@ -177,18 +175,6 @@ describe('people’s words', () => {
     expect(entries()).toEqual(['words:5']);
   });
 
-  it('a word acknowledged before main first published it is never called Not sent', async () => {
-    install({ 'org.channel.send': { ok: true, nonce: 'n1' } });
-    await mount();
-    await userEvent.type(composer(), 'quick{Enter}');
-    await waitFor(() => expect(fake.invoked('org.channel.send')).toHaveLength(1));
-    tell(change({ pending: [{ nonce: 'n1', text: 'quick', to: '*', state: 'sent' }] })); // main's first word of it: already acked
-    cleanup();
-    install();
-    await mount(opened()); // let go with its channel before the log held it
-    expect(stream().querySelector('[data-word-state="not-sent"]')).toBeNull();
-  });
-
   it('keeps what is typed while a send is in flight, clearing only the text it sent', async () => {
     install(); // each send answered when the test says
     await mount();
@@ -204,22 +190,23 @@ describe('people’s words', () => {
     expect(composer().value).toBe('');
   });
 
-  it('a word main let go with its channel, never acknowledged nor logged, reads Not sent when the tab opens again', async () => {
+  // Fix round 2: main is the one source of a word's state; the tab remembers no word of its own
+  it('draws a word Not sent only where main says so; one main no longer lists reads nothing at the next open', async () => {
     install({ 'org.channel.send': { ok: true, nonce: 'n1' } });
     await mount();
     await userEvent.type(composer(), 'lost one{Enter}');
     await waitFor(() => expect(fake.invoked('org.channel.send')).toHaveLength(1));
-    tell(change({ live: false })); // the hub went away before any answer
+    tell(change({ pending: [{ nonce: 'n1', text: 'lost one', to: '*', state: 'sending' }], live: false })); // the hub went away before any answer
     cleanup();
     install();
-    await mount(opened());
+    await mount(opened()); // main lists nothing: another member signed in, or the word was acknowledged and dropped
+    expect(stream().querySelector('[data-word-state]')).toBeNull();
+    cleanup();
+    install();
+    await mount(opened({ pending: [{ nonce: 'n1', text: 'lost one', to: '*', state: 'not-sent' }] }));
     const lost = stream().querySelector<HTMLElement>('[data-word-state="not-sent"]')!;
     expect(lost.textContent).toContain('lost one');
     expect(within(lost).getByText('Not sent')).toBeTruthy();
-    cleanup();
-    install();
-    await mount(opened()); // said once, for that tab's life
-    expect(stream().querySelector('[data-word-state]')).toBeNull();
   });
 });
 

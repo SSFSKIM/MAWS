@@ -21,7 +21,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord } from '@shared/ipc/schema';
-import type { ChannelEvent, ChannelRecipients, ChannelSession, OrgMember } from '@shared/ipc/schema/org';
+import type { ChannelEvent, ChannelRecipients, ChannelSession, ChannelWord, OrgMember } from '@shared/ipc/schema/org';
 import { waitsOnAnswer } from '@shared/attention/kinds';
 import { rowOfListed, rowOfListedRecord, rowOfSession, type OrgIndex, type RowKey } from '../stores/org-projects';
 import type { ListedSession } from '../stores/sessions';
@@ -31,15 +31,15 @@ export type ChannelLabel = ChannelEvent['label'];
 export type ChannelParty = { session: string; alias: string; title: string | null; machine: string | null };
 /** `verified` (a v2 signature main checked), `migrated` (a DX1 event a machine attested at the move; `by` names it) or `legacy`. */
 type Labelled = { key: string; label: ChannelLabel; by?: string };
-/** A word's state while the log doesn't hold it: main's (`sending`, refused), acknowledged and not yet logged (`sent`), or lost (`not-sent`). */
-export type WordState = 'sending' | 'sent' | 'not-sent' | { refused: string };
+/** A word's state while the log doesn't hold it, main's: `sending`, acknowledged and not yet logged (`sent`), let go unacknowledged (`not-sent`), or refused. */
+export type WordState = ChannelWord['state'];
 export type WordsEntry = Labelled & {
   kind: 'words';
   offset: number | null; // null for a word not in the log yet
   member: string | null;
   name: string;
   you: boolean;
-  to: ChannelRecipients | null; // null: not known (a word this renderer remembers by its text alone)
+  to: ChannelRecipients;
   text: string;
   at: string | null;
   state?: WordState;
@@ -57,8 +57,8 @@ export type ExchangeEntry = Labelled & {
 export type HostEntry = Labelled & { kind: 'host'; offset: number; party: ChannelParty; host: 'message' | 'question' | 'answered'; text: string; choices?: string[]; at: string };
 export type ChannelEntry = WordsEntry | SayEntry | ExchangeEntry | HostEntry;
 
-/** A word after the log: main's pending, or one this renderer sent that main no longer holds. */
-export type TailWord = { key: string; text: string; to: ChannelRecipients | null; state: WordState };
+/** A word after the log: main's pending, the signed-in member's own. */
+export type TailWord = { key: string; text: string; to: ChannelRecipients; state: WordState };
 
 export const EXCHANGE_WINDOW_MS = 10 * 60_000;
 

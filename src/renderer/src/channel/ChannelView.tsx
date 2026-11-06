@@ -32,7 +32,7 @@ export function ChannelView({ project }: { project: string }) {
   const me = useHubAccess((s) => s.member);
   const access = useHubAccess((s) => s.access);
   const { held } = channel;
-  const entries = held.phase === 'open' ? channelEntries({ events: held.events, sessions: held.sessions, tail: tailOf(held, channel.sent, channel.lost), me }) : [];
+  const entries = held.phase === 'open' ? channelEntries({ events: held.events, sessions: held.sessions, tail: tailOf(held), me }) : [];
 
   // The stream opens at its foot and stays there while the reader is there; a reader scrolled up stays where they are.
   const scroller = useRef<HTMLDivElement>(null);

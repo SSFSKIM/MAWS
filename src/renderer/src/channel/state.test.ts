@@ -1,10 +1,10 @@
 // The tab's copy of main's channel (P5 O8 M7a; the Decision Log's "M7a Task 1 … settles these points", 1 and 6): an
-// open answer whole, then each `org.channel.changed` delta over it, so the tab holds exactly main's set; and the words
-// this renderer sent, followed until the log holds them, so one main let go reads "Not sent". Task 2's fix wave: each
-// change applies only past the open answer's `rev`; an ack is main's word (`sent`), never inferred here.
+// open answer whole, then each `org.channel.changed` delta over it, so the tab holds exactly main's set. Task 2's fix
+// wave: each change applies only past the open answer's `rev`. Fix round 2: a word's state is main's alone, drawn as
+// main gives it; nothing about the words is remembered or inferred here.
 import { describe, expect, it } from 'vitest';
 import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelWord } from '@shared/ipc/schema/org';
-import { applyChange, held, openedWith, splitLost, tailOf, trackSent, type ChannelHeld, type OpenHeld, type SentWord } from './state';
+import { applyChange, held, openedWith, tailOf, type ChannelHeld, type OpenHeld } from './state';
 
 const P = 'proj';
 const e = (offset: number, label: ChannelEvent['label'] = 'verified', extra: Record<string, unknown> = {}): ChannelEvent => ({ offset, writer: 'mini/s', seq: offset, event: { kind: 'say', text: `t${offset}`, ...extra }, label });
@@ -53,38 +53,17 @@ describe('the held copy', () => {
   });
 });
 
-describe('the words this renderer sent', () => {
+describe('the words after the log', () => {
   const word = (nonce: string, state: ChannelWord['state'] = 'sending'): ChannelWord => ({ nonce, text: `w-${nonce}`, to: '*', state });
-  const logged = (nonce: string, offset: number) => e(offset, 'verified', { kind: 'human', nonce, member: 'me' });
-  const sent = (nonce: string, over: Partial<SentWord> = {}): SentWord => ({ nonce, text: `w-${nonce}`, to: null, acked: false, ...over });
 
-  it('reads the ack from main’s pending (`sent`), keeps a word that leaves pending unlogged as it was, and forgets one logged', () => {
-    let book = [sent('n1'), sent('n2')];
-    book = trackSent(book, opened(open([], { pending: [word('n1', 'sent'), word('n2')] }))); // acked before any publication listed it sending
-    expect(book).toEqual([sent('n1', { acked: true, to: '*' }), sent('n2', { to: '*' })]);
-    book = trackSent(book, opened(open([], { pending: [] })));
-    expect(book.map((w) => [w.nonce, w.acked])).toEqual([['n1', true], ['n2', false]]); // nothing inferred from leaving pending
-    book = trackSent(book, opened(open([logged('n1', 4)])));
-    expect(book.map((w) => w.nonce)).toEqual(['n2']);
-  });
-
-  it('at a new open, a word main lists no more, the log doesn’t hold and that never read sent is lost', () => {
-    const book = [sent('gone'), sent('acked', { acked: true }), sent('kept'), sent('logged')];
-    const { kept, lost } = splitLost(book, opened(open([logged('logged', 3)], { pending: [word('kept')] })));
-    expect(lost.map((w) => w.nonce)).toEqual(['gone']);
-    expect(kept.map((w) => w.nonce)).toEqual(['acked', 'kept']);
-  });
-
-  it('the tail: main’s pending in its order, then this page’s words main lists no more, and the lost the log doesn’t hold yet', () => {
-    const h = opened(open([logged('late', 9)], { pending: [word('p1'), word('p2', { refused: 'not-reachable' }), word('p3', 'sent')] }));
-    const tail = tailOf(h, [sent('p1'), sent('a1', { acked: true }), sent('fresh')], [sent('l1'), sent('late')]);
-    expect(tail).toEqual([
+  it('are main’s pending, in its order, each in the state main gives it', () => {
+    const h = opened(open([], { pending: [word('p1'), word('p2', { refused: 'not-reachable' }), word('p3', 'sent'), word('p4', 'not-sent')] }));
+    expect(tailOf(h)).toEqual([
       { key: 'p1', text: 'w-p1', to: '*', state: 'sending' },
       { key: 'p2', text: 'w-p2', to: '*', state: { refused: 'not-reachable' } },
       { key: 'p3', text: 'w-p3', to: '*', state: 'sent' },
-      { key: 'a1', text: 'w-a1', to: null, state: 'sent' },
-      { key: 'fresh', text: 'w-fresh', to: null, state: 'sending' }, // its send answered before main's first publication of it
-      { key: 'l1', text: 'w-l1', to: null, state: 'not-sent' },
+      { key: 'p4', text: 'w-p4', to: '*', state: 'not-sent' },
     ]);
+    expect(tailOf(opened(open([], { pending: [] })))).toEqual([]);
   });
 });

@@ -282,21 +282,70 @@ describe('a project channel', () => {
     expect(await h.channels.send('2f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0', 'hi')).toMatchObject({ ok: false, reason: 'not-open' });
   });
 
-  it('refuses its unanswered words context-changed when another member signs in, and sends them no more', async () => {
+  // Task 2's fix round 2: main is the one source of a word's state, its words bound to the member who signed them
+  it("shows only the signed-in member's words: another's sign-in hides them unsent, and its signer's shows them as they were", async () => {
     const h = await harness();
     opened(await h.channels.open(PROJECT));
     const first = await until(() => h.last(), 'a socket');
     first.welcome();
-    const sent = await h.channels.send(PROJECT, 'before the switch');
-    if (!sent.ok) throw new Error('unsent');
+    const sending = await h.channels.send(PROJECT, 'before the switch');
+    const acked = await h.channels.send(PROJECT, 'acked');
+    if (!sending.ok || !acked.ok) throw new Error('unsent');
+    first.frame({ t: 'human-ack', nonce: acked.nonce, offset: 2, writer: `hub/${h.o.A}`, seq: 1 });
+    const mine = [
+      { nonce: sending.nonce, text: 'before the switch', to: '*', state: 'sending' },
+      { nonce: acked.nonce, text: 'acked', to: '*', state: 'sent' },
+    ];
+    await until(() => JSON.stringify(opened(h.latest()).pending) === JSON.stringify(mine), 'the ack');
     const ours = h.signedIn();
     h.session.set({ ...ours, identity: { ...ours.identity, member: h.o.B } });
-    await until(() => opened(h.latest()).pending.some((w) => typeof w.state === 'object'), 'the refusal');
-    expect(opened(h.latest()).pending).toEqual([{ nonce: sent.nonce, text: 'before the switch', to: '*', state: { refused: 'context-changed' } }]);
+    await until(() => opened(h.latest()).pending.length === 0, 'the words hidden');
     first.emit('close', 1006, '');
     const second = await until(() => (h.sockets.length === 2 ? h.last() : null), 'a reconnect', 5_000);
     second.welcome();
     expect(second.sent.some((f) => f.t === 'human')).toBe(false);
+    h.session.set(ours);
+    await until(() => opened(h.latest()).pending.length === 2, 'the words back');
+    expect(opened(h.latest()).pending).toEqual(mine);
+  });
+
+  it('a word acknowledged after its tab closed is not Not sent at the next open; one never acknowledged is, until the next release', async () => {
+    const h = await harness();
+    opened(await h.channels.open(PROJECT));
+    const socket = await until(() => h.last(), 'a socket');
+    socket.welcome();
+    const acked = await h.channels.send(PROJECT, 'acked in the grace');
+    const lost = await h.channels.send(PROJECT, 'never acked');
+    if (!acked.ok || !lost.ok) throw new Error('unsent');
+    h.channels.release(PROJECT); // the tab is gone; the channel holds on for CHANNEL_RELEASE_MS
+    socket.frame({ t: 'human-ack', nonce: acked.nonce, offset: 2, writer: `hub/${h.o.A}`, seq: 1 });
+    await until(() => socket.closed, 'released', 2_000); // before the log's copy arrived
+    expect(opened(await h.channels.open(PROJECT)).pending).toEqual([{ nonce: lost.nonce, text: 'never acked', to: '*', state: 'not-sent' }]);
+    const again = await until(() => (h.sockets.length === 2 ? h.last() : null), 'a socket again');
+    again.welcome();
+    await sleep(20);
+    expect(again.sent.some((f) => f.t === 'human')).toBe(false); // a word not sent is never sent later
+    h.channels.release(PROJECT);
+    await until(() => again.closed, 'released again', 2_000);
+    expect(opened(await h.channels.open(PROJECT)).pending).toEqual([]);
+  });
+
+  it("keeps a member's words not sent for that member's next open of the project, never another's", async () => {
+    const h = await harness();
+    opened(await h.channels.open(PROJECT));
+    const first = await until(() => h.last(), 'a socket');
+    const lost = await h.channels.send(PROJECT, 'mine');
+    if (!lost.ok) throw new Error('unsent');
+    h.channels.release(PROJECT);
+    await until(() => first.closed, 'released', 2_000);
+    const ours = h.signedIn();
+    h.session.set({ ...ours, identity: { ...ours.identity, member: h.o.B } });
+    expect(opened(await h.channels.open(PROJECT)).pending).toEqual([]);
+    const second = await until(() => (h.sockets.length === 2 ? h.last() : null), 'a socket again');
+    h.channels.release(PROJECT);
+    await until(() => second.closed, 'released again', 2_000);
+    h.session.set(ours);
+    expect(opened(await h.channels.open(PROJECT)).pending).toEqual([{ nonce: lost.nonce, text: 'mine', to: '*', state: 'not-sent' }]);
   });
 
   it('addresses a session whose joined the bound let go, from the cache after a reload, and tells the sessions', async () => {

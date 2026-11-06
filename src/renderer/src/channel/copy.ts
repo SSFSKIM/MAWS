@@ -33,7 +33,7 @@ export const CHANNEL = {
   waiting: 'Waiting on you',
   sending: 'sending',
   notSent: 'Not sent',
-  refused: (reason: string) => (reason === 'not-reachable' ? 'Not reachable' : reason === 'context-changed' ? 'Not sent: another sign-in took over' : `Not sent · ${reason}`),
+  refused: (reason: string) => (reason === 'not-reachable' ? 'Not reachable' : `Not sent · ${reason}`),
   asOf: (time: string) => `As of ${time}`,
   offline: {
     connecting: 'Connecting to the hub…',
