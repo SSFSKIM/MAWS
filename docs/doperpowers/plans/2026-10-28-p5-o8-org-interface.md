@@ -3101,7 +3101,7 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   Date/Author: 2026-11-06, O8's executor (controller), from Task 1's report.
 
 - Decision: M7a Task 2, the renderer (3d355c066..7d113efb3), settles these points where the spec was silent.
-  1. §N's `ChannelEntry` is a renderer type. Every entry carries `key`, `label` and `by?`. An `exchange` carries its `says`, so it opens in place. `say.owners` are `OrgMember`s, labelled with M5's `ownersLabel`. A `words` entry has `you`, `to: … | null` and `state?: 'sending' | 'sent' | 'not-sent' | {refused}`, in place of §N's `sending?`/`refused?`. A word not yet in the log has `offset: null` and `at: null`.
+  1. §N's `ChannelEntry` is a renderer type. Every entry carries `key`, `label` and `by?`. An `exchange` carries its `says`, so it opens in place. `say.owners` are `OrgMember`s, labelled with M5's `ownersLabel`. A `words` entry has `you`, `to` and `state?: 'sending' | 'sent' | 'not-sent' | {refused}`, in place of §N's `sending?`/`refused?`. A word not yet in the log has `offset: null` and `at: null`.
   2. "Not sent" holds within the app's life, not across a relaunch. Main is the single source of a word's state (`sending`, `sent`, `not-sent`, `{refused}`), and the renderer draws it (the review's findings, superseding the first build's page-memory book and Task 1 item 6's last sentence).
      - Every pending word stays bound to the org, member and device that signed it. A channel exposes only the current context's words, and another context's are neither shown, resent nor refused.
      - An acknowledged word stays pending as `sent` until the log holds its nonce. At release (30 s after the last tab) it is dropped, since the log has it.
