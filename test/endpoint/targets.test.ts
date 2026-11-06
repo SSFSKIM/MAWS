@@ -16,6 +16,7 @@ import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { ClientRef } from '@shared/ipc/client';
+import type { SessionReport } from '../../src/endpoint/listings';
 import { Members, type Marks } from '../../src/endpoint/rl10/members';
 import type { RecordSource, SessionRecord, SessionTarget } from '../../src/endpoint/sources';
 import { EndpointState } from '../../src/endpoint/state/store';
@@ -264,11 +265,13 @@ class SminosRecords extends Records {
   }
 }
 
-const launchedBy = (member: string) => ({ member, device: 'b1', opId: 'op-spawn-000000000001', action: null });
+const launchedBy = (member: string, opId = 'op-spawn-000000000001') => ({ member, device: 'b1', opId, action: null });
+/** The sealed spawn act sminos's record keeps in its `ownersProof` (the proof file's action: its device and opId). */
+const spawnProof = (opId: string) => ({ device: 'b1', opId, action: 'session.spawn' });
 /** A lane B session `member` spawned: the spine's record (its `launchedBy`; its engine session, or none yet) and the engine host's live row. */
-function spawned(f: Fixture, app: string, member: string, engine: { recorded: string | null; live: string }): HostSession {
+function spawned(f: Fixture, app: string, member: string, engine: { recorded: string | null; live: string }, opId?: string): HostSession {
   const s = f.host.add(app, engine.live);
-  f.spine.set(app, engine.recorded, { launchedBy: launchedBy(member) });
+  f.spine.set(app, engine.recorded, { launchedBy: launchedBy(member, opId) });
   return s;
 }
 /** sminos's member frame of a lane B session. */
@@ -550,5 +553,211 @@ describe('the spawner as owner (P5 O12 M11)', () => {
     expect(await statusOf(b, 'app-kept')).toBe('grade'); // handed off before this start: no bridge
     await until(() => !handedOff(f).includes('app-deleted'), 'the deleted app session pruned');
     expect(handedOff(f)).toEqual(['app-kept']);
+  });
+});
+
+// ---- P5 Decision Log 190, residue (b): a record the join can't place, placed by its spawn's opId -----------------------
+
+/**
+ * A `Members` on a machine the test states, its mark in memory: `engine.sessions` answers the engine host's live rows when
+ * `gate` opens (at once without one), so a `/clear` can land while it is in flight; `session.list` the spine's records.
+ */
+function membersOf(machine: { live(): Array<{ appSessionId: string; engineSessionId: string }>; records(): Array<Record<string, unknown>>; gate?: Promise<void>; listGate?: Promise<void> }): { members: Members; reads: string[]; reports: SessionReport[]; changes: SessionTarget[] } {
+  const reads: string[] = [];
+  const reports: SessionReport[] = [];
+  const changes: SessionTarget[] = [];
+  const members = new Members({
+    dispatch: async (_owner, name) => {
+      reads.push(name);
+      if (name === 'engine.sessions') {
+        await machine.gate;
+        return { t: 'res', id: '0', ok: true, value: machine.live() };
+      }
+      if (name === 'session.list') {
+        await machine.listGate;
+        return { t: 'res', id: '0', ok: true, value: { sessions: machine.records(), revision: 1 } };
+      }
+      return { t: 'res', id: '0', ok: false, error: { code: 'unknown_command', message: name } };
+    },
+    listings: { report: async (report) => void reports.push(report), gone: async () => {} },
+    listed: () => [],
+    forget: () => {},
+    log: () => {},
+    now: Date.now,
+  });
+  members.onChange((target) => changes.push(target));
+  return { members, reads, reports, changes };
+}
+const laneB = (session: string, appSessionId: string): SessionTarget => ({ lane: 'B', session, appSessionId });
+
+describe('a record the join can’t place under its app session, placed by its spawn’s opId (P5 Decision Log 190, residue (b))', () => {
+  it('after a `/clear` before the first record arrived: placed, the mark passed, the bridge closed on the new engine session', async () => {
+    const f = await startEndpoint(org, started, withSminosRecords());
+    const s = spawned(f, 'app-c', org.B, { recorded: 'eng-1', live: 'eng-1' }, 'op-c');
+    const sm = await sminos(f);
+    const b = await openRemote(f, org.b1, org.B);
+    // the conversation goes on as eng-2 before sminos's first record, of eng-1, reaches the endpoint
+    s.engineSessionId = 'eng-2';
+    f.spine.set('app-c', 'eng-2', { launchedBy: launchedBy(org.B, 'op-c') });
+    expect(await statusOf(b, 'app-c')).toBe('ok'); // the bridge: no record seen yet
+    // the first record names other owners (O8 moving them in the session's first seconds)
+    sm.send({ t: 'member', ...laneBMember('eng-1', [org.C], { access: 'private', ownersProof: [spawnProof('op-c')] }) });
+    await until(() => handedOff(f).includes('app-c'), 'the hand-off on disk');
+    expect(f.endpoint.rl10.members.appSessionId('eng-1')).toBe('app-c');
+    expect(marksOf(f).engineSessionIds).toEqual([]);
+    expect(await statusOf(b, 'app-c')).toBe('grade');
+  });
+
+  it('after a `/clear` while the join’s `engine.sessions` was in flight', async () => {
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => (open = resolve));
+    let live = 'eng-1';
+    const { members } = membersOf({
+      live: () => [{ appSessionId: 'app-f', engineSessionId: live }],
+      records: () => [{ appId: 'app-f', engineSessionId: live, launchedBy: launchedBy(org.B, 'op-f') }],
+      gate,
+    });
+    const joined = members.member(laneBMember('eng-1', [org.C], { access: 'private', ownersProof: [spawnProof('op-f')] }));
+    live = 'eng-2'; // the `/clear`, which the engine host's answer follows
+    open();
+    await joined;
+    expect(members.appSessionId('eng-1')).toBe('app-f');
+    expect(members.handedOff(laneB('eng-2', 'app-f'))).toBe(true);
+  });
+
+  it('fails closed on an opId two app sessions share (reused after KEPT_S): placed under neither, both handed off', async () => {
+    const { members } = membersOf({
+      live: () => [{ appSessionId: 'app-new', engineSessionId: 'eng-n2' }],
+      records: () => [
+        { appId: 'app-old', engineSessionId: 'eng-old', launchedBy: launchedBy(org.A, 'op-reused') },
+        { appId: 'app-new', engineSessionId: 'eng-n2', launchedBy: launchedBy(org.B, 'op-reused') },
+      ],
+    });
+    await members.member(laneBMember('eng-n1', [org.C], { access: 'private', ownersProof: [spawnProof('op-reused')] }));
+    expect(members.appSessionId('eng-n1')).toBeNull();
+    expect(members.handedOff(laneB('eng-n2', 'app-new'))).toBe(true);
+    expect(members.handedOff(laneB('eng-old', 'app-old'))).toBe(true);
+  });
+
+  // the review's finding: the ambiguous hand-off places nothing, so it must tell each candidate's held subscriptions itself
+  it('ends a subscription its spawner holds by the bridge on a candidate of a shared opId', async () => {
+    const f = await startEndpoint(org, started, withSminosRecords());
+    spawned(f, 'app-old', org.A, { recorded: 'eng-old', live: 'eng-old' }, 'op-reused');
+    const s = spawned(f, 'app-new', org.B, { recorded: 'eng-n1', live: 'eng-n1' }, 'op-reused');
+    const sm = await sminos(f);
+    s.engineSessionId = 'eng-n2';
+    f.spine.set('app-new', 'eng-n2', { launchedBy: launchedBy(org.B, 'op-reused') });
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await subscribe(b, 'sb', { lane: 'B', id: 'app-new' })).toMatchObject({ t: 'subbed' });
+    const from = b.inbox.length;
+    sm.send({ t: 'member', ...laneBMember('eng-n1', [org.C], { access: 'private', ownersProof: [spawnProof('op-reused')] }) });
+    expect(await waitFor(b, (m) => m.sub === 'sb' && m.t === 'ended', 'the held subscription’s end', from)).toMatchObject({ reason: 'removed' });
+    expect(handedOff(f).sort()).toEqual(['app-new', 'app-old']);
+  });
+
+  it('tells the app session’s listeners of a hand-off it passed for a member gone during the lookup', async () => {
+    let open!: () => void;
+    const listGate = new Promise<void>((resolve) => (open = resolve));
+    const { members, reads, changes } = membersOf({ live: () => [], records: () => [{ appId: 'app-g', engineSessionId: 'eng-2', launchedBy: launchedBy(org.B, 'op-g') }], listGate });
+    const joined = members.member(laneBMember('eng-1', [org.C], { access: 'private', ownersProof: [spawnProof('op-g')] }));
+    await until(() => reads.includes('session.list'), 'the lookup');
+    await members.gone('eng-1');
+    open();
+    await joined;
+    expect(members.appSessionId('eng-1')).toBeNull();
+    expect(members.handedOff(laneB('eng-2', 'app-g'))).toBe(true);
+    expect(changes).toContainEqual(laneB('eng-1', 'app-g'));
+  });
+
+  // the review's finding: a predecessor's record placed by its spawn after its successor's never replaces the listing
+  it('never lets a superseded record placed by its spawn replace the listing its successor reported', async () => {
+    let live = 'eng-2';
+    const { members, reports } = membersOf({ live: () => [{ appSessionId: 'app-s', engineSessionId: live }], records: () => [{ appId: 'app-s', engineSessionId: live, launchedBy: launchedBy(org.B, 'op-s') }] });
+    await members.member(laneBMember('eng-2', [org.C], { access: 'private', ownersProof: [spawnProof('op-s')] }));
+    expect(members.appSessionId('eng-2')).toBe('app-s');
+    await members.member(laneBMember('eng-1', [org.B], { access: 'org-view', ownersProof: [spawnProof('op-s')] }));
+    expect(members.appSessionId('eng-1')).toBe('app-s');
+    expect(reports.at(-1)).toMatchObject({ session: 'app-s', owners: [org.C], access: 'private' });
+    // and once the successor is gone, the predecessor is what the app session has
+    live = 'eng-1';
+    await members.gone('eng-2');
+    await members.member(laneBMember('eng-1', [org.B], { access: 'listed', ownersProof: [spawnProof('op-s')] }));
+    expect(reports.at(-1)).toMatchObject({ session: 'app-s', owners: [org.B], access: 'listed' });
+  });
+
+  // the review's round 2: the record joined by its spawn may be the successor (the host away at the `/clear`, the index
+  // lagging it), so the listing a departing predecessor leaves is reported again from the record that stays
+  it('reports the listing from the record that stays once the predecessor it deferred to leaves', async () => {
+    let live: Array<{ appSessionId: string; engineSessionId: string }> = [{ appSessionId: 'app-s', engineSessionId: 'eng-old' }];
+    const { members, reports } = membersOf({ live: () => live, records: () => [{ appId: 'app-s', engineSessionId: 'eng-old', launchedBy: launchedBy(org.B, 'op-s') }] });
+    await members.member(laneBMember('eng-old', [org.B], { access: 'listed', ownersProof: [spawnProof('op-s')] }));
+    live = []; // the engine host away at the `/clear`
+    await members.member(laneBMember('eng-new', [org.C], { access: 'private', ownersProof: [spawnProof('op-s')] }));
+    expect(members.appSessionId('eng-new')).toBe('app-s');
+    expect(reports.at(-1)).toMatchObject({ owners: [org.B], access: 'listed' });
+    await members.gone('eng-old');
+    expect(reports.at(-1)).toMatchObject({ session: 'app-s', owners: [org.C], access: 'private' });
+  });
+
+  // the review's round 3: a record joined by its spawn that the live rows name later is theirs from then on
+  it('lets no delayed predecessor replace the listing of a spawn-joined record the recovered host has since named', async () => {
+    let live: Array<{ appSessionId: string; engineSessionId: string }> = [];
+    const { members, reports } = membersOf({ live: () => live, records: () => [{ appId: 'app-s', engineSessionId: 'eng-new', launchedBy: launchedBy(org.B, 'op-s') }] });
+    await members.member(laneBMember('eng-new', [org.C], { access: 'private', ownersProof: [spawnProof('op-s')] })); // the host away
+    live = [{ appSessionId: 'app-s', engineSessionId: 'eng-new' }]; // and back
+    await members.member(laneBMember('eng-old', [org.B], { access: 'listed', ownersProof: [spawnProof('op-s')] }));
+    expect(members.appSessionId('eng-old')).toBe('app-s');
+    expect(reports.at(-1)).toMatchObject({ session: 'app-s', owners: [org.C], access: 'private' });
+  });
+
+  // the review's round 4: with both records joined by their spawn (the host away), the spine names the current one, so
+  // whichever lookup finishes last, the predecessor never replaces its successor's listing
+  it('lists the record the spine names current when both were joined by their spawn, whichever lookup ends last', async () => {
+    const { members, reports } = membersOf({ live: () => [], records: () => [{ appId: 'app-s', engineSessionId: 'eng-new', launchedBy: launchedBy(org.B, 'op-s') }] });
+    await members.member(laneBMember('eng-new', [org.C], { access: 'private', ownersProof: [spawnProof('op-s')] }));
+    expect(reports.at(-1)).toMatchObject({ session: 'app-s', owners: [org.C], access: 'private' });
+    await members.member(laneBMember('eng-old', [org.B], { access: 'listed', ownersProof: [spawnProof('op-s')] }));
+    expect(members.appSessionId('eng-old')).toBe('app-s');
+    expect(reports.at(-1)).toMatchObject({ session: 'app-s', owners: [org.C], access: 'private' });
+  });
+
+  // the record executors' refinement: sminos appends a `record.owners` act to `ownersProof`, so the spawn's act is found
+  // by its action, never taken from index 0
+  it('places by the proof that is the spawn’s act, never by another act whose opId a `launchedBy` happens to name', async () => {
+    const machine = { live: () => [], records: () => [{ appId: 'app-o', engineSessionId: 'eng-2', launchedBy: launchedBy(org.B, 'op-o') }] };
+    const ownersAct = { device: 'b1', opId: 'op-o', action: 'record.owners' };
+    const alone = membersOf(machine);
+    await alone.members.member(laneBMember('eng-1', [org.C], { access: 'private', ownersProof: [ownersAct] }));
+    expect(alone.members.appSessionId('eng-1')).toBeNull();
+    expect(alone.members.handedOff(laneB('eng-2', 'app-o'))).toBe(false);
+    expect(alone.reads).toEqual(['engine.sessions']);
+    const behind = membersOf(machine);
+    await behind.members.member(laneBMember('eng-1', [org.C], { access: 'private', ownersProof: [{ ...ownersAct, opId: 'op-other' }, spawnProof('op-o')] }));
+    expect(behind.members.appSessionId('eng-1')).toBe('app-o');
+  });
+
+  it('leaves a record unplaced, as before, without a proof or without a spine record whose `launchedBy` it names', async () => {
+    const machine = {
+      live: () => [{ appSessionId: 'app-u', engineSessionId: 'eng-2' }],
+      records: () => [
+        { appId: 'app-u', engineSessionId: 'eng-2', launchedBy: launchedBy(org.B, 'op-u') },
+        { appId: 'app-plain', engineSessionId: 'eng-p' },
+      ],
+    };
+    // no proof: the spine is not read
+    const bare = membersOf(machine);
+    await bare.members.member(laneBMember('eng-1', [org.C], { access: 'private' }));
+    expect(bare.members.appSessionId('eng-1')).toBeNull();
+    expect(bare.members.handedOff(laneB('eng-2', 'app-u'))).toBe(false);
+    expect(bare.reads).toEqual(['engine.sessions']);
+    // a proof whose opId no spine record's `launchedBy` names (and a proof that names none)
+    for (const proof of [spawnProof('op-elsewhere'), { device: 'b1' }]) {
+      const { members, reads } = membersOf(machine);
+      await members.member(laneBMember('eng-1', [org.C], { access: 'private', ownersProof: [proof] }));
+      expect(members.appSessionId('eng-1')).toBeNull();
+      expect(members.handedOff(laneB('eng-2', 'app-u'))).toBe(false);
+      expect(members.handedOff(laneB('eng-1', ''))).toBe(true); // its own engine session's mark, as before
+      expect(reads).toEqual('opId' in proof ? ['engine.sessions', 'session.list'] : ['engine.sessions']);
+    }
   });
 });
