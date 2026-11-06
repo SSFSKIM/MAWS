@@ -8,11 +8,13 @@ import { basename, join } from 'node:path';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import { BrowserRefused, type BrowserFeed, type BrowserFrame, type BrowserInput, type BrowserInventory, type BrowserSubscription } from '@shared/browser/screencast';
 import { PEER_CAPABILITIES, type DocumentsOpen } from '@shared/host/socket-protocol';
+import type { NewHostEntry } from '@shared/ipc/schema/channel';
 import type { MachineRef } from '@shared/machine/ref';
 import { endpointLibrary, type ContentLookup } from '../../src/services/artifacts/scheme/endpoint-library';
 import type { EndpointServices } from '../../src/endpoint/services';
 
-export type FakeServices = EndpointServices & { lines: string[]; holds: Set<string>; cleanup(): void };
+/** `recorded`: each entry handed to the project channel's journal (P5 O8 M7b), in order. */
+export type FakeServices = EndpointServices & { lines: string[]; holds: Set<string>; recorded: NewHostEntry[]; cleanup(): void };
 
 /** A fresh ref as `mawsd` mints one: 22 base64url characters, or `<prefix>_` and 22 under a delegation. */
 export const mintRef = (prefix?: string) => `${prefix === undefined ? '' : `${prefix}_`}${randomBytes(16).toString('base64url')}` as MachineRef;
@@ -25,6 +27,7 @@ export function fakeServices(options: { ref?: MachineRef; kind?: 'unit' | 'priva
   fs.chmodSync(stateDir, 0o700);
   const lines: string[] = [];
   const holds = new Set<string>();
+  const recorded: NewHostEntry[] = [];
   const none = () => () => {};
   return {
     machine: { ref: options.ref ?? mintRef(), profileDir, stateDir, kind: options.kind ?? 'private' },
@@ -51,9 +54,12 @@ export function fakeServices(options: { ref?: MachineRef; kind?: 'unit' | 'priva
     },
     // P5 O7 M8: an engine host of this build behind the link (a suite stands in an older one by replacing it)
     engineHostLists: (capability) => (PEER_CAPABILITIES.engineHost as readonly string[]).includes(capability),
+    // P5 O8 M7b: the project channel's journal, which keeps what it is handed (a suite reads `recorded`)
+    channel: { record: (entry) => void recorded.push(entry) },
     log: (line) => void lines.push(line),
     lines,
     holds,
+    recorded,
     cleanup: () => fs.rmSync(profileDir, { recursive: true, force: true }),
   };
 }
