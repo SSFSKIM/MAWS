@@ -21,13 +21,13 @@ function useMachineOfName(name: string | null): MachineRef | null {
 /**
  * T1 and T2 for a log's machine name: the roster's chip (`@<name>`, "offline", nothing for this Mac) when the roster
  * names that machine, else the name the log carries, as another machine's. In a line too narrow for it the chip gives
- * way before the alias beside it (`Party`): it sits in a box that shrinks three times as readily, and truncates in it.
+ * way and truncates, before the alias beside it (`Party`) gives any.
  */
 export function MachineName({ name }: { name: string | null }) {
   const ref = useMachineOfName(name);
   if (ref === null && (name === null || name === '')) return null;
   return (
-    <span className="inline-flex min-w-0 shrink-[3]">
+    <span className="inline-flex min-w-0 shrink-[2]">
       {ref !== null ? (
         <MachineChip address={addressOf(ref, 'channel')} className="max-w-full" />
       ) : (
@@ -39,12 +39,15 @@ export function MachineName({ name }: { name: string | null }) {
   );
 }
 
-/** A session as the stream names it: its alias, its title faint beside it, its machine's chip; the alias gives way last. */
+/**
+ * A session as the stream names it: its alias, its title faint beside it, its machine's chip. The alias is drawn whole
+ * up to 24 characters and never gives way; the title, then the chip, truncate first.
+ */
 export function Party({ party, title = true }: { party: ChannelParty; title?: boolean }) {
   return (
     <span data-channel-party={party.session} className="inline-flex min-w-0 items-baseline gap-1.5" title={party.title ?? undefined}>
-      <span className="min-w-0 truncate font-medium text-fg">{party.alias}</span>
-      {title && party.title !== null && <span className="min-w-0 shrink-[2] truncate text-fg-muted">{party.title}</span>}
+      <span className="max-w-[24ch] shrink-0 truncate font-medium text-fg">{party.alias}</span>
+      {title && party.title !== null && <span className="min-w-0 shrink-[4] truncate text-fg-muted">{party.title}</span>}
       <MachineName name={party.machine} />
     </span>
   );
@@ -73,8 +76,11 @@ export function LabelLine({ entry }: { entry: Pick<ChannelEntry, 'label' | 'by'>
   );
 }
 
-/** Whom a message went to, beside its sender: "to @a, @b", nothing for everyone. */
+/**
+ * Whom a message went to, beside its sender: "to @a, @b", nothing for everyone. It gives way, but never below 12
+ * characters (one short alias whole); the room it keeps past a shorter one is the line's own, before the time.
+ */
 export function Recipients({ to }: { to: '*' | readonly { alias: string }[] }) {
   if (to === '*' || to.length === 0) return null;
-  return <span className="min-w-0 truncate text-ui-sm text-fg-muted">{`${CHANNEL.to} ${to.map((r) => `@${r.alias}`).join(', ')}`}</span>;
+  return <span className="min-w-[12ch] truncate text-ui-sm text-fg-muted">{`${CHANNEL.to} ${to.map((r) => `@${r.alias}`).join(', ')}`}</span>;
 }

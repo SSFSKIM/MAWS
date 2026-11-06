@@ -142,10 +142,10 @@ function scenario(): unknown {
 }
 
 // What is wider than its box under `root`: the root and every block that text lands in (an entry, its header, a bubble,
-// a list, a card's own blocks). A text item too wide for its block shows as that block's overflow; a run truncated on
-// purpose (a `truncate` span) is no fault. Each offender as `<tag> "<text>" scrollWidth > clientWidth`.
+// a list, a card's own blocks, a party: its alias, which never gives way, past a party squeezed narrower). A text item
+// too wide for its block shows as that block's overflow; a run truncated on purpose (a `truncate` span) is no fault. Each offender as `<tag> "<text>" scrollWidth > clientWidth`.
 function overflowing(root: Element): string[] {
-  return [root, ...Array.from(root.querySelectorAll('article, section, header, div, p, ol, ul, li, h2, button'))]
+  return [root, ...Array.from(root.querySelectorAll('article, section, header, div, p, ol, ul, li, h2, button, [data-channel-party]'))]
     .filter((el) => el.scrollWidth > el.clientWidth)
     .map((el) => `${el.tagName.toLowerCase()}${el.hasAttribute('data-channel-entry') ? `[${el.getAttribute('data-channel-entry')}]` : ''} "${(el.textContent ?? '').slice(0, 60)}" ${el.scrollWidth} > ${el.clientWidth}`);
 }
