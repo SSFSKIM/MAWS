@@ -758,6 +758,8 @@ const o5Events = {
 // it admits their `trust`), an unknown checkout for anyone else and for `sminos.spawn`. A registered checkout is an absolute
 // path, so it is never this; the field's shape is DX6's as before, and an older endpoint answers it `unknown-checkout`.
 export const HOME_CHECKOUT = '~';
+/** The RL2 capability an endpoint lists when it takes HOME_CHECKOUT (src/endpoint/capabilities.ts). */
+export const SPAWN_HOME_CAPABILITY = 'rl2.spawn-home';
 export const SessionSpawnInputSchema = z.strictObject({
   checkout: z.string().min(1),
   worktree: z.string().min(1).optional(),
