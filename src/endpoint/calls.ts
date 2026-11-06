@@ -27,6 +27,9 @@
 //     nothing of another session. A session the spine can't place answers `unavailable`. `session.search` answers at most
 //     SESSION_SEARCH_LIMIT hits, so its input names the sessions the caller views (`sessions`, from `session.list`'s
 //     records), applied by the store before its limit; a full page the cut still took hits from says `incomplete`.
+//   - P5 O8 M7b: `channel.history` takes the same shape over a project's to-human entries, its cut lane-aware
+//     (channel-view.ts): a lane A entry ranked by its engine session's sminos record, a lane B one by its app session's
+//     placements; the journal is read until the caller's page is full of entries they view, or it ends.
 //   - P5 O7 M5a: `library.list` takes the same shape over its rows: each row's own sessions (`LibraryRowSchema.sessions`,
 //     the index's view of the artifact's links) are what it names, and a row is kept when the caller holds `view` on its
 //     artifact by the `artifact` rule's predicate (artifacts.ts' `holdsArtifact`): on any one of its sessions, at every
@@ -63,8 +66,10 @@ import { FOLLOW_OWNERS_CAPABILITY } from '@shared/host/socket-protocol';
 import { gradeOf } from '@shared/ipc/grades';
 import { remoteDaemonStatus, type DaemonStatus } from '@shared/ipc/schema/daemon';
 import { SESSION_SEARCH_LIMIT, SESSION_SEARCH_SESSIONS_MAX } from '@shared/ipc/schema/session';
+import { HISTORY_LIMIT_MAX } from '@shared/ipc/schema/channel';
 import { holdsArtifact, type ArtifactRanks, type CachedPlacement } from './artifacts';
 import { holdsToSchema, type SessionRanks } from './authorize';
+import { cutPage, placeInto, readHistory, viewable } from './channel-view';
 import { writeBytes } from './bytes';
 import type { RemoteChannel } from './channels';
 import type { Granted } from './gate';
@@ -280,7 +285,8 @@ export class Calls {
     const by = () => (decision.askedAt ?? this.ctx.now()) + (this.ctx.acquireWithinMs ?? ACQUIRE_WITHIN_MS);
     // What runs answers a result, or (an `each-session` row) the step that makes it, taken as the answer goes.
     let run: Promise<Result | (() => Result)>;
-    if (row?.target === 'each-session') run = this.#eachSession(dispatch, channel.member, m);
+    if (row?.target === 'each-session' && m.name === 'channel.history') run = this.#channelHistory(dispatch, channel.member, m);
+    else if (row?.target === 'each-session') run = this.#eachSession(dispatch, channel.member, m);
     else if (m.name === 'connectors.open' && row?.executor === 'machine') run = this.#open(dispatch, channel, m, by());
     else if (m.name === 'connectors.close' && row?.executor === 'machine') run = this.#close(dispatch, channel, m);
     else if (m.name === 'delivery.receipts' && row?.executor === 'machine') run = this.#receipts(dispatch, channel, m);
@@ -461,6 +467,37 @@ export class Calls {
       if (!ranks.current()) return { ok: false, code: 'unavailable' };
       const seen = (id: string): Placement[] => [...(listed.has(id) ? [listed.get(id)!] : []), placed.get(id) ?? null, ...(heard.get(id) ?? [])];
       return { ok: true, output: filter.keep(output, (id) => id !== null && seen(id).every((placement) => ranks.holds(placement, grade)), ranks.ownsMachine(), asked) };
+    };
+  }
+
+  /**
+   * P5 O8 M7b: a project's to-human entries (`channel.history`, the `each-session` shape, its cut lane-aware:
+   * channel-view.ts), answered for the sessions `member` holds `view` on: the journal read until the page is filled with
+   * such entries or it ends, each lane B session placed by its record and held to every placement the call saw of it, a
+   * lane A one ranked by sminos's record; the cut is made as the answer goes, against the records as they stand then.
+   */
+  async #channelHistory(dispatch: EndpointServices['dispatch'], member: string, m: CallMessage): Promise<Result | (() => Result)> {
+    if (!holdsToSchema(m.name, m.input) || !isObject(m.input)) return { ok: false, code: 'malformed' };
+    const input = m.input as { project: string; before?: string; limit?: number };
+    const limit = input.limit ?? HISTORY_LIMIT_MAX;
+    const heard = new Map<string, Placement[]>();
+    this.#heard.add(heard);
+    const placed = new Map<string, Placement>();
+    const seen = (id: string): Placement[] | undefined => (placed.has(id) ? [placed.get(id)!, ...(heard.get(id) ?? [])] : undefined);
+    let ranks: SessionRanks;
+    let read: Awaited<ReturnType<typeof readHistory>>;
+    try {
+      ranks = await this.ctx.ranks(member);
+      read = await readHistory(dispatch, { project: input.project, ...(input.before === undefined ? {} : { before: input.before }), limit }, (ids) => placeInto(placed, ids, dispatch), (entry) => viewable(entry, ranks, seen));
+    } catch (error) {
+      this.#heard.delete(heard);
+      this.ctx.log(`endpoint: a \`channel.history\` call could not be answered: ${(error as Error).message}`);
+      return { ok: false, code: 'unavailable' };
+    }
+    return () => {
+      this.#heard.delete(heard);
+      if (!ranks.current()) return { ok: false, code: 'unavailable' };
+      return { ok: true, output: cutPage(read, limit, (entry) => viewable(entry, ranks, seen)) };
     };
   }
 

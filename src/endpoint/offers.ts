@@ -264,6 +264,9 @@ export const OFFERS: Offers = {
     // member (as `endpoint.listings`); the answer keeps only the sessions the caller holds the registry's grade (`view`) on.
     'attention.list': eachSession,
     'session.search': eachSession,
+    // P5 O8 M7b: a project's to-human entries (the journal's `channel.history`), each kept for a caller who views its
+    // session, ranked lane by lane (channel-view.ts): to-human text is the session's content.
+    'channel.history': eachSession,
     // P5 O7 M5a: a remote session's artifacts, by the `artifact` rule: the reads (`view`, O1's) as calls, the writes
     // (`manage`) as engine-host acts with no session (`host.artifactOp`, the claim naming the artifact: actions.ts);
     // `artifacts.list` only with the session it lists (`filter.appSessionId`), `copyAsset` on `to` with `view` on `from`
