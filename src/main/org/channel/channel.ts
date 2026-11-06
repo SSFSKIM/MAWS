@@ -26,7 +26,9 @@
 //   go to the run's not-sent list, which that signer's next open of the project shows `not-sent` (`NotSent`).
 // - The cache is written CHANNEL_WRITE_MS after a change, and last at `close()`: once the channel's own work has run
 //   (joined outside the org session's commit queue), a finished snapshot is entered in that queue, and the queued write
-//   awaits nothing of the channel's (M4a's rule). `close()` resolves once every final write is entered.
+//   awaits nothing of the channel's (M4a's rule). `close()` resolves once every final write is entered. Only the
+//   project's newest channel writes its file: a released one whose work outlives the next open of the project (a
+//   judgment in flight) lets its last snapshot go, so it never replaces the file its successor read and wrote.
 //
 // Electron-free.
 import { isHubWriter, type Certificates, type HistoryAttestation, type Signed, type SignedOrgState } from '../../../../apps/org-protocol/src/index.ts';
@@ -102,6 +104,8 @@ export function createChannels(deps: ChannelsDeps): Channels {
       return null;
     });
   const channels = new Map<string, Channel>();
+  /** Each project's newest channel, by the count of channels made for it: only that one writes the project's file. */
+  const generations = new Map<string, number>();
   /** Released channels still closing. */
   const closing = new Set<Promise<void>>();
   const listeners = new Set<(changed: ChannelChanged) => void>();
@@ -123,6 +127,8 @@ export function createChannels(deps: ChannelsDeps): Channels {
 
   function createChannel(project: string): Channel {
     const log = (line: string) => deps.log(`[org-channel] ${project.slice(0, 8)}: ${line}`);
+    const generation = (generations.get(project) ?? 0) + 1;
+    generations.set(project, generation);
     let held: HeldLog | null = null;
     let queue: Promise<void> = Promise.resolve();
     let stopped = false;
@@ -278,6 +284,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
     /** The cache as it stands, a finished snapshot, entered in the commit queue. */
     function enterWrite(): void {
       if (!dirty || held === null || held.reader === null) return;
+      if (generations.get(project) !== generation) return void log('a newer channel holds the cache: the last snapshot is let go');
       dirty = false;
       const file = held.file();
       deps.commit(() => deps.store.write(project, file)).catch((error: unknown) => log(`the cache was not written: ${(error as Error).message}`));

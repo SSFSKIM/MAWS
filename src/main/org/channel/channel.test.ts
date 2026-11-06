@@ -7,7 +7,7 @@
 //
 // `org.channel.changed` is a delta: the harness folds the open answer and each change after it as a renderer does
 // (`latest()`), so every case checks what a tab would draw; `told()` is the last change as sent.
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NO_CERTIFICATES, type HistoryAttestation, type OrgView, type Signed } from '../../../../apps/org-protocol/src/index.ts';
 import { ChannelOrg, NOW, ORG, PROJECT, S1, S2 } from '../../../../test/org/channel-world';
 import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelSession, ChannelWord } from '@shared/ipc/schema/org';
@@ -16,6 +16,19 @@ import type { WebSocketLike } from '../registry-feed';
 import { heldOrgSession, type SignedIn } from '../session';
 import { emptyLog, type ChannelCacheFile, type ChannelStore } from './cache';
 import { createChannels, type Channels } from './channel';
+
+/** A judgment of an event whose text is `held.text` waits for `held.until`: a verification still in flight. */
+const held = vi.hoisted(() => ({ text: null as string | null, until: Promise.resolve() }));
+vi.mock('./verify', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./verify')>();
+  return {
+    ...real,
+    judgeEvent: async (event: unknown, judging: Parameters<typeof real.judgeEvent>[1]) => {
+      if (held.text !== null && (event as { text?: unknown }).text === held.text) await held.until;
+      return real.judgeEvent(event, judging);
+    },
+  };
+});
 
 type Listener = (...args: never[]) => void;
 
@@ -635,6 +648,44 @@ describe('a project channel', () => {
     expect(ran).toBe(true);
     read();
     await Promise.all([opening, closing]);
+  });
+
+  // the branch re-review's finding: a channel released while a judgment is in flight writes last, after the project's
+  // next channel, so only the project's current channel may write its file
+  it("never lets a released channel's last snapshot replace the file of the project's channel after it", async () => {
+    const h = await harness();
+    opened(await h.channels.open(PROJECT)); // A
+    const first = await until(() => h.last(), "A's socket");
+    first.welcome();
+    first.frame({ t: 'log', events: [{ offset: 1, event: await h.o.say(h.o.mini, 1, 'first') }] });
+    first.frame({ t: 'caught-up', offset: 1 });
+    await until(() => h.writes.at(-1)?.after === 1, "A's cache written");
+    let judged!: () => void;
+    held.text = 'judged slowly';
+    held.until = new Promise<void>((resolve) => (judged = resolve));
+    first.frame({ t: 'log', events: [{ offset: 10, event: await h.o.say(h.o.mini, 2, 'judged slowly') }] }); // in flight
+    h.channels.release(PROJECT);
+    await until(() => first.closed, 'A released', 2_000);
+    opened(await h.channels.open(PROJECT)); // B, from the file A wrote at 1
+    const second = await until(() => (h.sockets.length === 2 ? h.last() : null), "B's socket");
+    second.welcome();
+    expect(second.sent).toEqual([{ t: 'resume', after: 1 }]);
+    const said = await h.channels.send(PROJECT, "B's word");
+    if (!said.ok) throw new Error('unsent');
+    const draft = (second.sent.find((f) => f.t === 'human') as { event: Record<string, unknown> }).event;
+    second.frame({ t: 'log', events: [{ offset: 20, event: { ts: new Date(NOW).toISOString(), writer: `hub/${h.o.A}`, seq: 1, ...draft } }] });
+    second.frame({ t: 'caught-up', offset: 20 });
+    await until(() => h.writes.at(-1)?.after === 20, "B's cache written", 1_000).finally(() => judged());
+    // A's judgment lands, and A's last snapshot after it
+    held.text = null;
+    await sleep(50);
+    await h.commit(async () => {});
+    expect(h.files.get(PROJECT)).toMatchObject({ after: 20 });
+    h.channels.release(PROJECT);
+    await until(() => second.closed, 'B released', 2_000);
+    h.session.set(h.signedIn(false)); // the hub away
+    const reopened = opened(await h.channels.open(PROJECT));
+    expect(reopened.events.map((e) => e.event.nonce)).toContain(said.nonce);
   });
 
   it('writes its cache through the commit queue at close, and nothing after', async () => {
