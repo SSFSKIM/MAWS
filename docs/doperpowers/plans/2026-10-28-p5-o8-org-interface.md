@@ -1425,7 +1425,13 @@ Rejected:
 
 The door adds no authority. An act through it is authenticated by its step-up signature alone, checked every time, and then authorized against the head as over a channel. It carries the three record acts and the one read, nothing else.
 
-*The CLI's widening.* Once these offers are on master, the desk track makes `sminos access` and `sminos share` refuse every widening with "use MAWS", and keep narrowing (the architect's brief, 2026-11-06).
+*The endpoint says `record` too.* The endpoint's RL10 welcome to sminos (its `capabilities`, `["access", "reach"]` today) gains `record` exactly when the build serves the three `record.*` offers, added in the same commit as them. It means "this machine's sessions can be widened from any member's MAWS through this endpoint", so a headless machine's endpoint advertises it too.
+- sminos 1.39.0 keys its CLI cutover on it: it refuses widening at the terminal ("use MAWS") only where its endpoint said `record`. It keeps that word across the endpoint being away, and lifts it only at a later welcome without it (a MAWS rollback).
+- The change moves the welcome's lines in `test/endpoint/rl10/conversation.json`, the blob the desk track's sminos conformance replay pins. Before M6b's PR, the new blob hash and the changed lines go to the desk track by `sminos say`, and the architect is told.
+- `record-acts.test.ts` proves the welcome carries `record` when the offers are registered, and not in a build without them.
+(Agreed by the architect and the desk track, 2026-11-06.)
+
+*The CLI's widening.* Once these offers are on master, the desk track makes `sminos access` and `sminos share` refuse every widening with "use MAWS", and keep narrowing (the architect's brief, 2026-11-06). The cutover follows each machine's own endpoint's `record`, so it no longer waits on M6b's landing date.
 - The exception, by the desk track's ruling: a machine enrolled at no hub keeps the terminal gate.
 - That, and this milestone, are preconditions of a second member joining production.
 - M6b's PR body says so, and the shared staging run checks it.
@@ -2326,6 +2332,9 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
         args: { session: <sid>, …the change }, fingerprint, proof: <the act verbatim> } }
     // <sid>: the id that keys sminos's record; lane B's through members.ts's join; unplaced -> refused 'no-session', nothing sent
     // gated by sminos's RL10 hello capability 'record'; sminos's target_of is {session: args.session}, a session of a hub project joined from this machine
+    // the endpoint's RL10 welcome to sminos (today capabilities ["access", "reach"]) gains 'record' exactly when this build serves the three record.* offers, headless machines too:
+    //   "this machine's sessions can be widened from any member's MAWS through this endpoint"; sminos 1.39.0 keys its "use MAWS" cutover on it (sticky across the endpoint's absence,
+    //   lifted only by a later welcome without it); test/endpoint/rl10/conversation.json's welcome lines change, and the desk track gets the new blob hash and lines by sminos say before M6b's PR
     // outcome: done {changed, policyRev} (changed: false is a no-op, no revision); refusals shown: no-session, unsupported, bad-shape, read-only (sminos);
     //   stale, expired, tombstoned (the ledger); not-offered, no-session (endpoint); cancelled (step-up)
 
