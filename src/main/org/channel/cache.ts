@@ -12,7 +12,8 @@
 // - Withheld tombstones are not kept. An event that fails is kept, counted (`unverified`) and judged again.
 // - The project's sessions outlive the bound too: each session's latest lifecycle event of each kind (address.ts) that
 //   didn't fail is kept beside the events, in the file, judged again with them and dropped when it fails; a later one
-//   that fails displaces nothing. At most CHANNEL_CACHE_SESSIONS sessions, the most recently named.
+//   that fails displaces nothing, and one held that verifies at a later head enters (the latest offset wins). At most
+//   CHANNEL_CACHE_SESSIONS sessions, the most recently named.
 // - A file that doesn't read as one of this project's (absent, damaged, another project's, another org's when the org
 //   is known) gives an empty log, read from offset 0, which recomputes every checkpoint from the full prefix.
 //
@@ -184,14 +185,22 @@ function makeLog(org: string, project: string, limits: ChannelLimits, held: Chan
     const record = records.get(event.writer);
     return !settled && record !== undefined && event.seq <= record.body.upTo && (checkpoints.get(event.writer)?.upTo ?? 0) < record.body.upTo;
   };
-  /** Evicts the oldest entries while either bound is passed, but an awaited DX1 event; the newest always stays. */
+  /**
+   * Evicts the oldest entries while either bound is passed, but an awaited DX1 event: one per writer and seq, the first
+   * held (the lowest offset), so replayed or conflicting copies are bounded as any others. The newest always stays.
+   */
   const bound = () => {
     if (entries.size <= limits.events && bytes <= limits.bytes) return;
     const offsets = [...entries.keys()].sort((a, b) => a - b);
+    const spared = new Set<string>();
     for (const offset of offsets) {
       if (entries.size <= 1 || (entries.size <= limits.events && bytes <= limits.bytes)) break;
       const { event } = entries.get(offset)!;
-      if (isDx1(event) && awaited(event)) continue;
+      const position = `${event.writer}\n${event.seq}`;
+      if (isDx1(event) && awaited(event) && !spared.has(position)) {
+        spared.add(position);
+        continue;
+      }
       entries.delete(offset);
       bytes -= sizes.get(offset) ?? 0;
       sizes.delete(offset);
@@ -225,7 +234,9 @@ function makeLog(org: string, project: string, limits: ChannelLimits, held: Chan
     for (const entry of [...entries.values()]) {
       if (!writers.has(entry.event.writer)) continue;
       const verdict = await judgeEvent(entry.event, judging(ground));
-      if (verdict !== null) keep({ ...entry, verdict });
+      if (verdict === null) continue;
+      keep({ ...entry, verdict });
+      note({ ...entry, verdict });
     }
     await rejudgeLifecycle(ground, writers);
   }
@@ -281,7 +292,10 @@ function makeLog(org: string, project: string, limits: ChannelLimits, held: Chan
           entries.delete(entry.offset);
           bytes -= sizes.get(entry.offset) ?? 0;
           sizes.delete(entry.offset);
-        } else keep({ ...entry, verdict });
+        } else {
+          keep({ ...entry, verdict });
+          note({ ...entry, verdict }); // a lifecycle event verifying now enters the sessions, latest offset winning
+        }
       }
       await rejudgeLifecycle(ground);
     },
