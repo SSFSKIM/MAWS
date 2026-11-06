@@ -1,12 +1,13 @@
 // Delegations, machine certificates, listings and endpoint records (O11 M4; RL §5.3, RL6): a provisioning key re-issued
 // as a delegation enrolls a VM whose certificate, signed with the delegation's key, the hub stores at its counted use
 // and serves beside the state; the VM's listings and endpoint record are stored at their newest and served to members;
-// a certificate that would contest a live one is refused with the conflict and its remedies; and removing the
-// delegation from the state stops its machines' records from being accepted.
+// a certificate that would contest a live one is refused with the conflict and its remedies; removing the delegation
+// from the state stops its machines' records from being accepted; and a key is renewed to its delegation's `expires`
+// once the head extends it (P5 O8 M4c).
 import { generateSigningKey, keyId, type EndpointRecord, type Listing, type MachineCert, type Signed, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { certify, endpointRecord, enrollDelegated, listing, machineFetch, mintRef, redeemDelegated, retirement, type DelegationKey, type V2Machine } from '../fake-machine/org';
-import { delegationFor, type Listings, type MachineEndpoint, type OrgStateView, type ProvisioningKeyRecord } from '../src/protocol/identity';
+import { delegationFor, MAX_PROVISIONING_KEY_TTL_S, type Listings, type MachineEndpoint, type OrgStateView, type ProvisioningKeyRecord } from '../src/protocol/identity';
 import { provisioningKey, refusal } from './support/clients';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from './support/local';
 import { genesis, newDevice, next, signedBy, type TestDevice } from './support/org';
@@ -164,5 +165,95 @@ describe('a delegated VM', () => {
     expect(await storeEndpoint(await endpointRecord(vm, ['100.64.0.9:7443']))).toBe('403 not-listed');
     const late = await redeemDelegated(hub.url, secret, 'vm-two', delegation);
     expect(await refusal(await machineFetch(hub.url, late.credentials, '/machine/cert', await certify(late, delegation)))).toBe('409 not-listed');
+  });
+});
+
+describe('renewing a provisioning key', () => {
+  const DAY = 86_400_000;
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const renew = (id: string) => hub.fetchAs(ADMIN, `/api/provisioning-keys/${id}/renew`, { method: 'POST' });
+  const redeem = (token: string, machine: string) => hub.fetchAs(null, '/machine/enroll', { body: { token, machine } });
+  const listed = async (id: string) => ((await (await hub.fetchAs(ADMIN, '/api/provisioning-keys')).json()) as { keys: ProvisioningKeyRecord[] }).keys.find((k) => k.id === id)!;
+  let made = 0;
+  /** A key the head re-issued as a delegation, at the key's own `expires`. */
+  async function reissued(request: { max_uses?: number | null } = {}) {
+    const key = await provisioningKey(hub, ADMIN, { label: `renewed ${++made}`, prefix: `rn${made}-`, ...request });
+    const pub = (await generateSigningKey()).pub;
+    await accept((s) => s.delegations.push(delegationFor(key.key, pub, 'org')));
+    return key;
+  }
+  /** The head's delegation of `id` moved to `expires`, as the app signs a renewal. */
+  const extend = (id: string, expires: string) => accept((s) => void (s.delegations.find((d) => d.id === id)!.expires = expires));
+
+  it('takes the head’s delegation’s expires, answering the key as listed and nothing else changed; a machine enrolls past the old date', async () => {
+    const renewed = await reissued({ max_uses: 3 });
+    const stale = await reissued();
+    expect((await redeem(renewed.token, `${renewed.key.prefix}before`)).status).toBe(200);
+    // The hub's copy runs out shortly; the head's delegation is extended well past it.
+    const old = Date.now() + 1500;
+    for (const { id } of [renewed, stale]) await hub.backdate({ key: { id, expires: iso(old) } });
+    const expires = iso(Date.now() + 120 * DAY);
+    await extend(renewed.id, expires);
+    await extend(stale.id, expires);
+    const before = await listed(renewed.id);
+
+    const response = await renew(renewed.id);
+    expect(response.status).toBe(200);
+    const answered = (await response.json()) as ProvisioningKeyRecord;
+    expect(answered).toEqual(await listed(renewed.id));
+    expect(answered).toEqual({ ...before, expires });
+    expect(answered).toMatchObject({ uses: 1, max_uses: 3 });
+
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, old - Date.now()) + 50));
+    expect((await redeem(renewed.token, `${renewed.key.prefix}after`)).status).toBe(200);
+    expect((await listed(renewed.id)).uses).toBe(2);
+    // The key nobody renewed is refused at its old date, whatever the head says.
+    expect(await refusal(await redeem(stale.token, `${stale.key.prefix}after`))).toBe('410 key-expired');
+  });
+
+  it('refuses a key the head holds no delegation of, or one not later than the hub’s, saying to submit the signed state first', async () => {
+    const bare = await provisioningKey(hub, ADMIN, { label: 'never delegated', prefix: 'rn-bare-' });
+    const same = await reissued();
+    const shorter = await reissued();
+    await extend(shorter.id, iso(Date.parse(shorter.key.expires) - DAY));
+    for (const { id } of [bare, same, shorter]) {
+      const before = await listed(id);
+      const response = await renew(id);
+      const answer = (await response.json()) as { error: string; message: string };
+      expect([response.status, answer.error], id).toEqual([409, 'not-renewed']);
+      expect(answer.message).toContain('submit the signed org state');
+      expect(await listed(id)).toEqual(before);
+    }
+  });
+
+  it('refuses a delegation past the cap creation applies, and takes one inside it', async () => {
+    const over = await reissued();
+    await extend(over.id, iso(Date.now() + MAX_PROVISIONING_KEY_TTL_S * 1000 + 60_000));
+    const before = await listed(over.id);
+    expect(await refusal(await renew(over.id))).toBe('409 too-long');
+    expect(await listed(over.id)).toEqual(before);
+
+    const inside = await reissued();
+    const expires = iso(Date.now() + MAX_PROVISIONING_KEY_TTL_S * 1000 - 60_000);
+    await extend(inside.id, expires);
+    const response = await renew(inside.id);
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as ProvisioningKeyRecord).expires).toBe(expires);
+  });
+
+  it('never revives an expired key nor renews a revoked one, however the head extends its delegation', async () => {
+    const expired = await reissued();
+    await extend(expired.id, iso(Date.now() + 120 * DAY));
+    await hub.backdate({ key: { id: expired.id, expires: iso(Date.now() - 1000) } });
+    const lapsed = await listed(expired.id);
+    expect(await refusal(await renew(expired.id))).toBe('410 key-expired');
+    expect(await listed(expired.id)).toEqual(lapsed);
+
+    const revoked = await reissued();
+    await extend(revoked.id, iso(Date.now() + 120 * DAY));
+    expect((await hub.fetchAs(ADMIN, `/api/provisioning-keys/${revoked.id}`, { method: 'DELETE' })).status).toBe(200);
+    const gone = await listed(revoked.id);
+    expect(await refusal(await renew(revoked.id))).toBe('410 key-revoked');
+    expect(await listed(revoked.id)).toEqual(gone);
   });
 });

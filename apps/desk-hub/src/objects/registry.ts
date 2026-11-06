@@ -56,6 +56,7 @@ import {
   machineNameKey,
   machineProjectId,
   MAX_ENROLLMENT_TTL_S,
+  MAX_PROVISIONING_KEY_TTL_S,
   serviceTokenName,
   type EnrollmentIssued,
   type EnrollmentRecord,
@@ -348,6 +349,31 @@ export class Registry extends DurableObject<Env> {
     const admin = this.current(member, 'admin');
     if (!admin.ok) return admin;
     return this.provisioning.revoke(id, iso(Date.now())) ? ok({ revoked: id }) : fail(404, 'unknown-key');
+  }
+
+  /**
+   * Moves the key's `expires` to its delegation's in the head, once the roots signed it later (O8 M4c): the hub's copy,
+   * which redemption refuses on, never outlives what the org state grants. A live, unrevoked key only, as the app's
+   * `renew-expired` check holds a delegation's renewal, and no further from now than a new key may run. Nothing else of
+   * the key changes. Answered as `provisioningKeys` lists it.
+   */
+  renewProvisioningKey(member: MemberRecord, id: string): Result<ProvisioningKeyRecord> {
+    const admin = this.current(member, 'admin');
+    if (!admin.ok) return admin;
+    const key = this.provisioning.byId(id);
+    if (!key) return fail(404, 'unknown-key');
+    if (key.revoked !== null) return fail(410, 'key-revoked', 'this provisioning key was revoked; make a new key');
+    const now = Date.now();
+    if (Date.parse(key.expires) <= now) return fail(410, 'key-expired', `this provisioning key expired at ${key.expires}; an expired key is not revived, so make a new key`);
+    const delegation = this.chain.head()?.state.delegations.find((d) => d.id === id);
+    if (!delegation || Date.parse(delegation.expires) <= Date.parse(key.expires)) {
+      return fail(409, 'not-renewed', `the org state this hub holds does not extend this key's delegation past ${key.expires}; submit the signed org state that renews it first, then renew the key`);
+    }
+    if (Date.parse(delegation.expires) > now + MAX_PROVISIONING_KEY_TTL_S * 1000) {
+      return fail(409, 'too-long', `the delegation runs to ${delegation.expires}, more than ${MAX_PROVISIONING_KEY_TTL_S} seconds from now, which no provisioning key may; renew it to an earlier date`);
+    }
+    this.provisioning.renew(id, delegation.expires);
+    return ok(this.provisioningKeys().find((k) => k.id === id)!);
   }
 
   /** Redeems a one-time token, or a provisioning key's secret, for the machine's own service token (the path Access does

@@ -27,6 +27,7 @@ const machines = async () => ((await (await hub.fetchAs(ADMIN, '/api/machines'))
 const keys = async (who = ADMIN) => ((await (await hub.fetchAs(who, '/api/provisioning-keys')).json()) as { keys: ProvisioningKeyRecord[] }).keys;
 const keyOf = async (id: string) => (await keys()).find((k) => k.id === id)!;
 const revokeKey = (id: string, who = ADMIN) => hub.fetchAs(who, `/api/provisioning-keys/${id}`, { method: 'DELETE' });
+const renewKey = (id: string, who = ADMIN) => hub.fetchAs(who, `/api/provisioning-keys/${id}/renew`, { method: 'POST' });
 const self = (creds: { clientId: string; clientSecret: string }) => hub.fetchAs(creds, '/machine/enrollment');
 /** Its first request confirms a pending machine, as any of a machine's requests does: 200 or the test fails. */
 async function admitted(creds: Credentials): Promise<void> {
@@ -122,6 +123,25 @@ describe('a provisioning key', () => {
     await revokeKey(a.id);
     const ids = (await keys()).map((k) => k.id);
     expect(ids.indexOf(a.id)).toBeLessThan(ids.indexOf(b.id));
+  });
+
+  // A renewal the head's delegation backs is org-delegations.test.ts's; this hub holds no org state.
+  it('is renewed by an admin only, never once revoked or expired, and not without a delegation the head extends', async () => {
+    const { id, key } = await newKey();
+    expect(await refusal(await renewKey(id, MEMBER))).toBe('403 not-admin');
+    expect(await refusal(await renewKey('0'.repeat(32)))).toBe('404 unknown-key');
+    const unbacked = await renewKey(id);
+    const answer = (await unbacked.json()) as { error: string; message: string };
+    expect([unbacked.status, answer.error]).toEqual([409, 'not-renewed']);
+    expect(answer.message).toContain('submit the signed org state');
+    expect(await keyOf(id)).toEqual(key);
+
+    const revoked = await newKey();
+    await revokeKey(revoked.id);
+    expect(await refusal(await renewKey(revoked.id))).toBe('410 key-revoked');
+    const expired = await newKey();
+    await hub.backdate({ key: { id: expired.id, expires: ago(1) } });
+    expect(await refusal(await renewKey(expired.id))).toBe('410 key-expired');
   });
 });
 
