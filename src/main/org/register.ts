@@ -8,11 +8,13 @@
 // `org.view`, `org.preview`, `org.change` and `org.pair.*` (under `MAWS_DEV_ORG`: no view, and every act refused). M7a
 // adds the project channel's `org.channel.open`, `.close` and `.send`, and forwards `org.channel.changed` through
 // `emitChannel` for the app's life, apart from the status's forwarding, which the Org page's e2e fixture stops (under
-// `MAWS_DEV_ORG` a channel reads signed out).
+// `MAWS_DEV_ORG` a channel reads signed out). Each page's opens are held for it (channel/holds.ts), and let go when the
+// page reloads or its window is destroyed.
 //
 // Electron-free: main injects its `registerMainHandler` and `emit`.
 import type { ChannelChanged, DiscardResult, OrgAttempt, OrgRows, OrgStatus, PairStartResult, PreviewResult, SignResult } from '@shared/ipc/schema/org';
 import type { MainHandler } from '../ipc/router';
+import { channelHolds } from './channel/holds';
 import type { OrgSessionService } from './org-session';
 import type { OrgSession } from './session';
 
@@ -98,8 +100,9 @@ export function registerOrgHandlers(deps: {
   deps.register('org.pair.start', (input) => service.pairStart(input));
   deps.register('org.pair.approve', (input) => service.pairApprove(input));
   deps.register('org.pair.cancel', () => service.pairCancel());
-  deps.register('org.channel.open', ({ project }) => service.channelOpen(project));
-  deps.register('org.channel.close', ({ project }) => service.channelRelease(project));
+  const holds = channelHolds({ open: (project) => service.channelOpen(project), release: (project) => service.channelRelease(project) });
+  deps.register('org.channel.open', ({ project }, { client }) => holds.open(client, project));
+  deps.register('org.channel.close', ({ project }, { client }) => holds.close(client, project));
   deps.register('org.channel.send', ({ project, text }) => service.channelSend(project, text));
   service.onChannel((changed) => deps.emitChannel(changed));
   return service.onStatus((status) => deps.emit('org.changed', status));
