@@ -71,7 +71,11 @@ export interface HubClient {
    * shape is dropped; the hub's own fields (its member, its times) are left out.
    */
   pendingOf(member: string | null, signal?: AbortSignal): Promise<HubResult<PendingDevice[]>>;
-  /** M7a: the project's history attestations as the member reads them; an item that is no signed record is dropped. */
+}
+
+/** M7a's read beside the session's: the project channel's, which the signer's and the pairing's clients don't carry. */
+export interface ProjectReads {
+  /** The project's history attestations as the member reads them; an item that is no signed record is dropped. */
   attestations(project: string, signal?: AbortSignal): Promise<HubResult<Signed<HistoryAttestation>[]>>;
 }
 
@@ -117,7 +121,7 @@ export function hubClient(input: {
   headers(): Promise<Record<string, string>>;
   fetch?: typeof fetch;
   timing?: Partial<OrgTiming>;
-}): HubClient {
+}): HubClient & ProjectReads {
   const base = input.url.replace(/\/+$/, '');
   const doFetch = input.fetch ?? fetch;
   const timing = orgTiming(input.timing);

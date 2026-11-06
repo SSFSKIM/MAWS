@@ -14,6 +14,7 @@
 // `onClosed` with its code, a refused upgrade's as one of those three.
 //
 // Electron-free.
+import type { Sig } from '../../../../apps/org-protocol/src/index.ts';
 import { BUILD_HEADER } from '../hub-client';
 import { PartJoiner, wsSocket, type WebSocketLike } from '../registry-feed';
 import type { HubAccess } from '../session';
@@ -37,7 +38,7 @@ export type DeviceHuman = {
   text: string;
   created: string;
   nonce: string;
-  sig: { alg: string; kid: string; sig: string };
+  sig: Sig;
 };
 export type HumanAck = { t: 'human-ack'; nonce: string; offset: number; writer: string; seq: number };
 export type HumanRefused = { t: 'refused'; refusal: { reason: string; nonce: string } };

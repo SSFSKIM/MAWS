@@ -50,7 +50,7 @@ class FakeSocket implements WebSocketLike {
 
 const event = (offset: number, seq = offset): LoggedEvent => ({ offset, event: { writer: 'mini/s1', seq, kind: 'say', text: `say ${seq}` } });
 const human = (nonce: string): DeviceHuman =>
-  ({ kind: 'human', from: 'human', member: 'a'.repeat(32), to: '*', text: 'hi', created: '2026-11-06T12:00:00.000Z', nonce, sig: { alg: 'ES256', kid: 'k', sig: 's' } }) as unknown as DeviceHuman;
+  ({ kind: 'human', from: 'human', member: 'a'.repeat(32), to: '*', text: 'hi', created: '2026-11-06T12:00:00.000Z', nonce, sig: { kid: 'k', value: 's' } }) as DeviceHuman;
 const flush = async () => {
   for (let i = 0; i < 5; i++) await Promise.resolve();
 };

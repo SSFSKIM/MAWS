@@ -82,7 +82,7 @@ function memberOf(state: OrgState, id: string): OrgMember {
 
 async function judgeSigned(event: StoredEvent, judging: Judging): Promise<Verdict> {
   const { ctx, state, certificates, now } = judging;
-  const verdict = await verifyEvent(ctx, state, event as LogEventV2, certificates, now);
+  const verdict = await verifyEvent(ctx, state, event as unknown as LogEventV2, certificates, now);
   if (!verdict.ok) return { failed: verdict.code };
   if (isHubWriter(event.writer)) {
     const member = streamOf(event.writer).base.slice(HUB_WRITER_PREFIX.length);
@@ -90,7 +90,7 @@ async function judgeSigned(event: StoredEvent, judging: Judging): Promise<Verdic
     return { label: 'verified', author: memberOf(state, member) };
   }
   if (event.attest === undefined) return { label: 'verified' };
-  const attested = await verifyAttestation(state, certificates, event as LogEventV2);
+  const attested = await verifyAttestation(state, certificates, event as unknown as LogEventV2);
   return attested.ok && attested.owners !== undefined ? { label: 'verified', owners: attested.owners.map((id) => memberOf(state, id)) } : { label: 'verified' };
 }
 

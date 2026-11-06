@@ -54,7 +54,7 @@ export function createWords(deps: {
       if (signer === null) return { ok: false, reason: 'signed-out' };
       const nonce = base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
       const draft = { kind: 'human' as const, from: 'human' as const, member: signer.member, to, text, created: new Date(now()).toISOString(), nonce };
-      const human = (await signEvent({ org: signer.org, project: deps.project }, draft, signer.key.privateKey, signer.key.pub)) as DeviceHuman;
+      const human: DeviceHuman = await signEvent({ org: signer.org, project: deps.project }, draft, signer.key.privateKey, signer.key.pub);
       words.set(nonce, { human, state: 'sending' });
       deps.send(human);
       changed();
