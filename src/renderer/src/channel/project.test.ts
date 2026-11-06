@@ -172,7 +172,7 @@ describe('waitingFor', () => {
       [grey, { machine: OTHER_MACHINE, orgKey: KEY } as unknown as ListedSession],
     ]);
     const bySession = new Map<AppSessionId, AttentionItem[]>([
-      [s1.appId, [item(s1.appId, 'i3'), item(s1.appId, 'i9', { state: 'answered' }), item(s1.appId, 'i8', { kind: 'error', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } })]],
+      [s1.appId, [item(s1.appId, 'i3'), item(s1.appId, 'i9', { state: 'retired' }), item(s1.appId, 'i8', { kind: 'error', request: { requestId: null, toolUseId: null, taskId: null, agentId: null } })]],
       [s2.appId, [item(s2.appId, 'i1')]],
       [remote, [item(remote, 'i2', { kind: 'question' })]],
       [grey, [item(grey, 'i4')]],
