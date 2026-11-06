@@ -133,7 +133,7 @@ import { ptyHostFiles } from '../pty-host/files';
 import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
 import { engineRequests } from './engine-requests';
 import { createArtifactsEndpoint, loadEndpointChunk } from './artifacts-endpoint'; // P5 O5 M2
-import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
+import { ENDPOINT_CHANNEL_BASE, ENDPOINT_STOP_MS, loadEndpointModule, NO_ENDPOINT_MODULE, spineChannel, type CheckoutSource, type DaemonServices, type EndpointModule } from './endpoint-seam';
 import { createServicesFront, spineTakes } from './front';
 import { tellEngineHandover } from './engine-handover-event'; // P5 O16 M3c fix wave 2
 import { runE2eBrowserView, runE2eRender, runE2eSeam } from './e2e-seam'; // M5b fix round 2; P5 O5 M4
@@ -1469,6 +1469,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     browser: browserFeed, // P5 O17 M6
     clientPort: { serve: (ref, target) => front.serveRemote(ref, target) }, // P5 O7 M5c
     engineHostLists: (capability) => hosts.peer('engine-host')?.capabilities.includes(capability) ?? false, // P5 O7 M8
+    channel: spineChannel(spine, log), // P5 O8 M7b: lane A's to-human entries, to the spine's journal (loaded for one if cold)
     log: (line) => log(`[endpoint] ${line}`),
   };
 

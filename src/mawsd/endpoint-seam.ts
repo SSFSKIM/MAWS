@@ -20,10 +20,12 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { DocumentsOpen } from '@shared/host/socket-protocol';
 import type { ClientRef } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
+import type { NewHostEntry } from '@shared/ipc/schema/channel';
 import type { MachineRef } from '@shared/machine/ref';
 import { enrollmentOnDisk, unloadedAnswer, UNENROLLED_STATUS } from '../endpoint/presence';
 import type { CheckoutSource } from '../endpoint/index';
 import type { PortTarget, RemotePortHandle } from './client-port';
+import type { LazySpine } from './spine-seam';
 
 export const ENDPOINT_STOP_MS = 2_500;
 // `daemon.endpoint`'s answer while there is no module (a daemon a test starts with none), `{code: 2, out:
@@ -67,7 +69,33 @@ export interface DaemonServices {
   // the services front's `route` consults after its own connections; the handle answers and closes it (client-port.ts)
   clientPort: { serve(ref: ClientRef, target: PortTarget): RemotePortHandle };
   engineHostLists(capability: string): boolean; // P5 O7 M8: the engine host's welcome on the link lists it now; false while no link is up
+  // P5 O8 M7b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §O): the spine's project channel
+  // journal, which the endpoint hands lane A's to-human entries to (sminos's sub-less RL10 host messages): `spineChannel`
+  channel: { record(entry: NewHostEntry): void };
   log(line: string): void;
+}
+
+/**
+ * P5 O8 M7b: `DaemonServices.channel` over the spine seam. An entry goes to the loaded spine's journal (`SpineRoot.channel`)
+ * at once; while the spine is cold it is loaded for it, as the endpoint's trigger (`ensure('endpoint')`), and the entry
+ * kept once it is. One that can't be kept (the spine refused or yielded, the daemon exiting, a run whose spine holds no
+ * journal) is logged: sminos's resend of the last 50 brings it again at its next connection.
+ */
+export function spineChannel(spine: Pick<LazySpine, 'root' | 'ensure'>, log: (line: string) => void): DaemonServices['channel'] {
+  const keep = (root: { channel?: { record(entry: NewHostEntry): void } }, entry: NewHostEntry) => {
+    if (root.channel === undefined) return log(`[channel] a lane A entry of ${entry.project.slice(0, 64)} was not kept: the spine holds no journal`);
+    root.channel.record(entry);
+  };
+  return {
+    record(entry) {
+      const root = spine.root();
+      if (root !== null) return keep(root, entry);
+      spine.ensure('endpoint').then(
+        (loaded) => keep(loaded, entry),
+        (error: unknown) => log(`[channel] a lane A entry of ${entry.project.slice(0, 64)} was not kept: ${error instanceof Error ? error.message : String(error)}`),
+      );
+    },
+  };
 }
 
 export interface EndpointModule {

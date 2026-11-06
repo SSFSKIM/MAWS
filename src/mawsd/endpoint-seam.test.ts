@@ -8,7 +8,10 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
 import type { EndpointModule as O10Module, EndpointServices } from '../endpoint/index';
 import { unloadedAnswer, UNENROLLED_STATUS } from '../endpoint/presence';
-import { LazyEndpoint, loadEndpointModule, type DaemonServices, type EndpointModule } from './endpoint-seam';
+import type { NewHostEntry } from '@shared/ipc/schema/channel';
+import type { SpineRoot } from '../services/spine-root';
+import { LazyEndpoint, loadEndpointModule, spineChannel, type DaemonServices, type EndpointModule } from './endpoint-seam';
+import { SpineUnavailable } from './spine-seam';
 
 let dir: string | null = null;
 afterEach(() => {
@@ -38,6 +41,7 @@ function services(enrolled = false): DaemonServices & { lines: string[] } {
     browser: { inventory: () => ({ epoch: 'e', tabs: [], selected: null, state: 'ready' }), watchInventory: () => () => {}, open: async () => Promise.reject(new Error('no browser here')) }, // P5 O17 M6
     clientPort: { serve: () => ({ answer: () => {}, close: () => {} }) }, // P5 O7 M5c
     engineHostLists: () => false, // P5 O7 M8
+    channel: { record: () => {} }, // P5 O8 M7b
     log: (line) => void lines.push(line),
     lines,
   };
@@ -249,5 +253,42 @@ describe('the endpoint loaded when it is needed (lever (a))', () => {
     await endpoint.start(services());
     await endpoint.cli('enroll', [], 'CODE');
     expect(Module.built.at(-1)).toEqual({ build: 'b9', projects });
+  });
+});
+
+// P5 O8 M7b (Interfaces §O): lane A's to-human entries reach the spine's journal (`SpineRoot.channel`), the spine loaded for
+// one if it is cold (the endpoint's trigger), and what can't be kept is logged.
+describe('the seam’s channel', () => {
+  const entry = (text: string): NewHostEntry => ({ project: 'p', appSessionId: null, engineSessionId: 'la-1' as never, lane: 'A', kind: 'message', text, at: '2026-11-06T10:00:00.000Z', src: `p/mini%2Fla-1/${text}` });
+  function spine(state: { root: SpineRoot | null; ensure: () => Promise<SpineRoot> }) {
+    const ensured: string[] = [];
+    return { ensured, root: () => state.root, ensure: (reason: string) => (ensured.push(reason), state.ensure()) };
+  }
+
+  it('hands an entry to the loaded spine’s journal at once, and loads a cold spine for one, as the endpoint’s trigger', async () => {
+    const kept: string[] = [];
+    const root = { channel: { record: (e: NewHostEntry) => void kept.push(e.text) } } as unknown as SpineRoot;
+    const loaded = spine({ root, ensure: () => Promise.reject(new Error('not asked')) });
+    spineChannel(loaded, () => {}).record(entry('now'));
+    expect([kept, loaded.ensured]).toEqual([['now'], []]);
+
+    let load!: (root: SpineRoot) => void;
+    const loading = new Promise<SpineRoot>((resolve) => (load = resolve)); // one load, which both entries wait on
+    const cold = spine({ root: null, ensure: () => loading });
+    const channel = spineChannel(cold, () => {});
+    channel.record(entry('first'));
+    channel.record(entry('second'));
+    expect(kept).toEqual(['now']);
+    load(root);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect([kept, cold.ensured]).toEqual([['now', 'first', 'second'], ['endpoint', 'endpoint']]);
+  });
+
+  it('logs an entry it can’t keep: a spine refused, or a run whose spine holds no journal', async () => {
+    const lines: string[] = [];
+    spineChannel(spine({ root: null, ensure: () => Promise.reject(new SpineUnavailable('pid 7 holds spine.lock', 'refused')) }), (line) => void lines.push(line)).record(entry('refused'));
+    spineChannel(spine({ root: {} as SpineRoot, ensure: () => Promise.reject(new Error('not asked')) }), (line) => void lines.push(line)).record(entry('none'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(lines.sort()).toEqual(['[channel] a lane A entry of p was not kept: pid 7 holds spine.lock', '[channel] a lane A entry of p was not kept: the spine holds no journal']);
   });
 });
