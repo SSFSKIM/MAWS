@@ -29,7 +29,7 @@
 //   awaits nothing of the channel's (M4a's rule). `close()` resolves once every final write is entered.
 //
 // Electron-free.
-import { isHubWriter, type HistoryAttestation, type Signed } from '../../../../apps/org-protocol/src/index.ts';
+import { isHubWriter, type Certificates, type HistoryAttestation, type Signed, type SignedOrgState } from '../../../../apps/org-protocol/src/index.ts';
 import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelSendResult } from '@shared/ipc/schema/org';
 import { hubClient } from '../hub-client';
 import type { HubAccess, OrgSession, SignedIn } from '../session';
@@ -73,6 +73,8 @@ export interface Channels {
   close(): Promise<void>;
 }
 
+type Snapshot = { head: SignedOrgState; certificates: Certificates };
+
 interface Channel {
   readonly loaded: Promise<void>;
   /** The tabs showing it. */
@@ -110,10 +112,12 @@ export function createChannels(deps: ChannelsDeps): Channels {
   const notSent = createNotSent();
 
   const readerOf = (current: SignedIn): ChannelReader => ({ org: current.identity.org, member: current.identity.member });
-  const groundOf = (current: SignedIn, project: string): Ground => ({
+  /** The head and certificates a judgment reads, sampled once: what is judged under them is what is recorded judged. */
+  const snapshotOf = (current: SignedIn): Snapshot => ({ head: current.view.head(), certificates: current.view.certificates() });
+  const groundOf = (current: SignedIn, project: string, snapshot: Snapshot = snapshotOf(current)): Ground => ({
     ctx: { org: current.identity.org, project },
-    state: current.view.head().state,
-    certificates: current.view.certificates(),
+    state: snapshot.head.state,
+    certificates: snapshot.certificates,
     now: new Date(now()),
   });
 
@@ -134,7 +138,8 @@ export function createChannels(deps: ChannelsDeps): Channels {
     let ended: 'unknown-project' | 'parked' | null = null;
     let attested = false;
     let reading: Promise<void> | null = null;
-    let judged: { head: unknown; certificates: unknown } | null = null;
+    /** The snapshot the held log was last judged under, whole; another (a head or certificates since) judges it again. */
+    let judged: Snapshot | null = null;
     let dirty = false;
     let writeTimer: ReturnType<typeof setTimeout> | null = null;
     let emitTimer: ReturnType<typeof setTimeout> | null = null;
@@ -401,12 +406,11 @@ export function createChannels(deps: ChannelsDeps): Channels {
           changed();
           if (current.hub !== null && ended === null) void connect(current.hub); // that reader's log, from offset 0
         }
-        const head = current.view.head();
-        const certificates = current.view.certificates();
-        if (judged === null || judged.head !== head || judged.certificates !== certificates) {
-          judged = { head, certificates };
+        const snapshot = snapshotOf(current);
+        if (judged === null || judged.head !== snapshot.head || judged.certificates !== snapshot.certificates) {
+          judged = snapshot;
           const before = verdictsOf(held.events());
-          await held.rejudge(groundOf(current, project));
+          await held.rejudge(groundOf(current, project, snapshot));
           if (!sameVerdicts(before, verdictsOf(held.events()))) resetDue = true;
           changed();
         }
@@ -423,8 +427,11 @@ export function createChannels(deps: ChannelsDeps): Channels {
         return null;
       });
       const current = deps.session.current();
-      held = await loadLog(raw, { reader: current === null ? null : readerOf(current), project, limits, ground: current === null ? null : groundOf(current, project), log });
-      if (current !== null) judged = { head: current.view.head(), certificates: current.view.certificates() };
+      // the snapshot the load judges under is the one recorded: a head adopted during the load is judged at the reconcile after it
+      const snapshot = current === null ? null : snapshotOf(current);
+      const ground = current === null || snapshot === null ? null : groundOf(current, project, snapshot);
+      held = await loadLog(raw, { reader: current === null ? null : readerOf(current), project, limits, ground, log });
+      judged = snapshot;
     }).then(() => reconcile());
 
     async function send(text: string): Promise<ChannelSendResult> {

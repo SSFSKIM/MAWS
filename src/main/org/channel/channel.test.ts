@@ -84,10 +84,12 @@ afterEach(async () => {
   channels = null;
 });
 
-async function harness(options: { seed?: (o: ChannelOrg) => Promise<ChannelCacheFile>; records?: Signed<HistoryAttestation>[]; signedIn?: boolean; hub?: boolean; events?: number; reading?: Promise<void>; coalesce?: number } = {}) {
+async function harness(
+  options: { seed?: (o: ChannelOrg) => Promise<ChannelCacheFile>; head?: (o: ChannelOrg) => OrgView['head']; records?: Signed<HistoryAttestation>[]; signedIn?: boolean; hub?: boolean; events?: number; reading?: Promise<void>; coalesce?: number } = {},
+) {
   const o = await ChannelOrg.make();
   const cache = options.seed === undefined ? undefined : await options.seed(o);
-  const view: OrgView = { head: () => o.head(), certificates: () => NO_CERTIFICATES, since: () => ({ states: [], transitions: [] }), advance: async () => {} };
+  const view: OrgView = { head: options.head?.(o) ?? (() => o.head()), certificates: () => NO_CERTIFICATES, since: () => ({ states: [], transitions: [] }), advance: async () => {} };
   const hub = { url: 'https://hub.example.com', headers: async () => ({ 'cf-access-token': 't' }) };
   const signedIn = (withHub = options.hub ?? true): SignedIn => ({
     identity: { org: ORG, member: o.A, device: 'app', clientClass: 'native-mac', channelKey: o.app.channel, build: 'test', capabilities: [] },
@@ -444,6 +446,36 @@ describe('a project channel', () => {
     await until(() => opened(h.latest()).unverified === 0, 'the event verified');
     expect(opened(h.latest()).events.map((e) => e.event.text)).toEqual(['early']);
     expect(delta(h.told())).toMatchObject({ reset: true, upserts: [{ offset: 1, label: 'verified' }] });
+  });
+
+  // the branch review's finding: the load judges the cache under the head it read first, so that head, and no later
+  // one, is what it records as judged
+  it('judges its cache again when a head adopted during the load ends a signer the load verified it under', async () => {
+    const h = await harness({
+      seed: async (o) => {
+        const studio = await o.machine('studio');
+        await o.adopt((s) => {
+          s.machines.push({ name: 'studio', ref: studio.ref, pub: studio.key.pub, owners: [o.A] });
+          s.machineNames.push({ name: 'studio', ref: studio.ref });
+        });
+        const cached = emptyLog({ org: ORG, member: o.A }, PROJECT, { events: 5000, bytes: 1 << 23 });
+        await cached.add([{ offset: 1, event: await o.say(studio, 1, 'from studio') }], { ctx: { org: ORG, project: PROJECT }, state: o.head().state, certificates: NO_CERTIFICATES, now: new Date(NOW) });
+        expect(cached.events().map((e) => e.label)).toEqual(['verified']);
+        await o.adopt((s) => {
+          s.machines = s.machines.filter((m) => m.ref !== studio.ref); // the head that ends studio, adopted mid-load
+        });
+        return cached.file();
+      },
+      // the load reads the head that still lists studio; every read after it gets the one that ended it
+      head: (o) => {
+        let reads = 0;
+        const listing = o.chain[o.chain.length - 2];
+        return () => (reads++ === 0 ? listing : o.head());
+      },
+    });
+    opened(await h.channels.open(PROJECT));
+    await until(() => opened(h.latest()).unverified === 1, 'the event judged again under the later head', 1_000);
+    expect(opened(h.latest()).events).toEqual([]);
   });
 
   it('tells each change as a delta: a page or a live event sends only its events, and the tab draws what a new open would', async () => {
