@@ -21,6 +21,10 @@ export const CHANNEL_BOUNDS = {
   choices: 32,
   // What lane B holds while a session's project waits for its org id at start (./lane-b.ts), the oldest let go past it.
   held: 1_000,
+  // The most a `channel.history` page is, in bytes of its entries' JSON, whatever its `limit` (the endpoint's page is held
+  // to the same, src/endpoint/channel-view.ts): 200 entries at the text bound would be ~13 MiB. A page holds its first
+  // entry whatever its size (at most ~640 KiB, above), and `more` says an older entry remains.
+  pageBytes: 1024 * 1024,
 } as const;
 
 // What ends a text cut at its bound.
@@ -108,7 +112,15 @@ export class ChannelJournal {
         project, cutoff, cursor.at, cursor.at, cursor.id, limit + 1,
       );
     }
-    return { entries: rows.slice(0, limit).map(entryOf), more: rows.length > limit };
+    const entries: HostEntry[] = [];
+    let bytes = 0;
+    for (const row of rows.slice(0, limit)) {
+      const entry = entryOf(row);
+      bytes += Buffer.byteLength(JSON.stringify(entry));
+      if (entries.length > 0 && bytes > CHANNEL_BOUNDS.pageBytes) break;
+      entries.push(entry);
+    }
+    return { entries, more: rows.length > entries.length };
   }
 
   // Every entry past the age bound; and, given a project, its entries past the newest CHANNEL_BOUNDS.perProject.

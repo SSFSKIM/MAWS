@@ -464,5 +464,25 @@ describe('the project channel journal', () => {
       expect(h.history({ project: 'proj-a', before: '999999' })).toEqual({ entries: [], more: false });
       expect(h.history({ project: 'proj-none' })).toEqual({ entries: [], more: false });
     });
+
+    it('holds a page to CHANNEL_BOUNDS.pageBytes of JSON whatever its limit, `more` exact, and pages on from its last', () => {
+      // 40 entries at the text bound: 2.5 MiB, past a page's bytes long before its 200
+      for (let n = 0; n < 40; n++) h.channel.record(laneA({ src: `proj-a/mini/s1/${n}`, at: iso(NOW - 40_000 + n * 1_000), text: `${n}:`.padEnd(CHANNEL_BOUNDS.textBytes, 'x') }));
+      const bytes = (entries: HostEntry[]) => entries.reduce((sum, entry) => sum + Buffer.byteLength(JSON.stringify(entry)), 0);
+      const seen: string[] = [];
+      let before: string | undefined;
+      for (;;) {
+        const page = h.history({ project: 'proj-a', ...(before === undefined ? {} : { before }) });
+        expect(page.entries.length).toBeGreaterThan(0);
+        expect(bytes(page.entries)).toBeLessThanOrEqual(CHANNEL_BOUNDS.pageBytes);
+        // the next entry would pass the bound: the page is as full as it may be
+        if (page.more) expect(bytes(page.entries) + bytes(h.history({ project: 'proj-a', before: page.entries.at(-1)!.id, limit: 1 }).entries)).toBeGreaterThan(CHANNEL_BOUNDS.pageBytes);
+        seen.push(...page.entries.map((entry) => entry.text.split(':')[0]));
+        expect(page.more).toBe(seen.length < 40);
+        if (!page.more) break;
+        before = page.entries.at(-1)!.id;
+      }
+      expect(seen).toEqual(Array.from({ length: 40 }, (_, n) => String(39 - n)));
+    });
   });
 });
