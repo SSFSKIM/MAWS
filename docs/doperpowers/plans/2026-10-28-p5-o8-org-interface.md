@@ -957,7 +957,8 @@ One pairing at a time, and none while a rekey runs, since both are the session's
   - the identity file and `admin.ts` import them;
   - `certificateViews`, `resolveMachine` and `machineRows` (`apps/desk-hub/deploy/admin-machines.ts`) move to `apps/org-protocol/src/machines.ts`, with their input typed by a package-owned structural `MachineRow` that the hub's `MachineView` satisfies.
   - `pnpm --filter desk-hub build` (a `wrangler deploy --dry-run`) stays clean (the desk track's condition).
-- **`src/endpoint`, second commit** (desk-track reviewed): the call `endpoint.grants` (machine-targeted, `list`), which answers the caller's own ledger grant. It answers every member's grants when the caller is an owner of the machine, or an admin of an org-owned one. Its offer row, and its test in `test/endpoint/`.
+- **`org-protocol`, in the move's commit:** `grantProblems`, the eligibility half of `verifyGrant` (*Grants*, below).
+- **`src/endpoint`, second commit** (desk-track reviewed): the call `endpoint.grants` (machine-targeted, `list`), which answers `{members: [{member, grant: Signed<Grant> | null, highWater: number}]}` from the ledger (`src/endpoint/grants.ts`): the caller's own entry, or every member's when the caller is an owner of the machine, or an admin of an org-owned one. `highWater` is answered even when no grant survives (a revoked signer's grant is deleted, while its high-water mark stays, `grants.ts:56-65`). Its offer row, and its test in `test/endpoint/`.
 - **Main:**
   - `src/main/org/edits.ts`: `machine.add`, `machine.replace`, `machine.owners` and `machine.drop`;
   - `src/main/org/enroll.ts` (new): the enrollment, built as `pairing.ts` is;
@@ -1009,19 +1010,16 @@ One pairing at a time, and none while a rekey runs, since both are the session's
 
 *Grants* (`grants.ts`).
 - **The record.** `<userData>/org/grants.json` is 0600 and written through the commit queue. It holds `{version: 1, issued: [{signed: Signed<Grant>, delivered: 'pending' | 'done' | {refused: string}, op?: string}]}`: every grant this app signed, the latest per (machine, member). It is listed in §C and joined by `close()`.
-- **The version.** The next version is above the highest of three: the issued record's, the ledger's (read through `endpoint.grants` before signing), and any refusal's named high-water mark. A ledger read that fails refuses the sign `ledger-unread`, so a version is never guessed.
+- **The version.** The next version is above both the issued record's and the ledger's `highWater` for that member, read through `endpoint.grants` just before signing. A ledger read that fails refuses the sign `ledger-unread`, so a version is never guessed. Another issuer (another owner's device) can move the mark meanwhile, and the endpoint then answers `not-newer` with no number (`grants.ts:38-51`). In that case the app reads `endpoint.grants` once more and offers "Another device changed this grant: sign again", one more confirmation, never a silent retry.
 - **Signing.** `RecordSigner.sign(domain, body, prompt, {live?})` confirms once, checks `live`, then calls `signRecord`. The key stays in the device module (P5 Decision Log 53).
   - The prompt names the machine, the member and each right.
-  - The signature is verified with `verifyGrant` against the held head before it is kept, so a grant the machine would refuse (a non-owner signer, a stale key) is refused before Touch ID by the same rule, run on an unsigned draft with a placeholder signature.
+  - **Before Touch ID**, `grantProblems(state, certificates, body, signerKid)` judges the unsigned grant: the machine listed or certified, `machineKey` its current uncontested key, the member listed, the rights known, and `signerKid` a step-up key of an owner's device (an admin's for `'org'`). This new package function is the eligibility half of `verifyGrant` (`records.ts:72-105`), which becomes eligibility then signature. It lands in an `org-protocol` commit of its own, desk-track reviewed, with `verifyGrant`'s verdicts unchanged (its suites prove it). A placeholder signature can't stand in, since `signedByIn` checks it (`records.ts:48-52, 79-89`).
+  - **After signing**, the full `verifyGrant` runs against the held head before the grant is kept or sent.
 - **Delivery.** `endpoint.grant {grant}` is sent as an act over the machine's link, `stepUp: 'none'`, since the grant carries its own signature.
   - The record notes `pending` before the send, and the act's outcome after it.
   - An act the endpoint answers `expired`, because its ledger reopened (`orphanAtOpen`, `endpoint-actions.ts:15-18`), is sent again as a new op.
   - A machine that is offline keeps `pending`, sent again when its link comes up, as M3's deliveries are.
-- **Missing grants.** At each `endpoint.grants` answer, an issued grant the ledger lacks is missing:
-  - when the grant's `machineKey` is the machine's current key, the ledger lost it;
-  - when it names an earlier key, the machine was enrolled again with a new key.
-
-  Either way the re-grant offer lists them. An issued grant whose rights are empty (a withdrawal) is never offered.
+- **Missing grants.** At each `endpoint.grants` answer, an issued grant the ledger lacks is missing. The real case is a machine enrolled again with a new key and an empty ledger. A lost ledger is that case too: the endpoint's startup moves the key and the ledger aside together when one of them is gone, and reads unenrolled (`src/endpoint/state/store.ts:286-300`), so it comes back only through re-enrollment. The re-grant offer lists them. An issued grant whose rights are empty (a withdrawal) is never offered.
 - **Display.** Rights are read from `endpoint.grants`, the machine's own word, with the issued record's `pending` ones marked "Not yet on <machine>". An offline machine shows the issued record's view "as of" its last answer.
 - Rejected:
   - grants in the org state, which changes RL5 and every verifier;
@@ -1030,7 +1028,7 @@ One pairing at a time, and none while a rekey runs, since both are the session's
 **Does not touch.** Delegations and their owners (M4c). Certified machines' retirement on the machine. `apps/desk-hub/src/` beyond the move's import. `apps/desk-web/`.
 
 **Proves.** Acceptance 4b.
-- **The move:** `admin.test.ts`, `admin-verbs.test.ts` and `production-scripts.test.ts` pass unchanged. `org-protocol`'s `enrollment.test.ts` gains the codec's cases. `pnpm --filter desk-hub build` is clean. The strip-types import line (M4a's form) prints `function` for each moved name.
+- **The move:** `admin.test.ts`, `admin-verbs.test.ts` and `production-scripts.test.ts` pass unchanged. `org-protocol`'s `enrollment.test.ts` gains the codec's cases, and `records.test.ts` gains `grantProblems`' cases, with `verifyGrant`'s existing cases unchanged. `pnpm --filter desk-hub build` is clean. The strip-types import line (M4a's form) prints `function` for each moved name.
 - **`test/endpoint/` `grants-call.test.ts`:** a member reads only their own grant; an owner reads every member's; a non-member reads nothing.
 - **`edits.test.ts`:**
   - each machine composer's successor passes `successorProblems` and `verifySuccessor` once signed;
@@ -1045,10 +1043,11 @@ One pairing at a time, and none while a rekey runs, since both are the session's
   - a cancel while the confirmation is open signs nothing;
   - the code and `k` are never in a status.
 - **`grants.test.ts`:**
-  - the version is above the record's and the ledger's;
+  - the version is above the record's and the ledger's `highWater`, including a member whose grant is gone and whose mark stays (a new signer replaces a revoked signer's grant without guessing);
+  - `not-newer` re-reads once and asks again;
   - an unread ledger refuses;
   - the grant verifies against the head before it is kept;
-  - a non-owner's grant refuses before Touch ID;
+  - a non-owner's grant refuses before Touch ID, and an owner's unsigned draft passes `grantProblems` and reaches exactly one confirmation;
   - delivery records `pending`, then the outcome;
   - an `expired` outcome resends as a new op;
   - missing grants are found in both cases, and a withdrawal is never re-offered;
@@ -1058,7 +1057,7 @@ One pairing at a time, and none while a rekey runs, since both are the session's
 - **`test/org/org-page.local.test.ts`** (desk-hub's Worker in Miniflare and a real endpoint, through `local-org.ts`):
   7. A enrolls a machine from the app. The endpoint redeems the code and posts its key, A compares and approves, and the endpoint reads `org-listed`.
   8. A grants B `spawn` on it. The endpoint's ledger holds it, and `machineRights` gives B `spawn`.
-  9. The endpoint's `grants.json` is removed and the endpoint restarted. A's page shows the grant missing, re-grants it at a higher version, and the ledger holds it again.
+  9. The endpoint's `grants.json` is removed and the endpoint restarted. Its startup invariant moves the key, the ledger and the enrollment aside and reads unenrolled (`src/endpoint/state/store.ts:286-300`), which the case asserts. A re-enrolls it from the page (Re-enroll, `machine.replace`, a new key). The page shows B's grant missing under the earlier key, re-grants it for the new key above the mark, and the new ledger holds it.
   10. A changes the machine's owners to B, then back. A drops it, and the hub row goes.
   11. Every state the hub accepted verifies from genesis.
 
@@ -1081,7 +1080,7 @@ One pairing at a time, and none while a rekey runs, since both are the session's
   - `edits.ts`: `delegation.add`, `delegation.renew`, `delegation.drop`;
   - `src/main/org/delegations.ts` (new): the create transaction, renew's and drop's hub halves;
   - `src/main/org/secret-store.ts` (new): the gcloud custody;
-  - `signer.ts`: `Edit.hold`, an edit signed into the slot unsent, and `publishHeld()`;
+  - `signer.ts` and `signing-store.ts`: `Edit.hold`, an edit signed into the slot held unsent, and `publishHeld(hash)` (*The held slot*, below);
   - `hub-client.ts`: `mintProvisioningKey`, `renewProvisioningKey`, `revokeProvisioningKey`, `provisioningKeys`;
   - `org-session.ts`: the commands;
   - `src/main/index.ts`: the gcloud resolver;
@@ -1098,24 +1097,35 @@ One pairing at a time, and none while a rekey runs, since both are the session's
 - M4a's change pipeline;
 - M3's signer, pending slot and checks;
 - the hub's provisioning-key routes and the desk track's renew route;
-- `org-protocol`'s `encodeProvisioningCode`, `signOrgState` and the delegation types.
+- `org-protocol`'s `encodeProvisioningCodeV2`, `signOrgState` and the delegation types.
 
 **Decisions.**
 
-*The create transaction* (`org.delegation.create {prefix, ttlDays, maxUses, owners}`), in `admin.ts`'s order:
+*The create transaction* (`org.delegation.create {label, prefix, ttlDays, maxUses: number | null, owners}`), in `admin.ts`'s order:
 1. **Before anything is minted:**
    - The prefix passes `prefixProblem`.
    - The destination is set (below), and gcloud is resolved and signed in: `gcloud auth print-access-token --account <account>` exits 0, its output discarded.
    - The secret exists: `gcloud secrets describe <secret> --project <project>` exits 0.
 
    Any failure refuses `secret-store`, naming what's missing, and nothing is minted or signed.
-2. It mints `POST /api/provisioning-keys {prefix, ttl, maxUses}` and checks the answer with `mintDisagrees`. A disagreement revokes the minted key and refuses.
+2. It mints exactly as `delegationCreate` does (`admin.ts:985-1029`): `POST /api/provisioning-keys {label, prefix, ttl_s, max_uses?}`. The sheet's values map like this:
+   - `label`: the sheet's required Label field, 1 to 100 characters;
+   - `ttl_s`: `ttlDays × 86,400`, inside `MIN_PROVISIONING_KEY_TTL_S` to `MAX_PROVISIONING_KEY_TTL_S`, checked in the sheet;
+   - `max_uses`: present only when a cap is chosen (1 to `MAX_PROVISIONING_KEY_USES`). Uncapped sends none, and signs `maxUses: NO_USE_CAP`.
+
+   The answer must be `201`, and is checked with `mintDisagrees(issued, {prefix, ttl, maxUses, before, after})`. A disagreement revokes the minted key and refuses. The signed delegation's `expires` is `before + ttl` and `offlineRevokeS` is `NEVER_OFFLINE`, as admin's are.
 3. It makes the delegation's key pair in main, composes `delegation.add {id, pub, prefix, expires, maxUses, offlineRevokeS, owners}`, and signs it into the pending slot **unsent** (`Edit.hold`). This is the change sheet's one Touch ID. The sheet says the code will go to `<project>/<secret>` as a new version.
-4. It encodes the `smns-provision-v2` code in memory and runs `gcloud secrets versions add <secret> --project <project> --account <account> --data-file=-`, with the code on stdin alone. Its stdout and stderr are read for the version name and an error line, never logged whole.
+4. It encodes the `smns-provision-v2` code in memory (`encodeProvisioningCodeV2`, `apps/org-protocol/src/provisioning.ts:122`) and runs `gcloud secrets versions add <secret> --project <project> --account <account> --data-file=-`, with the code on stdin alone. Its stdout and stderr are read for the version name and an error line, never logged whole.
 5. It confirms with `gcloud secrets versions describe <version> … --format=json`, which reads the version's metadata (`name`, `state: ENABLED`, `createTime`), never its value.
 6. It publishes the slot (`publishHeld()`), and the signer settles it as any pending proposal.
 
-A failure at 4 or 5 leaves the slot unsent, with the reason under the delegation row. "Write the code again" retries 4 and 5 while this run holds the key pair. Once the app has quit, the key pair is gone, and the row offers only Discard (M3's), since a delegation whose private key nobody holds must not be published. The key pair and the code live only in main's memory and the child's stdin, and are dropped at publish, discard, sign-out or quit.
+*The held slot.* An unsent delegation is a persisted phase of the pending slot, not a skipped first post:
+- `signing.json`'s `pending` gains `held: {kind: 'delegation', id} | null`, written in the same `update` that writes the slot.
+- **Nothing automatic posts a held slot.** It is excluded from `settleLocked`'s repost (`signer.ts:444-464`), which the session runs at startup and at a feed's reopen (`org-session.ts:643, 812`), from deliveries and from the weekly asking. Any other signing attempt meanwhile answers `pending`, as an ordinary unsettled slot does.
+- **`publishHeld(hash)`** clears `held` and posts in one `update`, and only when the slot's stored hash is `hash`, the slot this create made. So a gcloud operation that finishes after a Discard, or after another slot replaced it, publishes nothing.
+- **A relaunch** finds `held` with no key pair in memory. The row offers only Discard. It names the minted hub key, and Discard also revokes it, as admin's message says (`provisioning revoke`).
+
+A failure at 4 or 5 leaves the slot held, with the reason under the delegation row. "Write the code again" retries 4 and 5 while this run holds the key pair. Once the app has quit, the key pair is gone, and the row offers only Discard (M3's), since a delegation whose private key nobody holds must not be published. The key pair and the code live only in main's memory and the child's stdin, and are dropped at publish, discard, sign-out or quit.
 
 *The destination.* `org.provisioningSecret {project, secret, account}` is a machine setting, set once in the Delegations section. Nothing is read from devcloud's files.
 - Production's is project `ytdownload-505811`, secret `desk-provisioning-v2` and account `cli-owner@ytdownload-505811.iam.gserviceaccount.com`. These are the secret B4 step 6 versions, and the account O14 names as the MacBook's gcloud identity with Secret Manager access (O14's Dependencies).
@@ -1161,11 +1171,14 @@ Rejected:
   - the fake failing at `versions add` leaves the slot unsent with the reason, and "Write again" succeeds;
   - after a simulated relaunch only Discard is offered;
   - the metadata check reads `describe` and never `access`;
-  - publish settles the slot.
+  - publish settles the slot;
+  - a held slot survives startup, a feed's reopen and another signing attempt unposted (`settle` never sends it);
+  - a gcloud success arriving after Discard, or after a replacement slot, publishes nothing (the hash binding);
+  - a crash before `publishHeld`'s write leaves it held (only Discard after the relaunch), and a crash after leaves an ordinary pending slot that settles.
 - **`edits.test.ts`:** each delegation composer passes `successorProblems` and `verifySuccessor` once signed; renew refuses an expired or shortened delegation; drop moves its certificates' `retired` to `revoked`.
 - **The renderer:** the rows, the half-done renewal, the unsent row's two actions, and the destination setting.
 - **`test/org/org-page.local.test.ts`:**
-  12. A creates a delegation through the fake gcloud. A real endpoint provisions from the code the fake received, its certificate verifies, and it lists.
+  12. A creates a delegation through the fake gcloud, against the real local hub's mint (so the request's mapping meets the hub's own parser). A real endpoint provisions from the code the fake received, its certificate verifies, and it lists.
   13. A renews it, and the hub's key expiry follows.
   14. A drops it. The certificate's key reads revoked, and the hub key is gone.
 
@@ -1273,6 +1286,7 @@ Rejected:
 - **Reading.** A member's reader fields are their own row's, with no row reading `pinned: false`, `unread: false`, `lastSeen: null`. An `'owner'` reader reads the session row as today.
 - **Unread.** When a new turn ends, the index sets `unread` on the session row and on every `reader_state` row of the session. A member's first sight of a session is not unread. Only `markSeen` clears a member's own.
 - **Grades.** `session.update` (reader fields) is graded `list`, `session.drafts.get` and `.set` `converse`, and `title` and `archived` stay `manage`. A patch mixing reader fields with others is refused `malformed` remotely.
+- **What a remote reader update answers.** Never the record: `applyPatch` returns the whole `SessionRecord` (`register.ts:38-46`), which holds checkout paths, settings and `launchedBy.action` (a spawn's signed act, its brief included; `src/services/sessions/spawn.ts:51-53,75`), and a `list` caller must not read those. With a `reader` in the context, `session.update` answers `ReaderState {appSessionId, pinned, lastSeen, unread}` (a new schema beside `SessionRecordSchema`). The renderer's remote path applies that projection to the record it holds. Local `session.update` answers as today.
 - **Co-owners share.** Two members who both own a machine share its owners' reading. The index can't tell which owner sits at a device, and the case is rare. It is written in the Surprises, not hidden. Rejected: keying the local app by its signed-in member, which strands the state of a profile that signs in later, or signs out.
 - **No migration of data.** Existing rows stay the owners'. Rejected: copying them to the signed-in member, which needs an identity the daemon doesn't hold.
 - The document channel's member attribution (O7's §T, `stream-document.ts`) is outside M6a. Drafts here are the composer's.
@@ -1283,7 +1297,7 @@ Rejected:
 - `migrations.test.ts`: the new entry, and every existing migration's case unchanged.
 - `sessions.test.ts` and `drafts.test.ts`: per-member reads and writes; a new turn marks every reader unread; the owner's columns are untouched by a member's writes, and the reverse.
 - `register.test.ts`: `context.reader` routes each command.
-- `test/endpoint/` `reader-state.test.ts`: an owner's remote read hits the owner's columns; a non-owner's hits their own rows; `title` from a non-owner is refused; grades as above.
+- `test/endpoint/` `reader-state.test.ts`: an owner's remote read hits the owner's columns; a non-owner's hits their own rows; `title` from a non-owner is refused; grades as above. A `list`-only caller's `session.update` answer holds the four `ReaderState` fields and nothing else: no `launchedBy`, no path, no settings.
 - The renderer: a remote lane B session's unread and draft survive a relaunch (the fallback gone).
 - Live, at the staging run (M6b): B pins, reads and types a draft in a session the owner shares with B, and the owner's sidebar, unread count and draft are unchanged.
 
@@ -1310,7 +1324,12 @@ Rejected:
   - `offers.ts`: `record.access {access}`, `record.shares {member, grade: 'list' | 'view' | 'converse' | 'approve' | null}` and `record.owners {add: true, member}` (M5b's), each `manage`-graded, executor `sminos`, with an `accepts` validator. Step-up is already required for every `record.*` (`step-up.ts:11-31`). Also `record.policy` (a call, `manage`) answering `{supported, policies: [{session, access, shares, policyRev}]}` for the sessions the caller owns on the machine, or the one named.
   - `targets.ts`: a `record` target rule taking a listing's session id for either lane: lane A's engine session id, or lane B's `appSessionId`, placed through `members.ts`'s join.
   - `rl10/link.ts`'s `draw`: the record path. A `record.*` act goes to sminos as an `rpc` for either lane, with `session` (the sminos member), `args`, and the signed action as `proof`, under the opId ledger as `sminos.*` rpcs go. Its outcome returns as theirs do.
-  - The local door: `EndpointModule.local {act(action): Promise<Outcome>; call(name, input): Promise<unknown>}`. The daemon serves it as two machine-socket commands, `endpoint.local.act` and `endpoint.local.call`. `act` takes only an action that carries a step-up signature, and runs `authorize` for the device and member the action names, exactly as a channel's act. `call` runs for the machine owners' member (Decision Log 36's local reader).
+  - The local door: `EndpointModule.local {act(action): Promise<Outcome>; call(name: 'record.policy', input): Promise<unknown>}`. The daemon serves it as two machine-socket commands, `endpoint.local.act` and `endpoint.local.call`.
+    - `act` takes only the three `record.*` actions, and refuses anything else `not-offered`.
+    - It verifies the action's step-up signature cryptographically, unconditionally, before anything else (`src/endpoint/step-up.ts`'s verifier, called whatever the grade). Channel authorization skips that check for an action whose grade doesn't need it (`authorize.ts:490-499`), and the door has no channel identity to stand in for it.
+    - It derives the member and the class from the device's one entry in the held head (an `Action` names a device, not a member: `action.ts:30-47`). A device the head doesn't list, or lists twice, refuses `unknown-device`.
+    - Only then does it run `authorize`, as a channel's act does.
+    - `call` answers `record.policy` alone, as the machine owners' member (Decision Log 36's local reader).
   - `src/mawsd/endpoint-seam.ts` and the daemon's command registration;
   - tests.
 - **Main:**
@@ -1383,20 +1402,26 @@ Rejected:
 *Channel listings into the rows.*
 - `rows.ts` calls `endpoint.listings` on each link at link up, at each `org.changed` head, after each policy act's outcome, and every 60 s while up.
 - Each listing verifies as a hub one does, under the same marks.
-- **Source-aware.** A key first learned from a channel is kept until either that machine's next channel answer omits it, or the hub serves a higher revision or a `gone` for it. The hub snapshot's completion no longer drops it (`rows.ts:352-374` drops every key the snapshot lacked).
+- **Source-aware, by current membership.** Every key holds two independent memberships, whatever source first showed it: in the hub's current snapshot, and in its machine's last channel answer.
+  - A hub snapshot's completion clears only the hub membership of the keys it lacked (`rows.ts:365-374` drops the key today). A channel answer clears only the channel membership of the keys it lacked.
+  - A row is drawn while either holds, and only through the accepted revision ordering: a higher revision from either source replaces, an older one (a delayed hub `gone` included) is ignored, and a `gone` at a higher revision removes it from both.
+  - So a session that goes private moves from the hub's snapshot to the channel's without its row blinking, and the endpoint's withdrawal of the public listing (`listings.ts:17-20, 181-207`) doesn't take the channel's listing with it.
 - `RemoteRow` carries `audience` and `policyRev`.
 - Rejected: a private listing published to the hub with an audience, which RL6 rules out.
 
 *Policies* (`stores/policies.ts`).
 - `org.policy.get` is called per machine (`record.policy` with no session) at link up and after each save, for your own sessions.
 - The marks and the sheet read from it, and a session the call doesn't name has no mark.
-- The sheet opens on a fresh read, and saves only if `policyRev` is still the one read. Otherwise it reads "Changed elsewhere: reload", since sminos bumps `policyRev` per change (O18 D10).
+- **The revision check is best effort.** The agreed act carries no expected revision, and `set_visibility` applies to the record as it stands under its lock (O18 §C), so the app can't make a save conditional.
+  - The sheet opens on a fresh read, and reads `record.policy` again on Save, before Touch ID, and once more after Touch ID, before the first act is sent. A `policyRev` that moved at either point sends nothing and reads "Changed elsewhere: reload".
+  - A change that lands between that last read and an act's execution is applied over it. Each act's outcome then carries the revision it caused, and the sheet reads the policy again after the save and shows the result as it stands, marking a line whose outcome's `policyRev` skips a revision as "also changed elsewhere".
+  - Strict compare-and-set would need an expected revision in the frame, a contract change. It is not asked for: two owners editing one session's reach at once is rare, and the result is always shown.
 
 *The local door.*
 - Rejected: an RL2 link to this Mac's own endpoint. The direct listener binds only tailnet addresses (`direct-listener.ts:1-5`), and the roster excludes the local ref on purpose (`source.ts:47-56`).
 - Rejected: calling sminos's CLI as the operator, which would give the app a second, unsigned way to widen and leave no proof for sminos's record.
 
-The door adds no authority. An act through it is authorized by its step-up signature and the head, exactly as over a channel.
+The door adds no authority. An act through it is authenticated by its step-up signature alone, checked every time, and then authorized against the head as over a channel. It carries the three record acts and the one read, nothing else.
 
 *The CLI's widening.* Once these offers are on master, the desk track makes `sminos access` and `sminos share` refuse every widening with "use MAWS", and keep narrowing (the architect's brief, 2026-11-06).
 - The exception, by the desk track's ruling: a machine enrolled at no hub keeps the terminal gate.
@@ -1412,10 +1437,14 @@ The door adds no authority. An act through it is authorized by its step-up signa
   - the `rpc` carrying the proof;
   - `not-offered` without the capability;
   - `record.policy`'s answers;
-  - the local door refusing an act with no step-up, and authorizing as a channel does.
-- **`policy.test.ts`:** the acts' shapes; one confirmation per save; order and partial failure; `policyRev` staleness.
+  - the local door refusing an act with no step-up, an act with a present but invalid signature (on a `record.*` act and on a normally non-step-up command, which it refuses as not offered), any action outside `record.*`, and a device the head doesn't list; and authorizing a good act as a channel does.
+- **`policy.test.ts`:** the acts' shapes; one confirmation per save; order and partial failure; a revision moved before Touch ID and one moved after it each send nothing; a change landing during the acts is shown as the policy then stands, with the skipped revision marked.
 - **`step-up.test.ts`:** `signActions`, one confirmation, each signature verifying, and a cancel signing none.
-- **`rows.test.ts`:** a channel-only private listing survives a hub snapshot; it leaves at the channel's omission or at a hub `gone`; marks hold across both sources.
+- **`rows.test.ts`:**
+  - a channel-only private listing survives a hub snapshot;
+  - a session learned from the hub goes public → private, then a channel refresh, then a hub reconnect and snapshot: its row stays throughout, and a delayed older hub `gone` is ignored;
+  - it leaves at the channel's omission (with no hub membership) or at a higher-revision `gone`;
+  - marks hold across both sources.
 - **The renderer:** the sheet's levels and help text, the people list, the save; the marks; menus on listed rows; unsupported reads.
 - **`test/org/policy.local.test.ts`** (new; Miniflare hub, a real endpoint, and a sminos stand-in executing the contract):
   - A makes a session private;
@@ -1474,7 +1503,8 @@ The door adds no authority. An act through it is authorized by its step-up signa
 **Decisions.**
 
 *Verification* (`verify.ts`), per event:
-- **A v2 event** (it has `sig`): `verifyEvent({org, project}, head.state, event, certificates, now)`, then `verifyAttestation` for its owners. Its owners' label reads as RL9 says, by the held head's emails, never an email the event carries.
+- **A device's `human`** (writer `hub/<member>` or its audience stream `hub/<member>~<digest>`): `verifyEvent({org, project}, head.state, event, certificates, now)`. That covers the signature by one of the member's devices' channel keys, with the hub's `writer`, `seq` and `ts` outside what is signed (`events.ts:35-63`). The writer's member must equal the event's `member`, or the event fails. Its author is that member, named from the held head. It has no machine attestation, and `verifyAttestation` isn't run on it (it would answer `malformed`, `attest.ts:108-111`).
+- **A machine's v2 event** (writer `<machine>/…`, with `sig`): `verifyEvent`, then `verifyAttestation` for its owners. Its owners' label reads as RL9 says, by the held head's emails, never an email the event carries.
 - **A DX1 event** (it has `mac` and no `sig`): judged against the project's history attestations, read once per open from `GET /api/projects/<id>/attestations` and again when a writer's `upTo` is passed. It reads `migrated` when `verifyHistoryAttestation(record, events, head, certificates, {project, writer})` is `ok` for a record whose `upTo` covers its seq, and `legacy` otherwise. The app holds no org key, so it never verifies a `mac`.
 - **A withheld tombstone** (`{writer, seq, withheld: true}`) is skipped.
 - **A failed event** is kept in the cache, counted, and judged again at each adopted head.
@@ -1496,21 +1526,24 @@ The door adds no authority. An act through it is authorized by its step-up signa
 - The app sends nothing to a project that it can't read.
 
 *The cache.* Per project, events by offset and their verdicts, re-verified at load. A project whose cache doesn't read is read from offset 0. "As of" is the last `caught-up`'s time.
+- **Migrated history outlives the bound.** `verifyHistoryAttestation` needs every event of the writer from seq 1 to `upTo` (`history.ts:146-175`), which an evicted prefix no longer gives. So once a writer's prefix verifies in full, the cache keeps a checkpoint, `{writer, upTo, by, record}`, separate from the bounded events and never evicted.
+- **At load,** the record's signature and binding are verified again (`verifyHistorySigner`), and cached events of that writer at seq ≤ `upTo` read `migrated` from the checkpoint. The checkpoint is this profile's own 0600 file, under the same trust as M2's persisted listing marks.
+- **A damaged cache** reads from offset 0, which recomputes every checkpoint from the full prefix.
 
 *Hub access.* The socket opens only while `current()` has `hub`. An expired Access token shows "Sign in to the hub again" in the tab, the Org page's own action (Q7).
 
 **Does not touch.** To-human entries written after the cutover (M7b). Any endpoint or service. The hub. desk-web.
 
 **Proves.** Acceptance 7a.
-- `verify.test.ts`: a v2 say verifies with its owners; a forged one fails and is retried at the next head; a DX1 event under an attestation reads `migrated` with the machine's name; one past `upTo`, or under no attestation, reads `legacy`; a tombstone is skipped.
+- `verify.test.ts`: a device's `human` verifies with its member as author, and fails when its writer's member and `member` differ; a v2 say verifies with its owners; a forged one fails and is retried at the next head; a DX1 event under an attestation reads `migrated` with the machine's name; one past `upTo`, or under no attestation, reads `legacy`; a tombstone is skipped.
 - `project.test.ts` (renderer): exchanges and broadcasts fold; a third party ends an exchange; one message unfolded; titles and machines from lifecycle events; the waiting section filtered to the project.
 - `project-socket.test.ts`: resume from the cached offset; `more` followed; live after `caught-up`; 4403 ends it with "removed".
 - `words.test.ts`: the signature verifies under the device's channel key; a reconnect resends with the nonce; a refusal shows; signed out, nothing sends.
-- `cache.test.ts`: the bound; a damaged file reads from 0; "as of".
+- `cache.test.ts`: the bound; a damaged file reads from 0; "as of"; a DX1 writer larger than both bounds verifies once, is evicted in part, and still reads `migrated` across a restart from its checkpoint, re-checked by `verifyHistorySigner`.
 - **`test/org/channel.local.test.ts`** (Miniflare hub through `local-org.ts`):
   1. A machine's listed key signs v2 `say` events into the project log, plus a DX1 writer with a history attestation from a listed machine, as `apps/desk-hub/test/app-connection.test.ts` and the O14 suites seed them.
   2. The app's channel shows the exchange folded, the DX1 events "attested at migration by <name>", and a forged event uncounted in the stream.
-  3. The app sends words. A second socket (`ProjectSocket`) receives them with `sig` and no `mac`.
+  3. The app sends words. A second socket (`ProjectSocket`) receives them with `sig` and no `mac`, and the app's own channel draws them back from the log as verified words by A, as it draws a `human` another member's device sent through `deviceHuman`.
   4. The hub stops, and the tab shows the cache "as of".
 - **The renderer:** the tab opens once per project; Channel shows only with a `smnsId`; the composer is withdrawn offline; the inline native ask answers.
 - **The e2e case's screenshots,** read by the architect, as M4a's were.
@@ -1537,7 +1570,11 @@ The door adds no authority. An act through it is authorized by its step-up signa
   - **lane A's source:** the endpoint's sub-less RL10 `host` messages (`rl10/link.ts:612-643`'s `#host`), handed in through a new `EndpointServices.channel.record(entry)` seam. Each message carries its project and its `src`, and `UNIQUE(src)` dedupes sminos's resend of the last 50;
   - the project id is sminos's project id (`smnsId`), lane B's through `src/services/index/org-project.ts`'s join;
   - tests.
-- **`src/endpoint`** (desk-track reviewed): `offers.ts` rows for `channel.history`, and the feed `channel` beside `attention`, both filtered per session at `view` as `attention.list` is (`eachSession`). The feed's frames: `snapshot` (the newest page) and `changed`. Also the `#host` hand-off and its test.
+- **`src/endpoint`** (desk-track reviewed): `offers.ts` rows for `channel.history`, and the feed `channel` beside `attention`. The feed's frames: `snapshot` (the newest page) and `changed`. Also the `#host` hand-off and its test.
+  - **Filtering is lane-aware.** `attention.list`'s `eachSession` path places every id as a lane B `appSessionId` through the spine (`calls.ts:179-193, 451-463`; `targets.ts:260-278`), which a lane A entry doesn't have. So a new filter ranks each entry at `view`:
+    - a lane A entry by its `engineSessionId` through the RL10 member record (the `session` rule's target);
+    - a lane B entry by its `appSessionId` placement.
+  - The rank is re-checked at each feed frame before it is sent, so a session that becomes private, or a share removed, stops its entries at once.
 - `src/mawsd/endpoint-seam.ts`: the seam's `channel`.
 - **Main:** `src/main/org/channel/machines.ts` (new). It reads `channel.history` from this Mac's spine (a local command) and from each roster machine over its link, with the `channel` feed live. It keeps a per-machine cache, `<userData>/org/channel/<project>.machines.json` (the newest 500 entries per machine, `asOf`), and merges into M7a's `org.channel.changed`.
 - **Renderer:** `channel/project.ts` places to-human entries; `ToHumanEntry.tsx` (new) shows a message, a question with its choices and answer, the title and the machine chip, and "as of" on an offline machine's entries. Tests.
@@ -1562,7 +1599,7 @@ The door adds no authority. An act through it is authorized by its step-up signa
 
 **Proves.** Acceptance 7b.
 - `journal.test.ts`: lane B's message and answered ask recorded once; lane A's host message recorded, and sminos's resend deduped; the bounds; the project's join.
-- `test/endpoint/` `channel-feed.test.ts`: `view` filtering, the snapshot, changes, and an older device without the feed.
+- `test/endpoint/` `channel-feed.test.ts`: `view` filtering for both lanes, a lane A entry allowed and one refused, in history and in changes; a share removed mid-feed stopping the next frame; the snapshot, changes, and an older device without the feed.
 - `machines.test.ts`: the merge by time; offline "as of"; a machine leaving the roster drops its entries.
 - **`test/org/channel.local.test.ts`:**
   5. A real endpoint, fed a sub-less host message by an RL10 stand-in, and the local spine with a lane B message both appear in the project's channel with their titles and machines.
@@ -1590,7 +1627,7 @@ The door adds no authority. An act through it is authorized by its step-up signa
   4. The deletion.
   5. O15's check.
 
-  The deployment admin's anchor must not move again after the revocation, so no admin verb runs after step 3.
+  No admin verb signs after step 3. One read-only `admin show` checks the result, and moves the anchor to the revoking head, which is harmless once the files are deleted next.
 - **Removing a root.** The revocation is `device.remove {member: <the admin device's member>, device: <its id>}` from the People group. The member is the owner's own, since genesis lists `/api/me`'s member with the admin device (`admin.ts:604-617`).
   - The sheet's lines name it as the deployment admin's device, by its id (`deployment-admin-<12 hex>`, or `a1` for an old file; `admin-device.ts:15-19`).
   - The checks refuse it unless the app's device is a root (`empty-roots`).
@@ -1837,8 +1874,8 @@ Live: at the staging run, or the next sitting after it: the owner adds the secon
 3. **The revocation.**
    - In Settings › Org › People, the owner's own member lists the deployment admin's device (`deployment-admin-<12 hex>`, or `a1`). Remove device… shows its lines: both keys revoked, the root removed. Sign with Touch ID.
    - Check: "Signed version M." The Org group's roots list only this Mac. Its Deliveries line empties once every machine has acknowledged (M3's deliveries).
-   - Check: `production-run.sh admin show` reads `head version M`, with one root line, the app's device, and the admin device under revoked.
-   - This is the last `admin` command that reads with the admin's keys. The anchor goes in step 4.
+   - What was signed is what the sheet showed, bound by its digest (M4a). The sheet's lines name both of the admin device's keys revoked and its root removed. A screenshot of the sheet is the record.
+   - Check, the last `admin` command, read-only: `production-run.sh admin show` reads `head version M` with one root line (the app's device), and the owner's member no longer lists the admin device. `show` moves the admin's anchor up to version M (`anchored`, `admin.ts:366-421`), which is intended: the files go in step 4, and nothing signs with the admin device again. `show` prints no revoked device keys, so the sheet's lines and the signed state are the revocation's evidence.
 4. **The deletion.** Delete the admin's key file and anchor: by default `~/.local/state/desk-hub-production/device/keys.json` and `keys.json.org.json` (`production-run.sh:28-44`; `DESK_PRODUCTION_DIR` or `DESK_PRODUCTION_DEVICE` move them). The offline recovery key is not touched.
    - Check: the files are gone (`ls` of the directory). The Org page still reads "This Mac signs the org state."
 5. **O15's check**, read-only: the Org page's root lines name one device, the app's. The architect records it for O15.
@@ -2271,6 +2308,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     reader_state  (app_session_id, member, pinned, last_seen_uuid, last_seen_at, unread, PRIMARY KEY (app_session_id, member))
     member_drafts (app_session_id, member, doc, attachments, updated_at, PRIMARY KEY (app_session_id, member))
     // the router's command context gains reader?: 'owner' | MemberId   (absent: 'owner')
+    // with a reader, session.update answers ReaderState {appSessionId, pinned, lastSeen, unread}, never the record
     // src/endpoint/offers.ts: 'session.update' (reader fields only, list), 'session.drafts.get' and '.set' (converse)
 
 **§Q. Visibility and shares** (M6b; O18's Interfaces §D).
@@ -2290,7 +2328,8 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     //   stale, expired, tombstoned (the ledger); not-offered, no-session (endpoint); cancelled (step-up)
 
     // the local door: src/mawsd/endpoint-seam.ts EndpointModule.local { act(action): Promise<Outcome>; call(name, input): Promise<unknown> }
-    //   machine-socket commands 'endpoint.local.act' (a step-up act only) and 'endpoint.local.call' (as the machine owners' member)
+    //   machine-socket commands 'endpoint.local.act' (the three record.* acts only; step-up verified unconditionally; member from the device's one head entry)
+    //   and 'endpoint.local.call' (record.policy only, as the machine owners' member)
 
     // src/main/org/policy.ts: org.policy.get {address} -> OrgPolicy; org.policy.set {address, access?, shares?, policyRev} -> {ok, results: Outcome[]}
     // src/main/machines/remote/acts.ts: actMany(requests) under one confirmation; src/main/device/step-up.ts: signActions
@@ -2307,17 +2346,19 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     // org.grants.set {ref, member, rights} -> SignResult-like; org.grants.regrant {ref, digest}
     // src/main/device/step-up.ts: RecordSigner.sign(domain, body, prompt, {live?}) -> {ok: true, signed} | {ok: false, reason: 'cancelled'}
     // <userData>/org/grants.json {version: 1, issued: [{signed, delivered: 'pending' | 'done' | {refused}, op?}]}
-    // src/endpoint: 'endpoint.grants' (machine, list): the caller's grant; every member's for an owner (an admin for 'org')
+    // src/endpoint: 'endpoint.grants' (machine, list) -> {members: [{member, grant: Signed<Grant> | null, highWater: number}]}: the caller's; every member's for an owner (an admin for 'org')
+    // apps/org-protocol/src/records.ts: grantProblems(state, certificates, body: Grant, signerKid) -> Problem[]   (verifyGrant = grantProblems, then the signature)
 
 **§S. Delegations** (M4c).
 
     // apps/org-protocol/src/delegations.ts: prefixProblem, mintDisagrees (moved); successorProblems gains prefix-equal | prefix-nested | prefix-covers
     // OrgChange gains delegation.add {…the delegation} | delegation.renew {id, expires} | delegation.drop {id}
-    // org.delegation.create {prefix, ttlDays, maxUses, owners} -> SignResult & {secret?: {version, createTime}}
+    // org.delegation.create {label, prefix, ttlDays, maxUses: number | null, owners} -> SignResult & {secret?: {version, createTime}}
     // org.delegation.rewrite {id}; org.delegation.renewHub {id}; org.delegation.revokeHub {id}
     // OrgView gains delegations: {id, prefix, owners, expires, maxUses, machines: {ref, name, live}[], hub: {expires, uses} | null, held: 'unsent' | null}[]
     // machine settings: org.provisioningSecret {project, secret, account} | null
-    // Edit gains hold?: true (signed into the slot unsent); OrgSigner gains publishHeld(): Promise<SignOutcome>
+    // Edit gains hold?: true; signing.json's pending gains held: {kind: 'delegation', id} | null (never reposted by settle, deliveries or weekly)
+    // OrgSigner gains publishHeld(hash): Promise<SignOutcome>   (clears held and posts in one update, only for the slot whose stored hash is `hash`)
     // the desk track's route (branch p5-hub-key-renew; the architect lands it): POST /api/provisioning-keys/<id>/renew, admin-only, no body
     //   200: the key exactly as GET /api/provisioning-keys lists it, delegation included; `expires` is the head delegation's string verbatim
     //   403 not-admin | 404 unknown-key | 410 key-revoked | 410 key-expired (an elapsed key is never revived)
@@ -2987,6 +3028,23 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
 
 - Decision: Verification for the rest. This re-plan gets a `doperpowers:adversarial-reviewer` buildability round before its docs PR. Each milestone's PR is reviewed: reviewer-high with a security lens on M4b, M4c, M6b and M8; reviewer-medium on M7a, M7b and M6a, with a confidentiality lens on M7b's feed and M6a's reader routing. The desk track reviews every `src/endpoint` and `apps/org-protocol` hunk.
   Date/Author: 2026-11-06, the architect's brief, recorded by O8's executor.
+
+- Decision: The re-plan's buildability round is folded in (doperpowers:adversarial-reviewer on ce2dda8c2: 6 P1 and 7 P2, each checked against the cited code and adopted).
+  1. (P1, M6a) A remote reader update answers `ReaderState`, never the whole record, which holds `launchedBy.action` and paths a `list` caller must not read.
+  2. (P1, M4c) An unsent delegation is a persisted `held` phase of the slot. No automatic settle posts it, and `publishHeld(hash)` publishes only the slot this create made.
+  3. (P1, M6b) The local door takes the three `record.*` acts only, verifies their step-up signature unconditionally, and takes the member from the device's one head entry.
+  4. (P1, M4b) A package-owned `grantProblems` judges an unsigned grant before Touch ID. `verifyGrant` becomes eligibility then signature, its verdicts unchanged.
+  5. (P1, M4c) The mint is `delegationCreate`'s request exactly (`label`, `ttl_s`, `max_uses`), and the encoder is `encodeProvisioningCodeV2`.
+  6. (P1, M7a) A device's `human` is verified by `verifyEvent` alone, its author being its writer's member, with no machine attestation.
+  7. (P2, M4b) `endpoint.grants` answers each member's `highWater` with or without a grant, and a `not-newer` re-reads once and asks again.
+  8. (P2, M4b) A lost ledger unenrolls the endpoint (`state/store.ts:286-300`), so the local proof re-enrolls before re-granting.
+  9. (P2, M7a) A migrated writer's verdict is kept as a checkpoint beyond the cache's bound, re-checked by `verifyHistorySigner` at load.
+  10. (P2, M7b) The channel feed's filter is lane-aware, and re-checked per frame.
+  11. (P2, M6b) Rows track hub and channel membership per key, whatever showed the key first.
+  12. (P2, M6b) The `policyRev` check is best effort, read again before and after Touch ID, with a change landing during the acts shown as it stands.
+  13. (P2, M8) `admin show` is the one read after the revocation, and moving its anchor is intended. The revocation's evidence is the digest-bound sheet and the signed state, since `show` prints no revoked device keys.
+  The verdict found M5b buildable as written.
+  Date/Author: 2026-11-06, O8's executor.
 
 ## Outcomes & Retrospective
 
