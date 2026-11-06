@@ -336,7 +336,9 @@ describe("a device's words", () => {
     const theirs = await following(o.bEmail, project);
     const everyone = await seal(await KEY, 'log', project, { kind: 'human', from: 'human', member: A, to: '*', text: 'a note', created: new Date().toISOString() } as HumanDraft);
     expect(await send(mine, await words(project, A, [P]))).toMatchObject({ t: 'refused', refusal: { reason: 'not-reachable' } });
-    expect(await send(mine, await words(project, A, [L, P]))).toMatchObject({ t: 'refused', refusal: { reason: 'not-reachable' } });
+    // An `@all` as desk-web composes it: every live member it sees, the private one included, with `wake`.
+    const all = await seal(await KEY, 'log', project, { kind: 'human', from: 'human', member: A, to: [L, P].map((session) => ({ session, alias: 'p' })), text: '@all hello', created: new Date().toISOString(), wake: true } as HumanDraft);
+    expect(await send(mine, all)).toMatchObject({ t: 'refused', refusal: { reason: 'not-reachable' } });
     expect(await send(mine, await words(project, A, [L]))).toMatchObject({ t: 'human-ack', writer: `hub/${A}`, seq: 1 });
     expect(await send(mine, everyone)).toMatchObject({ t: 'human-ack', writer: `hub/${A}`, seq: 2 });
     await waitFor(() => (theirs.logged.filter((l) => l.event.writer === `hub/${A}`).length === 2 ? true : undefined));
