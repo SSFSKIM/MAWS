@@ -8,21 +8,30 @@
 // - each question of one the owner channel keeps a mark of (not an interrupted partial) is a `question`, as it was
 //   asked, with its options; and its answer is an `answered`, at the time the engine took it, once the owner channel
 //   states it delivered (`ownerChannel.changed`), the one truth of an answer. Only a question this journal recorded is
-//   answered here: the journal starts empty, with no back-fill (M7b, "Back-fill").
+//   answered here: the journal starts empty, with no back-fill (M7b, "Back-fill");
+// - each question of a MAWS ask (`mcp__maws__ask`, a subagent's too: the person answers it alike) is a `question` from
+//   the ask's own record as the engine host journals it (`maws.ask.opened`: the question and its options), and each
+//   answer an `answered` (`maws.ask.answered`), keyed by the ask's id; the host's ask table is its one store, held in its
+//   memory (src/engine-host/tool-server/asks.ts), and these events are what it tells of it.
 // Only what a MAWS process said is read (an event with its journal row, `seq`): history read back from disk is no entry
 // (M7b, "Back-fill": none), and nor is a transcript followed while a terminal or a job holds the session, whose words are
 // lane A's, sminos's to tell.
 // Each entry's `src` is its anchor in the session (`<project>/lane-b/<appSessionId>/<anchor>`), the same whenever the
 // batch is replayed, so a replay records nothing new. A session no org project joins (no checkout, or one with no
-// sminos id) records nothing.
+// sminos id) records nothing. One whose project's org id is not derived yet (the start's refresh, which waits on git) is
+// held, CHANNEL_BOUNDS.held at most across sessions, and recorded in the order it was said once the id is
+// (`placesChanged`), so nothing said early in a run is lost to the join.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { NewHostEntry } from '@shared/ipc/schema/channel';
+import { askQuestionId, type AskAnswer } from '@shared/maws/tools';
 import { answersOf } from '@shared/owner/answer';
 import type { OwnerChannelState } from '@shared/owner/state';
 import { finishedTextOf, messageOfCall, toHumanOfText } from '@shared/owner/to-human-items';
+import { CHANNEL_BOUNDS } from './journal';
 
 type ToolUse = Extract<SessionEvent, { kind: 'tool.use' }>;
+type Said = Pick<NewHostEntry, 'kind' | 'text' | 'at' | 'choices'>;
 
 // The message calls of a session waiting for their results. A call whose result never comes (its session gone mid-call)
 // is let go, oldest first, past this many.
@@ -34,20 +43,48 @@ export interface LaneBPlace {
 }
 
 export interface LaneBDeps {
-  place(appSessionId: AppSessionId): LaneBPlace | null; // the org-project join; null: no project joins the session
+  // the org-project join; null: no project joins the session; 'pending': its project's org id is not derived yet
+  place(appSessionId: AppSessionId): LaneBPlace | 'pending' | null;
   record(entry: NewHostEntry): void;
   recorded(src: string): boolean;
+  log(line: string): void;
+}
+
+// What a session said, waiting for its place. `requires`: the anchor of the question an answer answers, recorded first.
+interface Held {
+  appSessionId: AppSessionId;
+  engineSessionId: SessionId | undefined; // undefined: the session's, as the index holds it
+  said: Said;
+  anchor: string;
+  requires: string | undefined;
 }
 
 export class LaneBSource {
   private readonly pending = new Map<AppSessionId, Map<string, ToolUse>>();
+  private held: Held[] = [];
+  private readonly heldKeys = new Set<string>(); // `<appSessionId>/<anchor>`: a replay or a state stated again holds nothing more
+  private letGo = 0; // held entries let go past the bound since the last flush
 
   constructor(private readonly deps: LaneBDeps) {}
 
   onEvents(appSessionId: AppSessionId, events: readonly SessionEvent[]): void {
     for (const event of events) {
-      if (event.parentToolUseId !== null) continue; // a subagent's: drawn in its own transcript, not its parent's
       if (event.seq === null) continue; // read back from disk (no journal row): history, or a transcript another process holds
+      if (event.kind === 'maws.ask.opened') {
+        event.questions.forEach((question, index) => {
+          const choices = question.options?.map((option) => option.label) ?? [];
+          this.add(appSessionId, event.sessionId, { kind: 'question', text: question.question, at: event.at, ...(choices.length > 0 ? { choices } : {}) }, `ask/${event.askId}/${askQuestionId(question, index)}`);
+        });
+        continue;
+      }
+      if (event.kind === 'maws.ask.answered') {
+        for (const answer of event.answers) {
+          const question = `ask/${event.askId}/${answer.id}`;
+          this.add(appSessionId, event.sessionId, { kind: 'answered', text: askAnswerOf(answer), at: event.at }, `${question}/answered`, question);
+        }
+        continue;
+      }
+      if (event.parentToolUseId !== null) continue; // a subagent's words: drawn in its own transcript, not its parent's
       if (event.kind === 'tool.use') this.called(appSessionId, event);
       else if (event.kind === 'tool.result') {
         const calls = this.pending.get(appSessionId);
@@ -73,16 +110,25 @@ export class LaneBSource {
 
   // The owner channel's state of a session (`ownerChannel.changed`): each delivered answer of a question recorded here.
   ownerChanged(state: OwnerChannelState): void {
-    const appSessionId = state.appSessionId;
-    let place: LaneBPlace | null | undefined;
     for (const mark of state.marks) {
       if (mark.kind !== 'need-input' || mark.question?.state !== 'delivered') continue;
-      place ??= this.deps.place(appSessionId);
-      if (place === null) return;
       const anchor = `${mark.anchor.messageUuid}/${mark.anchor.blockIndex}/q${mark.anchor.span}`;
-      if (!this.deps.recorded(`${prefixOf(place, appSessionId)}/text/${anchor}`)) continue;
       const { text, at } = mark.question.answer;
-      this.add(appSessionId, place.engineSessionId, { kind: 'answered', text: answerOf(mark.head, text), at }, `answer/${anchor}/${at}`, place);
+      this.add(state.appSessionId, undefined, { kind: 'answered', text: answerOf(mark.head, text), at }, `answer/${anchor}/${at}`, `text/${anchor}`);
+    }
+  }
+
+  // A project's org id may have been derived (the index's projects changed): what waited for it is recorded, in order.
+  placesChanged(): void {
+    if (this.held.length > 0) {
+      const waiting = this.held;
+      this.held = [];
+      this.heldKeys.clear();
+      for (const item of waiting) this.add(item.appSessionId, item.engineSessionId, item.said, item.anchor, item.requires);
+    }
+    if (this.letGo > 0) {
+      this.deps.log(`${this.letGo} held entries were let go past ${CHANNEL_BOUNDS.held}`);
+      this.letGo = 0;
     }
   }
 
@@ -94,17 +140,45 @@ export class LaneBSource {
     if (calls.size > PENDING_MAX) calls.delete(calls.keys().next().value!);
   }
 
-  private add(appSessionId: AppSessionId, engineSessionId: SessionId | null, said: Pick<NewHostEntry, 'kind' | 'text' | 'at' | 'choices'>, anchor: string, known?: LaneBPlace): void {
-    const place = known ?? this.deps.place(appSessionId);
+  private add(appSessionId: AppSessionId, engineSessionId: SessionId | undefined, said: Said, anchor: string, requires?: string): void {
+    const place = this.deps.place(appSessionId);
     if (place === null) return;
-    this.deps.record({ project: place.project, appSessionId, engineSessionId, lane: 'B', ...said, src: `${prefixOf(place, appSessionId)}/${anchor}` });
+    if (place === 'pending') return this.hold({ appSessionId, engineSessionId, said, anchor, requires });
+    const prefix = `${place.project}/lane-b/${appSessionId}`;
+    if (requires !== undefined && !this.deps.recorded(`${prefix}/${requires}`)) return;
+    this.deps.record({ project: place.project, appSessionId, engineSessionId: engineSessionId ?? place.engineSessionId, lane: 'B', ...said, src: `${prefix}/${anchor}` });
+  }
+
+  private hold(item: Held): void {
+    const key = `${item.appSessionId}/${item.anchor}`;
+    if (this.heldKeys.has(key)) return;
+    this.heldKeys.add(key);
+    this.held.push(item);
+    if (this.held.length <= CHANNEL_BOUNDS.held) return;
+    const oldest = this.held.shift()!;
+    this.heldKeys.delete(`${oldest.appSessionId}/${oldest.anchor}`);
+    if (this.letGo++ === 0) this.deps.log(`more than ${CHANNEL_BOUNDS.held} entries wait for their project's org id; the oldest are let go`);
   }
 }
-
-const prefixOf = (place: LaneBPlace, appSessionId: AppSessionId) => `${place.project}/lane-b/${appSessionId}`;
 
 // What an answer says: its answer line for the question's head (`Answering "<head>": <answer>`, as a card and the
 // doperpowers mod send it), else the prompt as it was written (a reply in the person's own words).
 function answerOf(head: string, text: string): string {
   return answersOf(text).find((line) => line.head === head)?.answer ?? text;
+}
+
+// What a MAWS ask's answer says, read by the person rather than the model: the two non-answers as the steer names them
+// (src/shared/maws/ask.ts), else the chosen labels, the text or the paths, and what was typed under Other, a project's or
+// a design system's name, or the build request; then the note the person wrote beside it.
+function askAnswerOf(answer: AskAnswer): string {
+  const said = answer.status === 'skipped' ? 'skipped' : answer.status === 'decide_for_me' ? 'decide for me' : answeredOf(answer);
+  return answer.note === undefined ? said : `${said}\nnote: ${answer.note}`;
+}
+
+function answeredOf(answer: AskAnswer): string {
+  if (answer.create === true) return 'build a new one with me';
+  if (answer.designSystemId !== undefined) return answer.name !== undefined ? `${answer.name} (${answer.designSystemId})` : answer.designSystemId;
+  const values = (answer.value === undefined ? [] : Array.isArray(answer.value) ? answer.value : [answer.value]).join(', ');
+  const value = answer.name !== undefined ? `${answer.name} (${values})` : values;
+  return [value, answer.otherText !== undefined ? `Other: ${answer.otherText}` : ''].filter((part) => part !== '').join('; ');
 }

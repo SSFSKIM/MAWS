@@ -51,12 +51,13 @@ export function startChannel(deps: ChannelDeps): ProjectChannel {
     }
   };
 
-  // The org-project join: the session's checkout, and its sminos id.
-  const place = (appSessionId: AppSessionId): LaneBPlace | null => {
+  // The org-project join: the session's checkout, and its sminos id; 'pending' until the checkout's org project is derived.
+  const place = (appSessionId: AppSessionId): LaneBPlace | 'pending' | null => {
     const session = deps.index.sessions.get(appSessionId);
     if (session === null || session.projectId === null) return null;
-    const project = deps.index.projects.org(session.projectId)?.smnsId ?? null;
-    return project === null ? null : { project, engineSessionId: session.engineSessionId };
+    const org = deps.index.projects.org(session.projectId);
+    if (org === null) return 'pending';
+    return org.smnsId === null ? null : { project: org.smnsId, engineSessionId: session.engineSessionId };
   };
 
   deps.register('channel.history', ({ project, before, limit }) => journal.history({ project, ...(before === undefined ? {} : { before }), limit: limit ?? HISTORY_LIMIT_MAX }, now()));
@@ -68,7 +69,7 @@ export function startChannel(deps: ChannelDeps): ProjectChannel {
     } catch (error) {
       log(`the journal could not be pruned at start: ${messageOf(error)}`);
     }
-    const laneB = new LaneBSource({ place, record, recorded: (src) => journal.has(src) });
+    const laneB = new LaneBSource({ place, record, recorded: (src) => journal.has(src), log });
     const guarded = (what: string, read: () => void) => {
       try {
         read();
@@ -79,6 +80,7 @@ export function startChannel(deps: ChannelDeps): ProjectChannel {
     offs.push(
       deps.onEvent('session.eventBatch', ({ appSessionId, events }) => guarded(`a batch of ${appSessionId}`, () => laneB.onEvents(appSessionId as AppSessionId, events))),
       deps.onEmitted('ownerChannel.changed', ({ appSessionId, state }) => guarded(`the owner channel's state of ${appSessionId}`, () => laneB.ownerChanged(state))),
+      deps.index.projects.onChange(() => guarded('the held entries', () => laneB.placesChanged())),
     );
   } else log(`lane B's entries are not kept: index unavailable: ${deps.index.unavailable}`);
 

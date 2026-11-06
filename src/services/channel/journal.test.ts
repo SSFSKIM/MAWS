@@ -20,7 +20,7 @@ import type { OwnerChannelState, OwnerMark } from '@shared/owner/state';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from '../index/index';
-import { CHANNEL_BOUNDS } from './journal';
+import { CHANNEL_BOUNDS, CUT_MARKER } from './journal';
 import { startChannel, type ProjectChannel } from './register';
 
 const DAY = 24 * 60 * 60_000;
@@ -37,6 +37,7 @@ function harness() {
   const taps = new Map<string, Set<Listener>>();
   const handlers = new Map<string, (input: unknown) => unknown>();
   const emitted: EventPayload<'channel.changed'>[] = [];
+  const logs: string[] = [];
   let clock = NOW;
   const on = (table: Map<string, Set<Listener>>) => (name: string, listener: Listener) => {
     const set = table.get(name) ?? new Set();
@@ -55,16 +56,25 @@ function harness() {
       return true;
     }) as never,
     now: () => clock,
-    log: () => {},
+    log: (line) => void logs.push(line),
   });
-  // a session in a checkout whose org project is sminos's `smnsId` (null: a project no org id joins)
-  const session = (smnsId: string | null, engine = `00000000-0000-4000-8000-${Math.floor(Math.random() * 1e12).toString().padStart(12, '0')}`) => {
+  // a session in a checkout whose org project is not derived yet; `derive` gives it sminos's `smnsId` (null: a project no
+  // org id joins), as the start's refresh does once git answers
+  const pendingSession = (engine = `00000000-0000-4000-8000-${Math.floor(Math.random() * 1e12).toString().padStart(12, '0')}`) => {
     const directory = join(dir.path, `checkout-${Math.random().toString(36).slice(2)}`);
     mkdirSync(directory);
     const record = index.sessions.upsertFromSummary(summary({ directory, sessionId: engine as SessionId })).record;
-    const org: ProjectOrg = smnsId === null ? { key: `folder:m:${record.projectId}` as OrgKey, name: 'x', source: 'folder', smnsId: null } : { key: `smns:${smnsId}` as OrgKey, name: 'x', source: 'smns', smnsId };
-    index.projects.setOrg(record.projectId as ProjectId, org);
-    return { appSessionId: record.appId, engineSessionId: engine as SessionId };
+    const derive = (smnsId: string | null) => {
+      const org: ProjectOrg = smnsId === null ? { key: `folder:m:${record.projectId}` as OrgKey, name: 'x', source: 'folder', smnsId: null } : { key: `smns:${smnsId}` as OrgKey, name: 'x', source: 'smns', smnsId };
+      index.projects.setOrg(record.projectId as ProjectId, org);
+    };
+    return { appSessionId: record.appId, engineSessionId: engine as SessionId, derive };
+  };
+  // a session in a checkout whose org project is sminos's `smnsId` (null: a project no org id joins)
+  const session = (smnsId: string | null, engine?: string) => {
+    const { derive, ...ids } = pendingSession(engine);
+    derive(smnsId);
+    return ids;
   };
   const batch = (appSessionId: AppSessionId, events: SessionEvent[]) => {
     for (const listener of host.get('session.eventBatch') ?? []) listener({ appSessionId, events });
@@ -74,7 +84,7 @@ function harness() {
   };
   const history = (input: { project: string; before?: string; limit?: number }) => handlers.get('channel.history')!(input) as { entries: HostEntry[]; more: boolean };
   return {
-    index, channel, emitted, session, batch, ownerState, history, handlers,
+    index, channel, emitted, logs, session, pendingSession, batch, ownerState, history, handlers,
     rows: () => {
       const raw = new DatabaseSync(join(dir.path, 'index.sqlite'), { readOnly: true });
       try {
@@ -103,6 +113,11 @@ const toolResult = (engine: SessionId, at: string, toolUseId: string, isError = 
   ev(engine, at, { kind: 'tool.result', toolUseId, content: [{ type: 'text', text: isError ? 'refused' : 'sent' }], isError, structured: null, spillPath: null, denial: null, safeguard: 'not_evaluated', messageUuid: `res-${toolUseId}`, ...over });
 const turnEnded = (engine: SessionId, at: string) =>
   ev(engine, at, { kind: 'turn.ended', result: 'success', isError: false, terminalReason: null, resultText: null, durationMs: 1, numTurns: 1, costUsd: 0, usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 }, permissionDenials: [], errors: [], userMessageUuids: [] });
+
+const askOpened = (engine: SessionId, at: string, askId: string, questions: unknown[], over: Record<string, unknown> = {}) =>
+  ev(engine, at, { kind: 'maws.ask.opened', askId, toolUseId: askId, requestId: `req-${askId}`, blocking: true, title: 'Before I build', context: null, questions, ...over });
+const askAnswered = (engine: SessionId, at: string, askId: string, answers: unknown[], over: Record<string, unknown> = {}) =>
+  ev(engine, at, { kind: 'maws.ask.answered', askId, toolUseId: askId, answers, delivery: 'result', ...over });
 
 const laneA = (over: Partial<NewHostEntry> = {}): NewHostEntry => ({
   project: 'proj-a', appSessionId: null, engineSessionId: '11111111-1111-4111-8111-111111111111' as SessionId, lane: 'A', kind: 'message', text: 'From the terminal.',
@@ -209,6 +224,49 @@ describe('the project channel journal', () => {
       ]);
       expect(h.history({ project: 'proj-1' }).entries).toEqual([]);
     });
+
+    it('records each question of a MAWS ask from its own record, with its options, and each answer once the ask is answered, each once', () => {
+      const { appSessionId, engineSessionId: e } = h.session('proj-1');
+      const asked = iso(NOW - 60_000);
+      const questions = [
+        { id: 'q1', question: 'Which backend should the board use?', header: 'Backend', modality: 'choice', options: [{ label: 'Postgres' }, { label: 'SQLite' }] },
+        { id: 'q2', question: 'What should it be called?', modality: 'text' },
+        { id: 'q3', question: 'Which folders?', modality: 'folder', multiple: true },
+      ];
+      const opened = askOpened(e, asked, 'toolu_ask', questions);
+      h.batch(appSessionId, [opened]);
+      h.batch(appSessionId, [opened]); // a replay
+      const answeredAt = iso(NOW - 30_000);
+      const answered = askAnswered(e, answeredAt, 'toolu_ask', [
+        { id: 'q1', question: questions[0]!.question, status: 'answered', value: ['SQLite'], otherText: 'for now', note: 'Postgres later.' },
+        { id: 'q2', question: questions[1]!.question, status: 'answered', value: 'Board' },
+        { id: 'q3', question: questions[2]!.question, status: 'decide_for_me' },
+      ]);
+      h.batch(appSessionId, [answered]);
+      h.batch(appSessionId, [{ ...answered, delivery: 'steer' } as SessionEvent]); // the steer's meta row states it again
+      const prefix = `proj-1/lane-b/${appSessionId}/ask/toolu_ask`;
+      expect(h.history({ project: 'proj-1' }).entries.map(({ kind, text, choices, at, src }) => ({ kind, text, choices, at, src }))).toEqual([
+        { kind: 'answered', text: 'decide for me', choices: undefined, at: answeredAt, src: `${prefix}/q3/answered` },
+        { kind: 'answered', text: 'Board', choices: undefined, at: answeredAt, src: `${prefix}/q2/answered` },
+        { kind: 'answered', text: 'SQLite; Other: for now\nnote: Postgres later.', choices: undefined, at: answeredAt, src: `${prefix}/q1/answered` },
+        { kind: 'question', text: 'Which folders?', choices: undefined, at: asked, src: `${prefix}/q3` },
+        { kind: 'question', text: 'What should it be called?', choices: undefined, at: asked, src: `${prefix}/q2` },
+        { kind: 'question', text: 'Which backend should the board use?', choices: ['Postgres', 'SQLite'], at: asked, src: `${prefix}/q1` },
+      ]);
+      expect(h.emitted).toHaveLength(6);
+    });
+
+    it('records a subagent’s ask, which the person answers alike, and no answer to an ask it never heard asked, nor one read back from disk', () => {
+      const { appSessionId, engineSessionId: e } = h.session('proj-1');
+      const question = { id: 'q1', question: 'Ship it?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] };
+      h.batch(appSessionId, [
+        askOpened(e, iso(NOW - 9_000), 'toolu_sub', [question], { parentToolUseId: 'toolu_agent' }),
+        askAnswered(e, iso(NOW - 8_000), 'toolu_sub', [{ id: 'q1', question: 'Ship it?', status: 'answered', value: ['Yes'] }], { parentToolUseId: 'toolu_agent' }),
+        askAnswered(e, iso(NOW - 7_000), 'toolu_unheard', [{ id: 'q1', question: 'Earlier?', status: 'skipped' }]),
+        { ...askOpened(e, iso(NOW - 6_000), 'toolu_disk', [question]), seq: null } as SessionEvent,
+      ]);
+      expect(h.history({ project: 'proj-1' }).entries.map((entry) => `${entry.kind}: ${entry.text}`)).toEqual(['answered: Yes', 'question: Ship it?']);
+    });
   });
 
   describe('the org-project join', () => {
@@ -221,6 +279,44 @@ describe('the project channel journal', () => {
       expect(h.history({ project: 'proj-1' }).entries.map((entry) => entry.text)).toEqual(['one']);
       expect(h.history({ project: 'proj-2' }).entries.map((entry) => entry.text)).toEqual(['two']);
       expect(h.emitted.map((event) => event.project)).toEqual(['proj-1', 'proj-2']);
+    });
+
+    it('holds what a session says before its project’s org id is derived and records it, in order, once it is; a project no org id joins drops it', () => {
+      const early = h.pendingSession();
+      const folder = h.pendingSession();
+      const asked = iso(NOW - 60_000);
+      h.batch(early.appSessionId, [block(early.engineSessionId, iso(NOW - 70_000), 'mu-e', '<message>Starting.</message>')]);
+      h.batch(early.appSessionId, [block(early.engineSessionId, asked, 'mu-q', '<need-input>Ship it?</need-input>')]);
+      h.batch(early.appSessionId, [askOpened(early.engineSessionId, asked, 'toolu_ask', [{ id: 'q1', question: 'Which one?', modality: 'text' }])]);
+      h.batch(early.appSessionId, [askAnswered(early.engineSessionId, iso(NOW - 40_000), 'toolu_ask', [{ id: 'q1', question: 'Which one?', status: 'answered', value: 'The first.' }])]);
+      const anchor = { messageUuid: 'mu-q' as never, blockIndex: 0, span: 0 };
+      h.ownerState({
+        appSessionId: early.appSessionId, lane: { on: true, override: 'inherit', applied: null, pending: null, mismatch: null },
+        marks: [{ id: markIdOf(early.appSessionId, 'need-input', anchor), kind: 'need-input', anchor, head: 'Ship it?', at: asked, item: true, question: { state: 'delivered', answer: { text: answerText('Ship it?', 'Yes.'), origin: 'answer', at: iso(NOW - 30_000) } } }],
+      });
+      h.batch(folder.appSessionId, [block(folder.engineSessionId, iso(NOW - 1_000), 'mu-f', '<message>A folder’s.</message>')]);
+      expect(h.emitted, 'nothing is recorded before the org id is known').toEqual([]);
+      folder.derive(null);
+      early.derive('proj-1');
+      expect(h.emitted.map((event) => `${event.entry.kind}: ${event.entry.text}`), 'recorded in the order it was said, each answer after its question').toEqual([
+        'message: Starting.', 'question: Ship it?', 'question: Which one?', 'answered: The first.', 'answered: Yes.',
+      ]);
+      expect(h.history({ project: 'proj-1' }).entries).toHaveLength(5);
+      early.derive('proj-1'); // the project told again: nothing held is recorded twice
+      expect(h.emitted).toHaveLength(5);
+      expect(h.logs).toEqual([]);
+    });
+
+    it('holds at most CHANNEL_BOUNDS.held entries, letting the oldest go with one logged line', () => {
+      const early = h.pendingSession();
+      const over = 5;
+      const said = Array.from({ length: CHANNEL_BOUNDS.held + over }, (_, n) => block(early.engineSessionId, iso(NOW - 3_000_000 + n * 1_000), `mu-${n}`, `<message>m${n}</message>`));
+      h.batch(early.appSessionId, said);
+      expect(h.logs).toEqual([expect.stringContaining(`more than ${CHANNEL_BOUNDS.held} entries wait for their project's org id`)]);
+      early.derive('proj-1');
+      expect(h.emitted).toHaveLength(CHANNEL_BOUNDS.held);
+      expect(h.emitted[0]!.entry.text).toBe(`m${over}`);
+      expect(h.logs).toEqual([expect.any(String), `${over} held entries were let go past ${CHANNEL_BOUNDS.held}`]);
     });
   });
 
@@ -278,6 +374,31 @@ describe('the project channel journal', () => {
       expect(h.history({ project: 'proj-a' }).entries).toEqual([]);
       h.channel.record(laneA({ project: 'proj-b', src: 'proj-b/mini/s2/1', at: iso(NOW) }));
       expect(h.rows(), 'the record pruned the aged entry from the table').toBe(1);
+    });
+  });
+
+  describe('an entry’s size', () => {
+    it('cuts a text past CHANNEL_BOUNDS.textBytes at a character, with a visible marker, each option past choiceBytes alike, and keeps CHANNEL_BOUNDS.choices options', () => {
+      const { appSessionId, engineSessionId: e } = h.session('proj-1');
+      const long = 'é'.repeat(CHANNEL_BOUNDS.textBytes); // two bytes each
+      h.batch(appSessionId, [toolUse(e, iso(NOW - 2_000), 'toolu_long', PLUGIN, { text: long }), toolResult(e, iso(NOW - 2_000), 'toolu_long')]);
+      h.channel.record(laneA({ kind: 'question', text: 'Short.', choices: ['x'.repeat(CHANNEL_BOUNDS.choiceBytes + 1), 'kept'] }));
+      const [message] = h.history({ project: 'proj-1' }).entries;
+      const bytes = (text: string) => new TextEncoder().encode(text).length;
+      expect(message!.text.endsWith(CUT_MARKER)).toBe(true);
+      expect(bytes(message!.text)).toBeLessThanOrEqual(CHANNEL_BOUNDS.textBytes);
+      expect(message!.text.slice(0, -CUT_MARKER.length)).toMatch(/^é+$/); // no character split
+      const [question] = h.history({ project: 'proj-a' }).entries;
+      expect(question!.text).toBe('Short.');
+      expect(bytes(question!.choices![0]!)).toBeLessThanOrEqual(CHANNEL_BOUNDS.choiceBytes);
+      expect(question!.choices![0]!.endsWith(CUT_MARKER)).toBe(true);
+      expect(question!.choices![1]).toBe('kept');
+      // a text at the bound is whole; options past the count are not kept
+      h.channel.record(laneA({ src: 'proj-a/mini/s1/whole', text: 'a'.repeat(CHANNEL_BOUNDS.textBytes), kind: 'question', choices: Array.from({ length: CHANNEL_BOUNDS.choices + 3 }, (_, n) => `c${n}`) }));
+      const [whole] = h.history({ project: 'proj-a' }).entries;
+      expect(whole!.text).toHaveLength(CHANNEL_BOUNDS.textBytes);
+      expect(whole!.choices).toHaveLength(CHANNEL_BOUNDS.choices);
+      expect(whole!.choices!.at(-1)).toBe(`c${CHANNEL_BOUNDS.choices - 1}`);
     });
   });
 
