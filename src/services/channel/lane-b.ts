@@ -9,6 +9,9 @@
 //   asked, with its options; and its answer is an `answered`, at the time the engine took it, once the owner channel
 //   states it delivered (`ownerChannel.changed`), the one truth of an answer. Only a question this journal recorded is
 //   answered here: the journal starts empty, with no back-fill (M7b, "Back-fill").
+// Only what a MAWS process said is read (an event with its journal row, `seq`): history read back from disk is no entry
+// (M7b, "Back-fill": none), and nor is a transcript followed while a terminal or a job holds the session, whose words are
+// lane A's, sminos's to tell.
 // Each entry's `src` is its anchor in the session (`<project>/lane-b/<appSessionId>/<anchor>`), the same whenever the
 // batch is replayed, so a replay records nothing new. A session no org project joins (no checkout, or one with no
 // sminos id) records nothing.
@@ -44,6 +47,7 @@ export class LaneBSource {
   onEvents(appSessionId: AppSessionId, events: readonly SessionEvent[]): void {
     for (const event of events) {
       if (event.parentToolUseId !== null) continue; // a subagent's: drawn in its own transcript, not its parent's
+      if (event.seq === null) continue; // read back from disk (no journal row): history, or a transcript another process holds
       if (event.kind === 'tool.use') this.called(appSessionId, event);
       else if (event.kind === 'tool.result') {
         const calls = this.pending.get(appSessionId);

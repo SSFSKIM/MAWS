@@ -1,8 +1,8 @@
 // The index (C4 execution document, Interfaces "Index"; charter §4.4 as amended): main's one SQLite file holding what
 // the engine does not — projects and membership, app session records (X1), attention items, drafts, replay fixtures,
-// (E3) the side-thread rows, (P2-C) the owner channel's sessions and marks and (P3-L) the library's derived rows and
-// search index, (P5 O8 M7b) the project channel's journal — opened at `app.whenReady()` on `<userData>/index.sqlite`. Everything main-side (the session source,
-// C3's attention service, C5's read model, C10) reaches it through these stores. The browser's history, bookmarks and
+// (E3) the side-thread rows, (P2-C) the owner channel's sessions and marks, (P3-L) the library's derived rows and
+// search index and (P5 O8 M7b) the project channel's journal — opened at `app.whenReady()` on `<userData>/index.sqlite`.
+// Everything main-side (the session source, C3's attention service, C5's read model, C10) reaches it through these stores. The browser's history, bookmarks and
 // activity (E4a, cua boards #90 and #93) left it at migration 14 for the browser's own database (P5 O3-A).
 import { IndexAttentionStore, type AttentionStore } from './attention';
 import { openDb, refusedDb, type Db } from './db';

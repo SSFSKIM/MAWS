@@ -200,6 +200,15 @@ describe('the project channel journal', () => {
       h.ownerState(delivered(answerText('Ship it?', 'Yes, now.'), NOW - 10_000));
       expect(h.history({ project: 'proj-1' }).entries.map((entry) => `${entry.kind}: ${entry.text}`)).toEqual(['answered: Yes, now.', 'answered: Not yet: the tests are red.', 'question: Ship it?']);
     });
+    it('records nothing read back from disk (no back-fill): a backfilled history or a transcript followed while another process holds it', () => {
+      const { appSessionId, engineSessionId: e } = h.session('proj-1');
+      const disk = (event: SessionEvent) => ({ ...event, seq: null }) as SessionEvent;
+      h.batch(appSessionId, [
+        disk(block(e, iso(NOW - 5_000), 'mu-d', '<message>From the transcript.</message>\n<need-input>Old question?</need-input>')),
+        disk(toolUse(e, iso(NOW - 4_000), 'toolu_d', PLUGIN, { text: 'An old call.' })), disk(toolResult(e, iso(NOW - 4_000), 'toolu_d')),
+      ]);
+      expect(h.history({ project: 'proj-1' }).entries).toEqual([]);
+    });
   });
 
   describe('the org-project join', () => {
