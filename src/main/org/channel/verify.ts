@@ -13,14 +13,19 @@
 //   checkpoint covers its writer and seq and its own canonical hash is the checkpoint's at that seq; other bytes at a
 //   covered position fail; anything else reads `legacy`. A checkpoint is made once a history attestation verifies over
 //   the writer's events from seq 1 (`verifyHistoryAttestation`), and keeps the hash of each event that passed, so the
-//   verdict outlives the cache's bound (M7a's *The cache*) and extends to no event by writer and seq alone.
+//   verdict outlives the cache's bound (M7a's *The cache*) and extends to no event by writer and seq alone. A later
+//   attestation of the writer extends a checkpoint over the writer's newer events alone (`extendCheckpoint`): the digest
+//   is a chain, and the checkpoint's own record fixes its value at `upTo`.
 // - A withheld tombstone (`{writer, seq, withheld: true}`) is skipped. Anything else fails, and its caller keeps it,
 //   counts it and judges it again at the next head.
 //
 // Electron-free.
 import { createHash } from 'node:crypto';
 import {
+  base64urlDecode,
+  base64urlEncode,
   canonicalize,
+  historyDigestStep,
   HUB_WRITER_PREFIX,
   isHubWriter,
   isLogSeq,
@@ -120,6 +125,33 @@ export async function checkpointOf(record: Signed<HistoryAttestation>, events: r
   const verdict = await verifyHistoryAttestation(record, prefix, judging.state, judging.certificates, { project: judging.ctx.project, writer }, judging.now);
   if (!verdict.ok) return null;
   return { writer, upTo: record.body.upTo, by: verdict.by, record, hashes: Object.fromEntries(prefix.map((e) => [String(e.seq), eventHash(e)])) };
+}
+
+/**
+ * The checkpoint `record` makes by extending `kept` (the same writer's, to a lower `upTo`) over `events` (the writer's
+ * held events, any order; others are ignored), or null when it doesn't verify: its signer and binding, and exactly one
+ * event per seq from `kept.upTo + 1` to its `upTo`, folding from the digest `kept`'s record gives at `kept.upTo` to its
+ * own. History's digest is a chain (`h_i = SHA-256(h_{i-1} ‖ event_i)`, history.ts), and `kept` was made only once its
+ * record's digest was the fold of the very events it keeps the hashes of, so the record attests those events and the
+ * newer ones checked here, though the bound let the prefix go. `verifyHistoryAttestation`'s own rules apply to the newer
+ * ones: a position missing, repeated or out of turn verifies nothing.
+ */
+export async function extendCheckpoint(kept: Checkpoint, record: Signed<HistoryAttestation>, events: readonly StoredEvent[], judging: Judging): Promise<Checkpoint | null> {
+  const { writer } = kept;
+  if (record.body?.writer !== writer || !isLogSeq(record.body.upTo) || record.body.upTo <= kept.upTo || kept.record.body.upTo !== kept.upTo) return null;
+  const signer = await verifyHistorySigner(record, judging.state, judging.certificates, { project: judging.ctx.project, writer }, judging.now);
+  if (!signer.ok) return null;
+  const { upTo, digest } = record.body;
+  const newer = events.filter((e) => e.writer === writer && e.seq > kept.upTo && e.seq <= upTo).sort((a, b) => a.seq - b.seq);
+  if (newer.length !== upTo - kept.upTo || newer.some((e, i) => e.seq !== kept.upTo + 1 + i)) return null;
+  let chain: Uint8Array = base64urlDecode(kept.record.body.digest);
+  try {
+    for (const event of newer) chain = await historyDigestStep(chain, event);
+  } catch {
+    return null; // a value RFC 8785 can't write
+  }
+  if (base64urlEncode(chain) !== digest) return null;
+  return { writer, upTo, by: signer.by, record, hashes: { ...kept.hashes, ...Object.fromEntries(newer.map((e) => [String(e.seq), eventHash(e)])) } };
 }
 
 /** Whether `record`'s signer and binding (this project, its writer) verify against the held head: before its writer is trusted with anything. */

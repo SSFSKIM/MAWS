@@ -337,6 +337,22 @@ describe('migrated history past the bound', () => {
     expect(seqs.slice(0, 4)).toEqual([2, 3, 4, 5]); // spared up to upTo, the newest kept after them
   });
 
+  it('spares only the events past the checkpoint an attestation awaits, since extending it reads no others', async () => {
+    const { o, history, log } = await migrated(3, { events: 3, bytes: LIMITS.bytes });
+    const newer = [4, 5, 6].map((seq) => o.dx1('oldmini', seq));
+    await log.attest([await o.attest([...history, ...newer])], ground(o)); // the log is waiting on seqs 4 to 6
+    await log.add(at(await Promise.all([1, 2].map((n) => o.say(o.mini, n, `v2 ${n}`))), 4), ground(o));
+    expect(log.file().events.map((e) => e.offset)).toEqual([3, 4, 5]); // nothing the checkpoint covers is spared
+    await log.add(at(newer.slice(0, 2), 6), ground(o));
+    await log.add(at(await Promise.all([3, 4].map((n) => o.say(o.mini, n, `v2 ${n}`))), 8), ground(o));
+    expect(log.file().events.map((e) => e.offset)).toEqual([6, 7, 9]); // seqs 4 and 5 spared, the newest kept
+    await log.add(at(newer.slice(2), 10), ground(o));
+    expect(log.events().filter((e) => e.writer.startsWith('oldmini/')).map((e) => [e.seq, e.label])).toEqual([
+      [5, 'migrated'],
+      [6, 'migrated'],
+    ]); // checkpointed through 6, seq 4 is bounded again
+  });
+
   it('spares one copy of a seq an authentic attestation covers: replayed copies at new offsets are bounded', async () => {
     const o = await ChannelOrg.make();
     const history = [o.dx1('oldmini', 1), o.dx1('oldmini', 2)];
@@ -347,6 +363,34 @@ describe('migrated history past the bound', () => {
       ground(o),
     );
     expect(log.file().events.map((e) => e.offset)).toEqual([1, 10]); // the first copy spared, the newest kept
+  });
+
+  // the branch review's finding: the checkpoint's record already fixes the digest through its upTo, so a later
+  // attestation is checked from it over the writer's newer events alone, whatever the bound let go of the prefix
+  it('extends a checkpoint whose prefix the bound let go: an attestation through seq 4 makes seq 4 migrated, and only its own bytes', async () => {
+    const { o, history, log } = await migrated(3, { events: 3, bytes: LIMITS.bytes });
+    const fourth = o.dx1('oldmini', 4);
+    await log.add([{ offset: 4, event: fourth }], ground(o));
+    expect(log.events().map((e) => [e.seq, e.label])).toEqual([
+      [2, 'migrated'],
+      [3, 'migrated'],
+      [4, 'legacy'],
+    ]); // seq 1 is let go
+    // a record over other bytes at seq 4 than those held extends nothing
+    const copy = await loadLog(roundTrip(log.file()), { reader: reader(o), project: PROJECT, limits: { events: 3, bytes: LIMITS.bytes }, ground: ground(o), log: () => {} });
+    expect(await copy.attest([await o.attest([...history, o.dx1('oldmini', 4, 'not what was served')])], ground(o))).toBe(false);
+    expect(copy.events().at(-1)?.label).toBe('legacy');
+    expect(await log.attest([await o.attest([...history, fourth])], ground(o))).toBe(true);
+    expect(log.events().map((e) => [e.seq, e.label, e.by])).toEqual([
+      [2, 'migrated', 'mini'],
+      [3, 'migrated', 'mini'],
+      [4, 'migrated', 'mini'],
+    ]);
+    const reloaded = await loadLog(roundTrip(log.file()), { reader: reader(o), project: PROJECT, limits: { events: 3, bytes: LIMITS.bytes }, ground: ground(o), log: () => {} });
+    expect(reloaded.events().map((e) => e.label)).toEqual(['migrated', 'migrated', 'migrated']);
+    // other bytes at seq 4, served later, fail
+    await reloaded.add([{ offset: 9, event: o.dx1('oldmini', 4, 'a forged fourth') }], ground(o));
+    expect(reloaded.unverified()).toBe(1);
   });
 
   it('names the DX1 writers whose events pass every attestation it holds, once each time they pass', async () => {

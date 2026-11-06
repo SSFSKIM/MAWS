@@ -8,7 +8,8 @@
 //   event against the held head. The channel judges every event again at each adopted head (`rejudge`).
 // - Migrated history outlives the bound: a checkpoint, made once a writer's attestation verifies over its events from
 //   seq 1, keeps the hash of each event that passed, so an event of that writer reads `migrated` only when its own bytes
-//   are those, at any offset, after any eviction or reload.
+//   are those, at any offset, after any eviction or reload. A later attestation of the writer extends it over the newer
+//   events alone (`extendCheckpoint`), so a prefix the bound let go is never needed again.
 // - Withheld tombstones are not kept. An event that fails is kept, counted (`unverified`) and judged again.
 // - The project's sessions outlive the bound too: each session's latest lifecycle event of each kind (address.ts) that
 //   didn't fail is kept beside the events, in the file, judged again with them and dropped when it fails; a later one
@@ -32,7 +33,7 @@ import type { ChannelEvent, ChannelSession, OrgMember } from '@shared/ipc/schema
 import { isAuthenticated, lifecycleOf, projectSessions } from './address';
 import { privateFiles, type OrgFiles } from '../files';
 import type { LoggedEvent } from './project-socket';
-import { attestationSigned, checkpointOf, isDx1, judgeEvent, recheckCheckpoint, type Checkpoint, type Judging, type Verdict } from './verify';
+import { attestationSigned, checkpointOf, extendCheckpoint, isDx1, judgeEvent, recheckCheckpoint, type Checkpoint, type Judging, type Verdict } from './verify';
 
 /** What a judgment reads besides the log's own checkpoints. */
 export type Ground = Omit<Judging, 'checkpoints'>;
@@ -205,12 +206,13 @@ function makeLog(reader: ChannelReader | null, project: string, limits: ChannelL
   };
   /**
    * A DX1 event an authenticated attestation covers past its writer's checkpoint, before the log has caught up: it stays
-   * past the bound, since `verifyHistoryAttestation` needs every one from seq 1, which an evicted prefix no longer gives.
-   * Only up to the record's `upTo`: the writer's later events are bounded as any others.
+   * past the bound, since the attestation needs every one from the checkpoint on (seq 1 with none), which an evicted
+   * event no longer gives. Only up to the record's `upTo`: the writer's later events are bounded as any others, and those
+   * a checkpoint covers already too.
    */
   const awaited = (event: StoredEvent) => {
     const record = records.get(event.writer);
-    return !settled && record !== undefined && event.seq <= record.body.upTo && (checkpoints.get(event.writer)?.upTo ?? 0) < record.body.upTo;
+    return !settled && record !== undefined && event.seq <= record.body.upTo && event.seq > (checkpoints.get(event.writer)?.upTo ?? 0);
   };
   /**
    * Evicts the oldest entries while either bound is passed, but an awaited DX1 event: one per writer and seq, the first
@@ -240,7 +242,10 @@ function makeLog(reader: ChannelReader | null, project: string, limits: ChannelL
     return highest;
   };
 
-  /** Each held record whose writer has no checkpoint up to it, verified over the writer's events when they cover it. */
+  /**
+   * Each held record whose writer has no checkpoint up to it: one kept extended over the writer's newer events, else
+   * verified over the writer's events from seq 1 when they cover it.
+   */
   async function checkpoint(ground: Ground, writers: Iterable<string>): Promise<Set<string>> {
     const made = new Set<string>();
     for (const writer of writers) {
@@ -248,8 +253,9 @@ function makeLog(reader: ChannelReader | null, project: string, limits: ChannelL
       const kept = checkpoints.get(writer);
       if (record === undefined || (kept !== undefined && kept.upTo >= record.body.upTo)) continue;
       const events = writerEvents(writer);
-      if (new Set(events.map((e) => e.seq).filter((seq) => seq <= record.body.upTo)).size < record.body.upTo) continue;
-      const next = await checkpointOf(record, events, judging(ground));
+      const from = kept?.upTo ?? 0;
+      if (new Set(events.map((e) => e.seq).filter((seq) => seq > from && seq <= record.body.upTo)).size < record.body.upTo - from) continue;
+      const next = kept === undefined ? await checkpointOf(record, events, judging(ground)) : await extendCheckpoint(kept, record, events, judging(ground));
       if (next === null) continue;
       checkpoints.set(writer, next);
       made.add(writer);

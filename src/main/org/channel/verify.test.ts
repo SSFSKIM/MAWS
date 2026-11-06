@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { generateSigningKey } from '../../../../apps/org-protocol/src/index.ts';
 import { ChannelOrg as Org, ORG, S1, type Machine } from '../../../../test/org/channel-world';
-import { checkpointOf, eventHash, judgeEvent, recheckCheckpoint } from './verify';
+import { checkpointOf, eventHash, extendCheckpoint, judgeEvent, recheckCheckpoint } from './verify';
 
 const random = (n: number) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'[b % 64]).join('');
 
@@ -105,6 +105,22 @@ describe('DX1 history', () => {
     expect(await checkpointOf(record, [events[0], o.dx1('oldmini', 2, 'swapped')], o.judging())).toBeNull();
     expect(await checkpointOf(record, [events[1]], o.judging())).toBeNull();
     expect(await checkpointOf(record, events, { ...o.judging(), ctx: { org: ORG, project: '2f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0' } })).toBeNull();
+  });
+
+  it('extends a checkpoint over the newer events alone, by the chain its record fixes, and only with them whole and in turn', async () => {
+    const o = await Org.make();
+    const { events, cp } = await attested(o, 3);
+    const newer = [o.dx1('oldmini', 4), o.dx1('oldmini', 5)];
+    const record = await o.attest([...events, ...newer]);
+    const next = await extendCheckpoint(cp!, record, newer, o.judging()); // the prefix isn't given
+    expect(next).toMatchObject({ writer: events[0].writer, upTo: 5, by: { ref: o.mini.ref, name: 'mini' }, record });
+    expect(next!.hashes).toEqual({ ...cp!.hashes, '4': eventHash(newer[0]), '5': eventHash(newer[1]) });
+    expect(await extendCheckpoint(cp!, record, [newer[1]], o.judging())).toBeNull(); // a position missing
+    expect(await extendCheckpoint(cp!, record, [...newer, o.dx1('oldmini', 5, 'a second copy')], o.judging())).toBeNull(); // one repeated
+    expect(await extendCheckpoint(cp!, record, [newer[0], o.dx1('oldmini', 5, 'swapped')], o.judging())).toBeNull(); // other bytes
+    const forged = { ...record, sig: { ...record.sig, value: `${record.sig.value.slice(0, -6)}AAAAAA` } };
+    expect(await extendCheckpoint(cp!, forged, newer, o.judging())).toBeNull(); // no signer
+    expect(await extendCheckpoint(cp!, await o.attest(events.slice(0, 2)), [], o.judging())).toBeNull(); // no further
   });
 
   it("binds each covered position to the hash of the exact event that passed, and re-checks the record's signer alone", async () => {
