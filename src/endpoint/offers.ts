@@ -383,6 +383,7 @@ export const OFFERS: Offers = {
     'session.recentTurns': laneBMachine('call'),
   },
   subscriptions: ['A', 'B'],
-  // P5 O7 M5a: the machine's `artifacts` feed (artifacts-feed.ts). P5 O17 M9a: a session's `browser.inventory`.
-  feeds: ['checkout', 'attention', 'artifacts', 'browser.inventory'],
+  // P5 O7 M5a: the machine's `artifacts` feed (artifacts-feed.ts). P5 O17 M9a: a session's `browser.inventory`. P5 O8 M7b:
+  // a project's `channel` (channel-feed.ts).
+  feeds: ['checkout', 'attention', 'artifacts', 'browser.inventory', 'channel'],
 };

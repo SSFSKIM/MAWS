@@ -15,6 +15,7 @@
 // 2,000 entries a project, so a page reads at most eleven. A page is bounded by its bytes too (CHANNEL_PAGE_BYTES of JSON),
 // within the channel's message limit and a feed's backlog; an entry is at most ~640 KiB (the journal's cuts), so a page
 // always holds its first.
+import type { OrgState } from 'org-protocol';
 import { HISTORY_LIMIT_MAX, type HostEntry } from '@shared/ipc/schema/channel';
 import type { SessionRanks } from './authorize';
 import type { EndpointServices } from './services';
@@ -31,6 +32,14 @@ export type SeenPlacements = (appSessionId: string) => readonly Placement[] | un
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isId = (value: unknown): value is string => typeof value === 'string' && value !== '' && value.length <= 512;
+
+/**
+ * Whether `project` (sminos's project id) is one of the org's projects in `head`: the reach of a `channel` feed, which every
+ * member of the org holds while the project stands, as the hub admits a member to a project's socket.
+ */
+export function orgProject(head: OrgState | null | undefined, project: string): boolean {
+  return head?.projects.some((p) => p.id === project) === true;
+}
 
 /** The lane B app sessions `entries` name: the placements their cut needs. */
 export function laneBSessions(entries: readonly HostEntry[]): string[] {

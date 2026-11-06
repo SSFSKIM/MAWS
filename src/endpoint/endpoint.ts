@@ -65,6 +65,7 @@ import { AssetHolds } from './asset-holds';
 import { Leases } from './leases';
 import { ENDPOINT_CAPABILITIES } from './capabilities';
 import { Channels } from './channels';
+import { orgProject } from './channel-view';
 import { DirectListener, type DirectListenerOptions } from './direct-listener';
 import { Actions } from './actions';
 import { runCli } from './cli';
@@ -502,6 +503,7 @@ export class Endpoint implements EndpointModule {
       artifacts: this.artifactRanks,
       leases: this.leases,
       browser: () => this.#services?.browser ?? null, // P5 O17 M9a: a session's `browser.inventory` feed
+      reaches: (project) => orgProject(this.#org?.ready ? this.#org.head().state : null, project), // P5 O8 M7b: the `channel` feed's
       log,
       backlogBytes: seams.backlogBytes,
     });

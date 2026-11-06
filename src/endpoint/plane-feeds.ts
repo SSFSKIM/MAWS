@@ -31,11 +31,14 @@
 // carries `session.changed`. P5 O7 M5c: the `artifacts` feed carries O4's surfaces' events (artifacts-feed.ts).
 //
 // P5 O17 M9a: so is a session's `browser.inventory` feed, run by inventory-feed.ts (the agent's tabs on the session).
+//
+// P5 O8 M7b: so is the machine's `channel` feed, run by channel-feed.ts (a project's to-human entries, cut per entry).
 import { randomBytes } from 'node:crypto';
 import { BACKLOG_BYTES } from '@shared/host/stream-catchup';
 import type { ArtifactRanks } from './artifacts';
 import { ArtifactsFeeds, type ArtifactsFeedsContext } from './artifacts-feed';
 import { AttentionFeeds, type AttentionFeedsContext } from './attention-feed';
+import { ChannelFeeds, type ChannelFeedsContext } from './channel-feed';
 import { InventoryFeeds, type InventoryFeedsContext } from './inventory-feed';
 import { dispatchAs, type EndpointServices } from './services';
 import { namesSession, type Plane, type SessionSubscription, type Subscription } from './subscriptions';
@@ -52,6 +55,8 @@ export type PlaneFeedsContext = {
   leases: ArtifactsFeedsContext['leases'];
   /** P5 O17 M9a: the machine's agent browser (the `browser.inventory` feed's inventories), null before the endpoint starts. */
   browser: InventoryFeedsContext['browser'];
+  /** P5 O8 M7b: whether a project is the org's now (the `channel` feed's reach). */
+  reaches: ChannelFeedsContext['reaches'];
   log(line: string): void;
   /** The most a feed's unread stream may hold before it ends `behind`. */
   backlogBytes?: number;
@@ -100,16 +105,19 @@ export class PlaneFeeds implements Plane {
   readonly #attention: AttentionFeeds;
   readonly #artifacts: ArtifactsFeeds;
   readonly #inventory: InventoryFeeds;
+  readonly #channel: ChannelFeeds;
 
   constructor(ctx: PlaneFeedsContext) {
     this.#ctx = ctx;
     this.#attention = new AttentionFeeds({ dispatch: ctx.dispatch, ranks: ctx.ranks, log: ctx.log, backlogBytes: ctx.backlogBytes });
     this.#artifacts = new ArtifactsFeeds({ dispatch: ctx.dispatch, ranks: ctx.ranks, artifacts: ctx.artifacts, leases: ctx.leases, log: ctx.log, backlogBytes: ctx.backlogBytes });
     this.#inventory = new InventoryFeeds({ browser: ctx.browser, backlogBytes: ctx.backlogBytes });
+    this.#channel = new ChannelFeeds({ dispatch: ctx.dispatch, ranks: ctx.ranks, reaches: ctx.reaches, log: ctx.log, backlogBytes: ctx.backlogBytes });
   }
 
   open(sub: Subscription): void {
     if (sub.message.feed === 'artifacts') return this.#artifacts.open(sub);
+    if (sub.message.feed === 'channel') return this.#channel.open(sub);
     if (sub.message.feed === 'browser.inventory' && namesSession(sub)) return this.#inventory.open(sub);
     if (sub.message.feed === 'attention' || !namesSession(sub)) return this.#attention.open(sub);
     const open: Open = { sub, seq: 0, bounds: null, held: new Map(), files: null, heldFiles: [], reads: 0 };
@@ -123,6 +131,7 @@ export class PlaneFeeds implements Plane {
     this.#attention.close(sub);
     this.#artifacts.close(sub);
     this.#inventory.close(sub);
+    this.#channel.close(sub);
   }
 
   stop(): void {
@@ -130,6 +139,7 @@ export class PlaneFeeds implements Plane {
     this.#attention.stop();
     this.#artifacts.stop();
     this.#inventory.stop();
+    this.#channel.stop();
   }
 
   /** P5 O7 M5c: the members' rights were read again (a `caps` refresh): the `artifacts` feeds' ranks read again. */
@@ -141,12 +151,14 @@ export class PlaneFeeds implements Plane {
   accessChanged(): void {
     this.#attention.accessChanged();
     this.#artifacts.accessChanged();
+    this.#channel.accessChanged();
   }
 
   /** A machine event (`onEvent`; the engine host's `artifacts.changed` too, P5 O7 M5a): to every feed it concerns. */
   event(owner: string, message: { name: string; payload: unknown }): void {
     this.#attention.event(owner, message);
     this.#artifacts.event(owner, message);
+    this.#channel.event(owner, message);
     if (owner !== 'machine' || this.#open.size === 0) return;
     const { name, payload } = message;
     if (!isObject(payload)) return;
