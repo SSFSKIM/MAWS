@@ -3,9 +3,9 @@
 // saturated (an agent's build) one of them can sit on a background-QoS worker the kernel never schedules: the windows are
 // gone, the process stays until the load drops, and a relaunch meanwhile hands off to a process with no windows.
 //
-// So at Electron's `quit` main spawns a detached `/bin/sh` that sleeps REAP_AFTER_S and then SIGKILLs main, only if
-// main is still the shell's parent:
-// once main has exited the shell is reparented, so a pid the system has reused is never signalled. Main's own Chromium
+// So at Electron's `quit` main spawns a detached `/bin/sh` that sleeps REAP_AFTER_S and then SIGKILLs main, only if main
+// is still the shell's parent: once main has exited the shell is reparented, so a pid the system has reused is never
+// signalled (shutdown.ts says when `quit` comes). Main's own Chromium
 // helpers go with it, each a child of main whose executable is a `*Helper*` in the bundle's Frameworks: a helper main's
 // teardown had not yet ended is left orphaned by the kill and, starved the same way, lives on for minutes holding its
 // launcher's stdio (probe run 42184947993: one per reaped quit, still alive 25 s later). Nothing else is
