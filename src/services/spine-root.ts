@@ -61,6 +61,7 @@ import { registerMachineOps } from './machine-ops';
 import { registerFolders } from './machine/folders'; // P5 O7 M9
 import { registerSetupTrust, type SetupGuard } from './machine/setup'; // P5 O7 M9
 import { startOwnerChannel } from './owner/register';
+import { startChannel, type ChannelRecorder } from './channel/register'; // P5 O8 M7b
 import { startEngineConfigure } from './settings/engine-configure';
 import { startHostConfigure } from './settings/host-configure';
 import { startMachineSettings } from './settings/machine';
@@ -159,6 +160,9 @@ export interface SpineRoot {
   // P5 O3-D M6 (fix round 1; mawsd's discovery wake): whether the index holds the engine host's latest scan, its
   // discoveries applied (IndexSessionSource.discoveryApplied), and each time it comes to. Optional for a stand-in root.
   discovery?: { applied(): boolean; onApplied(listener: () => void): () => void };
+  // P5 O8 M7b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §O): the project channel's journal, to
+  // which the endpoint's seam hands lane A's host messages (`EndpointServices.channel`); absent in a run refused the spine.
+  channel?: ChannelRecorder;
 }
 
 export function startSpine(deps: SpineDeps): SpineRoot {
@@ -323,6 +327,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // C10, P2-C: the worktree service, the owner channel, the session service and the sweep, only while this run holds
   // spine.lock; refused, none starts and their commands have no handler
   let engineConfigure: ReturnType<typeof startEngineConfigure> | null = null;
+  let channel: ChannelRecorder | undefined; // P5 O8 M7b
   if (spineRuns) {
     // the worktree service (M2): git.worktree.*, every git mutation MAWS makes, with occupancy from holder authority
     const worktrees = new WorktreeService({ git: createGitRunner(), holders: { dispatch: hosts.dispatch, sessions: index.sessions } });
@@ -336,6 +341,10 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     });
     parts.push(['owner channel', ownerChannel.stop]);
     settling.push(ownerChannel.work);
+    // P5 O8 M7b: the project channel's journal, lane B's entries read from the same batches and the owner channel's states
+    const projectChannel = startChannel({ index, onEvent: (name, listener) => hosts.onEvent(name, listener), onEmitted: bus.onEmitted, register: bus.register, emit: bus.emit });
+    parts.push(['project channel', projectChannel.stop]);
+    channel = projectChannel;
     // The session service (M3): intents, start, fork, archive, delete, rename and the trust check, reading the global
     // config and the store with the environment the engine receives. Its start resets every stale `self` holder at once
     // (D-16), then forgets stale bootstrap ids and reconciles interrupted handoffs once the engine host answers.
@@ -542,6 +551,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     busy: () => root.busy(),
     stop: () => stopParts('spine', parts),
     discovery: { applied: () => indexSource.discoveryApplied(), onApplied: (listener) => indexSource.onDiscoveryApplied(listener) },
+    ...(channel === undefined ? {} : { channel }), // P5 O8 M7b
   };
 }
 

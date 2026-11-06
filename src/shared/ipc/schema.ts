@@ -72,6 +72,7 @@ import * as clientPort from './schema/client-port'; // P5 O3-D
 import * as render from './schema/render'; // P5 O5 M3
 import * as remote from './schema/remote'; // P5 O7 M2
 import * as browserEngine from './schema/browser-engine'; // P5 O17
+import * as channel from './schema/channel'; // P5 O8 M7b
 export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint } from './schema/customization';
 
 export {
@@ -181,6 +182,7 @@ export const commands = {
   ...render.commands, // P5 O5 M3
   ...remote.commands, // P5 O7 M2
   ...browserEngine.commands, // P5 O17
+  ...channel.commands, // P5 O8 M7b
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -238,6 +240,7 @@ export const events = {
   ...render.events, // P5 O5 M3
   ...remote.events, // P5 O7 M2
   ...browserEngine.events, // P5 O17
+  ...channel.events, // P5 O8 M7b
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;
@@ -304,6 +307,7 @@ export const MACHINE_EVENTS = [
   'connectors.watchUpdate', 'connectors.serversChanged', 'connectors.signInChanged', 'delivery.receipt', // P5 O4 M2: the connectors' and delivery's, composed with the spine
   'catalog.engineChanged', // P5 O4 M3: the catalog's machine half, composed with the spine
   'daemon.engineHandover', // P5 O16 M3c fix wave 2: `mawsd`'s engine host update under way (the front's own)
+  'channel.changed', // P5 O8 M7b: the project channel's journal, composed with the spine
 ] as const satisfies readonly EventName[];
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;
 export type CommandOutput<N extends CommandName> = z.output<(typeof commands)[N]['output']>;

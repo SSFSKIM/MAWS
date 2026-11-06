@@ -1,7 +1,7 @@
 // The index (C4 execution document, Interfaces "Index"; charter §4.4 as amended): main's one SQLite file holding what
 // the engine does not — projects and membership, app session records (X1), attention items, drafts, replay fixtures,
 // (E3) the side-thread rows, (P2-C) the owner channel's sessions and marks and (P3-L) the library's derived rows and
-// search index — opened at `app.whenReady()` on `<userData>/index.sqlite`. Everything main-side (the session source,
+// search index, (P5 O8 M7b) the project channel's journal — opened at `app.whenReady()` on `<userData>/index.sqlite`. Everything main-side (the session source,
 // C3's attention service, C5's read model, C10) reaches it through these stores. The browser's history, bookmarks and
 // activity (E4a, cua boards #90 and #93) left it at migration 14 for the browser's own database (P5 O3-A).
 import { IndexAttentionStore, type AttentionStore } from './attention';
@@ -19,6 +19,7 @@ import { SessionStore } from './sessions';
 import { SideThreadStore } from './side-threads'; // E3
 import { OwnerChannelStore } from '../owner/store'; // P2-C (2026-10-09)
 import { LibraryStore } from '../library/store'; // P3-L
+import { ChannelJournal } from '../channel/journal'; // P5 O8 M7b
 
 const ORG_CONCURRENCY = 4; // the derivations in flight at once, as `warmLinkedWorktrees` keeps its calls
 // A derivation git gave no answer to (its timeout, typically while the machine starts its hosts) is asked again after
@@ -43,6 +44,7 @@ export class Index {
   readonly sideThreads: SideThreadStore; // E3
   readonly ownerChannel: OwnerChannelStore; // P2-C (2026-10-09): the to-human lane's sessions and marks (migration 8)
   readonly library: LibraryStore; // P3-L: the library's rows, links, Spaces and search, derived from the engine host (migration 10)
+  readonly channel: ChannelJournal; // P5 O8 M7b: the project channel's to-human entries per org project (migration 16)
   private readonly db: Db;
   private stamped = 0;
   private closed = false;
@@ -63,6 +65,7 @@ export class Index {
     this.fixtures = new ReplayFixtureStore(this.db);
     this.sideThreads = new SideThreadStore(this.db); // E3
     this.ownerChannel = new OwnerChannelStore(this.db); // P2-C (2026-10-09)
+    this.channel = new ChannelJournal(this.db); // P5 O8 M7b
     this.library = new LibraryStore(this.db, { sessionTitle: (appSessionId) => this.sessions.get(appSessionId)?.title.text ?? '' }); // P3-L
   }
 

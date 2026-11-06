@@ -69,7 +69,7 @@ describe('messageOfCall', () => {
 describe('finishedTextOf', () => {
   const base = { id: 'e1', sessionId: 's', at: '2026-11-06T10:00:00.000Z', seq: 4, agentId: null, parentToolUseId: null };
   const complete = (over: Record<string, unknown> = {}) =>
-    ({ ...base, kind: 'assistant.block.complete', messageUuid: 'u1', apiMessageId: 'a1', blockIndex: 1, block: { type: 'text', text: '<message>hi</message>' }, model: 'm', supersedes: [], aborted: false, userMessageUuids: [], ...over }) as SessionEvent;
+    ({ ...base, kind: 'assistant.block.complete', messageUuid: 'u1', apiMessageId: 'a1', blockIndex: 1, block: { type: 'text', text: '<message>hi</message>' }, model: 'm', supersedes: [], aborted: false, userMessageUuids: [], ...over }) as unknown as SessionEvent;
 
   it('is a main-thread text block’s text and anchor, with whether an interrupt cut it', () => {
     expect(finishedTextOf(complete())).toEqual({ text: '<message>hi</message>', messageUuid: 'u1', blockIndex: 1, aborted: false });
@@ -80,6 +80,6 @@ describe('finishedTextOf', () => {
     expect(finishedTextOf(complete({ parentToolUseId: 'toolu_1' }))).toBeNull();
     expect(finishedTextOf(complete({ block: { type: 'thinking', thinking: 'x' } }))).toBeNull();
     expect(finishedTextOf(complete({ isApiErrorMessage: true }))).toBeNull();
-    expect(finishedTextOf({ ...base, kind: 'session.state', state: 'idle' } as SessionEvent)).toBeNull();
+    expect(finishedTextOf({ ...base, kind: 'session.state', state: 'idle' } as unknown as SessionEvent)).toBeNull();
   });
 });

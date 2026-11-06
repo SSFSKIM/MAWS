@@ -63,7 +63,7 @@ const SPINE_REFUSED_COMMANDS = [
 // lane B's claimed op, for a phone's rewind or act
 const SPINE_INTERCEPTS = ['session.answer', 'session.rewind', 'session.send', 'session.steer', 'session.queue.promote', 'session.bash', 'host.op'];
 const SPINE_REFUSED_INTERCEPTS = ['session.answer']; // no session service: nothing to repair
-const SPINE_TAPS = ['attention.changed', 'session.eventBatch', 'session.intent.changed', 'session.projects.changed'];
+const SPINE_TAPS = ['attention.changed', 'ownerChannel.changed' /* P5 O8 M7b: the project channel's answered questions */, 'session.eventBatch', 'session.intent.changed', 'session.projects.changed'];
 const SPINE_REFUSED_TAPS = ['attention.changed', 'session.eventBatch', 'session.intent.changed']; // no projects to follow: the index is unavailable
 // P5 O3-D M1 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §I): what the services front emits of
 // its own beside the spine's events; with them, the machine host's event list (`REGISTRY.machineEvents`). M5b: the

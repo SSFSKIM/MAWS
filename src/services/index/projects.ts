@@ -518,6 +518,13 @@ export class ProjectStore {
     });
   }
 
+  // P5 O8 M7b: a project's org project as its row holds it, for the project channel's join; null until it is derived,
+  // or for a project the index holds no row of.
+  org(id: ProjectId): ProjectOrg | null {
+    const row = this.db.get<ProjectRow>('SELECT * FROM projects WHERE id = ?', id);
+    return row === null ? null : orgOf(row);
+  }
+
   onCreated(derive: DeriveOrgOf | null): void {
     this.deriveOrg = derive;
   }
