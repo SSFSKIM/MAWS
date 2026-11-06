@@ -99,6 +99,9 @@ export function remoteTranscriptOf(appSessionId: AppSessionId, client: MawsBridg
   return transcript;
 }
 
+/** The page's transcript of a remote session while something holds it, or null; never made here. */
+export const heldRemoteTranscript = (appSessionId: AppSessionId): PlaneTranscript | null => held.get(appSessionId)?.transcript ?? null;
+
 /** Holds the transcript open until the returned release; the last release closes it. */
 export function holdRemoteTranscript(appSessionId: AppSessionId, transcript: PlaneTranscript): () => void {
   let entry = held.get(appSessionId);

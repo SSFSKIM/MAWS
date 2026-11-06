@@ -85,6 +85,7 @@ export const LANE_A_WORDS = {
   // the remote drill-in's words where the machine gives nothing of the agent's transcript (2026-11-06)
   agentReading: (machine: string) => `Reading this agent’s transcript from ${machine}…`,
   agentNoRows: (machine: string) => `${machine} holds no rows of this agent’s transcript yet`,
+  agentNotInTree: (machine: string) => `This subagent isn’t in the session’s tree on ${machine}`,
   agentOffline: (machine: string) => `${machine} isn’t reachable: this agent’s transcript shows once it is`,
   agentUnserved: (machine: string) => `${machine} isn’t giving this agent’s transcript now; asking again`,
   // an older page the link could not carry (fix wave 2): the reason main gave, and a way to ask again

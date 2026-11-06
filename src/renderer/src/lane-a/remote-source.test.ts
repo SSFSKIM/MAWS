@@ -225,6 +225,26 @@ describe('a remote lane A subagent’s own transcript', () => {
     close();
   });
 
+  // Every read is the session's: sminos answers one on an agent's subscription `unsupported`, and main refuses it before
+  // asking (src/main/lane-a/remote.ts). The agent's transcript asks none (no status, no diff); one asked anyway is that
+  // refusal, said as it came.
+  it('asks no read of the agent’s subscription, and rejects one asked anyway with main’s refusal', async () => {
+    const { remotePlane } = await import('./remote-source');
+    const { ReadError } = await import('./session-plane');
+    const { fake, transcript, plane, close } = await agentOpened({ 'laneA.read': { ok: false, code: 'unsupported', message: 'a read is the session’s: ask it on the session’s own view' } });
+    plane([agentSnapshot([])]);
+    transcript.requestStatus();
+    transcript.requestDiff();
+    await settle();
+    expect(fake.invoked('laneA.read')).toEqual([]);
+    const sub = remotePlane(fake.client).subscribe({ machine: OTHER_MACHINE, session: SESSION, agentId: AGENT }, { message: () => {}, interrupted: () => {}, end: () => {} });
+    const asked = sub.read('status');
+    await expect(asked).rejects.toBeInstanceOf(ReadError);
+    await expect(asked).rejects.toMatchObject({ code: 'unsupported', message: 'a read is the session’s: ask it on the session’s own view' });
+    sub.close();
+    close();
+  });
+
   it('says why it shows nothing: main’s refusal of the watch, or the machine’s pause before its first snapshot, cleared by what it gives', async () => {
     const refused = fakeClient();
     const held = remoteAgentTranscriptOf(APP, AGENT, refused.client);

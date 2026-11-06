@@ -609,4 +609,33 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
     await settle();
     expect(status()).toBe('mini holds no rows of this agent’s transcript yet');
   });
+
+  // The desk track's note (their 578): sminos serves an agent it doesn't know as an empty stream, so where the session's
+  // own transcript is shown here and its tree doesn't name the agent, the drill-in says so rather than wait on it.
+  it('says a subagent the session’s tree doesn’t name isn’t in it, where the session’s own transcript is shown', async () => {
+    listed();
+    roster(['rl2.agent-scope']);
+    onTestFinished(() => useMachines.getState().applyRoster([]));
+    const planes: Array<(payload: unknown, machine: string) => void> = []; // every watch's: the page's three
+    const invoke = vi.fn((name: string, input: { agentId?: string }) => Promise.resolve(name === 'laneA.watch' ? { ok: true, value: { watch: input.agentId === undefined ? 'w1' : `w-${input.agentId}` } } : { ok: false, error: { code: 'internal', message: 'unexpected' } }));
+    const on = vi.fn((name: string, listener: (payload: unknown, machine: string) => void) => (name === 'laneA.plane' && planes.push(listener), () => {}));
+    window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
+    const listeners = new Map([['laneA.plane', (payload: unknown, machine: string) => planes.forEach((listener) => listener(payload, machine))]]);
+    render(
+      <>
+        <TranscriptSlot appSessionId={REMOTE} />
+        <TranscriptSlot appSessionId={REMOTE} agentId={'a1' as AgentId} />
+        <TranscriptSlot appSessionId={REMOTE} agentId={'a9' as AgentId} />
+      </>,
+    );
+    for (let i = 0; i < 10 && invoke.mock.calls.filter(([name]) => name === 'laneA.watch').length < 3; i++) await settle();
+    await settle();
+    const snapshot = (subagents: unknown[]) => ({ project: 'p', machine: OTHER_MACHINE, session: SESSION, kind: 'snapshot', sub: 'up', n: 0, body: { rows: [], more: false, subagents, presence: { record: { status: 'idle' }, bridge: true }, streaming: [] } });
+    const meta = { agentId: 'a1', meta: { agentType: 'Explore', description: 'Find the config files' }, status: 'running', evidence: 'bridge' };
+    act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'w1', messages: [snapshot([meta])] }, OTHER_MACHINE));
+    for (const agent of ['a1', 'a9']) act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: `w-${agent}`, messages: [snapshot([])] }, OTHER_MACHINE));
+    await settle();
+    await settle();
+    expect(screen.getAllByTestId('subagent-rows-status').map((p) => p.textContent)).toEqual(['mini holds no rows of this agent’s transcript yet', 'This subagent isn’t in the session’s tree on mini']);
+  });
 });
