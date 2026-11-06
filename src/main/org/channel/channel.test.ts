@@ -220,13 +220,13 @@ describe('a project channel', () => {
   // Task 2's fix wave: a tab applies only the changes numbered past its open answer
   it('numbers each change past the last, across channels, and each open answer with the count as it stands', async () => {
     const h = await harness();
-    const first = opened(await h.channels.open(PROJECT));
+    const first = await h.channels.open(PROJECT); // the answer itself, as a tab gets it, `rev` and all
     const socket = await until(() => h.last(), 'a socket');
     socket.welcome();
     socket.frame({ t: 'log', events: [{ offset: 1, event: await h.o.say(h.o.mini, 1, 'one') }] });
     const one = delta(await until(() => h.told(), 'a change'));
     expect(one.rev).toBeGreaterThan(first.rev);
-    const again = opened(await h.channels.open(PROJECT));
+    const again = await h.channels.open(PROJECT);
     expect(again.rev).toBe(one.rev);
     socket.frame({ t: 'log', events: [{ offset: 2, event: await h.o.say(h.o.mini, 2, 'two') }] });
     const two = delta(await until(() => (h.told()?.rev ?? 0) > one.rev && h.told(), 'a later change'));

@@ -13,7 +13,7 @@ function harness() {
   const holds = channelHolds({
     open: async (project) => {
       calls.push(`open ${project}`);
-      return { ok: false, reason: 'signed-out' };
+      return { ok: false, reason: 'signed-out', rev: 0 };
     },
     release: (project) => calls.push(`release ${project}`),
   });
@@ -24,7 +24,7 @@ describe("a page's channel holds", () => {
   it('opens and lets go per call, and a page that ends lets go of what it still holds', async () => {
     const { calls, holds } = harness();
     const page = endableClientRef('page:1.1');
-    expect(await holds.open(page, PROJECT)).toEqual({ ok: false, reason: 'signed-out' });
+    expect(await holds.open(page, PROJECT)).toEqual({ ok: false, reason: 'signed-out', rev: 0 });
     await holds.open(page, PROJECT);
     await holds.open(page, OTHER);
     holds.close(page, PROJECT);
