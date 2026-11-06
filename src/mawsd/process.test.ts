@@ -13,22 +13,32 @@ import { RawApp, until } from '../../test/support/mawsd-scene';
 import { PEER_CAPABILITIES } from '@shared/host/socket-protocol';
 
 const MAWSD = resolve(__dirname, '../../out/main/mawsd.js');
-vi.setConfig({ testTimeout: 60_000 });
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 30_000 }); // the teardown waits up to 12 s for an engine host's exit
 
 let scratch: string | null = null;
 const children: ChildProcess[] = [];
 const pids: number[] = [];
 
-afterEach(() => {
-  for (const pid of pids.splice(0)) {
+// An engine host drains on SIGTERM and writes into the scratch `supervisor/` as it goes, so the scratch is removed only
+// once every process the case started has exited (ENOTEMPTY otherwise, six times on unit 3/4 through 2026-11-06, the
+// last two after the rm's retries alone); one still running after 10 s is killed.
+afterEach(async () => {
+  const signalled = pids.splice(0).filter((pid) => {
     try {
       process.kill(pid, 'SIGTERM');
+      return true;
     } catch {
-      // gone
+      return false; // gone
     }
-  }
-  for (const child of children.splice(0)) if (child.exitCode === null) child.kill('SIGKILL');
-  if (scratch) rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); // a killed child may still be writing in it (ENOTEMPTY)
+  });
+  const exits = children.splice(0).map((child) => {
+    if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+    const exited = new Promise<void>((done) => child.once('exit', () => done()));
+    child.kill('SIGKILL');
+    return exited;
+  });
+  await Promise.all([...signalled.map((pid) => gone(pid, 10_000)), ...exits]);
+  if (scratch) rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   scratch = null;
 });
 
@@ -40,6 +50,17 @@ const alive = (pid: number) => {
     return false;
   }
 };
+
+async function gone(pid: number, ms: number): Promise<void> {
+  for (const end = Date.now() + ms; alive(pid) && Date.now() < end; ) await new Promise((wake) => setTimeout(wake, 50));
+  if (!alive(pid)) return;
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    return; // gone meanwhile
+  }
+  for (const end = Date.now() + 2_000; alive(pid) && Date.now() < end; ) await new Promise((wake) => setTimeout(wake, 50));
+}
 
 function run(profile: string, entry = MAWSD): { child: ChildProcess; exited: Promise<number | null>; output: () => string } {
   let output = '';

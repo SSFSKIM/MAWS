@@ -1108,8 +1108,10 @@ async function ringText(page: Page, ptyId: string): Promise<string> {
 // keep-quit the restored tab is alive, the same shell pid, and its ring holds what the shell printed while the app was
 // closed; a second terminal that wrote more than the ring and the watermark (about 2 MiB) with the app closed has
 // reached its end marker. The markers are computed by the shell, so the echoed command line never matches them.
+// A command written to a shell runs only once the shell reads it, and the quit's report takes milliseconds: the case
+// quits once both shells report a foreground command (C9's probe, the one the guard asks), so the report names both.
 async function terminalsOutliveTheApp(): Promise<void> {
-  const DELAY_S = 6; // after the quit has begun: the output lands while no app runs
+  const DELAY_S = 8; // after the shells' commands have started: the quit begins and the output lands while no app runs
   const WRITTEN = 3_000_000;
   await withScratch('terminal', async (s) => {
     const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
@@ -1129,9 +1131,11 @@ async function terminalsOutliveTheApp(): Promise<void> {
     }, { message: 'the tab reaches layout.json' }).toContain(label);
     value(await invoke(first.page, 'pty.write', { ptyId, data: `sleep ${DELAY_S}; echo m7-closed-$((40+2))\n` }));
     const writer = value(await invoke(first.page, 'pty.spawn', { appSessionId: id, label: 'm7-writer', cwd: s.repo, cols: 80, rows: 24, shell: '/bin/sh', args: [], command: `sleep ${DELAY_S}; head -c ${WRITTEN} /dev/zero | tr '\\0' x; echo; echo m7-end-$((40+2))` }));
+    const busy = async (id: typeof ptyId) => value(await invoke(first.page, 'pty.foreground', { ptyId: id })).busy;
+    await expect.poll(async () => (await Promise.all([ptyId, writer.ptyId].map(busy))).every(Boolean), { message: 'both shells run their command' }).toBe(true);
     await s.quit(first);
     // the two shells run a command, so the log names them; on the daemon shape they keep running and nothing is asked (P5 O3-D, Q1)
-    expect(first.quitLines()).toContainEqual(expect.stringMatching(/^quit-guard: 1 mid-turn, (\d+ busy terminals?|terminals unknown), not asked: they outlive the app$/));
+    expect(first.quitLines()).toContainEqual(expect.stringMatching(/^quit-guard: 1 mid-turn, (2 busy terminals|terminals unknown), not asked: they outlive the app$/));
     expect(isAlive(shellPid), 'the shell outlives the app').toBe(true);
     expect(isAlive(daemonPid), 'mawsd serves the terminals').toBe(true);
     await new Promise((r) => setTimeout(r, (DELAY_S + 10) * 1_000)); // both commands run to their end with no app

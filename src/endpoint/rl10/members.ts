@@ -25,6 +25,12 @@
 // join awaits the engine host (which may be away, or no longer list it), and a placement on that engine session finds it
 // and marks its app session in its stead, as the join does once it places the record. The mark is pruned of the app
 // sessions the spine no longer holds, once a process, when first read.
+//
+// P5 Decision Log 190, residue (b) (O12's "M11's MAWS half as built"): a `/clear` can replace a lane B session's engine
+// session before its first record arrives, or while the join reads `engine.sessions`, so the live rows never name the
+// record's engine session. The join then places the record by its spawn: the app session whose spine record's
+// `launchedBy.opId` is the opId of the record's `session.spawn` act in `ownersProof` (`#bySpawn`), failing closed when two
+// app sessions share it.
 import type { EndpointServices } from '../services';
 import type { SessionReport } from '../listings';
 import type { Access, CheckoutSource, RecordSource, SessionRecord, SessionTarget, Share } from '../sources';
@@ -105,8 +111,13 @@ type MarkSets = { apps: Set<string>; engines: Set<string> };
 export class Members implements RecordSource, CheckoutSource {
   readonly #ctx: MembersContext;
   readonly #members = new Map<string, Member>();
-  /** Lane B: engine session id → appSessionId, from `engine.sessions`. */
+  /** Lane B: engine session id → appSessionId, from `engine.sessions` (or, Decision Log 190 (b), by the record's spawn). */
   readonly #apps = new Map<string, string>();
+  /**
+   * P5 Decision Log 190 (b): the engine sessions joined by their spawn while the spine named another engine session for
+   * their app session: superseded, so their records never replace its listing (`#report`).
+   */
+  readonly #superseded = new Set<string>();
   readonly #checkouts = new Map<string, string[]>();
   readonly #listeners = new Set<(target: SessionTarget) => void>();
   /** The sessions held from before the latest welcome, not restated since; null outside a restatement. */
@@ -166,6 +177,7 @@ export class Members implements RecordSource, CheckoutSource {
     this.#members.delete(session);
     if (member !== undefined) {
       this.#apps.delete(session);
+      this.#superseded.delete(session);
       this.#changed(member, member);
     }
     // A lane B app's listing outlives an engine session it superseded: while another member holds the listing (the
@@ -174,6 +186,13 @@ export class Members implements RecordSource, CheckoutSource {
       // Withdrawn first, which settles what notify told the hub (`settled 0`, or owed), then forgotten.
       await this.#ctx.listings.gone(listing);
       this.#ctx.forget(listing);
+    } else if (listing !== null && member !== undefined) {
+      // P5 Decision Log 190 (b): a superseded record that deferred to the one that left reports the listing now (the
+      // spine's index can lag a `/clear`, so the record it deferred to may have been the older).
+      for (const other of this.sessions()) {
+        const stays = this.#members.get(other);
+        if (stays !== undefined && this.#superseded.has(other) && this.listingId(other) === listing) await this.#report(stays);
+      }
     }
   }
 
@@ -280,6 +299,8 @@ export class Members implements RecordSource, CheckoutSource {
   /**
    * Joins a lane B member to its appSessionId through `engine.sessions`, once; a host that can't answer leaves it unjoined.
    * P5 O12 M11: each app session joined is marked handed off in its engine session's stead.
+   * P5 Decision Log 190 (b): a member the live rows leave unjoined (a `/clear` replaced its engine session before its
+   * record arrived, or while `engine.sessions` was in flight; or the host away) is joined by its spawn instead (`#bySpawn`).
    */
   async #join(session: string): Promise<void> {
     if (this.#apps.has(session)) return;
@@ -287,13 +308,53 @@ export class Members implements RecordSource, CheckoutSource {
     try {
       response = await this.#ctx.dispatch('engine-host', 'engine.sessions', undefined);
     } catch (error) {
-      return this.#ctx.log(`endpoint: engine.sessions could not be read (${(error as Error).message}); a lane B session waits for its appSessionId`);
+      this.#ctx.log(`endpoint: engine.sessions could not be read (${(error as Error).message}); a lane B session waits for its appSessionId`);
     }
-    if (!response.ok || !Array.isArray(response.value)) return;
-    for (const status of response.value as Array<{ appSessionId?: unknown; engineSessionId?: unknown }>) {
-      if (!isId(status.appSessionId) || !isId(status.engineSessionId) || this.#members.get(status.engineSessionId)?.lane !== 'B') continue;
-      this.#apps.set(status.engineSessionId, status.appSessionId);
-      this.#placed(status.engineSessionId, status.appSessionId);
+    if (response?.ok === true && Array.isArray(response.value)) {
+      for (const status of response.value as Array<{ appSessionId?: unknown; engineSessionId?: unknown }>) {
+        if (!isId(status.appSessionId) || !isId(status.engineSessionId) || this.#members.get(status.engineSessionId)?.lane !== 'B') continue;
+        this.#apps.set(status.engineSessionId, status.appSessionId);
+        this.#superseded.delete(status.engineSessionId); // Decision Log 190 (b): the live rows name it now
+        this.#placed(status.engineSessionId, status.appSessionId);
+      }
+    }
+    if (!this.#apps.has(session)) await this.#bySpawn(session);
+  }
+
+  /**
+   * P5 Decision Log 190 (b): a lane B member joined to the app session whose spine record's `launchedBy.opId` is the opId
+   * of its record's spawn act (the `ownersProof` entry whose action is `session.spawn`; sminos appends other acts, such
+   * as `record.owners`, after it or to a record that had none), the spawn its session was launched for (sminos takes the proof from the file
+   * `session.spawn` writes, and a `/clear` keeps it), which the spine names whatever engine session it runs now. A record
+   * with no spawn act, or whose spawn no spine record names, stays unjoined. An opId two app sessions share (reused after the
+   * op ledger's `KEPT_S`) joins neither and marks each handed off, the mark's closed side: a spawner's bridge on either
+   * ends until that session's own record decides. Every record counts, the archived too, so a reuse is never missed.
+   */
+  async #bySpawn(session: string): Promise<void> {
+    const proof = this.#members.get(session)?.ownersProof.find((act) => isObject(act) && act.action === 'session.spawn');
+    const opId = isObject(proof) ? proof.opId : undefined;
+    if (!isId(opId)) return;
+    let response;
+    try {
+      response = await this.#ctx.dispatch('machine', 'session.list', { includeArchived: true });
+    } catch {
+      return;
+    }
+    const sessions = response.ok && isObject(response.value) && Array.isArray(response.value.sessions) ? response.value.sessions : null;
+    if (sessions === null) return;
+    const spawned = sessions.filter((record): record is Record<string, unknown> & { appId: string } => isObject(record) && isId(record.appId) && isObject(record.launchedBy) && record.launchedBy.opId === opId);
+    const spawns = [...new Set(spawned.map((record) => record.appId))];
+    if (spawns.length > 1) this.#ctx.log(`endpoint: a lane B record's spawn ${opId.slice(0, 64)} names ${spawns.length} app sessions; it is placed under none, and each is handed off`);
+    // A member gone or joined meanwhile is not joined here; its sight is passed on all the same, and each app session
+    // it passed to, but not joined under, is told, so a subscription held there by the bridge is decided again.
+    if (spawns.length === 1 && this.#members.get(session)?.lane === 'B' && !this.#apps.has(session)) {
+      this.#apps.set(session, spawns[0]!);
+      const current = spawned[0]!.engineSessionId;
+      if (isId(current) && current !== session) this.#superseded.add(session);
+    }
+    for (const app of spawns) {
+      this.#placed(session, app);
+      if (this.#apps.get(session) !== app) this.#tell({ lane: 'B', session, appSessionId: app });
     }
   }
 
@@ -378,6 +439,8 @@ export class Members implements RecordSource, CheckoutSource {
   async #report(member: Member): Promise<void> {
     const session = this.listingId(member.session);
     if (session === null) return;
+    // P5 Decision Log 190 (b): a superseded record never replaces the listing of one that is not.
+    if (this.#superseded.has(member.session) && this.sessions().some((other) => other !== member.session && !this.#superseded.has(other) && this.listingId(other) === session)) return;
     await this.#ctx.listings.report({
       session,
       project: member.project,
@@ -394,7 +457,11 @@ export class Members implements RecordSource, CheckoutSource {
     const same = before !== undefined && before !== now && JSON.stringify([before.owners, before.access, before.shares, before.launch, before.lane]) === JSON.stringify([now.owners, now.access, now.shares, now.launch, now.lane]);
     if (same) return;
     const app = this.#apps.get(now.session);
-    const target: SessionTarget = now.lane === 'A' ? { lane: 'A', session: now.session } : { lane: 'B', session: now.session, appSessionId: app ?? '' };
+    this.#tell(now.lane === 'A' ? { lane: 'A', session: now.session } : { lane: 'B', session: now.session, appSessionId: app ?? '' });
+  }
+
+  /** Tells the record's listeners that what authorization reads of `target` may have moved. */
+  #tell(target: SessionTarget): void {
     for (const listener of this.#listeners) {
       try {
         listener(target);

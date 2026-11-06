@@ -10,6 +10,7 @@
 // the stage keeps its width. The agent's three tools are the
 // host's unit tests (src/engine-host/presentations/threads.test.ts), through the real tool server.
 import { openArtifactInPanel } from './support/shell';
+import { elementAt, traceFocus } from './support/focus-trace';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { launchMaws, type MawsLaunch } from './support/launch';
@@ -321,12 +322,23 @@ test('the pin popover: at the pin with its reply field focused, Escape keeps the
   await pin.click();
   await expect(reply).toHaveValue('Shorter?');
 
-  // a press on the empty stage: closed, and nothing selected anew (the body stays selected; no marquee) (V4)
-  await page.mouse.click(at(1800, 1000).x, at(1800, 1000).y);
+  // a press on the empty stage: closed, and nothing selected anew (the body stays selected; no marquee) (V4). The pin's
+  // focus after it failed four times on hosted Macs and in no probe (tracker, 2026-11-06): a red prints where the press
+  // landed and where the keyboard went (support/focus-trace.ts)
+  const empty = at(1800, 1000);
+  const trace = await traceFocus(page, '[data-comment-pin="body"]');
+  const landed = await elementAt(page, empty, '[data-stage-surface]');
+  await page.mouse.click(empty.x, empty.y);
   await expect(popover).toHaveCount(0);
   await expect(deck.locator('[data-overlay] [data-selected="body"]')).toBeVisible();
   await expect(deck.locator('[data-marquee]')).toHaveCount(0);
-  await expect(pin).toBeFocused();
+  await expect(pin)
+    .toBeFocused()
+    .catch(async (error: unknown) => {
+      console.log(`[focus trace] the press ${landed}\n${await trace.stop()}`);
+      throw error;
+    });
+  await trace.stop();
 
   // the reply posted from the popover; the last resolve: the popover, the pin and the badge go (V8)
   await pin.click();
