@@ -20,25 +20,31 @@ function useMachineOfName(name: string | null): MachineRef | null {
 
 /**
  * T1 and T2 for a log's machine name: the roster's chip (`@<name>`, "offline", nothing for this Mac) when the roster
- * names that machine, else the name the log carries, as another machine's.
+ * names that machine, else the name the log carries, as another machine's. In a line too narrow for it the chip gives
+ * way before the alias beside it (`Party`): it sits in a box that shrinks three times as readily, and truncates in it.
  */
 export function MachineName({ name }: { name: string | null }) {
   const ref = useMachineOfName(name);
-  if (ref !== null) return <MachineChip address={addressOf(ref, 'channel')} />;
-  if (name === null || name === '') return null;
+  if (ref === null && (name === null || name === '')) return null;
   return (
-    <span data-machine-chip className="shrink-0 truncate text-ui-sm text-fg-muted">
-      @{name}
+    <span className="inline-flex min-w-0 shrink-[3]">
+      {ref !== null ? (
+        <MachineChip address={addressOf(ref, 'channel')} className="max-w-full" />
+      ) : (
+        <span data-machine-chip className="max-w-full truncate text-ui-sm text-fg-muted">
+          @{name}
+        </span>
+      )}
     </span>
   );
 }
 
-/** A session as the stream names it: its alias, its title faint beside it, its machine's chip. */
+/** A session as the stream names it: its alias, its title faint beside it, its machine's chip; the alias gives way last. */
 export function Party({ party, title = true }: { party: ChannelParty; title?: boolean }) {
   return (
     <span data-channel-party={party.session} className="inline-flex min-w-0 items-baseline gap-1.5" title={party.title ?? undefined}>
-      <span className="truncate font-medium text-fg">{party.alias}</span>
-      {title && party.title !== null && <span className="min-w-0 truncate text-fg-muted">{party.title}</span>}
+      <span className="min-w-0 truncate font-medium text-fg">{party.alias}</span>
+      {title && party.title !== null && <span className="min-w-0 shrink-[2] truncate text-fg-muted">{party.title}</span>}
       <MachineName name={party.machine} />
     </span>
   );

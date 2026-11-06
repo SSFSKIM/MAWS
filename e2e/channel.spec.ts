@@ -4,7 +4,7 @@
 // of 40 messages folded, then opened in place; a phase-1 writer attested at migration, and its tail unverified from
 // before the move; an earlier question from the log; a refused word and a not-sent one; the channel offline "as of" its
 // last catch-up; and, under "Waiting on you", a permission and a question of the project's own sessions. The window, the
-// stream's head and foot and the opened exchange are attached as PNGs for the architect's look; the case asserts
+// stream's head and foot and the opened exchange's head and foot are attached as PNGs for the architect's look; the case asserts
 // structure only: nothing in the tab is wider than its box, and every action is drawn whole inside its entry.
 //
 // The channel is seeded where no real log can hold it at once: under MAWS_E2E=1 a harness build's main answers
@@ -246,9 +246,12 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       await exchange.getByRole('button').first().click();
       await expect(exchange.getByRole('button').first()).toHaveAttribute('aria-expanded', 'true');
       await expect(exchange.locator('[data-channel-exchange-messages] > li')).toHaveCount(EXCHANGE);
-      await exchange.scrollIntoViewIfNeeded();
-      await test.info().attach('channel-exchange-open', { body: await exchange.screenshot(), contentType: 'image/png' });
-      await test.info().attach('channel-exchange-window', { body: await page.screenshot(), contentType: 'image/png' });
+      // The stream clips what it scrolls past, so the opened exchange is photographed at its head and at its foot.
+      const said = exchange.locator('[data-channel-exchange-messages] > li');
+      await exchange.evaluate((el) => el.scrollIntoView({ block: 'start', behavior: 'instant' }));
+      await test.info().attach('channel-exchange-head', { body: await page.screenshot(), contentType: 'image/png' });
+      await said.last().evaluate((el) => el.scrollIntoView({ block: 'end', behavior: 'instant' }));
+      await test.info().attach('channel-exchange-foot', { body: await page.screenshot(), contentType: 'image/png' });
 
       expect(await channel.evaluate(overflowing), 'nothing in the Channel tab is wider than its box').toEqual([]);
       expect(await channel.getByRole('button').count(), 'the seeded channel offers its actions').toBeGreaterThan(0);

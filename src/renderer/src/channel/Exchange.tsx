@@ -10,7 +10,9 @@ export function ExchangeRow({ entry }: { entry: ExchangeEntry }) {
   const body = useId();
   const [from, other] = entry.between;
   return (
-    <section data-channel-entry="exchange" data-offset={entry.offsets[0]} data-channel-label={entry.label} data-count={entry.count} className={`flex min-w-0 flex-col gap-1 ${faintOf(entry)}`}>
+    // The button's hover pill reaches 8px past the text on each side (`-mx-2 px-2`); the section's own padding holds it
+    // (`-mx-2 px-2` here too), so nothing reaches past the section's box.
+    <section data-channel-entry="exchange" data-offset={entry.offsets[0]} data-channel-label={entry.label} data-count={entry.count} className={`-mx-2 flex min-w-0 flex-col gap-1 px-2 ${faintOf(entry)}`}>
       <button
         type="button"
         aria-expanded={open}
