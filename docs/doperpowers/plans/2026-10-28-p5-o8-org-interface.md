@@ -1092,7 +1092,7 @@ One pairing at a time, and none while a rekey runs, since both are the session's
   - Admin-only, with no body. The hub takes the new `expires` from the delegation with that id in its held org-state head.
   - It answers `200` with the key as `GET` lists it, or `404` for an unknown id.
   - It refuses a revoked or already-expired key (no revival). It refuses `not-renewed` when the head's delegation for the id is absent or not later than the hub's `expires`. It refuses an `expires` past now + `MAX_PROVISIONING_KEY_TTL_S`, the creation cap.
-  - The exact codes come with the desk track's PR and are copied into §S then. Staging gets it from the desk track; production gets it at the owner's next production hub deploy.
+  - Its codes are in §S: `200`, `403 not-admin`, `404 unknown-key`, `410 key-revoked`, `410 key-expired`, `409 not-renewed`, `409 too-long` and `503 hub-updating`. Staging gets it from the desk track; production gets it at the owner's next production hub deploy.
 
 **Interfaces.** It produces §S. It consumes:
 - M4a's change pipeline;
@@ -1132,7 +1132,12 @@ None found refuses `secret-store: gcloud not found` before the mint. The resolve
   - M3's `renew-expired` and `renew-not-extension`;
   - `renew-past-cap`, an `expires` past now + `MAX_PROVISIONING_KEY_TTL_S`. The hub would refuse it after the state was signed, leaving the two halves apart for good.
 - The state is the authority, so its extension is signed and settled through the signer first. Then `POST …/renew`, with no body.
-- A production hub without the route (before the owner's deploy) answers `404 not-found` with the Worker's build header. The row then reads "Renewed in the org state; this hub can't renew its key yet", with Retry.
+- The route's answers (§S):
+  - `409 not-renewed` is the half-done case: the head the hub holds hasn't the extension yet. Retry calls the route alone.
+  - `503 hub-updating` is retried, and is not a failure of the renewal.
+  - `410 key-revoked` and `410 key-expired` end it with their words, since an elapsed key is never revived.
+  - A production hub without the route (before the owner's deploy) answers `404 not-found` with the Worker's build header. The row then reads "Renewed in the org state; this hub can't renew its key yet", with Retry.
+- A delegation's `expires` is always ISO millis, so neither sheet offers "no expiry". `delegations.test.ts` covers every code against a fake hub.
 - The hub's key is read through `provisioningKeys()` at each view, so the row shows the hub's expiry beside the state's, and a mismatch ("half-done") offers Retry.
 
 *Drop* (`delegation.drop {id}`). Composed as `admin.ts`'s. `drops-delegation`'s warning names its certified machines and says the id and the prefix stay reserved for good. After the signer settles it, `DELETE /api/provisioning-keys/<id>`, with Retry on failure.
@@ -2313,7 +2318,13 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     // OrgView gains delegations: {id, prefix, owners, expires, maxUses, machines: {ref, name, live}[], hub: {expires, uses} | null, held: 'unsent' | null}[]
     // machine settings: org.provisioningSecret {project, secret, account} | null
     // Edit gains hold?: true (signed into the slot unsent); OrgSigner gains publishHeld(): Promise<SignOutcome>
-    // the desk track's route: POST /api/provisioning-keys/<id>/renew (admin, no body; expires from the head's delegation)
+    // the desk track's route (branch p5-hub-key-renew; the architect lands it): POST /api/provisioning-keys/<id>/renew, admin-only, no body
+    //   200: the key exactly as GET /api/provisioning-keys lists it, delegation included; `expires` is the head delegation's string verbatim
+    //   403 not-admin | 404 unknown-key | 410 key-revoked | 410 key-expired (an elapsed key is never revived)
+    //   409 not-renewed: the head has no delegation with that id, or its expires isn't later than the hub's (submit the state first; the half-done case, retried with the route alone)
+    //   409 too-long: past now + MAX_PROVISIONING_KEY_TTL_S (checked in the app before signing: `renew-past-cap`)
+    //   503 hub-updating: retryable, not a failure of the renewal
+    // a delegation's expires is always ISO millis: no "never", so the sheets offer no "no expiry" choice
 
 ## Open questions for the owner
 
