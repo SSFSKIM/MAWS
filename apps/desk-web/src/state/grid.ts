@@ -7,7 +7,6 @@ import type { ProjectSummary } from 'desk-hub/protocol';
 import { GridClient, type AppFrames } from '../hub/grid-client';
 import type { ConnectionStatus } from '../hub/socket';
 import { latency } from '../latency/latency';
-import { takePolicies } from './policies';
 
 /** `asOf`: when the hub last sent the grid or a change to it; while reconnecting, the counts shown are that old. */
 export type GridState = { projects: ProjectSummary[]; loaded: boolean; status: ConnectionStatus; asOf: number | null };
@@ -31,7 +30,6 @@ export function startGrid(base: string): () => void {
       firstGrid = true;
     },
     status: (status) => useGrid.setState({ status }),
-    policies: takePolicies,
   });
   client = own;
   own.setApp(appFrames);

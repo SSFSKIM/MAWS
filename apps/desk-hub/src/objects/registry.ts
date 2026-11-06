@@ -80,7 +80,7 @@ import {
 } from '../protocol/identity';
 import { OrgChain } from './org-chain';
 import { OrgRecords } from './org-records';
-import { Policies, type PoliciesAnswer, type Policy, type Snapshot } from './policies';
+import { Policies, type PoliciesAnswer, type Snapshot } from './policies';
 import { OrgKeys, type StoredKey } from './org-keys';
 import { described } from './project';
 import { relayObjectName } from './relay';
@@ -751,9 +751,6 @@ export class Registry extends DurableObject<Env> {
     const app = url.searchParams.get(REGISTRY_APP_PARAM) === '1';
     server.serializeAttachment({ member, ...(app ? { app } : {}) } satisfies RegistrySocketAttachment);
     this.send(server, this.gridFrame());
-    // The policy rows the member's words are sealed with (P5 O18 M2b), on every registry socket: desk-web's grid is
-    // where its words find them, a device or not.
-    this.send(server, { t: 'policies', rows: this.sessionPolicies.rowsFor(member) });
     if (app) {
       const version = this.chain.head()?.state.version;
       if (version !== undefined) this.send(server, { t: 'state', version });
@@ -1506,25 +1503,7 @@ export class Registry extends DurableObject<Env> {
     if (machine !== null) for (const snapshot of request.snapshots) this.sessionPolicies.apply(machine, snapshot);
     const mine: PoliciesAnswer['mine'] = {};
     if (machine !== null) for (const session of Object.keys(rows)) mine[session] = this.sessionPolicies.boundTo(session, machine);
-    for (const session of new Set(request.snapshots.map((s) => s.session))) this.tellPolicy(session, rows[session] ?? null, this.sessionPolicies.policy(session));
     return ok({ rows, mine });
-  }
-
-  /**
-   * A session's row moved from `was` to `now`: each member of either audience is told the row as it holds it now (P5
-   * O18 M2b): the new one while its audience holds them, else null, so a browser never seals words with an audience it
-   * has left. A member outside both is told nothing; a listed session's rows were never anyone's.
-   */
-  private tellPolicy(session: string, was: Policy | null, now: Policy | null): void {
-    if (was?.policyRev === now?.policyRev && JSON.stringify(was?.audience ?? null) === JSON.stringify(now?.audience ?? null)) return;
-    const members = new Set([...(was?.audience ?? []), ...(now?.audience ?? [])]);
-    if (members.size === 0) return;
-    for (const socket of this.ctx.getWebSockets()) {
-      const member = (socket.deserializeAttachment() as RegistrySocketAttachment | null)?.member;
-      if (member === undefined || !members.has(member)) continue;
-      const policy = now !== null && now.audience !== null && now.audience.includes(member) ? { audience: now.audience, policyRev: now.policyRev } : null;
-      this.send(socket, { t: 'policy', session, policy });
-    }
   }
 
   /** The fill: every project's newest plain snapshot per session (`Project.newestSnapshots`), the newest across

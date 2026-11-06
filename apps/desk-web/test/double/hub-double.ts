@@ -23,7 +23,6 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import { extname, join, normalize } from 'node:path';
 import { createGzip } from 'node:zlib';
-import { streamWriter } from 'org-protocol';
 import {
   hubWriter,
   importOrgKey,
@@ -631,9 +630,7 @@ export class HubDouble {
       return;
     }
     const known = this.project(project).log.find((entry) => (entry.event.mac as { nonce?: string }).nonce === event.mac.nonce);
-    // Words sealed with an audience go into the member's stream of it, as the hub places them (P5 O18 D8).
-    const audience = (event as { audience?: string[] }).audience;
-    const writer = audience === undefined ? hubWriter(event.member) : streamWriter(hubWriter(event.member), audience);
+    const writer = hubWriter(event.member);
     let entry = known;
     if (!entry) {
       const seq = (this.project(project).seqs.get(writer) ?? 0) + 1;

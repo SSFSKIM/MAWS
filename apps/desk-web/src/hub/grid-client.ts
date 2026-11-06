@@ -5,11 +5,9 @@
 // Once this browser is a `web-cards` device (P5 O13 M3; P5 Decision Log 38) the socket is opened as an app's,
 // `?app=1` (OX8): after the grid the hub also sends the org state's head version (`state`, at connect and at each
 // accepted state) and every listing it holds (`listings` pages, then a `listing` as each is stored), which go to the
-// device's org store and listings store (`app`). The grid is drawn from `grid` and `summary` as before. Every socket,
-// an app's or not, also gets its member's policy rows (`policies`, then `policy` at each change; P5 O18 M2b), which
-// the words the browser sends toward a private session are sealed with (`project/audience.ts`).
+// device's org store and listings store (`app`). The grid is drawn from `grid` and `summary` as before.
 import { REGISTRY_APP_PARAM, type ListingFrame, type ListingsFrame, type RegistryAppFrame, type StateNotice } from 'org-protocol';
-import type { GridDown, PoliciesFrame, PolicyFrame, ProjectSummary } from 'desk-hub/protocol';
+import type { GridDown, ProjectSummary } from 'desk-hub/protocol';
 import { latency } from '../latency/latency';
 import { HubSocket, type ConnectionStatus } from './socket';
 
@@ -27,8 +25,6 @@ export type GridClientOptions = {
   /** The grid after each frame, in the hub's order; a new project joins the end. */
   projects(projects: ProjectSummary[]): void;
   status?(status: ConnectionStatus): void;
-  /** The member's policy rows (P5 O18 M2b): the whole set on each connection, then each change, app or not. */
-  policies?(frame: PoliciesFrame | PolicyFrame): void;
   delay?: (attempt: number) => number;
 };
 
@@ -53,7 +49,6 @@ export class GridClient {
           else app.listing(frame);
           return;
         }
-        if (frame.t === 'policies' || frame.t === 'policy') return options.policies?.(frame);
         if (frame.t === 'grid') {
           this.projects = frame.projects;
           if (this.connecting !== null) latency.record('grid.socket', performance.now() - this.connecting);

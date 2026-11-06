@@ -19,36 +19,25 @@ export type Addressed = { ok: true; to: '*' | Recipient[]; wake: boolean } | { o
 const TAG = /@(?:"([^"\n]+)"|([\p{L}\p{N}_.-]+(?:\/[\p{L}\p{N}_.-]+)?))(?:#([0-9a-f]{1,8}))?/uy;
 
 export function leadingTags(text: string): Tag[] {
-  return leadingRun(text).tags;
-}
-
-/** The leading run of tags and where it ends: what follows `end` is the body, an @ in it just text. */
-export function leadingRun(text: string): { tags: Tag[]; end: number } {
   const tags: Tag[] = [];
   let pos = 0;
-  let last = 0;
   for (;;) {
     while (pos < text.length && /\s/u.test(text[pos])) pos++;
     TAG.lastIndex = pos;
     const m = TAG.exec(text);
-    if (!m) return { tags, end: last };
+    if (!m) return tags;
     let end = TAG.lastIndex;
     while (end < text.length && ',:;'.includes(text[end])) end++;
-    if (end < text.length && !/\s/u.test(text[end])) return { tags, end: last };
+    if (end < text.length && !/\s/u.test(text[end])) return tags;
     const full = m[1] ?? m[2];
     const slash = full.lastIndexOf('/');
     tags.push({ raw: m[0], project: slash < 0 ? '' : full.slice(0, slash), name: full.slice(slash + 1), short: m[3] ?? '' });
     pos = end;
-    last = end;
   }
 }
 
 const short = (session: string) => session.slice(0, 8);
-export const isAll = (tag: Tag) => tag.name === 'all' && !tag.project && !tag.short;
-
-/** Whether `tag` names session `s`: its alias with a matching short, else its alias, short or id. */
-export const tagNames = (tag: Tag, s: { session: string; alias: string }): boolean =>
-  tag.short ? s.alias === tag.name && short(s.session).startsWith(tag.short) : [s.alias, short(s.session), s.session].includes(tag.name);
+const isAll = (tag: Tag) => tag.name === 'all' && !tag.project && !tag.short;
 
 /** `project`: this project's id and name; a tag qualified with either is this project's, as sminos reads it. */
 export function address(text: string, sessions: readonly Addressable[], project?: { id: string; name: string }): Addressed {
@@ -61,7 +50,7 @@ export function address(text: string, sessions: readonly Addressable[], project?
   const to: Recipient[] = [];
   for (const tag of tags) {
     if (tag.project && tag.project !== project?.id && tag.project !== project?.name) return { ok: false, reason: `the desk sends to this project only: ${tag.raw}` };
-    const answers = (s: Addressable) => tagNames(tag, s);
+    const answers = (s: Addressable) => (tag.short ? s.alias === tag.name && short(s.session).startsWith(tag.short) : [s.alias, short(s.session), s.session].includes(tag.name));
     const found = sessions.filter((s) => s.member && answers(s));
     if (found.length > 1) return { ok: false, reason: `ambiguous ${tag.raw} matches: ${found.map((s) => `${s.alias}#${short(s.session)}`).sort().join(', ')}` };
     if (found.length === 0) {

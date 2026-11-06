@@ -31,8 +31,6 @@ import {
 import { latency, RETURN_WINDOW_MS } from '../latency/latency';
 import type { LogRecord } from '../log/record';
 import { ProjectLog, type ProjectLogState } from '../log/project-log';
-import { policyRows } from '../state/policies';
-import { planSay, privateInLog } from './audience';
 import { movedToMaws, useCardsBoard } from '../cards/board';
 import { HumanRefused, ProjectClient, type ConnectionStatus } from '../hub/project-client';
 import { Conversation, type RequestRecord } from './conversation';
@@ -297,28 +295,14 @@ export class ProjectConnection {
    */
   async say(member: string, to: '*' | Recipient[], text: string, wake: boolean): Promise<string> {
     const key = this.requireKey();
-    // Toward a private session the words carry its audience, the member's policy row's, and a say naming sessions of
-    // different audiences is one event per audience (P5 O18 M2b, `audience.ts`). One the member can't reach is refused
-    // here, whole, before anything is sent.
-    const entries = this.log.drawable();
-    const planned = planSay(member, to, text, policyRows(), (session) => privateInLog(entries, session));
-    if (!planned.ok) {
-      const nonce = newNonce();
-      this.conversation.outboxAdd({ nonce, to, text, wake, state: 'refused', reason: planned.reason });
-      return nonce;
-    }
-    const nonces: string[] = [];
-    for (const send of planned.sends) {
-      const draft: HumanDraft = { kind: 'human', from: 'human', member, to: send.to, text: send.text, created: new Date().toISOString(), ...(wake && { wake: true }), ...(send.audience && { audience: send.audience }) };
-      const event = await seal(key, 'log', this.project, draft);
-      const nonce = event.mac.nonce;
-      nonces.push(nonce);
-      this.conversation.outboxAdd({ nonce, to: send.to, text: send.text, wake, state: 'sending' });
-      this.client.sendHuman(event).catch((error: unknown) => {
-        if (error instanceof HumanRefused) this.conversation.outboxRefused(nonce, `${error.refusal.reason}${error.refusal.message ? `: ${error.refusal.message}` : ''}`);
-      });
-    }
-    return nonces[0];
+    const draft: HumanDraft = { kind: 'human', from: 'human', member, to, text, created: new Date().toISOString(), ...(wake && { wake: true }) };
+    const event = await seal(key, 'log', this.project, draft);
+    const nonce = event.mac.nonce;
+    this.conversation.outboxAdd({ nonce, to, text, wake, state: 'sending' });
+    this.client.sendHuman(event).catch((error: unknown) => {
+      if (error instanceof HumanRefused) this.conversation.outboxRefused(nonce, `${error.refusal.reason}${error.refusal.message ? `: ${error.refusal.message}` : ''}`);
+    });
+    return nonce;
   }
 
   /**
