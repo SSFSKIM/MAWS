@@ -89,6 +89,7 @@
     "src/services/index/sessions.ts",
     "src/services/index/side-threads.ts",
     "src/services/library/store.ts",
+    "src/services/channel/journal.ts", // P5 O8 M7b: the index constructs the project channel's journal
     "src/services/connectors/deadlines.ts", // P5 O4 M2: the OAuth scene bounds a pending Connect's listener by the flow's own deadline
     "src/main/delivery/e2e-hold.ts", // P5 O4 M2: the delivery scene bounds its refusal under the export hold by the hold's own limit
     "src/services/owner/answers.ts",
