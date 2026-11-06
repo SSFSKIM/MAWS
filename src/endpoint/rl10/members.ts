@@ -25,6 +25,11 @@
 // join awaits the engine host (which may be away, or no longer list it), and a placement on that engine session finds it
 // and marks its app session in its stead, as the join does once it places the record. The mark is pruned of the app
 // sessions the spine no longer holds, once a process, when first read.
+//
+// P5 Decision Log 190, residue (b) (O12's "M11's MAWS half as built"): a `/clear` can replace a lane B session's engine
+// session before its first record arrives, or while the join reads `engine.sessions`, so the live rows never name the
+// record's engine session. The join then places the record by its spawn: the app session whose spine record's
+// `launchedBy.opId` is the record's `ownersProof[0].opId` (`#bySpawn`), failing closed when two app sessions share it.
 import type { EndpointServices } from '../services';
 import type { SessionReport } from '../listings';
 import type { Access, CheckoutSource, RecordSource, SessionRecord, SessionTarget, Share } from '../sources';
@@ -280,6 +285,8 @@ export class Members implements RecordSource, CheckoutSource {
   /**
    * Joins a lane B member to its appSessionId through `engine.sessions`, once; a host that can't answer leaves it unjoined.
    * P5 O12 M11: each app session joined is marked handed off in its engine session's stead.
+   * P5 Decision Log 190 (b): a member the live rows leave unjoined (a `/clear` replaced its engine session before its
+   * record arrived, or while `engine.sessions` was in flight; or the host away) is joined by its spawn instead (`#bySpawn`).
    */
   async #join(session: string): Promise<void> {
     if (this.#apps.has(session)) return;
@@ -287,14 +294,43 @@ export class Members implements RecordSource, CheckoutSource {
     try {
       response = await this.#ctx.dispatch('engine-host', 'engine.sessions', undefined);
     } catch (error) {
-      return this.#ctx.log(`endpoint: engine.sessions could not be read (${(error as Error).message}); a lane B session waits for its appSessionId`);
+      this.#ctx.log(`endpoint: engine.sessions could not be read (${(error as Error).message}); a lane B session waits for its appSessionId`);
     }
-    if (!response.ok || !Array.isArray(response.value)) return;
-    for (const status of response.value as Array<{ appSessionId?: unknown; engineSessionId?: unknown }>) {
-      if (!isId(status.appSessionId) || !isId(status.engineSessionId) || this.#members.get(status.engineSessionId)?.lane !== 'B') continue;
-      this.#apps.set(status.engineSessionId, status.appSessionId);
-      this.#placed(status.engineSessionId, status.appSessionId);
+    if (response?.ok === true && Array.isArray(response.value)) {
+      for (const status of response.value as Array<{ appSessionId?: unknown; engineSessionId?: unknown }>) {
+        if (!isId(status.appSessionId) || !isId(status.engineSessionId) || this.#members.get(status.engineSessionId)?.lane !== 'B') continue;
+        this.#apps.set(status.engineSessionId, status.appSessionId);
+        this.#placed(status.engineSessionId, status.appSessionId);
+      }
     }
+    if (!this.#apps.has(session)) await this.#bySpawn(session);
+  }
+
+  /**
+   * P5 Decision Log 190 (b): a lane B member joined to the app session whose spine record's `launchedBy.opId` is its
+   * record's `ownersProof[0].opId`, the spawn its session was launched for (sminos takes the proof from the file
+   * `session.spawn` writes, and a `/clear` keeps it), which the spine names whatever engine session it runs now. A record
+   * with no proof, or whose spawn no spine record names, stays unjoined. An opId two app sessions share (reused after the
+   * op ledger's `KEPT_S`) joins neither and marks each handed off, the mark's closed side: a spawner's bridge on either
+   * ends until that session's own record decides. Every record counts, the archived too, so a reuse is never missed.
+   */
+  async #bySpawn(session: string): Promise<void> {
+    const proof = this.#members.get(session)?.ownersProof[0];
+    const opId = isObject(proof) ? proof.opId : undefined;
+    if (!isId(opId)) return;
+    let response;
+    try {
+      response = await this.#ctx.dispatch('machine', 'session.list', { includeArchived: true });
+    } catch {
+      return;
+    }
+    const sessions = response.ok && isObject(response.value) && Array.isArray(response.value.sessions) ? response.value.sessions : null;
+    if (sessions === null) return;
+    const spawns = [...new Set(sessions.flatMap((record) => (isObject(record) && isId(record.appId) && isObject(record.launchedBy) && record.launchedBy.opId === opId ? [record.appId] : [])))];
+    if (spawns.length > 1) this.#ctx.log(`endpoint: a lane B record's spawn ${opId.slice(0, 64)} names ${spawns.length} app sessions; it is placed under none, and each is handed off`);
+    // A member gone or joined meanwhile is not joined here; its sight is passed on all the same.
+    if (spawns.length === 1 && this.#members.get(session)?.lane === 'B' && !this.#apps.has(session)) this.#apps.set(session, spawns[0]!);
+    for (const app of spawns) this.#placed(session, app);
   }
 
   /** P5 O12 M11: the handed-off mark as on disk, read on its first use (then pruned once); null while it can't be read. */
