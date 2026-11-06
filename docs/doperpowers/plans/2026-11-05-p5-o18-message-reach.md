@@ -1051,6 +1051,16 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   - Kept: desk-web's tombstone verdict, in `src/log/`, outside the frozen DX6 client (`src/project/`,
     `src/hub/project-client.ts`).
   Date/Author: 2026-11-06, the architect, relayed by the coordinator (p5-desk-track-owner).
+- Decision (M2b, the architect's ruling): the audit row of a refused device human stays as it is, shown to every
+  browser of the project.
+  Rationale:
+  - It is content-free: no session and no message. A refusal toward a session that doesn't exist reads the same, so
+    it is no oracle.
+  - It matches D5, where every reader of a plain writer sees that writer's tombstones.
+  - It tells the project's browsers only that a member had a send refused.
+  Rejected: narrowing it to the sender alone in `auditFor`/`refuseBrowser`, which would protect nothing a reader of
+  the plain writer doesn't already see.
+  Date/Author: 2026-11-06, the architect, relayed by the coordinator (p5-desk-track-owner).
 - Decision (M2b): desk-web reads the hub's `withheld` tombstone as its own verdict, neither drawn nor reported as a
   forgery, closing M1's "desk-web reads a tombstone as malformed" residue.
   Date/Author: 2026-11-05, p5-desk-track-owner (M2b).
