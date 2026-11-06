@@ -3149,6 +3149,13 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   4. The to-human classification lives in the renderer today (`owner/report/project.ts`, `transcript/model/`). The spine reads the shared definitions (`message-call.ts`, `to-human-parser.ts`, `marks.ts`, `answer.ts`), not a renderer copy.
   Date/Author: 2026-11-06, O8's executor (refresh pass).
 
+- Decision: M7b is built as four tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-high on the branch with a confidentiality lens.
+  1. The spine: `src/services/channel/` (the journal and its migration, `channel.history` and `channel.changed`, lane B's source from the owner channel's event batches, the `smnsId` join), and `journal.test.ts`.
+  2. The endpoint, in commits of its own for the desk track's review: `endpoint-seam.ts`'s `channel`, the `#host` hand-off, the `channel.history` offer row, the `channel` feed, and the lane-aware `view` filter re-checked at each frame. Also `test/endpoint/channel-feed.test.ts`.
+  3. Main and the renderer: `src/main/org/channel/machines.ts`, its cache, and the merge into `org.channel.*`; `ToHumanEntry.tsx` and `project.ts`'s placement; `machines.test.ts`.
+  4. `test/org/channel.local.test.ts` cases 5 and 6, and the e2e seed's to-human entries, photographed.
+  Date/Author: 2026-11-06, O8's executor.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
