@@ -92,13 +92,17 @@ const heldTargets = (): Map<AppSessionId, SpawnTarget> => {
   return chosen;
 };
 
+/** Whether two targets name one place: the same machine and the same checkout there. */
+const samePlace = (a: SpawnTarget, b: SpawnTarget | null): boolean => b !== null && a.machine === b.machine && a.checkout === b.checkout;
+
 export const useRemoteSpawn = create<RemoteSpawnStore>()((set) => ({
   chosen: heldTargets(),
   spawning: new Map(),
   choose(tab, target) {
-    // another machine chosen (or this Mac): the held attempt is the person's to leave
+    // another machine chosen (or this Mac), or 2026-11-06 another place there: the held attempt is the person's to leave,
+    // so a reload restores, and the next Send asks after, only the place the chip names
     const held = unconfirmed.get(tab);
-    if (held !== null && held.target.machine !== target?.machine) unconfirmed.delete(tab);
+    if (held !== null && !samePlace(held.target, target)) unconfirmed.delete(tab);
     set((s) => {
       const chosen = new Map(s.chosen);
       if (target === null) chosen.delete(tab);
@@ -229,7 +233,7 @@ export async function spawnOnMachine(request: SpawnRequest, client: MawsBridge =
   if (checkout === null) return { started: false, words: SPAWN_WORDS.noPlace(target.name), again: null }; // 2026-11-06
   const home = checkout === HOME_CHECKOUT;
   const held = unconfirmed.get(from);
-  const asked = held?.target.machine === target.machine ? held : null;
+  const asked = held !== null && samePlace(held.target, target) ? held : null;
   // a check on the start the machine took, under its attempt key; "Start a new session": the next key, a new start
   const attempt = request.fresh === true ? (held?.attempt ?? 0) + 1 : (asked?.attempt ?? 0);
   const again = request.fresh === true || asked?.open !== true ? null : asked.input;

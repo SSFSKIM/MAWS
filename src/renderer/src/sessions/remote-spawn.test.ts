@@ -296,6 +296,42 @@ describe('a spawn on another machine', () => {
     });
   });
 
+  // The branch review (P2): a place changes on one machine now (2026-11-06), so the held attempt follows the place, not
+  // the machine alone: another place chosen lets it go, and the next Send starts there anew, never the old place's input
+  it('lets the attempt go when the person chooses another place on the same machine, and starts there anew', async () => {
+    const home: SpawnTarget = { machine: OTHER_MACHINE, name: 'mini', checkout: HOME_CHECKOUT, key: null, label: 'No project' };
+    const notes: SpawnTarget = { machine: OTHER_MACHINE, name: 'mini', checkout: '/Users/mini/notes', key: null, label: 'notes' };
+    const fake = fakeClient();
+    const ask = (at: SpawnTarget, text: string) => {
+      const d = docOf([paragraph(textNode(text))]);
+      return spawnOnMachine({ from: LOCAL_TAB, target: at, s: serializeDraft(d, { sessionId: null, cwd: '' }), doc: d, intent: { model: null, effort: null, location: null }, mode: 'default' }, fake.client);
+    };
+    useRemoteSpawn.getState().choose(LOCAL_TAB, home);
+    const first = ask(home, 'go home');
+    await Promise.resolve();
+    await fake.fail('session.spawn', 'mini took the request but hasn’t confirmed it', 'timeout');
+    await first;
+    expect(spawnUnconfirmed(LOCAL_TAB)).toBe(true);
+    useRemoteSpawn.getState().choose(LOCAL_TAB, home); // the same place again: still held
+    expect(spawnUnconfirmed(LOCAL_TAB)).toBe(true);
+    useRemoteSpawn.getState().choose(LOCAL_TAB, notes);
+    expect(spawnUnconfirmed(LOCAL_TAB)).toBe(false);
+    useRemoteSpawn.setState({ chosen: new Map() });
+    restoreHeldAttempts(); // a reload restores no old place
+    expect(spawnTargetOf(LOCAL_TAB, null)).toBeNull();
+    useRemoteSpawn.getState().choose(LOCAL_TAB, notes);
+    const next = ask(notes, 'go to the notes');
+    await Promise.resolve();
+    expect(fake.invoked('session.spawn').at(-1)).toEqual({ checkout: '/Users/mini/notes', permission_mode: 'default', brief: 'go to the notes' }); // a new start there
+    await fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' });
+    await next;
+    // a refused attempt's place, left for another: a reload restores none of it either
+    useRemoteSpawn.getState().choose(LOCAL_TAB, home);
+    useRemoteSpawn.setState({ chosen: new Map() });
+    restoreHeldAttempts();
+    expect(spawnTargetOf(LOCAL_TAB, null)).toBeNull();
+  });
+
   it('chooses the held attempt’s machine again on a reload, so the tab’s next Send checks on that start', async () => {
     const fake = fakeClient();
     useRemoteSpawn.getState().choose(LOCAL_TAB, target);
