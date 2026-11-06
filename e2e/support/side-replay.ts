@@ -36,6 +36,7 @@ const ECHOED = `${FIXTURES}/pass2/bash-context-echoed.jsonl`;
 const STEER_NEXT = `${FIXTURES}/pass3/steer-next.jsonl`;
 const SIDE_QUESTIONS = `${FIXTURES}/pass3/p1-side-question-session.jsonl`;
 const MAWS_ARTIFACTS = `${FIXTURES}/pass3/p1-maws-artifacts.jsonl`; // P2-E1 (M5)
+const SUBAGENT = `${FIXTURES}/subagent.jsonl`; // a background agent's call, its own rows and its end
 
 // The recorded ids each borrowed frame carries, re-addressed to the journal's.
 const RECORDED = {
@@ -45,6 +46,8 @@ const RECORDED = {
   side: { session: '9aa9686c-27a8-44cc-a068-58c1fe15f3ac' },
   // P2-E1 (M5): the recording's `artifact_update` call (seq 357 to 369): its session, tool use and the engine's two requests
   maws: { session: '2269c353-97d9-4e4f-a868-5aab4cf2b0c4', toolUse: 'toolu_01DDpRYFhNCCo2pJdJN3gNmg', permission: '7da4b64b-8f26-49fb-a725-9797b1f5bf38', call: '068847a0-9b35-4703-af19-3952813273c6' },
+  // the recording's first background agent: its start (seq 169 to 174), a reply of its own (332) and its end (333 to 335)
+  agent: { session: '9a1d4262-0b43-46ad-acb9-5982f31d209c', toolUse: 'toolu_01CYiK6ncgQLFUQ2iqC1b4oB', id: 'ad286defbc77bc090', description: 'Read and report one.txt content' },
 } as const;
 
 const AT = '2026-10-06T12:00:00.000Z';
@@ -221,6 +224,34 @@ export class SideJournal {
     const result = swapped(frameOf(MAWS_ARTIFACTS, 369), swap);
     this.push('in', { ...result, uuid: this.uuid(), message: { role: 'user', content: [{ tool_use_id: toolUseId, type: 'tool_result', content: [{ type: 'text', text }] }] }, tool_use_result: [{ type: 'text', text }] });
     return toolUseId;
+  }
+
+  // A background agent the turn starts, as `subagent.jsonl` records its first, re-addressed to `agentId` and
+  // `description`: the assistant's `Agent` call (seq 169), the engine's `background_tasks_changed` and `task_started`
+  // (171, 172), and the call's async launch naming the agent (174). The handle writes the agent's own replies (seq 332's
+  // frame, under the call) and its end (333 with no task left running, 334, 335).
+  agent(agentId: string, description: string): { toolUseId: string; text(text: string): void; completed(summary: string): void } {
+    const toolUseId = `toolu_e1${this.sessionId.at(-1)}${String(this.minted + 1).padStart(6, '0')}`;
+    const swap = { [RECORDED.agent.session]: this.sessionId, [RECORDED.agent.toolUse]: toolUseId, [RECORDED.agent.id]: agentId, [RECORDED.agent.description]: description };
+    const frame = (seq: number) => ({ ...swapped(frameOf(SUBAGENT, seq), swap), uuid: this.uuid() }) as Frame & { message: Frame & { content: Frame[] } };
+    const call = frame(169);
+    this.push('in', { ...call, wire_tool_inputs: { [toolUseId]: call.message.content[0]!.input } }); // keyed by the call's id
+    this.push('in', frame(171));
+    this.push('in', frame(172));
+    const launched = frame(174);
+    this.push('in', { ...launched, message: { role: 'user', content: [{ tool_use_id: toolUseId, type: 'tool_result', content: [{ type: 'text', text: `Async agent launched successfully.\nagentId: ${agentId}` }] }] } });
+    return {
+      toolUseId,
+      text: (text) => {
+        const reply = frame(332);
+        this.push('in', { ...reply, message: { ...reply.message, id: `msg_e2e${this.uuid().replace(/-/g, '')}`, content: [{ type: 'text', text }] } });
+      },
+      completed: (summary) => {
+        this.push('in', { ...frame(333), tasks: [] });
+        this.push('in', frame(334));
+        this.push('in', { ...frame(335), summary });
+      },
+    };
   }
 
   // A `next` steer written into the running turn (seq 46's shape), and the engine's `queued` for it.
