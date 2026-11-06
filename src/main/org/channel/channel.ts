@@ -6,7 +6,7 @@
 // changed since the last it told (or since the first open's answer): the events new or judged again (`upserts`), the
 // offsets any tab was sent (a later open's answer included) that main no longer draws (`removed`: let go by the bound,
 // or failing now), the rest whole. It tells everything (`reset`)
-// when a judgment at a new head or certificate set changed verdicts, when another org's log is dropped, and after a
+// when a judgment at a new head or certificate set changed verdicts, when another reader's log is dropped, and after a
 // closed answer. Each change takes the next `rev` of a count shared by every channel of the run, and each open answer
 // carries the count as it stands, so a tab drops a change told before its answer (it describes an older state).
 //
@@ -14,7 +14,9 @@
 //   opens only while the session has a hub, after the project's history attestations are read once, so a DX1 writer's
 //   attestation is held before its events arrive (cache.ts keeps the events an authenticated attestation covers past the
 //   bound); they are read again when a DX1 writer's events pass every attestation held.
-// - Every event is judged again at each adopted head or certificate set; another org's log is dropped at sign-in.
+// - Every event is judged again at each adopted head or certificate set. The held log is one reader's, the signed-in
+//   org's member's (cache.ts): another reader's is drawn to no one signed in, and dropped at their sign-in, read again
+//   from offset 0 on their own socket.
 // - A socket the hub refuses the project (404) ends the channel `unknown-project` until the tab's next open or another
 //   hub; one that ends `removed` or with the hub sign-in waits, as the Registry feed does, for the session's next change.
 // - The owner's words: a leading `@alias` addresses a session the log's lifecycle names, held past the bound (address.ts,
@@ -33,7 +35,7 @@ import { hubClient } from '../hub-client';
 import type { HubAccess, OrgSession, SignedIn } from '../session';
 import { orgTiming, type OrgTiming } from '../timing';
 import { addressOf } from './address';
-import { emptyLog, loadLog, type ChannelLimits, type ChannelStore, type Ground, type HeldLog } from './cache';
+import { emptyLog, isReaders, loadLog, type ChannelLimits, type ChannelReader, type ChannelStore, type Ground, type HeldLog } from './cache';
 import { CLOSE_CREDENTIALS, CLOSE_REMOVED, CLOSE_UNKNOWN_PROJECT, openProjectSocket, type ProjectSocket, type ProjectSocketDeps } from './project-socket';
 import { createNotSent, createWords } from './words';
 
@@ -107,6 +109,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
   /** The words channels let go unacknowledged, for their signer's next open of the project. */
   const notSent = createNotSent();
 
+  const readerOf = (current: SignedIn): ChannelReader => ({ org: current.identity.org, member: current.identity.member });
   const groundOf = (current: SignedIn, project: string): Ground => ({
     ctx: { org: current.identity.org, project },
     state: current.view.head().state,
@@ -170,23 +173,28 @@ export function createChannels(deps: ChannelsDeps): Channels {
       return run;
     }
 
-    /** The member's word is in the log held, the signed-in org's: delivered. */
+    /** The member's word is in the log held, the signed-in reader's: delivered. */
     const inLog = (nonce: string, member: string): boolean =>
       signedIn() !== null && (held?.events() ?? []).some(({ writer, event }) => isHubWriter(writer) && event.nonce === nonce && event.member === member);
 
+    /** The session, while the log held is its reader's. */
     const signedIn = (): SignedIn | null => {
       const current = deps.session.current();
-      return current !== null && held !== null && current.identity.org === held.org ? current : null;
+      return current !== null && held !== null && isReaders(held, readerOf(current)) ? current : null;
     };
+
+    /** The log held, as far as `current` may draw or address it: signed out, the file's own reader's stands. */
+    const visible = (current: SignedIn | null): HeldLog | null => (held !== null && (current === null || isReaders(held, readerOf(current))) ? held : null);
 
     function answer(): ChannelAnswer {
       const rev = revision;
       if (ended === 'unknown-project') return { ok: false, reason: 'unknown-project', rev };
       const current = deps.session.current();
-      const events = held?.events() ?? [];
-      const sessions = held?.sessions() ?? [];
-      const unverified = held?.unverified() ?? 0;
-      const asOf = held?.asOf() ?? null;
+      const shown = visible(current); // another reader's, until the queued session change replaces it: nothing
+      const events = shown?.events() ?? [];
+      const sessions = shown?.sessions() ?? [];
+      const unverified = shown?.unverified() ?? 0;
+      const asOf = shown?.asOf() ?? null;
       const pending = words.pending();
       if (events.length === 0 && sessions.length === 0 && unverified === 0 && asOf === null && pending.length === 0) {
         if (current === null) return { ok: false, reason: 'signed-out', rev };
@@ -264,7 +272,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
 
     /** The cache as it stands, a finished snapshot, entered in the commit queue. */
     function enterWrite(): void {
-      if (!dirty || held === null || held.org === '') return;
+      if (!dirty || held === null || held.reader === null) return;
       dirty = false;
       const file = held.file();
       deps.commit(() => deps.store.write(project, file)).catch((error: unknown) => log(`the cache was not written: ${(error as Error).message}`));
@@ -383,15 +391,15 @@ export function createChannels(deps: ChannelsDeps): Channels {
       }
       void enqueue('a session change', async () => {
         if (held === null) return;
-        if (held.org !== current.identity.org) {
-          log('another org is signed in: the cache held is dropped');
-          held = emptyLog(current.identity.org, project, limits);
+        if (!isReaders(held, readerOf(current))) {
+          log('another reader is signed in: the cache held is dropped');
+          held = emptyLog(readerOf(current), project, limits);
           judged = null;
           attested = false;
           resetDue = true;
           dropSocket();
           changed();
-          if (current.hub !== null && ended === null) void connect(current.hub); // that org's log, from offset 0
+          if (current.hub !== null && ended === null) void connect(current.hub); // that reader's log, from offset 0
         }
         const head = current.view.head();
         const certificates = current.view.certificates();
@@ -415,7 +423,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
         return null;
       });
       const current = deps.session.current();
-      held = await loadLog(raw, { org: current?.identity.org ?? null, project, limits, ground: current === null ? null : groundOf(current, project), log });
+      held = await loadLog(raw, { reader: current === null ? null : readerOf(current), project, limits, ground: current === null ? null : groundOf(current, project), log });
       if (current !== null) judged = { head: current.view.head(), certificates: current.view.certificates() };
     }).then(() => reconcile());
 
@@ -425,7 +433,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
       if (current === null) return { ok: false, reason: 'signed-out' };
       if (current.hub === null) return { ok: false, reason: 'no-hub' };
       if (ended !== null) return { ok: false, reason: 'unreadable' };
-      const addressed = addressOf(text, held?.sessions() ?? []);
+      const addressed = addressOf(text, visible(current)?.sessions() ?? []);
       if (!addressed.ok) return { ok: false, reason: addressed.reason, detail: addressed.detail };
       const said = await words.say(text, addressed.to);
       return said.ok ? said : { ok: false, reason: said.reason };

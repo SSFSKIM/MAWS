@@ -94,9 +94,9 @@ export class ChannelOrg {
     return signEvent({ org: ORG, project: PROJECT }, event, machine.key.privateKey, machine.key.pub) as Promise<Event>;
   }
 
-  /** A machine's v2 `joined`: its session's alias in the project, from the session's own writer. */
-  joined(machine: Machine, seq: number, alias: string, session = S1): Promise<Event> {
-    const event = { ts: iso(NOW - 40_000), created: iso(NOW - 40_000), writer: `${machine.name}/${session}`, seq, kind: 'joined', session, alias, machine: machine.name, cwd: '/w' };
+  /** A machine's v2 `joined`: its session's alias in the project, from the session's own writer (`stream`: its audience stream's `~<digest>`). */
+  joined(machine: Machine, seq: number, alias: string, session = S1, stream = ''): Promise<Event> {
+    const event = { ts: iso(NOW - 40_000), created: iso(NOW - 40_000), writer: `${machine.name}/${session}${stream}`, seq, kind: 'joined', session, alias, machine: machine.name, cwd: '/w' };
     return signEvent({ org: ORG, project: PROJECT }, event, machine.key.privateKey, machine.key.pub) as Promise<Event>;
   }
 

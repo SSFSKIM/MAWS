@@ -9,7 +9,7 @@
 // (`latest()`), so every case checks what a tab would draw; `told()` is the last change as sent.
 import { afterEach, describe, expect, it } from 'vitest';
 import { NO_CERTIFICATES, type HistoryAttestation, type OrgView, type Signed } from '../../../../apps/org-protocol/src/index.ts';
-import { ChannelOrg, NOW, ORG, PROJECT, S1 } from '../../../../test/org/channel-world';
+import { ChannelOrg, NOW, ORG, PROJECT, S1, S2 } from '../../../../test/org/channel-world';
 import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelSession, ChannelWord } from '@shared/ipc/schema/org';
 import { BUILD_HEADER } from '../hub-client';
 import type { WebSocketLike } from '../registry-feed';
@@ -162,7 +162,7 @@ describe('a project channel', () => {
   it('draws its cache at once, resumes after its offset once the attestations are read, and reads live after caught-up', async () => {
     const h = await harness({
       seed: async (o) => {
-        const cached = emptyLog(ORG, PROJECT, { events: 5000, bytes: 1 << 23 });
+        const cached = emptyLog({ org: ORG, member: o.A }, PROJECT, { events: 5000, bytes: 1 << 23 });
         await cached.add([{ offset: 7, event: await o.say(o.mini, 1, 'from the cache') }], { ctx: { org: ORG, project: PROJECT }, state: o.head().state, certificates: NO_CERTIFICATES, now: new Date(NOW) });
         cached.caughtUp(9, '2026-11-06T11:00:00.000Z');
         return cached.file();
@@ -371,15 +371,22 @@ describe('a project channel', () => {
     await until(() => second.closed, 'released again', 2_000);
     h.session.set(ours);
     const answer = opened(await h.channels.open(PROJECT));
-    expect(answer.events.some((e) => e.event.nonce === said.nonce)).toBe(true);
     expect(answer.pending).toEqual([]);
+    // B's log is B's: A reads the project afresh, on A's own socket, and draws the word from there
+    expect(answer.events).toEqual([]);
+    const third = await until(() => (h.sockets.length === 3 ? h.last() : null), "A's socket again");
+    third.welcome();
+    expect(third.sent).toEqual([{ t: 'resume', after: 0 }]);
+    third.frame({ t: 'log', events: [{ offset: 1, event: { ts: new Date(NOW).toISOString(), writer: `hub/${h.o.A}`, seq: 1, ...draft } }] });
+    await until(() => opened(h.latest()).events.some((e) => e.event.nonce === said.nonce), "the log copy on A's socket");
+    expect(opened(h.latest()).pending).toEqual([]);
   });
 
   it('addresses a session whose joined the bound let go, from the cache after a reload, and tells the sessions', async () => {
     const h = await harness({
       events: 2,
       seed: async (o) => {
-        const cached = emptyLog(ORG, PROJECT, { events: 2, bytes: 1 << 23 });
+        const cached = emptyLog({ org: ORG, member: o.A }, PROJECT, { events: 2, bytes: 1 << 23 });
         const g = { ctx: { org: ORG, project: PROJECT }, state: o.head().state, certificates: NO_CERTIFICATES, now: new Date(NOW) };
         await cached.add([{ offset: 1, event: await o.joined(o.mini, 1, 'maws-45') }, { offset: 2, event: await o.say(o.mini, 2, 'two') }, { offset: 3, event: await o.say(o.mini, 3, 'three') }], g);
         return cached.file();
@@ -519,6 +526,38 @@ describe('a project channel', () => {
     expect(socket.closed).toBe(true);
     next.welcome();
     expect(next.sent).toEqual([{ t: 'resume', after: 0 }]);
+  });
+
+  // the branch review's finding: what the hub served one member (an audience stream only its members read, P5 O18) and
+  // the offset that member's socket reached are never another member's
+  it("scopes the held log, its file and its cursor to the member: another member of the org draws none of it and resumes from its own", async () => {
+    const h = await harness();
+    opened(await h.channels.open(PROJECT));
+    const socket = await until(() => h.last(), 'a socket');
+    socket.welcome();
+    const scoped = await h.o.say(h.o.mini, 1, 'for A alone', [h.o.A], `${S2}~0123456789abcdef`);
+    socket.frame({ t: 'log', events: [{ offset: 5, event: scoped }, { offset: 6, event: await h.o.joined(h.o.mini, 2, 'a-only', S2, '~0123456789abcdef') }] });
+    socket.frame({ t: 'caught-up', offset: 6 });
+    await until(() => opened(h.latest()).live, 'live');
+    expect(opened(h.latest()).events.map((e) => e.offset)).toEqual([5, 6]);
+    await until(() => h.writes.at(-1)?.after === 6, "A's cache written");
+    const ours = h.signedIn();
+    h.session.set({ ...ours, identity: { ...ours.identity, member: h.o.B, device: 'b-app', channelKey: h.o.bDevice.channel } });
+    // a tab B opens at once draws nothing of A's, nor addresses A's sessions
+    const b = opened(await h.channels.open(PROJECT));
+    expect(b.events).toEqual([]);
+    expect(b.sessions).toEqual([]);
+    expect(b.asOf).toBeNull();
+    await until(() => opened(h.latest()).events.length === 0, "A's log dropped");
+    expect(opened(h.latest()).sessions).toEqual([]);
+    const next = await until(() => (h.sockets.length === 2 ? h.last() : null), "B's socket");
+    expect(socket.closed).toBe(true);
+    next.welcome();
+    expect(next.sent).toEqual([{ t: 'resume', after: 0 }]); // B's own cursor: B has read nothing yet
+    next.frame({ t: 'log', events: [{ offset: 2, event: await h.o.say(h.o.mini, 3, 'for everyone') }] });
+    next.frame({ t: 'caught-up', offset: 6 });
+    await until(() => h.writes.at(-1)?.member === h.o.B && h.writes.at(-1)?.events.length === 1, "B's cache written");
+    expect(h.writes.at(-1)?.events.map((e) => e.event.text)).toEqual(['for everyone']);
   });
 
   it('reads the attestations again when a DX1 writer passes every one it holds', async () => {

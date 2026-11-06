@@ -347,7 +347,7 @@ export const CHANNEL_TEXT_MAX = 100_000;
  * A change since the last: `upserts` are the events new or judged again since, by offset, each replacing what a tab holds
  * at its offset; `removed` the offsets main no longer draws (let go by its bound, or failing now), so a tab holds exactly
  * main's set; the sessions, the pending words, `unverified`, `asOf` and `live` are whole. `reset` replaces every event a
- * tab holds with `upserts`: told when a judgment at a new head or certificate set changed verdicts, when another org's
+ * tab holds with `upserts`: told when a judgment at a new head or certificate set changed verdicts, when another reader's
  * log was dropped, and for the first change after a closed one.
  */
 const ChannelDeltaSchema = z.strictObject({

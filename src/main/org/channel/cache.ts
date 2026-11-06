@@ -14,8 +14,11 @@
 //   didn't fail is kept beside the events, in the file, judged again with them and dropped when it fails; a later one
 //   that fails displaces nothing, and one held that verifies at a later head enters (the latest offset wins). At most
 //   CHANNEL_CACHE_SESSIONS sessions, the most recently named.
-// - A file that doesn't read as one of this project's (absent, damaged, another project's, another org's when the org
-//   is known) gives an empty log, read from offset 0, which recomputes every checkpoint from the full prefix.
+// - The log is one reader's, an org's member: the hub serves each member only what it may read (an audience stream to
+//   its audience alone, P5 O18), so the events, the sessions, the checkpoints and the offset one member's socket reached
+//   are never another's. The file names its reader.
+// - A file that doesn't read as one of this project's (absent, damaged, another project's, another reader's when the
+//   reader is known) gives an empty log, read from offset 0, which recomputes every checkpoint from the full prefix.
 //
 // The file is `<userData>/org/channel/<project>.json` (`channelStore`), written by the channel through the org
 // session's commit queue.
@@ -35,9 +38,12 @@ export type Ground = Omit<Judging, 'checkpoints'>;
 export type ChannelLimits = { events: number; bytes: number; sessions?: number };
 export const CHANNEL_CACHE_SESSIONS = 500;
 export type CachedEvent = { offset: number; event: StoredEvent; verdict: Verdict };
+/** Whose log it is: the signed-in org and member that read it. */
+export type ChannelReader = { org: string; member: string };
 export type ChannelCacheFile = {
   version: 1;
   org: string;
+  member: string;
   project: string;
   after: number;
   asOf: string | null;
@@ -48,8 +54,8 @@ export type ChannelCacheFile = {
 };
 
 export interface HeldLog {
-  /** The org whose events these are. */
-  readonly org: string;
+  /** The org and member whose log this is; null when none is known (signed out, with no file), so nothing is written. */
+  readonly reader: ChannelReader | null;
   /** The offset the socket resumes after. */
   after(): number;
   /** The last `caught-up`'s time; null until one. */
@@ -95,7 +101,7 @@ const isCached = (value: unknown): value is CachedEvent =>
   isObject(value) && isOffset(value.offset) && isObject(value.event) && typeof value.event.writer === 'string' && isLogSeq(value.event.seq) && isVerdict(value.verdict);
 
 function isCacheFile(value: unknown, project: string): value is ChannelCacheFile {
-  if (!isObject(value) || value.version !== 1 || typeof value.org !== 'string' || value.project !== project || !isOffset(value.after)) return false;
+  if (!isObject(value) || value.version !== 1 || typeof value.org !== 'string' || typeof value.member !== 'string' || value.project !== project || !isOffset(value.after)) return false;
   if (value.asOf !== null && typeof value.asOf !== 'string') return false;
   if (!Array.isArray(value.lifecycle) || !value.lifecycle.every(isCached)) return false;
   return Array.isArray(value.events) && value.events.every(isCached) && Array.isArray(value.checkpoints) && value.checkpoints.every(isCheckpoint);
@@ -126,7 +132,7 @@ function drawn(entry: CachedEvent): ChannelEvent | null {
   return out;
 }
 
-function makeLog(org: string, project: string, limits: ChannelLimits, held: ChannelCacheFile | null): HeldLog {
+function makeLog(reader: ChannelReader | null, project: string, limits: ChannelLimits, held: ChannelCacheFile | null): HeldLog {
   const entries = new Map<number, CachedEvent>((held?.events ?? []).map((e) => [e.offset, e]));
   const sizes = new Map<number, number>([...entries.values()].map((e) => [e.offset, sizeOf(e)]));
   let bytes = [...sizes.values()].reduce((sum, n) => sum + n, 0);
@@ -251,7 +257,7 @@ function makeLog(org: string, project: string, limits: ChannelLimits, held: Chan
   }
 
   return {
-    org,
+    reader,
     after: () => after,
     asOf: () => asOf,
     async add(events, ground) {
@@ -324,7 +330,8 @@ function makeLog(org: string, project: string, limits: ChannelLimits, held: Chan
     unverified: () => [...entries.values()].filter((e) => 'failed' in e.verdict).length,
     file: () => ({
       version: 1,
-      org,
+      org: reader?.org ?? '',
+      member: reader?.member ?? '',
       project,
       after,
       asOf,
@@ -335,21 +342,24 @@ function makeLog(org: string, project: string, limits: ChannelLimits, held: Chan
   };
 }
 
-/** A log of nothing yet, read from offset 0. */
-export function emptyLog(org: string, project: string, limits: ChannelLimits): HeldLog {
-  return makeLog(org, project, limits, null);
+/** `reader`'s log of nothing yet, read from offset 0. */
+export function emptyLog(reader: ChannelReader | null, project: string, limits: ChannelLimits): HeldLog {
+  return makeLog(reader, project, limits, null);
 }
 
+/** Whether `held` is `reader`'s log. */
+export const isReaders = (held: HeldLog, reader: ChannelReader): boolean => held.reader?.org === reader.org && held.reader.member === reader.member;
+
 /**
- * The cache as read: `org` is the signed-in org (null signed out: the file's own stands), `ground` the held head to
- * judge it against again (null signed out: the stored verdicts stand). Anything that isn't this project's log reads as
- * an empty log of `org`.
+ * The cache as read: `reader` is the signed-in org and member (null signed out: the file's own stands), `ground` the
+ * held head to judge it against again (null signed out: the stored verdicts stand). Anything that isn't this project's
+ * log, or is another reader's, reads as an empty log of `reader`.
  */
-export async function loadLog(raw: unknown, input: { org: string | null; project: string; limits: ChannelLimits; ground: Ground | null; log(line: string): void }): Promise<HeldLog> {
-  const { org, project, limits, ground } = input;
+export async function loadLog(raw: unknown, input: { reader: ChannelReader | null; project: string; limits: ChannelLimits; ground: Ground | null; log(line: string): void }): Promise<HeldLog> {
+  const { reader, project, limits, ground } = input;
   if (raw !== null && !isCacheFile(raw, project)) input.log(`the cache of ${project} is damaged: read from offset 0`);
-  if (!isCacheFile(raw, project) || (org !== null && raw.org !== org)) return emptyLog(org ?? '', project, limits);
-  const log = makeLog(raw.org, project, limits, raw);
+  if (!isCacheFile(raw, project) || (reader !== null && (raw.org !== reader.org || raw.member !== reader.member))) return emptyLog(reader, project, limits);
+  const log = makeLog({ org: raw.org, member: raw.member }, project, limits, raw);
   if (ground !== null) await log.rejudge(ground);
   return log;
 }
