@@ -46,8 +46,9 @@ const RECORDED = {
   side: { session: '9aa9686c-27a8-44cc-a068-58c1fe15f3ac' },
   // P2-E1 (M5): the recording's `artifact_update` call (seq 357 to 369): its session, tool use and the engine's two requests
   maws: { session: '2269c353-97d9-4e4f-a868-5aab4cf2b0c4', toolUse: 'toolu_01DDpRYFhNCCo2pJdJN3gNmg', permission: '7da4b64b-8f26-49fb-a725-9797b1f5bf38', call: '068847a0-9b35-4703-af19-3952813273c6' },
-  // the recording's first background agent: its start (seq 169 to 174), a reply of its own (332) and its end (333 to 335)
-  agent: { session: '9a1d4262-0b43-46ad-acb9-5982f31d209c', toolUse: 'toolu_01CYiK6ncgQLFUQ2iqC1b4oB', id: 'ad286defbc77bc090', description: 'Read and report one.txt content' },
+  // the recording's first background agent: its start (seq 169 to 174), its Read (223 to 225), a reply of its own (332)
+  // and its end (333 to 335)
+  agent: { session: '9a1d4262-0b43-46ad-acb9-5982f31d209c', toolUse: 'toolu_01CYiK6ncgQLFUQ2iqC1b4oB', id: 'ad286defbc77bc090', description: 'Read and report one.txt content', read: 'toolu_01WHcNPsuUXRb5uAumPGpTyF' },
 } as const;
 
 const AT = '2026-10-06T12:00:00.000Z';
@@ -228,9 +229,10 @@ export class SideJournal {
 
   // A background agent the turn starts, as `subagent.jsonl` records its first, re-addressed to `agentId` and
   // `description`: the assistant's `Agent` call (seq 169), the engine's `background_tasks_changed` and `task_started`
-  // (171, 172), and the call's async launch naming the agent (174). The handle writes the agent's own replies (seq 332's
-  // frame, under the call) and its end (333 with no task left running, 334, 335).
-  agent(agentId: string, description: string): { toolUseId: string; text(text: string): void; completed(summary: string): void } {
+  // (171, 172), and the call's async launch naming the agent (174). The handle writes the agent's own work under the
+  // call, its Read of a file (223, its progress 224, its result 225) and its replies (332's frame), and its end (333 with
+  // no task left running, 334, 335).
+  agent(agentId: string, description: string): { toolUseId: string; read(): void; text(text: string): void; completed(summary: string): void } {
     const toolUseId = `toolu_e1${this.sessionId.at(-1)}${String(this.minted + 1).padStart(6, '0')}`;
     const swap = { [RECORDED.agent.session]: this.sessionId, [RECORDED.agent.toolUse]: toolUseId, [RECORDED.agent.id]: agentId, [RECORDED.agent.description]: description };
     const frame = (seq: number) => ({ ...swapped(frameOf(SUBAGENT, seq), swap), uuid: this.uuid() }) as unknown as Frame & { message: Frame & { content: Frame[] } };
@@ -242,6 +244,10 @@ export class SideJournal {
     this.push('in', { ...launched, message: { role: 'user', content: [{ tool_use_id: toolUseId, type: 'tool_result', content: [{ type: 'text', text: `Async agent launched successfully.\nagentId: ${agentId}` }] }] } });
     return {
       toolUseId,
+      read: () => {
+        const readId = `toolu_e1${this.sessionId.at(-1)}${String(this.minted + 1).padStart(6, '0')}`;
+        for (const seq of [223, 224, 225]) this.push('in', swapped(frame(seq), { [RECORDED.agent.read]: readId }));
+      },
       text: (text) => {
         const reply = frame(332);
         this.push('in', { ...reply, message: { ...reply.message, id: `msg_e2e${this.uuid().replace(/-/g, '')}`, content: [{ type: 'text', text }] } });

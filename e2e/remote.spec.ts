@@ -2293,12 +2293,13 @@ test('a subagent of B’s lane B session, drilled into from A: the rows it gave 
   let scene: RemoteScene | null = null;
   let a: MawsLaunch | null = null;
   try {
-    // B's session: the brief's turn starts the agent, which replies, holds (until the spec asks B's engine its context
-    // usage), replies again, holds, and ends; the turn itself goes on with no reply of its own
+    // B's session: the brief's turn starts the agent, which replies and reads a file, holds (until the spec asks B's
+    // engine its context usage), replies again, holds, and ends; the turn itself goes on with no reply of its own
     const journal = new SideJournal(SUB_SPAWNED, checkout);
     journal.prompt();
     const agent = journal.agent(SUB_AGENT.id, SUB_AGENT.description);
     agent.text(SUB_FIRST);
+    agent.read();
     journal.holdAtContextUsage();
     agent.text(SUB_SECOND);
     journal.holdAtContextUsage();
