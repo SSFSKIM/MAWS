@@ -260,6 +260,9 @@ describe('toolbar', () => {
     const browser = { id: `browser:${A}:b_000000000001`, kind: 'browser', appSessionId: A, browserTabId: 'b_000000000001', pinned: false } as const;
     expect(toolbarTitle(browser, records, 'Page A')).toEqual({ title: 'Page A', branch: null });
     expect(toolbarTitle(browser, records)).toEqual({ title: 'Browser', branch: null });
+    const channel = { id: 'channel:p1', kind: 'channel', project: 'p1', pinned: false } as const; // P5 O8 M7a
+    expect(toolbarTitle(channel, records, null, null, new Map(), 'MAWS').title).toBe('MAWS · channel');
+    expect(toolbarTitle(channel, records).title).toBe('Channel');
     // W9 (H2): the engine's HEAD (a folder that is no repository) is no branch, so no chip
     expect(toolbarTitle(sessionTab(A), new Map([[A, record(A, { branch: 'HEAD' })]])).branch).toBeNull();
   });

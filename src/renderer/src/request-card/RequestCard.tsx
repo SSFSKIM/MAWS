@@ -7,7 +7,9 @@
 // `DockedCardFrame` around the card; in an Overview card, the nearest ancestor with a `tabindex` (C5's article), since
 // the article, not the card, holds focus there; hover and inline bind no key. Digits pick a permission's scope from
 // the same owner. E1 M4b: a blocking `maws` ask's item (originating in `maws.ask.opened`) renders compact
-// (`variants/Ask.tsx`), its one action opening the Question sheet; the card never answers it.
+// (`variants/Ask.tsx`), its one action opening the Question sheet; the card never answers it. P5 O8 M7a: a placement
+// that asks for it (`askInPlace`: the project channel's waiting cards) draws the sheet's body inline instead, which
+// answers through `maws.ask.answer` as the sheet does; the sheet stays the session pane's.
 //
 // P5 O9 M6: each option is drawn from the session's controls port (`answerCapability`), disabled in place with its reason
 // where the port can't carry it. A request its session's terminal asks too says so ("Also asked in the terminal: the first
@@ -70,6 +72,7 @@ export interface RequestCardProps {
   placement: Placement;
   paneIndex: 0 | 1 | null; // informational
   onAnswered?: (outcome: 'delivered' | 'not_pending' | 'write_failed') => void;
+  askInPlace?: boolean; // P5 O8 M7a: a MAWS ask answers here, through the Question sheet's body, rather than opening the sheet
 }
 
 // The kind line (C5's table, so the Needs-you row, the hover and the card read alike); docked, the frame's title.
@@ -215,7 +218,7 @@ function RequestCardFor(props: RequestCardProps) {
   );
 }
 
-function NativeRequestCard({ item, request, placement, onAnswered, loading, unreadable, concealed }: RequestCardProps & {
+function NativeRequestCard({ item, request, placement, onAnswered, loading, unreadable, concealed, askInPlace = false }: RequestCardProps & {
   loading: boolean;
   unreadable: string | null;
   concealed: boolean;
@@ -322,7 +325,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
       </p>
     );
   } else if (request?.kind === 'maws.ask.opened') {
-    body = <AskBody appSessionId={item.appSessionId} request={request} hover={hover} />;
+    body = <AskBody appSessionId={item.appSessionId} request={request} inPlace={hover || askInPlace} />;
   } else if (hover) {
     body = request ? <HoverPreview request={request} /> : <NoticeBody item={item} />;
   } else {

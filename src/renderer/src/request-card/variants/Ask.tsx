@@ -1,5 +1,6 @@
-// A blocking MAWS ask opens its sheet from the main request card. The sidebar hover card instead answers in place,
-// through the sheet's controls and shared drafts; neither path uses the native tool's `session.answer`.
+// A blocking MAWS ask opens its sheet from the main request card. The sidebar hover card and the project channel's
+// waiting cards (P5 O8 M7a) instead answer in place, through the sheet's controls and shared drafts; neither path uses
+// the native tool's `session.answer`.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import { registeredActions, type AskRowData } from '../../transcript';
@@ -15,8 +16,8 @@ const rowDataOf = (request: AskOpenedEvent): AskRowData => ({
   questions: request.questions, state: 'pending', answers: null, error: null, cancelReason: null,
 });
 
-export function AskBody({ appSessionId, request, hover = false }: { appSessionId: AppSessionId; request: AskOpenedEvent; hover?: boolean }) {
-  if (hover) return <HoverAsk appSessionId={appSessionId} askId={request.askId} />;
+export function AskBody({ appSessionId, request, inPlace = false }: { appSessionId: AppSessionId; request: AskOpenedEvent; inPlace?: boolean }) {
+  if (inPlace) return <HoverAsk appSessionId={appSessionId} askId={request.askId} />;
   return (
     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2 text-ui-sm text-fg-muted">
       <span>{ASK_CARD.count(request.questions.length)}</span>

@@ -1,0 +1,260 @@
+// The Channel tab (P5 O8 M7a, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M7a's Proves, "The renderer":
+// the tab opens once per project; Channel shows only with a smnsId; the composer is withdrawn offline; the inline native
+// ask answers), with the tab's hold paired with its mount, main's deltas over the open answer, words sent and refused,
+// and "Not sent" for a word main let go.
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { formatDayTime } from '@shared/app/date-format';
+import type { PreloadBridge } from '@shared/ipc/schema';
+import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelSession, OrgMember } from '@shared/ipc/schema/org';
+import { tabId } from '@shared/ipc/schema/layout';
+import type { OrgKey } from '@shared/machine/org-key';
+import { project, record } from '../../../../test/support/builders';
+import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { registerSlot, resetSlots } from '../app/slots';
+import { RequestCard } from '../request-card';
+import { askItemFor, askOpened } from '../request-card/test-requests';
+import { Sidebar } from '../sidebar/Sidebar';
+import { useAttention } from '../stores/attention';
+import { useHubAccess } from '../stores/hub-access';
+import { useLayout } from '../stores/layout';
+import { allTabs } from '../stores/layout-model';
+import { fillStores, resetShellStores } from '../test-support/shell-stores';
+import { resetAskSheets } from '../tools/maws/ask/store';
+import { ChannelView } from './ChannelView';
+import { useChannelTitle } from './title';
+import { forgetSentWords } from './use-channel';
+
+const SMNS = '1f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
+const KEY = `smns:${SMNS}` as OrgKey;
+const S1 = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+const S2 = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb';
+const ME: OrgMember = { id: 'owner0000000000000000000000000000', email: 'sam@example.com', name: 'Sam' };
+const ANA: OrgMember = { id: 'ana00000000000000000000000000000', email: 'ana@example.com', name: 'Ana' };
+const T = (minute: number) => new Date(Date.UTC(2026, 10, 6, 12, minute)).toISOString();
+const SESSIONS: ChannelSession[] = [
+  { session: S1, alias: 'maws-45', machine: 'mini', title: 'Fix the relay', member: true },
+  { session: S2, alias: 'ci-opt', machine: 'mini', title: null, member: true },
+];
+const say = (offset: number, from: string, to: string, minute: number, extra: Partial<ChannelEvent> = {}): ChannelEvent => ({
+  offset, writer: `mini/${from}`, seq: offset, label: 'verified', owners: [ME],
+  event: { kind: 'say', writer: `mini/${from}`, seq: offset, from: 'x', to: [{ session: to, alias: 'y' }], text: `say ${offset}`, ts: T(minute) }, ...extra,
+});
+const human = (offset: number, member: OrgMember, text: string, extra: Record<string, unknown> = {}): ChannelEvent => ({
+  offset, writer: `hub/${member.id}`, seq: offset, label: 'verified', author: member,
+  event: { kind: 'human', writer: `hub/${member.id}`, seq: offset, from: 'human', member: member.id, to: '*', text, ts: T(offset), ...extra },
+});
+const opened = (over: Partial<Extract<ChannelAnswer, { ok: true }>> = {}): ChannelAnswer => ({ ok: true, events: [], sessions: SESSIONS, pending: [], unverified: 0, asOf: T(30), live: true, ...over });
+const change = (over: Partial<Extract<ChannelChanged, { ok: true }>> = {}): ChannelChanged => ({ project: SMNS, ok: true, upserts: [], removed: [], sessions: SESSIONS, pending: [], unverified: 0, asOf: T(30), live: true, ...over });
+
+let fake: FakeClient;
+const install = (given: Parameters<typeof fakeClient>[0] = {}) => {
+  fake = fakeClient({ 'org.channel.close': undefined, ...given });
+  window.maws = fake.client as unknown as PreloadBridge;
+};
+const stream = () => document.querySelector<HTMLElement>(`[data-channel="${SMNS}"]`)!;
+const entries = () => [...stream().querySelectorAll<HTMLElement>('[data-channel-entry]')].map((e) => `${e.dataset.channelEntry}:${e.dataset.offset ?? '-'}`);
+const tell = (payload: ChannelChanged) => act(() => fake.event('org.channel.changed', payload));
+
+beforeEach(() => {
+  resetShellStores();
+  forgetSentWords();
+  useHubAccess.setState({ access: 'connected', member: ME.id });
+});
+afterEach(() => {
+  cleanup();
+  delete (window as { maws?: PreloadBridge }).maws;
+});
+
+describe('the tab’s hold', () => {
+  it('opens the project’s channel at mount and closes it at unmount, once each', async () => {
+    install();
+    const view = render(<ChannelView project={SMNS} />);
+    await act(() => fake.reply('org.channel.open', opened()));
+    expect(fake.invoked('org.channel.open')).toEqual([{ project: SMNS }]);
+    expect(fake.invoked('org.channel.close')).toEqual([]);
+    view.unmount();
+    expect(fake.invoked('org.channel.close')).toEqual([{ project: SMNS }]);
+  });
+
+  it('draws the open answer, then each delta over it; a change heard before the answer applies on top of it', async () => {
+    install();
+    render(<ChannelView project={SMNS} />);
+    tell(change({ upserts: [human(9, ANA, 'early')] })); // before the answer: held for it
+    tell({ ...change({ upserts: [human(50, ANA, 'another project')] }), project: 'other' });
+    await act(() => fake.reply('org.channel.open', opened({ events: [say(1, S1, S2, 0), say(2, S2, S1, 1), human(3, ANA, 'hi all')] })));
+    expect(entries()).toEqual(['exchange:1', 'words:3', 'words:9']);
+    tell(change({ upserts: [human(4, ME, 'mine')], removed: [3], unverified: 2 }));
+    expect(entries()).toEqual(['exchange:1', 'words:4', 'words:9']);
+    expect(screen.getByText('2 events didn’t verify')).toBeTruthy();
+    expect(within(stream()).getByText('You')).toBeTruthy();
+    tell(change({ upserts: [say(7, S1, S2, 3, { label: 'migrated', by: 'mini' })], reset: true }));
+    expect(entries()).toEqual(['say:7']);
+    expect(screen.getByText('attested at migration by mini')).toBeTruthy();
+  });
+
+  it('a folded exchange opens its messages in place on a click', async () => {
+    install();
+    render(<ChannelView project={SMNS} />);
+    await act(() => fake.reply('org.channel.open', opened({ events: [say(1, S1, S2, 0), say(2, S2, S1, 1), say(3, S1, S2, 2)] })));
+    const fold = screen.getByRole('button', { name: /3 messages between/ });
+    expect(fold.textContent).toContain('maws-45');
+    expect(fold.textContent).toContain('ci-opt');
+    expect(screen.queryByText('say 2')).toBeNull();
+    fireEvent.click(fold);
+    expect(fold.getAttribute('aria-expanded')).toBe('true');
+    expect(within(stream().querySelector<HTMLElement>('[data-channel-exchange-messages]')!).getAllByRole('listitem')).toHaveLength(3);
+  });
+
+  it('says why there is nothing to draw', async () => {
+    install();
+    render(<ChannelView project={SMNS} />);
+    await act(() => fake.reply('org.channel.open', { ok: false, reason: 'unknown-project' }));
+    expect(stream().querySelector('[data-channel-closed="unknown-project"]')).toBeTruthy();
+  });
+});
+
+describe('offline', () => {
+  it('withdraws the composer and draws what main holds as of its last catch-up', async () => {
+    install();
+    render(<ChannelView project={SMNS} />);
+    await act(() => fake.reply('org.channel.open', opened({ events: [human(1, ANA, 'cached')], live: false })));
+    act(() => useHubAccess.setState({ access: 'unreachable' }));
+    expect(screen.queryByRole('textbox', { name: 'Message the project' })).toBeNull();
+    expect(stream().querySelector(`[data-channel-as-of="${T(30)}"]`)?.textContent).toBe(`As of ${formatDayTime(Date.parse(T(30)))}`);
+    expect(within(stream().querySelector<HTMLElement>('[data-channel-offline]')!).getByText('Hub unreachable')).toBeTruthy();
+    tell(change({ live: true }));
+    expect(screen.getByRole('textbox', { name: 'Message the project' })).toBeTruthy();
+  });
+
+  it('an ended hub sign-in offers Sign in to the hub again, the Org page’s own action', async () => {
+    install({ 'org.signIn': { ok: false, reason: { code: 'access' } } });
+    useHubAccess.setState({ access: 'expired' });
+    render(<ChannelView project={SMNS} />);
+    await act(() => fake.reply('org.channel.open', opened({ live: false })));
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in to the hub again' }));
+    expect(fake.invoked('org.signIn')).toEqual([undefined]);
+    expect((await screen.findByRole('alert')).textContent).toBe('Couldn’t sign in · access');
+  });
+});
+
+describe('people’s words', () => {
+  const composer = () => screen.getByRole('textbox', { name: 'Message the project' }) as HTMLTextAreaElement;
+  const mount = async (answer = opened()) => {
+    render(<ChannelView project={SMNS} />);
+    await act(() => fake.reply('org.channel.open', answer));
+  };
+
+  it('sends on Enter and clears; a refusal of main’s shows under the field and keeps the text', async () => {
+    install({ 'org.channel.send': ({ text }: { text: string }) => (text.startsWith('@nobody') ? { ok: false, reason: 'no-member', detail: '@nobody' } : { ok: true, nonce: 'n1' }) });
+    await mount();
+    await userEvent.type(composer(), '@nobody hello{Enter}');
+    expect((await screen.findByRole('alert')).textContent).toBe('No session here answers to @nobody');
+    expect(composer().value).toBe('@nobody hello');
+    await userEvent.clear(composer());
+    await userEvent.type(composer(), 'line one{Shift>}{Enter}{/Shift}line two{Enter}');
+    await waitFor(() => expect(fake.invoked('org.channel.send').at(-1)).toEqual({ project: SMNS, text: 'line one\nline two' }));
+    await waitFor(() => expect(composer().value).toBe(''));
+  });
+
+  it('a word reads sending until main lets it go, its refusal under it, and the logged copy replaces it', async () => {
+    install({ 'org.channel.send': { ok: true, nonce: 'n1' } });
+    await mount();
+    await userEvent.type(composer(), 'status?{Enter}');
+    tell(change({ pending: [{ nonce: 'n1', text: 'status?', to: '*', state: 'sending' }, { nonce: 'n0', text: 'hidden', to: [{ session: S2, alias: 'ci-opt' }], state: { refused: 'not-reachable' } }] }));
+    const words = () => [...stream().querySelectorAll<HTMLElement>('[data-channel-entry="words"]')].map((e) => [e.textContent?.includes('status?') ? 'status?' : 'hidden', e.dataset.wordState]);
+    expect(words()).toEqual([['status?', 'sending'], ['hidden', 'refused']]);
+    expect(screen.getByText('Not reachable')).toBeTruthy();
+    tell(change({ pending: [{ nonce: 'n0', text: 'hidden', to: [{ session: S2, alias: 'ci-opt' }], state: { refused: 'not-reachable' } }] })); // acknowledged
+    expect(words()).toEqual([['hidden', 'refused'], ['status?', 'sent']]);
+    tell(change({ upserts: [human(5, ME, 'status?', { nonce: 'n1' })], pending: [] }));
+    expect(entries()).toEqual(['words:5']);
+  });
+
+  it('a word main let go with its channel, never acknowledged nor logged, reads Not sent when the tab opens again', async () => {
+    install({ 'org.channel.send': { ok: true, nonce: 'n1' } });
+    await mount();
+    await userEvent.type(composer(), 'lost one{Enter}');
+    await waitFor(() => expect(fake.invoked('org.channel.send')).toHaveLength(1));
+    tell(change({ live: false })); // the hub went away before any answer
+    cleanup();
+    install();
+    await mount(opened());
+    const lost = stream().querySelector<HTMLElement>('[data-word-state="not-sent"]')!;
+    expect(lost.textContent).toContain('lost one');
+    expect(within(lost).getByText('Not sent')).toBeTruthy();
+    cleanup();
+    install();
+    await mount(opened()); // said once, for that tab's life
+    expect(stream().querySelector('[data-word-state]')).toBeNull();
+  });
+});
+
+describe('Waiting on you', () => {
+  const MAWS = project('maws', 0, { org: { key: KEY, name: 'MAWS', source: 'smns', smnsId: SMNS } });
+  const OTHER = project('other', 1);
+  const mine = record('s-mine', { projectId: MAWS.id, title: { text: 'Release notes', source: 'user' } });
+  const elsewhere = record('s-else', { projectId: OTHER.id });
+  const event = askOpened();
+
+  beforeEach(() => {
+    resetAskSheets();
+    registerSlot('requestCard', RequestCard);
+    fillStores({ projects: [MAWS, OTHER], sessions: [mine, elsewhere], digests: [], engine: [], attention: [], timeline: [] });
+    useAttention.getState().applyChanged({ appSessionId: at(mine.appId), items: [askItemFor(event, at(mine.appId))] }, TEST_MACHINE);
+    useAttention.getState().applyChanged({ appSessionId: at(elsewhere.appId), items: [askItemFor(askOpened({ requestId: 'req-else' as never }), at(elsewhere.appId))] }, TEST_MACHINE);
+  });
+  afterEach(() => {
+    resetSlots();
+    resetAskSheets();
+  });
+
+  it('holds the project’s own waiting cards, a MAWS ask answered in place through maws.ask.answer', async () => {
+    install({
+      'attention.request': { event },
+      'maws.asks.list': { asks: [{ askId: event.askId, toolUseId: event.toolUseId, requestId: event.requestId, title: event.title, context: event.context, blocking: event.blocking, questions: event.questions, openedAt: event.at }] },
+    });
+    render(<ChannelView project={SMNS} />);
+    await act(() => fake.reply('org.channel.open', opened()));
+    const waiting = stream().querySelector<HTMLElement>('[data-channel-waiting]')!;
+    expect(waiting.querySelectorAll('[data-channel-card]')).toHaveLength(1);
+    expect(within(waiting).getByText('Release notes')).toBeTruthy();
+    await userEvent.click(await within(waiting).findByRole('radio', { name: 'Blue' }));
+    await userEvent.type(within(waiting).getByRole('textbox', { name: 'What title?' }), 'v2');
+    await userEvent.click(within(waiting).getByRole('button', { name: 'Submit' }));
+    await waitFor(() => expect(fake.invoked('maws.ask.answer')).toEqual([{
+      appSessionId: mine.appId, askId: event.askId, answers: [
+        { id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] },
+        { id: 'q2', question: 'What title?', status: 'answered', value: 'v2' },
+      ],
+    }]));
+    expect(fake.invoked('session.answer')).toEqual([]);
+  });
+});
+
+describe('Channel in the project’s menu', () => {
+  const MAWS = project('maws', 0, { org: { key: KEY, name: 'MAWS', source: 'smns', smnsId: SMNS } });
+  const LOOSE = project('loose', 1, { org: { key: 'folder:loose' as OrgKey, name: 'loose', source: 'folder', smnsId: null } });
+  const menuFor = async (name: string) => {
+    fireEvent.contextMenu(screen.getByRole('treeitem', { name }));
+    return screen.findByRole('menu');
+  };
+
+  it('shows only for a project whose sminos id is known, and opens one tab per project, titled for it', async () => {
+    install();
+    fillStores({ projects: [MAWS, LOOSE], sessions: [], digests: [], engine: [], attention: [], timeline: [] });
+    render(<Sidebar />);
+    expect(within(await menuFor('loose')).queryByRole('menuitem', { name: 'Channel' })).toBeNull();
+    await userEvent.keyboard('{Escape}');
+    for (let i = 0; i < 2; i += 1) {
+      fireEvent.click(within(await menuFor('MAWS')).getByRole('menuitem', { name: 'Channel' }));
+      await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    }
+    const channels = allTabs(useLayout.getState().main).filter((tab) => tab.kind === 'channel');
+    expect(channels).toEqual([{ id: tabId({ kind: 'channel', project: SMNS }), kind: 'channel', project: SMNS, pinned: false }]);
+    expect(renderHook(() => useChannelTitle(SMNS)).result.current).toBe('MAWS · channel');
+    expect(renderHook(() => useChannelTitle('not-known')).result.current).toBe('Channel');
+  });
+});

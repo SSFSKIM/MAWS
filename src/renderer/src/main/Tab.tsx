@@ -39,6 +39,7 @@ import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { BROWSER_COPY } from '../tools/browser/copy';
 import { useBrowserTitle } from '../tools/browser/store';
 // E4a end
+import { useChannelTitle } from '../channel/title'; // P5 O8 M7a
 
 export { TAB_DRAG_TYPE };
 
@@ -86,6 +87,7 @@ export function useTabLabel(tab: TabRef): TabLabel {
   const session = useSessionLabel(appSessionId, tab.kind === 'session' ? tab.title : undefined);
   const browserTitle = useBrowserTitle(tab.kind === 'browser' ? tab.appSessionId : null, tab.kind === 'browser' ? tab.browserTabId : null); // E4a
   const artifactTitle = useArtifactTitle(tab.kind === 'artifact' ? tab.artifactId : null); // P3-L
+  const channelTitle = useChannelTitle(tab.kind === 'channel' ? tab.project : null); // P5 O8 M7a
   switch (tab.kind) {
     case 'session':
       return session;
@@ -109,8 +111,8 @@ export function useTabLabel(tab: TabRef): TabLabel {
       return { title: artifactTitle ?? LIBRARY_COPY.fallbackTitle, secondary: null, glyph: null, fileType: null };
     case 'browser': // E4a
       return { title: browserTitle ?? BROWSER_COPY.title, secondary: null, glyph: null, fileType: null };
-    case 'channel': // P5 O8 M7a: the kind's seam; Task 2 titles it "<project> · channel"
-      return { title: 'Channel', secondary: null, glyph: null, fileType: null };
+    case 'channel': // P5 O8 M7a: "<project> · channel"
+      return { title: channelTitle, secondary: null, glyph: null, fileType: null };
   }
 }
 
