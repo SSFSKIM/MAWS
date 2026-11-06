@@ -36,7 +36,7 @@ Then `sminos share <session> <member> list` (run by the owner at a terminal): th
 - [ ] The execution section's buildability review.
 - [x] (2026-11-05 22:50Z) M1: the hub's policy registry, upload backstop and audience filter (MAWS). Branch `p5-o18-m1`, `49dd6b262..`; static and unit GREEN on `a091ce1cb` (run 42120533710); reviewer-high with a security lens converged on the third pass.
 - [x] M2: the endpoint: the `list` grade, `reach?`, audiences and the policy cache (MAWS). Branch `p5-o18-m2` from `9f49f8fbc`; built at `062e061a0` (2026-11-06 00:00Z); M1's same-batch reference fix at `bf194ee8c`; the review's fix wave at `c100ab45f`; high-rung re-review clean (2026-11-06).
-- [ ] M2b: devices: an unchanged browser refused toward a private session (MAWS). Branch `p5-o18-m2b` from `b30f810fb`. A first build sealed audiences from hub policy rows (`7c57f8cf0`, `50d47bb9f`), set aside by the architect's ruling (2026-11-06); what stands is the hub proof and desk-web's tombstone verdict.
+- [x] (2026-11-06 01:40Z) M2b: devices: an unchanged browser refused toward a private session (MAWS). static, unit and e2e:desk-web GREEN on the merged head `b656e8ddb` (run 42141731122); reviewer-high with a security lens: no findings. Branch `p5-o18-m2b` from `b30f810fb`. A first build sealed audiences from hub policy rows (`7c57f8cf0`, `50d47bb9f`), set aside by the architect's ruling (2026-11-06); what stands is the hub proof and desk-web's tombstone verdict.
 - [ ] M3: sminos's visibility frames, records and audience streams (doperpowers).
 - [ ] M4: sminos's send boundary, the setters, refusals and unlisting (doperpowers).
 - [ ] M6: live acceptance on the staging org.
@@ -1098,3 +1098,14 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   The re-review was clean.
 - Left for later: a phase-1 name-held binding lost on a machine's rename (Surprises, M2), and desk-web's exact
   `isListing` (M2b).
+- M2b (2026-11-06). Desk-web's DX6 client stays frozen (the architect's ruling).
+  - It seals no audience. M1's `takeHuman` refuses its words toward a private session, an `@all` naming one included,
+    and nothing about the attempt reaches an outsider but a content-free audit row. Toward listed sessions it works
+    as before.
+  - A hub test on M1's local hub proves it. Desk-web reads the hub's tombstone as `withheld`, closing M1's residue.
+    M2's `isListing` residue turned out to be the deployed desk-web alone, which the next hub deploy replaces.
+  - A browser that does message a private session was built first: the hub's per-member policy rows on the registry
+    socket, and a `say` that splits per audience. It was reverted unmerged when the ruling came in. The Decision Log
+    keeps it as the route for a later client, and why it beat an `endpoint.listings` call (O13's "Nothing but cards").
+  - The lesson: before changing a frozen client to reach a new capability, check whether the backstop already makes
+    its old behaviour a refusal. If it does, the frozen client's "can't" is a recorded behaviour, not a gap.
