@@ -38,7 +38,7 @@ import { BROWSER_TOOL_NAMES, browserCallOf, browserToolResultSchemaOf, type Brow
 import type { ContentBlock } from '@shared/graph/events';
 import { denialDisposition } from './classify';
 import { marksOfText } from './owner-marks'; // P2-C (2026-10-09)
-import { messageCallState, messageCallText } from '@shared/owner/message-call'; // P4-R7
+import { messageOfCall } from '@shared/owner/to-human-items'; // P4-R7; P5 O8 M7b: the one extraction, the channel's too
 import { isHistoryGap } from './gap'; // P5 O7 M2
 // E4c end
 
@@ -1194,14 +1194,14 @@ function deliveryRow(delivery: DeliveryRecord, turnId: TurnId, context: TurnCont
 }
 // E1 end
 
-// P4-R7: a message tool's call as the message it sends (`@shared/owner/message-call`): drawn while its result is still
-// due in an open turn, and once its result says it was sent; null for a call that sent nothing (no text in its input,
-// a refused or failed result, a turn that closed before the result), which the engine's cell shows instead.
+// P4-R7: a message tool's call as the message it sends (`@shared/owner/to-human-items`' `messageOfCall`, which the
+// project channel's journal reads too): drawn while its result is still due in an open turn, and once its result says it
+// was sent; null for a call that sent nothing (no text in its input, a refused or failed result, a turn that closed
+// before the result), which the engine's cell shows instead.
 function toHumanRow(rec: ToolRecord, turnId: TurnId, context: TurnContext): RowOf<'to_human'> | null {
-  const text = messageCallText(rec.use.input);
-  const state = messageCallState(rec.result);
-  if (text === null || state === 'refused' || (state === 'pending' && context.closed)) return null;
-  return { id: rowId.toHuman(rec.use.toolUseId), turnId, at: rec.use.at, kind: 'to_human', toolUseId: rec.use.toolUseId, text, pending: state === 'pending' };
+  const message = messageOfCall(rec.use, rec.result);
+  if (message === null || message.state === 'refused' || (message.state === 'pending' && context.closed)) return null;
+  return { id: rowId.toHuman(rec.use.toolUseId), turnId, at: rec.use.at, kind: 'to_human', toolUseId: rec.use.toolUseId, text: message.text, pending: message.state === 'pending' };
 }
 
 // E7 start: a Workflow call's launch result names its task and run (`{ status: 'async_launched', taskId, runId, … }`,
