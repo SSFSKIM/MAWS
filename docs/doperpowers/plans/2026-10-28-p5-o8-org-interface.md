@@ -3051,6 +3051,18 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   A third pass, on a8d1fdb0a, closed all three and found nothing new. The review has converged: rounds of 13, 3, then 0 findings, every one adopted.
   Date/Author: 2026-11-06, O8's executor.
 
+- Decision: M7a is built as three tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-medium on the branch.
+  1. Main and the shared schema: `src/main/org/channel/` (the socket client, verification, the cache with its migration checkpoints, words, the per-project channel), the session's commands and `close()`'s join, the `org.channel.*` schema, and the `channel` tab kind.
+  2. The renderer: the tab, the projection and folding, the stream, the composer, the waiting cards with the native ask inline, Channel in the project menu.
+  3. `test/org/channel.local.test.ts`, and the e2e case over a harness-only seeded channel, with screenshots.
+
+  The pre-flight settles one point §N leaves two ways. `org.channel.open` and `org.channel.changed` carry main's verified events, not §N's folded entries:
+  - `ChannelEvent {offset, writer, seq, event, label: 'verified' | 'migrated' | 'legacy', by?, author?, owners?}`, plus the pending words (`{nonce, text, to, state: 'sending' | {refused}}`), `unverified`, `asOf` and `live`;
+  - the renderer's pure `channel/project.ts` folds them into §N's `ChannelEntry`, which becomes a renderer type.
+
+  Main holds what only main can judge (signatures, attestations, the held head's names), and the renderer the presentation, which its tests pin without main.
+  Date/Author: 2026-11-06, O8's executor (pre-flight).
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
