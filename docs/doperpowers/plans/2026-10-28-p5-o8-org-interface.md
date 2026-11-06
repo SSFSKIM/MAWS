@@ -1272,7 +1272,7 @@ Rejected:
 
 **Touches.**
 - `src/services/index/`:
-  - `migrations.ts`, a new entry: `reader_state (app_session_id, member, pinned, last_seen_uuid, last_seen_at, unread, PRIMARY KEY (app_session_id, member))` and `member_drafts (app_session_id, member, doc, attachments, updated_at, PRIMARY KEY (app_session_id, member))`, both `ON DELETE CASCADE`;
+  - `migrations.ts`, two `ADDED_TABLES` entries (not a migration: a newer `user_version` costs a downgraded build its whole index; M7b's ruling, 2026-11-06): `reader_state (app_session_id, member, pinned, last_seen_uuid, last_seen_at, unread, PRIMARY KEY (app_session_id, member))` and `member_drafts (app_session_id, member, doc, attachments, updated_at, PRIMARY KEY (app_session_id, member))`, both `ON DELETE CASCADE`;
   - `sessions.ts` and `drafts.ts`, the reader argument;
   - `register.ts`: `applyPatch` and the draft commands read `context.reader`;
   - their tests.
@@ -1575,7 +1575,7 @@ The door adds no authority. An act through it is authenticated by its step-up si
 
 **Touches.**
 - **`src/services/channel/` (new, the spine):**
-  - `journal.ts`: an index table `channel_entries (id, project, app_session_id, engine_session_id, lane, kind, text, choices, at, src, UNIQUE(src))`, in a new migration entry, pruned at the bounds above;
+  - `journal.ts`: an index table `channel_entries (id, project, app_session_id, engine_session_id, lane, kind, text, choices, at, src, UNIQUE(src))`, an `ADDED_TABLES` entry in `src/services/index/migrations.ts` (created `IF NOT EXISTS` after the migrations at any version, never dropped or renamed, so a downgraded build keeps its index; revised 2026-11-06), pruned at the bounds above;
   - `register.ts`: `channel.history {project, before?, limit ≤ 200}` (newest first, paged) and the event `channel.changed {project, entry}`;
   - **lane B's source:** the owner channel's event batches (`src/services/owner/register.ts`'s `onEvent`), taking each accepted message-tool call as a `message` (`src/shared/owner/message-call.ts`'s `isMessageTool`, both `mcp__to-human__message` and a recorded session's `mcp__maws__message`, counted once `messageCallState` reads `sent`), each `<message>` span (the parser's `to-human` kind) as one `message`, and each answered ask with its question and answer as `question` and `answered`;
   - **lane A's source:** the endpoint's sub-less RL10 `host` messages (`rl10/link.ts:616`'s dispatch to `#host` at :632), handed in through a new `EndpointServices.channel.record(entry)` seam, beside `notifier.hostMessage` and not behind the `hosts.json` mark, which moves only once a `wrote` reaches the hub. `src` is `<project>/<writer>/<seq>` of the host event. Each message carries its project and its `src`, and `UNIQUE(src)` dedupes sminos's resend of the last 50;
@@ -2125,7 +2125,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 - **M3 (executable):** §K: `createStateSigner`, the next keys, `checks.ts`, the signer and its pending slot, the weekly asking, deliveries, `postState`, `OrgStatus`'s `signer` and `problem: 'signing'`, `org.resign`, `org.revokeSuperseded`, `org.rekey`, `org.discardPending`, `org.resetSigning`, `signing.json` (failing closed) and `registration.json`'s `signing` and `rekey`; `deployment admin root add`. No `WIRE_MINOR`, settings version, `IpcError` code or e2e group.
 - **M5 (executable):** §L: `memberName`, `OrgMember`, `OrgRows.members`, the `sidebar.people` layout key, `ownersLabel`. No layout version, `WIRE_MINOR` or settings version.
 - **M4a (executable):** §M: `successorProblems` and `stateProblems` in `org-protocol`, the pairing judges moved there, `OrgView`, `OrgChange`, `org.view`, `org.preview`, `org.change`, `org.pair.start`, `org.pair.approve`, `org.pair.cancel`, `OrgStatus`'s `pairing`, `OrgRefusal.attempt`, `Edit.endorse` and `StateSigner.sign`'s `endorse`. No `WIRE_MINOR`, settings version or e2e group.
-- **The rest (executable, 2026-11-06):** §N (M7a), §O (M7b), §P (M6a), §Q (M6b, with M5b's `record.owners`), §R (M4b) and §S (M4c). No `WIRE_MINOR` moves: the new endpoint offers and feeds are additive rows (OX1), and the index takes a new migration entry. M7a adds the `channel` tab kind with no layout version.
+- **The rest (executable, 2026-11-06):** §N (M7a), §O (M7b), §P (M6a), §Q (M6b, with M5b's `record.owners`), §R (M4b) and §S (M4c). No `WIRE_MINOR` moves: the new endpoint offers and feeds are additive rows (OX1), and the index takes new tables as `ADDED_TABLES` entries, not migrations (revised 2026-11-06). M7b's spine commands do move `WIRE_MINOR` (to 29): they are machine-owned wire entries, not endpoint offer rows. M7a adds the `channel` tab kind with no layout version.
 
 **§K. The signer** (M3).
 
@@ -2315,7 +2315,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 
 **§P. Reader state per member** (M6a).
 
-    // src/services/index/migrations.ts (a new entry)
+    // src/services/index/migrations.ts (two ADDED_TABLES entries, revised 2026-11-06)
     reader_state  (app_session_id, member, pinned, last_seen_uuid, last_seen_at, unread, PRIMARY KEY (app_session_id, member))
     member_drafts (app_session_id, member, doc, attachments, updated_at, PRIMARY KEY (app_session_id, member))
     // the router's command context gains reader?: 'owner' | MemberId   (absent: 'owner')
@@ -3155,6 +3155,19 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   3. Main and the renderer: `src/main/org/channel/machines.ts`, its cache, and the merge into `org.channel.*`; `ToHumanEntry.tsx` and `project.ts`'s placement; `machines.test.ts`.
   4. `test/org/channel.local.test.ts` cases 5 and 6, and the e2e seed's to-human entries, photographed.
   Date/Author: 2026-11-06, O8's executor.
+
+- Decision: the architect's rulings on M7b Task 1's report (2026-11-06).
+  1. New index tables are `ADDED_TABLES` entries beside `ADDED_COLUMNS`, not migrations. This is the rule `migrations.ts` already states for columns (P5 O7 M4): a newer `user_version` costs a downgraded build its whole index, and every swap keeps the previous build as its rollback.
+     - A table qualifies only if no earlier build reads it.
+     - It is created `IF NOT EXISTS`, indexes included, after the migrations at any version. It is never dropped or renamed; anything else stays a migration.
+     - A downgrade leaves a gap (the old build writes no journal rows), which is accepted. `UNIQUE(src)` absorbs the resends after a re-upgrade.
+     - The cross-build downgrade scene must pass whole, so the provisional skips are reverted.
+     - The same rule applies to M6a's two tables.
+  2. Questions asked through `mcp__maws__ask` are in, since that is the contract's question form today. They are sourced from the ask's own record (the question, its choices, its answer), with `src` keyed by the ask's id, not parsed from the transcript. The same record answers the ask and feeds the journal, which keeps the one-source condition. Need-input marks stay as the older form.
+  3. No entry may be dropped on the normal start path. Entries that arrive before the project's org id is derived are held in a bounded buffer and written once the id is known; an overflow is logged.
+  4. A message's text is bounded, with a visible cut marker, at a size the hub's event limit can carry after the envelope (the number cites the hub's limit).
+  5. `WIRE_MINOR` 29 stands as a wire entry. Whoever lands second takes the next number at the merge.
+  Date/Author: 2026-11-06, the architect, recorded by O8's executor.
 
 ## Outcomes & Retrospective
 
