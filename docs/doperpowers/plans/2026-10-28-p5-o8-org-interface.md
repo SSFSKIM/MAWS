@@ -143,6 +143,7 @@ Items 1, 2, 3, 4a and 5's display half have landed. The rest became executable o
 - **Commits.** End every commit message with `Sminos-Session: GUI AI agent workspace charter#37052769 (MAWS on macbook)` as a second `-m`, or the line the executor's own session is given. Add no other trailer. Never rebase. Merge origin/master in when a branch needs it.
 - **Review.** Each milestone lands by its own PR with doperpowers:reviewer-high before it goes to the architect: M1 is the device side of the org's trust (it pins the chain, registers a device and holds a bearer credential), and M2 decides what the app believes about other machines' sessions. Later milestones are reviewed at the rung their re-plan names.
 - **Amended 2026-11-06** (Decision Log, "the constraints for the rest"): M4b, M4c, M6a, M6b and M7b change `src/endpoint/`, `src/services/` and `src/mawsd/endpoint-seam.ts`, and M4b and M4c move code into `apps/org-protocol/src/`. The desk track reviews every `src/endpoint` and `apps/org-protocol` hunk, in commits of their own. `apps/desk-hub/src/` stays as landed: the renew route M4c consumes is the desk track's PR. No milestone changes the RL4 `Action` shape (`apps/org-protocol/src/action.ts`: its keys, encodings or bounds) without telling the architect first. sminos's `record_proof` refuses `bad-shape` on any act that isn't exactly what `isAction` accepts, so a shape change must ship with a sminos release, or every `record.*` fails closed (the desk track, 2026-11-06). The bullets above stand as written for M1 to M5. For the rest, on this MacBook: eslint runs on one file at a time and never over more than one, and typechecks, broad lint and full suites go to the gate. The gates are the worktree's own `scripts/ci-gate.sh W --gates <list> --runner macos --label <label>` (Concrete Steps, "The rest"), not the class 1a lines above.
+- **Amended 2026-11-06** (Decision Log, "M7b's channel feed"): `apps/org-protocol` is touched by M4b, M4c and M7b's channel feed. M7b's change is `'channel'` in `MachineFeed` and `RL2_PROTOCOL.minor` 10 → 11, in a commit of its own for the desk track's review, and it needs no hub change.
 
 ### Orientation
 
@@ -3191,6 +3192,18 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - Every part of a lane B `src`, anchor and hold key is passed through `encodeURIComponent`, so an id containing a separator can't collide with another identity.
      - An answer that arrives before its question waits for it: at most 256, the oldest dropped silently (answers to questions from before the journal began land here by design). It is recorded right after its question, under either listener order and either placement. The architect accepted this.
   Date/Author: 2026-11-06, O8's executor (controller), from Task 1's report.
+
+- Decision: M7b's channel feed (the architect, 2026-11-06, on Task 2's report).
+  1. **An org-protocol commit of its own.** M7b carries one, for the desk track's review: `'channel'` in `apps/org-protocol/src/messages.ts`'s `MachineFeed`, `RL2_PROTOCOL.minor` 10 → 11, an `rl2.channel` capability in `src/endpoint/capabilities.ts`, and a `messages.test.ts` case. Polling `channel.history` was rejected: the spec's feed is live, and every earlier feed came this way.
+  2. **The sub names a project:** `{t:'sub', feed:'channel', project, cursor, credit}`. The snapshot is that project's newest viewable page, and `changed` carries only that project's entries. Main opens one feed per machine and project, only while a tab holds that channel.
+     - The endpoint checks the reader's view of the project when the sub opens, and again at each change as `view` is graded today.
+     - A reader whose access is revoked mid-feed has the feed ended, as the other feeds end on revocation.
+     - Reach is per project, so the check sits in one place, and other projects' entries never go on the wire.
+  3. **Older peers.** A device never asks an endpoint that lacks `rl2.channel` for the feed: main checks the capability first. Against an older endpoint the tab falls back to `channel.history` on open, with no live updates, or to greyed words if even that is missing. Tested in that direction, and `e2e:cross-build` stays green.
+  4. **No deployed component parses the feed name.** The production hub (hub@8813921b) must need no change, since a hub deploy is the owner's. The commit cites the code showing that the hub and its carriers relay RL2 frames without validating `feed`. If the hub parses it, the work stops and the architect is told.
+  5. **The minors.** Branch `remote-lane-a-agents` will also want RL2 minor 11. Whichever lands later takes the next minor at the merge, by a new commit, never a rebase. The same holds for `WIRE_MINOR` (29 here). The PR body names the numbers taken.
+  6. **The spine's page bound.** The spine's `channel.history` page is capped at 1 MiB of JSON, as the endpoint's is, with `more` exact.
+  Date/Author: 2026-11-06, the architect, recorded by O8's executor.
 
 ## Outcomes & Retrospective
 
