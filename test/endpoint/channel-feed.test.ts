@@ -156,7 +156,7 @@ describe('channel.history, view-filtered lane by lane', () => {
   });
 
   it('answers a member the entries of the sessions they view, a lane A one by sminos’s record and a lane B one by the spine’s, and the machine’s owner every one', async () => {
-    const f = await startEndpoint(org, started);
+    const f = await startEndpoint(org, started, { projects: PROJECTS });
     const channel = journal(f);
     const s = await sminos(f, laneAMembers());
     shared(f, 'app-1', 'view');
@@ -185,7 +185,7 @@ describe('channel.history, view-filtered lane by lane', () => {
   });
 
   it('fills a page with the entries the member views, past a full page of others’, and pages on from its last', async () => {
-    const f = await startEndpoint(org, started);
+    const f = await startEndpoint(org, started, { projects: PROJECTS });
     const channel = journal(f);
     shared(f, 'app-1', 'view');
     shared(f, 'app-2', null);
@@ -200,6 +200,52 @@ describe('channel.history, view-filtered lane by lane', () => {
     expect(texts(first)).toEqual(['mine 3', 'mine 2']);
     const last = (first.output as { entries: HostEntry[] }).entries[1].id;
     const second = await call(b, 'channel.history', { project: PROJECT, limit: 2, before: last });
+    expect(second).toMatchObject({ ok: true, output: { more: false } });
+    expect(texts(second)).toEqual(['mine 1']);
+  });
+  it('answers nothing for a project the org has none of, or one that left its head', async () => {
+    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const channel = journal(f);
+    shared(f, 'app-1', 'view');
+    channel.record(laneB('app-1', 1, 'B shared'));
+    channel.record({ ...laneB('app-1', 2, 'B unknown'), project: 'proj-unknown', src: 'proj-unknown/lane-b/app-1/call/t2' });
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await call(b, 'channel.history', { project: 'proj-unknown' })).toMatchObject({ ok: true, output: { entries: [], more: false } });
+    expect(texts(await call(b, 'channel.history', { project: PROJECT }))).toEqual(['B shared']);
+    const next = await successor(f.chain[f.chain.length - 1], [org.a1], (st) => void (st.projects = st.projects.filter((p) => p.id !== PROJECT)));
+    const out = await f.endpoint.cli('revoke', ['-'], JSON.stringify(next));
+    expect(out.code, out.out).toBe(0);
+    f.chain.push(next);
+    expect(await call(b, 'channel.history', { project: PROJECT })).toMatchObject({ ok: true, output: { entries: [], more: false } });
+  });
+
+  it('names each entry by an opaque cursor, the feed’s as history’s, and pages nothing from one it didn’t give the member, one placement read whatever it is', async () => {
+    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const channel = journal(f);
+    shared(f, 'app-1', 'view');
+    shared(f, 'app-2', null);
+    channel.record(laneB('app-2', 1, 'hidden'));
+    channel.record(laneB('app-1', 2, 'mine 1'));
+    channel.record(laneB('app-1', 3, 'mine 2'));
+    const [a, b] = [await openRemote(f, org.a1, org.A), await openRemote(f, org.b1, org.B)];
+
+    const first = await call(b, 'channel.history', { project: PROJECT, limit: 1 });
+    expect(first).toMatchObject({ ok: true, output: { more: true } });
+    const [mine] = (first.output as { entries: HostEntry[] }).entries;
+    expect(mine.text).toBe('mine 2');
+    expect(mine.id).not.toMatch(/^[0-9]+$/);
+    await channelFeed(b, 'ch', PROJECT);
+    expect(((await snapshot(b, 'ch')).body.entries as HostEntry[]).map((e) => [e.text, e.id])[0]).toEqual(['mine 2', mine.id]);
+
+    const hidden = (await call(a, 'channel.history', { project: PROJECT })).output as { entries: HostEntry[] };
+    const theirs = hidden.entries.find((e) => e.text === 'hidden')!.id;
+    const placements = () => f.host.calls.filter((c) => c.name === 'session.get').length;
+    for (const before of [theirs, '1', '3', `${mine.id.slice(0, -2)}xx`]) {
+      const from = placements();
+      expect(await call(b, 'channel.history', { project: PROJECT, before }), before).toMatchObject({ ok: true, output: { entries: [], more: false } });
+      expect(placements() - from, before).toBe(1);
+    }
+    const second = await call(b, 'channel.history', { project: PROJECT, before: mine.id });
     expect(second).toMatchObject({ ok: true, output: { more: false } });
     expect(texts(second)).toEqual(['mine 1']);
   });
@@ -301,5 +347,44 @@ describe('the channel feed: a project’s entries, live', () => {
     await b.channel.send({ t: 'sub', sub: 'bare', feed: 'channel', cursor: null, credit: 1024 });
     await until(() => closed, 'the channel’s close');
     expect(closed).toBe('malformed');
+  });
+  it('takes back a queued lane B entry once its session’s record is removed, and the next entry takes its seq', async () => {
+    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const channel = journal(f);
+    const s = await sminos(f, laneAMembers());
+    shared(f, 'app-1', 'view');
+    const b = await openRemote(f, org.b1, org.B);
+    await channelFeed(b, 'ch', PROJECT, 1);
+    await snapshot(b, 'ch'); // the snapshot spends the credit: what follows is queued, not taken
+    channel.record(laneB('app-1', 1, 'queued B'));
+    await settle();
+    f.spine.records.delete('app-1');
+    f.host.emitMachine('session.removed', { appSessionId: 'app-1', revision: 2 });
+    await settle();
+    s.send(host('la-2', 2, { kind: 'message', to: 'host', text: 'next A' }));
+    await journaled(channel, 2);
+    await b.channel.send({ t: 'credit', sub: 'ch', bytes: 1024 * 1024 });
+    await until(() => changed(b, 'ch').length >= 1, 'the next change');
+    await settle();
+    expect(changed(b, 'ch')).toEqual(['next A']);
+    expect(evs(b, 'ch').map((e) => e.seq)).toEqual([1]);
+  });
+
+  it('ranks a new lane B entry by its session’s record as it stands, not a placement it read before the record moved', async () => {
+    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const channel = journal(f);
+    const s = await sminos(f, laneAMembers());
+    shared(f, 'app-1', 'view');
+    const b = await openRemote(f, org.b1, org.B);
+    await channelFeed(b, 'ch', PROJECT);
+    await snapshot(b, 'ch');
+    channel.record(laneB('app-1', 1, 'B first'));
+    await until(() => changed(b, 'ch').length >= 1, 'the first change');
+    f.spine.set('app-1', 'eng-private', { appId: 'app-1' }); // moved to a private engine; its `session.changed` not yet heard
+    channel.record(laneB('app-1', 2, 'after the move'));
+    s.send(host('la-2', 3, { kind: 'message', to: 'host', text: 'next A' }));
+    await until(() => changed(b, 'ch').length >= 2, 'the next change');
+    await settle();
+    expect(changed(b, 'ch')).toEqual(['B first', 'next A']);
   });
 });
