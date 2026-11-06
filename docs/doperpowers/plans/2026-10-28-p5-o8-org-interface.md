@@ -3205,6 +3205,20 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   6. **The spine's page bound.** The spine's `channel.history` page is capped at 1 MiB of JSON, as the endpoint's is, with `more` exact.
   Date/Author: 2026-11-06, the architect, recorded by O8's executor.
 
+- Decision: M7b Task 2, the endpoint (5a6b05638..28285e413), settles these points.
+  1. **No hub change.** After the handshake an RL2 sub travels inside a sealed frame (`apps/org-protocol/src/channel.ts:20`), and the deployed hub passes channel frames on unread (`apps/desk-hub/src/objects/relay.ts:27`, `:417-429`, `:451-462`). Nothing in `apps/desk-hub/src` imports the message parser.
+  2. **The protocol.** `MachineFeed` gains `'channel'`. The sub's `project` is required for `channel` and refused on any other feed. RL2 is 1.11, and the endpoint lists `rl2.channel` in its `h2`.
+  3. **The feed's frames.** Each open answers `subbed` (mode `snapshot`, epoch `channel:<boot>`, seq 0), then a snap of `{entries, more}`: the project's newest page that the member may view. Each later viewable entry comes as `ev {body: {entry}}`. The end reasons are `no-target` (the project isn't in the org), `class` (a web-cards device), `removed` (the project left the head), `behind` and `unavailable`.
+  4. **Reach.** The feed's reach is the project's presence in `head.projects`, so every org member reaches every org project, as the hub admits them. Each entry's session is still ranked at `view` before it is sent.
+     - A lane A entry is ranked only against sminos's lane A record.
+     - An entry whose session has no record is visible to no one, its machine's owners included.
+  5. **Paging.** `channel.history` keeps reading journal pages until the caller's page is full, so `more` is exact and paging never stalls on other members' entries. A page is at most 1 MiB of JSON, on the endpoint and in the spine. For a member who may view few sessions, a page costs up to eleven journal reads.
+  6. **The seam and lane A.**
+     - The seam's `channel` is `record` only: history and changes travel through the existing `dispatch` and `onEvent`.
+     - A lane A entry arriving while the spine is cold loads it with the endpoint's trigger. An entry that can't be kept is logged.
+     - Lane A's `src` is encoded per part. A host message with no session isn't journaled. A question's texts are joined by a blank line.
+  Date/Author: 2026-11-06, O8's executor (controller), from Task 2's report.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
