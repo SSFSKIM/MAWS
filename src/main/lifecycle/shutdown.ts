@@ -14,9 +14,10 @@
 // run at once, in the same will-quit, as before.
 // W-B review M6: `quitting()` reads true from the moment the steps begin, so what may open a window (the dock's
 // activate) does not, during the hold, over services already stopped.
-// The quit reaper (reaper.ts; tracker 2026-11-06): `reap` runs once, at Electron's `quit`, which comes only after the
-// steps here have settled on both paths: the held one ends in `app.exit(0)`, which emits it, and on the unheld one
-// Electron's own quit goes on to it. Never earlier, so it can cut no drain, no step and no engine handover.
+// The quit reaper (reaper.ts; tracker 2026-11-06): `reap` runs once, at Electron's `quit`. On both paths here it follows
+// the steps: the held one ends in `app.exit(0)`, which emits it, and on the unheld one Electron's own quit goes on to it.
+// A fatal start's `app.exit()` emits it too, with nothing to settle; the reaper has nothing to do unless that process
+// also outlives its wait.
 
 export interface ShutdownApp {
   on(event: 'will-quit', listener: (event: { preventDefault(): void }) => void): unknown;

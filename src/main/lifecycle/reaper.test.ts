@@ -72,6 +72,20 @@ describe('the quit reaper', () => {
     }
   });
 
+  it.skipIf(process.platform !== 'darwin')('spares a helper candidate whose parent is no longer the target', async () => {
+    const helperPath = '/tmp/maws-reaper-test.app/Contents/Frameworks/MAWS Helper.app/Contents/MacOS/MAWS Helper';
+    const helper = spawn('/bin/bash', ['-c', 'exec -a "$1" /bin/sleep 30', 'helper', helperPath], { stdio: 'ignore' });
+    children.push(helper);
+    // a stale pgrep result names a real helper, but one owned by this runner, not the target
+    const script = REAPER_SCRIPT.replace('/usr/bin/pgrep -P "$1"', 'printf \'%s\\n\' "$3"');
+    const parent = spawn('/bin/sh', ['-c', '/bin/sh -c "$1" maws-reaper $$ 0.3 "$2" & exec /bin/sleep 30', 'parent', script, String(helper.pid)], { stdio: 'ignore' });
+    children.push(parent);
+    expect(await ended(parent)).toEqual({ code: null, signal: 'SIGKILL' });
+    expect(helper.exitCode).toBeNull();
+    expect(helper.signalCode).toBeNull();
+    expect(() => process.kill(helper.pid!, 0)).not.toThrow();
+  });
+
   it('leaves a process that is not its parent alone: the target outlives the reaper', async () => {
     const target = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
     children.push(target);

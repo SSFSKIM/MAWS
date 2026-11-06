@@ -3,8 +3,8 @@
 // saturated (an agent's build) one of them can sit on a background-QoS worker the kernel never schedules: the windows are
 // gone, the process stays until the load drops, and a relaunch meanwhile hands off to a process with no windows.
 //
-// So at Electron's `quit` (after the shutdown list's steps have settled, on its held path and its unheld one) main
-// spawns a detached `/bin/sh` that sleeps REAP_AFTER_S and then SIGKILLs main, only if main is still the shell's parent:
+// So at Electron's `quit` main spawns a detached `/bin/sh` that sleeps REAP_AFTER_S and then SIGKILLs main, only if
+// main is still the shell's parent:
 // once main has exited the shell is reparented, so a pid the system has reused is never signalled. Main's own Chromium
 // helpers go with it, each a child of main whose executable is a `*Helper*` in the bundle's Frameworks: a helper main's
 // teardown had not yet ended is left orphaned by the kill and, starved the same way, lives on for minutes holding its
@@ -21,13 +21,20 @@ import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:c
 // past 60 s (42182048773). 5 s is about ten times the half-load p99 and four times its slowest.
 export const REAP_AFTER_S = 5;
 
-// The shell's script: `$1` the pid to end, `$2` the seconds to wait. `ps -o ppid=` pads with spaces; `ps -o comm=` is the
-// executable's path on macOS (an `argv0` such as mawsd's where one was given).
+// The shell's script: `$1` the pid to end, `$2` the seconds to wait. `read` strips `ps`'s ppid padding and keeps the path's
+// spaces in its last variable; `comm` is the executable's path on macOS (an `argv0` such as mawsd's where one was given).
+// Each helper's parent is checked with its path, and the shell's own parent again just before main is signalled.
 export const REAPER_SCRIPT = [
   'exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-',
   'sleep "$2"',
   '[ "$(/bin/ps -o ppid= -p $$ | tr -d \' \')" = "$1" ] || exit 1',
-  'for child in $(/usr/bin/pgrep -P "$1"); do case "$(/bin/ps -o comm= -p "$child")" in */Contents/Frameworks/*Helper*) kill -9 "$child" ;; esac; done',
+  'for child in $(/usr/bin/pgrep -P "$1"); do',
+  '  /bin/ps -o ppid=,comm= -p "$child" | while read -r parent executable; do',
+  '    [ "$parent" = "$1" ] || continue',
+  '    case "$executable" in */Contents/Frameworks/*Helper*) kill -9 "$child" ;; esac',
+  '  done',
+  'done',
+  '[ "$(/bin/ps -o ppid= -p $$ | tr -d \' \')" = "$1" ] || exit 1',
   'kill -9 "$1"',
 ].join('\n');
 
