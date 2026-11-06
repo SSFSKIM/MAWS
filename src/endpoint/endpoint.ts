@@ -65,6 +65,7 @@ import { AssetHolds } from './asset-holds';
 import { Leases } from './leases';
 import { ENDPOINT_CAPABILITIES } from './capabilities';
 import { Channels } from './channels';
+import { ChannelCursors } from './channel-cursors';
 import { orgProject } from './channel-view';
 import { DirectListener, type DirectListenerOptions } from './direct-listener';
 import { Actions } from './actions';
@@ -496,6 +497,11 @@ export class Endpoint implements EndpointModule {
       resumeMs: seams.resumeMs,
     });
     this.planeB = new PlaneB({ dispatch, log, backlogBytes: seams.backlogBytes });
+    // P5 O8 M7b fix wave: the channel's cursors, under a key in the endpoint's own state (channel-cursors.ts).
+    const channelCursors = new ChannelCursors(() => {
+      if (this.#state === null) throw new Error('the endpoint has not started');
+      return this.#state.subdirectory('channel');
+    });
     this.planeFeeds = new PlaneFeeds({
       dispatch,
       bounds: this.checkoutBounds,
@@ -504,6 +510,7 @@ export class Endpoint implements EndpointModule {
       leases: this.leases,
       browser: () => this.#services?.browser ?? null, // P5 O17 M9a: a session's `browser.inventory` feed
       reaches: (project) => orgProject(this.#org?.ready ? this.#org.head().state : null, project), // P5 O8 M7b: the `channel` feed's
+      cursors: channelCursors, // P5 O8 M7b fix wave: its entries' cursors, history's too
       log,
       backlogBytes: seams.backlogBytes,
     });
@@ -550,6 +557,8 @@ export class Endpoint implements EndpointModule {
       ...(options.acquireWithinMs === undefined ? {} : { acquireWithinMs: options.acquireWithinMs }),
       engineHostLists: (capability) => this.#services?.engineHostLists(capability) ?? false, // P5 O7 M8
       setup,
+      reaches: (project) => orgProject(this.#org?.ready ? this.#org.head().state : null, project), // P5 O8 M7b fix wave
+      cursors: channelCursors,
       log,
     });
     this.gate.setExecutors({

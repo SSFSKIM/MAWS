@@ -7,28 +7,39 @@
 // Every opening is `subbed {mode: 'snapshot', epoch: 'channel:<this endpoint's boot>', seq: 0}` with its `snap`, the
 // project's newest page the member views (`{entries, more}`, `channel.history {project}`'s first page as the member would be
 // answered it); then each new entry of the project the member views goes as `ev {body: {entry}}` at the next `seq`, in the
-// order the journal recorded them (`channel.changed`). Another project's entries never go on this feed. An entry the
-// snapshot holds is not sent again. Older entries are the device's to page with `channel.history`.
+// order the journal recorded them (`channel.changed`), `seq` without gaps. Another project's entries never go on this
+// feed. An entry the snapshot holds is not sent again. Every entry goes under its cursor (channel-cursors.ts), as
+// history's do. Older entries are the device's to page with `channel.history`.
 //
 // Output crosses no change of rights, as the `attention` feed's doesn't: one output is queued at a time (the snapshot, or
 // one entry) and the next is worked out only once it was taken; at every change of rights (a record change, a new head:
-// `accessChanged`) the queued output is checked again before anything more of it can leave. An entry that no longer
-// stands is taken back and dropped (the member no longer views its session); a snapshot is cut again, or, once a page of it
-// left, the feed ends `behind` and the device opens it again. A lane B entry waits while its session is placed. The member's
-// ranks are read again once they are no longer current.
+// `accessChanged`; a lane B session's record heard, or its removal) the queued output is checked again before anything more
+// of it can leave. An entry that no longer stands is taken back and dropped (the member no longer views its session), its
+// `seq` given to the next; a snapshot is read again (never cut again: its `more` is exact only for the read it came of),
+// or, once a page of it left, the feed ends `behind` and the device opens it again. The member's ranks are read again once
+// they are no longer current.
+//
+// A lane B entry is ranked by its session's record as read after the entry came, and every record of it heard since
+// (channel-view.ts' `PlacementBook`); one that waited behind another output is read again when its turn comes, so what
+// goes is ranked by the record as it stood then, not a placement read before the record moved. An entry the member
+// doesn't view is dropped once ranked, before it counts toward what the feed holds. What the feed holds is what it still
+// has to send: the snapshot's read until it is taken, the entries waiting, the reads ranking them, the ids of the
+// snapshot's page (an entry it holds that `channel.changed` brings again goes once).
 //
 // It ends with its channel, `removed` once the project is no longer the org's (the reader's reach is per project), `behind`
-// past plane B's backlog or past CHANGES_HELD entries waiting, and `unavailable` when the spine can't answer the snapshot's
-// read, a session's placement or the member's ranks: the device opens it again on its backoff.
+// past plane B's backlog or past CHANGES_HELD entries the member views waiting (or as many waiting to be ranked), and
+// `unavailable` when the spine can't answer the snapshot's read, a session's placement or the member's ranks, or the
+// snapshot could not be published after SNAPSHOT_READS reads: the device opens it again on its backoff.
 import { randomBytes } from 'node:crypto';
 import type { HostEntry } from '@shared/ipc/schema/channel';
 import { HISTORY_LIMIT_MAX } from '@shared/ipc/schema/channel';
 import { BACKLOG_BYTES } from '@shared/host/stream-catchup';
 import type { SessionRanks } from './authorize';
-import { cutPage, laneBSessions, readHistory, viewable, type ChannelPage } from './channel-view';
+import type { ChannelCursors } from './channel-cursors';
+import { PlacementBook, publish, readViewable, viewable } from './channel-view';
 import { dispatchAs, type EndpointServices } from './services';
 import type { Subscription } from './subscriptions';
-import { placeRecorded, recordedPlacement, type Placement } from './targets';
+import { recordedPlacement, type Placement } from './targets';
 
 export type ChannelFeedsContext = {
   dispatch: EndpointServices['dispatch'];
@@ -36,34 +47,45 @@ export type ChannelFeedsContext = {
   ranks(member: string): Promise<SessionRanks>;
   /** Whether `project` is one of the org's projects in the head now (channel-view.ts' `orgProject`). */
   reaches(project: string): boolean;
+  /** The cursor each entry goes under (channel-cursors.ts). */
+  cursors: Pick<ChannelCursors, 'seal'>;
   log(line: string): void;
   /** The most a feed's queued stream may hold before it ends `behind`. */
   backlogBytes?: number;
 };
 
-/** How many of the project's new entries a feed holds unsent before it ends `behind` (the device reads its snapshot again). */
+/** How many of the project's new entries the member views a feed holds unsent before it ends `behind`; as many unranked. */
 export const CHANGES_HELD = 1_000;
+/** How many reads in a row a snapshot may take without one it could queue before the feed ends `unavailable`. */
+export const SNAPSHOT_READS = 3;
 
-type Pending = { kind: 'snapshot'; entries: readonly HostEntry[] } | { kind: 'change'; entry: HostEntry };
+/**
+ * A new entry: its mark (`after`), what ranks it once its session's record read after it landed; whether the member viewed
+ * it then (`ranked`); and the mark it goes by (`deliverAfter`): the same, when it came with nothing ahead of it, else one
+ * taken when its turn came.
+ */
+type Change = { entry: HostEntry; after: number; ranked: boolean; deliverAfter: number | null };
+type Pending = { kind: 'snapshot'; kept: readonly HostEntry[]; after: number } | { kind: 'change'; change: Change; after: number };
 
 type Feed = {
   sub: Subscription;
   project: string;
   seq: number;
   subbed: boolean;
-  /** The snapshot's read: the journal's entries it read and whether older ones remain; null while it is out. */
-  read: { entries: HostEntry[]; more: boolean } | null;
+  book: PlacementBook;
+  /** The snapshot's read, out (`kept` null) or landed and not yet queued; null once queued, or before it is begun. */
+  snapshot: { after: number; kept: readonly HostEntry[] | null } | null;
   /** The snapshot was queued: what the project records goes as `ev`s after it. */
   snapshotted: boolean;
-  /** The ids the device was given or is queued, so an entry the snapshot holds goes once. */
+  /** Reads of the snapshot since one was last queued. */
+  reads: number;
+  /** The journal ids of the snapshot's page as queued: an entry it holds goes once. */
   known: Set<string>;
-  /** The project's new entries, in order, not yet worked out. */
-  queue: HostEntry[];
-  /** Each lane B session's placements, every one of which the member must view: the latest heard, or a read's and those heard meanwhile. */
-  placed: Map<string, readonly Placement[]>;
-  /** The placement read out per session, with the placements heard meanwhile. */
-  placing: Map<string, { heard: Placement[] }>;
+  /** The project's new entries, in order, not yet sent. */
+  changes: Change[];
   pending: Pending | null;
+  /** The reads a ranking waits on, each settling the feed once when it lands. */
+  waiting: Set<Promise<void>>;
   ranks: SessionRanks | null;
   rankReads: number;
 };
@@ -71,6 +93,7 @@ type Feed = {
 const SNAPSHOT = 'channel';
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isId = (value: unknown): value is string => typeof value === 'string' && value !== '' && value.length <= 512;
+const laneBOf = (entry: HostEntry): string | null => (entry.lane === 'B' && isId(entry.appSessionId) ? entry.appSessionId : null);
 
 export class ChannelFeeds {
   readonly #ctx: ChannelFeedsContext;
@@ -84,10 +107,10 @@ export class ChannelFeeds {
   open(sub: Subscription): void {
     const project = sub.message.feed === 'channel' && 'project' in sub.message ? sub.message.project : undefined;
     if (!isId(project)) return void sub.end('no-target');
-    const feed: Feed = { sub, project, seq: 0, subbed: false, read: null, snapshotted: false, known: new Set(), queue: [], placed: new Map(), placing: new Map(), pending: null, ranks: null, rankReads: 0 };
+    const feed: Feed = { sub, project, seq: 0, subbed: false, book: new PlacementBook(), snapshot: null, snapshotted: false, reads: 0, known: new Set(), changes: [], pending: null, waiting: new Set(), ranks: null, rankReads: 0 };
     this.#feeds.set(sub, feed);
     sub.onRoom = () => this.#settle(feed);
-    void this.#readRanks(feed).then(() => this.#readSnapshot(feed));
+    void this.#readRanks(feed);
   }
 
   close(sub: Subscription): void {
@@ -103,34 +126,48 @@ export class ChannelFeeds {
     for (const feed of this.#feeds.values()) this.#settle(feed);
   }
 
-  /** A machine event: a project's new entry (`channel.changed`), or a lane B session's record (its placement). */
+  /** What a feed holds (the suites' measure of its bounds): entries for its snapshot, entries waiting, sessions placed, ids known. */
+  held(sub: Subscription): { snapshot: number; changes: number; placements: number; known: number } | null {
+    const feed = this.#feeds.get(sub);
+    if (feed === undefined) return null;
+    const snapshot = (feed.snapshot?.kept?.length ?? 0) + (feed.pending?.kind === 'snapshot' ? feed.pending.kept.length : 0);
+    return { snapshot, changes: feed.changes.length + (feed.pending?.kind === 'change' ? 1 : 0), placements: feed.book.size, known: feed.known.size };
+  }
+
+  /** A machine event: a project's new entry (`channel.changed`), or a lane B session's record (`session.changed`, `.removed`). */
   event(owner: string, message: { name: string; payload: unknown }): void {
     if (owner !== 'machine' || this.#feeds.size === 0) return;
     const { name, payload } = message;
     if (!isObject(payload)) return;
     if (name === 'channel.changed' && isId(payload.project) && isObject(payload.entry) && isId(payload.entry.id)) {
       const entry = payload.entry as HostEntry;
-      for (const feed of this.#feeds.values()) {
-        if (feed.project !== payload.project || feed.known.has(entry.id)) continue;
-        if (feed.queue.length >= CHANGES_HELD) {
-          feed.sub.end('behind');
-          continue;
-        }
-        feed.queue.push(entry);
-        this.#settle(feed);
-      }
+      for (const feed of this.#feeds.values()) if (feed.project === payload.project) this.#arrive(feed, entry);
     } else if (name === 'session.changed' && isObject(payload.record) && isId(payload.record.appId)) {
-      const id = payload.record.appId;
-      const placement = recordedPlacement(id, payload.record);
-      for (const feed of this.#feeds.values()) {
-        const reading = feed.placing.get(id);
-        if (reading !== undefined) reading.heard.push(placement);
-        else if (feed.placed.has(id)) {
-          feed.placed.set(id, [placement]);
-          this.#settle(feed);
-        }
-      }
+      this.#heard(payload.record.appId, recordedPlacement(payload.record.appId, payload.record));
+    } else if (name === 'session.removed' && isId(payload.appSessionId)) {
+      this.#heard(payload.appSessionId, null); // a removed record places the session nowhere: nobody views it
     }
+  }
+
+  /** A lane B session's record heard: one more placement every read of it holds the member to, and each feed holding one settled. */
+  #heard(appSessionId: string, placement: Placement): void {
+    for (const feed of this.#feeds.values()) {
+      if (!feed.book.has(appSessionId)) continue;
+      feed.book.heard(appSessionId, placement);
+      this.#settle(feed);
+    }
+  }
+
+  #arrive(feed: Feed, entry: HostEntry): void {
+    if (feed.known.has(entry.id)) return;
+    const idle = feed.snapshotted && feed.pending === null && feed.changes.length === 0;
+    const after = feed.book.mark();
+    feed.changes.push({ entry, after, ranked: false, deliverAfter: idle ? after : null });
+    this.#settle(feed);
+  }
+
+  #live(feed: Feed): boolean {
+    return !feed.sub.ended && this.#feeds.get(feed.sub) === feed;
   }
 
   async #readRanks(feed: Feed): Promise<void> {
@@ -140,93 +177,130 @@ export class ChannelFeeds {
     try {
       ranks = await this.#ctx.ranks(feed.sub.who.member);
     } catch (error) {
-      if (n !== feed.rankReads || this.#feeds.get(feed.sub) !== feed) return;
+      if (n !== feed.rankReads || !this.#live(feed)) return;
       this.#ctx.log(`endpoint: a channel feed's ranks could not be read: ${(error as Error).message}`);
       return void feed.sub.end('unavailable');
     }
-    if (n !== feed.rankReads || this.#feeds.get(feed.sub) !== feed) return;
+    if (n !== feed.rankReads || !this.#live(feed)) return;
     feed.ranks = ranks;
     this.#settle(feed);
   }
 
-  /** The project's newest page as the journal holds it, read until it holds a page of what the member views (channel-view.ts). */
-  async #readSnapshot(feed: Feed): Promise<void> {
-    if (this.#feeds.get(feed.sub) !== feed || feed.sub.ended) return;
+  /** The project's newest page the member views, read from the journal (channel-view.ts' `readViewable`), then the feed settled. */
+  #readSnapshot(feed: Feed, ranks: SessionRanks): void {
+    const snapshot: NonNullable<Feed['snapshot']> = { after: feed.book.mark(), kept: null };
+    feed.snapshot = snapshot;
+    feed.reads++;
     const dispatch = dispatchAs(this.#ctx.dispatch, feed.sub.channel.client);
-    try {
-      const read = await readHistory(
-        dispatch,
-        { project: feed.project, limit: HISTORY_LIMIT_MAX },
-        (ids) => Promise.all(ids.filter((id) => !feed.placed.has(id)).map((id) => this.#place(feed, id, dispatch))).then(() => {}),
-        (entry) => this.#views(feed, entry),
-      );
-      if (this.#feeds.get(feed.sub) !== feed) return;
-      feed.read = read;
-    } catch (error) {
-      if (this.#feeds.get(feed.sub) !== feed) return;
-      this.#ctx.log(`endpoint: a channel feed's snapshot could not be read: ${(error as Error).message}`);
-      return void feed.sub.end('unavailable');
-    }
-    this.#settle(feed);
-  }
-
-  /** A lane B session's placement by its record, with what was heard of it meanwhile; throws when the spine can't answer. */
-  async #place(feed: Feed, id: string, dispatch: EndpointServices['dispatch']): Promise<void> {
-    const reading = { heard: [] as Placement[] };
-    feed.placing.set(id, reading);
-    try {
-      const placement = await placeRecorded(id, dispatch);
-      if (feed.placing.get(id) === reading) feed.placed.set(id, [...reading.heard, placement]);
-    } finally {
-      if (feed.placing.get(id) === reading) feed.placing.delete(id);
-    }
-  }
-
-  /** A queued change's lane B session, placed for the feed; settled again when it lands. */
-  #placeChange(feed: Feed, id: string): void {
-    if (feed.placing.has(id)) return;
-    void this.#place(feed, id, dispatchAs(this.#ctx.dispatch, feed.sub.channel.client)).then(
-      () => this.#feeds.get(feed.sub) === feed && this.#settle(feed),
+    const place = (ids: string[]) => Promise.all(ids.map((id) => feed.book.ensure(id, snapshot.after, dispatch))).then(() => {});
+    readViewable(dispatch, { project: feed.project, limit: HISTORY_LIMIT_MAX }, (entry) => viewable(entry, ranks, feed.book, snapshot.after), place).then(
+      (read) => {
+        if (!this.#live(feed) || feed.snapshot !== snapshot) return;
+        if (read.truncated) this.#ctx.log(`endpoint: a channel feed's snapshot of ${feed.project.slice(0, 64)} stopped at its scan bound with ${read.kept.length} entries`);
+        snapshot.kept = read.kept;
+        this.#settle(feed);
+      },
       (error: unknown) => {
-        if (this.#feeds.get(feed.sub) !== feed) return;
+        if (!this.#live(feed) || feed.snapshot !== snapshot) return;
+        this.#ctx.log(`endpoint: a channel feed's snapshot could not be read: ${(error as Error).message}`);
+        feed.sub.end('unavailable');
+      },
+    );
+  }
+
+  /** A lane B session's record, read after `after` for the feed; settled again once it lands. */
+  #place(feed: Feed, appSessionId: string, after: number): void {
+    const read = feed.book.ensure(appSessionId, after, dispatchAs(this.#ctx.dispatch, feed.sub.channel.client));
+    if (feed.waiting.has(read)) return;
+    feed.waiting.add(read);
+    read.then(
+      () => {
+        feed.waiting.delete(read);
+        if (this.#live(feed)) this.#settle(feed);
+      },
+      (error: unknown) => {
+        feed.waiting.delete(read);
+        if (!this.#live(feed)) return;
         this.#ctx.log(`endpoint: a channel feed could not place a session: ${(error as Error).message}`);
         feed.sub.end('unavailable');
       },
     );
   }
 
-  #views(feed: Feed, entry: HostEntry): boolean {
-    return feed.ranks !== null && viewable(entry, feed.ranks, (id) => feed.placed.get(id));
-  }
-
-  /** Whether `entries` can be ranked now: the ranks held, and each lane B session placed. */
-  #rankable(feed: Feed, entries: readonly HostEntry[]): boolean {
-    return feed.ranks !== null && laneBSessions(entries).every((id) => feed.placed.has(id));
+  /** Whether the member views `entry` by what was seen since `after`; null while that can't be said (no ranks, its read out). */
+  #views(feed: Feed, entry: HostEntry, after: number): boolean | null {
+    if (feed.ranks === null) return null;
+    const app = laneBOf(entry);
+    if (app !== null && feed.book.seen(app, after) === undefined) return null;
+    return viewable(entry, feed.ranks, feed.book, after);
   }
 
   /**
-   * The feed against the rights now, in one synchronous step: the queued output checked again (held while it can't be,
-   * taken back once it no longer stands), and once nothing waits, the next output queued.
+   * The feed against the rights now, in one synchronous step: the entries waiting ranked (the hidden dropped), the queued
+   * output checked again (held while it can't be, taken back once it no longer stands), and once nothing waits, the next
+   * output queued.
    */
   #settle(feed: Feed): void {
     const { sub } = feed;
     for (;;) {
-      if (sub.ended || this.#feeds.get(sub) !== feed) return;
+      if (!this.#live(feed)) return;
       if (!this.#ctx.reaches(feed.project)) return void sub.end('removed');
       if (feed.pending !== null && sub.backlog === 0) feed.pending = null; // taken: the device holds it
       if (feed.ranks !== null && !feed.ranks.current()) void this.#readRanks(feed);
+      if (!this.#rank(feed)) return;
       if (feed.pending !== null) {
-        const entries = feed.pending.kind === 'snapshot' ? feed.pending.entries : [feed.pending.entry];
-        if (!this.#rankable(feed, entries)) return void sub.hold();
-        if (entries.every((entry) => this.#views(feed, entry))) return void sub.unhold();
+        const pending = feed.pending;
+        const stands = pending.kind === 'snapshot' ? this.#allView(feed, pending.kept, pending.after) : this.#views(feed, pending.change.entry, pending.after);
+        if (stands === null) return void sub.hold();
+        if (stands) {
+          sub.unhold();
+          return void this.#prune(feed);
+        }
         if (!this.#takeBack(feed)) return;
+        continue;
       }
-      if (feed.ranks === null || feed.read === null) return;
+      if (feed.ranks === null) return;
       sub.unhold();
-      if (!this.#queueNext(feed)) return;
+      let queued: boolean;
+      try {
+        queued = this.#queueNext(feed, feed.ranks);
+      } catch (error) {
+        this.#ctx.log(`endpoint: a channel feed could not seal its entries' cursors: ${(error as Error).message}`);
+        return void sub.end('unavailable');
+      }
+      if (!queued) return void this.#prune(feed);
       if (sub.backlog > (this.#ctx.backlogBytes ?? BACKLOG_BYTES)) return void sub.end('behind');
-      if (sub.backlog > 0) return; // taken later: `onRoom` settles again
+      if (sub.backlog > 0) return void this.#prune(feed); // taken later: `onRoom` settles again
     }
+  }
+
+  /** Whether the member views every one of `entries` (null: one can't be said yet). */
+  #allView(feed: Feed, entries: readonly HostEntry[], after: number): boolean | null {
+    let all: boolean | null = true;
+    for (const entry of entries) {
+      const views = this.#views(feed, entry, after);
+      if (views === false) return false;
+      if (views === null) all = null;
+    }
+    return all;
+  }
+
+  /** Each new entry not yet ranked, ranked: dropped when the member doesn't view it. False when the feed ended `behind`. */
+  #rank(feed: Feed): boolean {
+    if (feed.ranks !== null) {
+      feed.changes = feed.changes.filter((change) => {
+        if (change.ranked) return true;
+        const views = this.#views(feed, change.entry, change.after);
+        if (views === false) return false;
+        if (views === null) this.#place(feed, laneBOf(change.entry)!, change.after);
+        else change.ranked = true;
+        return true;
+      });
+    }
+    const ranked = feed.changes.filter((change) => change.ranked).length;
+    if (ranked <= CHANGES_HELD && feed.changes.length - ranked <= CHANGES_HELD) return true;
+    feed.sub.end('behind');
+    return false;
   }
 
   /** The queued output no longer stands: taken back. False when it can't be (a part-sent snapshot): the feed ended. */
@@ -238,49 +312,83 @@ export class ChannelFeeds {
         sub.end('behind');
         return false;
       }
-      sub.dropSnapshot(SNAPSHOT); // its `subbed`, already queued, stands: the snapshot queued next replaces it
-      for (const entry of pending.entries) feed.known.delete(entry.id);
+      sub.dropSnapshot(SNAPSHOT); // its `subbed`, already queued, stands: the snapshot read next replaces it
+      feed.known.clear();
       feed.snapshotted = false;
     } else {
       sub.clear(); // the entry is dropped: the member no longer views its session
+      feed.seq--; // and its `seq` is the next entry's
     }
     feed.pending = null;
     return true;
   }
 
-  /** The next output, queued: the snapshot, then the first new entry the member views. False: none (or one waits on a placement). */
-  #queueNext(feed: Feed): boolean {
+  /** The next output, queued: the snapshot, then the first new entry the member views. False: none (or one waits on a read). */
+  #queueNext(feed: Feed, ranks: SessionRanks): boolean {
     const { sub } = feed;
-    if (!feed.snapshotted) {
-      const missing = laneBSessions(feed.read!.entries).filter((id) => !feed.placed.has(id));
-      if (missing.length > 0) {
-        for (const id of missing) this.#placeChange(feed, id);
+    while (!feed.snapshotted) {
+      const snapshot = feed.snapshot;
+      if (snapshot === null) {
+        if (feed.reads >= SNAPSHOT_READS) {
+          this.#ctx.log(`endpoint: a channel feed's snapshot of ${feed.project.slice(0, 64)} moved under each of its ${feed.reads} reads`);
+          sub.end('unavailable');
+          return false;
+        }
+        this.#readSnapshot(feed, ranks);
         return false;
       }
-      const page: ChannelPage = cutPage(feed.read!, HISTORY_LIMIT_MAX, (entry) => this.#views(feed, entry));
+      if (snapshot.kept === null) return false;
+      const kept = snapshot.kept;
+      const page = publish(kept, HISTORY_LIMIT_MAX, (entry) => this.#views(feed, entry, snapshot.after) === true, (entry) => this.#sealed(entry));
+      feed.snapshot = null;
+      if (page === null) continue; // what it read moved since: read again
       const at = { epoch: this.#epoch, seq: 0 };
       if (!feed.subbed) sub.subbed('snapshot', at);
       feed.subbed = true;
       feed.snapshotted = true;
-      for (const entry of page.entries) feed.known.add(entry.id);
-      feed.queue = feed.queue.filter((entry) => !feed.known.has(entry.id));
-      feed.pending = { kind: 'snapshot', entries: page.entries };
+      feed.reads = 0;
+      feed.known = new Set(kept.slice(0, page.entries.length).map((entry) => entry.id));
+      feed.changes = feed.changes.filter((change) => !feed.known.has(change.entry.id));
+      feed.pending = { kind: 'snapshot', kept, after: snapshot.after };
       sub.snap(at, page, SNAPSHOT);
       return true;
     }
-    while (feed.queue.length > 0) {
-      const entry = feed.queue[0];
-      if (!this.#rankable(feed, [entry])) {
-        for (const id of laneBSessions([entry])) if (!feed.placed.has(id)) this.#placeChange(feed, id);
+    while (feed.changes.length > 0) {
+      const change = feed.changes[0];
+      if (!change.ranked) return false; // its read is out (`#rank` began it)
+      change.deliverAfter ??= feed.book.mark();
+      const views = this.#views(feed, change.entry, change.deliverAfter);
+      if (views === null) {
+        this.#place(feed, laneBOf(change.entry)!, change.deliverAfter);
         return false;
       }
-      feed.queue.shift();
-      if (feed.known.has(entry.id) || !this.#views(feed, entry)) continue;
-      feed.known.add(entry.id);
-      feed.pending = { kind: 'change', entry };
-      sub.ev({ epoch: this.#epoch, seq: ++feed.seq }, { entry });
+      feed.changes.shift();
+      if (!views) continue;
+      feed.pending = { kind: 'change', change, after: change.deliverAfter };
+      sub.ev({ epoch: this.#epoch, seq: ++feed.seq }, { entry: this.#sealed(change.entry) });
       return true;
     }
     return false;
+  }
+
+  #sealed(entry: HostEntry): HostEntry {
+    return { ...entry, id: this.#ctx.cursors.seal(entry) };
+  }
+
+  /** Lets go of the placements nothing the feed holds is ranked by; none while the snapshot's read is out. */
+  #prune(feed: Feed): void {
+    if (feed.snapshot !== null && feed.snapshot.kept === null) return;
+    const needs: Array<readonly [string, number]> = [];
+    const need = (entries: readonly HostEntry[], after: number) => {
+      for (const entry of entries) {
+        const app = laneBOf(entry);
+        if (app !== null) needs.push([app, after]);
+      }
+    };
+    if (feed.snapshot?.kept != null) need(feed.snapshot.kept, feed.snapshot.after);
+    if (feed.pending?.kind === 'snapshot') need(feed.pending.kept, feed.pending.after);
+    if (feed.pending?.kind === 'change') need([feed.pending.change.entry], feed.pending.after);
+    for (const change of feed.changes) need([change.entry], change.after);
+    feed.book.prune(needs);
   }
 }
