@@ -1247,7 +1247,7 @@ Rejected:
 
 **Waits on.**
 - The desk track's executor, behind sminos's `record` capability (M6b, *Offered only when sminos can*).
-- DL190 (b)'s fix: the endpoint places a lane B record by `ownersProof[0].opId`, failing closed when one opId names two app sessions (`src/endpoint/rl10/members.ts:280-298`; tracker row `docs/tech-debt-tracker.md:556`). It must be on master first, since an owner add re-lists a lane B record.
+- DL190 (b)'s fix: the endpoint places a lane B record by the `opId` of its `ownersProof` entry that is the spawn's act (action `session.spawn`), not `ownersProof[0]`, which an owner add can occupy, failing closed when one opId names two app sessions (`src/endpoint/rl10/members.ts:280-298`; tracker row `docs/tech-debt-tracker.md:556`). It must be on master first, since an owner add re-lists a lane B record.
 
 **Proves.** Acceptance 5's add half.
 - `AddOwnerSheet.test.tsx` (the members offered; the outcome shown).
@@ -3064,6 +3064,9 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   Date/Author: 2026-11-06, O8's executor (pre-flight).
 
 - Decision: The record.* executors ship in sminos 1.38.0, not 1.37.0. 1.37.0 is D5's restatement (doperpowers #492), and 1.38.0 is built on top of it, to §Q exactly. M6b and M5b need sminos 1.38.0 or later on the target machine. Nothing in the app changes, since the `record` capability is the real gate. The merge order onto doperpowers main is #463 (O18 M3), M4, D5, then the executors.
+  Also from the desk track:
+  - DL190 (b) as built places an unplaced lane B record by the `ownersProof` entry that is the spawn's act (`session.spawn`), not by `ownersProof[0]`. Once `record.owners` exists, a record with an empty `ownersProof` can hold an owner-add act at index 0. M5b's wait is corrected to match.
+  - MAWS #496 (master bdd6cb7db) gives `test/endpoint/rl10/conversation.json`'s three sminos hello lines `capabilities: ["audience", "record"]`, the blob sminos 1.38.0's conformance replay compares exactly (bc2593f1). An M6b change to that fixture starts from master's copy, and the architect is told, since the desk track's sminos gate pins it.
   Date/Author: 2026-11-06, the desk track through the architect, recorded by O8's executor.
 
 ## Outcomes & Retrospective
