@@ -766,8 +766,11 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       const heardStart = remote && (startsHeard !== heardBefore || [...subscribers].some((subscriber) => subscriber.held.some((batch) => batch.some((event) => starts(event) && liveForm(event) && !lifecycleSeen.has(event.id)))));
       if (remote ? liveStart || heardStart : liveStart && end < started && !onDisk()) {
         const sliceEnd = !remote ? null : end > started ? parent[end] : started >= 0 && lostBefore !== null && Date.parse(parent[started].at) <= Date.parse(lostBefore.at) ? lostBefore : null;
+        const sliceLast = parent.findLast(liveForm) ?? null;
+        // another machine's: the slice's latest first, so what the batches held or already heard (newer) stands over it
+        if (remote && provenance !== 'live') lastLive = sliceLast;
         decide('live');
-        lastLive = parent.findLast(liveForm) ?? null;
+        if (!remote) lastLive = sliceLast;
         const live = parent.filter((event) => own(event) && liveForm(event));
         const history = sliceEnd === null ? live : [...live, sliceEnd];
         pager.started(history, null);

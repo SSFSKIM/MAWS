@@ -995,6 +995,27 @@ describe('child source provenance', () => {
       useTranscriptStore.getState().detach(REMOTE_KEY);
     });
 
+    // The third review: the liveness the held batches show outlives an empty first slice (E11's host loss reads it).
+    it('keeps the liveness its held batches showed past an empty first slice: a host lost then ends the child as stopped', async () => {
+      const { parent, child } = live();
+      const fake = fakeClient();
+      const hydrated = useTranscriptStore.getState().attach(REMOTE_KEY, remoteChild(fake), { agentId: AGENT });
+      const started = parent.find((event) => event.kind === 'subagent.started')!;
+      fake.emit('session.eventBatch', remoteBatch([started, ...child.slice(0, 2)]), OTHER_MACHINE); // held: the slice is on its way
+      answer(fake, 'session.events', { events: [], lastSeq: 0, complete: true }); // read before the child started
+      await hydrated;
+      await flush();
+      expect(dividerOf(REMOTE_KEY).state).toBe('working');
+      fake.emit('engine.hostState', { state: 'restarting' } as never, OTHER_MACHINE);
+      fake.emit('engine.hostState', { state: 'ready' } as never, OTHER_MACHINE);
+      answer(fake, 'engine.sessions', []);
+      await flush();
+      answer(fake, 'host.supervisorStatus', { pid: 1 }); // no session hosts: its table stands
+      await flush();
+      expect(dividerOf(REMOTE_KEY)).toMatchObject({ state: 'stopped', cause: 'crash' });
+      useTranscriptStore.getState().detach(REMOTE_KEY);
+    });
+
     it('keeps a disk-backed child that resumes while its slice is read again on the stream, whatever that older slice holds', async () => {
       const { parent, child } = live();
       const disk = onDisk(child);
