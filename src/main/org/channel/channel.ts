@@ -4,7 +4,8 @@
 // socket (project-socket.ts) and the owner's words (words.ts). `open` answers whole: main's verified events, the words
 // not yet in the log, the count that didn't verify, "as of" and `live`. `org.channel.changed` tells, coalesced, what
 // changed since the last it told (or since the first open's answer): the events new or judged again (`upserts`), the
-// offsets no longer drawn (`removed`: let go by the bound, or failing now), the rest whole. It tells everything (`reset`)
+// offsets any tab was sent (a later open's answer included) that main no longer draws (`removed`: let go by the bound,
+// or failing now), the rest whole. It tells everything (`reset`)
 // when a judgment at a new head or certificate set changed verdicts, when another org's log is dropped, and after a
 // closed answer.
 //
@@ -131,6 +132,8 @@ export function createChannels(deps: ChannelsDeps): Channels {
     let told: Map<number, string> | null = null;
     let toldRest = '';
     let toldClosed = '';
+    /** Every offset any tab may hold: those sent in an open answer or a change since the last change told. */
+    let exposed = new Set<number>();
     let baselined = false;
     /** The next change tells everything. */
     let resetDue = false;
@@ -197,6 +200,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
       let change: ChannelChanged;
       if (!now.ok) {
         told = null;
+        exposed = new Set(); // a tab drawing a closed answer holds no event
         const text = JSON.stringify(now);
         if (text === toldClosed) return;
         toldClosed = text;
@@ -207,10 +211,12 @@ export function createChannels(deps: ChannelsDeps): Channels {
         const before = told;
         const reset = resetDue || before === null;
         const upserts = reset || before === null ? now.events : now.events.filter((e) => before.get(e.offset) !== verdicts.get(e.offset));
-        const removed = reset || before === null ? [] : [...before.keys()].filter((offset) => !verdicts.has(offset)).sort((a, b) => a - b);
+        // whatever any tab was sent and main no longer draws, a later open's included
+        const removed = reset || before === null ? [] : [...exposed].filter((offset) => !verdicts.has(offset)).sort((a, b) => a - b);
         const rest = restOf(now);
         resetDue = false;
         told = verdicts;
+        exposed = new Set(verdicts.keys());
         if (!reset && upserts.length === 0 && removed.length === 0 && rest === toldRest) return;
         toldRest = rest;
         const { sessions, pending, unverified, asOf, live } = now;
@@ -221,6 +227,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
 
     function opened(): ChannelAnswer {
       const whole = answer();
+      if (whole.ok) for (const event of whole.events) exposed.add(event.offset);
       if (!baselined) {
         baselined = true;
         if (whole.ok) {
