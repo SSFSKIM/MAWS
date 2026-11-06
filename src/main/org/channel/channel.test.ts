@@ -178,7 +178,7 @@ describe('a project channel', () => {
     expect(offline.asOf).toBe(new Date(NOW).toISOString());
   });
 
-  it("ends unknown-project when the hub doesn't hold the project, and opens again at the session's next change", async () => {
+  it("ends unknown-project when the hub doesn't hold the project, kept through a head, and opens again at the tab's next open", async () => {
     const h = await harness();
     opened(await h.channels.open(PROJECT));
     const socket = await until(() => h.last(), 'a socket');
@@ -186,7 +186,11 @@ describe('a project channel', () => {
     await until(() => h.latest()?.ok === false, 'the refusal');
     expect(h.latest()).toEqual({ project: PROJECT, ok: false, reason: 'unknown-project' });
     expect(await h.channels.send(PROJECT, 'hello')).toMatchObject({ ok: false, reason: 'unreadable' });
-    h.session.set(h.signedIn());
+    h.session.changed(); // a new head keeps the hub: no new socket, the refusal stands
+    await sleep(30);
+    expect(h.sockets).toHaveLength(1);
+    expect(h.latest()).toEqual({ project: PROJECT, ok: false, reason: 'unknown-project' });
+    expect(await h.channels.open(PROJECT)).toMatchObject({ ok: true, live: false });
     await until(() => h.sockets.length === 2, 'a second socket');
   });
 

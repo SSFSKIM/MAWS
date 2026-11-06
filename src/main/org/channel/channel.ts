@@ -9,8 +9,8 @@
 //   attestation is held before its events arrive (cache.ts keeps an awaited writer's events past the bound); they are
 //   read again when a DX1 writer's events pass every attestation held.
 // - Every event is judged again at each adopted head or certificate set; another org's log is dropped at sign-in.
-// - A socket the hub refuses the project (404) ends the channel `unknown-project`; one that ends `removed` or with the
-//   hub sign-in waits, as that does, for the session's next change (or the tab's next open).
+// - A socket the hub refuses the project (404) ends the channel `unknown-project` until the tab's next open or another
+//   hub; one that ends `removed` or with the hub sign-in waits, as the Registry feed does, for the session's next change.
 // - The owner's words: a leading `@alias` addresses a session the log names (address.ts), and untagged words go to
 //   everyone. Nothing is sent signed out, with no hub, or to a project the hub refused.
 // - The cache is written CHANNEL_WRITE_MS after a change, through the org session's commit queue, and last at `close()`,
@@ -62,8 +62,8 @@ interface Channel {
   refs(): number;
   answer(): ChannelAnswer;
   send(text: string): Promise<ChannelSendResult>;
-  /** The session changed, or a tab opened it again: what was parked may open again. */
-  reconcile(): void;
+  /** The session changed, or (`reopened`) a tab opened it again: what was parked may open again. */
+  reconcile(reopened?: boolean): void;
   release(): void;
   retain(): void;
   close(): Promise<void>;
@@ -233,6 +233,8 @@ export function createChannels(deps: ChannelsDeps): Channels {
       }
       if (stopped || socket !== null || ended !== null || deps.session.current()?.hub !== hub || held === null) return;
       socketHub = hub;
+      welcomed = false;
+      caughtUp = false;
       const mine = (): boolean => !stopped && socketHub === hub && socket === current;
       const current: ProjectSocket = openProjectSocket({
         hub: () => (deps.session.current()?.hub === hub ? hub : null),
@@ -273,8 +275,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
           caughtUp = false;
           if (code === CLOSE_UNKNOWN_PROJECT || code === CLOSE_CREDENTIALS || code === CLOSE_REMOVED) {
             ended = code === CLOSE_UNKNOWN_PROJECT ? 'unknown-project' : 'parked';
-            socket = null;
-            socketHub = null;
+            socket = null; // the hub it was for stays `socketHub`, so a change that keeps it keeps the refusal
           }
           scheduleEmit();
         },
@@ -287,10 +288,12 @@ export function createChannels(deps: ChannelsDeps): Channels {
       scheduleEmit();
     }
 
-    function reconcile(): void {
+    function reconcile(reopened = false): void {
       if (stopped) return;
-      ended = null;
       const current = deps.session.current();
+      // a parked socket opens again at any change, as the Registry feed does; a project the hub refused, only at the
+      // tab's next open or with another hub
+      if (reopened || ended === 'parked' || (current?.hub ?? null) !== socketHub) ended = null;
       if (current === null) {
         dropSocket();
         scheduleEmit();
@@ -316,7 +319,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
       });
       const hub = current.hub;
       if (hub !== socketHub) dropSocket();
-      if (hub !== null && socket === null && connecting !== hub) void connect(hub);
+      if (hub !== null && socket === null && ended === null && connecting !== hub) void connect(hub);
       scheduleEmit();
     }
 
@@ -383,7 +386,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
       if (closed || !PROJECT_ID.test(project)) return { ok: false, reason: 'unknown-project' };
       let channel = channels.get(project);
       if (channel === undefined) channels.set(project, (channel = createChannel(project)));
-      else channel.reconcile();
+      else channel.reconcile(true);
       channel.retain();
       await channel.loaded;
       return channel.answer();
