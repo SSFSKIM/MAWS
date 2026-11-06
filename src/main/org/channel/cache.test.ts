@@ -106,7 +106,7 @@ describe("the project's sessions", () => {
     await log.add(at([await o.joined(o.mini, 1, 'maws-45'), ...says]), ground(o));
     await log.add(at([await o.lifecycle(o.mini, 5, 'titled', { title: 'the channel' })], 5), ground(o));
     expect(log.events().map((e) => e.offset)).toEqual([4, 5]); // the joined is let go
-    const maws45 = { session: S1, alias: 'maws-45', machine: 'mini', title: 'the channel', member: true };
+    const maws45 = { session: S1, alias: 'maws-45', machine: 'mini', title: 'the channel', member: true, authenticated: true };
     expect(log.sessions()).toEqual([maws45]);
     const reloaded = await loadLog(roundTrip(log.file()), { reader: reader(o), project: PROJECT, limits: { events: 2, bytes: LIMITS.bytes }, ground: ground(o), log: () => {} });
     expect(reloaded.sessions()).toEqual([maws45]);
@@ -133,8 +133,8 @@ describe("the project's sessions", () => {
     });
     await log.rejudge(ground(o));
     expect(log.sessions()).toEqual([
-      { session: S1, alias: 'maws-45', machine: 'mini', title: null, member: true },
-      { session: S2, alias: 'studio-2', machine: 'studio', title: null, member: true },
+      { session: S1, alias: 'maws-45', machine: 'mini', title: null, member: true, authenticated: true },
+      { session: S2, alias: 'studio-2', machine: 'studio', title: null, member: true, authenticated: true },
     ]);
   });
 
@@ -170,7 +170,7 @@ describe("the project's sessions, by their lifecycle's provenance", () => {
     ];
     await log.add(at(forged, 2), ground(o));
     expect(log.events().filter((e) => e.offset > 1).map((e) => e.label)).toEqual(['legacy', 'legacy', 'legacy']);
-    const maws45 = { session: S1, alias: 'maws-45', machine: 'mini', title: null, member: true };
+    const maws45 = { session: S1, alias: 'maws-45', machine: 'mini', title: null, member: true, authenticated: true };
     expect(log.sessions()).toEqual([maws45]);
     expect(addressOf('@hijacked hi', log.sessions())).toEqual({ ok: false, reason: 'no-member', detail: '@hijacked' });
     expect(addressOf('@maws-45 hi', log.sessions())).toEqual({ ok: true, to: [{ session: S1, alias: 'maws-45' }] });
@@ -183,11 +183,11 @@ describe("the project's sessions, by their lifecycle's provenance", () => {
     const log = emptyLog(reader(o), PROJECT, LIMITS);
     const history = [unsigned(`oldmini/${S2}`, 1, { kind: 'joined', session: S2, alias: 'old-one', machine: 'oldmini' }), o.dx1('oldmini', 2)];
     await log.add(at(history), ground(o));
-    expect(log.sessions()).toEqual([{ session: S2, alias: 'old-one', machine: 'oldmini', title: null, member: false }]);
+    expect(log.sessions()).toEqual([{ session: S2, alias: 'old-one', machine: 'oldmini', title: null, member: false, authenticated: false }]);
     expect(addressOf('@old-one hi', log.sessions())).toEqual({ ok: false, reason: 'no-member', detail: '@old-one' });
     expect(await log.attest([await o.attest(history)], ground(o))).toBe(true);
     expect(log.events().map((e) => e.label)).toEqual(['migrated', 'migrated']);
-    expect(log.sessions()).toEqual([{ session: S2, alias: 'old-one', machine: 'oldmini', title: null, member: true }]);
+    expect(log.sessions()).toEqual([{ session: S2, alias: 'old-one', machine: 'oldmini', title: null, member: true, authenticated: true }]);
     expect(addressOf('@old-one hi', log.sessions())).toEqual({ ok: true, to: [{ session: S2, alias: 'old-one' }] });
   });
 });

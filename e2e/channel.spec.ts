@@ -50,10 +50,10 @@ function seededChannel(now: number): { status: Extract<OrgStatus, { state: 'regi
   const member = (m: { id: string; email: string }): OrgMember => ({ ...m, name: names.get(m.id)! });
 
   const sessions: ChannelSession[] = [
-    { session: S1, alias: 'maws-45', machine: 'studio-mini', title: 'Refactor the channel cache bound so a phase-one writer larger than both bounds still verifies once', member: true },
-    { session: S2, alias: 'ci-optimization-coordinator-for-the-clinical-research-shards', machine: 'render-farm-03.clinical-research-operations.northwind-health', title: 'Rerun the flaky shards of the clinical research operations suite', member: true },
-    { session: S3, alias: 'oldmini', machine: 'oldmini', title: null, member: false },
-    { session: S4, alias: 'docs-writer', machine: 'studio-mini', title: 'Write the migration notes', member: true },
+    { session: S1, alias: 'maws-45', machine: 'studio-mini', title: 'Refactor the channel cache bound so a phase-one writer larger than both bounds still verifies once', member: true, authenticated: true },
+    { session: S2, alias: 'ci-optimization-coordinator-for-the-clinical-research-shards', machine: 'render-farm-03.clinical-research-operations.northwind-health', title: 'Rerun the flaky shards of the clinical research operations suite', member: true, authenticated: true },
+    { session: S3, alias: 'oldmini', machine: 'oldmini', title: null, member: false, authenticated: false },
+    { session: S4, alias: 'docs-writer', machine: 'studio-mini', title: 'Write the migration notes', member: true, authenticated: true },
   ];
   const at = (minutesAgo: number) => new Date(now - minutesAgo * 60_000).toISOString();
   const events: ChannelEvent[] = [];

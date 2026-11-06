@@ -22,17 +22,17 @@ describe('the sessions a project log names', () => {
       logged(joined(S1, 'maws-45'), joined(S2, 'ci-opt'), retired(S2), joined(S1, 'maws-46'), { ...joined(S3, 'forged'), writer: `mini/${S1}` }, titled(S1, '  the channel  '), renamed(S2, 'ci-opt-2', 'mini'), titled(S2, 42)),
     );
     expect(sessions).toEqual([
-      { session: S1, alias: 'maws-46', machine: 'mini', title: 'the channel', member: true },
-      { session: S2, alias: 'ci-opt-2', machine: 'mini', title: null, member: false },
+      { session: S1, alias: 'maws-46', machine: 'mini', title: 'the channel', member: true, authenticated: true },
+      { session: S2, alias: 'ci-opt-2', machine: 'mini', title: null, member: false, authenticated: true },
     ]);
   });
 
   it('reads them by offset, whatever order they are given in', () => {
     const [a, b, c] = logged(joined(S1, 'maws-45'), retired(S1), joined(S1, 'maws-46'));
-    expect(projectSessions([c, a, b])).toEqual([{ session: S1, alias: 'maws-46', machine: 'mini', title: null, member: true }]);
+    expect(projectSessions([c, a, b])).toEqual([{ session: S1, alias: 'maws-46', machine: 'mini', title: null, member: true, authenticated: true }]);
   });
 
-  it('reads an authenticated lifecycle alone when a session has one; a legacy one names a session without one, never a member', () => {
+  it('reads an authenticated lifecycle alone when a session has one; a legacy one names a session without one, never a member, and says which', () => {
     const legacy = { label: 'legacy' as const };
     const [join, rename] = logged(joined(S1, 'maws-45'), renamed(S1, 'maws-46'));
     const entries = [
@@ -46,8 +46,8 @@ describe('the sessions a project log names', () => {
     ];
     const sessions = projectSessions(entries);
     expect(sessions).toEqual([
-      { session: S1, alias: 'maws-46', machine: 'mini', title: null, member: true },
-      { session: S2, alias: 'old-one', machine: 'mini', title: null, member: false },
+      { session: S1, alias: 'maws-46', machine: 'mini', title: null, member: true, authenticated: true },
+      { session: S2, alias: 'old-one', machine: 'mini', title: null, member: false, authenticated: false },
     ]);
     expect(addressOf('@old-one hi', sessions)).toEqual({ ok: false, reason: 'no-member', detail: '@old-one' });
   });

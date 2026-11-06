@@ -34,8 +34,8 @@ const ME: OrgMember = { id: 'owner0000000000000000000000000000', email: 'sam@exa
 const ANA: OrgMember = { id: 'ana00000000000000000000000000000', email: 'ana@example.com', name: 'Ana' };
 const T = (minute: number) => new Date(Date.UTC(2026, 10, 6, 12, minute)).toISOString();
 const SESSIONS: ChannelSession[] = [
-  { session: S1, alias: 'maws-45', machine: 'mini', title: 'Fix the relay', member: true },
-  { session: S2, alias: 'ci-opt', machine: 'mini', title: null, member: true },
+  { session: S1, alias: 'maws-45', machine: 'mini', title: 'Fix the relay', member: true, authenticated: true },
+  { session: S2, alias: 'ci-opt', machine: 'mini', title: null, member: true, authenticated: true },
 ];
 const say = (offset: number, from: string, to: string, minute: number, extra: Partial<ChannelEvent> = {}): ChannelEvent => ({
   offset, writer: `mini/${from}`, seq: offset, session: from, label: 'verified', owners: [ME],

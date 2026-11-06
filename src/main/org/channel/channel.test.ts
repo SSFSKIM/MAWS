@@ -396,7 +396,7 @@ describe('a project channel', () => {
     });
     const answer = opened(await h.channels.open(PROJECT));
     expect(answer.events.map((e) => e.offset)).toEqual([2, 3]);
-    expect(answer.sessions).toEqual([{ session: S1, alias: 'maws-45', machine: 'mini', title: null, member: true }]);
+    expect(answer.sessions).toEqual([{ session: S1, alias: 'maws-45', machine: 'mini', title: null, member: true, authenticated: true }]);
     const socket = await until(() => h.last(), 'a socket');
     socket.welcome();
     socket.frame({ t: 'log', events: [{ offset: 4, event: await h.o.lifecycle(h.o.mini, 4, 'renamed', { alias: 'maws-46' }) }] });

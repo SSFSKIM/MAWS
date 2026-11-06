@@ -14,6 +14,10 @@
 // Everything else draws nothing: lifecycle events (they give the parties their aliases, titles and machines, through
 // main's `sessions`), states, statuses, `unlisted` notices. Main sends no tombstone and no event that failed.
 //
+// A session whose lifecycle is only `legacy` (main's `authenticated: false`: a phase-1 code nothing checks) names only
+// `legacy` entries. A verified or migrated entry of it draws as a session the lifecycle doesn't name: its event's own
+// alias and its writer's machine, so unchecked names never stand on a checked entry.
+//
 // `waitingFor` is the "Waiting on you" section's filter: the open requests of the sessions the sidebar files under this
 // org project, this Mac's and other machines' (`rowOfSession`, `rowOfListed`), a greyed machine's left out (nothing
 // there can be answered now).
@@ -76,8 +80,10 @@ const labelOf = (e: ChannelEvent): Pick<Labelled, 'label' | 'by'> => (e.by === u
 
 export function channelEntries(input: { events: readonly ChannelEvent[]; sessions: readonly ChannelSession[]; tail: readonly TailWord[]; me: string | null }): ChannelEntry[] {
   const known = new Map(input.sessions.map((s) => [s.session, s]));
-  const party = (session: string, fallback: { alias?: string; writer?: string } = {}): ChannelParty => {
-    const s = known.get(session);
+  /** `session` as an entry labelled `label` may name it: by its lifecycle, a legacy one for a legacy entry alone. */
+  const party = (session: string, label: ChannelLabel, fallback: { alias?: string; writer?: string } = {}): ChannelParty => {
+    const lifecycle = known.get(session);
+    const s = lifecycle !== undefined && (lifecycle.authenticated || label === 'legacy') ? lifecycle : undefined;
     return {
       session,
       alias: s?.alias || fallback.alias || session.slice(0, 8),
@@ -113,8 +119,8 @@ export function channelEntries(input: { events: readonly ChannelEvent[]; session
     const at = str(event.ts);
     switch (event.kind) {
       case 'say': {
-        const from = party(sessionOf(e), { alias: str(event.from), writer: e.writer });
-        const to = event.to === '*' ? ('*' as const) : recipients(event.to).map((r) => party(r.session, { alias: r.alias }));
+        const from = party(sessionOf(e), e.label, { alias: str(event.from), writer: e.writer });
+        const to = event.to === '*' ? ('*' as const) : recipients(event.to).map((r) => party(r.session, e.label, { alias: r.alias }));
         const entry: SayEntry = { kind: 'say', key: `s:${e.offset}`, ...labelOf(e), offset: e.offset, from, to, text: str(event.text), at, owners: e.owners ?? [] };
         // the run this say may join: its two sessions, or its session's broadcasts; a say to several folds with none
         const fold = to === '*' ? `*:${from.session}` : to.length === 1 && to[0].session !== from.session ? `2:${[from.session, to[0].session].sort().join(':')}` : null;
@@ -150,7 +156,7 @@ export function channelEntries(input: { events: readonly ChannelEvent[]; session
           key: `h:${e.offset}`,
           ...labelOf(e),
           offset: e.offset,
-          party: party(sessionOf(e), { alias: str(event.from), writer: e.writer }),
+          party: party(sessionOf(e), e.label, { alias: str(event.from), writer: e.writer }),
           host,
           text: host === 'question' ? questionText(event.text) : str(event.text),
           ...(choices.length > 0 ? { choices } : {}),

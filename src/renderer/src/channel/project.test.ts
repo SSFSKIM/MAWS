@@ -35,9 +35,9 @@ const say = (from: string, to: '*' | string[], minute: number, text = `from ${fr
 const human = (member: OrgMember, minute: number, text: string, extra: Record<string, unknown> = {}) =>
   ev({ kind: 'human', writer: `hub/${member.id}`, from: 'human', member: member.id, to: '*', text, ts: T(minute), ...extra }, { author: member });
 const sessions: ChannelSession[] = [
-  { session: A, alias: 'maws-45', machine: 'mini', title: 'Fix the relay', member: true },
-  { session: B, alias: 'ci-opt', machine: 'build-vm', title: null, member: true },
-  { session: C, alias: 'third', machine: 'mini', title: 'A third', member: false },
+  { session: A, alias: 'maws-45', machine: 'mini', title: 'Fix the relay', member: true, authenticated: true },
+  { session: B, alias: 'ci-opt', machine: 'build-vm', title: null, member: true, authenticated: true },
+  { session: C, alias: 'third', machine: 'mini', title: 'A third', member: false, authenticated: true },
 ];
 const project = (events: ChannelEvent[], rest: Partial<Parameters<typeof channelEntries>[0]> = {}) => channelEntries({ events, sessions, tail: [], me: null, ...rest });
 const kinds = (entries: ChannelEntry[]) => entries.map((e) => (e.kind === 'exchange' ? `exchange:${e.count}` : e.kind));
@@ -105,6 +105,22 @@ describe('channelEntries: folding', () => {
       ['say', 'verified', undefined],
     ]);
     expect(project([say(A, [B], 0, 'x', { label: 'legacy' })])[0]).toMatchObject({ kind: 'say', label: 'legacy' });
+  });
+
+  // the branch re-review's finding: a legacy lifecycle (a phase-1 code nothing checks) names only legacy entries
+  it('never names a verified or migrated entry by a session whose only lifecycle is legacy: it draws as a session the lifecycle does not name', () => {
+    const lone = 'dddddddd-4444-4444-8444-dddddddddddd';
+    const forged: ChannelSession = { session: lone, alias: 'forged-alias', machine: 'forged-machine', title: 'A forged title', member: false, authenticated: false };
+    const withForged = { sessions: [...sessions, forged] };
+    const verified = ev({ kind: 'say', writer: `studio/${lone}`, from: 'studio-1', to: [{ session: lone, alias: 'signed-alias' }], text: 'signed', ts: T(0) });
+    const [entry] = project([verified], withForged);
+    expect(entry).toMatchObject({ kind: 'say', label: 'verified', from: { session: lone, alias: 'studio-1', title: null, machine: 'studio' }, to: [{ session: lone, alias: 'signed-alias', title: null, machine: null }] });
+    const toForged = project([say(A, [lone], 1, 'to it', { label: 'migrated', by: 'mini' })], withForged)[0];
+    expect(toForged).toMatchObject({ kind: 'say', to: [{ session: lone, alias: `alias-${lone.slice(0, 1)}`, title: null, machine: null }] });
+    expect(JSON.stringify([entry, toForged])).not.toMatch(/forged/);
+    // a legacy entry of that session is named by its legacy lifecycle, as legacy
+    const old = ev({ kind: 'say', writer: `oldmini/${lone}`, from: 'old', to: '*', text: 'before the move', ts: T(2) }, { label: 'legacy' });
+    expect(project([old], withForged)[0]).toMatchObject({ kind: 'say', label: 'legacy', from: { alias: 'forged-alias', machine: 'forged-machine', title: 'A forged title' } });
   });
 
   it('names a session the lifecycle does not by its event’s alias and its writer’s machine', () => {

@@ -12,7 +12,8 @@
 // Only an authenticated lifecycle (`verified`, or `migrated`: attested at migration) is a session's identity and makes
 // it addressable. A `legacy` one (a phase-1 code nothing in the app checks, which a hub could write under any writer)
 // names a session that has no authenticated lifecycle at all, as its legacy events are drawn, but never overrides an
-// authenticated one, and never makes a session a member that words can address.
+// authenticated one, and never makes a session a member that words can address. Each session says which it is read
+// from (`authenticated`), so the renderer names only legacy entries by a legacy lifecycle.
 //
 // Electron-free.
 import { streamOf, writerMachine } from '../../../../apps/org-protocol/src/index.ts';
@@ -56,7 +57,7 @@ export function projectSessions(entries: Iterable<{ offset: number; event: Logge
   const sessions = new Map<string, ChannelSession>();
   for (const { event, session, kind, authentic } of named) {
     if (authentic !== authenticated.has(session)) continue;
-    const held = sessions.get(session) ?? { session, alias: session.slice(0, 8), machine: writerMachine(event.writer) ?? '', title: null, member: false };
+    const held = sessions.get(session) ?? { session, alias: session.slice(0, 8), machine: writerMachine(event.writer) ?? '', title: null, member: false, authenticated: authentic };
     if (kind === 'joined') sessions.set(session, { ...held, alias: text(event.alias) ?? held.alias, machine: text(event.machine) ?? held.machine, member: authentic });
     else if (kind === 'retired') sessions.set(session, { ...held, member: false });
     else if (kind === 'renamed') sessions.set(session, { ...held, alias: text(event.alias) ?? held.alias });
