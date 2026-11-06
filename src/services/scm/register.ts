@@ -4,6 +4,7 @@
 // The local commands, the plans and their runs, cancel, the latest run and PR state: the twelve commands of the namespace.
 import type { AppSessionId } from '@shared/graph/ids';
 import { HostCommandError } from '@shared/host/runtime';
+import type { HandlerContext } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import { machineHomes } from '@shared/machine/machine-home';
@@ -20,9 +21,9 @@ export const SCM_HOME_REFUSAL = 'the session works in this machine’s home, whi
 export function registerScmHandlers(service: ScmService, { register }: Pick<ServicesBus, 'register'>, homes: () => readonly string[] = machineHomes): void {
   const session = <T extends { appSessionId: string }>(input: T) => ({ ...input, appSessionId: input.appSessionId as AppSessionId });
   const scm = <N extends CommandName>(name: N, run: (input: CommandInput<N>) => Promise<CommandOutput<N>>) =>
-    register(name, async (input, context) => {
+    register(name, async (input, context?: HandlerContext) => {
       const { appSessionId } = input as unknown as { appSessionId: string };
-      if (context.remote === true && (await service.coversHome(appSessionId as AppSessionId, homes()))) throw new HostCommandError(ipcError('internal', SCM_HOME_REFUSAL));
+      if (context?.remote === true && (await service.coversHome(appSessionId as AppSessionId, homes()))) throw new HostCommandError(ipcError('internal', SCM_HOME_REFUSAL));
       return relay(() => run(input));
     });
   scm('scm.status', ({ appSessionId }) => service.status(appSessionId as AppSessionId));

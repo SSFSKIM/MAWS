@@ -5,7 +5,7 @@
 // reloads) releases whatever it still holds, since its page can no longer unwatch and a reloaded page watches afresh.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientPort } from '@shared/client/port';
-import type { ClientId, ClientRef } from '@shared/ipc/client';
+import type { ClientId, ClientRef, HandlerContext } from '@shared/ipc/client';
 import type { FilesChanged, FilesReadUploadsInput, FilesReadUploadsOutput, FilesUploadInput, FilesUploadOutput } from '@shared/ipc/schema/files';
 import type { ServicesBus } from '@shared/spine/bus';
 import type { AllowlistRecord } from './allowlist';
@@ -43,12 +43,14 @@ export function registerFilesHandlers(records: (appSessionId: AppSessionId) => A
   };
   const session = (id: string) => id as AppSessionId;
   // 2026-11-06: a remote request's roots leave out the machine's home (the context's `remote`, the endpoint seam's)
-  register('files.list', ({ appSessionId, path }, { remote }) => files.list({ appSessionId: session(appSessionId), path }, remote === true));
-  register('files.read', (input, { remote }) => files.read({ ...input, appSessionId: session(input.appSessionId) }, remote === true));
-  register('files.write', (input, { remote }) => files.write({ ...input, appSessionId: session(input.appSessionId) }, remote === true)); // E5
-  register('files.watch', async ({ appSessionId, path }, { client, remote }) => {
+  const remote = (context: HandlerContext | undefined) => context?.remote === true; // a caller that passes no context is this machine's
+  register('files.list', ({ appSessionId, path }, context?: HandlerContext) => files.list({ appSessionId: session(appSessionId), path }, remote(context)));
+  register('files.read', (input, context?: HandlerContext) => files.read({ ...input, appSessionId: session(input.appSessionId) }, remote(context)));
+  register('files.write', (input, context?: HandlerContext) => files.write({ ...input, appSessionId: session(input.appSessionId) }, remote(context))); // E5
+  register('files.watch', async ({ appSessionId, path }, context: HandlerContext) => {
+    const { client } = context;
     follow(client);
-    await files.watch(session(appSessionId), path, client.id, remote === true);
+    await files.watch(session(appSessionId), path, client.id, remote(context));
     if (!followed.has(client.id)) await files.unwatch(session(appSessionId), path, client.id); // released while in flight
   });
   register('files.unwatch', ({ appSessionId, path }, { client }) => files.unwatch(session(appSessionId), path, client.id));
