@@ -12,7 +12,7 @@
 // sessions on the stub engine, a real process each under a real session host, instead of the in-process replay:
 // every launch of the app names the stub (MAWS_E2E_ENGINE_BIN), and `launchSession` (and so `startTurn`) launches live
 // sessions that play their fixture on it. Every other case keeps the replay.
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -293,9 +293,32 @@ export class Scratch {
     await run.exited;
   }
 
+  // A quit ends in about 0.2 to 0.6 s on a hosted Mac (39 timed in run 42152465959). One that runs past the bound says
+  // how far it got, in ms from the call: main's report, the guard's line, and Node's wait for Playwright's inspector to
+  // detach, which comes only once Electron's main loop has ended (the app's own shutdown done, Chromium's teardown and
+  // the exit still ahead); and leaves the process's stacks beside the test's results (run 41995538110: 20 s with the
+  // guard's line and no more to go on).
   async quit(run: Run): Promise<void> {
-    await run.maws.app.evaluate(({ app }) => app.quit());
-    await bounded(run.exited, 20_000, () => `MAWS did not quit; the guard said ${JSON.stringify(run.quitLines())}`);
+    const started = Date.now();
+    const at: Record<string, number> = {};
+    const watch = (chunk: Buffer | string) => {
+      const text = String(chunk);
+      for (const [name, line] of [['report', /(^|\n)quit-report:/], ['guard', /(^|\n)quit-guard:/], ['debugger', /Waiting for the debugger to disconnect/]] as const) {
+        if (at[name] === undefined && line.test(text)) at[name] = Date.now() - started;
+      }
+    };
+    run.child.stdout?.on('data', watch);
+    run.child.stderr?.on('data', watch);
+    try {
+      await run.maws.app.evaluate(({ app }) => app.quit());
+      await bounded(run.exited, 20_000, () => {
+        const phases = Object.entries(at).map(([name, ms]) => `${name} +${ms} ms`).join(', ') || 'no line';
+        return `MAWS did not quit; the guard said ${JSON.stringify(run.quitLines())}; seen: ${phases}; stacks: ${sampleStuck(run.child.pid)}`;
+      });
+    } finally {
+      run.child.stdout?.off('data', watch);
+      run.child.stderr?.off('data', watch);
+    }
   }
 
   // Every app this case launched is killed, then every supervisor it saw or that names its profile, then the profile.
@@ -317,6 +340,19 @@ export class Scratch {
     if (!socketDir.startsWith(this.root)) rmSync(socketDir, { recursive: true, force: true });
     rmSync(this.root, { recursive: true, force: true });
     if (leftover !== null) throw leftover;
+  }
+}
+
+// A process that would not exit: two seconds of its threads' stacks (macOS's `sample`) in the test's output directory,
+// answered as that file's path, or why there is none.
+function sampleStuck(pid: number | undefined): string {
+  if (pid === undefined) return 'no pid';
+  const file = test.info().outputPath(`quit-stuck-${pid}.sample.txt`);
+  try {
+    execFileSync('/usr/bin/sample', [String(pid), '2', '-mayDie', '-file', file], { stdio: 'ignore', timeout: 30_000 });
+    return file;
+  } catch (error) {
+    return `sample failed: ${String(error).slice(0, 200)}`;
   }
 }
 
