@@ -6,7 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { preAmendmentIndex, summary, tempDir } from '../../../test/support/index-fixture';
 import { openDb } from './db';
 import { Index } from './index';
-import { ADDED_COLUMNS, MIGRATIONS, REPAIRS } from './migrations';
+import { ADDED_COLUMNS, ADDED_TABLES, MIGRATIONS, REPAIRS } from './migrations';
 
 describe('the index opens, migrates and refuses what it cannot own', () => {
   let dir: ReturnType<typeof tempDir>;
@@ -37,16 +37,16 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
   };
 
   // P3-L: version 10's four library tables, the FTS5 table with its five shadow tables; P5 O3-A: no browser table since 14
-  it('a fresh index has user_version 16 and the sixteen tables (with AUTOINCREMENT\'s sqlite_sequence and FTS5\'s shadow tables), in WAL mode', () => {
+  it('a fresh index has user_version 15 and the fifteen tables (with AUTOINCREMENT\'s sqlite_sequence and FTS5\'s shadow tables), in WAL mode', () => {
     const path = join(dir.path, 'index.sqlite');
     const index = open(path);
     expect(index.readOnly).toBe(false);
-    expect(index.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]); // cua board #90: 7; P2-C: 8; P2-C2: 9; P3-L: 10; P5 O3-A: 14; search resume: 15
-    expect(MIGRATIONS).toHaveLength(16); // P5 O6 M5: 13; P5 O3-A: 14; search resume: 15; P5 O8 M7b: 16
+    expect(index.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]); // cua board #90: 7; P2-C: 8; P2-C2: 9; P3-L: 10; P5 O3-A: 14; search resume: 15
+    expect(MIGRATIONS).toHaveLength(15); // P5 O6 M5: 13; P5 O3-A: 14; search resume: 15
     expect(inspect(path)).toEqual({
-      version: 16,
+      version: 15,
       tables: [
-        'attention_items', 'channel_entries' /* P5 O8 M7b */, 'drafts',
+        'attention_items', 'channel_entries' /* P5 O8 M7b: an ADDED_TABLES entry */, 'drafts',
         'library_artifacts', 'library_links', 'library_spaces', 'library_text', 'library_text_config', 'library_text_content', 'library_text_data', 'library_text_docsize', 'library_text_idx', // P3-L
         'owner_channel_marks', 'owner_channel_sessions', 'projects', 'replay_fixtures', 'session_text', 'session_text_chunks', 'session_text_config', 'session_text_content', 'session_text_data', 'session_text_docsize', 'session_text_idx', 'session_text_state', 'sessions', 'side_threads', 'sqlite_sequence',
       ],
@@ -67,9 +67,9 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
   });
 
   // P5 O7 M4 (ADDED_COLUMNS): `launched_by` is added at any version without moving `user_version`, so a file the build
-  // before wrote gains it, and the build before (which knows its own last version) still opens a file this one wrote; a record keeps its
+  // before wrote gains it, and the build before (which knows 15) still opens a file this one wrote; a record keeps its
   // `launchedBy` across opens, and one written without it reads none.
-  it('adds launched_by to a file at 16 that lacks it, user_version unmoved, and a record keeps its launchedBy', () => {
+  it('adds launched_by to a file at 15 that lacks it, user_version unmoved, and a record keeps its launchedBy', () => {
     const path = join(dir.path, 'index.sqlite');
     const first = open(path);
     const kept = first.sessions.createForLaunch({ directory: '/w', additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode: { requested: 'default', effective: 'default', refusal: null } }).record;
@@ -83,10 +83,44 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     const launchedBy = { member: 'mem-a', device: 'dev-1', opId: 'op-1', action: { action: 'session.spawn', signature: 'sig' } };
     const spawned = reopened.sessions.createForLaunch({ directory: '/w', additionalDirectories: [], worktree: null, model: { requested: null, resolved: null }, effort: null, permissionMode: { requested: 'default', effective: 'default', refusal: null }, launchedBy }).record;
     reopened.close();
-    expect(inspect(path).version).toBe(16);
+    expect(inspect(path).version).toBe(15);
     const again = open(path);
     expect(again.applied).toEqual([]);
     expect(again.sessions.get(spawned.appId)?.launchedBy).toEqual(launchedBy);
+  });
+
+  // P5 O8 M7b (the architect's ruling on M7b Task 1): a table no earlier build reads is an ADDED_TABLES entry, created with
+  // its indexes after the migrations at any version, `user_version` unmoved, so the build before still opens the file
+  // (a newer `user_version` would cost a downgraded build its whole index); a file that lacks it gains it, rows elsewhere
+  // untouched, and one that holds it keeps its rows
+  it('creates each added table and its indexes on any file that lacks it, user_version unmoved, and keeps one it holds', () => {
+    const path = join(dir.path, 'index.sqlite');
+    const first = open(path);
+    expect(ADDED_TABLES.map((table) => table.table)).toEqual(['channel_entries']);
+    first.channel.record({ project: 'p', appSessionId: null, engineSessionId: null, lane: 'A', kind: 'message', text: 'kept', at: new Date().toISOString(), src: 'p/w/1' }, Date.now());
+    first.close();
+    opened.pop();
+    expect(inspect(path).version).toBe(15);
+    const again = open(path);
+    expect(again.applied).toEqual([]);
+    expect(again.channel.history({ project: 'p', limit: 10 }, Date.now()).entries.map((entry) => entry.text)).toEqual(['kept']);
+    again.close();
+    opened.pop();
+    const raw = new DatabaseSync(path);
+    raw.exec('DROP TABLE channel_entries'); // the file as the build before leaves it
+    raw.close();
+    const reopened = open(path);
+    expect(reopened.applied).toEqual([]);
+    expect(reopened.channel.history({ project: 'p', limit: 10 }, Date.now()).entries).toEqual([]);
+    reopened.close();
+    opened.pop();
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      expect((db.prepare("SELECT name FROM sqlite_master WHERE tbl_name = 'channel_entries' ORDER BY name").all() as { name: string }[]).map((row) => row.name)).toEqual(['channel_entries', 'channel_entries_at', 'channel_entries_project_at', 'sqlite_autoindex_channel_entries_1']);
+      expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(15);
+    } finally {
+      db.close();
+    }
   });
 
   // P5 O7 M4 (the architect's conditions on ADDED_COLUMNS): the guard iterates the constant itself, so every future entry
@@ -153,7 +187,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     raw.close();
 
     const index = open(path);
-    expect(index.applied).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]); // cua board #90: 7; P2-C: 8; P2-C2: 9; P3-L: 10; P5 O3-A: 14; search resume: 15
+    expect(index.applied).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]); // cua board #90: 7; P2-C: 8; P2-C2: 9; P3-L: 10; P5 O3-A: 14; search resume: 15
     const routed = (appId: string) => index.sessions.get(appId as AppSessionId)?.gateway.routed;
     expect([routed('discovered'), routed('routed'), routed('direct'), routed('mismatch')]).toEqual([null, true, false, false]);
     // The rebuild touches only the flag: every other column, its values and the project index survive.
@@ -190,7 +224,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     raw.close();
 
     const index = open(path);
-    expect(index.applied).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]); // cua board #90: 7; P2-C: 8; P2-C2: 9; P3-L: 10; P5 O3-A: 14; search resume: 15
+    expect(index.applied).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]); // cua board #90: 7; P2-C: 8; P2-C2: 9; P3-L: 10; P5 O3-A: 14; search resume: 15
     const of = (appId: string) => index.sessions.get(appId as AppSessionId)!;
     expect([of('non-repo').branch, of('empty').branch, of('empty').worktree, of('on-main').branch, of('on-main').worktree]).toEqual([
       null,
@@ -223,7 +257,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     raw.close();
 
     const index = open(path);
-    expect(index.applied).toEqual([4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]); // cua board #90: 7; P2-C: 8; P2-C2: 9; P3-L: 10; P5 O3-A: 14; search resume: 15
+    expect(index.applied).toEqual([4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]); // cua board #90: 7; P2-C: 8; P2-C2: 9; P3-L: 10; P5 O3-A: 14; search resume: 15
     const db = new DatabaseSync(path, { readOnly: true });
     try {
       const columns = (db.prepare('PRAGMA table_info(sessions)').all() as { name: string; type: string }[]).map((c) => [c.name, c.type]);
@@ -231,7 +265,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       const sideColumns = (db.prepare('PRAGMA table_info(side_threads)').all() as { name: string }[]).map((c) => c.name);
       expect(sideColumns).toEqual(['child_app_id', 'parent_app_id', 'opened_at', 'summarised_at', 'text', 'is_error', 'turns', 'last_turn_event_id']);
       const indexes = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]).map((i) => i.name);
-      expect(indexes).toEqual(['channel_entries_at', 'channel_entries_project_at' /* P5 O8 M7b: v16 */, 'library_artifacts_updated', 'library_links_session', 'owner_channel_marks_session', 'session_text_chunks_app', 'sessions_project', 'sessions_root', 'side_threads_parent']); // P2-C: v8; P3-L: v10; the browser's (v5 to v7) went with their tables at v14 (P5 O3-A)
+      expect(indexes).toEqual(['channel_entries_at', 'channel_entries_project_at' /* P5 O8 M7b: ADDED_TABLES */, 'library_artifacts_updated', 'library_links_session', 'owner_channel_marks_session', 'session_text_chunks_app', 'sessions_project', 'sessions_root', 'side_threads_parent']); // P2-C: v8; P3-L: v10; the browser's (v5 to v7) went with their tables at v14 (P5 O3-A)
       const sizes = db.prepare('SELECT app_id, transcript_size, transcript_mtime_ms, lineage, lineage_source FROM sessions ORDER BY app_id').all();
       expect(sizes).toEqual([
         { app_id: 'no-transcript', transcript_size: null, transcript_mtime_ms: null, lineage: null, lineage_source: null },
@@ -257,7 +291,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     raw.close();
 
     const index = open(path);
-    expect(index.applied).toEqual([8, 9, 10, 11, 12, 13, 14, 15, 16]); // P2-C2: 9; P3-L: 10; P5 O3-A: 14; search resume: 15
+    expect(index.applied).toEqual([8, 9, 10, 11, 12, 13, 14, 15]); // P2-C2: 9; P3-L: 10; P5 O3-A: 14; search resume: 15
     expect(index.sessions.get('kept' as AppSessionId)).not.toBeNull();
     const db = new DatabaseSync(path, { readOnly: true });
     try {
@@ -295,7 +329,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     raw.close();
 
     const index = open(path);
-    expect(index.applied).toEqual([9, 10, 11, 12, 13, 14, 15, 16]); // P3-L's 10 follows
+    expect(index.applied).toEqual([9, 10, 11, 12, 13, 14, 15]); // P3-L's 10 follows
     const db = new DatabaseSync(path, { readOnly: true });
     try {
       expect(dump(db)).toEqual(before);
@@ -325,7 +359,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     raw.close();
 
     const index = open(path);
-    expect(index.applied).toEqual([10, 11, 12, 13, 14, 15, 16]);
+    expect(index.applied).toEqual([10, 11, 12, 13, 14, 15]);
     expect(index.sessions.get('kept' as AppSessionId)).not.toBeNull();
     expect(index.ownerChannel.override('kept' as AppSessionId)).toBe('off');
     const db = new DatabaseSync(path, { readOnly: true });
@@ -510,9 +544,9 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const index = open(path);
     expect(index.readOnly).toBe(true);
-    expect(index.unavailable).toBe('user_version 99 is newer than this app knows (16)');
+    expect(index.unavailable).toBe('user_version 99 is newer than this app knows (15)');
     expect(error).toHaveBeenCalledWith(expect.stringContaining('user_version 99'));
-    const message = 'index unavailable: user_version 99 is newer than this app knows (16)';
+    const message = 'index unavailable: user_version 99 is newer than this app knows (15)';
     expect(() => index.sessions.list()).toThrow(message);
     expect(() => index.sessions.get('x' as AppSessionId)).toThrow(message);
     expect(() => index.sessions.setPinned('x' as AppSessionId, true)).toThrow(message);
@@ -568,13 +602,13 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const index = open(path);
     expect(index.readOnly).toBe(false);
-    expect(index.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]); // cua board #90: 7; P2-C: 8; P2-C2: 9; P3-L: 10; P5 O3-A: 14; search resume: 15
+    expect(index.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]); // cua board #90: 7; P2-C: 8; P2-C2: 9; P3-L: 10; P5 O3-A: 14; search resume: 15
     const aside = readdirSync(dir.path).filter((name) => /^index\.sqlite\.broken-\d+$/.test(name));
     expect(aside).toHaveLength(1);
     expect(readFileSync(join(dir.path, aside[0]), 'utf8')).toBe(garbage);
     expect(error).toHaveBeenCalledWith(expect.stringContaining(aside[0]));
     expect(existsSync(path)).toBe(true);
-    expect(inspect(path).version).toBe(16); // cua board #90: 7; P2-C: 8; P2-C2: 9; P3-L: 10; P5 O3-A: 14; search resume: 15
+    expect(inspect(path).version).toBe(15); // cua board #90: 7; P2-C: 8; P2-C2: 9; P3-L: 10; P5 O3-A: 14; search resume: 15
   });
 
   it('a transient failure at open (another connection holds the lock) throws and leaves the file untouched', () => {

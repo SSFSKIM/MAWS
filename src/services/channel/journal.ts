@@ -1,5 +1,5 @@
 // The project channel's journal (P5 O8 M7b, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M7b, Interfaces
-// §O; index migration 16): the to-human entries this machine's sessions wrote, per org project, as `channel.history`
+// §O; the index's ADDED_TABLES): the to-human entries this machine's sessions wrote, per org project, as `channel.history`
 // pages them. An entry is recorded once by its `src` (a resend, a replayed batch or a state stated again adds nothing),
 // and the journal keeps the newest CHANNEL_BOUNDS.perProject of each project and nothing older than
 // CHANNEL_BOUNDS.maxAgeMs: pruned at each record and at start, and never read past the age bound in between.

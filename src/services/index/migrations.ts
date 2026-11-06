@@ -278,22 +278,6 @@ ALTER TABLE projects ADD COLUMN org_smns_id TEXT;
   // The conversation-search index resumes a transcript where it last stopped (src/services/index/session-search.ts): a
   // ready text's checkpoint, JSON, null until its next full pass.
   { version: 15, sql: 'ALTER TABLE session_text_state ADD COLUMN resume TEXT;' },
-  {
-    version: 16,
-    // P5 O8 M7b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M7b, Interfaces §O): the project channel's
-    // journal (src/services/channel/journal.ts), the to-human entries this machine's sessions wrote per org project
-    // (sminos's id), lane B's read from the owner channel's batches and lane A's handed in by the endpoint. `src` is each
-    // entry's origin, so a resend or a replay adds no row; `at` is epoch milliseconds, so entries from either lane order by
-    // time whatever their ISO spelling. Kept to the newest 2,000 per project and 30 days; no foreign key: an entry stays
-    // the project's history after its session goes.
-    sql: `
-CREATE TABLE channel_entries (id INTEGER PRIMARY KEY, project TEXT NOT NULL, app_session_id TEXT, engine_session_id TEXT,
-  lane TEXT NOT NULL CHECK (lane IN ('A','B')), kind TEXT NOT NULL CHECK (kind IN ('message','question','answered')),
-  text TEXT NOT NULL, choices TEXT, at INTEGER NOT NULL, src TEXT NOT NULL, UNIQUE(src));
-CREATE INDEX channel_entries_project_at ON channel_entries(project, at, id);
-CREATE INDEX channel_entries_at ON channel_entries(at);
-`,
-  },
 ];
 
 export const REPAIRS: readonly Repair[] = [{ version: 1, table: 'sessions', column: 'removed_at', definition: 'TEXT' }];
@@ -318,4 +302,33 @@ export const ADDED_COLUMNS: readonly AddedColumn[] = [
   // an older build reads and writes as before; null for a session never verified on the machine route
   { table: 'sessions', column: 'gateway_route', definition: 'TEXT' },
   { table: 'sessions', column: 'gateway_observed', definition: 'TEXT' },
+];
+
+// A table added without moving `user_version` (P5 O8 M7b; the spec's Decision Log, the architect's rulings on M7b Task
+// 1's report), for the reason ADDED_COLUMNS gives: the build before still opens the file, and a table it does not know
+// costs it nothing. Only a table no earlier build reads qualifies. Its SQL creates it and its indexes `IF NOT EXISTS`; the
+// opener runs it, after the migrations and the added columns, on any file that lacks the table, at any version. One is
+// never dropped or renamed; anything else is a migration.
+export interface AddedTable {
+  table: string;
+  sql: string; // CREATE TABLE IF NOT EXISTS … and its CREATE INDEX IF NOT EXISTS …
+}
+
+export const ADDED_TABLES: readonly AddedTable[] = [
+  // P5 O8 M7b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M7b, Interfaces §O): the project channel's
+  // journal (src/services/channel/journal.ts), the to-human entries this machine's sessions wrote per org project
+  // (sminos's id), lane B's read from the owner channel's batches and MAWS asks, lane A's handed in by the endpoint. `src`
+  // is each entry's origin, so a resend or a replay adds no row; `at` is epoch milliseconds, so entries from either lane
+  // order by time whatever their ISO spelling. Kept to the newest 2,000 per project and 30 days; no foreign key: an entry
+  // stays the project's history after its session goes.
+  {
+    table: 'channel_entries',
+    sql: `
+CREATE TABLE IF NOT EXISTS channel_entries (id INTEGER PRIMARY KEY, project TEXT NOT NULL, app_session_id TEXT, engine_session_id TEXT,
+  lane TEXT NOT NULL CHECK (lane IN ('A','B')), kind TEXT NOT NULL CHECK (kind IN ('message','question','answered')),
+  text TEXT NOT NULL, choices TEXT, at INTEGER NOT NULL, src TEXT NOT NULL, UNIQUE(src));
+CREATE INDEX IF NOT EXISTS channel_entries_project_at ON channel_entries(project, at, id);
+CREATE INDEX IF NOT EXISTS channel_entries_at ON channel_entries(at);
+`,
+  },
 ];
