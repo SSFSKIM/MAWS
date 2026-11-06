@@ -110,8 +110,10 @@ type MarkSets = { apps: Set<string>; engines: Set<string> };
 export class Members implements RecordSource, CheckoutSource {
   readonly #ctx: MembersContext;
   readonly #members = new Map<string, Member>();
-  /** Lane B: engine session id → appSessionId, from `engine.sessions`. */
+  /** Lane B: engine session id → appSessionId, from `engine.sessions` (or, Decision Log 190 (b), by the record's spawn). */
   readonly #apps = new Map<string, string>();
+  /** P5 Decision Log 190 (b): the engine sessions joined by their spawn, which the live rows did not name (superseded). */
+  readonly #bySpawned = new Set<string>();
   readonly #checkouts = new Map<string, string[]>();
   readonly #listeners = new Set<(target: SessionTarget) => void>();
   /** The sessions held from before the latest welcome, not restated since; null outside a restatement. */
@@ -171,6 +173,7 @@ export class Members implements RecordSource, CheckoutSource {
     this.#members.delete(session);
     if (member !== undefined) {
       this.#apps.delete(session);
+      this.#bySpawned.delete(session);
       this.#changed(member, member);
     }
     // A lane B app's listing outlives an engine session it superseded: while another member holds the listing (the
@@ -328,9 +331,16 @@ export class Members implements RecordSource, CheckoutSource {
     if (sessions === null) return;
     const spawns = [...new Set(sessions.flatMap((record) => (isObject(record) && isId(record.appId) && isObject(record.launchedBy) && record.launchedBy.opId === opId ? [record.appId] : [])))];
     if (spawns.length > 1) this.#ctx.log(`endpoint: a lane B record's spawn ${opId.slice(0, 64)} names ${spawns.length} app sessions; it is placed under none, and each is handed off`);
-    // A member gone or joined meanwhile is not joined here; its sight is passed on all the same.
-    if (spawns.length === 1 && this.#members.get(session)?.lane === 'B' && !this.#apps.has(session)) this.#apps.set(session, spawns[0]!);
-    for (const app of spawns) this.#placed(session, app);
+    // A member gone or joined meanwhile is not joined here; its sight is passed on all the same, and each app session
+    // it passed to, but not joined under, is told, so a subscription held there by the bridge is decided again.
+    if (spawns.length === 1 && this.#members.get(session)?.lane === 'B' && !this.#apps.has(session)) {
+      this.#apps.set(session, spawns[0]!);
+      this.#bySpawned.add(session);
+    }
+    for (const app of spawns) {
+      this.#placed(session, app);
+      if (this.#apps.get(session) !== app) this.#tell({ lane: 'B', session, appSessionId: app });
+    }
   }
 
   /** P5 O12 M11: the handed-off mark as on disk, read on its first use (then pruned once); null while it can't be read. */
@@ -414,6 +424,8 @@ export class Members implements RecordSource, CheckoutSource {
   async #report(member: Member): Promise<void> {
     const session = this.listingId(member.session);
     if (session === null) return;
+    // P5 Decision Log 190 (b): a superseded record joined by its spawn never replaces its successor's listing.
+    if (this.#bySpawned.has(member.session) && this.sessions().some((other) => other !== member.session && this.listingId(other) === session)) return;
     await this.#ctx.listings.report({
       session,
       project: member.project,
@@ -430,7 +442,11 @@ export class Members implements RecordSource, CheckoutSource {
     const same = before !== undefined && before !== now && JSON.stringify([before.owners, before.access, before.shares, before.launch, before.lane]) === JSON.stringify([now.owners, now.access, now.shares, now.launch, now.lane]);
     if (same) return;
     const app = this.#apps.get(now.session);
-    const target: SessionTarget = now.lane === 'A' ? { lane: 'A', session: now.session } : { lane: 'B', session: now.session, appSessionId: app ?? '' };
+    this.#tell(now.lane === 'A' ? { lane: 'A', session: now.session } : { lane: 'B', session: now.session, appSessionId: app ?? '' });
+  }
+
+  /** Tells the record's listeners that what authorization reads of `target` may have moved. */
+  #tell(target: SessionTarget): void {
     for (const listener of this.#listeners) {
       try {
         listener(target);
