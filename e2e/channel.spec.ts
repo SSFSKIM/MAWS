@@ -22,6 +22,7 @@ import type { ChannelAnswer, ChannelEvent, ChannelSession, OrgMember, OrgStatus 
 import { memberNames } from '../src/shared/org/member-name';
 import { CHANNEL } from '../src/renderer/src/channel/copy';
 import { addressed } from './support/address';
+import { actionsNotWhole, addClippedProbes, type ActionEntry } from './support/actions-whole';
 import { launchMaws, REPO_ROOT } from './support/launch';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now; a plain build's main lacks the seam.
@@ -150,43 +151,8 @@ function overflowing(root: Element): string[] {
     .map((el) => `${el.tagName.toLowerCase()}${el.hasAttribute('data-channel-entry') ? `[${el.getAttribute('data-channel-entry')}]` : ''} "${(el.textContent ?? '').slice(0, 60)}" ${el.scrollWidth} > ${el.clientWidth}`);
 }
 
-// Every action under `root` that is not drawn whole: each is scrolled into view first (the stream scrolls, which is no
-// fault), then its four edges must lie inside its entry (or card, else `root`), inside every ancestor that clips (an
-// overflow other than visible), and inside the window. Each offender as `"<text>" <box> outside <what> <box>`.
-function actionsNotWhole(root: Element): string[] {
-  type Box = { left: number; top: number; right: number; bottom: number };
-  const inside = (a: Box, b: Box) => a.left >= b.left - 0.5 && a.top >= b.top - 0.5 && a.right <= b.right + 0.5 && a.bottom <= b.bottom + 0.5;
-  const shown = (b: Box) => `${Math.round(b.left)},${Math.round(b.top)}..${Math.round(b.right)},${Math.round(b.bottom)}`;
-  return Array.from(root.querySelectorAll('button')).flatMap((button) => {
-    button.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
-    const box = button.getBoundingClientRect();
-    const name = `"${(button.textContent ?? '').trim().slice(0, 60)}" ${shown(box)}`;
-    if (box.width === 0 || box.height === 0 || getComputedStyle(button).visibility !== 'visible') return [`${name} not drawn`];
-    const bounds: Array<[string, Box]> = [
-      ['its entry', (button.closest('[data-channel-entry], [data-channel-card]') ?? root).getBoundingClientRect()],
-      ['the window', { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }],
-    ];
-    for (let el = button.parentElement; el !== null; el = el.parentElement) {
-      const style = getComputedStyle(el);
-      if (style.overflowX === 'visible' && style.overflowY === 'visible') continue;
-      const r = el.getBoundingClientRect();
-      const left = r.left + el.clientLeft;
-      const top = r.top + el.clientTop;
-      bounds.push([`clipping ${el.tagName.toLowerCase()}`, { left, top, right: left + el.clientWidth, bottom: top + el.clientHeight }]);
-    }
-    return bounds.filter(([, b]) => !inside(box, b)).map(([what, b]) => `${name} outside ${what} ${shown(b)}`);
-  });
-}
-
-// Two actions clipped on purpose, one across and one down, appended to `root` as entries (each marked `data-probe`,
-// removed after): the check above must name both, or it proves nothing about the tab.
-function addClippedProbes(root: Element): void {
-  root.insertAdjacentHTML(
-    'beforeend',
-    '<div data-probe data-channel-entry="probe" style="overflow:hidden;width:40px"><button type="button" style="width:120px">wide probe</button></div>' +
-      '<div data-probe data-channel-entry="probe" style="overflow:hidden;height:8px"><button type="button" style="height:24px">tall probe</button></div>',
-  );
-}
+/** An action lies inside its entry, or its card. */
+const ENTRY: ActionEntry = { selector: '[data-channel-entry], [data-channel-card]', name: 'its entry', probe: 'data-channel-entry="probe"' };
 
 const scrollLog = (page: Page, to: 'top' | 'foot') =>
   page.locator(`[data-channel="${PROJECT}"] [role="log"]`).evaluate((el, where) => {
@@ -255,10 +221,10 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
 
       expect(await channel.evaluate(overflowing), 'nothing in the Channel tab is wider than its box').toEqual([]);
       expect(await channel.getByRole('button').count(), 'the seeded channel offers its actions').toBeGreaterThan(0);
-      expect(await channel.evaluate(actionsNotWhole), 'every action is drawn whole inside its entry').toEqual([]);
+      expect(await channel.evaluate(actionsNotWhole, ENTRY), 'every action is drawn whole inside its entry').toEqual([]);
       // ...and the check sees a clipped action when there is one
-      await channel.evaluate(addClippedProbes);
-      const probed = await channel.evaluate(actionsNotWhole);
+      await channel.evaluate(addClippedProbes, ENTRY);
+      const probed = await channel.evaluate(actionsNotWhole, ENTRY);
       await channel.evaluate((root) => root.querySelectorAll('[data-probe]').forEach((probe) => probe.remove()));
       expect(probed.some((line) => line.startsWith('"wide probe"')) && probed.some((line) => line.startsWith('"tall probe"')), `the check names both probes: ${probed.join('; ')}`).toBe(true);
     } finally {
