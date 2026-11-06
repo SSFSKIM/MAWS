@@ -154,7 +154,7 @@ describe('the checkout rule', () => {
 
   it('reads the home by default as a home spawn starts in it (machineHome), so a chat in the home is always the root it drops', async () => {
     const dispatch = () => Promise.reject(new Error('no repository read for a dropped root'));
-    expect(await new CheckoutBounds().of({ directory: machineHome(), additionalDirectories: [], worktree: null }, dispatch)).toEqual({ within: [], dropped: [machineHome()] });
+    expect(await new CheckoutBounds().of({ directory: machineHome(), additionalDirectories: [], worktree: null }, dispatch)).toEqual({ within: [], roots: [], dropped: [machineHome()], checkoutCovers: true });
   });
 
   it('keeps a project root while the home added beside it bounds nothing', async () => {
@@ -168,15 +168,27 @@ describe('the checkout rule', () => {
     expect(code(await call(a, 'git.status', { directory: two.root }, B('app-1')))).toBe('no-target');
   });
 
-  it('drops a repository at the home (a home kept in git), while the project root inside it still bounds itself', async () => {
+  // The desk track's review (P1): git answers for the repository a path is in, so a root inside a home kept in git would
+  // read the whole home repository (its status's every file, an untracked file's contents through the diff).
+  it('bounds nothing of git’s by a root whose repository is a home (a home kept in git), nor that repository', async () => {
     const one = await repo();
     mkdirSync(join(one.root, 'proj'));
+    await one.write('proj/notes.md', 'notes\n');
+    await one.write('secret.txt', 'the home’s own\n'); // untracked in the home repository
+    const two = await repo();
     const f = await machine(one.serviceEnv(), one.root); // the home is the repository's root
     session(f, 'app-1', { directory: join(one.root, 'proj') });
+    session(f, 'app-2', { directory: join(one.root, 'proj'), additionalDirectories: [two.root] });
     const a = await openRemote(f, org.a1, org.A);
-    expect(code(await call(a, 'git.status', { directory: join(one.root, 'proj') }, B('app-1')))).toBe('ok');
+    const asked = f.host.calls.length;
+    expect(code(await call(a, 'git.status', { directory: join(one.root, 'proj') }, B('app-1')))).toBe('no-target');
+    expect(code(await call(a, 'git.diff', { directory: join(one.root, 'proj'), scope: 'untracked', path: 'secret.txt' }, B('app-1')))).toBe('no-target');
+    expect(code(await call(a, 'git.log', { directory: join(one.root, 'proj'), limit: 5 }, B('app-1')))).toBe('no-target');
     expect(code(await call(a, 'git.status', { directory: one.root }, B('app-1')))).toBe('no-target');
     expect(code(await call(a, 'git.worktree.list', { repoRoot: one.root }, B('app-1')))).toBe('no-target');
+    expect(f.host.calls.slice(asked).filter((c) => c.name === 'git.diff' || c.name === 'git.log' || c.name === 'git.worktree.list')).toEqual([]);
+    // a root of its own repository beside it keeps serving
+    expect(await call(a, 'git.status', { directory: two.root }, B('app-2'))).toMatchObject({ ok: true, output: { repoRoot: two.root } });
   });
 
   it('reads the bounds again when the session’s roots change', async () => {

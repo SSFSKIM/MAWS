@@ -339,7 +339,7 @@ export class Endpoint implements EndpointModule {
     this.hub.setChannels(this.channels.relay(this.hub));
     const authorization = options.authorization ?? {};
     const home = authorization.home;
-    this.checkoutBounds = new CheckoutBounds(home === undefined ? undefined : () => home);
+    this.checkoutBounds = new CheckoutBounds(home === undefined ? undefined : () => [home]);
     this.checkouts = authorization.checkouts ?? (options.projects === undefined ? this.rl10.members : anyCheckout(this.rl10.members, options.projects));
     const setupHome = authorization.setup;
     const setup = new MachineSetup(setupHome === undefined ? undefined : () => setupHome); // P5 O7 M9: the authorizer's and the folder list's

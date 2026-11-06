@@ -34,7 +34,7 @@ describe('main answers scm.* on the services bus', () => {
     expect(await bus.invoke('scm.stage', { appSessionId, paths: ['a.txt'] }, remote)).toEqual({ ok: false, error: { code: 'internal', message: SCM_HOME_REFUSAL } });
     expect(service.status).not.toHaveBeenCalled();
     expect(service.stage).not.toHaveBeenCalled();
-    expect(service.coversHome).toHaveBeenCalledWith(appSessionId, expect.any(String));
+    expect(service.coversHome).toHaveBeenCalledWith(appSessionId, expect.any(Array));
     service.coversHome.mockClear();
     expect(await invoke('scm.status', { appSessionId })).toMatchObject({ ok: true, value: { directory: '/r' } });
     expect(service.coversHome).not.toHaveBeenCalled();

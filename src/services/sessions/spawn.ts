@@ -8,8 +8,9 @@
 // (PR #411); nothing here loads anything on an event.
 // 2026-11-06 (the New chat's machine first): `checkout: '~'` (HOME_CHECKOUT, a machine owner's alone: the endpoint's
 // guard) is a chat in this machine's home with no project, as a local New chat's "Don't work in a project": its location
-// the home as the home-root rule reads it (machineHome, the one realpath both read), never `$HOME`; a worktree needs a
-// project's checkout.
+// `machineHome`, `os.homedir()`'s realpath read once (`$HOME`, else the account's), the home the trust card's `~` read and
+// the folder list read too, and one the home-root rule drops (it drops the account's home beside it: machineHomes); a
+// worktree needs a project's checkout.
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { LaunchedBy } from '@shared/graph/session';
 import { PermissionModeSchema } from '@shared/graph/enums';

@@ -52,7 +52,7 @@ import type { Action, SessionRef } from 'org-protocol';
 import { parseArtifactUrl } from '@shared/artifacts/scheme';
 import { sanitiseListId } from '@shared/engine/task-list';
 import type { LaunchedBy } from '@shared/graph/session';
-import { coversHome, machineHome } from '@shared/machine/machine-home';
+import { coversHome, machineHomes } from '@shared/machine/machine-home';
 import type { TargetRule } from './offers';
 import type { EndpointServices } from './services';
 import type { SessionTarget } from './sources';
@@ -301,10 +301,16 @@ export async function ownTaskList(input: unknown, target: Extract<SessionTarget,
 /** How many sessions' checkout bounds are kept: one entry per distinct set of roots. */
 export const CHECKOUT_BOUNDS_KEPT = 256;
 
-/** A session's checkout bounds (`within`), and its roots the home-root rule took out of them (`dropped`). */
+/**
+ * A session's checkout bounds as a remote reader has them: git's (`within`: its roots and their repositories), its roots
+ * a file may lie in (`roots`), the roots the home-root rule took out (`dropped`), and whether its checkout (the
+ * worktree's path, else its directory: scm's) is a home's, by itself or its repository (`checkoutCovers`).
+ */
 export interface Bounds {
   readonly within: readonly string[];
+  readonly roots: readonly string[];
   readonly dropped: readonly string[];
+  readonly checkoutCovers: boolean;
 }
 
 /**
@@ -317,37 +323,52 @@ export interface Bounds {
  * is read again next time (fix wave 1).
  *
  * 2026-11-06 (the home-root rule; the New chat's machine first, whose chat in a machine's home has the home as its
- * root): a root or a repository whose realpath is the machine's home or an ancestor of it (`/`, `/Users`) bounds nothing
- * for a remote reader, whoever they are, since it would reach every repository and file under the home. The dropped
- * roots are said beside the bounds (`dropped`), which the checkout feed reads for a file's change. The home is
- * src/shared/machine/machine-home.ts' (a home spawn's directory is the same), a suite's fake one when given.
+ * root): a root whose realpath is a home of the machine or an ancestor of one (`/`, `/Users`) is no root for a remote
+ * reader, whoever they are, since it would reach every repository and file under the home (`dropped`). And git answers
+ * for the repository a path is in, so a root whose repository is such (a home kept in git, a root inside it) bounds
+ * nothing of git's either: every path within the bounds then has a repository below the home (the nearest repository of
+ * a path under a root is the root's, or one nested deeper), which the `checkout` rule and the checkout feed's
+ * `git.changed` read. Its files stay the session's (`roots`). The homes are src/shared/machine/machine-home.ts' (a home
+ * spawn's directory is the first), a suite's fake one when given.
  */
 export class CheckoutBounds {
   readonly #kept = new Map<string, Bounds>();
 
-  constructor(private readonly home: () => string = machineHome) {}
+  constructor(private readonly homes: () => readonly string[] = machineHomes) {}
 
   /** The bounds of `record` (`session.get`'s answer), read on the machine through `dispatch`. */
   async of(record: unknown, dispatch: EndpointServices['dispatch']): Promise<Bounds> {
-    const home = this.home();
-    const resolved = await Promise.all(rootsOf(record).map((root) => realpathOf(root)));
-    const roots = [...new Set(resolved.filter((root): root is string => root !== null))];
-    const real = roots.filter((root) => !coversHome(root, home));
-    const dropped = roots.filter((root) => coversHome(root, home));
-    const key = JSON.stringify([real, dropped]);
+    const homes = this.homes();
+    const declared = rootsOf(record);
+    const resolved = await Promise.all(declared.map((root) => realpathOf(root)));
+    const all = [...new Set(resolved.filter((root): root is string => root !== null))];
+    const roots = all.filter((root) => !coversHome(root, homes));
+    const dropped = all.filter((root) => coversHome(root, homes));
+    const checkout = resolved[declared.indexOf(checkoutOf(record) ?? '')] ?? null; // the scm checkout's realpath, when it is a root that resolved
+    const key = JSON.stringify([roots, dropped, checkout]);
     const kept = this.#kept.get(key);
     if (kept !== undefined) return kept;
     let answered = !resolved.includes(null);
     const repos = await Promise.all(
-      real.map(async (root) => {
+      roots.map(async (root) => {
         const status = await dispatch('machine', 'git.status', { directory: root }).catch(() => null);
         if (status === null || (!status.ok && (status.error.code === 'host_unavailable' || status.error.code === 'timeout'))) answered = false;
         const repoRoot = status?.ok === true ? field(status.value, 'repoRoot') : undefined;
         return typeof repoRoot === 'string' ? realpathOf(repoRoot) : null;
       }),
     );
-    // a repository at the home or above it (a home kept in git) bounds nothing either: its root inside it still does
-    const bounds: Bounds = { within: [...new Set([...real, ...repos.filter((repo): repo is string => repo !== null && !coversHome(repo, home))])], dropped };
+    const within = new Set<string>();
+    let checkoutCovers = checkout === null || coversHome(checkout, homes);
+    roots.forEach((root, i) => {
+      const repo = repos[i];
+      if (repo !== null && coversHome(repo, homes)) {
+        if (root === checkout) checkoutCovers = true;
+        return; // a home's repository: git's answer would be the whole of it
+      }
+      within.add(root);
+      if (repo !== null) within.add(repo);
+    });
+    const bounds: Bounds = { within: [...within], roots, dropped, checkoutCovers };
     if (answered) {
       if (this.#kept.size >= CHECKOUT_BOUNDS_KEPT) this.#kept.delete(this.#kept.keys().next().value!);
       this.#kept.set(key, bounds);
@@ -373,6 +394,14 @@ export async function withinCheckout(input: unknown, appSessionId: string, placi
   if (record === null || !record.ok || record.value === null || typeof record.value !== 'object') return false;
   const [real, within] = await Promise.all([realpathOf(path), bounds.of(record.value, placing.dispatch)]);
   return real !== null && withinBounds(within.within, real);
+}
+
+/** A record's scm checkout, as the scm service reads it: its worktree's path, else its directory. */
+function checkoutOf(record: unknown): string | null {
+  const worktree = field(field(record, 'worktree'), 'path');
+  const directory = field(record, 'directory');
+  const checkout = typeof worktree === 'string' ? worktree : directory;
+  return typeof checkout === 'string' && isAbsolute(checkout) ? checkout : null;
 }
 
 /** A record's roots, as the files service reads them: its directory, its additional directories and its worktree. */

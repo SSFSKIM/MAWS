@@ -22,6 +22,9 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { gradeOf } from '@shared/ipc/grades';
 import { OFFERS } from '../../src/endpoint/offers';
+import { PlaneFeeds } from '../../src/endpoint/plane-feeds';
+import type { Subscription } from '../../src/endpoint/subscriptions';
+import { CheckoutBounds } from '../../src/endpoint/targets';
 import type { AllowlistRecord } from '../../src/services/files/allowlist';
 import { registerFilesHandlers } from '../../src/services/files/register';
 import { Index } from '../../src/services/index/index';
@@ -145,6 +148,77 @@ describe('a session’s checkout feed', () => {
       ['files.changed', change('app-proj', join(home, 'proj', 'a.ts'))],
       ['files.changed', change('app-proj', join(home, 'proj', 'b.ts'))],
     ]);
+  });
+
+  // The desk track's review (P2): a refresh of the bounds (the session's roots changed) holds the files' changes as it
+  // holds git's, so a root that is the home, just added, never lets a change under it through on the old bounds.
+  it('holds a file change while its bounds are read again, and reads it against the new ones: the home just added beside the project', async () => {
+    const home = scratch();
+    const proj = join(home, 'proj');
+    mkdirSync(proj);
+    const f = await startEndpoint(org, started, { home });
+    const record = session(f, 'app-1', proj);
+    let gate: Promise<void> = Promise.resolve();
+    let open: () => void = () => {};
+    f.spine.handle('git.status', async () => {
+      await gate;
+      return { repoRoot: null, branch: null, files: [] };
+    });
+    const a = await openRemote(f, org.a1, org.A);
+    await feed(a, 'f1', { lane: 'B', id: 'app-1' });
+    f.host.emitMachine('files.changed', { appSessionId: 'app-1', path: join(proj, 'a.ts'), kind: 'changed' });
+    await until(() => evs(a, 'f1').length === 1, 'the project’s change, on its first bounds');
+    gate = new Promise<void>((resolve) => (open = resolve));
+    const reads = f.host.calls.filter((c) => c.name === 'git.status').length;
+    f.host.emitMachine('session.changed', { record: { ...record, additionalDirectories: [home] }, cause: 'updated', revision: 2 });
+    await until(() => f.host.calls.filter((c) => c.name === 'git.status').length > reads, 'the bounds read again');
+    f.host.emitMachine('files.changed', { appSessionId: 'app-1', path: join(home, 'notes.txt'), kind: 'changed' }); // during the read
+    f.host.emitMachine('files.changed', { appSessionId: 'app-1', path: join(proj, 'b.ts'), kind: 'changed' });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(names(a, 'f1').filter(([name]) => name === 'files.changed')).toHaveLength(1); // held while read
+    open();
+    await until(() => names(a, 'f1').filter(([name]) => name === 'files.changed').length === 2, 'the held project change');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(names(a, 'f1').filter(([name]) => name === 'files.changed').map(([, payload]) => payload.path)).toEqual([join(proj, 'a.ts'), join(proj, 'b.ts')]);
+  });
+
+  // P3 (b): an scm run's output is a home's when the session's checkout is (scm's own rule), and is not carried then.
+  it('carries no scm output of a session whose checkout is the home, and a project’s', async () => {
+    const home = scratch();
+    const proj = join(home, 'proj');
+    mkdirSync(proj);
+    const f = await startEndpoint(org, started, { home });
+    session(f, 'app-home', home);
+    session(f, 'app-proj', proj);
+    f.spine.handle('git.status', () => ({ repoRoot: null, branch: null, files: [] }));
+    const a = await openRemote(f, org.a1, org.A);
+    await feed(a, 'fh', { lane: 'B', id: 'app-home' });
+    await feed(a, 'fp', { lane: 'B', id: 'app-proj' });
+    const output = (appSessionId: string) => ({ appSessionId, token: randomUUID(), seq: 1, kind: 'stdout', text: 'pushed' });
+    f.host.emitMachine('scm.remote.output', output('app-home'));
+    f.host.emitMachine('scm.remote.output', output('app-proj'));
+    await until(() => evs(a, 'fp').length >= 1, 'the project’s output');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(evs(a, 'fh')).toEqual([]);
+    expect(names(a, 'fp').map(([name]) => name)).toEqual(['scm.remote.output']);
+  });
+
+  // P1's feed half: a git change of a home's repository is no session's to hear, its project root inside it included.
+  it('carries no git change of a home kept in git, for a project root inside it', async () => {
+    const home = scratch();
+    const proj = join(home, 'proj');
+    mkdirSync(proj);
+    const f = await startEndpoint(org, started, { home });
+    session(f, 'app-1', proj);
+    f.spine.handle('git.status', () => status(home)); // the project's repository is the home's
+    const a = await openRemote(f, org.a1, org.A);
+    await feed(a, 'f1', { lane: 'B', id: 'app-1' });
+    await until(() => f.host.calls.some((c) => c.name === 'git.status'), 'the bounds read');
+    f.host.emitMachine('git.changed', { repoRoot: home, status: status(home), reason: 'fs' });
+    f.host.emitMachine('files.changed', { appSessionId: 'app-1', path: join(proj, 'a.ts'), kind: 'changed' }); // its files stay the session's
+    await until(() => evs(a, 'f1').length >= 1, 'the project’s file change');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(names(a, 'f1').map(([name]) => name)).toEqual(['files.changed']);
   });
 
   it('holds a git change that comes before its bounds are read, and follows the session’s roots as its record changes', async () => {
@@ -911,5 +985,34 @@ describe('the machine’s artifacts feed (P5 O7 M5a)', () => {
     const f = await startEndpoint(org, started);
     const c = await openRemote(f, org.c1, org.C, { passkey: org.passkey });
     expect(await feed(c, 'art', null, 'artifacts')).toMatchObject({ t: 'ended', reason: 'class' });
+  });
+});
+
+// The desk track's review (P2): bounds the feed couldn't read (the session's record unread: the spine away) are none it
+// delivers against, a file's change or an scm run's output held, never taken as a session with no root.
+describe('a checkout feed whose bounds couldn’t be read', () => {
+  it('delivers no file change and no scm output until bounds are read', async () => {
+    const home = scratch();
+    const sent: unknown[] = [];
+    const away = async () => ({ t: 'res', id: 'x', ok: false, error: { code: 'host_unavailable', message: 'the spine is away' } }) as never;
+    const feeds = new PlaneFeeds({ dispatch: away, bounds: new CheckoutBounds(() => [home]), ranks: (() => new Map()) as never, artifacts: { onDropped: () => () => {} } as never, leases: {} as never, browser: () => null, log: () => {} });
+    const sub = {
+      message: { feed: 'checkout' },
+      session: { lane: 'B', id: 'app-1' },
+      channel: { client: undefined },
+      ended: false,
+      backlog: 0,
+      subbed: () => {},
+      ev: (_cursor: unknown, body: unknown) => void sent.push(body),
+      end: () => {},
+    } as unknown as Subscription;
+    feeds.open(sub);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    feeds.event('machine', { name: 'files.changed', payload: { appSessionId: 'app-1', path: join(home, 'notes.txt'), kind: 'changed' } });
+    feeds.event('machine', { name: 'files.changed', payload: { appSessionId: 'app-1', path: '/elsewhere/a.ts', kind: 'changed' } });
+    feeds.event('machine', { name: 'scm.remote.output', payload: { appSessionId: 'app-1', token: randomUUID(), seq: 1, kind: 'stdout', text: 'pushed' } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(sent).toEqual([]);
+    feeds.stop();
   });
 });

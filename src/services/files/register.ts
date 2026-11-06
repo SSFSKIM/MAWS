@@ -18,7 +18,7 @@ export interface FilesHandlerDeps {
   port: Pick<ClientPort, 'openExternal' | 'reveal'>; // the client port (OX4): files.openExternal, E1's files.reveal
   env?: NodeJS.ProcessEnv;
   admitted?: (appSessionId: AppSessionId, real: string) => Promise<boolean>; // E2: the deliverable reader's admission (Design §3)
-  home?: () => string; // 2026-11-06: the machine's home as the home-root rule reads it (a suite's fake one)
+  homes?: () => readonly string[]; // 2026-11-06: the machine's homes as the home-root rule reads them (a suite's fake one)
   upload?: (input: FilesUploadInput) => Promise<FilesUploadOutput>; // P5 O3-E M3 (./upload.ts); none: every upload refused
   readUploads?: (input: FilesReadUploadsInput) => Promise<FilesReadUploadsOutput>; // P5 O7 M8 (./upload.ts); none: every read refused
 }

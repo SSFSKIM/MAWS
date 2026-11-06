@@ -33,12 +33,12 @@ export function allowlistOf(view: Pick<SpineView, 'record' | 'intent'>): (appSes
 }
 
 // The roots in record order (directory, additional directories, worktree), deduplicated by realpath; for a remote caller
-// (`remoteHome`, the machine's home's realpath), less any that is the home or above it.
-export async function rootsOf(record: AllowlistRecord, remoteHome?: string): Promise<string[]> {
+// (`remoteHomes`, the machine's homes' realpaths: machineHomes), less any that is a home or above one.
+export async function rootsOf(record: AllowlistRecord, remoteHomes?: readonly string[]): Promise<string[]> {
   const declared = [record.directory, ...record.additionalDirectories, ...(record.worktree ? [record.worktree.path] : [])];
   const resolved = await Promise.all(declared.map((path) => fs.promises.realpath(path).catch(() => null)));
   const roots = [...new Set(resolved.filter((root): root is string => root !== null))];
-  return remoteHome === undefined ? roots : roots.filter((root) => !coversHome(root, remoteHome));
+  return remoteHomes === undefined ? roots : roots.filter((root) => !coversHome(root, remoteHomes));
 }
 
 // Whether a realpath lies under a root: equal to it, or inside it at a segment boundary (`/repo2` is not under `/repo`).

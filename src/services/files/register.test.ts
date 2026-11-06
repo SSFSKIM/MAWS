@@ -79,7 +79,7 @@ describe('main answers files.* on the services bus', () => {
       ['R', { directory: '/', additionalDirectories: [], worktree: null }],
       ['P', { directory: join(home, 'proj'), additionalDirectories: [home], worktree: null }],
     ]);
-    const files = registerFilesHandlers((id) => records.get(id) ?? null, { bus, emit: vi.fn(), port: { openExternal: vi.fn(), reveal: vi.fn() }, env: {}, home: () => home });
+    const files = registerFilesHandlers((id) => records.get(id) ?? null, { bus, emit: vi.fn(), port: { openExternal: vi.fn(), reveal: vi.fn() }, env: {}, homes: () => [home] });
     dispose = () => files.dispose();
     const remote = { client: page, remote: true as const };
     const read = (appSessionId: string, path: string, asked: typeof remote | EndableClientRef = remote) => bus.invoke('files.read', { appSessionId, path }, asked) as Promise<Result>;

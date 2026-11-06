@@ -58,7 +58,7 @@ import {
 } from '@shared/ipc/schema/files';
 import { confirmOpened, NO_LINK, walk, WALKED } from '../fs/no-link';
 import { ReleaseFences } from '../release-fences';
-import { machineHome } from '@shared/machine/machine-home';
+import { machineHomes } from '@shared/machine/machine-home';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { fileMime, isTextMime } from './mime';
 import { sameIdentity, WatchTable, type Identity, type Installation } from './watch';
@@ -79,8 +79,8 @@ export interface FilesServiceOptions {
   // E2: whether the session's deliverable records name this realpath (main's `DeliverableReader.admitted`), consulted for
   // a path outside the roots by `read`, `openExternal` and `reveal` only (Design §3, Decision Log 18)
   admitted?: (appSessionId: AppSessionId, real: string) => Promise<boolean>;
-  // 2026-11-06: the machine's home as the home-root rule reads it for a remote caller (machineHome; a suite's fake one)
-  home?: () => string;
+  // 2026-11-06: the machine's homes as the home-root rule reads them for a remote caller (machineHomes; a suite's fake one)
+  homes?: () => readonly string[];
 }
 
 // E2: what an operation may reach beyond the roots. Only looking at a file (`read`) and handing it to the OS
@@ -147,7 +147,7 @@ interface Confirmed {
   roots: string[];
 }
 
-export function createFilesService({ records, hooks, emit = () => {}, port, env = process.env, admitted /* E2 */, home = machineHome }: FilesServiceOptions): FilesService {
+export function createFilesService({ records, hooks, emit = () => {}, port, env = process.env, admitted /* E2 */, homes = machineHomes }: FilesServiceOptions): FilesService {
   const at = async (point: BoundaryPoint, path: string) => {
     await hooks?.at?.(point, path);
   };
@@ -168,7 +168,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     const record = records(appSessionId);
     if (!record) throw new Error(`unknown app session: ${appSessionId}`);
     if (normalize(path) !== path || (path !== sep && path.endsWith(sep))) throw new Refusal();
-    let roots = await rootsOf(record, remote ? home() : undefined); // 2026-11-06: a remote caller's, less the home
+    let roots = await rootsOf(record, remote ? homes() : undefined); // 2026-11-06: a remote caller's, less the home
     const admits = purpose.admitDelivered && admitted !== undefined; // E2
     if (roots.length === 0 && !admits) throw new Refusal();
     let real0: string;
@@ -261,7 +261,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   async function listRoots(appSessionId: AppSessionId, remote: boolean): Promise<FilesListOutput> {
     const record = records(appSessionId);
     if (!record) throw new Error(`unknown app session: ${appSessionId}`);
-    const roots = await rootsOf(record, remote ? home() : undefined);
+    const roots = await rootsOf(record, remote ? homes() : undefined);
     if (roots.length === 0) throw new Refusal();
     const entries = await Promise.all(
       roots.map(async (root): Promise<FilesEntry | null> => {

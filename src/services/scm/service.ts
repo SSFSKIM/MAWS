@@ -290,12 +290,17 @@ export class ScmService {
   }
 
   /**
-   * 2026-11-06 (the home-root rule, src/shared/machine/machine-home.ts): whether the session's checkout is, by its
-   * realpath, the machine's home (`home`) or above it, a checkout another machine's caller reaches nothing of.
+   * 2026-11-06 (the home-root rule, src/shared/machine/machine-home.ts): whether the session's checkout is a home of the
+   * machine (`homes`) or above one, by its realpath or by its repository's (its trust key: the main worktree's root,
+   * which every scm command acts on), a checkout another machine's caller reaches nothing of. A checkout that doesn't
+   * resolve is one too: nothing of it is known to lie below a home.
    */
-  async coversHome(appSessionId: AppSessionId, home: string): Promise<boolean> {
-    const real = await realpath(this.checkout(appSessionId)).catch(() => null);
-    return real !== null && coversHome(real, home);
+  async coversHome(appSessionId: AppSessionId, homes: readonly string[]): Promise<boolean> {
+    const checkout = this.checkout(appSessionId);
+    const real = await realpath(checkout).catch(() => null);
+    if (real === null || coversHome(real, homes)) return true;
+    const key = await this.trust(checkout);
+    return key.keyKind === 'repo' && coversHome(key.trustKey, homes);
   }
 
   private checkout(appSessionId: AppSessionId): string {
