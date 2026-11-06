@@ -27,6 +27,7 @@ import { readAdminKeys } from '../../apps/desk-hub/deploy/admin-device.ts';
 import { FakeEndpoint } from '../../apps/desk-hub/fake-machine/endpoint';
 import { enrollV2, machineFetch, type V2Machine } from '../../apps/desk-hub/fake-machine/org';
 import { encodeEnrollmentCodeV2 } from '../../apps/desk-hub/src/protocol/identity';
+import type { LogEvent } from '../../apps/desk-hub/src/protocol/log';
 import { enroll } from '../../apps/desk-hub/test/support/clients';
 import type { OrgSessionService } from '../../src/main/org/org-session';
 import { createRegistryFeed, type RegistryFeed } from '../../src/main/org/registry-feed';
@@ -84,11 +85,9 @@ async function machine(name: string): Promise<{ machine: V2Machine; endpoint: Fa
 }
 
 /** A machine's v2 event from its session's writer, signed by its key (the hub gives it no position: the writer's seq is the machine's). */
-function v2(from: V2Machine, session: string, seq: number, body: Record<string, unknown>): Promise<Record<string, unknown> & { writer: string; seq: number }> {
+function v2(from: V2Machine, session: string, seq: number, body: Record<string, unknown>): Promise<LogEvent> {
   const now = new Date().toISOString();
-  return signEvent({ org: ORG, project: PROJECT }, { ts: now, created: now, writer: `${from.name}/${session}`, seq, ...body }, from.key.privateKey, from.key.pub) as Promise<
-    Record<string, unknown> & { writer: string; seq: number }
-  >;
+  return signEvent({ org: ORG, project: PROJECT }, { ts: now, created: now, writer: `${from.name}/${session}`, seq, ...body }, from.key.privateKey, from.key.pub) as unknown as Promise<LogEvent>;
 }
 const joined = (from: V2Machine, session: string, alias: string) => v2(from, session, 1, { kind: 'joined', session, alias, machine: from.name, cwd: '/w/o8-channel' });
 async function say(from: V2Machine, session: string, seq: number, to: '*' | { session: string; alias: string }, text: string) {
