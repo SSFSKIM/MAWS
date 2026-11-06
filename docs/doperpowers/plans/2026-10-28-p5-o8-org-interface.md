@@ -1530,7 +1530,7 @@ The door adds no authority. An act through it is authenticated by its step-up si
 *Words* (`words.ts`).
 - The draft is `{kind: 'human', from: 'human', member, to, text, created, nonce}`, signed with `signEvent({org, project}, draft, channelKey)` (`project-socket.ts:19-22` is the reference).
 - A word not acknowledged is resent with the same nonce after a reconnect, and the hub dedupes it.
-- The draft lives in main's memory, and a relaunch drops an unsent word with "Not sent".
+- The draft lives in main's memory only. A word the channel dropped unsent (its last tab gone 30 s) reads "Not sent" at the tab's next open within the app's life. A relaunch drops it with nothing to show, since no copy of it is on disk (revised 2026-11-06, Task 2's Decision 2).
 - The app sends nothing to a project that it can't read.
 
 *The cache.* Per project, events by offset and their verdicts, re-verified at load. A project whose cache doesn't read is read from offset 0. "As of" is the last `caught-up`'s time.
