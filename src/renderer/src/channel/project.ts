@@ -132,7 +132,7 @@ export function channelEntries(input: { events: readonly ChannelEvent[]; session
         flush();
         const member = str(event.member) || null;
         const you = member !== null && member === input.me;
-        const name = you ? CHANNEL.you : (e.author?.name ?? (member === null ? CHANNEL.someone('') : CHANNEL.someone(member)));
+        const name = you ? CHANNEL.you : (e.author?.name ?? (member === null ? CHANNEL.nobody : CHANNEL.someone(member)));
         const to: ChannelRecipients = event.to === '*' ? '*' : recipients(event.to);
         entries.push({ kind: 'words', key: `w:${e.offset}`, ...labelOf(e), offset: e.offset, member, name, you, to, text: str(event.text), at });
         break;
