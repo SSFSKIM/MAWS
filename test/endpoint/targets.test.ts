@@ -685,6 +685,20 @@ describe('a record the join can’t place under its app session, placed by its s
     expect(reports.at(-1)).toMatchObject({ session: 'app-s', owners: [org.B], access: 'listed' });
   });
 
+  // the review's round 2: the record joined by its spawn may be the successor (the host away at the `/clear`), so the
+  // listing a departing predecessor leaves is reported again from the record that stays
+  it('reports the listing from the record that stays once the predecessor it deferred to leaves', async () => {
+    let live: Array<{ appSessionId: string; engineSessionId: string }> = [{ appSessionId: 'app-s', engineSessionId: 'eng-old' }];
+    const { members, reports } = membersOf({ live: () => live, records: () => [{ appId: 'app-s', engineSessionId: 'eng-new', launchedBy: launchedBy(org.B, 'op-s') }] });
+    await members.member(laneBMember('eng-old', [org.B], { access: 'listed', ownersProof: [spawnProof('op-s')] }));
+    live = []; // the engine host away at the `/clear`
+    await members.member(laneBMember('eng-new', [org.C], { access: 'private', ownersProof: [spawnProof('op-s')] }));
+    expect(members.appSessionId('eng-new')).toBe('app-s');
+    expect(reports.at(-1)).toMatchObject({ owners: [org.B], access: 'listed' });
+    await members.gone('eng-old');
+    expect(reports.at(-1)).toMatchObject({ session: 'app-s', owners: [org.C], access: 'private' });
+  });
+
   it('leaves a record unplaced, as before, without a proof or without a spine record whose `launchedBy` it names', async () => {
     const machine = {
       live: () => [{ appSessionId: 'app-u', engineSessionId: 'eng-2' }],

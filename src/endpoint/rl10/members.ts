@@ -182,6 +182,13 @@ export class Members implements RecordSource, CheckoutSource {
       // Withdrawn first, which settles what notify told the hub (`settled 0`, or owed), then forgotten.
       await this.#ctx.listings.gone(listing);
       this.#ctx.forget(listing);
+    } else if (listing !== null && member !== undefined) {
+      // P5 Decision Log 190 (b): a record joined by its spawn that deferred to the one that left (the successor, when the
+      // host was away at a `/clear`) reports the listing now.
+      for (const other of this.sessions()) {
+        const stays = this.#members.get(other);
+        if (stays !== undefined && this.#bySpawned.has(other) && this.listingId(other) === listing) await this.#report(stays);
+      }
     }
   }
 
@@ -424,8 +431,9 @@ export class Members implements RecordSource, CheckoutSource {
   async #report(member: Member): Promise<void> {
     const session = this.listingId(member.session);
     if (session === null) return;
-    // P5 Decision Log 190 (b): a superseded record joined by its spawn never replaces its successor's listing.
-    if (this.#bySpawned.has(member.session) && this.sessions().some((other) => other !== member.session && this.listingId(other) === session)) return;
+    // P5 Decision Log 190 (b): a record joined by its spawn, which the live rows did not name, never replaces the listing
+    // of one they did.
+    if (this.#bySpawned.has(member.session) && this.sessions().some((other) => other !== member.session && !this.#bySpawned.has(other) && this.listingId(other) === session)) return;
     await this.#ctx.listings.report({
       session,
       project: member.project,
