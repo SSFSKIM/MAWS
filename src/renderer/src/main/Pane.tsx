@@ -175,6 +175,8 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
       return <ArtifactTab tab={tab} />;
     case 'browser': // E4a
       return <BrowserTab tab={tab} />;
+    case 'channel': // P5 O8 M7a: the kind's seam; Task 2 draws the project's channel here
+      return null;
   }
 }
 

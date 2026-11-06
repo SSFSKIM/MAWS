@@ -251,6 +251,81 @@ export const OrgRowsSchema = z.strictObject({
 });
 export type OrgRows = z.infer<typeof OrgRowsSchema>;
 
+/**
+ * M7a (Interfaces §N, with the pre-flight's ruling in the Decision Log, "M7a is built as three tasks"): a project's
+ * channel, the app's one reader of the log plane. Main reads the hub's Project socket and verifies every event against
+ * the held head (src/main/org/channel/); the renderer folds what it is sent into the stream (`channel/project.ts`), so
+ * these carry main's verdicts, never a folded entry.
+ *
+ * `ChannelEvent`: one event of the log that verified, as stored at `offset` (its `mac` and `sig` left out: nothing past
+ * main checks them). `label`: `verified` (a v2 signature main checked), `migrated` (a DX1 event a machine's history
+ * attestation covers; `by` names that machine) or `legacy` (a DX1 event nothing covers, drawn faint). `author`: a
+ * device's `human`, its member as the held head names them; `owners`: a machine's v2 event whose owner attestation (RL9)
+ * verified, named from the held head, never from the event. Withheld tombstones and events that don't verify are not
+ * sent; `unverified` counts the latter.
+ */
+export const CHANNEL_LABELS = ['verified', 'migrated', 'legacy'] as const;
+export const ChannelEventSchema = z.strictObject({
+  offset: z.number().int().nonnegative(),
+  writer: z.string(),
+  seq: z.number().int().positive(),
+  event: z.record(z.string(), z.unknown()),
+  label: z.enum(CHANNEL_LABELS),
+  by: z.string().optional(),
+  author: OrgMemberSchema.optional(),
+  owners: z.array(OrgMemberSchema).optional(),
+});
+export type ChannelEvent = z.infer<typeof ChannelEventSchema>;
+/** Whom words go to: everyone, or the sessions a leading `@alias` named. */
+export const ChannelRecipientsSchema = z.union([z.literal('*'), z.array(z.strictObject({ session: z.string(), alias: z.string() }))]);
+export type ChannelRecipients = z.infer<typeof ChannelRecipientsSchema>;
+/**
+ * The owner's words this channel sent and the log doesn't hold yet: `sending` until the hub's `human-ack`, or the hub's
+ * refusal (`not-reachable` for a session hidden from you, P5 Decision Log 224). Kept in main's memory only: words still
+ * here when the channel is released are dropped, never sent later.
+ */
+export const ChannelWordSchema = z.strictObject({
+  nonce: z.string(),
+  text: z.string(),
+  to: ChannelRecipientsSchema,
+  state: z.union([z.literal('sending'), z.strictObject({ refused: z.string() })]),
+});
+export type ChannelWord = z.infer<typeof ChannelWordSchema>;
+/**
+ * Why a channel has nothing to draw: signed out, or signed in with no hub, with no cache of the project either; or a
+ * project the hub doesn't hold (`unknown-project`, also any id that isn't a project's). With a cache, a channel opened
+ * offline answers it, `live: false` and `asOf` its last `caught-up`.
+ */
+export const CHANNEL_CLOSED_REASONS = ['signed-out', 'no-hub', 'unknown-project'] as const;
+const ChannelOpenSchema = z.strictObject({
+  ok: z.literal(true),
+  events: z.array(ChannelEventSchema), // oldest first, by offset
+  pending: z.array(ChannelWordSchema),
+  unverified: z.number().int().nonnegative(),
+  asOf: z.string().nullable(), // the last `caught-up`'s time; null until one
+  live: z.boolean(), // the socket is open and caught up
+});
+const ChannelClosedSchema = z.strictObject({ ok: z.literal(false), reason: z.enum(CHANNEL_CLOSED_REASONS) });
+export const ChannelAnswerSchema = z.union([ChannelOpenSchema, ChannelClosedSchema]);
+export type ChannelAnswer = z.infer<typeof ChannelAnswerSchema>;
+/** The project's sminos id (its `smnsId`); any other string answers `unknown-project`. */
+const ChannelProjectSchema = z.string().min(1).max(64);
+/**
+ * Why words weren't sent: no session or no hub, a channel not open or one whose project the hub refused (`unreadable`:
+ * the app sends nothing to a project it can't read), nothing to say, or a leading `@alias` that names no session of the
+ * project (`no-member`) or more than one (`ambiguous`).
+ */
+export const CHANNEL_SEND_REFUSALS = ['signed-out', 'no-hub', 'not-open', 'unreadable', 'empty', 'no-member', 'ambiguous'] as const;
+export const ChannelSendResultSchema = z.union([
+  z.strictObject({ ok: z.literal(true), nonce: z.string() }),
+  z.strictObject({ ok: z.literal(false), reason: z.enum(CHANNEL_SEND_REFUSALS), detail: z.string().optional() }),
+]);
+export type ChannelSendResult = z.infer<typeof ChannelSendResultSchema>;
+/** The most text one word carries; the hub's frame (1 MiB) holds it in any script. */
+export const CHANNEL_TEXT_MAX = 100_000;
+export const ChannelChangedSchema = z.union([ChannelOpenSchema.extend({ project: z.string() }), ChannelClosedSchema.extend({ project: z.string() })]);
+export type ChannelChanged = z.infer<typeof ChannelChangedSchema>;
+
 export const commands = {
   'org.status': { input: z.void(), output: OrgStatusSchema, owner: 'main' },
   'org.register': { input: CodeInputSchema, output: OrgAttemptSchema, owner: 'main' },
@@ -270,9 +345,13 @@ export const commands = {
   'org.pair.start': { input: z.strictObject({ member: MemberIdSchema, class: DeviceClassSchema }), output: PairStartResultSchema, owner: 'main' }, // M4a
   'org.pair.approve': { input: z.strictObject({ generation: z.number().int().positive(), digest: z.string().min(1).max(128) }), output: SignResultSchema, owner: 'main' }, // M4a
   'org.pair.cancel': { input: z.void(), output: z.void(), owner: 'main' }, // M4a
+  'org.channel.open': { input: z.strictObject({ project: ChannelProjectSchema }), output: ChannelAnswerSchema, owner: 'main' }, // M7a: one per open tab
+  'org.channel.close': { input: z.strictObject({ project: ChannelProjectSchema }), output: z.void(), owner: 'main' }, // M7a: released 30 s after the last
+  'org.channel.send': { input: z.strictObject({ project: ChannelProjectSchema, text: z.string().max(CHANNEL_TEXT_MAX) }), output: ChannelSendResultSchema, owner: 'main' }, // M7a
 } as const satisfies Record<`org.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   'org.changed': OrgStatusSchema, // at every change of the status, the whole status
   'org.rows.changed': OrgRowsSchema, // M2: coalesced, the whole list
+  'org.channel.changed': ChannelChangedSchema, // M7a: an open channel's whole answer, coalesced
 } as const satisfies Record<`org.${string}`, z.ZodType>;

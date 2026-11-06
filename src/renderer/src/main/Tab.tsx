@@ -109,6 +109,8 @@ export function useTabLabel(tab: TabRef): TabLabel {
       return { title: artifactTitle ?? LIBRARY_COPY.fallbackTitle, secondary: null, glyph: null, fileType: null };
     case 'browser': // E4a
       return { title: browserTitle ?? BROWSER_COPY.title, secondary: null, glyph: null, fileType: null };
+    case 'channel': // P5 O8 M7a: the kind's seam; Task 2 titles it "<project> · channel"
+      return { title: 'Channel', secondary: null, glyph: null, fileType: null };
   }
 }
 

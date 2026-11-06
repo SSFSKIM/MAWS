@@ -74,6 +74,8 @@ export function toolbarTitle(
       return { title: artifactTitle ?? LIBRARY_COPY.fallbackTitle, branch: null };
     case 'browser': // E4a
       return { title: browserTitle ?? BROWSER_COPY.title, branch: null };
+    case 'channel': // P5 O8 M7a: the kind's seam; Task 2 titles it "<project> · channel"
+      return { title: 'Channel', branch: null };
   }
 }
 
