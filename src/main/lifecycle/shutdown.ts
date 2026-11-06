@@ -14,9 +14,13 @@
 // run at once, in the same will-quit, as before.
 // W-B review M6: `quitting()` reads true from the moment the steps begin, so what may open a window (the dock's
 // activate) does not, during the hold, over services already stopped.
+// The quit reaper (reaper.ts; tracker 2026-11-06): `reap` runs once, at Electron's `quit`, which comes only after the
+// steps here have settled on both paths: the held one ends in `app.exit(0)`, which emits it, and on the unheld one
+// Electron's own quit goes on to it. Never earlier, so it can cut no drain, no step and no engine handover.
 
 export interface ShutdownApp {
   on(event: 'will-quit', listener: (event: { preventDefault(): void }) => void): unknown;
+  on(event: 'quit', listener: () => void): unknown;
   exit(code?: number): void;
 }
 
@@ -31,7 +35,7 @@ interface Step {
   step: () => void | Promise<void>;
 }
 
-export function shutdownSteps(app: ShutdownApp, boundMs: number): ShutdownSteps {
+export function shutdownSteps(app: ShutdownApp, boundMs: number, reap: () => void = () => {}): ShutdownSteps {
   const drains: Step[] = [];
   const steps: Step[] = [];
   const failed = (name: string) => (error: unknown) => console.error(`[shutdown] ${name} failed; going on`, error);
@@ -51,6 +55,12 @@ export function shutdownSteps(app: ShutdownApp, boundMs: number): ShutdownSteps 
   };
   let holding = false;
   let quitting = false;
+  let reaped = false;
+  app.on('quit', () => {
+    if (reaped) return;
+    reaped = true;
+    reap();
+  });
   app.on('will-quit', (event) => {
     if (holding) return event.preventDefault();
     quitting = true;
