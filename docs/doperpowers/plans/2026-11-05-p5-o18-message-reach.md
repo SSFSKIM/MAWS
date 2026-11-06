@@ -727,6 +727,13 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
 - Observation (M2): the RL1 link sends each project's hello before its welcome hook runs, so what the endpoint learns
   from the welcome (`capabilities`) is in place for the first upload of the connection but not for the hellos.
   Evidence: `src/endpoint/hub-link.ts` `#welcomed`.
+- Observation (M2): a machine re-enrolled under a new name keeps its registry bindings only when it keeps its ref.
+  - An endpoint-enrolled machine does. Its ref is the profile's `machine.json` MachineRef, which survives unenroll,
+    and `machineNames` gives both names that ref, so `refOf(new name)` answers it.
+  - A delegated machine re-certified under another delegation gets a new ref, since its ref carries the
+    delegation's prefix. It is a new machine by construction.
+  - A phase-1 name-held binding (`name:<old>`) is lost on a rename. Proposed fix, not built: `boundTo` also accepts
+    such a row when `refOfName(head, <old name>)` is the caller's ref. Left as residue (coordinator, 2026-11-05).
 
 ## Decision Log
 
@@ -962,6 +969,16 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
     machine on RL1 as the reader. It is not in `conversation.json`, whose cases sminos's conformance replay plays too.
   - `EndpointOptions.uplink` is a suites' seam for the ask wait, so a `state-unavailable` lands within the test.
   Date/Author: 2026-11-05, p5-desk-track-owner (M2).
+- Decision (M2, a fix to M1 at the coordinator's request, from M3): the hub judges an upload's references in two
+  passes. `reachOf` first takes every snapshot of the batch whose session is bound to the uploader, or that the batch
+  binds, into `after`, the registry's rows with the whole batch applied; `judge` then checks every reference,
+  addressing or provenance, against `after`. Before this, a say to a seat whose first `joined` sat under a writer later
+  in the same batch was withheld for good: a seat spawned and messaged at once. An `unlisted` notice is still judged
+  against the rows from before the batch, so the share removal's notice-then-snapshot batch holds. `keepPolicies`
+  stores `after`.
+  Consequence, accepted by the coordinator: a say in a batch that also takes its session private is judged against
+  the private policy even when the say comes first. That fails closed.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M2), ruled by the coordinator.
 
 ## Outcomes & Retrospective
 
