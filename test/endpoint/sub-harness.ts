@@ -671,6 +671,8 @@ export type StartOptions = {
   owners?: string[];
   /** 2026-11-06: the machine's home as the home-root rule reads it (`EndpointOptions.authorization.home`; a fake one). */
   home?: string;
+  /** 2026-11-06: the endpoint's environment beside the direct listener's switch (an e2e seam a case reads). */
+  env?: Record<string, string>;
 };
 
 export async function startEndpoint(org: Org, started: Fixture[], options: StartOptions = {}): Promise<Fixture> {
@@ -713,7 +715,7 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
   const records = options.records ?? new Records();
   endpoint = createEndpoint({
     sleep: (ms) => sleep(Math.min(ms, 50)),
-    env: { MAWS_ENDPOINT_DIRECT: '1' },
+    env: { MAWS_ENDPOINT_DIRECT: '1', ...options.env },
     direct: { interfaces: () => ({ utun4: [{ address: TAILNET, family: 'IPv4', internal: false, netmask: '255.255.255.255', mac: '00:00:00:00:00:00', cidr: null }] }), listen, ...(options.limits === undefined ? {} : { limits: options.limits }) },
     authorization: {
       records,

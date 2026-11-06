@@ -345,6 +345,18 @@ describe('a lane A subscription of one subagent’s transcript', () => {
     expect(a.channel.peer.capabilities).toContain('rl2.agent-scope');
   });
 
+  // e2e:remote's endpoint of an earlier build: MAWS_E2E_ENDPOINT_WITHOUT withholds what it names from the handshake, under
+  // MAWS_E2E=1 alone
+  it('is withheld from the handshake by the e2e’s old-endpoint seam, and only under MAWS_E2E', async () => {
+    const old = await startEndpoint(org, started, { env: { MAWS_E2E: '1', MAWS_E2E_ENDPOINT_WITHOUT: 'rl2.agent-scope,rl2.spawn-home' } });
+    const caps = (await openRemote(old, org.a1, org.A)).channel.peer.capabilities;
+    expect(caps).not.toContain('rl2.agent-scope');
+    expect(caps).not.toContain('rl2.spawn-home');
+    expect(caps).toContain('rl2.feeds');
+    const unset = await startEndpoint(org, started, { env: { MAWS_E2E_ENDPOINT_WITHOUT: 'rl2.agent-scope' } });
+    expect((await openRemote(unset, org.a1, org.A)).channel.peer.capabilities).toContain('rl2.agent-scope');
+  });
+
   it('holds an upstream subscription of its own scoped to the agent beside the main one’s, and carries that upstream’s own stream alone', async () => {
     const f = await startEndpoint(org, started);
     const s = await sminos(f);
