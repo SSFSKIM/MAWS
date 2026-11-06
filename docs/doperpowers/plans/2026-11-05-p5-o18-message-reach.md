@@ -606,7 +606,7 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
 
     sminos → endpoint:  {t: 'reach?', id, project, session /* recipient */, event /* as stored, with verified */}
     endpoint → sminos:  {t: 'reach', id, verdict: 'deliver' | 'refuse', reason?: 'not-reachable' | 'unverified'}
-    endpoint → sminos:  {t: 'audience', session, owners: string[], members: string[] | null, digest: string | null, policyRev}
+    endpoint → sminos:  {t: 'audience', session, owners: string[], members: string[] | null, digest: string | null, policyRev, withdrawn?: string[]}   // withdrawn (M4): who this rev's change withdrew, the exact audience of its `unlisted` notice; absent when none
                           // members null: listed; sent for local sessions and for remote ones the policy cache holds
     endpoint → sminos:  {t: 'snapshots?', id, project, after?: string}       // a lost policy cache, one project at a time
     sminos → endpoint:  {t: 'snapshots', id, project, events: [...], next: string | null, done: boolean}
@@ -1064,6 +1064,10 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
 - Decision (M2b): desk-web reads the hub's `withheld` tombstone as its own verdict, neither drawn nor reported as a
   forgery, closing M1's "desk-web reads a tombstone as malformed" residue.
   Date/Author: 2026-11-05, p5-desk-track-owner (M2b).
+- Decision: the endpoint's `audience` frame for a local session carries an optional `withdrawn`, the members the change at that `policyRev` withdrew, computed by the same `withdrawnBy` the signer's `#notice` check uses (`src/endpoint/rl10/audiences.ts`); absent when the change withdrew no one, and on a session's first rev the cache holds.
+  Rationale: going private from listed or org-wide withdraws "the org's members less the new audience" (D6), and sminos holds no member list, so it couldn't name the notice's stream writer; M4 found it. One function for both sides keeps the frame's set and the signer's check equal by construction.
+  Rejected: the head's member ids on the `org` frame, which would hand every machine's sminos the whole member list to compute one set the endpoint already computes.
+  Date/Author: 2026-11-06, p5-desk-track-owner (an M2 follow-up landed beside M4).
 
 ## Outcomes & Retrospective
 

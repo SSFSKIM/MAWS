@@ -43,7 +43,7 @@ import type { SessionLaneMessage } from '../notify';
 import type { EndpointState } from '../state/store';
 import { InboundIndex } from './inbound-index';
 import { LegacyKey } from './legacy';
-import { localPolicy, digestOf, type AudienceContext } from './audiences';
+import { localPolicy, digestOf, withdrawnBy, type AudienceContext } from './audiences';
 import { LogRelay, type RelayContext } from './log-relay';
 import { Members, type MembersContext } from './members';
 import { PolicyCache } from './policy-cache';
@@ -313,14 +313,22 @@ export class Rl10 {
     const ctx: AudienceContext = { org: () => ({ head: head.state, certificates: head.certificates, ref: identity.ref }), members: this.members, cache: this.cache, now: this.#ctx.now };
     const policy = await localPolicy(ctx, session);
     if (policy === null) return;
+    // What this rev's change withdrew, against the newest rev before it the cache holds (none held: nothing to name).
+    const before = this.cache.before(session, policy.policyRev);
+    const withdrawn = before === undefined ? [] : withdrawnBy(before.audience, policy.members, head.state.members.map((m) => m.id));
     this.cache.remember(session, policy.policyRev, policy.members);
-    this.#tellAudience(session, policy);
+    this.#tellAudience(session, { ...policy, withdrawn });
   }
 
-  /** An `audience` frame down, when sminos takes them and it differs from the last sent of the session. */
-  #tellAudience(session: string, policy: { owners: string[]; members: string[] | null; policyRev: number }): void {
+  /**
+   * An `audience` frame down, when sminos takes them and it differs from the last sent of the session. `withdrawn` (O18
+   * M4) names the members the change at this `policyRev` withdrew, the exact audience of its `unlisted` notice, since
+   * sminos holds no member list; absent when it withdrew none.
+   */
+  #tellAudience(session: string, policy: { owners: string[]; members: string[] | null; policyRev: number; withdrawn?: string[] }): void {
     if (!this.#welcomed || !this.#streams) return;
-    const frame = { t: 'audience', session, owners: policy.owners, members: policy.members, digest: digestOf(policy.members), policyRev: policy.policyRev };
+    const withdrawn = policy.withdrawn !== undefined && policy.withdrawn.length > 0 ? { withdrawn: policy.withdrawn } : {};
+    const frame = { t: 'audience', session, owners: policy.owners, members: policy.members, digest: digestOf(policy.members), policyRev: policy.policyRev, ...withdrawn };
     const text = JSON.stringify(frame);
     if (this.#audienceSent.get(session) === text) return;
     this.#audienceSent.set(session, text);

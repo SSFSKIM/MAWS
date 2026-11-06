@@ -44,6 +44,17 @@ export const sameAudience = (a: Audience, b: Audience) => (a === null ? b === nu
 /** An audience's digest, null for the whole org. */
 export const digestOf = (audience: Audience): string | null => (audience === null ? null : audienceDigest(audience));
 
+/**
+ * The members a local session's change withdrew: its audience before the change (`null`, listed or org-wide, is every
+ * member of the head) less its audience after, sorted. An `unlisted` notice is written to exactly this set (D6), so the
+ * signer checks a notice's digest against it, and the `audience` frame tells it to sminos, which holds no member list.
+ */
+export function withdrawnBy(previous: Audience, next: Audience, everyone: readonly string[]): string[] {
+  const before = previous ?? everyone;
+  const after = next ?? everyone;
+  return [...new Set(before.filter((m) => !after.includes(m)))].sort();
+}
+
 const sorted = (members: Iterable<string>) => [...new Set(members)].sort();
 
 /** A local session's policy now from its member frame, against the head; null with no member or no head. */

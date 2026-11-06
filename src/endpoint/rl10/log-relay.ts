@@ -97,7 +97,7 @@ import {
 } from 'org-protocol';
 import type { LogProject } from '../hub-link';
 import { attestFor, sessionOfWriter, verifiedOwners } from './attest';
-import { contains, digestOf, knownAudience, localPolicy, meet, sameAudience, type AudienceContext } from './audiences';
+import { contains, digestOf, knownAudience, localPolicy, meet, sameAudience, withdrawnBy, type AudienceContext } from './audiences';
 import { PolicyCache, type Audience } from './policy-cache';
 import type { InboundIndex } from './inbound-index';
 import type { LegacyKey } from './legacy';
@@ -449,10 +449,7 @@ export class LogRelay {
     if (member === null || member.policyRev === undefined || now === null) return { refuse: 'an unlisted notice is signed only for a session this machine holds, at its policyRev' };
     const before = this.#ctx.cache.before(own, member.policyRev);
     if (before === undefined) return { refuse: `no audience of ${own.slice(0, 64)} before policyRev ${member.policyRev} is held to withdraw from` };
-    const everyone = org.head.members.map((m) => m.id);
-    const previous = before.audience ?? everyone;
-    const next = now.members ?? everyone;
-    const withdrawn = [...new Set(previous.filter((m) => !next.includes(m)))].sort();
+    const withdrawn = withdrawnBy(before.audience, now.members, org.head.members.map((m) => m.id));
     if (withdrawn.length === 0) return { refuse: 'the change withdraws no member: no unlisted notice' };
     if (audienceDigest(withdrawn) !== digest) return { refuse: "the notice's digest is not the members its change withdraws" };
     return { audience: withdrawn, policyRev: member.policyRev, redact: [], spawner: false };
