@@ -11,7 +11,8 @@
 // launcher's stdio (probe run 42184947993: one per reaped quit, still alive 25 s later). Nothing else is
 // signalled, and never a process group: `mawsd` and the engine hosts outlive the app by design. A quit that ends on its
 // own leaves the shell to sleep out and exit with nothing to do. The shell closes the descriptors above stderr it may have
-// inherited, so it holds no launcher's pipe while it sleeps.
+// inherited, so it holds no launcher's pipe while it sleeps. (Electron's `app.relaunch()` would start its relauncher as
+// such a helper; MAWS never calls it, and a change that does must spare that helper here.)
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 
 // Electron's `quit` to the exit, over MAWS's e2e quits on GitHub's hosted Macs (3 cores): with one core busy (about half),
