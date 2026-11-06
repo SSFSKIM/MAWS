@@ -10,7 +10,10 @@
 // the shell to sleep out and exit with nothing to do.
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 
-// REAP_AFTER_S: MEASURED below (probe run, quits under half the cores busy: Electron's `quit` to the exit).
+// Electron's `quit` to the exit, over MAWS's e2e quits on GitHub's hosted Macs (3 cores): with one core busy (about half),
+// p50 151 ms, p90 240, p99 530, max 1214 over 78 quits (probe run 42180403479); with two busy, 64 of 78 under 0.7 s, 10
+// from 0.9 to 4.4 s and 4 stalled 25 to 33 s, the stall itself (42182017028); with all three busy every quit stalls
+// past 60 s (42182048773). 5 s is about ten times the half-load p99 and four times its slowest.
 export const REAP_AFTER_S = 5;
 
 // The shell's script: `$1` the pid to end, `$2` the seconds to wait. `ps -o ppid=` pads with spaces.
