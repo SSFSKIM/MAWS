@@ -887,7 +887,6 @@ describe('child source provenance', () => {
     const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
     const { parent, child } = live();
     const disk = onDisk(child);
-    const done = finish(AGENT, '2026-09-28T10:00:08.000Z', 'completed');
     const fake = fakeClient();
     const source = ipcSourceOver(fake.client, REMOTE, AGENT);
     const off = source.subscribe(() => {});
@@ -895,14 +894,75 @@ describe('child source provenance', () => {
     const snapshot = source.snapshot();
     answer(fake, 'session.events', { events: [], lastSeq: 0, complete: false });
     await vi.advanceTimersByTimeAsync(REMOTE_FOLLOW_POLL_MS);
-    answer(fake, 'session.events', { events: [...parent, ...child, done], lastSeq: 9, complete: true });
+    answer(fake, 'session.events', { events: parent.filter((event) => event.kind !== 'subagent.started'), lastSeq: 3, complete: true }); // an earlier launch's child
     await vi.advanceTimersByTimeAsync(0);
     answer(fake, 'fs.agentEvents', { events: [], complete: false });
     await vi.advanceTimersByTimeAsync(REMOTE_FOLLOW_POLL_MS);
     answer(fake, 'fs.agentEvents', { events: disk, complete: true });
-    await expect(snapshot).resolves.toEqual([...disk, done]);
+    await expect(snapshot).resolves.toEqual(disk);
     expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'session.events', 'fs.agentEvents', 'fs.agentEvents']);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // The remote drill-in: a child of another machine's session is read from the session's stream whenever its launch's
+  // slice holds the child's start, its end included (main reads that slice in pages the channel carries, while a disk
+  // window crosses as one answer), and from its disk transcript only otherwise; a start heard while it is disk-backed (a
+  // resume) is the stream's again, since that machine's disk follow sends nothing here.
+  describe('of another machine’s session', () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    const remoteChild = (fake: ReturnType<typeof fakeClient>) => ipcSourceOver(fake.client, REMOTE, AGENT);
+    const remoteBatch = (events: SessionEvent[]) => batch(events, REMOTE);
+
+    it('reads a child that ended in the launch from the stream’s slice, its end closing it, with no disk read', async () => {
+      const { parent, child } = live();
+      const done = finish(AGENT, '2026-09-28T10:00:08.000Z', 'completed');
+      const fake = fakeClient();
+      const snapshot = remoteChild(fake).snapshot();
+      answer(fake, 'session.events', { events: [...parent, ...child, done], lastSeq: 9, complete: true });
+      await expect(snapshot).resolves.toEqual([...child, done]);
+      expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
+      expect(rowsOf(applyEvents(createState(null, AGENT), [...child, done])).find((row) => row.kind === 'divider')).toMatchObject({ state: 'completed' });
+    });
+
+    it('keeps a live child on the stream at its end: the end joins its rows, no reset, no disk read', async () => {
+      const { parent, child } = live();
+      const done = finish(AGENT, '2026-09-28T10:00:08.000Z', 'completed');
+      const fake = fakeClient();
+      const source = remoteChild(fake);
+      const resets = vi.fn();
+      source.onReset!(resets);
+      const received: EventId[][] = [];
+      const off = source.subscribe((events) => received.push(events.map((event) => event.id)));
+      onTestFinished(off);
+      const snapshot = source.snapshot();
+      answer(fake, 'session.events', { events: [...parent, ...child.slice(0, 2)], lastSeq: 9, complete: true });
+      await expect(snapshot).resolves.toEqual(child.slice(0, 2));
+      fake.emit('session.eventBatch', remoteBatch([...child.slice(2), done]), OTHER_MACHINE);
+      await flush();
+      expect(received).toEqual([[...child.slice(2), done].map((event) => event.id)]);
+      expect(resets).not.toHaveBeenCalled();
+      expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
+    });
+
+    it('takes a disk-backed child back to the stream at a start it hears (a resume): the resumed run’s rows pass', async () => {
+      const { parent, child } = live();
+      const disk = onDisk(child);
+      const fake = fakeClient();
+      const source = remoteChild(fake);
+      const received: EventId[][] = [];
+      const off = source.subscribe((events) => received.push(events.map((event) => event.id)));
+      onTestFinished(off);
+      const snapshot = source.snapshot();
+      answer(fake, 'session.events', { events: parent.filter((event) => event.kind !== 'subagent.started'), lastSeq: 3, complete: true }); // an earlier launch's child
+      await flush();
+      answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+      await expect(snapshot).resolves.toEqual(disk);
+      const resumed = { ...parent.find((event) => event.kind === 'subagent.started')!, id: 'resumed' as EventId };
+      const run = child.map((event) => ({ ...event, id: `run:${event.id}` as EventId }));
+      fake.emit('session.eventBatch', remoteBatch([resumed, ...run]), OTHER_MACHINE);
+      await flush();
+      expect(received).toEqual([run.map((event) => event.id)]);
+    });
   });
 
   it('waits for an incomplete empty child backfill before applying the parent completion', async () => {

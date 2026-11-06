@@ -519,6 +519,12 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
 // reset, so the store rebuilds the key from the disk transcript. Disk provenance is final, but lifecycle is not:
 // the same agent id can resume, and a parent relaunch can stop its disk follower.
 //
+// The remote drill-in (2026-11-06): a child of another machine's session is live whenever the launch's slice holds its
+// start, its end included, and its end switches nothing: main reads that slice in pages the channel carries
+// (remote-history.ts), while a disk window crosses as one answer, and that machine's disk follow sends nothing here.
+// So it is disk-backed only when the launch never started it (an earlier launch's child, a session not live there),
+// and a start it hears then (a resume) takes it back to the stream.
+//
 // The same events reach `session.eventBatch` in two forms, the live journal's (with their row's `seq`) and the disk
 // transcript's (`seq: null`, ruling 5 of the wave-2 ledger), under different ids, so id deduplication cannot merge
 // them: the source passes only the form of its provenance. Batches that arrive before the provenance is known are held
@@ -535,7 +541,8 @@ interface Subscriber {
 export const REMOTE_FOLLOW_POLL_MS = 1_000;
 
 function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: AgentId): TranscriptSource {
-  const followPollMs = machineOf(appSessionId) === client.localMachine ? null : REMOTE_FOLLOW_POLL_MS;
+  const remote = machineOf(appSessionId) !== client.localMachine;
+  const followPollMs = remote ? REMOTE_FOLLOW_POLL_MS : null;
   let provenance: 'undecided' | 'live' | 'disk' = 'undecided';
   // The long-transcript window: the disk snapshot whose `fs.agentEvents` answer is on its way. The child's events that
   // batches carry meanwhile are held until it completes, then those older than the window it answered are dropped
@@ -579,7 +586,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
     return at === undefined ? startAt >= 0 || startedInStream : startAt >= 0 && at > startAt;
   };
   // One batch under the current provenance: its own events in that form, the parent's finish for the child, and while
-  // live an exit that ends it, pass into the child's state; an end seen while live switches to disk.
+  // live an exit that ends it, pass into the child's state; an end seen while live switches this machine's child to disk.
   const receive = (subscriber: Subscriber, events: SessionEvent[]) => {
     if (provenance === 'undecided') {
       subscriber.held.push(events);
@@ -596,6 +603,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
           startedInStream = true;
           ended = null;
           hostLost = null;
+          if (remote && provenance === 'disk' && liveForm(event)) provenance = 'live'; // a resume, which the stream carries
         } else {
           ended = event;
           changedEnd = true;
@@ -609,8 +617,9 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       pager.delivered(passed);
       subscriber.listener(passed);
     }
-    // On disk too, a newly observed finish must follow the complete backfill, not overtake it in a batch.
-    if (changedEnd && ended !== null) toDisk();
+    // On disk too, a newly observed finish must follow the complete backfill, not overtake it in a batch. Another
+    // machine's child the stream carries stays on it, closed by its end there.
+    if (changedEnd && ended !== null && !(remote && provenance === 'live')) toDisk();
   };
   const flush = () => {
     for (const subscriber of subscribers) for (const events of subscriber.held.splice(0)) receive(subscriber, events);
@@ -698,7 +707,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       });
       // E11 (W-C): the session source's host-loss rule, for the parent's process as the live child sees it; the exit
       // ends the child as any parent exit does (closed as stopped, then the switch to disk)
-      const offLoss = onHostLoss(client, appSessionId, () => (provenance === 'live' ? lastLive : null), (exit) => {
+      const offLoss = onHostLoss(client, appSessionId, () => (provenance === 'live' && ended === null ? lastLive : null), (exit) => {
         hostLost = exit;
         receive(subscriber, [exit]);
       });
@@ -738,12 +747,14 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       // the parent's read cannot show stays the end of the run it ended (E11).
       const lost = hostLost !== null && (started < 0 || Date.parse(parent[started].at) <= Date.parse(hostLost.at)) ? hostLost : null;
       if (revision === lifecycleRevision) ended = end > started || (started < 0 && end >= 0) ? parent[end] : lost;
-      if (started >= 0 && end < started && liveForm(parent[started]) && !onDisk()) {
+      // Another machine's child is the stream's whenever the launch started it, its end joining its slice.
+      if (started >= 0 && liveForm(parent[started]) && (remote || (end < started && !onDisk()))) {
         decide('live');
         lastLive = parent.findLast(liveForm) ?? null;
         const live = parent.filter((event) => own(event) && liveForm(event));
-        pager.started(live, null);
-        return live;
+        const history = remote && ended !== null ? [...live, ended] : live;
+        pager.started(history, null);
+        return history;
       }
       // The child's events are held, not passed, until the disk answer is in (the long-transcript window: `reading`).
       const token = {};
