@@ -314,6 +314,8 @@ export class Endpoint implements EndpointModule {
         return this.#services.dispatch(owner, name, input);
       },
       behind: () => void this.#syncAfter(),
+      // P5 O8 M7b: lane A's to-human entries, to the project channel's journal in the spine
+      channel: { record: (entry) => this.#services?.channel.record(entry) },
       now: this.deps.now,
       log,
       ...(options.uplink === undefined ? {} : { uplink: options.uplink }),

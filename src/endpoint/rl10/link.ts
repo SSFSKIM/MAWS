@@ -38,6 +38,7 @@
 import { RL1_CAPABILITIES, type Action, type Certificates, type OrgState, type SigningKey } from 'org-protocol';
 import type { EndpointPolicy, Policy } from '../policy';
 import { isCeiling } from '../policy';
+import type { NewHostEntry } from '@shared/ipc/schema/channel';
 import type { LogProject } from '../hub-link';
 import type { SessionLaneMessage } from '../notify';
 import type { EndpointState } from '../state/store';
@@ -97,6 +98,11 @@ export type Rl10Context = {
   dispatch: MembersContext['dispatch'];
   /** A read of the hub's org state, asked for an arriving event held for a key it may bring (log-relay.ts). */
   behind?(): void;
+  /**
+   * P5 O8 M7b: the project channel's journal (`EndpointServices.channel`), which each sub-less host message's to-human
+   * entry is handed to (`#host`); absent in a suite that hands nothing on.
+   */
+  channel?: { record(entry: NewHostEntry): void };
   now(): number;
   log(line: string): void;
   /** The uplink's cap, reserve and ask wait (the suites'; uplink.ts's defaults unless given). */
@@ -630,6 +636,7 @@ export class Rl10 {
    * lost to a restart comes again in sminos's resend of the last 50.
    */
   #host(message: SessionLaneMessage): void {
+    this.#journal(message);
     const event = (message.body as { event?: { writer?: unknown; seq?: unknown } } | null)?.event;
     const state = this.#ctx.state();
     if (state === null || typeof event?.writer !== 'string' || !Number.isSafeInteger(event.seq)) return this.#ctx.notifier.hostMessage(message);
@@ -645,6 +652,35 @@ export class Rl10 {
         this.#ctx.log(`endpoint: the host mark could not be kept: ${(error as Error).message}`);
       }
     });
+  }
+
+  /**
+   * P5 O8 M7b (Interfaces §O): a sub-less host message's to-human entry, handed to the project channel's journal beside
+   * notify and before the durable mark is read, since the mark moves once a `wrote` reaches the hub, not once the entry is
+   * kept: an entry the hub was told of is journaled still. Its `src` is the host event's `<project>/<writer>/<seq>`, each
+   * part URI-encoded as lane B's are (the writer holds a `/`), so sminos's resend of the last 50 records nothing new
+   * (the journal's `UNIQUE(src)`). sminos's three host kinds map as they come: `message` and `answered` by their text, a
+   * `question` by its questions (one text, or several, joined as the channel draws them) and its choices; its time is the
+   * event's `ts` (in UTC), else now. An entry no session is named for, which nobody could be ranked on, is not kept.
+   */
+  #journal(message: SessionLaneMessage): void {
+    const channel = this.#ctx.channel;
+    if (channel === undefined || typeof message.session !== 'string' || message.session === '') return;
+    const event = (message.body as { event?: Record<string, unknown> } | null)?.event;
+    if (typeof event !== 'object' || event === null || typeof event.writer !== 'string' || !Number.isSafeInteger(event.seq)) return;
+    const { kind, writer } = event;
+    if (kind !== 'message' && kind !== 'question' && kind !== 'answered') return;
+    const text = kind === 'question' && Array.isArray(event.text) ? event.text.filter((t): t is string => typeof t === 'string').join('\n\n') : event.text;
+    if (typeof text !== 'string') return;
+    const choices = kind === 'question' && Array.isArray(event.choices) ? event.choices.filter((c): c is string => typeof c === 'string') : [];
+    const said = typeof event.ts === 'string' ? Date.parse(event.ts) : NaN;
+    const at = new Date(Number.isFinite(said) ? said : this.#ctx.now()).toISOString();
+    const src = [message.project, writer, String(event.seq)].map(encodeURIComponent).join('/');
+    try {
+      channel.record({ project: message.project, appSessionId: null, engineSessionId: message.session as NewHostEntry['engineSessionId'], lane: 'A', kind, text, ...(choices.length > 0 ? { choices } : {}), at, src });
+    } catch (error) {
+      this.#ctx.log(`endpoint: a host entry of ${message.project.slice(0, 64)} could not be handed to the channel: ${(error as Error).message}`);
+    }
   }
 
   /**
