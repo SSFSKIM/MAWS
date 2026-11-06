@@ -3211,3 +3211,41 @@ A future child that composes async modules over shared state should list each ac
 Retrospective (M2). The mark rule and the coverage rule, which the planning rounds had sharpened, were exactly where the build's two real defects lay: an unverified certificate read beside a verified record, and a set emptied across an await while another reader treated it as coverage. Both are the same shape: a trust or coverage fact derived from something that was not itself the verified or settled thing. A future child deriving state from verified records should take every derived fact from the verified object itself, and keep in-flight work visible in whatever a reader treats as coverage.
 
 Retrospective. The document held: every decision it made stood, and the gaps it left were small (a `directory` refusal, a feed close hook, the chain re-read from below the head for a recovery). What it didn't foresee was the session's write concurrency: four parallel actors (attempts, adoptions from two sources, sign-out, recovery) each writing `registration.json`. Ad hoc fences left three windows, which the review found; one serialized commit queue closed them. A future child holding a trust anchor beside a credential should start from that queue. The test-writing workers found three real bugs each time they were given a module they hadn't written, which paid for the split.
+
+**M7a (2026-11-06, PR from `p5-o8-m7a`).** A project's Channel tab, opened from the project's menu, draws the project's signed log as main verified it against the held head:
+- exchanges between two sessions folded, broadcasts, people's words, and earlier to-human entries;
+- DX1 history "attested at migration by <machine>", and unattested history as legacy;
+- an unverified count for what failed;
+- "as of" from the cache while offline;
+- "Waiting on you", where the MAWS ask is answered in place.
+
+Main reads the log over the Project socket into a bounded cache, one reader's (org and member), and sends the renderer verified events with `rev`-ordered deltas. The renderer folds them in a pure projection. The composer signs words with the device's channel key. Main is the only source of a word's state: sending, sent, refused, or Not sent within the app's life. That state stays bound to the org, member and device that signed the word.
+
+Evidence:
+- the unit suites (each run alone):
+  - `verify` 15, `cache` 22, `channel` 23, `words` 14, `address` 7, `project-socket` 9, `holds` 3, `channel-fixture` 4;
+  - the renderer's `project` 15, `state` 5, `ChannelView` 24;
+- `test/org/channel.local.test.ts` 4, on desk-hub's Worker in Miniflare:
+  - a v2 exchange folded with its owners;
+  - a DX1 writer attested at migration;
+  - a revoked key's event, and a forgery on A's transport, both counted and not drawn;
+  - A's words received signed and unmacked on B's socket, then drawn back as A's;
+  - "as of" across a relaunch with the hub down;
+- `e2e/channel.spec.ts` in `e2e:settings`, over a harness-only seeded channel under classic scrollbars, with its screenshots;
+- the gates the PR body lists.
+
+Retrospective (M7a). Built as three tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-medium on the branch over three rounds.
+- **The task reviews' findings.** Most had one shape: a fact inferred from a transition the observer might not see.
+  - the renderer's ack inferred from a pending word's disappearance, under coalescing and across unmount;
+  - an older buffered reset applied over a newer open;
+  - a recalled receipt the log already held.
+
+  Each was closed by moving the truth to the one process that sees every transition (main), and numbering what it publishes (`rev`).
+- **The branch review's findings.** They were trust boundaries the tasks had each held locally but not at their seams:
+  - the cache scoped by org, not by reader, against O18's per-member reach;
+  - a judgment recorded after its await;
+  - legacy lifecycle feeding identity, first for addressing and then for attribution;
+  - a superseded channel's write.
+- **Task 3's screenshots.** They caught two layout faults that happy-dom couldn't, as M4a's did.
+
+A future child that reads hub-served content into a cache should key the cache, its cursor and every projection by the reader whose rights fetched it. It should also carry each datum's provenance to the point of display, not just to the point of judgment.
