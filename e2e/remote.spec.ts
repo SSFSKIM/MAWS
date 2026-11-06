@@ -2268,19 +2268,19 @@ test('M9: "+ Session" on B with no registered checkout sets its folder up there:
 // subagent's own rows aren't carried from another machine yet" in place of the agent's transcript). On e2e:remote's
 // scene over the relay, A starts the session on B with "+ Session"; its first turn starts a background agent (the frames
 // of `subagent.jsonl`'s first agent) that replies, holds, replies again, holds and ends. From A's Subagents tool, in order:
-// the drill-in into the running agent shows the reply it gave before it was opened (the parent's slice for it, read over
-// the link); the next reply shows in it as B's engine gives it (the session's stream); and once the agent ends, the
-// drill-in reads the agent's transcript from B's disk (`fs.agentEvents` over the link, its follow held by A's channel on
-// B), its work folded behind its last reply as a local agent's is.
+// the drill-in into the running agent shows the reply it gave before it was opened (the session's slice for the agent,
+// read over the link); the next reply shows in it as B's engine gives it (the session's stream); and once the agent
+// ends, its work folds behind its last reply as a local agent's does, still from the stream: nothing on B follows the
+// agent's transcript for A, whose one disk window would cross the link as one answer.
 const SUB_SPAWNED = 'b0c0d0e0-0000-4000-8000-0000000000b8'; // the engine session id the session's journal pins
 const SUB_TITLE = 'B’s session with an agent';
 const SUB_BRIEF = 'Start an agent on B.';
-const SUB_AGENT = { id: 'ab5e2e00000000001', description: 'Survey the checkout on B', prompt: 'List the files of the checkout on B.' };
+const SUB_AGENT = { id: 'ab5e2e00000000001', description: 'Survey the checkout on B' };
 const SUB_FIRST = 'The agent on B is reading the checkout.';
 const SUB_SECOND = 'The agent on B found one file.';
 const SUB_SUMMARY = 'One file on B.'; // the engine's summary of the agent at its end
 
-test('a subagent of B’s lane B session, drilled into from A: the rows it gave before, the next as B’s engine gives it, and once it ends its transcript from B’s disk', async () => {
+test('a subagent of B’s lane B session, drilled into from A: the rows it gave before, the next as B’s engine gives it, and its work folded once it ends', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-agent-')));
   const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-agent-'));
   const checkout = join(root, 'b-checkout');
@@ -2355,17 +2355,6 @@ test('a subagent of B’s lane B session, drilled into from A: the rows it gave 
         });
       await scene!.sminos.list({ engine: SUB_SPAWNED, app: spawnedApp, owners: [scene!.member], project: PROJECT, title: SUB_TITLE, cwd: checkout });
       expect(bareOf(await movedTo(page, b.ref, null, bSaid)), 'the New chat tab moved to the session B started').toBe(spawnedApp);
-      // the agent's transcript and meta as the engine leaves them beside the session's on B, which B reads once it ends
-      const agentDir = join(b.claudeConfigDir, 'projects', slugOf(checkout), SUB_SPAWNED, 'subagents');
-      mkdirSync(agentDir, { recursive: true });
-      const t = transcript({ sessionId: SUB_SPAWNED, cwd: checkout, start: Date.now() });
-      t.user('f8a10000-0000-4000-8000-000000000001', SUB_AGENT.prompt);
-      t.text('f8a10000-0000-4000-8000-000000000002', SUB_FIRST);
-      t.text('f8a10000-0000-4000-8000-000000000003', SUB_SECOND);
-      // an agent's records: on its sidechain, named by its id, its prompt its parent's; only its last reply ends its turn
-      const sidechain = t.records.map((record, i) => ({ ...record, isSidechain: true, agentId: SUB_AGENT.id, origin: undefined, promptSource: undefined, ...(i === 1 && { message: { ...(record.message as object), stop_reason: null } }) }));
-      writeFileSync(join(agentDir, `agent-${SUB_AGENT.id}.jsonl`), sidechain.map((record) => JSON.stringify(record)).join('\n') + '\n');
-      writeFileSync(join(agentDir, `agent-${SUB_AGENT.id}.meta.json`), JSON.stringify({ agentType: 'general-purpose', description: SUB_AGENT.description, toolUseId: agent.toolUseId, spawnDepth: 1, requestShape: 'background', requestNonInteractive: true, model: 'haiku' }));
     });
 
     // the agent's slice of the session as B's engine host holds it (its own rows and the session's reports on it)
@@ -2391,26 +2380,19 @@ test('a subagent of B’s lane B session, drilled into from A: the rows it gave 
       await expect(drillIn.getByText(SUB_FIRST, { exact: true }), 'the first still there, once').toHaveCount(1);
     });
 
-    await test.step('once the agent ends, the drill-in reads its transcript from B’s disk: its work folded behind its last reply', async () => {
-      // B's engine host's lines about the agent's follow, from every log of B's (M8's way of reading them)
-      const prefix = `[fs] follow ${spawnedApp}/${SUB_AGENT.id}: `;
-      const followLines = () =>
-        (readdirSync(b.userData, { recursive: true }) as string[])
-          .filter((name) => name.endsWith('.log'))
-          .flatMap((name) => readFileSync(join(b.userData, name), 'utf8').split('\n'))
-          .map((line) => line.slice(Math.max(0, line.indexOf(prefix))))
-          .filter((line) => line.startsWith(prefix))
-          .map((line) => line.slice(prefix.length));
-      expect(followLines(), 'nothing on B follows the agent’s transcript while it runs').toEqual([]);
+    await test.step('once the agent ends, its work folds behind its last reply, from the stream: nothing on B follows its transcript', async () => {
       await b.request('session.getContextUsage', { appSessionId: spawnedApp, detail: 'summary' }); // lets the agent end
-      await quoting(
-        expect.poll(followLines, { timeout: 60_000, message: 'B follows the agent’s transcript for A, its hold A’s channel’s' }).toContainEqual(expect.stringMatching(/^held by client [0-9a-f]{8} \(1 holding\)$/)),
-        drillInSaid,
-      );
       await quoting(expect(drillIn.getByRole('button', { name: /^Worked for / }), 'its work folded, as a finished local agent’s').toBeVisible({ timeout: 60_000 }), drillInSaid);
       await expect(drillIn.getByText(SUB_SECOND, { exact: true }), 'behind its last reply').toBeVisible();
       await expect(drillIn.getByTestId('subagent-rows-gap')).toHaveCount(0);
-      console.log(`[e2e:remote] agent drill-in: ${spawnedApp}/${SUB_AGENT.id}; B's follow of its transcript: ${followLines().join('; ')}`);
+      // B's engine host's lines about a follow of the agent's transcript, from every log of B's (M8's way of reading them)
+      const prefix = `[fs] follow ${spawnedApp}/${SUB_AGENT.id}: `;
+      const followLines = (readdirSync(b.userData, { recursive: true }) as string[])
+        .filter((name) => name.endsWith('.log'))
+        .flatMap((name) => readFileSync(join(b.userData, name), 'utf8').split('\n'))
+        .filter((line) => line.includes(prefix));
+      expect(followLines, 'no follow of the agent’s transcript on B').toEqual([]);
+      console.log(`[e2e:remote] agent drill-in: ${spawnedApp}/${SUB_AGENT.id} read from the session's stream, running and ended`);
     });
   } finally {
     await a?.cleanup();

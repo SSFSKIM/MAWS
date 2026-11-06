@@ -233,7 +233,7 @@ export class SideJournal {
   agent(agentId: string, description: string): { toolUseId: string; text(text: string): void; completed(summary: string): void } {
     const toolUseId = `toolu_e1${this.sessionId.at(-1)}${String(this.minted + 1).padStart(6, '0')}`;
     const swap = { [RECORDED.agent.session]: this.sessionId, [RECORDED.agent.toolUse]: toolUseId, [RECORDED.agent.id]: agentId, [RECORDED.agent.description]: description };
-    const frame = (seq: number) => ({ ...swapped(frameOf(SUBAGENT, seq), swap), uuid: this.uuid() }) as Frame & { message: Frame & { content: Frame[] } };
+    const frame = (seq: number) => ({ ...swapped(frameOf(SUBAGENT, seq), swap), uuid: this.uuid() }) as unknown as Frame & { message: Frame & { content: Frame[] } };
     const call = frame(169);
     this.push('in', { ...call, wire_tool_inputs: { [toolUseId]: call.message.content[0]!.input } }); // keyed by the call's id
     this.push('in', frame(171));
