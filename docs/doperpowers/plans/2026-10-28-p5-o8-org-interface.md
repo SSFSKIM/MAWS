@@ -3100,6 +3100,24 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   13. `src/shared/machine/coverage.test.ts` reviews `ChannelEvent.event`'s string-keyed record: a log event's own fields, sminos's ids, no MAWS address.
   Date/Author: 2026-11-06, O8's executor (controller), from Task 1's report.
 
+- Decision: M7a Task 2, the renderer (3d355c066..7d113efb3), settles these points where the spec was silent.
+  1. §N's `ChannelEntry` is a renderer type. Every entry carries `key`, `label` and `by?`. An `exchange` carries its `says`, so it opens in place. `say.owners` are `OrgMember`s, labelled with M5's `ownersLabel`. A `words` entry has `you`, `to: … | null` and `state?: 'sending' | 'sent' | 'not-sent' | {refused}`, in place of §N's `sending?`/`refused?`. A word not yet in the log has `offset: null` and `at: null`.
+  2. "Not sent" holds within the app's life, not across a relaunch.
+     - The renderer remembers every word it sent, per project, in page memory that outlives the tab.
+     - A word is `seen` once main's pending lists it. While a tab holds the channel, a word leaving pending was acknowledged.
+     - At a later open, a word that is not pending, not logged and never acknowledged was dropped with the channel (30 s after its last tab). It reads "Not sent" for that tab's life, then is forgotten.
+     - A relaunch can say nothing: the draft lives in main's memory, and a disk copy would defeat that rule.
+  3. A fold holds one label: a label change ends a run. A say to several sessions folds with nothing. Any other drawn entry ends a run, words and to-human entries included, as desk-web's rule has it.
+  4. The waiting cards leave out a greyed machine's items, which nothing can answer now. The native ask answers in place through `RequestCard`'s `askInPlace`, which feeds `AskBody`'s shared `inPlace` mode, so no variant's types change. `HoverAsk` gained the sheet's "older peer" gate.
+  5. Words by the signed-in member read "You". The member comes from `useHubAccess`'s new `member` field.
+  6. Machine chips resolve the log's machine *name* to a roster ref, case-insensitively as `machineNameKey` compares, and reuse `MachineChip`'s rules. An unresolved name draws as `@name`.
+  7. The channel tab is a tab of no session. Like Settings, it follows the current set, and `channel:<smnsId>` keeps it one tab per project.
+  8. Offline reasons come from `hubAccess`: "Signed out", "The hub sign-in has ended." (with Sign in again), "The hub no longer admits you.", "Hub unreachable", and otherwise "Connecting to the hub…". The composer is withdrawn whenever `live` is false.
+  9. Text renders plain (`whitespace-pre-wrap`), not Markdown, which keeps an untrusted log's text inert.
+  10. An open that main doesn't answer shows "Couldn't open the channel" with Retry.
+  11. The e2e-facing selectors are `data-channel`, `data-channel-entry` (with `data-offset`, `data-channel-label`, `data-host`, `data-count`), `data-word-state`, `data-channel-provenance`, `data-channel-exchange-messages`, `data-channel-party`, `data-machine-chip`, `data-channel-unverified`, `data-channel-waiting`/`data-channel-card`, `data-channel-composer`, `data-channel-offline`/`data-channel-as-of` and `data-channel-closed`. The scroller is `role="log"`.
+  Date/Author: 2026-11-06, O8's executor (controller), from Task 2's report.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
