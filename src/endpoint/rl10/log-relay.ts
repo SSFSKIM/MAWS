@@ -74,6 +74,7 @@ import { createHash } from 'node:crypto';
 import {
   audienceDigest,
   eventSigningInput,
+  HUB_WRITER_PREFIX,
   isAudience,
   isHubWriter,
   isIsoMillis,
@@ -120,6 +121,8 @@ type Judged =
   | { deliver: Wrapped }
   | { spent: SpentReason; reason: Rejected['reason']; message: string }
   | { hold: string; read?: string };
+
+const HUB_LACKS_STREAMS = "the hub's welcome advertises no audience streams";
 
 /** How many arriving events the relay holds at most, and how long each, while their verdict waits on the head. */
 export const HOLD_MAX = 1000;
@@ -196,6 +199,7 @@ export class LogRelay {
       writable: () => ctx.hub.writable?.() ?? Promise.resolve(),
       toSminos: (frame) => this.#toSminos(frame),
       signed: (project, writer, seq) => ctx.ledger.get(project, writer, seq) !== null,
+      waits: (writer) => this.#streamHeld(writer),
       now: () => ctx.now(),
       log: (line) => ctx.log(line),
       limits: ctx.uplink,
@@ -360,14 +364,14 @@ export class LogRelay {
     }
     const held = this.#ctx.ledger.get(project, writer, seq);
     if (held !== null) {
-      if (held.hash === hash) return { event: rebuilt(form, held) };
+      if (held.hash === hash) return this.#streamHeld(writer) ? { hold: HUB_LACKS_STREAMS } : { event: rebuilt(form, held) };
       this.#ctx.log(`endpoint: sminos uploaded another body at ${writer}:${seq} in project ${project}, where the endpoint signed one already: refused (conflict), not signed again`);
       return { reason: 'conflict', message: `${writer}:${seq} was signed with another body` };
     }
     const judged = await this.#judge(project, e, form, org);
     if ('refuse' in judged) return { reason: judged.reason ?? 'audience', message: judged.refuse };
     if ('hold' in judged) return judged;
-    if (streamOf(writer).digest !== null && !this.#ctx.hubStreams()) return { hold: "the hub's welcome advertises no audience streams" };
+    if (this.#streamHeld(writer)) return { hold: HUB_LACKS_STREAMS };
     const session = sessionOfWriter(writer);
     const member = session === null ? null : this.#ctx.members.get(session);
     const now = new Date(this.#ctx.now());
@@ -386,6 +390,14 @@ export class LogRelay {
     const kept: Signature = { ...signature, sig: signed.sig, ...(mac === null ? {} : { mac }) };
     this.#ctx.ledger.put(project, writer, seq, kept);
     return { event: rebuilt(form, kept) };
+  }
+
+  /**
+   * Whether `writer`'s events wait for the hub (D9): a stream's while the hub's welcome lacks `audience`. Checked at
+   * signing, at a resend of what the ledger signed, and again by the uplink as each upload leaves.
+   */
+  #streamHeld(writer: string): boolean {
+    return streamOf(writer).digest !== null && !this.#ctx.hubStreams();
   }
 
   #audiences(org: { head: OrgState; certificates: Certificates; ref: string }): AudienceContext {
@@ -723,12 +735,12 @@ function rebuilt(form: Record<string, unknown>, signature: Signature): Record<st
   return { ...unsigned(form, signature), sig: signature.sig, ...(signature.mac === undefined ? {} : { mac: signature.mac }) };
 }
 
-/** Who signed a verified v2 event: a member's device for a `hub/` writer, else the machine its name binds (by the head's
- * `machineNames`, or a certificate bearing the name). */
+/** Who signed a verified v2 event: a member's device for a `hub/` writer or its stream, else the machine its name binds
+ * (by the head's `machineNames`, or a certificate bearing the name). */
 export async function signerOf(head: OrgState, certificates: Certificates, event: LogEventV2): Promise<Signer | null> {
   const kid = event.sig.kid;
   if (isHubWriter(event.writer)) {
-    const member = event.writer.slice('hub/'.length);
+    const member = streamOf(event.writer).base.slice(HUB_WRITER_PREFIX.length);
     for (const m of head.members) {
       if (m.id !== member) continue;
       for (const d of m.devices) if ((await keyId(d.channelPub)) === kid) return { kind: 'device', member, device: d.id, keyId: kid };

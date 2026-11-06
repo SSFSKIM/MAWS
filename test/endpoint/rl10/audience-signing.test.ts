@@ -9,7 +9,7 @@
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateSigningKey, signEvent, streamWriter, verifyEvent, type Certificates, type SignedOrgState } from 'org-protocol';
+import { generateSigningKey, hubWriter, signEvent, streamWriter, verifyEvent, type Certificates, type SignedOrgState } from 'org-protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { InboundIndex } from '../../../src/endpoint/rl10/inbound-index';
 import { LegacyKey } from '../../../src/endpoint/rl10/legacy';
@@ -51,8 +51,9 @@ const ts = () => new Date(++clock).toISOString();
 
 const member = (session: string, alias: string, record: Record<string, unknown>) => ({ t: 'member', session, alias, project: P, lane: 'A', state: 'idle', cwd: '/w', launch: 'L', owners: ['@machine'], ownersProof: [], origin: { kind: 'terminal' }, ...record });
 
-async function scene(options: { rebuilding?: boolean; hubStreams?: boolean; streamsDown?: boolean; askMs?: number } = {}) {
+async function scene(options: { rebuilding?: boolean; hubStreams?: boolean; streamsDown?: boolean; askMs?: number; writable?: () => Promise<void> } = {}) {
   const a1 = await newDevice('a1');
+  const b1 = await newDevice('b1');
   const host = await generateSigningKey();
   const mini = await generateSigningKey();
   const A = memberId();
@@ -60,7 +61,7 @@ async function scene(options: { rebuilding?: boolean; hubStreams?: boolean; stre
   const C = memberId();
   let head: SignedOrgState = await genesis(ORG, A, a1, await generateSigningKey());
   head = await successor(head, [a1], (s) => {
-    s.members.push({ id: B, email: 'b@example.com', role: 'member', devices: [] }, { id: C, email: 'c@example.com', role: 'member', devices: [] });
+    s.members.push({ id: B, email: 'b@example.com', role: 'member', devices: [b1.device] }, { id: C, email: 'c@example.com', role: 'member', devices: [] });
     s.machines.push({ name: 'host', ref: REF, pub: host.pub, owners: [A] }, { name: 'mini', ref: MINI, pub: mini.pub, owners: [C] });
     s.machineNames.push({ name: 'host', ref: REF }, { name: 'mini', ref: MINI });
   });
@@ -78,7 +79,7 @@ async function scene(options: { rebuilding?: boolean; hubStreams?: boolean; stre
     ledger,
     index: new InboundIndex(() => state.subdirectory('inbound'), Date.now),
     legacy: new LegacyKey(() => state, () => ORG),
-    hub: { openProject: () => () => {}, send: (f) => (toHub.push(structuredClone(f) as Frame), true) },
+    hub: { openProject: () => () => {}, send: (f) => (toHub.push(structuredClone(f) as Frame), true), ...(options.writable === undefined ? {} : { writable: options.writable }) },
     toSminos: (f) => void toSminos.push(structuredClone(f) as Frame),
     opened: () => {},
     now: Date.now,
@@ -112,7 +113,14 @@ async function scene(options: { rebuilding?: boolean; hubStreams?: boolean; stre
     const created = ts();
     return signEvent({ org: ORG, project: P }, { ts: created, created, writer, seq, ...fields }, mini.privateKey, mini.pub) as Promise<Record<string, unknown>>;
   };
-  return { A, B, C, head, relay, members, cache, ledger, toHub, toSminos, flags, record, sent, refused, upload, verifies, miniEvent };
+  /** B's device's words into `session` toward `audience`, as the hub posts them in B's stream at `seq` (D8). */
+  const deviceWords = async (session: string, audience: string[], seq: number) => {
+    const created = ts();
+    const draft = { kind: 'human', from: 'human', member: B, to: [{ session, alias: 'bob' }], text: 'do it', created, nonce: 'AAAAAAAAAAAAAAAAAAAAAA', audience };
+    const signed = await signEvent({ org: ORG, project: P }, draft, b1.channel.privateKey, b1.channel.pub);
+    return { ...signed, writer: streamWriter(hubWriter(B), audience), seq, ts: created } as Record<string, unknown>;
+  };
+  return { A, B, C, head, relay, members, cache, ledger, toHub, toSminos, flags, record, sent, refused, upload, verifies, miniEvent, deviceWords };
 }
 
 const say = (writer: string, seq: number, to: string[], text = 'hi', extra: Record<string, unknown> = {}) => ({ ts: ts(), writer, seq, kind: 'say', from: 'x', to: to.map((session) => ({ session, alias: session.slice(0, 4) })), text, ...extra });
@@ -294,6 +302,44 @@ describe('holding what can’t be decided yet', () => {
     await t.upload([e]);
     expect(t.sent(`host/${L}`, 1)).toHaveLength(1);
   });
+
+  it('holds a stream position the ledger signed already, resent while the hub’s welcome lacks `audience`', async () => {
+    const t = await scene();
+    const writer = streamWriter(`host/${S}`, sorted([t.A, t.B]));
+    const e = say(writer, 1, []);
+    await t.upload([e]);
+    expect(t.sent(writer, 1)).toHaveLength(1);
+    // A reconnect to a hub rolled back past the capability: sminos's resend of the signed position is held, not sent.
+    t.flags.hubStreams = false;
+    await t.upload([e]);
+    expect(t.sent(writer, 1)).toHaveLength(1);
+    expect(t.relay.heldAt(P, writer)).toBe(1);
+    expect(t.refused(writer, 1)).toEqual([]);
+    // The capability back: asked again, and resent byte for byte.
+    t.flags.hubStreams = true;
+    t.relay.release();
+    expect(t.toSminos.some((f) => f.t === 'resend' && f.writer === writer && f.from === 1)).toBe(true);
+    await t.upload([e]);
+    const copies = t.sent(writer, 1).map((x) => JSON.stringify(x));
+    expect(copies).toHaveLength(2);
+    expect(copies[1]).toBe(copies[0]);
+  });
+
+  it('sends no queued stream event over a connection whose hub lacks `audience`: it is held, the plain writers go', async () => {
+    let open: () => void = () => {};
+    const room = new Promise<void>((resolve) => (open = () => resolve()));
+    const t = await scene({ writable: () => room });
+    const writer = streamWriter(`host/${S}`, sorted([t.A, t.B]));
+    await t.upload([say(writer, 1, []), say(`host/${L}`, 1, [])]);
+    // Signed and queued on a capable hub's connection; the link is replaced by one to a hub without the capability.
+    expect(t.ledger.get(P, writer, 1)).not.toBeNull();
+    t.flags.hubStreams = false;
+    open();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(t.sent(writer, 1)).toEqual([]);
+    expect(t.sent(`host/${L}`, 1)).toHaveLength(1);
+    expect(t.relay.heldAt(P, writer)).toBe(1);
+  });
 });
 
 describe('from the hub', () => {
@@ -352,5 +398,54 @@ describe('from the hub', () => {
     expect(t.cache.get(Q)?.policyRev).toBe(2);
     await t.relay.fromHub({ t: 'events', project: P, events: [forged] });
     expect(t.cache.get(Q)).toMatchObject({ audience: null, policyRev: 9 });
+  });
+
+  it('verifies a device’s words in its member’s stream as the member’s, and delivers them', async () => {
+    const t = await scene();
+    const words = await t.deviceWords(S, sorted([t.A, t.B]), 1);
+    await t.relay.fromHub({ t: 'events', project: P, events: [words] });
+    const down = t.toSminos.find((f) => f.t === 'events');
+    expect((down?.events as Array<{ signer: unknown }> | undefined)?.[0]?.signer).toMatchObject({ kind: 'device', member: t.B, device: 'b1' });
+    expect(t.relay.holding).toBe(0);
+  });
+
+  it('asks a revived stream again: its `audience` stop lifted once the void at the stopped position is signed', async () => {
+    const t = await scene({ askMs: 200 });
+    const writer = streamWriter(`host/${S}`, sorted([t.A, t.B]));
+    await t.upload([say(writer, 1, [])]);
+    // Position 2 held while the hub lacks `audience`; B's share is removed before it is asked again.
+    t.flags.hubStreams = false;
+    const two = say(writer, 2, []);
+    await t.upload([two]);
+    await t.record(S, 'secret', { access: 'private', policyRev: 2 });
+    t.flags.hubStreams = true;
+    t.relay.release();
+    await t.upload([two]);
+    expect(t.refused(writer, 2)[0]?.reason).toBe('audience');
+    // B's share is back, the digest current again: sminos voids 2 and the writer continues.
+    await t.record(S, 'secret', { access: 'private', shares: [{ member: t.B, grade: 'list' }], policyRev: 3 });
+    await t.upload([{ ts: ts(), writer, seq: 2, kind: 'void', of: 2, audience: sorted([t.A, t.B]) }]);
+    expect(t.sent(writer, 2)).toHaveLength(1);
+    const three = say(writer, 3, []);
+    await t.upload([three]);
+    expect(t.sent(writer, 3)).toHaveLength(1);
+    // The registry is down at 3: asked again after the wait, as any writer's.
+    await t.relay.fromHub({ t: 'refused', project: P, refusal: { reason: 'state-unavailable', writer, seq: 3, message: 'registry' } });
+    const asked = () => t.toSminos.some((f) => f.t === 'resend' && f.writer === writer && f.from === 3);
+    for (let waited = 0; !asked() && waited < 2000; waited += 10) await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(asked()).toBe(true);
+  });
+
+  it('keeps the hub’s `audience` refusal of a signed position a stop: no void revives it', async () => {
+    const t = await scene({ askMs: 50 });
+    const writer = streamWriter(`host/${S}`, sorted([t.A, t.B]));
+    const two = say(writer, 2, []);
+    await t.upload([say(writer, 1, []), two]);
+    await t.relay.fromHub({ t: 'refused', project: P, refusal: { reason: 'audience', writer, seq: 2, message: 'mismatch' } });
+    // The signed position uploaded again (its bytes rebuilt) lifts nothing, and the hole the registry opens there stays unasked.
+    await t.upload([two]);
+    await t.relay.fromHub({ t: 'refused', project: P, refusal: { reason: 'state-unavailable', writer, seq: 2, message: 'registry' } });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(t.toSminos.some((f) => f.t === 'resend' && f.writer === writer)).toBe(false);
   });
 });

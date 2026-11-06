@@ -4,12 +4,13 @@
 // a session it holds no `member` for, and otherwise decides by where the event came from:
 //
 //   - an arriving event (stored with its `sig`): verified again against the head at this moment, and found in the
-//     inbound index at its own position. A device-signed `hub/<member>` event is `words` when its member is in the
-//     head and holds `converse` on the session (M5's rank); a revoked signer, a body that no longer verifies, or one
-//     the index doesn't hold at this position (a replay) is `refuse`; a machine-signed event, one signed more than a day
-//     ago, one whose member the head no longer holds (a retired key still verifies), or any while the head is past RL
-//     §5.2's 30-day backstop, is `peer`: words into another machine's session need a device's signature, the inbound
-//     index outlives a day, and a stale head can't vouch for a person's standing.
+//     inbound index at its own position. A device-signed `hub/<member>` event (or one in the member's stream,
+//     `hub/<member>~<digest>`) is `words` when its member is in the head and holds `converse` on the session (M5's
+//     rank); a revoked signer, a body that no longer verifies, or one the index doesn't hold at this position (a
+//     replay) is `refuse`; a machine-signed event, one signed more than a day ago, one whose member the head no longer
+//     holds (a retired key still verifies), or any while the head is past RL §5.2's 30-day backstop, is `peer`: words
+//     into another machine's session need a device's signature, the inbound index outlives a day, and a stale head
+//     can't vouch for a person's standing.
 //   - this machine's own writer (the operator path; sminos stores it unsigned and asks only when its append receipt
 //     matches): `words` when the session's owners, `@machine` resolved against the head, include one of the machine's
 //     owners, `peer` otherwise; and `refuse` when the signature ledger holds another body at its position, which is
@@ -21,7 +22,7 @@
 // `words?` names the project whose log holds the event (`project`, required): sminos's `say` copies one message into
 // two projects' logs, so the session's member's project is no stand-in. One without a project is `refuse`.
 import { createHash } from 'node:crypto';
-import { eventSigningInput, isHubWriter, isIsoMillis, isLogSeq, isSig, machineNameKey, verifyEvent, writerMachine, type Certificates, type LogEventV2, type OrgState } from 'org-protocol';
+import { eventSigningInput, HUB_WRITER_PREFIX, isHubWriter, isIsoMillis, isLogSeq, isSig, machineNameKey, streamOf, verifyEvent, writerMachine, type Certificates, type LogEventV2, type OrgState } from 'org-protocol';
 import { rankAtLeast, sessionRank } from '../grades';
 import { BACKSTOP_MS } from '../org-sync';
 import { resolveOwners } from '../listings';
@@ -78,8 +79,9 @@ export async function decideWords(ctx: WordsContext, frame: Record<string, unkno
   // same uid's and exempt).
   if (ctx.now() - Date.parse(org.head.issued) > BACKSTOP_MS) return 'peer';
   // A retired key still verifies its member's earlier words after they left; a member the head no longer holds has no
-  // standing on any session, whatever a record's owners, shares or access say.
-  const signer = event.writer.slice('hub/'.length);
+  // standing on any session, whatever a record's owners, shares or access say. A stream of the member's
+  // (`hub/<member>~<digest>`, P5 O18 D8) is the member's.
+  const signer = streamOf(event.writer).base.slice(HUB_WRITER_PREFIX.length);
   if (!org.head.members.some((m) => m.id === signer)) return 'peer';
   return rankAtLeast(sessionRank(record, signer, owners), 'converse') ? 'words' : 'peer';
 }

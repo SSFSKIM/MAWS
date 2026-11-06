@@ -11,10 +11,12 @@ import { join } from 'node:path';
 import {
   eventSigningInput,
   generateSigningKey,
+  hubWriter,
   keyId,
   signEvent,
   signRecord,
   SIGNING_DOMAINS,
+  streamWriter,
   type Certificates,
   type OrgState,
   type SignedOrgState,
@@ -116,6 +118,16 @@ describe('words?', () => {
       s.retired.push(...(await retiredDevice(B, b1.device, s.issued)));
     });
     expect(await decide(left, event, [A], { access: 'org-converse', shares: [{ member: B, grade: 'converse' }] })).toBe('peer');
+  });
+
+  it('takes a device’s words in its member’s stream (`hub/<member>~<digest>`) as that member’s (O18 M2)', async () => {
+    const { b1, A, B, head } = await org();
+    const audience = [A, B].sort();
+    const created = new Date().toISOString();
+    const draft = { kind: 'human', from: 'human', member: B, to: [{ session: S, alias: 'bob' }], text: 'do it', created, nonce: 'AAAAAAAAAAAAAAAAAAAAAA', audience };
+    const signed = await signEvent({ org: ORG, project: P }, draft, b1.channel.privateKey, b1.channel.pub);
+    const event = { ...signed, writer: streamWriter(hubWriter(B), audience), seq: 1, ts: created };
+    expect(await decide(head, event, [A], { access: 'private', shares: [{ member: B, grade: 'converse' }] })).toBe('words');
   });
 
   it('answers no remote words past the head’s 30-day backstop (finding 2)', async () => {

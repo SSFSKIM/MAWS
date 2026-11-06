@@ -4,7 +4,7 @@
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateSigningKey, signEvent, type Certificates, type OrgState, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { generateSigningKey, hubWriter, signEvent, streamWriter, type Certificates, type OrgState, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EndpointPolicy } from '../../../src/endpoint/policy';
 import { InboundIndex } from '../../../src/endpoint/rl10/inbound-index';
@@ -125,6 +125,17 @@ describe('reach? (D1, D2)', () => {
     expect(await decide(o, from, { access: 'private', shares: [{ member: o.B, grade: 'list' }] })).toBe('deliver');
     expect(await decide(o, from, { access: 'private', shares: [{ member: o.B, grade: 'view' }] })).toBe('deliver');
     expect(await decide(o, from, { access: 'private' })).toEqual({ refuse: 'not-reachable' });
+  });
+
+  it('takes a device’s words in its member’s stream (`hub/<member>~<digest>`) as that member’s', async () => {
+    const o = await org();
+    const audience = [o.A, o.B].sort();
+    const created = new Date().toISOString();
+    const draft = { kind: 'human', from: 'human', member: o.B, to: [{ session: S, alias: 'bob' }], text: 'hi', created, nonce: 'AAAAAAAAAAAAAAAAAAAAAA', audience };
+    const signed = await signEvent({ org: ORG, project: P }, draft, o.b1.channel.privateKey, o.b1.channel.pub);
+    const words = { ...signed, writer: streamWriter(hubWriter(o.B), audience), seq: 1, ts: created };
+    expect(await decide(o, words, { access: 'private', shares: [{ member: o.B, grade: 'list' }] })).toBe('deliver');
+    expect(await decide(o, words, { access: 'private' })).toEqual({ refuse: 'not-reachable' });
   });
 
   it('lets an unverified sender reach only a session the whole org may message', async () => {
