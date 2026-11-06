@@ -7,7 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
 import { addressOf } from '@shared/machine/address';
 import type { OrgKey } from '@shared/machine/org-key';
-import type { Draft } from '@shared/ipc/schema/session';
+import { HOME_CHECKOUT, type Draft } from '@shared/ipc/schema/session';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { attachmentsOf, docOf, paragraph, textNode, type Attachment } from '../composer/editor/doc';
@@ -30,6 +30,12 @@ beforeEach(() => {
 afterEach(() => useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() }));
 
 describe('the machine chosen for a New chat tab', () => {
+  it('stands, once a place is chosen on the machine itself, whatever the local project', () => {
+    const there: SpawnTarget = { machine: OTHER_MACHINE, name: 'mini', checkout: '/Users/mini/notes', key: null, label: 'notes' };
+    useRemoteSpawn.getState().choose(LOCAL_TAB, there);
+    expect([spawnTargetOf(LOCAL_TAB, null), spawnTargetOf(LOCAL_TAB, KEY), spawnTargetOf(LOCAL_TAB, 'repo:another')]).toEqual([there, there, there]);
+  });
+
   it('is this Mac until another is chosen, and only for the project it was chosen with', () => {
     expect(spawnTargetOf(LOCAL_TAB, KEY)).toBeNull();
     useRemoteSpawn.getState().choose(LOCAL_TAB, target);
@@ -68,6 +74,31 @@ describe('a spawn on another machine', () => {
     expect(fake.invoked('session.intent.discard')).toEqual([{ appSessionId: LOCAL_TAB }]);
     expect(takeFirstSend(NEW)).toBe(false); // the brief was the first message
     expect(useSpawnedHere.getState().leading.has(NEW), 'P5 O7 M8: it leads its sidebar group until its first turn ends').toBe(true);
+  });
+
+  // 2026-11-06 (the machine first): a place chosen on the machine (no local project's key) is its own: a project there, or
+  // its home (`~`), with no Worktree box of the local project's; none chosen yet, Send asks for one and spawns nothing
+  it('spawns in a place chosen there: its home as `~` with the local Worktree box left out, and nothing with no place yet', async () => {
+    const worktree = { model: null, effort: null, location: { kind: 'newWorktree' as const, repoRoot: '/work/app', name: 'app-1a2b', branch: { kind: 'new' as const, name: 'worktree-app-1a2b', base: 'HEAD' } } };
+    const home: SpawnTarget = { machine: OTHER_MACHINE, name: 'mini', checkout: HOME_CHECKOUT, key: null, label: 'No project' };
+    const { fake, run } = spawnOf(undefined, { target: home, intent: worktree });
+    await expect(run).resolves.toEqual({ started: true });
+    expect(fake.invoked('session.spawn')).toEqual([{ checkout: HOME_CHECKOUT, permission_mode: 'acceptEdits', brief: 'fix the build' }]);
+    const none = spawnOf(undefined, { target: { ...home, checkout: null } });
+    await expect(none.run).resolves.toEqual({ started: false, words: SPAWN_WORDS.noPlace('mini'), again: null });
+    expect(none.fake.invoked('session.spawn')).toEqual([]);
+  });
+
+  it('says a home chat’s refusals as the home’s: untrusted offers its card, and an endpoint that predates it says so', async () => {
+    const home: SpawnTarget = { machine: OTHER_MACHINE, name: 'mini', checkout: HOME_CHECKOUT, key: null };
+    const fake = fakeClient({ 'session.spawn': { status: 'refused', reason: 'untrusted' } });
+    const doc = docOf([paragraph(textNode('hi'))]);
+    const s = serializeDraft(doc, { sessionId: null, cwd: '' });
+    const intent = { model: null, effort: null, location: null };
+    await expect(spawnOnMachine({ from: LOCAL_TAB, target: home, s, doc, intent, mode: 'default' }, fake.client)).resolves.toEqual({ started: false, words: SPAWN_WORDS.untrustedHome('mini'), again: null, trust: true });
+    const older = fakeClient({ 'session.spawn': { status: 'refused', reason: 'unknown-checkout' } });
+    await expect(spawnOnMachine({ from: LOCAL_TAB, target: home, s, doc, intent, mode: 'default', fresh: true }, older.client)).resolves.toMatchObject({ started: false, words: SPAWN_WORDS.noHome('mini') });
+    expect(spawnErrorWords({ code: 'internal', message: 'refused', issues: { refusal: 'unknown-checkout' } }, 'mini', true)).toBe(SPAWN_WORDS.noHome('mini'));
   });
 
   it('names the worktree a Worktree box asked for', async () => {
@@ -263,6 +294,44 @@ describe('a spawn on another machine', () => {
       reload();
       expect(spawnTargetOf(LOCAL_TAB, KEY)).toBeNull();
     });
+  });
+
+  // The branch review (P2): a place changes on one machine now (2026-11-06), so the held attempt follows the place, not
+  // the machine alone: another place chosen lets it go, and the next Send starts there anew, never the old place's input
+  it('lets the attempt go when the person chooses another place on the same machine, and starts there anew', async () => {
+    const home: SpawnTarget = { machine: OTHER_MACHINE, name: 'mini', checkout: HOME_CHECKOUT, key: null, label: 'No project' };
+    const notes: SpawnTarget = { machine: OTHER_MACHINE, name: 'mini', checkout: '/Users/mini/notes', key: null, label: 'notes' };
+    const fake = fakeClient();
+    const ask = (at: SpawnTarget, text: string) => {
+      const d = docOf([paragraph(textNode(text))]);
+      return spawnOnMachine({ from: LOCAL_TAB, target: at, s: serializeDraft(d, { sessionId: null, cwd: '' }), doc: d, intent: { model: null, effort: null, location: null }, mode: 'default' }, fake.client);
+    };
+    useRemoteSpawn.getState().choose(LOCAL_TAB, home);
+    const first = ask(home, 'go home');
+    await Promise.resolve();
+    await fake.fail('session.spawn', 'mini took the request but hasn’t confirmed it', 'timeout');
+    await first;
+    expect(spawnUnconfirmed(LOCAL_TAB)).toBe(true);
+    useRemoteSpawn.getState().choose(LOCAL_TAB, home); // the same place again: still held
+    expect(spawnUnconfirmed(LOCAL_TAB)).toBe(true);
+    useRemoteSpawn.getState().choose(LOCAL_TAB, notes);
+    expect(spawnUnconfirmed(LOCAL_TAB)).toBe(false);
+    useRemoteSpawn.setState({ chosen: new Map() });
+    restoreHeldAttempts(); // a reload restores no old place
+    expect(spawnTargetOf(LOCAL_TAB, null)).toBeNull();
+    useRemoteSpawn.getState().choose(LOCAL_TAB, notes);
+    const next = ask(notes, 'go to the notes');
+    await Promise.resolve();
+    expect(fake.invoked('session.spawn').at(-1)).toEqual({ checkout: '/Users/mini/notes', permission_mode: 'default', brief: 'go to the notes' }); // a new start there
+    // the final review: under the next attempt key, never the left one's, which main still answers with the home's attempt
+    expect(fake.sessions('session.spawn')).toEqual([LOCAL_TAB, addressOf(TEST_MACHINE, 'new-1~1' as AppSessionId)]);
+    await fake.reply('session.spawn', { status: 'refused', reason: 'untrusted' });
+    await next;
+    // a refused attempt's place, left for another: a reload restores none of it either
+    useRemoteSpawn.getState().choose(LOCAL_TAB, home);
+    useRemoteSpawn.setState({ chosen: new Map() });
+    restoreHeldAttempts();
+    expect(spawnTargetOf(LOCAL_TAB, null)).toBeNull();
   });
 
   it('chooses the held attempt’s machine again on a reload, so the tab’s next Send checks on that start', async () => {

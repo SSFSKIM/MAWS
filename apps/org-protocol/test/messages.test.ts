@@ -163,8 +163,8 @@ describe('the pong clock', () => {
     }
   });
 
-  it('is at minor 9 of major 1 (P5 O7 M8: `rl2.upload-blocks`, after O17 M9a’s `rl2.browser-screencast` at 8)', () => {
-    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 9 });
+  it('is at minor 10 of major 1 (the New chat’s machine first: `rl2.spawn-home`, after P5 O7 M8’s `rl2.upload-blocks` at 9)', () => {
+    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 10 });
   });
 });
 

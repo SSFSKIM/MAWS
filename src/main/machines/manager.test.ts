@@ -289,6 +289,33 @@ describe('RL2 machines (P5 O7 M1)', () => {
     expect(m.manager.list().map((x) => x.ref)).toEqual([LOCAL]);
   });
 
+  // 2026-11-06 (the New chat's machine first): the machine menu reads who may start a session there and what its endpoint
+  // takes, so an up RL2 machine says its member's rights (its caps) and its endpoint's capabilities, again at a caps refresh
+  it('reports an up RL2 link’s member rights and its endpoint’s capabilities, and again when its caps move', () => {
+    const remote = fakeRemote([{ ref: D, name: 'mini' }]);
+    let grades: string[] | null = null;
+    const capsListeners = new Set<() => void>();
+    const connect = remote.connect.bind(remote);
+    remote.connect = (machine) =>
+      Object.assign(connect(machine), {
+        caps: () => (grades === null ? null : { machine: { grades } }),
+        peerCapabilities: () => ['rl2.feeds', 'rl2.spawn-home'],
+        onCaps: (listener: () => void) => (capsListeners.add(listener), () => void capsListeners.delete(listener)),
+      });
+    const m = manager([], undefined, remote);
+    const link = remote.links.get(D)!;
+    expect(m.manager.list().find((x) => x.ref === D)).not.toHaveProperty('rights');
+    link.carrierNow = 'relay';
+    link.up(D, 'mini');
+    expect(m.manager.list().find((x) => x.ref === D)).toMatchObject({ state: 'up', capabilities: ['rl2.feeds', 'rl2.spawn-home'] });
+    expect(m.manager.list().find((x) => x.ref === D)).not.toHaveProperty('rights'); // no caps yet
+    grades = ['machine-admin', 'spawn', 'view'];
+    for (const listener of capsListeners) listener();
+    expect(m.changes.at(-1)!.find((x) => x.ref === D)).toMatchObject({ rights: ['spawn', 'machine-admin'] });
+    link.down();
+    expect(m.manager.list().find((x) => x.ref === D)).not.toHaveProperty('capabilities');
+  });
+
   it('reports a link’s refusal while it holds', () => {
     const remote = fakeRemote([{ ref: D, name: 'mini' }]);
     const m = manager([], undefined, remote);

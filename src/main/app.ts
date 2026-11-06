@@ -105,6 +105,9 @@ import { engineQuitDeps } from './lifecycle/engine-quit';
 // E10 end
 // E11 start
 import { shutdownSteps } from './lifecycle/shutdown';
+import { startReaper } from './lifecycle/reaper'; // the quit reaper
+import { flushSessions } from './lifecycle/flush-sessions'; // the quit reaper's flush
+import { session as electronSession } from 'electron'; // the quit reaper's flush: `session` below is the org's
 import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
 import { MACHINE_DELIVERY_CAPABILITY, MACHINE_RENDER_CAPABILITY } from '@shared/host/socket-protocol'; // P5 O5 M4; P5 O7 M5c: delivery
 // E11 end
@@ -486,7 +489,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
   // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace;
   // P4 W2-B: the hosts' stop is a drain, run before the rest, which stop once it has settled
-  const shutdown = shutdownSteps(app, CLOSE_GRACE_MS);
+  const shutdown = shutdownSteps(app, CLOSE_GRACE_MS, () => startReaper()); // the quit reaper: lifecycle/reaper.ts
   shutdown.add('remote lane B', () => remoteLaneB.stop()); // P5 O7 M2: its subscriptions closed before the links
   // P5 O17 M9b (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §K, "The app's bridge"): a window's own
   // viewers of the agent's tabs on another machine's session, over its RL2 link (src/main/browser/remote-view.ts); the
@@ -775,6 +778,9 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // E4b end
   // P5 O3-A: once the browser and its import have stopped; the agent activity's last flush runs as it closes
   shutdown.add('browser data', () => browserData.close());
+  // The quit reaper (tracker 2026-11-06): the app's own session and every browser partition opened write their storage
+  // and cookies to disk, within the steps' bound, so a reap after the exit's stall loses only what Chromium had left
+  shutdown.add('browser storage', () => flushSessions([electronSession.defaultSession, ...browser.partitions.sessions()]));
 
   // The hosts belong to the app, not to a window or a page (§4.1): they start here, before any window exists, and
   // `start()` is idempotent, so opening a window again forks nothing and a reload never reaches them.

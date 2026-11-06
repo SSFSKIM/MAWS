@@ -192,6 +192,59 @@ describe('scm service stages, unstages, discards and commits against a real repo
     expect(new Set(refresh.mock.calls.map(([d]) => d))).toEqual(new Set([directory]));
   });
 
+  // 2026-11-06 (the home-root rule; the desk track's review, P1's scm half): a checkout is a home's by itself or by its
+  // repository: a project folder inside a home kept in git is the home's repository to scm, so another machine's caller
+  // reaches nothing of it.
+  it('says a checkout covers a home by its realpath or its repository’s, and one of its own repository doesn’t', async () => {
+    mkdirSync(join(repo.root, 'proj'));
+    const other = await GitFixture.create();
+    try {
+      const ids = ['b1111111-1111-4111-8111-111111111111', 'b2222222-2222-4222-8222-222222222222', 'b3333333-3333-4333-8333-333333333333'] as AppSessionId[];
+      view = fakeSpineView({ records: [at(ids[0], repo.root), at(ids[1], join(repo.root, 'proj')), at(ids[2], other.root)] });
+      const scm = service();
+      expect(await scm.coversHome(ids[0], [repo.root])).toBe(true); // the home itself
+      expect(await scm.coversHome(ids[1], [repo.root])).toBe(true); // a folder of the home's repository
+      expect(await scm.coversHome(ids[2], [repo.root])).toBe(false); // a repository of its own
+      expect(await scm.coversHome(ids[1], [other.root])).toBe(false);
+    } finally {
+      other.dispose();
+    }
+  });
+
+  // Round 2 (P2): the trust key is spelled in NFC, the home as the disk names it; a home named in decomposed form is still
+  // the home its repository covers.
+  it('says a checkout covers a home named in decomposed form, by its repository’s trust key', async () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'scm-nfd-')));
+    try {
+      const home = join(parent, 'cafe\u0301'); // "café", decomposed
+      mkdirSync(join(home, 'proj'), { recursive: true });
+      await runGit(home, ['init', '-q', '-b', 'main']);
+      const id = 'c1111111-1111-4111-8111-111111111111' as AppSessionId;
+      view = fakeSpineView({ records: [at(id, join(home, 'proj'))] });
+      expect(await service().coversHome(id, [realpathSync.native(home)])).toBe(true);
+      expect(await service().coversHome(id, [realpathSync.native(home).normalize('NFC')])).toBe(true);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  // The final review (P1): a home that is a linked worktree of a repository kept elsewhere has that repository's main
+  // checkout as its trust key; git's own top level at the checkout is the home, which scm acts on
+  it('says a checkout covers a home by git’s top level there: a home that is a linked worktree of a repository kept elsewhere', async () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'scm-wt-home-')));
+    try {
+      const home = join(parent, 'home');
+      await repo.git('worktree', 'add', '-q', home, '-b', 'home');
+      mkdirSync(join(home, 'project'));
+      const id = 'd1111111-1111-4111-8111-111111111111' as AppSessionId;
+      view = fakeSpineView({ records: [at(id, join(home, 'project'))] });
+      expect(await service().coversHome(id, [home])).toBe(true);
+      expect(await service().coversHome(id, [join(parent, 'elsewhere')])).toBe(false);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
   it('refuses an untrusted checkout and an unlisted path, running nothing', async () => {
     await repo.write('a.txt', 'a\n');
     expect(await service().stage({ appSessionId: ID, paths: ['nope.txt'] })).toMatchObject({ refused: 'changed' });

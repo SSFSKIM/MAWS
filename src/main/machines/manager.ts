@@ -26,6 +26,7 @@ import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 import type { MachineState } from '@shared/ipc/schema/machines';
+import { MACHINE_RIGHTS } from '@shared/ipc/schema/remote';
 import type { MachineRef } from '@shared/machine/ref';
 import type { MainContext } from '../ipc/router';
 import { readKnownMachines, writeKnownMachines, type KnownMachine } from './known-machines';
@@ -65,8 +66,17 @@ export interface ConnectionManagerDeps {
   log(line: string): void;
 }
 
-/** What a link of the second source says beyond its state: its carrier and its permanent refusal (remote/link.ts). */
-type Described = MachineLink & { carrier?(): string | null; refusal?(): string | null };
+/**
+ * What a link of the second source says beyond its state (remote/link.ts): its carrier, its permanent refusal, and
+ * (2026-11-06) its member's machine rights there (`caps`) and what the machine's endpoint listed (`h2`).
+ */
+type Described = MachineLink & {
+  carrier?(): string | null;
+  refusal?(): string | null;
+  caps?(): { machine: { grades: readonly string[] } } | null;
+  peerCapabilities?(): readonly string[] | null;
+  onCaps?(listener: () => void): () => void;
+};
 
 // One configured directory, or one RL2 machine (`dir` null): its link, and what the manager knows of the machine behind it.
 interface Entry {
@@ -112,6 +122,10 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
     for (const entry of listed()) {
       const carrier = entry.state !== 'up' ? undefined : entry.dir !== null ? 'socket' : (entry.link.carrier?.() ?? undefined);
       const refusal = entry.dir === null ? (entry.link.refusal?.() ?? undefined) : undefined;
+      // 2026-11-06: an RL2 link's member's rights and its endpoint's capabilities, while it is up and they are known
+      const rl2Up = entry.state === 'up' && entry.dir === null;
+      const grades = rl2Up ? (entry.link.caps?.()?.machine.grades ?? null) : null;
+      const capabilities = rl2Up ? (entry.link.peerCapabilities?.() ?? null) : null;
       machines.push({
         ref: entry.ref!,
         name: entry.name,
@@ -121,6 +135,8 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
         generation: generations.get(entry.ref!) ?? 0,
         ...(carrier === undefined ? {} : { carrier: carrier as 'socket' | 'direct' | 'relay' }),
         ...(refusal === undefined ? {} : { refusal }),
+        ...(grades === null ? {} : { rights: MACHINE_RIGHTS.filter((right) => grades.includes(right)) }),
+        ...(capabilities === null ? {} : { capabilities: [...capabilities] }),
       });
     }
     return machines;
@@ -222,7 +238,7 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
           log(`an RL2 link reached machine ${machine.ref}, which another link already reaches; closing the RL2 link`);
           return link.close();
         }
-        const now = `${link.carrier?.() ?? ''}|${link.refusal?.() ?? ''}`;
+        const now = `${link.carrier?.() ?? ''}|${link.refusal?.() ?? ''}|${(link.peerCapabilities?.() ?? []).join(',')}`;
         if (state === entry.state && now === described) return;
         described = now;
         if (state !== entry.state) {
@@ -231,6 +247,10 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
           if (state === 'up') generations.set(machine.ref, (generations.get(machine.ref) ?? 0) + 1);
         }
         changed();
+      });
+      // 2026-11-06: a `caps` refresh (the member's rights moved) is the machine's news too
+      link.onCaps?.(() => {
+        if (remoteEntries.get(machine.ref) === entry && entry.state === 'up') changed();
       });
       link.onEvent((name, payload) => {
         if (remoteEntries.get(machine.ref) === entry && entry.state === 'up') deps.emitFrom(machine.ref, name, payload as never);

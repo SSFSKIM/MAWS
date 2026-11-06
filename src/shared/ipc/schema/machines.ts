@@ -6,6 +6,7 @@
 import * as z from 'zod';
 import { MachineRefSchema } from '../../machine/ref';
 import type { CommandSpec } from './common';
+import { MACHINE_RIGHTS } from './remote';
 
 export const MachineStateSchema = z.strictObject({
   ref: MachineRefSchema,
@@ -19,6 +20,11 @@ export const MachineStateSchema = z.strictObject({
   // verdict holding an RL2 link down (the machine removed this device). Main-to-renderer only; nothing draws them yet.
   carrier: z.enum(['socket', 'direct', 'relay']).optional(),
   refusal: z.string().optional(),
+  // 2026-11-06 (the New chat's machine first): while an RL2 link is up, this device's member's machine rights there (its
+  // `caps`; absent until they are known) and what the machine's endpoint listed in its handshake (its `h2`), which the
+  // machine menu reads (who may start a session there; `rl2.spawn-home`, a chat in its home). Main-to-renderer only.
+  rights: z.array(z.enum(MACHINE_RIGHTS)).optional(),
+  capabilities: z.array(z.string()).optional(),
 });
 export type MachineState = z.infer<typeof MachineStateSchema>;
 export const MachinesSchema = z.strictObject({ machines: z.array(MachineStateSchema) }); // the whole list, the local machine first

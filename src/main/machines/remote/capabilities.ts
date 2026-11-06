@@ -42,9 +42,10 @@ export type Capability = (typeof DEVICE_CAPABILITIES)[number];
 
 /**
  * The endpoint's additions this device sends without reading anything new back, so it lists none of them in its own
- * `h1`: P5 O7 M8's `rl2.upload-blocks` (`session.send`'s `uploads`).
+ * `h1`: P5 O7 M8's `rl2.upload-blocks` (`session.send`'s `uploads`); 2026-11-06's `rl2.spawn-home` (`session.spawn`'s
+ * `checkout: '~'`, which the machine menu offers only where the endpoint listed it: MachineState's `capabilities`).
  */
-export type EndpointCapability = 'rl2.upload-blocks';
+export type EndpointCapability = 'rl2.upload-blocks' | 'rl2.spawn-home';
 
 /** Whether the peer of the current channel listed `capability` in its handshake; false while no channel is current. */
 export function peerLists(link: { peerCapabilities(): readonly string[] | null }, capability: Capability | EndpointCapability): boolean {

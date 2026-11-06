@@ -36,7 +36,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { ClientRef, HandlerContext, HandlerOp } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { OpLedger } from '@shared/host/op-ledger';
-import { createHostRuntime, type HostPort } from '@shared/host/runtime';
+import { createHostRuntime, thrownError, type HostPort } from '@shared/host/runtime';
 import { REGISTRY, type WireRegistry } from '@shared/ipc/registry';
 import type { CommandInput } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
@@ -549,7 +549,7 @@ export class FakeSpine {
       try {
         return ok(await handler(input, { client: client ?? {} } as HandlerContext));
       } catch (error) {
-        return { t: 'res', id: '0', ok: false, error: { code: 'internal', message: (error as Error).message } };
+        return { t: 'res', id: '0', ok: false, error: thrownError(error) }; // a typed refusal as the front answers it (a timeout's), any other throw `internal`
       }
     }
     return null;
@@ -669,6 +669,8 @@ export type StartOptions = {
   setup?: Home;
   /** P5 O7 M9's review: the machine's owners in the org's chain (`org.A` alone by default). */
   owners?: string[];
+  /** 2026-11-06: the machine's home as the home-root rule reads it (`EndpointOptions.authorization.home`; a fake one). */
+  home?: string;
 };
 
 export async function startEndpoint(org: Org, started: Fixture[], options: StartOptions = {}): Promise<Fixture> {
@@ -713,7 +715,13 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
     sleep: (ms) => sleep(Math.min(ms, 50)),
     env: { MAWS_ENDPOINT_DIRECT: '1' },
     direct: { interfaces: () => ({ utun4: [{ address: TAILNET, family: 'IPv4', internal: false, netmask: '255.255.255.255', mac: '00:00:00:00:00:00', cidr: null }] }), listen, ...(options.limits === undefined ? {} : { limits: options.limits }) },
-    authorization: { records, checkouts: { known: (path) => endpoint?.rl10.members.known(path) ?? false }, settingsMode: () => 'default', ...(options.setup === undefined ? {} : { setup: options.setup }) },
+    authorization: {
+      records,
+      checkouts: { known: (path) => endpoint?.rl10.members.known(path) ?? false },
+      settingsMode: () => 'default',
+      ...(options.setup === undefined ? {} : { setup: options.setup }),
+      ...(options.home === undefined ? {} : { home: options.home }),
+    },
     subscriptions: options.subscriptions,
     ...(options.acquireWithinMs === undefined ? {} : { acquireWithinMs: options.acquireWithinMs }),
   });

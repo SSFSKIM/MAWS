@@ -254,6 +254,8 @@ export const TARGETED_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['f
 const SENDS: ReadonlySet<CommandName> = new Set<CommandName>(['session.send', 'session.steer']);
 const OPERATIONS: ReadonlySet<string> = new Set<string>(OPERATION_COMMANDS);
 export const NOT_OPEN = 'open the session to drive it';
+/** The remote drill-in: `fs.agentEvents` takes no byte budget, so an agent's disk window past the channel's bound can't cross. */
+export const AGENT_TOO_LARGE = (machine: string) => `This agent’s transcript on ${machine} is too large to show here yet`;
 
 /**
  * The router's `remote`: a name the adapter handles, for a machine `remote` answers, goes to it; everything else to
@@ -596,7 +598,10 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       if (agentId !== null) of().reading.set(reading, agentId);
       const result = await reading;
       of().reading.delete(reading);
-      if (result.ok && agentId !== null) of().followed.add(agentId);
+      // the remote drill-in (2026-11-06): an answer past the channel's bound was refused after the machine took the hold
+      const tooLarge = !result.ok && (result.error.issues as { refusal?: unknown } | undefined)?.refusal === 'too-large';
+      if ((result.ok || tooLarge) && agentId !== null) of().followed.add(agentId);
+      if (tooLarge) return failure('internal', AGENT_TOO_LARGE(link.name), { refusal: 'too-large' });
       return result;
     }
     if (name === 'fs.unfollow') {

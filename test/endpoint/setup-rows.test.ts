@@ -142,6 +142,17 @@ describe('the remote setup’s rows', () => {
     expect(await act(a, await stepped(f, a, 'session.spawn', { checkout: '/elsewhere', permission_mode: 'default', trust: 'accepted' }))).toBe('unknown-checkout');
   });
 
+  // 2026-11-06 (the New chat's machine first): a chat in the home has `~` as its checkout, so its trust card reads the
+  // home's trust by that name, which the setup policy resolves as the folder list does.
+  it('read the home’s trust by `~` for an owner, resolved to the home’s real path', async () => {
+    const { f, home, a, b } = await setup();
+    const from = f.host.calls.length;
+    expect(await call(a, 'session.trust.check', { directory: '~' })).toMatchObject({ ok: true, output: { trustKey: home, trusted: false } });
+    expect(reached(f, from, 'session.trust.check').map((c) => c.input)).toEqual([expect.objectContaining({ directory: home })]);
+    expect(code(await call(b, 'session.trust.check', { directory: '~' }))).toBe('owners-only');
+    expect(code(await call(a, 'session.trust.check', { directory: '~elsewhere' }))).toBe('no-folder');
+  });
+
   it('hold the registration to the setup policy: a folder that exists, under the home, through no link out of it', async () => {
     const { f, home, a } = await setup();
     const outside = tempDir('setup-rows-out-');

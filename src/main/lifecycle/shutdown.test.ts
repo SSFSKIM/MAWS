@@ -12,9 +12,11 @@ import { shutdownSteps } from './shutdown';
 
 const BOUND_MS = 1_000;
 
-// Electron's `app` as the list sees it: `will-quit` with a preventable event, and `exit()`.
+// Electron's `app` as the list sees it: `will-quit` with a preventable event, and `exit()`, which emits `quit` as
+// Electron's does (the reaper's moment).
 function fakeApp() {
-  const app = Object.assign(new EventEmitter(), { exit: vi.fn() });
+  const emitter = new EventEmitter();
+  const app = Object.assign(emitter, { exit: vi.fn<(code?: number) => void>(() => void emitter.emit('quit')) });
   const quit = () => {
     const event = { defaultPrevented: false, preventDefault: () => (event.defaultPrevented = true) };
     app.emit('will-quit', event);
@@ -37,6 +39,36 @@ describe('the shutdown list', () => {
     expect(quit()).toBe(false); // every step synchronous: the quit goes on as Electron runs it
     expect(ran).toEqual(['deliverables', 'git', 'chat panels', 'layout and sessions', 'index', 'usage', 'files', 'scm', 'yield', 'side threads', 'engine configure', 'host configure', 'widgets', 'browser', 'import', 'hosts', 'voice']);
     expect(app.exit).not.toHaveBeenCalled();
+  });
+
+  // The quit reaper (reaper.ts): once, at Electron's `quit`, after the steps have settled, on both paths
+  it('reaps at Electron’s quit after an unheld will-quit, and only once', () => {
+    const { app, quit } = fakeApp();
+    const order: string[] = [];
+    const steps = shutdownSteps(app, BOUND_MS, () => void order.push('reap'));
+    steps.add('index', () => void order.push('index'));
+    expect(quit()).toBe(false);
+    expect(order).toEqual(['index']); // not yet: Electron's quit goes on to `quit`
+    app.emit('quit');
+    app.emit('quit');
+    expect(order).toEqual(['index', 'reap']);
+  });
+
+  it('on the held path reaps only once the step has settled and the exit has begun', async () => {
+    vi.useFakeTimers();
+    const { app, quit } = fakeApp();
+    const reap = vi.fn();
+    let drained!: () => void;
+    const steps = shutdownSteps(app, BOUND_MS, reap);
+    steps.drain('hosts', () => new Promise<void>((resolve) => (drained = resolve)));
+    steps.add('browser storage', () => Promise.resolve());
+    expect(quit()).toBe(true);
+    await vi.advanceTimersByTimeAsync(BOUND_MS / 2);
+    expect(reap).not.toHaveBeenCalled();
+    drained();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(app.exit).toHaveBeenCalledWith(0);
+    expect(reap).toHaveBeenCalledOnce();
   });
 
   it('a step that throws is logged by name and the steps after it still run', () => {

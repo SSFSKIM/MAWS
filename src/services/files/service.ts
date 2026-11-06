@@ -58,6 +58,7 @@ import {
 } from '@shared/ipc/schema/files';
 import { confirmOpened, NO_LINK, walk, WALKED } from '../fs/no-link';
 import { ReleaseFences } from '../release-fences';
+import { machineHomes } from '@shared/machine/machine-home';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { fileMime, isTextMime } from './mime';
 import { sameIdentity, WatchTable, type Identity, type Installation } from './watch';
@@ -78,6 +79,8 @@ export interface FilesServiceOptions {
   // E2: whether the session's deliverable records name this realpath (main's `DeliverableReader.admitted`), consulted for
   // a path outside the roots by `read`, `openExternal` and `reveal` only (Design §3, Decision Log 18)
   admitted?: (appSessionId: AppSessionId, real: string) => Promise<boolean>;
+  // 2026-11-06: the machine's homes as the home-root rule reads them for a remote caller (machineHomes; a suite's fake one)
+  homes?: () => readonly string[];
 }
 
 // E2: what an operation may reach beyond the roots. Only looking at a file (`read`) and handing it to the OS
@@ -89,17 +92,19 @@ interface Purpose {
 const ROOTS_ONLY: Purpose = { admitDelivered: false };
 const DELIVERED_TOO: Purpose = { admitDelivered: true };
 
+// 2026-11-06 (the home-root rule, ./allowlist.ts): `remote`, a request from another machine (the handler context's), whose
+// roots leave out the machine's home and anything above it.
 export interface FilesService {
-  list(input: { appSessionId: AppSessionId; path?: string }): Promise<FilesListOutput>;
-  read(input: FilesReadInput): Promise<FilesReadOutput>;
+  list(input: { appSessionId: AppSessionId; path?: string }, remote?: boolean): Promise<FilesListOutput>;
+  read(input: FilesReadInput, remote?: boolean): Promise<FilesReadOutput>;
   // P3-L (M6b fix wave 2): a file at a path main itself resolved (a File artifact's stored file, `library.read`), read as
   // `read` reads one: the path's realpath opened with no symlink anywhere on it, a regular file, the same answer. No
   // session and no roots: the caller's resolution is the admission, and a window never names the path.
   // P5 O7 M5a: `linkFree`, the path must be its own real path (no link anywhere on it) or the read is refused, so a caller
   // that resolved a path inside a directory it owns reads that file and nothing a link leads to (`library.read`'s export).
   readResolved(input: Omit<FilesReadInput, 'appSessionId'>, options?: { linkFree?: boolean }): Promise<FilesReadOutput>;
-  write(input: FilesWriteInput): Promise<FilesWriteOutput>; // E5
-  watch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
+  write(input: FilesWriteInput, remote?: boolean): Promise<FilesWriteOutput>; // E5
+  watch(appSessionId: AppSessionId, path: string, owner: string, remote?: boolean): Promise<void>;
   unwatch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
   openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null): Promise<FilesOpenExternalOutput>;
   reveal(appSessionId: AppSessionId, path: string, client: ClientRef | null): Promise<FilesRevealOutput>; // E1
@@ -142,7 +147,7 @@ interface Confirmed {
   roots: string[];
 }
 
-export function createFilesService({ records, hooks, emit = () => {}, port, env = process.env, admitted /* E2 */ }: FilesServiceOptions): FilesService {
+export function createFilesService({ records, hooks, emit = () => {}, port, env = process.env, admitted /* E2 */, homes = machineHomes }: FilesServiceOptions): FilesService {
   const at = async (point: BoundaryPoint, path: string) => {
     await hooks?.at?.(point, path);
   };
@@ -158,12 +163,12 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   // realpath under one of them. E2: for a purpose that admits delivered files, a realpath outside every root that the
   // session's records name is a root of its own for the rest of the boundary (`under` accepts it as equal), so step 5
   // and every later confirmation hold for exactly that file and nothing beside it.
-  async function precheck(appSessionId: AppSessionId, path: string, purpose: Purpose): Promise<{ roots: string[]; real0: string }> {
+  async function precheck(appSessionId: AppSessionId, path: string, purpose: Purpose, remote = false): Promise<{ roots: string[]; real0: string }> {
     if (!isAbsolute(path)) throw new Error('path must be absolute');
     const record = records(appSessionId);
     if (!record) throw new Error(`unknown app session: ${appSessionId}`);
     if (normalize(path) !== path || (path !== sep && path.endsWith(sep))) throw new Refusal();
-    let roots = await rootsOf(record);
+    let roots = await rootsOf(record, remote ? homes() : undefined); // 2026-11-06: a remote caller's, less the home
     const admits = purpose.admitDelivered && admitted !== undefined; // E2
     if (roots.length === 0 && !admits) throw new Refusal();
     let real0: string;
@@ -205,8 +210,8 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
 
   // Steps 2 to 5b for a regular file (`read`; `write` opens it read-write) or a directory (`list`, `watch`). The caller
   // closes the handle.
-  async function openConfirmed(appSessionId: AppSessionId, path: string, kind: 'file' | 'write' | 'dir', purpose: Purpose = ROOTS_ONLY): Promise<Confirmed> {
-    const { roots, real0 } = await precheck(appSessionId, path, purpose);
+  async function openConfirmed(appSessionId: AppSessionId, path: string, kind: 'file' | 'write' | 'dir', purpose: Purpose = ROOTS_ONLY, remote = false): Promise<Confirmed> {
+    const { roots, real0 } = await precheck(appSessionId, path, purpose, remote);
     await at('before-open', path);
     let handle: FileHandle;
     try {
@@ -234,9 +239,9 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     }
   }
 
-  async function list({ appSessionId, path }: { appSessionId: AppSessionId; path?: string }): Promise<FilesListOutput> {
-    if (path === undefined) return listRoots(appSessionId);
-    const { handle, stat, real, roots } = await openConfirmed(appSessionId, path, 'dir');
+  async function list({ appSessionId, path }: { appSessionId: AppSessionId; path?: string }, remote = false): Promise<FilesListOutput> {
+    if (path === undefined) return listRoots(appSessionId, remote);
+    const { handle, stat, real, roots } = await openConfirmed(appSessionId, path, 'dir', ROOTS_ONLY, remote);
     try {
       const names = await fs.promises.readdir(real).catch(async () => {
         throw await afterConfirmed(path, roots);
@@ -253,10 +258,10 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     }
   }
 
-  async function listRoots(appSessionId: AppSessionId): Promise<FilesListOutput> {
+  async function listRoots(appSessionId: AppSessionId, remote: boolean): Promise<FilesListOutput> {
     const record = records(appSessionId);
     if (!record) throw new Error(`unknown app session: ${appSessionId}`);
-    const roots = await rootsOf(record);
+    const roots = await rootsOf(record, remote ? homes() : undefined);
     if (roots.length === 0) throw new Refusal();
     const entries = await Promise.all(
       roots.map(async (root): Promise<FilesEntry | null> => {
@@ -267,8 +272,8 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     return { root: null, path: '', entries: entries.filter((entry) => entry !== null), truncated: false };
   }
 
-  async function read({ appSessionId, path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false }: FilesReadInput): Promise<FilesReadOutput> {
-    const { handle, stat, real } = await openConfirmed(appSessionId, path, 'file', DELIVERED_TOO); // E2: a delivered file is read
+  async function read({ appSessionId, path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false }: FilesReadInput, remote = false): Promise<FilesReadOutput> {
+    const { handle, stat, real } = await openConfirmed(appSessionId, path, 'file', DELIVERED_TOO, remote); // E2: a delivered file is read
     return readOpened(handle, stat, real, offset, length, hash);
   }
 
@@ -336,10 +341,10 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   // inside the file's critical section, the compare against the bytes read through the descriptor and the write in
   // place through it (truncate, write every byte, fsync). In place rather than temp-and-rename: a rename is by path into
   // a directory confirmed earlier (the race the boundary closes) and replaces the inode (mode, hard links, xattrs).
-  async function write({ appSessionId, path, content, expectedHash }: FilesWriteInput): Promise<FilesWriteOutput> {
+  async function write({ appSessionId, path, content, expectedHash }: FilesWriteInput, remote = false): Promise<FilesWriteOutput> {
     const bytes = Buffer.from(content, 'utf8');
     if (bytes.length > FILES_WRITE_MAX_BYTES) throw new Error('content too large');
-    const { handle, stat } = await openConfirmed(appSessionId, path, 'write');
+    const { handle, stat } = await openConfirmed(appSessionId, path, 'write', ROOTS_ONLY, remote);
     const tooLarge = () => new Error(`too large to edit: ${path}`);
     try {
       if (Number(stat.size) > FILES_WRITE_MAX_BYTES) throw tooLarge();
@@ -377,8 +382,8 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     }
   }
 
-  async function watch(appSessionId: AppSessionId, path: string, owner: string): Promise<void> {
-    const { handle, stat, real, roots } = await openConfirmed(appSessionId, path, 'dir');
+  async function watch(appSessionId: AppSessionId, path: string, owner: string, remote = false): Promise<void> {
+    const { handle, stat, real, roots } = await openConfirmed(appSessionId, path, 'dir', ROOTS_ONLY, remote);
     const holder = { owner, appSessionId, path };
     try {
       const identity: Identity = { dev: stat.dev, ino: stat.ino };
