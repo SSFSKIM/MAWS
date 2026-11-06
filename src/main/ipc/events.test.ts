@@ -4,6 +4,7 @@ const electron = vi.hoisted(() => ({ windows: [] as { webContents: { send: Retur
 vi.mock('../windows', () => ({ appWindows: () => electron.windows })); // E2: the emitter sends to app windows only
 
 import { emit, emitFrom, emitTo, onEmitted } from './events';
+import { hostEventToWindows } from '../hosts/window-events';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { MachineRef } from '@shared/machine/ref';
 import { bindLocalMachine } from '../machine/local';
@@ -58,6 +59,23 @@ describe('main event emitter', () => {
     expect(emit('pty.data', { ptyId: 'p1', offset: 0, data: 42 } as never)).toBe(false);
     expect(w.webContents.send).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.stringContaining('pty.data'), [expect.objectContaining({ path: ['data'] })]);
+  });
+
+  // P5 O8 M7b: a main-only event (`MAIN_ONLY_EVENTS`) reaches no window by any path: main's own emit (which the local
+  // host's relay calls), another machine's over its link, or one page; main's taps still hear the local machine's
+  it('sends a main-only event, channel.changed, to no window from any path, and main’s taps hear the local one', () => {
+    const [w, page] = [window(), { send: vi.fn(), isDestroyed: () => false }];
+    electron.windows = [w];
+    const heard: unknown[] = [];
+    const off = onEmitted('channel.changed', (payload) => heard.push(payload));
+    const change = { project: 'proj-1', entry: { id: '1', project: 'proj-1', appSessionId: null, engineSessionId: null, lane: 'A' as const, kind: 'message' as const, text: 'Hi.', at: '2026-11-06T12:00:00.000Z', src: 'proj-1/w/1' } };
+    expect(hostEventToWindows(emit)('channel.changed', change)).toBe(true); // the local host's relay
+    expect(emitFrom(OTHER, 'channel.changed', change)).toBe(true); // a machine link's
+    expect(emitTo(page, 'channel.changed', change)).toBe(true);
+    off();
+    expect(w.webContents.send).not.toHaveBeenCalled();
+    expect(page.send).not.toHaveBeenCalled();
+    expect(heard).toEqual([change, change]);
   });
 
   // ---- C5: onEmitted ----

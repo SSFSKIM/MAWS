@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MachineRef } from '../machine/ref'; // P5 O6 M2
 import { IpcErrorSchema } from './errors';
-import { NAMES, MAIN_ONLY_COMMANDS } from './names';
+import { NAMES, MAIN_ONLY_COMMANDS, MAIN_ONLY_EVENTS } from './names';
 import { commandChannel, commands, eventChannel, events, HOST_EVENTS, MACHINE_EVENTS, NAMESPACES, type Namespace } from './schema';
 import * as attention from './schema/attention';
 import * as engine from './schema/engine';
@@ -104,7 +104,7 @@ describe('ipc schema validates both directions', () => {
     // Debt wave 4: the preload bridges these zod-free lists, not the registries.
     it.each(NAMESPACES)('names/%s.ts lists exactly schema/%s.ts’s keys, once each', (ns) => {
       expect([...NAMES[ns].commands]).toEqual(Object.keys(modules[ns].commands).filter((name) => !MAIN_ONLY_COMMANDS.includes(name as never)));
-      expect([...NAMES[ns].events]).toEqual(Object.keys(modules[ns].events));
+      expect([...NAMES[ns].events]).toEqual(Object.keys(modules[ns].events).filter((name) => !MAIN_ONLY_EVENTS.includes(name as never)));
     });
 
     it('merges without losing a key to a duplicate', () => {

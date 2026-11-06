@@ -5,7 +5,7 @@
 // registries lose no key to a duplicate, which the spread below would otherwise overwrite without a word.
 import type * as z from 'zod';
 import type { IpcError } from './errors';
-import type { BridgedCommandName, BridgedEventName, MainOnlyCommandName } from './names';
+import type { BridgedCommandName, BridgedEventName, MainOnlyCommandName, MainOnlyEventName } from './names';
 import type { PathCommandName } from './routes'; // P5 O6 M2
 import type { MachineRef } from '../machine/ref'; // P5 O6 M2
 import type { AppSessionId } from '../graph/ids'; // P5 O7 M4
@@ -368,6 +368,6 @@ export interface PreloadBridge {
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type Assert<T extends true> = T;
 export type BridgedNamesAreRegistered = Assert<Same<BridgedCommandName | MainOnlyCommandName, CommandName>> &
-  Assert<Same<BridgedEventName, EventName>>;
+  Assert<Same<BridgedEventName | MainOnlyEventName, EventName>>;
 
 export { commandChannel, eventChannel } from './names';
