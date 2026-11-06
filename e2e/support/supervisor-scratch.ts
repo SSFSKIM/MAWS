@@ -294,10 +294,10 @@ export class Scratch {
   }
 
   // A quit ends in about 0.2 to 0.6 s on a hosted Mac (39 timed in run 42152465959). One that runs past the bound says
-  // how far it got, in ms from the call: main's report, the guard's line, and Node's wait for Playwright's inspector to
-  // detach, which comes only once Electron's main loop has ended (the app's own shutdown done, Chromium's teardown and
-  // the exit still ahead); and leaves the process's stacks beside the test's results (run 41995538110: 20 s with the
-  // guard's line and no more to go on).
+  // how far it got, in ms from the call (main's report and the guard's line), and leaves the process's stacks beside the
+  // test's results. On a saturated Mac the exit can stall in Chromium's teardown, after the app's own shutdown: its
+  // thread pool waits for a shutdown-blocking task on a background-QoS worker the kernel does not schedule (probe run
+  // 42174440050, symbolicated against Electron 44.4.5's symbols; tracker, 2026-11-06).
   async quit(run: Run): Promise<void> {
     const started = Date.now();
     const at: Record<string, number> = {};
@@ -306,7 +306,7 @@ export class Scratch {
       return (chunk: Buffer | string) => {
         const text = tail + String(chunk);
         tail = text.slice(text.lastIndexOf('\n') + 1);
-        for (const [name, line] of [['report', /(^|\n)quit-report:/], ['guard', /(^|\n)quit-guard:/], ['debugger', /Waiting for the debugger to disconnect/]] as const) {
+        for (const [name, line] of [['report', /(^|\n)quit-report:/], ['guard', /(^|\n)quit-guard:/]] as const) {
           if (at[name] === undefined && line.test(text)) at[name] = Date.now() - started;
         }
       };
@@ -316,11 +316,15 @@ export class Scratch {
     run.child.stdout?.on('data', stdout);
     run.child.stderr?.on('data', stderr);
     try {
-      await run.maws.app.evaluate(({ app }) => app.quit());
+      // Playwright's close is the same app.quit() followed by its inspector's detach, so main's end never waits on the
+      // inspector: with it still attached, Node holds the exited main loop until Playwright reads that wait's stderr line
+      // (run 41995538110's red ended on that line). The exit is still what the bound waits for.
+      const closing = run.maws.app.close().catch(() => {});
       await bounded(run.exited, 20_000, () => {
         const phases = Object.entries(at).map(([name, ms]) => `${name} +${ms} ms`).join(', ') || 'no line';
         return `MAWS did not quit; the guard said ${JSON.stringify(run.quitLines())}; seen: ${phases}; stacks: ${sampleStuck(run.child.pid)}`;
       });
+      await closing;
     } finally {
       run.child.stdout?.off('data', stdout);
       run.child.stderr?.off('data', stderr);
