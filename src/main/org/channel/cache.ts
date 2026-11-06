@@ -1,6 +1,6 @@
 // A project's held log and its cache (P5 O8 M7a, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M7a's *The
 // cache*): the events the Project socket brought, by offset, each with its verdict (verify.ts), bounded to the newest
-// CHANNEL_CACHE_EVENTS or CHANNEL_CACHE_BYTES by offset, whichever binds first; the offset to resume after; "as of", the
+// CHANNEL_CACHE_EVENTS or CHANNEL_CACHE_BYTES (UTF-8) by offset, whichever binds first; the offset to resume after; "as of", the
 // time of the last `caught-up`; and each DX1 writer's checkpoint, which is never evicted.
 //
 // - Verdicts are kept with the events so a channel opened signed out draws them as they were judged. Signed in, the
@@ -81,8 +81,8 @@ function isCacheFile(value: unknown, project: string): value is ChannelCacheFile
   return Array.isArray(value.events) && value.events.every(isCached) && Array.isArray(value.checkpoints) && value.checkpoints.every(isCheckpoint);
 }
 
-/** The bytes an entry takes in the file, near enough to bound it. */
-const sizeOf = (entry: CachedEvent): number => JSON.stringify(entry).length;
+/** The bytes an entry takes in the file (UTF-8), near enough to bound it. */
+const sizeOf = (entry: CachedEvent): number => Buffer.byteLength(JSON.stringify(entry), 'utf8');
 
 function drawn(entry: CachedEvent): ChannelEvent | null {
   const { verdict } = entry;

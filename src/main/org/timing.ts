@@ -52,6 +52,7 @@ export interface OrgTiming {
   CHANNEL_RELEASE_MS: number;
   /** A project's cache keeps the newest events up to both bounds, by offset (M7a's *The cache*). */
   CHANNEL_CACHE_EVENTS: number;
+  /** The file's UTF-8 bytes. */
   CHANNEL_CACHE_BYTES: number;
   /** A channel's changes are coalesced this long before its cache is written, and before `org.channel.changed`. */
   CHANNEL_WRITE_MS: number;

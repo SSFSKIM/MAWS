@@ -32,6 +32,19 @@ describe('the bound', () => {
     expect(small.events().at(-1)?.offset).toBe(6);
   });
 
+  it("counts the bytes in UTF-8, as the file takes them, not the text's characters", async () => {
+    const o = await ChannelOrg.make();
+    const says = await Promise.all([1, 2, 3].map((n) => o.say(o.mini, n, '채널'.repeat(500))));
+    const one = emptyLog(ORG, PROJECT, LIMITS);
+    await one.add(at(says.slice(0, 1)), ground(o));
+    const stored = JSON.stringify(one.file().events[0]);
+    expect(Buffer.byteLength(stored, 'utf8')).toBeGreaterThan(2 * stored.length);
+    // room for two entries by their characters, for only one by their bytes
+    const log = emptyLog(ORG, PROJECT, { events: 100, bytes: Math.ceil(2.5 * stored.length) });
+    await log.add(at(says), ground(o));
+    expect(log.events().map((e) => e.offset)).toEqual([3]);
+  });
+
   it("sends each event with its verdict, without the mac or the signature nothing past main checks", async () => {
     const o = await ChannelOrg.make();
     const log = emptyLog(ORG, PROJECT, LIMITS);
