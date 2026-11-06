@@ -39,7 +39,8 @@
 //
 // M7a (the project channel; Interfaces §N) composes the channels (channel/channel.ts) over the session: each project a
 // tab shows reads the hub's Project socket while `current()` has a hub, verifies against the held head, and writes its
-// cache under `org/channel/` through the commit queue; `close` enters their last writes in that queue before the fence.
+// cache under `org/channel/` through the commit queue; `close` stops them with its fence, joins their work, and lets
+// their final snapshots into the queue before its tail.
 //
 // Electron-free: the browser opener, the step-up signer, the state signer, focus, notifications and the RL2 links are
 // injected from main.
@@ -378,9 +379,21 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
    */
   function commit<T>(body: () => Promise<T>): Promise<T> {
     if (closed) return Promise.reject(new Error('the org session is closed'));
+    return enterCommit(body);
+  }
+  function enterCommit<T>(body: () => Promise<T>): Promise<T> {
     const turn = commits.then(body);
     commits = turn.catch(() => {});
     return turn;
+  }
+  /**
+   * M7a: the channels' door into the queue. `close`'s fence is synchronous for every other writer; the channels, stopped
+   * at the same moment, enter their final snapshots once their own work is joined, after which this closes too.
+   */
+  let channelsFenced = false;
+  function channelCommit<T>(body: () => Promise<T>): Promise<T> {
+    if (channelsFenced) return Promise.reject(new Error('the org session is closed'));
+    return enterCommit(body);
   }
 
   /** Every held view's guard (held.ts's `open`): no adoption writes once the session is closed. */
@@ -1067,7 +1080,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   const channels = createChannels({
     session: { current: () => computeCurrent(), onChanged },
     store: channelStore(files, log),
-    commit,
+    commit: channelCommit,
     socket: deps.channelSocket,
     fetch: deps.fetch,
     timing: deps.timing,
@@ -1693,7 +1706,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
    * writer joins one of them.
    */
   async function shut(): Promise<void> {
-    // 0. M7a: the channels stop, their last cache writes entered in the commit queue before its fence.
+    // 0. M7a: the channels stop, now; their work is joined in step 3, outside the commit queue, and each one's final
+    //    snapshot is entered through their own door (`channelCommit`), which closes once they are joined.
     const channelsClosed = channels.close();
     // 1. The fence: an attempt writes nothing more, no producer adopts or queues a write after its next await, the
     //    commit queue takes no new turn, and every held view refuses adoptions (`open`).
@@ -1714,6 +1728,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     //    sync and the load; then the held view's adoption queue, a write under way and a link's direct advance
     //    included, once the load can no longer hold another view.
     await Promise.all([...parts, syncing?.catch(() => {}), loaded, channelsClosed]);
+    channelsFenced = true;
     await held?.close();
     // 4. The commit queue's tail.
     await commits;

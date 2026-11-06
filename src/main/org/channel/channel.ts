@@ -17,8 +17,9 @@
 //   hub; one that ends `removed` or with the hub sign-in waits, as the Registry feed does, for the session's next change.
 // - The owner's words: a leading `@alias` addresses a session the log names (address.ts), and untagged words go to
 //   everyone. Nothing is sent signed out, with no hub, or to a project the hub refused.
-// - The cache is written CHANNEL_WRITE_MS after a change, through the org session's commit queue, and last at `close()`,
-//   whose writes enter the queue before it returns.
+// - The cache is written CHANNEL_WRITE_MS after a change, and last at `close()`: once the channel's own work has run
+//   (joined outside the org session's commit queue), a finished snapshot is entered in that queue, and the queued write
+//   awaits nothing of the channel's (M4a's rule). `close()` resolves once every final write is entered.
 //
 // Electron-free.
 import type { HistoryAttestation, Signed } from '../../../../apps/org-protocol/src/index.ts';
@@ -61,7 +62,7 @@ export interface Channels {
   release(project: string): void;
   send(project: string, text: string): Promise<ChannelSendResult>;
   onChanged(listener: (changed: ChannelChanged) => void): () => void;
-  /** Every channel stops; its last cache write enters the commit queue before this returns, and resolves with it. */
+  /** Every channel stops and its work is joined; resolves once each one's last cache write is entered in the commit queue. */
   close(): Promise<void>;
 }
 
@@ -92,6 +93,8 @@ export function createChannels(deps: ChannelsDeps): Channels {
       return null;
     });
   const channels = new Map<string, Channel>();
+  /** Released channels still closing. */
+  const closing = new Set<Promise<void>>();
   const listeners = new Set<(changed: ChannelChanged) => void>();
   let closed = false;
 
@@ -143,6 +146,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
     words.onChanged(() => scheduleEmit());
 
     function enqueue(what: string, step: () => Promise<void> | void): Promise<void> {
+      if (stopped) return Promise.resolve(); // nothing new once `close` joins the queue
       const run = queue.then(async () => {
         try {
           await step();
@@ -236,16 +240,18 @@ export function createChannels(deps: ChannelsDeps): Channels {
       (writeTimer as { unref?: () => void }).unref?.();
     }
 
-    /** The cache as it stands once everything queued has run, through the commit queue. */
-    function write(): Promise<void> {
-      return deps
-        .commit(async () => {
-          await queue;
-          if (!dirty || held === null || held.org === '') return;
-          dirty = false;
-          await deps.store.write(project, held.file());
-        })
-        .catch((error: unknown) => log(`the cache was not written: ${(error as Error).message}`));
+    /** The cache as it stands, a finished snapshot, entered in the commit queue. */
+    function enterWrite(): void {
+      if (!dirty || held === null || held.org === '') return;
+      dirty = false;
+      const file = held.file();
+      deps.commit(() => deps.store.write(project, file)).catch((error: unknown) => log(`the cache was not written: ${(error as Error).message}`));
+    }
+
+    /** The cache once everything queued has run, joined here, outside the commit queue. */
+    async function write(): Promise<void> {
+      await queue;
+      if (!stopped) enterWrite(); // a stopped channel's last write is `close`'s
     }
 
     function dropSocket(): void {
@@ -416,18 +422,24 @@ export function createChannels(deps: ChannelsDeps): Channels {
         releaseTimer = null;
         if (refs > 0) return;
         if (channels.get(project) === channel) channels.delete(project);
-        void close();
+        const done = close();
+        closing.add(done); // `Channels.close` joins a released channel's last write too
+        void done.finally(() => closing.delete(done));
       }, timing.CHANNEL_RELEASE_MS);
       (releaseTimer as { unref?: () => void }).unref?.();
     }
 
+    let stopping: Promise<void> | null = null;
     function close(): Promise<void> {
-      if (stopped) return Promise.resolve();
-      stopped = true;
-      for (const timer of [releaseTimer, writeTimer, emitTimer]) if (timer !== null) clearTimeout(timer);
-      releaseTimer = writeTimer = emitTimer = null;
-      dropSocket();
-      return write();
+      stopping ??= (async () => {
+        stopped = true;
+        for (const timer of [releaseTimer, writeTimer, emitTimer]) if (timer !== null) clearTimeout(timer);
+        releaseTimer = writeTimer = emitTimer = null;
+        dropSocket();
+        await queue;
+        enterWrite();
+      })();
+      return stopping;
     }
 
     const channel: Channel = { loaded, refs: () => refs, opened, send, reconcile, retain, release, close };
@@ -464,7 +476,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
       if (closed) return Promise.resolve();
       closed = true;
       unsubscribe();
-      const all = [...channels.values()].map((channel) => channel.close());
+      const all = [...[...channels.values()].map((channel) => channel.close()), ...closing];
       channels.clear();
       return Promise.all(all).then(() => undefined);
     },

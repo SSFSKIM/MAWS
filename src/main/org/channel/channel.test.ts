@@ -83,7 +83,7 @@ afterEach(async () => {
   channels = null;
 });
 
-async function harness(options: { seed?: (o: ChannelOrg) => Promise<ChannelCacheFile>; records?: Signed<HistoryAttestation>[]; signedIn?: boolean; hub?: boolean; events?: number } = {}) {
+async function harness(options: { seed?: (o: ChannelOrg) => Promise<ChannelCacheFile>; records?: Signed<HistoryAttestation>[]; signedIn?: boolean; hub?: boolean; events?: number; reading?: Promise<void> } = {}) {
   const o = await ChannelOrg.make();
   const cache = options.seed === undefined ? undefined : await options.seed(o);
   const view: OrgView = { head: () => o.head(), certificates: () => NO_CERTIFICATES, since: () => ({ states: [], transitions: [] }), advance: async () => {} };
@@ -98,7 +98,10 @@ async function harness(options: { seed?: (o: ChannelOrg) => Promise<ChannelCache
   const files = new Map<string, unknown>(cache === undefined ? [] : [[PROJECT, JSON.parse(JSON.stringify(cache))]]);
   const writes: ChannelCacheFile[] = [];
   const store: ChannelStore = {
-    read: async (project) => files.get(project) ?? null,
+    read: async (project) => {
+      await options.reading;
+      return files.get(project) ?? null;
+    },
     write: async (project, file) => {
       writes.push(file);
       files.set(project, JSON.parse(JSON.stringify(file)));
@@ -109,15 +112,16 @@ async function harness(options: { seed?: (o: ChannelOrg) => Promise<ChannelCache
   const sockets: FakeSocket[] = [];
   const changes: ChannelChanged[] = [];
   let reads = 0;
+  const commit = <T,>(body: () => Promise<T>): Promise<T> => {
+    commits.push('turn');
+    const turn = tail.then(body);
+    tail = turn.catch(() => {});
+    return turn;
+  };
   channels = createChannels({
     session,
     store,
-    commit: (body) => {
-      commits.push('turn');
-      const turn = tail.then(body);
-      tail = turn.catch(() => {});
-      return turn;
-    },
+    commit,
     attestations: async () => {
       reads++;
       return options.records ?? [];
@@ -150,7 +154,7 @@ async function harness(options: { seed?: (o: ChannelOrg) => Promise<ChannelCache
   const last = () => sockets[sockets.length - 1];
   const latest = () => drawn;
   const told = () => changes.filter((c) => c.project === PROJECT).at(-1);
-  return { o, session, signedIn, files, writes, commits, sockets, changes, last, latest, told, reads: () => reads, channels: tab };
+  return { o, session, signedIn, files, writes, commit, commits, sockets, changes, last, latest, told, reads: () => reads, channels: tab };
 }
 
 describe('a project channel', () => {
@@ -380,6 +384,22 @@ describe('a project channel', () => {
     expect(await h.channels.send(PROJECT, 'hi')).toMatchObject({ ok: false, reason: 'not-open' });
   });
 
+  it('enters its cache write in the commit queue only once its own work is done: the queue never waits on a channel', async () => {
+    let read!: () => void;
+    const h = await harness({ reading: new Promise<void>((resolve) => (read = resolve)) });
+    const opening = h.channels.open(PROJECT); // its cache read holds the channel's own queue
+    await sleep(5);
+    const closing = h.channels.close();
+    let ran = false;
+    void h.commit(async () => {
+      ran = true;
+    });
+    await sleep(20);
+    expect(ran).toBe(true);
+    read();
+    await Promise.all([opening, closing]);
+  });
+
   it('writes its cache through the commit queue at close, and nothing after', async () => {
     const h = await harness({ records: [] });
     opened(await h.channels.open(PROJECT));
@@ -388,6 +408,7 @@ describe('a project channel', () => {
     socket.frame({ t: 'log', events: [{ offset: 3, event: await h.o.say(h.o.mini, 1, 'last words') }] });
     await sleep(0);
     await h.channels.close();
+    await h.commit(async () => {}); // the queue's tail: the last write was entered before close resolved
     expect(h.writes.at(-1)?.events.map((e) => e.offset)).toEqual([3]);
     expect(socket.closed).toBe(true);
     const written = h.writes.length;
