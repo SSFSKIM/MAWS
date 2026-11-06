@@ -301,14 +301,20 @@ export class Scratch {
   async quit(run: Run): Promise<void> {
     const started = Date.now();
     const at: Record<string, number> = {};
-    const watch = (chunk: Buffer | string) => {
-      const text = String(chunk);
-      for (const [name, line] of [['report', /(^|\n)quit-report:/], ['guard', /(^|\n)quit-guard:/], ['debugger', /Waiting for the debugger to disconnect/]] as const) {
-        if (at[name] === undefined && line.test(text)) at[name] = Date.now() - started;
-      }
+    const watch = () => {
+      let tail = '';
+      return (chunk: Buffer | string) => {
+        const text = tail + String(chunk);
+        tail = text.slice(text.lastIndexOf('\n') + 1);
+        for (const [name, line] of [['report', /(^|\n)quit-report:/], ['guard', /(^|\n)quit-guard:/], ['debugger', /Waiting for the debugger to disconnect/]] as const) {
+          if (at[name] === undefined && line.test(text)) at[name] = Date.now() - started;
+        }
+      };
     };
-    run.child.stdout?.on('data', watch);
-    run.child.stderr?.on('data', watch);
+    const stdout = watch();
+    const stderr = watch();
+    run.child.stdout?.on('data', stdout);
+    run.child.stderr?.on('data', stderr);
     try {
       await run.maws.app.evaluate(({ app }) => app.quit());
       await bounded(run.exited, 20_000, () => {
@@ -316,8 +322,8 @@ export class Scratch {
         return `MAWS did not quit; the guard said ${JSON.stringify(run.quitLines())}; seen: ${phases}; stacks: ${sampleStuck(run.child.pid)}`;
       });
     } finally {
-      run.child.stdout?.off('data', watch);
-      run.child.stderr?.off('data', watch);
+      run.child.stdout?.off('data', stdout);
+      run.child.stderr?.off('data', stderr);
     }
   }
 
