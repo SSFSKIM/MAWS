@@ -230,8 +230,23 @@ describe('layout value shapes', () => {
     expect(TabRefSchema.safeParse({ ...tab, browserTabId: 'tab-1' }).success).toBe(false);
     expect(TabRefSchema.safeParse({ ...tab, appSessionId: null }).success).toBe(false);
     expect(TabRefSchema.safeParse({ ...tab, url: 'https://example.com/' }).success).toBe(false);
-    expect(TabRefSchema.options.map((option) => option.shape.kind.value).at(-1)).toBe('browser');
+    expect(TabRefSchema.options.map((option) => option.shape.kind.value)).toContain('browser');
     expect(tabId({ kind: 'browser', appSessionId: 'App-1' as never, browserTabId: 'b_0123456789ab' })).toBe('browser:App-1:b_0123456789ab');
+  });
+
+  // P5 O8 M7a (Interfaces §N): a project's channel, one tab per org project (its smnsId), pinnable; appended last, with no
+  // layout version, since a build that doesn't know the kind drops the tab
+  it('admits a channel tab with its org project, pinnable, and derives its id from it', () => {
+    const project = '1f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
+    const tab = { id: `channel:${project}`, kind: 'channel', project, pinned: true };
+    expect(TabRefSchema.parse(tab)).toEqual(tab);
+    expect(TabRefSchema.safeParse({ ...tab, project: undefined }).success).toBe(false);
+    expect(TabRefSchema.safeParse({ ...tab, appSessionId: at('a1') }).success).toBe(false);
+    expect(TabRefSchema.options.map((option) => option.shape.kind.value).at(-1)).toBe('channel');
+    expect(tabId({ kind: 'channel', project })).toBe(tab.id);
+    expect(UNPINNABLE_KINDS.has('channel')).toBe(false);
+    const v3 = { version: 3, current: 'none', sets: { none: { panes: [{ tabs: [tab], activeTabId: tab.id }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [tab] };
+    expect(StoredMainSchema.parse(v3)).toEqual(v3);
   });
 
   // E4a (X15): Settings › Browser is a section the settings tab opens at (the partition pill's click)

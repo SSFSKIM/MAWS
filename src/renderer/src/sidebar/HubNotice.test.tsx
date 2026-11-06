@@ -15,7 +15,7 @@ import { HubNotice } from './HubNotice';
 const local: MachineState = { ref: TEST_MACHINE, name: 'MacBook', local: true, state: 'up', since: T0, generation: 0 };
 const mini = (over: Partial<MachineState>): MachineState => ({ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: T0, generation: 1, ...over });
 
-beforeEach(() => useHubAccess.setState({ access: null }));
+beforeEach(() => useHubAccess.setState({ access: null, member: null }));
 afterEach(cleanup);
 
 describe('connectHubAccess', () => {
@@ -29,6 +29,21 @@ describe('connectHubAccess', () => {
     expect(useHubAccess.getState().access).toBe('connected');
     fake.event('org.changed', { state: 'none' });
     expect(useHubAccess.getState().access).toBeNull();
+    off();
+  });
+
+  // P5 O8 M7a: the project channel reads the signed-in member's words as yours
+  it('follows the signed-in member, none while signed out or in no org', async () => {
+    const fake = fakeClient();
+    const off = connectHubAccess(fake.client);
+    await fake.reply('org.status', REGISTERED);
+    expect(useHubAccess.getState().member).toBe(REGISTERED.member.id);
+    fake.event('org.changed', { ...REGISTERED, session: 'signed-out' });
+    expect(useHubAccess.getState().member).toBeNull();
+    fake.event('org.changed', { state: 'development', org: 'o', member: 'dev-member', device: 'd' });
+    expect(useHubAccess.getState().member).toBe('dev-member');
+    fake.event('org.changed', { state: 'none' });
+    expect(useHubAccess.getState().member).toBeNull();
     off();
   });
 });

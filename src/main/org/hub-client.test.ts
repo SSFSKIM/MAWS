@@ -98,4 +98,23 @@ describe('the hub client', () => {
     });
     expect(await client(worker(201, { version: 'two' })).postState(signed)).toEqual({ ok: false, kind: 'status', status: 201, error: 'malformed' });
   });
+
+  it("reads a project's history attestations (M7a): the member's route, items that are no signed record dropped", async () => {
+    const paths: string[] = [];
+    const project = '1f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
+    const key = await generateSigningKey();
+    const body = { org: 'o', project, writer: 'mini/s', names: ['mini'], upTo: 2, digest: 'A'.repeat(43), created: '2026-11-06T12:00:00.000Z' };
+    const record = await signRecord(SIGNING_DOMAINS.historyAttest, body, key.privateKey, key.pub);
+    const client = hubClient({
+      url: HUB,
+      headers: () => Promise.resolve({}),
+      fetch: (async (url: string) => {
+        paths.push(new URL(url).pathname);
+        return worker(200, { records: [record, { body: { ...body, upTo: 'x' }, sig: record.sig }, 'x'] });
+      }) as typeof fetch,
+    });
+    expect(await client.attestations(project)).toEqual({ ok: true, value: [record] });
+    expect(paths).toEqual([`/api/projects/${project}/attestations`]);
+    expect(await over(() => worker(200, { records: 'x' })).attestations(project)).toEqual({ ok: false, kind: 'status', status: 200, error: 'malformed' });
+  });
 });

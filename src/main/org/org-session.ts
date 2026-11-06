@@ -37,6 +37,11 @@
 // signer, never beside another attempt. A refusal on the status names the attempt it ended (`refused.attempt`).
 // `close` fences every writer under `org/` and joins it (`shut`), so nothing is written there once it resolves.
 //
+// M7a (the project channel; Interfaces §N) composes the channels (channel/channel.ts) over the session: each project a
+// tab shows reads the hub's Project socket while `current()` has a hub, verifies against the held head, and writes its
+// cache under `org/channel/` through the commit queue; `close` stops them with its fence, joins their work, and lets
+// their final snapshots into the queue before its tail.
+//
 // Electron-free: the browser opener, the step-up signer, the state signer, focus, notifications and the RL2 links are
 // injected from main.
 import { lstat } from 'node:fs/promises';
@@ -62,7 +67,21 @@ import {
   type Signed,
   type SignedOrgState,
 } from '../../../apps/org-protocol/src/index.ts';
-import type { DiscardResult, OrgAttempt, OrgChange, OrgRefusal, OrgSignerStatus, OrgStatus, OrgView, PairStartResult, PreviewResult, SignResult } from '@shared/ipc/schema/org';
+import type {
+  ChannelAnswer,
+  ChannelChanged,
+  ChannelSendResult,
+  DiscardResult,
+  OrgAttempt,
+  OrgChange,
+  OrgRefusal,
+  OrgSignerStatus,
+  OrgStatus,
+  OrgView,
+  PairStartResult,
+  PreviewResult,
+  SignResult,
+} from '@shared/ipc/schema/org';
 import type { MachineRef } from '@shared/machine/ref';
 import {
   createNextDeviceKeys,
@@ -91,6 +110,9 @@ import {
   type OrgFiles,
   type RegistrationFile,
 } from './files';
+import { channelStore } from './channel/cache';
+import { createChannels } from './channel/channel';
+import type { ProjectSocketDeps } from './channel/project-socket';
 import { checkSuccessor, describeHolder, supersededRevocations, type Finding, type SupersededOffer } from './checks';
 import { createDeliveries, type Deliveries, type DeliveryLink } from './deliveries';
 import { composeChange, normalizeChange, type ChangeEdit, type EditSelf } from './edits';
@@ -144,6 +166,14 @@ export interface OrgSessionService extends OrgSession {
   pairStart(input: { member: string; class: 'native-mac' | 'web-cards' }): PairStartResult;
   pairApprove(input: { generation: number; digest: string }): Promise<SignResult>;
   pairCancel(): void;
+  /** M7a: a tab shows the project's channel (`org.channel.open`). */
+  channelOpen(project: string): Promise<ChannelAnswer>;
+  /** M7a: a tab no longer shows it (`org.channel.close`); released 30 s after the last. */
+  channelRelease(project: string): void;
+  /** M7a: the owner's words (`org.channel.send`). */
+  channelSend(project: string, text: string): Promise<ChannelSendResult>;
+  /** M7a: an open channel's whole answer, coalesced (`org.channel.changed`). */
+  onChannel(listener: (changed: ChannelChanged) => void): () => void;
 }
 
 /** M3: what the signer needs of main, injected so this module stays Electron-free. Without it nothing is signed. */
@@ -194,6 +224,8 @@ export interface OrgSessionDeps {
   signing?: OrgSigningDeps;
   /** M3: the rekey's key files; keys.ts's by default. */
   keyFiles?: Partial<DeviceKeyFiles>;
+  /** M7a: the channels' Project socket; `ws` by default (tests inject one). */
+  channelSocket?: ProjectSocketDeps['socket'];
   now?(): number;
   timing?: Partial<OrgTiming>;
   log(line: string): void;
@@ -347,9 +379,21 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
    */
   function commit<T>(body: () => Promise<T>): Promise<T> {
     if (closed) return Promise.reject(new Error('the org session is closed'));
+    return enterCommit(body);
+  }
+  function enterCommit<T>(body: () => Promise<T>): Promise<T> {
     const turn = commits.then(body);
     commits = turn.catch(() => {});
     return turn;
+  }
+  /**
+   * M7a: the channels' door into the queue. `close`'s fence is synchronous for every other writer; the channels, stopped
+   * at the same moment, enter their final snapshots once their own work is joined, after which this closes too.
+   */
+  let channelsFenced = false;
+  function channelCommit<T>(body: () => Promise<T>): Promise<T> {
+    if (channelsFenced) return Promise.reject(new Error('the org session is closed'));
+    return enterCommit(body);
   }
 
   /** Every held view's guard (held.ts's `open`): no adoption writes once the session is closed. */
@@ -1031,6 +1075,19 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     log,
   });
 
+  // ---- M7a: the project channels ----
+
+  const channels = createChannels({
+    session: { current: () => computeCurrent(), onChanged },
+    store: channelStore(files, log),
+    commit: channelCommit,
+    socket: deps.channelSocket,
+    fetch: deps.fetch,
+    timing: deps.timing,
+    now: deps.now,
+    log: deps.log,
+  });
+
   // ---- startup ----
 
   async function load(): Promise<void> {
@@ -1649,6 +1706,9 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
    * writer joins one of them.
    */
   async function shut(): Promise<void> {
+    // 0. M7a: the channels stop, now; their work is joined in step 3, outside the commit queue, and each one's final
+    //    snapshot is entered through their own door (`channelCommit`), which closes once they are joined.
+    const channelsClosed = channels.close();
     // 1. The fence: an attempt writes nothing more, no producer adopts or queues a write after its next await, the
     //    commit queue takes no new turn, and every held view refuses adoptions (`open`).
     if (attempt !== null) endAttempt('ended by quit');
@@ -1667,7 +1727,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     // 3. The producers in flight, joined from outside the commit queue (which never waits on them): the parts, the
     //    sync and the load; then the held view's adoption queue, a write under way and a link's direct advance
     //    included, once the load can no longer hold another view.
-    await Promise.all([...parts, syncing?.catch(() => {}), loaded]);
+    await Promise.all([...parts, syncing?.catch(() => {}), loaded, channelsClosed]);
+    channelsFenced = true;
     await held?.close();
     // 4. The commit queue's tail.
     await commits;
@@ -1712,6 +1773,10 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     pairStart: (input) => pairing.start(input),
     pairApprove: (input) => pairing.approve(input),
     pairCancel: () => pairing.cancel(),
+    channelOpen: (project) => channels.open(project),
+    channelRelease: (project) => channels.release(project),
+    channelSend: (project, text) => channels.send(project, text),
+    onChannel: (listener) => channels.onChanged(listener),
     close: () => (closing ??= shut()),
   };
 }

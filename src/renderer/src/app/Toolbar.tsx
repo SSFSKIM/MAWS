@@ -34,6 +34,7 @@ import { LIBRARY_COPY } from '../library/copy';
 // E4a start
 import { BROWSER_COPY } from '../tools/browser/copy';
 // E4a end
+import { CHANNEL } from '../channel/copy'; // P5 O8 M7a
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
@@ -45,6 +46,7 @@ export function toolbarTitle(
   browserTitle: string | null = null, // E4a
   artifactTitle: string | null = null, // P3-L: an `artifact` tab's row title, when the library store holds it
   listed: ReadonlyMap<AppSessionId, ListedSession> = new Map(), // P5 O9 M9: another machine's session, titled by its row
+  channelProject: string | null = null, // P5 O8 M7a: a `channel` tab's org project's name, when the sidebar's index holds it
 ): { title: string; branch: string | null } {
   switch (tab?.kind) {
     case undefined:
@@ -74,6 +76,8 @@ export function toolbarTitle(
       return { title: artifactTitle ?? LIBRARY_COPY.fallbackTitle, branch: null };
     case 'browser': // E4a
       return { title: browserTitle ?? BROWSER_COPY.title, branch: null };
+    case 'channel': // P5 O8 M7a: "<project> · channel"
+      return { title: CHANNEL.title(channelProject), branch: null };
   }
 }
 

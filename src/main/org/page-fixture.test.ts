@@ -74,11 +74,11 @@ describe("the Org page's e2e fixture in main", () => {
     }
   });
 
-  it("answers org.status and org.view from the file and every act without effect, leaving org.rows to main's rows", async () => {
+  it("answers org.status and org.view from the file and every act without effect, leaving org.rows and org.channel.* to main's", async () => {
     const d = deps({ MAWS_E2E: '1', [ORG_PAGE_FIXTURE_ENV]: fixtureFile({ status: STATUS, view: VIEW }) });
     const stop = installOrgPageFixture(d);
     expect(stop).not.toBeNull();
-    expect([...d.handlers.keys()].sort()).toEqual(Object.keys(commands).filter((name) => name !== 'org.rows').sort());
+    expect([...d.handlers.keys()].sort()).toEqual(Object.keys(commands).filter((name) => name !== 'org.rows' && !name.startsWith('org.channel.')).sort()); // M7a: the channel stays main's
     const ask = (name: string, input?: unknown) => Promise.resolve(d.handlers.get(name)!(input));
     expect(await ask('org.status')).toEqual(STATUS);
     expect(await ask('org.view')).toEqual(VIEW);
@@ -101,9 +101,10 @@ describe("the Org page's e2e fixture in main", () => {
         publish = listener;
         return () => void (publish = () => {});
       },
+      onChannel: () => () => {},
     } as unknown as OrgSessionService;
     const emitted: OrgStatus[] = [];
-    const unpublish = registerOrgHandlers({ register: () => {}, emit: (_name, status) => void emitted.push(status), service, development: null });
+    const unpublish = registerOrgHandlers({ register: () => {}, emit: (_name, status) => void emitted.push(status), emitChannel: () => {}, service, development: null });
     publish({ state: 'none' });
     expect(emitted).toEqual([{ state: 'none' }]); // forwarded before the fixture
 

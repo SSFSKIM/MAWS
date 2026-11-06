@@ -66,7 +66,11 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-10-28) Class 1a at the merge with master (df6c2826a, run 40786128124) found one typecheck error in `derive.test.ts`, fixed at 50a1ab992. reviewer-medium found one P2, the early toggle's replay (Decision Log, M5's build, item 11), fixed at 854178726.
   - [x] (2026-10-28) The first final gate (run 40786951312 on 53f147ef1) found one M5 regression. The People action sat on every row and took a line-center click at the sidebar's 200px floor (`e2e/shell.spec.ts:50`). Fixed at 54aab1ada: the toggle shows only where it can act. The same run's unit red was a test-side race, fixed with two others in tests: `OrgSection`'s clock, the teardown's `rm`, and the rekey crash setup.
   - [x] (2026-10-28) The final gate on 7e58d6984: run 40794571273, 48 jobs green and 3 skipped, `e2e:default` and `e2e:discover` among the green. One flaky line, `browser-cua.spec.ts:483` (M3's known one), was green on retry.
-- [ ] M7a — The project channel: the log reader, the Channel tab and people's words — *executable (re-planned 2026-11-06); first*
+- [x] M7a — The project channel: the log reader, the Channel tab and people's words — *executable (re-planned 2026-11-06); first*
+  - [x] (2026-11-06) Task 1, reviewed clean in three rounds (221c6daaf..64d278151; fixes 4fe3fac85..4e5e867bd): main's channel reader (the socket client, verification, the bounded cache with hash-bound migration checkpoints and the lifecycle projection, signed words scoped to their signer, deltas with `removed`), the session's commands and `close()`'s join, the `org.channel.*` schema and the `channel` tab kind. Gates green at 64d278151, 2d145630e and 7e5ff6d02 (runs 42171173230, 42173482918, 42176161523).
+  - [x] (2026-11-06) Task 2, reviewed in three rounds, the last fix checked by the controller (3d355c066..7d113efb3; fixes a21cc2653..4e74435aa): the Channel tab (the projection folding main's verified events, the stream, the composer, Not sent, "as of" offline, Waiting on you with the MAWS ask answered in place, Channel in the project's menu), and main as the one source of a word's state, bound to its signer's context. Gates green at 7d113efb3, a8c03bcbc and 4e74435aa (runs 42181546717, 42190002590, 42194136958).
+  - [x] (2026-11-06) Task 3, reviewed with one fix wave, checked by the controller (d2f99da15..7bd4dcd17; fixes 68f9b8f20, ee29e26aa): `test/org/channel.local.test.ts` on the Miniflare hub (the folded exchange, DX1 attested at migration, a revoked key's event and a forgery on A's transport counted and not drawn, words signed and unmacked on B's socket and drawn back, "as of" across a relaunch), and the Channel tab's e2e case in `e2e:settings` over a harness-only fixture with its screenshots; two layout fixes from them. Gates green: e2e:settings 42208872828 and 42214481766, static,unit,probes 42219970692.
+  - [x] (2026-11-06) The branch: reviewer-medium in three rounds (fixes 912fc182f..8139e7713, the last round clean); master merged at 1675f282d and 9ebbacbc5; the final `--gates all --evidence` on 9ebbacbc5, run 42259619702, 55 jobs green with packaged and unit:darwin among them. Its one flaky line, `browser-cua.spec.ts:1028`, is explained from the code: a headless O17 scene with no M7a code in it, tracked.
 - [ ] M7b — The project channel: to-human messages across machines — *executable; after M7a; the owner's week (P5 acceptance 16) starts when it lands*
 - [ ] M6a — Reader state and drafts per member — *executable; after M7b*
 - [ ] M6b — Visibility and shares (O18's M5) — *executable; after M6a; its live proof is the staging run it shares with O18 M6, which needs the desk track's sminos executors and a real second member (the owner)*
@@ -137,7 +141,7 @@ Items 1, 2, 3, 4a and 5's display half have landed. The rest became executable o
 - **Hands off.** Never touch the owner's running MAWS, its build output under the main checkout, or its user data; every profile is a scratch `MAWS_USER_DATA`. Never read `~/.config/claude-secrets` or `~/.cloudflared`. Never print a token, a pairing code or a key. Never stage `spikes/gws-onboarding/`, `.playwright-cli/`, `node_modules` or `plugin/`. Never edit the charter, P5, the remote layer, the ledgers or `docs/tech-debt-tracker.md`; debt and residue go to this document's record and the PR body.
 - **Commits.** End every commit message with `Sminos-Session: GUI AI agent workspace charter#37052769 (MAWS on macbook)` as a second `-m`, or the line the executor's own session is given. Add no other trailer. Never rebase. Merge origin/master in when a branch needs it.
 - **Review.** Each milestone lands by its own PR with doperpowers:reviewer-high before it goes to the architect: M1 is the device side of the org's trust (it pins the chain, registers a device and holds a bearer credential), and M2 decides what the app believes about other machines' sessions. Later milestones are reviewed at the rung their re-plan names.
-- **Amended 2026-11-06** (Decision Log, "the constraints for the rest"): M4b, M4c, M6a, M6b and M7b change `src/endpoint/`, `src/services/` and `src/mawsd/endpoint-seam.ts`, and M4b and M4c move code into `apps/org-protocol/src/`. The desk track reviews every `src/endpoint` and `apps/org-protocol` hunk, in commits of their own. `apps/desk-hub/src/` stays as landed: the renew route M4c consumes is the desk track's PR. The bullets above stand as written for M1 to M5. For the rest, on this MacBook: eslint runs on one file at a time and never over more than one, and typechecks, broad lint and full suites go to the gate. The gates are the worktree's own `scripts/ci-gate.sh W --gates <list> --runner macos --label <label>` (Concrete Steps, "The rest"), not the class 1a lines above.
+- **Amended 2026-11-06** (Decision Log, "the constraints for the rest"): M4b, M4c, M6a, M6b and M7b change `src/endpoint/`, `src/services/` and `src/mawsd/endpoint-seam.ts`, and M4b and M4c move code into `apps/org-protocol/src/`. The desk track reviews every `src/endpoint` and `apps/org-protocol` hunk, in commits of their own. `apps/desk-hub/src/` stays as landed: the renew route M4c consumes is the desk track's PR. No milestone changes the RL4 `Action` shape (`apps/org-protocol/src/action.ts`: its keys, encodings or bounds) without telling the architect first. sminos's `record_proof` refuses `bad-shape` on any act that isn't exactly what `isAction` accepts, so a shape change must ship with a sminos release, or every `record.*` fails closed (the desk track, 2026-11-06). The bullets above stand as written for M1 to M5. For the rest, on this MacBook: eslint runs on one file at a time and never over more than one, and typechecks, broad lint and full suites go to the gate. The gates are the worktree's own `scripts/ci-gate.sh W --gates <list> --runner macos --label <label>` (Concrete Steps, "The rest"), not the class 1a lines above.
 
 ### Orientation
 
@@ -167,7 +171,7 @@ M1 runs now and lands by its own PR. M2 needs M1 and O7 M1 on master, and lands 
 - **The owner's week** (P5 acceptance 16) starts when M7b lands.
 - **The shared staging run.** M6b's live proof and O18 M6 share one staging run. It waits on:
   - M6b's offers on master;
-  - the desk track's executors (sminos 1.37.0 or later);
+  - the desk track's executors (sminos 1.38.0 or later);
   - a real second member, admitted by the owner's Access change.
 - **M5b lands** only once the desk track's `record.owners` executor and DL190 (b)'s fix are on master.
 - **M8 is last.** It is owner steps and evidence. Its first step is M3's root-add sitting, and its revocation waits on B4's steps 4 to 8.
@@ -1247,7 +1251,7 @@ Rejected:
 
 **Waits on.**
 - The desk track's executor, behind sminos's `record` capability (M6b, *Offered only when sminos can*).
-- DL190 (b)'s fix: the endpoint places a lane B record by `ownersProof[0].opId`, failing closed when one opId names two app sessions (`src/endpoint/rl10/members.ts:280-298`; tracker row `docs/tech-debt-tracker.md:556`). It must be on master first, since an owner add re-lists a lane B record.
+- DL190 (b)'s fix: the endpoint places a lane B record by the `opId` of its `ownersProof` entry that is the spawn's act (action `session.spawn`), not `ownersProof[0]`, which an owner add can occupy, failing closed when one opId names two app sessions (`src/endpoint/rl10/members.ts:280-298`; tracker row `docs/tech-debt-tracker.md:556`). It must be on master first, since an owner add re-lists a lane B record.
 
 **Proves.** Acceptance 5's add half.
 - `AddOwnerSheet.test.tsx` (the members offered; the outcome shown).
@@ -1384,6 +1388,7 @@ Rejected:
 
   Each has its own line in `copy.ts`.
 - **The outcome.** `done` carries `{changed, policyRev}`. The sheet confirms each line against the revision it caused, and the member frame follows as usual. `changed: false` (an owner who already was one, or a level already set) shows as a no-op, not an error, and bumps nothing.
+- sminos binds each act's proof to the op's target and change. The act M6b signs names exactly the session and the change the offer carries: the `args` the device signs are the args the frame's change copies, with lane B's `appSessionId` as signed. On a lane B target sminos checks only that it is a non-empty string, since the endpoint's join placed it (the desk track, 2026-11-06; sminos 1.38.0, branch `o18-record-executors`).
 - `record.owners` appends the act to `ownersProof` verbatim, and the ledger keeps the proof (`REMOTE_KEPT`). The RL10 adapter's context check exempts `record.*`, as it does `spawn`, since a record act doesn't depend on how the session was launched.
 
 *One Touch ID per save.* A save is a list of acts:
@@ -1423,7 +1428,13 @@ Rejected:
 
 The door adds no authority. An act through it is authenticated by its step-up signature alone, checked every time, and then authorized against the head as over a channel. It carries the three record acts and the one read, nothing else.
 
-*The CLI's widening.* Once these offers are on master, the desk track makes `sminos access` and `sminos share` refuse every widening with "use MAWS", and keep narrowing (the architect's brief, 2026-11-06).
+*The endpoint says `record` too.* The endpoint's RL10 welcome to sminos (its `capabilities`, `["access", "reach"]` today) gains `record` exactly when the build serves the three `record.*` offers, added in the same commit as them. It means "this machine's sessions can be widened from any member's MAWS through this endpoint", so a headless machine's endpoint advertises it too.
+- sminos 1.39.0 keys its CLI cutover on it: it refuses widening at the terminal ("use MAWS") only where its endpoint said `record`. It keeps that word across the endpoint being away, and lifts it only at a later welcome without it (a MAWS rollback).
+- The change moves the welcome's lines in `test/endpoint/rl10/conversation.json`, the blob the desk track's sminos conformance replay pins. Before M6b's PR, the new blob hash and the changed lines go to the desk track by `sminos say`, and the architect is told.
+- `record-acts.test.ts` proves the welcome carries `record` when the offers are registered, and not in a build without them.
+(Agreed by the architect and the desk track, 2026-11-06.)
+
+*The CLI's widening.* Once these offers are on master, the desk track makes `sminos access` and `sminos share` refuse every widening with "use MAWS", and keep narrowing (the architect's brief, 2026-11-06). The cutover follows each machine's own endpoint's `record`, so it no longer waits on M6b's landing date.
 - The exception, by the desk track's ruling: a machine enrolled at no hub keeps the terminal gate.
 - That, and this milestone, are preconditions of a second member joining production.
 - M6b's PR body says so, and the shared staging run checks it.
@@ -1522,7 +1533,7 @@ The door adds no authority. An act through it is authenticated by its step-up si
 *Words* (`words.ts`).
 - The draft is `{kind: 'human', from: 'human', member, to, text, created, nonce}`, signed with `signEvent({org, project}, draft, channelKey)` (`project-socket.ts:19-22` is the reference).
 - A word not acknowledged is resent with the same nonce after a reconnect, and the hub dedupes it.
-- The draft lives in main's memory, and a relaunch drops an unsent word with "Not sent".
+- The draft lives in main's memory only. A word the channel dropped unsent (its last tab gone 30 s) reads "Not sent" at the tab's next open within the app's life. A relaunch drops it with nothing to show, since no copy of it is on disk (revised 2026-11-06, Task 2's Decision 2).
 - The app sends nothing to a project that it can't read.
 
 *The cache.* Per project, events by offset and their verdicts, re-verified at load. A project whose cache doesn't read is read from offset 0. "As of" is the last `caught-up`'s time.
@@ -1821,7 +1832,7 @@ The live check is the owner's, in their own MAWS once a build carrying M7b is on
 **The shared staging run** (M6b with O18 M6). The architect schedules it with the owner and the desk track: from 2026-11-07, never 06:45 to 07:00Z (the mini), never in a cua_repl hold. The owner's steps:
 1. **A real second member.** The owner adds Access's admission for a second email they control (an Access change, the owner's). Then, from the owner's staging scratch profile, the Org page adds that member (Add person), and pairs a second scratch MAWS profile as their first device (Pair a device, H1).
 2. **A VM under them.** The desk track's `staging-run.sh endpoint-vm setup <base commit>` prepares a VM. The owner's Org page enrolls it (M4b's flow once M4b lands; before that, `staging-run.sh admin enroll <name>`) and sets its owners to the second member.
-3. **The builds.** The desk track deploys O18 M1's hub to staging, and puts sminos 1.37.0 or later and a MAWS at or after M6b on the staging machines.
+3. **The builds.** The desk track deploys O18 M1's hub to staging, and puts sminos 1.38.0 or later and a MAWS at or after M6b on the staging machines.
 4. **The run.** O18's acceptance 1 to 8, then O8's 6:
    - the owner makes a session private, shares it Can message, then View;
    - the second member's rows and agents follow;
@@ -2324,6 +2335,9 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
         args: { session: <sid>, …the change }, fingerprint, proof: <the act verbatim> } }
     // <sid>: the id that keys sminos's record; lane B's through members.ts's join; unplaced -> refused 'no-session', nothing sent
     // gated by sminos's RL10 hello capability 'record'; sminos's target_of is {session: args.session}, a session of a hub project joined from this machine
+    // the endpoint's RL10 welcome to sminos (today capabilities ["access", "reach"]) gains 'record' exactly when this build serves the three record.* offers, headless machines too:
+    //   "this machine's sessions can be widened from any member's MAWS through this endpoint"; sminos 1.39.0 keys its "use MAWS" cutover on it (sticky across the endpoint's absence,
+    //   lifted only by a later welcome without it); test/endpoint/rl10/conversation.json's welcome lines change, and the desk track gets the new blob hash and lines by sminos say before M6b's PR
     // outcome: done {changed, policyRev} (changed: false is a no-op, no revision); refusals shown: no-session, unsupported, bad-shape, read-only (sminos);
     //   stale, expired, tombstoned (the ledger); not-offered, no-session (endpoint); cancelled (step-up)
 
@@ -2461,6 +2475,8 @@ Each is built as its recommendation when its milestone is re-planned, unless the
 - Observation (the re-plan): no record shows M3's root-add sitting on staging or production. The prepared steps are in the report, and Outcomes still owes it.
   Evidence: `2026-10-28-p5-o8-report.md:195-237`; this document's M3 Outcomes; P5 Decision Log 155 ("dormant until the owner's `root add` sitting").
 - Observation (M6a's design): two members who both own a machine share its owners' reader state, because the index can't tell which owner sits at a device.
+- Observation (M7a Task 1): the hub's `fanOut` sends a member's own `human` back to the socket that sent it, so words come back through the log after their `human-ack`. `words.logged` also clears a word whose nonce appears in the log.
+  Evidence: `apps/desk-hub/src/objects/project.ts:1577-1586`.
 
 ## Decision Log
 
@@ -3051,6 +3067,81 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   A third pass, on a8d1fdb0a, closed all three and found nothing new. The review has converged: rounds of 13, 3, then 0 findings, every one adopted.
   Date/Author: 2026-11-06, O8's executor.
 
+- Decision: M7a is built as three tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-medium on the branch.
+  1. Main and the shared schema: `src/main/org/channel/` (the socket client, verification, the cache with its migration checkpoints, words, the per-project channel), the session's commands and `close()`'s join, the `org.channel.*` schema, and the `channel` tab kind.
+  2. The renderer: the tab, the projection and folding, the stream, the composer, the waiting cards with the native ask inline, Channel in the project menu.
+  3. `test/org/channel.local.test.ts`, and the e2e case over a harness-only seeded channel, with screenshots.
+
+  The pre-flight settles one point §N leaves two ways. `org.channel.open` and `org.channel.changed` carry main's verified events, not §N's folded entries:
+  - `ChannelEvent {offset, writer, seq, event, label: 'verified' | 'migrated' | 'legacy', by?, author?, owners?}`, plus the pending words (`{nonce, text, to, state: 'sending' | {refused}}`), `unverified`, `asOf` and `live`;
+  - the renderer's pure `channel/project.ts` folds them into §N's `ChannelEntry`, which becomes a renderer type.
+
+  Main holds what only main can judge (signatures, attestations, the held head's names), and the renderer the presentation, which its tests pin without main.
+  Date/Author: 2026-11-06, O8's executor (pre-flight).
+
+- Decision: The record.* executors ship in sminos 1.38.0, not 1.37.0. 1.37.0 is D5's restatement (doperpowers #492), and 1.38.0 is built on top of it, to §Q exactly. M6b and M5b need sminos 1.38.0 or later on the target machine. Nothing in the app changes, since the `record` capability is the real gate. The merge order onto doperpowers main is #463 (O18 M3), M4, D5, then the executors.
+  Also from the desk track:
+  - DL190 (b) as built places an unplaced lane B record by the `ownersProof` entry that is the spawn's act (`session.spawn`), not by `ownersProof[0]`. Once `record.owners` exists, a record with an empty `ownersProof` can hold an owner-add act at index 0. M5b's wait is corrected to match.
+  - MAWS #496 (master bdd6cb7db) gives `test/endpoint/rl10/conversation.json`'s three sminos hello lines `capabilities: ["audience", "record"]`, the blob sminos 1.38.0's conformance replay compares exactly (bc2593f1). An M6b change to that fixture starts from master's copy, and the architect is told, since the desk track's sminos gate pins it.
+  Date/Author: 2026-11-06, the desk track through the architect, recorded by O8's executor.
+
+- Decision: M7a Task 1, main and the shared schema (221c6daaf..64d278151; fixes 4fe3fac85..2d145630e), settles these points.
+  1. `open` answers main's verified events whole. `changed` is a delta: `upserts` by offset, `removed` offsets: every offset any tab was sent, by an open's answer or a delta, that main no longer holds, so a tab holds exactly main's bounded set and every judgment covers all it holds, the words, the sessions' lifecycle, `unverified`, `asOf` and `live`. `reset: true` comes only after a judgment that changed verdicts in bulk, another org's log, or a closed answer. Coalescing is at 100 ms. (The controller's fix, which replaced a whole-log resend, and the review's, which made evictions told.)
+  2. `author` and `owners` are M5's `OrgMember` objects, named from the held head, so a cached verdict still draws names signed out. `by` is the attesting machine's name. `mac` and `sig` are stripped before the renderer.
+  3. `open` answers `ok: true` with `live: false` whenever a cache exists, so "as of" draws offline. `signed-out` and `no-hub` come only when there is nothing to draw, and `unknown-project` for a non-project id or the hub's 404. A refused project stays refused through later heads, until the tab's next open or another hub.
+  4. (A gap the spec missed.) A DX1 writer larger than the cache's bound could never verify, since the bound evicted its prefix while pages arrived. The channel reads the project's attestations before it opens the socket, and spares an awaited writer's events past the bound until `caught-up`. Only an attestation whose signer and binding verify (`verifyHistorySigner`) earns the exemption, and only up to its `upTo`, for one copy per (writer, seq): the first held. Replays and conflicting copies fall under the normal bound. An unauthenticated record, or replays of an authentic one, would otherwise let a hub defeat the bound (the review's findings).
+  5. Every cached event is judged again at each new head or certificate set, not only failed ones. A failed owner attestation leaves a machine event verified with no owners.
+  6. `@alias` follows `sminos say`'s leading-tag grammar, in `channel/address.ts`. It reads each session's latest verified lifecycle (`joined`, `retired`, `renamed`, `titled`), which is kept past the bound, persisted in the cache and judged again at each head, so a session whose `joined` was evicted stays addressable. A lifecycle event that first verifies at a later head enters the projection then, the latest offset winning (the review's findings). Each pending word belongs to the org, member and device that signed it, and a sign whose await outlives a context change sends nothing (the review's finding). Task 2's review moved the rest into main (Task 2, item 2): another sign-in hides the old context's words rather than refusing them, and release drops acked words and keeps the unacked ones as "not sent".
+  7. §N's socket signature gains `onWelcome`, a boolean from `send()`, and the client's own close codes 4401 (credentials) and 4404 (unknown project).
+  8. `attestations` sits on `ProjectReads` beside `HubClient`, so the signer's, the pairing's and the deliveries' clients need no channel read.
+  9. `close()`'s join, by M4a's rule:
+     - a channel's work is joined outside the commit queue, and its write enters the queue as a finished snapshot that awaits nothing;
+     - `shut()` stops the channels with its fence and lets their final snapshots in through their own door (the review's finding, replacing a write that awaited its producer inside the queue).
+  10. The cache's 8 MiB bound counts UTF-8 bytes.
+  11. A renderer frame that reloads or is destroyed releases the channel references it held (`holds.ts`).
+  12. Words are signed with `identity.channelKey` through `org-protocol`'s `signEvent`, as O7's links already sign RL2 handshakes with it. P5 Decision Log 53's rule covers step-up and state signing, and this reading is recorded rather than widened.
+  13. `src/shared/machine/coverage.test.ts` reviews `ChannelEvent.event`'s string-keyed record: a log event's own fields, sminos's ids, no MAWS address.
+  Date/Author: 2026-11-06, O8's executor (controller), from Task 1's report.
+
+- Decision: M7a Task 2, the renderer (3d355c066..7d113efb3), settles these points where the spec was silent.
+  1. §N's `ChannelEntry` is a renderer type. Every entry carries `key`, `label` and `by?`. An `exchange` carries its `says`, so it opens in place. `say.owners` are `OrgMember`s, labelled with M5's `ownersLabel`. A `words` entry has `you`, `to` and `state?: 'sending' | 'sent' | 'not-sent' | {refused}`, in place of §N's `sending?`/`refused?`. A word not yet in the log has `offset: null` and `at: null`.
+  2. "Not sent" holds within the app's life, not across a relaunch. Main is the single source of a word's state (`sending`, `sent`, `not-sent`, `{refused}`), and the renderer draws it (the review's findings, superseding the first build's page-memory book and Task 1 item 6's last sentence).
+     - Every pending word stays bound to the org, member and device that signed it. A channel exposes only the current context's words, and another context's are neither shown, resent nor refused.
+     - An acknowledged word stays pending as `sent` until the log holds its nonce. At release (30 s after the last tab) it is dropped, since the log has it.
+     - A word never acknowledged at release moves to a bounded in-memory "not sent" list per project and context. The next open in that context returns it as `not-sent`, with its text, until that channel's next release.
+     - A relaunch can say nothing: the draft lives in main's memory, and a disk copy would defeat that rule.
+  3. A fold holds one label: a label change ends a run. A say to several sessions folds with nothing. Any other drawn entry ends a run, words and to-human entries included, as desk-web's rule has it.
+  4. The waiting cards leave out a greyed machine's items, which nothing can answer now. The native ask answers in place through `RequestCard`'s `askInPlace`, which feeds `AskBody`'s shared `inPlace` mode, so no variant's types change. `HoverAsk` gained the sheet's "older peer" gate.
+  5. Words by the signed-in member read "You". The member comes from `useHubAccess`'s new `member` field.
+  6. Machine chips resolve the log's machine *name* to a roster ref, case-insensitively as `machineNameKey` compares, and reuse `MachineChip`'s rules. An unresolved name draws as `@name`.
+  7. The channel tab is a tab of no session. Like Settings, it follows the current set, and `channel:<smnsId>` keeps it one tab per project.
+  8. Offline reasons come from `hubAccess`: "Signed out", "The hub sign-in has ended." (with Sign in again), "The hub no longer admits you.", "Hub unreachable", and otherwise "Connecting to the hub…". The composer is withdrawn whenever `live` is false.
+  9. Text renders plain (`whitespace-pre-wrap`), not Markdown, which keeps an untrusted log's text inert.
+  10. An open that main doesn't answer shows "Couldn't open the channel" with Retry.
+  11. The e2e-facing selectors are `data-channel`, `data-channel-entry` (with `data-offset`, `data-channel-label`, `data-host`, `data-count`), `data-word-state`, `data-channel-provenance`, `data-channel-exchange-messages`, `data-channel-party`, `data-machine-chip`, `data-channel-unverified`, `data-channel-waiting`/`data-channel-card`, `data-channel-composer`, `data-channel-offline`/`data-channel-as-of` and `data-channel-closed`. The scroller is `role="log"`.
+  Date/Author: 2026-11-06, O8's executor (controller), from Task 2's report.
+
+- Decision: M7a Task 3, the local suite and the e2e case (d2f99da15..7bd4dcd17; fixes 68f9b8f20, ee29e26aa), settles these points.
+  1. The local suite meets two events that must not draw. One is a say by `studio`, stored while its key verified and then revoked by the org. The other is a real forgery: a hostile hub played on A's own transport (`orgSession`'s `channelSocket` seam) alters a stored say's text while its signer stays listed. Both are counted in `unverified`, neither draws, and the forgery fails again from the cache after a relaunch (the review's finding: a revoked key is refused before its signature is checked, so it alone proves no read-side forgery check).
+  2. The v2 machines are desk-hub's `FakeEndpoint` with `enrollV2`, not O10's endpoint. Joins and says go in one upload, because the hub withholds a say to a session it doesn't know. B's socket receives A's words, and B's own device sends words through `deviceHuman`. "As of" is proved both live and across a relaunch with the hub down.
+  3. `tsconfig.node.json` lists the renderer's pure projection and the graph it imports, file by file, so the node-timing suite typechecks against it.
+  4. The e2e case is its own spec, `e2e/channel.spec.ts`, in `e2e:settings`. That moved both default-spec pins and the group's script. Its fixture, `channel-fixture.ts`, is a separate harness-only module beside `page-fixture.ts`, guarded the same way. The waiting cards come from C5's stub scenario (`nine-sessions.json`), filed under the channel's project.
+  5. The screenshots set the layout priority of a long-named row. The alias holds, drawn whole up to 24 characters. The title gives way first, then the machine chip, and recipients keep at least 12 characters. The exchange's hover pill stays inside its section.
+  6. The e2e gate needs `--evidence` for a green run to upload its screenshots; they then come from `gh run download`.
+  7. The action-box and clipping-ancestor check is one helper, `e2e/support/actions-whole.ts`, shared by the Org page's and the Channel's specs (the review's finding).
+  Left as UX residue (the architect, 2026-11-06, with the 24-character cap kept for now): the offline footer reserves no scrollbar gutter, so it sits about 7 px right of the stream under classic scrollbars; the cap cuts a long alias even when there is room; below a column of about 500 px a long-named exchange row's fixed parts can't fit.
+  Date/Author: 2026-11-06, O8's executor (controller), from Task 3's report.
+
+- Decision: M7a's branch review (reviewer-medium over 10328b26b...1675f282d) found three trust defects and one cache defect in main's reader, fixed in 912fc182f..b9a8380b6; its second round, two more, fixed in bfe900973 and 8139e7713. The architect accepted items 1–5 (2026-11-06). They amend Task 1's items 3–6.
+  1. The held log, its cache file and its resume cursor belong to one reader, the org and the member. The cache stays one file per project and records `member` beside `org`. Another reader's file reads from offset 0, and that reader's first write replaces it. A member switch is handled like an org switch: the log is dropped, a reset is sent, and the new reader reads from 0. Until then an open draws and addresses nothing of the previous reader's. Without this, an audience stream the hub's `mayRead` serves only to its members stayed visible to the next member signed in, and the shared cursor skipped streams only the new member could read. Signed out, the last reader's cache still draws "as of".
+  2. Each judgment samples the head and certificates once and records that same snapshot as judged. A head or certificate set adopted during an awaited load is judged again, not marked done.
+  3. Lifecycle carries its provenance. A verified or migrated lifecycle is a session's identity and its address. A legacy one names only a session that has no authenticated lifecycle, never as a member, never overriding, and never addressable. The two are kept apart in the cache, and the sessions bound drops legacy-only sessions first. Legacy still names its session because its events already draw at that trust level, and naming gives a hostile hub neither an address nor an override.
+  4. `historyDigest` is a hash chain, and a checkpoint's digest is its value at `upTo`, already proven. So a later attestation extends a checkpoint from that value: its signer and binding verify, one event per newer seq is folded in turn, and the result matches its digest. The evicted prefix is not needed. The extended checkpoint takes the new record's `by`.
+  5. The bound's exemption spares only an awaited writer's events past its checkpoint. Before this, a writer with a checkpoint and an authentic attestation above it spared its whole prefix, and the bound evicted the newest events instead.
+  6. (Round 2.) `ChannelSession` carries `authenticated`. A legacy lifecycle names only `legacy`-labelled entries. A verified or migrated entry whose session has only a legacy lifecycle draws its parties as the tab draws a session it knows nothing about: the signed event's own alias, the writer's machine, no title. This covers the sender, a say's recipients and a host entry's party. Without it, a hub that withheld a `joined` and served an unsigned one could name a verified message's sender.
+  7. (Round 2.) Only a project's newest channel writes its cache file, under a per-project generation count. A released channel's last snapshot is dropped once the project has been opened again. Task 1 item 9's join rule is unchanged, and the cost is re-reading from the hub what the old channel held after its last write.
+  Date/Author: 2026-11-06, O8's executor (controller), from the branch fix wave's report.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
@@ -3121,3 +3212,41 @@ A future child that composes async modules over shared state should list each ac
 Retrospective (M2). The mark rule and the coverage rule, which the planning rounds had sharpened, were exactly where the build's two real defects lay: an unverified certificate read beside a verified record, and a set emptied across an await while another reader treated it as coverage. Both are the same shape: a trust or coverage fact derived from something that was not itself the verified or settled thing. A future child deriving state from verified records should take every derived fact from the verified object itself, and keep in-flight work visible in whatever a reader treats as coverage.
 
 Retrospective. The document held: every decision it made stood, and the gaps it left were small (a `directory` refusal, a feed close hook, the chain re-read from below the head for a recovery). What it didn't foresee was the session's write concurrency: four parallel actors (attempts, adoptions from two sources, sign-out, recovery) each writing `registration.json`. Ad hoc fences left three windows, which the review found; one serialized commit queue closed them. A future child holding a trust anchor beside a credential should start from that queue. The test-writing workers found three real bugs each time they were given a module they hadn't written, which paid for the split.
+
+**M7a (2026-11-06, PR from `p5-o8-m7a`).** A project's Channel tab, opened from the project's menu, draws the project's signed log as main verified it against the held head:
+- exchanges between two sessions folded, broadcasts, people's words, and earlier to-human entries;
+- DX1 history "attested at migration by <machine>", and unattested history as legacy;
+- an unverified count for what failed;
+- "as of" from the cache while offline;
+- "Waiting on you", where the MAWS ask is answered in place.
+
+Main reads the log over the Project socket into a bounded cache, one reader's (org and member), and sends the renderer verified events with `rev`-ordered deltas. The renderer folds them in a pure projection. The composer signs words with the device's channel key. Main is the only source of a word's state: sending, sent, refused, or Not sent within the app's life. That state stays bound to the org, member and device that signed the word.
+
+Evidence:
+- the unit suites (each run alone):
+  - `verify` 15, `cache` 22, `channel` 23, `words` 14, `address` 7, `project-socket` 9, `holds` 3, `channel-fixture` 4;
+  - the renderer's `project` 15, `state` 5, `ChannelView` 24;
+- `test/org/channel.local.test.ts` 4, on desk-hub's Worker in Miniflare:
+  - a v2 exchange folded with its owners;
+  - a DX1 writer attested at migration;
+  - a revoked key's event, and a forgery on A's transport, both counted and not drawn;
+  - A's words received signed and unmacked on B's socket, then drawn back as A's;
+  - "as of" across a relaunch with the hub down;
+- `e2e/channel.spec.ts` in `e2e:settings`, over a harness-only seeded channel under classic scrollbars, with its screenshots;
+- the gates the PR body lists.
+
+Retrospective (M7a). Built as three tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-medium on the branch over three rounds.
+- **The task reviews' findings.** Most had one shape: a fact inferred from a transition the observer might not see.
+  - the renderer's ack inferred from a pending word's disappearance, under coalescing and across unmount;
+  - an older buffered reset applied over a newer open;
+  - a recalled receipt the log already held.
+
+  Each was closed by moving the truth to the one process that sees every transition (main), and numbering what it publishes (`rev`).
+- **The branch review's findings.** They were trust boundaries the tasks had each held locally but not at their seams:
+  - the cache scoped by org, not by reader, against O18's per-member reach;
+  - a judgment recorded after its await;
+  - legacy lifecycle feeding identity, first for addressing and then for attribution;
+  - a superseded channel's write.
+- **Task 3's screenshots.** They caught two layout faults that happy-dom couldn't, as M4a's did.
+
+A future child that reads hub-served content into a cache should key the cache, its cursor and every projection by the reader whose rights fetched it. It should also carry each datum's provenance to the point of display, not just to the point of judgment.
