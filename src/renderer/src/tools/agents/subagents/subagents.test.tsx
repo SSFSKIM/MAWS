@@ -645,10 +645,11 @@ describe('drill-in', () => {
     // plane, a watch naming the agent, and builds no child source of this machine's
     it('draws a remote session’s subagent from its machine’s plane where its endpoint carries it: a watch naming the agent, no child source', async () => {
       remoteSession(['rl2.feeds', 'rl2.agent-scope']);
+      await import('../../../lane-a/view/RemoteAgentTranscript'); // the drill-in's lazy chunk, loaded before the clock below starts
       render(<Mounted state={create({ agentId: 'a1' as AgentId }, remote)} appSessionId={remote} />);
       expect(screen.queryByTestId('subagent-rows-gap')).toBeNull();
-      await waitFor(() => expect(invoked.filter(([name]) => name === 'laneA.watch')).toEqual([['laneA.watch', { appSessionId: 'eng-r', agentId: 'a1' }]])); // the bare id, routed to its machine
-      await waitFor(() => expect(screen.getByTestId('subagent-rows-status').textContent).toBe('unexpected laneA.watch')); // main's refusal, said in place
+      await waitFor(() => expect(invoked.filter(([name]) => name === 'laneA.watch')).toEqual([['laneA.watch', { appSessionId: 'eng-r', agentId: 'a1' }]]), { timeout: 5_000 }); // the bare id, routed to its machine
+      await waitFor(() => expect(screen.getByTestId('subagent-rows-status').textContent).toBe('unexpected laneA.watch'), { timeout: 5_000 }); // main's refusal, said in place
       expect(ipcSourceSpy).not.toHaveBeenCalled();
       expect(invoked.filter(([name]) => name === 'session.events')).toEqual([]);
       expect(screen.getByRole('textbox')).toBeTruthy();
