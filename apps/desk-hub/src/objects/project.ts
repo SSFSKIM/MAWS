@@ -552,8 +552,8 @@ export class Project extends DurableObject<Env> {
   // wait inside it.
   //
   // Message reach (P5 O18 D5): an event whose `audience` its writer stream does not name is refused `audience`; then
-  // each event that may be stored is judged against the policy registry, read once for the batch (`reachOf`) and
-  // replayed in order as the batch's own snapshots move it (`judge`). One out of reach is withheld: refused
+  // each event that may be stored is judged against the policy registry, read once for the batch (`reachOf`), its
+  // references against the rows with all the batch's own snapshots taken, in two passes (`judge`). One out of reach is withheld: refused
   // `not-reachable` with no message, a tombstone stored at its position, and the writer goes on at the next seq. One the
   // registry could not be read for is refused `state-unavailable` and stores nothing, its writer stopped there. The hub
   // only refuses: what it admits still meets the receiving endpoint's `reach?`.
@@ -644,7 +644,7 @@ export class Project extends DurableObject<Env> {
         owed.push(this.toMachine(ctx.machine, ctx.generation, { t: 'resend', project: ctx.project, writer, from: last + 1 }, 'replies'));
       }
     }
-    if (reach !== null) this.keepPolicies(reach.rows);
+    if (reach !== null) this.keepPolicies(reach.after);
     this.fanOut(accepted, ctx.machine);
     // An async question opened, answered, or ended with its session: the grid's `waiting` may move (owner, 2026-10-18).
     if (accepted.some(({ event }) => questionEffect(event) !== null)) this.reportSummary();
@@ -723,9 +723,10 @@ export class Project extends DurableObject<Env> {
     }
     if (!registry && !owners) return null;
     const held = owners ? await this.machineOwnersOf(ctx.machine) : [];
-    if (!registry) return { available: true, rows: {}, mine: {}, owners: held };
+    if (!registry) return { available: true, rows: {}, after: {}, mine: {}, owners: held };
     const answer = await this.askPolicies({ machine: ctx.machine, snapshots, sessions: [...sessions] });
-    return answer === null ? { available: false, rows: {}, mine: {}, owners: held } : { available: true, rows: answer.rows, mine: answer.mine, owners: held };
+    if (answer === null) return { available: false, rows: {}, after: {}, mine: {}, owners: held };
+    return { available: true, rows: answer.rows, after: afterBatch(answer, snapshots), mine: answer.mine, owners: held };
   }
 
   /** The registry's answer for one batch (`Registry.policies`), or null when it can't be had: the batch's events that
@@ -1555,7 +1556,7 @@ export class Project extends DurableObject<Env> {
     if (facts.needsRegistry) {
       const answer = await this.askPolicies({ snapshots: [], sessions: facts.refs.map((r) => r.session) });
       if (!this.stateHolds(member)) return;
-      const verdict = judge(positioned(), answer === null ? { available: false, rows: {}, mine: {}, owners: [member] } : { available: true, rows: answer.rows, mine: answer.mine, owners: [member] }, [member], true);
+      const verdict = judge(positioned(), answer === null ? { available: false, rows: {}, after: {}, mine: {}, owners: [member] } : { available: true, rows: answer.rows, after: answer.rows, mine: answer.mine, owners: [member] }, [member], true);
       if (verdict.kind === 'unavailable') return this.refuseBrowser(socket, { reason: 'state-unavailable', writer, nonce, message: 'the policy registry could not be read to check whom these words name; send them again' });
       if (verdict.kind === 'withhold') return this.refuseBrowser(socket, { reason: 'not-reachable', writer, nonce });
       if (answer !== null) this.keepPolicies(answer.rows);
@@ -1979,10 +1980,19 @@ function humanShapeError(event: unknown): string | null {
 
 // ---- Message reach (P5 O18 D5) ---------------------------------------------------------------------------------------
 
-/** What an upload's reach check read for its batch (`Project.reachOf`): whether the registry answered, its rows (as
- * they stood before the batch, replayed as `judge` takes the batch's snapshots) and bindings, and the uploading
- * machine's owners, null when they could not be resolved. */
-type Reach = { available: boolean; rows: Record<string, Policy | null>; mine: Record<string, boolean>; owners: string[] | null };
+/** What an upload's reach check read for its batch (`Project.reachOf`): whether the registry answered, its rows as
+ * they stood before the batch (`rows`) and with every snapshot of the batch its machine may write taken (`after`), its
+ * bindings, and the uploading machine's owners, null when they could not be resolved. */
+type Reach = { available: boolean; rows: Record<string, Policy | null>; after: Record<string, Policy | null>; mine: Record<string, boolean>; owners: string[] | null };
+
+/** The registry's rows with a batch's snapshots taken, each where the session is bound to the uploading machine (or
+ * the batch binds it) and the snapshot is newer than the row: what a reference anywhere in the batch is judged against,
+ * so a seat spawned and addressed in one batch is known to the say naming it whichever writer the batch orders first. */
+function afterBatch(answer: PoliciesAnswer, snapshots: Snapshot[]): Record<string, Policy | null> {
+  const after = { ...answer.rows };
+  for (const { session, ...policy } of snapshots) if (answer.mine[session] && newer(policy, after[session] ?? null)) after[session] = policy;
+  return after;
+}
 
 /** What an event states of reach: its writing session, its audience, the sessions it names, the snapshot it is (a
  * `joined` or `state` under its session's own writer), the session of an `unlisted` notice, and its attested owners. */
@@ -2015,7 +2025,9 @@ function audienceError(event: Record<string, unknown>): string | null {
 }
 
 /**
- * One event judged against the registry (D5), `reach.rows` replayed as its snapshots are taken: withheld when it names
+ * One event judged against the registry (D5), its references against the rows with the whole batch's snapshots taken
+ * (`reach.after`) and an `unlisted` notice against the rows before the batch, since the snapshot of the change it
+ * announces may come in the same batch, after it or before: withheld when it names
  * a session the registry doesn't know (an addressing reference; an unknown provenance reference is no one's private
  * session yet, its own machine uploading its snapshot first), when its audience is not within each named private
  * session's, when its senders are not all inside its audience, or when it is a snapshot of a session bound to another
@@ -2029,21 +2041,17 @@ function judge(event: Record<string, unknown>, reach: Reach | null, owners: stri
   const sender = given ? owners : (f.attested ?? owners);
   const senders = sender ?? [];
   if (f.needsRegistry && (reach === null || !reach.available)) return { kind: 'unavailable' };
-  const rows = reach?.rows ?? {};
+  const rows = reach?.after ?? {};
   const mine = reach?.mine ?? {};
   const withhold = { kind: 'withhold' as const, senders };
   if (event.kind === 'unlisted') {
     // Its audience is the members the change withdraws, its sender outside it by construction (D5).
     if (!isUnlistedNotice(event) || f.refs.length > 0 || f.own === null || event.session !== f.own || streamOf(event.writer as string).digest === null || !mine[f.own]) return withhold;
-    const row = rows[f.own] ?? null;
+    const row = reach?.rows[f.own] ?? null;
     if (row === null || !(event.policyRev > row.policyRev)) return withhold;
     return row.audience === null || subset(event.audience, row.audience) ? { kind: 'admit' } : withhold;
   }
-  if (f.snapshot !== null) {
-    if (!mine[f.snapshot.session]) return withhold;
-    const { session, ...policy } = f.snapshot;
-    if (newer(policy, rows[session] ?? null)) rows[session] = policy;
-  }
+  if (f.snapshot !== null && !mine[f.snapshot.session]) return withhold;
   for (const ref of f.refs) {
     const row = rows[ref.session] ?? null;
     if (row === null) {

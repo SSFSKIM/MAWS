@@ -63,6 +63,12 @@
     "apps/desk-hub/test/support/local.ts",
     "apps/desk-hub/test/support/send-fault.ts",
     "apps/desk-hub/test/support/push.ts",
+    // O18 M2: test/endpoint/rl10/conversation.local.test.ts puts a second machine on RL1 through desk-hub's own RL1
+    // machines (TestOrg), which sign their org with the suites' test devices
+    "apps/desk-hub/test/support/rl1.ts",
+    "apps/desk-hub/test/support/clients.ts",
+    "apps/desk-hub/test/support/org.ts",
+    "apps/desk-hub/fake-machine/endpoint.ts",
     "apps/desk-hub/local/proxy.ts",
     "apps/desk-hub/local/standin.ts",
     "apps/desk-hub/src/push/web-push.ts",

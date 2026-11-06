@@ -169,6 +169,31 @@ describe('the backstop', () => {
     expect(reasons(await upload(mB, project, [say(mB, project, S, 1, [P], [A])]))).toEqual(['not-reachable@1']);
   });
 
+  it('takes a session’s first snapshot anywhere in the same batch for a reference to it: a seat spawned and messaged at once (O18 M2)', async () => {
+    const project = await opened();
+    const { A } = o;
+    const X = newSession();
+    // The new session's snapshot under a writer later in the batch than the say naming it, listed or private.
+    const listed = newSession();
+    const plain = say(mA, project, X, 1, [listed]);
+    expect(await upload(mA, project, [plain, joined(mA, project, listed, 1, undefined, 0)])).toEqual([]);
+    const secret = newSession();
+    const toSecret = say(mA, project, X, 1, [secret], [A]);
+    expect(await upload(mA, project, [toSecret, joined(mA, project, secret, 1, [A], 1)])).toEqual([]);
+    expect(lastHave(mA, project).have).toMatchObject({ [plain.writer]: 1, [toSecret.writer]: 1 });
+    expect(lastHave(mA, project).withheld).toBeUndefined();
+    // The reference still meets the session's policy: a plain say toward the private one is withheld.
+    const other = newSession();
+    expect(reasons(await upload(mA, project, [say(mA, project, X, 2, [other]), joined(mA, project, other, 1, [A], 1)]))).toEqual(['not-reachable@2']);
+    // A snapshot from a machine the session isn't bound to satisfies nothing: B's machine can't make A's private
+    // session listed for its own say by forging a newer plain snapshot of it in the same batch.
+    const theirs = newSession();
+    expect(await upload(mA, project, [joined(mA, project, theirs, 1, [A], 1)])).toEqual([]);
+    const Y = newSession();
+    expect(reasons(await upload(mB, project, [say(mB, project, Y, 1, [theirs]), joined(mB, project, theirs, 1, undefined, 5)]))).toEqual(['not-reachable@1', 'not-reachable@1']);
+    expect(await row(theirs)).toMatchObject({ audience: [A], policyRev: 1 });
+  });
+
   it('refuses after a share removal a say carrying the old audience', async () => {
     const project = await opened();
     const { A, B } = o;
