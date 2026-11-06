@@ -77,6 +77,38 @@ describe('the bound', () => {
   });
 });
 
+describe("the project's sessions", () => {
+  it("keeps each session's latest lifecycle past the bound, across a reload, and judges it again at each head", async () => {
+    const o = await ChannelOrg.make();
+    const log = emptyLog(ORG, PROJECT, { events: 2, bytes: LIMITS.bytes });
+    const says = await Promise.all([2, 3, 4].map((n) => o.say(o.mini, n, `say ${n}`)));
+    await log.add(at([await o.joined(o.mini, 1, 'maws-45'), ...says]), ground(o));
+    await log.add(at([await o.lifecycle(o.mini, 5, 'titled', { title: 'the channel' })], 5), ground(o));
+    expect(log.events().map((e) => e.offset)).toEqual([4, 5]); // the joined is let go
+    const maws45 = { session: S1, alias: 'maws-45', machine: 'mini', title: 'the channel', member: true };
+    expect(log.sessions()).toEqual([maws45]);
+    const reloaded = await loadLog(roundTrip(log.file()), { org: ORG, project: PROJECT, limits: { events: 2, bytes: LIMITS.bytes }, ground: ground(o), log: () => {} });
+    expect(reloaded.sessions()).toEqual([maws45]);
+    const offline = await loadLog(roundTrip(log.file()), { org: null, project: PROJECT, limits: LIMITS, ground: null, log: () => {} });
+    expect(offline.sessions()).toEqual([maws45]);
+    // a head that drops mini: nothing it wrote names a session any more
+    await o.adopt((s) => {
+      s.machines = s.machines.filter((m) => m.ref !== o.mini.ref);
+    });
+    await reloaded.rejudge(ground(o));
+    expect(reloaded.sessions()).toEqual([]);
+  });
+
+  it("keeps a session's verified lifecycle when a later one of the same kind fails", async () => {
+    const o = await ChannelOrg.make();
+    const studio = await o.machine('studio'); // not in the head: its events fail
+    const log = emptyLog(ORG, PROJECT, LIMITS);
+    const forged = { ...(await o.joined(studio, 2, 'hijacked')), writer: `mini/${S1}` };
+    await log.add(at([await o.joined(o.mini, 1, 'maws-45'), forged]), ground(o));
+    expect(log.sessions().map((s) => s.alias)).toEqual(['maws-45']);
+  });
+});
+
 describe('the file', () => {
   it('reads a damaged file, or another project\'s, from offset 0', async () => {
     const o = await ChannelOrg.make();

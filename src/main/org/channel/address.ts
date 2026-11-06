@@ -4,30 +4,46 @@
 // only the run of tags that opens the text addresses anyone (`@name`, `@"name with spaces"`, `@name#short`, `@short`,
 // each optionally followed by `,:;`), and an @ later in the text is text. The text is sent as typed, tags and all.
 //
-// The project's sessions are what its log's lifecycle events say: each session's latest `joined` (its alias) or
-// `retired`, from the session's own writer.
+// The project's sessions are what its log's lifecycle events say (`projectSessions`): each session's latest `joined`
+// (its alias, its machine; a member), `retired` (a member no more), `renamed` (its alias) and `titled` (its title), by
+// offset, from the session's own writer. The held log keeps these past its bound (cache.ts), so a session whose `joined`
+// was let go is still addressed and titled.
 //
 // Electron-free.
 import { streamOf, writerMachine } from '../../../../apps/org-protocol/src/index.ts';
-import type { ChannelRecipients } from '@shared/ipc/schema/org';
+import type { ChannelRecipients, ChannelSession } from '@shared/ipc/schema/org';
 
 /** A session of the project as addressing sees it: its alias, and whether it is a member now (joined, not retired). */
-export type Addressable = { session: string; alias: string; member: boolean };
+export type Addressable = Pick<ChannelSession, 'session' | 'alias' | 'member'>;
 export type Addressed = { ok: true; to: ChannelRecipients } | { ok: false; reason: 'no-member' | 'ambiguous'; detail: string };
 
 type Logged = Record<string, unknown> & { writer: string };
+export const LIFECYCLE_KINDS = ['joined', 'retired', 'renamed', 'titled'] as const;
+export type LifecycleKind = (typeof LIFECYCLE_KINDS)[number];
 
-/** Each session's latest membership, in the order the log first names it. */
-export function projectSessions(events: Iterable<Logged>): Addressable[] {
-  const sessions = new Map<string, Addressable>();
-  for (const event of events) {
-    if ((event.kind !== 'joined' && event.kind !== 'retired') || typeof event.session !== 'string') continue;
-    const machine = writerMachine(event.writer);
-    // a session's lifecycle is its own writer's (`<machine>/<session>`), or one of its streams
-    if (machine === null || streamOf(event.writer).base !== `${machine}/${event.session}`) continue;
-    const held = sessions.get(event.session);
-    if (event.kind === 'joined' && typeof event.alias === 'string' && event.alias !== '') sessions.set(event.session, { session: event.session, alias: event.alias, member: true });
-    else if (event.kind === 'retired' && held !== undefined) sessions.set(event.session, { ...held, member: false });
+/** The session and kind of a lifecycle event from the session's own writer (`<machine>/<session>`, or a stream of it). */
+export function lifecycleOf(event: Logged): { session: string; kind: LifecycleKind } | null {
+  const kind = LIFECYCLE_KINDS.find((k) => k === event.kind);
+  if (kind === undefined || typeof event.session !== 'string') return null;
+  const machine = writerMachine(event.writer);
+  if (machine === null || streamOf(event.writer).base !== `${machine}/${event.session}`) return null;
+  return { session: event.session, kind };
+}
+
+const text = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null);
+
+/** Each session's latest lifecycle, read by offset, in the order the log first names it. */
+export function projectSessions(entries: Iterable<{ offset: number; event: Logged }>): ChannelSession[] {
+  const sessions = new Map<string, ChannelSession>();
+  for (const { event } of [...entries].sort((a, b) => a.offset - b.offset)) {
+    const lifecycle = lifecycleOf(event);
+    if (lifecycle === null) continue;
+    const { session } = lifecycle;
+    const held = sessions.get(session) ?? { session, alias: session.slice(0, 8), machine: writerMachine(event.writer) ?? '', title: null, member: false };
+    if (lifecycle.kind === 'joined') sessions.set(session, { ...held, alias: text(event.alias) ?? held.alias, machine: text(event.machine) ?? held.machine, member: true });
+    else if (lifecycle.kind === 'retired') sessions.set(session, { ...held, member: false });
+    else if (lifecycle.kind === 'renamed') sessions.set(session, { ...held, alias: text(event.alias) ?? held.alias });
+    else sessions.set(session, { ...held, title: typeof event.title === 'string' ? event.title.trim() || null : null });
   }
   return [...sessions.values()];
 }

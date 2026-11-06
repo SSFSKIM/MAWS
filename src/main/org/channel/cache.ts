@@ -10,6 +10,9 @@
 //   seq 1, keeps the hash of each event that passed, so an event of that writer reads `migrated` only when its own bytes
 //   are those, at any offset, after any eviction or reload.
 // - Withheld tombstones are not kept. An event that fails is kept, counted (`unverified`) and judged again.
+// - The project's sessions outlive the bound too: each session's latest lifecycle event of each kind (address.ts) that
+//   didn't fail is kept beside the events, in the file, judged again with them and dropped when it fails; a later one
+//   that fails displaces nothing. At most CHANNEL_CACHE_SESSIONS sessions, the most recently named.
 // - A file that doesn't read as one of this project's (absent, damaged, another project's, another org's when the org
 //   is known) gives an empty log, read from offset 0, which recomputes every checkpoint from the full prefix.
 //
@@ -19,16 +22,29 @@
 // Electron-free.
 import { join } from 'node:path';
 import { isHistoryAttestation, isLogSeq, isSigned, type HistoryAttestation, type Signed, type StoredEvent } from '../../../../apps/org-protocol/src/index.ts';
-import type { ChannelEvent, OrgMember } from '@shared/ipc/schema/org';
+import type { ChannelEvent, ChannelSession, OrgMember } from '@shared/ipc/schema/org';
+import { lifecycleOf, projectSessions } from './address';
 import { privateFiles, type OrgFiles } from '../files';
 import type { LoggedEvent } from './project-socket';
 import { attestationSigned, checkpointOf, isDx1, judgeEvent, recheckCheckpoint, type Checkpoint, type Judging, type Verdict } from './verify';
 
 /** What a judgment reads besides the log's own checkpoints. */
 export type Ground = Omit<Judging, 'checkpoints'>;
-export type ChannelLimits = { events: number; bytes: number };
+/** `sessions`: the most sessions the lifecycle keeps (CHANNEL_CACHE_SESSIONS by default). */
+export type ChannelLimits = { events: number; bytes: number; sessions?: number };
+export const CHANNEL_CACHE_SESSIONS = 500;
 export type CachedEvent = { offset: number; event: StoredEvent; verdict: Verdict };
-export type ChannelCacheFile = { version: 1; org: string; project: string; after: number; asOf: string | null; events: CachedEvent[]; checkpoints: Checkpoint[] };
+export type ChannelCacheFile = {
+  version: 1;
+  org: string;
+  project: string;
+  after: number;
+  asOf: string | null;
+  events: CachedEvent[];
+  checkpoints: Checkpoint[];
+  /** Each session's latest lifecycle event of each kind that didn't fail, past the bound. */
+  lifecycle: CachedEvent[];
+};
 
 export interface HeldLog {
   /** The org whose events these are. */
@@ -51,6 +67,8 @@ export interface HeldLog {
   attestationsDue(): boolean;
   /** The events that draw, oldest first. */
   events(): ChannelEvent[];
+  /** The project's sessions, as their lifecycle held past the bound names them. */
+  sessions(): ChannelSession[];
   unverified(): number;
   file(): ChannelCacheFile;
 }
@@ -78,6 +96,7 @@ const isCached = (value: unknown): value is CachedEvent =>
 function isCacheFile(value: unknown, project: string): value is ChannelCacheFile {
   if (!isObject(value) || value.version !== 1 || typeof value.org !== 'string' || value.project !== project || !isOffset(value.after)) return false;
   if (value.asOf !== null && typeof value.asOf !== 'string') return false;
+  if (!Array.isArray(value.lifecycle) || !value.lifecycle.every(isCached)) return false;
   return Array.isArray(value.events) && value.events.every(isCached) && Array.isArray(value.checkpoints) && value.checkpoints.every(isCheckpoint);
 }
 
@@ -111,7 +130,45 @@ function makeLog(org: string, project: string, limits: ChannelLimits, held: Chan
   /** The log caught up since the attestations were read: a writer they cover that hasn't verified by then never will. */
   let settled = true;
 
+  /** By `<session>\n<kind>`: the latest of each that didn't fail. */
+  const lifecycle = new Map<string, CachedEvent>();
+  const keyOf = (event: StoredEvent): string | null => {
+    const named = lifecycleOf(event);
+    return named === null ? null : `${named.session}\n${named.kind}`;
+  };
+  /** At most `limits.sessions` sessions: those named longest ago go first. */
+  const boundSessions = () => {
+    const latest = new Map<string, number>();
+    for (const [key, entry] of lifecycle) {
+      const session = key.slice(0, key.indexOf('\n'));
+      latest.set(session, Math.max(latest.get(session) ?? -1, entry.offset));
+    }
+    const cap = limits.sessions ?? CHANNEL_CACHE_SESSIONS;
+    if (latest.size <= cap) return;
+    const dropped = new Set([...latest].sort((a, b) => a[1] - b[1]).slice(0, latest.size - cap).map(([session]) => session));
+    for (const key of [...lifecycle.keys()]) if (dropped.has(key.slice(0, key.indexOf('\n')))) lifecycle.delete(key);
+  };
+  /** An event judged: the lifecycle it is, if it is the latest of its kind and didn't fail. */
+  const note = (entry: CachedEvent) => {
+    const key = keyOf(entry.event);
+    if (key === null || 'failed' in entry.verdict) return;
+    const held = lifecycle.get(key);
+    if (held !== undefined && held.offset > entry.offset) return;
+    lifecycle.set(key, entry);
+    if (held === undefined) boundSessions();
+  };
+  for (const entry of held?.lifecycle ?? []) note(entry);
+
   const judging = (ground: Ground): Judging => ({ ...ground, checkpoints });
+  /** The lifecycle (of `writers`, or all) judged again: an event held at the same offset gives its verdict; one that fails is dropped. */
+  async function rejudgeLifecycle(ground: Ground, writers?: ReadonlySet<string>): Promise<void> {
+    for (const [key, entry] of [...lifecycle]) {
+      if (writers !== undefined && !writers.has(entry.event.writer)) continue;
+      const verdict = entries.get(entry.offset)?.verdict ?? (await judgeEvent(entry.event, judging(ground)));
+      if (verdict === null || 'failed' in verdict) lifecycle.delete(key);
+      else lifecycle.set(key, { ...entry, verdict });
+    }
+  }
   const keep = (entry: CachedEvent) => {
     const size = sizeOf(entry);
     bytes += size - (sizes.get(entry.offset) ?? 0);
@@ -170,6 +227,7 @@ function makeLog(org: string, project: string, limits: ChannelLimits, held: Chan
       const verdict = await judgeEvent(entry.event, judging(ground));
       if (verdict !== null) keep({ ...entry, verdict });
     }
+    await rejudgeLifecycle(ground, writers);
   }
 
   return {
@@ -185,6 +243,7 @@ function makeLog(org: string, project: string, limits: ChannelLimits, held: Chan
         const verdict = await judgeEvent(event, judging(ground));
         if (verdict === null) continue;
         keep({ offset, event, verdict });
+        note({ offset, event, verdict });
         if (isDx1(event)) dx1.add(event.writer);
         changed = true;
       }
@@ -224,6 +283,7 @@ function makeLog(org: string, project: string, limits: ChannelLimits, held: Chan
           sizes.delete(entry.offset);
         } else keep({ ...entry, verdict });
       }
+      await rejudgeLifecycle(ground);
     },
     attestationsDue() {
       for (const [writer, seq] of highestDx1()) {
@@ -237,8 +297,18 @@ function makeLog(org: string, project: string, limits: ChannelLimits, held: Chan
         .sort((a, b) => a.offset - b.offset)
         .map(drawn)
         .filter((e): e is ChannelEvent => e !== null),
+    sessions: () => projectSessions(lifecycle.values()),
     unverified: () => [...entries.values()].filter((e) => 'failed' in e.verdict).length,
-    file: () => ({ version: 1, org, project, after, asOf, events: [...entries.values()].sort((a, b) => a.offset - b.offset), checkpoints: [...checkpoints.values()] }),
+    file: () => ({
+      version: 1,
+      org,
+      project,
+      after,
+      asOf,
+      events: [...entries.values()].sort((a, b) => a.offset - b.offset),
+      checkpoints: [...checkpoints.values()],
+      lifecycle: [...lifecycle.values()].sort((a, b) => a.offset - b.offset),
+    }),
   };
 }
 

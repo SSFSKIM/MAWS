@@ -100,6 +100,12 @@ export class ChannelOrg {
     return signEvent({ org: ORG, project: PROJECT }, event, machine.key.privateKey, machine.key.pub) as Promise<Event>;
   }
 
+  /** A machine's v2 lifecycle event of `kind` (`retired`, `renamed`, `titled`), from the session's own writer. */
+  lifecycle(machine: Machine, seq: number, kind: string, fields: Record<string, unknown>, session = S1): Promise<Event> {
+    const event = { ts: iso(NOW - 35_000), created: iso(NOW - 35_000), writer: `${machine.name}/${session}`, seq, kind, session, ...fields };
+    return signEvent({ org: ORG, project: PROJECT }, event, machine.key.privateKey, machine.key.pub) as Promise<Event>;
+  }
+
   /** A phase-1 `say` under a former name, with a code nothing in the app checks. */
   dx1(name: string, seq: number, text = `${name} says ${seq}`, session = S2): Event {
     return {

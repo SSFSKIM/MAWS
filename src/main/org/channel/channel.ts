@@ -15,9 +15,9 @@
 // - Every event is judged again at each adopted head or certificate set; another org's log is dropped at sign-in.
 // - A socket the hub refuses the project (404) ends the channel `unknown-project` until the tab's next open or another
 //   hub; one that ends `removed` or with the hub sign-in waits, as the Registry feed does, for the session's next change.
-// - The owner's words: a leading `@alias` addresses a session the log names (address.ts), and untagged words go to
-//   everyone. Nothing is sent signed out, with no hub, or to a project the hub refused; words another org, member or
-//   device signed are refused `context-changed` at the session's change (words.ts).
+// - The owner's words: a leading `@alias` addresses a session the log's lifecycle names, held past the bound (address.ts,
+//   cache.ts), and untagged words go to everyone. Nothing is sent signed out, with no hub, or to a project the hub
+//   refused; words another org, member or device signed are refused `context-changed` at the session's change (words.ts).
 // - The cache is written CHANNEL_WRITE_MS after a change, and last at `close()`: once the channel's own work has run
 //   (joined outside the org session's commit queue), a finished snapshot is entered in that queue, and the queued write
 //   awaits nothing of the channel's (M4a's rule). `close()` resolves once every final write is entered.
@@ -28,7 +28,7 @@ import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelSendResult } f
 import { hubClient } from '../hub-client';
 import type { HubAccess, OrgSession, SignedIn } from '../session';
 import { orgTiming, type OrgTiming } from '../timing';
-import { addressOf, projectSessions } from './address';
+import { addressOf } from './address';
 import { emptyLog, loadLog, type ChannelLimits, type ChannelStore, type Ground, type HeldLog } from './cache';
 import { CLOSE_CREDENTIALS, CLOSE_REMOVED, CLOSE_UNKNOWN_PROJECT, openProjectSocket, type ProjectSocket, type ProjectSocketDeps } from './project-socket';
 import { createWords } from './words';
@@ -168,15 +168,16 @@ export function createChannels(deps: ChannelsDeps): Channels {
       if (ended === 'unknown-project') return { ok: false, reason: 'unknown-project' };
       const current = deps.session.current();
       const events = held?.events() ?? [];
+      const sessions = held?.sessions() ?? [];
       const unverified = held?.unverified() ?? 0;
       const asOf = held?.asOf() ?? null;
       const pending = words.pending();
-      if (events.length === 0 && unverified === 0 && asOf === null && pending.length === 0) {
+      if (events.length === 0 && sessions.length === 0 && unverified === 0 && asOf === null && pending.length === 0) {
         if (current === null) return { ok: false, reason: 'signed-out' };
         if (current.hub === null) return { ok: false, reason: 'no-hub' };
       }
       const live = socket !== null && welcomed && caughtUp && current !== null && current.hub === socketHub;
-      return { ok: true, events, pending, unverified, asOf, live };
+      return { ok: true, events, sessions, pending, unverified, asOf, live };
     }
 
     function scheduleEmit(): void {
@@ -188,7 +189,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
       (emitTimer as { unref?: () => void }).unref?.();
     }
 
-    const restOf = (a: ChannelAnswer & { ok: true }) => JSON.stringify([a.pending, a.unverified, a.asOf, a.live]);
+    const restOf = (a: ChannelAnswer & { ok: true }) => JSON.stringify([a.sessions, a.pending, a.unverified, a.asOf, a.live]);
 
     /** The change since what was last told, if any. */
     function tell(): void {
@@ -212,8 +213,8 @@ export function createChannels(deps: ChannelsDeps): Channels {
         told = verdicts;
         if (!reset && upserts.length === 0 && removed.length === 0 && rest === toldRest) return;
         toldRest = rest;
-        const { pending, unverified, asOf, live } = now;
-        change = { project, ok: true, upserts, removed, pending, unverified, asOf, live, ...(reset ? { reset: true as const } : {}) };
+        const { sessions, pending, unverified, asOf, live } = now;
+        change = { project, ok: true, upserts, removed, sessions, pending, unverified, asOf, live, ...(reset ? { reset: true as const } : {}) };
       }
       for (const listener of [...listeners]) listener(change);
     }
@@ -404,8 +405,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
       if (current === null) return { ok: false, reason: 'signed-out' };
       if (current.hub === null) return { ok: false, reason: 'no-hub' };
       if (ended !== null) return { ok: false, reason: 'unreadable' };
-      const events = (held?.events() ?? []).map((e) => ({ ...e.event, writer: e.writer }));
-      const addressed = addressOf(text, projectSessions(events));
+      const addressed = addressOf(text, held?.sessions() ?? []);
       if (!addressed.ok) return { ok: false, reason: addressed.reason, detail: addressed.detail };
       const said = await words.say(text, addressed.to);
       return said.ok ? said : { ok: false, reason: said.reason };

@@ -10,7 +10,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { NO_CERTIFICATES, type HistoryAttestation, type OrgView, type Signed } from '../../../../apps/org-protocol/src/index.ts';
 import { ChannelOrg, NOW, ORG, PROJECT, S1 } from '../../../../test/org/channel-world';
-import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelWord } from '@shared/ipc/schema/org';
+import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelSession, ChannelWord } from '@shared/ipc/schema/org';
 import { BUILD_HEADER } from '../hub-client';
 import type { WebSocketLike } from '../registry-feed';
 import { heldOrgSession, type SignedIn } from '../session';
@@ -57,7 +57,7 @@ async function until<T>(check: () => T | null | undefined | false, what: string,
 }
 
 /** What a tab draws: the open answer, each change folded onto it by offset, `reset` replacing it. */
-type Drawn = { project: string; ok: true; events: ChannelEvent[]; pending: ChannelWord[]; unverified: number; asOf: string | null; live: boolean } | { project: string; ok: false; reason: string };
+type Drawn = { project: string; ok: true; events: ChannelEvent[]; sessions: ChannelSession[]; pending: ChannelWord[]; unverified: number; asOf: string | null; live: boolean } | { project: string; ok: false; reason: string };
 
 function fold(base: Drawn | undefined, change: ChannelChanged): Drawn | undefined {
   if (!change.ok) return change;
@@ -65,8 +65,8 @@ function fold(base: Drawn | undefined, change: ChannelChanged): Drawn | undefine
   const byOffset = new Map((change.reset === true || base === undefined || !base.ok ? [] : base.events).map((e) => [e.offset, e]));
   for (const offset of change.removed ?? []) byOffset.delete(offset);
   for (const event of change.upserts) byOffset.set(event.offset, event);
-  const { project, pending, unverified, asOf, live } = change;
-  return { project, ok: true, events: [...byOffset.values()].sort((a, b) => a.offset - b.offset), pending, unverified, asOf, live };
+  const { project, sessions, pending, unverified, asOf, live } = change;
+  return { project, ok: true, events: [...byOffset.values()].sort((a, b) => a.offset - b.offset), sessions, pending, unverified, asOf, live };
 }
 
 const opened = (answer: ChannelAnswer | Drawn | undefined) => {
@@ -276,6 +276,28 @@ describe('a project channel', () => {
     const second = await until(() => (h.sockets.length === 2 ? h.last() : null), 'a reconnect', 5_000);
     second.welcome();
     expect(second.sent.some((f) => f.t === 'human')).toBe(false);
+  });
+
+  it('addresses a session whose joined the bound let go, from the cache after a reload, and tells the sessions', async () => {
+    const h = await harness({
+      events: 2,
+      seed: async (o) => {
+        const cached = emptyLog(ORG, PROJECT, { events: 2, bytes: 1 << 23 });
+        const g = { ctx: { org: ORG, project: PROJECT }, state: o.head().state, certificates: NO_CERTIFICATES, now: new Date(NOW) };
+        await cached.add([{ offset: 1, event: await o.joined(o.mini, 1, 'maws-45') }, { offset: 2, event: await o.say(o.mini, 2, 'two') }, { offset: 3, event: await o.say(o.mini, 3, 'three') }], g);
+        return cached.file();
+      },
+    });
+    const answer = opened(await h.channels.open(PROJECT));
+    expect(answer.events.map((e) => e.offset)).toEqual([2, 3]);
+    expect(answer.sessions).toEqual([{ session: S1, alias: 'maws-45', machine: 'mini', title: null, member: true }]);
+    const socket = await until(() => h.last(), 'a socket');
+    socket.welcome();
+    socket.frame({ t: 'log', events: [{ offset: 4, event: await h.o.lifecycle(h.o.mini, 4, 'renamed', { alias: 'maws-46' }) }] });
+    await until(() => opened(h.latest()).sessions[0]?.alias === 'maws-46', 'the rename told');
+    const sent = await h.channels.send(PROJECT, '@maws-46 still there?');
+    expect(sent).toMatchObject({ ok: true });
+    expect(socket.sent.find((f) => f.t === 'human')).toMatchObject({ event: { to: [{ session: S1, alias: 'maws-46' }] } });
   });
 
   it('resends unanswered words at the next welcome, with the same nonce', async () => {

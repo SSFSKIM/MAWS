@@ -276,6 +276,13 @@ export const ChannelEventSchema = z.strictObject({
   owners: z.array(OrgMemberSchema).optional(),
 });
 export type ChannelEvent = z.infer<typeof ChannelEventSchema>;
+/**
+ * A session of the project as its log's lifecycle names it (each session's latest `joined`, `retired`, `renamed` and
+ * `titled` that verified, kept past the cache's bound): its alias, machine and title, and whether it is a member now.
+ * Addressing reads these, and the stream's titles.
+ */
+export const ChannelSessionSchema = z.strictObject({ session: z.string(), alias: z.string(), machine: z.string(), title: z.string().nullable(), member: z.boolean() });
+export type ChannelSession = z.infer<typeof ChannelSessionSchema>;
 /** Whom words go to: everyone, or the sessions a leading `@alias` named. */
 export const ChannelRecipientsSchema = z.union([z.literal('*'), z.array(z.strictObject({ session: z.string(), alias: z.string() }))]);
 export type ChannelRecipients = z.infer<typeof ChannelRecipientsSchema>;
@@ -301,6 +308,7 @@ export const CHANNEL_CLOSED_REASONS = ['signed-out', 'no-hub', 'unknown-project'
 const ChannelOpenSchema = z.strictObject({
   ok: z.literal(true),
   events: z.array(ChannelEventSchema), // oldest first, by offset
+  sessions: z.array(ChannelSessionSchema),
   pending: z.array(ChannelWordSchema),
   unverified: z.number().int().nonnegative(),
   asOf: z.string().nullable(), // the last `caught-up`'s time; null until one
@@ -328,15 +336,16 @@ export const CHANNEL_TEXT_MAX = 100_000;
 /**
  * A change since the last: `upserts` are the events new or judged again since, by offset, each replacing what a tab holds
  * at its offset; `removed` the offsets main no longer draws (let go by its bound, or failing now), so a tab holds exactly
- * main's set; the pending words, `unverified`, `asOf` and `live` are whole. `reset` replaces everything a tab holds with
- * `upserts`: told when a judgment at a new head or certificate set changed verdicts, when another org's log was dropped,
- * and for the first change after a closed one.
+ * main's set; the sessions, the pending words, `unverified`, `asOf` and `live` are whole. `reset` replaces every event a
+ * tab holds with `upserts`: told when a judgment at a new head or certificate set changed verdicts, when another org's
+ * log was dropped, and for the first change after a closed one.
  */
 const ChannelDeltaSchema = z.strictObject({
   project: z.string(),
   ok: z.literal(true),
   upserts: z.array(ChannelEventSchema), // oldest first, by offset
   removed: z.array(z.number().int().nonnegative()), // offsets; empty with `reset`
+  sessions: z.array(ChannelSessionSchema), // whole
   pending: z.array(ChannelWordSchema),
   unverified: z.number().int().nonnegative(),
   asOf: z.string().nullable(),
