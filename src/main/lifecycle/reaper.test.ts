@@ -42,6 +42,36 @@ describe('the quit reaper', () => {
     expect(Date.now() - started).toBeLessThan(10_000);
   });
 
+  // macOS's `ps -o comm=` names a process by its executable's path (Linux's by a 15-character name)
+  it.skipIf(process.platform !== 'darwin')('takes its parent’s Chromium helpers with it, and no other child', async () => {
+    const helperPath = '/tmp/maws-reaper-test.app/Contents/Frameworks/MAWS Helper.app/Contents/MacOS/MAWS Helper';
+    const parent = spawn(
+      '/bin/bash',
+      ['-c', '(exec -a "$2" /bin/sleep 30) & echo "$!"; (exec -a mawsd /bin/sleep 30) & echo "$!"; /bin/sh -c "$1" maws-reaper $$ 0.5 & exec /bin/sleep 30', 'parent', REAPER_SCRIPT, helperPath],
+      { stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    children.push(parent);
+    let out = '';
+    parent.stdout!.on('data', (chunk: Buffer) => void (out += String(chunk)));
+    await expect.poll(() => out.trim().split('\n').length).toBe(2);
+    const [helper, mawsd] = out.trim().split('\n').map(Number) as [number, number];
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    try {
+      expect(await ended(parent)).toEqual({ code: null, signal: 'SIGKILL' });
+      await expect.poll(() => alive(helper)).toBe(false);
+      expect(alive(mawsd), 'a child that is not a Chromium helper stays').toBe(true);
+    } finally {
+      for (const pid of [helper, mawsd]) if (alive(pid)) process.kill(pid, 'SIGKILL');
+    }
+  });
+
   it('leaves a process that is not its parent alone: the target outlives the reaper', async () => {
     const target = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
     children.push(target);

@@ -5,9 +5,13 @@
 //
 // So at Electron's `quit` (after the shutdown list's steps have settled, on its held path and its unheld one) main
 // spawns a detached `/bin/sh` that sleeps REAP_AFTER_S and then SIGKILLs main, only if main is still the shell's parent:
-// once main has exited the shell is reparented, so a pid the system has reused is never signalled. It kills that one
-// pid, never a process group: `mawsd` and the engine hosts outlive the app by design. A quit that ends on its own leaves
-// the shell to sleep out and exit with nothing to do.
+// once main has exited the shell is reparented, so a pid the system has reused is never signalled. Main's own Chromium
+// helpers go with it, each a child of main whose executable is a `*Helper*` in the bundle's Frameworks: a helper main's
+// teardown had not yet ended is left orphaned by the kill and, starved the same way, lives on for minutes holding its
+// launcher's stdio (probe run 42184947993: one per reaped quit, still alive 25 s later). Nothing else is
+// signalled, and never a process group: `mawsd` and the engine hosts outlive the app by design. A quit that ends on its
+// own leaves the shell to sleep out and exit with nothing to do. The shell closes the descriptors above stderr it may have
+// inherited, so it holds no launcher's pipe while it sleeps.
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 
 // Electron's `quit` to the exit, over MAWS's e2e quits on GitHub's hosted Macs (3 cores): with one core busy (about half),
@@ -16,8 +20,15 @@ import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:c
 // past 60 s (42182048773). 5 s is about ten times the half-load p99 and four times its slowest.
 export const REAP_AFTER_S = 5;
 
-// The shell's script: `$1` the pid to end, `$2` the seconds to wait. `ps -o ppid=` pads with spaces.
-export const REAPER_SCRIPT = 'sleep "$2"; [ "$(/bin/ps -o ppid= -p $$ | tr -d \' \')" = "$1" ] && kill -9 "$1"';
+// The shell's script: `$1` the pid to end, `$2` the seconds to wait. `ps -o ppid=` pads with spaces; `ps -o comm=` is the
+// executable's path on macOS (an `argv0` such as mawsd's where one was given).
+export const REAPER_SCRIPT = [
+  'exec 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&-',
+  'sleep "$2"',
+  '[ "$(/bin/ps -o ppid= -p $$ | tr -d \' \')" = "$1" ] || exit 1',
+  'for child in $(/usr/bin/pgrep -P "$1"); do case "$(/bin/ps -o comm= -p "$child")" in */Contents/Frameworks/*Helper*) kill -9 "$child" ;; esac; done',
+  'kill -9 "$1"',
+].join('\n');
 
 type Spawn = (command: string, args: readonly string[], options: SpawnOptions) => Pick<ChildProcess, 'on' | 'unref'>;
 
