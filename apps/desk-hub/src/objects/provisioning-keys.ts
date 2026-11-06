@@ -119,6 +119,16 @@ export class ProvisioningKeys {
     return this.sql.exec('UPDATE provisioning_keys SET revoked = COALESCE(revoked, ?) WHERE id = ?', at, id).rowsWritten > 0;
   }
 
+  /** The key of this id, if any. */
+  byId(id: string): KeyRow | undefined {
+    return this.sql.exec<KeyRow>(`SELECT ${COLUMNS} FROM provisioning_keys WHERE id = ?`, id).toArray()[0];
+  }
+
+  /** Moves the key's `expires`, and nothing else of it; the caller checked the renewal. */
+  renew(id: string, expires: string): void {
+    this.sql.exec('UPDATE provisioning_keys SET expires = ? WHERE id = ?', expires, id);
+  }
+
   /** Whether any key was made (a key's code carries the org id, so a key is built on it). */
   any(): boolean {
     return this.sql.exec('SELECT 1 FROM provisioning_keys LIMIT 1').toArray().length > 0;

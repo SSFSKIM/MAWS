@@ -43,6 +43,7 @@ const adminCalls: Array<[string, ...unknown[]]> = [
   ['createEnrollment', {}],
   ['createProvisioningKey', { label: 'vms', prefix: 'vm-' }],
   ['revokeProvisioningKey', 'no-such-key'],
+  ['renewProvisioningKey', 'no-such-key'],
   ['revoke', 'no-such-machine'],
   ['designateArchive', '0a1b2c3d-0000-4000-8000-000000000000', { machine: null }],
   ['purgeOrgKeys'],
@@ -65,6 +66,13 @@ describe('a route this code added', () => {
   it('answers 503 hub-updating from a Registry still on the code before it', async () => {
     await hub.registryLacks('orgState');
     const response = await hub.fetchAs(ADMIN, '/api/org/state');
+    await hub.registryLacks(null);
+    expect([response.status, ((await response.json()) as { error: string }).error]).toEqual([503, 'hub-updating']);
+  });
+
+  it('answers a provisioning key’s renewal 503 hub-updating from a Registry before it', async () => {
+    await hub.registryLacks('renewProvisioningKey');
+    const response = await hub.fetchAs(ADMIN, `/api/provisioning-keys/${'0'.repeat(32)}/renew`, { method: 'POST' });
     await hub.registryLacks(null);
     expect([response.status, ((await response.json()) as { error: string }).error]).toEqual([503, 'hub-updating']);
   });

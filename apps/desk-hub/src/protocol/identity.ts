@@ -333,7 +333,15 @@ export type ProvisioningKeyIssued = { key: ProvisioningKeyRecord; token: string 
 export type ProvisioningKeys = { keys: ProvisioningKeyRecord[] };
 /** `DELETE /api/provisioning-keys/<id>` (an admin): new enrollments stop; the machines it enrolled stay. */
 export type ProvisioningKeyRevoked = { revoked: string };
-export type ProvisioningKeyError = 'bad-shape' | 'not-admin' | 'unknown-key';
+/**
+ * `POST /api/provisioning-keys/<id>/renew` (an admin, no body): the key's `expires` moved to its delegation's in the
+ * head, once a signed state extends it (O8 M4c: the app submits that state first), answered as the key is listed; its
+ * uses, cap and secret unchanged. Refused `410 key-revoked`, `410 key-expired` (an expired key is never revived),
+ * `409 not-renewed` (the head holds no delegation of the id, or one not later than the key), and `409 too-long` (one
+ * past now and `MAX_PROVISIONING_KEY_TTL_S`, the cap a new key has).
+ */
+export type ProvisioningKeyRenewed = ProvisioningKeyRecord;
+export type ProvisioningKeyError = 'bad-shape' | 'not-admin' | 'unknown-key' | 'key-revoked' | 'key-expired' | 'not-renewed' | 'too-long';
 export const PROVISIONING_KEYS_PATH = '/api/provisioning-keys';
 export const PROVISIONING_KEY_TTL_S = 7_776_000; // 90 days
 export const MIN_PROVISIONING_KEY_TTL_S = 3600;

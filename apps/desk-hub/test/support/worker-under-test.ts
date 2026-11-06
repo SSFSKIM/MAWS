@@ -166,6 +166,12 @@ export class Registry extends DeployedRegistry {
     return super.pendingDevicesOf(member, of);
   }
 
+  /** Armed, refused as a Registry on the code before a provisioning key's renewal (P5 O8 M4c) would refuse it. */
+  renewProvisioningKey(member: MemberRecord, id: string): ReturnType<DeployedRegistry['renewProvisioningKey']> {
+    if (this.ctx.storage.kv.get<string>('lacks') === 'renewProvisioningKey') throw new TypeError('The RPC receiver does not implement the method "renewProvisioningKey".');
+    return super.renewProvisioningKey(member, id);
+  }
+
   /** Armed, refused as a Registry on the code before the policy registry (P5 O18), as an unreadable one fails. */
   policies(request: Parameters<DeployedRegistry['policies']>[0]): ReturnType<DeployedRegistry['policies']> {
     if (this.ctx.storage.kv.get<string>('lacks') === 'policies') throw new TypeError('The RPC receiver does not implement the method "policies".');

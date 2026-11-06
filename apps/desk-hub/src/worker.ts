@@ -56,6 +56,7 @@ const PROJECT_SOCKET = new RegExp(`^/api/projects/(${UUID})/socket$`);
 const PROJECT_ARCHIVE = new RegExp(`^/api/projects/(${UUID})/archive$`);
 const MACHINE_PATH = /^\/api\/machines\/([^/]+)$/;
 const PROVISIONING_KEY_PATH = /^\/api\/provisioning-keys\/([^/]+)$/;
+const PROVISIONING_KEY_RENEW_PATH = /^\/api\/provisioning-keys\/([^/]+)\/renew$/;
 /** A JSON body of an endpoint is small. */
 const BODY_LIMIT = 64 * 1024;
 /** A signed org state grows with the org (members, devices, every machine name it ever held): it may take a frame. */
@@ -234,6 +235,8 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
   if (pathname === PROVISIONING_KEYS_PATH && method === 'POST') return answer(await registry.createProvisioningKey(you, await body(request)), 201);
   const provisioningKey = PROVISIONING_KEY_PATH.exec(pathname);
   if (provisioningKey && method === 'DELETE') return answer(await registry.revokeProvisioningKey(you, decodeURIComponent(provisioningKey[1])));
+  const renewal = PROVISIONING_KEY_RENEW_PATH.exec(pathname);
+  if (renewal && method === 'POST') return answer(await registry.renewProvisioningKey(you, decodeURIComponent(renewal[1])));
   if (pathname === ORG_STATE_PATH && method === 'GET') return answer(await registry.orgState(url.searchParams.get('since')));
   if (pathname === ORG_STATE_PATH && method === 'POST') return answer(await registry.submitState(you, await body(request, STATE_LIMIT)), 201);
   if (pathname === ORG_TRANSITIONS_PATH && method === 'POST') return answer(await registry.submitTransition(you, await body(request)), 201);
