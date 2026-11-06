@@ -220,7 +220,7 @@ describe('words', () => {
 
   it('keeps the newest NOT_SENT_KEPT words not sent', () => {
     const notSent = createNotSent(2);
-    const word = (nonce: string) => ({ project: PROJECT, context: 'c', member: 'm', nonce, text: nonce, to: '*' as const });
+    const word = (nonce: string) => ({ project: PROJECT, org: ORG, context: 'c', member: 'm', nonce, text: nonce, to: '*' as const });
     for (const nonce of ['a', 'b', 'c']) notSent.put(word(nonce));
     expect(notSent.take(PROJECT, 'other')).toEqual([]);
     expect(notSent.take('another-project', 'c')).toEqual([]);
