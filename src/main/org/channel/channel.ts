@@ -4,9 +4,9 @@
 // socket (project-socket.ts) and the owner's words (words.ts). `open` answers whole: main's verified events, the words
 // not yet in the log, the count that didn't verify, "as of" and `live`. `org.channel.changed` tells, coalesced, what
 // changed since the last it told (or since the first open's answer): the events new or judged again (`upserts`), the
-// rest whole. It tells everything (`reset`) when a judgment at a new head or certificate set changed verdicts, when
-// another org's log is dropped, when an event told inside the held range is gone, and after a closed answer. An event the
-// bound lets go is not told.
+// offsets no longer drawn (`removed`: let go by the bound, or failing now), the rest whole. It tells everything (`reset`)
+// when a judgment at a new head or certificate set changed verdicts, when another org's log is dropped, and after a
+// closed answer.
 //
 // - Opening draws the cache at once, judged again against the held head (signed out, as it was judged). The socket
 //   opens only while the session has a hub, after the project's history attestations are read once, so a DX1 writer's
@@ -202,17 +202,17 @@ export function createChannels(deps: ChannelsDeps): Channels {
       } else {
         toldClosed = '';
         const verdicts = verdictsOf(now.events);
-        const floor = held?.floor() ?? null;
         const before = told;
-        const reset = resetDue || before === null || [...before.keys()].some((offset) => floor !== null && offset >= floor && !verdicts.has(offset));
+        const reset = resetDue || before === null;
         const upserts = reset || before === null ? now.events : now.events.filter((e) => before.get(e.offset) !== verdicts.get(e.offset));
+        const removed = reset || before === null ? [] : [...before.keys()].filter((offset) => !verdicts.has(offset)).sort((a, b) => a - b);
         const rest = restOf(now);
         resetDue = false;
         told = verdicts;
-        if (!reset && upserts.length === 0 && rest === toldRest) return;
+        if (!reset && upserts.length === 0 && removed.length === 0 && rest === toldRest) return;
         toldRest = rest;
         const { pending, unverified, asOf, live } = now;
-        change = { project, ok: true, upserts, pending, unverified, asOf, live, ...(reset ? { reset: true as const } : {}) };
+        change = { project, ok: true, upserts, removed, pending, unverified, asOf, live, ...(reset ? { reset: true as const } : {}) };
       }
       for (const listener of [...listeners]) listener(change);
     }

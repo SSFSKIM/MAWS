@@ -325,14 +325,16 @@ export type ChannelSendResult = z.infer<typeof ChannelSendResultSchema>;
 export const CHANNEL_TEXT_MAX = 100_000;
 /**
  * A change since the last: `upserts` are the events new or judged again since, by offset, each replacing what a tab holds
- * at its offset; the pending words, `unverified`, `asOf` and `live` are whole. `reset` replaces everything a tab holds
- * with `upserts`: told when a judgment at a new head or certificate set changed verdicts, when another org's log was
- * dropped, and for the first change after a closed one. An event main's bound lets go is not told: a tab keeps it.
+ * at its offset; `removed` the offsets main no longer draws (let go by its bound, or failing now), so a tab holds exactly
+ * main's set; the pending words, `unverified`, `asOf` and `live` are whole. `reset` replaces everything a tab holds with
+ * `upserts`: told when a judgment at a new head or certificate set changed verdicts, when another org's log was dropped,
+ * and for the first change after a closed one.
  */
 const ChannelDeltaSchema = z.strictObject({
   project: z.string(),
   ok: z.literal(true),
   upserts: z.array(ChannelEventSchema), // oldest first, by offset
+  removed: z.array(z.number().int().nonnegative()), // offsets; empty with `reset`
   pending: z.array(ChannelWordSchema),
   unverified: z.number().int().nonnegative(),
   asOf: z.string().nullable(),

@@ -63,6 +63,7 @@ function fold(base: Drawn | undefined, change: ChannelChanged): Drawn | undefine
   if (!change.ok) return change;
   if (change.reset !== true && (base === undefined || !base.ok)) throw new Error(`a delta onto nothing drawn: ${JSON.stringify(change)}`);
   const byOffset = new Map((change.reset === true || base === undefined || !base.ok ? [] : base.events).map((e) => [e.offset, e]));
+  for (const offset of change.removed ?? []) byOffset.delete(offset);
   for (const event of change.upserts) byOffset.set(event.offset, event);
   const { project, pending, unverified, asOf, live } = change;
   return { project, ok: true, events: [...byOffset.values()].sort((a, b) => a.offset - b.offset), pending, unverified, asOf, live };
@@ -321,20 +322,31 @@ describe('a project channel', () => {
     expect(drawn).toMatchObject({ pending: fresh.pending, unverified: fresh.unverified, asOf: fresh.asOf, live: fresh.live });
   });
 
-  it("tells no eviction: a tab keeps what main's bound let go, and the delta carries only the new event", async () => {
+  it("tells each event main lets go (removed): a tab holds main's bounded set, so a revoked signer's evicted event is held nowhere", async () => {
     const h = await harness({ events: 2 });
+    const studio = await h.o.machine('studio');
+    await h.o.adopt((s) => {
+      s.machines.push({ name: 'studio', ref: studio.ref, pub: studio.key.pub, owners: [h.o.A] });
+      s.machineNames.push({ name: 'studio', ref: studio.ref });
+    });
     opened(await h.channels.open(PROJECT));
     const socket = await until(() => h.last(), 'a socket');
     socket.welcome();
-    const says = await Promise.all([1, 2, 3].map((n) => h.o.say(h.o.mini, n, `say ${n}`)));
-    socket.frame({ t: 'log', events: [{ offset: 1, event: says[0] }, { offset: 2, event: says[1] }] });
+    socket.frame({ t: 'log', events: [{ offset: 1, event: await h.o.say(studio, 1, 'from studio') }, { offset: 2, event: await h.o.say(h.o.mini, 1, 'one') }] });
     socket.frame({ t: 'caught-up', offset: 2 });
-    await until(() => opened(h.latest()).live, 'live');
-    socket.frame({ t: 'log', events: [{ offset: 3, event: says[2] }] });
-    await until(() => opened(h.latest()).events.length === 3, 'the live event');
-    expect(delta(h.told())).toMatchObject({ upserts: [{ offset: 3 }] });
+    await until(() => opened(h.latest()).live && opened(h.latest()).events.length === 2, 'live');
+    socket.frame({ t: 'log', events: [{ offset: 3, event: await h.o.say(h.o.mini, 2, 'two') }] });
+    await until(() => opened(h.latest()).events.some((e) => e.offset === 3), 'the live event');
+    expect(delta(h.told())).toMatchObject({ upserts: [{ offset: 3 }], removed: [1] });
     expect(delta(h.told()).reset).toBeUndefined();
-    expect(opened(await h.channels.open(PROJECT)).events.map((e) => e.offset)).toEqual([2, 3]);
+    // the head revokes studio: nothing of it is drawn, by main or by the tab
+    await h.o.adopt((s) => {
+      s.machines = s.machines.filter((m) => m.ref !== studio.ref);
+    });
+    h.session.changed();
+    await sleep(30);
+    expect(opened(h.latest()).events.map((e) => e.offset)).toEqual([2, 3]);
+    expect(opened(h.latest()).events).toEqual(opened(await h.channels.open(PROJECT)).events);
   });
 
   it("drops another org's log at its sign-in, told as a reset, and reads that org's log afresh", async () => {
