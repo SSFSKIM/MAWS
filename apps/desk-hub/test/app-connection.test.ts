@@ -1,7 +1,7 @@
 // The app's hub connection (OX8; O11 M7), through the Node reference client in apps/org-protocol/test-support: the
 // Registry socket opened as an app's (`?app=1`) gains the org state's head version (`state`, on connect and at each
 // accepted state) and the listings (`listings` pages on connect, `listing` as each is stored) after DX3's grid, while
-// desk-web's grid socket, without the query, keeps the grid alone; and one
+// desk-web's grid socket, without the query, keeps the grid and its member's policy rows (P5 O18 M2b) alone; and one
 // member's client holds the Registry, Project and Machine sockets at once (acceptance 6), signing its words into the
 // log with its device key and binding a push subscription to that device.
 import { base64urlEncode, generateSigningKey, keyId, LISTING_GONE, LISTINGS_PAGE_BYTES, type Listing, type ListingsFrame, type Signed, type SignedOrgState, type SigningKey } from 'org-protocol';
@@ -53,7 +53,7 @@ afterAll(async () => {
 describe('the Registry socket', () => {
   it('sends the grid first, then every listing and no state before one exists; the genesis is noticed on it', async () => {
     const before = await client.registry();
-    expect(before.frames.map((f) => f.t)).toEqual(['grid', 'listings']);
+    expect(before.frames.map((f) => f.t)).toEqual(['grid', 'policies', 'listings']);
     expect(before.version).toBeNull();
     expect(before.listings.size).toBe(0);
 
@@ -61,7 +61,7 @@ describe('the Registry socket', () => {
     expect(await before.next((f) => f.t === 'state', 'the genesis notice')).toEqual({ t: 'state', version: 1 });
 
     const after = await client.registry();
-    expect(after.frames.map((f) => f.t)).toEqual(['grid', 'state', 'listings']);
+    expect(after.frames.map((f) => f.t)).toEqual(['grid', 'policies', 'state', 'listings']);
     expect(after.version).toBe(1);
     before.close();
     after.close();
@@ -121,7 +121,7 @@ describe('the Registry socket', () => {
     fresh.close();
   });
 
-  it('keeps a grid socket without the app query (desk-web’s) to the grid alone, as states are accepted and listings stored', async () => {
+  it('keeps a grid socket without the app query (desk-web’s) to the grid and its member’s policy rows, as states are accepted and listings stored', async () => {
     const grid = await GridClient.open(hub, ADMIN);
     await accept(next(head));
     endpoint.listing(await listing(mini, SESSION, 4, fields('idle')));
@@ -130,7 +130,7 @@ describe('the Registry socket', () => {
     await waitFor(() => (app.listings.get(`${mini.ref}/${SESSION}`)?.body.revision === 4 ? true : undefined));
     // The grid socket is behind the app's in nothing: both were sent everything in the same steps.
     await sleep(200);
-    expect(new Set(grid.frames.map((f) => f.t))).toEqual(new Set(['grid']));
+    expect(new Set(grid.frames.map((f) => f.t))).toEqual(new Set(['grid', 'policies']));
     grid.close();
     app.close();
   });
@@ -254,7 +254,7 @@ describe('a listing set past what one frame holds', () => {
     expect(app.listings.size).toBe((await client.listings()).listings.length);
     for (const session of sessions) expect(app.listings.has(`${mini.ref}/${session}`)).toBe(true);
     await sleep(300);
-    expect(new Set(grid.frames.map((f) => f.t))).toEqual(new Set(['grid']));
+    expect(new Set(grid.frames.map((f) => f.t))).toEqual(new Set(['grid', 'policies']));
     expect(Math.max(...grid.wire)).toBeLessThan(64 * 1024);
     grid.close();
     app.close();

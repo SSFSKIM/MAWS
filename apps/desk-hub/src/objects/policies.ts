@@ -65,6 +65,16 @@ export class Policies {
     return { audience: row.audience === null ? null : (JSON.parse(row.audience) as string[]), policyRev: row.policy_rev, created: row.created ?? '' };
   }
 
+  /** The private sessions whose audience holds `member`, with their policy: what that member's browser seals its words
+   * toward them with (P5 O18 M2b). */
+  rowsFor(member: string): Array<{ session: string; audience: string[]; policyRev: number }> {
+    const rows = this.sql.exec<{ session: string; audience: string; policy_rev: number }>('SELECT session, audience, policy_rev FROM session_policies WHERE audience IS NOT NULL AND policy_rev IS NOT NULL').toArray();
+    return rows.flatMap(({ session, audience, policy_rev }) => {
+      const members = JSON.parse(audience) as string[];
+      return members.includes(member) ? [{ session, audience: members, policyRev: policy_rev }] : [];
+    });
+  }
+
   /** Whether the session is bound to `machine`, a name-held binding taken as the machine's ref once it has one. */
   boundTo(session: string, machine: Bindable): boolean {
     const row = this.row(session);

@@ -162,13 +162,27 @@ export type MachineSummary = { name: string; online: boolean; seen: string | nul
 
 /** Hub → browser over the registry socket. A frame above `FRAME_LIMIT` (a grid of many projects) comes as numbered parts,
  * joined as on a project socket. */
-export type GridDown = { t: 'grid'; projects: ProjectSummary[] } | { t: 'summary'; project: ProjectSummary } | Part;
+export type GridDown = { t: 'grid'; projects: ProjectSummary[] } | { t: 'summary'; project: ProjectSummary } | PoliciesFrame | PolicyFrame | Part;
+
+/** A private session's policy as the hub's registry holds it (P5 O18 D5): its audience, sorted member ids, and its
+ * `policyRev`. */
+export type MemberPolicy = { audience: string[]; policyRev: number };
 
 /**
- * Everything the registry socket sends: the grid, and since O11 M7, to a socket opened as an app's (`?app=1`), the app's
- * frames after it (OX8, `org-protocol`'s `RegistryAppFrame`): the org state's head version and every listing the hub
- * holds, in bounded pages, then a `state` notice at each accepted state and a `listing` as each is stored. Desk-web opens
- * its grid without the query and gets the grid alone.
+ * The policy rows of the private sessions whose audience holds the socket's member (P5 O18 M2b), sent on every registry
+ * socket after the grid: the whole set, which replaces what the browser held. What a browser seals into words toward a
+ * private session (`audience`, D8) is the row's. A listed session, and a private one the member is outside, has none.
+ */
+export type PoliciesFrame = { t: 'policies'; rows: Array<MemberPolicy & { session: string }> };
+
+/** A row changed for a member it holds or held: the new row, or null once the session is listed or the member outside. */
+export type PolicyFrame = { t: 'policy'; session: string; policy: MemberPolicy | null };
+
+/**
+ * Everything the registry socket sends: the grid and the member's policy rows, and since O11 M7, to a socket opened as
+ * an app's (`?app=1`), the app's frames after it (OX8, `org-protocol`'s `RegistryAppFrame`): the org state's head
+ * version and every listing the hub holds, in bounded pages, then a `state` notice at each accepted state and a
+ * `listing` as each is stored. Desk-web opens its grid without the query and gets the grid and the rows alone.
  */
 export type RegistryDown = GridDown | RegistryAppFrame;
 

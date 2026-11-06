@@ -6,9 +6,9 @@ import { streamWriter } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { listing } from '../fake-machine/org';
 import { importOrgKey, seal } from '../src/protocol/codes';
-import type { ProjectDown } from '../src/protocol/browser';
+import type { GridDown, ProjectDown } from '../src/protocol/browser';
 import type { HumanDraft, HumanEvent, LogEvent } from '../src/protocol/log';
-import { BrowserClient, waitFor } from './support/clients';
+import { BrowserClient, GridClient, waitFor } from './support/clients';
 import { ADMIN, startLocalHub, type LocalHub } from './support/local';
 import { memberId } from './support/org';
 import { AUDIENCE, event, joined, lastHave, newSession, reachOrg, say, unlisted, upload, type ReachOrg } from './support/reach';
@@ -320,6 +320,87 @@ describe("a device's words", () => {
     const forged = { kind: 'human', from: 'human', member: B, to: [{ session: P, alias: 'p' }], text: 'as A', created: new Date().toISOString(), audience: [A], attest: { owners: [A] } } as unknown as HumanDraft;
     expect(await send(theirs, await seal(await KEY, 'log', project, forged))).toMatchObject({ t: 'refused', refusal: { reason: 'not-reachable' } });
     expect(theirs.logged.some((l) => l.event.writer.startsWith(`hub/${A}~`))).toBe(false);
+    mine.close();
+    theirs.close();
+  });
+});
+
+// P5 O18 M2b: what a browser seals into its words comes from the registry's rows of the sessions whose audience holds
+// its member, on its registry socket: the whole set at connect, then each change to a row it is or was in.
+describe("a member's policy rows", () => {
+  type Rows = Extract<GridDown, { t: 'policies' }>['rows'];
+  const rowsOf = (grid: GridClient) => grid.frames.filter((f): f is Extract<GridDown, { t: 'policies' }> => f.t === 'policies').at(-1)?.rows ?? [];
+  const changes = (grid: GridClient, session: string) => grid.frames.filter((f): f is Extract<GridDown, { t: 'policy' }> => f.t === 'policy' && f.session === session);
+  const has = (rows: Rows, session: string) => rows.find((r) => r.session === session);
+
+  it('are sent at connect to each audience member and to no outsider, and follow a share change to the member it adds or withdraws', async () => {
+    const project = await opened();
+    const { A, B } = o;
+    const shared = newSession();
+    const own = newSession();
+    const listed = newSession();
+    expect(await upload(mA, project, [joined(mA, project, shared, 1, [A, B], 1), joined(mA, project, own, 1, [A], 1), joined(mA, project, listed, 1)])).toEqual([]);
+    const mine = await GridClient.open(hub, ADMIN);
+    const theirs = await GridClient.open(hub, o.bEmail);
+    await waitFor(() => (has(rowsOf(mine), own) && has(rowsOf(theirs), shared) ? true : undefined));
+    expect(has(rowsOf(mine), shared)).toEqual({ session: shared, audience: [A, B].sort(), policyRev: 1 });
+    expect(has(rowsOf(mine), own)).toEqual({ session: own, audience: [A], policyRev: 1 });
+    expect(has(rowsOf(theirs), shared)).toEqual({ session: shared, audience: [A, B].sort(), policyRev: 1 });
+    // No row for a session outside the member's audience, nor for a listed one.
+    expect(has(rowsOf(theirs), own)).toBeUndefined();
+    expect(has(rowsOf(mine), listed)).toBeUndefined();
+
+    // B's share removed: A is told the narrower row, B that it holds none.
+    expect(await upload(mA, project, [unlisted(mA, project, shared, 1, 2, [B]), joined(mA, project, shared, 1, [A], 2)])).toEqual([]);
+    await waitFor(() => (changes(mine, shared).length > 0 && changes(theirs, shared).length > 0 ? true : undefined));
+    expect(changes(mine, shared)).toEqual([{ t: 'policy', session: shared, policy: { audience: [A], policyRev: 2 } }]);
+    expect(changes(theirs, shared)).toEqual([{ t: 'policy', session: shared, policy: null }]);
+    // Shared again: B is told the row; a member outside a row is told nothing of it.
+    expect(await upload(mA, project, [joined(mA, project, shared, 2, [A, B], 3)])).toEqual([]);
+    await waitFor(() => (changes(theirs, shared).length === 2 ? true : undefined));
+    expect(changes(theirs, shared)[1]).toEqual({ t: 'policy', session: shared, policy: { audience: [A, B].sort(), policyRev: 3 } });
+    expect(changes(theirs, own)).toEqual([]);
+    // Listed again: the members it was private to hold no row of it.
+    expect(await upload(mA, project, [joined(mA, project, own, 1, undefined, 2)])).toEqual([]);
+    await waitFor(() => (changes(mine, own).length > 0 ? true : undefined));
+    expect(changes(mine, own)).toEqual([{ t: 'policy', session: own, policy: null }]);
+    expect(changes(theirs, own)).toEqual([]);
+    mine.close();
+    theirs.close();
+  });
+
+  it("let one browser alternate between a listed and a private session, each message under its writer and reaching only that writer's readers; words with no audience are refused toward the private one", async () => {
+    const project = await opened();
+    const { A } = o;
+    const P = newSession();
+    const L = newSession();
+    expect(await upload(mA, project, [joined(mA, project, P, 1, [A], 1), joined(mA, project, L, 1)])).toEqual([]);
+    const grid = await GridClient.open(hub, ADMIN);
+    await waitFor(() => (has(rowsOf(grid), P) ? true : undefined));
+    const audience = has(rowsOf(grid), P)!.audience;
+    const mine = await following(ADMIN, project);
+    const theirs = await following(o.bEmail, project);
+    const human = async (to: string, sealed?: string[]) =>
+      seal(await KEY, 'log', project, { kind: 'human', from: 'human', member: A, to: [{ session: to, alias: 'p' }], text: 'hello', created: new Date().toISOString(), ...(sealed ? { audience: sealed } : {}) } as HumanDraft);
+    const send = async (event: HumanEvent) => {
+      const from = mine.frames.length;
+      mine.send({ t: 'human', event });
+      return (await mine.next((f) => (f.t === 'human-ack' && f.nonce === event.mac.nonce) || (f.t === 'refused' && f.refusal.nonce === event.mac.nonce), 'the answer', from)) as ProjectDown;
+    };
+    const stream = streamWriter(`hub/${A}`, audience);
+    const writers: string[] = [];
+    for (const [to, sealed] of [[L], [P, audience], [L], [P, audience]] as Array<[string, string[]?]>) {
+      const ack = await send(await human(to, sealed));
+      writers.push(ack.t === 'human-ack' ? ack.writer : `refused ${(ack as { refusal: { reason: string } }).refusal.reason}`);
+    }
+    expect(writers).toEqual([`hub/${A}`, stream, `hub/${A}`, stream]);
+    await waitFor(() => (theirs.logged.filter((l) => l.event.writer === `hub/${A}`).length === 2 ? true : undefined));
+    await waitFor(() => (mine.logged.filter((l) => l.event.writer === stream).length === 2 ? true : undefined));
+    expect(theirs.logged.some((l) => l.event.writer === stream)).toBe(false);
+    // An old client's words (no audience): refused toward P, delivered toward L.
+    expect(await send(await human(P))).toMatchObject({ t: 'refused', refusal: { reason: 'not-reachable' } });
+    expect(await send(await human(L))).toMatchObject({ t: 'human-ack', writer: `hub/${A}` });
+    grid.close();
     mine.close();
     theirs.close();
   });
