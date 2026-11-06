@@ -14,11 +14,13 @@ async function setup() {
   const head = o.head();
   const sent: DeviceHuman[] = [];
   let open = true;
-  let signer: WordsSigner | null = { org: ORG, member: A, key: o.app.channel };
+  const mine: WordsSigner = { org: ORG, member: A, device: 'app', key: o.app.channel };
+  let signer: WordsSigner | null = mine;
+  let signers: Array<WordsSigner | null> = []; // the signer each next call reads, then `signer`
   const changes: number[] = [];
   const words = createWords({
     project: PROJECT,
-    signer: () => signer,
+    signer: () => (signers.length > 0 ? signers.shift()! : signer),
     send: (human) => {
       if (!open) return false;
       sent.push(human);
@@ -26,7 +28,19 @@ async function setup() {
     },
   });
   words.onChanged(() => changes.push(1));
-  return { A, head, sent, words, changes, setOpen: (v: boolean) => void (open = v), signOut: () => void (signer = null) };
+  return {
+    A,
+    o,
+    mine,
+    head,
+    sent,
+    words,
+    changes,
+    setOpen: (v: boolean) => void (open = v),
+    signOut: () => void (signer = null),
+    signIn: (next: WordsSigner) => void (signer = next),
+    reads: (next: Array<WordsSigner | null>) => void (signers = next),
+  };
 }
 
 describe('words', () => {
@@ -90,6 +104,48 @@ describe('words', () => {
     if (!result.ok) throw new Error('unsent');
     s.words.answered({ t: 'refused', refusal: { reason: 'Bearer eyJhbGciOi…', nonce: result.nonce } });
     expect(s.words.pending()[0].state).toEqual({ refused: 'unrecognized' });
+  });
+
+  it('refuses each word not yet answered, context-changed, when another org, member or device signs in; a sign-out alone keeps it', async () => {
+    for (const other of [{ org: 'another-org' }, { member: 'someone-else' }, { device: 'another-device' }]) {
+      const s = await setup();
+      s.setOpen(false);
+      const said = await s.words.say('before', '*');
+      if (!said.ok) throw new Error('unsent');
+      s.signOut();
+      s.words.reconcile();
+      s.signIn(s.mine);
+      s.words.reconcile();
+      expect(s.words.pending()[0].state).toBe('sending');
+      s.signIn({ ...s.mine, ...other });
+      s.words.reconcile();
+      expect(s.words.pending()).toEqual([{ nonce: said.nonce, text: 'before', to: '*', state: { refused: 'context-changed' } }]);
+      s.setOpen(true);
+      s.words.resend();
+      s.signIn(s.mine);
+      s.words.resend();
+      expect(s.sent).toEqual([]);
+    }
+  });
+
+  it('resends a word only under the signer that signed it', async () => {
+    const s = await setup();
+    s.setOpen(false);
+    await s.words.say('mine', '*');
+    s.setOpen(true);
+    s.signIn({ ...s.mine, member: 'someone-else' }); // not yet reconciled: the welcome came first
+    s.words.resend();
+    expect(s.sent).toEqual([]);
+  });
+
+  it('sends nothing for a word whose signing outlives a change of signer', async () => {
+    const s = await setup();
+    s.reads([s.mine, { ...s.mine, member: 'someone-else' }]);
+    expect(await s.words.say('in flight', '*')).toEqual({ ok: false, reason: 'context-changed' });
+    s.reads([s.mine, null]);
+    expect(await s.words.say('in flight', '*')).toEqual({ ok: false, reason: 'signed-out' });
+    expect(s.sent).toEqual([]);
+    expect(s.words.pending()).toEqual([]);
   });
 
   it('signs and sends nothing signed out, and nothing empty', async () => {

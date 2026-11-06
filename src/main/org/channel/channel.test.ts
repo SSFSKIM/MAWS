@@ -261,6 +261,23 @@ describe('a project channel', () => {
     expect(await h.channels.send('2f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0', 'hi')).toMatchObject({ ok: false, reason: 'not-open' });
   });
 
+  it('refuses its unanswered words context-changed when another member signs in, and sends them no more', async () => {
+    const h = await harness();
+    opened(await h.channels.open(PROJECT));
+    const first = await until(() => h.last(), 'a socket');
+    first.welcome();
+    const sent = await h.channels.send(PROJECT, 'before the switch');
+    if (!sent.ok) throw new Error('unsent');
+    const ours = h.signedIn();
+    h.session.set({ ...ours, identity: { ...ours.identity, member: h.o.B } });
+    await until(() => opened(h.latest()).pending.some((w) => typeof w.state === 'object'), 'the refusal');
+    expect(opened(h.latest()).pending).toEqual([{ nonce: sent.nonce, text: 'before the switch', to: '*', state: { refused: 'context-changed' } }]);
+    first.emit('close', 1006, '');
+    const second = await until(() => (h.sockets.length === 2 ? h.last() : null), 'a reconnect', 5_000);
+    second.welcome();
+    expect(second.sent.some((f) => f.t === 'human')).toBe(false);
+  });
+
   it('resends unanswered words at the next welcome, with the same nonce', async () => {
     const h = await harness();
     opened(await h.channels.open(PROJECT));

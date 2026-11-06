@@ -16,7 +16,8 @@
 // - A socket the hub refuses the project (404) ends the channel `unknown-project` until the tab's next open or another
 //   hub; one that ends `removed` or with the hub sign-in waits, as the Registry feed does, for the session's next change.
 // - The owner's words: a leading `@alias` addresses a session the log names (address.ts), and untagged words go to
-//   everyone. Nothing is sent signed out, with no hub, or to a project the hub refused.
+//   everyone. Nothing is sent signed out, with no hub, or to a project the hub refused; words another org, member or
+//   device signed are refused `context-changed` at the session's change (words.ts).
 // - The cache is written CHANNEL_WRITE_MS after a change, and last at `close()`: once the channel's own work has run
 //   (joined outside the org session's commit queue), a finished snapshot is entered in that queue, and the queued write
 //   awaits nothing of the channel's (M4a's rule). `close()` resolves once every final write is entered.
@@ -138,7 +139,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
       project,
       signer: () => {
         const current = deps.session.current();
-        return current === null ? null : { org: current.identity.org, member: current.identity.member, key: current.identity.channelKey };
+        return current === null ? null : { org: current.identity.org, member: current.identity.member, device: current.identity.device, key: current.identity.channelKey };
       },
       send: (human) => socket?.send(human) ?? false,
       now,
@@ -349,6 +350,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
 
     function reconcile(reopened = false): void {
       if (stopped) return;
+      words.reconcile(); // words another org, member or device signed are refused
       const current = deps.session.current();
       // a parked socket opens again at any change, as the Registry feed does; a project the hub refused, only at the
       // tab's next open or with another hub

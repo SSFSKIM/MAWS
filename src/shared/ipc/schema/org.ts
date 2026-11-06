@@ -281,8 +281,9 @@ export const ChannelRecipientsSchema = z.union([z.literal('*'), z.array(z.strict
 export type ChannelRecipients = z.infer<typeof ChannelRecipientsSchema>;
 /**
  * The owner's words this channel sent and the log doesn't hold yet: `sending` until the hub's `human-ack`, or the hub's
- * refusal (`not-reachable` for a session hidden from you, P5 Decision Log 224). Kept in main's memory only: words still
- * here when the channel is released are dropped, never sent later.
+ * refusal (`not-reachable` for a session hidden from you, P5 Decision Log 224), or main's `context-changed` once another
+ * org, member or device signs in. Kept in main's memory only: words still here when the channel is released are dropped,
+ * never sent later.
  */
 export const ChannelWordSchema = z.strictObject({
   nonce: z.string(),
@@ -313,9 +314,10 @@ const ChannelProjectSchema = z.string().min(1).max(64);
 /**
  * Why words weren't sent: no session or no hub, a channel not open or one whose project the hub refused (`unreadable`:
  * the app sends nothing to a project it can't read), nothing to say, or a leading `@alias` that names no session of the
- * project (`no-member`) or more than one (`ambiguous`).
+ * project (`no-member`) or more than one (`ambiguous`), or another org, member or device signed in while the words were
+ * being signed (`context-changed`).
  */
-export const CHANNEL_SEND_REFUSALS = ['signed-out', 'no-hub', 'not-open', 'unreadable', 'empty', 'no-member', 'ambiguous'] as const;
+export const CHANNEL_SEND_REFUSALS = ['signed-out', 'no-hub', 'not-open', 'unreadable', 'empty', 'no-member', 'ambiguous', 'context-changed'] as const;
 export const ChannelSendResultSchema = z.union([
   z.strictObject({ ok: z.literal(true), nonce: z.string() }),
   z.strictObject({ ok: z.literal(false), reason: z.enum(CHANNEL_SEND_REFUSALS), detail: z.string().optional() }),
