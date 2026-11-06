@@ -47,6 +47,8 @@ import { OFFERS } from '../../src/endpoint/offers';
 import { registerFilesHandlers, type FilesHandlers } from '../../src/services/files/register';
 import { createUpload } from '../../src/services/files/upload';
 import { registerGitHandlers } from '../../src/services/git/register';
+import { WorktreeService } from '../../src/services/git/worktrees';
+import { registerWorktreeHandlers } from '../../src/services/git/worktrees-register';
 import { createGitRunner } from '../../src/services/git/runner';
 import { GitService } from '../../src/services/git/service';
 import { GitFixture } from '../support/git-fixture';
@@ -503,6 +505,8 @@ function checkoutServices(l: Lab, repo: GitFixture): FilesHandlers {
   const recordOf = (id: string) => (f.spine.records.get(id) as SessionRecord | undefined) ?? null;
   const upload = createUpload({ sessions: { record: recordOf, intent: () => null } as never, roots: { record: () => {}, sweep: () => 0 }, git: createGitRunner({ env: repo.serviceEnv() }), log: () => {} });
   registerGitHandlers(new GitService({ env: repo.serviceEnv(), emit: (change) => f.host.emitMachine('git.changed', change) }), f.spine.bus as never);
+  // 2026-11-06: the endpoint's bounds learn a root's repository from the worktree list (rev-parse, no status scan)
+  registerWorktreeHandlers(new WorktreeService({ git: createGitRunner({ env: repo.serviceEnv() }), holders: { dispatch: () => Promise.reject(new Error('no holders here')), sessions: { list: () => [] } } as never }), f.spine.bus as never);
   const files = registerFilesHandlers((id) => recordOf(id), {
     bus: f.spine.bus as never,
     emit: (payload) => f.host.emitMachine('files.changed', payload),
@@ -1009,7 +1013,7 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     l.place('app-1', undefined, { directory: repo.root });
     const files = checkoutServices(l, repo);
     await opened(l.a, 'app-1', s.launchId);
-    await until(() => l.host.calls.some((c) => c.name === 'git.status'), 'the feed’s bounds read');
+    await until(() => l.host.calls.some((c) => c.name === 'git.worktree.list'), 'the feed’s bounds read');
     const page = { client: endableClientRef('page-panel'), session: 'app-1' as AppSessionId };
     const second = { client: endableClientRef('page-second'), session: 'app-1' as AppSessionId }; // another window's panel
     expect(((await l.a.cmd('git.watch', { directory: repo.root }, page)) as GitStatus).repoRoot).toBe(repo.root);
