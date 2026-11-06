@@ -12,7 +12,8 @@
 // `additionalDirectories`, `worktree.path`) or the repository a root belongs to, or under one. The boundary a remote
 // reader gets is so the repository, with its worktrees, not the root alone: a session opened on a subfolder of a
 // repository reads that repository's status and diff, as its transcript already spans it. The checkout feed filters
-// git's changes by the same bounds (plane-feeds.ts).
+// git's changes by the same bounds (plane-feeds.ts). 2026-11-06: a root or a repository at the machine's home or above
+// it bounds nothing (`CheckoutBounds`, the home-root rule).
 //
 // P5 O7 M6: `each-session`, a machine-wide read whose answer is per session (`attention.list`, `session.search`): it names
 // no target (the machine), and its answer is cut per session against each one's placement by its record alone
@@ -51,6 +52,7 @@ import type { Action, SessionRef } from 'org-protocol';
 import { parseArtifactUrl } from '@shared/artifacts/scheme';
 import { sanitiseListId } from '@shared/engine/task-list';
 import type { LaunchedBy } from '@shared/graph/session';
+import { coversHome, machineHome } from '@shared/machine/machine-home';
 import type { TargetRule } from './offers';
 import type { EndpointServices } from './services';
 import type { SessionTarget } from './sources';
@@ -299,6 +301,12 @@ export async function ownTaskList(input: unknown, target: Extract<SessionTarget,
 /** How many sessions' checkout bounds are kept: one entry per distinct set of roots. */
 export const CHECKOUT_BOUNDS_KEPT = 256;
 
+/** A session's checkout bounds (`within`), and its roots the home-root rule took out of them (`dropped`). */
+export interface Bounds {
+  readonly within: readonly string[];
+  readonly dropped: readonly string[];
+}
+
 /**
  * A lane B session's checkout bounds: the realpaths of its record's roots and of the repository each belongs to
  * (`git.status`'s `repoRoot`). A root that does not resolve is dropped; one in no repository bounds only itself.
@@ -307,15 +315,26 @@ export const CHECKOUT_BOUNDS_KEPT = 256;
  * that is a symlink retargeted since is read where it points now. A set is kept only when every root resolved and
  * every repository read answered (the spine away, a git timeout): a root that appears later, or a read that failed,
  * is read again next time (fix wave 1).
+ *
+ * 2026-11-06 (the home-root rule; the New chat's machine first, whose chat in a machine's home has the home as its
+ * root): a root or a repository whose realpath is the machine's home or an ancestor of it (`/`, `/Users`) bounds nothing
+ * for a remote reader, whoever they are, since it would reach every repository and file under the home. The dropped
+ * roots are said beside the bounds (`dropped`), which the checkout feed reads for a file's change. The home is
+ * src/shared/machine/machine-home.ts' (a home spawn's directory is the same), a suite's fake one when given.
  */
 export class CheckoutBounds {
-  readonly #kept = new Map<string, readonly string[]>();
+  readonly #kept = new Map<string, Bounds>();
+
+  constructor(private readonly home: () => string = machineHome) {}
 
   /** The bounds of `record` (`session.get`'s answer), read on the machine through `dispatch`. */
-  async of(record: unknown, dispatch: EndpointServices['dispatch']): Promise<readonly string[]> {
+  async of(record: unknown, dispatch: EndpointServices['dispatch']): Promise<Bounds> {
+    const home = this.home();
     const resolved = await Promise.all(rootsOf(record).map((root) => realpathOf(root)));
-    const real = [...new Set(resolved.filter((root): root is string => root !== null))];
-    const key = JSON.stringify(real);
+    const roots = [...new Set(resolved.filter((root): root is string => root !== null))];
+    const real = roots.filter((root) => !coversHome(root, home));
+    const dropped = roots.filter((root) => coversHome(root, home));
+    const key = JSON.stringify([real, dropped]);
     const kept = this.#kept.get(key);
     if (kept !== undefined) return kept;
     let answered = !resolved.includes(null);
@@ -327,7 +346,8 @@ export class CheckoutBounds {
         return typeof repoRoot === 'string' ? realpathOf(repoRoot) : null;
       }),
     );
-    const bounds = [...new Set([...real, ...repos.filter((repo): repo is string => repo !== null)])];
+    // a repository at the home or above it (a home kept in git) bounds nothing either: its root inside it still does
+    const bounds: Bounds = { within: [...new Set([...real, ...repos.filter((repo): repo is string => repo !== null && !coversHome(repo, home))])], dropped };
     if (answered) {
       if (this.#kept.size >= CHECKOUT_BOUNDS_KEPT) this.#kept.delete(this.#kept.keys().next().value!);
       this.#kept.set(key, bounds);
@@ -352,7 +372,7 @@ export async function withinCheckout(input: unknown, appSessionId: string, placi
   const record = await placing.dispatch('machine', 'session.get', { appSessionId }).catch(() => null);
   if (record === null || !record.ok || record.value === null || typeof record.value !== 'object') return false;
   const [real, within] = await Promise.all([realpathOf(path), bounds.of(record.value, placing.dispatch)]);
-  return real !== null && withinBounds(within, real);
+  return real !== null && withinBounds(within.within, real);
 }
 
 /** A record's roots, as the files service reads them: its directory, its additional directories and its worktree. */

@@ -18,6 +18,7 @@
 // P5 O3-E M2 (Interfaces §H; D14, D17): a mutation, a push and a pull request are admitted within SCM_ADMIT_MS of their
 // call or refused `busy` with nothing run (a push or a pull request then keeps its unspent token); the runs in flight
 // are reported (`runs`), so the spine's release or yield waits for them.
+import { realpath } from 'node:fs/promises';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type {
@@ -38,6 +39,7 @@ import type {
   ScmRunStarted,
   ScmStatus,
 } from '@shared/ipc/schema/scm';
+import { coversHome } from '@shared/machine/machine-home';
 import type { SpineView } from '@shared/spine/view';
 import type { MutateRun } from '../git/mutate';
 import { GitCommandError, NotARepositoryError, type GitRun } from '../git/runner';
@@ -285,6 +287,15 @@ export class ScmService {
     this.ghProbe = null;
     this.chains.clear();
     this.admissions.clear();
+  }
+
+  /**
+   * 2026-11-06 (the home-root rule, src/shared/machine/machine-home.ts): whether the session's checkout is, by its
+   * realpath, the machine's home (`home`) or above it, a checkout another machine's caller reaches nothing of.
+   */
+  async coversHome(appSessionId: AppSessionId, home: string): Promise<boolean> {
+    const real = await realpath(this.checkout(appSessionId)).catch(() => null);
+    return real !== null && coversHome(real, home);
   }
 
   private checkout(appSessionId: AppSessionId): string {

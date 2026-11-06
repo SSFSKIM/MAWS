@@ -5,11 +5,14 @@
 // the repository with its worktrees; what a worktree read names beyond that the service bounds itself. A spawn's args
 // hold to the registry's schema (step 2), then to the machine's policy (step 6's guard, as `sminos.spawn`'s).
 import { mkdirSync, rmSync, symlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { keyId, signRecord, SIGNING_DOMAINS, type Action, type Grant } from 'org-protocol';
 import type { HandlerContext } from '@shared/ipc/client';
 import { REMOTE_UPLOAD_PART_BYTES, type FilesUploadInput } from '@shared/ipc/schema/files';
+import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
+import { machineHome } from '@shared/machine/machine-home';
+import { CheckoutBounds } from '../../src/endpoint/targets';
 import { createUpload } from '../../src/services/files/upload';
 import { registerGitHandlers } from '../../src/services/git/register';
 import { createGitRunner } from '../../src/services/git/runner';
@@ -50,9 +53,9 @@ async function call(r: Remote, name: string, input: unknown, session?: { lane: '
 const code = (m: Msg) => (m.ok === true ? 'ok' : (m.error as { code: string }).code);
 const B = (id: string) => ({ lane: 'B' as const, id });
 
-/** The endpoint, with the machine's real git and worktree handlers behind its spine, git confined to `env`. */
-async function machine(env: NodeJS.ProcessEnv): Promise<Fixture> {
-  const f = await startEndpoint(org, started);
+/** The endpoint, with the machine's real git and worktree handlers behind its spine, git confined to `env`; `home`, the machine's home as the home-root rule reads it. */
+async function machine(env: NodeJS.ProcessEnv, home?: string): Promise<Fixture> {
+  const f = await startEndpoint(org, started, home === undefined ? {} : { home });
   registerGitHandlers(new GitService({ env }), f.spine.bus as never);
   registerWorktreeHandlers(new WorktreeService({ git: createGitRunner({ env }), holders: { dispatch: () => Promise.reject(new Error('no holders here')), sessions: { list: () => [] } } as never }), f.spine.bus as never);
   return f;
@@ -129,6 +132,51 @@ describe('the checkout rule', () => {
     expect(await call(a, 'git.worktree.branch', { repoRoot: worktree, branch: 'no-such-branch' }, B('app-wt'))).toMatchObject({ ok: true, output: null });
     // The repository's own worktrees are its own to list, its main checkout among them.
     expect(await call(a, 'git.worktree.list', { repoRoot: worktree }, B('app-wt'))).toMatchObject({ ok: true, output: { worktrees: expect.arrayContaining([expect.objectContaining({ path: one.root }), expect.objectContaining({ path: worktree })]) } });
+  });
+
+  // 2026-11-06 (the home-root rule): a root at the machine's home, or above it, bounds nothing for a remote reader, whoever
+  // they are (the owner here); a repository there neither, while a root inside it still bounds itself.
+  it('bounds nothing by a root that is the machine’s home or above it: a chat in the home reads no repository under it', async () => {
+    const one = await repo();
+    const home = dirname(one.root); // the fake home holds every fixture repository
+    const f = await machine(one.serviceEnv(), home);
+    session(f, 'app-home', { directory: home });
+    session(f, 'app-root', { directory: '/' });
+    const a = await openRemote(f, org.a1, org.A);
+    const asked = f.host.calls.length;
+    expect(code(await call(a, 'git.status', { directory: one.root }, B('app-home')))).toBe('no-target');
+    expect(code(await call(a, 'git.status', { directory: home }, B('app-home')))).toBe('no-target');
+    expect(code(await call(a, 'git.log', { directory: one.root, limit: 5 }, B('app-home')))).toBe('no-target');
+    expect(code(await call(a, 'git.lsFiles', { directory: one.root, query: '', limit: 10 }, B('app-home')))).toBe('no-target');
+    expect(code(await call(a, 'git.status', { directory: one.root }, B('app-root')))).toBe('no-target');
+    expect(f.host.calls.slice(asked).filter((c) => c.name === 'git.status' && (c.input as { directory: string }).directory === one.root)).toEqual([]);
+  });
+
+  it('reads the home by default as a home spawn starts in it (machineHome), so a chat in the home is always the root it drops', async () => {
+    const dispatch = () => Promise.reject(new Error('no repository read for a dropped root'));
+    expect(await new CheckoutBounds().of({ directory: machineHome(), additionalDirectories: [], worktree: null }, dispatch)).toEqual({ within: [], dropped: [machineHome()] });
+  });
+
+  it('keeps a project root while the home added beside it bounds nothing', async () => {
+    const one = await repo();
+    const two = await repo();
+    const home = dirname(one.root);
+    const f = await machine(one.serviceEnv(), home);
+    session(f, 'app-1', { directory: one.root, additionalDirectories: [home] });
+    const a = await openRemote(f, org.a1, org.A);
+    expect(await call(a, 'git.status', { directory: one.root }, B('app-1'))).toMatchObject({ ok: true, output: { repoRoot: one.root } });
+    expect(code(await call(a, 'git.status', { directory: two.root }, B('app-1')))).toBe('no-target');
+  });
+
+  it('drops a repository at the home (a home kept in git), while the project root inside it still bounds itself', async () => {
+    const one = await repo();
+    mkdirSync(join(one.root, 'proj'));
+    const f = await machine(one.serviceEnv(), one.root); // the home is the repository's root
+    session(f, 'app-1', { directory: join(one.root, 'proj') });
+    const a = await openRemote(f, org.a1, org.A);
+    expect(code(await call(a, 'git.status', { directory: join(one.root, 'proj') }, B('app-1')))).toBe('ok');
+    expect(code(await call(a, 'git.status', { directory: one.root }, B('app-1')))).toBe('no-target');
+    expect(code(await call(a, 'git.worktree.list', { repoRoot: one.root }, B('app-1')))).toBe('no-target');
   });
 
   it('reads the bounds again when the session’s roots change', async () => {
@@ -284,6 +332,21 @@ describe('the spawn guard over `session.spawn`', () => {
     expect(await spawn(a, f, { ...SPAWN, permission_mode: 'plan', checkout: '/not/a/checkout' })).toBe('unknown-checkout');
     await waitFor(a, (m) => m.t === 'done', 'the admitted spawn’s done');
     expect(spawned).toEqual([{ input: { ...SPAWN, permission_mode: 'plan' }, member: org.A }]);
+  });
+
+  // 2026-11-06 (the New chat's machine first): `checkout: '~'`, a chat in the machine's home with no project, is a current
+  // owner's alone, as their `trust` is; a member a grant lets spawn, and anyone's `sminos.spawn`, find it no checkout.
+  it('admits the home (`~`) as a checkout for the machine’s owner alone: a grant-holder and `sminos.spawn` are `unknown-checkout`', async () => {
+    const { f, a, b, spawned } = await spawnMachine();
+    const home = { checkout: HOME_CHECKOUT, permission_mode: 'default' };
+    expect(await spawn(a, f, home)).toBe('ok');
+    await waitFor(a, (m) => m.t === 'done', 'the home spawn’s done');
+    expect(spawned).toEqual([{ input: home, member: org.A }]);
+    expect(await grant(f, org.B)).toBe(`kept: version 1 for member ${org.B}, spawn`);
+    expect(await spawn(b, f, home)).toBe('unknown-checkout');
+    expect(await spawn(b, f, { ...home, trust: 'accepted' })).toBe('spec-field');
+    expect(await act(a, await a.device.stepUp(a.device.action({ machine: f.ref, action: 'sminos.spawn', args: home })))).toBe('unknown-checkout');
+    expect(spawned).toHaveLength(1);
   });
 
   it('admits a member who isn’t the machine’s owner once a grant gives them `spawn`, and reads nothing of the checkouts for one without it', async () => {

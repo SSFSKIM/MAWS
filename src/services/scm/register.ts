@@ -5,24 +5,36 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
+import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
+import { machineHome } from '@shared/machine/machine-home';
 import type { ServicesBus } from '@shared/spine/bus';
 import { GitTimeoutError } from '../git/runner';
 import type { ScmService } from './service';
 
-export function registerScmHandlers(service: ScmService, { register }: Pick<ServicesBus, 'register'>): void {
+// 2026-11-06 (the home-root rule): a request from another machine (`HandlerContext.remote`) on a session whose checkout is
+// the machine's home, or above it, runs nothing: that checkout is no root of the session for it.
+export const SCM_HOME_REFUSAL = 'the session works in this machine’s home, which source control from another machine doesn’t reach';
+
+export function registerScmHandlers(service: ScmService, { register }: Pick<ServicesBus, 'register'>, home: () => string = machineHome): void {
   const session = <T extends { appSessionId: string }>(input: T) => ({ ...input, appSessionId: input.appSessionId as AppSessionId });
-  register('scm.status', ({ appSessionId }) => relay(() => service.status(appSessionId as AppSessionId)));
-  register('scm.stage', (input) => relay(() => service.stage(session(input))));
-  register('scm.unstage', (input) => relay(() => service.unstage(session(input))));
-  register('scm.discard', (input) => relay(() => service.discard(session(input))));
-  register('scm.commit', (input) => relay(() => service.commit(session(input))));
-  register('scm.push.plan', (input) => relay(() => service.planPush(session(input))));
-  register('scm.push', (input) => relay(() => service.run(session(input), 'push')));
-  register('scm.pr.plan', (input) => relay(() => service.planPr(session(input))));
-  register('scm.pr.create', (input) => relay(() => service.run(session(input), 'pr')));
-  register('scm.remote.cancel', (input) => relay(() => service.cancel(session(input))));
-  register('scm.remote.last', ({ appSessionId }) => relay(() => service.last(appSessionId as AppSessionId)));
-  register('scm.pr.state', (input) => relay(() => service.prState(session(input))));
+  const scm = <N extends CommandName>(name: N, run: (input: CommandInput<N>) => Promise<CommandOutput<N>>) =>
+    register(name, async (input, context) => {
+      const { appSessionId } = input as unknown as { appSessionId: string };
+      if (context.remote === true && (await service.coversHome(appSessionId as AppSessionId, home()))) throw new HostCommandError(ipcError('internal', SCM_HOME_REFUSAL));
+      return relay(() => run(input));
+    });
+  scm('scm.status', ({ appSessionId }) => service.status(appSessionId as AppSessionId));
+  scm('scm.stage', (input) => service.stage(session(input)));
+  scm('scm.unstage', (input) => service.unstage(session(input)));
+  scm('scm.discard', (input) => service.discard(session(input)));
+  scm('scm.commit', (input) => service.commit(session(input)));
+  scm('scm.push.plan', (input) => service.planPush(session(input)));
+  scm('scm.push', (input) => service.run(session(input), 'push'));
+  scm('scm.pr.plan', (input) => service.planPr(session(input)));
+  scm('scm.pr.create', (input) => service.run(session(input), 'pr'));
+  scm('scm.remote.cancel', (input) => service.cancel(session(input)));
+  scm('scm.remote.last', ({ appSessionId }) => service.last(appSessionId as AppSessionId));
+  scm('scm.pr.state', (input) => service.prState(session(input)));
 }
 
 async function relay<T>(call: () => Promise<T>): Promise<T> {

@@ -16,6 +16,10 @@ export interface HandlerContext {
   // set by `machine.op` for the run it claimed (the member and device the endpoint verified, the action's fingerprint, and
   // the sealed action when the endpoint sent it); absent for a local client's own command.
   readonly op?: HandlerOp;
+  // 2026-11-06 (the home-root rule): the request came from another machine, through the endpoint (set by `mawsd`'s
+  // services front for the endpoint's dispatch alone, never from a request's args); a service narrows what it reaches for
+  // it (src/shared/machine/machine-home.ts). Absent for this machine's own clients.
+  readonly remote?: true;
 }
 
 export interface HandlerOp {

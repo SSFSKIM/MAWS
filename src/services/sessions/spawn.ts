@@ -6,6 +6,10 @@
 // once the start is `launching` (the record exists), with the requester written as `launchedBy` from the claim
 // `machine.op` hands the handler. `create` waits on the service's boot, which wakes a parked engine host as a need
 // (PR #411); nothing here loads anything on an event.
+// 2026-11-06 (the New chat's machine first): `checkout: '~'` (HOME_CHECKOUT, a machine owner's alone: the endpoint's
+// guard) is a chat in this machine's home with no project, as a local New chat's "Don't work in a project": its location
+// the home as the home-root rule reads it (machineHome, the one realpath both read), never `$HOME`; a worktree needs a
+// project's checkout.
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { LaunchedBy } from '@shared/graph/session';
 import { PermissionModeSchema } from '@shared/graph/enums';
@@ -14,6 +18,8 @@ import type { HandlerContext } from '@shared/ipc/client';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { Location, SetupIntentPatch } from '@shared/sessions/intent';
 import type { StartOutcome } from '@shared/sessions/setup';
+import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
+import { machineHome } from '@shared/machine/machine-home';
 import type { ServicesBus } from '@shared/spine/bus';
 import { IntentRefused, type SessionService } from './service';
 
@@ -25,6 +31,7 @@ export interface SpawnDeps {
   // the machine's projects, hidden ones included: a checkout is known when a row's directory is exactly it, as the
   // endpoint's checkout source reads them (src/mawsd/daemon.ts)
   projects(): ReadonlyArray<{ id: string; directory: string }>;
+  home?: () => string; // the home a `~` spawn starts in: machineHome (a suite's fake one)
 }
 
 // the start guards' location verdicts that mean the named worktree or its branch is already there (intent-rules.ts)
@@ -41,16 +48,18 @@ async function spawn(bus: Pick<ServicesBus, 'onEmitted'>, deps: SpawnDeps, input
   if (!mode.success) return refused(`permission_mode: ${input.permission_mode} is not a permission mode`);
   const effort = input.effort === undefined ? null : EffortSchema.safeParse(input.effort);
   if (effort !== null && !effort.success) return refused(`effort: ${input.effort} is not an effort level`);
-  const project = deps.projects().find((row) => row.directory === input.checkout);
+  const home = input.checkout === HOME_CHECKOUT;
+  if (home && input.worktree !== undefined) return refused('worktree: a new worktree needs a project’s checkout');
+  const project = home ? null : deps.projects().find((row) => row.directory === input.checkout);
   if (project === undefined) return refused('unknown-checkout');
 
   const location: Location =
-    input.worktree === undefined
-      ? { kind: 'directory', path: input.checkout }
-      : { kind: 'newWorktree', repoRoot: input.checkout, name: input.worktree, branch: { kind: 'new', name: input.worktree, base: 'HEAD' } };
+    home ? { kind: 'directory', path: (deps.home ?? machineHome)() }
+    : input.worktree === undefined ? { kind: 'directory', path: input.checkout }
+    : { kind: 'newWorktree', repoRoot: input.checkout, name: input.worktree, branch: { kind: 'new', name: input.worktree, base: 'HEAD' } };
   const { op } = context;
   const launchedBy: LaunchedBy | undefined = op && { member: op.member, device: op.device, opId: op.opId, action: (op.action ?? null) as LaunchedBy['action'] };
-  const { appSessionId } = await deps.sessions.create({ projectId: project.id as ProjectId, location }, launchedBy && { launchedBy });
+  const { appSessionId } = await deps.sessions.create({ projectId: project === null ? null : (project.id as ProjectId), location }, launchedBy && { launchedBy });
 
   // Until the start hands the intent to its setup, a refusal leaves nothing behind: the intent goes.
   const abandon = async (reason: string): Promise<SpawnOutput> => {

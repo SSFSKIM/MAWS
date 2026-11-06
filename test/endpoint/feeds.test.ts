@@ -116,6 +116,37 @@ describe('a session’s checkout feed', () => {
     expect(f.interest.filter(([kind, , sessions]) => kind === 'report' && (sessions ?? []).includes('app-1'))).toEqual([]);
   });
 
+  // 2026-11-06 (the home-root rule): a file's change under a root at the machine's home, or above it, within no bound, is
+  // not carried, as the files service refuses that path to a remote reader; a project root's, and one elsewhere, are.
+  it('carries no file change the home alone reaches: a chat in the home’s, and the home added beside a project’s', async () => {
+    const home = scratch();
+    const elsewhere = scratch();
+    mkdirSync(join(home, 'proj'));
+    const f = await startEndpoint(org, started, { home });
+    session(f, 'app-home', home);
+    session(f, 'app-proj', join(home, 'proj'), [home]);
+    f.spine.handle('git.status', () => ({ repoRoot: null, branch: null, files: [] }));
+    const a = await openRemote(f, org.a1, org.A);
+    await feed(a, 'fh', { lane: 'B', id: 'app-home' });
+    await feed(a, 'fp', { lane: 'B', id: 'app-proj' });
+    const change = (appSessionId: string, path: string) => ({ appSessionId, path, kind: 'changed' });
+    f.host.emitMachine('files.changed', change('app-home', join(home, 'notes.txt'))); // held until its first bounds, then dropped
+    f.host.emitMachine('files.changed', change('app-home', join(elsewhere, 'delivered.pdf')));
+    f.host.emitMachine('files.changed', change('app-proj', join(home, 'proj', 'a.ts')));
+    f.host.emitMachine('files.changed', change('app-proj', join(home, 'notes.txt')));
+    await until(() => evs(a, 'fh').length >= 1 && evs(a, 'fp').length >= 1, 'the carried changes');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    f.host.emitMachine('files.changed', change('app-home', join(home, 'later.txt'))); // with the bounds known
+    f.host.emitMachine('files.changed', change('app-proj', join(home, 'proj', 'b.ts')));
+    await until(() => evs(a, 'fp').length >= 2, 'the project’s second change');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(names(a, 'fh')).toEqual([['files.changed', change('app-home', join(elsewhere, 'delivered.pdf'))]]);
+    expect(names(a, 'fp')).toEqual([
+      ['files.changed', change('app-proj', join(home, 'proj', 'a.ts'))],
+      ['files.changed', change('app-proj', join(home, 'proj', 'b.ts'))],
+    ]);
+  });
+
   it('holds a git change that comes before its bounds are read, and follows the session’s roots as its record changes', async () => {
     const repo = scratch();
     const added = scratch();

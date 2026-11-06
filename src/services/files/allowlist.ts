@@ -3,10 +3,15 @@
 // realpath is the native one (`fs.promises.realpath`), which canonicalises case on APFS as the JS implementation does
 // not, so a record that spells the repository in another case still names the same root. A root that does not
 // resolve is dropped, never replaced by the record's string: a session with no resolvable root reads nothing.
+// 2026-11-06 (the home-root rule, src/shared/machine/machine-home.ts): for a remote caller (`HandlerContext.remote`, the
+// endpoint's requests), a root whose realpath is the machine's home or an ancestor of it (`/`, `/Users`) is no root, since
+// it would reach the whole home tree (a chat in the home has it as its directory); this machine's own clients read every
+// root as before.
 import fs from 'node:fs';
 import { sep } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import { coversHome } from '@shared/machine/machine-home';
 import type { SpineView } from '@shared/spine/view';
 
 export type AllowlistRecord = Pick<SessionRecord, 'directory' | 'additionalDirectories' | 'worktree'>;
@@ -27,11 +32,13 @@ export function allowlistOf(view: Pick<SpineView, 'record' | 'intent'>): (appSes
   };
 }
 
-// The roots in record order (directory, additional directories, worktree), deduplicated by realpath.
-export async function rootsOf(record: AllowlistRecord): Promise<string[]> {
+// The roots in record order (directory, additional directories, worktree), deduplicated by realpath; for a remote caller
+// (`remoteHome`, the machine's home's realpath), less any that is the home or above it.
+export async function rootsOf(record: AllowlistRecord, remoteHome?: string): Promise<string[]> {
   const declared = [record.directory, ...record.additionalDirectories, ...(record.worktree ? [record.worktree.path] : [])];
   const resolved = await Promise.all(declared.map((path) => fs.promises.realpath(path).catch(() => null)));
-  return [...new Set(resolved.filter((root): root is string => root !== null))];
+  const roots = [...new Set(resolved.filter((root): root is string => root !== null))];
+  return remoteHome === undefined ? roots : roots.filter((root) => !coversHome(root, remoteHome));
 }
 
 // Whether a realpath lies under a root: equal to it, or inside it at a segment boundary (`/repo2` is not under `/repo`).

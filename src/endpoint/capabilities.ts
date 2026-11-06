@@ -44,4 +44,8 @@ export const ENDPOINT_CAPABILITIES = [
   // the send as document blocks before the engine host sees it (send-uploads.ts); a device names them only to an
   // endpoint that listed it, since an older one holds the send's args to a schema without them (`malformed`).
   'rl2.upload-blocks',
+  // 2026-11-06 (the New chat's machine first): `session.spawn`'s `checkout: '~'` (HOME_CHECKOUT) from a machine owner, a
+  // chat in this machine's home with no project (policy.ts' `spawnRefusal`); a device's menu offers it only on an endpoint
+  // that listed it, since an older one answers it `unknown-checkout`.
+  'rl2.spawn-home',
 ] as const;

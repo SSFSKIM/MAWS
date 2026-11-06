@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName } from '@shared/ipc/schema';
 import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { GitTimeoutError } from '../git/runner';
-import { registerScmHandlers } from './register';
+import { endableClientRef } from '@shared/ipc/client';
+import { registerScmHandlers, SCM_HOME_REFUSAL } from './register';
 import type { ScmService } from './service';
 
 const appSessionId = 'a1111111-1111-4111-8111-111111111111';
@@ -15,12 +16,31 @@ describe('main answers scm.* on the services bus', () => {
   beforeEach(() => {
     service = {
       status: vi.fn(), stage: vi.fn(), unstage: vi.fn(), discard: vi.fn(), commit: vi.fn(), planPush: vi.fn(), planPr: vi.fn(), run: vi.fn(),
-      cancel: vi.fn(), last: vi.fn(), prState: vi.fn(),
+      cancel: vi.fn(), last: vi.fn(), prState: vi.fn(), coversHome: vi.fn(async () => false),
     };
     bus = fakeBus();
     registerScmHandlers(service as unknown as ScmService, bus);
   });
   const invoke = (name: string, input?: unknown) => bus.invoke(name as CommandName, input);
+
+  // 2026-11-06 (the home-root rule): another machine's request (the endpoint seam's `remote`) on a session whose checkout is
+  // the machine's home, or above it, runs nothing; this machine's own client's runs as before, its checkout never asked.
+  it('runs nothing for a remote request on a session working in the machine’s home, and runs a local one', async () => {
+    const remote = { client: endableClientRef('endpoint'), remote: true as const };
+    service.coversHome.mockResolvedValue(true);
+    service.status.mockResolvedValue({ directory: '/r', repository: false, trusted: false, trustKey: '/r', remotes: [], defaultRemote: null, defaultBase: null, gh: { state: 'missing' }, checkedAt: 'now' });
+    service.stage.mockResolvedValue({ refused: 'untrusted', detail: 'x', output: '' });
+    expect(await bus.invoke('scm.status', { appSessionId }, remote)).toEqual({ ok: false, error: { code: 'internal', message: SCM_HOME_REFUSAL } });
+    expect(await bus.invoke('scm.stage', { appSessionId, paths: ['a.txt'] }, remote)).toEqual({ ok: false, error: { code: 'internal', message: SCM_HOME_REFUSAL } });
+    expect(service.status).not.toHaveBeenCalled();
+    expect(service.stage).not.toHaveBeenCalled();
+    expect(service.coversHome).toHaveBeenCalledWith(appSessionId, expect.any(String));
+    service.coversHome.mockClear();
+    expect(await invoke('scm.status', { appSessionId })).toMatchObject({ ok: true, value: { directory: '/r' } });
+    expect(service.coversHome).not.toHaveBeenCalled();
+    service.coversHome.mockResolvedValue(false);
+    expect(await bus.invoke('scm.status', { appSessionId }, remote)).toMatchObject({ ok: true, value: { directory: '/r' } });
+  });
 
   it('passes each command its input and answers a refusal as a value', async () => {
     const refusal = { refused: 'untrusted', detail: 'MAWS runs git here only after you trust the folder in a session', output: '' };

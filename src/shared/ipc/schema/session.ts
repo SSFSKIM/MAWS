@@ -753,6 +753,11 @@ const o5Events = {
 // the ceiling there and as the user's default here, which can be looser). `checkout` is a project's directory on this
 // machine; `worktree`, a new worktree of that name on a new branch of that name from HEAD. Answered once the start is
 // `launching` (the record exists); a checkout this machine has not trusted is refused `untrusted` with nothing created.
+// 2026-11-06 (the New chat's machine first): `checkout: '~'` (HOME_CHECKOUT) is the machine's home with no project, as a
+// local New chat's "Don't work in a project": admitted for a current machine owner alone (the endpoint's spawn guard, as
+// it admits their `trust`), an unknown checkout for anyone else and for `sminos.spawn`. A registered checkout is an absolute
+// path, so it is never this; the field's shape is DX6's as before, and an older endpoint answers it `unknown-checkout`.
+export const HOME_CHECKOUT = '~';
 export const SessionSpawnInputSchema = z.strictObject({
   checkout: z.string().min(1),
   worktree: z.string().min(1).optional(),

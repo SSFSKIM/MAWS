@@ -9,7 +9,8 @@
 // permission mode no looser than the ceiling by the order `plan` < `default` < `acceptEdits` < `auto` < `dontAsk` <
 // `bypassPermissions` (none asked is the ceiling, as sminos takes it; `ceiling`), and a checkout the machine knows
 // (`unknown-checkout`). P5 O7 M9: `session.spawn`'s `trust: 'accepted'` is one of its fields for a current machine owner
-// alone, `spec-field` for anyone else.
+// alone, `spec-field` for anyone else. 2026-11-06 (the New chat's machine first): so is its `checkout: '~'`
+// (HOME_CHECKOUT), the machine's home with no project; for anyone else, and for `sminos.spawn`, `unknown-checkout`.
 //
 // P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Remote setup"): the setup policy, apart from the
 // spawn guard. A setup act or read naming a directory (`session.projects.addFolder`, and `session.trust.check`, whose trust
@@ -20,11 +21,13 @@
 // answers the real path it resolved, which the row's executor runs on (authorize.ts' `Decision.setup`). A protected
 // folder is opened by an owner's `machine.folders.list` with `open: true` that the machine answered
 // (`MachineSetup.listed`), for that member, so the folder they browsed into is one they may register; kept for the
-// endpoint's life, the latest FOLDERS_OPENED_MAX each.
+// endpoint's life, the latest FOLDERS_OPENED_MAX each. The directory is named as the folder list names one: absolute, or
+// `~` and `~/…` under the home (2026-11-06: the trust card of a chat in the home, whose spawn names `~`).
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { expandHome, readableInside, resolveInHome, walk, within, type Home, type HomeRefusal } from '@shared/machine/home-folders';
+import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
 import { setupReadsRefusal } from '@shared/machine/setup-reads';
 import { DEFAULT_POLICY, type Policy, type PolicySource } from './answers';
 import type { CheckoutSource } from './sources';
@@ -74,15 +77,18 @@ export const SPAWN_FIELDS: ReadonlySet<string> = new Set(['checkout', 'worktree'
 
 /**
  * Why the policy refuses a spawn with these args, or null. `settingsMode` is the machine's `defaultMode`, which `settings`
- * reads. `acceptsTrust` (P5 O7 M9): the spawn is `session.spawn` asked by a current machine owner, whose `trust` (the
- * registry's schema holds it to `'accepted'`) is then one of its fields.
+ * reads. `ownerSpawn`: the spawn is `session.spawn` asked by a current machine owner, whose `trust` (P5 O7 M9; the
+ * registry's schema holds it to `'accepted'`) is then one of its fields, and whose `checkout` may be the home
+ * (HOME_CHECKOUT, 2026-11-06: a chat in no project there); for anyone else, and for `sminos.spawn`, the home is no
+ * checkout the machine knows.
  */
-export function spawnRefusal(args: Readonly<Record<string, unknown>>, policy: Policy, settingsMode: () => string, checkouts: CheckoutSource, acceptsTrust = false): 'spec-field' | 'ceiling' | 'unknown-checkout' | null {
-  if (Object.keys(args).some((field) => !SPAWN_FIELDS.has(field) && !(acceptsTrust && field === 'trust'))) return 'spec-field';
+export function spawnRefusal(args: Readonly<Record<string, unknown>>, policy: Policy, settingsMode: () => string, checkouts: CheckoutSource, ownerSpawn = false): 'spec-field' | 'ceiling' | 'unknown-checkout' | null {
+  if (Object.keys(args).some((field) => !SPAWN_FIELDS.has(field) && !(ownerSpawn && field === 'trust'))) return 'spec-field';
   const modes: readonly string[] = PERMISSION_MODES;
   const ceiling = policy.ceiling === 'settings' ? settingsMode() : policy.ceiling;
   const mode = args.permission_mode ?? ceiling;
   if (!modes.includes(ceiling) || typeof mode !== 'string' || !modes.includes(mode) || modes.indexOf(mode) > modes.indexOf(ceiling)) return 'ceiling';
+  if (ownerSpawn && args.checkout === HOME_CHECKOUT) return null;
   if (typeof args.checkout !== 'string' || !checkouts.known(args.checkout)) return 'unknown-checkout';
   return null;
 }
@@ -96,14 +102,15 @@ export type SetupCheck = { ok: true; directory: string } | { ok: false; reason: 
 export const FOLDERS_OPENED_MAX = 32;
 
 /**
- * The setup policy on a setup row's directory, read by `opened`: an absolute path (anything else `no-folder`) to a
- * directory under the home, and every pointer the registration (`trustFiles` false) or the trust read follows from it
+ * The setup policy on a setup row's directory, read by `opened`: an absolute path, or `~` and `~/…` (anything else
+ * `no-folder`), to a directory under the home, and every pointer the registration (`trustFiles` false) or the trust read follows from it
  * (src/shared/machine/setup-reads.ts), each touching no unopened protected folder; answered with the real path the
  * executor then runs on, never the input's spelling.
  */
 export async function setupRefusal(input: unknown, where: Home, opened: (folder: string) => boolean, options: { trustFiles: boolean }): Promise<SetupCheck> {
-  const directory = typeof input === 'object' && input !== null ? (input as { directory?: unknown }).directory : undefined;
-  if (typeof directory !== 'string' || !isAbsolute(directory)) return { ok: false, reason: 'no-folder' };
+  const named = typeof input === 'object' && input !== null ? (input as { directory?: unknown }).directory : undefined;
+  const directory = typeof named === 'string' ? expandHome(named, where.home) : null;
+  if (directory === null || !isAbsolute(directory)) return { ok: false, reason: 'no-folder' };
   const resolved = await resolveInHome(directory, where, opened);
   if (!resolved.ok) return resolved;
   const reads = await setupReadsRefusal(resolved.real, where, opened, options);

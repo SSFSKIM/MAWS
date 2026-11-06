@@ -18,6 +18,7 @@ export interface FilesHandlerDeps {
   port: Pick<ClientPort, 'openExternal' | 'reveal'>; // the client port (OX4): files.openExternal, E1's files.reveal
   env?: NodeJS.ProcessEnv;
   admitted?: (appSessionId: AppSessionId, real: string) => Promise<boolean>; // E2: the deliverable reader's admission (Design §3)
+  home?: () => string; // 2026-11-06: the machine's home as the home-root rule reads it (a suite's fake one)
   upload?: (input: FilesUploadInput) => Promise<FilesUploadOutput>; // P5 O3-E M3 (./upload.ts); none: every upload refused
   readUploads?: (input: FilesReadUploadsInput) => Promise<FilesReadUploadsOutput>; // P5 O7 M8 (./upload.ts); none: every read refused
 }
@@ -41,12 +42,13 @@ export function registerFilesHandlers(records: (appSessionId: AppSessionId) => A
     });
   };
   const session = (id: string) => id as AppSessionId;
-  register('files.list', ({ appSessionId, path }) => files.list({ appSessionId: session(appSessionId), path }));
-  register('files.read', (input) => files.read({ ...input, appSessionId: session(input.appSessionId) }));
-  register('files.write', (input) => files.write({ ...input, appSessionId: session(input.appSessionId) })); // E5
-  register('files.watch', async ({ appSessionId, path }, { client }) => {
+  // 2026-11-06: a remote request's roots leave out the machine's home (the context's `remote`, the endpoint seam's)
+  register('files.list', ({ appSessionId, path }, { remote }) => files.list({ appSessionId: session(appSessionId), path }, remote === true));
+  register('files.read', (input, { remote }) => files.read({ ...input, appSessionId: session(input.appSessionId) }, remote === true));
+  register('files.write', (input, { remote }) => files.write({ ...input, appSessionId: session(input.appSessionId) }, remote === true)); // E5
+  register('files.watch', async ({ appSessionId, path }, { client, remote }) => {
     follow(client);
-    await files.watch(session(appSessionId), path, client.id);
+    await files.watch(session(appSessionId), path, client.id, remote === true);
     if (!followed.has(client.id)) await files.unwatch(session(appSessionId), path, client.id); // released while in flight
   });
   register('files.unwatch', ({ appSessionId, path }, { client }) => files.unwatch(session(appSessionId), path, client.id));

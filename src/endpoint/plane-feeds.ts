@@ -15,6 +15,9 @@
 // again at each `session.changed` of the session (its roots may move). While a read is out the bounds
 // are unknown: a `git.changed` waits for the latest read's answer, the latest per repository, and is sent only if the
 // new bounds take it, so a root's change neither leaks the old repository's changes nor drops the new one's (fix wave 1).
+// 2026-11-06 (the home-root rule, targets.ts' CheckoutBounds): a `files.changed` under a root the rule dropped (the
+// machine's home, or above it) and within no bound is not carried, as the files service refuses its path to a remote
+// reader; one is read against the latest bounds answered, and is held until the first are (`fileReached`).
 //
 // A feed lives with its channel and its access (the table re-checks it as any subscription), and ends `behind` when the
 // device leaves more than its backlog unread: the device opens it again, as after a reconnect.
@@ -35,7 +38,7 @@ import { AttentionFeeds, type AttentionFeedsContext } from './attention-feed';
 import { InventoryFeeds, type InventoryFeedsContext } from './inventory-feed';
 import { dispatchAs, type EndpointServices } from './services';
 import { namesSession, type Plane, type SessionSubscription, type Subscription } from './subscriptions';
-import { withinBounds, type CheckoutBounds } from './targets';
+import { withinBounds, type Bounds, type CheckoutBounds } from './targets';
 
 export type PlaneFeedsContext = {
   dispatch: EndpointServices['dispatch'];
@@ -55,6 +58,8 @@ export type PlaneFeedsContext = {
 
 /** How many repositories' latest `git.changed` a feed holds while its bounds are read. */
 export const HELD_REPOSITORIES = 64;
+/** How many `files.changed` a feed holds until its first bounds are read (the latest ones). */
+export const HELD_FILE_CHANGES = 256;
 
 type Open = {
   sub: SessionSubscription;
@@ -63,11 +68,22 @@ type Open = {
   bounds: readonly string[] | null;
   /** Each repository's latest `git.changed`, held while the bounds are read. */
   held: Map<string, unknown>;
+  /** 2026-11-06: the latest bounds answered, kept while a later read is out (a file's change reads them); null before the first. */
+  files: Bounds | null;
+  /** The `files.changed` held until the first bounds are answered. */
+  heldFiles: Record<string, unknown>[];
   /** Reads of the bounds begun: only the latest one's answer is taken. */
   reads: number;
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+const NO_BOUNDS: Bounds = { within: [], dropped: [] };
+/**
+ * 2026-11-06 (the home-root rule): whether a file's change reaches a remote reader. A path within the bounds does; one
+ * under a root the rule dropped (the home, or above it) and in no bound doesn't, as the files service refuses it to
+ * them; any other is as before (a delivered file's, a watch's elsewhere). The path is compared as named.
+ */
+const fileReached = (bounds: Bounds, path: unknown): boolean => typeof path === 'string' && (withinBounds(bounds.within, path) || !withinBounds(bounds.dropped, path));
 
 export class PlaneFeeds implements Plane {
   readonly #ctx: PlaneFeedsContext;
@@ -89,7 +105,7 @@ export class PlaneFeeds implements Plane {
     if (sub.message.feed === 'artifacts') return this.#artifacts.open(sub);
     if (sub.message.feed === 'browser.inventory' && namesSession(sub)) return this.#inventory.open(sub);
     if (sub.message.feed === 'attention' || !namesSession(sub)) return this.#attention.open(sub);
-    const open: Open = { sub, seq: 0, bounds: null, held: new Map(), reads: 0 };
+    const open: Open = { sub, seq: 0, bounds: null, held: new Map(), files: null, heldFiles: [], reads: 0 };
     this.#open.set(sub, open);
     sub.subbed('snapshot', { epoch: this.#epoch, seq: 0 });
     void this.#readBounds(open, null);
@@ -127,7 +143,17 @@ export class PlaneFeeds implements Plane {
     if (owner !== 'machine' || this.#open.size === 0) return;
     const { name, payload } = message;
     if (!isObject(payload)) return;
-    if (name === 'files.changed' || name === 'scm.remote.output' || name === 'session.capabilitiesChanged') {
+    if (name === 'files.changed') {
+      for (const open of this.#open.values()) {
+        if (open.sub.session.id !== payload.appSessionId) continue;
+        if (open.files !== null) {
+          if (fileReached(open.files, payload.path)) this.#send(open, name, payload);
+        } else {
+          if (open.heldFiles.length >= HELD_FILE_CHANGES) open.heldFiles.shift();
+          open.heldFiles.push(payload);
+        }
+      }
+    } else if (name === 'scm.remote.output' || name === 'session.capabilitiesChanged') {
       for (const open of this.#open.values()) if (open.sub.session.id === payload.appSessionId) this.#send(open, name, payload);
     } else if (name === 'git.changed' && typeof payload.repoRoot === 'string') {
       const repoRoot = payload.repoRoot;
@@ -159,18 +185,21 @@ export class PlaneFeeds implements Plane {
     const n = ++open.reads;
     open.bounds = null;
     const dispatch = dispatchAs(this.#ctx.dispatch, open.sub.channel.client);
-    let bounds: readonly string[] = [];
+    let bounds: Bounds = NO_BOUNDS;
     try {
       const read = record ?? (await this.#record(open, dispatch));
-      bounds = read === null ? [] : await this.#ctx.bounds.of(read, dispatch);
+      bounds = read === null ? NO_BOUNDS : await this.#ctx.bounds.of(read, dispatch);
     } catch (error) {
       this.#ctx.log(`endpoint: a checkout feed's bounds could not be read: ${(error as Error).message}`);
     }
     if (n !== open.reads || this.#open.get(open.sub) !== open) return;
-    open.bounds = bounds;
+    open.bounds = bounds.within;
+    open.files = bounds;
     const held = [...open.held.entries()];
     open.held.clear();
-    for (const [repoRoot, payload] of held) if (withinBounds(bounds, repoRoot)) this.#send(open, 'git.changed', payload);
+    for (const [repoRoot, payload] of held) if (withinBounds(bounds.within, repoRoot)) this.#send(open, 'git.changed', payload);
+    const heldFiles = open.heldFiles.splice(0);
+    for (const payload of heldFiles) if (fileReached(bounds, payload.path)) this.#send(open, 'files.changed', payload);
   }
 
   async #record(open: Open, dispatch: EndpointServices['dispatch']): Promise<Record<string, unknown> | null> {

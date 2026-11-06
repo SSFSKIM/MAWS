@@ -12,6 +12,7 @@
 // the delete takes the proof with the record.
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { base64urlEncode, canonicalize, generateSigningKey, isAction, signStepUp, type Action } from 'org-protocol';
@@ -19,6 +20,8 @@ import type { ClientPort } from '@shared/client/port';
 import { NO_CLIENT } from '@shared/client/port';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
+import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
+import { machineHome } from '@shared/machine/machine-home';
 import type { MachineRef } from '@shared/machine/ref';
 import { status } from '../../../test/support/builders';
 import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
@@ -364,6 +367,21 @@ describe('session.spawn on the spine', () => {
     expect(await bus.invoke('session.spawn', { checkout, permission_mode: 'yolo' })).toEqual({ ok: true, value: { status: 'refused', reason: 'permission_mode: yolo is not a permission mode' } });
     expect(await bus.invoke('session.intent.list', undefined)).toEqual({ ok: true, value: { intents: [] } });
     expect(launched).toEqual([]);
+  });
+
+  // 2026-11-06 (the New chat's machine first): `~` is a chat in this machine's home with no project, the home being the one
+  // the home-root rule reads (machineHome, the realpath of os.homedir()), never `$HOME`; no worktree without a project.
+  it('starts a `~` spawn in the machine’s home (machineHome) with no project, and refuses a worktree there', async () => {
+    const home = machineHome();
+    expect(home).toBe(realpathSync.native(homedir()));
+    trust(home);
+    const { bus, launched } = await composed();
+    expect(await bus.invoke('session.spawn', { checkout: HOME_CHECKOUT, worktree: 'feature-x', permission_mode: 'default' })).toEqual({ ok: true, value: { status: 'refused', reason: 'worktree: a new worktree needs a project’s checkout' } });
+    const spawned = await bus.invoke('session.spawn', { checkout: HOME_CHECKOUT, permission_mode: 'default' });
+    expect(spawned).toEqual({ ok: true, value: { status: 'ok', appSessionId: expect.any(String) } });
+    const appSessionId = (spawned as { value: { appSessionId: AppSessionId } }).value.appSessionId;
+    await expect.poll(() => launched).toEqual([expect.objectContaining({ appSessionId, cwd: home })]);
+    expect(await record(bus, appSessionId)).toMatchObject({ appId: appSessionId, directory: home, projectId: null });
   });
 
   // P5 O7 M9 (M9 "The route"): a spawn on a machine whose default is the machine route, through an engine host that does

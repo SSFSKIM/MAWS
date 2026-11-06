@@ -25,7 +25,7 @@
 //      refuses everything graded above `view` (`read-only`), and a spawn (every `spawn`-graded row with the `machine`
 //      target: `sminos.spawn`, and from P5 O7 M4 `session.spawn`) is held to the ceiling, the known checkouts and its
 //      allowed fields (`ceiling`, `unknown-checkout`, `spec-field`; P5 O7 M9: `session.spawn`'s `trust` one of them for a
-//      machine owner alone), and (P5 O7 M9) a setup row naming a directory to the setup policy (`no-folder`,
+//      machine owner alone, and 2026-11-06 its `checkout: '~'`, the home), and (P5 O7 M9) a setup row naming a directory to the setup policy (`no-folder`,
 //      `outside-home`, `symlink-escape`, `protected`: policy.ts' `setupRefusal`), never to the spawn guard, its checked
 //      directory the decision's (`setup`), which the executor acts on;
 //   7. what the class may say: a web-cards answer only takes or refuses what is pending (`class`);
@@ -465,9 +465,9 @@ export class Authorizer {
     if (grade !== null && grade !== 'list' && grade !== 'view' && policy.read_only) return no('read-only');
     const owners = await reads.owners();
     if (grade === 'spawn' && row.target === 'machine') {
-      // P5 O7 M9: a trust card's answer is a current owner's alone to give
-      const acceptsTrust = name === 'session.spawn' && owners.includes(who.member);
-      const refusal = spawnRefusal(input as Readonly<Record<string, unknown>>, policy, () => this.ctx.settingsMode(), this.ctx.checkouts, acceptsTrust);
+      // P5 O7 M9: a trust card's answer is a current owner's alone to give; 2026-11-06: so is a chat in the home
+      const ownerSpawn = name === 'session.spawn' && owners.includes(who.member);
+      const refusal = spawnRefusal(input as Readonly<Record<string, unknown>>, policy, () => this.ctx.settingsMode(), this.ctx.checkouts, ownerSpawn);
       if (refusal !== null) return no(refusal);
     }
     let setup: SetupTarget | undefined;
