@@ -36,7 +36,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { ClientRef, HandlerContext, HandlerOp } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { OpLedger } from '@shared/host/op-ledger';
-import { createHostRuntime, type HostPort } from '@shared/host/runtime';
+import { createHostRuntime, thrownError, type HostPort } from '@shared/host/runtime';
 import { REGISTRY, type WireRegistry } from '@shared/ipc/registry';
 import type { CommandInput } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
@@ -549,7 +549,7 @@ export class FakeSpine {
       try {
         return ok(await handler(input, { client: client ?? {} } as HandlerContext));
       } catch (error) {
-        return { t: 'res', id: '0', ok: false, error: { code: 'internal', message: (error as Error).message } };
+        return { t: 'res', id: '0', ok: false, error: thrownError(error) }; // a typed refusal as the front answers it (a timeout's), any other throw `internal`
       }
     }
     return null;

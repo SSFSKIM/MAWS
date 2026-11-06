@@ -72,6 +72,12 @@ async function call(r: Remote, name: string, input: unknown): Promise<Msg> {
 }
 
 const status = (repoRoot: string) => ({ repoRoot, branch: 'main', files: [] });
+/** `git.worktree.list`'s answer for a repository whose main worktree is `repoRoot`: the bounds' probe of a root in it. */
+const listed = (repoRoot: string) => ({ repoRoot, commonDir: join(repoRoot, '.git'), worktrees: [{ repoRoot, path: repoRoot, branch: 'main', head: 'h', isMain: true, locked: false, prunable: false, managed: false }] });
+/** The probe's answer for a root in no repository (the worktree service's NotARepositoryError). */
+const notARepository = (): never => {
+  throw new Error('not a git repository');
+};
 const names = (r: Remote, sub: string): Array<[string, Record<string, unknown>]> => evs(r, sub).map((e) => [(e.body as { name: string }).name, (e.body as { payload: Record<string, unknown> }).payload]);
 /** The feed's `git.changed`s alone (a change of roots is a `session.changed`, which the feed carries too). */
 const gits = (r: Remote, sub: string) => names(r, sub).filter(([name]) => name === 'git.changed');
@@ -83,13 +89,13 @@ describe('a session’s checkout feed', () => {
     mkdirSync(join(repo, 'pkg'));
     const f = await startEndpoint(org, started);
     session(f, 'app-1', join(repo, 'pkg'));
-    f.spine.handle('git.status', () => status(repo)); // the root's repository: the directory above it
+    f.spine.handle('git.worktree.list', () => listed(repo)); // the root's repository: the directory above it
     const a = await openRemote(f, org.a1, org.A);
 
     const subbed = await feed(a, 'f1', { lane: 'B', id: 'app-1' });
     expect(subbed).toMatchObject({ t: 'subbed', mode: 'snapshot', seq: 0 });
     expect(subbed.epoch).toMatch(/^checkout:/);
-    await until(() => f.host.calls.some((c) => c.name === 'git.status'), 'the bounds read');
+    await until(() => f.host.calls.some((c) => c.name === 'git.worktree.list'), 'the bounds read');
 
     const files = { appSessionId: 'app-1', path: join(repo, 'pkg', 'a.ts'), kind: 'created' };
     const scm = { appSessionId: 'app-1', token: randomUUID(), seq: 1, kind: 'stdout', text: 'pushed' };
@@ -128,7 +134,7 @@ describe('a session’s checkout feed', () => {
     const f = await startEndpoint(org, started, { home });
     session(f, 'app-home', home);
     session(f, 'app-proj', join(home, 'proj'), [home]);
-    f.spine.handle('git.status', () => ({ repoRoot: null, branch: null, files: [] }));
+    f.spine.handle('git.worktree.list', notARepository);
     const a = await openRemote(f, org.a1, org.A);
     await feed(a, 'fh', { lane: 'B', id: 'app-home' });
     await feed(a, 'fp', { lane: 'B', id: 'app-proj' });
@@ -160,18 +166,18 @@ describe('a session’s checkout feed', () => {
     const record = session(f, 'app-1', proj);
     let gate: Promise<void> = Promise.resolve();
     let open: () => void = () => {};
-    f.spine.handle('git.status', async () => {
+    f.spine.handle('git.worktree.list', async () => {
       await gate;
-      return { repoRoot: null, branch: null, files: [] };
+      return notARepository();
     });
     const a = await openRemote(f, org.a1, org.A);
     await feed(a, 'f1', { lane: 'B', id: 'app-1' });
     f.host.emitMachine('files.changed', { appSessionId: 'app-1', path: join(proj, 'a.ts'), kind: 'changed' });
     await until(() => evs(a, 'f1').length === 1, 'the project’s change, on its first bounds');
     gate = new Promise<void>((resolve) => (open = resolve));
-    const reads = f.host.calls.filter((c) => c.name === 'git.status').length;
+    const reads = f.host.calls.filter((c) => c.name === 'git.worktree.list').length;
     f.host.emitMachine('session.changed', { record: { ...record, additionalDirectories: [home] }, cause: 'updated', revision: 2 });
-    await until(() => f.host.calls.filter((c) => c.name === 'git.status').length > reads, 'the bounds read again');
+    await until(() => f.host.calls.filter((c) => c.name === 'git.worktree.list').length > reads, 'the bounds read again');
     f.host.emitMachine('files.changed', { appSessionId: 'app-1', path: join(home, 'notes.txt'), kind: 'changed' }); // during the read
     f.host.emitMachine('files.changed', { appSessionId: 'app-1', path: join(proj, 'b.ts'), kind: 'changed' });
     await new Promise((resolve) => setTimeout(resolve, 30));
@@ -190,7 +196,7 @@ describe('a session’s checkout feed', () => {
     const f = await startEndpoint(org, started, { home });
     session(f, 'app-home', home);
     session(f, 'app-proj', proj);
-    f.spine.handle('git.status', () => ({ repoRoot: null, branch: null, files: [] }));
+    f.spine.handle('git.worktree.list', notARepository);
     const a = await openRemote(f, org.a1, org.A);
     await feed(a, 'fh', { lane: 'B', id: 'app-home' });
     await feed(a, 'fp', { lane: 'B', id: 'app-proj' });
@@ -210,10 +216,10 @@ describe('a session’s checkout feed', () => {
     mkdirSync(proj);
     const f = await startEndpoint(org, started, { home });
     session(f, 'app-1', proj);
-    f.spine.handle('git.status', () => status(home)); // the project's repository is the home's
+    f.spine.handle('git.worktree.list', () => listed(home)); // the project's repository is the home's
     const a = await openRemote(f, org.a1, org.A);
     await feed(a, 'f1', { lane: 'B', id: 'app-1' });
-    await until(() => f.host.calls.some((c) => c.name === 'git.status'), 'the bounds read');
+    await until(() => f.host.calls.some((c) => c.name === 'git.worktree.list'), 'the bounds read');
     f.host.emitMachine('git.changed', { repoRoot: home, status: status(home), reason: 'fs' });
     f.host.emitMachine('files.changed', { appSessionId: 'app-1', path: join(proj, 'a.ts'), kind: 'changed' }); // its files stay the session's
     await until(() => evs(a, 'f1').length >= 1, 'the project’s file change');
@@ -228,13 +234,13 @@ describe('a session’s checkout feed', () => {
     const record = session(f, 'app-1', repo);
     let answer: () => void = () => {};
     const answered = new Promise<void>((resolve) => (answer = resolve));
-    f.spine.handle('git.status', async (input) => {
+    f.spine.handle('git.worktree.list', async (input) => {
       await answered;
-      return status((input as { directory: string }).directory);
+      return listed((input as { repoRoot: string }).repoRoot);
     });
     const a = await openRemote(f, org.a1, org.A);
     await feed(a, 'f1', { lane: 'B', id: 'app-1' });
-    await until(() => f.host.calls.some((c) => c.name === 'git.status'), 'the bounds read begun');
+    await until(() => f.host.calls.some((c) => c.name === 'git.worktree.list'), 'the bounds read begun');
     f.host.emitMachine('git.changed', { repoRoot: repo, status: status(repo), reason: 'first' });
     f.host.emitMachine('git.changed', { repoRoot: repo, status: status(repo), reason: 'fs' });
     f.host.emitMachine('git.changed', { repoRoot: added, status: status(added), reason: 'fs' });
@@ -245,7 +251,7 @@ describe('a session’s checkout feed', () => {
     expect(names(a, 'f1')).toEqual([['git.changed', { repoRoot: repo, status: status(repo), reason: 'fs' }]]);
 
     f.host.emitMachine('session.changed', { record: { ...record, additionalDirectories: [added] }, cause: 'updated', revision: 2 });
-    await until(() => f.host.calls.some((c) => c.name === 'git.status' && (c.input as { directory: string }).directory === added), 'the new root’s repository read');
+    await until(() => f.host.calls.some((c) => c.name === 'git.worktree.list' && (c.input as { repoRoot: string }).repoRoot === added), 'the new root’s repository read');
     await new Promise((resolve) => setTimeout(resolve, 20));
     f.host.emitMachine('git.changed', { repoRoot: added, status: status(added), reason: 'fs' });
     await until(() => gits(a, 'f1').length === 2, 'the added repository’s change');
@@ -260,10 +266,10 @@ describe('a session’s checkout feed', () => {
     const gates = new Map<string, Promise<void>>();
     const open = new Map<string, () => void>();
     const gate = (dir: string) => gates.set(dir, new Promise<void>((resolve) => open.set(dir, resolve)));
-    f.spine.handle('git.status', async (input) => {
-      const { directory } = input as { directory: string };
+    f.spine.handle('git.worktree.list', async (input) => {
+      const { repoRoot: directory } = input as { repoRoot: string };
       await gates.get(directory);
-      return status(directory);
+      return listed(directory);
     });
     const a = await openRemote(f, org.a1, org.A);
     await feed(a, 'f1', { lane: 'B', id: 'app-1' });
@@ -276,7 +282,7 @@ describe('a session’s checkout feed', () => {
     f.host.emitMachine('session.changed', { record: { ...record, directory: repoB }, cause: 'updated', revision: 2 });
     changed(repoA, 'during');
     changed(repoB, 'during');
-    await until(() => f.host.calls.some((c) => c.name === 'git.status' && (c.input as { directory: string }).directory === repoB), 'B’s read begun');
+    await until(() => f.host.calls.some((c) => c.name === 'git.worktree.list' && (c.input as { repoRoot: string }).repoRoot === repoB), 'B’s read begun');
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(gits(a, 'f1')).toHaveLength(1);
     open.get(repoB)!();
@@ -287,10 +293,10 @@ describe('a session’s checkout feed', () => {
     gate(repoD);
     f.host.emitMachine('session.changed', { record: { ...record, directory: repoD }, cause: 'updated', revision: 3 });
     f.host.emitMachine('session.changed', { record: { ...record, directory: repoC }, cause: 'updated', revision: 4 });
-    await until(() => f.host.calls.some((c) => c.name === 'git.status' && (c.input as { directory: string }).directory === repoC), 'C’s read');
+    await until(() => f.host.calls.some((c) => c.name === 'git.worktree.list' && (c.input as { repoRoot: string }).repoRoot === repoC), 'C’s read');
     await new Promise((resolve) => setTimeout(resolve, 20));
     open.get(repoD)!();
-    await until(() => f.host.calls.filter((c) => c.name === 'git.status' && (c.input as { directory: string }).directory === repoD).length === 1, 'D’s read');
+    await until(() => f.host.calls.filter((c) => c.name === 'git.worktree.list' && (c.input as { repoRoot: string }).repoRoot === repoD).length === 1, 'D’s read');
     await new Promise((resolve) => setTimeout(resolve, 20));
     changed(repoD, 'after');
     changed(repoA, 'after');
@@ -308,10 +314,10 @@ describe('a session’s checkout feed', () => {
     const f = await startEndpoint(org, started);
     const record = session(f, 'app-1', repo);
     session(f, 'app-2', repo);
-    f.spine.handle('git.status', () => status(repo));
+    f.spine.handle('git.worktree.list', () => listed(repo));
     const a = await openRemote(f, org.a1, org.A);
     await feed(a, 'f1', { lane: 'B', id: 'app-1' });
-    await until(() => f.host.calls.some((c) => c.name === 'git.status'), 'the bounds read');
+    await until(() => f.host.calls.some((c) => c.name === 'git.worktree.list'), 'the bounds read');
     const engineReads = f.host.calls.filter((c) => c.name === 'session.status').length;
     const live = { record: { ...record, holder: { kind: 'self' } }, cause: 'live', revision: 2 };
     f.host.emitMachine('session.changed', { record: { ...record, appId: 'app-2', holder: { kind: 'self' } }, cause: 'live', revision: 2 });
@@ -328,7 +334,7 @@ describe('a session’s checkout feed', () => {
     const f = await startEndpoint(org, started);
     session(f, 'app-1', repo);
     session(f, 'app-2', repo);
-    f.spine.handle('git.status', () => status(repo));
+    f.spine.handle('git.worktree.list', () => listed(repo));
     const a = await openRemote(f, org.a1, org.A);
     await feed(a, 'f1', { lane: 'B', id: 'app-1' });
     const changed = (appSessionId: string, available: boolean) => ({ appSessionId, capabilities: { browser: { available, ...(available ? {} : { reason: 'no display' }) } } });
@@ -831,7 +837,7 @@ describe('a watch the channel installed', () => {
     mkdirSync(join(repo, 'src'));
     const f = await startEndpoint(org, started);
     session(f, 'app-1', repo);
-    f.spine.handle('git.status', () => status(repo));
+    f.spine.handle('git.worktree.list', () => listed(repo));
     const roots = new Map<string, AllowlistRecord>([['app-1', { directory: repo, additionalDirectories: [], worktree: null }]]);
     const files = registerFilesHandlers((id) => roots.get(id) ?? null, {
       bus: f.spine.bus as never,

@@ -314,8 +314,10 @@ export interface Bounds {
 }
 
 /**
- * A lane B session's checkout bounds: the realpaths of its record's roots and of the repository each belongs to
- * (`git.status`'s `repoRoot`). A root that does not resolve is dropped; one in no repository bounds only itself.
+ * A lane B session's checkout bounds: the realpaths of its record's roots and of the repository each belongs to (its
+ * own worktree's root, `repositoryOf`; round 2 of the desk track's review: rev-parse and the worktree list, never a
+ * status, whose scan of a home kept in git times out). A root that does not resolve is dropped; one in no repository
+ * bounds only itself; one whose repository git didn't answer bounds nothing of git's (fail closed, never kept).
  *
  * The roots are realpathed on every read (cheap), and the repositories are kept per set of canonical roots, so a root
  * that is a symlink retargeted since is read where it points now. A set is kept only when every root resolved and
@@ -325,7 +327,8 @@ export interface Bounds {
  * 2026-11-06 (the home-root rule; the New chat's machine first, whose chat in a machine's home has the home as its
  * root): a root whose realpath is a home of the machine or an ancestor of one (`/`, `/Users`) is no root for a remote
  * reader, whoever they are, since it would reach every repository and file under the home (`dropped`). And git answers
- * for the repository a path is in, so a root whose repository is such (a home kept in git, a root inside it) bounds
+ * for the repository a path is in, so a root whose repository is such (a home kept in git, a root inside it, or a
+ * linked worktree whose main checkout is a home: git's worktree reads and scm resolve to the main checkout) bounds
  * nothing of git's either: every path within the bounds then has a repository below the home (the nearest repository of
  * a path under a root is the root's, or one nested deeper), which the `checkout` rule and the checkout feed's
  * `git.changed` read. Its files stay the session's (`roots`). The homes are src/shared/machine/machine-home.ts' (a home
@@ -349,24 +352,20 @@ export class CheckoutBounds {
     const kept = this.#kept.get(key);
     if (kept !== undefined) return kept;
     let answered = !resolved.includes(null);
-    const repos = await Promise.all(
-      roots.map(async (root) => {
-        const status = await dispatch('machine', 'git.status', { directory: root }).catch(() => null);
-        if (status === null || (!status.ok && (status.error.code === 'host_unavailable' || status.error.code === 'timeout'))) answered = false;
-        const repoRoot = status?.ok === true ? field(status.value, 'repoRoot') : undefined;
-        return typeof repoRoot === 'string' ? realpathOf(repoRoot) : null;
-      }),
-    );
+    const repos = await Promise.all(roots.map((root) => repositoryOf(root, dispatch)));
+    if (repos.includes('unknown')) answered = false;
     const within = new Set<string>();
     let checkoutCovers = checkout === null || coversHome(checkout, homes);
     roots.forEach((root, i) => {
       const repo = repos[i];
-      if (repo !== null && coversHome(repo, homes)) {
+      // a home's repository (its own worktree's root or its main checkout's) gives git the whole of it, and an answer
+      // git didn't give says nothing of what it would give: either way, a file root alone
+      if (repo === 'unknown' || (repo !== null && (coversHome(repo.toplevel, homes) || coversHome(repo.main, homes)))) {
         if (root === checkout) checkoutCovers = true;
-        return; // a home's repository: git's answer would be the whole of it
+        return;
       }
       within.add(root);
-      if (repo !== null) within.add(repo);
+      if (repo !== null) within.add(repo.toplevel);
     });
     const bounds: Bounds = { within: [...within], roots, dropped, checkoutCovers };
     if (answered) {
@@ -375,6 +374,29 @@ export class CheckoutBounds {
     }
     return bounds;
   }
+}
+
+/** The failure a git read of a directory in no repository answers (src/services/git/runner.ts' NotARepositoryError). */
+const NOT_A_REPOSITORY = 'not a git repository';
+
+/**
+ * The repository `root` (a realpath) is in, as `git.worktree.list` answers it: rev-parse and the worktree list, no read of
+ * the work tree (a home kept in git answers at once, where a status would scan the whole home past git's bound). Its own
+ * worktree's root (the deepest listed worktree holding it: git's toplevel) and its main checkout's (the list's
+ * `repoRoot`, from the common dir), each a realpath; null when git says it is in none; `unknown` for any other answer
+ * (the spine or git away, a timeout, a failure), which bounds nothing of git's and is never kept.
+ */
+async function repositoryOf(root: string, dispatch: EndpointServices['dispatch']): Promise<{ toplevel: string; main: string } | null | 'unknown'> {
+  const listed = await dispatch('machine', 'git.worktree.list', { repoRoot: root }).catch(() => null);
+  if (listed === null) return 'unknown';
+  if (!listed.ok) return listed.error.code === 'internal' && listed.error.message === NOT_A_REPOSITORY ? null : 'unknown';
+  const main = field(listed.value, 'repoRoot');
+  const worktrees = field(listed.value, 'worktrees');
+  if (typeof main !== 'string' || !Array.isArray(worktrees)) return 'unknown';
+  const paths = await Promise.all(worktrees.map((w) => field(w, 'path')).filter((path): path is string => typeof path === 'string' && isAbsolute(path)).map((path) => realpathOf(path)));
+  const holding = paths.filter((path): path is string => path !== null && withinBounds([path], root)).sort((a, b) => b.length - a.length);
+  const [toplevel, mainReal] = [holding[0], await realpathOf(main)];
+  return toplevel === undefined || mainReal === null ? 'unknown' : { toplevel, main: mainReal };
 }
 
 /** Whether `real`, a realpath, is one of `bounds` or lies under one (at a segment boundary: `/repo2` is not under `/repo`). */
@@ -413,4 +435,8 @@ function rootsOf(record: unknown): string[] {
   return roots.filter((root): root is string => typeof root === 'string' && isAbsolute(root));
 }
 
-const realpathOf = (path: string): Promise<string | null> => realpath(path).catch(() => null);
+// A realpath in one Unicode form (NFC), as the homes are compared (machine-home.ts' `coversHome`) and the trust key is
+// spelled: every path the bounds hold or are compared with is read through here, a feed's event path too (`inNfc`).
+const realpathOf = (path: string): Promise<string | null> => realpath(path).then(inNfc, () => null);
+/** A path in the bounds' one Unicode form. */
+export const inNfc = (path: string): string => path.normalize('NFC');

@@ -211,6 +211,23 @@ describe('scm service stages, unstages, discards and commits against a real repo
     }
   });
 
+  // Round 2 (P2): the trust key is spelled in NFC, the home as the disk names it; a home named in decomposed form is still
+  // the home its repository covers.
+  it('says a checkout covers a home named in decomposed form, by its repository’s trust key', async () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'scm-nfd-')));
+    try {
+      const home = join(parent, 'cafe\u0301'); // "café", decomposed
+      mkdirSync(join(home, 'proj'), { recursive: true });
+      await runGit(home, ['init', '-q', '-b', 'main']);
+      const id = 'c1111111-1111-4111-8111-111111111111' as AppSessionId;
+      view = fakeSpineView({ records: [at(id, join(home, 'proj'))] });
+      expect(await service().coversHome(id, [realpathSync.native(home)])).toBe(true);
+      expect(await service().coversHome(id, [realpathSync.native(home).normalize('NFC')])).toBe(true);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
   it('refuses an untrusted checkout and an unlisted path, running nothing', async () => {
     await repo.write('a.txt', 'a\n');
     expect(await service().stage({ appSessionId: ID, paths: ['nope.txt'] })).toMatchObject({ refused: 'changed' });

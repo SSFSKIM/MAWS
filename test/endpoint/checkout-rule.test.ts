@@ -4,11 +4,14 @@
 // the path must lie in one of the session's roots or the repository a root belongs to, so the boundary a reader gets is
 // the repository with its worktrees; what a worktree read names beyond that the service bounds itself. A spawn's args
 // hold to the registry's schema (step 2), then to the machine's policy (step 6's guard, as `sminos.spawn`'s).
-import { mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { keyId, signRecord, SIGNING_DOMAINS, type Action, type Grant } from 'org-protocol';
+import { HostCommandError } from '@shared/host/runtime';
 import type { HandlerContext } from '@shared/ipc/client';
+import { ipcError } from '@shared/ipc/errors';
 import { REMOTE_UPLOAD_PART_BYTES, type FilesUploadInput } from '@shared/ipc/schema/files';
 import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
 import { machineHome } from '@shared/machine/machine-home';
@@ -107,7 +110,7 @@ describe('the checkout rule', () => {
     expect(code(await call(a, 'git.status', { directory: one.root }, { lane: 'A', id: 'la-1' }))).toBe('no-target');
     // None of them reached git for the path asked.
     expect(f.host.calls.slice(asked).filter((c) => c.name === 'git.status' && (c.input as { directory: string }).directory !== one.root)).toEqual([]);
-    expect(f.host.calls.slice(asked).filter((c) => c.name === 'git.diff' || c.name === 'git.worktree.list')).toEqual([]);
+    expect(f.host.calls.slice(asked).filter((c) => c.name === 'git.diff' || (c.name === 'git.worktree.list' && (c.input as { repoRoot: string }).repoRoot !== one.root))).toEqual([]); // the bounds' own probe of the root aside
   });
 
   it('places the session before the path: one the caller can’t view is `grade`, whatever the path names', async () => {
@@ -186,9 +189,66 @@ describe('the checkout rule', () => {
     expect(code(await call(a, 'git.log', { directory: join(one.root, 'proj'), limit: 5 }, B('app-1')))).toBe('no-target');
     expect(code(await call(a, 'git.status', { directory: one.root }, B('app-1')))).toBe('no-target');
     expect(code(await call(a, 'git.worktree.list', { repoRoot: one.root }, B('app-1')))).toBe('no-target');
-    expect(f.host.calls.slice(asked).filter((c) => c.name === 'git.diff' || c.name === 'git.log' || c.name === 'git.worktree.list')).toEqual([]);
+    expect(f.host.calls.slice(asked).filter((c) => c.name === 'git.diff' || c.name === 'git.log' || (c.name === 'git.worktree.list' && (c.input as { repoRoot: string }).repoRoot !== join(one.root, 'proj')))).toEqual([]); // the bounds' own probe of the root aside
     // a root of its own repository beside it keeps serving
     expect(await call(a, 'git.status', { directory: two.root }, B('app-2'))).toMatchObject({ ok: true, output: { repoRoot: two.root } });
+  });
+
+  // The desk track's review, round 2 (P1): the repository is learned by rev-parse and the worktree list (no work-tree
+  // scan, which a home kept in git times out), and only a definite answer (the repository, or none) lets a root bound
+  // git: any other leaves it a file root alone, and is never kept.
+  it('bounds nothing of git’s by a root whose repository it couldn’t learn (a timeout, a failure, the spine away), and keeps none of it', async () => {
+    const one = await repo();
+    const failures: Array<[string, () => never]> = [
+      ['timeout', () => { throw new HostCommandError(ipcError('timeout', 'git worktree list timed out')); }],
+      ['internal', () => { throw new Error('git rev-parse answered nothing'); }],
+      ['host_unavailable', () => { throw new HostCommandError(ipcError('host_unavailable', 'the spine is away')); }],
+    ];
+    for (const [what, fail] of failures) {
+      const f = await machine(one.serviceEnv());
+      f.spine.handle('git.worktree.list', fail);
+      session(f, 'app-1', { directory: one.root });
+      const a = await openRemote(f, org.a1, org.A);
+      const asked = f.host.calls.length;
+      expect([what, code(await call(a, 'git.log', { directory: one.root, limit: 5 }, B('app-1')))]).toEqual([what, 'no-target']);
+      expect([what, code(await call(a, 'git.diff', { directory: one.root, scope: 'all' }, B('app-1')))]).toEqual([what, 'no-target']);
+      expect([what, code(await call(a, 'git.diff', { directory: one.root, scope: 'staged' }, B('app-1')))]).toEqual([what, 'no-target']);
+      expect([what, f.host.calls.slice(asked).filter((c) => c.name === 'git.worktree.list').length]).toEqual([what, 3]); // asked again each time
+      expect([what, f.host.calls.slice(asked).filter((c) => c.name === 'git.log' || c.name === 'git.diff')]).toEqual([what, []]);
+    }
+  });
+
+  it('lets a root in no repository bound itself (git’s own answer), and learns a repository with no status read', async () => {
+    const one = await repo();
+    const plain = realpathSync(mkdtempSync(join(tmpdir(), 'checkout-plain-')));
+    try {
+      const f = await machine(one.serviceEnv());
+      session(f, 'app-plain', { directory: plain });
+      session(f, 'app-1', { directory: one.root });
+      const a = await openRemote(f, org.a1, org.A);
+      const asked = f.host.calls.length;
+      expect(code(await call(a, 'git.lsFiles', { directory: plain, query: '', limit: 10 }, B('app-plain')))).not.toBe('no-target'); // admitted (this suite's spine runs no lsFiles)
+      expect(await f.endpoint.checkoutBounds.of({ directory: plain, additionalDirectories: [], worktree: null }, (owner, name, input) => f.services.dispatch(owner, name, input))).toEqual({ within: [plain], roots: [plain], dropped: [], checkoutCovers: false });
+      expect(code(await call(a, 'git.log', { directory: one.root, limit: 5 }, B('app-1')))).toBe('ok');
+      expect(f.host.calls.slice(asked).filter((c) => c.name === 'git.status')).toEqual([]); // the bounds read no status
+    } finally {
+      rmSync(plain, { recursive: true, force: true });
+    }
+  });
+
+  // Round 2 (P2): a linked worktree of a home kept in git is the home's repository to git's worktree reads (which resolve
+  // to the main checkout) and to scm (its trust key, the main checkout): it bounds nothing of git's either.
+  it('bounds nothing of git’s by a linked worktree of a home kept in git', async () => {
+    const one = await repo();
+    const worktree = await one.addWorktree('wt');
+    const f = await machine(one.serviceEnv(), one.root); // the home is the main checkout
+    session(f, 'app-wt', { directory: worktree, worktree });
+    const a = await openRemote(f, org.a1, org.A);
+    expect(code(await call(a, 'git.worktree.status', { repoRoot: worktree, path: one.root }, B('app-wt')))).toBe('no-target');
+    expect(code(await call(a, 'git.status', { directory: worktree }, B('app-wt')))).toBe('no-target');
+    expect(code(await call(a, 'git.log', { directory: worktree, limit: 5 }, B('app-wt')))).toBe('no-target');
+    const bounds = await f.endpoint.checkoutBounds.of({ directory: worktree, additionalDirectories: [], worktree: { path: worktree, branch: 'wt' } }, (owner, name, input) => f.services.dispatch(owner, name, input));
+    expect(bounds).toMatchObject({ within: [], roots: [worktree], checkoutCovers: true });
   });
 
   it('reads the bounds again when the session’s roots change', async () => {

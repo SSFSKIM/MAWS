@@ -40,5 +40,9 @@ describe('the machine’s home', () => {
     for (const root of ['/Users/kim', '/Users', '/']) expect([root, coversHome(root, home)]).toEqual([root, true]);
     for (const root of ['/Users/kim/proj', '/Users/ki', '/Users/kimberly', '/opt']) expect([root, coversHome(root, home)]).toEqual([root, false]);
     expect(coversHome('/home', ['/Users/kim', '/home/kim'])).toBe(true);
+    // one Unicode form: a home named in decomposed form is the same home as its composed spelling (the trust key's)
+    expect(coversHome('/Users/cafe\u0301', '/Users/caf\u00e9')).toBe(true);
+    expect(coversHome('/Users/caf\u00e9/proj', '/Users/cafe\u0301')).toBe(false);
+    expect(coversHome('/Users', ['/Users/cafe\u0301'])).toBe(true);
   });
 });

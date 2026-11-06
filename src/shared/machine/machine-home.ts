@@ -42,8 +42,15 @@ export function machineHomes(): readonly string[] {
   return homes;
 }
 
-/** Whether `root` (a realpath) is one of the homes or an ancestor of one: a root that reaches a whole home tree. */
+/**
+ * Whether `root` (a realpath) is one of the homes or an ancestor of one: a root that reaches a whole home tree. Both are
+ * compared in one Unicode form (NFC, the trust key's), so a home named in decomposed form is still the home.
+ */
 export function coversHome(root: string, home: string | readonly string[] = machineHomes()): boolean {
-  const prefix = root.endsWith(sep) ? root : root + sep;
-  return (typeof home === 'string' ? [home] : home).some((h) => root === h || h.startsWith(prefix));
+  const at = root.normalize('NFC');
+  const prefix = at.endsWith(sep) ? at : at + sep;
+  return (typeof home === 'string' ? [home] : home).some((h) => {
+    const real = h.normalize('NFC');
+    return at === real || real.startsWith(prefix);
+  });
 }
