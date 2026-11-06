@@ -36,7 +36,7 @@ Then `sminos share <session> <member> list` (run by the owner at a terminal): th
 - [ ] The execution section's buildability review.
 - [x] (2026-11-05 22:50Z) M1: the hub's policy registry, upload backstop and audience filter (MAWS). Branch `p5-o18-m1`, `49dd6b262..`; static and unit GREEN on `a091ce1cb` (run 42120533710); reviewer-high with a security lens converged on the third pass.
 - [x] M2: the endpoint: the `list` grade, `reach?`, audiences and the policy cache (MAWS). Branch `p5-o18-m2` from `9f49f8fbc`; built at `062e061a0` (2026-11-06 00:00Z); M1's same-batch reference fix at `bf194ee8c`; the review's fix wave at `c100ab45f`; high-rung re-review clean (2026-11-06).
-- [ ] M2b: devices: the audience from the listing (MAWS).
+- [x] (2026-11-06 01:40Z) M2b: devices: an unchanged browser refused toward a private session (MAWS). static, unit and e2e:desk-web GREEN on the merged head `b656e8ddb` (run 42141731122); reviewer-high with a security lens: no findings. Branch `p5-o18-m2b` from `b30f810fb`. A first build sealed audiences from hub policy rows (`7c57f8cf0`, `50d47bb9f`), set aside by the architect's ruling (2026-11-06); what stands is the hub proof and desk-web's tombstone verdict.
 - [ ] M3: sminos's visibility frames, records and audience streams (doperpowers).
 - [ ] M4: sminos's send boundary, the setters, refusals and unlisting (doperpowers).
 - [ ] M6: live acceptance on the staging org.
@@ -221,7 +221,7 @@ sminos has one authorization and stream-selection boundary, used by every path t
 
 **Release.** The setters (D10) ship in the same sminos release as these guards: they are built in M4, with the guards. M3 can release alone because without a setter no session can become private.
 
-**Devices.** Desk-web's `say` (`apps/desk-web/src/project/connection.ts:296-306`), and any device that signs a `hub/` human, compute the event's audience from the listings they hold (D7) and seal it into the event. The hub positions it under `hub/<member>~<digest>` when it carries an audience, and `isHubPosition` (`apps/org-protocol/src/names.ts:73-81`) accepts that writer exactly when the digest is the event's own audience's. `takeHuman` applies D5's checks with the member as the sender. A browser that sends no audience (an old one) is refused `not-reachable` toward any session with an audience.
+**Devices.** A device's words toward a private session are judged at the hub. `takeHuman` applies D5's checks with the member as the sender, and words that carry no audience are refused `not-reachable` toward any session with an audience: the whole event, an `@all` naming one included, with nothing stored or fanned out. The hub would position words that carry an audience under `hub/<member>~<digest>`, and `isHubPosition` (`apps/org-protocol/src/names.ts:73-81`) accepts that writer exactly when the digest is the event's own audience's (M1). No device composes them yet. Desk-web's `say` (`apps/desk-web/src/project/connection.ts`) is in its frozen DX6 client and stays unchanged, so it seals no audience: from the browser, a private session can't be messaged, and that is a refusal, never a leak. Toward a listed session, or to everyone, its words go as before. A later client that should message a private session takes the route the Decision Log sets aside for this one (M2b).
 
 ### D9. Versions and order (OX1)
 
@@ -294,7 +294,7 @@ On the staging org `staging-ssfskim` with a second member, added for the run and
    - an old hub (the endpoint holds the events);
    - an old endpoint upstream (the hub refuses);
    - an old reader (the hub filters);
-   - an old browser (the hub refuses its humans toward the session);
+   - an old browser, or today's desk-web, whose frozen client seals no audience (the hub refuses its humans toward the session, and its words toward a listed session go as before);
    - an owner's own second machine on an old sminos, designated the project's archiver: it never receives the private stream (its endpoint withholds it), and the archive it writes holds none of it.
 7. A private session's agent messaging a session outside its audience is refused at its own CLI with the unlisted message (D4), and nothing is written.
 8. From an agent's shell, `sminos share <s> <person> view` and `sminos access <s> listed` are refused. `sminos access <s> private` from the same shell succeeds.
@@ -430,22 +430,25 @@ Gates `static,unit` (`scripts/ci-gate.sh <wt> --gates static,unit`), then a stag
 
 Gates `static,unit` plus the conversation replay. Review: reviewer-high, security lens. The MacBook's and the mini's app builds swap on the owner's word, at the next convenient build.
 
-### M2b — Devices: the audience from the listing (MAWS)
+### M2b — Devices: an unchanged browser toward a private session (MAWS)
 
-**Scope.** Desk-web, and any device that signs a `hub/` human, seal the right audience into a message to a private session, taken from the private listing it holds.
+**Scope.** What the browser does toward a private session once M1 and M2 are in: refused at the hub, with nothing reaching an outsider, while its words toward listed sessions go as before. Desk-web's frozen DX6 client stays unchanged (D8, the architect's ruling).
 
 **Work.**
-- **Desk-web:** the listings store keeps a private session's `audience` and `policyRev` from its machine-signed listing; `say` (`apps/desk-web/src/project/connection.ts:296-306`) computes D4's audience for its recipients and seals it into the draft, refuses locally a recipient with no listing it can see, and shows the hub's `not-reachable` refusal on the outbox entry as it shows other refusals.
-- **A device-signed human (RL8)** puts `audience` inside its signature the same way.
+- **The hub proof:** desk-web's words as its unchanged `say` seals them (DX1, no audience), against M1's `takeHuman`.
+- **Desk-web reads the hub's `withheld` tombstone** (D5) as its own verdict, neither drawn nor reported as a forgery (`src/log/verify.ts`, `src/log/project-log.ts`), closing M1's residue.
+- **Not built:** a browser that seals an audience (D8), and the policy rows it would read (Decision Log, M2b).
 
-**Result.** A member's messages from the browser reach a private session they may message, under its stream, and nothing reaches one they may not.
+**Result.** From the browser, a private session can't be messaged and nothing of the attempt reaches anyone outside its audience. A listed session is messaged as today.
 
-**Proof.** Red first, in desk-web's tests and the local-hub replay (Miniflare, from M1):
-- messages alternating between a public and a private session go under `hub/<member>` and `hub/<member>~<digest>` in turn, each reaching only its readers;
-- a listing whose `policyRev` rises changes the audience sealed into the next message;
-- an old client (no audience) toward the private session is refused, and toward the public one is delivered.
+**Proof.** Red first, in `apps/desk-hub/test/policies.test.ts` on M1's local hub (Miniflare):
+- the unchanged browser's words toward the private session, and an `@all` naming it with a listed one, are refused `not-reachable` and stored nowhere;
+- the outsider's browser and machine hold no event naming the session, and the audit rows they see are content-free, naming no session and carrying no message (D5);
+- its words toward the listed session, and its untagged record to everyone, go under `hub/<member>` and reach the outsider as before.
 
-Gates `static,unit`. Review: reviewer-high, security lens.
+Also `apps/desk-web/src/log/verify.test.ts`: a tombstone is `withheld`, and one with anything more is malformed.
+
+Gates `static,unit,e2e:desk-web`. Review: reviewer-high, security lens.
 
 ### M3 — sminos's visibility frames, records and audience streams (doperpowers)
 
@@ -738,6 +741,23 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   by a void. The ledger holds the signed body there, so the void would be refused `conflict`. The endpoint never signs an
   audience whose digest disagrees with its writer, so the hub has no ground to refuse one. That stop stays terminal,
   and a test holds it there.
+- Observation (M2b): desk-web never holds a private session's listing. Its listings store is fed only by the hub's
+  registry socket, and a private listing never reaches the hub (`Listings.welcome` withdraws it). The one place it
+  exists is `endpoint.listings` over a device channel (`src/endpoint/calls.ts`), which desk-web never calls. O13's
+  binding constraint "Nothing but cards" (`2026-10-27-p5-o13-web-cards.md:53`, pinned by `cards/client.test.ts`)
+  rules out a `call` on its channel, even though the endpoint grants one to a web-cards device (`authorize.ts` step 3).
+  A lane B session is also listed under its appSessionId, not the sminos session id the log addresses, so desk-web
+  couldn't have matched a listing to a recipient anyway.
+  Evidence: `apps/desk-web/src/cards/listings-store.ts`, `cards/client.ts:1-8`; `src/endpoint/listings.ts` `welcome`,
+  `recordFor`; `src/endpoint/rl10/members.ts` `listingId`.
+- Observation (M2b): no `hub/` human is composed anywhere in the MAWS app. Desk-web's `ProjectConnection.say` is the
+  one composer. The RL8 device-signed human exists only in `apps/org-protocol/test-support` (`deviceHuman`), whose
+  `signEvent` covers every field, `audience` included, and whose hub check M1 already applies.
+  Evidence: a grep for `kind: 'human'` and `t: 'human'` over `src/` and `apps/*/src`.
+- Observation (M2b): `isListing` accepts `audience` and `policyRev` since M2, so desk-web built from this branch takes
+  a private listing. M2's residue is only the deployed desk-web, which the next hub deploy replaces (desk-web is
+  served by the hub's Worker).
+  Evidence: `apps/org-protocol/src/shapes.ts` `isListing`.
 
 ## Decision Log
 
@@ -783,7 +803,7 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Rationale: the hub sees every event before fan-out and already speaks back to the sender's machine; a relay that can drop anything gains nothing by refusing.
   Rejected: a signed `refused` log event from the recipient's machine, which needed its own audience stream toward the sender, confirmed the recipient's machine holds the session, and came only after fan-out.
   Date/Author: 2026-11-05, p5-desk-track-owner, approved by the architect (chat 1131–1132).
-- Decision: browser and device humans get the same registry backstop at `takeHuman`, go under `hub/<member>~<digest>` when they carry an audience, and take the audience from the private session's machine-signed channel listing, which gains `audience` and `policyRev`. An old browser is refused toward any session with an audience. Built in a new M2b.
+- Decision (amended in M2b: the backstop stands, and no device composes audience words yet, desk-web's client staying frozen): browser and device humans get the same registry backstop at `takeHuman`, go under `hub/<member>~<digest>` when they carry an audience, and take the audience from the private session's machine-signed channel listing, which gains `audience` and `policyRev`. An old browser is refused toward any session with an audience. Built in a new M2b.
   Rationale: a device verifies log events only by the org MAC, so a listing is the one machine-signed source it has; M2b's verification (desk-web tests against the local hub) differs from M2's.
   Rejected: leaving device humans under plain `hub/<member>`, which fans a message to a private session out to the whole org.
   Date/Author: 2026-11-05, p5-desk-track-owner, approved by the architect (chat 1131–1132).
@@ -984,6 +1004,67 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   the private policy even when the say comes first. That fails closed.
   Date/Author: 2026-11-05, p5-desk-track-owner (M2), ruled by the coordinator.
 
+- Decision (M2b, the coordinator's ruling; set aside below, kept as the route a later client takes): a browser takes a private session's audience from its member's policy row,
+  which the hub's registry sends on the registry socket, not from the session's channel listing (D7's "A device").
+  - What the hub sends: after the grid, on every registry socket (an app's or not), `{t: 'policies', rows}`, one row
+    `{session, audience, policyRev}` per private session whose audience holds the socket's member. Then, whenever a
+    snapshot moves a row (`Registry.policies`), `{t: 'policy', session, policy}` goes to each member of the row's old
+    or new audience: the new row while it holds them, else null. A listed session has no row. A member outside a
+    row's audience is never sent it.
+  - What desk-web does: `say` seals the row's audience. A recipient with no row goes plain, the hub being the
+    backstop. A recipient the log shows private (its newest own snapshot is in a stream, or an `unlisted` notice
+    reached this reader) with no row, or a row the member is outside, is refused locally and nothing is sent.
+  Rationale:
+  - It needs no `call` on the cards channel, so O13's "Nothing but cards" stands.
+  - The row is keyed by the sminos session id the log addresses, so lane B sessions are covered.
+  - It is the registry `takeHuman` judges the words against, so a stale row is the hub's own to refuse.
+  - It adds no trust. The hub already decides who is served a stream, and a device verifies log events only by the
+    org MAC. The sealed audience chooses which stream the words go into, never who may receive them, and the
+    recipient's endpoint still answers `reach?` on its own verification (D3, D5).
+  - The rows a member is sent name only sessions whose audience holds them, so they show nothing the member's
+    browser isn't served anyway.
+  Rejected: an `endpoint.listings` call on desk-web's channel to the session's machine. It would widen O13's pin,
+  need a listed device and a channel per machine, and leave lane B sessions unmatched.
+  The machine-signed private listing keeps its `audience` and `policyRev` (M2) for a native device.
+  Date/Author: 2026-11-05, the coordinator (p5-desk-track-owner), for M2b.
+- Decision (M2b; set aside with the policy rows): a say naming sessions of different audiences becomes one event per audience, in the order each
+  group's first recipient was named. Each split's text is its own recipients' raw leading tags, in order, then the
+  body after the run (D4). `@all` names no session and stays in every split. A say with one audience keeps its text as
+  typed. The outbox holds one entry per split. A local refusal is one refused outbox entry for the whole say.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M2b).
+- Decision (M2b, the architect's ruling, relayed by the coordinator 2026-11-06): desk-web's frozen DX6 client stays
+  frozen. M1's `takeHuman` refuses a human with no audience that names a private session, so the unchanged `say` is
+  refused, never leaked, and the browser not reaching a private session is its recorded behaviour.
+  - The `say` change and the hub's policy rows (`{t: 'policies'}`, `{t: 'policy'}`) are reverted. With `say` frozen
+    the rows have no consumer, and unused code doesn't land. The route stays designed above, for a later client: the
+    rows on the registry socket, the split per audience, the local refusal.
+  - Before reverting, the premise was checked: no traffic the hub can't catch names no session yet carries a private
+    session's content. An untagged record (`to: '*'`) names none and carries only the words the member typed, which
+    is prose and not addressing (D4). An `@all` resolves to every live member desk-web sees, a private one included,
+    so it is refused whole while the member sees any private session in the project. That is a refusal, not a leak:
+    the member reaches everyone by tagging the listed sessions.
+  - What the proof found: the hub's audit row of a refused device human, under the plain `hub/<member>`, goes to every
+    browser of the project, as a plain writer's withheld position is a tombstone every reader of it gets (D5). It is
+    content-free: its reason, writer, nonce and member, with no session and no message. A refusal toward a session
+    that doesn't exist reads the same.
+  - The proof is in `apps/desk-hub/test/policies.test.ts` ("from an unchanged browser"), on the M1 local hub.
+  - Kept: desk-web's tombstone verdict, in `src/log/`, outside the frozen DX6 client (`src/project/`,
+    `src/hub/project-client.ts`).
+  Date/Author: 2026-11-06, the architect, relayed by the coordinator (p5-desk-track-owner).
+- Decision (M2b, the architect's ruling): the audit row of a refused device human stays as it is, shown to every
+  browser of the project.
+  Rationale:
+  - It is content-free: no session and no message. A refusal toward a session that doesn't exist reads the same, so
+    it is no oracle.
+  - It matches D5, where every reader of a plain writer sees that writer's tombstones.
+  - It tells the project's browsers only that a member had a send refused.
+  Rejected: narrowing it to the sender alone in `auditFor`/`refuseBrowser`, which would protect nothing a reader of
+  the plain writer doesn't already see.
+  Date/Author: 2026-11-06, the architect, relayed by the coordinator (p5-desk-track-owner).
+- Decision (M2b): desk-web reads the hub's `withheld` tombstone as its own verdict, neither drawn nor reported as a
+  forgery, closing M1's "desk-web reads a tombstone as malformed" residue.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M2b).
+
 ## Outcomes & Retrospective
 
 - M1 (2026-11-05). The hub now does everything Interfaces §A gives it:
@@ -1017,3 +1098,14 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   The re-review was clean.
 - Left for later: a phase-1 name-held binding lost on a machine's rename (Surprises, M2), and desk-web's exact
   `isListing` (M2b).
+- M2b (2026-11-06). Desk-web's DX6 client stays frozen (the architect's ruling).
+  - It seals no audience. M1's `takeHuman` refuses its words toward a private session, an `@all` naming one included,
+    and nothing about the attempt reaches an outsider but a content-free audit row. Toward listed sessions it works
+    as before.
+  - A hub test on M1's local hub proves it. Desk-web reads the hub's tombstone as `withheld`, closing M1's residue.
+    M2's `isListing` residue turned out to be the deployed desk-web alone, which the next hub deploy replaces.
+  - A browser that does message a private session was built first: the hub's per-member policy rows on the registry
+    socket, and a `say` that splits per audience. It was reverted unmerged when the ruling came in. The Decision Log
+    keeps it as the route for a later client, and why it beat an `endpoint.listings` call (O13's "Nothing but cards").
+  - The lesson: before changing a frozen client to reach a new capability, check whether the backstop already makes
+    its old behaviour a refusal. If it does, the frozen client's "can't" is a recorded behaviour, not a gap.

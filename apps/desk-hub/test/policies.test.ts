@@ -323,6 +323,41 @@ describe("a device's words", () => {
     mine.close();
     theirs.close();
   });
+
+  // P5 O18 M2b: desk-web's frozen DX6 client seals no audience. Its words toward a private session are refused here,
+  // whole, and nothing of them reaches an outsider; toward a listed session, or to everyone, they go as before.
+  it("from an unchanged browser are refused toward a private session, an @all naming one included, with nothing to an outsider, and go as before toward a listed one", async () => {
+    const project = await opened();
+    const { A } = o;
+    const P = newSession();
+    const L = newSession();
+    expect(await upload(mA, project, [joined(mA, project, P, 1, [A], 1), joined(mA, project, L, 1)])).toEqual([]);
+    const mine = await following(ADMIN, project);
+    const theirs = await following(o.bEmail, project);
+    const everyone = await seal(await KEY, 'log', project, { kind: 'human', from: 'human', member: A, to: '*', text: 'a note', created: new Date().toISOString() } as HumanDraft);
+    expect(await send(mine, await words(project, A, [P]))).toMatchObject({ t: 'refused', refusal: { reason: 'not-reachable' } });
+    // An `@all` as desk-web composes it: every live member it sees, the private one included, with `wake`.
+    const all = await seal(await KEY, 'log', project, { kind: 'human', from: 'human', member: A, to: [L, P].map((session) => ({ session, alias: 'p' })), text: '@all hello', created: new Date().toISOString(), wake: true } as HumanDraft);
+    expect(await send(mine, all)).toMatchObject({ t: 'refused', refusal: { reason: 'not-reachable' } });
+    expect(await send(mine, await words(project, A, [L]))).toMatchObject({ t: 'human-ack', writer: `hub/${A}`, seq: 1 });
+    expect(await send(mine, everyone)).toMatchObject({ t: 'human-ack', writer: `hub/${A}`, seq: 2 });
+    await waitFor(() => (theirs.logged.filter((l) => l.event.writer === `hub/${A}`).length === 2 ? true : undefined));
+    await waitFor(() => (mB.log.get(project)?.get(`hub/${A}`)?.size === 2 ? true : undefined));
+    // The outsider holds the two that went, and nothing of the refused: no event naming P.
+    const named = (l: { event: LogEvent }) => JSON.stringify(l.event).includes(P);
+    expect(theirs.logged.filter((l) => l.event.writer.startsWith('hub/')).some(named)).toBe(false);
+    // The audit record shows a plain writer's refusals to the project, as a withheld position's tombstone is in a plain
+    // stream (D5): content-free, naming no session and carrying no message, as one toward a session that doesn't exist.
+    const rows = theirs.frames.filter((f) => f.t === 'refused').map((f) => (f as Extract<ProjectDown, { t: 'refused' }>).refusal);
+    expect(rows.map((r) => r.reason)).toEqual(['not-reachable', 'not-reachable']);
+    for (const r of rows) {
+      expect(JSON.stringify(r)).not.toContain(P);
+      expect(r.message).toBeUndefined();
+    }
+    expect([...(mB.log.get(project)?.get(`hub/${A}`)?.values() ?? [])].some((e) => JSON.stringify(e).includes(P))).toBe(false);
+    mine.close();
+    theirs.close();
+  });
 });
 
 describe('the welcome', () => {

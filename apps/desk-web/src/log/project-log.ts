@@ -11,7 +11,8 @@ import type { LogEvent, OrgKey } from 'desk-hub/protocol';
 import type { LogEntry, LogRecord } from './record';
 import { verifyLogEvent } from './verify';
 
-export type Verdict = 'pending' | 'ok' | 'bad-code' | 'malformed';
+/** `withheld`: the hub's tombstone of a refused position (verify.ts), neither drawn nor reported. */
+export type Verdict = 'pending' | 'ok' | 'bad-code' | 'malformed' | 'withheld';
 export type HeldEntry = LogEntry & { verdict: Verdict };
 
 export type ProjectLogState = {
