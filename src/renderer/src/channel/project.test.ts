@@ -134,8 +134,8 @@ describe('channelEntries: people’s words', () => {
       me: OWNER.id,
       tail: [
         { key: 'n1', text: 'one', to: '*', state: 'sending' },
-        { key: 'n2', text: 'two', to: null, state: { refused: 'not-reachable' } },
-        { key: 'n3', text: 'three', to: null, state: 'not-sent' },
+        { key: 'n2', text: 'two', to: '*', state: { refused: 'not-reachable' } },
+        { key: 'n3', text: 'three', to: '*', state: 'not-sent' },
       ],
     });
     expect(entries.slice(1)).toMatchObject([
