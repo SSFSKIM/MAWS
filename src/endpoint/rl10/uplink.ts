@@ -41,8 +41,18 @@ export const UPLINK_RESERVE = 1024 * 1024;
 /** How long an asked hole waits for its filling before the next is asked, and then before it is asked again. */
 export const ASK_MS = 30_000;
 
+// Message reach (P5 O18 D5, D7). Three refusals move a position rather than stop or re-ask it. `not-reachable` is the hub's
+// withheld position: it holds a tombstone there and the writer goes on, so a hole at that seq moves past it.
+// `state-unavailable` is the hub's policy registry unreadable: a position the endpoint signed is a hole at that seq,
+// asked again from sminos after ASK_MS, with no reconnect and no further write. And `audience` is the endpoint's own
+// refusal of a stream sminos chose from a stale view: a stop, as sminos takes it, the position never signed with its
+// body (sminos voids it once the stream is current again, and the void signed there lifts the stop). A position the
+// signer can't decide yet (the policy cache's rebuild is incomplete, or the hub can't filter streams) is held: a hole
+// parked until `release`, then asked as any. A queued stream event is held the same way when it leaves over a link
+// whose hub can't filter streams (`waits`).
+
 /** The refusals after which sminos uploads none of the writer from the refused position on (`HubLog.on_refused`). */
-const STOPS = new Set(['conflict', 'writer-not-yours', 'bad-shape', 'too-large']);
+const STOPS = new Set(['conflict', 'writer-not-yours', 'bad-shape', 'too-large', 'audience']);
 
 export type UplinkContext = {
   /** The hub link: an upload sent (false while RL1 is down), and its socket's room. */
@@ -51,6 +61,11 @@ export type UplinkContext = {
   toSminos(frame: Frame): void;
   /** Whether the endpoint signed `writer`'s `seq` in `project` (the hub is owed it). */
   signed(project: string, writer: string, seq: number): boolean;
+  /**
+   * Whether `writer`'s uploads wait for the hub now (a stream's, while its welcome lacks `audience`): checked as each
+   * upload leaves, since the link may have been replaced since it was queued, and held as the signer holds it.
+   */
+  waits?(writer: string): boolean;
   now(): number;
   log(line: string): void;
   /** The cap, the reserve and the ask's wait (UPLINK_BYTES, UPLINK_RESERVE and ASK_MS unless given). */
@@ -61,7 +76,7 @@ export type UplinkContext = {
  * A writer's hole: the first position the hub is owed and the uplink let go; whether sminos was asked for it (only
  * then is an upload of it its filling); and when it may be asked (again).
  */
-type Hole = { from: number; asked: boolean; due: number };
+type Hole = { from: number; asked: boolean; due: number; held?: true };
 
 const key = (project: string, writer: string) => `${project}\n${writer}`;
 const at = (project: string, e: Record<string, unknown>) => `${project}\n${e.writer as string}\n${e.seq as number}`;
@@ -75,8 +90,12 @@ export class Uplink {
   #draining = false;
   /** Each writer's hole, by project, then writer. Nothing of the writer's past it is queued until it is filled. */
   readonly #holes = new Map<string, Map<string, Hole>>();
-  /** Where sminos stopped each writer it stopped on this connection, by `project\nwriter` (0: the writer itself). */
-  readonly #stopped = new Map<string, number>();
+  /**
+   * Where sminos stopped each writer it stopped on this connection, by `project\nwriter` (0: the writer itself), and
+   * whether the stop can be lifted: only the endpoint's own `audience` refusal of an unsigned position, which sminos
+   * revives with a `void` there once the stream is current again (the M2 ruling: a stop on both sides).
+   */
+  readonly #stopped = new Map<string, { seq: number; revivable: boolean }>();
   /** The hole asked for last, until it is filled or let go, and when it is let go unanswered. */
   #asking: { project: string; writer: string; until: number } | null = null;
   #timer: ReturnType<typeof setTimeout> | null = null;
@@ -105,6 +124,12 @@ export class Uplink {
    * may take the reserve too, and past that is let go, the hole asked for again.
    */
   upload(project: string, events: Record<string, unknown>[]): void {
+    // A signed upload at a revivable stop's position (its void): sminos goes on with the writer, and asks of it stand.
+    for (const e of events) {
+      const k = key(project, e.writer as string);
+      const stop = this.#stopped.get(k);
+      if (stop?.revivable === true && stop.seq === e.seq) this.#stopped.delete(k);
+    }
     const holes = this.#holes.get(project);
     /** Each holed writer's next position from its hole on, as this upload fills it. */
     const filling = new Map<string, number>();
@@ -155,10 +180,23 @@ export class Uplink {
    */
   refused(project: string, writer: string, seq: number, reason: string): void {
     const hole = this.#holes.get(project)?.get(writer);
-    if (STOPS.has(reason)) {
+    if (reason === 'not-reachable') {
+      // Settled: the hub holds the position's tombstone, and owes the writer from the next one.
+      if (hole !== undefined && hole.from === seq) {
+        if (this.#ctx.signed(project, writer, seq + 1)) this.#set(project, writer, { from: seq + 1, asked: false, due: 0 });
+        else this.#forget(project, writer);
+        if (this.#isAsking(project, writer)) this.#asking = null;
+      }
+    } else if (reason === 'state-unavailable' && seq >= 1 && this.#ctx.signed(project, writer, seq)) {
+      // Asked again at its position after the wait: the hub stored nothing there and stopped the writer's batch.
+      if (hole === undefined || hole.from > seq) this.#set(project, writer, { from: seq, asked: false, due: this.#ctx.now() + this.#askMs });
+      else if (hole.from === seq) this.#again(project, writer, this.#ctx.now() + this.#askMs);
+    } else if (STOPS.has(reason)) {
       if (hole === undefined && !this.#ctx.signed(project, writer, Math.max(seq, 1))) return;
       const k = key(project, writer);
-      this.#stopped.set(k, Math.min(seq, this.#stopped.get(k) ?? seq));
+      const prior = this.#stopped.get(k);
+      const revivable = reason === 'audience' && !this.#ctx.signed(project, writer, seq) && (prior?.revivable ?? true);
+      this.#stopped.set(k, { seq: Math.min(seq, prior?.seq ?? seq), revivable });
       if (this.#isAsking(project, writer) && !this.#askable(project, writer, hole!)) this.#asking = null;
     } else if (hole !== undefined && hole.from === seq && this.#isAsking(project, writer)) {
       this.#again(project, writer, this.#ctx.now() + this.#askMs);
@@ -185,6 +223,37 @@ export class Uplink {
       this.#ctx.toSminos({ t: 'resend', project, writer, from });
     }
     this.#ask();
+  }
+
+  /**
+   * A position the signer holds back (see the header): a hole at `seq`, asked for only once `release` comes, unless the
+   * writer holds an earlier hole already, whose filling brings it again.
+   */
+  hold(project: string, writer: string, seq: number): void {
+    const held = this.#holes.get(project)?.get(writer);
+    if (held !== undefined && held.from < seq) return;
+    this.#set(project, writer, { from: seq, asked: false, due: Infinity, held: true });
+    if (this.#isAsking(project, writer)) this.#asking = null;
+    this.#ask();
+  }
+
+  /** Every held position asked for now (the policy cache confirmed more, or the hub can filter streams). */
+  release(): void {
+    const now = this.#ctx.now();
+    for (const holes of this.#holes.values()) {
+      for (const hole of holes.values()) {
+        if (hole.held !== true) continue;
+        delete hole.held;
+        Object.assign(hole, { asked: false, due: now });
+      }
+    }
+    this.#ask();
+  }
+
+  /** Whether a position is held now (a suite's view). */
+  holding(project: string, writer: string): number | null {
+    const hole = this.#holes.get(project)?.get(writer);
+    return hole?.held === true ? hole.from : null;
   }
 
   /** sminos's connection ended: what was asked of it is lost with it, and its successor starts every writer over. */
@@ -236,7 +305,7 @@ export class Uplink {
   /** Whether sminos follows a `resend` of `writer` from its hole: one before where it stopped the writer, or none. */
   #askable(project: string, writer: string, hole: Hole): boolean {
     const stopped = this.#stopped.get(key(project, writer));
-    return stopped === undefined || hole.from < stopped;
+    return stopped === undefined || hole.from < stopped.seq;
   }
 
   /**
@@ -295,13 +364,20 @@ export class Uplink {
         const next = this.#queue.shift()!;
         this.#bytes -= next.bytes;
         for (const e of next.events) this.#queued.delete(at(next.project, e));
-        if (this.#ctx.send({ t: 'events', project: next.project, events: next.events })) {
+        const going = next.events.filter((e) => this.#ctx.waits?.(e.writer as string) !== true);
+        for (const e of next.events) {
+          if (going.includes(e)) continue;
+          if (this.holding(next.project, e.writer as string) === null) this.#ctx.log(`endpoint: holding ${e.writer as string}:${e.seq as number} in project ${next.project}, signed but not sent: the hub now connected can't filter its stream`);
+          this.hold(next.project, e.writer as string, e.seq as number);
+        }
+        if (going.length === 0) continue;
+        if (this.#ctx.send({ t: 'events', project: next.project, events: going })) {
           this.#ask();
           continue;
         }
         // RL1 is down: what was queued is let go, a hole left for each writer in it, and nothing is asked now, only
         // to be lost the same way; the next welcome checks every project's `have` against the ledger and asks then.
-        for (const { project, events } of [next, ...this.#queue.splice(0)]) {
+        for (const { project, events } of [{ project: next.project, events: going }, ...this.#queue.splice(0)]) {
           for (const e of events) this.#hole(project, e.writer as string, e.seq as number);
         }
         this.#bytes = 0;

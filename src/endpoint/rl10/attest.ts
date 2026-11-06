@@ -10,24 +10,32 @@
 // `{id, email}`, the email read from this endpoint's head at that moment (`null` for an id it no longer holds), never
 // from the event: the signed attestation carries member ids alone (P5 Decision Log 51's label). One that fails goes
 // down with `owners: []` and a log line, so sminos labels the sender's owners unverified.
-import { isAction, verifyAttestation, type Action, type Attest, type Certificates, type LogEventV2, type OrgState } from 'org-protocol';
+import { isAction, streamOf, verifyAttestation, type Action, type Attest, type Certificates, type LogEventV2, type OrgState } from 'org-protocol';
 import { resolveOwners } from '../listings';
 import type { Member } from './members';
 
 const SESSION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** The session a writer is a session writer of (`<name>/<session uuid>`), or null (`<name>/human` and other feeds). */
+/**
+ * The session a writer is a session writer of (`<name>/<session uuid>`, or one of its audience streams,
+ * `<name>/<session uuid>~<digest>`, P5 O18), or null (`<name>/human` and its streams, and other feeds).
+ */
 export function sessionOfWriter(writer: string): string | null {
-  const at = writer.indexOf('/');
-  const rest = at < 0 ? '' : writer.slice(at + 1);
+  const base = streamOf(writer).base;
+  const at = base.indexOf('/');
+  const rest = at < 0 ? '' : base.slice(at + 1);
   return SESSION.test(rest) ? rest : null;
 }
 
-/** The attestation an own session writer's event carries, from its member's record against `head`. */
-export async function attestFor(member: Member, head: OrgState, ref: string, certificates: Certificates, now: Date): Promise<Attest> {
+/**
+ * The attestation an own session writer's event carries, from its member's record against `head`. `spawner: false`
+ * leaves `origin.spawnerSession` out (P5 O18 D4: a provenance reference never widens what a session's id reaches; the
+ * verifier refuses a null one, so it is omitted rather than nulled).
+ */
+export async function attestFor(member: Member, head: OrgState, ref: string, certificates: Certificates, now: Date, options: { spawner?: boolean } = {}): Promise<Attest> {
   const origin: Attest['origin'] = { kind: member.origin.kind };
   if (typeof member.origin.requester === 'string') origin.requester = member.origin.requester;
-  if (typeof member.origin.spawnerSession === 'string') origin.spawnerSession = member.origin.spawnerSession;
+  if (options.spawner !== false && typeof member.origin.spawnerSession === 'string') origin.spawnerSession = member.origin.spawnerSession;
   return {
     owners: await resolveOwners(member.owners, head, ref, certificates, now),
     ownersProof: member.ownersProof.filter((proof): proof is Action => isAction(proof)),

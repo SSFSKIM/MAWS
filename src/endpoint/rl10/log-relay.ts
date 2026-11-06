@@ -49,23 +49,47 @@
 //     or renews would otherwise wait for the next periodic read. A key asks at most once per `HELD_READ_MS`: a burst of
 //     its events asks once, and a key the read left unknown asks no more until then, however many of its events come.
 
+// Message reach (P5 O18, docs/doperpowers/plans/2026-11-05-p5-o18-message-reach.md D4–D7, D9).
+//   - Up: every own event is signed with the audience the endpoint computes for it from its own records and policy
+//     cache (audiences.ts): the meet of its writing session's and each addressed session's. A writer's digest that
+//     isn't that audience's, recipients that give differing ones, or an audience no member is in, is refused to sminos
+//     as `audience`; a snapshot (`joined`, `state`) and an `unlisted` notice gain the record's `policyRev`; a notice's
+//     audience is checked to be the members its change withdraws, from the cache's history of the session's policy; a
+//     `void` (a content-free filler at a position refused `audience`) carries the audience sminos claims for its writer,
+//     signed when it hashes to the writer's digest. Provenance references whose session's audience doesn't contain the
+//     event's are written null before signing (the attestation's spawner left out), and the ledger keeps what was
+//     signed, so a resend is byte for byte and the audience frozen. An upload naming a session the cache hasn't
+//     confirmed while its rebuild is incomplete, or a stream event while the hub's welcome lacks `audience`, is held:
+//     neither signed nor refused, its position a parked hole released when the cache or the hub can decide it.
+//   - Down: the hub's tombstone of a withheld position goes to sminos as `spent {reason: 'withheld'}` in stream order,
+//     and every verified snapshot of a remote session feeds the policy cache, passed down or not. To an sminos whose
+//     hello lacks `audience`, nothing that names a stream writer goes down: no event, `have` entry, `spent`,
+//     `refused` or `resend` (its archive would copy them to the project's shared remote, D9).
+
 // Lost on the way. RL10 takes what is written, but RL1 can be down while sminos uploads (its first `have` came on an
 // earlier RL1 connection), and what the hub never took would be lost: sminos's upload cursor only moves forward. So the
 // first `have` of each project after an RL1 welcome is compared with what the ledger signed, and each own writer the
 // hub holds less of is asked again from sminos with DX2's `resend`, which rebuilds the same bytes from the ledger.
 import { createHash } from 'node:crypto';
 import {
+  audienceDigest,
   eventSigningInput,
+  HUB_WRITER_PREFIX,
+  isAudience,
   isHubWriter,
   isIsoMillis,
   isLogSeq,
   isSig,
+  isWithheldTombstone,
   keyId,
   machineNameKey,
   refOfName,
+  sessionRefs,
   signEvent,
+  streamOf,
   verifyEvent,
   writerMachine,
+  writerSession,
   type Certificates,
   type LogEventV2,
   type OrgState,
@@ -73,6 +97,8 @@ import {
 } from 'org-protocol';
 import type { LogProject } from '../hub-link';
 import { attestFor, sessionOfWriter, verifiedOwners } from './attest';
+import { contains, digestOf, knownAudience, localPolicy, meet, sameAudience, type AudienceContext } from './audiences';
+import { PolicyCache, type Audience } from './policy-cache';
 import type { InboundIndex } from './inbound-index';
 import type { LegacyKey } from './legacy';
 import type { Members } from './members';
@@ -85,14 +111,18 @@ export type Signer = { kind: 'device'; member: string; device: string; keyId: st
 export type Wrapped = { event: Record<string, unknown>; signer: Signer; owners?: Array<{ id: string; email: string | null }> };
 /** DX2's `rejected` up: the event named only by what it carried. */
 export type Rejected = { t: 'rejected'; project: string; event: { writer: string; seq: number } | null; reason: 'bad-code' | 'seen-nonce' | 'bad-shape' | 'conflict'; message: string };
-type Uploaded = { event: Record<string, unknown> } | { reason: string; message: string };
-/** Why a position was spent (`spent`'s `reason`): the endpoint's own words for a final verdict. */
-export type SpentReason = 'bad-shape' | 'conflict' | 'replayed' | 'bad-signature' | 'revoked' | 'expired';
+type Uploaded = { event: Record<string, unknown> } | { reason: string; message: string } | { hold: string };
+/** Why a position was spent (`spent`'s `reason`): the endpoint's own words for a final verdict, or the hub's tombstone. */
+export type SpentReason = 'bad-shape' | 'conflict' | 'replayed' | 'bad-signature' | 'revoked' | 'expired' | 'withheld';
+/** What the signer makes of an own event's audience (see the header). */
+type Judgment = { audience: Audience; policyRev?: number; redact: string[]; spawner: boolean } | { refuse: string; reason?: string } | { hold: string };
 /** What the endpoint makes of an arriving event (see the header). `read`: the key a read of the hub's state may bring. */
 type Judged =
   | { deliver: Wrapped }
   | { spent: SpentReason; reason: Rejected['reason']; message: string }
   | { hold: string; read?: string };
+
+const HUB_LACKS_STREAMS = "the hub's welcome advertises no audience streams";
 
 /** How many arriving events the relay holds at most, and how long each, while their verdict waits on the head. */
 export const HOLD_MAX = 1000;
@@ -123,6 +153,16 @@ export type RelayContext = {
   log(line: string): void;
   /** The uplink's cap, reserve and ask wait (uplink.ts's defaults unless given). */
   uplink?: UplinkContext['limits'];
+  /** P5 O18: the policy cache, which the signer reads and the hub's snapshots feed (one held in memory unless given). */
+  cache?: PolicyCache;
+  /** Whether sminos's RL10 hello advertised `audience`: only then do stream writers go down (D9). Absent: no. */
+  streamsDown?(): boolean;
+  /** Whether the hub's RL1 welcome advertised `audience`: only then do stream events go up (D9). Absent: no. */
+  hubStreams?(): boolean;
+  /** Whether the policy cache's rebuild is incomplete (link.ts): an unconfirmed session's upload is held meanwhile. */
+  rebuilding?(): boolean;
+  /** A remote session's policy moved in the cache. */
+  policyChanged?(session: string): void;
 };
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -132,7 +172,7 @@ const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest(
 const isWriterName = (writer: string) => /^[^/]+\/.+$/.test(writer) && writer.length <= 256 && ![...writer].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
 
 export class LogRelay {
-  readonly #ctx: RelayContext;
+  readonly #ctx: RelayContext & Required<Pick<RelayContext, 'cache' | 'streamsDown' | 'hubStreams' | 'rebuilding'>>;
   /** The projects sminos opened on this connection: their latest hello, and their close on RL1. */
   readonly #projects = new Map<string, { hello: { name: string; have: Record<string, number>; follow?: boolean }; close: () => void }>();
   /** Projects whose first `have` since the RL1 welcome is still to come. */
@@ -153,12 +193,13 @@ export class LogRelay {
   #retries = 0;
 
   constructor(ctx: RelayContext) {
-    this.#ctx = ctx;
+    this.#ctx = { cache: new PolicyCache(null, ctx.log), streamsDown: () => false, hubStreams: () => false, rebuilding: () => false, ...ctx };
     this.#uplink = new Uplink({
       send: (frame) => ctx.hub.send(frame),
       writable: () => ctx.hub.writable?.() ?? Promise.resolve(),
-      toSminos: (frame) => ctx.toSminos(frame),
+      toSminos: (frame) => this.#toSminos(frame),
       signed: (project, writer, seq) => ctx.ledger.get(project, writer, seq) !== null,
+      waits: (writer) => this.#streamHeld(writer),
       now: () => ctx.now(),
       log: (line) => ctx.log(line),
       limits: ctx.uplink,
@@ -190,6 +231,11 @@ export class LogRelay {
     return this.#projects.has(project);
   }
 
+  /** The projects sminos opened on this connection, in the order it opened them. */
+  projects(): string[] {
+    return [...this.#projects.keys()];
+  }
+
   /** sminos's own events up: each signed (or rebuilt from the ledger) and sent on, or refused to sminos. */
   async events(frame: Frame): Promise<void> {
     const { project, events } = frame;
@@ -198,13 +244,46 @@ export class LogRelay {
     for (const e of events) {
       const signed = await this.#up(project, e);
       if ('event' in signed) out.push(signed.event);
-      else {
+      else if ('hold' in signed) {
+        const at = position(e)!;
+        if (this.#uplink.holding(project, at.writer) === null) this.#ctx.log(`endpoint: holding ${at.writer}:${at.seq} in project ${project} unsigned until it can be decided (${signed.hold})`);
+        this.#uplink.hold(project, at.writer, at.seq);
+      } else {
         const at = position(e);
-        this.#ctx.toSminos({ t: 'refused', project, refusal: { reason: signed.reason, ...(at ?? {}), message: signed.message } });
+        this.#toSminos({ t: 'refused', project, refusal: { reason: signed.reason, ...(at ?? {}), message: signed.message } });
         if (at !== null) this.#uplink.refused(project, at.writer, isLogSeq(at.seq) ? at.seq : 0, signed.reason);
       }
     }
     if (out.length > 0) this.#uplink.upload(project, out);
+  }
+
+  /** The positions held for the policy cache or the hub asked for again now (link.ts, when either can decide more). */
+  release(): void {
+    this.#uplink.release();
+  }
+
+  /** The first position of `writer` held unsigned, or null (a suite's view). */
+  heldAt(project: string, writer: string): number | null {
+    return this.#uplink.holding(project, writer);
+  }
+
+  /** Whether a frame names only what sminos may be sent: every stream writer is left out of one to an old sminos. */
+  #toSminos(frame: Frame): void {
+    if (this.#ctx.streamsDown()) return this.#ctx.toSminos(frame);
+    const stream = (writer: unknown) => typeof writer === 'string' && streamOf(writer).digest !== null;
+    if (stream(frame.writer) || (isObject(frame.refusal) && stream(frame.refusal.writer))) return;
+    if (frame.t === 'have') {
+      const plain = (map: unknown) => (isObject(map) ? Object.fromEntries(Object.entries(map).filter(([writer]) => !stream(writer))) : map);
+      const out: Frame = { ...frame, have: plain(frame.have) };
+      if (frame.withheld !== undefined) out.withheld = plain(frame.withheld);
+      return this.#ctx.toSminos(out);
+    }
+    if (frame.t === 'events' && Array.isArray(frame.events)) {
+      const events = frame.events.filter((w) => !stream((isObject(w) && isObject(w.event) ? w.event : w)?.writer as unknown));
+      if (events.length === 0) return;
+      return this.#ctx.toSminos({ ...frame, events });
+    }
+    this.#ctx.toSminos(frame);
   }
 
   /** The signed uploads' bytes waiting for the hub link's room. */
@@ -285,20 +364,98 @@ export class LogRelay {
     }
     const held = this.#ctx.ledger.get(project, writer, seq);
     if (held !== null) {
-      if (held.hash === hash) return { event: rebuilt(form, held) };
+      if (held.hash === hash) return this.#streamHeld(writer) ? { hold: HUB_LACKS_STREAMS } : { event: rebuilt(form, held) };
       this.#ctx.log(`endpoint: sminos uploaded another body at ${writer}:${seq} in project ${project}, where the endpoint signed one already: refused (conflict), not signed again`);
       return { reason: 'conflict', message: `${writer}:${seq} was signed with another body` };
     }
+    const judged = await this.#judge(project, e, form, org);
+    if ('refuse' in judged) return { reason: judged.reason ?? 'audience', message: judged.refuse };
+    if ('hold' in judged) return judged;
+    if (this.#streamHeld(writer)) return { hold: HUB_LACKS_STREAMS };
     const session = sessionOfWriter(writer);
     const member = session === null ? null : this.#ctx.members.get(session);
     const now = new Date(this.#ctx.now());
-    const attest = member === null ? undefined : await attestFor(member, org.head, org.ref, org.certificates, now);
-    const body = attest === undefined ? form : { ...form, attest };
+    const attest = member === null ? undefined : await attestFor(member, org.head, org.ref, org.certificates, now, { spawner: judged.spawner });
+    const redacted = judged.redact.length === 0 ? undefined : { paths: judged.redact, hash: bodyHash(redact(form, judged.redact)) };
+    const signature: Omit<Signature, 'sig'> = {
+      hash,
+      ...(attest === undefined ? {} : { attest }),
+      ...(judged.audience === null ? {} : { audience: judged.audience }),
+      ...(judged.policyRev === undefined ? {} : { policyRev: judged.policyRev }),
+      ...(redacted === undefined ? {} : { redacted }),
+    };
+    const body = unsigned(form, signature);
     const signed = await signEvent({ org: org.head.org, project }, body, key.key.privateKey, key.key.pub);
     const mac = await this.#ctx.legacy.mac(project, signed);
-    const signature: Signature = { hash, sig: signed.sig, ...(attest === undefined ? {} : { attest }), ...(mac === null ? {} : { mac }) };
-    this.#ctx.ledger.put(project, writer, seq, signature);
-    return { event: rebuilt(form, signature) };
+    const kept: Signature = { ...signature, sig: signed.sig, ...(mac === null ? {} : { mac }) };
+    this.#ctx.ledger.put(project, writer, seq, kept);
+    return { event: rebuilt(form, kept) };
+  }
+
+  /**
+   * Whether `writer`'s events wait for the hub (D9): a stream's while the hub's welcome lacks `audience`. Checked at
+   * signing, at a resend of what the ledger signed, and again by the uplink as each upload leaves.
+   */
+  #streamHeld(writer: string): boolean {
+    return streamOf(writer).digest !== null && !this.#ctx.hubStreams();
+  }
+
+  #audiences(org: { head: OrgState; certificates: Certificates; ref: string }): AudienceContext {
+    return { org: () => org, members: this.#ctx.members, cache: this.#ctx.cache, now: this.#ctx.now };
+  }
+
+  /**
+   * The audience an own event is signed with, or why it is refused or held (see the header). `e` is the event as sminos
+   * sent it (a `void`'s claimed audience is read from it), `form` its upload form.
+   */
+  async #judge(project: string, e: Record<string, unknown> & { writer: string; seq: number }, form: Record<string, unknown>, org: { head: OrgState; certificates: Certificates; ref: string }): Promise<Judgment> {
+    const { writer, seq } = e;
+    const { digest } = streamOf(writer);
+    const ctx = this.#audiences(org);
+    const own = writerSession(writer);
+    if (form.kind === 'void') {
+      const extra = Object.keys(form).filter((k) => !['ts', 'writer', 'seq', 'kind', 'of', 'created'].includes(k));
+      if (extra.length > 0 || form.of !== seq) return { refuse: 'a void is {ts, writer, seq, kind, of: seq, audience?}, and nothing else', reason: 'malformed' };
+      if (digest === null) return e.audience === undefined ? { audience: null, redact: [], spawner: false } : { refuse: 'a void under a plain writer carries no audience' };
+      if (!isAudience(e.audience) || audienceDigest(e.audience) !== digest) return { refuse: "a void's audience is its writer's: the one its digest names" };
+      return { audience: [...e.audience], redact: [], spawner: false };
+    }
+    const member = own === null ? null : this.#ctx.members.get(own);
+    if (form.kind === 'unlisted') return this.#notice(form, own, digest, org, ctx);
+    const writing: Audience = own === null ? null : await audienceOrNull(ctx, own);
+    const refs = sessionRefs(form);
+    const known = new Map<string, Audience>();
+    for (const session of new Set([...refs.map((r) => r.session), ...(typeof member?.origin.spawnerSession === 'string' ? [member.origin.spawnerSession] : [])])) {
+      const k = await knownAudience(ctx, session);
+      if (k.kind === 'unknown' && this.#ctx.rebuilding()) return { hold: `session ${session.slice(0, 64)} is not yet in the policy cache, whose rebuild is incomplete` };
+      known.set(session, k.kind === 'unknown' ? null : k.audience);
+    }
+    const addressed = refs.filter((r) => r.role === 'addressing').map((r) => meet(writing, known.get(r.session) ?? null));
+    const audience = addressed[0] ?? writing;
+    if (addressed.some((a) => !sameAudience(a, audience))) return { refuse: 'its recipients give differing audiences: one event per audience' };
+    if (audience !== null && audience.length === 0) return { refuse: 'no member may read it: the audiences it names do not meet' };
+    if (digestOf(audience) !== digest) return { refuse: digest === null ? 'it names a private session: it is written under its audience stream' : "the writer's digest is not the audience the endpoint computes for it" };
+    const redacted = refs.filter((r) => r.role === 'provenance' && !contains(known.get(r.session) ?? null, audience)).map((r) => r.path);
+    const spawner = typeof member?.origin.spawnerSession !== 'string' || contains(known.get(member.origin.spawnerSession) ?? null, audience);
+    const snapshot = own !== null && (form.kind === 'joined' || form.kind === 'state') && form.session === own;
+    return { audience, ...(snapshot && member?.policyRev !== undefined ? { policyRev: member.policyRev } : {}), redact: redacted, spawner };
+  }
+
+  /** An `unlisted` notice (D6): a local session's, under its own namespace, its audience the members its change withdraws. */
+  async #notice(form: Record<string, unknown>, own: string | null, digest: string | null, org: { head: OrgState }, ctx: AudienceContext): Promise<Judgment> {
+    if (own === null || form.session !== own || 'text' in form || 'to' in form || digest === null) return { refuse: "an unlisted notice is its session's own, content-free, under a stream" };
+    const member = this.#ctx.members.get(own);
+    const now = await localPolicy(ctx, own);
+    if (member === null || member.policyRev === undefined || now === null) return { refuse: 'an unlisted notice is signed only for a session this machine holds, at its policyRev' };
+    const before = this.#ctx.cache.before(own, member.policyRev);
+    if (before === undefined) return { refuse: `no audience of ${own.slice(0, 64)} before policyRev ${member.policyRev} is held to withdraw from` };
+    const everyone = org.head.members.map((m) => m.id);
+    const previous = before.audience ?? everyone;
+    const next = now.members ?? everyone;
+    const withdrawn = [...new Set(previous.filter((m) => !next.includes(m)))].sort();
+    if (withdrawn.length === 0) return { refuse: 'the change withdraws no member: no unlisted notice' };
+    if (audienceDigest(withdrawn) !== digest) return { refuse: "the notice's digest is not the members its change withdraws" };
+    return { audience: withdrawn, policyRev: member.policyRev, redact: [], spawner: false };
   }
 
   // ---- hub → sminos -----------------------------------------------------------------------------------------------
@@ -309,7 +466,7 @@ export class LogRelay {
     if (frame.t === 'events') return this.#arrived(frame.project, frame.events);
     // A gap the hub names in what the endpoint signed: a hole, asked for once there is room (uplink.ts).
     if (frame.t === 'resend' && typeof frame.writer === 'string' && isLogSeq(frame.from) && this.#uplink.resend(frame.project, frame.writer, frame.from)) return;
-    this.#ctx.toSminos(frame);
+    this.#toSminos(frame);
     const refusal = frame.t === 'refused' && isObject(frame.refusal) ? frame.refusal : null;
     if (refusal !== null && typeof refusal.writer === 'string' && typeof refusal.reason === 'string') this.#uplink.refused(frame.project, refusal.writer, isLogSeq(refusal.seq) ? refusal.seq : 0, refusal.reason);
     if (frame.t === 'have' && this.#fresh.delete(frame.project)) this.#behind(frame.project, frame.have);
@@ -333,10 +490,16 @@ export class LogRelay {
     let down: Wrapped[] = [];
     let read = false;
     const flush = () => {
-      if (down.length > 0) this.#ctx.toSminos({ t: 'events', project, events: down });
+      if (down.length > 0) this.#toSminos({ t: 'events', project, events: down });
       down = [];
     };
     for (const e of events) {
+      // The hub's tombstone of a position it withheld (D5): spent, in stream order, so the writer goes on past it.
+      if (isWithheldTombstone(e)) {
+        flush();
+        this.#toSminos({ t: 'spent', project, writer: e.writer, seq: e.seq, reason: 'withheld' satisfies SpentReason });
+        continue;
+      }
       // A hold judged while a `retry` began is judged again: that retry may have passed this project before the event
       // was held, and no later one comes unless the state moves. The check and the hold run with no await between.
       let judged: Judged;
@@ -347,6 +510,7 @@ export class LogRelay {
       }
       const at = position(e);
       if ('deliver' in judged) {
+        this.#feed(judged.deliver, false);
         down.push(judged.deliver);
       } else if ('hold' in judged) {
         const kept = at !== null && this.#hold(project, at, e, judged.hold, since?.(`${at.writer}\n${at.seq}`));
@@ -356,12 +520,57 @@ export class LogRelay {
         this.#ctx.hub.send({ t: 'rejected', project, event: at, reason: judged.reason, message: judged.message } satisfies Rejected);
         if (at !== null && isLogSeq(at.seq)) {
           flush();
-          this.#ctx.toSminos({ t: 'spent', project, writer: at.writer, seq: at.seq, reason: judged.spent });
+          this.#toSminos({ t: 'spent', project, writer: at.writer, seq: at.seq, reason: judged.spent });
         }
       }
     }
     flush();
     if (read) this.#ctx.behind?.();
+  }
+
+  /**
+   * A verified remote snapshot into the policy cache (D7): a `joined` or `state` of a session on another machine, under
+   * its own writer or a stream of it, signed by that machine. Its audience is the stream's (none for a plain writer), its
+   * owners the attestation's as verified. `rebuild`: read back from the log, where two machines leave it unbound.
+   */
+  #feed(wrapped: Wrapped, rebuild: boolean): void {
+    const e = wrapped.event;
+    if (wrapped.signer.kind !== 'machine' || typeof e.writer !== 'string' || (e.kind !== 'joined' && e.kind !== 'state')) return;
+    const session = writerSession(e.writer);
+    if (session === null || e.session !== session) return;
+    const org = this.#ctx.org();
+    const name = writerMachine(e.writer);
+    if (org === null || name === null || this.#own(org.head, org.ref, name)) return;
+    const { digest } = streamOf(e.writer);
+    const audience = digest === null ? null : isAudience(e.audience) && audienceDigest(e.audience) === digest ? [...e.audience] : undefined;
+    if (audience === undefined || typeof e.created !== 'string') return;
+    const policyRev = Number.isSafeInteger(e.policyRev) && (e.policyRev as number) >= 0 ? (e.policyRev as number) : 0;
+    const owners = (wrapped.owners ?? []).map((o) => o.id);
+    if (this.#ctx.cache.take({ session, machine: wrapped.signer.ref, audience, policyRev, created: e.created, owners }, rebuild)) this.#ctx.policyChanged?.(session);
+  }
+
+  /**
+   * A page of `snapshots?` (D7's rebuild): each stored snapshot verified again here, as an arriving one is, and taken
+   * into the cache; sminos carries them and is never their source. What doesn't verify now is left out.
+   */
+  async snapshots(project: string, events: unknown): Promise<void> {
+    if (!Array.isArray(events)) return;
+    const org = this.#ctx.org();
+    if (org === null) return;
+    for (const raw of events) {
+      if (!isObject(raw) || typeof raw.writer !== 'string' || !isSig(raw.sig)) continue;
+      const event: Record<string, unknown> = { ...raw };
+      delete event.verified;
+      const signed = event as unknown as LogEventV2;
+      const name = writerMachine(signed.writer);
+      if (name === null || this.#own(org.head, org.ref, name)) continue;
+      const verdict = await verifyEvent({ org: org.head.org, project }, org.head, signed, org.certificates, new Date(this.#ctx.now()));
+      if (!verdict.ok) continue;
+      const signer = await signerOf(org.head, org.certificates, signed);
+      if (signer === null) continue;
+      const owners = await verifiedOwners(signed, org.head, org.certificates, this.#ctx.log);
+      this.#feed({ event, signer, ...(owners === undefined ? {} : { owners }) }, true);
+    }
   }
 
   /** An arriving event kept for a head that can judge it (see the header), within the hold's bounds; false once let go. */
@@ -459,7 +668,13 @@ export class LogRelay {
     let same = false;
     if (held !== null && form !== null && isSig(event.sig)) {
       try {
-        same = bodyHash(form) === held.hash && event.sig.kid === held.sig.kid && event.sig.value === held.sig.value && JSON.stringify(event.attest ?? null) === JSON.stringify(held.attest ?? null);
+        same =
+          bodyHash(form) === (held.redacted?.hash ?? held.hash) &&
+          event.sig.kid === held.sig.kid &&
+          event.sig.value === held.sig.value &&
+          JSON.stringify(event.attest ?? null) === JSON.stringify(held.attest ?? null) &&
+          JSON.stringify((event as { audience?: unknown }).audience ?? null) === JSON.stringify(held.audience ?? null) &&
+          JSON.stringify((event as { policyRev?: unknown }).policyRev ?? null) === JSON.stringify(held.policyRev ?? null);
       } catch {
         same = false;
       }
@@ -487,17 +702,45 @@ async function certifies(certificates: Certificates, kid: string): Promise<boole
   return false;
 }
 
-/** An own event as it goes up: the upload form with what the endpoint added, in the order it first went. */
-function rebuilt(form: Record<string, unknown>, signature: Signature): Record<string, unknown> {
-  return { ...form, ...(signature.attest === undefined ? {} : { attest: signature.attest }), sig: signature.sig, ...(signature.mac === undefined ? {} : { mac: signature.mac }) };
+/** A local session's audience as the endpoint knows it, the whole org when it knows none. */
+async function audienceOrNull(ctx: AudienceContext, session: string): Promise<Audience> {
+  const known = await knownAudience(ctx, session);
+  return known.kind === 'unknown' ? null : known.audience;
 }
 
-/** Who signed a verified v2 event: a member's device for a `hub/` writer, else the machine its name binds (by the head's
- * `machineNames`, or a certificate bearing the name). */
-async function signerOf(head: OrgState, certificates: Certificates, event: LogEventV2): Promise<Signer | null> {
+/** `form` with each dot path written null (a provenance reference redacted, D4); the rest untouched. */
+function redact(form: Record<string, unknown>, paths: readonly string[]): Record<string, unknown> {
+  const out = structuredClone(form);
+  for (const path of paths) {
+    const parts = path.split('.');
+    let at: unknown = out;
+    for (const part of parts.slice(0, -1)) at = isObject(at) || Array.isArray(at) ? (at as Record<string, unknown>)[part] : undefined;
+    if (isObject(at) || Array.isArray(at)) (at as Record<string, unknown>)[parts[parts.length - 1]] = null;
+  }
+  return out;
+}
+
+/** What is signed: the upload form, redacted, with the endpoint's additions but the signature. */
+function unsigned(form: Record<string, unknown>, signature: Omit<Signature, 'sig'>): Record<string, unknown> {
+  return {
+    ...(signature.redacted === undefined ? form : redact(form, signature.redacted.paths)),
+    ...(signature.attest === undefined ? {} : { attest: signature.attest }),
+    ...(signature.audience === undefined ? {} : { audience: signature.audience }),
+    ...(signature.policyRev === undefined ? {} : { policyRev: signature.policyRev }),
+  };
+}
+
+/** An own event as it goes up: the upload form with what the endpoint added, in the order it first went. */
+function rebuilt(form: Record<string, unknown>, signature: Signature): Record<string, unknown> {
+  return { ...unsigned(form, signature), sig: signature.sig, ...(signature.mac === undefined ? {} : { mac: signature.mac }) };
+}
+
+/** Who signed a verified v2 event: a member's device for a `hub/` writer or its stream, else the machine its name binds
+ * (by the head's `machineNames`, or a certificate bearing the name). */
+export async function signerOf(head: OrgState, certificates: Certificates, event: LogEventV2): Promise<Signer | null> {
   const kid = event.sig.kid;
   if (isHubWriter(event.writer)) {
-    const member = event.writer.slice('hub/'.length);
+    const member = streamOf(event.writer).base.slice(HUB_WRITER_PREFIX.length);
     for (const m of head.members) {
       if (m.id !== member) continue;
       for (const d of m.devices) if ((await keyId(d.channelPub)) === kid) return { kind: 'device', member, device: d.id, keyId: kid };

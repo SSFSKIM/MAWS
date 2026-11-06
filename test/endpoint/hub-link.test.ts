@@ -57,10 +57,25 @@ describe('the connection', () => {
     expect(link.generation).toBe(1);
     expect(hub.upgrades[0].headers['cf-access-client-id']).toBe('client-id.access');
     expect(hub.upgrades[0].headers['cf-access-client-secret']).toBe(CREDENTIAL);
-    expect(hub.frames('hello')[0].frame).toEqual({ t: 'hello', protocol: RL1_PROTOCOL, build: 'test-build', machine: ref });
+    // `audience` (P5 O18 D9): this endpoint passes no audience stream down to an sminos that doesn't advertise it.
+    expect(hub.frames('hello')[0].frame).toEqual({ t: 'hello', protocol: RL1_PROTOCOL, build: 'test-build', machine: ref, capabilities: ['audience'] });
+    expect(link.capabilities).toEqual([]);
     hub.current.close(1011, 'failed');
     await until(() => link.generation === 2, 'the second welcome');
     expect(hub.frames('hello')[1].frame).toMatchObject({ machine: ref, leaseGeneration: 1 });
+  });
+
+  it('reads the welcome’s capabilities (P5 O18 D9), and none from one that names none or a malformed list', async () => {
+    const hub = await fakeHub();
+    hub.welcomeFields = { capabilities: ['audience', 'later'] };
+    const { link } = linkTo(hub);
+    link.start();
+    await until(() => link.connected, 'the welcome');
+    expect(link.capabilities).toEqual(['audience', 'later']);
+    hub.welcomeFields = { capabilities: 'audience' };
+    hub.current.close(1011, 'failed');
+    await until(() => link.generation === 2, 'the second welcome');
+    expect(link.capabilities).toEqual([]);
   });
 
   it('reads the welcome for what it needs and ignores a frame it doesn’t know, with one log line per kind', async () => {

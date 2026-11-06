@@ -9,7 +9,7 @@
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { base64urlDecode, importOrgKey, machineProjectId, seal, verify, encodeEnrollmentCodeV2, type EnrollmentIssued, type EnrollmentKey } from 'desk-hub/protocol';
-import { base64urlEncode, generateSigningKey, isListingGone, keyId, signEvent, verifyEvent, type Action, type SignedOrgState, type SigningKey, type OrgState } from 'org-protocol';
+import { audienceDigest, base64urlEncode, generateSigningKey, isListingGone, keyId, signEvent, streamWriter, verifyEvent, type Action, type SignedOrgState, type SigningKey, type OrgState } from 'org-protocol';
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
 import { createEndpoint, type Endpoint } from '../../../src/endpoint';
 import type { Decision } from '../../../src/endpoint/authorize';
@@ -18,7 +18,8 @@ import type { ListingsFile } from '../../../src/endpoint/state/store';
 import { fakeServices, type FakeServices } from '../fake-services';
 import { ADMIN, ORG, startMiniflareHub, type LocalHub } from '../miniflare-hub';
 import { endorsed, genesis, memberId, newDevice, revokedDevice, successor, type TestDevice } from '../org-fixtures';
-import { replayCase, type Conversation, type FakeSminos, type Frame } from './fake-sminos';
+import { FakeSminos as Sminos, replayCase, type Conversation, type FakeSminos, type Frame } from './fake-sminos';
+import { TestOrg, type Rl1Machine } from '../../../apps/desk-hub/test/support/rl1';
 
 const conversation = JSON.parse(fs.readFileSync(join(__dirname, 'conversation.json'), 'utf8')) as Conversation;
 const sample = conversation.bindings;
@@ -66,8 +67,12 @@ async function accept(edit: (s: OrgState) => void | Promise<void>): Promise<void
 }
 
 /** A started endpoint on `services`, its hub link's sends watched and engine.sessions answering for lane B. */
-async function startEndpoint(): Promise<Endpoint> {
-  const started = createEndpoint({ build: sample.build as string, sleep: (ms) => sleep(Math.min(ms, 50)) });
+async function startEndpoint(options: { askMs?: number } = {}): Promise<Endpoint> {
+  const started = createEndpoint({
+    build: sample.build as string,
+    sleep: (ms) => sleep(Math.min(ms, 50)),
+    ...(options.askMs === undefined ? {} : { uplink: { bytes: 8 * 1024 * 1024, reserve: 1024 * 1024, askMs: options.askMs } }),
+  });
   const send = started.hub.send.bind(started.hub);
   started.hub.send = (frame) => {
     toHub.push(structuredClone(frame) as Frame);
@@ -112,7 +117,10 @@ beforeAll(async () => {
   legacyKey = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
 }, 120_000);
 
+const closers: Array<() => void> = [];
+
 afterAll(async () => {
+  for (const close of closers.splice(0)) close();
   for (const c of connections.values()) c.close();
   await endpoint?.stop();
   services?.cleanup();
@@ -348,4 +356,104 @@ it('replays the conversation O12 copies, line for line', async () => {
   const log = services.lines.join('\n');
   expect(log).not.toContain(legacyKey);
   expect(log).not.toContain(bindings.token as string);
+}, 120_000);
+
+// P5 O18 M2 (docs/doperpowers/plans/2026-11-05-p5-o18-message-reach.md): a private session's events through the real
+// signer to the M1 hub, read by B's machine on RL1 (owned by B, advertising `audience`), after the replay above.
+it('replays a private session against the hub: notices through the real signer, streams served by audience, a spawner redacted, a registry outage retried', async () => {
+  const org = TestOrg.of(hub as never, A, a1 as never, recovery, head);
+  const bm: Rl1Machine = await org.machine('b-view', { capabilities: ['audience'], owners: [B] });
+  head = org.head;
+  closers.push(() => bm.close());
+  // An endpoint whose uplink asks a hole again after half a second, so a `state-unavailable` lands within the test.
+  await endpoint.stop();
+  endpoint = await startEndpoint({ askMs: 500 });
+  await until(() => endpoint.hub.connected && endpoint.status().stateVersion === head.state.version && fs.existsSync(join(services.machine.stateDir, 'rl10.json')), 'the endpoint on the new head');
+  const info = rl10Info();
+  const sminos = await Sminos.open(info.socket);
+  closers.push(() => sminos.close());
+  sminos.send({ t: 'hello', protocol: { major: 1, minor: 0 }, capabilities: ['audience'], token: info.token, sminos: { version: 'o18' }, policy: { read_only: false, ceiling: 'settings' } });
+  await sminos.next((f) => f.t === 'welcome', 'the welcome');
+  // sminos's `snapshots?` responder: its log holds no remote snapshot, so each project is one empty last page.
+  const answered = new Set<number>();
+  const responder = setInterval(() => {
+    sminos.received.forEach((f, i) => {
+      if (f.t !== 'snapshots?' || answered.has(i)) return;
+      answered.add(i);
+      sminos.send({ t: 'snapshots', id: f.id, project: f.project, events: [], next: null, done: true });
+    });
+  }, 20);
+  closers.push(() => clearInterval(responder));
+  sminos.send({ t: 'hello', project: PROJECT, name: 'maws', have: {} });
+  await bm.sync(PROJECT);
+
+  const sid = () => crypto.randomUUID();
+  const S = sid();
+  const L = sid();
+  const K = sid();
+  const L2 = sid();
+  const member = (session: string, alias: string, record: Record<string, unknown>) =>
+    sminos.send({ t: 'member', session, alias, project: PROJECT, lane: 'A', state: 'idle', cwd: '/w', owners: ['@machine'], ownersProof: [], origin: { kind: 'terminal' }, ...record });
+  const told = (session: string, policyRev: number) => sminos.next((f) => f.t === 'audience' && f.session === session && f.policyRev === policyRev, `the audience of ${session} at ${policyRev}`);
+  const ts = () => new Date().toISOString();
+  const up = (events: Array<Record<string, unknown>>) => sminos.send({ t: 'events', project: PROJECT, events });
+  const refusedOf = (writer: string) => sminos.received.filter((f) => f.t === 'refused' && (f.refusal as { writer?: string }).writer === writer);
+  const atB = (writer: string, seq: number) => bm.log.get(PROJECT)?.get(writer)?.get(seq) as Record<string, unknown> | undefined;
+  const sorted = (m: string[]) => [...new Set(m)].sort();
+
+  // S, private to {A, B}, then B's share removed: the notice, audience {B}, through the real signer.
+  member(S, 'secret', { access: 'private', shares: [{ member: B, grade: 'list' }], policyRev: 1 });
+  expect((await told(S, 1)).members).toEqual(sorted([A, B]));
+  const shared = streamWriter(`${NAME}/${S}`, sorted([A, B]));
+  up([{ ts: ts(), writer: shared, seq: 1, kind: 'joined', session: S, alias: 'secret' }]);
+  await until(() => atB(shared, 1), 'S’s shared snapshot at B');
+  member(S, 'secret', { access: 'private', policyRev: 2 });
+  expect((await told(S, 2)).members).toEqual([A]);
+  const notice = streamWriter(`${NAME}/${S}`, [B]);
+  const alone = streamWriter(`${NAME}/${S}`, [A]);
+  up([
+    { ts: ts(), writer: notice, seq: 1, kind: 'unlisted', session: S },
+    { ts: ts(), writer: alone, seq: 1, kind: 'joined', session: S, alias: 'secret' },
+  ]);
+  const unlisted = await until(() => atB(notice, 1), 'the notice at B');
+  expect(unlisted).toMatchObject({ kind: 'unlisted', session: S, policyRev: 2, audience: [B] });
+
+  // L, listed, then private with no share: its notice's audience is every other member of the org.
+  member(L, 'open', { policyRev: 0 });
+  await told(L, 0);
+  up([{ ts: ts(), writer: `${NAME}/${L}`, seq: 1, kind: 'joined', session: L, alias: 'open' }]);
+  await until(() => atB(`${NAME}/${L}`, 1), 'L’s listed snapshot at B');
+  member(L, 'open', { access: 'private', policyRev: 1 });
+  await told(L, 1);
+  const everyone = sorted(head.state.members.map((m) => m.id).filter((id) => id !== A));
+  const gone = streamWriter(`${NAME}/${L}`, everyone);
+  up([{ ts: ts(), writer: gone, seq: 1, kind: 'unlisted', session: L }]);
+  expect(await until(() => atB(gone, 1), 'L’s notice at B')).toMatchObject({ audience: everyone, policyRev: 1 });
+
+  // K, a listed child of the now private S: its snapshot and attestation don't name its spawner.
+  member(K, 'child', { origin: { kind: 'sminos', spawnerSession: S }, policyRev: 0 });
+  await told(K, 0);
+  up([{ ts: ts(), writer: `${NAME}/${K}`, seq: 1, kind: 'joined', session: K, alias: 'child', origin: { kind: 'sminos', spawnerSession: S } }]);
+  const child = await until(() => atB(`${NAME}/${K}`, 1), 'K’s snapshot at B');
+  expect((child.origin as { spawnerSession: unknown }).spawnerSession).toBeNull();
+  expect((child.attest as { origin: Record<string, unknown> }).origin.spawnerSession).toBeUndefined();
+  expect(JSON.stringify(child)).not.toContain(S);
+
+  // The registry unreadable: a say naming K is refused `state-unavailable` and stored nowhere; the registry back, the
+  // endpoint asks sminos for it again on its own, with no further write and no reconnect, and it lands.
+  member(L2, 'open2', { policyRev: 0 });
+  await told(L2, 0);
+  await hub.registryLacks('policies');
+  const say = { ts: ts(), writer: `${NAME}/${L2}`, seq: 1, kind: 'say', from: 'open2', to: [{ session: K, alias: 'child' }], text: 'after the outage' };
+  up([say]);
+  await until(() => refusedOf(`${NAME}/${L2}`).some((f) => (f.refusal as { reason: string }).reason === 'state-unavailable'), 'the state-unavailable refusal');
+  await hub.registryLacks(null);
+  await sminos.next((f) => f.t === 'resend' && f.writer === `${NAME}/${L2}` && f.from === 1, 'the endpoint’s ask for it again', 10_000);
+  up([say]);
+  expect(await until(() => atB(`${NAME}/${L2}`, 1), 'the say at B')).toMatchObject({ text: 'after the outage' });
+
+  // Nothing of what B may not read reached B's machine, and the hub admitted every event (nothing withheld).
+  expect(bm.log.get(PROJECT)?.has(alone)).toBe(false);
+  expect(JSON.stringify(bm.frames)).not.toContain(audienceDigest([A]));
+  for (const writer of [shared, notice, alone, `${NAME}/${L}`, gone, `${NAME}/${K}`]) expect(refusedOf(writer)).toEqual([]);
 }, 120_000);

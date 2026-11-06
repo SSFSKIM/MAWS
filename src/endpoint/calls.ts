@@ -512,7 +512,17 @@ export class Calls {
     const out: Signed<Listing>[] = [];
     for (const { member: m, listingId, target } of this.ctx.members()) {
       if (listingId === null || !rankAtLeast(sessionRank(this.ctx.records.record(target), member, owners), 'list')) continue;
-      const record = await this.ctx.recordFor({ session: listingId, project: m.project, lane: m.lane, state: m.state, title: m.title ?? '', owners: m.owners, ...(m.access === undefined ? {} : { access: m.access }) });
+      const record = await this.ctx.recordFor({
+        session: listingId,
+        project: m.project,
+        lane: m.lane,
+        state: m.state,
+        title: m.title ?? '',
+        owners: m.owners,
+        ...(m.access === undefined ? {} : { access: m.access }),
+        ...(m.shares === undefined ? {} : { shares: m.shares.map((share) => share.member) }),
+        ...(m.policyRev === undefined ? {} : { policyRev: m.policyRev }),
+      });
       if (record !== null) out.push(record);
     }
     return out;

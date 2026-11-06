@@ -18,6 +18,7 @@
 //     `machine` presence gives its project's checkouts, a sub-less `host` is a to-human event (M3's `wrote`, once per
 //     `(writer, seq)`, durably), a sub-less `raised` or `settled` moves its session's notify count by one request
 //     between the sets, and every message goes to the session listeners (M8's subscriptions);
+//   - `reach?`, answered `reach` (reach.ts, P5 O18 D3), and `snapshots`, the policy cache's rebuild (rebuild.ts);
 //   - `words?`, answered `words` (words.ts); `policy-set`, the policy changed and restated; `legacy-key`, kept (logged
 //     and dropped once the org state retires the key);
 //   - `rpc-result`, handed to the result listeners (M7) and acknowledged `rpc-ack {opId, nonce}`; `queried` and
@@ -26,7 +27,15 @@
 // What the endpoint sends besides: lane A actions as DX2's `rpc` (`rpc()`, M7's to call), `query` and `tombstone`
 // (answered within `ANSWER_MS`, else `unavailable`), M8's session-lane requests (`send`: `subscribe`, `unsubscribe`,
 // `rows`, `diff`, `output`, `read`, fed by `onSession`, `onPending` and `onLink`), and the policy at each change.
-import type { Action, Certificates, OrgState, SigningKey } from 'org-protocol';
+//
+// Message reach (P5 O18, docs/doperpowers/plans/2026-11-05-p5-o18-message-reach.md D7, D9). The welcome advertises
+// `capabilities: ['access', 'reach']`: sminos may send a member's `access`, `shares` and `policyRev`, and ask `reach?`.
+// To an sminos whose hello advertises `audience`, the endpoint sends an `audience {session, owners, members, digest,
+// policyRev}` for each local session as its record or the head moves, and for each remote session the policy cache
+// holds, all of them after each welcome, and asks `snapshots?` while the cache's rebuild is incomplete; to any other,
+// neither, and no stream writer goes down (log-relay.ts). Each local session's audience by `policyRev` is kept in the
+// cache as its record moves, which an `unlisted` notice is checked against.
+import { RL1_CAPABILITIES, type Action, type Certificates, type OrgState, type SigningKey } from 'org-protocol';
 import type { EndpointPolicy, Policy } from '../policy';
 import { isCeiling } from '../policy';
 import type { LogProject } from '../hub-link';
@@ -34,12 +43,19 @@ import type { SessionLaneMessage } from '../notify';
 import type { EndpointState } from '../state/store';
 import { InboundIndex } from './inbound-index';
 import { LegacyKey } from './legacy';
-import { LogRelay } from './log-relay';
+import { localPolicy, digestOf, type AudienceContext } from './audiences';
+import { LogRelay, type RelayContext } from './log-relay';
 import { Members, type MembersContext } from './members';
+import { PolicyCache } from './policy-cache';
+import { decideReach } from './reach';
+import { Rebuild } from './rebuild';
 import { formerNames, orgDirectory, revocationSet, type RevocationSet } from './org-directory';
 import { RL10_PROTOCOL, Rl10Server, type Frame, type Rl10Connection } from './server';
 import { SignatureLedger } from './signature-ledger';
 import { decideWords } from './words';
+
+/** What the welcome advertises to sminos (P5 O18 D9): a member frame's `access`, `shares`, `policyRev`, and `reach?`. */
+export const RL10_CAPABILITIES = ['access', 'reach'] as const;
 
 /** How long a `query` or `tombstone` waits for sminos's answer before it is `unavailable`. */
 export const ANSWER_MS = 10_000;
@@ -68,7 +84,7 @@ export type Rl10Context = {
   identity(): Identity | null;
   key(): { key: SigningKey; keyId: string } | null;
   policy: EndpointPolicy;
-  hub: { openProject(project: string, handler: LogProject): () => void; send(frame: Frame): boolean; writable?(): Promise<void> };
+  hub: { openProject(project: string, handler: LogProject): () => void; send(frame: Frame): boolean; writable?(): Promise<void>; readonly capabilities?: readonly string[] };
   /** M3's listings and notify, which the session lane feeds. */
   listings: MembersContext['listings'] & { refresh(): Promise<void>; listedSessions(): readonly string[] };
   notifier: {
@@ -83,6 +99,8 @@ export type Rl10Context = {
   behind?(): void;
   now(): number;
   log(line: string): void;
+  /** The uplink's cap, reserve and ask wait (the suites'; uplink.ts's defaults unless given). */
+  uplink?: RelayContext['uplink'];
 };
 
 /** A lane A action's result, as sminos reports it. */
@@ -106,6 +124,13 @@ export class Rl10 {
   readonly #queries = new Map<string, Waiting[]>();
   readonly #tombstones = new Map<string, Waiting[]>();
   readonly #said = new Set<string>();
+  /** P5 O18: the policy cache and its rebuild. */
+  readonly cache: PolicyCache;
+  readonly #rebuild: Rebuild;
+  /** What sminos's hello advertised on this connection (`audience`, P5 O18 D9). */
+  #sminos: readonly string[] = [];
+  /** Each session's `audience` frame as last sent on this connection, by session. */
+  readonly #audienceSent = new Map<string, string>();
   /** What this connection was last told of the head (a restatement goes only when it changed). */
   #told: { revoked: string; org: string } | null = null;
   /** The last restatement queued (`#restate`). */
@@ -122,6 +147,7 @@ export class Rl10 {
       return state.subdirectory(name);
     };
     this.#ledger = new SignatureLedger(sub('signatures'));
+    this.cache = new PolicyCache(sub('policy'), ctx.log);
     this.#index = new InboundIndex(sub('inbound'), ctx.now);
     // The enrollment's org, listed or not, or a pending provisioning's (O14 M1, whose first sync precedes its set): the
     // first sync's head, which an enrollment adopts before it is listed, is one `legacy.json` follows (legacy.ts).
@@ -166,6 +192,25 @@ export class Rl10 {
       behind: () => ctx.behind?.(),
       now: ctx.now,
       log: ctx.log,
+      ...(ctx.uplink === undefined ? {} : { uplink: ctx.uplink }),
+      cache: this.cache,
+      streamsDown: () => this.#streams,
+      hubStreams: () => ctx.hub.capabilities?.includes(RL1_CAPABILITIES.audience) === true,
+      rebuilding: () => this.#rebuild.incomplete,
+      policyChanged: (session) => {
+        const remote = this.cache.get(session);
+        if (remote !== null) this.#tellAudience(session, { owners: remote.owners, members: remote.audience, policyRev: remote.policyRev });
+        this.relay.release();
+      },
+    });
+    this.#rebuild = new Rebuild({
+      cache: this.cache,
+      send: (frame) => this.send(frame),
+      take: (project, events) => this.relay.snapshots(project, events),
+      projects: () => this.relay.projects(),
+      enabled: () => this.#streams,
+      progressed: () => this.relay.release(),
+      log: ctx.log,
     });
     this.#server = new Rl10Server({
       stateDir: ctx.stateDir,
@@ -188,6 +233,12 @@ export class Rl10 {
   forgetRecords(): void {
     this.#ledger.forget();
     this.#index.forget();
+    this.cache.forget();
+  }
+
+  /** Whether sminos's hello on this connection advertised `audience` (P5 O18 D9). */
+  get #streams(): boolean {
+    return this.#sminos.includes('audience');
   }
 
   /** Whether RL10 is wanted served (the last `serve` or `unserve` called); the socket follows, one change at a time. */
@@ -240,12 +291,40 @@ export class Rl10 {
   async adopted(): Promise<void> {
     if (!this.#welcomed) return;
     await this.#restate(false);
+    // A head moves what `@machine` resolves to, so every local audience is stated again where it moved.
+    for (const session of this.members.sessions()) await this.#recordMoved(session);
     await this.relay.retry();
   }
 
-  /** An RL1 connection was welcomed (the log relay checks what the hub holds). */
+  /** An RL1 connection was welcomed (the log relay checks what the hub holds; stream events held for it go up). */
   hubWelcomed(): void {
     this.relay.hubWelcomed();
+    if (this.#ctx.hub.capabilities?.includes(RL1_CAPABILITIES.audience) === true) this.relay.release();
+  }
+
+  /**
+   * A local session's record as it stands (a `member` frame, or a new head): its audience at its `policyRev` kept in the
+   * cache's history, and told to sminos when it moved.
+   */
+  async #recordMoved(session: string): Promise<void> {
+    const head = this.#ctx.head();
+    const identity = this.#ctx.identity();
+    if (head === null || identity === null) return;
+    const ctx: AudienceContext = { org: () => ({ head: head.state, certificates: head.certificates, ref: identity.ref }), members: this.members, cache: this.cache, now: this.#ctx.now };
+    const policy = await localPolicy(ctx, session);
+    if (policy === null) return;
+    this.cache.remember(session, policy.policyRev, policy.members);
+    this.#tellAudience(session, policy);
+  }
+
+  /** An `audience` frame down, when sminos takes them and it differs from the last sent of the session. */
+  #tellAudience(session: string, policy: { owners: string[]; members: string[] | null; policyRev: number }): void {
+    if (!this.#welcomed || !this.#streams) return;
+    const frame = { t: 'audience', session, owners: policy.owners, members: policy.members, digest: digestOf(policy.members), policyRev: policy.policyRev };
+    const text = JSON.stringify(frame);
+    if (this.#audienceSent.get(session) === text) return;
+    this.#audienceSent.set(session, text);
+    this.send(frame);
   }
 
   // ---- M7's and M8's seams ----------------------------------------------------------------------------------------
@@ -388,13 +467,17 @@ export class Rl10 {
     if (policy !== null) this.#ctx.policy.fromSminos(policy);
     // A connection replaced: what the last one held open on RL1 closes, and is opened again by this one's hellos.
     this.relay.closeAll();
+    this.#rebuild.ended();
     if (this.#welcomed) this.#link(false);
     this.#told = null;
+    this.#sminos = Array.isArray(hello.capabilities) ? hello.capabilities.filter((c): c is string => typeof c === 'string').slice(0, 32) : [];
+    this.#audienceSent.clear();
     const current = this.#ctx.policy.current();
     connection.send({
       t: 'welcome',
       protocol: RL10_PROTOCOL,
-      capabilities: [],
+      // P5 O18 D9: sminos may send a member's access, shares and policyRev, and ask `reach?`.
+      capabilities: [...RL10_CAPABILITIES],
       build: this.#ctx.build,
       identity: { org: identity.org, hub: identity.hub, name: identity.name, former: formerNames(head.state, identity.ref, identity.name), ref: identity.ref, enrolled: identity.enrolled },
       policy: { read_only: current.read_only, ceiling: current.ceiling },
@@ -405,6 +488,8 @@ export class Rl10 {
     await this.#restate(true);
     if (!this.legacy.held && !this.legacy.retired) this.send({ t: 'legacy-key?' });
     this.members.welcome();
+    // The remote sessions' audiences; the local ones follow their member frames in the restatement.
+    for (const [session, remote] of this.cache.policies()) this.#tellAudience(session, { owners: remote.owners, members: remote.audience, policyRev: remote.policyRev });
   }
 
   #closed(): void {
@@ -413,6 +498,9 @@ export class Rl10 {
     this.members.stop();
     this.#told = null;
     this.relay.closeAll();
+    this.#rebuild.ended();
+    this.#sminos = [];
+    this.#audienceSent.clear();
     for (const waiting of [this.#queries, this.#tombstones]) {
       for (const entries of waiting.values()) {
         for (const entry of entries) {
@@ -448,13 +536,16 @@ export class Rl10 {
     if (!this.#welcomed || connection !== this.#server.current) return;
     switch (frame.t) {
       case 'hello':
-        return this.relay.hello(frame);
+        this.relay.hello(frame);
+        return this.#rebuild.kick();
       case 'events':
         return this.relay.events(frame);
       case 'rejected':
         return this.relay.rejected(frame);
       case 'member':
-        return this.members.member(frame);
+        await this.members.member(frame);
+        if (frame.gone !== true && typeof frame.session === 'string') await this.#recordMoved(frame.session);
+        return;
       case 'restated':
         return this.members.restated();
       case 'pending':
@@ -463,6 +554,10 @@ export class Rl10 {
         return this.#session(frame.message);
       case 'words?':
         return this.#words(frame);
+      case 'reach?':
+        return this.#reach(frame);
+      case 'snapshots':
+        return this.#rebuild.answer(frame);
       case 'rpc-result':
         return this.#result(frame);
       case 'queried':
@@ -576,6 +671,41 @@ export class Rl10 {
       if (before.every((v, i) => v === after[i])) return this.send({ t: 'words', id: frame.id, verdict });
     }
     this.#ctx.log(`endpoint: words? ${frame.id.slice(0, 64)} went unanswered: the head or the session's record moved twice while it was decided`);
+  }
+
+  /**
+   * `reach?` (P5 O18 D3), decided against what it read as `words?` is: decided again, once, when the head, the
+   * certificates or the recipient's record moved meanwhile; moved again, or a recipient the endpoint holds no record
+   * of, and no answer goes, so the delivery stays owed and sminos asks again.
+   */
+  async #reach(frame: Frame): Promise<void> {
+    if (typeof frame.id !== 'string') return;
+    const session = typeof frame.session === 'string' ? frame.session : null;
+    const stamp = () => {
+      const head = this.#ctx.head();
+      return [head?.state, head?.certificates, session === null ? null : JSON.stringify([this.members.get(session), this.members.recordOf(session)])];
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const before = stamp();
+      const head = this.#ctx.head();
+      const identity = this.#ctx.identity();
+      const verdict = await decideReach(
+        {
+          org: () => (head === null || identity === null ? null : { head: head.state, certificates: head.certificates, ref: identity.ref }),
+          machineOwners: this.#ctx.machineOwners,
+          members: this.members,
+          ledger: this.#ledger,
+          index: this.#index,
+          now: this.#ctx.now,
+        },
+        frame,
+      );
+      const after = stamp();
+      if (!before.every((v, i) => v === after[i])) continue;
+      if (verdict === null) return;
+      return this.send(verdict === 'deliver' ? { t: 'reach', id: frame.id, verdict } : { t: 'reach', id: frame.id, verdict: 'refuse', reason: verdict.refuse });
+    }
+    this.#ctx.log(`endpoint: reach? ${frame.id.slice(0, 64)} went unanswered: the head or the session's record moved twice while it was decided`);
   }
 
   #result(frame: Frame): void {

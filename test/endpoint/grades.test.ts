@@ -22,6 +22,8 @@ import type { HostResponse } from '@shared/ipc/host-protocol';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
 import { Authorizer, type AuthorizeContext } from '../../src/endpoint/authorize';
 import { OFFERS, type Offers } from '../../src/endpoint/offers';
+import { rankAtLeast, sessionRank } from '../../src/endpoint/grades';
+import { readMember } from '../../src/endpoint/rl10/members';
 import { EndpointOrg } from '../../src/endpoint/org-sync';
 import type { SessionRecord, SessionTarget } from '../../src/endpoint/sources';
 import { EndpointState } from '../../src/endpoint/state/store';
@@ -780,6 +782,24 @@ describe('the decision without a channel', () => {
     // A spawn's target is the machine: its member's spawn right.
     expect((await authz.authorize(query(A, null, 'sminos.spawn'), { member: A, device: 'a1', clientClass: 'native-mac' }, now)).ok).toBe(true);
     expect(await authz.authorize(query(B, null, 'sminos.spawn'), { member: B, device: 'b1', clientClass: 'native-mac' }, now)).toEqual({ ok: false, reason: 'grade' });
+  });
+
+  it('a `list` share (Can message, P5 O18 D1) grants message reach and nothing view-gated', async () => {
+    const listed: SessionRecord = { lane: 'A', session: 'la-list', owners: [A], access: 'private', shares: [{ member: B, grade: 'list' }], launch: 'L1' };
+    expect(sessionRank(listed, B, [])).toBe('list');
+    expect(rankAtLeast(sessionRank(listed, B, []), 'list')).toBe(true);
+    expect(rankAtLeast(sessionRank(listed, B, []), 'view')).toBe(false);
+    expect(sessionRank(listed, C, [])).toBeNull();
+    // RL10 carries it: a member frame with a `list` share is read, not refused whole.
+    expect(readMember({ session: 'la-list', alias: 'l', project: 'p', lane: 'A', state: 'idle', cwd: '/w', owners: [A], ownersProof: [], origin: { kind: 'terminal' }, access: 'private', shares: [{ member: B, grade: 'list' }], policyRev: 3 })).not.toBeNull();
+    const unit = await authorizer();
+    unit.records.set('A:la-list', listed);
+    const target: SessionTarget = { lane: 'A', session: 'la-list' };
+    const now = Date.now();
+    // Every view-gated read of the session is refused to B: rows, and a query on an op there.
+    expect(await unit.authorizer.authorize({ kind: 'call', name: 'sminos.rows', input: { session: 'la-list' } }, whoB, now)).toEqual({ ok: false, reason: 'grade' });
+    expect(await unit.authorizer.authorize({ kind: 'query', name: 'sminos.steer', input: { member: B, target } }, whoB, now)).toEqual({ ok: false, reason: 'grade' });
+    expect((await unit.authorizer.authorize({ kind: 'call', name: 'sminos.rows', input: { session: 'la-list' } }, whoA, now)).ok).toBe(true);
   });
 
   it('stops every action but a delivered state once the head is too old (`state-too-old`), and serves reads', async () => {
