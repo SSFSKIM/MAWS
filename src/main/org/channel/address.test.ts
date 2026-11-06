@@ -12,8 +12,9 @@ const joined = (session: string, alias: string, machine = 'mini') => ({ writer: 
 const retired = (session: string, machine = 'mini') => ({ writer: `${machine}/${session}`, seq: 2, kind: 'retired', session, by: '', reason: 'ended' });
 const renamed = (session: string, alias: string, machine = 'mini') => ({ writer: `${machine}/${session}`, seq: 3, kind: 'renamed', session, alias, name_source: 'user' });
 const titled = (session: string, title: unknown, machine = 'mini') => ({ writer: `${machine}/${session}`, seq: 4, kind: 'titled', session, title });
-/** The events at offsets 1, 2, …, in the order given. */
-const logged = (...events: Array<Record<string, unknown> & { writer: string }>) => events.map((event, i) => ({ offset: i + 1, event }));
+type Logged = Record<string, unknown> & { writer: string };
+/** The events at offsets 1, 2, …, in the order given, verified. */
+const logged = (...events: Logged[]) => events.map((event, i) => ({ offset: i + 1, event, verdict: { label: 'verified' as const } }));
 
 describe('the sessions a project log names', () => {
   it("keeps each session's latest membership, alias and title, from its own writer only", () => {
@@ -29,6 +30,26 @@ describe('the sessions a project log names', () => {
   it('reads them by offset, whatever order they are given in', () => {
     const [a, b, c] = logged(joined(S1, 'maws-45'), retired(S1), joined(S1, 'maws-46'));
     expect(projectSessions([c, a, b])).toEqual([{ session: S1, alias: 'maws-46', machine: 'mini', title: null, member: true }]);
+  });
+
+  it('reads an authenticated lifecycle alone when a session has one; a legacy one names a session without one, never a member', () => {
+    const legacy = { label: 'legacy' as const };
+    const [join, rename] = logged(joined(S1, 'maws-45'), renamed(S1, 'maws-46'));
+    const entries = [
+      join,
+      { offset: 2, event: renamed(S1, 'hijacked'), verdict: legacy },
+      { offset: 3, event: joined(S1, 'hijacked', 'mini'), verdict: legacy },
+      { ...rename, offset: 4, verdict: { label: 'migrated' as const, by: 'mini' } },
+      { offset: 5, event: titled(S1, 'forged'), verdict: legacy },
+      { offset: 6, event: joined(S2, 'old-one'), verdict: legacy },
+      { offset: 7, event: joined(S3, 'failed'), verdict: { failed: 'signature' } },
+    ];
+    const sessions = projectSessions(entries);
+    expect(sessions).toEqual([
+      { session: S1, alias: 'maws-46', machine: 'mini', title: null, member: true },
+      { session: S2, alias: 'old-one', machine: 'mini', title: null, member: false },
+    ]);
+    expect(addressOf('@old-one hi', sessions)).toEqual({ ok: false, reason: 'no-member', detail: '@old-one' });
   });
 
   it('names the lifecycle an event is: its session and kind, from its own writer', () => {

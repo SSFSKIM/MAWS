@@ -281,8 +281,9 @@ export const ChannelEventSchema = z.strictObject({
 export type ChannelEvent = z.infer<typeof ChannelEventSchema>;
 /**
  * A session of the project as its log's lifecycle names it (each session's latest `joined`, `retired`, `renamed` and
- * `titled` that verified, kept past the cache's bound): its alias, machine and title, and whether it is a member now.
- * Addressing reads these, and the stream's titles.
+ * `titled`, kept past the cache's bound): its alias, machine and title, and whether it is a member now. Its authenticated
+ * lifecycle (`verified` or `migrated`) alone, when it has any; a session with only a `legacy` one is named by it but is
+ * never a member. Addressing reads these (members only), and the stream's titles.
  */
 export const ChannelSessionSchema = z.strictObject({ session: z.string(), alias: z.string(), machine: z.string(), title: z.string().nullable(), member: z.boolean() });
 export type ChannelSession = z.infer<typeof ChannelSessionSchema>;

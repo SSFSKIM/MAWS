@@ -5,6 +5,7 @@
 // whatever offset served them and however often the cache is reloaded.
 import { describe, expect, it } from 'vitest';
 import { ChannelOrg, ORG, PROJECT, S1, S2, type Event } from '../../../../test/org/channel-world';
+import { addressOf } from './address';
 import { emptyLog, loadLog, type ChannelLimits, type Ground } from './cache';
 
 const LIMITS: ChannelLimits = { events: 5000, bytes: 8 * 1024 * 1024 };
@@ -144,6 +145,50 @@ describe("the project's sessions", () => {
     const forged = { ...(await o.joined(studio, 2, 'hijacked')), writer: `mini/${S1}` };
     await log.add(at([await o.joined(o.mini, 1, 'maws-45'), forged]), ground(o));
     expect(log.sessions().map((s) => s.alias)).toEqual(['maws-45']);
+  });
+});
+
+describe("the project's sessions, by their lifecycle's provenance", () => {
+  /** A lifecycle event with a phase-1 code and no signature: nothing in the app can check it, so it reads `legacy`. */
+  const unsigned = (writer: string, seq: number, fields: Record<string, unknown>): Event => ({
+    ts: '2026-10-15T08:00:00.000Z',
+    writer,
+    seq,
+    ...fields,
+    mac: { nonce: 'AAAAAAAAAAAAAAAAAAAAAA', value: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' },
+  });
+
+  // the branch review's finding: a hostile hub may serve an unsigned lifecycle record under any writer
+  it("never lets an unsigned rename or join override a session's verified lifecycle, nor address it", async () => {
+    const o = await ChannelOrg.make();
+    const log = emptyLog(reader(o), PROJECT, LIMITS);
+    await log.add(at([await o.joined(o.mini, 1, 'maws-45')]), ground(o));
+    const forged = [
+      unsigned(`mini/${S1}`, 2, { kind: 'renamed', session: S1, alias: 'hijacked' }),
+      unsigned(`mini/${S1}`, 3, { kind: 'joined', session: S1, alias: 'hijacked', machine: 'elsewhere' }),
+      unsigned(`mini/${S1}`, 4, { kind: 'titled', session: S1, title: 'a forged title' }),
+    ];
+    await log.add(at(forged, 2), ground(o));
+    expect(log.events().filter((e) => e.offset > 1).map((e) => e.label)).toEqual(['legacy', 'legacy', 'legacy']);
+    const maws45 = { session: S1, alias: 'maws-45', machine: 'mini', title: null, member: true };
+    expect(log.sessions()).toEqual([maws45]);
+    expect(addressOf('@hijacked hi', log.sessions())).toEqual({ ok: false, reason: 'no-member', detail: '@hijacked' });
+    expect(addressOf('@maws-45 hi', log.sessions())).toEqual({ ok: true, to: [{ session: S1, alias: 'maws-45' }] });
+    const reloaded = await loadLog(roundTrip(log.file()), { reader: reader(o), project: PROJECT, limits: LIMITS, ground: ground(o), log: () => {} });
+    expect(reloaded.sessions()).toEqual([maws45]);
+  });
+
+  it('names a session that has only a legacy lifecycle, never addressed, until its attestation makes it migrated', async () => {
+    const o = await ChannelOrg.make();
+    const log = emptyLog(reader(o), PROJECT, LIMITS);
+    const history = [unsigned(`oldmini/${S2}`, 1, { kind: 'joined', session: S2, alias: 'old-one', machine: 'oldmini' }), o.dx1('oldmini', 2)];
+    await log.add(at(history), ground(o));
+    expect(log.sessions()).toEqual([{ session: S2, alias: 'old-one', machine: 'oldmini', title: null, member: false }]);
+    expect(addressOf('@old-one hi', log.sessions())).toEqual({ ok: false, reason: 'no-member', detail: '@old-one' });
+    expect(await log.attest([await o.attest(history)], ground(o))).toBe(true);
+    expect(log.events().map((e) => e.label)).toEqual(['migrated', 'migrated']);
+    expect(log.sessions()).toEqual([{ session: S2, alias: 'old-one', machine: 'oldmini', title: null, member: true }]);
+    expect(addressOf('@old-one hi', log.sessions())).toEqual({ ok: true, to: [{ session: S2, alias: 'old-one' }] });
   });
 });
 

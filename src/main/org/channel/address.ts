@@ -9,9 +9,15 @@
 // offset, from the session's own writer. The held log keeps these past its bound (cache.ts), so a session whose `joined`
 // was let go is still addressed and titled.
 //
+// Only an authenticated lifecycle (`verified`, or `migrated`: attested at migration) is a session's identity and makes
+// it addressable. A `legacy` one (a phase-1 code nothing in the app checks, which a hub could write under any writer)
+// names a session that has no authenticated lifecycle at all, as its legacy events are drawn, but never overrides an
+// authenticated one, and never makes a session a member that words can address.
+//
 // Electron-free.
 import { streamOf, writerMachine } from '../../../../apps/org-protocol/src/index.ts';
 import type { ChannelRecipients, ChannelSession } from '@shared/ipc/schema/org';
+import type { Verdict } from './verify';
 
 /** A session of the project as addressing sees it: its alias, and whether it is a member now (joined, not retired). */
 export type Addressable = Pick<ChannelSession, 'session' | 'alias' | 'member'>;
@@ -32,17 +38,28 @@ export function lifecycleOf(event: Logged): { session: string; kind: LifecycleKi
 
 const text = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null);
 
-/** Each session's latest lifecycle, read by offset, in the order the log first names it. */
-export function projectSessions(entries: Iterable<{ offset: number; event: Logged }>): ChannelSession[] {
+/** Whether a verdict authenticates what the event says: signed and verified, or attested at migration; not `legacy`. */
+export const isAuthenticated = (verdict: Verdict): boolean => !('failed' in verdict) && verdict.label !== 'legacy';
+
+/**
+ * Each session's latest lifecycle, read by offset, in the order the log first names it: its authenticated lifecycle
+ * alone when it has any, else its legacy one, which names it but never makes it a member. A failed one names nothing.
+ */
+export function projectSessions(entries: Iterable<{ offset: number; event: Logged; verdict: Verdict }>): ChannelSession[] {
+  const named = [...entries]
+    .flatMap((entry) => {
+      const lifecycle = lifecycleOf(entry.event);
+      return lifecycle === null || 'failed' in entry.verdict ? [] : [{ ...entry, ...lifecycle, authentic: isAuthenticated(entry.verdict) }];
+    })
+    .sort((a, b) => a.offset - b.offset);
+  const authenticated = new Set(named.filter((n) => n.authentic).map((n) => n.session));
   const sessions = new Map<string, ChannelSession>();
-  for (const { event } of [...entries].sort((a, b) => a.offset - b.offset)) {
-    const lifecycle = lifecycleOf(event);
-    if (lifecycle === null) continue;
-    const { session } = lifecycle;
+  for (const { event, session, kind, authentic } of named) {
+    if (authentic !== authenticated.has(session)) continue;
     const held = sessions.get(session) ?? { session, alias: session.slice(0, 8), machine: writerMachine(event.writer) ?? '', title: null, member: false };
-    if (lifecycle.kind === 'joined') sessions.set(session, { ...held, alias: text(event.alias) ?? held.alias, machine: text(event.machine) ?? held.machine, member: true });
-    else if (lifecycle.kind === 'retired') sessions.set(session, { ...held, member: false });
-    else if (lifecycle.kind === 'renamed') sessions.set(session, { ...held, alias: text(event.alias) ?? held.alias });
+    if (kind === 'joined') sessions.set(session, { ...held, alias: text(event.alias) ?? held.alias, machine: text(event.machine) ?? held.machine, member: authentic });
+    else if (kind === 'retired') sessions.set(session, { ...held, member: false });
+    else if (kind === 'renamed') sessions.set(session, { ...held, alias: text(event.alias) ?? held.alias });
     else sessions.set(session, { ...held, title: typeof event.title === 'string' ? event.title.trim() || null : null });
   }
   return [...sessions.values()];

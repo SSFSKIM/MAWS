@@ -12,8 +12,10 @@
 // - Withheld tombstones are not kept. An event that fails is kept, counted (`unverified`) and judged again.
 // - The project's sessions outlive the bound too: each session's latest lifecycle event of each kind (address.ts) that
 //   didn't fail is kept beside the events, in the file, judged again with them and dropped when it fails; a later one
-//   that fails displaces nothing, and one held that verifies at a later head enters (the latest offset wins). At most
-//   CHANNEL_CACHE_SESSIONS sessions, the most recently named.
+//   that fails displaces nothing, and one held that verifies at a later head enters (the latest offset wins). The
+//   authenticated (`verified`, `migrated`) and the `legacy` are kept apart, so an unchecked record never displaces an
+//   authenticated one, which alone is the session's identity and makes it addressable (address.ts). At most
+//   CHANNEL_CACHE_SESSIONS sessions: those with only a legacy lifecycle go first, then those named longest ago.
 // - The log is one reader's, an org's member: the hub serves each member only what it may read (an audience stream to
 //   its audience alone, P5 O18), so the events, the sessions, the checkpoints and the offset one member's socket reached
 //   are never another's. The file names its reader.
@@ -27,7 +29,7 @@
 import { join } from 'node:path';
 import { isHistoryAttestation, isLogSeq, isSigned, streamOf, writerMachine, type HistoryAttestation, type Signed, type StoredEvent } from '../../../../apps/org-protocol/src/index.ts';
 import type { ChannelEvent, ChannelSession, OrgMember } from '@shared/ipc/schema/org';
-import { lifecycleOf, projectSessions } from './address';
+import { isAuthenticated, lifecycleOf, projectSessions } from './address';
 import { privateFiles, type OrgFiles } from '../files';
 import type { LoggedEvent } from './project-socket';
 import { attestationSigned, checkpointOf, isDx1, judgeEvent, recheckCheckpoint, type Checkpoint, type Judging, type Verdict } from './verify';
@@ -146,28 +148,32 @@ function makeLog(reader: ChannelReader | null, project: string, limits: ChannelL
   /** The log caught up since the attestations were read: a writer they cover that hasn't verified by then never will. */
   let settled = true;
 
-  /** By `<session>\n<kind>`: the latest of each that didn't fail. */
+  /** By `<session>\n<kind>\n<authenticated or legacy>`: the latest of each that didn't fail. */
   const lifecycle = new Map<string, CachedEvent>();
-  const keyOf = (event: StoredEvent): string | null => {
-    const named = lifecycleOf(event);
-    return named === null ? null : `${named.session}\n${named.kind}`;
+  const keyOf = (entry: CachedEvent): string | null => {
+    const named = lifecycleOf(entry.event);
+    if (named === null || 'failed' in entry.verdict) return null;
+    return `${named.session}\n${named.kind}\n${isAuthenticated(entry.verdict) ? 'authenticated' : 'legacy'}`;
   };
-  /** At most `limits.sessions` sessions: those named longest ago go first. */
+  const sessionOfKey = (key: string) => key.slice(0, key.indexOf('\n'));
+  /** At most `limits.sessions` sessions: those with only a legacy lifecycle go first, then those named longest ago. */
   const boundSessions = () => {
-    const latest = new Map<string, number>();
+    const latest = new Map<string, { offset: number; authentic: boolean }>();
     for (const [key, entry] of lifecycle) {
-      const session = key.slice(0, key.indexOf('\n'));
-      latest.set(session, Math.max(latest.get(session) ?? -1, entry.offset));
+      const session = sessionOfKey(key);
+      const prior = latest.get(session) ?? { offset: -1, authentic: false };
+      latest.set(session, { offset: Math.max(prior.offset, entry.offset), authentic: prior.authentic || isAuthenticated(entry.verdict) });
     }
     const cap = limits.sessions ?? CHANNEL_CACHE_SESSIONS;
     if (latest.size <= cap) return;
-    const dropped = new Set([...latest].sort((a, b) => a[1] - b[1]).slice(0, latest.size - cap).map(([session]) => session));
-    for (const key of [...lifecycle.keys()]) if (dropped.has(key.slice(0, key.indexOf('\n')))) lifecycle.delete(key);
+    const order = [...latest].sort(([, a], [, b]) => Number(a.authentic) - Number(b.authentic) || a.offset - b.offset);
+    const dropped = new Set(order.slice(0, latest.size - cap).map(([session]) => session));
+    for (const key of [...lifecycle.keys()]) if (dropped.has(sessionOfKey(key))) lifecycle.delete(key);
   };
-  /** An event judged: the lifecycle it is, if it is the latest of its kind and didn't fail. */
+  /** An event judged: the lifecycle it is, if it is the latest of its kind and provenance and didn't fail. */
   const note = (entry: CachedEvent) => {
-    const key = keyOf(entry.event);
-    if (key === null || 'failed' in entry.verdict) return;
+    const key = keyOf(entry);
+    if (key === null) return;
     const held = lifecycle.get(key);
     if (held !== undefined && held.offset > entry.offset) return;
     lifecycle.set(key, entry);
@@ -176,14 +182,20 @@ function makeLog(reader: ChannelReader | null, project: string, limits: ChannelL
   for (const entry of held?.lifecycle ?? []) note(entry);
 
   const judging = (ground: Ground): Judging => ({ ...ground, checkpoints });
-  /** The lifecycle (of `writers`, or all) judged again: an event held at the same offset gives its verdict; one that fails is dropped. */
+  /**
+   * The lifecycle (of `writers`, or all) judged again: an event held at the same offset gives its verdict; one that fails
+   * is dropped, and one whose provenance changed (a checkpoint made or ended) moves to its own, the latest offset winning.
+   */
   async function rejudgeLifecycle(ground: Ground, writers?: ReadonlySet<string>): Promise<void> {
+    const judged: Array<[string, CachedEvent | null]> = [];
     for (const [key, entry] of [...lifecycle]) {
       if (writers !== undefined && !writers.has(entry.event.writer)) continue;
       const verdict = entries.get(entry.offset)?.verdict ?? (await judgeEvent(entry.event, judging(ground)));
-      if (verdict === null || 'failed' in verdict) lifecycle.delete(key);
-      else lifecycle.set(key, { ...entry, verdict });
+      judged.push([key, verdict === null ? null : { ...entry, verdict }]);
     }
+    // applied at once, after every await, so the sessions read meanwhile are the last judgment's whole
+    for (const [key] of judged) lifecycle.delete(key);
+    for (const [, entry] of judged) if (entry !== null) note(entry);
   }
   const keep = (entry: CachedEvent) => {
     const size = sizeOf(entry);
