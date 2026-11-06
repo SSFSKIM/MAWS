@@ -167,7 +167,7 @@ M1 runs now and lands by its own PR. M2 needs M1 and O7 M1 on master, and lands 
 - **The owner's week** (P5 acceptance 16) starts when M7b lands.
 - **The shared staging run.** M6b's live proof and O18 M6 share one staging run. It waits on:
   - M6b's offers on master;
-  - the desk track's executors (sminos 1.37.0 or later);
+  - the desk track's executors (sminos 1.38.0 or later);
   - a real second member, admitted by the owner's Access change.
 - **M5b lands** only once the desk track's `record.owners` executor and DL190 (b)'s fix are on master.
 - **M8 is last.** It is owner steps and evidence. Its first step is M3's root-add sitting, and its revocation waits on B4's steps 4 to 8.
@@ -1821,7 +1821,7 @@ The live check is the owner's, in their own MAWS once a build carrying M7b is on
 **The shared staging run** (M6b with O18 M6). The architect schedules it with the owner and the desk track: from 2026-11-07, never 06:45 to 07:00Z (the mini), never in a cua_repl hold. The owner's steps:
 1. **A real second member.** The owner adds Access's admission for a second email they control (an Access change, the owner's). Then, from the owner's staging scratch profile, the Org page adds that member (Add person), and pairs a second scratch MAWS profile as their first device (Pair a device, H1).
 2. **A VM under them.** The desk track's `staging-run.sh endpoint-vm setup <base commit>` prepares a VM. The owner's Org page enrolls it (M4b's flow once M4b lands; before that, `staging-run.sh admin enroll <name>`) and sets its owners to the second member.
-3. **The builds.** The desk track deploys O18 M1's hub to staging, and puts sminos 1.37.0 or later and a MAWS at or after M6b on the staging machines.
+3. **The builds.** The desk track deploys O18 M1's hub to staging, and puts sminos 1.38.0 or later and a MAWS at or after M6b on the staging machines.
 4. **The run.** O18's acceptance 1 to 8, then O8's 6:
    - the owner makes a session private, shares it Can message, then View;
    - the second member's rows and agents follow;
@@ -3062,6 +3062,9 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
 
   Main holds what only main can judge (signatures, attestations, the held head's names), and the renderer the presentation, which its tests pin without main.
   Date/Author: 2026-11-06, O8's executor (pre-flight).
+
+- Decision: The record.* executors ship in sminos 1.38.0, not 1.37.0. 1.37.0 is D5's restatement (doperpowers #492), and 1.38.0 is built on top of it, to §Q exactly. M6b and M5b need sminos 1.38.0 or later on the target machine. Nothing in the app changes, since the `record` capability is the real gate. The merge order onto doperpowers main is #463 (O18 M3), M4, D5, then the executors.
+  Date/Author: 2026-11-06, the desk track through the architect, recorded by O8's executor.
 
 ## Outcomes & Retrospective
 
