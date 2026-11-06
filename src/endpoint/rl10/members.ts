@@ -310,6 +310,7 @@ export class Members implements RecordSource, CheckoutSource {
       for (const status of response.value as Array<{ appSessionId?: unknown; engineSessionId?: unknown }>) {
         if (!isId(status.appSessionId) || !isId(status.engineSessionId) || this.#members.get(status.engineSessionId)?.lane !== 'B') continue;
         this.#apps.set(status.engineSessionId, status.appSessionId);
+        this.#bySpawned.delete(status.engineSessionId); // Decision Log 190 (b): named by the live rows now
         this.#placed(status.engineSessionId, status.appSessionId);
       }
     }

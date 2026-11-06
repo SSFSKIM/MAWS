@@ -699,6 +699,17 @@ describe('a record the join can’t place under its app session, placed by its s
     expect(reports.at(-1)).toMatchObject({ session: 'app-s', owners: [org.C], access: 'private' });
   });
 
+  // the review's round 3: a record joined by its spawn that the live rows name later is theirs from then on
+  it('lets no delayed predecessor replace the listing of a spawn-joined record the recovered host has since named', async () => {
+    let live: Array<{ appSessionId: string; engineSessionId: string }> = [];
+    const { members, reports } = membersOf({ live: () => live, records: () => [{ appId: 'app-s', engineSessionId: 'eng-new', launchedBy: launchedBy(org.B, 'op-s') }] });
+    await members.member(laneBMember('eng-new', [org.C], { access: 'private', ownersProof: [spawnProof('op-s')] })); // the host away
+    live = [{ appSessionId: 'app-s', engineSessionId: 'eng-new' }]; // and back
+    await members.member(laneBMember('eng-old', [org.B], { access: 'listed', ownersProof: [spawnProof('op-s')] }));
+    expect(members.appSessionId('eng-old')).toBe('app-s');
+    expect(reports.at(-1)).toMatchObject({ session: 'app-s', owners: [org.C], access: 'private' });
+  });
+
   it('leaves a record unplaced, as before, without a proof or without a spine record whose `launchedBy` it names', async () => {
     const machine = {
       live: () => [{ appSessionId: 'app-u', engineSessionId: 'eng-2' }],
