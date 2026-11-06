@@ -48,6 +48,14 @@ export interface OrgTiming {
   PAIR_TTL_MS: number;
   /** How often a pairing reads the target member's pending entries (`pair`'s 2 s). */
   PAIR_POLL_MS: number;
+  /** M7a's. A project's channel lives this long after its last tab closes. */
+  CHANNEL_RELEASE_MS: number;
+  /** A project's cache keeps the newest events up to both bounds, by offset (M7a's *The cache*). */
+  CHANNEL_CACHE_EVENTS: number;
+  CHANNEL_CACHE_BYTES: number;
+  /** A channel's changes are coalesced this long before its cache is written, and before `org.channel.changed`. */
+  CHANNEL_WRITE_MS: number;
+  CHANNEL_COALESCE_MS: number;
 }
 
 export const ORG_TIMING: Readonly<OrgTiming> = Object.freeze({
@@ -73,6 +81,11 @@ export const ORG_TIMING: Readonly<OrgTiming> = Object.freeze({
   DELIVERY_MAX_BYTES: 524_288,
   PAIR_TTL_MS: 600_000,
   PAIR_POLL_MS: 2_000,
+  CHANNEL_RELEASE_MS: 30_000,
+  CHANNEL_CACHE_EVENTS: 5_000,
+  CHANNEL_CACHE_BYTES: 8 * 1024 * 1024,
+  CHANNEL_WRITE_MS: 1_000,
+  CHANNEL_COALESCE_MS: 100,
 });
 
 export const orgTiming = (overrides: Partial<OrgTiming> = {}): OrgTiming => ({ ...ORG_TIMING, ...overrides });
