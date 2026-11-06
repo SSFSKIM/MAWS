@@ -3169,6 +3169,24 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   5. `WIRE_MINOR` 29 stands as a wire entry. Whoever lands second takes the next number at the merge.
   Date/Author: 2026-11-06, the architect, recorded by O8's executor.
 
+- Decision: M7b Task 1, the spine (9327c77f2..a54248357), settles these points.
+  1. **The one extraction is `src/shared/owner/to-human-items.ts`.** The renderer-resident part of the report view's decision was `derive.ts`'s `toHumanRow` call rule and the text-block filter, and those moved there. The renderer's `to_human` row, the owner channel's marks and lane B all call it. The report view's broader "marked" rule (which also counts essentials and insights, for folding) is not "a message" and stays as it is.
+  2. **When a call counts.** A message-tool call counts once its result reads sent, whenever that result arrives, as the renderer's row does. Pending calls are bounded at 256 per session.
+  3. **Interrupted blocks.** Message spans in an interrupted block count, since the transcript draws them. Questions in one don't, since no mark is kept for them, so no answer could follow.
+  4. **No back-fill.** Lane B reads only events with a journal row (`seq !== null`). That also keeps a terminal-held session's transcript, followed from disk, out of lane B, where lane A's entries already cover it.
+  5. **Answers to need-input questions** come from the owner channel's delivered state (`ownerChannel.changed`), and only for a question the journal recorded. A later answer is a new entry.
+  6. **MAWS asks.** They are read from the host's journaled `maws.ask.opened` and `maws.ask.answered`, since the engine host's `AskTable` forgets an answered ask.
+     - Each question is one entry (`src …/ask/<askId>/<questionId>`), with its option labels as choices. Each answer is one `answered` entry, recorded only if its question was.
+     - The answer text is written for the person (`askAnswerOf`).
+     - A subagent's asks are in, since the person answers them in the same sheet. Its words stay out.
+     - The ask's `title` and `context` aren't carried. A multi-question ask groups by its `ask/<askId>/` prefix; a title would be an optional field, added only if the person can't follow without it (the architect).
+  7. **The hold.** Entries said before a project's org id is derived are held for lane B only, at most 1,000 across every session. Past that, the oldest goes, with one logged line, and the next flush counts what went. They are written in order on the next project change.
+  8. **The cuts.** The hub refuses an event over 1 MiB (`apps/desk-hub/src/protocol/parts.ts:5`'s `FRAME_LIMIT`, refused at `objects/log-store.ts:79`). So the journal cuts text at 64 KiB of UTF-8 and an option at 512 bytes, at a character boundary with `… [cut]`, and keeps at most 32 options. The worst case on the wire is 640 KiB. The cut sits inside `ChannelJournal.record`, so both lanes and the emitted event are bounded in one place.
+  9. **Storage.** `at` is stored as epoch milliseconds and returned as UTC ISO. History's `before` is an entry id, ordered `at DESC, id DESC`, with a default and maximum page of 200. Pruning runs at each record and at start, and the age bound applies on read too. `channel_entries` has no foreign key: a deleted session's entries stay the project's history, and Task 2's `view` filter governs who reads them.
+  10. **The command's reach.** `channel.history` is main-only (the preload doesn't bridge it) and graded `view`. `channel.changed` is a link event. `ProjectStore.org(id)` reads the join. `AddedTable` is `{table, sql}`, the entry's SQL owning its indexes.
+  The architect accepted items 6–8's choices: subagents' asks, the shared hold, and the option cuts.
+  Date/Author: 2026-11-06, O8's executor (controller), from Task 1's report.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
