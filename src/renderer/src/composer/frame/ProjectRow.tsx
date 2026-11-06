@@ -12,14 +12,24 @@
 // read-only in the chip's tooltip and at the foot of its menu, as the location popover lists them once started.
 // P5 O7 M4 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "The machine menu", A5): beside the project chip,
 // the machine the chat runs on (MachineMenu.tsx), and under the row the line naming another machine once it is chosen.
+// 2026-11-06 (the owner's ruling: the machine first, the place following it): with another machine chosen, the chip's
+// menu is that machine's, in the local menu's shape, and the chip names the place chosen there (the local project's
+// checkout there keeps the local project's words, as before): its own projects, most recently active first where this app knows their sessions, "New
+// project" there (RemoteSetupSheet.tsx's folder sheet: any folder, git or not, registered as a project there) and "Don't
+// work in a project" (its home); one it can't offer is greyed with why, in the item. No branch or Worktree box there:
+// they are the local project's. This Mac chosen again, the local row is as it was.
 import { Command } from 'cmdk';
 import { Popover } from 'radix-ui';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
+import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
 import { machineOf } from '@shared/machine/address';
 import { ipc } from '../../ipc/client';
+import { openDialog } from '../../sessions/dialogs';
+import { useRemoteSpawn, useSpawnTarget, type SpawnTarget } from '../../sessions/remote-spawn';
+import { knownCheckouts, readPlaces, SETUP_WORDS, suggestionsFor, type Places } from '../../sessions/remote-setup';
 import { projectsByRecency } from '../../sidebar/derive';
 import { selectProjectOrder, useSessions } from '../../stores/sessions';
 import type { HookResult } from '../setup-intent';
@@ -31,6 +41,11 @@ import { MachineLine, MachineMenu } from './MachineMenu'; // P5 O7 M4
 export const CHOOSE_PROJECT = 'Choose a project';
 export const NEW_PROJECT = 'New project';
 export const NO_PROJECT = "Don't work in a project";
+export const NO_PROJECT_LABEL = 'No project'; // the chip's words for a chat in no project (useSetupIntent's, for another machine's home)
+export const PLACE_WORDS = {
+  choose: (machine: string) => `Select a project on ${machine} to run your chat in`,
+  change: (label: string, machine: string) => `${label} on ${machine} · Change the project for this chat`,
+} as const;
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
@@ -46,6 +61,84 @@ export function matchesProject(project: ProjectRecord, query: string): boolean {
 }
 
 const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 text-ui outline-none select-none data-[selected=true]:bg-bg-hover data-[disabled=true]:text-fg-faint';
+
+// An item of the menu's actions, greyed with its reason as a second line when it can't be taken (`why`).
+function ActionItem({ value, label, why, disabled, onSelect }: { value: string; label: string; why: string | null; disabled: boolean; onSelect(): void }) {
+  return (
+    <Command.Item value={value} disabled={disabled || why !== null} onSelect={onSelect} className={why === null ? ITEM : `${ITEM} h-auto flex-col items-start gap-0 py-1`}>
+      <span>{label}</span>
+      {why !== null && <span className="text-ui-sm whitespace-normal text-fg-muted">{why}</span>}
+    </Command.Item>
+  );
+}
+
+// 2026-11-06: another machine's places, read as the menu opens (sessions/remote-setup.ts' `readPlaces`); a choice is the
+// tab's target there (sessions/remote-spawn.ts), "New project" its folder sheet.
+function RemoteMenu({ appSessionId, target, projectKey, disabled, onDone }: { appSessionId: AppSessionId; target: SpawnTarget; projectKey: string | null; disabled: boolean; onDone(): void }) {
+  const [query, setQuery] = useState('');
+  const [places, setPlaces] = useState<Places | null>(null); // null while read
+  const { machine, name } = target;
+  useEffect(() => {
+    let live = true;
+    void readPlaces(machine, name).then((read) => live && setPlaces(read));
+    return () => {
+      live = false;
+    };
+  }, [machine, name]);
+  const records = useSessions((s) => s.records);
+  const digests = useSessions((s) => s.digests);
+  const ordered = useMemo(() => recentProjects({ records, digests, projects: places?.projects ?? [] }), [records, digests, places]);
+  const shown = ordered.filter((p) => matchesProject(p, query));
+  const choose = (place: Pick<SpawnTarget, 'checkout' | 'label'>) => {
+    useRemoteSpawn.getState().choose(appSessionId, { machine, name, key: null, ...place });
+    onDone();
+  };
+  const newProject = () => {
+    const first = places?.first;
+    if (first == null) return;
+    onDone();
+    const home = places?.home ?? null;
+    openDialog({ kind: 'remoteSetup', request: { kind: 'folder', tab: appSessionId, machine, name, key: projectKey, home, first, suggestions: suggestionsFor(knownCheckouts(projectKey), home) } });
+  };
+  return (
+    <Command label={`Projects on ${name}`} shouldFilter={false} loop>
+      <Command.Input
+        value={query}
+        onValueChange={setQuery}
+        placeholder="Search projects"
+        aria-label="Search projects"
+        className="h-8 w-full border-b border-border bg-transparent px-2 text-ui text-fg outline-none placeholder:text-fg-faint"
+      />
+      <Command.List>
+        <Command.Group className="max-h-40 overflow-y-auto py-1">
+          {places === null && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">{SETUP_WORDS.reading(name)}</p>}
+          {places?.error != null && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">{places.error}</p>}
+          {places?.projects != null && shown.length === 0 && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">No projects found</p>}
+          {shown.map((project) => {
+            const folder = basename(project.directory);
+            const chosen = project.directory === target.checkout;
+            return (
+              <Command.Item key={project.id} value={`project:${project.id}`} disabled={disabled} onSelect={() => choose({ checkout: project.directory, label: project.name })} aria-current={chosen || undefined} className={ITEM}>
+                <span className="min-w-0 truncate">{project.name}</span>
+                {folder !== project.name && <span className="min-w-0 shrink truncate text-ui-sm text-fg-muted">{folder}</span>}
+                <span aria-hidden className="ml-auto w-3 shrink-0 text-accent">
+                  {chosen ? '✓' : ''}
+                </span>
+              </Command.Item>
+            );
+          })}
+        </Command.Group>
+        <Command.Separator alwaysRender className="border-t border-border" />
+        <Command.Group className="py-1">
+          <ActionItem value="new-project" label={NEW_PROJECT} why={places?.newProject ?? null} disabled={disabled || places?.first == null} onSelect={newProject} />
+          {target.checkout !== HOME_CHECKOUT && (
+            <ActionItem value="no-project" label={NO_PROJECT} why={places?.noProject ?? null} disabled={disabled || places === null} onSelect={() => choose({ checkout: HOME_CHECKOUT, label: NO_PROJECT_LABEL })} />
+          )}
+        </Command.Group>
+      </Command.List>
+    </Command>
+  );
+}
 
 function ProjectMenu({ binding, disabled, onWrite }: { binding: ProjectRowBinding; disabled: boolean; onWrite(write: () => Promise<HookResult>): void }) {
   const [query, setQuery] = useState('');
@@ -135,9 +228,14 @@ export function ProjectRow({ binding, directories = [], appSessionId }: { bindin
   const [open, setOpen] = useState(false);
   // P5 O7 M4: the org project the chosen project is, which another machine's checkout must be of
   const projectKey = useSessions((s) => (binding.projectId === null ? null : (s.projects.get(binding.projectId)?.org?.key ?? null)));
+  // 2026-11-06: another machine chosen, the menu is its places; a place of its own there (not the local project's checkout
+  // there, which keeps the local project's words, branch and Worktree box as before) names the chip
+  const remote = useSpawnTarget(appSessionId, projectKey);
+  const there = remote !== null && remote.key === null ? remote : null;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const chosen = binding.label !== null;
+  const label = there === null ? binding.label : there.checkout === null ? null : (there.label ?? basename(there.checkout));
+  const chosen = label !== null;
   const disabled = binding.disabled !== null || pending;
   // All row writes share this lock: a worktree location must use the settled project's repository facts.
   const run = async (write: () => Promise<HookResult>) => {
@@ -151,34 +249,42 @@ export function ProjectRow({ binding, directories = [], appSessionId }: { bindin
       setPending(false);
     }
   };
-  const base = binding.disabled ?? (chosen ? `${binding.path ?? binding.label} · Change the project for this chat` : 'Select a project to run your chat in');
-  const title = directories.length > 0 ? `${base}\n\n${ADDITIONAL_DIRECTORIES}\n${directories.map(formatCwd).join('\n')}` : base;
+  const base =
+    binding.disabled ??
+    (there !== null ? (label === null ? PLACE_WORDS.choose(there.name) : PLACE_WORDS.change(label, there.name))
+    : chosen ? `${binding.path ?? binding.label} · Change the project for this chat`
+    : 'Select a project to run your chat in');
+  const title = directories.length > 0 && remote === null ? `${base}\n\n${ADDITIONAL_DIRECTORIES}\n${directories.map(formatCwd).join('\n')}` : base;
   return (
     <div data-project-row className="flex min-w-0 flex-col">
       <div className="flex min-w-0 items-center justify-between gap-2 px-1 py-1.5">
         <div className="flex min-w-0 items-center gap-1">
           <Popover.Root open={open} onOpenChange={setOpen}>
-            <Popover.Trigger aria-label={chosen ? `Project ${binding.label}` : CHOOSE_PROJECT} title={title} className={`${CHIP} ${chosen ? 'text-fg' : ''}`}>
+            <Popover.Trigger aria-label={chosen ? `Project ${label}` : CHOOSE_PROJECT} title={title} className={`${CHIP} ${chosen ? 'text-fg' : ''}`}>
               {/* the status dot: ready to run where the chip says, or waiting for a project (Codex's size-2 badge, app-initial:453119-453146) */}
               <span aria-hidden className={`size-2 shrink-0 rounded-full ${chosen ? 'bg-success' : 'bg-fg-faint'}`} />
-              <span className="truncate">{chosen ? binding.label : CHOOSE_PROJECT}</span>
+              <span className="truncate">{chosen ? label : CHOOSE_PROJECT}</span>
               <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
             </Popover.Trigger>
             <Popover.Portal>
               <Popover.Content aria-label="Choose a project" side="top" align="start" sideOffset={6} collisionPadding={8} className={`${POPOVER} w-72 p-0`}>
-                <ProjectMenu binding={binding} disabled={disabled} onWrite={(write) => void run(write)} />
-                {directories.length > 0 && <DirectoriesNote directories={directories} />}
+                {remote !== null && appSessionId !== undefined ? (
+                  <RemoteMenu appSessionId={appSessionId} target={remote} projectKey={projectKey} disabled={disabled} onDone={() => setOpen(false)} />
+                ) : (
+                  <ProjectMenu binding={binding} disabled={disabled} onWrite={(write) => void run(write)} />
+                )}
+                {directories.length > 0 && remote === null && <DirectoriesNote directories={directories} />}
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
           {appSessionId !== undefined && <MachineMenu appSessionId={appSessionId} projectKey={projectKey} disabled={binding.disabled} />}
-          {binding.branch !== null && (
+          {binding.branch !== null && there === null && (
             <span aria-label={`Branch ${binding.branch}`} title={binding.branch} className="max-w-40 truncate font-mono text-ui-sm text-fg-muted">
               ⎇ {binding.branch}
             </span>
           )}
         </div>
-        {binding.worktree !== null && (
+        {binding.worktree !== null && there === null && (
           <label title={binding.disabled ?? 'Run this chat in a new git worktree'} className="relative flex shrink-0 items-center gap-2 pe-2 text-ui-sm text-fg-muted select-none">
             Worktree
             <input

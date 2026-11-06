@@ -222,7 +222,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const memoryUnavailable = useRemoteUnavailable(appSessionId, 'session.memoryAppend');
   const decision = submitState({
     status,
-    intent: unstarted ? { starting, messageHeld, phase: setup.phase ?? null, noProject: setup.intent.location === null } : null, // C10: the setup phase
+    // C10: the setup phase; 2026-11-06: on another machine, its place there (none chosen yet: Send waits)
+    intent: unstarted ? { starting, messageHeld, phase: setup.phase ?? null, noProject: spawnAt !== null ? spawnAt.checkout === null : setup.intent.location === null } : null,
     queue,
     empty: draft.empty,
     mode: draft.mode,
@@ -312,11 +313,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     if (setup) {
       // read synchronously: a second Enter in the same tick, or before C10 answers, starts nothing
       const where = setup.intent.location; // New chat: Send waits for a project
-      if (where === null || isStarting(useComposerStore.getState(), appSessionId) || setup.intent.message !== null || s.mode !== 'send' || s.empty) return false;
-      setStarting(appSessionId, true);
       // P5 O7 M4: another machine chosen: one `session.spawn` there, the tab moving to its session once it answers. P5 O7
-      // M9: read at submit, not from the render: the trust card's Send again runs as its choice lands, before a render
+      // M9: read at submit, not from the render: the trust card's Send again runs as its choice lands, before a render.
+      // 2026-11-06: there, Send waits for a place on that machine, whatever this Mac's intent holds
       const at = spawnTargetOf(appSessionId, projectKey);
+      if ((at === null ? where === null : at.checkout === null) || isStarting(useComposerStore.getState(), appSessionId) || setup.intent.message !== null || s.mode !== 'send' || s.empty) return false;
+      setStarting(appSessionId, true);
       if (at !== null) {
         try {
           const doc = handle.current?.doc() ?? emptyDoc();
@@ -356,8 +358,9 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       }
       // P5 O7 M4: a file held for another machine has no path here: say so rather than start without it
       const elsewhere = attachmentsOf(handle.current?.doc() ?? emptyDoc()).filter((a) => a.kind === 'file');
-      if (elsewhere.length > 0) {
+      if (where === null || elsewhere.length > 0) {
         setStarting(appSessionId, false);
+        if (where === null) return false; // this Mac: no project chosen (checked above, read again for the type)
         toast({ level: 'warning', text: FILES_FOR_ANOTHER_MACHINE(elsewhere.map((a) => a.name)), actions: [], dismissible: true });
         return false;
       }

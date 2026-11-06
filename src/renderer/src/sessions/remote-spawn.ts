@@ -10,6 +10,12 @@
 //   steps it up (the sheet, then Touch ID) and answers at its outcome. The tab stays this Mac's New chat until then, and
 //   moves to the new session's address on success; the local intent is discarded. A refusal is said in words a person
 //   can act on, and the tab stays as it was, its text kept.
+// - 2026-11-06 (the owner's ruling: the machine first, the place following it). The machine is chosen with or without a
+//   project: a target names the machine and, once chosen, the place there (`checkout`): that machine's project, a folder
+//   set up there as a new project, or its home with no project (HOME_CHECKOUT, a machine owner's alone, on an endpoint
+//   that lists `rl2.spawn-home`). A target chosen for the tab's local project (`key`, its org project) is that project's
+//   checkout there, and the local project's own choice leads it as before (another project brings the tab back here); a
+//   place chosen on the machine (`key` null) stands until the person chooses another machine. Send waits for a place.
 // - With attachments, no brief: the composer's whole document becomes the new session's draft (this window's memory, as
 //   any remote draft), the tab moves, and the new session's composer sends it once it is open, through the remote send
 //   path (its files go up first, then one `session.send` names their paths there; a failed upload keeps the text with
@@ -22,7 +28,7 @@ import type { IpcError } from '@shared/ipc/errors';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { tabId } from '@shared/ipc/schema/layout';
 import { addressOf, bareOf, machineOf } from '@shared/machine/address';
-import type { SessionSpawnInput } from '@shared/ipc/schema/session';
+import { HOME_CHECKOUT, type SessionSpawnInput } from '@shared/ipc/schema/session';
 import type { MachineRef } from '@shared/machine/ref';
 import type { Location } from '@shared/sessions/intent';
 import { attachmentsOf, type ComposerDoc } from '../composer/editor/doc';
@@ -32,12 +38,15 @@ import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
 import { markSpawnedHere } from './spawned-here';
 
-/** A machine a New chat tab can start its session on, with the checkout of its project there. */
+/** A machine a New chat tab can start its session on, with the place there it starts in once one is chosen. */
 export interface SpawnTarget {
   machine: MachineRef;
   name: string;
-  checkout: string; // the directory of that machine's project of the same org project
-  key: string; // the org project it was chosen for
+  // the directory of that machine's project (of the same org project, with `key`), HOME_CHECKOUT for its home with no
+  // project, or null while no place there is chosen ("Choose a project" on that machine)
+  checkout: string | null;
+  key: string | null; // the org project of the tab's local project it was chosen for; null: a place chosen on the machine
+  label?: string; // the place's words on the project chip when `key` is null: that machine's project's name, or "No project"
   // P5 O7 M9 ("Remote setup"): the person accepted that machine's trust card for the checkout, so the spawn carries
   // `trust: 'accepted'` and the machine runs the attested bootstrap (MAWS never writes trust)
   trust?: 'accepted';
@@ -112,11 +121,11 @@ export function resetRemoteSpawn(): void {
 
 const targetFor = (chosen: ReadonlyMap<AppSessionId, SpawnTarget>, tab: AppSessionId, key: string | null): SpawnTarget | null => {
   const target = chosen.get(tab);
-  return target !== undefined && target.key === key ? target : null;
+  return target !== undefined && (target.key === null || target.key === key) ? target : null;
 };
-/** The machine the tab starts on for the org project `key`; null: this Mac. */
+/** The machine the tab starts on, its local project's org project being `key`; null: this Mac. */
 export const spawnTargetOf = (tab: AppSessionId, key: string | null): SpawnTarget | null => targetFor(useRemoteSpawn.getState().chosen, tab, key);
-export const useSpawnTarget = (tab: AppSessionId, key: string | null): SpawnTarget | null => useRemoteSpawn((s) => targetFor(s.chosen, tab, key));
+export const useSpawnTarget = (tab: AppSessionId | undefined, key: string | null): SpawnTarget | null => useRemoteSpawn((s) => (tab === undefined ? null : targetFor(s.chosen, tab, key)));
 export const useSpawning = (tab: AppSessionId): string | null => useRemoteSpawn((s) => s.spawning.get(tab) ?? null);
 /** Whether the tab's last spawn was taken but not confirmed: its next try checks on that start. */
 export const spawnUnconfirmed = (tab: AppSessionId): boolean => unconfirmed.get(tab)?.open === true;
@@ -142,6 +151,9 @@ export const SPAWN_WORDS = {
   checkAgain: 'Check again',
   editKept: (machine: string) => `Started on ${machine} with your first message; your edit is in the message box, not sent`,
   untrusted: (machine: string) => `This project isn’t trusted on ${machine} yet; review its trust there to start it`, // P5 O7 M9: the card is offered
+  untrustedHome: (machine: string) => `${machine}’s home folder isn’t trusted there yet; review its trust to start the chat`, // 2026-11-06
+  noPlace: (machine: string) => `Choose a project on ${machine} first`, // 2026-11-06: the machine chosen, no place there yet
+  noHome: (machine: string) => `${machine} can’t start a chat outside a project from this Mac yet; update MAWS on ${machine}`, // 2026-11-06: an endpoint without rl2.spawn-home
   reviewTrust: 'Review trust…',
   unknownCheckout: (machine: string) => `${machine} no longer has this project’s checkout; choose the machine again`,
   worktreeExists: (machine: string) => `${machine} already has a worktree of that name; turn Worktree off and on for a new name`,
@@ -157,7 +169,7 @@ export const SPAWN_WORDS = {
 } as const;
 
 /** A spawn's error in words: the machine's and the link's refusals named, main's own words as they are. */
-export function spawnErrorWords(error: Pick<IpcError, 'code' | 'message' | 'issues'>, machine: string): string {
+export function spawnErrorWords(error: Pick<IpcError, 'code' | 'message' | 'issues'>, machine: string, home = false): string {
   const refusal = (error.issues as { refusal?: unknown } | undefined)?.refusal;
   switch (refusal) {
     case 'step-up-cancelled':
@@ -166,8 +178,8 @@ export function spawnErrorWords(error: Pick<IpcError, 'code' | 'message' | 'issu
       return SPAWN_WORDS.grade(machine);
     case 'ceiling':
       return SPAWN_WORDS.ceiling(machine);
-    case 'unknown-checkout':
-      return SPAWN_WORDS.unknownCheckout(machine);
+    case 'unknown-checkout': // 2026-11-06: the home's, an endpoint that predates it (or one whose owners no longer include the member)
+      return home ? SPAWN_WORDS.noHome(machine) : SPAWN_WORDS.unknownCheckout(machine);
     case 'not-offered':
       return SPAWN_WORDS.notOffered(machine);
     case 'malformed':
@@ -179,8 +191,8 @@ export function spawnErrorWords(error: Pick<IpcError, 'code' | 'message' | 'issu
   }
 }
 
-function refusedWords(reason: string, machine: string): string {
-  if (reason === 'unknown-checkout') return SPAWN_WORDS.unknownCheckout(machine);
+function refusedWords(reason: string, machine: string, home: boolean): string {
+  if (reason === 'unknown-checkout') return home ? SPAWN_WORDS.noHome(machine) : SPAWN_WORDS.unknownCheckout(machine);
   if (reason === 'worktree-exists') return SPAWN_WORDS.worktreeExists(machine);
   return SPAWN_WORDS.refused(machine, reason);
 }
@@ -213,6 +225,9 @@ export type SpawnOutcome = { started: true; note?: string } | { started: false; 
 /** Starts the session on the target's machine and moves the tab there. */
 export async function spawnOnMachine(request: SpawnRequest, client: MawsBridge = ipc): Promise<SpawnOutcome> {
   const { from, target, s, doc, intent, mode } = request;
+  const { checkout } = target;
+  if (checkout === null) return { started: false, words: SPAWN_WORDS.noPlace(target.name), again: null }; // 2026-11-06
+  const home = checkout === HOME_CHECKOUT;
   const held = unconfirmed.get(from);
   const asked = held?.target.machine === target.machine ? held : null;
   // a check on the start the machine took, under its attempt key; "Start a new session": the next key, a new start
@@ -228,11 +243,12 @@ export async function spawnOnMachine(request: SpawnRequest, client: MawsBridge =
   const editKept = again?.brief !== undefined && (attached || text !== again.brief);
   const brief = !handed ? text : null;
   const input: SessionSpawnInput = again ?? {
-    checkout: target.checkout,
+    checkout,
     permission_mode: mode,
     ...(intent.model !== null && { model: intent.model }),
     ...(intent.effort !== null && { effort: intent.effort }),
-    ...(intent.location?.kind === 'newWorktree' && { worktree: intent.location.name }),
+    // the Worktree box is the local project's: it goes with that project's checkout there alone (2026-11-06)
+    ...(target.key !== null && intent.location?.kind === 'newWorktree' && { worktree: intent.location.name }),
     ...(brief !== null && { brief }),
     ...(target.trust === 'accepted' && { trust: 'accepted' as const }), // P5 O7 M9
   };
@@ -251,9 +267,9 @@ export async function spawnOnMachine(request: SpawnRequest, client: MawsBridge =
     // still unknown, the person may choose to start a new session.
     if (unknown && wasUnknown) return { started: false, words: SPAWN_WORDS.stillUnknown(target.name), again: 'check', startNew: true };
     if (unknown) return { started: false, words: SPAWN_WORDS.unknown(target.name), again: 'check' };
-    if (!result.ok) return { started: false, words: spawnErrorWords(result.error, target.name), again: 'retry' };
-    if (result.value.status === 'refused' && result.value.reason === 'untrusted') return { started: false, words: SPAWN_WORDS.untrusted(target.name), again: null, trust: true }; // P5 O7 M9
-    if (result.value.status !== 'ok') return { started: false, words: refusedWords(result.value.reason, target.name), again: 'retry' };
+    if (!result.ok) return { started: false, words: spawnErrorWords(result.error, target.name, home), again: 'retry' };
+    if (result.value.status === 'refused' && result.value.reason === 'untrusted') return { started: false, words: home ? SPAWN_WORDS.untrustedHome(target.name) : SPAWN_WORDS.untrusted(target.name), again: null, trust: true }; // P5 O7 M9
+    if (result.value.status !== 'ok') return { started: false, words: refusedWords(result.value.reason, target.name, home), again: 'retry' };
     spawned = result.value.appSessionId;
   } finally {
     setSpawning(from, null);
