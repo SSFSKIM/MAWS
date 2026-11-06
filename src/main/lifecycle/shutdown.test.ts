@@ -15,7 +15,8 @@ const BOUND_MS = 1_000;
 // Electron's `app` as the list sees it: `will-quit` with a preventable event, and `exit()`, which emits `quit` as
 // Electron's does (the reaper's moment).
 function fakeApp() {
-  const app: EventEmitter & { exit: ReturnType<typeof vi.fn> } = Object.assign(new EventEmitter(), { exit: vi.fn(() => void app.emit('quit')) });
+  const emitter = new EventEmitter();
+  const app = Object.assign(emitter, { exit: vi.fn<(code?: number) => void>(() => void emitter.emit('quit')) });
   const quit = () => {
     const event = { defaultPrevented: false, preventDefault: () => (event.defaultPrevented = true) };
     app.emit('will-quit', event);
