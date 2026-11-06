@@ -21,7 +21,7 @@ Messages among one person's own sessions are never restricted. With the org as t
 
 **To see it working**, use the staging org (`staging-ssfskim`) with a second member and a second machine enrolled under that member:
 - set a session private with `sminos access <session> private`;
-- from the second member's session, `sminos say "@<short> hi"`: it answers `no member named …`;
+- from the second member's session, `sminos say "@<short> hi"`: it answers `no member @<short> in project <p>`;
 - a forged copy of that `say` gets back a `not-reachable` notice;
 - the second machine's log files hold no trace of the private session.
 
@@ -37,8 +37,8 @@ Then `sminos share <session> <member> list` (run by the owner at a terminal): th
 - [x] (2026-11-05 22:50Z) M1: the hub's policy registry, upload backstop and audience filter (MAWS). Branch `p5-o18-m1`, `49dd6b262..`; static and unit GREEN on `a091ce1cb` (run 42120533710); reviewer-high with a security lens converged on the third pass.
 - [x] M2: the endpoint: the `list` grade, `reach?`, audiences and the policy cache (MAWS). Branch `p5-o18-m2` from `9f49f8fbc`; built at `062e061a0` (2026-11-06 00:00Z); M1's same-batch reference fix at `bf194ee8c`; the review's fix wave at `c100ab45f`; high-rung re-review clean (2026-11-06).
 - [x] (2026-11-06 01:40Z) M2b: devices: an unchanged browser refused toward a private session (MAWS). static, unit and e2e:desk-web GREEN on the merged head `b656e8ddb` (run 42141731122); reviewer-high with a security lens: no findings. Branch `p5-o18-m2b` from `b30f810fb`. A first build sealed audiences from hub policy rows (`7c57f8cf0`, `50d47bb9f`), set aside by the architect's ruling (2026-11-06); what stands is the hub proof and desk-web's tombstone verdict.
-- [ ] M3: sminos's visibility frames, records and audience streams (doperpowers).
-- [ ] M4: sminos's send boundary, the setters, refusals and unlisting (doperpowers).
+- [x] (2026-11-06 01:33Z) M3: sminos's visibility frames, records and audience streams (doperpowers). sminos 1.35.0, doperpowers PR #463 (`386c4b07..4a6bc875`), merging after the post-soak swaps; all five sminos gates GREEN on `4a6bc875` (run 42142252798); reviewer-high with a security lens, three rounds, the third correct.
+- [x] (2026-11-06 03:57Z) M4: sminos's send boundary, the setters, refusals and unlisting (doperpowers). sminos 1.36.0, branch `o18-m4-sminos` on M3's head (`4a6bc875..bccda6f1`), its PR to open after #463; GREEN on `bccda6f1` (run 42157326546); reviewer-high with a security lens, three rounds, the third correct. One finding stands by the architect's ruling until M5's step-up cutover (Decision Log, 2026-11-06).
 - [ ] M6: live acceptance on the staging org.
 - [ ] M5 is an external contract, blocked on O8 M6 and outside O18's acceptance.
 
@@ -100,7 +100,7 @@ A member's agents may message a session when the member's rank on it is at least
 
 ### D3. The receiving endpoint decides
 
-- **Where the ask happens.** sminos asks its endpoint `reach?` before it pushes any peer message (`say`, `send`, and wakes), on every send path (D8). The ask carries the event's writer, its `verified` block, the project and the recipient session.
+- **Where the ask happens.** sminos asks its endpoint `reach?` before it pushes any peer message (`say`, `send`, and wakes), on every send path (D8). The ask carries the event as stored, less sminos's `verified` (the endpoint verifies the sender itself, Decision Log M2), the project and the recipient session.
 - **What the endpoint does with it.** It decides by D1 and D2 from its org state and the recipient's record.
 - **Failing closed.**
   - An endpoint that can't be asked leaves the delivery owed, retried on each tick like any owed delivery.
@@ -120,7 +120,7 @@ A member's agents may message a session when the member's rank on it is at least
   - Example: a private session S with audience {A, B} messages a private session R owned by A with audience {A, C}. The event's audience is {A}.
 - **A provenance reference never widens what a session's id reaches.** One whose session's audience doesn't contain the event's audience (a listed child of a private parent, say) is redacted, by sminos at writing and by the endpoint at signing: written null in a sminos field, and left out of the attestation, whose verifier refuses a null `spawnerSession` (`apps/org-protocol/src/attest.ts:45-48`), so an old receiver still verifies it. The hub refuses an event that carries one unredacted (D5). Provenance takes no part in the intersection: a child shouldn't go private because its parent is.
 - **Delivery needs the recipient inside.** An event is sent only when every recipient's resolved owners are inside its audience, and the writing session's owners are too. The sender's CLI refuses before anything is written: `<alias> can't be reached from this session: this session is unlisted; share it as Can message with <person> first` when the writing session is private and the recipient's owners fall outside its audience. This generalizes the architect's ruling (b): messaging out never grants an implicit reach back.
-- **What the sender sees.** A sender's projection of the logs holds only the sessions its person may see (D6), so a tag naming a private session it isn't shared on fails as `no member named …`, the same words as for a session that doesn't exist. A broadcast (`@all`, `--org`, `--project`) wakes only what it sees.
+- **What the sender sees.** A sender's projection of the logs holds only the sessions its person may see (D6), so a tag naming a private session it isn't shared on fails as `no member @<alias> in project <p>`, the same words as for a session that doesn't exist. A broadcast (`@all`, `--org`, `--project`) wakes only what it sees.
 - **Splitting.** A `say` to several sessions is split into one event per resulting audience, each with the recipients that produce it. A cross-project copy (`record_copy`, `sminos.py:5025`) carries the same audience as the original it copies, and is split the same way: one copy per distinct audience among the delivering events.
   - **Each split carries only its own recipients' tags.** `cmd_say` stores the whole `a.text` (`sminos.py:5218`), and its opening run of `@name#short` tags (`leading_tags`, `:4655`) is the addressing itself: unchanged, the public event of `@private#12345678 @public hello` would name the private alias and its short. Each split's `text` is rebuilt as the raw tags of its own recipients, in their original order, then the body after the run unchanged; each tag resolves to exactly one member (`resolve_tags`, `:4881-4910`), and `@all` stands alone and names no session. A copy's text is its own split's. This rewrites the CLI's addressing syntax only, never prose: an `@` after the leading run is text and stays as written.
 - **Who computes it.** sminos computes the intersection from the audiences its endpoint sends (D7) so it can choose the writer stream before the event is signed. The endpoint computes it again at signing and refuses a mismatch.
@@ -215,7 +215,7 @@ So a session's stream count is bounded by its policy changes plus the distinct a
 
 sminos has one authorization and stream-selection boundary, used by every path that writes or pushes a peer message:
 - **At writing:** `record_message`, `cmd_say` and `record_copy` choose each event's writer by D4 (`stream_for`, Interfaces §C), split per audience, and refuse before appending when a recipient falls outside.
-- **At pushing, in the push primitives.** The gate sits inside the functions that hand a log event to a session, not in their callers: `push_live` (`sminos_control.py:183`), the last hop of every live push (`push_member`, `sminos.py:4960`, `:4985`; a receipt's push in `holder_carry`, `:4308`; `send_to_seat`, `:9855`; `send_to_member`'s legacy holder, `:10120`), and `resume_session` (`sminos.py:9535`) when it resumes a stopped seat with a message as its prompt (`:5015`, `:9838`). Every log event they hand over as a peer frame asks `reach?` at that moment; a person's words (verdict `words`) are the words gate's. So a not-yet-delivered peer is checked wherever it comes from, `deliver_verdict`'s human downgraded to a peer (`decideWords` answers `peer` on several paths, `words.ts:53-84`, rank below `converse` among them), a receipt's retry and `SendDelivery`'s queue included. An event the endpoint refuses is settled `refused-reach` and left out; one it can't answer for holds the send owed.
+- **At pushing, in the push primitives.** The gate sits inside the functions that hand a log event to a session, not in their callers: `push_live` (`sminos_control.py:183`), the last hop of every live push (`push_member`, `sminos.py:4960`, `:4985`; a receipt's push in `holder_carry`, `:4308`; `send_to_seat`, `:9855`; `send_to_member`'s legacy holder, `:10120`), and `resume_session` (`sminos.py:9535`) when it resumes a stopped seat with a message as its prompt (`:5015`, `:9838`). Every log event they hand over as a peer frame needs the endpoint's answer for that one push, asked by the uplink (Interfaces §C); a person's words (verdict `words`) are the words gate's. So a not-yet-delivered peer is checked wherever it comes from, `deliver_verdict`'s human downgraded to a peer (`decideWords` answers `peer` on several paths, `words.ts:53-84`, rank below `converse` among them), a receipt's retry and `SendDelivery`'s queue included. An event the endpoint refuses is settled `refused-reach` and left out; one it can't answer for holds the send owed.
 - **Admission never authorizes a later delivery.** Neither the hub's admission, an earlier `reach` answer nor a prepared receipt stands for the push that follows it: each push asks again.
 - **A projectless push** (a seat with no project, so no event to ask about) goes only to a session whose owners intersect the sender's; otherwise the CLI refuses it: `<alias> has no project, so only its owners' sessions reach it`.
 
@@ -245,16 +245,16 @@ The app's share picker is O8 M6, and it isn't built (`docs/doperpowers/plans/202
     sminos access <member> private|listed|org-view|org-converse
     sminos share <member> <person> list|view|converse|approve|none
 
-- **Where they act.** Both call one function, `set_visibility` (Interfaces §C), which changes the session's record on its own machine (`session-records/<sid>.json`) under the records lock, bumps `policyRev`, writes D6's `unlisted` notice when members are withdrawn and the new snapshot, and has the endpoint restate the record. M5's executor calls the same function.
+- **Where they act.** Both call one function, `set_visibility` (Interfaces §C), which changes the session's record on its own machine (`session-records/<sid>.json`) under the records lock, bumps `policyRev`, and records the change for the uplink. The uplink has the endpoint restate the record and, once the endpoint's `audience` frame at the new `policyRev` comes, writes D6's `unlisted` notice when members are withdrawn, then the new snapshot. M5's executor calls the same function.
 - **Narrowing is open to anyone in a session's shell:** going private, removing a share, lowering a grade.
 - **Widening only from the owner's terminal:** going listed or org-wide, adding a share, raising a grade.
   - Widening runs only as the operator: no `CLAUDE_CODE_SESSION_ID`, with a confirmation read from `/dev/tty`, as Decision Log 28 does for signing.
   - From a session it is refused: `widening reach needs its owner: run this in a terminal, or use MAWS`.
 
-  An agent can't open a session to more people than its owner chose.
+  An agent that follows its instructions can't open a session to more people than its owner chose; M5's cutover closes widening to every agent.
 - **The policy survives record rebuilds.** `access`, `shares` and `policyRev` are kept when `establish` replaces a record's provenance (`sminos_records.py:166-191`) and copied into a continuation's record by `inherited` (`:520-524`), so a background copy or a resume keeps its predecessor's reach. A sminos-spawned session takes its spawner's access and shares (`spawn_provenance`, `sminos.py:9343-9369`), so a spawn never widens reach; an operator's spawn takes the default. Every write of a record reads and writes these fields under the same lock, so a setter racing a reconciliation can't lose either change.
 - **An unreadable established record fails closed.** A session with no record file is new and takes the defaults (`listed`). One whose record file exists but can't be read is established, and its policy is unknown: `ensure_record` returns None for it (`sminos.py:2934-2952`), and `member_frame` would then send the defaults (`sminos_uplink.py:1367-1381`), listing a private session. Until the record reads again, sminos sends no member frame for it (a restatement leaves it out, so the endpoint withdraws its listing, `members.ts:127-131`), writes no event of it (`stream_for` can't choose its stream), and asks no `reach?` for it, so deliveries to it stay owed.
-- **Rejected:** a step-up signed widening through the device, as for owner changes (Decision Log 219's list). It's right for the app's picker (M5), but it needs the app. The operator's terminal is the same trust that already admits signing.
+- **Rejected for the CLI:** a step-up signed widening through the device, as for owner changes (Decision Log 219's list). It needs the app, so it is the app's picker's (M5); until the cutover, the operator's terminal is the same trust that already admits signing.
 
 ### RL amendments
 
@@ -297,7 +297,7 @@ On the staging org `staging-ssfskim` with a second member, added for the run and
    - an old browser, or today's desk-web, whose frozen client seals no audience (the hub refuses its humans toward the session, and its words toward a listed session go as before);
    - an owner's own second machine on an old sminos, designated the project's archiver: it never receives the private stream (its endpoint withholds it), and the archive it writes holds none of it.
 7. A private session's agent messaging a session outside its audience is refused at its own CLI with the unlisted message (D4), and nothing is written.
-8. From an agent's shell, `sminos share <s> <person> view` and `sminos access <s> listed` are refused. `sminos access <s> private` from the same shell succeeds.
+8. From an agent's shell, `sminos share <s> <person> view` and `sminos access <s> listed` are refused for an agent that follows its instructions, and `sminos access <s> private` from the same shell succeeds. Widening is closed to every agent by M5's step-up cutover, before a second member joins the production org.
 
 ## Constraints that bind every milestone
 
@@ -522,8 +522,9 @@ M5 is outside O18's acceptance, which runs on the CLI setters. It is built by th
   - `record.shares {member, grade: 'list' | 'view' | 'converse' | 'approve' | null}` (null removes the share).
 - **The executor:** O12's sminos executor runs each under its opId ledger by calling `set_visibility` (Interfaces §C), the same function the CLI verbs call, so the two paths can't differ.
 - **The picker's text:** the **Can message** level; a private session's agents talk only within its audience; what was already shared stays shared; the old "say messages stay org-readable" warning (O8 document `:1032`) is gone.
+- **The cutover.** Once the app's `record.access` and `record.shares` offers exist, sminos's CLI refuses widening, from a terminal too ("use MAWS"), and keeps narrowing. M6's live run, if it comes later, widens through the app or a staging-only path instead of the CLI. Why: a same-user agent can defeat the CLI's `/dev/tty` confirmation by running the CLI under a pty it controls, with `CLAUDE_CODE_SESSION_ID` unset (M4's first review reproduced it), so only the app's step-up closes widening to every agent. The cutover lands before a second member joins the production org (M6).
 
-**Proof:** O8's own e2e for the picker.
+**Proof:** O8's own e2e for the picker; for the cutover, a sminos test that a widening from a terminal is refused and a narrowing still runs.
 
 ### M6 — Live acceptance on the staging org
 
@@ -532,6 +533,7 @@ M5 is outside O18's acceptance, which runs on the CLI setters. It is built by th
 - **What's recorded:** each item with its evidence (a transcript line, a file listing showing absence, an outcome row, the archive's file list) in this document's Surprises or Outcomes.
 - **Teardown:** the second member is removed and the VM torn down after the run.
 - **Production:** M1's production deploy is the owner's, and it waits for this proof.
+- **A second member joins the production org** only once O18 has landed and M5's step-up cutover with it (M5 says why).
 
 ## Concrete Steps
 
@@ -604,7 +606,7 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
 
 ### B. RL10 and the listing (M2 ↔ M2b, M3, M4)
 
-    sminos → endpoint:  {t: 'reach?', id, project, session /* recipient */, event /* as stored, with verified */}
+    sminos → endpoint:  {t: 'reach?', id, project, session /* recipient */, event /* as stored, less sminos's verified */}
     endpoint → sminos:  {t: 'reach', id, verdict: 'deliver' | 'refuse', reason?: 'not-reachable' | 'unverified'}
     endpoint → sminos:  {t: 'audience', session, owners: string[], members: string[] | null, digest: string | null, policyRev, withdrawn?: string[]}   // withdrawn (M4): who this rev's change withdrew, the exact audience of its `unlisted` notice; absent when none
                           // members null: listed; sent for local sessions and for remote ones the policy cache holds
@@ -612,6 +614,8 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
     sminos → endpoint:  {t: 'snapshots', id, project, events: [...], next: string | null, done: boolean}
                           // newest stored joined/state per remote writer, a bounded page; `done` on the project's last
     endpoint → sminos:  {t: 'spent', project, writer, seq, reason: 'withheld'}   // a hub tombstone, in stream order
+    sminos → endpoint:  {ts, writer, seq, kind: 'void', of: seq, audience?}     // an uploaded event at a position refused `audience`,
+                          // reviving the writer; `audience` (a stream's only) is sminos's claim, signed when its digest is the writer's
     endpoint hello:     capabilities?: string[]   // 'access', 'reach'
     sminos hello:       capabilities?: string[]   // 'audience': streams may come down; its archive copies only the admitted public projection
     member frame:       access?: 'private' | 'listed' | 'org-view' | 'org-converse'; shares?: [{member, grade: 'list'|'view'|'converse'|'approve'}]; policyRev?: number
@@ -621,14 +625,17 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
 
 ### C. sminos (M3, M4)
 
-- `sminos access <member> <level>` and `sminos share <member> <person> <grade|none>` (D10), both through `set_visibility(sid, *, access=None, share=None, operator)`: the record change under the records lock, `policyRev` bumped, the `unlisted` notice (when members are withdrawn) and the snapshot written, the endpoint told. M5's executor calls it with the act's proof.
-- `stream_for(project, writer_session, recipients, text) → [(writer, audience, recipients, text)]` or the D4 refusal: the one stream choice every append path uses; each split's `text` carries only its recipients' leading tags.
-- `ReachGate(project).held(event, session) → None | 'refused' | 'owed'`: the one push check, called inside `push_live` and `resume_session`, so every deliverer reaches it.
+- `sminos access <member> <level>` and `sminos share <member> <person> <grade|none>` (D10), both through `set_visibility(sid, *, access=None, share=None, operator) → {record, changed, transition}`: the record change under the records lock (`sminos_records.set_policy`, `policyRev` bumped) and the pending transition, which the uplink completes as D10 says. A widening without `operator` raises `Widening`. M5's executor calls it with the act's proof.
+- `stream_for(project, writer_session, recipients, text=None, raws=None) → [(writer, audience, recipients, text)]`, raising `Unreachable` (the D4 refusal) or `StreamUnknown` (D10): the one stream choice every append path uses; given `raws` (each recipient's raw leading tags), each split's `text` carries only its own recipients' tags.
+- `ReachGate(project).held(event, session, words=None) → None | 'owed'`: the one push check, called inside `push_live` and `resume_session` (`reach_hold` raises `ReachHeld` before anything is handed over), so every deliverer reaches it. It lets a peer frame through only under the single-use permit the uplink sets around the one push that follows a `reach {deliver}` (`deliver_reach`), or between one owner's sessions of this machine; a refusal is settled in `deliver_reach`, never by the gate.
 - `sessionRefs(event)` in Python, the same list as §A's, pinned by a shared vector.
 - `HubLog.withhold_own(writer, seq)`: an own position the hub withheld.
-- `uplink.json` `archive_have: {have: {writer: seq}, withheld: {writer: [seq, …]}}`: the own-writer entries of the `have` that last confirmed the archive, and the positions the hub withheld in them; `copy_log`'s frontier for this machine's writers.
+- `uplink.json` `archive_have: {have: {writer: seq}, withheld: {writer: [seq | [from, to], …]}}`: the own-writer entries of the `have` that last confirmed the archive, and the positions the hub withheld in them, as runs on the wire; `copy_log`'s frontier for this machine's writers. Beside it, `dead {writer: {at, last, final?}}` (writers stopped by an `audience` refusal), `voided` and `withheld` (`{writer: [seq]}`, each for good) and the notices not yet shown.
+- `daemon/audiences.json` `{v, capabilities, sessions: {sid: {owners, members, policyRev, withdrawn?}}}`: the endpoint's capabilities and `audience` frames, kept by the uplink and read by every writer, the CLI's included.
+- `<project home>/streams.json` `{writer: audience}`: this machine's own streams, each kept before its first event; a void's claimed audience.
+- `daemon/visibility.json` `{v, sessions: {sid: transition}}`: the transitions `set_visibility` records and the uplink completes.
 - RL1 `have` (M1): optional `withheld: {writer: [seq | [from, to], …]}`, for the hello's own machine's writers only.
-- Outcome `refused-reach`. `REACH_WAIT = 10`.
+- Outcome `refused-reach`, settled on this machine and never reported. `REACH_WAIT = 10`.
 
 ### D. M5 (O8 M6, the architect)
 
@@ -759,6 +766,23 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   served by the hub's Worker).
   Evidence: `apps/org-protocol/src/shapes.ts` `isListing`.
 
+- Observation (M3): the hub's withheld list speaks only for the machine's current name, since the hub knows no former names. A refusal lost before a rename can never be learned from the hub's word, so a former name's archive frontier can be no later than the last `have` that listed it.
+  Evidence: `LogStore.withheldOf(machine)` (`apps/desk-hub/src/objects/log-store.ts:171`), called with the hello's machine (`project.ts:531`).
+- Observation (M3): an event's `ts` is the only order across a session's streams, at millisecond resolution, so own events written in the same millisecond under different streams merge in file order. A test that assumed otherwise failed in CI.
+  Evidence: run 42135171871 (`test_streams`).
+- Observation (M3, second review): an own writer's archive frontier can move backwards. A frozen former name, or the cap below a kept conflict, can leave the confirmed top below what the archive file already holds from another archiver's run, and rewriting the file whole then deleted public history, with no audience involved. The fix keeps those positions (Decision Log, M3), with a limit: an edit someone else made to a position between the top and the kept bound survives, for a former name indefinitely, because the bytes can't tell it from another archiver's copy. The archive repo is no authority; the hub log is.
+  Evidence: review 2 on `5e26289b`; `copy_log` (`sminos_archive.py`).
+- Observation (M4): only the uplink can ask `reach?`. The endpoint's RL10 server serves one connection, and a new one replaces the last, so the CLI, the daemon's tick and every other process can't ask. On a reach-capable machine every peer delivery but the same-owner local one goes through the uplink's ask.
+  Evidence: `src/endpoint/rl10/server.ts`; sminos's `Link.ask_words` (`sminos_uplink.py`).
+- Observation (M4): the member frame sminos sends ahead of an ask (`members_before`) is load-bearing for `reach?`: `decideReach` answers nothing for a recipient whose member record the endpoint doesn't hold (Decision Log, M2), so without the frame the ask goes unanswered.
+  Evidence: `src/endpoint/rl10/reach.ts`; `sminos_uplink.py` `members_before`.
+- Observation (M4): MAWS's RL10 conversation fixture advertises `reach` but stages no `reach?`. sminos's conformance replay, re-pinned in M3 to the fixture at MAWS `c100ab45f`, now answers each unstaged `reach?` with `deliver`, as it answers an unstaged `words?` with `refuse`, and passes at 107 ok, 0 FAIL. One staged `reach?` exchange in MAWS's fixture would pin the frame's shape.
+  Evidence: `test/endpoint/rl10/conversation.json`; sminos's `rl10-conversation.source.json`.
+- Observation (M4): two setter changes in quick succession, the second before the endpoint has answered the first, give a withdrawn set that sminos computes across both and the endpoint across the last alone. The endpoint then refuses the notice `audience`, which stops only the notice's stream, so it fails closed. The endpoint's `withdrawn` makes the set exact.
+  Evidence: `sminos_visibility.py` (the withdrawn set without `withdrawn`); the signer's `#notice` (`src/endpoint/rl10/log-relay.ts`).
+- Observation (M4): `daemon probe` writes `identity.json` but not the endpoint's capabilities, so between a probe's cutover and the uplink's first welcome every peer push is held. That fails closed and lasts seconds.
+  Evidence: `sminos_audience.reach_capable` takes a missing `audiences.json` on a cut-over machine as capable.
+
 ## Decision Log
 
 - Decision: the verification. One independent spec review (`doperpowers:adversarial-reviewer`, security lens) and its buildability review of this execution section. Each landing that touches `reach?`, an audience, the registry or the hub's fan-out gets reviewer-high with a security lens. M6 is the end-to-end proof.
@@ -780,7 +804,7 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Rationale: OX1 asks for additive change within a major, and these two hellos are where each side learns what the other can do.
   Rejected: a strict deploy order with no signal, which can't be checked and fails open in between.
   Date/Author: 2026-11-05, p5-desk-track-owner, accepted by the architect (chat 1131).
-- Decision: the setters. Narrowing is open to a session's shell; widening is operator-only, with confirmation at `/dev/tty`. A red-first test covers it.
+- Decision (amended below, 2026-11-06: widening moves to the app's step-up before a second member joins the production org): the setters. Narrowing is open to a session's shell; widening is operator-only, with confirmation at `/dev/tty`. A red-first test covers it.
   Rationale: an agent must never open a session to more people than its owner chose (the architect's condition (a)).
   Rejected for the CLI: device step-up, which needs the app; M5's picker uses it.
   Date/Author: 2026-11-05, p5-desk-track-owner, accepted by the architect (chat 1131).
@@ -1069,6 +1093,87 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Rejected: the head's member ids on the `org` frame, which would hand every machine's sminos the whole member list to compute one set the endpoint already computes.
   Date/Author: 2026-11-06, p5-desk-track-owner (an M2 follow-up landed beside M4).
 
+- Decision (M3): the endpoint's word is kept where every writer reads it. The uplink keeps the endpoint's capabilities and its `audience` frames in `daemon/audiences.json` (`keep_capabilities`, `keep_audience`), and a frame of an older `policyRev` never replaces a newer one. A local private session writes under a stream only when the kept audience is at exactly its record's `policyRev`; otherwise the write raises `StreamUnknown`, and a required write fails (`LogWriteFailed`) while any other warns and writes nothing. Without `access`, member frames carry no visibility and every event goes under its plain writer.
+  Rationale: the CLI writes events, so it reads the endpoint's word outside the uplink process; frames can be reordered across reconnects; an audience from another revision is no audience, so the write fails closed.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M3).
+- Decision (M3): writing and splitting.
+  - Streams exist only in hub projects (`streams_here`). A git-mirrored or local project keeps plain writers, and a copy under a stream is never written into a home that isn't a hub project's; a warning says why (review 1).
+  - `streams.json` in a project's home catalogues this machine's own streams and their audiences (`keep_stream`). An audience is kept before its stream's first event, a copy's included, inside the copy's error handling: a copy that can't keep it is skipped with a warning and delivery goes on (reviews 1 and 2). Readers stat the file and never glob the log, and the uplink reads it to build voids.
+  - A listed sender toward a private session is refused before any append when the recipient's owners, or the sender's, fall outside the event's audience or are unknown, with the words a session that doesn't exist gets: `no member @<alias> in project <p>`. The operator's writer, `<machine>/human`, has no sender-owners check.
+  - A say's text is rewritten only when it splits; `@all` and selectors are never rewritten.
+  - `spawnerSession`, and a `retired {reason: 'continued'}`'s `to`, are written null when the referenced session's audience doesn't contain the event's, or can't be told.
+  Rationale: a git mirror publishes the log whole, so a stream there would hide nothing; the refusal's words tell the sender nothing of a private session it can't see (D4).
+  Date/Author: 2026-11-05, p5-desk-track-owner (M3).
+- Decision (M3): a record's policy and its member frame.
+  - A record keeps its own `access`, `shares` and `policyRev` across a replacement and takes the provenance's only when it has none. The fields are written only when present, and a record whose policy fields don't parse is unreadable (D10).
+  - Shares are sorted by member, and a duplicate member is refused.
+  - A spawn takes its spawner's `access` and `shares` at `policyRev` 0; with the spawner's record unreadable, it is private with no shares.
+  - `sminos_records.set_policy(sid, mutate, deadline=None)` returns `(record, changed)`: a no-op writes nothing, and a missing or unreadable record raises `NoRecord`.
+  - A member frame is built from the record as it reads at publication (`Link.fresh_frame`), never from a cached plane row (review 1). An unreadable established record gets no frame, and `gone` if one was sent before.
+  Rationale: an unreadable policy, or a spawner's, must never read as the listed default, and a frame from a cached row could restate a policy the record no longer holds.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M3).
+- Decision (M3): a `snapshots` page holds at most 200 events and 256 KiB, in whole writers, at least one; its cursor (`next`) is its last writer, in Python string order. An unknown project, or one that isn't a hub project, gets one empty page marked `done: true`.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M3).
+- Decision (M3): the archive's frontier, with the reviews' fixes.
+  - `archive_have.withheld` keeps the hub's runs as they come on the wire. A run fails when no `have` has been saved, or when the saved `have`'s withheld list disagrees with its own vector, which then confirms nothing.
+  - A kept `conflict` caps its own writer below it.
+  - A former name's entry is frozen at the last `have` that listed it (review 1); a former name with none saved stays out of the archive.
+  - Past an own writer's confirmed top, `copy_log` keeps the archive's existing positions up to the larger of this machine's last local seq and the hub's vector (review 2). Every position recorded here as withheld, refused or voided is written as its tombstone, no local body past the top is copied, and lines past both bounds are dropped, since only this machine writes its own writers.
+  Rationale: the hub's withheld list speaks only for current names, and a frontier that moves backwards must not delete public history another archiver copied (Surprises, M3).
+  Date/Author: 2026-11-05, p5-desk-track-owner (M3).
+- Decision (M3): sminos's side of the `audience` stop and the void (the coordinator's rulings, M2).
+  - An `audience` refusal stops its writer, recorded as `dead` in `uplink.json`. An event appended after the stop revives it: each refused position goes up as a void (Interfaces §B), kept in `voided` for good, with the original `ts`, so a resend is byte-identical.
+  - A void the endpoint answers `conflict` stops its writer for good (`final`).
+  - A stream whose audience isn't kept here stays stopped, and daemon.log says so: no void goes up without a claimed audience.
+  - On a direct stream, a hub tombstone is a spent position, never reported.
+  Date/Author: 2026-11-05, p5-desk-track-owner (M3); the `conflict` stop ruled by the coordinator.
+
+- Decision (M4): the `reach?` ask runs only in the uplink, and the gate passes a push under a single-use permit. `ReachGate` sits inside `push_live` and `resume_session` (D8) and passes a peer frame only under a permit keyed by project, recipient, writer, seq and event hash, which the uplink sets around the one push that follows a `reach {deliver}` (`deliver_reach`) and clears in `finally`. Every other deliverer (`say`'s fast path, the daemon's tick, `send`) leaves the writer owed at that event and nudges, as a words-gated writer is left owed, and `say` prints `recorded; the endpoint decides its delivery`. The gate raises `ReachHeld` before anything is handed over or launched.
+  Rationale: the endpoint serves one RL10 connection, the uplink's (Surprises, M4), so no other process can ask; a permit for exactly one push keeps "each push asks".
+  Rejected: a relay from the CLI to the uplink, which is new local IPC for one question; and asking at the caller, which D8 rejects.
+  Date/Author: 2026-11-06, p5-desk-track-owner (M4), approved by the coordinator.
+- Decision (M4, the coordinator's ruling): the same-owner local path. An event a session of this machine wrote under its own writer (`<current name>/<session>` or one of its streams) to another session of this machine is delivered with no ask when both records read and their `owners` are equal as sets (both `['@machine']`, or the same member ids), so one person's sessions on one machine keep messaging while mawsd is down. It applies only in a project that can't import this machine's own writers from anyone: a hub project of this org with no git remote, or a project nothing syncs. A git remote, even one kept after `project init --hub` with its imported history, can import an own-name line (reviews 1 and 2). Every other case asks: a remote sender, the operator's writer, `hub/` words and their `peer` downgrade, differing owners, an unreadable record.
+  Rationale: it reads no access, share, grade or org state, so it is no grade logic. It compares the identities of two records on one machine, where `@machine` is one owner set, and the endpoint would answer `deliver` anyway (D2).
+  Date/Author: 2026-11-06, the coordinator (p5-desk-track-owner), for M4.
+- Decision (M4): an unanswered ask leaves the delivery owed, with no attempt counted. No answer within `REACH_WAIT` (10 s), or a malformed one, leaves it owed: it is asked again under a new id, never given up, and said once in daemon.log. A recipient whose record can't be read is held owed with no ask.
+  Rationale: acceptance 5 is "delivered once the endpoint answers", however long that takes; the 60-attempt give-up would drop it after five minutes.
+  Date/Author: 2026-11-06, p5-desk-track-owner (M4), approved by the coordinator.
+- Decision (M4): `refused-reach` stays on this machine: one content-free daemon.log line (project, writer:seq, the recipient's short, reason), no outbox record, and no delivery outcome goes up.
+  Rationale: D3, "a refusal here stays here"; the hub's `DELIVERY_OUTCOMES` has no such outcome anyway.
+  Date/Author: 2026-11-06, p5-desk-track-owner (M4), approved by the coordinator.
+- Decision (M4): a words verdict `peer` chains into `reach?`, and the batch rule is met per event. On a reach-capable machine a `peer` verdict queues `reach?` under the same `(project, session, writer)` key and pushes only on `deliver`. A `send` whose queue holds an event that needs an answer is held whole, and the uplink then delivers that writer one event at a time, in order: a refused earlier event settles `refused-reach`, and the next is asked.
+  Rationale: M4's Proof: "the verdict comes back `peer`, and the push asks `reach?` again", and "an earlier queued event the endpoint refuses is left out of the batch".
+  Date/Author: 2026-11-06, p5-desk-track-owner (M4).
+- Decision (M4): the projectless push. `resume <seat> <msg>`, `fill`'s resume and a raw `send` carry no log event; on a reach-capable machine they go only to a session whose owners meet the sender's. Owners are the endpoint's resolved ones (the operator's: those it resolved for this machine's `@machine` sessions, `machine_owners()`), with the records' tokens as the fallback. Unknown owners are refused with D8's message.
+  Rationale: without `machine_owners()`, the owner at their own terminal would be refused on a seat their own desk spawned.
+  Date/Author: 2026-11-06, p5-desk-track-owner (M4).
+- Decision (M4): the setters' transition is asynchronous, completed by the uplink. `set_visibility` changes the policy (`sminos_records.set_policy`) and records the pending transition in `daemon/visibility.json`, both under one lock. The uplink completes it once the endpoint's `audience` frame at the new `policyRev` is kept (on that frame, and at each tick): the notice first, then the snapshot (`joined`, `state`) under the new stream, or under the plain writer once listed. A snapshot write that fails leaves the transition pending for the next tick without writing the notice twice. The CLI waits up to 5 s while a daemon runs, and says whether the notice and snapshot are written or still pending.
+  - The notice goes under `<machine>/<session>~audienceDigest(withdrawn)`, from the frame's `withdrawn` (the M2 follow-up above), else the previous audience less the new one when both are known. A change from the whole org with neither writes the snapshot alone and a daemon.log line; that fails closed, since the hub's registry and the recipient's `reach?` refuse what the withdrawn members send.
+  - The notice goes up before its snapshot: `HubLog.uploads` draws a writer whose first event is an `unlisted` notice before the others, and writing a notice or completing a transition cancels a draw already made of the project.
+  Rationale: the new audience is the endpoint's word, known only once the member frame at the new `policyRev` has reached it; the hub judges a notice against its rows from before the batch, so a snapshot uploaded in an earlier batch would make every valid notice stale.
+  Date/Author: 2026-11-06, p5-desk-track-owner (M4).
+- Decision (M4): without the endpoint's `access`, the setters take only a no-op or a change whose result is `listed` with the shares unchanged; `share` is always refused.
+  Rationale: a private session behind an endpoint that can't carry it writes nothing (`StreamUnknown`, Decision Log M3), and a share no endpoint carries would mislead its owner.
+  Date/Author: 2026-11-06, p5-desk-track-owner (M4).
+- Decision (M4): a lost private session comes back private.
+  - A continuation known only from its predecessor's `joined` under an audience stream is private with no shares; under a plain writer it takes the listed default. Before this, M3 made every such continuation listed.
+  - A session whose record file is lost, and that has an own stream catalogued in some project's `streams.json` (this machine's former names counted), is recreated private with no shares. A corrupt pending launch is claimed private.
+  - Each recreated private record's `policyRev` is the larger of its candidate's and the floor above every revision this machine still holds (`policy_rev_floor`: `audiences.json` + 1, `visibility.json` + 1).
+  Rationale: each would otherwise widen a private session without its owner, or leave it blocked on an audience at an older revision.
+  Date/Author: 2026-11-06, p5-desk-track-owner (M4).
+- Decision (M4): every operator writer waits for its own head. `waits_for_head`, the queues and their release cover `<machine>/human` and each `<machine>/human~<digest>`, each released above its own head in the `have`, a former name's queue draining into its namesake. The enrolment's first `have` is kept as `headed`, so a stream that `have` didn't name stops waiting at once.
+  Rationale: a re-enrolled machine's operator stream would otherwise restart at seq 1 under positions the hub holds (#147). M3's first review found it, and it was deferred here.
+  Date/Author: 2026-11-06, p5-desk-track-owner (M4).
+- Decision (M4): `HubLog.withhold_own` records the position in `uplink.json`'s `withheld`, counts it taken (`keep_taken`; `sent` stays as it is, so a `resend` from before it is still answered), keeps the event in its file and queues one notice. It runs on a `not-reachable` refusal, on RL10's `spent {reason: 'withheld'}`, on a direct stream's tombstone and on a `have`'s withheld list (`withhold_listed`), so a refusal lost to a disconnect still reaches its sender. The notice goes to message kinds only, as `[sminos: your message to <aliases> was not delivered: not-reachable]`, in a frame no log holds, kept while the session isn't live and dropped a day after the message; the operator's writer gets a daemon.log line instead. `copy_log` writes a tombstone at each position recorded here.
+  Date/Author: 2026-11-06, p5-desk-track-owner (M4).
+- Decision (the architect's ruling, from M4's first review): until M5's step-up cutover, widening from an agent's shell stands as built, and the cutover lands before a second member joins the production org.
+  - What stands: an agent's shell can unset `CLAUDE_CODE_SESSION_ID`, run the CLI under a pty it opened and type `y`, and `sminos access <s> listed` succeeds (the review's repro). Meanwhile sminos's skill tells agents to hand widening to their human.
+  - The cutover (M5): once the app's `record.access` and `record.shares` offers exist, sminos's CLI refuses widening ("use MAWS") and keeps narrowing, and M6's live widening moves to the app or a staging-only path.
+  - Acceptance 8 reads: refused for an agent that follows its instructions; closed to every agent by the cutover, before a second member joins the production org.
+  Rationale: D10 chose the operator's terminal as the trust that already admits signing, and any local check is defeatable by a shell of the same user. Only the app's step-up, signed by the device's step-up key, closes widening to every agent. While the org is the owner alone, a widened session reaches no one but its owner.
+  Rejected: an ancestry check (refuse when a `claude` process is an ancestor), which adds code and closes nothing, since tmux, launchd and setsid detach the CLI from its agent; and step-up on the CLI, which is M5-sized.
+  Date/Author: 2026-11-06, the architect (chat 1150), relayed by the coordinator (p5-desk-track-owner).
+
 ## Outcomes & Retrospective
 
 - M1 (2026-11-05). The hub now does everything Interfaces §A gives it:
@@ -1113,3 +1218,26 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
     keeps it as the route for a later client, and why it beat an `endpoint.listings` call (O13's "Nothing but cards").
   - The lesson: before changing a frozen client to reach a new capability, check whether the backstop already makes
     its old behaviour a refusal. If it does, the frozen client's "can't" is a recorded behaviour, not a gap.
+- M3 (2026-11-06, sminos 1.35.0, doperpowers PR #463). With an M2 endpoint and an M1 hub, sminos now:
+  - sends `access`, `shares` and `policyRev` to an endpoint that advertises `access`, keeps them across every rebuild of a record, and sends nothing for a record it can't read;
+  - writes a private session's events only under its audience streams, splitting a `say` and its copies per audience so the public part names nothing private, with narrower provenance redacted;
+  - archives only the hub-admitted public projection, never a stream file, and keeps the public history the archive already held;
+  - answers `snapshots?`, and stops a writer refused `audience` until a new event revives it with voids.
+
+  Each Proof item has a red-first test: `test_streams` (22), `test_reach` (30), `test_snapshots` (5), `test_records`' policy cases (9), and 13 new assertions in `test-archive.sh` (68 in all). Replayed against a pre-M2 endpoint's conversation with only the hello amended, 1.35.0 sends what 1.34.0 sent (107 ok, 0 FAIL).
+  - What the reviews caught (three rounds; the third correct): state taken from somewhere other than its authority at the moment of use. A member frame was built from a cached record, a former name's frontier came from a `have` that couldn't speak for it, a copy went into a home whose transport doesn't filter, and a frontier that moved backwards rewrote public history. The lesson repeats M1's: decide from authoritative state, read where the data leaves.
+  - Left for later: a former name with no saved frontier stays out of the archive for good, and a refusal lost before a rename can't be learned from the hub. Both fail closed, and a former-name list on the hub's side would close both. Two gaps went to M4, which closed them: the operator stream's head-wait on re-enrolment, and a continuation known only from the log taking the listed defaults.
+- M4 (2026-11-06, sminos 1.36.0, branch `o18-m4-sminos`). On a machine whose endpoint advertises `reach`:
+  - every peer push is authorized as it leaves, by the endpoint's `reach` or by the identity of two local records, and silence never drops a message;
+  - a refusal stays on the machine;
+  - the owner narrows from any shell and widens from a terminal;
+  - a withdrawn member's projection drops the session at its `unlisted` notice;
+  - a sender whose message the hub withheld is told once.
+
+  Tests, each red first: `test_reach_gate` (26 and more), `test_visibility` (19 and more), `test_withheld` (9), and additions to `test_records`, `test_heads` and `test_streams`; the conformance replay at 107 ok, 0 FAIL.
+  - What the reviews caught (three rounds; the third correct): as in M3, provenance and capability read from somewhere other than their authority. A writer name stood for local provenance though a git mirror can import it, a missing `audiences.json` read as an old endpoint's "no capability", a recovered record's `policyRev` came from evidence older than what survived on the machine, and a draw suspended across a transition sent the snapshot ahead of its notice. One finding stands until M5's cutover by the architect's ruling: an agent can pass the terminal's confirmation under a pty of its own (Decision Log, 2026-11-06). The lesson for M6: check that a fast path's condition is still true of the data in hand, not of the configuration around it.
+  - Left for later:
+    - D5's republishing of a withheld own snapshot isn't built. Unbounded, a snapshot refused for good (a session bound to another machine) would go up on every reconciliation, so it needs a bound or a ruling.
+    - `cmd_steer` pushes to another session's bridge, supervisor or inbox with no event and no reach check. It is a control verb outside D8's list, but on a shared machine it reaches another person's session.
+    - A project whose git remote was removed by hand, while it still holds imported own-name lines, takes the same-owner fast path for them. Closing it needs per-event provenance for a session's `say`; receipts exist only for `human`.
+    - Smaller: `send --wait` returns early when only `push_live`'s hold fired; a transition for a session that is no member here stays pending, at one stat per tick; events to sessions that aren't live are now asked too, which adds `reach?` traffic; MAWS's conversation fixture stages no `reach?` (Surprises, M4).
