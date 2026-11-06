@@ -1113,16 +1113,16 @@ One pairing at a time, and none while a rekey runs, since both are the session's
    - `ttl_s`: `ttlDays × 86,400`, inside `MIN_PROVISIONING_KEY_TTL_S` to `MAX_PROVISIONING_KEY_TTL_S`, checked in the sheet;
    - `max_uses`: present only when a cap is chosen (1 to `MAX_PROVISIONING_KEY_USES`). Uncapped sends none, and signs `maxUses: NO_USE_CAP`.
 
-   The answer must be `201`, and is checked with `mintDisagrees(issued, {prefix, ttl, maxUses, before, after})`. A disagreement revokes the minted key and refuses. The signed delegation's `expires` is `before + ttl` and `offlineRevokeS` is `NEVER_OFFLINE`, as admin's are.
+   The answer must be `201`, and is checked with `mintDisagrees(issued, {prefix, ttl, maxUses, before, after})`. A disagreement revokes the minted key and refuses. With `ttlSeconds = ttlDays × 86,400` and `beforeMs = Date.now()` taken just before the mint, the signed delegation's `expires` is `new Date(beforeMs + ttlSeconds × 1000).toISOString()`, and `mintDisagrees` gets the same units (`ttl: ttlSeconds`, `before` and `after` in milliseconds), as `admin.ts:953-963, 1009-1026` does. `offlineRevokeS` is `NEVER_OFFLINE`, as admin's is.
 3. It makes the delegation's key pair in main, composes `delegation.add {id, pub, prefix, expires, maxUses, offlineRevokeS, owners}`, and signs it into the pending slot **unsent** (`Edit.hold`). This is the change sheet's one Touch ID. The sheet says the code will go to `<project>/<secret>` as a new version.
 4. It encodes the `smns-provision-v2` code in memory (`encodeProvisioningCodeV2`, `apps/org-protocol/src/provisioning.ts:122`) and runs `gcloud secrets versions add <secret> --project <project> --account <account> --data-file=-`, with the code on stdin alone. Its stdout and stderr are read for the version name and an error line, never logged whole.
 5. It confirms with `gcloud secrets versions describe <version> … --format=json`, which reads the version's metadata (`name`, `state: ENABLED`, `createTime`), never its value.
-6. It publishes the slot (`publishHeld()`), and the signer settles it as any pending proposal.
+6. It publishes the slot (`publishHeld(hash)`, with the hash step 3 captured), and the signer settles it as any pending proposal.
 
 *The held slot.* An unsent delegation is a persisted phase of the pending slot, not a skipped first post:
 - `signing.json`'s `pending` gains `held: {kind: 'delegation', id} | null`, written in the same `update` that writes the slot.
 - **Nothing automatic posts a held slot.** It is excluded from `settleLocked`'s repost (`signer.ts:444-464`), which the session runs at startup and at a feed's reopen (`org-session.ts:643, 812`), from deliveries and from the weekly asking. Any other signing attempt meanwhile answers `pending`, as an ordinary unsettled slot does.
-- **`publishHeld(hash)`** clears `held` and posts in one `update`, and only when the slot's stored hash is `hash`, the slot this create made. So a gcloud operation that finishes after a Discard, or after another slot replaced it, publishes nothing.
+- **`publishHeld(hash)`** runs under the signer's existing exclusive operation, in two steps. First, one `SigningStore.update`, whose callback stays pure and synchronous (`signing-store.ts:29-38, 92-109`), checks that the slot's stored hash is `hash` (the slot this create made) and still `held`, and durably clears `held`. Only after that update resolves does it run the normal post path, which writes exposure first, as every post does (`signer.ts:361-382`). So a gcloud operation that finishes after a Discard, or after another slot replaced it, publishes nothing, and a crash between the two steps leaves an ordinary pending slot that settles.
 - **A relaunch** finds `held` with no key pair in memory. The row offers only Discard. It names the minted hub key, and Discard also revokes it, as admin's message says (`provisioning revoke`).
 
 A failure at 4 or 5 leaves the slot held, with the reason under the delegation row. "Write the code again" retries 4 and 5 while this run holds the key pair. Once the app has quit, the key pair is gone, and the row offers only Discard (M3's), since a delegation whose private key nobody holds must not be published. The key pair and the code live only in main's memory and the child's stdin, and are dropped at publish, discard, sign-out or quit.
@@ -1178,7 +1178,7 @@ Rejected:
 - **`edits.test.ts`:** each delegation composer passes `successorProblems` and `verifySuccessor` once signed; renew refuses an expired or shortened delegation; drop moves its certificates' `retired` to `revoked`.
 - **The renderer:** the rows, the half-done renewal, the unsent row's two actions, and the destination setting.
 - **`test/org/org-page.local.test.ts`:**
-  12. A creates a delegation through the fake gcloud, against the real local hub's mint (so the request's mapping meets the hub's own parser). A real endpoint provisions from the code the fake received, its certificate verifies, and it lists.
+  12. A creates a delegation through the fake gcloud, against the real local hub's mint (so the request's mapping meets the hub's own parser). The case asserts the request's fields, and the signed `expires` within a minute of now + `ttlDays` days. A real endpoint provisions from the code the fake received, its certificate verifies, and it lists.
   13. A renews it, and the hub's key expiry follows.
   14. A drops it. The certificate's key reads revoked, and the hub key is gone.
 
@@ -1526,8 +1526,8 @@ The door adds no authority. An act through it is authenticated by its step-up si
 - The app sends nothing to a project that it can't read.
 
 *The cache.* Per project, events by offset and their verdicts, re-verified at load. A project whose cache doesn't read is read from offset 0. "As of" is the last `caught-up`'s time.
-- **Migrated history outlives the bound.** `verifyHistoryAttestation` needs every event of the writer from seq 1 to `upTo` (`history.ts:146-175`), which an evicted prefix no longer gives. So once a writer's prefix verifies in full, the cache keeps a checkpoint, `{writer, upTo, by, record}`, separate from the bounded events and never evicted.
-- **At load,** the record's signature and binding are verified again (`verifyHistorySigner`), and cached events of that writer at seq ≤ `upTo` read `migrated` from the checkpoint. The checkpoint is this profile's own 0600 file, under the same trust as M2's persisted listing marks.
+- **Migrated history outlives the bound.** `verifyHistoryAttestation` needs every event of the writer from seq 1 to `upTo` (`history.ts:146-175`), which an evicted prefix no longer gives. So once a writer's prefix verifies in full, the cache keeps a checkpoint, separate from the bounded events and never evicted: `{writer, upTo, by, record, hashes: {<seq>: <hash of the exact canonical event that passed>}}`, one hash per position 1 to `upTo`.
+- **At load,** the record's signature and binding are verified again (`verifyHistorySigner`). A cached event of that writer reads `migrated` only when its own canonical hash equals the checkpoint's hash at its seq, as M2's marks bind a record by its hash (`rows.ts:298-307`). Any other bytes at a covered position (a hub serving a different event at that writer and seq, at any offset) read as failed, and are never upgraded by the checkpoint. The verdict extends to no event by writer and seq alone.
 - **A damaged cache** reads from offset 0, which recomputes every checkpoint from the full prefix.
 
 *Hub access.* The socket opens only while `current()` has `hub`. An expired Access token shows "Sign in to the hub again" in the tab, the Org page's own action (Q7).
@@ -1539,7 +1539,7 @@ The door adds no authority. An act through it is authenticated by its step-up si
 - `project.test.ts` (renderer): exchanges and broadcasts fold; a third party ends an exchange; one message unfolded; titles and machines from lifecycle events; the waiting section filtered to the project.
 - `project-socket.test.ts`: resume from the cached offset; `more` followed; live after `caught-up`; 4403 ends it with "removed".
 - `words.test.ts`: the signature verifies under the device's channel key; a reconnect resends with the nonce; a refusal shows; signed out, nothing sends.
-- `cache.test.ts`: the bound; a damaged file reads from 0; "as of"; a DX1 writer larger than both bounds verifies once, is evicted in part, and still reads `migrated` across a restart from its checkpoint, re-checked by `verifyHistorySigner`.
+- `cache.test.ts`: the bound; a damaged file reads from 0; "as of"; a DX1 writer larger than both bounds verifies once, is evicted in part, and still reads `migrated` across a restart from its checkpoint, re-checked by `verifyHistorySigner`; a forged event at a covered writer and seq, served at a new offset, then evicted and reloaded, never reads `migrated`.
 - **`test/org/channel.local.test.ts`** (Miniflare hub through `local-org.ts`):
   1. A machine's listed key signs v2 `say` events into the project log, plus a DX1 writer with a history attestation from a listed machine, as `apps/desk-hub/test/app-connection.test.ts` and the O14 suites seed them.
   2. The app's channel shows the exchange folded, the DX1 events "attested at migration by <name>", and a forged event uncounted in the stream.
@@ -2358,7 +2358,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     // OrgView gains delegations: {id, prefix, owners, expires, maxUses, machines: {ref, name, live}[], hub: {expires, uses} | null, held: 'unsent' | null}[]
     // machine settings: org.provisioningSecret {project, secret, account} | null
     // Edit gains hold?: true; signing.json's pending gains held: {kind: 'delegation', id} | null (never reposted by settle, deliveries or weekly)
-    // OrgSigner gains publishHeld(hash): Promise<SignOutcome>   (clears held and posts in one update, only for the slot whose stored hash is `hash`)
+    // OrgSigner gains publishHeld(hash): Promise<SignOutcome>   (under the signer's exclusive operation: one pure update clears `held` for the slot whose stored hash is `hash`; then the normal post path)
     // the desk track's route (branch p5-hub-key-renew; the architect lands it): POST /api/provisioning-keys/<id>/renew, admin-only, no body
     //   200: the key exactly as GET /api/provisioning-keys lists it, delegation included; `expires` is the head delegation's string verbatim
     //   403 not-admin | 404 unknown-key | 410 key-revoked | 410 key-expired (an elapsed key is never revived)
@@ -3043,7 +3043,10 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   11. (P2, M6b) Rows track hub and channel membership per key, whatever showed the key first.
   12. (P2, M6b) The `policyRev` check is best effort, read again before and after Touch ID, with a change landing during the acts shown as it stands.
   13. (P2, M8) `admin show` is the one read after the revocation, and moving its anchor is intended. The revocation's evidence is the digest-bound sheet and the signed state, since `show` prints no revoked device keys.
-  The verdict found M5b buildable as written.
+  The verdict found M5b buildable as written. The second pass (on 0701ee0a5) closed 12 of the 13 and found three in the fixes, each adopted:
+  - (P1, M7a) the migration checkpoint now binds each covered position to the hash of the exact event that passed, so other bytes at that writer and seq never read `migrated`;
+  - (P2, M4c) `publishHeld` clears `held` in one pure update, then runs the normal post path, under the signer's exclusive operation;
+  - (P2, M4c) the delegation's `expires` is computed in explicit units.
   Date/Author: 2026-11-06, O8's executor.
 
 ## Outcomes & Retrospective
