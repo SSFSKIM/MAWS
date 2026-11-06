@@ -523,7 +523,8 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
 // start, its end included, and its end switches nothing: main reads that slice in pages the channel carries
 // (remote-history.ts), while a disk window crosses as one answer, and that machine's disk follow sends nothing here.
 // So it is disk-backed only when the launch never started it (an earlier launch's child, a session not live there),
-// and a start it hears then (a resume) takes it back to the stream.
+// and a start it hears then (a resume), or while its slice is read, takes it back to the stream; a gap in the
+// session's stream (`remote.gap`) reads a live one again, since the gap may have taken its rows or its end.
 //
 // The same events reach `session.eventBatch` in two forms, the live journal's (with their row's `seq`) and the disk
 // transcript's (`seq: null`, ruling 5 of the wave-2 ledger), under different ids, so id deduplication cannot merge
@@ -573,6 +574,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
   // can carry an exit of an earlier run, which says nothing about a child started since.
   let startAt = -1; // the child's start in the parent's snapshot
   let startedInStream = false;
+  let startsHeard = 0; // the remote drill-in: starts a batch carried, so a snapshot knows one came while its slice was read
   // E11 (W-C; E10's host loss): the parent's latest live-form event while the child is live, for the loss's exit, and
   // the exit the source synthesised when the host died with the child running: no journal holds it, so the disk re-read
   // after the switch keeps it as the child's end unless the parent started the child again after it.
@@ -601,6 +603,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
         lifecycleRevision++;
         if (starts(event)) {
           startedInStream = true;
+          startsHeard++;
           ended = null;
           hostLost = null;
           if (remote && provenance === 'disk' && liveForm(event)) provenance = 'live'; // a resume, which the stream carries
@@ -674,14 +677,17 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       for (const subscriber of attached) subscriber.ended.signal.removeEventListener('abort', signal);
     }
   };
-  const toDisk = () => {
-    decide('disk');
+  const signalReset = () => {
     if (resetPending) return;
     resetPending = true;
     queueMicrotask(() => {
       resetPending = false;
       for (const listener of [...resets]) listener();
     });
+  };
+  const toDisk = () => {
+    decide('disk');
+    signalReset();
   };
   return {
     key: `${appSessionId}:${agentId}`,
@@ -711,6 +717,9 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
         hostLost = exit;
         receive(subscriber, [exit]);
       });
+      // The remote drill-in: a gap in the session's stream (a range its journal could not give back, an event too large
+      // to carry) may have taken the child's rows or its end, so a child the stream carries is read again from the slice.
+      const offGap = remote ? client.on('remote.gap', ({ appSessionId: gapped }) => void (gapped === appSessionId && provenance === 'live' && signalReset())) : () => {};
       return () => {
         subscribers.delete(subscriber);
         subscriber.ended.abort();
@@ -718,6 +727,7 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
         offFollow();
         offChanged();
         offLoss();
+        offGap();
       };
     },
     async snapshot() {
@@ -727,6 +737,8 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       const attached = [...subscribers];
       const detached = () => attached.length > 0 && attached.every((subscriber) => !subscribers.has(subscriber));
       const revision = lifecycleRevision;
+      const heardBefore = startsHeard;
+      const lostBefore = hostLost;
       const onDisk = () => provenance === 'disk'; // read after the await: the child may have ended meanwhile
       // Even disk provenance must refresh lifecycle: a closed/reopened child may have resumed unobserved. The parent's
       // events for this child alone (`agentId`: its own and the parent's reports on it, with the parent's exits, in
@@ -747,12 +759,17 @@ function childSource(client: MawsBridge, appSessionId: AppSessionId, agentId: Ag
       // the parent's read cannot show stays the end of the run it ended (E11).
       const lost = hostLost !== null && (started < 0 || Date.parse(parent[started].at) <= Date.parse(hostLost.at)) ? hostLost : null;
       if (revision === lifecycleRevision) ended = end > started || (started < 0 && end >= 0) ? parent[end] : lost;
-      // Another machine's child is the stream's whenever the launch started it, its end joining its slice.
-      if (started >= 0 && liveForm(parent[started]) && (remote || (end < started && !onDisk()))) {
+      // Another machine's child is the stream's whenever the launch started it, or a start came while the slice was read
+      // (heard, or held for the provenance), the slice's own end joining it; an end only a batch carried stays behind that
+      // batch's rows, and a host loss told before this read stands as the end of the run it ended (E11).
+      const liveStart = started >= 0 && liveForm(parent[started]);
+      const heardStart = remote && (startsHeard !== heardBefore || [...subscribers].some((subscriber) => subscriber.held.some((batch) => batch.some((event) => starts(event) && liveForm(event) && !lifecycleSeen.has(event.id)))));
+      if (remote ? liveStart || heardStart : liveStart && end < started && !onDisk()) {
+        const sliceEnd = !remote ? null : end > started ? parent[end] : started >= 0 && lostBefore !== null && Date.parse(parent[started].at) <= Date.parse(lostBefore.at) ? lostBefore : null;
         decide('live');
         lastLive = parent.findLast(liveForm) ?? null;
         const live = parent.filter((event) => own(event) && liveForm(event));
-        const history = remote && ended !== null ? [...live, ended] : live;
+        const history = sliceEnd === null ? live : [...live, sliceEnd];
         pager.started(history, null);
         return history;
       }
