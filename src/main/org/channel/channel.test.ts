@@ -348,6 +348,33 @@ describe('a project channel', () => {
     expect(opened(await h.channels.open(PROJECT)).pending).toEqual([{ nonce: lost.nonce, text: 'mine', to: '*', state: 'not-sent' }]);
   });
 
+  // Task 2's fix round 3 (the reviewer's repro): the log may hold a word main let go unacknowledged, heard while another
+  // member held the channel; the word is delivered, never Not sent
+  it('never recalls Not sent a word the log came to hold while another member held the channel', async () => {
+    const h = await harness();
+    opened(await h.channels.open(PROJECT));
+    const first = await until(() => h.last(), 'a socket');
+    first.welcome();
+    const said = await h.channels.send(PROJECT, 'delivered without its ack');
+    if (!said.ok) throw new Error('unsent');
+    const draft = (first.sent.find((f) => f.t === 'human') as { event: Record<string, unknown> }).event;
+    h.channels.release(PROJECT);
+    await until(() => first.closed, 'released', 2_000);
+    const ours = h.signedIn();
+    h.session.set({ ...ours, identity: { ...ours.identity, member: h.o.B, device: 'b-app', channelKey: h.o.bDevice.channel } });
+    opened(await h.channels.open(PROJECT));
+    const second = await until(() => (h.sockets.length === 2 ? h.last() : null), 'a socket again');
+    second.welcome();
+    second.frame({ t: 'log', events: [{ offset: 1, event: { ts: new Date(NOW).toISOString(), writer: `hub/${h.o.A}`, seq: 1, ...draft } }] });
+    await until(() => opened(h.latest()).events.some((e) => e.event.nonce === said.nonce), 'the log copy');
+    h.channels.release(PROJECT);
+    await until(() => second.closed, 'released again', 2_000);
+    h.session.set(ours);
+    const answer = opened(await h.channels.open(PROJECT));
+    expect(answer.events.some((e) => e.event.nonce === said.nonce)).toBe(true);
+    expect(answer.pending).toEqual([]);
+  });
+
   it('addresses a session whose joined the bound let go, from the cache after a reload, and tells the sessions', async () => {
     const h = await harness({
       events: 2,

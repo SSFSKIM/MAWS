@@ -15,7 +15,9 @@
 // The words live in main's memory, nothing on disk. At the channel's release (`release`) a word acknowledged is done
 // (the log has it) and dropped; one never acknowledged goes to the not-sent list (`NotSent`, the newest NOT_SENT_KEPT of
 // the run, every project's), from which its signer's next open of the project takes it (`recall`), shown `not-sent` for
-// that channel's life and dropped at its release. A not-sent word is never sent again; the log holding it ends it.
+// that channel's life and dropped at its release. A not-sent word is never sent again; the log holding it ends it, heard
+// by any channel of the project (the list's copy too: another member may hold the channel when it arrives), or held
+// already at the recall (Task 2's fix round 3).
 //
 // Electron-free.
 import { base64urlEncode, isHubWriter, signEvent, type SigningKey } from '../../../../apps/org-protocol/src/index.ts';
@@ -33,7 +35,7 @@ const contextOf = (signer: WordsSigner): string => JSON.stringify([signer.org, s
 export const CONTEXT_CHANGED = 'context-changed';
 
 /** A word its channel let go unacknowledged, for its signer's next open of the project. */
-export type UnsentWord = { project: string; context: string; member: string; nonce: string; text: string; to: ChannelRecipients };
+export type UnsentWord = { project: string; org: string; context: string; member: string; nonce: string; text: string; to: ChannelRecipients };
 
 /** How many unacknowledged words the run keeps, every project's and signer's, the newest. */
 export const NOT_SENT_KEPT = 50;
@@ -43,6 +45,8 @@ export interface NotSent {
   put(word: UnsentWord): void;
   /** The project's words that signer let go, taken: none are kept after. */
   take(project: string, context: string): UnsentWord[];
+  /** The org's log holds the member's word: it was delivered. */
+  retire(project: string, org: string, member: string, nonce: string): void;
 }
 
 export function createNotSent(kept = NOT_SENT_KEPT): NotSent {
@@ -57,6 +61,9 @@ export function createNotSent(kept = NOT_SENT_KEPT): NotSent {
       list = list.filter((w) => !mine(w));
       return taken;
     },
+    retire(project, org, member, nonce) {
+      list = list.filter((w) => !(w.project === project && w.org === org && w.member === member && w.nonce === nonce));
+    },
   };
 }
 
@@ -65,12 +72,15 @@ export interface Words {
   say(text: string, to: ChannelRecipients): Promise<SaidResult>;
   /** At each welcome: every word not yet answered that the signer in now signed, the same signed bytes. */
   resend(): void;
-  /** At each open and change of the session: the not-sent words the signed-in signer let go here before, `not-sent`. */
-  recall(): void;
+  /**
+   * At each open and change of the session: the not-sent words the signed-in signer let go here before, `not-sent`, but
+   * none the project's log already holds (`inLog`, by nonce and member).
+   */
+  recall(inLog: (nonce: string, member: string) => boolean): void;
   /** The channel is released: the acknowledged dropped, the rest not sent (`NotSent`). */
   release(): void;
   answered(answer: HumanAck | HumanRefused): void;
-  /** Logged events: a word of this member's that the log now holds needs no answer. */
+  /** Logged events, the signed-in org's: a word of this member's that the log now holds needs no answer, nor any copy the not-sent list keeps. */
   logged(events: readonly LoggedEvent[]): void;
   /** The signed-in signer's words, in the order said; none signed out. */
   pending(): ChannelWord[];
@@ -89,7 +99,7 @@ export function createWords(deps: {
 }): Words {
   const now = deps.now ?? Date.now;
   /** By nonce, in the order said (a recalled word: in the order taken). The signed bytes while it may be sent. */
-  type Word = { nonce: string; text: string; to: ChannelRecipients; member: string; context: string; state: ChannelWord['state']; human: DeviceHuman | null };
+  type Word = { nonce: string; text: string; to: ChannelRecipients; org: string; member: string; context: string; state: ChannelWord['state']; human: DeviceHuman | null };
   const words = new Map<string, Word>();
   const current = (): string | null => {
     const signer = deps.signer();
@@ -112,7 +122,7 @@ export function createWords(deps: {
       const after = current(); // the signer in once the signature is made
       if (after === null) return { ok: false, reason: 'signed-out' };
       if (after !== context) return { ok: false, reason: CONTEXT_CHANGED };
-      words.set(nonce, { nonce, text, to, member: signer.member, context, state: 'sending', human });
+      words.set(nonce, { nonce, text, to, org: signer.org, member: signer.member, context, state: 'sending', human });
       deps.send(human);
       changed();
       return { ok: true, nonce };
@@ -121,21 +131,21 @@ export function createWords(deps: {
       const signedIn = current();
       for (const { human, context, state } of words.values()) if (state === 'sending' && context === signedIn && human !== null) deps.send(human);
     },
-    recall() {
+    recall(inLog) {
       const signedIn = current();
       if (signedIn === null) return;
       let any = false;
-      for (const { nonce, text, to, member, context } of deps.notSent.take(deps.project, signedIn)) {
-        if (words.has(nonce)) continue;
-        words.set(nonce, { nonce, text, to, member, context, state: 'not-sent', human: null });
+      for (const { nonce, text, to, org, member, context } of deps.notSent.take(deps.project, signedIn)) {
+        if (words.has(nonce) || inLog(nonce, member)) continue;
+        words.set(nonce, { nonce, text, to, org, member, context, state: 'not-sent', human: null });
         any = true;
       }
       if (any) changed();
     },
     release() {
-      for (const { nonce, text, to, member, context, state } of words.values()) {
+      for (const { nonce, text, to, org, member, context, state } of words.values()) {
         if (state === 'sent' || state === 'not-sent') continue; // delivered; or shown not sent for this channel's life
-        deps.notSent.put({ project: deps.project, context, member, nonce, text, to });
+        deps.notSent.put({ project: deps.project, org, context, member, nonce, text, to });
       }
       words.clear();
     },
@@ -148,9 +158,11 @@ export function createWords(deps: {
       changed();
     },
     logged(events) {
+      const org = deps.signer()?.org ?? null;
       let any = false;
       for (const { event } of events) {
-        if (!isHubWriter(event.writer) || typeof event.nonce !== 'string') continue;
+        if (!isHubWriter(event.writer) || typeof event.nonce !== 'string' || typeof event.member !== 'string') continue;
+        if (org !== null) deps.notSent.retire(deps.project, org, event.member, event.nonce);
         const word = words.get(event.nonce);
         if (word === undefined || word.member !== event.member) continue;
         words.delete(event.nonce);

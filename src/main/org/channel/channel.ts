@@ -27,7 +27,7 @@
 //   awaits nothing of the channel's (M4a's rule). `close()` resolves once every final write is entered.
 //
 // Electron-free.
-import type { HistoryAttestation, Signed } from '../../../../apps/org-protocol/src/index.ts';
+import { isHubWriter, type HistoryAttestation, type Signed } from '../../../../apps/org-protocol/src/index.ts';
 import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelSendResult } from '@shared/ipc/schema/org';
 import { hubClient } from '../hub-client';
 import type { HubAccess, OrgSession, SignedIn } from '../session';
@@ -169,6 +169,10 @@ export function createChannels(deps: ChannelsDeps): Channels {
       queue = run;
       return run;
     }
+
+    /** The member's word is in the log held, the signed-in org's: delivered. */
+    const inLog = (nonce: string, member: string): boolean =>
+      signedIn() !== null && (held?.events() ?? []).some(({ writer, event }) => isHubWriter(writer) && event.nonce === nonce && event.member === member);
 
     const signedIn = (): SignedIn | null => {
       const current = deps.session.current();
@@ -367,7 +371,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
 
     function reconcile(reopened = false): void {
       if (stopped) return;
-      words.recall(); // the signer's words the project's last channel let go
+      words.recall(inLog); // the signer's words the project's last channel let go, but none its log holds
       const current = deps.session.current();
       // a parked socket opens again at any change, as the Registry feed does; a project the hub refused, only at the
       // tab's next open or with another hub

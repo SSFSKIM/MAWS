@@ -172,20 +172,20 @@ describe('words', () => {
     // another signer's open takes none of them
     s.signIn({ ...s.mine, member: 'someone-else' });
     const theirs = s.next();
-    theirs.recall();
+    theirs.recall(() => false);
     expect(theirs.pending()).toEqual([]);
     theirs.release();
     s.signIn(s.mine);
     const next = s.next();
-    next.recall();
+    next.recall(() => false);
     expect(next.pending()).toEqual(lost);
     next.resend();
     expect(s.sent.map((h) => h.text)).toEqual(['unacked', 'acked', 'refused']); // a lost word is never sent again
-    next.recall(); // taken once
+    next.recall(() => false); // taken once
     expect(next.pending()).toEqual(lost);
     next.release(); // shown for that channel's life: gone for good at its release
     const after = s.next();
-    after.recall();
+    after.recall(() => false);
     expect(after.pending()).toEqual([]);
   });
 
@@ -195,8 +195,26 @@ describe('words', () => {
     if (!said.ok) throw new Error('unsent');
     s.words.release();
     const next = s.next();
-    next.recall();
+    next.recall(() => false);
     next.logged([{ offset: 9, event: { writer: `hub/${s.A}`, seq: 3, member: s.A, nonce: said.nonce } }]);
+    expect(next.pending()).toEqual([]);
+  });
+
+  // Task 2's fix round 3: the log holding a word main let go ends it, heard by any channel of the project, or held already
+  it('a word let go that the log holds, heard by another member’s channel or already held at recall, is never Not sent', async () => {
+    const s = await setup();
+    const heard = await s.words.say('heard by another channel', '*');
+    const held = await s.words.say('held at recall', '*');
+    if (!heard.ok || !held.ok) throw new Error('unsent');
+    s.words.release();
+    s.signIn({ ...s.mine, member: 'someone-else' });
+    const theirs = s.next();
+    theirs.logged([{ offset: 7, event: { writer: `hub/${s.A}`, seq: 1, member: 'someone-else', nonce: heard.nonce } }]); // not the signer's: kept
+    theirs.logged([{ offset: 8, event: { writer: `hub/${s.A}`, seq: 2, member: s.A, nonce: heard.nonce } }]);
+    theirs.release();
+    s.signIn(s.mine);
+    const next = s.next();
+    next.recall((nonce, member) => nonce === held.nonce && member === s.A);
     expect(next.pending()).toEqual([]);
   });
 
