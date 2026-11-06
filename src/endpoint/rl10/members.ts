@@ -29,7 +29,8 @@
 // P5 Decision Log 190, residue (b) (O12's "M11's MAWS half as built"): a `/clear` can replace a lane B session's engine
 // session before its first record arrives, or while the join reads `engine.sessions`, so the live rows never name the
 // record's engine session. The join then places the record by its spawn: the app session whose spine record's
-// `launchedBy.opId` is the record's `ownersProof[0].opId` (`#bySpawn`), failing closed when two app sessions share it.
+// `launchedBy.opId` is the opId of the record's `session.spawn` act in `ownersProof` (`#bySpawn`), failing closed when two
+// app sessions share it.
 import type { EndpointServices } from '../services';
 import type { SessionReport } from '../listings';
 import type { Access, CheckoutSource, RecordSource, SessionRecord, SessionTarget, Share } from '../sources';
@@ -321,15 +322,16 @@ export class Members implements RecordSource, CheckoutSource {
   }
 
   /**
-   * P5 Decision Log 190 (b): a lane B member joined to the app session whose spine record's `launchedBy.opId` is its
-   * record's `ownersProof[0].opId`, the spawn its session was launched for (sminos takes the proof from the file
+   * P5 Decision Log 190 (b): a lane B member joined to the app session whose spine record's `launchedBy.opId` is the opId
+   * of its record's spawn act (the `ownersProof` entry whose action is `session.spawn`; sminos appends other acts, such
+   * as `record.owners`, after it or to a record that had none), the spawn its session was launched for (sminos takes the proof from the file
    * `session.spawn` writes, and a `/clear` keeps it), which the spine names whatever engine session it runs now. A record
-   * with no proof, or whose spawn no spine record names, stays unjoined. An opId two app sessions share (reused after the
+   * with no spawn act, or whose spawn no spine record names, stays unjoined. An opId two app sessions share (reused after the
    * op ledger's `KEPT_S`) joins neither and marks each handed off, the mark's closed side: a spawner's bridge on either
    * ends until that session's own record decides. Every record counts, the archived too, so a reuse is never missed.
    */
   async #bySpawn(session: string): Promise<void> {
-    const proof = this.#members.get(session)?.ownersProof[0];
+    const proof = this.#members.get(session)?.ownersProof.find((act) => isObject(act) && act.action === 'session.spawn');
     const opId = isObject(proof) ? proof.opId : undefined;
     if (!isId(opId)) return;
     let response;

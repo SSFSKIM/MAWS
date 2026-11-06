@@ -266,7 +266,7 @@ class SminosRecords extends Records {
 }
 
 const launchedBy = (member: string, opId = 'op-spawn-000000000001') => ({ member, device: 'b1', opId, action: null });
-/** The sealed spawn action sminos's record keeps as its `ownersProof[0]` (the proof file's action: its device and opId). */
+/** The sealed spawn act sminos's record keeps in its `ownersProof` (the proof file's action: its device and opId). */
 const spawnProof = (opId: string) => ({ device: 'b1', opId, action: 'session.spawn' });
 /** A lane B session `member` spawned: the spine's record (its `launchedBy`; its engine session, or none yet) and the engine host's live row. */
 function spawned(f: Fixture, app: string, member: string, engine: { recorded: string | null; live: string }, opId?: string): HostSession {
@@ -719,6 +719,21 @@ describe('a record the join can’t place under its app session, placed by its s
     await members.member(laneBMember('eng-old', [org.B], { access: 'listed', ownersProof: [spawnProof('op-s')] }));
     expect(members.appSessionId('eng-old')).toBe('app-s');
     expect(reports.at(-1)).toMatchObject({ session: 'app-s', owners: [org.C], access: 'private' });
+  });
+
+  // the record executors' refinement: sminos appends a `record.owners` act to `ownersProof`, so the spawn's act is found
+  // by its action, never taken from index 0
+  it('places by the proof that is the spawn’s act, never by another act whose opId a `launchedBy` happens to name', async () => {
+    const machine = { live: () => [], records: () => [{ appId: 'app-o', engineSessionId: 'eng-2', launchedBy: launchedBy(org.B, 'op-o') }] };
+    const ownersAct = { device: 'b1', opId: 'op-o', action: 'record.owners' };
+    const alone = membersOf(machine);
+    await alone.members.member(laneBMember('eng-1', [org.C], { access: 'private', ownersProof: [ownersAct] }));
+    expect(alone.members.appSessionId('eng-1')).toBeNull();
+    expect(alone.members.handedOff(laneB('eng-2', 'app-o'))).toBe(false);
+    expect(alone.reads).toEqual(['engine.sessions']);
+    const behind = membersOf(machine);
+    await behind.members.member(laneBMember('eng-1', [org.C], { access: 'private', ownersProof: [{ ...ownersAct, opId: 'op-other' }, spawnProof('op-o')] }));
+    expect(behind.members.appSessionId('eng-1')).toBe('app-o');
   });
 
   it('leaves a record unplaced, as before, without a proof or without a spine record whose `launchedBy` it names', async () => {
