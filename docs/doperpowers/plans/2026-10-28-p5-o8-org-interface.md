@@ -3102,10 +3102,10 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
 
 - Decision: M7a Task 2, the renderer (3d355c066..7d113efb3), settles these points where the spec was silent.
   1. §N's `ChannelEntry` is a renderer type. Every entry carries `key`, `label` and `by?`. An `exchange` carries its `says`, so it opens in place. `say.owners` are `OrgMember`s, labelled with M5's `ownersLabel`. A `words` entry has `you`, `to: … | null` and `state?: 'sending' | 'sent' | 'not-sent' | {refused}`, in place of §N's `sending?`/`refused?`. A word not yet in the log has `offset: null` and `at: null`.
-  2. "Not sent" holds within the app's life, not across a relaunch.
-     - The renderer remembers every word it sent, per project, in page memory that outlives the tab.
-     - A word is `seen` once main's pending lists it. While a tab holds the channel, a word leaving pending was acknowledged.
-     - At a later open, a word that is not pending, not logged and never acknowledged was dropped with the channel (30 s after its last tab). It reads "Not sent" for that tab's life, then is forgotten.
+  2. "Not sent" holds within the app's life, not across a relaunch. Main is the single source of a word's state (`sending`, `sent`, `not-sent`, `{refused}`), and the renderer draws it (the review's findings, superseding the first build's page-memory book and Task 1 item 6's last sentence).
+     - Every pending word stays bound to the org, member and device that signed it. A channel exposes only the current context's words, and another context's are neither shown, resent nor refused.
+     - An acknowledged word stays pending as `sent` until the log holds its nonce. At release (30 s after the last tab) it is dropped, since the log has it.
+     - A word never acknowledged at release moves to a bounded in-memory "not sent" list per project and context. The next open in that context returns it as `not-sent`, with its text, until that channel's next release.
      - A relaunch can say nothing: the draft lives in main's memory, and a disk copy would defeat that rule.
   3. A fold holds one label: a label change ends a run. A say to several sessions folds with nothing. Any other drawn entry ends a run, words and to-human entries included, as desk-web's rule has it.
   4. The waiting cards leave out a greyed machine's items, which nothing can answer now. The native ask answers in place through `RequestCard`'s `askInPlace`, which feeds `AskBody`'s shared `inPlace` mode, so no variant's types change. `HoverAsk` gained the sheet's "older peer" gate.
