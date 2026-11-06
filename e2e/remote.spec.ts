@@ -2643,12 +2643,15 @@ function terminalRow(n: number, type: 'user' | 'assistant', text: string, agentI
   return { ...base, message: { id: `msg_c1${String(n).padStart(6, '0')}`, role: 'assistant', model: 'claude-opus-5-5', type: 'message', content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } };
 }
 
+/** What `terminalAgent` has started, held as each is acquired: the caller's `finally` stops them, A first, whatever failed. */
+type TerminalHeld = { scene: RemoteScene | null; a: MawsLaunch | null };
+
 /** The terminal session on B, listed and served, A launched over the relay with B up, and the agent's drill-in opened. */
-async function terminalAgent(opts: { root: string; aUserData: string; bEnv?: Record<string, string> }) {
+async function terminalAgent(opts: { root: string; aUserData: string; bEnv?: Record<string, string> }, held: TerminalHeld) {
   const checkout = join(opts.root, 'b-terminal');
   mkdirSync(checkout);
   const agent = TERMINAL_AGENT.id;
-  const scene = await startRemoteScene({ scratch: join(opts.root, 'scene'), aUserData: opts.aUserData, ...(opts.bEnv !== undefined && { b: { env: opts.bEnv } }) });
+  const scene = (held.scene = await startRemoteScene({ scratch: join(opts.root, 'scene'), aUserData: opts.aUserData, ...(opts.bEnv !== undefined && { b: { env: opts.bEnv } }) }));
   const plane = scene.sminos.laneA(PROJECT, {
     engine: TERMINAL.engine,
     title: TERMINAL.title,
@@ -2660,7 +2663,7 @@ async function terminalAgent(opts: { root: string; aUserData: string; bEnv?: Rec
     subagents: [{ agentId: agent, meta: { agentType: 'general-purpose', description: TERMINAL_AGENT.description }, status: 'running', evidence: 'bridge' }],
     agentWindow: 1, // the agent's snapshot holds its newest row: the rest page in
   });
-  const a = await launchMaws({ userData: opts.aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A' } });
+  const a = (held.a = await launchMaws({ userData: opts.aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A' } }));
   keepMainLines(a);
   const { page } = a;
   const { b } = scene;
@@ -2681,16 +2684,15 @@ async function terminalAgent(opts: { root: string; aUserData: string; bEnv?: Rec
   await agentRow.click();
   const drillIn = tool.locator('[data-view="agent"]');
   const drillInSaid = async () => `the drill-in: ${await drillIn.innerText({ timeout: 1_000 }).catch(() => 'none')}\n${said()}`;
-  return { scene, a, page, plane, drillIn, drillInSaid, agent, checkout };
+  return { scene, page, plane, drillIn, drillInSaid, agent, checkout };
 }
 
 test('a subagent of B’s terminal session, drilled into from A: its own rows from B’s plane, older rows paged in, a channel drop and a reset survived', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-la-agent-')));
   const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-la-agent-'));
-  let opened: Awaited<ReturnType<typeof terminalAgent>> | null = null;
+  const held: TerminalHeld = { scene: null, a: null };
   try {
-    opened = await terminalAgent({ root, aUserData });
-    const { scene, page, plane, drillIn, drillInSaid, agent, checkout } = opened;
+    const { scene, page, plane, drillIn, drillInSaid, agent, checkout } = await terminalAgent({ root, aUserData }, held);
     const { b } = scene;
     const once = (text: string) => expect(drillIn.getByText(text, { exact: true }), `"${text}" once in the drill-in`).toHaveCount(1);
 
@@ -2725,8 +2727,8 @@ test('a subagent of B’s terminal session, drilled into from A: its own rows fr
       console.log(`[e2e:remote] terminal agent drill-in: ${TERMINAL.engine}/${agent} over ${plane.subscribes(agent).length} upstreams, ${plane.pages(agent).length} pages`);
     });
   } finally {
-    await opened?.a.cleanup();
-    await opened?.scene.stop();
+    await held.a?.cleanup();
+    await held.scene?.stop();
     rmSync(aUserData, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
@@ -2735,18 +2737,17 @@ test('a subagent of B’s terminal session, drilled into from A: its own rows fr
 test('a subagent of B’s terminal session, where B’s endpoint lists no rl2.agent-scope: the drill-in names B to update, and nothing is asked of B for the agent', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-la-old-')));
   const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-la-old-'));
-  let opened: Awaited<ReturnType<typeof terminalAgent>> | null = null;
+  const held: TerminalHeld = { scene: null, a: null };
   try {
-    opened = await terminalAgent({ root, aUserData, bEnv: { MAWS_E2E_ENDPOINT_WITHOUT: 'rl2.agent-scope' } }); // an endpoint of an earlier build
-    const { scene, page, plane, drillIn, drillInSaid, agent } = opened;
+    const { scene, page, plane, drillIn, drillInSaid, agent } = await terminalAgent({ root, aUserData, bEnv: { MAWS_E2E_ENDPOINT_WITHOUT: 'rl2.agent-scope' } }, held); // an endpoint of an earlier build
     expect((await machineOf(page, scene.b.ref))?.capabilities ?? [], 'B’s endpoint lists no rl2.agent-scope').not.toContain('rl2.agent-scope');
     await quoting(expect(drillIn.getByTestId('subagent-rows-gap'), 'the gap, naming B').toHaveText(`${B_NAME} can’t send a subagent’s own transcript to this Mac yet; update MAWS on ${B_NAME}`, { timeout: 60_000 }), drillInSaid);
     await page.waitForTimeout(2_000); // what a watch of the agent would have asked by now
     expect(plane.subscribes(agent), 'nothing asked of B for the agent').toEqual([]);
     expect(plane.subscribes(null), 'the session’s own transcript still read').toHaveLength(1);
   } finally {
-    await opened?.a.cleanup();
-    await opened?.scene.stop();
+    await held.a?.cleanup();
+    await held.scene?.stop();
     rmSync(aUserData, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
