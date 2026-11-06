@@ -46,7 +46,7 @@
 // a task list's read (`fs.tasks`). A list names no session, so the call names it too (`appSessionId`), placed as the
 // `appSessionId` rule places it, and once the caller is known to view it the `listId` must be that session's own list
 // (`ownTaskList`), else `no-target`: a member who views one session reads no other session's list by its id.
-import { realpath } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, sep } from 'node:path';
 import type { Action, SessionRef } from 'org-protocol';
 import { parseArtifactUrl } from '@shared/artifacts/scheme';
@@ -353,6 +353,11 @@ export class CheckoutBounds {
     return repo === null || !(coversHome(repo.toplevel, homes) || coversHome(repo.main, homes));
   }
 
+  /** Whether `real` (a realpath) is a home of the machine or above one. */
+  coversAHome(real: string): boolean {
+    return coversHome(real, this.homes());
+  }
+
   /** The bounds of `record` (`session.get`'s answer), read on the machine through `dispatch`. */
   async of(record: unknown, dispatch: EndpointServices['dispatch']): Promise<Bounds> {
     const homes = this.homes();
@@ -402,6 +407,11 @@ const NOT_A_REPOSITORY = 'not a git repository';
  * or git away, a timeout, a failure, a list naming nothing that holds it), which bounds nothing of git's and is never kept.
  */
 async function repositoryOf(root: string, dispatch: EndpointServices['dispatch']): Promise<{ toplevel: string; main: string } | null | 'unknown'> {
+  // round 4: the service folds the path to NFC before git runs (holders.ts' canonicalPath), so its answer is the NFC
+  // spelling's, which is the root's only where the filesystem folds the forms too (the same directory: APFS); a
+  // sibling of that spelling (ext4), or none, says nothing of the root
+  const folded = root.normalize('NFC');
+  if (folded !== root && !(await sameDirectory(root, folded))) return 'unknown';
   const listed = await dispatch('machine', 'git.worktree.list', { repoRoot: root }).catch(() => null);
   if (listed === null) return 'unknown';
   if (!listed.ok) return listed.error.code === 'internal' && listed.error.message === NOT_A_REPOSITORY ? null : 'unknown';
@@ -411,6 +421,12 @@ async function repositoryOf(root: string, dispatch: EndpointServices['dispatch']
   const named = new Set(worktrees.map((w) => field(w, 'path')).filter((path): path is string => typeof path === 'string' && isAbsolute(path)).map((path) => path.normalize('NFC')));
   const toplevel = ancestorsOf(root).find((path) => named.has(path.normalize('NFC')));
   return toplevel === undefined ? 'unknown' : { toplevel, main };
+}
+
+/** Whether `a` and `b` name one directory (its device and inode); false when either doesn't stat. */
+async function sameDirectory(a: string, b: string): Promise<boolean> {
+  const [x, y] = await Promise.all([stat(a, { bigint: true }).catch(() => null), stat(b, { bigint: true }).catch(() => null)]);
+  return x !== null && y !== null && x.isDirectory() && x.dev === y.dev && x.ino === y.ino;
 }
 
 /** `path` and each directory above it, nearest first. */
@@ -432,9 +448,16 @@ export function withinBounds(bounds: readonly string[], real: string): boolean {
  * repository git would answer for at that path is no home's (`CheckoutBounds.reaches`), asked at each request, since a
  * root's own repository says nothing of a home's worktree checked out below it.
  */
-export async function withinCheckout(input: unknown, appSessionId: string, placing: Placing, bounds: CheckoutBounds): Promise<boolean> {
+export async function withinCheckout(input: unknown, appSessionId: string, placing: Placing, bounds: CheckoutBounds, name?: string): Promise<boolean> {
   const path = field(input, 'directory') ?? field(input, 'repoRoot');
   if (typeof path !== 'string' || !isAbsolute(path)) return false;
+  // round 4: a worktree status's `path` names a place (the worktree whose state it reads), which is no home of the
+  // machine nor above one, and resolves (git.diff's and git.log's `path` is a pathspec in the repository, bounded by it)
+  if (name === 'git.worktree.status') {
+    const place = field(input, 'path');
+    const real = typeof place === 'string' && isAbsolute(place) ? await realpathOf(place) : null;
+    if (real === null || bounds.coversAHome(real)) return false;
+  }
   const record = await placing.dispatch('machine', 'session.get', { appSessionId }).catch(() => null);
   if (record === null || !record.ok || record.value === null || typeof record.value !== 'object') return false;
   const [real, within] = await Promise.all([realpathOf(path), bounds.of(record.value, placing.dispatch)]);

@@ -440,7 +440,7 @@ export class Authorizer {
     // Placed on its recorded engine session, but not runnable against it now: said only to a caller who stands on it.
     if (resolved.kind === 'session' && resolved.unavailable === true) return no('unavailable');
     // A checkout read's path, read only for a caller who views the session: in its checkout, or no target of it.
-    if (row.target === 'checkout' && !(target?.lane === 'B' && (await withinCheckout(input, target.appSessionId, placing, this.#bounds)))) return no('no-target');
+    if (row.target === 'checkout' && !(target?.lane === 'B' && (await withinCheckout(input, target.appSessionId, placing, this.#bounds, name)))) return no('no-target');
     // P5 O7 M8: a task list's read, likewise: the session's own list, or no target of it.
     if (row.target === 'task-list') {
       const list = target?.lane === 'B' ? await ownTaskList(input, target, placing) : 'no-target';

@@ -4,7 +4,8 @@
 // the path must lie in one of the session's roots or the repository a root belongs to, so the boundary a reader gets is
 // the repository with its worktrees; what a worktree read names beyond that the service bounds itself. A spawn's args
 // hold to the registry's schema (step 2), then to the machine's policy (step 6's guard, as `sminos.spawn`'s).
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -300,6 +301,61 @@ describe('the checkout rule', () => {
     } finally {
       rmSync(parent, { recursive: true, force: true });
     }
+  });
+
+  // Round 4 (b): a worktree status's `path` names the worktree whose state it reads; when the home is a linked worktree of a
+  // project's repository, the project's own repoRoot is no guard of it, so that path is held to the homes itself
+  it('refuses a worktree status whose path is a home, or doesn’t resolve, and serves one of the project’s own worktrees', async () => {
+    const one = await repo();
+    const other = await one.addWorktree('other');
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), 'checkout-wt-home-')));
+    try {
+      const home = join(parent, 'home');
+      await one.git('worktree', 'add', '-q', home, '-b', 'home'); // the home: a linked worktree of the project's repository
+      const f = await machine(one.serviceEnv(), home);
+      session(f, 'app-1', { directory: one.root });
+      const a = await openRemote(f, org.a1, org.A);
+      const asked = f.host.calls.length;
+      expect(code(await call(a, 'git.worktree.status', { repoRoot: one.root, path: home }, B('app-1')))).toBe('no-target');
+      expect(code(await call(a, 'git.worktree.status', { repoRoot: one.root, path: parent }, B('app-1')))).toBe('no-target'); // above the home
+      expect(code(await call(a, 'git.worktree.status', { repoRoot: one.root, path: join(parent, 'missing') }, B('app-1')))).toBe('no-target');
+      expect(code(await call(a, 'git.worktree.status', { repoRoot: one.root, path: 'home' }, B('app-1')))).toBe('no-target'); // a place is absolute
+      expect(f.host.calls.slice(asked).filter((c) => c.name === 'git.worktree.status')).toEqual([]);
+      // admitted to the service (this suite's worktree service has no holders to read occupancy from, so it answers a failure)
+      expect(code(await call(a, 'git.worktree.status', { repoRoot: one.root, path: other }, B('app-1')))).not.toBe('no-target');
+      expect(f.host.calls.slice(asked).filter((c) => c.name === 'git.worktree.status')).toHaveLength(1);
+      // git.diff's and git.log's `path` is a pathspec in the repository, not a place: it still serves
+      await one.write('notes.md', 'a\n');
+      expect(code(await call(a, 'git.log', { directory: one.root, limit: 5, path: 'README.md' }, B('app-1')))).toBe('ok');
+      expect(code(await call(a, 'git.diff', { directory: one.root, scope: 'untracked', path: 'notes.md' }, B('app-1')))).toBe('ok');
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  // Round 4 (a): the worktree service folds a path to NFC before git runs, so for a root named in decomposed form its
+  // answer is the composed spelling's, which is the root only where the filesystem folds the forms (APFS: one inode)
+  it('takes no repository answer for a decomposed root that its composed spelling isn’t (a sibling, or nothing there)', async (ctx) => {
+    const outer = await repo(); // an outer repository holding both spellings
+    const decomposed = join(outer.root, 'cafe\u0301');
+    const composed = join(outer.root, 'caf\u00e9');
+    mkdirSync(decomposed);
+    await runGit(decomposed, ['init', '-q', '-b', 'main']); // an independent repository, its own toplevel
+    await runGit(decomposed, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'own']);
+    const folds = await stat(composed).then((s) => s.ino === statSync(decomposed).ino, () => false);
+    const f = await machine(outer.serviceEnv());
+    session(f, 'app-1', { directory: decomposed });
+    const a = await openRemote(f, org.a1, org.A);
+    expect(code(await call(a, 'git.status', { directory: outer.root }, B('app-1')))).toBe('no-target'); // never widened to the outer repository
+    // folded (APFS), the service's answer is the root's own; otherwise there is none to take, and git reaches nothing there
+    expect(code(await call(a, 'git.log', { directory: realpathSync(decomposed), limit: 5 }, B('app-1')))).toBe(folds ? 'ok' : 'no-target');
+    if (folds) ctx.skip(); // no composed sibling can be made beside it here
+    mkdirSync(composed); // a plain sibling in the outer repository
+    const g = await machine(outer.serviceEnv());
+    session(g, 'app-2', { directory: decomposed });
+    const b = await openRemote(g, org.a1, org.A);
+    expect(code(await call(b, 'git.status', { directory: outer.root }, B('app-2')))).toBe('no-target');
+    expect(code(await call(b, 'git.log', { directory: decomposed, limit: 5 }, B('app-2')))).toBe('no-target');
   });
 
   it('reads the bounds again when the session’s roots change', async () => {
