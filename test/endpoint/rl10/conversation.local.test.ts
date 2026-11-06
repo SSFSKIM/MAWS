@@ -403,12 +403,18 @@ it('replays a private session against the hub: notices through the real signer, 
 
   // S, private to {A, B}, then B's share removed: the notice, audience {B}, through the real signer.
   member(S, 'secret', { access: 'private', shares: [{ member: B, grade: 'list' }], policyRev: 1 });
-  expect((await told(S, 1)).members).toEqual(sorted([A, B]));
+  const first = await told(S, 1);
+  expect(first.members).toEqual(sorted([A, B]));
+  // Its first rev withdrew no one the endpoint knew of: no `withdrawn`.
+  expect(first).not.toHaveProperty('withdrawn');
   const shared = streamWriter(`${NAME}/${S}`, sorted([A, B]));
   up([{ ts: ts(), writer: shared, seq: 1, kind: 'joined', session: S, alias: 'secret' }]);
   await until(() => atB(shared, 1), 'S’s shared snapshot at B');
   member(S, 'secret', { access: 'private', policyRev: 2 });
-  expect((await told(S, 2)).members).toEqual([A]);
+  const removed = await told(S, 2);
+  expect(removed.members).toEqual([A]);
+  // The frame names who the change withdrew, the notice's exact audience, since sminos holds no member list.
+  expect(removed.withdrawn).toEqual([B]);
   const notice = streamWriter(`${NAME}/${S}`, [B]);
   const alone = streamWriter(`${NAME}/${S}`, [A]);
   up([
@@ -424,8 +430,9 @@ it('replays a private session against the hub: notices through the real signer, 
   up([{ ts: ts(), writer: `${NAME}/${L}`, seq: 1, kind: 'joined', session: L, alias: 'open' }]);
   await until(() => atB(`${NAME}/${L}`, 1), 'L’s listed snapshot at B');
   member(L, 'open', { access: 'private', policyRev: 1 });
-  await told(L, 1);
+  const closed = await told(L, 1);
   const everyone = sorted(head.state.members.map((m) => m.id).filter((id) => id !== A));
+  expect(closed.withdrawn).toEqual(everyone);
   const gone = streamWriter(`${NAME}/${L}`, everyone);
   up([{ ts: ts(), writer: gone, seq: 1, kind: 'unlisted', session: L }]);
   expect(await until(() => atB(gone, 1), 'L’s notice at B')).toMatchObject({ audience: everyone, policyRev: 1 });
