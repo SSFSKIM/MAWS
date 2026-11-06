@@ -51,17 +51,22 @@ export type Feed = SessionFeed | MachineFeed;
  * change. A device sends the latter only to an endpoint that listed the capability: an older one reads it `malformed`.
  */
 export type SessionFeed = 'checkout' | 'browser.inventory';
-/** The feeds that name no session: the machine's own (M6's `attention`, M5a's `artifacts`). */
-export type MachineFeed = 'attention' | 'artifacts';
-const MACHINE_FEEDS: readonly string[] = ['attention', 'artifacts'] satisfies readonly MachineFeed[];
+/**
+ * The feeds that name no session: the machine's own (M6's `attention`, M5a's `artifacts`). P5 O8 M7b (behind
+ * `rl2.channel`): `channel`, a project's to-human entries on the machine, which names its `project` (sminos's project id)
+ * and is the only feed that does. A device sends it only to an endpoint that listed the capability: an older one reads
+ * it `malformed` and closes.
+ */
+export type MachineFeed = 'attention' | 'artifacts' | 'channel';
+const MACHINE_FEEDS: readonly string[] = ['attention', 'artifacts', 'channel'] satisfies readonly MachineFeed[];
 const SESSION_FEEDS: readonly string[] = ['checkout', 'browser.inventory'] satisfies readonly SessionFeed[];
 const FEEDS: readonly string[] = [...SESSION_FEEDS, ...MACHINE_FEEDS];
 /** Whether `feed` is one of the machine's own feeds, which name no session. */
 export const isMachineFeed = (feed: unknown): feed is MachineFeed => MACHINE_FEEDS.includes(feed as string);
 /** A session's stream (no `feed`), or one of its feeds (`checkout`; P5 O17 M9a: `browser.inventory`). */
 export type SessionSubMessage = { t: 'sub'; sub: string; session: SessionRef; view?: 'full' | 'cards'; feed?: SessionFeed; cursor: Cursor | null; credit: number };
-/** One of the machine's own feeds (M6's `attention`, M5a's `artifacts`), which name no session. */
-export type MachineFeedSubMessage = { t: 'sub'; sub: string; feed: MachineFeed; cursor: Cursor | null; credit: number };
+/** One of the machine's own feeds (M6's `attention`, M5a's `artifacts`), which name no session; `channel`'s its `project`. */
+export type MachineFeedSubMessage = { t: 'sub'; sub: string; feed: MachineFeed; project?: string; cursor: Cursor | null; credit: number };
 export type SubMessage = SessionSubMessage | MachineFeedSubMessage;
 /** Whether `m` subscribes to one of the machine's own feeds (no session). */
 export const isMachineFeedSub = (m: SubMessage): m is MachineFeedSubMessage => isMachineFeed(m.feed);
@@ -281,7 +286,9 @@ const FROM_DEVICE: Record<string, (m: Fields) => boolean> = {
     (m.feed === undefined
       ? isSessionRef(m.session) && optional(m.view, (v) => v === 'full' || v === 'cards') && isCursor(m.cursor, m.session.lane)
       : // A feed's cursor is `(epoch, seq)`, as lane A's; it has no view. `checkout` names its session, the machine's none.
-        FEEDS.includes(m.feed as string) && m.view === undefined && isCursor(m.cursor, 'A') && (isMachineFeed(m.feed) ? m.session === undefined : isSessionRef(m.session))),
+        FEEDS.includes(m.feed as string) && m.view === undefined && isCursor(m.cursor, 'A') && (isMachineFeed(m.feed) ? m.session === undefined : isSessionRef(m.session))) &&
+    // P5 O8 M7b: `channel` names its project, and no other sub names one.
+    (m.feed === 'channel' ? isText(m.project, 512) : m.project === undefined),
   credit: (m) => isText(m.sub, 128) && isPositive(m.bytes, SUB_CREDIT_MAX),
   unsub: (m) => isText(m.sub, 128),
   ...STREAM_EITHER,
