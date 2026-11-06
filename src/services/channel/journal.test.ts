@@ -44,6 +44,13 @@ function harness() {
     table.set(name, set.add(listener));
     return () => void set.delete(listener);
   };
+  // The owner channel's batch listener, registered before the project channel's as the spine composes them
+  // (src/services/spine-root.ts): it reads each batch first and may state an answer delivered before lane B reads it.
+  const ownerReads: ((appSessionId: AppSessionId, events: SessionEvent[]) => void)[] = [];
+  on(host)('session.eventBatch', (payload) => {
+    const { appSessionId, events } = payload as { appSessionId: AppSessionId; events: SessionEvent[] };
+    for (const read of ownerReads) read(appSessionId, events);
+  });
   const channel: ProjectChannel = startChannel({
     index,
     onEvent: on(host) as never,
@@ -84,7 +91,7 @@ function harness() {
   };
   const history = (input: { project: string; before?: string; limit?: number }) => handlers.get('channel.history')!(input) as { entries: HostEntry[]; more: boolean };
   return {
-    index, channel, emitted, logs, session, pendingSession, batch, ownerState, history, handlers,
+    index, channel, emitted, logs, session, pendingSession, batch, ownerState, history, handlers, ownerReads,
     rows: () => {
       const raw = new DatabaseSync(join(dir.path, 'index.sqlite'), { readOnly: true });
       try {
@@ -199,7 +206,7 @@ describe('the project channel journal', () => {
         { kind: 'answered', text: 'Postgres', choices: undefined, at: answered },
         { kind: 'question', text: head, choices: ['Postgres', 'SQLite'], at: asked },
       ]);
-      expect(entries[0]!.src).toBe(`proj-1/lane-b/${appSessionId}/answer/mu-q/0/q0/${answered}`);
+      expect(entries[0]!.src).toBe(`proj-1/lane-b/${appSessionId}/answer/mu-q/0/q0/${encodeURIComponent(answered)}`);
       expect(h.emitted.map((event) => event.entry.kind)).toEqual(['question', 'answered']);
     });
 
@@ -254,6 +261,48 @@ describe('the project channel journal', () => {
         { kind: 'question', text: 'Which backend should the board use?', choices: ['Postgres', 'SQLite'], at: asked, src: `${prefix}/q1` },
       ]);
       expect(h.emitted).toHaveLength(6);
+    });
+
+    it('keeps every identity apart whatever its ids hold: a question named like another’s answer, ids with separators', () => {
+      const { appSessionId, engineSessionId: e } = h.session('proj-1');
+      const questions = [
+        { id: 'q', question: 'First?', modality: 'text' },
+        { id: 'q/answered', question: 'Second?', modality: 'text' },
+        { id: 'a%2Fb', question: 'Third?', modality: 'text' },
+        { id: 'a/b', question: 'Fourth?', modality: 'text' },
+      ];
+      const opened = askOpened(e, iso(NOW - 9_000), 'toolu/ask', questions);
+      const answered = askAnswered(e, iso(NOW - 8_000), 'toolu/ask', questions.map((q) => ({ id: q.id, question: q.question, status: 'answered', value: `for ${q.id}` })));
+      h.batch(appSessionId, [opened, answered]);
+      h.batch(appSessionId, [opened, answered]); // a replay: the same identities
+      const { entries } = h.history({ project: 'proj-1' });
+      expect(entries.map((entry) => `${entry.kind}: ${entry.text}`).sort()).toEqual([
+        'answered: for a%2Fb', 'answered: for a/b', 'answered: for q', 'answered: for q/answered',
+        'question: First?', 'question: Fourth?', 'question: Second?', 'question: Third?',
+      ]);
+      expect(new Set(entries.map((entry) => entry.src)).size).toBe(8);
+      expect(entries.find((entry) => entry.text === 'Second?')!.src).toBe(`proj-1/lane-b/${appSessionId}/ask/toolu%2Fask/q%2Fanswered`);
+    });
+
+    it('records a need-input answer the owner channel states before lane B has read its question, as the spine’s listener order has it', () => {
+      for (const placement of ['known', 'pending'] as const) {
+        const s = h.pendingSession();
+        if (placement === 'known') s.derive(`proj-${placement}`);
+        const asked = iso(NOW - 60_000);
+        const anchor = { messageUuid: `mu-${placement}` as never, blockIndex: 0, span: 0 };
+        const delivered: OwnerChannelState = {
+          appSessionId: s.appSessionId, lane: { on: true, override: 'inherit', applied: null, pending: null, mismatch: null },
+          marks: [{ id: markIdOf(s.appSessionId, 'need-input', anchor), kind: 'need-input', anchor, head: 'Ship it?', at: asked, item: true, question: { state: 'delivered', answer: { text: answerText('Ship it?', 'Yes.'), origin: 'answer', at: iso(NOW - 30_000) } } }],
+        };
+        // a replayed batch holding the question and its answer: the owner channel reads it first and states the answer
+        h.ownerReads.splice(0, Infinity, (appSessionId) => {
+          if (appSessionId === s.appSessionId) h.ownerState(delivered);
+        });
+        h.batch(s.appSessionId, [block(s.engineSessionId, asked, `mu-${placement}`, '<need-input>Ship it?</need-input>')]);
+        if (placement === 'pending') s.derive(`proj-${placement}`);
+        expect(h.history({ project: `proj-${placement}` }).entries.map((entry) => `${entry.kind}: ${entry.text}`), placement).toEqual(['answered: Yes.', 'question: Ship it?']);
+      }
+      expect(h.logs).toEqual([]);
     });
 
     it('records a subagent’s ask, which the person answers alike, and no answer to an ask it never heard asked, nor one read back from disk', () => {
