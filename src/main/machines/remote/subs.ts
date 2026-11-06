@@ -32,6 +32,12 @@ export interface SessionSubscribeRequest {
    * later `event`, every one complete, stamped with the epoch a screencast open names.
    */
   feed?: SessionFeed;
+  /**
+   * 2026-11-06: one subagent's transcript of a lane A session's `full` stream, sent only to an endpoint that listed
+   * `rl2.agent-scope` (an older one would pass the field by and serve the main transcript); for any other the
+   * subscription ends `not-offered`, never sent.
+   */
+  agentId?: string;
 }
 /** P5 O7 M6: the machine's `attention` feed, which names no session; M5a's `artifacts` feed (behind `rl2.artifacts`) the same. */
 export interface MachineFeedRequest {
@@ -211,9 +217,16 @@ export class SubTable {
   #sub(entry: Entry): void {
     const { request } = entry;
     const credit = this.#deps.timing.SUB_INITIAL_CREDIT;
-    if (request.feed === undefined) return void this.#deps.send({ t: 'sub', sub: entry.id, session: request.session, ...(request.view === undefined ? {} : { view: request.view }), cursor: entry.cursor, credit });
-    // What the peer could not read never goes: the feed ends here, as the endpoint would end a name it does not offer.
+    // What the peer could not read never goes: the subscription ends here, as the endpoint would end a name it does not offer.
     const peers = this.#deps.peerCapabilities();
+    if (request.feed === undefined) {
+      const { agentId } = request;
+      if (agentId !== undefined && peers?.includes('rl2.agent-scope') !== true) {
+        this.#remove(entry);
+        return void queueMicrotask(() => entry.sink.ended('not-offered'));
+      }
+      return void this.#deps.send({ t: 'sub', sub: entry.id, session: request.session, ...(request.view === undefined ? {} : { view: request.view }), ...(agentId === undefined ? {} : { agentId }), cursor: entry.cursor, credit });
+    }
     const gated = request.feed === 'artifacts' ? 'rl2.artifacts' : request.feed === 'browser.inventory' ? 'rl2.browser-screencast' : null;
     if (peers?.includes('rl2.feeds') !== true || (gated !== null && !peers.includes(gated))) {
       this.#remove(entry);
