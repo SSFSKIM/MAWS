@@ -12,7 +12,8 @@
 // `additionalDirectories`, `worktree.path`) or the repository a root belongs to, or under one. The boundary a remote
 // reader gets is so the repository, with its worktrees, not the root alone: a session opened on a subfolder of a
 // repository reads that repository's status and diff, as its transcript already spans it. The checkout feed filters
-// git's changes by the same bounds (plane-feeds.ts).
+// git's changes by the same bounds (plane-feeds.ts). 2026-11-06: a root or a repository at the machine's home or above
+// it bounds nothing (`CheckoutBounds`, the home-root rule).
 //
 // P5 O7 M6: `each-session`, a machine-wide read whose answer is per session (`attention.list`, `session.search`): it names
 // no target (the machine), and its answer is cut per session against each one's placement by its record alone
@@ -45,12 +46,13 @@
 // a task list's read (`fs.tasks`). A list names no session, so the call names it too (`appSessionId`), placed as the
 // `appSessionId` rule places it, and once the caller is known to view it the `listId` must be that session's own list
 // (`ownTaskList`), else `no-target`: a member who views one session reads no other session's list by its id.
-import { realpath } from 'node:fs/promises';
-import { isAbsolute, sep } from 'node:path';
+import { realpath, stat } from 'node:fs/promises';
+import { dirname, isAbsolute, sep } from 'node:path';
 import type { Action, SessionRef } from 'org-protocol';
 import { parseArtifactUrl } from '@shared/artifacts/scheme';
 import { sanitiseListId } from '@shared/engine/task-list';
 import type { LaunchedBy } from '@shared/graph/session';
+import { coversHome, machineHomes } from '@shared/machine/machine-home';
 import type { TargetRule } from './offers';
 import type { EndpointServices } from './services';
 import type { SessionTarget } from './sources';
@@ -300,40 +302,138 @@ export async function ownTaskList(input: unknown, target: Extract<SessionTarget,
 export const CHECKOUT_BOUNDS_KEPT = 256;
 
 /**
- * A lane B session's checkout bounds: the realpaths of its record's roots and of the repository each belongs to
- * (`git.status`'s `repoRoot`). A root that does not resolve is dropped; one in no repository bounds only itself.
+ * A session's checkout bounds as a remote reader has them: git's (`within`: its roots and their repositories), its roots
+ * a file may lie in (`roots`), the roots the home-root rule took out (`dropped`), and whether its checkout (the
+ * worktree's path, else its directory: scm's) is a home's, by itself or its repository (`checkoutCovers`).
+ */
+export interface Bounds {
+  readonly within: readonly string[];
+  readonly roots: readonly string[];
+  readonly dropped: readonly string[];
+  readonly checkoutCovers: boolean;
+}
+
+/**
+ * A lane B session's checkout bounds: the realpaths of its record's roots and of the repository each belongs to (its
+ * own worktree's root, `repositoryOf`; round 2 of the desk track's review: rev-parse and the worktree list, never a
+ * status, whose scan of a home kept in git times out). A root that does not resolve is dropped; one in no repository
+ * bounds only itself; one whose repository git didn't answer bounds nothing of git's (fail closed, never kept).
  *
  * The roots are realpathed on every read (cheap), and the repositories are kept per set of canonical roots, so a root
  * that is a symlink retargeted since is read where it points now. A set is kept only when every root resolved and
  * every repository read answered (the spine away, a git timeout): a root that appears later, or a read that failed,
  * is read again next time (fix wave 1).
+ *
+ * 2026-11-06 (the home-root rule; the New chat's machine first, whose chat in a machine's home has the home as its
+ * root): a root whose realpath is a home of the machine or an ancestor of one (`/`, `/Users`) is no root for a remote
+ * reader, whoever they are, since it would reach every repository and file under the home (`dropped`). And git answers
+ * for the repository a path is in, so a root whose repository is such (a home kept in git, a root inside it, or a
+ * linked worktree whose main checkout is a home: git's worktree reads and scm resolve to the main checkout) bounds
+ * nothing of git's either: every path within the bounds then has a repository below the home (the nearest repository of
+ * a path under a root is the root's, or one nested deeper), which the `checkout` rule and the checkout feed's
+ * `git.changed` read. Its files stay the session's (`roots`). The homes are src/shared/machine/machine-home.ts' (a home
+ * spawn's directory is the first), a suite's fake one when given.
  */
 export class CheckoutBounds {
-  readonly #kept = new Map<string, readonly string[]>();
+  readonly #kept = new Map<string, Bounds>();
+
+  constructor(private readonly homes: () => readonly string[] = machineHomes) {}
+
+  /**
+   * Whether git, asked at `real` (a realpath within the bounds), answers for a repository below every home: its own
+   * worktree's root and its main checkout's cover none, or git says it is in none. Any other answer is no (fail closed).
+   * A remote git read's path, at its request: a project's root may hold a linked worktree of a home kept in git, which
+   * git's worktree reads resolve to the home's checkout and its log reads the home's history of. One rev-parse and one
+   * worktree list, no work-tree scan, never kept.
+   */
+  async reaches(real: string, dispatch: EndpointServices['dispatch']): Promise<boolean> {
+    const repo = await repositoryOf(real, dispatch);
+    if (repo === 'unknown') return false;
+    const homes = this.homes();
+    return repo === null || !(coversHome(repo.toplevel, homes) || coversHome(repo.main, homes));
+  }
+
+  /** Whether `real` (a realpath) is a home of the machine or above one. */
+  coversAHome(real: string): boolean {
+    return coversHome(real, this.homes());
+  }
 
   /** The bounds of `record` (`session.get`'s answer), read on the machine through `dispatch`. */
-  async of(record: unknown, dispatch: EndpointServices['dispatch']): Promise<readonly string[]> {
-    const resolved = await Promise.all(rootsOf(record).map((root) => realpathOf(root)));
-    const real = [...new Set(resolved.filter((root): root is string => root !== null))];
-    const key = JSON.stringify(real);
+  async of(record: unknown, dispatch: EndpointServices['dispatch']): Promise<Bounds> {
+    const homes = this.homes();
+    const declared = rootsOf(record);
+    const resolved = await Promise.all(declared.map((root) => realpathOf(root)));
+    const all = [...new Set(resolved.filter((root): root is string => root !== null))];
+    const roots = all.filter((root) => !coversHome(root, homes));
+    const dropped = all.filter((root) => coversHome(root, homes));
+    const checkout = resolved[declared.indexOf(checkoutOf(record) ?? '')] ?? null; // the scm checkout's realpath, when it is a root that resolved
+    const key = JSON.stringify([roots, dropped, checkout]);
     const kept = this.#kept.get(key);
     if (kept !== undefined) return kept;
     let answered = !resolved.includes(null);
-    const repos = await Promise.all(
-      real.map(async (root) => {
-        const status = await dispatch('machine', 'git.status', { directory: root }).catch(() => null);
-        if (status === null || (!status.ok && (status.error.code === 'host_unavailable' || status.error.code === 'timeout'))) answered = false;
-        const repoRoot = status?.ok === true ? field(status.value, 'repoRoot') : undefined;
-        return typeof repoRoot === 'string' ? realpathOf(repoRoot) : null;
-      }),
-    );
-    const bounds = [...new Set([...real, ...repos.filter((repo): repo is string => repo !== null)])];
+    const repos = await Promise.all(roots.map((root) => repositoryOf(root, dispatch)));
+    if (repos.includes('unknown')) answered = false;
+    const within = new Set<string>();
+    let checkoutCovers = checkout === null || coversHome(checkout, homes);
+    roots.forEach((root, i) => {
+      const repo = repos[i];
+      // a home's repository (its own worktree's root or its main checkout's) gives git the whole of it, and an answer
+      // git didn't give says nothing of what it would give: either way, a file root alone
+      if (repo === 'unknown' || (repo !== null && (coversHome(repo.toplevel, homes) || coversHome(repo.main, homes)))) {
+        if (root === checkout) checkoutCovers = true;
+        return;
+      }
+      within.add(root);
+      if (repo !== null) within.add(repo.toplevel);
+    });
+    const bounds: Bounds = { within: [...within], roots, dropped, checkoutCovers };
     if (answered) {
       if (this.#kept.size >= CHECKOUT_BOUNDS_KEPT) this.#kept.delete(this.#kept.keys().next().value!);
       this.#kept.set(key, bounds);
     }
     return bounds;
   }
+}
+
+/** The failure a git read of a directory in no repository answers (src/services/git/runner.ts' NotARepositoryError). */
+const NOT_A_REPOSITORY = 'not a git repository';
+
+/**
+ * The repository `root` (a realpath) is in, as `git.worktree.list` answers it: rev-parse and the worktree list, no read of
+ * the work tree (a home kept in git answers at once, where a status would scan the whole home past git's bound). Its top
+ * level as git reads it there (the list's `toplevel`, `core.worktree` included; the final review), which must be the
+ * root or one of its ancestors, taken in the root's own spelling (the service names its paths in NFC), and its main
+ * checkout's root (the list's `repoRoot`, from the common dir, for a comparison with the homes alone); null when git says
+ * it is in none; `unknown` for any other answer (the spine or git away, a timeout, a failure, a top level elsewhere or
+ * none), which bounds nothing of git's and is never kept.
+ */
+async function repositoryOf(root: string, dispatch: EndpointServices['dispatch']): Promise<{ toplevel: string; main: string } | null | 'unknown'> {
+  // round 4: the service folds the path to NFC before git runs (holders.ts' canonicalPath), so its answer is the NFC
+  // spelling's, which is the root's only where the filesystem folds the forms too (the same directory: APFS); a
+  // sibling of that spelling (ext4), or none, says nothing of the root
+  const folded = root.normalize('NFC');
+  if (folded !== root && !(await sameDirectory(root, folded))) return 'unknown';
+  const listed = await dispatch('machine', 'git.worktree.list', { repoRoot: root }).catch(() => null);
+  if (listed === null) return 'unknown';
+  if (!listed.ok) return listed.error.code === 'internal' && listed.error.message === NOT_A_REPOSITORY ? null : 'unknown';
+  const main = field(listed.value, 'repoRoot');
+  const top = field(listed.value, 'toplevel');
+  if (typeof main !== 'string' || !isAbsolute(main) || typeof top !== 'string' || !isAbsolute(top)) return 'unknown';
+  const toplevel = ancestorsOf(root).find((path) => path.normalize('NFC') === top.normalize('NFC'));
+  return toplevel === undefined ? 'unknown' : { toplevel, main };
+}
+
+/** Whether `a` and `b` name one directory (its device and inode); false when either doesn't stat. */
+async function sameDirectory(a: string, b: string): Promise<boolean> {
+  const [x, y] = await Promise.all([stat(a, { bigint: true }).catch(() => null), stat(b, { bigint: true }).catch(() => null)]);
+  return x !== null && y !== null && x.isDirectory() && x.dev === y.dev && x.ino === y.ino;
+}
+
+/** `path` and each directory above it, nearest first. */
+function ancestorsOf(path: string): string[] {
+  const out = [path];
+  for (let at = path; dirname(at) !== at; ) out.push((at = dirname(at)));
+  return out;
 }
 
 /** Whether `real`, a realpath, is one of `bounds` or lies under one (at a segment boundary: `/repo2` is not under `/repo`). */
@@ -344,15 +444,32 @@ export function withinBounds(bounds: readonly string[], real: string): boolean {
 /**
  * Whether a `checkout` read's path lies in its session's checkout: the input's `directory`, else its `repoRoot`, an
  * absolute path whose realpath is within the bounds of the session's record (`session.get`, read on the asker's
- * behalf). No record, no path, or a path that does not resolve: not within.
+ * behalf). No record, no path, or a path that does not resolve: not within. 2026-11-06 (the desk track's round 3): and the
+ * repository git would answer for at that path is no home's (`CheckoutBounds.reaches`), asked at each request, since a
+ * root's own repository says nothing of a home's worktree checked out below it.
  */
-export async function withinCheckout(input: unknown, appSessionId: string, placing: Placing, bounds: CheckoutBounds): Promise<boolean> {
+export async function withinCheckout(input: unknown, appSessionId: string, placing: Placing, bounds: CheckoutBounds, name?: string): Promise<boolean> {
   const path = field(input, 'directory') ?? field(input, 'repoRoot');
   if (typeof path !== 'string' || !isAbsolute(path)) return false;
+  // round 4: a worktree status's `path` names a place (the worktree whose state it reads), which is no home of the
+  // machine nor above one, and resolves (git.diff's and git.log's `path` is a pathspec in the repository, bounded by it)
+  if (name === 'git.worktree.status') {
+    const place = field(input, 'path');
+    const real = typeof place === 'string' && isAbsolute(place) ? await realpathOf(place) : null;
+    if (real === null || bounds.coversAHome(real)) return false;
+  }
   const record = await placing.dispatch('machine', 'session.get', { appSessionId }).catch(() => null);
   if (record === null || !record.ok || record.value === null || typeof record.value !== 'object') return false;
   const [real, within] = await Promise.all([realpathOf(path), bounds.of(record.value, placing.dispatch)]);
-  return real !== null && withinBounds(within, real);
+  return real !== null && withinBounds(within.within, real) && (await bounds.reaches(real, placing.dispatch));
+}
+
+/** A record's scm checkout, as the scm service reads it: its worktree's path, else its directory. */
+function checkoutOf(record: unknown): string | null {
+  const worktree = field(field(record, 'worktree'), 'path');
+  const directory = field(record, 'directory');
+  const checkout = typeof worktree === 'string' ? worktree : directory;
+  return typeof checkout === 'string' && isAbsolute(checkout) ? checkout : null;
 }
 
 /** A record's roots, as the files service reads them: its directory, its additional directories and its worktree. */
@@ -364,4 +481,7 @@ function rootsOf(record: unknown): string[] {
   return roots.filter((root): root is string => typeof root === 'string' && isAbsolute(root));
 }
 
+// A path's realpath as the filesystem names it: the bounds hold, compare and dispatch on it, since a filesystem that tells
+// Unicode forms apart (ext4 under a Linux `mawsd`) holds `café` composed and decomposed as two directories. Only a
+// comparison with a home folds the forms (machine-home.ts' `coversHome`), where folding errs toward refusing.
 const realpathOf = (path: string): Promise<string | null> => realpath(path).catch(() => null);

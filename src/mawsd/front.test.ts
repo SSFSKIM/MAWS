@@ -305,6 +305,17 @@ describe('the services front', () => {
     }
   });
 
+  // 2026-11-06 (the home-root rule): the endpoint's requests come from another machine, which a service reads in its
+  // context (`remote`), set here alone; a machine.sock client's never carry it, whatever it sends.
+  it('marks the endpoint’s dispatch remote in its handler’s context, and a machine.sock client’s request not', async () => {
+    const { served, client } = front();
+    const seen: unknown[] = [];
+    served.bus.register('session.launchMode', (_input, context) => (seen.push(context.remote), ({ mode: 'index' }) as never));
+    expect(await served.dispatch('session.launchMode', undefined)).toMatchObject({ ok: true });
+    expect(await client().request('session.launchMode')).toMatchObject({ ok: true });
+    expect(seen).toEqual([true, undefined]);
+  });
+
   it('a client’s end ends its refs and its events', async () => {
     const { served, client } = front();
     let ended = false;

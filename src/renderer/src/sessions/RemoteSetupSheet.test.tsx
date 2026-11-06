@@ -7,6 +7,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge, ProjectRecord } from '@shared/ipc/schema';
+import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
 import { addressOf } from '@shared/machine/address';
 import type { OrgKey } from '@shared/machine/org-key';
 import type { TrustState } from '@shared/sessions/trust';
@@ -53,7 +54,7 @@ describe('setting a project up on another machine', () => {
   it('asks for the folder, reads its trust there, shows that machine’s trust card, registers the folder, and starts there trusted', async () => {
     install({ 'machine.folders.list': { entries: [entry(`${APP}/src`)], cursor: null }, 'session.trust.check': trustOf(), 'session.projects.addFolder': registered(APP) });
     openFolderSetup();
-    const sheet = screen.getByRole('dialog', { name: 'Set up this project on mini' });
+    const sheet = screen.getByRole('dialog', { name: 'New project on mini' });
     expect(within(sheet).getByText(SETUP_WORDS.privacy('mini'))).toBeTruthy(); // the warning first
     expect(folders().getAllByRole('button').map((b) => b.textContent)).toEqual(['Developer', 'Documentsprivate']);
     expect((within(sheet).getByRole('button', { name: SETUP_WORDS.use }) as HTMLButtonElement).disabled).toBe(true); // the home is no project
@@ -74,7 +75,9 @@ describe('setting a project up on another machine', () => {
     await waitFor(() => expect(useDialogs.getState().open).toBeNull());
     expect(fake.invoked('session.projects.addFolder')).toEqual([{ directory: APP }]);
     expect(fake.machines('session.projects.addFolder')).toEqual([OTHER_MACHINE]);
-    expect(spawnTargetOf(TAB, KEY)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: APP, key: KEY, trust: 'accepted' });
+    // the tab's place on mini: the folder's new project there, named on the chip, whatever the local project (2026-11-06)
+    expect(spawnTargetOf(TAB, KEY)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: APP, key: null, label: registered(APP).project.name, trust: 'accepted' });
+    expect(spawnTargetOf(TAB, null)).toEqual(spawnTargetOf(TAB, KEY));
   });
 
   it('opens a private folder only when asked, warning first, and reads inside it only while within it', async () => {
@@ -117,7 +120,7 @@ describe('setting a project up on another machine', () => {
     await waitFor(() => expect(fake.pending('session.projects.addFolder')).toBe(1));
     await act(() => fake.reply('session.projects.addFolder', registered(`${HOME}/Developer`)));
     await waitFor(() => expect(useDialogs.getState().open).toBeNull());
-    expect(spawnTargetOf(TAB, KEY)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: `${HOME}/Developer`, key: KEY }); // no trust to carry
+    expect(spawnTargetOf(TAB, KEY)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: `${HOME}/Developer`, key: null, label: registered(`${HOME}/Developer`).project.name }); // no trust to carry
   });
 
   it('applies nothing once cancelled while the trust read is out: no registration starts', async () => {
@@ -141,7 +144,7 @@ describe('setting a project up on another machine', () => {
     await waitFor(() => expect(screen.getByText(SETUP_WORDS.empty)).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: SETUP_WORDS.use }));
     await waitFor(() => expect(fake.pending('session.projects.addFolder')).toBe(1));
-    fireEvent.keyDown(screen.getByRole('dialog', { name: 'Set up this project on mini' }), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByRole('dialog', { name: 'New project on mini' }), { key: 'Escape' });
     expect(useDialogs.getState().open).toBeNull();
     act(() => openDialog({ kind: 'hiddenProjects' }));
     await act(() => fake.reply('session.projects.addFolder', registered(`${HOME}/Developer`)));
@@ -162,5 +165,19 @@ describe('setting a project up on another machine', () => {
     expect(spawnTargetOf(TAB, KEY)).toEqual({ ...target, trust: 'accepted' });
     expect(then).toHaveBeenCalledOnce();
     expect(fake.invoked('session.projects.addFolder')).toEqual([]); // registered already
+  });
+
+  // 2026-11-06: a chat in the machine's home (`~`, "Don't work in a project" there) refused untrusted: the card reads the
+  // home's trust by that name, which the machine resolves
+  it('offers the home’s trust card for a chat in no project there, read by `~`', async () => {
+    install({ 'session.trust.check': trustOf({ directory: HOME, trustKey: HOME, keyKind: 'directory', isHome: true }) });
+    const then = vi.fn();
+    const target = { machine: OTHER_MACHINE, name: 'mini', checkout: HOME_CHECKOUT, key: null, label: 'No project' };
+    act(() => openDialog({ kind: 'remoteSetup', request: { kind: 'trust', tab: TAB, target, then } }));
+    fireEvent.click(await within(await screen.findByRole('dialog', { name: 'Trust this folder on mini?' })).findByRole('button', { name: SETUP_WORDS.trustAndStart }));
+    expect(fake.invoked('session.trust.check')).toEqual([{ directory: HOME_CHECKOUT }]);
+    await waitFor(() => expect(useDialogs.getState().open).toBeNull());
+    expect(spawnTargetOf(TAB, null)).toEqual({ ...target, trust: 'accepted' });
+    expect(then).toHaveBeenCalledOnce();
   });
 });

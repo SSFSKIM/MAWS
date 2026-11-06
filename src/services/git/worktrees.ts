@@ -107,6 +107,7 @@ interface Repo {
   root: string;
   commonDir: string;
   isMain: boolean;
+  toplevel: string; // git's own top level at the path asked (2026-11-06: the endpoint's home-root rule reads it)
 }
 
 export class WorktreeService {
@@ -114,7 +115,7 @@ export class WorktreeService {
 
   async list(repoRoot: string): Promise<GitWorktreeList> {
     const repo = await this.mainRoot(repoRoot);
-    return { repoRoot: repo.root, commonDir: repo.commonDir, worktrees: await this.entries(repo) };
+    return { repoRoot: repo.root, commonDir: repo.commonDir, worktrees: await this.entries(repo), toplevel: repo.toplevel };
   }
 
   // null when git does not list the path (removed, or never a worktree). A listed entry whose directory is gone
@@ -282,10 +283,10 @@ export class WorktreeService {
     const [toplevel, commonDir, gitDir] = out.split('\n').map((line) => line.trim());
     if (!toplevel || !commonDir || !gitDir) throw new Error(`git rev-parse answered no toplevel, common dir and git dir for ${repoRoot}`);
     const [common, git, top] = await Promise.all([canonicalPath(commonDir), canonicalPath(gitDir), canonicalPath(toplevel)]);
-    if (basename(commonDir) === '.git') return { root: await canonicalPath(dirname(commonDir)), commonDir: common, isMain: true };
-    if (git === common) return { root: top, commonDir: common, isMain: true };
+    if (basename(commonDir) === '.git') return { root: await canonicalPath(dirname(commonDir)), commonDir: common, isMain: true, toplevel: top };
+    if (git === common) return { root: top, commonDir: common, isMain: true, toplevel: top };
     const checkout = await checkoutAbove(top, common);
-    return { root: checkout ?? top, commonDir: common, isMain: checkout !== null };
+    return { root: checkout ?? top, commonDir: common, isMain: checkout !== null, toplevel: top };
   }
 
   // `worktree list --porcelain -z`: NUL-terminated attribute lines, an empty one between stanzas; the first is the main

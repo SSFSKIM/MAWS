@@ -101,9 +101,11 @@ async function setup(): Promise<{ f: Fixture; dir: string; a: Remote; b: Remote 
   const s = f.host.add(APP);
   f.spine.set(APP, s.engineSessionId, { appId: APP, directory: dir, additionalDirectories: [], worktree: null });
   f.records.set({ lane: 'B', session: s.engineSessionId!, owners: ['@machine'] }, APP);
-  // The services answer each name with what it was asked (git.status with the repository its directory is in).
+  // The services answer each name with what it was asked (git.worktree.list, which the bounds read a root's repository
+  // by, with the repository its directory is in).
+  const listed = { repoRoot: dir, commonDir: join(dir, '.git'), worktrees: [{ repoRoot: dir, path: dir, branch: 'main', head: 'h', isMain: true, locked: false, prunable: false, managed: false }], toplevel: dir };
   for (const name of [...Object.keys(SESSION_CALLS), ...Object.keys(gitCalls(dir)), ...Object.keys(ACTS), 'session.spawn', 'session.projects.list']) {
-    f.spine.handle(name, (input) => (name === 'git.status' ? { repoRoot: dir } : name === 'session.spawn' ? { status: 'ok', appSessionId: 'app-new' } : { asked: name, input }));
+    f.spine.handle(name, (input) => (name === 'git.worktree.list' ? listed : name === 'session.spawn' ? { status: 'ok', appSessionId: 'app-new' } : { asked: name, input }));
   }
   return { f, dir, a: await openRemote(f, org.a1, org.A), b: await openRemote(f, org.b1, org.B) };
 }
@@ -164,11 +166,12 @@ describe('the checkout’s offer rows (M4)', () => {
       let from = f.host.calls.length;
       expect([name, code(await call(b, name, input, { session: SESSION }))]).toEqual([name, 'grade']);
       // Below its floor the caller learns nothing of the session: not its checkout, not its repository.
-      expect([name, reached(f, from, 'machine', 'git.status'), reached(f, from, 'machine', name)]).toEqual([name, [], []]);
+      expect([name, reached(f, from, 'machine', 'git.worktree.list'), reached(f, from, 'machine', name)]).toEqual([name, [], []]);
       from = f.host.calls.length;
       const answered = await call(a, name, input, { session: SESSION });
       expect([name, code(answered)]).toEqual([name, 'ok']);
-      expect([name, reached(f, from, 'machine', name, input).length]).toEqual([name, 1]);
+      // the request's own probe of its path (round 3) is a worktree list of it: that call's count holds both
+      expect([name, reached(f, from, 'machine', name, input).length]).toEqual([name, name === 'git.worktree.list' ? 2 : 1]);
     }
   });
 

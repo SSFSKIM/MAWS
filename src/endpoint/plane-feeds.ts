@@ -15,6 +15,10 @@
 // again at each `session.changed` of the session (its roots may move). While a read is out the bounds
 // are unknown: a `git.changed` waits for the latest read's answer, the latest per repository, and is sent only if the
 // new bounds take it, so a root's change neither leaks the old repository's changes nor drops the new one's (fix wave 1).
+// 2026-11-06 (the home-root rule, targets.ts' CheckoutBounds): a `files.changed` under a root the rule dropped (a home of
+// the machine, or above it) and within none of the session's roots is not carried, as the files service refuses its path
+// to a remote reader, nor an `scm.remote.output` of a session whose checkout is a home's; both are held while the bounds
+// are read, as a `git.changed` is, and delivered only against bounds that were read (`reached`).
 //
 // A feed lives with its channel and its access (the table re-checks it as any subscription), and ends `behind` when the
 // device leaves more than its backlog unread: the device opens it again, as after a reconnect.
@@ -35,7 +39,7 @@ import { AttentionFeeds, type AttentionFeedsContext } from './attention-feed';
 import { InventoryFeeds, type InventoryFeedsContext } from './inventory-feed';
 import { dispatchAs, type EndpointServices } from './services';
 import { namesSession, type Plane, type SessionSubscription, type Subscription } from './subscriptions';
-import { withinBounds, type CheckoutBounds } from './targets';
+import { withinBounds, type Bounds, type CheckoutBounds } from './targets';
 
 export type PlaneFeedsContext = {
   dispatch: EndpointServices['dispatch'];
@@ -55,6 +59,8 @@ export type PlaneFeedsContext = {
 
 /** How many repositories' latest `git.changed` a feed holds while its bounds are read. */
 export const HELD_REPOSITORIES = 64;
+/** How many `files.changed` a feed holds until its first bounds are read (the latest ones). */
+export const HELD_FILE_CHANGES = 256;
 
 type Open = {
   sub: SessionSubscription;
@@ -63,11 +69,28 @@ type Open = {
   bounds: readonly string[] | null;
   /** Each repository's latest `git.changed`, held while the bounds are read. */
   held: Map<string, unknown>;
+  /**
+   * 2026-11-06: the bounds a file's change and an scm run's output are read against; null while a read of them is out,
+   * or the last one couldn't read them (until the next read answers: never delivered against none).
+   */
+  files: Bounds | null;
+  /** The `files.changed` and `scm.remote.output` held while `files` is null, in order (the latest HELD_FILE_CHANGES). */
+  heldFiles: { name: string; payload: Record<string, unknown> }[];
   /** Reads of the bounds begun: only the latest one's answer is taken. */
   reads: number;
 };
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+/**
+ * 2026-11-06 (the home-root rule): whether a file's change, or an scm run's output, reaches a remote reader. A file's
+ * path within the session's roots does; one under a root the rule dropped (a home, or above it) and in no root doesn't,
+ * as the files service refuses it to them; any other is as before (a delivered file's, a watch's elsewhere). The path is
+ * compared as named, which is canonical up to its last name: the machine's watches name a change under the watched
+ * directory's confirmed realpath (src/services/files/watch.ts, `join(entry.real, name)`), the only `files.changed` its
+ * services emit. An scm run's output reaches them unless the session's checkout is a home's (scm.ts' rule, the same).
+ */
+const reached = (bounds: Bounds, name: string, payload: Record<string, unknown>): boolean =>
+  name === 'scm.remote.output' ? !bounds.checkoutCovers : typeof payload.path === 'string' && (withinBounds(bounds.roots, payload.path) || !withinBounds(bounds.dropped, payload.path));
 
 export class PlaneFeeds implements Plane {
   readonly #ctx: PlaneFeedsContext;
@@ -89,7 +112,7 @@ export class PlaneFeeds implements Plane {
     if (sub.message.feed === 'artifacts') return this.#artifacts.open(sub);
     if (sub.message.feed === 'browser.inventory' && namesSession(sub)) return this.#inventory.open(sub);
     if (sub.message.feed === 'attention' || !namesSession(sub)) return this.#attention.open(sub);
-    const open: Open = { sub, seq: 0, bounds: null, held: new Map(), reads: 0 };
+    const open: Open = { sub, seq: 0, bounds: null, held: new Map(), files: null, heldFiles: [], reads: 0 };
     this.#open.set(sub, open);
     sub.subbed('snapshot', { epoch: this.#epoch, seq: 0 });
     void this.#readBounds(open, null);
@@ -127,7 +150,17 @@ export class PlaneFeeds implements Plane {
     if (owner !== 'machine' || this.#open.size === 0) return;
     const { name, payload } = message;
     if (!isObject(payload)) return;
-    if (name === 'files.changed' || name === 'scm.remote.output' || name === 'session.capabilitiesChanged') {
+    if (name === 'files.changed' || name === 'scm.remote.output') {
+      for (const open of this.#open.values()) {
+        if (open.sub.session.id !== payload.appSessionId) continue;
+        if (open.files !== null) {
+          if (reached(open.files, name, payload)) this.#send(open, name, payload);
+        } else {
+          if (open.heldFiles.length >= HELD_FILE_CHANGES) open.heldFiles.shift();
+          open.heldFiles.push({ name, payload });
+        }
+      }
+    } else if (name === 'session.capabilitiesChanged') {
       for (const open of this.#open.values()) if (open.sub.session.id === payload.appSessionId) this.#send(open, name, payload);
     } else if (name === 'git.changed' && typeof payload.repoRoot === 'string') {
       const repoRoot = payload.repoRoot;
@@ -153,24 +186,31 @@ export class PlaneFeeds implements Plane {
   /**
    * The session's checkout bounds, from `record` (a `session.changed`'s) or the spine's `session.get`; then what was held.
    * The bounds are unknown from the call on (synchronously, before anything else is delivered), and only the latest
-   * read's answer is taken.
+   * read's answer is taken. One that couldn't be read (no record, the spine or git away) takes git's changes nowhere, as
+   * before, and keeps the files' and scm's held (2026-11-06: never delivered against bounds it doesn't have), until the
+   * session's next change reads them again.
    */
   async #readBounds(open: Open, record: Record<string, unknown> | null): Promise<void> {
     const n = ++open.reads;
     open.bounds = null;
+    open.files = null;
     const dispatch = dispatchAs(this.#ctx.dispatch, open.sub.channel.client);
-    let bounds: readonly string[] = [];
+    let bounds: Bounds | null = null;
     try {
       const read = record ?? (await this.#record(open, dispatch));
-      bounds = read === null ? [] : await this.#ctx.bounds.of(read, dispatch);
+      bounds = read === null ? null : await this.#ctx.bounds.of(read, dispatch);
     } catch (error) {
       this.#ctx.log(`endpoint: a checkout feed's bounds could not be read: ${(error as Error).message}`);
     }
     if (n !== open.reads || this.#open.get(open.sub) !== open) return;
-    open.bounds = bounds;
+    open.bounds = bounds?.within ?? [];
+    open.files = bounds;
     const held = [...open.held.entries()];
     open.held.clear();
-    for (const [repoRoot, payload] of held) if (withinBounds(bounds, repoRoot)) this.#send(open, 'git.changed', payload);
+    for (const [repoRoot, payload] of held) if (withinBounds(open.bounds, repoRoot)) this.#send(open, 'git.changed', payload);
+    if (bounds === null) return;
+    const heldFiles = open.heldFiles.splice(0);
+    for (const { name, payload } of heldFiles) if (reached(bounds, name, payload)) this.#send(open, name, payload);
   }
 
   async #record(open: Open, dispatch: EndpointServices['dispatch']): Promise<Record<string, unknown> | null> {

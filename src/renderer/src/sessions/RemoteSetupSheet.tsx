@@ -5,6 +5,10 @@
 // trusted (accepted, the spawn carries `trust: 'accepted'`), then the folder registered (Touch ID) and the New chat tab
 // pointed at it. For a registered checkout the machine refused untrusted at Send: its trust card alone, then the Send
 // again. Every step has a way back or out; a refusal is said in words and leaves the sheet where it was.
+// 2026-11-06 (the machine first): the sheet is "New project" on the machine, naming no org project: any folder there, git
+// or not, becomes a project of its own and the tab's place there (its project's name on the chip); the other checkouts'
+// paths are suggested when the tab's local project has an org project. The trust card of the machine's home (a chat in no
+// project there, `~`) reads that home's trust by its name.
 import { useEffect, useState } from 'react';
 import type { FolderEntry } from '@shared/ipc/schema/machine';
 import type { TrustState } from '@shared/sessions/trust';
@@ -42,8 +46,10 @@ function TrustSetup({ request }: { request: Extract<SetupRequest, { kind: 'trust
   const [trust, setTrust] = useState<TrustState | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
+    const { checkout } = target;
+    if (checkout === null) return; // a refused Send had a place: only that place's trust is asked
     let live = true;
-    void checkTrust(target.machine, target.name, target.checkout).then((read) => {
+    void checkTrust(target.machine, target.name, checkout).then((read) => {
       if (!live) return;
       if (read.ok) setTrust(read.trust);
       else setError(read.words);
@@ -124,7 +130,7 @@ function FolderSetup({ request }: { request: FolderRequest }) {
     const added = await registerFolder(machine, name, directory);
     if (!showing(request)) return;
     if (!added.ok) return fail(added.words);
-    const target: SpawnTarget = { machine, name, checkout: added.checkout, key: request.key, ...(accepted && { trust: 'accepted' as const }) };
+    const target: SpawnTarget = { machine, name, checkout: added.checkout, key: null, label: added.label, ...(accepted && { trust: 'accepted' as const }) };
     useRemoteSpawn.getState().choose(request.tab, target);
     closeDialog();
   };

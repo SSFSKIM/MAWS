@@ -66,6 +66,39 @@ describe('main answers files.* on the services bus', () => {
     expect(await invoke('files.list', { appSessionId: 'nope' })).toEqual({ ok: false, error: { code: 'internal', message: 'unknown app session: nope' } });
   });
 
+  // 2026-11-06 (the home-root rule): for a request from another machine (the endpoint seam's `remote`), a root that is the
+  // machine's home or above it is no root, so a chat in the home reads nothing there remotely; this machine's own client
+  // reads every root as before, and a project root beside the home keeps serving a remote reader.
+  it('reaches nothing remotely through a root that is the machine’s home or above it, and keeps a project root beside it', async () => {
+    const home = join(root, 'home');
+    mkdirSync(join(home, 'proj'), { recursive: true });
+    writeFileSync(join(home, 'notes.txt'), 'private\n');
+    writeFileSync(join(home, 'proj', 'a.ts'), 'export {};\n');
+    const records = new Map<string, AllowlistRecord>([
+      ['H', { directory: home, additionalDirectories: [], worktree: null }],
+      ['R', { directory: '/', additionalDirectories: [], worktree: null }],
+      ['P', { directory: join(home, 'proj'), additionalDirectories: [home], worktree: null }],
+    ]);
+    const files = registerFilesHandlers((id) => records.get(id) ?? null, { bus, emit: vi.fn(), port: { openExternal: vi.fn(), reveal: vi.fn() }, env: {}, homes: () => [home] });
+    dispose = () => files.dispose();
+    const remote = { client: page, remote: true as const };
+    const read = (appSessionId: string, path: string, asked: typeof remote | EndableClientRef = remote) => bus.invoke('files.read', { appSessionId, path }, asked) as Promise<Result>;
+    const refused = { ok: false, error: { code: 'internal', message: OUT } };
+    expect(await read('H', join(home, 'notes.txt'))).toEqual(refused);
+    expect(await read('R', join(home, 'notes.txt'))).toEqual(refused);
+    expect(await bus.invoke('files.list', { appSessionId: 'H' }, remote)).toEqual(refused);
+    expect(await bus.invoke('files.list', { appSessionId: 'H', path: home }, remote)).toEqual(refused);
+    expect(await bus.invoke('files.watch', { appSessionId: 'H', path: home }, remote)).toEqual(refused);
+    expect(await bus.invoke('files.write', { appSessionId: 'H', path: join(home, 'notes.txt'), content: 'x', expectedHash: createHash('sha256').update('private\n').digest('hex') }, remote)).toEqual(refused);
+    // the project root keeps serving; the home beside it reaches nothing more
+    expect(await read('P', join(home, 'proj', 'a.ts'))).toMatchObject({ ok: true, value: { content: 'export {};\n' } });
+    expect(await read('P', join(home, 'notes.txt'))).toEqual(refused);
+    expect(await bus.invoke('files.list', { appSessionId: 'P' }, remote)).toMatchObject({ ok: true, value: { entries: [{ path: join(home, 'proj') }] } });
+    // this machine's own client: every root, the home included
+    expect(await read('H', join(home, 'notes.txt'), page)).toMatchObject({ ok: true, value: { content: 'private\n' } });
+    expect(await read('P', join(home, 'notes.txt'), page)).toMatchObject({ ok: true, value: { content: 'private\n' } });
+  });
+
   // E5: the hash-checked save through the router, its answers validated by the output schema.
   it('writes a file over its hash, answers conflict over a stale one, and refuses a path outside', async () => {
     await install();
