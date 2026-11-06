@@ -35,7 +35,7 @@ Then `sminos share <session> <member> list` (run by the owner at a terminal): th
 - [x] (2026-11-05) The round-3 review found four more holes; this revision folds each with the architect's resolution: the archive's own-writer frontier is the hub's `have`, not socket handoff; an old sminos or endpoint never receives an audience stream; a split `say` carries only its own recipients' leading tags; a valid `unlisted` notice is admitted by its own rule.
 - [ ] The execution section's buildability review.
 - [x] (2026-11-05 22:50Z) M1: the hub's policy registry, upload backstop and audience filter (MAWS). Branch `p5-o18-m1`, `49dd6b262..`; static and unit GREEN on `a091ce1cb` (run 42120533710); reviewer-high with a security lens converged on the third pass.
-- [ ] M2: the endpoint: the `list` grade, `reach?`, audiences and the policy cache (MAWS). Branch `p5-o18-m2` from `9f49f8fbc`; built at `062e061a0` (2026-11-06 00:00Z), each new suite seen red against the base sources; gates and review next.
+- [x] M2: the endpoint: the `list` grade, `reach?`, audiences and the policy cache (MAWS). Branch `p5-o18-m2` from `9f49f8fbc`; built at `062e061a0` (2026-11-06 00:00Z); M1's same-batch reference fix at `bf194ee8c`; the review's fix wave at `c100ab45f`; high-rung re-review clean (2026-11-06).
 - [ ] M2b: devices: the audience from the listing (MAWS).
 - [ ] M3: sminos's visibility frames, records and audience streams (doperpowers).
 - [ ] M4: sminos's send boundary, the setters, refusals and unlisting (doperpowers).
@@ -734,6 +734,10 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
     delegation's prefix. It is a new machine by construction.
   - A phase-1 name-held binding (`name:<old>`) is lost on a rename. Proposed fix, not built: `boundTo` also accepts
     such a row when `refOfName(head, <old name>)` is the caller's ref. Left as residue (coordinator, 2026-11-05).
+- Observation (M2, the fix wave): the hub refusing `audience` at a position the endpoint already signed can't be revived
+  by a void. The ledger holds the signed body there, so the void would be refused `conflict`. The endpoint never signs an
+  audience whose digest disagrees with its writer, so the hub has no ground to refuse one. That stop stays terminal,
+  and a test holds it there.
 
 ## Decision Log
 
@@ -994,3 +998,22 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   - the browser offset counter shows a stream's volume (accepted residue);
   - the send-path window in the relay (Surprises, third review);
   - today's endpoints and desk-web read a tombstone as malformed, until M2 and M2b.
+- M2 (2026-11-06). The endpoint now:
+  - decides `reach?` from the sender it verifies itself (the `list` grade among the share grades);
+  - signs audience streams with the meet of the sessions' audiences, redacting provenance and voiding refused positions;
+  - keeps the policy cache, rebuilt from paged `snapshots?` when sminos advertises `audience`;
+  - holds private streams while the hub's welcome lacks `audience`;
+  - reads M1's tombstone as a spent, withheld position.
+
+  The same branch fixes M1's same-batch withholding (a seat spawned and messaged at once) with a two-pass judgment.
+  There are three new endpoint suites (`reach`, `audience-signing`, `policy-cache`) and a private-session replay against
+  the M1 hub in `conversation.local.test.ts`.
+- What the reviews caught. The first high-rung review found three things:
+  - a ledger resend that skipped the hub-capability hold;
+  - a device's stream writer that resolved to no member;
+  - an `audience` stop that a void never lifted.
+
+  The lesson repeats M1's: a gate belongs where data leaves (every send path), not only where it is first decided.
+  The re-review was clean.
+- Left for later: a phase-1 name-held binding lost on a machine's rename (Surprises, M2), and desk-web's exact
+  `isListing` (M2b).
