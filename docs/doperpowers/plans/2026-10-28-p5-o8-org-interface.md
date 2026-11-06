@@ -3047,6 +3047,8 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   - (P1, M7a) the migration checkpoint now binds each covered position to the hash of the exact event that passed, so other bytes at that writer and seq never read `migrated`;
   - (P2, M4c) `publishHeld` clears `held` in one pure update, then runs the normal post path, under the signer's exclusive operation;
   - (P2, M4c) the delegation's `expires` is computed in explicit units.
+
+  A third pass, on a8d1fdb0a, closed all three and found nothing new. The review has converged: rounds of 13, 3, then 0 findings, every one adopted.
   Date/Author: 2026-11-06, O8's executor.
 
 ## Outcomes & Retrospective
