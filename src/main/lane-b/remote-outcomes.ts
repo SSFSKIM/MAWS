@@ -36,12 +36,13 @@ export const TOO_LARGE_WORDS = REMOTE_TOO_LARGE_WORDS;
 /**
  * What a session on another machine can't take yet, by control: closed with these words whatever the link says. P5 O7
  * M4 opened `media` (a file goes up to the machine as an upload, the composer's remote-uploads.ts) and `rewind` and
- * `rewind-files` (the files panel follows the machine's checkout, so a rewind's effect on the files shows).
+ * `rewind-files` (the files panel follows the machine's checkout, so a rewind's effect on the files shows). The remote
+ * drill-in (2026-11-06) opened `subagent-rows`: a running subagent's rows come in the session's stream and its slice is
+ * `session.events` with its `agentId`; an ended one's transcript is `fs.agentEvents`; each crosses the link.
  */
 export const REMOTE_GAPS: Readonly<Partial<Record<ControlKey, string>>> = {
   'take-over': 'not offered for a session on another machine',
   reopen: 'not offered for a session on another machine',
-  'subagent-rows': 'a subagent’s own rows aren’t carried from another machine yet',
 };
 
 /** An act's outcome as the command's result (§F, A4, the image bound, a lost answer). */

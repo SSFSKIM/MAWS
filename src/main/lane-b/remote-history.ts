@@ -16,8 +16,11 @@
 //   again): a one-row page refused there is refused at every cursor. So no more than LEFT_OUT_IN_A_ROW rows are left out
 //   with no page crossing between them; past that the read ends with the bar below (`newest`), and the gaps it found are
 //   said only once a page crosses (fix wave 2: M2's pager stepped on forever there).
+// - A subagent's slice (`agentId`) of a live launch is read the same way (the remote drill-in, 2026-11-06): each page
+//   names the agent, the engine host answering the page's rows' events of it, so a page may hold none while the launch
+//   reads on; a row of it alone too large ends the read as history unavailable, since a gap would mark the session's.
 // - A window the inputs can't page is answered as history unavailable (no events, `complete`, `historyUnavailable`):
-//   an older page (`before`), a subagent's slice (`agentId`), a seek, and a transcript the engine host reads from disk
+//   an older page (`before`), a subagent's slice with no launch, a seek, and a transcript the engine host reads from disk
 //   (a session with no stream there: its events carry no `seq`, and its `limit` selects the transcript's first events,
 //   not a page after a cursor). Paging those needs a byte budget on the engine host's history window (M4, acceptance
 //   12); until then main says why first, `remote.historyTooLarge {window}` (`newest` for the disk read, `older` for the
@@ -179,7 +182,9 @@ async function readWhole(link: RemoteLink, input: Record<string, unknown>, deps:
   const whole = await dispatchOverLink(link, 'session.events', input);
   if (!tooLarge(whole)) return whole;
   const said = `lane B: session.events of ${link.name}/${app}`;
-  if (input.before !== undefined || input.agentId !== undefined || input.seek !== undefined) {
+  const agentId = input.agentId;
+  // the remote drill-in (2026-11-06): a subagent's slice of a live launch pages as the launch does, each page naming it
+  if (input.before !== undefined || input.seek !== undefined || (agentId !== undefined && deps.launch() === null)) {
     deps.log(`${said}: an older window too large for the channel, answered as history unavailable`);
     deps.tooLarge('older');
     return unavailable();
@@ -194,11 +199,16 @@ async function readWhole(link: RemoteLink, input: Record<string, unknown>, deps:
   let lost = false;
   let leftOut: Array<[string, { seq: number }] | null> = []; // since the last page that crossed; null: no launch to name
   for (;;) {
-    const read = await dispatchOverLink(link, 'session.events', { appSessionId: app, afterSeq: cursor, limit: size });
+    const read = await dispatchOverLink(link, 'session.events', { appSessionId: app, afterSeq: cursor, limit: size, ...(agentId !== undefined && { agentId }) });
     if (tooLarge(read)) {
       if (size > 1) {
         size = Math.floor(size / 2);
         continue;
+      }
+      // a gap would mark the session's own transcript, not the subagent's
+      if (agentId !== undefined) {
+        deps.log(`${said}: a row of subagent ${String(agentId)} alone is too large for the channel; its slice answered as history unavailable`);
+        return unavailable();
       }
       if (leftOut.length >= LEFT_OUT_IN_A_ROW) {
         deps.log(`${said}: ${leftOut.length + 1} rows in a row alone too large for the channel (a transcript read from disk), answered as history unavailable`);
@@ -230,7 +240,8 @@ async function readWhole(link: RemoteLink, input: Record<string, unknown>, deps:
     const advanced = page.lastSeq > (cursor ?? 0) || (cursor === null && page.events.length > 0);
     lastSeq = Math.max(lastSeq, page.lastSeq);
     const full = total !== null && events.length >= total;
-    if (page.complete || page.events.length === 0 || !advanced || full) {
+    // a subagent's slice of a page may hold none of its events while the launch reads on
+    if (page.complete || (page.events.length === 0 && agentId === undefined) || !advanced || full) {
       const value: Events = { events, lastSeq, complete: page.complete && !full, ...(lost && { historyUnavailable: true as const }) };
       return { ok: true, value } as Result;
     }

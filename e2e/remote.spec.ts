@@ -2263,3 +2263,142 @@ test('M9: "+ Session" on B with no registered checkout sets its folder up there:
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// A subagent of B's lane B session, drilled into from A (the owner's report of 2026-11-06: the drill-in showed "a
+// subagent's own rows aren't carried from another machine yet" in place of the agent's transcript). On e2e:remote's
+// scene over the relay, A starts the session on B with "+ Session"; its first turn starts a background agent (the frames
+// of `subagent.jsonl`'s first agent) that replies, holds, replies again, holds and ends. From A's Subagents tool, in order:
+// the drill-in into the running agent shows the reply it gave before it was opened (the session's slice for the agent,
+// read over the link); the next reply shows in it as B's engine gives it (the session's stream); and once the agent
+// ends, its work folds behind its last reply as a local agent's does, still from the stream: nothing on B follows the
+// agent's transcript for A, whose one disk window would cross the link as one answer.
+const SUB_SPAWNED = 'b0c0d0e0-0000-4000-8000-0000000000b8'; // the engine session id the session's journal pins
+const SUB_TITLE = 'B’s session with an agent';
+const SUB_BRIEF = 'Start an agent on B.';
+const SUB_AGENT = { id: 'ab5e2e00000000001', description: 'Survey the checkout on B' };
+const SUB_FIRST = 'The agent on B is reading the checkout.';
+const SUB_SECOND = 'The agent on B found one file.';
+const SUB_SUMMARY = 'One file on B.'; // the engine's summary of the agent at its end
+
+test('a subagent of B’s lane B session, drilled into from A: the rows it gave before, the next as B’s engine gives it, and its work folded once it ends', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-agent-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-agent-'));
+  const checkout = join(root, 'b-checkout');
+  const journals = join(root, 'journals');
+  const hooks = join(root, 'no-hooks');
+  const aCheckout = join(root, A_PROJECT);
+  for (const dir of [checkout, journals, hooks, aCheckout]) mkdirSync(dir);
+  checkoutRepository(checkout, hooks);
+  checkoutRepository(aCheckout, hooks);
+  let scene: RemoteScene | null = null;
+  let a: MawsLaunch | null = null;
+  try {
+    // B's session: the brief's turn starts the agent, which replies and reads a file, holds (until the spec asks B's
+    // engine its context usage), replies again, holds, and ends; the turn itself goes on with no reply of its own
+    const journal = new SideJournal(SUB_SPAWNED, checkout);
+    journal.prompt();
+    const agent = journal.agent(SUB_AGENT.id, SUB_AGENT.description);
+    agent.text(SUB_FIRST);
+    agent.read();
+    journal.holdAtContextUsage();
+    agent.text(SUB_SECOND);
+    journal.holdAtContextUsage();
+    agent.completed(SUB_SUMMARY);
+    const fixture = journal.write(journals, 'b-agent');
+
+    scene = await startRemoteScene({
+      scratch: join(root, 'scene'),
+      aUserData,
+      b: {
+        root: '/tmp', // as M8's: the replay writes the session's transcript only into a config home that is its own real path
+        env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: fixture, DISABLE_AUTOUPDATER: '1' },
+        prepare: ({ claudeConfigDir }) => {
+          writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, projects: { [checkout]: { hasTrustDialogAccepted: true } } }));
+          writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
+        },
+      },
+    });
+    const { b } = scene;
+    await b.request('machineSettings.set', { patch: { gateway: { defaultRoute: 'direct' } } });
+    await b.request('session.projects.add', { directory: checkout }); // B's checkout of the org project, which "+ Session" offers
+
+    a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A', MAWS_E2E_STEP_UP: 'accept' } }); // the spawn's step-up, accepted
+    keepMainLines(a);
+    const { page } = a;
+    await expect.poll(async () => (await machineOf(page, b.ref))?.state ?? null, { timeout: 60_000, message: `A's link to B comes up over the relay\n${mainSaid(page)}` }).toBe('up');
+    type Projects = { projects: { directory: string; org?: { key: string } }[] };
+    await invoke(page, 'session.projects.add', { directory: aCheckout });
+    await expect
+      .poll(async () => (await invoke<Projects>(page, 'session.projects.list', undefined)).projects.find((p) => p.directory === aCheckout)?.org?.key ?? null, { timeout: 30_000 })
+      .toBe(`smns:${PROJECT}`);
+    const bSaid = async () => {
+      const engines = await b.request<unknown[]>('engine.sessions').catch((error: unknown) => String(error));
+      const lines = b.log().split('\n').filter((line) => /spawn|session\.(create|start|intent)|machine\.op|step-up|refus|replay|endpoint|follow|agent/i.test(line));
+      return `B's engine sessions: ${JSON.stringify(engines)}\nB's log:\n${lines.slice(-40).join('\n')}`;
+    };
+
+    let spawnedApp = '';
+    await test.step('"+ Session" starts the session on B, whose first turn starts the agent', async () => {
+      await newChat(page, A_PROJECT);
+      await chooseMachine(page, B_NAME);
+      await composerOf(page).click();
+      await page.keyboard.type(SUB_BRIEF);
+      await page.keyboard.press('Enter');
+      await expect
+        .poll(async () => (spawnedApp = (await b.request<{ appSessionId: string; engineSessionId: string | null }[]>('engine.sessions')).find((s) => s.engineSessionId === SUB_SPAWNED)?.appSessionId ?? ''), {
+          timeout: 120_000,
+          intervals: [100],
+          message: 'B’s engine host runs the spawned session',
+        })
+        .not.toBe('')
+        .catch(async (error: unknown) => {
+          throw new Error(`${error instanceof Error ? error.message : String(error)}\n${await paneSaid(page)}\n${mainSaid(page)}\n${await bSaid()}`);
+        });
+      await scene!.sminos.list({ engine: SUB_SPAWNED, app: spawnedApp, owners: [scene!.member], project: PROJECT, title: SUB_TITLE, cwd: checkout });
+      expect(bareOf(await movedTo(page, b.ref, null, bSaid)), 'the New chat tab moved to the session B started').toBe(spawnedApp);
+    });
+
+    // the agent's slice of the session as B's engine host holds it (its own rows and the session's reports on it)
+    const sliceOnB = async () => JSON.stringify((await b.request<{ events: SessionEvent[] }>('session.events', { appSessionId: spawnedApp, afterSeq: null, limit: null, agentId: SUB_AGENT.id })).events);
+    const tool = surface(page, 'subagents');
+    const drillIn = tool.locator('[data-view="agent"]');
+    const drillInSaid = async () => `the drill-in: ${await drillIn.innerText({ timeout: 1_000 }).catch(() => 'none')}\n${mainSaid(page)}\n${await bSaid()}`;
+    await test.step('the drill-in into the running agent shows the reply it gave before the drill-in opened', async () => {
+      await expect.poll(async () => (await sliceOnB()).includes(SUB_FIRST), { timeout: 60_000, message: `B's engine gave the agent's first reply\n${await bSaid()}` }).toBe(true);
+      expect(await sliceOnB(), 'and holds before its next').not.toContain(SUB_SECOND);
+      await openSurface(page, 'Subagents');
+      const row = tool.locator(`[data-agent-row="${SUB_AGENT.id}"]`);
+      await quoting(expect(row, 'the agent in A’s Subagents tool').toBeVisible({ timeout: 60_000 }), async () => `the tool: ${await tool.innerText().catch(() => 'none')}\n${mainSaid(page)}`);
+      await row.click();
+      await quoting(expect(drillIn.getByText(SUB_FIRST, { exact: true }), 'its first reply, in the drill-in').toBeVisible({ timeout: 60_000 }), drillInSaid);
+      await expect(drillIn.getByTestId('subagent-rows-gap'), 'no gap in place of its rows').toHaveCount(0);
+    });
+
+    await test.step('its next reply shows in the open drill-in as B’s engine gives it', async () => {
+      await b.request('session.getContextUsage', { appSessionId: spawnedApp, detail: 'summary' }); // lets B's engine go on
+      await expect.poll(async () => (await sliceOnB()).includes(SUB_SECOND), { timeout: 30_000, message: `B's engine gave the agent's next reply\n${await bSaid()}` }).toBe(true);
+      await quoting(expect(drillIn.getByText(SUB_SECOND, { exact: true }), 'its next reply, appended').toBeVisible({ timeout: 60_000 }), drillInSaid);
+      await expect(drillIn.getByText(SUB_FIRST, { exact: true }), 'the first still there, once').toHaveCount(1);
+    });
+
+    await test.step('once the agent ends, its work folds behind its last reply, from the stream: nothing on B follows its transcript', async () => {
+      await b.request('session.getContextUsage', { appSessionId: spawnedApp, detail: 'summary' }); // lets the agent end
+      await quoting(expect(drillIn.getByRole('button', { name: /^Worked for / }), 'its work folded, as a finished local agent’s').toBeVisible({ timeout: 60_000 }), drillInSaid);
+      await expect(drillIn.getByText(SUB_SECOND, { exact: true }), 'behind its last reply').toBeVisible();
+      await expect(drillIn.getByTestId('subagent-rows-gap')).toHaveCount(0);
+      // B's engine host's lines about a follow of the agent's transcript, from every log of B's (M8's way of reading them)
+      const prefix = `[fs] follow ${spawnedApp}/${SUB_AGENT.id}: `;
+      const followLines = (readdirSync(b.userData, { recursive: true }) as string[])
+        .filter((name) => name.endsWith('.log'))
+        .flatMap((name) => readFileSync(join(b.userData, name), 'utf8').split('\n'))
+        .filter((line) => line.includes(prefix));
+      expect(followLines, 'no follow of the agent’s transcript on B').toEqual([]);
+      console.log(`[e2e:remote] agent drill-in: ${spawnedApp}/${SUB_AGENT.id} read from the session's stream, running and ended`);
+    });
+  } finally {
+    await a?.cleanup();
+    await scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
