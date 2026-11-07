@@ -241,13 +241,14 @@ the log from offset 0 to `caught-up` and sends nothing else (no visibility, no
 `human`, no RPC, no subscription), so it runs against the configuration's own org.
 `machine-counts.py` reads a machine's half from its log files
 (`$SMINOS_HOME/projects/<id>/log/`) and its enrolled and former names (from
-`daemon/hub.json`, nothing else of it), standard library only, so a machine with
-no MAWS checkout runs it over ssh. No machine has held `hub.json` since O14 B4
-step 5 (2026-11-07): a cut-over machine's names are in sminos's
-`daemon/identity.json` (`name`, and `former` keyed by name), which the script
-does not read yet. Its snapshot then names no machine and no former name:
-`--side <name>` gives it the name the audit's refusals are matched under, and a
-writer kept only under a former name reads `differs`, not `explained`.
+sminos's `daemon/identity.json`, the RL10 identity a machine writes at its
+cutover: `name`, and the keys of `former`; nothing else of it), standard library
+only, so a machine with no MAWS checkout runs it over ssh. A machine that has
+not cut over has no `identity.json` (no machine has held DX2's `hub.json` since
+O14 B4 step 5, 2026-11-07, and sminos 1.40.0 reads it no more): its snapshot
+names no machine and no former name, `--side <name>` gives it the name the
+audit's refusals are matched under, and a writer kept only under a former name
+reads `differs`, not `explained`.
 
     python3 apps/desk-hub/deploy/machine-counts.py --dir <checkout> > /tmp/sk.json
     ssh mini python3 - --dir <checkout on the mini> < apps/desk-hub/deploy/machine-counts.py > /tmp/mini.json

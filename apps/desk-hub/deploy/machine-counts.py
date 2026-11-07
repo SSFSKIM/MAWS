@@ -7,10 +7,11 @@ Read-only, and standard library only, so it runs on a machine with no MAWS
 checkout (`ssh mini python3 - … < machine-counts.py`). It reads the log files
 under $SMINOS_HOME/projects/<id>/log/, the positions the machine refused on
 import (`spent` in the project's uplink.json), and from
-$SMINOS_HOME/daemon/hub.json the machine's enrolled name and its former names
-(the keys of `former`, the names the installation wrote under before it
-enrolled): those names alone, nothing else of that file is kept or printed. It
-runs no sminos command, since every sminos verb may migrate state first.
+$SMINOS_HOME/daemon/identity.json (the machine's RL10 identity, written at its
+cutover) its name and its former names (the keys of `former`, the names the
+installation wrote under before): those names alone, nothing else of that file
+is kept or printed. It runs no sminos command, since every sminos verb may
+migrate state first.
 
     python3 machine-counts.py --dir <a checkout of the project> > sk.json
     ssh mini python3 - --dir <the checkout there> < machine-counts.py > mini.json
@@ -56,15 +57,15 @@ def project_of(directory):
 
 
 def enrollment(home):
-    """The enrolled name and the former names (hub.json's `machine` and the keys of its `former`)."""
+    """The enrolled name and the former names (identity.json's `name` and the keys of its `former`)."""
     try:
-        with open(os.path.join(home, "daemon", "hub.json")) as f:
+        with open(os.path.join(home, "daemon", "identity.json")) as f:
             held = json.load(f)
     except (OSError, ValueError):
         return None, []
     if not isinstance(held, dict):
         return None, []
-    name, former = held.get("machine"), held.get("former")
+    name, former = held.get("name"), held.get("former")
     return (name if isinstance(name, str) and name else None,
             sorted(n for n in former if isinstance(n, str) and n) if isinstance(former, dict) else [])
 

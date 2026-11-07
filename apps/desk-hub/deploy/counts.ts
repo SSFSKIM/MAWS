@@ -35,7 +35,7 @@ export type Snapshot = {
   at: string;
   /** The machine's enrolled name (a machine's snapshot), which its own writers begin with. */
   machine?: string | null;
-  /** A machine's: the names it wrote under before it enrolled (hub.json's `former`), whose writers the hub never takes. */
+  /** A machine's: the names it wrote under before it enrolled (identity.json's `former`), whose writers the hub never takes. */
   former?: string[];
   writers: Record<string, WriterCounts>;
   /** The hub's: the audit rows it replayed after `caught-up`, newest last. */
