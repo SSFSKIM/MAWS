@@ -27,8 +27,9 @@ export function ToHumanEntry({ entry }: { entry: Entry }) {
         <span className="max-w-[24ch] shrink-0 truncate font-medium text-fg" title={entry.name}>
           {entry.name}
         </span>
-        {entry.title !== null && <span className="min-w-0 shrink-[4] truncate text-fg-muted">{entry.title}</span>}
-        <span className="inline-flex min-w-0 shrink-[2]">
+        {/* The title gives way first, all of it before the chip gives any: the chip keeps up to 24 characters, as the name does. */}
+        {entry.title !== null && <span className="min-w-0 truncate text-fg-muted">{entry.title}</span>}
+        <span className="inline-flex max-w-[24ch] min-w-0 shrink-0">
           <MachineChip address={addressOf(entry.machine, 'channel')} name={entry.machineName ?? undefined} className="max-w-full" />
         </span>
         <span className="shrink-0 text-fg-muted">{CHANNEL.host[entry.host]}</span>
