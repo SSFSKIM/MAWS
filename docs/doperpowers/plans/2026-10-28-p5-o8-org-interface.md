@@ -87,6 +87,12 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
     - Every surface carries a member's own reading, proven per surface. An owner's queued change is checked at send.
     - Also in this task: the certificates parity fix the desk track asked for (65e0532b1, outside the reader work), and the client's record re-read on a reopened checkout feed (cd5ab7f28 and 16f310a0d).
     - Static green on every head, last 42385684134.
+  - [x] (2026-11-07) Task 3, reviewed clean in two rounds (c3db6ff24, 166197fa4; fix cf5f833c5).
+    - On a machine that keeps the rows, a remote lane B session's reading, pin and draft are the member's own, through `session.reader.update`, with its `ReaderState` applied. They survive a relaunch.
+    - On a machine that refuses the rows, today's in-run fallback runs as before.
+    - One session's draft saves are serialized and coalesced, and a switch to the fallback ends the queued ones.
+    - The fix wave closed a late refusal overwriting the newest fallback draft, and a doubled seen write.
+    - Static green at cf5f833c5 (42386392490).
 - [ ] M6b — Visibility and shares (O18's M5) — *executable; after M6a; its live proof is the staging run it shares with O18 M6, which needs the desk track's sminos executors and a real second member (the owner)*
 - [ ] M4b — Machines and their rights — *executable; after M6b*
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
