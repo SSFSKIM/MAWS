@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HostEntry } from '@shared/ipc/schema/channel';
 import type { SessionRanks } from '../../src/endpoint/authorize';
-import { CHANNEL_PAGE_BYTES, HEARD_MAX, PlacementBook, publish, publishFiltered, readViewable, SCAN_ENTRIES, viewable } from '../../src/endpoint/channel-view';
+import { CHANNEL_PAGE_BYTES, HEARD_MAX, PlacementBook, publish, publishFiltered, readViewable, SCAN_ENTRIES, viewable, type EntrySession } from '../../src/endpoint/channel-view';
 import type { EndpointServices } from '../../src/endpoint/services';
 import type { Placement } from '../../src/endpoint/targets';
 
@@ -169,7 +169,7 @@ describe('a member’s read of the journal', () => {
   const read = (s: ReturnType<typeof spine>, member: SessionRanks, ask: { before?: string; limit: number }) => {
     const book = new PlacementBook();
     const after = book.mark();
-    const views = (entry: HostEntry) => viewable(entry, member, book, after);
+    const views = (entry: EntrySession) => viewable(entry, member, book, after);
     return readViewable(s.dispatch, { project: PROJECT, ...ask }, views, (ids) => Promise.all(ids.map((id) => book.ensure(id, after, s.dispatch))).then(() => {})).then((r) => ({ ...r, views }));
   };
 
@@ -212,6 +212,8 @@ describe('a member’s read of the journal', () => {
 describe('a page published', () => {
   const kept = [laneB(3, 'app-1'), laneB(2, 'app-1'), laneB(1, 'app-1')];
   const read = { kept, skipped: [{ lane: 'B', appSessionId: 'app-2', engineSessionId: null }] };
+  /** A kept entry's journal id (a passed-by session has none). */
+  const idOf = (e: EntrySession) => ('id' in e ? (e as HostEntry).id : null);
 
   it('says `more` exactly when a viewable entry past it was read, its ids sealed', () => {
     const all = (e: { appSessionId: string | null }) => e.appSessionId !== 'app-2';
@@ -221,13 +223,13 @@ describe('a page published', () => {
   });
 
   it('is not published once anything read, the entry past it too, is no longer viewable, or a session it passed by is: it is read again', () => {
-    expect(publish(read, 2, (e) => e.id !== '1' && e.appSessionId !== 'app-2', (e) => e)).toBeNull();
-    expect(publish(read, 2, (e) => e.id !== '3' && e.appSessionId !== 'app-2', (e) => e)).toBeNull();
+    expect(publish(read, 2, (e) => idOf(e) !== '1' && e.appSessionId !== 'app-2', (e) => e)).toBeNull();
+    expect(publish(read, 2, (e) => idOf(e) !== '3' && e.appSessionId !== 'app-2', (e) => e)).toBeNull();
     expect(publish(read, 2, () => true, (e) => e)).toBeNull(); // app-2 is viewable now: its entries may belong on the page
   });
 
   it('once read again past its bound, goes as what is viewable of what it kept', () => {
-    expect(publishFiltered(read, 2, (e) => e.id !== '3', (e) => e)).toEqual({ entries: [kept[1], kept[2]], more: false });
-    expect(publishFiltered(read, 1, (e) => e.id !== '3', (e) => e)).toEqual({ entries: [kept[1]], more: true });
+    expect(publishFiltered(read, 2, (e) => idOf(e) !== '3', (e) => e)).toEqual({ entries: [kept[1], kept[2]], more: false });
+    expect(publishFiltered(read, 1, (e) => idOf(e) !== '3', (e) => e)).toEqual({ entries: [kept[1]], more: true });
   });
 });
