@@ -175,9 +175,10 @@ async function ownerLog(scene: ReachScene): Promise<LoggedEvent[]> {
   }
 }
 
-/** A probe machine's request to the hub's HTTP history routes, as the machine. */
+/** A probe machine's request to the hub's HTTP history routes, as the machine: its service token alone, never the
+ * owner's Access token beside it, which would make the request the owner's. */
 async function probeGet<T>(scene: ReachScene, probe: Probe, path: string): Promise<{ status: number; body: T | null }> {
-  const response = await fetch(`${scene.hub}${path}`, { headers: { ...scene.person.headers, ...credentialHeaders(probe.machine.credentials) }, signal: AbortSignal.timeout(30_000) });
+  const response = await fetch(`${scene.hub}${path}`, { headers: credentialHeaders(probe.machine.credentials), signal: AbortSignal.timeout(30_000) });
   const text = await response.text();
   let body: T | null = null;
   try {
