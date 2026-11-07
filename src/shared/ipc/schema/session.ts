@@ -42,7 +42,7 @@ import {
 // (AppSessionIdSchema and MessageUuidSchema come with C3's imports above.)
 import { ProjectIdSchema, SessionIdSchema } from '@shared/graph/ids';
 import { OrgKeySchema } from '@shared/machine/org-key'; // P5 O6 M5
-import { ForeignHolderSchema, SessionRecordSchema } from '@shared/graph/session';
+import { ForeignHolderSchema, ReaderStateSchema, SessionRecordSchema } from '@shared/graph/session';
 // C4 end
 // C7 start: the composer's prompt history shapes (C7 execution document, Interfaces "X2 additions")
 import { HistoryEntrySchema, PastedContentSchema } from '../../composer/history-entry';
@@ -251,6 +251,17 @@ export const SessionPatchSchema = z
   .refine((patch) => Object.values(patch).some((value) => value !== undefined), { message: 'a patch sets at least one field' });
 export type SessionPatch = z.infer<typeof SessionPatchSchema>;
 
+// P5 O8 M6a (Interfaces §P; Decision Log, "M6a Task 1's fork"): a reader's update, the reader fields of SessionPatch alone
+// (`title` and `archived` stay `session.update`'s, the owners'), at least one present; mapped as SessionPatch's are.
+export const ReaderPatchSchema = z
+  .strictObject({
+    pinned: z.boolean().optional(),
+    unread: z.boolean().optional(),
+    lastSeen: z.strictObject({ messageUuid: MessageUuidSchema.nullable(), at: z.string() }).optional(),
+  })
+  .refine((patch) => Object.values(patch).some((value) => value !== undefined), { message: 'a patch sets at least one field' });
+export type ReaderPatch = z.infer<typeof ReaderPatchSchema>;
+
 // A composer draft: C7's Tiptap document, opaque here, and its attachments.
 export const DraftSchema = z.strictObject({
   doc: z.unknown(),
@@ -312,6 +323,8 @@ const c4Commands = {
   'session.get': { input: appSession, output: SessionRecordSchema.nullable(), owner: 'machine' },
   // pin, archive, mark read, C10's rename with provenance
   'session.update': { input: z.strictObject({ appSessionId: AppSessionIdSchema, patch: SessionPatchSchema }), output: SessionRecordSchema, owner: 'machine' },
+  // P5 O8 M6a: the reader's own pinned, lastSeen and unread (the context's reader, the owners' when none), never the record
+  'session.reader.update': { input: z.strictObject({ appSessionId: AppSessionIdSchema, patch: ReaderPatchSchema }), output: ReaderStateSchema, owner: 'machine' },
   // P5 O3-D (D13): `rows`, every project row the index holds (hidden ones, and those with no present session), for the
   // spine's view in another process (main's mirror, Interfaces §F)
   'session.projects.list': { input: z.void(), output: z.strictObject({ projects: z.array(ProjectRecordSchema), revision: z.number().int(), rows: z.array(ProjectRecordSchema).optional() }), owner: 'machine' },

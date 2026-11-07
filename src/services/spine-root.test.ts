@@ -56,7 +56,7 @@ const SPINE_REFUSED_COMMANDS = [
   'machineSettings.get', 'machineSettings.set', // P5 O3-D M5b: read, and a set refused (the machine half is read-only)
   'session.appEvents', 'session.digests', 'session.drafts.get', 'session.drafts.set', 'session.engineStatuses', 'session.get', 'session.launchMode', 'session.list', 'session.observedFacts',
   'session.projects.add', 'session.projects.addFolder', 'session.projects.list', 'session.projects.remove', 'session.projects.update',
-  'session.recentTurns', 'session.search', 'session.setVisible', 'session.update', 'session.visible',
+  'session.reader.update' /* P5 O8 M6a */, 'session.recentTurns', 'session.search', 'session.setVisible', 'session.update', 'session.visible',
   'settings.engineApplied', 'settings.userEngineDefaults',
 ].sort();
 // P5 O3-D M4 (D18): the rewind's last-act note and the conversation acts that clear it, in launch mode index; M5a (D47):

@@ -102,8 +102,8 @@ describe('main answers the record side of session.* from the index', () => {
       expect(await invoke('session.drafts.get', { appSessionId: record.appId })).toEqual({ ok: true, value: owners });
     });
 
-    // Held until the answer a reader gets is settled (Task 1's report): `session.update`'s output is the whole record,
-    // which a reader must never be answered, so it fails closed, before any write.
+    // `session.update`'s answer is the whole record (paths, settings, a spawn's signed act), which a reader must never be
+    // answered; a reader's update is `session.reader.update` (Decision Log, "M6a Task 1's fork"). Refused before any write.
     it('session.update with a reader is refused, and writes nothing', async () => {
       const { record } = index.sessions.upsertFromSummary(summary());
       for (const reader of [B, 'owner']) {
@@ -111,6 +111,43 @@ describe('main answers the record side of session.* from the index', () => {
       }
       expect(index.sessions.get(record.appId)!.pinned).toBe(false);
       expect(index.sessions.get(record.appId, B)!.pinned).toBe(false);
+    });
+
+    it('session.reader.update writes a member’s own state and answers their ReaderState alone: no record, no change, no revision', async () => {
+      const { record } = index.sessions.upsertFromSummary(summary());
+      index.sessions.setUnread(record.appId, true);
+      const changes: unknown[] = [];
+      index.sessions.onChange((changed) => changes.push(changed));
+      const revision = index.revision;
+      const pinned = await invoke('session.reader.update', { appSessionId: record.appId, patch: { pinned: true } }, as(B));
+      expect(pinned).toEqual({ ok: true, value: { appSessionId: record.appId, pinned: true, lastSeen: { messageUuid: null, at: null }, unread: false } });
+      expect(await invoke('session.reader.update', { appSessionId: record.appId, patch: { unread: true } }, as(B))).toMatchObject({ value: { pinned: true, unread: true } });
+      // "Mark all read": lastSeen with unread false, as session.update maps it
+      expect(await invoke('session.reader.update', { appSessionId: record.appId, patch: { unread: false, lastSeen: { messageUuid: 'm9', at } } }, as(B))).toEqual({
+        ok: true,
+        value: { appSessionId: record.appId, pinned: true, lastSeen: { messageUuid: 'm9', at }, unread: false },
+      });
+      expect(changes).toEqual([]);
+      expect(index.revision).toBe(revision);
+      expect(index.sessions.get(record.appId)).toMatchObject({ pinned: false, unread: true, lastSeen: { messageUuid: null, at: null } });
+    });
+
+    it('session.reader.update with no reader, or the owner, writes the session row and answers the owners’ ReaderState', async () => {
+      const { record } = index.sessions.upsertFromSummary(summary());
+      expect(await invoke('session.reader.update', { appSessionId: record.appId, patch: { pinned: true } })).toEqual({ ok: true, value: { appSessionId: record.appId, pinned: true, lastSeen: { messageUuid: null, at: null }, unread: false } });
+      expect(await invoke('session.reader.update', { appSessionId: record.appId, patch: { unread: true } }, as('owner'))).toEqual({ ok: true, value: { appSessionId: record.appId, pinned: true, lastSeen: { messageUuid: null, at: null }, unread: true } });
+      expect(index.sessions.get(record.appId)).toMatchObject({ pinned: true, unread: true });
+      expect(index.sessions.get(record.appId, B)).toMatchObject({ pinned: false, unread: false });
+    });
+
+    it('session.reader.update takes reader fields alone, and fails for an app session with no row', async () => {
+      const { record } = index.sessions.upsertFromSummary(summary());
+      for (const patch of [{}, { title: { text: 'Mine', source: 'user' } }, { archived: true }, { pinned: true, archived: true }]) {
+        expect(await invoke('session.reader.update', { appSessionId: record.appId, patch }, as(B))).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+      }
+      const unknown = randomUUID();
+      expect(await invoke('session.reader.update', { appSessionId: unknown, patch: { pinned: true } }, as(B))).toEqual({ ok: false, error: { code: 'internal', message: `unknown app session: ${unknown}` } });
+      expect(index.sessions.get(record.appId)).toMatchObject({ title: { text: 'hello' }, archived: false });
     });
   });
 

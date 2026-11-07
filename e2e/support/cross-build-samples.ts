@@ -90,6 +90,7 @@ export const INPUTS: Record<string, unknown> = {
   'session.drafts.set': { appSessionId: 'x', draft: null },
   'session.replay.start': { source: { kind: 'journal', path: '/nonexistent/cross-build-probe.jsonl' }, speed: 'instant' }, // an absolute path; no replay starts
   'session.update': { appSessionId: 'x', patch: { pinned: true } }, // a patch sets at least one field
+  'session.reader.update': { appSessionId: 'x', patch: { pinned: true } }, // P5 O8 M6a: so does a reader's
   // P5 O5 M4: on the wire as `machine`; an id no artifact has, one id for both probes so the two answers compare. Its
   // handler answers an unknown artifact `invalid_input` with its named refusal (`notFound`), which a parsed input alone reaches.
   'artifacts.export': { artifactId: '00000000-0000-4000-8000-00000000c0b5', format: 'pdf' },

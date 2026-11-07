@@ -37,6 +37,8 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   'session.rename': notYet('renaming a session'),
   'session.renameSession': notYet('renaming a session'),
   'session.update': notYet('pinning, archiving or marking a session read'),
+  // P5 O8 M6a: until the endpoint offers it (M6a's endpoint task drops this line with session.update's and the drafts')
+  'session.reader.update': notYet('pinning or marking a session read'),
   'session.intent.get': notYet('setting up a new session; use + Session'),
   'session.intent.patch': notYet('setting up a new session; use + Session'),
   'session.intent.release': notYet('setting up a new session; use + Session'),
