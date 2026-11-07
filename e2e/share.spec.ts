@@ -5,11 +5,12 @@
 // message; its session the org can view, shared with one more; its session at the default, which has no mark; another
 // member's private session shared with you, its lock read from its listing's audience; and `render-farm-03…`'s
 // session, whose sminos can't keep a session's reach yet. The sidebar's marks and a row's hover card, the private
-// session's sheet, its save (one line saved with the revision also changed elsewhere, one refused for a reason no line
-// of the sheet knows, its raw word beside it, and the one after it not sent), a save whose first line's outcome is
-// unknown (the lines after it not sent, a reload offered), and the farm's sheet are attached as PNGs for the architect's
-// look; the case asserts structure only: nothing in a sheet or a marked row is wider than its box, every action is
-// drawn whole on all four edges, and each mark lies inside its row.
+// session's sheet, its change, removal and addition pending in the order Save sends them, its save (one line saved with
+// the revision also changed elsewhere, one refused for a reason no line of the sheet knows, its raw word beside it, and
+// the one after it not sent), a save whose first line's outcome is unknown (the lines after it not sent, one reload
+// offered), and the farm's sheet are attached as PNGs for the architect's look; the case asserts structure only: nothing
+// in a sheet or a marked row is wider than its box, every control is drawn whole on all four edges, and each mark lies
+// inside its row.
 //
 // The org is seeded where no real one holds it at once: under MAWS_E2E=1 a harness build's main answers `org.status`,
 // `org.view`, `org.rows`, `machines.list`, `org.policy.get` and each save from a file the schemas admit
@@ -132,7 +133,7 @@ function seeded(local: MachineRef, now: number): Seed {
       ok: true,
       results: [
         { line: { kind: 'share', member: long.id, grade: 'converse' }, state: 'done', changed: true, policyRev: 9, elsewhere: true },
-        { line: { kind: 'share', member: ben.id, grade: 'view' }, state: 'refused', reason: UNKNOWN_REASON },
+        { line: { kind: 'share', member: ben.id, grade: null }, state: 'refused', reason: UNKNOWN_REASON },
         { line: { kind: 'share', member: dara.id, grade: 'list' }, state: 'not-sent' },
       ],
       policy: { ...s1, shares: [{ member: long.id, grade: 'converse' }, { member: ben.id, grade: 'list' }], policyRev: 9 },
@@ -177,7 +178,7 @@ function scenario(): unknown {
 // block shows as that block's overflow; a run truncated on purpose (a `truncate` span) is no fault. Each offender as
 // `<tag> "<text>" scrollWidth > clientWidth`.
 function overflowing(root: Element): string[] {
-  return [root, ...Array.from(root.querySelectorAll('section, fieldset, label, div, p, ul, li, button'))]
+  return [root, ...Array.from(root.querySelectorAll('section, fieldset, label, div, p, ul, li, button, select'))]
     .filter((el) => el.scrollWidth > el.clientWidth)
     .map((el) => `${el.tagName.toLowerCase()} "${(el.textContent ?? '').slice(0, 60)}" ${el.scrollWidth} > ${el.clientWidth}`);
 }
@@ -206,7 +207,8 @@ async function checkSheet(sheet: Locator): Promise<void> {
   await sheet.evaluate(addClippedProbes, SHEET);
   const probed = await sheet.evaluate(actionsNotWhole, SHEET);
   await sheet.evaluate((root) => root.querySelectorAll('[data-probe]').forEach((probe) => probe.remove()));
-  expect(probed.some((line) => line.startsWith('"wide probe"')) && probed.some((line) => line.startsWith('"tall probe"')), `the check names both probes: ${probed.join('; ')}`).toBe(true);
+  const named = ['"wide probe"', '"tall probe"', '"select probe"'].filter((probe) => probed.some((line) => line.startsWith(probe)));
+  expect(named, `the check names every probe: ${probed.join('; ')}`).toEqual(['"wide probe"', '"tall probe"', '"select probe"']);
 }
 
 /** Opens the row's Share sheet from its menu, as a person does. */
@@ -281,10 +283,23 @@ test('share: the reach marks across machines, a row’s hover card, the private 
       await expect(sheet.getByText(SHARE.grade.list.line).first()).toBeVisible();
       await expect(sheet.getByText(SHARE.foot)).toBeVisible();
       await expect(sheet.getByRole('button', { name: SHARE.save })).toBeDisabled();
+      await expect(page.locator('[data-sheet-scrim]')).toHaveClass(/\bbg-bg-active\b/); // the window under it is dimmed
       await test.info().attach('share-sheet', { body: await page.screenshot(), contentType: 'image/png' });
       await checkSheet(sheet);
-      // A change, then Save: a line saved over another's change, one refused for a reason no line knows, one not sent.
-      await sheet.locator('[data-share-person] select').first().selectOption('converse');
+      // A change, a removal and an addition, each pending in its place (the order Save sends them), then Save: a line
+      // saved over another's change, one refused for a reason no line knows, one not sent.
+      const people = sheet.locator('[data-share-person]');
+      await people.first().locator('select').selectOption('converse');
+      await people.nth(1).getByRole('button', { name: /^Remove / }).click();
+      await expect(people.nth(1)).toHaveAttribute('data-share-pending', 'remove');
+      await expect(people.nth(1)).toContainText(SHARE.removing);
+      await sheet.getByRole('combobox', { name: SHARE.addPerson, exact: true }).selectOption(seed.view.members.find((m) => m.email.startsWith('dara'))!.id);
+      await sheet.getByRole('combobox', { name: SHARE.newGrade, exact: true }).selectOption('list');
+      await sheet.getByRole('button', { name: SHARE.add, exact: true }).click();
+      await expect(sheet.locator('[data-share-pending]')).toHaveCount(3);
+      await people.last().scrollIntoViewIfNeeded();
+      await test.info().attach('share-sheet-pending', { body: await page.screenshot(), contentType: 'image/png' });
+      await checkSheet(sheet);
       await sheet.getByRole('button', { name: SHARE.save }).click();
       const results = sheet.locator('[data-share-results]');
       await expect(results.locator('[data-share-outcome]')).toHaveCount(3);
@@ -304,7 +319,8 @@ test('share: the reach marks across machines, a row’s hover card, the private 
       await sheet.getByRole('button', { name: SHARE.save }).click();
       await expect(sheet.locator('[data-share-stopped]')).toContainText(SHARE.stopped);
       await expect(sheet.locator('[data-share-outcome="unknown"]')).toContainText(SHARE.unknown.malformed('studio-mini'));
-      await expect(sheet.getByText(SHARE.unavailable)).toBeVisible();
+      await expect(sheet.getByText(SHARE.unavailable)).toHaveCount(0); // the results' Reload is the one offered
+      await expect(sheet.getByRole('button', { name: SHARE.reload })).toHaveCount(1);
       await test.info().attach('share-sheet-unknown', { body: await page.screenshot(), contentType: 'image/png' });
       await checkSheet(sheet);
       await sheet.getByRole('button', { name: SHARE.close }).click();
