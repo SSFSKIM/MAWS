@@ -7,12 +7,12 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { formatDayTime } from '@shared/app/date-format';
 import type { PreloadBridge } from '@shared/ipc/schema';
-import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelSession, OrgMember } from '@shared/ipc/schema/org';
+import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelHost, ChannelSession, OrgMember } from '@shared/ipc/schema/org';
 import { tabId } from '@shared/ipc/schema/layout';
 import type { OrgKey } from '@shared/machine/org-key';
 import { project, record } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerSlot, resetSlots } from '../app/slots';
 import { RequestCard } from '../request-card';
 import { askItemFor, askOpened } from '../request-card/test-requests';
@@ -274,5 +274,28 @@ describe('Channel in the project’s menu', () => {
     expect(channels).toEqual([{ id: tabId({ kind: 'channel', project: SMNS }), kind: 'channel', project: SMNS, pinned: false }]);
     expect(renderHook(() => useChannelTitle(SMNS)).result.current).toBe('MAWS · channel');
     expect(renderHook(() => useChannelTitle('not-known')).result.current).toBe('Channel');
+  });
+});
+
+// M7b: every machine's to-human entries, placed by time among the log's, and a machine that shares none said greyed.
+describe('to-human entries', () => {
+  const host = (id: string, minute: number, over: Partial<ChannelHost> = {}): ChannelHost => ({
+    key: `${OTHER_MACHINE} ${id}`, machine: OTHER_MACHINE, id, lane: 'A', appSessionId: null, engineSessionId: S1, kind: 'message', text: `message ${id}`, at: T(minute), src: `${SMNS}/mini%2F${S1}/${id}`, ...over,
+  });
+
+  it('draws them by time among the log’s entries, each by its session and machine, and takes them by key from each change', async () => {
+    install();
+    render(<ChannelView project={SMNS} />);
+    await act(() =>
+      fake.reply('org.channel.open', opened({ events: [say(1, S1, S2, 1), say(2, S2, S1, 30)], hosts: [host('m1', 5)], machines: [{ machine: OTHER_MACHINE, name: 'mini', state: 'live', asOf: T(5) }, { machine: TEST_MACHINE, name: 'Old Mac', state: 'unavailable', asOf: null }] })),
+    );
+    expect(entries()).toEqual(['say:1', 'to-human:-', 'say:2']);
+    const drawn = stream().querySelector<HTMLElement>('[data-channel-entry="to-human"]')!;
+    expect(within(drawn).getByText('maws-45')).toBeTruthy();
+    expect(within(drawn).getByText('message m1')).toBeTruthy();
+    expect(stream().querySelector('[data-channel-unavailable]')?.textContent).toContain('Old Mac');
+    tell(change({ hosts: { upserts: [host('m2', 40)], removed: [`${OTHER_MACHINE} m1`] } }));
+    expect(entries()).toEqual(['say:1', 'say:2', 'to-human:-']);
+    expect(stream().querySelector('[data-channel-entry="to-human"]')?.getAttribute('data-key')).toBe(`${OTHER_MACHINE} m2`);
   });
 });

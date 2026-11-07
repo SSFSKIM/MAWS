@@ -3,7 +3,8 @@
 // wave: each change applies only past the open answer's `rev`. Fix round 2: a word's state is main's alone, drawn as
 // main gives it; nothing about the words is remembered or inferred here.
 import { describe, expect, it } from 'vitest';
-import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelWord } from '@shared/ipc/schema/org';
+import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelHost, ChannelMachine, ChannelWord } from '@shared/ipc/schema/org';
+import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { applyChange, held, openedWith, tailOf, type ChannelHeld, type OpenHeld } from './state';
 
 const P = 'proj';
@@ -65,5 +66,27 @@ describe('the words after the log', () => {
       { key: 'p4', text: 'w-p4', to: '*', state: 'not-sent' },
     ]);
     expect(tailOf(opened(open([], { pending: [] })))).toEqual([]);
+  });
+});
+
+// M7b: every machine's to-human entries, held by key as the events are by offset, and the machines whole.
+describe('the to-human entries', () => {
+  const h = (id: string): ChannelHost => ({ key: `${OTHER_MACHINE} ${id}`, machine: OTHER_MACHINE, id, lane: 'A', appSessionId: null, engineSessionId: 'la-1', kind: 'message', text: id, at: '2026-11-06T12:00:00.000Z', src: id });
+  const mini: ChannelMachine = { machine: OTHER_MACHINE, name: 'mini', state: 'live', asOf: null };
+  const keys = (held: ChannelHeld) => (held.phase === 'open' ? held.hosts.map((x) => x.id) : held.phase);
+
+  it('takes them whole from the open answer (none when it carries none), then by key: new ones in, gone ones out, a reset whole', () => {
+    expect(opened(open([]))).toMatchObject({ hosts: [], machines: [] });
+    let held = openedWith(open([], { hosts: [h('a'), h('b')], machines: [mini] }));
+    held = applyChange(held, delta({ hosts: { upserts: [h('c')], removed: [`${OTHER_MACHINE} a`] }, machines: [{ ...mini, state: 'offline', asOf: '2026-11-06T13:00:00.000Z' }] }));
+    expect(keys(held)).toEqual(['b', 'c']);
+    expect(held).toMatchObject({ machines: [{ state: 'offline', asOf: '2026-11-06T13:00:00.000Z' }] });
+    held = applyChange(held, delta({ upserts: [e(1)] })); // a change of the log's alone keeps them
+    expect(keys(held)).toEqual(['b', 'c']);
+    held = applyChange(held, delta({ hosts: { reset: true, upserts: [h('d')], removed: [] }, machines: [mini] }));
+    expect(keys(held)).toEqual(['d']);
+    held = applyChange(held, { project: P, ok: false, reason: 'no-hub', rev: (rev += 1) });
+    held = applyChange(held, delta({ upserts: [], reset: true }));
+    expect(keys(held)).toEqual([]);
   });
 });

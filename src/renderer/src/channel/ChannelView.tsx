@@ -6,20 +6,26 @@
 // what main holds, "As of" the last time it caught up, and the composer is withdrawn; an ended hub sign-in offers "Sign
 // in to the hub again", the Org page's own action (`org.signIn`, Q7). "N events didn't verify" counts what main held
 // back. The tab holds the channel while mounted (use-channel.ts).
+// M7b: every machine's to-human entries (ToHumanEntry.tsx) are placed by time among the log's (project.ts), each session
+// named from the sessions store; a machine whose MAWS shares none says so, greyed, above the stream.
 //
 // The selectors the e2e case reads: `data-channel` (the project), `data-channel-entry` (words, say, exchange, host) with
 // `data-offset` and `data-channel-label`, `data-word-state`, `data-channel-provenance`, `data-channel-exchange-messages`,
 // `data-channel-unverified`, `data-channel-waiting` and `data-channel-card`, `data-channel-composer`, `data-channel-offline`
-// with `data-channel-as-of`, and `data-channel-closed`.
+// with `data-channel-as-of`, and `data-channel-closed`; M7b's `data-channel-entry="to-human"` with `data-host`,
+// `data-machine`, `data-key` and `data-greyed`, `data-to-human-question`, `data-to-human-text`, `data-to-human-answer`, and
+// `data-channel-unavailable` (the machine's ref).
 import { useLayoutEffect, useRef, useState } from 'react';
 import { formatDayTime } from '@shared/app/date-format';
 import { ipc } from '../ipc/client';
 import { useHubAccess, type HubAccess } from '../stores/hub-access';
+import { useSessions } from '../stores/sessions';
 import { CHANNEL } from './copy';
 import { Composer } from './Composer';
 import { EntryRow } from './Entries';
-import { channelEntries } from './project';
+import { channelEntries, placeByTime, toHumanEntries, type StreamEntry } from './project';
 import { tailOf } from './state';
+import { ToHumanEntry } from './ToHumanEntry';
 import { useChannel } from './use-channel';
 import { Waiting } from './Waiting';
 
@@ -31,8 +37,17 @@ export function ChannelView({ project }: { project: string }) {
   const channel = useChannel(project);
   const me = useHubAccess((s) => s.member);
   const access = useHubAccess((s) => s.access);
+  const records = useSessions((s) => s.records);
+  const listed = useSessions((s) => s.listed);
   const { held } = channel;
-  const entries = held.phase === 'open' ? channelEntries({ events: held.events, sessions: held.sessions, tail: tailOf(held), me }) : [];
+  const entries: StreamEntry[] =
+    held.phase === 'open'
+      ? placeByTime(
+          channelEntries({ events: held.events, sessions: held.sessions, tail: tailOf(held), me }),
+          toHumanEntries({ hosts: held.hosts, machines: held.machines, sessions: held.sessions, records, listed }),
+        )
+      : [];
+  const unavailable = held.phase === 'open' ? held.machines.filter((m) => m.state === 'unavailable') : [];
 
   // The stream opens at its foot and stays there while the reader is there; a reader scrolled up stays where they are.
   const scroller = useRef<HTMLDivElement>(null);
@@ -73,10 +88,13 @@ export function ChannelView({ project }: { project: string }) {
               {CHANNEL.unverified(held.unverified)}
             </p>
           )}
-          {held.phase === 'open' && entries.length === 0 && <p className="m-0 text-fg-muted">{CHANNEL.empty}</p>}
-          {entries.map((entry) => (
-            <EntryRow key={entry.key} entry={entry} me={me} />
+          {unavailable.map((machine) => (
+            <p key={machine.machine} data-channel-unavailable={machine.machine} className="m-0 text-ui-sm text-fg-faint">
+              {CHANNEL.toHuman.unavailable(machine.name)}
+            </p>
           ))}
+          {held.phase === 'open' && entries.length === 0 && <p className="m-0 text-fg-muted">{CHANNEL.empty}</p>}
+          {entries.map((entry) => (entry.kind === 'to-human' ? <ToHumanEntry key={entry.key} entry={entry} /> : <EntryRow key={entry.key} entry={entry} me={me} />))}
           <div className="mt-auto">
             <Waiting project={project} />
           </div>
