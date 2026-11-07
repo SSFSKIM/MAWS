@@ -118,6 +118,9 @@ async function signsUnasked(action: Action, held: HeldOrgView | undefined, pub: 
  * `confirm` defaults to `promptTouchIDConfirmation(systemPreferences)`, main's confirmation. `org`: the session's held
  * view, by which a spawn on a machine the member owns is signed unasked; without it every action is confirmed.
  */
+/** An action as built for the person to be shown, and whether its request named its own `opCreated`. */
+type Shown = { action: Action; ownOpCreated: boolean };
+
 export function createStepUp(deps: { device: { org: string; device: string }; key: SigningKey; confirm?: Confirm; now?: () => Date; org?: HeldOrgView }): StepUpSigner {
   const now = deps.now ?? (() => new Date());
   const confirm = deps.confirm ?? promptTouchIDConfirmation(systemPreferences);
@@ -127,8 +130,9 @@ export function createStepUp(deps: { device: { org: string; device: string }; ke
    * absent), or null when its fields make no action. The fields come from the request by name, so nothing else it
    * carries reaches the action. Taken before anything is shown: the caller keeps references to its args, context and
    * digest, and to the device identity, and may change them while the person decides. What is shown is what is signed.
+   * `ownOpCreated`: the request named its own `opCreated` (a reseal's), which the seal keeps, as taken here.
    */
-  function build(request: StepUpRequest): Action | null {
+  function build(request: StepUpRequest): Shown | null {
     const { machine, action, args, session, context, requestDigest, opId, opCreated } = request;
     const at = now().toISOString();
     const built: Action = {
@@ -146,7 +150,7 @@ export function createStepUp(deps: { device: { org: string; device: string }; ke
       nonce: random(NONCE_BYTES),
       created: at,
     };
-    return isAction(built) ? (JSON.parse(canonicalize(built)) as Action) : null;
+    return isAction(built) ? { action: JSON.parse(canonicalize(built)) as Action, ownOpCreated: opCreated !== undefined } : null;
   }
 
   async function ask(prompt: StepUpPrompt): Promise<Confirmation> {
@@ -159,10 +163,11 @@ export function createStepUp(deps: { device: { org: string; device: string }; ke
 
   /**
    * Stamped when the person confirmed, so time spent at the prompt doesn't make it stale (RL4's 60 s). Only the nonce
-   * and times change, and they are not part of what is rendered. A request's own `opCreated` (a reseal's) is kept.
+   * and times change, and they are not part of what is rendered. A request's own `opCreated` (a reseal's) is kept, as
+   * `build` took it before the person was asked: nothing is read from the request after.
    */
-  async function seal(shown: Action, request: StepUpRequest, sealedAt: string): Promise<Action | null> {
-    const sealed: Action = { ...shown, opCreated: request.opCreated ?? sealedAt, nonce: random(NONCE_BYTES), created: sealedAt };
+  async function seal({ action, ownOpCreated }: Shown, sealedAt: string): Promise<Action | null> {
+    const sealed: Action = { ...action, opCreated: ownOpCreated ? action.opCreated : sealedAt, nonce: random(NONCE_BYTES), created: sealedAt };
     return isAction(sealed) ? signStepUp(sealed, deps.key) : null;
   }
 
@@ -171,21 +176,21 @@ export function createStepUp(deps: { device: { org: string; device: string }; ke
       const shown = build(request);
       if (shown === null) return { ok: false, reason: 'malformed' };
       // Judged on `shown`, the copy that is sealed below, never on the request: what is exempted is what is signed.
-      const answer: Confirmation = (await signsUnasked(shown, deps.org, deps.key.pub, now())) ? { ok: true } : await ask(renderAction(shown));
+      const answer: Confirmation = (await signsUnasked(shown.action, deps.org, deps.key.pub, now())) ? { ok: true } : await ask(renderAction(shown.action));
       if (!answer.ok) return answer;
-      const signed = await seal(shown, request, now().toISOString());
+      const signed = await seal(shown, now().toISOString());
       return signed === null ? { ok: false, reason: 'malformed' } : { ok: true, action: signed };
     },
     async signActions(requests) {
       const shown = requests.map(build);
       if (shown.length === 0 || shown.some((action) => action === null)) return { ok: false, reason: 'malformed' };
-      const actions = shown as Action[];
-      const answer = await ask(renderActions(actions));
+      const asked = shown as Shown[];
+      const answer = await ask(renderActions(asked.map((one) => one.action)));
       if (!answer.ok) return answer;
       const sealedAt = now().toISOString();
       const signed: Action[] = [];
-      for (let i = 0; i < actions.length; i++) {
-        const action = await seal(actions[i], requests[i], sealedAt);
+      for (const one of asked) {
+        const action = await seal(one, sealedAt);
         if (action === null) return { ok: false, reason: 'malformed' };
         signed.push(action);
       }

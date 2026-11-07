@@ -160,6 +160,28 @@ describe('a step-up', () => {
     expect(await verifyStepUp(signed.action, (await stepUpKey()).pub)).toEqual({ ok: true });
   });
 
+  it('seals the opCreated the request had when the person was asked, whatever the caller sets it to meanwhile', async () => {
+    const given = new Date(NOW.getTime() - 30_000).toISOString();
+    const resealed: { machine: string; action: string; args: Record<string, unknown>; opId: string; opCreated?: string } = { ...spawn, opId: 'op-reseal-0123456789', opCreated: given };
+    const fresh: { machine: string; action: string; args: Record<string, unknown>; opCreated?: string } = { ...spawn };
+    const stepUp = createStepUp({
+      device: DEVICE,
+      key: await stepUpKey(),
+      now: () => NOW,
+      confirm: async () => {
+        resealed.opCreated = '2020-01-01T00:00:00.000Z';
+        fresh.opCreated = '2020-01-01T00:00:00.000Z';
+        return { ok: true };
+      },
+    });
+    // both are built before either confirmation runs
+    const [kept, stamped] = await Promise.all([stepUp.sign(resealed), stepUp.sign(fresh)]);
+    if (!kept.ok || !stamped.ok) throw new Error('refused');
+    expect(kept.action.opCreated).toBe(given);
+    expect(stamped.action.opCreated).toBe(NOW.toISOString());
+    expect(await verifyStepUp(kept.action, (await stepUpKey()).pub)).toEqual({ ok: true });
+  });
+
   it('treats an arg whose value is undefined as absent, as the canonical form the signature covers does', async () => {
     const h = harness();
     const stepUp = createStepUp({ device: DEVICE, key: await stepUpKey(), confirm: h.confirm, now: h.now });
@@ -248,6 +270,28 @@ describe('several step-ups under one confirmation', () => {
     expect(signed.actions[1]).toMatchObject({ args: { grade: 'view' }, opId: 'op-given-0123456789', opCreated: NOW.toISOString(), created: new Date(later).toISOString() });
     expect(signed.actions[0]).toMatchObject({ opCreated: new Date(later).toISOString(), created: new Date(later).toISOString() });
     expect(prompts).toEqual([renderActions(signed.actions)]);
+  });
+
+  it('seals each opCreated as it was when the person was asked, whatever the caller sets meanwhile', async () => {
+    const given = new Date(NOW.getTime() - 30_000).toISOString();
+    const later = NOW.getTime() + 5_000;
+    let clock = NOW.getTime();
+    const resealed: { machine: string; action: string; args: Record<string, unknown>; opId: string; opCreated?: string } = { ...share, opId: 'op-given-0123456789', opCreated: given };
+    const fresh: { machine: string; action: string; args: Record<string, unknown>; opCreated?: string } = { ...access };
+    const stepUp = createStepUp({
+      device: DEVICE,
+      key: await stepUpKey(),
+      now: () => new Date(clock),
+      confirm: async () => {
+        resealed.opCreated = '2020-01-01T00:00:00.000Z';
+        fresh.opCreated = '2020-01-01T00:00:00.000Z';
+        clock = later;
+        return { ok: true };
+      },
+    });
+    const signed = await stepUp.signActions([fresh, resealed]);
+    if (!signed.ok) throw new Error(`refused: ${signed.reason}`);
+    expect(signed.actions.map((a) => a.opCreated)).toEqual([new Date(later).toISOString(), given]);
   });
 
   it('never signs unasked, not even a spawn the single path would exempt', async () => {
