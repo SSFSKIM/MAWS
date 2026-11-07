@@ -45,9 +45,10 @@ import { openExternalUrl } from './open-external'; // P5 O8 M1: the Access login
 import { createOrgSession } from './org/org-session'; // P5 O8 M1
 import { excludeFromBackup } from '@shared/fs/backup-exclusion';
 import { createRegistryFeed } from './org/registry-feed'; // P5 O8 M1
-import { registerOrgHandlers, registerRowsHandler } from './org/register'; // P5 O8 M1; M2: org.rows
+import { registerOrgHandlers, registerPolicyHandlers, registerRowsHandler } from './org/register'; // P5 O8 M1; M2: org.rows; M6b: org.policy.*
 import { orgFiles } from './org/files'; // P5 O8 M1
 import { createRemoteRows } from './org/rows'; // P5 O8 M2
+import { createOrgPolicies } from './org/policy'; // P5 O8 M6b
 import { installOrgPageFixture } from './org/page-fixture'; // P5 O8 M4a Task 8: a harness build's only
 import { installChannelFixture } from './org/channel-fixture'; // P5 O8 M7a Task 3: a harness build's only
 import { createRemoteLaneA, routeLaneA } from './lane-a/remote'; // P5 O9 M9
@@ -634,6 +635,32 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   laneOfRow = (machine, session) => remoteRows.rows().rows.find((row) => row.machine === machine && row.session === session)?.lane ?? null;
   void remoteRows.loaded.then(() => remoteLaneB.refresh());
   registerRowsHandler({ register: registerMainHandler, rows: remoteRows });
+  // P5 O8 M6b: a session's reach (src/main/org/policy.ts): another machine's over its link, this Mac's over its own
+  // endpoint's local door (mawsd's main-only endpoint.local.*, through main's own route); after each act the rows read
+  // that machine's channel listings again, and org.policies.changed tells the windows a machine's whole read
+  registerPolicyHandlers({
+    register: registerMainHandler,
+    policies: createOrgPolicies({
+      session,
+      local,
+      remote: (ref) => machines.remote(ref),
+      door: {
+        act: async (action) => {
+          const answer = await bus.invoke('endpoint.local.act', { action }, { client: mainClient });
+          // the door's way to mawsd failed under an act it may have taken: its fate is sminos's ledger's
+          return answer.ok ? answer.value : { state: 'unknown', reason: answer.error.code };
+        },
+        call: async (input) => {
+          const answer = await bus.invoke('endpoint.local.call', { name: 'record.policy', input }, { client: mainClient });
+          return answer.ok ? answer.value : { ok: false, code: answer.error.code };
+        },
+      },
+      laneOf: (machine, id) => laneOfRow(machine, id),
+      acted: (machine) => remoteRows.refreshChannel(machine),
+      emit: (policy) => void emit('org.policies.changed', policy),
+      log: (line) => console.log(line),
+    }),
+  });
   const stopChatPanels = registerChatPanels(layout, view, local); // P5 O6 M2: local; P5 O3-C (reader R4): the view
   shutdown.add('chat panels', stopChatPanels);
   shutdown.add('layout', () => layout.flush());

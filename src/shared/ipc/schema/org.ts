@@ -8,6 +8,7 @@ import * as z from 'zod';
 import { OrgKeySchema } from '../../machine/org-key';
 import { MachineRefSchema } from '../../machine/ref';
 import type { CommandSpec } from './common';
+import { RecordAccessSchema, RecordPolicyEntrySchema } from './endpoint';
 
 /**
  * Why an attempt ended without signing in; `detail` names a verdict, a status or the email Access signed in.
@@ -417,6 +418,73 @@ const ChannelDeltaSchema = z.strictObject({
 export const ChannelChangedSchema = z.union([ChannelDeltaSchema, ChannelClosedSchema.extend({ project: z.string() })]);
 export type ChannelChanged = z.infer<typeof ChannelChangedSchema>;
 
+/**
+ * M6b (Interfaces §Q): a session's reach, as its machine's `record.policy` reads it (src/main/org/policy.ts): the
+ * machine's own sessions' policies (`{machine}`), or one session's (`{address}`, `<ref>/<listing id>`: lane A's engine
+ * session id, lane B's appSessionId). `supported: false`: the machine's sminos can't keep a session's reach yet. Refused
+ * (`ok: false`): `signed-out`, `offline` (no link to the machine), `malformed`, or the read's own code (`unavailable`,
+ * `not-offered`, …). A whole machine's read is also told as `org.policies.changed`.
+ */
+export const OrgPolicySchema = z.union([
+  z.strictObject({ ok: z.literal(true), machine: MachineRefSchema, supported: z.literal(false) }),
+  z.strictObject({ ok: z.literal(true), machine: MachineRefSchema, supported: z.literal(true), policies: z.array(RecordPolicyEntrySchema) }),
+  z.strictObject({ ok: z.literal(false), machine: MachineRefSchema, reason: z.string() }),
+]);
+export type OrgPolicy = z.infer<typeof OrgPolicySchema>;
+/** A session by its address, `<ref>/<listing id>`: a plain string, so O6's codec lifts nothing in it. */
+const PolicyAddressSchema = z.string().min(1).max(600);
+const ShareGradeSchema = z.enum(['list', 'view', 'converse', 'approve']);
+/** One line of a save, as the sheet showed it: the access, a share (`grade: null` removes it), or M5b's owner added. */
+export const OrgPolicyLineSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('access'), access: RecordAccessSchema }),
+  z.strictObject({ kind: z.literal('share'), member: MemberIdSchema, grade: ShareGradeSchema.nullable() }),
+  z.strictObject({ kind: z.literal('owner'), member: MemberIdSchema }),
+]);
+export type OrgPolicyLine = z.infer<typeof OrgPolicyLineSchema>;
+/**
+ * A line's outcome. `done`: it ran; `changed: false` is a no-op that bumped nothing; `policyRev`, the revision it left
+ * (null when the outcome didn't say); `elsewhere`, its revision skipped one, so the policy also changed elsewhere.
+ * `refused`: nothing ran, in its refuser's words: sminos's (`no-session`, `unsupported`, `bad-shape`, `read-only`), the
+ * endpoint's (`not-offered`, `no-session`), the ledger's (`stale`, `expired`, `tombstoned`), step-up's (`cancelled`), the
+ * link's (`offline`, `closed`, …). `unknown`: it may have run. `failed`: it was tried and failed. `not-sent`: an earlier
+ * line's failure stopped the save first.
+ */
+export const OrgPolicyOutcomeSchema = z.union([
+  z.strictObject({ line: OrgPolicyLineSchema, state: z.literal('done'), changed: z.boolean(), policyRev: z.number().int().nonnegative().nullable(), elsewhere: z.boolean() }),
+  z.strictObject({ line: OrgPolicyLineSchema, state: z.enum(['refused', 'unknown', 'failed']), reason: z.string() }),
+  z.strictObject({ line: OrgPolicyLineSchema, state: z.literal('not-sent') }),
+]);
+export type OrgPolicyOutcome = z.infer<typeof OrgPolicyOutcomeSchema>;
+/**
+ * Why a save sent nothing (`OrgPolicySetResult`'s `reason`): `signed-out`, `malformed`, `empty` (nothing to change),
+ * `no-session` (no row places the session), `offline`, `not-supported` (the machine's sminos can't keep its reach),
+ * `unavailable` (its reach can't be read now), `changed-elsewhere` (its revision moved before or after Touch ID:
+ * reload), `cancelled`; or a read's, a link's or the step-up's own code (`not-offered`, `closed`, `too-large`, …).
+ */
+export const POLICY_REFUSALS = ['signed-out', 'malformed', 'empty', 'no-session', 'offline', 'not-supported', 'unavailable', 'changed-elsewhere', 'cancelled'] as const;
+/** A save's answer: each line's outcome in order, and the session's policy read after it as it stands (null unread). */
+export const OrgPolicySetResultSchema = z.union([
+  z.strictObject({ ok: z.literal(true), results: z.array(OrgPolicyOutcomeSchema), policy: RecordPolicyEntrySchema.nullable() }),
+  z.strictObject({ ok: z.literal(false), reason: z.string() }),
+]);
+export type OrgPolicySetResult = z.infer<typeof OrgPolicySetResultSchema>;
+/** The most shares one save changes. */
+export const POLICY_SHARES_MAX = 64;
+export const OrgPolicyGetInputSchema = z.union([z.strictObject({ machine: MachineRefSchema }), z.strictObject({ address: PolicyAddressSchema })]);
+/**
+ * A save: the access if it changed, and each share added, changed or removed (`grade: null`), in the sheet's order, at
+ * the `policyRev` the sheet opened on.
+ */
+export const OrgPolicySetInputSchema = z.strictObject({
+  address: PolicyAddressSchema,
+  access: RecordAccessSchema.optional(),
+  shares: z.array(z.strictObject({ member: MemberIdSchema, grade: ShareGradeSchema.nullable() })).max(POLICY_SHARES_MAX).optional(),
+  policyRev: z.number().int().nonnegative(),
+});
+export type OrgPolicySetInput = z.infer<typeof OrgPolicySetInputSchema>;
+/** M5b's: an owner added to a session. */
+export const OrgOwnersAddInputSchema = z.strictObject({ address: PolicyAddressSchema, member: MemberIdSchema });
+
 export const commands = {
   'org.status': { input: z.void(), output: OrgStatusSchema, owner: 'main' },
   'org.register': { input: CodeInputSchema, output: OrgAttemptSchema, owner: 'main' },
@@ -439,10 +507,14 @@ export const commands = {
   'org.channel.open': { input: z.strictObject({ project: ChannelProjectSchema }), output: ChannelAnswerSchema, owner: 'main' }, // M7a: one per open tab
   'org.channel.close': { input: z.strictObject({ project: ChannelProjectSchema }), output: z.void(), owner: 'main' }, // M7a: released 30 s after the last
   'org.channel.send': { input: z.strictObject({ project: ChannelProjectSchema, text: z.string().max(CHANNEL_TEXT_MAX) }), output: ChannelSendResultSchema, owner: 'main' }, // M7a
+  'org.policy.get': { input: OrgPolicyGetInputSchema, output: OrgPolicySchema, owner: 'main' }, // M6b
+  'org.policy.set': { input: OrgPolicySetInputSchema, output: OrgPolicySetResultSchema, owner: 'main' }, // M6b: one Touch ID per save
+  'org.owners.add': { input: OrgOwnersAddInputSchema, output: OrgPolicySetResultSchema, owner: 'main' }, // M5b's, built here
 } as const satisfies Record<`org.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   'org.changed': OrgStatusSchema, // at every change of the status, the whole status
   'org.rows.changed': OrgRowsSchema, // M2: coalesced, the whole list
   'org.channel.changed': ChannelChangedSchema, // M7a: an open channel's change since the last, coalesced
+  'org.policies.changed': OrgPolicySchema, // M6b: a machine's policies, at each whole read (at a sheet's save, and when asked)
 } as const satisfies Record<`org.${string}`, z.ZodType>;
