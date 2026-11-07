@@ -12,16 +12,18 @@
 // CHANNEL_PAGE_BYTES of them (src/services/channel/). A member's page is cut from as many journal pages as fill it
 // (`readViewable`): each journal page is ranked as it comes and only what the member views is kept, the one entry past
 // the page too, so `more` says exactly whether a viewable older entry remains, and a member who views few of a busy
-// project's sessions still pages on from the last entry they were given. What a read scans is bounded (SCAN_BYTES of the
-// journal's JSON): past it the page is what it found, `more` false (a member viewing next to nothing of a project whose
-// entries are large reads the rest from a later entry they view). A page is bounded by its bytes too (CHANNEL_PAGE_BYTES of
-// JSON), within the channel's message limit and a feed's backlog; an entry is at most ~640 KiB (the journal's cuts), so a
-// page always holds its first.
+// project's sessions still pages on from the last entry they were given. What a read holds is bounded by what it keeps
+// (a page and one entry), not by what it scans, so it reads on to the journal's end, which holds at most 2,000 entries a
+// project: a read past SCAN_ENTRIES is of a journal it can't page exactly, and is no read (thrown: `unavailable`), never a
+// page that says `more: false` with a viewable entry left. A page is bounded by its bytes too (CHANNEL_PAGE_BYTES of JSON),
+// within the channel's message limit and a feed's backlog; an entry is at most ~640 KiB (the journal's cuts), so a page
+// always holds its first.
 //
-// Fix wave (P5 O8 M7b): a lane B session is ranked at every placement a reader saw of it since its read began
-// (`PlacementBook`): the spine's record read after the reader's mark, and every record heard since, a removed record
-// placing nobody. Placements only narrow within a read: none heard can widen what the member views. A page is published
-// only while everything its read kept still stands, the entry past it too (`publish`); else it is read again.
+// A lane B session is ranked at every placement a reader saw of it from its mark on (`PlacementBook`): the spine's record
+// read after the mark, and every record heard since the mark, before that read too, a removed record placing nobody.
+// Placements only narrow within a read: none heard can widen what the member views. A page is published only while
+// everything its read kept still stands, the entry past it too, and no session it passed by is viewable now (`publish`):
+// else it is read again, since what it passed by may belong on the page.
 import type { OrgState } from 'org-protocol';
 import { HISTORY_LIMIT_MAX, type HostEntry } from '@shared/ipc/schema/channel';
 import type { SessionRanks } from './authorize';
@@ -34,8 +36,13 @@ export const CHANNEL_PAGE_BYTES = 1024 * 1024;
 /** A page as a member reads it: newest first, and whether a viewable older entry remains. */
 export type ChannelPage = { entries: HostEntry[]; more: boolean };
 
-/** The most of the journal's JSON one read of a member's page scans. */
-export const SCAN_BYTES = 16 * 1024 * 1024;
+/**
+ * The most entries one read of a member's page scans: twice what the journal holds of a project (CHANNEL_BOUNDS.perProject,
+ * 2,000), for what is recorded while the read goes. Past it the read is no read.
+ */
+export const SCAN_ENTRIES = 4_000;
+/** The most distinct placements heard of one session a book holds; past it the session is placed nowhere (nobody views it). */
+export const HEARD_MAX = 32;
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isId = (value: unknown): value is string => typeof value === 'string' && value !== '' && value.length <= 512;
@@ -54,22 +61,28 @@ export function laneBSessions(entries: readonly HostEntry[]): string[] {
   return [...new Set(entries.flatMap((entry) => (entry.lane === 'B' && isId(entry.appSessionId) ? [entry.appSessionId] : [])))];
 }
 
-type Read = { start: number; placements: Placement[]; landed: boolean; promise: Promise<void> };
+type Read = { start: number; placement: Placement; landed: boolean; promise: Promise<void> };
+type Heard = { at: number; placement: Placement };
+
+const samePlacement = (a: Placement, b: Placement): boolean =>
+  a === null || b === null ? a === b : a.target.session === b.target.session && a.target.appSessionId === b.target.appSessionId && a.launchedBy?.member === b.launchedBy?.member;
 
 /**
- * Every placement a reader saw of each lane B session, read by read. A reader takes a mark (`mark`) before it ranks; a
- * session is ranked for it by the reads begun after its mark (`ensure`), each holding the spine's record as read and every
- * record heard since the read began (`heard`: a `session.changed`, or a `session.removed` placing nobody), every one of
- * which the member must view (`seen`). A read is begun only when none begun after the mark is held or out; while one is
- * out, every later reader waits on one more, begun once it lands, so a burst of entries costs a read a round trip. What
- * no reader still needs is let go of (`prune`).
+ * Every placement a reader saw of each lane B session. A reader takes a mark (`mark`) before it ranks; a session is
+ * ranked for it by the reads of its record begun after the mark (`ensure`) and by every record heard after the mark
+ * (`heard`: a `session.changed`, or a `session.removed` placing nobody), before or after the read began, every one of
+ * which the member must view (`seen`). A placement heard again is kept once, at its latest hearing; past HEARD_MAX
+ * distinct ones the session is placed nowhere. A read is begun only when none begun after the mark is held or out; while
+ * one is out, every later reader waits on one more, begun once it lands, so a burst of entries costs a read a round
+ * trip. What no reader still needs is let go of (`prune`).
  */
 export class PlacementBook {
   #clock = 0;
   readonly #reads = new Map<string, Read[]>();
+  readonly #heard = new Map<string, Heard[]>();
   readonly #next = new Map<string, Promise<void>>();
 
-  /** A reader's mark: what it ranks by is read after it. */
+  /** A reader's mark: what it ranks by is read, or heard, after it. */
   mark(): number {
     return ++this.#clock;
   }
@@ -93,18 +106,22 @@ export class PlacementBook {
     return queued;
   }
 
-  /** A record of the session heard (null: removed, or placing no engine session): one more placement of every read of it. */
+  /** A record of the session heard (null: removed, or placing no engine session): one more placement its readers since are held to. */
   heard(appSessionId: string, placement: Placement): void {
-    for (const read of this.#reads.get(appSessionId) ?? []) read.placements.push(placement);
+    const at = ++this.#clock;
+    const heard = (this.#heard.get(appSessionId) ?? []).filter((h) => !samePlacement(h.placement, placement));
+    heard.push({ at, placement });
+    this.#heard.set(appSessionId, heard.length > HEARD_MAX ? [{ at, placement: null }] : heard);
   }
 
-  /** Every placement the reads of the session begun after `after` saw; undefined while none of them landed. */
+  /** Every placement seen of the session from `after` on: its reads begun since and what was heard since; undefined while none of the reads landed. */
   seen(appSessionId: string, after: number): readonly Placement[] | undefined {
     const landed = (this.#reads.get(appSessionId) ?? []).filter((read) => read.landed && read.start > after);
-    return landed.length === 0 ? undefined : landed.flatMap((read) => read.placements);
+    if (landed.length === 0) return undefined;
+    return [...landed.map((read) => read.placement), ...(this.#heard.get(appSessionId) ?? []).filter((h) => h.at > after).map((h) => h.placement)];
   }
 
-  /** Lets go of every landed read but those a reader still ranks by: per session, the reads begun after its oldest mark. */
+  /** Lets go of every landed read and every hearing but those a reader still ranks by: per session, those after its oldest mark. */
   prune(needs: Iterable<readonly [string, number]>): void {
     const oldest = new Map<string, number>();
     for (const [id, after] of needs) oldest.set(id, Math.min(oldest.get(id) ?? Infinity, after));
@@ -114,6 +131,12 @@ export class PlacementBook {
       if (kept.length === 0) this.#reads.delete(id);
       else this.#reads.set(id, kept);
     }
+    for (const [id, heard] of this.#heard) {
+      const after = oldest.get(id);
+      const kept = after === undefined ? [] : heard.filter((h) => h.at > after);
+      if (kept.length === 0) this.#heard.delete(id);
+      else this.#heard.set(id, kept);
+    }
   }
 
   /** Whether it holds a read of the session, landed or out. */
@@ -121,17 +144,17 @@ export class PlacementBook {
     return this.#reads.has(appSessionId);
   }
 
-  /** The sessions it holds reads of. */
+  /** The sessions it holds reads or hearings of. */
   get size(): number {
-    return this.#reads.size;
+    return new Set([...this.#reads.keys(), ...this.#heard.keys()]).size;
   }
 
   #begin(appSessionId: string, dispatch: EndpointServices['dispatch']): Promise<void> {
-    const read: Read = { start: ++this.#clock, placements: [], landed: false, promise: Promise.resolve() };
+    const read: Read = { start: ++this.#clock, placement: null, landed: false, promise: Promise.resolve() };
     this.#reads.set(appSessionId, [...(this.#reads.get(appSessionId) ?? []), read]);
     read.promise = placeRecorded(appSessionId, dispatch).then(
       (placement) => {
-        read.placements.unshift(placement);
+        read.placement = placement;
         read.landed = true;
       },
       (error: unknown) => {
@@ -166,14 +189,17 @@ function journalPage(value: unknown): { entries: HostEntry[]; more: boolean } | 
   return { entries, more: value.more };
 }
 
-/** What a member's read kept, newest first: the page's entries and the one past them; `truncated`, stopped at SCAN_BYTES. */
-export type ViewableRead = { kept: HostEntry[]; truncated: boolean };
+/**
+ * What a member's read kept, newest first (the page's entries and the one past them), and the sessions of what it passed
+ * by, each once: what `publish` checks again.
+ */
+export type ViewableRead = { kept: HostEntry[]; skipped: EntrySession[] };
 
 /**
  * A project's journal from before `before` (a journal id; none: the newest), ranked page by page as it is read: `place`
  * reads the placements of the lane B sessions a journal page names, then `views` keeps what the member views of it. It
- * stops once one entry past `limit` (or past CHANNEL_PAGE_BYTES of them) is kept, at the journal's end, or past
- * SCAN_BYTES scanned. Throws when the spine can't answer, or answers no page.
+ * stops once one entry past `limit` (or past CHANNEL_PAGE_BYTES of them) is kept, or at the journal's end. Throws when the
+ * spine can't answer, answers no page, or the journal runs past SCAN_ENTRIES.
  */
 export async function readViewable(
   dispatch: EndpointServices['dispatch'],
@@ -182,6 +208,7 @@ export async function readViewable(
   place: (appSessionIds: string[]) => Promise<void>,
 ): Promise<ViewableRead> {
   const kept: HostEntry[] = [];
+  const skipped = new Map<string, EntrySession>();
   let keptBytes = 0;
   let scanned = 0;
   let before = ask.before;
@@ -192,33 +219,47 @@ export async function readViewable(
     if (page === null) throw new Error(`the spine's history of ${ask.project.slice(0, 64)} is not a page`);
     await place(laneBSessions(page.entries));
     for (const entry of page.entries) {
-      if (!views(entry)) continue;
+      if (!views(entry)) {
+        const session: EntrySession = { lane: entry.lane, appSessionId: entry.lane === 'B' ? entry.appSessionId : null, engineSessionId: entry.lane === 'A' ? entry.engineSessionId : null };
+        skipped.set(`${session.lane}\n${session.appSessionId ?? session.engineSessionId ?? ''}`, session);
+        continue;
+      }
       kept.push(entry);
       keptBytes += Buffer.byteLength(JSON.stringify(entry));
-      if (kept.length > ask.limit || (kept.length > 1 && keptBytes > CHANNEL_PAGE_BYTES)) return { kept, truncated: false };
+      if (kept.length > ask.limit || (kept.length > 1 && keptBytes > CHANNEL_PAGE_BYTES)) return { kept, skipped: [...skipped.values()] };
     }
-    if (!page.more || page.entries.length === 0) return { kept, truncated: false };
-    scanned += Buffer.byteLength(JSON.stringify(page.entries));
-    if (scanned >= SCAN_BYTES) return { kept, truncated: true };
+    if (!page.more || page.entries.length === 0) return { kept, skipped: [...skipped.values()] };
+    scanned += page.entries.length;
+    if (scanned >= SCAN_ENTRIES) throw new Error(`the history of ${ask.project.slice(0, 64)} runs past the scan's bound (${SCAN_ENTRIES} entries)`);
     before = page.entries[page.entries.length - 1].id;
   }
 }
 
-/**
- * The page a read kept, as it goes: null (read it again) when anything it kept, the entry past the page too, is no
- * longer viewable; else at most `limit` entries and CHANNEL_PAGE_BYTES of their JSON, each as `seal` names it, `more`
- * when a kept entry is left past them.
- */
-export function publish(kept: readonly HostEntry[], limit: number, views: (entry: HostEntry) => boolean, seal: (entry: HostEntry) => HostEntry): ChannelPage | null {
-  if (!kept.every(views)) return null;
-  const entries: HostEntry[] = [];
+/** At most `limit` of `entries` and CHANNEL_PAGE_BYTES of their JSON, each as `seal` names it, `more` when one is left past them. */
+function page(entries: readonly HostEntry[], limit: number, seal: (entry: HostEntry) => HostEntry): ChannelPage {
+  const out: HostEntry[] = [];
   let bytes = 0;
-  for (const entry of kept) {
-    if (entries.length === limit) break;
+  for (const entry of entries) {
+    if (out.length === limit) break;
     const sealed = seal(entry);
     bytes += Buffer.byteLength(JSON.stringify(sealed));
-    if (entries.length > 0 && bytes > CHANNEL_PAGE_BYTES) break;
-    entries.push(sealed);
+    if (out.length > 0 && bytes > CHANNEL_PAGE_BYTES) break;
+    out.push(sealed);
   }
-  return { entries, more: entries.length < kept.length };
+  return { entries: out, more: out.length < entries.length };
+}
+
+/**
+ * The page a read kept, as it goes: null (read it again) when anything it kept, the entry past the page too, is no
+ * longer viewable, or a session it passed by is viewable now; else at most `limit` entries and CHANNEL_PAGE_BYTES of their
+ * JSON, each as `seal` names it, `more` when a kept entry is left past them.
+ */
+export function publish(read: { kept: readonly HostEntry[]; skipped: readonly EntrySession[] }, limit: number, views: (entry: EntrySession) => boolean, seal: (entry: HostEntry) => HostEntry): ChannelPage | null {
+  if (!read.kept.every(views) || read.skipped.some(views)) return null;
+  return page(read.kept, limit, seal);
+}
+
+/** What is viewable now of what a read kept, as a page: a feed's snapshot read again past its bound (channel-feed.ts). */
+export function publishFiltered(read: { kept: readonly HostEntry[] }, limit: number, views: (entry: EntrySession) => boolean, seal: (entry: HostEntry) => HostEntry): ChannelPage {
+  return page(read.kept.filter(views), limit, seal);
 }

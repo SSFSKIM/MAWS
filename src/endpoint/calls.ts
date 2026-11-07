@@ -33,7 +33,8 @@
 //     project that isn't the org's answers no entries (asked, and as it goes); each entry goes under its opaque cursor
 //     (channel-cursors.ts), and a `before` is one: one the endpoint didn't seal for the project, or of an entry the
 //     caller doesn't view, answers no entries, after the one placement read either takes; the page goes only while all it
-//     read still stands (else it is read again, `unavailable` past HISTORY_READS), so `more` is exact.
+//     read still stands and nothing it passed by is viewable (else it is read again, `unavailable` past HISTORY_READS),
+//     and a read goes on to the journal's end (or is `unavailable` past its bound), so `more` is exact.
 //   - P5 O7 M5a: `library.list` takes the same shape over its rows: each row's own sessions (`LibraryRowSchema.sessions`,
 //     the index's view of the artifact's links) are what it names, and a row is kept when the caller holds `view` on its
 //     artifact by the `artifact` rule's predicate (artifacts.ts' `holdsArtifact`): on any one of its sessions, at every
@@ -512,7 +513,7 @@ export class Calls {
     const done = (result: Result): Result => (this.#books.delete(book), result);
     const seal = (entry: HostEntry): HostEntry => ({ ...entry, id: this.ctx.cursors.seal(entry) });
     try {
-      for (let read = 0; read < HISTORY_READS; read++) {
+      for (let attempt = 0; attempt < HISTORY_READS; attempt++) {
         const ranks = await this.ctx.ranks(member);
         const after = book.mark();
         if (!this.ctx.reaches(input.project)) return done(none);
@@ -525,13 +526,12 @@ export class Calls {
           before = at.id;
         }
         const place = (ids: string[]) => Promise.all(ids.map((id) => book.ensure(id, after, dispatch))).then(() => {});
-        const { kept, truncated } = await readViewable(dispatch, { project: input.project, ...(before === undefined ? {} : { before }), limit }, views, place);
-        if (!ranks.current() || publish(kept, limit, views, seal) === null) continue;
-        if (truncated) this.ctx.log(`endpoint: a \`channel.history\` read of ${input.project.slice(0, 64)} stopped at its scan bound with ${kept.length} entries`);
+        const read = await readViewable(dispatch, { project: input.project, ...(before === undefined ? {} : { before }), limit }, views, place);
+        if (!ranks.current() || publish(read, limit, views, seal) === null) continue;
         return () => {
           this.#books.delete(book);
           if (!this.ctx.reaches(input.project)) return none;
-          const page = ranks.current() ? publish(kept, limit, views, seal) : null;
+          const page = ranks.current() ? publish(read, limit, views, seal) : null;
           return page === null ? { ok: false, code: 'unavailable' } : { ok: true, output: page };
         };
       }

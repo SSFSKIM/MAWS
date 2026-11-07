@@ -4,7 +4,8 @@
 // the feed's) carries an opaque cursor instead, which `channel.history` takes back as its `before`.
 //
 // A cursor is sealed deterministically (SIV): its nonce is an HMAC-SHA256 of the project and the plaintext under one half
-// of the key, and the plaintext (the journal id, the entry's lane and its session's id) is sealed with AES-256-GCM
+// of the key, and the plaintext (the journal id zero-padded to ID_DIGITS, so a cursor's length tells nothing of it; the
+// entry's lane and its session's id) is sealed with AES-256-GCM
 // under the other half, the project as associated data. The same entry always seals to the same cursor, so a device
 // dedupes the feed's entries against history's by it, across restarts; a cursor opens only for its own project, and
 // nothing the endpoint did not seal opens at all. The session it carries lets a `before` be ranked (a member pages only
@@ -21,6 +22,8 @@ import { readPrivateText, writeAtomic } from './state/files';
 export type CursorAt = { id: string; lane: 'A' | 'B'; session: string };
 
 const KEY_FILE = 'cursor-key';
+/** A journal id's digits as sealed: an SQLite row id (a signed 64-bit integer) has at most 19. */
+const ID_DIGITS = 20;
 const NONCE = 12;
 const TAG = 16;
 /** A cursor's plaintext is at most a journal id, a lane and a session id (512): one longer is none sealed here. */
@@ -38,7 +41,7 @@ export class ChannelCursors {
   /** `entry`'s cursor. */
   seal(entry: HostEntry): string {
     const session = (entry.lane === 'A' ? entry.engineSessionId : entry.appSessionId) ?? '';
-    const plain = Buffer.from(`${entry.id}\n${entry.lane}\n${session}`, 'utf8');
+    const plain = Buffer.from(`${entry.id.padStart(ID_DIGITS, '0')}\n${entry.lane}\n${session}`, 'utf8');
     const key = this.#keys();
     const nonce = this.#nonce(key, entry.project, plain);
     const cipher = createCipheriv('aes-256-gcm', key.seal, nonce);
@@ -64,9 +67,9 @@ export class ChannelCursors {
       return null;
     }
     if (!this.#nonce(key, project, plain).equals(nonce)) return null;
-    const [id, lane, session, ...rest] = plain.toString('utf8').split('\n');
-    if (rest.length > 0 || (lane !== 'A' && lane !== 'B') || id === '' || session === undefined) return null;
-    return { id, lane, session };
+    const [padded, lane, session, ...rest] = plain.toString('utf8').split('\n');
+    if (rest.length > 0 || (lane !== 'A' && lane !== 'B') || !new RegExp(`^[0-9]{${ID_DIGITS}}$`).test(padded) || session === undefined) return null;
+    return { id: padded.replace(/^0+(?=[0-9])/, ''), lane, session };
   }
 
   #nonce(key: { nonce: Buffer }, project: string, plain: Buffer): Buffer {
