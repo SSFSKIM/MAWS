@@ -18,8 +18,12 @@ import { OFFERS } from '../../src/endpoint/offers';
 import { PlaneFeeds, type OwnersRead } from '../../src/endpoint/plane-feeds';
 import type { Subscription } from '../../src/endpoint/subscriptions';
 import { CheckoutBounds } from '../../src/endpoint/targets';
+import { PromptHistory } from '../../src/services/history/prompt-history';
 import { Index } from '../../src/services/index/index';
 import { registerIndexHandlers } from '../../src/services/index/register';
+import { startSessions } from '../../src/services/sessions';
+import { ev } from '../support/events';
+import { fakeBus } from '../support/fake-bus';
 import { summary } from '../support/index-fixture';
 import { endorsed, memberId, newDevice, successor, type TestDevice } from './org-fixtures';
 import { act, done, evs, laneAMember, makeOrg, openRemote, ORG, sminos, snapshot, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
@@ -31,6 +35,7 @@ let D: string;
 const started: Fixture[] = [];
 const indexes: Index[] = [];
 const dirs: string[] = [];
+const stops: Array<() => void> = [];
 
 beforeAll(async () => {
   org = await makeOrg();
@@ -40,6 +45,7 @@ beforeAll(async () => {
 });
 afterEach(async () => {
   await stopAll(started);
+  for (const stop of stops.splice(0)) stop();
   for (const index of indexes.splice(0)) index.close();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
@@ -91,6 +97,35 @@ function ownersRead(index: Index, app: AppSessionId): Record<string, unknown> {
   index.sessions.markSeen(app, { messageUuid: 'm1' as MessageUuid, at: AT });
   index.sessions.setUnread(app, true);
   return { pinned: true, unread: true, lastSeen: { messageUuid: 'm1', at: AT } };
+}
+
+/**
+ * The machine's app events and prompt history for `app`, as the spine answers them: `session.appEvents` by the sessions
+ * service itself (its read model holding the record, an app-synthesised notice emitted on its bus), and
+ * `session.history.list` by spine-root's handler over a real prompt history with two prompts appended.
+ */
+async function historyOf(f: Fixture, index: Index, app: AppSessionId): Promise<{ notice: unknown; prompts: string[] }> {
+  const bus = fakeBus();
+  const sessions = startSessions({ env: {}, packaged: false, appRoot: process.cwd(), bus, hosts: { dispatch: async () => ({ ok: true, value: null }) as never, onEvent: () => () => {}, onState: () => () => {}, setResync: () => {} } });
+  stops.push(() => sessions.stop());
+  stops.push(sessions.model.register({ start: (writer) => (writer.observeRecord(index.sessions.get(app)!), () => {}) }));
+  const notice = ev('notice.posted', { id: `${app}:c10:relay-fallback:1`, seq: null, level: 'warning', key: 'relay:direct_fallback', text: 'Direct.' });
+  expect(bus.emit('session.eventBatch', { appSessionId: app, events: [notice] })).toBe(true);
+  f.spine.handle('session.appEvents', async (input) => {
+    const answer = await bus.invoke('session.appEvents', input);
+    if (!answer.ok) throw new Error(answer.error.message);
+    return answer.value;
+  });
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'reader-history-')));
+  dirs.push(dir);
+  const history = new PromptHistory({ file: join(dir, 'prompt-history.jsonl'), configDir: dir, session: (id) => (id === app ? index.sessions.get(app)! : null) });
+  const prompts = ['the first prompt', 'the second prompt'];
+  for (const display of prompts) await history.append(app, display, {});
+  f.spine.handle('session.history.list', async (input) => {
+    const { appSessionId, limit } = input as { appSessionId: AppSessionId; limit: number };
+    return { entries: await history.list(appSessionId, limit) };
+  });
+  return { notice, prompts };
 }
 
 /** A successor head, delivered: the machine's owners become `owners` (A signs; every other member keeps their shares). */
@@ -443,8 +478,7 @@ describe('every record a member is sent carries their own reading', () => {
     f.host.attach(true);
     const at = AT;
     f.spine.handle('attention.list', () => [{ id: 'att-r1', appSessionId: app, sessionId: index.sessions.get(app)!.engineSessionId, kind: 'permission', request: { requestId: 'r1', toolUseId: 'tu-r1', taskId: null, agentId: null }, summary: 'permission', createdAt: at, state: 'pending', stateChangedAt: at, expiresAt: null }]);
-    f.spine.handle('session.appEvents', () => ({ events: [] }));
-    f.spine.handle('session.history.list', () => ({ entries: [] }));
+    const { notice, prompts } = await historyOf(f, index, app);
 
     const inboxes = new Map<string, Remote>();
     for (const [member, device] of [[org.A, org.a1], [org.B, org.b1], [D, d1]] as const) {
@@ -463,7 +497,11 @@ describe('every record a member is sent carries their own reading', () => {
         ['session.get', { appSessionId: app }],
         ['session.drafts.get', { appSessionId: app }],
       ] as const) {
-        expect([member, name, code(await call(r, name, input))]).toEqual([member, name, 'ok']);
+        const answer = await call(r, name, input);
+        expect([member, name, code(answer)]).toEqual([member, name, 'ok']);
+        // The history pages carry what the machine holds: its app event, and the prompts in their order.
+        if (name === 'session.appEvents') expect([member, output(answer).events]).toEqual([member, [notice]]);
+        if (name === 'session.history.list') expect([member, (output(answer).entries as Array<{ display: string }>).map((entry) => entry.display)]).toEqual([member, prompts]);
       }
     }
     f.host.emitMachine('session.changed', { record: index.sessions.get(app)!, cause: 'update', revision: 9 });
