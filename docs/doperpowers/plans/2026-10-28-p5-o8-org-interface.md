@@ -75,6 +75,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-06) Task 1, reviewed clean in two rounds (9327c77f2..a54248357; fixes ef3d17d7e, 832534dca): the one extraction of a message (`src/shared/owner/to-human-items.ts`), the spine's channel journal as an `ADDED_TABLES` entry, lane B from the owner channel's batches and the asks' own record, the start-path hold, the cuts, `channel.history` and the main-only `channel.changed` (`WIRE_MINOR` 29). Gates green: 42290932596, 42292712838 (cross-build, the downgrade scene whole), 42297329414.
   - [x] (2026-11-06) Task 2, reviewed by our task reviewer in three rounds and by the desk track in six (READY, their 601) (5a6b05638..f37817c55, with the org-protocol commits 40e793791 and 9e4b67f20): the seam and lane A's `#host` hand-off, `channel.history` with the per-lane `view` cut and opaque cursors, the project-scoped `channel` feed (`rl2.channel`, RL2 1.12, `WIRE_MINOR` 30), reach checks, a bounded streamed scan, the snapshot's restarts, and recovery from the let-go ids. Gates green: 42321083327 (full), 42328732994, 42331543046.
   - [x] (2026-11-06) Task 3, accepted by the architect (58e294092..19456cac9), with its review carried by the branch's reviewer-high: `machines.ts` (the spine and each machine's feed, gated on `rl2.channel`, with the older-peer fallback and a per-machine cache that belongs to one reader), the merge into `org.channel.*`, and `ToHumanEntry.tsx`. Gate green: 42336903199.
+  - [x] (2026-11-06) Task 4 (33098354b..daf8d4a3c): `channel.local.test.ts` cases 5 and 6, plus an older-peer case (7/7, three runs in a row), and the e2e seed's to-human entries photographed, with two layout fixes. Gates green: e2e:settings 42341855912, static,unit,probes 42343748493.
 - [ ] M6a — Reader state and drafts per member — *executable; after M7b*
 - [ ] M6b — Visibility and shares (O18's M5) — *executable; after M6a; its live proof is the staging run it shares with O18 M6, which needs the desk track's sminos executors and a real second member (the owner)*
 - [ ] M4b — Machines and their rights — *executable; after M6b*
@@ -3257,6 +3258,20 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   9. **Wiring.** This Mac's spine is late-bound in `app.ts`, because the org session is built before the services bus.
   10. **Residue, for the tech-debt tracker at landing.** A flapping link re-reads up to 500 entries per opening, and the open answer can carry up to 4 MiB per machine over IPC at the worst-case text size.
   Date/Author: 2026-11-06, O8's executor (controller), from Task 3's report.
+
+- Decision: M7b Task 4, the local suite and the e2e seed (33098354b..daf8d4a3c), settles these points.
+  1. **Cases 5 and 6** sit in M7a's suite and run before case 4, which stops the hub.
+     - The endpoint and its spine journal are real, fed over their real RL10 socket. Sminos's side is `FakeSminos`, because sminos lives outside the repo.
+     - This Mac's spine is real and fed through lane B's real source. The services bus around it is a stand-in, because no `mawsd` runs in a suite.
+     - Titles come by the real paths: a lane A session's from its listing, a lane B session's from its record.
+     - Case 6 drops the link by stopping the endpoint. It proves the outcome, not which of `machines.ts`'s two paths marks the machine offline.
+  2. **The older peer** is a second real endpoint whose `h2` withholds `rl2.channel`. It is read through one `channel.history` call, and no feed is opened.
+  3. **The e2e seed** adds to-human entries from two machines, a multi-question MAWS ask with its answers, a lane A question, long titles, and one machine offline with "as of" and one unavailable. These are photographed under classic scrollbars. The screenshots caught two faults:
+     - A to-human entry's chip fell back to the raw ref. It now falls back to `ChannelMachine.name`, and the roster's name still wins.
+     - The header's title didn't give way before its machine chip. Now it does, and the chip keeps up to 24 characters.
+  4. **The open answer's weight** at the seed's realistic size is 42,904 bytes of JSON. The 48 log events take 37,508, the 9 to-human entries 3,591 (about 400 each), the sessions 850 and the machines 377.
+  5. **M7a's `Party`** in `parts.tsx` shrinks proportionally in the same way, so a long title can cut a say's machine chip too. It was left as it is, for the architect.
+  Date/Author: 2026-11-06, O8's executor (controller), from Task 4's report.
 
 ## Outcomes & Retrospective
 
