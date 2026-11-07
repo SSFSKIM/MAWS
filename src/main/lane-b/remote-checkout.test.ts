@@ -24,6 +24,7 @@ function lab() {
   link.peers = ['rl2.executor.machine', 'rl2.call-session', 'rl2.feeds'];
   link.answers.set('git.watch', () => ({ ok: true, output: status() }));
   for (const name of ['git.unwatch', 'files.watch', 'files.unwatch']) link.answers.set(name, () => ({ ok: true, output: undefined }));
+  link.answers.set('session.get', () => ({ ok: true, output: null })); // a reopening's read of the record: none, unless a case says
   const emitted: Array<{ name: EventName; payload: Record<string, unknown> }> = [];
   const logs: string[] = [];
   const records: unknown[] = [];
@@ -60,7 +61,9 @@ function lab() {
     opened,
     cmd: (name: string, input: Record<string, unknown>, c: MainContext = ctx) => checkout.dispatch(link, name as CommandName, input, c),
     of: (name: EventName) => emitted.filter((e) => e.name === name).map((e) => e.payload),
-    sent: () => link.calls.map((c) => c.name),
+    /** The watch calls sent (a reopening's read of the record is its own cases'). */
+    sent: () => link.calls.map((c) => c.name).filter((name) => name !== 'session.get'),
+    reads: () => link.calls.filter((c) => c.name === 'session.get').map((c) => c.input),
   };
 }
 
@@ -118,6 +121,38 @@ describe('the checkout feed', () => {
     expect(l.checkout.follows(MINI, APP)).toBe(true);
     l.checkout.close(MINI, APP);
     expect(l.checkout.follows(MINI, APP)).toBe(false);
+  });
+
+  // The desk track's round 3 on P5 O8 M6a's G1: a feed the endpoint ended `behind` dropped the change it held.
+  it('reads the record again at each reopening and hands it to the session, unless the feed tells one first', async () => {
+    const l = lab();
+    const now = { ...record(APP), title: { text: 'now', source: 'user' as const } };
+    let answer!: (output: unknown) => void;
+    l.link.answers.set('session.get', () => ({ ok: true, output: now }));
+    l.checkout.open(l.link, APP);
+    l.opened();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.reads()).toEqual([]); // the first opening: the session reads its record itself
+    l.feed().sink.ended('behind');
+    await vi.advanceTimersByTimeAsync(0);
+    l.opened();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.reads()).toEqual([{ appSessionId: APP }]);
+    expect(l.records).toEqual([[MINI, APP, now]]);
+    // Reopened again; a change told on the feed before the read is answered is the newer word: the answer yields.
+    l.link.answers.set('session.get', () => new Promise((resolve) => (answer = (output) => resolve({ ok: true, output }))));
+    l.feed().sink.ended('behind');
+    await vi.advanceTimersByTimeAsync(0);
+    l.opened();
+    await vi.advanceTimersByTimeAsync(0);
+    const told = { ...now, title: { text: 'told', source: 'user' as const } };
+    l.feed().sink.event({ epoch: 'checkout:boot', seq: 1 }, { name: 'session.changed', payload: { record: told, cause: 'update', revision: 9 } });
+    answer(now);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.records).toEqual([
+      [MINI, APP, now],
+      [MINI, APP, told],
+    ]);
   });
 
   it('asks no feed of a peer that did not list `rl2.feeds`, and leaves the asking to the link while no channel is current', () => {
