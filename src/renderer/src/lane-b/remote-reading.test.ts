@@ -8,6 +8,7 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { ReaderState, SessionRecord } from '@shared/graph/session';
 import type { ReaderPatch } from '@shared/ipc/schema/session';
 import { addressOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
 import { humanTurn, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { OTHER_MACHINE } from '../../../../test/support/machine';
@@ -152,6 +153,34 @@ describe('a machine that keeps each member’s reading', () => {
     expect(readerRowsOf(REMOTE)).toBeNull();
     void setRemoteReading(REMOTE, { unread: false }, fake.client);
     expect(fake.pending('session.reader.update')).toBe(1);
+  });
+});
+
+// M6a's branch review, F4: a session that stays on screen while its seen write failed, or its machine refused one, is
+// marked seen again when the machine's feed opens again (its link back, or its endpoint newer)
+describe('a session on screen at its machine’s resync', () => {
+  it('is marked seen there again after a write that failed', async () => {
+    const fake = fakeClient();
+    connect(fake);
+    showRemote(REMOTE, true, fake.client);
+    await fake.fail('session.reader.update', 'session.reader.update: machine mini is not reachable', 'host_unavailable');
+    fake.event('artifacts.resync', {}, OTHER_MACHINE);
+    expect(fake.invoked('session.reader.update')).toHaveLength(2);
+    fake.event('artifacts.resync', {}, 'another-machine' as MachineRef);
+    expect(fake.invoked('session.reader.update')).toHaveLength(2); // another machine's feed: not this session's
+  });
+
+  it('is marked seen there once a machine that refused it may be newer', async () => {
+    const fake = fakeClient();
+    connect(fake);
+    showRemote(REMOTE, true, fake.client);
+    await fake.fail('session.reader.update', 'refused', 'internal', NOT_OFFERED);
+    expect(readerRowsOf(REMOTE)).toBe('refused');
+    fake.event('artifacts.resync', {}, OTHER_MACHINE);
+    expect(fake.invoked('session.reader.update')).toHaveLength(2);
+    showRemote(REMOTE, false, fake.client);
+    fake.event('artifacts.resync', {}, OTHER_MACHINE);
+    expect(fake.invoked('session.reader.update')).toHaveLength(2); // off screen now: nothing to mark
   });
 });
 

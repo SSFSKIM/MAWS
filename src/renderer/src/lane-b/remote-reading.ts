@@ -17,6 +17,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ReaderState, SessionRecord } from '@shared/graph/session';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import type { ReaderPatch } from '@shared/ipc/schema/session';
+import { isAddress, machineOf } from '@shared/machine/address';
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { setRemoteUnread, setRemoteVisible, useRemoteReadMarks } from './read-marks';
@@ -114,7 +115,12 @@ export function connectRemoteReading(client: MawsBridge = ipc): () => void {
       markSeen(appSessionId, client);
     }
   });
-  const offResync = client.on('artifacts.resync', (_resync, from) => forgetReaderRowsRefusal(from.machine));
+  // M6a's branch review, F4: the machine's feed opened again (its link back, or its endpoint perhaps newer): a refusal is
+  // asked afresh, and a session on screen there is marked seen again, its last write perhaps failed or refused
+  const offResync = client.on('artifacts.resync', (_resync, from) => {
+    forgetReaderRowsRefusal(from.machine);
+    for (const appSessionId of useRemoteReadMarks.getState().visible) if (isAddress(appSessionId) && machineOf(appSessionId) === from.machine) markSeen(appSessionId, client);
+  });
   return () => {
     offRecords();
     offResync();
