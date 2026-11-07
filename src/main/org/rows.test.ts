@@ -619,6 +619,32 @@ describe('channel listings (M6b)', () => {
     expect(shown).toEqual([['s r10'], ['s r12'], ['s r14'], ['s r14'], ['s r14']]);
   });
 
+  it('draw a private listing signed again for each answer as it was first shown, emitting nothing, while the marks follow the newest (Task 3)', async () => {
+    const w = await World.make();
+    const h = await up(w);
+    const fields = { title: 'private work', audience: [w.A], policyRev: 4 };
+    const first = await w.list(w.m1, 'p', 20, fields);
+    await channel(h, w.m1.ref, first);
+    await pause(5);
+    const emitted = h.emitted.length;
+    // the endpoint keeps no private listing, so each answer signs it again at a new revision and issue time
+    for (const revision of [80, 140]) {
+      w.clock += 60_000;
+      await channel(h, w.m1.ref, await w.list(w.m1, 'p', revision, fields));
+    }
+    await pause(5);
+    expect(h.rows.rows().rows).toMatchObject([{ session: 'p', revision: 20, issued: first.body.issued, audience: [w.A], policyRev: 4 }]);
+    expect(h.emitted.length, 'no rows went out for a listing that says nothing new').toBe(emitted);
+    // the newest record is still the mark: a withdrawal below it is a replay, ignored
+    await push(h, await w.gone(w.m1, 'p', 100));
+    expect(h.shown()).toEqual(['p r20']);
+    // what it says changing shows at once, at its own revision and time
+    w.clock += 60_000;
+    const renamed = await w.list(w.m1, 'p', 200, { ...fields, title: 'renamed' });
+    await channel(h, w.m1.ref, renamed);
+    expect(h.rows.rows().rows).toMatchObject([{ session: 'p', revision: 200, issued: renamed.body.issued, title: 'renamed' }]);
+  });
+
   it("leave at the channel's omission with no hub membership, but not while the hub holds them", async () => {
     const w = await World.make();
     const h = await up(w);

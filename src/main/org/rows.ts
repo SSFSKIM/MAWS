@@ -40,6 +40,10 @@
 // record waiting on verification remembers which sources showed it, and a held one keeps no row once neither holds.
 // When a `gone` lands for a row the channel held (the hub's withdrawal arriving before the channel's private listing),
 // the row goes, as the rule says, and the machine's channel is asked at once, so it comes back within a round trip.
+// The endpoint keeps no private listing, so each channel answer signs one afresh, at a new revision and issue time with
+// nothing else changed. Such a record is accepted as any other (the mark follows it, so no replay below it lands), but
+// the row is drawn at the revision and issue time its content was first shown at (`since`), so a listing that says
+// nothing new sends no rows, and its age and place in the recency order stay what its last change made them.
 //
 // Electron-free: vitest's node project runs it, and O3 moves it with the index into `mawsd`.
 import { createHash } from 'node:crypto';
@@ -150,8 +154,13 @@ const shown = (key: string) => JSON.stringify(key.length > 120 ? `${key.slice(0,
 
 /** A record that failed verification, and the sources that showed it (M6b). */
 type Waiting = { key: string; hash: string; record: Signed<Listing>; sources: Set<Source> };
-/** An accepted live record, and the revision each source last showed its key at (M6b). */
-type Held = { record: Signed<Listing> } & ListingShown;
+/**
+ * An accepted live record, and the revision each source last showed its key at (M6b); `since`, the revision and issue time
+ * of the first record that said what it says, at which its row is drawn.
+ */
+type Held = { record: Signed<Listing>; since: { revision: number; issued: string } } & ListingShown;
+/** Whether two records of a key say the same, whatever their revision, issue time or signature. */
+const sameContent = (a: Listing, b: Listing): boolean => canonicalize([a.org, a.machine, a.session, a.fields]) === canonicalize([b.org, b.machine, b.session, b.fields]);
 /** Whether either source holds the held key at its record's revision, the newest accepted. */
 const holds = (h: Held): boolean => h.hub === h.record.body.revision || h.channel === h.record.body.revision;
 const HUB: ReadonlySet<Source> = new Set(['hub']);
@@ -290,10 +299,12 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     const { key, hash, record, sources } = entry;
     const revision = record.body.revision;
     const gone = isListingGone(record.body);
-    const next: Held = { record, hub: sources.has('hub') ? revision : null, channel: sources.has('channel') ? revision : null };
+    const before = held.get(key);
+    const since = before !== undefined && sameContent(before.record.body, record.body) ? before.since : { revision, issued: record.body.issued };
+    const next: Held = { record, since, hub: sources.has('hub') ? revision : null, channel: sources.has('channel') ? revision : null };
     // a withdrawal of a row its machine's channel held (the hub's, as a session goes private) asks that channel at once,
     // so the row it may still list comes back within a round trip rather than at the next period
-    if (gone && held.get(key)?.channel != null) {
+    if (gone && before?.channel != null) {
       const watch = watched.get(record.body.machine as MachineRef);
       if (watch !== undefined) ask(watch);
     }
@@ -623,8 +634,8 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
         project: body.fields.project,
         orgKey: body.fields.project === null ? null : (join.get(body.fields.project) ?? null),
         availability: body.fields.lane === 'A' ? 'foreign_held' : null,
-        revision: body.revision,
-        issued: body.issued,
+        revision: h.since.revision,
+        issued: h.since.issued,
         mine: body.fields.owners.includes(member),
         // M6b: a private session's channel listing states who it reaches, and the policy revision it was made at
         ...(body.fields.audience === undefined ? {} : { audience: [...body.fields.audience] }),
