@@ -36,11 +36,13 @@ export const CHANNEL_PAGE_BYTES = 1024 * 1024;
 /** A page as a member reads it: newest first, and whether a viewable older entry remains. */
 export type ChannelPage = { entries: HostEntry[]; more: boolean };
 
+/** The most entries the journal holds of a project (CHANNEL_BOUNDS.perProject): it lets go of the oldest past it. */
+export const JOURNAL_ENTRIES = 2_000;
 /**
- * The most entries one read of a member's page scans: twice what the journal holds of a project (CHANNEL_BOUNDS.perProject,
- * 2,000), for what is recorded while the read goes. Past it the read is no read.
+ * The most entries one read of a member's page scans: twice what the journal holds of a project, for what is recorded
+ * while the read goes. Past it the read is no read.
  */
-export const SCAN_ENTRIES = 4_000;
+export const SCAN_ENTRIES = 2 * JOURNAL_ENTRIES;
 /** The most distinct placements heard of one session a book holds; past it the session is placed nowhere (nobody views it). */
 export const HEARD_MAX = 32;
 
@@ -191,20 +193,20 @@ function journalPage(value: unknown): { entries: HostEntry[]; more: boolean } | 
 
 /**
  * What a member's read kept, newest first (the page's entries and the one past them), and the sessions of what it passed
- * by, each once: what `publish` checks again. `full`: it stopped at the page's bound, not the journal's end. `top`: the
- * highest journal id it scanned (0: none).
+ * by, each once: what `publish` checks again. `full`: it stopped at the page's bound, not the journal's end.
  */
-export type ViewableRead = { kept: HostEntry[]; skipped: EntrySession[]; full: boolean; top: number };
+export type ViewableRead = { kept: HostEntry[]; skipped: EntrySession[]; full: boolean };
 
 /**
  * A project's journal from before `before` (a journal id; none: the newest), ranked page by page as it is read: `place`
  * reads the placements of the lane B sessions a journal page names, then `views` keeps what the member views of it. It
  * stops once one entry past `limit` (or past `pageBytes` of them, CHANNEL_PAGE_BYTES unless given) is kept, or at the
- * journal's end. Throws when the spine can't answer, answers no page, or the journal runs past SCAN_ENTRIES.
+ * journal's end. Given `among`, an entry outside it is passed over: neither placed, ranked nor counted as passed by.
+ * Throws when the spine can't answer, answers no page, or the journal runs past SCAN_ENTRIES.
  */
 export async function readViewable(
   dispatch: EndpointServices['dispatch'],
-  ask: { project: string; before?: string; limit: number; pageBytes?: number },
+  ask: { project: string; before?: string; limit: number; pageBytes?: number; among?: (entry: HostEntry) => boolean },
   views: (entry: HostEntry) => boolean,
   place: (appSessionIds: string[]) => Promise<void>,
 ): Promise<ViewableRead> {
@@ -212,17 +214,10 @@ export async function readViewable(
   const skipped = new Map<string, EntrySession>();
   const pageBytes = ask.pageBytes ?? CHANNEL_PAGE_BYTES;
   let keptBytes = 0;
-  let scanned = 0;
-  let top = 0;
-  let before = ask.before;
-  for (;;) {
-    const answer = await dispatch('machine', 'channel.history', { project: ask.project, ...(before === undefined ? {} : { before }), limit: HISTORY_LIMIT_MAX });
-    if (!answer.ok) throw new Error(`the spine answered ${answer.error.code} for the history of ${ask.project.slice(0, 64)}`);
-    const page = journalPage(answer.value);
-    if (page === null) throw new Error(`the spine's history of ${ask.project.slice(0, 64)} is not a page`);
-    await place(laneBSessions(page.entries));
-    for (const entry of page.entries) {
-      top = Math.max(top, Number(entry.id) || 0);
+  for await (const all of journalPages(dispatch, ask.project, ask.before)) {
+    const entries = ask.among === undefined ? all : all.filter(ask.among);
+    await place(laneBSessions(entries));
+    for (const entry of entries) {
       if (!views(entry)) {
         const session: EntrySession = { lane: entry.lane, appSessionId: entry.lane === 'B' ? entry.appSessionId : null, engineSessionId: entry.lane === 'A' ? entry.engineSessionId : null };
         skipped.set(`${session.lane}\n${session.appSessionId ?? session.engineSessionId ?? ''}`, session);
@@ -230,11 +225,32 @@ export async function readViewable(
       }
       kept.push(entry);
       keptBytes += Buffer.byteLength(JSON.stringify(entry));
-      if (kept.length > ask.limit || (kept.length > 1 && keptBytes > pageBytes)) return { kept, skipped: [...skipped.values()], full: true, top };
+      if (kept.length > ask.limit || (kept.length > 1 && keptBytes > pageBytes)) return { kept, skipped: [...skipped.values()], full: true };
     }
-    if (!page.more || page.entries.length === 0) return { kept, skipped: [...skipped.values()], full: false, top };
+  }
+  return { kept, skipped: [...skipped.values()], full: false };
+}
+
+/** Every id the journal holds of a project, read to its end. Throws as `readViewable` does. */
+export async function journalIds(dispatch: EndpointServices['dispatch'], project: string): Promise<Set<string>> {
+  const ids = new Set<string>();
+  for await (const entries of journalPages(dispatch, project)) for (const entry of entries) ids.add(entry.id);
+  return ids;
+}
+
+/** A project's journal from before `before`, newest first, page by page to its end; throws past SCAN_ENTRIES. */
+async function* journalPages(dispatch: EndpointServices['dispatch'], project: string, from?: string): AsyncGenerator<HostEntry[]> {
+  let scanned = 0;
+  let before = from;
+  for (;;) {
+    const answer = await dispatch('machine', 'channel.history', { project, ...(before === undefined ? {} : { before }), limit: HISTORY_LIMIT_MAX });
+    if (!answer.ok) throw new Error(`the spine answered ${answer.error.code} for the history of ${project.slice(0, 64)}`);
+    const page = journalPage(answer.value);
+    if (page === null) throw new Error(`the spine's history of ${project.slice(0, 64)} is not a page`);
+    yield page.entries;
+    if (!page.more || page.entries.length === 0) return;
     scanned += page.entries.length;
-    if (scanned >= SCAN_ENTRIES) throw new Error(`the history of ${ask.project.slice(0, 64)} runs past the scan's bound (${SCAN_ENTRIES} entries)`);
+    if (scanned >= SCAN_ENTRIES) throw new Error(`the history of ${project.slice(0, 64)} runs past the scan's bound (${SCAN_ENTRIES} entries)`);
     before = page.entries[page.entries.length - 1].id;
   }
 }
