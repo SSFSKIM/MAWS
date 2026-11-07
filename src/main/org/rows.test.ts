@@ -787,7 +787,7 @@ describe('channel listings (M6b)', () => {
     // B's own read follows, and holds what it answers
     await channel(h, w.m1.ref, await w.list(w.m1, 'only-b', 7, { audience: [w.B], policyRev: 1 }));
     expect(h.shown()).toEqual(['only-b r7', 'pub r3']);
-    await drain(h);
+    await h.rows.close(); // flushes the cache's deferred write
     expect(h.cache()).toMatchObject({ member: w.B });
   });
 
@@ -796,8 +796,8 @@ describe('channel listings (M6b)', () => {
     let h = await up(w);
     await snapshot(h, [await w.list(w.m1, 'pub', 3)]);
     await channel(h, w.m1.ref, await w.list(w.m1, 'only-a', 12, { audience: [w.A], policyRev: 3 }));
+    await h.rows.close(); // flushes the cache's deferred write
     expect(h.cache()).toMatchObject({ member: w.A });
-    await h.rows.close();
     w.session.set(w.signedIn(w.B));
     h = await start(w, { files: h.files, links: fakeLinks('down') });
     await drain(h);
