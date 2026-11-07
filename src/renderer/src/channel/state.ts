@@ -41,7 +41,7 @@ export function openedWith(answer: ChannelAnswer): ChannelHeld {
   return { phase: 'open', rev, events: [...events].sort(byOffset), sessions, pending, unverified, asOf, live, hosts: answer.hosts ?? [], machines: answer.machines ?? [] };
 }
 
-/** The to-human entries after a change: by key over what is held, main's order kept (each `upsert` is new to it). */
+/** The to-human entries after a change: by key over what is held, in main's order (time, machine, the machine's `order`). */
 function hostsAfter(current: ChannelHeld, change: Extract<ChannelChanged, { ok: true }>): ChannelHost[] {
   const held = current.phase === 'open' ? current.hosts : [];
   const delta = change.hosts;
@@ -51,7 +51,7 @@ function hostsAfter(current: ChannelHeld, change: Extract<ChannelChanged, { ok: 
   const byKey = new Map(held.filter((host) => !removed.has(host.key)).map((host) => [host.key, host]));
   for (const host of delta.upserts) byKey.set(host.key, host);
   const time = (host: ChannelHost) => Date.parse(host.at) || 0;
-  return [...byKey.values()].sort((a, b) => time(a) - time(b) || (a.machine < b.machine ? -1 : a.machine > b.machine ? 1 : 0)); // stable: one time's entries of a machine keep main's order
+  return [...byKey.values()].sort((a, b) => time(a) - time(b) || (a.machine < b.machine ? -1 : a.machine > b.machine ? 1 : 0) || a.order - b.order); // main's order
 }
 
 export function applyChange(current: ChannelHeld, change: ChannelChanged): ChannelHeld {

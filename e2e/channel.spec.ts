@@ -63,9 +63,9 @@ const nonce = () => randomBytes(16).toString('base64url');
 function seededHosts(local: MachineRef, at: (minutesAgo: number) => string): { hosts: ChannelHost[]; machines: ChannelMachine[]; asOf: { studio: string; render: string } } {
   const asOf = { studio: at(25), render: at(3 * 60) };
   const hosts: ChannelHost[] = [];
-  const add = (machine: MachineRef, host: Omit<ChannelHost, 'key' | 'machine' | 'id'>) => {
+  const add = (machine: MachineRef, host: Omit<ChannelHost, 'key' | 'machine' | 'id' | 'order'>) => {
     const id = String(hosts.length + 1);
-    hosts.push({ key: `${machine} ${id}`, machine, id, ...host });
+    hosts.push({ key: `${machine} ${id}`, machine, id, ...host, order: hosts.length }); // main's place: the seed's order
   };
   const laneA = (session: string, machine: string, seq: number) => `${PROJECT}/${encodeURIComponent(`${machine}/${session}`)}/${seq}`;
   const laneB = (session: string, ...rest: string[]) => [PROJECT, 'lane-b', session, ...rest].join('/');

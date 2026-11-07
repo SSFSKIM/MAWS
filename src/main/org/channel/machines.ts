@@ -101,7 +101,8 @@ type Page = { entries: HostEntry[]; more: boolean };
 type Failed = { failed: string };
 /** `order`: where the entry stands in its machine's journal among those it said at the same time (below). */
 type Held = { entry: HostEntry; host: ChannelHost; bytes: number; order: number };
-type Hold = { name: string; asOf: string | null; entries: Map<string, Held>; reading: Set<string> | null; next: number };
+/** `next` and `low`: the places a later entry and an older page's entry take, above and below every entry held. */
+type Hold = { name: string; asOf: string | null; entries: Map<string, Held>; reading: Set<string> | null; next: number; low: number };
 type MachineState = ChannelMachine['state'];
 type Source = { state: MachineState; timer: ReturnType<typeof setTimeout> | null; backoff: number; stop(): void };
 type Remote = Source & {
@@ -132,9 +133,11 @@ const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 /** Oldest first: the entry's own time, then (one machine's) its id. */
 /**
  * Oldest first: the entry's own time, then, within one machine, its place in the journal. An id from another machine
- * is an opaque cursor that sorts nothing, so each entry takes the next of its hold's counter as it is first held, in its
- * journal's order: a page (newest first) from its oldest, each `ev` and tap as it comes (the journal's order), a cached
- * file in the order it was written. The questions of one ask, said at one time, keep the order they were asked in.
+ * is an opaque cursor that sorts nothing, so each entry takes a place as it is first held, in its journal's order: a
+ * read's first page (newest first) from its oldest and each `ev` and tap as it comes (the journal's order) take the next
+ * places above every entry held; a read's older pages, from their newest, the next below every entry held; a cached
+ * file, in the order it was written. The questions of one ask, said at one time, keep the order they were asked in,
+ * a page boundary between them included. The place goes to the renderer (`ChannelHost.order`), which orders by it too.
  */
 const byTime = (a: Held, b: Held): number => timeOf(a.entry.at) - timeOf(b.entry.at) || a.order - b.order;
 const sameReader = (a: Reader | null, b: Reader | null): boolean => a !== null && b !== null && a.org === b.org && a.member === b.member;
@@ -214,12 +217,12 @@ export function createChannelMachines(deps: ChannelMachinesDeps): ChannelMachine
 
     function holdOf(ref: MachineRef, name: string): Hold {
       let hold = holds.get(ref);
-      if (hold === undefined) holds.set(ref, (hold = { name, asOf: null, entries: new Map(), reading: null, next: 0 }));
+      if (hold === undefined) holds.set(ref, (hold = { name, asOf: null, entries: new Map(), reading: null, next: 0, low: -1 }));
       hold.name = name;
       return hold;
     }
 
-    const hostOf = (ref: MachineRef, e: HostEntry): ChannelHost => ({
+    const hostOf = (ref: MachineRef, e: HostEntry, order: number): ChannelHost => ({
       key: `${ref} ${e.id}`,
       machine: ref,
       id: e.id,
@@ -230,6 +233,7 @@ export function createChannelMachines(deps: ChannelMachinesDeps): ChannelMachine
       ...(e.choices === undefined ? {} : { choices: e.choices }),
       at: e.at,
       src: e.src,
+      order,
     });
 
     /** The newest entries within both bounds, by the entry's own time. */
@@ -248,17 +252,19 @@ export function createChannelMachines(deps: ChannelMachinesDeps): ChannelMachine
     }
 
     /**
-     * Each entry not yet held, once by its id, in the journal's order (`newestFirst`: a page's, read from its end); true
-     * when anything was. A read in flight hears each id.
+     * Each entry not yet held, once by its id, at its place (`byTime`): `live`, in the journal's order, above every entry
+     * held; `newest`, a read's first page (newest first), the same from its end; `older`, a read's later page, below
+     * every entry held, from its newest. True when anything was. A read in flight hears each id.
      */
-    function add(ref: MachineRef, entries: readonly HostEntry[], newestFirst = false): boolean {
+    function add(ref: MachineRef, entries: readonly HostEntry[], place: 'live' | 'newest' | 'older' = 'live'): boolean {
       const hold = holds.get(ref);
       if (hold === undefined) return false;
       let added = false;
-      for (const entry of newestFirst ? [...entries].reverse() : entries) {
+      for (const entry of place === 'newest' ? [...entries].reverse() : entries) {
         hold.reading?.add(entry.id);
         if (entry.project !== project || hold.entries.has(entry.id)) continue;
-        hold.entries.set(entry.id, { entry, host: hostOf(ref, entry), bytes: sizeOf(entry), order: hold.next++ });
+        const order = place === 'older' ? hold.low-- : hold.next++;
+        hold.entries.set(entry.id, { entry, host: hostOf(ref, entry, order), bytes: sizeOf(entry), order });
         added = true;
       }
       if (added) trim(hold);
@@ -293,10 +299,12 @@ export function createChannelMachines(deps: ChannelMachinesDeps): ChannelMachine
       const current = () => alive() && holds.get(ref) === hold && hold.reading === seen;
       try {
         let next: Page | Failed = first ?? (await page(undefined, Math.min(HISTORY_LIMIT_MAX, limits.entries)));
+        let place: 'newest' | 'older' = 'newest';
         for (;;) {
           if (!current()) return 'stopped';
           if ('failed' in next) return next;
-          if (add(ref, next.entries, true)) changed();
+          if (add(ref, next.entries, place)) changed();
+          place = 'older';
           const before = next.entries.at(-1)?.id;
           if (!next.more || seen.size >= limits.entries || before === undefined) break;
           next = await page(before, Math.min(HISTORY_LIMIT_MAX, limits.entries - seen.size));
@@ -621,7 +629,10 @@ export function createChannelMachines(deps: ChannelMachinesDeps): ChannelMachine
         for (const machine of file.machines) {
           const hold = holdOf(machine.machine, machine.name);
           hold.asOf = machine.asOf;
-          for (const entry of machine.entries) hold.entries.set(entry.id, { entry, host: hostOf(machine.machine, entry), bytes: sizeOf(entry), order: hold.next++ });
+          for (const entry of machine.entries) {
+            const order = hold.next++;
+            hold.entries.set(entry.id, { entry, host: hostOf(machine.machine, entry, order), bytes: sizeOf(entry), order });
+          }
         }
       } else reader = current;
       offs.push(

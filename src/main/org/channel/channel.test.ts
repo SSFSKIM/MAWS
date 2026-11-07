@@ -732,6 +732,7 @@ describe('the machines’ to-human entries', () => {
     text: id,
     at: new Date(NOW + minute * 60_000).toISOString(),
     src: `p/w/${id}`,
+    order: minute,
   });
   function stand() {
     let entries: ChannelHost[] = [];

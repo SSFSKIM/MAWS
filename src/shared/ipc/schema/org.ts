@@ -324,6 +324,9 @@ export const ChannelHostSchema = z.strictObject({
   choices: z.array(z.string()).optional(),
   at: z.string(),
   src: z.string(),
+  // among one machine's entries said at the same time, its place in that machine's journal (lower first), fixed when main
+  // first holds the entry: the renderer's order after `at` and the machine, across changes
+  order: z.number().int(),
 });
 export type ChannelHost = z.infer<typeof ChannelHostSchema>;
 /**

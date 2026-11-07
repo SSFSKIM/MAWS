@@ -228,7 +228,7 @@ describe('the to-human entries', () => {
   const host = (machine: typeof TEST_MACHINE, minute: number, over: Partial<ChannelHost> = {}): ChannelHost => {
     n += 1;
     const id = over.id ?? `e${n}`;
-    return { key: `${machine} ${id}`, machine, id, lane: 'A', session: A, kind: 'message', text: `said at ${minute}`, at: T(minute), src: `${SMNS}/mini%2F${A}/${n}`, ...over };
+    return { key: `${machine} ${id}`, machine, id, lane: 'A', session: A, kind: 'message', text: `said at ${minute}`, at: T(minute), src: `${SMNS}/mini%2F${A}/${n}`, order: n, ...over };
   };
   const live = (machine: typeof TEST_MACHINE, name: string, over: Partial<ChannelMachine> = {}): ChannelMachine => ({ machine, name, state: 'live', asOf: T(0), ...over });
   const MACHINES = [live(TEST_MACHINE, 'MacBook'), live(OTHER_MACHINE, 'mini')];
