@@ -3351,6 +3351,20 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   - **The test** (Task 2): a member's write on device 1 reaches the same member's device 2 with their fields, and reaches neither another member's channel nor an owner's.
   Date/Author: 2026-11-07, O8's executor (controller).
 
+- Decision: M6a Task 2, the endpoint (d6347dda2, endpoint-only, for the desk track; 80ccbfc65 and ab33757ae, the rest). It settles these points.
+  1. **The reader is computed with the authorization decision.** It comes from the owners that decision already read, rather than from a second lookup at execution, since an act may await nothing between its decision check and the ledger. A machine owner reads as `'owner'`; anyone else reads as their own member id. Every `machine` request a channel makes carries that reader. The new file is `src/endpoint/readers.ts`.
+  2. **Grades.** `session.drafts.get` stays a call graded `view`, as the registry has it, and not `converse` as M6a's Grades decision said, because a call graded `converse` is refused `act-required` and would have to be a ledgered act. A member reads only their own draft either way. `session.drafts.set` is a `converse` act, and it's in `KEPT_WITHOUT_ACTION`, so the ledger doesn't store each draft save's document. `session.reader.update` is graded `list`, as ruled.
+  3. **The mixed patch** is refused by authorization's existing strict schema check on the raw input, before tolerant decoding. No new code was needed, and a test pins it.
+  4. **Surfaces.**
+     - Each checkout feed's `session.changed` carries its member's own reading.
+     - If a member's re-read fails, the record goes with no reading at all, never the owners'.
+     - The feeds' owners hook is optional and fails closed: without it, every member reads as their own.
+     - The notice to a member's other devices is a `session.changed` with `cause: 'update'` and the last revision heard, on that member's checkout feeds for the session.
+     - Cost: about 15 µs per index read, and about 224 µs against 195 µs per `session.changed` end to end once a member's feed is added beside an owner's. Not measured: the per-event owners read on a delegated machine, where it verifies certificates.
+  5. **The notice's reach.** A member's other device hears of a change only while it holds that session's checkout feed open. A sidebar row for a session that isn't open picks the change up at its next read. The gap is the narrower half of the architect's option (b); it's recorded for Task 3 and in the residue.
+  6. **Main's adapter** takes `session.drafts.set` as a machine act. Task 3 must send one session's draft saves one after another, because acts are decided concurrently.
+  Date/Author: 2026-11-07, O8's executor (controller), from Task 2's report.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
