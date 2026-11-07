@@ -165,7 +165,7 @@ async function uSees(scene: ReachScene, s: ReachSession = scene.S): Promise<bool
 }
 
 /** The owner's view of the project's log, from offset 0, caught up. */
-async function ownerLog(scene: ReachScene): Promise<LoggedEvent[]> {
+export async function ownerLog(scene: Pick<ReachScene, 'hub' | 'person' | 'project'>): Promise<LoggedEvent[]> {
   const socket = await ProjectSocket.open(scene.hub, scene.person.headers, scene.project.id, 15_000);
   try {
     await socket.catchUp(0);
@@ -175,9 +175,12 @@ async function ownerLog(scene: ReachScene): Promise<LoggedEvent[]> {
   }
 }
 
+/** Where a probe speaks: the hub, the org it signs for, and the run's project. */
+export type ProbeAt = Pick<ReachScene, 'hub' | 'org' | 'project'>;
+
 /** A probe machine's request to the hub's HTTP history routes, as the machine: its service token alone, never the
  * owner's Access token beside it, which would make the request the owner's. */
-async function probeGet<T>(scene: ReachScene, probe: Probe, path: string): Promise<{ status: number; body: T | null }> {
+export async function probeGet<T>(scene: ProbeAt, probe: Probe, path: string): Promise<{ status: number; body: T | null }> {
   const response = await fetch(`${scene.hub}${path}`, { headers: credentialHeaders(probe.machine.credentials), signal: AbortSignal.timeout(30_000) });
   const text = await response.text();
   let body: T | null = null;
@@ -190,10 +193,10 @@ async function probeGet<T>(scene: ReachScene, probe: Probe, path: string): Promi
 }
 
 /** A probe's project hello: the hub's vector and archive flag, and the events it sends after (its backlog), settled. */
-async function probeHello(scene: ReachScene, probe: Probe): Promise<{ have: string[]; backlog: Array<{ writer: string; seq: number }> }> {
+export async function probeHello(scene: ProbeAt, probe: Probe, settleMs = 5000): Promise<{ have: string[]; backlog: Array<{ writer: string; seq: number }> }> {
   const from = probe.endpoint.frames.length;
   const have = await probe.endpoint.project(scene.project.id, scene.project.name);
-  await sleep(5000);
+  await sleep(settleMs);
   const backlog = probe.endpoint.frames
     .slice(from)
     .filter((f) => f.t === 'events' && f.project === scene.project.id)
@@ -202,7 +205,7 @@ async function probeHello(scene: ReachScene, probe: Probe): Promise<{ have: stri
 }
 
 /** A hand-signed v2 `say` from a probe to `to` uploaded with no audience: the hub's refusal of it, or its acceptance. */
-async function probeSay(scene: ReachScene, probe: Probe, to: ReachSession, tok: string): Promise<{ writer: string; seq: number; refusal: { reason: string; message?: string } | null }> {
+export async function probeSay(scene: ProbeAt, probe: Probe, to: Pick<ReachSession, 'session' | 'alias'>, tok: string): Promise<{ writer: string; seq: number; refusal: { reason: string; message?: string } | null }> {
   const writer = `${probe.name}/${randomUUID()}`;
   const ts = new Date().toISOString();
   const draft = { ts, created: ts, writer, seq: 1, kind: 'say', from: 'o18-probe', to: [{ session: to.session, alias: to.alias }], text: `@${to.alias} hello ${tok}` };

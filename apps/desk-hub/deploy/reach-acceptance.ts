@@ -185,6 +185,20 @@ export type ReachRunOptions = {
   tag?: string;
 };
 
+/**
+ * A probe machine (PA, PB): enrolled the v2 way and listed as `owner`'s by the admin, its RL1 socket open, its hello
+ * advertising `capabilities` (nothing when undefined). `secret` hears its service token's secret before anything
+ * carries it; the socket's close and the listing's undoing are registered on `cleanup`.
+ */
+export async function listProbe(admin: OrgAdmin, hub: string, name: string, owner: string, capabilities: string[] | undefined, cleanup: Cleanup, secret: (value: string) => void = () => {}): Promise<Probe> {
+  const machine = await admin.listedMachine(name, cleanup, undefined, { owners: [owner] });
+  secret(machine.credentials.clientSecret);
+  const endpoint = echoingEndpoint(hub, machine, capabilities === undefined ? {} : { capabilities });
+  cleanup.add(`close ${name}'s RL1 socket`, async () => endpoint.close());
+  const welcome = await connectEndpoint(endpoint);
+  return { name, machine, endpoint, welcome };
+}
+
 /** The run's scene, each undoing registered on the cleanup before what it undoes (reach-items.ts's ReachScene). */
 export async function buildReachScene(o: ReachRunOptions & { tag: string }, made: Made, log: (line: string) => void): Promise<{ scene: ReachScene; machines: VmMachine[] }> {
   const { person, cleanup, tag } = o;
@@ -230,14 +244,10 @@ export async function buildReachScene(o: ReachRunOptions & { tag: string }, made
   };
   const probe = async (name: string, owner: string, capabilities: string[] | undefined): Promise<Probe> => {
     made.machines.push(name);
-    const machine = await admin.listedMachine(name, cleanup, undefined, { owners: [owner] });
-    o.secrets.add(machine.credentials.clientSecret);
+    const listed = await listProbe(admin, person.hub, name, owner, capabilities, cleanup, (value) => o.secrets.add(value));
     await view.refresh();
-    const endpoint = echoingEndpoint(person.hub, machine, capabilities === undefined ? {} : { capabilities });
-    cleanup.add(`close ${name}'s RL1 socket`, async () => endpoint.close());
-    const welcome = await connectEndpoint(endpoint);
     log(`${name}: a probe machine of ${owner === a.member ? 'the admin' : 'B'}'s, its hello ${capabilities ? `advertising ${capabilities.join(',')}` : 'advertising nothing'}`);
-    return { name, machine, endpoint, welcome };
+    return listed;
   };
 
   // The undoing the run's own acts need, registered before them: the archive designation cleared, then S's share with B
