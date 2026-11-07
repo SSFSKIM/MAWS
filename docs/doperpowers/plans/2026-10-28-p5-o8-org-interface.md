@@ -96,6 +96,10 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-07) The branch, reviewed and gated as a whole. reviewer-medium ran four passes with a confidentiality lens; every data loss it found is fixed, and it found no disclosure. The desk track checked every endpoint and draft-path delta and found them correct. `--gates all --evidence` passed on b90a20de5 (run 42395007929): 55 jobs green, no flaky line. The PR is #518.
 - [ ] M6b — Visibility and shares (O18's M5) — *executable; after M6a; its live proof is the staging run it shares with O18 M6, which needs the desk track's sminos executors and a real second member (the owner)*
   - [x] (2026-11-07) Refresh at the cut: branch `p5-o8-m6b` from master 48e0ed15a, after M6a landed as #518. The cited lines were reconciled, the parent re-pinned at Decision Log 248, and the plan made: four tasks (Decision Log, "M6b's refresh at its cut" and "M6b is built as four tasks").
+  - [x] (2026-11-07) Task 1, reviewed clean. The commits: 776b239cd, 727a103e6 and 5c24e83d1 (endpoint only), 79dc87205 and a35f6cf5a; then the fix wave 5cc92783f and f443e16cd, merged at 7a8e5a47b.
+    - What it adds: the `record.*` acts and `record.policy` behind sminos's `record`; the welcome's `record`; and the local door, served as `endpoint.local.act` and `.call` at `WIRE_MINOR` 32.
+    - Reviews: our task reviewer took two rounds. The desk track's desk 632 found the acts correct and raised three P2s on `record.policy`; desk 633 closed them.
+    - Static green at a35f6cf5a (42404533003) and f443e16cd (42406895430).
 - [ ] M4b — Machines and their rights — *executable; after M6b*
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
 - [ ] M5b — Add owner — *executable; after M4c; lands once the desk track's `record.owners` executor and DL190 (b)'s fix are on master*
@@ -3544,6 +3548,70 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   - **Nothing leaks.** An unnamed non-owner gets no entry. A named session that exists but isn't the caller's gets the same `unavailable` as one that doesn't exist.
   - **Residue** (the desk track's Minor; the architect files it): `placeListings` waits for each lane B listing's spine placement in turn, so a `record.policy` call without a named session costs one spine dispatch per lane B listing, in sequence. The exit is `Promise.all`. If Task 3's Share-sheet e2e shows the sheet's opening waiting on these placements, it is fixed in Task 3's wave instead, and its endpoint hunk goes to the desk track.
   Date/Author: 2026-11-07, the owner, the desk track and the architect, recorded by O8's executor (controller).
+
+- Decision: M6b Task 2, main (fa42186a5, 237682977, 40b9742e6, 656527ca8, 28eae9dfc). It settles these points, and the architect accepted them (2026-11-07).
+  1. **The commands.**
+     - `org.policy.get` takes `{machine}` or `{address}`.
+     - `org.policy.set` answers `{ok, results, policy}`. The refusal codes are `POLICY_REFUSALS`. A line's reason is the refuser's own word, and `no-session` arrives as a plain string.
+     - "Also changed elsewhere": the returned revision is above the base plus 1 for a change, or above the base plus 0 for a no-op.
+  2. **One confirmation per save.**
+     - `actMany` only signs, and returns one sender per act.
+     - `policy.ts` sends the acts in order and stops at the first failure. A send past `ACT_FRESH_MS` is refused `stale`.
+     - `signActions` always asks for confirmation; an empty list is `malformed`. A `StepUpSigner` is required.
+  3. **Lanes.** This Mac's sessions are lane B. A remote session's lane comes from its row; with no row, a save is refused `no-session`.
+  4. **The rows' two memberships.** Each membership is scoped to revisions:
+     - an older record is ignored;
+     - a failed call releases nothing;
+     - a machine answers only for its own sessions.
+
+     `listings.json` gains `shown`, and a file without it reads as hub-held. There's at most one channel call per machine at a time. The channel is read:
+     - at link up and at each new head;
+     - at sign-in;
+     - after each act (`refreshChannel`);
+     - every 60 s;
+     - and at once on a hub `gone` for a row the channel held.
+  5. **The enumerating test** (in 237682977) covers 5,040 permutations plus 16,807 five-event sequences, in about 30 s.
+     - Its first run failed 4,284 of 5,040 orders: every order where the channel spoke first, `hubRows chanAnswer` (stuck at revision 10), and `gone11 chanAnswer`.
+     - Three mutations show it catches the faults it targets.
+     - The architect keeps length 5, since that's what this test proves (M6a's resend fault showed only at five events). The unit gate's four shards absorb the 30 s. If that shard becomes the long pole, the test moves to its own shard; it is not shortened.
+  6. **The e2e Org page fixture** answers `set` and `owners.add` `busy`, and leaves `policy.get` to main.
+  7. **Private-listing churn.** The endpoint re-signs a private listing on every call. Task 3 finds out whether that churn is visible:
+     - an `org.policies.changed` or row-changed broadcast every 60 s;
+     - a re-render or reset of an open Share sheet;
+     - a flap of unread or of membership;
+     - a bump of a membership revision.
+
+     If it is, main dedupes a listing on its content and revision, not its signature, with a test, in Task 3's wave. No endpoint change is needed. If it's only CPU and IPC cost, it becomes residue m6b-r2.
+  8. **Free-string line reasons.** Task 3 maps the known `POLICY_REFUSALS` codes and `no-session` to copy. Any other reason shows as one generic refusal line naming the machine, with the raw word secondary (a detail or a tooltip). Nothing outside the known codes ever renders blank, and Task 3's e2e photographs one unknown reason.
+  9. **Commits that don't build alone.** fa42186a5, 237682977, 40b9742e6 and 656527ca8 fail the typecheck on their own, and 28eae9dfc fixes them. No squash, as with Task 1. The PR body lists them.
+  Date/Author: 2026-11-07, O8's executor (controller), from Task 2's report and the architect's rulings.
+
+- Decision: The real-member sitting (desk 634, with the architect's ruling, 2026-11-07). Task 4 plans it.
+  1. **cloudflared.** No login is needed. The owner's staging Access token, the one `staging-run.sh`'s admin and reach steps use, is valid until 2026-11-26T01:36Z and names the owner's staging email. Only if the sitting falls after about 11-25 does the owner run `cloudflared access login https://desk-hub-staging.opencognita-platform.workers.dev` once, before the logout step.
+  2. **The Access admission** takes no dashboard step. `staging-run.sh access-sync` (O11 M3) sets staging's Access people policy to exactly the emails of the org state head's members. Once the run adds B to staging's org state, the desk track runs `access-sync` and Access admits B. At teardown B is removed and `access-sync` runs again. The owner's only input is the address itself, sent to the desk track directly, never into a repo or a PR. The records say "the owner's second email".
+  3. **A pitfall in B's sign-in.** The scratch profile's org sign-in opens the default browser at the staging hub's `/cdn-cgi/access/cli` (`access-login.ts:194`). If that browser still holds the owner's staging Access session, Access likely completes the transfer as the owner. So just before B's sign-in, the owner opens `https://desk-hub-staging.opencognita-platform.workers.dev/cdn-cgi/access/logout`.
+     - That logs out of every Access app on the team, so production desk web asks for sign-in again later. The MAWS apps' org sessions and cloudflared's CLI token are untouched.
+     - Until the owner signs back in as themselves, they must not run `cloudflared access login` for staging, or the CLI token would name B.
+     - The pass-through is unverified live. The sitting checks it by reading the member email the scratch profile shows before its pairing completes.
+  4. **The harness path** (the architect's ruling, keeping "your harness does the rest"). Task 4 adds two harness steps, both signed by the staging admin's test keys, as `addRunMember` is:
+     - (a) adding B with the real email, read at run time from a 0600 file outside the repo, never committed or logged;
+     - (b) endorsing the second profile's device programmatically.
+
+     A test pins both to refuse any hub but staging's, as O18 M6's harness does. A pairing code goes to a 0600 file, never into chat. The owner's admin flows in the app aren't part of M6b's acceptance. The scratch profile lives under a path Task 4 names, outside the repo, which the desk track can delete at teardown. Launching it is the owner's one command at the sitting, not an Electron app an agent runs on the MacBook.
+  5. **Teardown.**
+     - The run removes B and revokes the device.
+     - The desk track runs `access-sync`.
+     - The second scratch profile's directory is deleted.
+     - The owner signs back into staging Access as themselves the next time a browser needs it.
+     - The VM is a fresh one at the slot, without the MAWS project; its scenes run sminos 1.40.3.
+  6. **The owner's steps**, for the architect to hand over:
+     1. Send the second email to the desk track directly.
+     2. At the sitting, launch the scratch profile with the given command.
+     3. Open the logout URL in the default browser.
+     4. Sign in with the second email and the code from its inbox, and check the member email the profile shows before pairing completes.
+     5. Don't run `cloudflared access login` for staging until signed back in as yourself.
+     6. Only if the sitting falls after about 11-25: the one-time `cloudflared` login, before step 3.
+  Date/Author: 2026-11-07, the desk track and the architect, recorded by O8's executor (controller).
 
 ## Outcomes & Retrospective
 
