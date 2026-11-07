@@ -1,10 +1,11 @@
 // The Share sheet (P5 O8 M6b, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M6b's "At its end" and Decisions;
 // Q4 as O18 amended it), opened from a session's header (the Toolbar's session actions) and its row's menu, for a session
-// you own (target.ts). Shaped like a shared document's: the general access, each with its line; the people it is shared
-// with, each at Can message, View, Converse or Approve, and Add person; the foot; and Save, which main signs with one
-// Touch ID for everything it changes (`org.policy.set`), sending the acts in the order the sheet shows them: the access,
-// then each person's change top to bottom (the policy's people in its order, then each added). A person removed stays in
-// their place, marked, until Save; a failure stops the acts after it, so the order shown is the order that matters.
+// you own (target.ts). Shaped like a shared document's: the general access, each with its line; Add person, then the
+// people it is shared with under it, each at Can message, View, Converse or Approve; the foot; and Save, which main signs
+// with one Touch ID for everything it changes (`org.policy.set`), sending the acts in the order the sheet shows them:
+// the access, then each person's change top to bottom (the policy's people in its order, then each added). A person
+// removed stays in their place, marked, until Save; a failure stops the acts after it, so the order shown is the order
+// that matters.
 //
 // - It opens on a fresh read of the session's policy (`org.policy.get {address}`). A machine whose sminos can't keep a
 //   session's reach says so and offers nothing; a session whose reach can't be read, or a read refused, says why and
@@ -146,16 +147,17 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
     take(result.value.policy === null ? { state: 'unavailable' } : 'unavailable' in result.value.policy ? { state: 'unavailable' } : { state: 'ready', policy: result.value.policy });
   };
 
-  const said = (text: string, extra?: ReactNode) => (
-    <p data-share-said className="m-0 text-fg-muted">
-      {text}
-      {extra}
-    </p>
-  );
   const reloadButton = (
-    <button type="button" onClick={reload} className={`${QUIET} ml-1`}>
+    <button type="button" onClick={reload} className={SECONDARY}>
       {SHARE.reload}
     </button>
+  );
+  /** What the sheet says in place of a policy, Reload under it when `offerReload`. */
+  const said = (words: ReactNode, offerReload = false) => (
+    <div data-share-said className="flex min-w-0 flex-col items-start gap-2">
+      <p className="m-0 text-fg-muted">{words}</p>
+      {offerReload && reloadButton}
+    </div>
   );
 
   return (
@@ -180,28 +182,26 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
                 ))}
               </ul>
               {unknown !== undefined && (
-                <p data-share-stopped className="m-0 text-fg-muted">
-                  {SHARE.stopped}
+                <div data-share-stopped className="flex min-w-0 flex-col items-start gap-2">
+                  <p className="m-0 text-fg-muted">{SHARE.stopped}</p>
                   {reloadButton}
-                </p>
+                </div>
               )}
             </section>
           )}
           {refusal !== null && (
-            <p role="alert" data-share-refusal={refusal} className="m-0 text-ui-sm text-danger [overflow-wrap:anywhere]">
-              <Words {...refusalWords(refusal, machine)} />
+            <div role="alert" data-share-refusal={refusal} className="flex min-w-0 flex-col items-start gap-2 text-ui-sm">
+              <p className="m-0 text-danger [overflow-wrap:anywhere]">
+                <Words {...refusalWords(refusal, machine)} />
+              </p>
               {refusal === 'changed-elsewhere' && reloadButton}
-            </p>
+            </div>
           )}
           {read.state === 'reading' && said(SHARE.reading)}
           {read.state === 'unsupported' && said(SHARE.unsupported(machine))}
-          {read.state === 'unavailable' && said(SHARE.unavailable, reloadButton)}
-          {read.state === 'refused' && (
-            <p data-share-said className="m-0 text-fg-muted">
-              <Words {...refusalWords(read.reason, machine)} />
-              {reloadButton}
-            </p>
-          )}
+          {/* a save stopped by an unknown outcome offers its Reload in its results, the one Reload the sheet shows */}
+          {read.state === 'unavailable' && unknown === undefined && said(SHARE.unavailable, true)}
+          {read.state === 'refused' && said(<Words {...refusalWords(read.reason, machine)} />, true)}
           {ready !== null && (
             <>
               <fieldset disabled={saving} className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
@@ -218,6 +218,37 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
               </fieldset>
               <fieldset disabled={saving} className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
                 <legend className="mb-1 p-0 text-ui-sm font-medium text-fg">{SHARE.people}</legend>
+                <div data-share-add className="flex min-w-0 flex-col gap-0.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <select
+                      aria-label={SHARE.addPerson}
+                      value={adding.member}
+                      disabled={addable.length === 0}
+                      onChange={(e) => setAdding((a) => ({ ...a, member: e.target.value }))}
+                      className={`${SELECT} min-w-0 flex-1`}
+                    >
+                      <option value="">{view === null ? SHARE.noMembers : addable.length === 0 && view !== 'reading' ? SHARE.nobodyToAdd : SHARE.choose}</option>
+                      {addable.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name} · {m.email}
+                        </option>
+                      ))}
+                    </select>
+                    <GradeSelect label={SHARE.newGrade} grade={adding.grade} onChange={(grade) => setAdding((a) => ({ ...a, grade }))} />
+                    <button
+                      type="button"
+                      disabled={adding.member === ''}
+                      onClick={() => {
+                        setPeople((ps) => [...ps, { member: adding.member, was: null, grade: adding.grade }]);
+                        setAdding((a) => ({ ...a, member: '' }));
+                      }}
+                      className={`${SECONDARY} shrink-0`}
+                    >
+                      {SHARE.add}
+                    </button>
+                  </div>
+                  <span className="text-ui-sm text-fg-muted">{SHARE.grade[adding.grade].line}</span>
+                </div>
                 {people.length === 0 ? (
                   <p className="m-0 text-ui-sm text-fg-muted">{SHARE.nobody}</p>
                 ) : (
@@ -259,37 +290,6 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
                     })}
                   </ul>
                 )}
-                <div data-share-add className="flex min-w-0 flex-col gap-0.5">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <select
-                      aria-label={SHARE.addPerson}
-                      value={adding.member}
-                      disabled={addable.length === 0}
-                      onChange={(e) => setAdding((a) => ({ ...a, member: e.target.value }))}
-                      className={`${SELECT} min-w-0 flex-1`}
-                    >
-                      <option value="">{view === null ? SHARE.noMembers : addable.length === 0 && view !== 'reading' ? SHARE.nobodyToAdd : SHARE.choose}</option>
-                      {addable.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name} · {m.email}
-                        </option>
-                      ))}
-                    </select>
-                    <GradeSelect label={SHARE.newGrade} grade={adding.grade} onChange={(grade) => setAdding((a) => ({ ...a, grade }))} />
-                    <button
-                      type="button"
-                      disabled={adding.member === ''}
-                      onClick={() => {
-                        setPeople((ps) => [...ps, { member: adding.member, was: null, grade: adding.grade }]);
-                        setAdding((a) => ({ ...a, member: '' }));
-                      }}
-                      className={`${SECONDARY} shrink-0`}
-                    >
-                      {SHARE.add}
-                    </button>
-                  </div>
-                  <span className="text-ui-sm text-fg-muted">{SHARE.grade[adding.grade].line}</span>
-                </div>
               </fieldset>
               <p data-share-foot className="m-0 text-ui-sm text-fg-faint">
                 {SHARE.foot}

@@ -88,8 +88,9 @@ describe('the sheet', () => {
     expect((within(people).getByRole('combobox', { name: "Ben's access" }) as HTMLSelectElement).value).toBe('list');
     expect(within(people).getByText("Their agents can message this session. They can't read it.")).toBeTruthy();
     expect(within(sheet).getByText('What was already shared stays shared.')).toBeTruthy();
-    // Add person offers the org's other members: not you, an owner, nor anyone shared with already
+    // Add person, above the people, offers the org's other members: not you, an owner, nor anyone shared with already
     const pick = within(sheet).getByRole('combobox', { name: SHARE.addPerson }) as HTMLSelectElement;
+    expect(pick.compareDocumentPosition(people) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect([...pick.options].map((o) => o.value)).toEqual(['', CHEN]);
     expect((within(sheet).getByRole('button', { name: SHARE.save }) as HTMLButtonElement).disabled).toBe(true); // nothing changed
   });
@@ -222,7 +223,9 @@ describe('the sheet', () => {
     const outcomes = await within(sheet).findByRole('region', { name: SHARE.results });
     expect(within(outcomes).getAllByRole('listitem').map((li) => li.textContent)).toEqual([`General access: Private · ${SHARE.unknown.malformed('studio-mini')}`, `Ana: removed · ${SHARE.notSent}`]);
     expect(within(outcomes).getByText(SHARE.stopped)).toBeTruthy();
-    expect(within(sheet).getByText(SHARE.unavailable)).toBeTruthy(); // no policy came back with it
+    // no policy came back with it, and the results' Reload is the one the sheet offers
+    expect(within(sheet).queryByText(SHARE.unavailable)).toBeNull();
+    expect(within(sheet).getAllByRole('button', { name: SHARE.reload })).toHaveLength(1);
     fireEvent.click(within(outcomes).getByRole('button', { name: SHARE.reload }));
     await fake.reply('org.policy.get', read([entry({ access: 'private', policyRev: 8 })]));
     expect(within(sheet).queryByRole('region', { name: SHARE.results })).toBeNull();
