@@ -71,11 +71,12 @@ class Sub {
 }
 
 let ids = 0;
-const laneB = (app: string, text: string): HostEntry => {
+/** An entry's id is the journal's arrival order; its `at`, when it was said, is the id's second unless given (`atSeconds`). */
+const laneB = (app: string, text: string, atSeconds?: number): HostEntry => {
   const id = ++ids;
-  return { id: String(id), project: PROJECT, appSessionId: app as never, engineSessionId: null, lane: 'B', kind: 'message', text, at: new Date(Date.UTC(2026, 10, 6) + id * 1000).toISOString(), src: `${PROJECT}/lane-b/${app}/${id}` };
+  return { id: String(id), project: PROJECT, appSessionId: app as never, engineSessionId: null, lane: 'B', kind: 'message', text, at: new Date(Date.UTC(2026, 10, 6) + (atSeconds ?? id) * 1000).toISOString(), src: `${PROJECT}/lane-b/${app}/${id}` };
 };
-const laneA = (session: string, text: string): HostEntry => ({ ...laneB('x', text), appSessionId: null, engineSessionId: session as never, lane: 'A' });
+const laneA = (session: string, text: string, atSeconds?: number): HostEntry => ({ ...laneB('x', text, atSeconds), appSessionId: null, engineSessionId: session as never, lane: 'A' });
 
 /** The spine stood in for: the project's journal, the records (app → engine), each read countable and holdable. */
 function machine(records: Record<string, string | null> = {}) {
@@ -94,7 +95,8 @@ function machine(records: Record<string, string | null> = {}) {
     }
     if (name !== 'channel.history') return { ok: false, error: { code: 'unknown_command', message: name } } as never;
     const { before, limit } = input as { before?: string; limit: number };
-    const newest = [...journal].reverse();
+    // newest first by `at`, then by id, as the journal orders them
+    const newest = [...journal].sort((a, b) => b.at.localeCompare(a.at) || Number(b.id) - Number(a.id));
     const from = before === undefined ? 0 : newest.findIndex((e) => e.id === before) + 1;
     const entries = newest.slice(from, from + limit);
     return { ok: true, value: { entries, more: from + entries.length < newest.length } } as never;
@@ -448,6 +450,81 @@ describe('the feed’s bound on what waits', () => {
       { seq: 5, text: 'viewed 1000' },
       { seq: 6, text: 'after' },
     ]);
+  });
+
+  it('recovers a let-go entry the member views that was said earlier than the rest, and sends the recovered in the journal’s arrival order', async () => {
+    const m = machine({ 'app-h': 'eng-h', 'app-v': 'eng-v' });
+    const who = member(new Set(['eng-v']));
+    const { sub, record } = start(m, who);
+    await settle();
+    sub.take();
+    await settle();
+    const base = ids + 100_000;
+    m.hold('session.get');
+    record(laneB('app-v', 'early, said long ago', 1)); // arrives first, its `at` older than any
+    for (let i = 0; i <= CHANGES_HELD; i++) record(laneB('app-h', `hidden ${i}`, base + i));
+    record(laneB('app-v', 'late, said last', base + 5_000));
+    m.release();
+    for (let i = 0; i < 4; i++) {
+      await settle();
+      sub.take();
+    }
+    expect(sub.endedWith).toBeNull();
+    expect(sub.snaps()).toHaveLength(1);
+    expect(sub.evs()).toEqual([
+      { seq: 1, text: 'early, said long ago' },
+      { seq: 2, text: 'late, said last' },
+    ]);
+    const delivered = sub.sent.filter((out) => out.t === 'ev').map((out) => Number((out.body as { entry: HostEntry }).entry.id.slice(1)));
+    expect(delivered).toEqual([...delivered].sort((a, b) => a - b));
+  });
+
+  it('recovers a viewable entry however many came after it, as long as the journal holds it', async () => {
+    const m = machine({ 'app-h': 'eng-h', 'app-v': 'eng-v' });
+    const who = member(new Set(['eng-v']));
+    const { sub, record } = start(m, who);
+    await settle();
+    sub.take();
+    await settle();
+    const base = ids + 100_000;
+    m.hold('session.get');
+    record(laneB('app-v', 'viewed', base + 10_000)); // first to arrive, said last: the journal keeps it
+    for (let i = 0; i < 2 * CHANGES_HELD + 100; i++) record(laneB('app-h', `hidden ${i}`, base + 2_200 - i));
+    m.release();
+    for (let i = 0; i < 4; i++) {
+      await settle();
+      sub.take();
+    }
+    expect(sub.endedWith).toBeNull();
+    expect(sub.evs()).toEqual([{ seq: 1, text: 'viewed' }]);
+  });
+
+  it('recovers by the rights as they stand: a session revoked mid-read sends what stays viewable as an ev, never a snapshot', async () => {
+    const m = machine({ 'app-p': 'eng-p' });
+    const who = member(new Set(['eng-p', 'la-q']));
+    const { feeds, sub, record } = start(m, who);
+    await settle();
+    sub.take();
+    await settle();
+    const base = ids + 100_000;
+    m.hold('session.get');
+    record(laneB('app-p', 'p first', base + 6_000)); // unranked: what comes after it waits
+    record(laneA('la-q', 'q stays', base)); // said before every P entry
+    for (let i = 0; i < CHANGES_HELD + 100; i++) record(laneB('app-p', `p ${i}`, base + 5_000 - i));
+    m.hold('channel.history', 1 + 5); // the snapshot's read and five pages of the recovery's go; the sixth waits
+    m.release();
+    m.hold('channel.history', 1 + 5);
+    await settle();
+    who.views.delete('eng-p'); // P revoked mid-read
+    feeds.accessChanged();
+    m.release();
+    for (let i = 0; i < 6; i++) {
+      await settle();
+      sub.take();
+    }
+    expect(sub.endedWith).toBeNull();
+    expect(sub.snaps()).toHaveLength(1);
+    expect(sub.evs()).toEqual([{ seq: 1, text: 'q stays' }]);
   });
 
   it('ends `behind` past CHANGES_HELD entries the member views waiting', async () => {
