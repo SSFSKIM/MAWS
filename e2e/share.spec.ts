@@ -182,8 +182,8 @@ function overflowing(root: Element): string[] {
     .map((el) => `${el.tagName.toLowerCase()} "${(el.textContent ?? '').slice(0, 60)}" ${el.scrollWidth} > ${el.clientWidth}`);
 }
 
-/** An action lies inside its sheet. */
-const SHEET: ActionEntry = { selector: '[data-share-sheet]', name: 'its sheet', probe: 'data-share-sheet="probe"' };
+/** An action lies inside its sheet (a probe inside its own clipping part, so the sheet's locator never names a probe). */
+const SHEET: ActionEntry = { selector: '[data-share-sheet], [data-share-probe]', name: 'its sheet', probe: 'data-share-probe' };
 
 /** Each mark that doesn't lie inside its row, and each marked row wider than its box. */
 function marksNotWhole(rows: Element[]): string[] {
