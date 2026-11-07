@@ -64,7 +64,7 @@ const TIMING_NODE_TESTS = [
   'test/org/rows.local.test.ts', // P5 O8 M2: a real endpoint's listings as rows through desk-hub's Worker in Miniflare and the app's feed
   'test/org/signer.local.test.ts', // P5 O8 M3: the app as the org's signer against desk-hub's Worker in Miniflare, revocations delivered over O7's link
   'test/org/org-page.local.test.ts', // P5 O8 M4a: the Org page's people and devices against desk-hub's Worker in Miniflare, a second member added, paired, promoted, demoted and removed
-  'test/org/channel.local.test.ts', // P5 O8 M7a: the project channel against desk-hub's Worker in Miniflare: machines' v2 events, a DX1 writer attested, words sent and read back, the cache as of offline
+  'test/org/channel.local.test.ts', // P5 O8 M7a: the project channel against desk-hub's Worker in Miniflare: machines' v2 events, a DX1 writer attested, words sent and read back, the cache as of offline; M7b: real endpoints' and this Mac's to-human entries, an older peer read once, a dropped link's entries as of
   'src/mawsd/process-endpoint.test.ts', // P5 O10 M10: the built mawsd and its endpoint as processes, enrolling against desk-hub's Worker in Miniflare
   'test/endpoint/acceptance-local.test.ts', // P5 O10 M11: the endpoint acceptance run end to end against the built mawsd and a Miniflare hub, its direct dials paced under the listener's limit
   'test/support/local-org.test.ts', // P5 O10 M10: the enrolled idle scene's org, a built mawsd enrolling against desk-hub's local runner (wrangler dev)
