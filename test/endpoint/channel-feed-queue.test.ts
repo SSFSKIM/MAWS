@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HostEntry } from '@shared/ipc/schema/channel';
 import type { SessionRanks } from '../../src/endpoint/authorize';
-import { ChannelFeeds, CHANGES_HELD } from '../../src/endpoint/channel-feed';
+import { ChannelFeeds, CHANGES_HELD, SNAPSHOT_READS } from '../../src/endpoint/channel-feed';
 import type { EndpointServices } from '../../src/endpoint/services';
 import type { Subscription } from '../../src/endpoint/subscriptions';
 
@@ -280,6 +280,25 @@ describe('the feed’s snapshot', () => {
     expect(snap.entries[0].text).toBe('mine');
     expect(snap.entries).toHaveLength(200);
     expect(snap.more).toBe(true);
+  });
+
+  it('ends `unavailable` when every read it may take moved before it could go: never a page whose `more` it can’t vouch for', async () => {
+    const m = machine();
+    m.journal.push(laneA('la-x', 'older'));
+    for (let i = 0; i < 200; i++) m.journal.push(laneA('la-v', `shown ${i}`));
+    // la-x is hidden while each read passes it by, and viewable by the time that read would go.
+    let asked = 0;
+    const ranks = (): SessionRanks => ({
+      holds: (placement) => placement !== null && (placement.target.session === 'la-v' || (placement.target.session === 'la-x' && ++asked % 2 === 0)),
+      ownsMachine: () => false,
+      holdsRight: () => false,
+      current: () => true,
+    });
+    const { sub } = start(m, { ranks } as unknown as ReturnType<typeof member>);
+    await settle();
+    expect(m.reads('channel.history')).toBe(2 * SNAPSHOT_READS);
+    expect(sub.snaps()).toEqual([]);
+    expect(sub.endedWith).toBe('unavailable');
   });
 
   it('is never queued once the project left the org meanwhile: the feed ends `removed`', async () => {

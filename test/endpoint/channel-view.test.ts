@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HostEntry } from '@shared/ipc/schema/channel';
 import type { SessionRanks } from '../../src/endpoint/authorize';
-import { CHANNEL_PAGE_BYTES, HEARD_MAX, PlacementBook, publish, publishFiltered, readViewable, SCAN_ENTRIES, viewable, type EntrySession } from '../../src/endpoint/channel-view';
+import { CHANNEL_PAGE_BYTES, HEARD_MAX, PlacementBook, publish, readViewable, SCAN_ENTRIES, viewable, type EntrySession } from '../../src/endpoint/channel-view';
 import type { EndpointServices } from '../../src/endpoint/services';
 import type { Placement } from '../../src/endpoint/targets';
 
@@ -226,10 +226,5 @@ describe('a page published', () => {
     expect(publish(read, 2, (e) => idOf(e) !== '1' && e.appSessionId !== 'app-2', (e) => e)).toBeNull();
     expect(publish(read, 2, (e) => idOf(e) !== '3' && e.appSessionId !== 'app-2', (e) => e)).toBeNull();
     expect(publish(read, 2, () => true, (e) => e)).toBeNull(); // app-2 is viewable now: its entries may belong on the page
-  });
-
-  it('once read again past its bound, goes as what is viewable of what it kept', () => {
-    expect(publishFiltered(read, 2, (e) => idOf(e) !== '3', (e) => e)).toEqual({ entries: [kept[1], kept[2]], more: false });
-    expect(publishFiltered(read, 1, (e) => idOf(e) !== '3', (e) => e)).toEqual({ entries: [kept[1]], more: true });
   });
 });
