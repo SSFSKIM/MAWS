@@ -1,7 +1,13 @@
+import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import * as z from 'zod';
 import { describe, expect, it } from 'vitest';
 import { commands, events, HOST_EVENTS } from './schema';
 import { fingerprintOf, wireFingerprint } from './wire-fingerprint';
+
+const FINGERPRINT_PATH = fileURLToPath(new URL('./wire-fingerprint.json', import.meta.url));
+// `pnpm wire:manifest` runs this file beside wire.test.ts; under either of its modes the fingerprint is rewritten
+const WRITE = process.env.MAWS_WIRE_MANIFEST_WRITE !== undefined && process.env.MAWS_WIRE_MANIFEST_WRITE !== '';
 
 type Registry = Parameters<typeof fingerprintOf>[0];
 const registry = (): Registry => ({ commands: { ...commands }, events: { ...events } });
@@ -52,13 +58,21 @@ describe('HOST_EVENTS', () => {
   });
 });
 
-describe('wireFingerprint', () => {
-  it('is 16 hex characters, stable across calls and equal to a fresh computation', () => {
-    const first = wireFingerprint();
-    expect(first).toMatch(/^[0-9a-f]{16}$/);
-    expect(wireFingerprint()).toBe(first);
-    expect(fingerprintOf(registry(), HOST_EVENTS)).toBe(first);
+// The production check: what every process reads (wire-fingerprint.json, the build's constant) is the fingerprint of
+// the live schemas, the value they computed at their start before the O17 footprint fix, so a peer of another build
+// sees no change. An authorized write comes first; the assertion after it is against the file as it then stands.
+describe('the committed wire fingerprint', () => {
+  it('is fingerprintOf over the live registry, 16 hex characters', () => {
+    const live = fingerprintOf(registry(), HOST_EVENTS);
+    if (WRITE) writeFileSync(FINGERPRINT_PATH, `${JSON.stringify({ fingerprint: live })}\n`);
+    const file = (JSON.parse(readFileSync(FINGERPRINT_PATH, 'utf8')) as { fingerprint: unknown }).fingerprint;
+    const read = WRITE ? file : wireFingerprint(); // a write is read back from the file; the import holds what was there
+    if (read !== live) throw new Error(`wire-fingerprint.json holds ${String(read)}, but the live schemas give ${live}: rewrite it with pnpm wire:manifest (a changed host shape also answers to wire.test.ts's rule; a rendering-only change, such as a zod upgrade, with MAWS_WIRE_MANIFEST_WRITE=rebase pnpm wire:manifest)`);
+    expect(live).toMatch(/^[0-9a-f]{16}$/);
   });
+});
+
+describe('wireFingerprint', () => {
 
   it('changes when a field is added to an engine-host command’s input or output', () => {
     const base = fingerprintOf(registry(), HOST_EVENTS);
