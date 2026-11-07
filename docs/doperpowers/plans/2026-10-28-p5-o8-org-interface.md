@@ -100,6 +100,11 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
     - What it adds: the `record.*` acts and `record.policy` behind sminos's `record`; the welcome's `record`; and the local door, served as `endpoint.local.act` and `.call` at `WIRE_MINOR` 32.
     - Reviews: our task reviewer took two rounds. The desk track's desk 632 found the acts correct and raised three P2s on `record.policy`; desk 633 closed them.
     - Static green at a35f6cf5a (42404533003) and f443e16cd (42406895430).
+  - [x] (2026-11-07) Task 2, reviewed clean. The commits: fa42186a5, 237682977, 40b9742e6, 656527ca8 and 28eae9dfc; then the review's fixes, dad52c414, 56eaf7f55 and 4d95d25b6.
+    - What it adds: `org.policy.get` and `.set` and `org.owners.add`; one confirmation per save, through `actMany` and `signActions`; and the rows reading each machine's channel listings, with two memberships per key, bound to the reader.
+    - The enumerating rows test has 5,040 permutations plus 16,807 five-event sequences.
+    - Reviews: our task reviewer approved it, then approved the three Minor fixes.
+    - Static green at 4d95d25b6 (42410961560). One local run of `rows.test.ts`'s crypto-heavy marks case hit its 5 s timeout at a load average near 100, then passed on the committed code. Under CI it counts as a flake to explain.
 - [ ] M4b — Machines and their rights — *executable; after M6b*
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
 - [ ] M5b — Add owner — *executable; after M4c; lands once the desk track's `record.owners` executor and DL190 (b)'s fix are on master*
