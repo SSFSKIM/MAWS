@@ -258,8 +258,3 @@ export function publish(read: { kept: readonly HostEntry[]; skipped: readonly En
   if (!read.kept.every(views) || read.skipped.some(views)) return null;
   return page(read.kept, limit, seal);
 }
-
-/** What is viewable now of what a read kept, as a page: a feed's snapshot read again past its bound (channel-feed.ts). */
-export function publishFiltered(read: { kept: readonly HostEntry[] }, limit: number, views: (entry: EntrySession) => boolean, seal: (entry: HostEntry) => HostEntry): ChannelPage {
-  return page(read.kept.filter(views), limit, seal);
-}

@@ -19,7 +19,8 @@
 // or, once a page of it left, the feed ends `behind` and the device opens it again. The member's ranks are read again once
 // they are no longer current, and a snapshot read out under ranks since replaced is read again under the new ones; one
 // read is published only while nothing it kept is hidden now and nothing it passed by is viewable now (channel-view.ts'
-// `publish`). After SNAPSHOT_READS reads in a row that moved so, the last goes as what is viewable of what it kept.
+// `publish`). After SNAPSHOT_READS reads in a row that moved so, the feed ends `unavailable`: no page whose `more` it can't
+// vouch for goes.
 //
 // A lane B entry is ranked by its session's record as read after the entry came, and every record of it heard since
 // (channel-view.ts' `PlacementBook`); one that waited behind another output is read again when its turn comes, so what
@@ -32,15 +33,15 @@
 //
 // It ends with its channel, `removed` once the project is no longer the org's (the reader's reach is per project), `behind`
 // past plane B's backlog or past CHANGES_HELD entries the member views waiting, and `unavailable` when the spine can't
-// answer the snapshot's read (or the journal runs past the scan's bound), a session's placement or the member's ranks: the
-// device opens it again on its backoff.
+// answer the snapshot's read (or the journal runs past the scan's bound), a session's placement or the member's ranks, or
+// the snapshot moved under SNAPSHOT_READS reads in a row: the device opens it again on its backoff.
 import { randomBytes } from 'node:crypto';
 import type { HostEntry } from '@shared/ipc/schema/channel';
 import { HISTORY_LIMIT_MAX } from '@shared/ipc/schema/channel';
 import { BACKLOG_BYTES } from '@shared/host/stream-catchup';
 import type { SessionRanks } from './authorize';
 import type { ChannelCursors } from './channel-cursors';
-import { PlacementBook, publish, publishFiltered, readViewable, viewable, type EntrySession, type ViewableRead } from './channel-view';
+import { PlacementBook, publish, readViewable, viewable, type EntrySession, type ViewableRead } from './channel-view';
 import { dispatchAs, type EndpointServices } from './services';
 import type { Subscription } from './subscriptions';
 import { recordedPlacement, type Placement } from './targets';
@@ -60,7 +61,7 @@ export type ChannelFeedsContext = {
 
 /** How many of the project's new entries the member views a feed holds unsent before it ends `behind`; as many unranked before it reads the project again. */
 export const CHANGES_HELD = 1_000;
-/** How many reads in a row a snapshot may take, what each read moving under it, before the last goes as what it holds. */
+/** How many reads in a row a snapshot may take, what each read moving under it, before the feed ends `unavailable`. */
 export const SNAPSHOT_READS = 3;
 
 /**
@@ -367,13 +368,14 @@ export class ChannelFeeds {
       const views = (entry: EntrySession) => this.#views(feed, entry, snapshot.after) === true;
       const seal = (entry: HostEntry) => this.#sealed(entry);
       feed.snapshot = null;
-      let page = publish(read, HISTORY_LIMIT_MAX, views, seal);
-      let kept: readonly HostEntry[] = read.kept;
+      const page = publish(read, HISTORY_LIMIT_MAX, views, seal);
+      const kept = read.kept;
       if (page === null && feed.reads < SNAPSHOT_READS) continue; // what it read moved since: read again
       if (page === null) {
-        this.#ctx.log(`endpoint: a channel feed's snapshot of ${feed.project.slice(0, 64)} moved under each of its ${feed.reads} reads; it goes as what the last holds`);
-        kept = read.kept.filter(views);
-        page = publishFiltered(read, HISTORY_LIMIT_MAX, views, seal);
+        // No page it can vouch for (its `more` exact): the device opens the feed again on its backoff, as history answers.
+        this.#ctx.log(`endpoint: a channel feed's snapshot of ${feed.project.slice(0, 64)} moved under each of its ${feed.reads} reads`);
+        sub.end('unavailable');
+        return false;
       }
       // A snapshot again (new entries let go of unranked) is at the stream's place: what follows goes on from its `seq`.
       const at = { epoch: this.#epoch, seq: feed.seq };
