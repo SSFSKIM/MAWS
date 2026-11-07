@@ -19,6 +19,8 @@ import { moveFocusedArtifactToPanel, moveShownRecordToTab } from '../shell/trans
 import { panelInMain } from './regions';
 import { setSessionUnread, visibleSessionStep } from '../keymap/session-navigation';
 import { registerSessionAction } from './session-actions';
+import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O8 M6a
+import { pinRemote } from '../lane-b/remote-reading'; // P5 O8 M6a
 import { focusRegion, focusSidebar, stepMainTab } from '../keymap/shell-navigation';
 import { toggleKeyboardShortcuts } from '../keymap/KeyboardShortcuts';
 import { toggleSidebar } from './shell-view';
@@ -104,6 +106,12 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     registerSessionAction('pin', async (appSessionId) => {
       const current = useSessions.getState().records.get(appSessionId);
       if (!current) return;
+      // P5 O8 M6a: another machine's session is pinned for this member there, never in its owners' record
+      if (isRemoteLaneB(appSessionId)) {
+        const words = await pinRemote(appSessionId, !current.pinned, client);
+        if (words !== null) console.error('[shell] session.reader.update (pin) failed', words);
+        return;
+      }
       const result = await client.invoke('session.update', { appSessionId, patch: { pinned: !current.pinned } });
       if (!result.ok) console.error('[shell] session.update (pin) failed', result.error);
     }),

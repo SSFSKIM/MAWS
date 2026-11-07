@@ -6,24 +6,31 @@ import { visibleSessionStep } from './session-navigation';
 // P5 O6 M2: the rows render the page's ids, addresses
 const [a, b, c] = [at('a'), at('b'), at('c')];
 
-// P5 O7 M2: a lane B session on another machine is marked in this app's memory; its owner's record is never written
+// P5 O7 M2: a lane B session on another machine is marked in this app's memory; its owner's record is never written.
+// P5 O8 M6a: its machine is asked to keep the member's own mark (`session.reader.update`, lane-b/remote-reading.test.ts).
 describe('the unread toggle', () => {
-  it('marks a session on another machine in memory, and sends this Mac’s through session.update', async () => {
+  it('marks a session on another machine in memory and as the member’s own there, and sends this Mac’s through session.update', async () => {
     const { addressOf } = await import('@shared/machine/address');
     const { OTHER_MACHINE } = await import('../../../../test/support/machine');
     const { fakeClient } = await import('../../../../test/support/fake-client');
     const { useSessions } = await import('../stores/sessions');
     const { resetRemoteReadMarks, useRemoteReadMarks } = await import('../lane-b/read-marks');
+    const { resetReaderRows } = await import('../lane-b/reader-rows');
     const { setSessionUnread } = await import('./session-navigation');
     const remote = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
     useSessions.setState({ listed: new Map(), listedMachines: new Set([OTHER_MACHINE]) });
-    const fake = fakeClient({ 'session.update': () => undefined });
+    const fake = fakeClient({
+      'session.update': () => undefined,
+      'session.reader.update': ({ appSessionId, patch }: { appSessionId: AppSessionId; patch: { unread: boolean } }) => ({ appSessionId, pinned: false, lastSeen: { messageUuid: null, at: null }, unread: patch.unread }),
+    });
     await setSessionUnread(remote, true, fake.client);
     expect(useRemoteReadMarks.getState().unread.get(remote)).toBe(true);
+    expect(fake.invoked('session.reader.update')).toEqual([{ appSessionId: remote, patch: { unread: true } }]);
     expect(fake.invoked('session.update')).toEqual([]);
     void setSessionUnread(a as AppSessionId, true, fake.client);
     expect(fake.invoked('session.update')).toEqual([{ appSessionId: a, patch: { unread: true } }]);
     resetRemoteReadMarks();
+    resetReaderRows();
   });
 });
 

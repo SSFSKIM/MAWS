@@ -46,9 +46,10 @@ const canTakeOver = (record: SessionRecord): boolean => record.holder.kind === '
 // P5 O9 M5: a foreign-live session MAWS drives through its bridge (`bridged`) shows no holder notice, so its menu adds
 // what the notice carried: Take over in MAWS (where today's Take over applies) and Fork.
 // P5 O7 M2: a lane B session on another machine (`remote`) only the opens: the record's writes, a fork, a delete and a
-// worktree's removal are not offered over that machine's link (O7's Interfaces §L).
-export function sessionActionsFor(record: SessionRecord, { bridged = false, remote = false }: { bridged?: boolean; remote?: boolean } = {}): SessionActionId[] {
-  if (remote) return ['open', 'openInNewTab', 'openInSplit'];
+// worktree's removal are not offered over that machine's link (O7's Interfaces §L). P5 O8 M6a: nor Pin, but where the
+// machine keeps the member's own reading (`remoteReading`: it isn't known to refuse `session.reader.update`).
+export function sessionActionsFor(record: SessionRecord, { bridged = false, remote = false, remoteReading = false }: { bridged?: boolean; remote?: boolean; remoteReading?: boolean } = {}): SessionActionId[] {
+  if (remote) return ['open', 'openInNewTab', 'openInSplit', ...(remoteReading ? (['pin'] as const) : [])];
   const notice: SessionActionId[] = bridged && isForeign(record) ? [...(canTakeOver(record) ? (['takeOver'] as const) : []), 'fork'] : [];
   // C10 start: a background job with a known id is attached beside the opens; nothing else holds a job to attach to
   if (record.holder.kind === 'background_job' && record.holder.jobId !== null) return ['open', 'openInNewTab', 'attach', ...notice];

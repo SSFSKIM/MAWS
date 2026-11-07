@@ -5,7 +5,10 @@
 // timing only; where it writes (C4's `session.drafts.set`, or C10's intent on an unstarted session) is its caller's.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { JSONContent } from '@tiptap/core';
+import type { MawsBridge } from '@shared/ipc/schema';
 import type { Draft } from '@shared/ipc/schema/session';
+import { readerRowsOf } from '../../lane-b/reader-rows';
+import { loadRemoteDraft, resetRemoteDraftSaves, saveRemoteDraft } from '../../lane-b/remote-drafts';
 import { markPersisted } from './attachments';
 import { attachmentsOf, MENTION, type ComposerDoc, type MentionAttrs } from './doc';
 
@@ -74,24 +77,39 @@ export function createDraftWriter(save: (draft: Draft | null) => void, options: 
 }
 
 // P5 O7 M2 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Reads"): a draft for a lane B session on another
-// machine is kept in this app's memory for its run, never on that machine (`session.drafts.*` are not offered there: a
-// draft on another machine's index is per member, O8 M6). `remote` is asked at each load and save, so a session's
-// drafts go where its machine is as the stores know it then.
+// machine is kept in this app's memory for its run, never on that machine. `remote` is asked at each load and save, so a
+// session's drafts go where its machine is as the stores know it then. P5 O8 M6a (docs/doperpowers/plans/2026-10-28-p5-o8-
+// org-interface.md, Interfaces §P): a machine that offers `session.drafts.*` keeps each member's own, so the draft goes
+// there (../../lane-b/remote-drafts.ts) and the memory holds only what the machine doesn't: everything, for a machine that
+// refuses them (an endpoint older than M6a, ../../lane-b/reader-rows.ts), and a spawn's handed document until the first save.
 const remoteDrafts = new Map<AppSessionId, Draft>();
-export const resetRemoteDrafts = (): void => remoteDrafts.clear(); // for suites
+export const resetRemoteDrafts = (): void => {
+  remoteDrafts.clear();
+  resetRemoteDraftSaves();
+}; // for suites
 // P5 O7 M4: a session spawned on another machine from a New chat tab takes that tab's document as its draft, whole (its
 // attachments go up from the new session's composer, so no byte budget applies to a draft that lives in this memory)
 export function rememberRemoteDraft(appSessionId: AppSessionId, doc: ComposerDoc): void {
   remoteDrafts.set(appSessionId, { doc, attachments: [], updatedAt: new Date().toISOString() });
 }
-export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null>; save(draft: Draft | null): void }>(port: P, appSessionId: AppSessionId, remote: () => boolean): P {
+export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null>; save(draft: Draft | null): void }>(port: P, appSessionId: AppSessionId, remote: () => boolean, client: MawsBridge): P {
+  const remember = (draft: Draft | null) => {
+    if (draft === null) remoteDrafts.delete(appSessionId);
+    else remoteDrafts.set(appSessionId, draft);
+  };
+  const remembered = () => remoteDrafts.get(appSessionId) ?? null;
   return {
     ...port,
-    load: () => (remote() ? Promise.resolve(remoteDrafts.get(appSessionId) ?? null) : port.load()),
+    load: () => {
+      if (!remote()) return port.load();
+      if (remoteDrafts.has(appSessionId) || readerRowsOf(appSessionId) === 'refused') return Promise.resolve(remembered());
+      return loadRemoteDraft(client, appSessionId, remembered);
+    },
     save: (draft: Draft | null) => {
       if (!remote()) return port.save(draft);
-      if (draft === null) remoteDrafts.delete(appSessionId);
-      else remoteDrafts.set(appSessionId, draft);
+      if (readerRowsOf(appSessionId) === 'refused') return remember(draft);
+      remoteDrafts.delete(appSessionId); // a handed document, which this save replaces
+      saveRemoteDraft(client, appSessionId, draft, remember);
     },
   };
 }

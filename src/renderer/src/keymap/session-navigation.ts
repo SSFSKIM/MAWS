@@ -3,7 +3,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
 import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O7 M2
-import { setRemoteUnread } from '../lane-b/read-marks'; // P5 O7 M2
+import { setRemoteReading } from '../lane-b/remote-reading'; // P5 O8 M6a
 
 // Read the rendered order, not a second implementation of the sidebar's filters,
 // caps and expansion. Needs-you precedes the tree; its duplicate tree rows are skipped.
@@ -16,7 +16,13 @@ export function visibleSessionStep(current: string | null, delta: 1 | -1): AppSe
 }
 
 export async function setSessionUnread(appSessionId: AppSessionId, unread: boolean, client: MawsBridge = ipc): Promise<void> {
-  if (isRemoteLaneB(appSessionId)) return setRemoteUnread(appSessionId, unread); // P5 O7 M2: in this app's memory, never the owner's record
+  // P5 O7 M2: another machine's, in this app's memory, never the owner's record; P5 O8 M6a: and on a machine that keeps the
+  // member's own reading, there
+  if (isRemoteLaneB(appSessionId)) {
+    const words = await setRemoteReading(appSessionId, { unread }, client);
+    if (words !== null) toast({ level: 'danger', text: words, actions: [], dismissible: true });
+    return;
+  }
   const result = await client.invoke('session.update', { appSessionId, patch: { unread } });
   if (!result.ok) toast({ level: 'danger', text: result.error.message, actions: [], dismissible: true });
 }

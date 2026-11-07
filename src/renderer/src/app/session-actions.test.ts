@@ -10,4 +10,9 @@ describe('sessionActionsFor', () => {
     expect(sessionActionsFor(record('app-r'), { remote: true })).toEqual(['open', 'openInNewTab', 'openInSplit']);
     expect(sessionActionsFor(record('app-r'))).toContain('rename');
   });
+
+  // P5 O8 M6a: Pin too, where the machine keeps the member's own reading (it isn't known to refuse `session.reader.update`)
+  it('offers Pin for a lane B session on another machine that keeps the member’s reading', () => {
+    expect(sessionActionsFor(record('app-r'), { remote: true, remoteReading: true })).toEqual(['open', 'openInNewTab', 'openInSplit', 'pin']);
+  });
 });

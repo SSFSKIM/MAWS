@@ -26,7 +26,8 @@ import { PROJECT_ACTION_IDS, PROJECT_ACTIONS, runProjectAction, useProjectAction
 import { openResumeChooser } from '../resume/host'; // P2-D
 import { KEEP_RUNNING } from './copy'; // P5 O2 M2
 import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O7 M2
-import { setRemoteUnread } from '../lane-b/read-marks'; // P5 O7 M2
+import { setRemoteReading } from '../lane-b/remote-reading'; // P5 O8 M6a
+import { useReaderRowsOf } from '../lane-b/reader-rows'; // P5 O8 M6a
 
 // P5 O8 M5: a project's or machine's `people` says whether its row offers the People toggle.
 export type MenuTarget = { kind: 'machine'; machine: MachineRef; people: boolean } | { kind: 'session'; appSessionId: AppSessionId } | { kind: 'project'; projectId: ProjectId; people: boolean };
@@ -78,11 +79,12 @@ function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSes
   const record = useSessions((s) => s.records.get(appSessionId));
   const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5
   const kept = useSessions((s) => s.engine.get(appSessionId)?.kept); // P5 O2 M2: undefined while no status reports it
+  const remoteReading = useReaderRowsOf(appSessionId) !== 'refused'; // P5 O8 M6a
   if (!record) return null;
   const foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job'; // D-12: the opens only
   return (
     <>
-      {sessionActionsFor(record, { bridged, remote: isRemoteLaneB(appSessionId) /* P5 O7 M2 */ }).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />)}
+      {sessionActionsFor(record, { bridged, remote: isRemoteLaneB(appSessionId) /* P5 O7 M2 */, remoteReading }).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />)}
       {kept !== undefined && !foreign && <KeepItem appSessionId={appSessionId} kept={kept} dropdown={dropdown} />}
     </>
   );
@@ -171,18 +173,21 @@ function ProjectItem({ id, projectId }: { id: ProjectActionId; projectId: Projec
 }
 
 // "Mark all read" (residue *Unread*): C4's `session.update` per unread session, with `lastSeen` now.
-// P5 O7 M2: a lane B session on another machine is marked read in this app's memory (lane-b/read-marks.ts): its record's
-// read marks are its machine's owner's until O8 M6.
+// P5 O7 M2: a lane B session on another machine is marked read in this app's memory (lane-b/read-marks.ts); P5 O8 M6a: and
+// on a machine that keeps each member's own reading, there (lane-b/remote-reading.ts).
 async function markAllRead(records: SessionRecord[]): Promise<void> {
   const at = new Date().toISOString();
   const [remote, local] = [records.filter((r) => isRemoteLaneB(r.appId)), records.filter((r) => !isRemoteLaneB(r.appId))];
-  for (const r of remote) setRemoteUnread(r.appId, false);
-  await Promise.all(
-    local.map(async (r) => {
+  await Promise.all([
+    ...remote.map(async (r) => {
+      const words = await setRemoteReading(r.appId, { unread: false, lastSeen: { messageUuid: r.lastSeen.messageUuid, at } });
+      if (words !== null) console.error('[sidebar] session.reader.update (mark read) failed', words);
+    }),
+    ...local.map(async (r) => {
       const result = await ipc.invoke('session.update', { appSessionId: r.appId, patch: { unread: false, lastSeen: { messageUuid: r.lastSeen.messageUuid, at } } });
       if (!result.ok) console.error('[sidebar] session.update (mark read) failed', result.error);
     }),
-  );
+  ]);
 }
 
 // The same action list as the context menu, without sacrificing title width at rest.
