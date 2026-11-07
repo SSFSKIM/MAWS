@@ -26,6 +26,19 @@
 // and name from the held head (an id the head doesn't list reads "former member"), so the renderer derives nothing from
 // state it doesn't hold.
 //
+// M6b ("Channel listings into the rows"): a private session's listing never reaches the hub, only its owners and shares
+// through `endpoint.listings` over a channel, so the rows also read each roster machine's listings from its link: at
+// link up, at each new head, after each policy act (`refreshChannel`), and every ROWS_CHANNEL_MS while up. Each record
+// is judged as a hub one is, under the same marks. A held key keeps two memberships apart, whichever source showed it
+// first: the hub's (its snapshot's pages and the live frames since the feed opened) and its machine's last channel
+// answer. Each is the revision that source last showed the key at, and holds while that is the key's newest accepted
+// revision: a higher revision from either source replaces the record (the other's older one no longer holds), an older
+// one is ignored (a delayed hub `gone` included), and a `gone` at a higher revision removes the row from both. A hub
+// snapshot's completion clears only the hub's membership of the keys it lacked, and a channel answer only the channel's
+// of its machine's keys it lacked; a call that failed (a dropped link) clears nothing. A row is drawn while either
+// holds, so a session that goes private moves from the hub's snapshot to the channel's without its row blinking. A
+// record waiting on verification remembers which sources showed it, and a held one keeps no row once neither holds.
+//
 // Electron-free: vitest's node project runs it, and O3 moves it with the index into `mawsd`.
 import { createHash } from 'node:crypto';
 import {
@@ -46,6 +59,8 @@ import { FORMER_MEMBER, type OrgMember, type OrgRows, type RemoteRow } from '@sh
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import type { OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
+import type { LinkState } from '../machines/manager';
+import type { RemoteLink } from '../machines/remote/link';
 import { memberNames } from '@shared/org/member-name';
 import { repoProjectId } from '@shared/machine/project-ids';
 import type { OrgFiles } from './files';
@@ -57,7 +72,13 @@ export const LISTINGS_FILE = 'listings.json';
 
 /** A key's high-water mark (Interfaces §C). */
 export type ListingMark = { revision: number; hash: string; kid: string; delegation: string | null; gone: boolean };
-export type ListingsFile = { version: 1; org: string; records: Signed<Listing>[]; marks: Record<string, ListingMark> };
+/** M6b: the revision each source last showed a held key at, null while its set lacks the key. */
+export type ListingShown = { hub: number | null; channel: number | null };
+/** `shown` (M6b) is absent from a file M2 wrote, whose records were all the hub's. */
+export type ListingsFile = { version: 1; org: string; records: Signed<Listing>[]; marks: Record<string, ListingMark>; shown?: Record<string, ListingShown> };
+/** What the rows read of an RL2 link (M6b): its state, and `endpoint.listings`. */
+export type ListingsLink = Pick<RemoteLink, 'call'> & { state(): LinkState; onState(listener: (state: LinkState) => void): () => void };
+type Source = keyof ListingShown;
 
 /** `<ref>/<session>`: a ref holds no `/`, so the first one splits it. */
 export const listingKey = (listing: Listing): string => `${listing.machine}/${listing.session}`;
@@ -70,6 +91,8 @@ export interface RemoteRows {
   loaded: Promise<void>;
   /** Resolves once everything received so far is applied (the suites', and a caller that must read after a change). */
   settled(): Promise<void>;
+  /** M6b: the machine's channel listings read again (after a policy act's outcome), while its link is up. */
+  refreshChannel(ref: MachineRef): void;
   close(): Promise<void>;
 }
 
@@ -81,6 +104,8 @@ export interface RemoteRowsDeps {
   onRoster(listener: () => void): () => void;
   localProjects(): Promise<readonly ProjectRecord[]>;
   onLocalProjects(listener: () => void): () => void;
+  /** M6b: a roster machine's link (`Machines.remote`), for its channel listings; null while it has none. */
+  link(ref: MachineRef): ListingsLink | null;
   files: OrgFiles;
   emit(rows: OrgRows): void;
   now?(): number;
@@ -103,6 +128,9 @@ function isMark(value: unknown): value is ListingMark {
   );
 }
 
+const isRevision = (value: unknown): value is number | null => value === null || (typeof value === 'number' && Number.isInteger(value) && value >= 1);
+const isShown = (value: unknown): value is ListingShown => isObject(value) && isRevision(value.hub) && isRevision(value.channel);
+
 function isListingsFile(value: unknown): value is ListingsFile {
   return isObject(value) && value.version === 1 && typeof value.org === 'string' && Array.isArray(value.records) && isObject(value.marks);
 }
@@ -118,7 +146,16 @@ function markDead(state: OrgState, kid: string, delegation: string | null): bool
 /** A log's view of a hub-supplied key: bounded, quoted. */
 const shown = (key: string) => JSON.stringify(key.length > 120 ? `${key.slice(0, 120)}…` : key);
 
-type Waiting = { key: string; hash: string; record: Signed<Listing> };
+/** A record that failed verification, and the sources that showed it (M6b). */
+type Waiting = { key: string; hash: string; record: Signed<Listing>; sources: Set<Source> };
+/** An accepted live record, and the revision each source last showed its key at (M6b). */
+type Held = { record: Signed<Listing> } & ListingShown;
+/** Whether either source holds the held key at its record's revision, the newest accepted. */
+const holds = (h: Held): boolean => h.hub === h.record.body.revision || h.channel === h.record.body.revision;
+const HUB: ReadonlySet<Source> = new Set(['hub']);
+const CHANNEL: ReadonlySet<Source> = new Set(['channel']);
+/** A machine's channel, as the rows read it: one `endpoint.listings` call out at a time (`again`: one more after it). */
+type Watch = { ref: MachineRef; link: ListingsLink; up: boolean; asking: boolean; again: boolean; timer: ReturnType<typeof setTimeout> | null; off: () => void };
 
 export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
   const timing = orgTiming(deps.timing);
@@ -128,8 +165,8 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
   /** The org the marks, rows and waiting records belong to: the signed-in org's, once one signed in. */
   let dataOrg: string | null = null;
   const marks = new Map<string, ListingMark>();
-  /** The accepted live records, each verified against the head and certificates last judged against. */
-  const held = new Map<string, Signed<Listing>>();
+  /** The accepted live records a source holds, each verified against the head and certificates last judged against. */
+  const held = new Map<string, Held>();
   /** Records that failed verification, by `<key>\n<hash>`, oldest first. */
   const waiting = new Map<string, Waiting>();
   /** The cache as read, until a signed-in session applies it. */
@@ -147,6 +184,10 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
   let projects: readonly ProjectRecord[] = [];
   let projectsRead = 0;
   let joinMemo: { projects: readonly ProjectRecord[]; org: string; join: Map<string, OrgKey> } | null = null;
+
+  // M6b: each roster machine's channel, and the head they were last all asked at
+  const watched = new Map<MachineRef, Watch>();
+  let askedAt: SignedOrgState | null = null;
 
   let closed = false;
   let emitTimer: ReturnType<typeof setTimeout> | null = null;
@@ -209,47 +250,82 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     return verdict.ok;
   }
 
+  /** Waits a record for a later judgment, with the sources that showed it (merged into its earlier wait, if any). */
   function wait(entry: Waiting, state: OrgState): void {
     // a record whose key the head retired or revoked can never verify
     if (markDead(state, entry.record.sig.kid, null)) return;
     const id = `${entry.key}\n${entry.hash}`;
+    const before = waiting.get(id);
     waiting.delete(id);
-    waiting.set(id, entry);
+    waiting.set(id, before === undefined ? entry : { ...entry, sources: new Set([...before.sources, ...entry.sources]) });
     while (waiting.size > timing.UNVERIFIED_MAX) waiting.delete(waiting.keys().next().value as string);
   }
 
-  function accept(entry: Waiting, delegation: string | null): void {
-    const { key, hash, record } = entry;
-    const gone = isListingGone(record.body);
-    if (gone) held.delete(key);
-    else held.set(key, record);
-    marks.set(key, { revision: record.body.revision, hash, kid: record.sig.kid, delegation, gone });
-    for (const [id, other] of waiting) if (other.key === key && other.record.body.revision <= record.body.revision) waiting.delete(id);
+  /** A source's set no longer holds the key at its newest revision: its membership goes, and the row with the last one. */
+  function release(key: string, source: Source): void {
+    const h = held.get(key);
+    if (h === undefined || h[source] === null) return;
+    h[source] = null;
+    if (!holds(h)) held.delete(key);
     changed();
   }
 
-  /** One record against its key's mark, then the head. */
-  async function judge(current: SignedIn, record: Signed<Listing>, hash = listingHash(record)): Promise<void> {
+  /** `source` left the waiting records `kept` says no to: a record no source shows any more stops waiting. */
+  function unwait(source: Source, kept: (entry: Waiting) => boolean): void {
+    for (const [id, entry] of waiting) {
+      if (kept(entry) || !entry.sources.delete(source)) continue;
+      if (entry.sources.size === 0) waiting.delete(id);
+    }
+  }
+
+  function accept(entry: Waiting, delegation: string | null): void {
+    const { key, hash, record, sources } = entry;
+    const revision = record.body.revision;
+    const gone = isListingGone(record.body);
+    const next: Held = { record, hub: sources.has('hub') ? revision : null, channel: sources.has('channel') ? revision : null };
+    if (gone || !holds(next)) held.delete(key);
+    else held.set(key, next);
+    marks.set(key, { revision, hash, kid: record.sig.kid, delegation, gone });
+    for (const [id, other] of waiting) if (other.key === key && other.record.body.revision <= revision) waiting.delete(id);
+    changed();
+  }
+
+  /**
+   * One record against its key's mark, then the head, as `sources` showed it (M6b): the hub, a channel, or for a cached
+   * or waiting record the sources that held it. An older record changes nothing; the mark's own record, held, is now
+   * held by these sources too; anything newer is verified, waits with its sources, or replaces the row as theirs alone.
+   */
+  async function judge(current: SignedIn, record: Signed<Listing>, sources: ReadonlySet<Source>, hash = listingHash(record)): Promise<void> {
     const key = listingKey(record.body);
+    const revision = record.body.revision;
     const mark = marks.get(key);
     if (mark !== undefined) {
-      if (record.body.revision < mark.revision) return;
-      if (record.body.revision === mark.revision) {
+      if (revision < mark.revision) return;
+      if (revision === mark.revision) {
         if (hash !== mark.hash) {
           log(`a conflicting record for ${shown(key)} at revision ${mark.revision} ignored`);
           return;
         }
-        if (mark.gone || held.has(key)) return;
+        if (mark.gone) return;
+        const h = held.get(key);
+        if (h !== undefined) {
+          for (const source of sources) {
+            if (h[source] === revision) continue;
+            h[source] = revision;
+            changed();
+          }
+          return;
+        }
       }
     }
     const state = current.view.head().state;
     const certificates = current.view.certificates();
     const at = now();
     if (!(await verified(current, record, at))) {
-      wait({ key, hash, record }, state);
+      wait({ key, hash, record, sources: new Set(sources) }, state);
       return;
     }
-    accept({ key, hash, record }, await delegationOf(state, certificates, record, at));
+    accept({ key, hash, record, sources: new Set(sources) }, await delegationOf(state, certificates, record, at));
   }
 
   /** A hub-supplied record's shape, and its org: anything else never verifies and isn't held. */
@@ -273,17 +349,20 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     // it goes unless the judgment replaced it: `accept` has removed it, `wait` has set a new entry, and anything else
     // (below its mark, a conflict, an ended key) leaves this one.
     for (const [id, entry] of [...waiting]) {
-      await judge(current, entry.record, entry.hash);
+      await judge(current, entry.record, entry.sources, entry.hash);
       if (waiting.get(id) === entry) waiting.delete(id);
     }
   }
 
+  /** The sources holding a held key now. */
+  const holders = (h: Held): Set<Source> => new Set((['hub', 'channel'] as const).filter((source) => h[source] === h.record.body.revision));
+
   async function reverifyHeld(current: SignedIn): Promise<void> {
     const state = current.view.head().state;
-    for (const [key, record] of [...held]) {
-      if (held.get(key) !== record || (await verified(current, record, now()))) continue;
+    for (const [key, h] of [...held]) {
+      if (held.get(key) !== h || (await verified(current, h.record, now()))) continue;
       held.delete(key);
-      wait({ key, hash: listingHash(record), record }, state);
+      wait({ key, hash: listingHash(h.record), record: h.record, sources: holders(h) }, state);
       changed();
     }
   }
@@ -295,6 +374,7 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     }
     for (const [key, mark] of Object.entries(file.marks)) if (isMark(mark) && !marks.has(key)) marks.set(key, mark);
     dropEnded(current.view.head().state);
+    const sourcesOf = file.shown === undefined ? null : isObject(file.shown) ? file.shown : {};
     for (const record of file.records) {
       if (!usable(current, record)) continue;
       const key = listingKey(record.body);
@@ -304,7 +384,10 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
         log(`a cached record for ${shown(key)} is not its mark's, skipped`);
         continue;
       }
-      await judge(current, record, hash);
+      // M6b: held again by the sources that held it; a file M2 wrote held only the hub's
+      const was: unknown = sourcesOf === null ? { hub: mark.revision, channel: null } : sourcesOf[key];
+      const sources = new Set<Source>(isShown(was) ? (['hub', 'channel'] as const).filter((source) => was[source] === mark.revision) : []);
+      await judge(current, record, sources, hash);
     }
   }
 
@@ -312,7 +395,10 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
 
   async function sessionChanged(): Promise<void> {
     const current = deps.session.current();
-    if (current === null) return; // signed out: no rows; what is held stays
+    if (current === null) {
+      askedAt = null; // signed out: no rows; what is held stays, and the next sign-in reads every channel again
+      return;
+    }
     if (dataOrg !== current.identity.org) {
       if (dataOrg !== null) {
         log('the signed-in org changed: the listings held for the last one are dropped');
@@ -323,6 +409,7 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
       }
       dataOrg = current.identity.org;
       judgedAgainst = null;
+      askedAt = null;
     }
     const head = current.view.head();
     const certificates = current.view.certificates();
@@ -336,6 +423,11 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
       const file = cache;
       cache = null;
       await applyCache(current, file);
+    }
+    // M6b: every channel read again at the sign-in and at each new head
+    if (askedAt !== head) {
+      askedAt = head;
+      for (const watch of watched.values()) ask(watch);
     }
   }
 
@@ -359,17 +451,14 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     for (const record of records) {
       if (!usable(current, record)) continue;
       snapshotKeys.add(listingKey(record.body));
-      await judge(current, record);
+      await judge(current, record, HUB);
     }
     if (!last) return;
-    // the replace rule: a key neither the snapshot nor a live frame since the open brought leaves the rows (its mark stays)
+    // the replace rule: a key neither the snapshot nor a live frame since the open brought leaves the hub's set (its mark
+    // stays), and its row unless its machine's channel holds it (M6b)
     const kept = (key: string) => snapshotKeys.has(key) || liveKeys.has(key);
-    for (const key of [...held.keys()]) {
-      if (kept(key)) continue;
-      held.delete(key);
-      changed();
-    }
-    for (const [id, entry] of waiting) if (!kept(entry.key)) waiting.delete(id);
+    for (const key of [...held.keys()]) if (!kept(key)) release(key, 'hub');
+    unwait('hub', (entry) => kept(entry.key));
     gathering = false;
     snapshotApplied = true;
   }
@@ -378,7 +467,93 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     const current = signedIn();
     if (current === null || !usable(current, record)) return;
     liveKeys.add(listingKey(record.body));
-    await judge(current, record);
+    await judge(current, record, HUB);
+  }
+
+  // ---- the channels (M6b) ----
+
+  /** One machine's channel answer, if it is still the one asked of: its records judged, and its keys it lacked released. */
+  async function channelAnswer(watch: Watch, org: string, result: Awaited<ReturnType<ListingsLink['call']>>): Promise<void> {
+    const current = signedIn();
+    if (current === null || current.identity.org !== org || watched.get(watch.ref) !== watch) return;
+    // a failed call (a dropped link, a refusal) says nothing of what the machine lists, so it releases nothing
+    if (!result.ok) return void log(`${shown(watch.ref)}'s channel listings did not read: ${result.error.code}`);
+    const listings = isObject(result.output) ? result.output.listings : undefined;
+    if (!Array.isArray(listings)) return void log(`${shown(watch.ref)}'s channel listings are not a list, ignored`);
+    const keys = new Set<string>();
+    for (const record of listings) {
+      // a machine answers for its own sessions alone
+      if (!usable(current, record) || record.body.machine !== watch.ref) continue;
+      keys.add(listingKey(record.body));
+      await judge(current, record, CHANNEL);
+    }
+    const ofMachine = (key: string) => key.startsWith(`${watch.ref}/`);
+    for (const key of [...held.keys()]) if (ofMachine(key) && !keys.has(key)) release(key, 'channel');
+    unwait('channel', (entry) => !ofMachine(entry.key) || keys.has(entry.key));
+  }
+
+  /** Reads the machine's channel listings, one call at a time; then again in ROWS_CHANNEL_MS while its link is up. */
+  function ask(watch: Watch): void {
+    if (closed || !watch.up || dataOrg === null || deps.session.current()?.identity.org !== dataOrg) return;
+    if (watch.asking) {
+      watch.again = true;
+      return;
+    }
+    watch.asking = true;
+    watch.again = false;
+    if (watch.timer !== null) clearTimeout(watch.timer);
+    watch.timer = null;
+    const org = dataOrg;
+    void watch.link
+      .call('endpoint.listings', null)
+      .catch((error: unknown) => ({ ok: false as const, error: { code: (error as Error).message } }))
+      .then((result) => {
+        void enqueue('a channel answer', () => channelAnswer(watch, org, result));
+        watch.asking = false;
+        if (watch.again) return ask(watch);
+        if (closed || !watch.up || watched.get(watch.ref) !== watch) return;
+        watch.timer = setTimeout(() => {
+          watch.timer = null;
+          ask(watch);
+        }, timing.ROWS_CHANNEL_MS);
+        (watch.timer as { unref?: () => void }).unref?.();
+      });
+  }
+
+  function unwatch(watch: Watch): void {
+    watch.off();
+    if (watch.timer !== null) clearTimeout(watch.timer);
+    watch.timer = null;
+    watch.up = false;
+  }
+
+  /** Watches each roster machine's link: asked at its link up, its watch ended when it leaves (its memberships stay). */
+  function watchRoster(): void {
+    if (closed) return;
+    const roster = new Set(deps.roster());
+    for (const [ref, watch] of watched) {
+      if (roster.has(ref) && deps.link(ref) === watch.link) continue;
+      unwatch(watch);
+      watched.delete(ref);
+    }
+    for (const ref of roster) {
+      if (watched.has(ref)) continue;
+      const link = deps.link(ref);
+      if (link === null) continue;
+      const watch: Watch = { ref, link, up: false, asking: false, again: false, timer: null, off: () => {} };
+      watched.set(ref, watch);
+      const onState = (state: LinkState) => {
+        const was = watch.up;
+        watch.up = state === 'up';
+        if (watch.up && !was) ask(watch);
+        if (!watch.up && watch.timer !== null) {
+          clearTimeout(watch.timer);
+          watch.timer = null;
+        }
+      };
+      watch.off = link.onState(onState);
+      onState(link.state());
+    }
   }
 
   // ---- the rows ----
@@ -406,8 +581,8 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     const join = joinIds(current.identity.org);
     const member = current.identity.member;
     const out: RemoteRow[] = [];
-    for (const record of held.values()) {
-      const body = record.body;
+    for (const h of held.values()) {
+      const body = h.record.body;
       if (!roster.has(body.machine)) continue;
       out.push({
         machine: body.machine as MachineRef,
@@ -422,6 +597,9 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
         revision: body.revision,
         issued: body.issued,
         mine: body.fields.owners.includes(member),
+        // M6b: a private session's channel listing states who it reaches, and the policy revision it was made at
+        ...(body.fields.audience === undefined ? {} : { audience: [...body.fields.audience] }),
+        ...(body.fields.policyRev === undefined ? {} : { policyRev: body.fields.policyRev }),
       });
     }
     out.sort((a, b) => (a.machine === b.machine ? (a.session < b.session ? -1 : a.session > b.session ? 1 : 0) : a.machine < b.machine ? -1 : 1));
@@ -468,7 +646,13 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     writing = writing.then(async () => {
       if (!dirty || dataOrg === null) return;
       dirty = false;
-      const file: ListingsFile = { version: 1, org: dataOrg, records: [...held.values()], marks: Object.fromEntries(marks) };
+      const file: ListingsFile = {
+        version: 1,
+        org: dataOrg,
+        records: [...held.values()].map((h) => h.record),
+        marks: Object.fromEntries(marks),
+        shown: Object.fromEntries([...held].map(([key, h]) => [key, { hub: h.hub, channel: h.channel }])),
+      };
       try {
         const check = await deps.files.check();
         if (check === null || !check.ok) {
@@ -507,9 +691,13 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     ),
     deps.feed.onListings(({ records, last }) => void enqueue('a listings page', () => page(Array.isArray(records) ? records : [], last))),
     deps.feed.onListing((record) => void enqueue('a listing', () => listing(record))),
-    deps.onRoster(schedule),
+    deps.onRoster(() => {
+      watchRoster();
+      schedule();
+    }),
     deps.onLocalProjects(() => void readProjects()),
   ];
+  watchRoster();
 
   const loaded = Promise.all([enqueue('the cache', sessionChanged), readProjects()]).then(() => {});
 
@@ -517,9 +705,15 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     rows,
     loaded,
     settled: () => queue,
+    refreshChannel(ref) {
+      const watch = watched.get(ref);
+      if (watch !== undefined) ask(watch);
+    },
     async close() {
       if (closed) return;
       for (const off of unsubscribe) off();
+      for (const watch of watched.values()) unwatch(watch);
+      watched.clear();
       await queue;
       closed = true;
       if (emitTimer !== null) clearTimeout(emitTimer);

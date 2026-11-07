@@ -232,6 +232,9 @@ export const RemoteRowSchema = z.strictObject({
   revision: z.number().int().nonnegative(),
   issued: z.string(),
   mine: z.boolean(), // the signed-in member is an owner
+  // M6b: a private session's channel listing names who it reaches (its owners and shares) and its policy revision
+  audience: z.array(z.string()).optional(),
+  policyRev: z.number().int().nonnegative().optional(),
 });
 export type RemoteRow = z.infer<typeof RemoteRowSchema>;
 /**

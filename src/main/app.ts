@@ -623,6 +623,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     onRoster,
     localProjects: async () => view.projects(),
     onLocalProjects: (listener) => view.on('projects', () => listener()),
+    link: (ref) => machines.remote(ref), // P5 O8 M6b: each roster machine's channel listings (a private session's)
     files: orgDir,
     emit: (rows) => {
       void emit('org.rows.changed', rows);
