@@ -249,6 +249,51 @@ describe('channel.history, view-filtered lane by lane', () => {
     expect(second).toMatchObject({ ok: true, output: { more: false } });
     expect(texts(second)).toEqual(['mine 1']);
   });
+  it('holds a member to a placement heard while the call reads, before it read the session: a record placing no engine for a moment hides its entries', async () => {
+    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const channel = journal(f);
+    shared(f, 'app-1', 'view');
+    channel.record(laneB('app-1', 1, 'B shared'));
+    const b = await openRemote(f, org.b1, org.B);
+    const page = f.spine.handlers.get('channel.history')!;
+    let go!: () => void;
+    const gate = new Promise<void>((resolve) => (go = resolve));
+    f.spine.handle('channel.history', async (input, context) => (await gate, page(input, context)));
+    const answer = call(b, 'channel.history', { project: PROJECT });
+    await until(() => f.host.calls.some((c) => c.name === 'channel.history'), 'the first page asked');
+    f.host.emitMachine('session.changed', { record: { appId: 'app-1', engineSessionId: null }, revision: 2 });
+    f.host.emitMachine('session.changed', { record: { appId: 'app-1', engineSessionId: 'eng-app-1' }, revision: 3 });
+    go();
+    expect(await answer).toMatchObject({ ok: true, output: { entries: [], more: false } });
+  });
+
+  it('pages exactly past the most the journal holds of others’ largest entries, within the device’s call deadline, as the feed’s snapshot does', { timeout: 120_000 }, async () => {
+    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const channel = journal(f);
+    shared(f, 'app-1', 'view');
+    shared(f, 'app-2', null);
+    channel.record(laneB('app-1', 1, 'mine'));
+    const big = 'x'.repeat(64 * 1024);
+    for (let i = 0; i < 1_999; i++) channel.record({ ...laneB('app-2', 2 + i, big), src: `${PROJECT}/lane-b/app-2/big/${i}` });
+    expect(channel.index.channel.history({ project: PROJECT, limit: 200 }, Date.now()).more).toBe(true);
+    const b = await openRemote(f, org.b1, org.B);
+
+    let from = Date.now();
+    const answer = await call(b, 'channel.history', { project: PROJECT });
+    const historyMs = Date.now() - from;
+    expect(answer).toMatchObject({ ok: true, output: { more: false } });
+    expect(texts(answer)).toEqual(['mine']);
+
+    from = Date.now();
+    await channelFeed(b, 'ch', PROJECT);
+    const snap = await snapshot(b, 'ch');
+    const snapshotMs = Date.now() - from;
+    expect(snap.body).toMatchObject({ more: false });
+    expect((snap.body.entries as HostEntry[]).map((e) => e.text)).toEqual(['mine']);
+    if (process.env.CHANNEL_SCAN_TIMING === '1') process.stdout.write(`channel scan: history ${historyMs} ms, snapshot ${snapshotMs} ms\n`);
+    expect(historyMs).toBeLessThan(10_000); // the device's CALL_TIMEOUT_MS
+    expect(snapshotMs).toBeLessThan(10_000);
+  });
 });
 
 describe('the channel feed: a project’s entries, live', () => {

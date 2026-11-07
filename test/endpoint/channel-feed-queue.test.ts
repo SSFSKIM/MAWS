@@ -113,16 +113,23 @@ function machine(records: Record<string, string | null> = {}) {
   };
 }
 
-/** A member who views the engine sessions and lane A sessions in `views`, their ranks current while `current`. */
+/**
+ * A member who views the engine sessions and lane A sessions in `views`. Each read of their ranks is its own, current
+ * until `stale` (a new head): stale ranks rank nothing, as ranks read under a head no longer held.
+ */
 function member(views: Set<string>) {
-  const state = { current: true };
-  const ranks: SessionRanks = {
-    holds: (placement) => placement !== null && views.has(placement.target.session),
-    ownsMachine: () => false,
-    holdsRight: () => false,
-    current: () => state.current,
+  const issued: Array<{ current: boolean }> = [];
+  const ranks = (): SessionRanks => {
+    const own = { current: true };
+    issued.push(own);
+    return {
+      holds: (placement) => own.current && placement !== null && views.has(placement.target.session),
+      ownsMachine: () => false,
+      holdsRight: () => false,
+      current: () => own.current,
+    };
   };
-  return { views, state, ranks };
+  return { views, ranks, stale: () => issued.forEach((own) => void (own.current = false)) };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
@@ -130,7 +137,7 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 function start(m: ReturnType<typeof machine>, who: ReturnType<typeof member>, reach = { reaches: true }) {
   const feeds = new ChannelFeeds({
     dispatch: m.dispatch,
-    ranks: async () => who.ranks,
+    ranks: async () => who.ranks(),
     reaches: () => reach.reaches,
     cursors: { seal: (entry) => `c${entry.id}` },
     log: () => {},
@@ -242,6 +249,39 @@ describe('the feed’s snapshot', () => {
     expect(sub.snaps()).toEqual([{ entries: [], more: false }]);
   });
 
+  it('is read again under the member’s new ranks once they change while it is read: a new head never empties it', async () => {
+    const m = machine({ 'app-1': 'eng-1' });
+    m.journal.push(laneB('app-1', 'shared'));
+    const who = member(new Set(['eng-1']));
+    m.hold('channel.history'); // the snapshot's read waits
+    const { feeds, sub } = start(m, who);
+    await settle();
+    who.stale(); // a new head, access unchanged: the ranks the read began under are no longer current
+    feeds.accessChanged();
+    await settle();
+    m.release();
+    await settle();
+    expect(sub.snaps().map((snap) => [snap.entries.map((e) => e.text), snap.more])).toEqual([[['shared'], false]]);
+  });
+
+  it('is read again when a session it passed by is viewable by the time it would go', async () => {
+    const m = machine({ 'app-1': 'eng-1', 'app-2': 'eng-2' });
+    for (let i = 0; i < 250; i++) m.journal.push(laneB('app-2', `other ${i}`));
+    m.journal.push(laneB('app-1', 'mine'));
+    const who = member(new Set(['eng-2']));
+    m.hold('channel.history', 1); // the snapshot's second page waits
+    const { feeds, sub } = start(m, who);
+    await settle();
+    who.views.add('eng-1'); // app-1 shared, passed by on the first page
+    feeds.accessChanged();
+    m.release();
+    await settle();
+    const [snap] = sub.snaps();
+    expect(snap.entries[0].text).toBe('mine');
+    expect(snap.entries).toHaveLength(200);
+    expect(snap.more).toBe(true);
+  });
+
   it('is never queued once the project left the org meanwhile: the feed ends `removed`', async () => {
     const m = machine({ 'app-1': 'eng-1' });
     m.journal.push(laneB('app-1', 'b'));
@@ -288,6 +328,32 @@ describe('the feed’s bound on what waits', () => {
     sub.take();
     await settle();
     sub.take();
+    expect(sub.evs()).toEqual([{ seq: 1, text: 'shown' }]);
+  });
+
+  it('never ends for hidden entries waiting to be ranked past CHANGES_HELD: it lets them go and reads the project again', async () => {
+    const m = machine({ 'app-h': 'eng-h' });
+    const who = member(new Set(['la-2']));
+    const { sub, record } = start(m, who);
+    await settle();
+    sub.take();
+    await settle();
+    m.hold('session.get'); // their placement is slow to come
+    for (let i = 0; i <= CHANGES_HELD; i++) record(laneB('app-h', `hidden ${i}`));
+    expect(sub.endedWith).toBeNull();
+    m.release();
+    await settle();
+    sub.take(); // the project read again
+    await settle();
+    record(laneA('la-2', 'shown'));
+    await settle();
+    sub.take();
+    await settle();
+    expect(sub.endedWith).toBeNull();
+    expect(sub.snaps()).toEqual([
+      { entries: [], more: false },
+      { entries: [], more: false },
+    ]);
     expect(sub.evs()).toEqual([{ seq: 1, text: 'shown' }]);
   });
 

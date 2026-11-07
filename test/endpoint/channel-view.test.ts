@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HostEntry } from '@shared/ipc/schema/channel';
 import type { SessionRanks } from '../../src/endpoint/authorize';
-import { CHANNEL_PAGE_BYTES, PlacementBook, publish, readViewable, SCAN_BYTES, viewable } from '../../src/endpoint/channel-view';
+import { CHANNEL_PAGE_BYTES, HEARD_MAX, PlacementBook, publish, publishFiltered, readViewable, SCAN_ENTRIES, viewable } from '../../src/endpoint/channel-view';
 import type { EndpointServices } from '../../src/endpoint/services';
 import type { Placement } from '../../src/endpoint/targets';
 
@@ -101,6 +101,38 @@ describe('the placements a reader saw', () => {
     expect(s.reads('session.get')).toBe(2);
   });
 
+  it('holds a reader to a placement heard after its mark and before its first read of the session', async () => {
+    const s = spine([], { 'app-1': 'eng-1' });
+    const book = new PlacementBook();
+    const after = book.mark();
+    book.heard('app-1', null); // the record placed no engine session for a moment
+    book.heard('app-1', placed('app-1', 'eng-1'));
+    await book.ensure('app-1', after, s.dispatch);
+    expect(book.seen('app-1', after)).toEqual([placed('app-1', 'eng-1'), null, placed('app-1', 'eng-1')]);
+    expect(viewable(laneB(1, 'app-1'), ranks(new Set(['eng-1'])), book, after)).toBe(false);
+    // heard before the mark: older than what the reader goes by
+    const later = book.mark();
+    await book.ensure('app-1', later, s.dispatch);
+    expect(viewable(laneB(1, 'app-1'), ranks(new Set(['eng-1'])), book, later)).toBe(true);
+  });
+
+  it('keeps each placement heard once, at its latest hearing, and past HEARD_MAX of them places the session nowhere', async () => {
+    const s = spine([], { 'app-1': 'eng-1' });
+    const book = new PlacementBook();
+    const after = book.mark();
+    await book.ensure('app-1', after, s.dispatch);
+    for (let i = 0; i < 10_000; i++) book.heard('app-1', placed('app-1', 'eng-1'));
+    expect(book.seen('app-1', after)).toHaveLength(2);
+    const later = book.mark();
+    book.heard('app-1', placed('app-1', 'eng-1')); // heard again after a later mark: that reader holds it too
+    await book.ensure('app-1', later, s.dispatch);
+    expect(book.seen('app-1', later)).toEqual([placed('app-1', 'eng-1'), placed('app-1', 'eng-1')]);
+    for (let i = 0; i <= HEARD_MAX; i++) book.heard('app-1', placed('app-1', `eng-x${i}`));
+    expect(book.seen('app-1', after)!.length).toBeLessThanOrEqual(HEARD_MAX + 2);
+    expect(book.seen('app-1', after)).toContain(null);
+    expect(viewable(laneB(1, 'app-1'), ranks(new Set(['eng-1', ...Array.from({ length: HEARD_MAX + 1 }, (_, i) => `eng-x${i}`)])), book, after)).toBe(false);
+  });
+
   it('reuses a read begun after the reader’s mark, and while one is out, every later reader waits on one more', async () => {
     const s = spine([], { 'app-1': 'eng-1' });
     const book = new PlacementBook();
@@ -146,19 +178,24 @@ describe('a member’s read of the journal', () => {
     const s = spine(entries, { 'app-1': 'eng-1', 'app-2': 'eng-2' });
     const r = await read(s, ranks(new Set(['eng-1', 'la-2'])), { limit: 2 });
     expect(r.kept.map((e) => e.id)).toEqual(['500', '2', '1']);
-    expect(r.truncated).toBe(false);
+    expect(r.skipped).toEqual([{ lane: 'B', appSessionId: 'app-2', engineSessionId: null }]);
     expect(s.reads('channel.history')).toBe(3);
     expect(s.reads('session.get')).toBe(2); // one read a session
   });
 
-  it('stops at its byte bound when the member views nothing of a busy project, holding none of what it scanned', async () => {
-    const entries = Array.from({ length: 400 }, (_, i) => laneB(i + 1, `app-${i % 7}`, 64 * 1024)) // 25 MiB;
-    const s = spine(entries, Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`app-${i}`, `eng-${i}`])));
-    const r = await read(s, ranks(new Set()), { limit: 200 });
-    expect(r.kept).toEqual([]);
-    expect(r.truncated).toBe(true);
-    expect(s.served()).toBeLessThanOrEqual(SCAN_BYTES + CHANNEL_PAGE_BYTES);
-    expect(s.served()).toBeGreaterThanOrEqual(SCAN_BYTES);
+  it('reads on to the journal’s end past any bytes of others’ entries, holding none of them, and so finds the one viewable past them', async () => {
+    const entries = [laneB(1, 'app-mine'), ...Array.from({ length: 300 }, (_, i) => laneB(i + 2, `app-${i % 7}`, 64 * 1024))]; // ~19 MiB hidden
+    const s = spine(entries, { 'app-mine': 'eng-mine', ...Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`app-${i}`, `eng-${i}`])) });
+    const r = await read(s, ranks(new Set(['eng-mine'])), { limit: 200 });
+    expect(r.kept.map((e) => e.id)).toEqual(['1']);
+    expect(publish(r, 200, r.views, (e) => e)).toEqual({ entries: [entries[0]], more: false });
+    expect(s.served()).toBeGreaterThan(16 * 1024 * 1024);
+  });
+
+  it('answers no read past the journal’s own bound on what it holds: a journal past it is not one it can page exactly', async () => {
+    expect(SCAN_ENTRIES).toBeGreaterThanOrEqual(2_000);
+    const s = spine(Array.from({ length: SCAN_ENTRIES + 1 }, (_, i) => laneA(i + 1, 'la-hidden')));
+    await expect(read(s, ranks(new Set()), { limit: 200 })).rejects.toThrow(/bound/);
   });
 
   it('keeps no more than a page’s bytes and the one past it', async () => {
@@ -166,7 +203,7 @@ describe('a member’s read of the journal', () => {
     const s = spine(entries, { 'app-1': 'eng-1' });
     const r = await read(s, ranks(new Set(['eng-1'])), { limit: 200 });
     expect(r.kept.length).toBeLessThan(13);
-    const page = publish(r.kept, 200, r.views, (entry) => entry);
+    const page = publish(r, 200, r.views, (entry) => entry);
     expect(page?.more).toBe(true);
     expect(page!.entries.length).toBe(r.kept.length - 1);
   });
@@ -174,16 +211,23 @@ describe('a member’s read of the journal', () => {
 
 describe('a page published', () => {
   const kept = [laneB(3, 'app-1'), laneB(2, 'app-1'), laneB(1, 'app-1')];
+  const read = { kept, skipped: [{ lane: 'B', appSessionId: 'app-2', engineSessionId: null }] };
 
   it('says `more` exactly when a viewable entry past it was read, its ids sealed', () => {
-    const all = () => true;
-    expect(publish(kept, 2, all, (e) => ({ ...e, id: `c${e.id}` }))).toEqual({ entries: [{ ...kept[0], id: 'c3' }, { ...kept[1], id: 'c2' }], more: true });
-    expect(publish(kept, 3, all, (e) => e)).toEqual({ entries: kept, more: false });
-    expect(publish([], 3, all, (e) => e)).toEqual({ entries: [], more: false });
+    const all = (e: { appSessionId: string | null }) => e.appSessionId !== 'app-2';
+    expect(publish(read, 2, all, (e) => ({ ...e, id: `c${e.id}` }))).toEqual({ entries: [{ ...kept[0], id: 'c3' }, { ...kept[1], id: 'c2' }], more: true });
+    expect(publish(read, 3, all, (e) => e)).toEqual({ entries: kept, more: false });
+    expect(publish({ kept: [], skipped: [] }, 3, all, (e) => e)).toEqual({ entries: [], more: false });
   });
 
-  it('is not published once anything read, the entry past it too, is no longer viewable: it is read again', () => {
-    expect(publish(kept, 2, (e) => e.id !== '1', (e) => e)).toBeNull();
-    expect(publish(kept, 2, (e) => e.id !== '3', (e) => e)).toBeNull();
+  it('is not published once anything read, the entry past it too, is no longer viewable, or a session it passed by is: it is read again', () => {
+    expect(publish(read, 2, (e) => e.id !== '1' && e.appSessionId !== 'app-2', (e) => e)).toBeNull();
+    expect(publish(read, 2, (e) => e.id !== '3' && e.appSessionId !== 'app-2', (e) => e)).toBeNull();
+    expect(publish(read, 2, () => true, (e) => e)).toBeNull(); // app-2 is viewable now: its entries may belong on the page
+  });
+
+  it('once read again past its bound, goes as what is viewable of what it kept', () => {
+    expect(publishFiltered(read, 2, (e) => e.id !== '3', (e) => e)).toEqual({ entries: [kept[1], kept[2]], more: false });
+    expect(publishFiltered(read, 1, (e) => e.id !== '3', (e) => e)).toEqual({ entries: [kept[1]], more: true });
   });
 });

@@ -53,6 +53,13 @@ describe('channel cursors', () => {
     expect(new ChannelCursors(dir).open(first, 'proj-1')).toBeNull();
   });
 
+  it('tells nothing of the id by its length: every id is sealed at twenty digits', () => {
+    const cursors = new ChannelCursors(dir);
+    const lengths = ['7', '41', '123456', '9007199254740991'].map((id) => cursors.seal(entry(id)).length);
+    expect(new Set(lengths).size).toBe(1);
+    expect(cursors.open(cursors.seal(entry('7')), 'proj-1')).toEqual({ id: '7', lane: 'B', session: 'app-1' });
+  });
+
   it('opens nothing it did not seal: an id, a tampered cursor, a truncated one, garbage', () => {
     const cursors = new ChannelCursors(dir);
     const cursor = cursors.seal(entry('41'));
