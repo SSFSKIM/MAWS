@@ -4,13 +4,14 @@
 // that only narrow across a snapshot's reads, a snapshot read again rather than cut again, `more` exact, hidden entries
 // never counted against the feed's bound, `seq` without gaps, and what a feed holds bounded.
 import { describe, expect, it } from 'vitest';
-import type { HostEntry } from '@shared/ipc/schema/channel';
+import { HISTORY_LIMIT_MAX, type HostEntry } from '@shared/ipc/schema/channel';
 import type { SessionRanks } from '../../src/endpoint/authorize';
 import { ChannelFeeds, CHANGES_HELD, SNAPSHOT_READS } from '../../src/endpoint/channel-feed';
 import type { EndpointServices } from '../../src/endpoint/services';
 import type { Subscription } from '../../src/endpoint/subscriptions';
 
 const PROJECT = 'proj-1';
+const JOURNAL_HOLDS = 2_000; // CHANNEL_BOUNDS.perProject
 type Out = { t: string; seq?: number; body?: unknown; key?: string };
 
 /** A subscription that sends only what the device takes (`take`), as one without credit holds its stream. */
@@ -105,6 +106,12 @@ function machine(records: Record<string, string | null> = {}) {
     dispatch,
     records,
     journal,
+    /** What the journal does at each record: it keeps a project's newest JOURNAL_HOLDS by `(at, id)`, and lets go of the rest. */
+    prune: () => {
+      const newest = [...journal].sort((a, b) => b.at.localeCompare(a.at) || Number(b.id) - Number(a.id));
+      const gone = new Set(newest.slice(JOURNAL_HOLDS).map((e) => e.id));
+      for (let i = journal.length - 1; i >= 0; i--) if (gone.has(journal[i].id)) journal.splice(i, 1);
+    },
     reads: (name: string) => calls.filter((c) => c === name).length,
     /** Reads of `name` past the first `after` wait until `release`. */
     hold: (name: string, after = 0) => void holding.set(name, after),
@@ -149,6 +156,7 @@ function start(m: ReturnType<typeof machine>, who: Pick<ReturnType<typeof member
   feeds.open(sub as unknown as Subscription);
   const record = (entry: HostEntry) => {
     m.journal.push(entry);
+    m.prune();
     feeds.event('machine', { name: 'channel.changed', payload: { project: PROJECT, entry } });
   };
   const event = (name: string, payload: unknown) => feeds.event('machine', { name, payload });
@@ -382,7 +390,7 @@ describe('the feed’s snapshot', () => {
     }
     await settle();
     expect(sub.evs()).toHaveLength(300);
-    expect(feeds.held(sub as unknown as Subscription)).toEqual({ snapshot: 0, changes: 0, placements: 0, known: expect.any(Number) });
+    expect(feeds.held(sub as unknown as Subscription)).toEqual({ snapshot: 0, changes: 0, placements: 0, known: expect.any(Number), letGo: 0 });
     expect(feeds.held(sub as unknown as Subscription)!.known).toBeLessThanOrEqual(201);
   });
 });
@@ -482,7 +490,7 @@ describe('the feed’s bound on what waits', () => {
   it('recovers a viewable entry however many came after it, as long as the journal holds it', async () => {
     const m = machine({ 'app-h': 'eng-h', 'app-v': 'eng-v' });
     const who = member(new Set(['eng-v']));
-    const { sub, record } = start(m, who);
+    const { feeds, sub, record } = start(m, who);
     await settle();
     sub.take();
     await settle();
@@ -490,6 +498,9 @@ describe('the feed’s bound on what waits', () => {
     m.hold('session.get');
     record(laneB('app-v', 'viewed', base + 10_000)); // first to arrive, said last: the journal keeps it
     for (let i = 0; i < 2 * CHANGES_HELD + 100; i++) record(laneB('app-h', `hidden ${i}`, base + 2_200 - i));
+    await settle();
+    // Past what the journal holds, the ids it let go of are those of entries the journal still holds: no more than it does.
+    expect(feeds.held(sub as unknown as Subscription)!.letGo).toBeLessThanOrEqual(JOURNAL_HOLDS);
     m.release();
     for (let i = 0; i < 4; i++) {
       await settle();
@@ -497,6 +508,79 @@ describe('the feed’s bound on what waits', () => {
     }
     expect(sub.endedWith).toBeNull();
     expect(sub.evs()).toEqual([{ seq: 1, text: 'viewed' }]);
+  });
+
+  it('recovers a let-go entry whose id is below a snapshot read again since: an id the snapshot never reached is still recovered', async () => {
+    const m = machine({ 'app-v': 'eng-v', 'app-h': 'eng-h' });
+    m.journal.push(laneA('la-h', 'h')); // the snapshot passes it by, and is taken back once it is shared
+    const who = member(new Set(['eng-v', 'la-q']));
+    const { feeds, sub, record } = start(m, who);
+    await settle(); // the first snapshot queued, not taken
+    m.hold('session.get');
+    record(laneB('app-v', 'p, said long ago', 1)); // waits on its placement; its `at` older than any
+    for (let i = 0; i < 2 * HISTORY_LIMIT_MAX; i++) record(laneA('la-q', `q ${i}`)); // the snapshot read again stops among them
+    who.views.add('la-h');
+    feeds.accessChanged(); // the queued snapshot no longer stands: read again, a page of q's ids, all above p's
+    await settle();
+    sub.take();
+    await settle();
+    for (let i = 0; i <= CHANGES_HELD; i++) record(laneB('app-h', `hidden ${i}`)); // p let go of, unranked
+    m.release();
+    for (let i = 0; i < HISTORY_LIMIT_MAX + 10; i++) {
+      await settle();
+      sub.take();
+    }
+    expect(sub.endedWith).toBeNull();
+    expect(sub.snaps()).toHaveLength(1); // the first, taken back before the device took it, never went
+    expect(sub.snaps()[0].more).toBe(true);
+    const evs = sub.evs();
+    expect(evs.filter((ev) => ev.text === 'p, said long ago')).toHaveLength(1);
+    expect(evs.filter((ev) => ev.text.startsWith('q '))).toHaveLength(HISTORY_LIMIT_MAX); // the q's past the page, none lost
+    expect(evs.map((ev) => ev.seq)).toEqual(evs.map((_, i) => i + 1));
+  });
+
+  it('replays no history from before it opened for a wholly hidden burst: the snapshot of older ids said later leaves newer ids behind it', async () => {
+    const m = machine({ 'app-h': 'eng-h' });
+    const base = ids + 100_000;
+    for (let i = 0; i <= HISTORY_LIMIT_MAX; i++) m.journal.push(laneA('la-v', `said late ${i}`, base + 5_000 + i)); // the snapshot's page
+    for (let i = 0; i <= CHANGES_HELD; i++) m.journal.push(laneA('la-v', `said early ${i}`, base + i)); // newer ids, older `at`s
+    const who = member(new Set(['la-v']));
+    const { sub, record } = start(m, who);
+    await settle();
+    sub.take();
+    await settle();
+    m.hold('session.get');
+    for (let i = 0; i <= CHANGES_HELD; i++) record(laneB('app-h', `hidden ${i}`, base + 10_000 + i));
+    m.release();
+    for (let i = 0; i < 4; i++) {
+      await settle();
+      sub.take();
+    }
+    expect(sub.endedWith).toBeNull();
+    expect(sub.snaps()).toHaveLength(1);
+    expect(sub.evs()).toEqual([]);
+  });
+
+  it('replays no entry it dropped as hidden once its session is shared later, when an unrelated burst is let go of', async () => {
+    const m = machine({ 'app-h': 'eng-h' });
+    const who = member(new Set(['la-v']));
+    const { feeds, sub, record } = start(m, who);
+    await settle();
+    sub.take();
+    await settle();
+    record(laneA('la-d', 'dropped as hidden')); // ranked when it came: the member didn't view it
+    who.views.add('la-d');
+    feeds.accessChanged();
+    await settle();
+    m.hold('session.get');
+    for (let i = 0; i <= CHANGES_HELD; i++) record(laneB('app-h', `hidden ${i}`));
+    m.release();
+    for (let i = 0; i < 4; i++) {
+      await settle();
+      sub.take();
+    }
+    expect(sub.endedWith).toBeNull();
+    expect(sub.evs()).toEqual([]);
   });
 
   it('recovers by the rights as they stand: a session revoked mid-read sends what stays viewable as an ev, never a snapshot', async () => {
