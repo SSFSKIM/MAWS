@@ -73,6 +73,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-06) The branch: reviewer-medium in three rounds (fixes 912fc182f..8139e7713, the last round clean); master merged at 1675f282d and 9ebbacbc5; the final `--gates all --evidence` on 9ebbacbc5, run 42259619702, 55 jobs green with packaged and unit:darwin among them. Its one flaky line, `browser-cua.spec.ts:1028`, is explained from the code: a headless O17 scene with no M7a code in it, tracked.
 - [ ] M7b — The project channel: to-human messages across machines — *executable; after M7a; the owner's week (P5 acceptance 16) starts when it lands*
   - [x] (2026-11-06) Task 1, reviewed clean in two rounds (9327c77f2..a54248357; fixes ef3d17d7e, 832534dca): the one extraction of a message (`src/shared/owner/to-human-items.ts`), the spine's channel journal as an `ADDED_TABLES` entry, lane B from the owner channel's batches and the asks' own record, the start-path hold, the cuts, `channel.history` and the main-only `channel.changed` (`WIRE_MINOR` 29). Gates green: 42290932596, 42292712838 (cross-build, the downgrade scene whole), 42297329414.
+  - [x] (2026-11-06) Task 2, reviewed by our task reviewer in three rounds and by the desk track in six (READY, their 601) (5a6b05638..f37817c55, with the org-protocol commits 40e793791 and 9e4b67f20): the seam and lane A's `#host` hand-off, `channel.history` with the per-lane `view` cut and opaque cursors, the project-scoped `channel` feed (`rl2.channel`, RL2 1.12, `WIRE_MINOR` 30), reach checks, a bounded streamed scan, the snapshot's restarts, and recovery from the let-go ids. Gates green: 42321083327 (full), 42328732994, 42331543046.
 - [ ] M6a — Reader state and drafts per member — *executable; after M7b*
 - [ ] M6b — Visibility and shares (O18's M5) — *executable; after M6a; its live proof is the staging run it shares with O18 M6, which needs the desk track's sminos executors and a real second member (the owner)*
 - [ ] M4b — Machines and their rights — *executable; after M6b*
@@ -3238,6 +3239,9 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - A queued lane B entry can still leave if its record moves silently just before credit, before the notification is heard; the text was authorized before it was queued. Rated minor (the architect).
      - The real-socket timing at the maximum serialized payload is unmeasured.
      - The recovery latency in item 6.
+     - Ordering across overlapping recovery batches, rated P2 by the desk track's round 6 (their 601). A finished recovery starts sending while another batch is still let go, so a higher-id viewable entry can go out before a lower-id recovered one. Each entry still arrives once, with no gap and no audience breach. It closes when lower-id recovery candidates are considered before later ranked arrivals go out, with that case pinned. Its effect is confined to delivery order, because the Channel tab orders entries by `at`, then id (Task 3).
+  8. **The consumer dedupes** (the desk track's round 6 and the architect's ruling). Main's channel consumer dedupes by (machine, entry id) across snapshot, ev and history, since the transport dedupes stream positions only. Task 3 owns this.
+  The desk track's round 6 found the endpoint READY under the agreed final-round bar (2026-11-06).
   Date/Author: 2026-11-06, O8's executor (controller), from Task 2's fix-wave sections.
 
 ## Outcomes & Retrospective
