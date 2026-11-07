@@ -63,8 +63,13 @@ const SESSION_FEEDS: readonly string[] = ['checkout', 'browser.inventory'] satis
 const FEEDS: readonly string[] = [...SESSION_FEEDS, ...MACHINE_FEEDS];
 /** Whether `feed` is one of the machine's own feeds, which name no session. */
 export const isMachineFeed = (feed: unknown): feed is MachineFeed => MACHINE_FEEDS.includes(feed as string);
-/** A session's stream (no `feed`), or one of its feeds (`checkout`; P5 O17 M9a: `browser.inventory`). */
-export type SessionSubMessage = { t: 'sub'; sub: string; session: SessionRef; view?: 'full' | 'cards'; feed?: SessionFeed; cursor: Cursor | null; credit: number };
+/**
+ * A session's stream (no `feed`), or one of its feeds (`checkout`; P5 O17 M9a: `browser.inventory`). 2026-11-06 (behind
+ * `rl2.agent-scope`; RL2_PROTOCOL 1.11): a lane A session's `full` stream may name one subagent's transcript, `agentId`
+ * as sminos spells an agent id, in place of the main one. A device names one only to an endpoint that listed the
+ * capability: an older one passes the field by unread and would serve the main transcript in its place.
+ */
+export type SessionSubMessage = { t: 'sub'; sub: string; session: SessionRef; view?: 'full' | 'cards'; feed?: SessionFeed; agentId?: string; cursor: Cursor | null; credit: number };
 /** One of the machine's own feeds (M6's `attention`, M5a's `artifacts`), which name no session; `channel`'s its `project`. */
 export type MachineFeedSubMessage = { t: 'sub'; sub: string; feed: MachineFeed; project?: string; cursor: Cursor | null; credit: number };
 export type SubMessage = SessionSubMessage | MachineFeedSubMessage;
@@ -228,6 +233,8 @@ function isCursor(v: unknown, lane: 'A' | 'B'): boolean {
 }
 
 const isSessionRef = (v: unknown): v is SessionRef => isObject(v) && (v.lane === 'A' || v.lane === 'B') && isText(v.id);
+/** An agent id as sminos's plane takes one (`AGENT_ID`, sminos_plane.py). */
+const AGENT_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 // A stream's fields, read whole: an id or an epoch is exactly 16 bytes' canonical base64url, a chunk 1 to
 // STREAM_CHUNK_BYTES bytes of base64url (its alphabet and a length some encoding has; the receiver decodes it), credit
@@ -284,9 +291,14 @@ const FROM_DEVICE: Record<string, (m: Fields) => boolean> = {
     isText(m.sub, 128) &&
     isPositive(m.credit, SUB_CREDIT_MAX) &&
     (m.feed === undefined
-      ? isSessionRef(m.session) && optional(m.view, (v) => v === 'full' || v === 'cards') && isCursor(m.cursor, m.session.lane)
-      : // A feed's cursor is `(epoch, seq)`, as lane A's; it has no view. `checkout` names its session, the machine's none.
-        FEEDS.includes(m.feed as string) && m.view === undefined && isCursor(m.cursor, 'A') && (isMachineFeed(m.feed) ? m.session === undefined : isSessionRef(m.session))) &&
+      ? isSessionRef(m.session) &&
+        optional(m.view, (v) => v === 'full' || v === 'cards') &&
+        isCursor(m.cursor, m.session.lane) &&
+        // `rl2.agent-scope`: one subagent's transcript, of a lane A session's `full` stream alone
+        optional(m.agentId, (a) => typeof a === 'string' && AGENT_ID.test(a) && (m.session as SessionRef).lane === 'A' && m.view !== 'cards')
+      : // A feed's cursor is `(epoch, seq)`, as lane A's; it has no view and names no agent. `checkout` names its session,
+        // the machine's none.
+        FEEDS.includes(m.feed as string) && m.view === undefined && m.agentId === undefined && isCursor(m.cursor, 'A') && (isMachineFeed(m.feed) ? m.session === undefined : isSessionRef(m.session))) &&
     // P5 O8 M7b: `channel` names its project, and no other sub names one.
     (m.feed === 'channel' ? isText(m.project, 512) : m.project === undefined),
   credit: (m) => isText(m.sub, 128) && isPositive(m.bytes, SUB_CREDIT_MAX),

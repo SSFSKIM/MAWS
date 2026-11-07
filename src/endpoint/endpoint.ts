@@ -216,9 +216,16 @@ export class Endpoint implements EndpointModule {
   readonly #retries = new RecordRetries();
   /** The changes of the enrollment begun, one after another (`EnrollContext.lifecycle`). */
   #lifecycle: Promise<unknown> = Promise.resolve();
+  /**
+   * 2026-11-06: e2e:remote's endpoint of an earlier build (MAWS_E2E=1 alone): the capabilities MAWS_E2E_ENDPOINT_WITHOUT
+   * names, a comma list, withheld from its `h2`, so a scene meets a device's old-peer path against this build.
+   */
+  readonly #withheld: ReadonlySet<string>;
 
   constructor(options: EndpointOptions = {}) {
     this.#options = options;
+    const env = options.env ?? process.env;
+    this.#withheld = new Set(env.MAWS_E2E === '1' ? (env.MAWS_E2E_ENDPOINT_WITHOUT ?? '').split(',').filter(Boolean) : []);
     this.deps = {
       fetch: options.fetch ?? ((input, init) => fetch(input, init)),
       sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
@@ -878,7 +885,7 @@ export class Endpoint implements EndpointModule {
   /** The machine as RL2's `h2` signs it, while it serves channels: it speaks for its ref, its state sound. */
   #identity(): MachineIdentity | null {
     if (this.#stopped || this.#services === null || this.#key === null || !this.#speaks || this.#state?.refusing !== null || this.#org?.ready !== true) return null;
-    return { ref: this.#services.machine.ref, key: this.#key, build: this.#options.build ?? 'unknown', capabilities: [...ENDPOINT_CAPABILITIES] };
+    return { ref: this.#services.machine.ref, key: this.#key, build: this.#options.build ?? 'unknown', capabilities: ENDPOINT_CAPABILITIES.filter((c) => !this.#withheld.has(c)) };
   }
 
   #listener(env: Record<string, string | undefined>): DirectListener {

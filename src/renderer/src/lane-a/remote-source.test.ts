@@ -15,7 +15,7 @@ import { useTranscriptStore } from '../stores/transcript';
 import type { Row } from '../transcript/model/rows';
 import { Chain, SESSION, wakeAfterStop } from './test-support/chain-rows';
 import { mount, settle } from './test-support/fake-plane';
-import { remoteTranscriptOf, holdRemoteTranscript, resetRemoteTranscripts } from './remote-source';
+import { holdRemoteAgentTranscript, holdRemoteTranscript, remoteAgentTranscriptOf, remoteTranscriptOf, resetRemoteTranscripts } from './remote-source';
 import { resetLaneAWatches } from './watches';
 
 const APP = addressOf(OTHER_MACHINE, SESSION as AppSessionId);
@@ -161,12 +161,108 @@ describe('a remote lane A session’s transcript', () => {
     close();
   });
 
-  it('ends a subagent’s own transcript at once with its gap: the machine serves no agent-scoped subscription', async () => {
-    const { remotePlane } = await import('./remote-source');
-    const ended: unknown[] = [];
-    remotePlane(fakeClient().client).subscribe({ machine: OTHER_MACHINE, session: SESSION, agentId: 'a1' }, { message: () => {}, interrupted: () => {}, end: (body) => ended.push(body) });
+});
+
+// 2026-11-06 (the remote lane A drill-in): a subagent's own transcript of another machine's terminal session is a watch
+// of its own naming the agent (main subscribes with `rl2.agent-scope`), drawn under `<address>:<agent>` as the agent's
+// transcript; its older rows are asked of that watch, a reset keeps what it drew, and when the machine gives nothing the
+// transcript says why: the watch refused, or the machine's pause before its first snapshot.
+describe('a remote lane A subagent’s own transcript', () => {
+  const AGENT = 'a1';
+  const KEY = `${APP}:${AGENT}`;
+  const agentEnvelope = (kind: string, body: unknown) => ({ ...envelope(kind, body, 'up-a'), ...(kind === 'snapshot' && { n: 0 }) }) as SessionMessage;
+  const agentSnapshot = (rows: JsonObject[], more = false) => agentEnvelope('snapshot', { rows: [...rows].reverse(), more, subagents: [], presence: { record: { status: 'idle' }, bridge: true, launch: 'L1' }, streaming: [] });
+  const agentDrawn = () => useTranscriptStore.getState().entries[KEY]?.rows ?? [];
+  const agentUser = (text: string) => agentDrawn().find((row): row is User => row.kind === 'user' && row.text === text);
+
+  async function agentOpened(given: Parameters<typeof fakeClient>[0] = {}) {
+    const fake = fakeClient({ 'laneA.watch': (input: { agentId?: string }) => ({ watch: input.agentId === undefined ? 'w1' : `w-${input.agentId}` }), 'laneA.read': { ok: true, result: { requested: true } }, ...given });
+    const held = remoteAgentTranscriptOf(APP, AGENT, fake.client);
+    const release = holdRemoteAgentTranscript(APP, AGENT, held);
+    const unmount = mount(held.transcript, useTranscriptStore);
     await settle();
-    expect(ended).toEqual([{ reason: 'error', message: 'A subagent’s own transcript on another machine isn’t shown yet' }]);
+    const plane = (messages: SessionMessage[]) => fake.event('laneA.plane', { appSessionId: APP, watch: `w-${AGENT}`, messages }, OTHER_MACHINE);
+    return { fake, ...held, plane, close: () => (unmount(), release()) };
+  }
+
+  it('opens a watch naming the agent and draws its own snapshot and live rows under the agent’s key', async () => {
+    const c = new Chain('c4a1e500', 'sminos');
+    c.prompt('Survey the checkout.');
+    const { fake, transcript, plane, close } = await agentOpened();
+    expect(fake.invoked('laneA.watch')).toEqual([{ appSessionId: APP, agentId: AGENT }]);
+    expect(transcript.key).toBe(KEY);
+    plane([agentSnapshot(c.rows)]);
+    c.answer('One file.');
+    plane([agentEnvelope('row', { row: c.rows.at(-1), agentId: AGENT })]);
+    await wait(() => agentDrawn().some((row) => row.kind === 'assistant_text'));
+    expect(agentUser('Survey the checkout.')).toBeDefined();
+    expect(agentDrawn().find((row) => row.kind === 'assistant_text')).toMatchObject({ markdown: 'One file.' });
+    expect(drawn()).toEqual([]); // nothing of the session's own transcript
+    close();
+  });
+
+  it('asks older rows of the agent’s own watch and draws them before the held ones; a reset keeps what it drew', async () => {
+    const c = new Chain('c4a1e600', 'sminos');
+    c.prompt('Older words.');
+    c.answer('Older answer.');
+    const older = c.rows.splice(0);
+    c.prompt('Newer words.');
+    const { fake, transcript, plane, close } = await agentOpened();
+    plane([agentSnapshot(c.rows, true)]);
+    await wait(() => agentUser('Newer words.') !== undefined);
+    transcript.loadOlder();
+    await wait(() => fake.invoked('laneA.read').length > 0);
+    expect(fake.invoked('laneA.read')).toEqual([{ appSessionId: APP, watch: `w-${AGENT}`, kind: 'rows', args: { before: c.rows[0].uuid, limit: 100 } }]);
+    plane([agentEnvelope('rows', { rows: [...older].reverse(), before: c.rows[0].uuid, more: false })]);
+    await wait(() => agentUser('Older words.') !== undefined);
+    fake.event('laneA.plane', { appSessionId: APP, watch: `w-${AGENT}`, reset: true }, OTHER_MACHINE);
+    expect(transcript.state.getState().phase).toBe('reconnecting');
+    expect(agentUser('Newer words.')).toBeDefined();
+    c.answer('After the reset.');
+    plane([agentSnapshot(c.rows)]);
+    await wait(() => agentDrawn().some((row) => row.kind === 'assistant_text' && row.markdown === 'After the reset.'));
+    expect(agentDrawn().filter((row) => row.kind === 'user').map((row) => (row as User).text)).toEqual(['Older words.', 'Newer words.']);
+    close();
+  });
+
+  // Every read is the session's: sminos answers one on an agent's subscription `unsupported`, and main refuses it before
+  // asking (src/main/lane-a/remote.ts). The agent's transcript asks none (no status, no diff); one asked anyway is that
+  // refusal, said as it came.
+  it('asks no read of the agent’s subscription, and rejects one asked anyway with main’s refusal', async () => {
+    const { remotePlane } = await import('./remote-source');
+    const { ReadError } = await import('./session-plane');
+    const { fake, transcript, plane, close } = await agentOpened({ 'laneA.read': { ok: false, code: 'unsupported', message: 'a read is the session’s: ask it on the session’s own view' } });
+    plane([agentSnapshot([])]);
+    transcript.requestStatus();
+    transcript.requestDiff();
+    await settle();
+    expect(fake.invoked('laneA.read')).toEqual([]);
+    const sub = remotePlane(fake.client).subscribe({ machine: OTHER_MACHINE, session: SESSION, agentId: AGENT }, { message: () => {}, interrupted: () => {}, end: () => {} });
+    const asked = sub.read('status');
+    await expect(asked).rejects.toBeInstanceOf(ReadError);
+    await expect(asked).rejects.toMatchObject({ code: 'unsupported', message: 'a read is the session’s: ask it on the session’s own view' });
+    sub.close();
+    close();
+  });
+
+  it('says why it shows nothing: main’s refusal of the watch, or the machine’s pause before its first snapshot, cleared by what it gives', async () => {
+    const refused = fakeClient();
+    const held = remoteAgentTranscriptOf(APP, AGENT, refused.client);
+    const release = holdRemoteAgentTranscript(APP, AGENT, held);
+    await refused.fail('laneA.watch', 'mini can’t send it yet; update MAWS on mini');
+    expect(held.unserved.getState()).toEqual({ why: { kind: 'refused', reason: 'mini can’t send it yet; update MAWS on mini' } });
+    release();
+    resetRemoteTranscripts();
+    resetLaneAWatches();
+
+    const c = new Chain('c4a1e700', 'sminos');
+    c.prompt('Late words.');
+    const { fake, unserved, plane, close } = await agentOpened();
+    fake.event('laneA.plane', { appSessionId: APP, watch: `w-${AGENT}`, paused: 'unavailable' }, OTHER_MACHINE);
+    expect(unserved.getState()).toEqual({ why: { kind: 'paused', reason: 'unavailable' } });
+    plane([agentSnapshot(c.rows)]);
+    expect(unserved.getState()).toEqual({ why: null });
+    close();
   });
 });
 

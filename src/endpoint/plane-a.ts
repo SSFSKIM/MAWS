@@ -22,6 +22,13 @@
 // (the session ended, a discontinuity) ends its subscription `unavailable`; RL10 going ends them all, since sminos's
 // subscriptions go with the connection.
 //
+// One subagent's transcript (2026-11-06, `rl2.agent-scope`): a `full` subscription naming `agentId` holds an upstream of
+// that agent's own in sminos (RL10's `subscribe` with the agent, sminos's agent scope: that transcript's rows and chunks
+// and the agent's own entry of the tree), so a session's main transcript and each of its agents' are upstreams apart,
+// and a cursor resumes only the upstream of its own session and scope. It carries its upstream's stream alone: no
+// session-wide message and no pending request, which the session's main stream carries. Its `rows`, `output` and `read`
+// are asked of that transcript; a diff is the session's, asked on the main one. Its access is the main transcript's.
+//
 // A `cards` subscription needs no upstream: it carries only the session's pending requests (`raised`, which holds the
 // tool and its input) and their settlement (`settled`), from the pending sets sminos restates (`pending`) and the
 // session-wide raises and settlements, never a `host` message, a row or the transcript. Its snapshot is the pending set
@@ -80,6 +87,8 @@ class Upstream {
     readonly session: string,
     readonly project: string,
     readonly who: Who,
+    /** The subagent whose transcript it carries; null for the main one. */
+    readonly agentId: string | null,
   ) {}
 
   /** Whether the ring holds everything after `seq` (or `seq` is the last numbered). */
@@ -143,7 +152,7 @@ export class PlaneA implements Plane<SessionSubscription> {
     const cursor = sub.cursor;
     const up = cursor === null ? undefined : this.#upstreams.get(cursor.epoch);
     if (cursor !== null && up !== undefined) {
-      if (up.session === sub.session.id && up.who.member === sub.who.member && up.who.device === sub.who.device) {
+      if (up.session === sub.session.id && up.agentId === sub.agentId && up.who.member === sub.who.member && up.who.device === sub.who.device) {
         // The device's own resumable cursor (a channel it left half-open gives its upstream up).
         if (up.sub !== null && up.sub !== sub) {
           const old = up.sub;
@@ -181,10 +190,10 @@ export class PlaneA implements Plane<SessionSubscription> {
     if (up !== undefined && up.sub === null) this.#drop(up);
   }
 
-  /** The upstream a subscription holds, for its `rows`, `diff`, `output` and `read` (calls.ts). */
-  upstreamOf(sub: SessionSubscription): { epoch: string; project: string; session: string } | null {
+  /** The upstream a subscription holds, for its `rows`, `diff`, `output` and `read` (calls.ts): its scope among them. */
+  upstreamOf(sub: SessionSubscription): { epoch: string; project: string; session: string; agentId: string | null } | null {
     const up = this.#of.get(sub);
-    return up === undefined ? null : { epoch: up.epoch, project: up.project, session: up.session };
+    return up === undefined ? null : { epoch: up.epoch, project: up.project, session: up.session, agentId: up.agentId };
   }
 
   /** A session-lane message from sminos (RL10's `onSession`). */
@@ -197,7 +206,8 @@ export class PlaneA implements Plane<SessionSubscription> {
     }
     if (m.kind === 'host') return;
     for (const up of [...this.#upstreams.values()]) {
-      if (up.session !== m.session || up.project !== m.project) continue;
+      // a subagent's transcript carries its own upstream's stream alone
+      if (up.session !== m.session || up.project !== m.project || up.agentId !== null) continue;
       if (up.snapshot) this.#add(up, 'ev', m);
       else if (up.early.length < EARLY_MAX) up.early.push(m);
       else this.#restart(up, 'more session-wide messages came before its snapshot than it holds');
@@ -308,10 +318,10 @@ export class PlaneA implements Plane<SessionSubscription> {
   #fresh(sub: SessionSubscription): void {
     const member = this.#ctx.member(sub.session.id);
     if (member === null || member.lane !== 'A') return sub.end('unavailable');
-    const up = new Upstream(sub.session.id, member.project, sub.who);
+    const up = new Upstream(sub.session.id, member.project, sub.who, sub.agentId);
     this.#upstreams.set(up.epoch, up);
     this.#attach(up, sub);
-    this.#ctx.send({ t: 'subscribe', project: up.project, session: up.session, agentId: null, sub: up.epoch });
+    this.#ctx.send({ t: 'subscribe', project: up.project, session: up.session, agentId: up.agentId, sub: up.epoch });
     sub.subbed('snapshot', { epoch: up.epoch, seq: 0 });
   }
 
@@ -356,6 +366,7 @@ export class PlaneA implements Plane<SessionSubscription> {
     if (m.kind !== 'snapshot') return;
     up.snapshot = true;
     this.#add(up, 'snap', m);
+    if (up.agentId !== null) return;
     // What is pending now (sminos's snapshot carries none), then what came before the snapshot.
     for (const raised of this.pending.of(up.session)) {
       this.#add(up, 'ev', { project: up.project, machine: m.machine, session: up.session, kind: 'raised', sub: null, n: null, body: raised });

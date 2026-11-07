@@ -84,6 +84,7 @@ import { DATASET_STATES } from '../src/artifacts/dashboard/states';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-scene';
+import type { PlaneRow } from './support/fake-sminos'; // 2026-11-06
 import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M10
 import { closeSurface, mainTabById, openSurface, surface } from './support/shell';
@@ -2610,6 +2611,143 @@ test('a subagent of B’s lane B session, drilled into from A: the rows it gave 
   } finally {
     await a?.cleanup();
     await scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// 2026-11-06 (the remote lane A drill-in): a subagent of a terminal session on B (lane A, which B's sminos serves: no
+// engine of B's runs it), drilled into from A, shows the agent's own transcript from B's session plane: a watch naming
+// the agent, which A's link sends to B's endpoint behind `rl2.agent-scope` and the endpoint holds as an upstream of the
+// agent's own in sminos (the scene's fake, e2e/support/fake-sminos.ts). Its newest row comes with its snapshot and the
+// older ones page in at the top; a row the agent writes while A is cut off from B arrives once A is let back, the
+// endpoint's ring replaying it under the same upstream; and when sminos ends that upstream (a gap in its bridge's stream)
+// the view starts over under a fresh one, every row drawn kept. An endpoint of an earlier build, which lists no
+// `rl2.agent-scope`, is asked nothing for the agent: the drill-in names B as the machine to update.
+const TERMINAL = { engine: 'b0c0d0e0-0000-4000-8000-0000000000c1', title: 'B’s terminal session', launch: 'L-terminal-1' };
+const TERMINAL_ASK = 'Survey the checkout with an agent.';
+const TERMINAL_REPLY = 'The agent is surveying B’s checkout.';
+const TERMINAL_AGENT = { id: 'ab5e2e000000000c1', description: 'Survey the checkout on B' };
+const AGENT_TASK = 'Read each file of the checkout.';
+const AGENT_OLDER = 'The agent read the checkout’s first file.';
+const AGENT_NEWER = 'The agent read the checkout’s second file.';
+const AGENT_WHILE_CUT = 'The agent wrote this while A was cut off.';
+const AGENT_AFTER_RESET = 'The agent went on after B’s plane started over.';
+
+/** A row of the terminal session's transcripts, as the engine writes one (the main loop's, or an agent's sidechain). */
+function terminalRow(n: number, type: 'user' | 'assistant', text: string, agentId: string | null, cwd: string): PlaneRow {
+  const uuid = `c1c1c1c1-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  const parentUuid = n === 1 || n === 11 ? null : `c1c1c1c1-0000-4000-8000-${String(n - 1).padStart(12, '0')}`;
+  const base = { parentUuid, isSidechain: agentId !== null, ...(agentId !== null && { agentId }), type, uuid, timestamp: new Date(Date.parse('2026-11-06T09:00:00.000Z') + n * 1000).toISOString(), sessionId: TERMINAL.engine, cwd, version: '2.1.312' };
+  if (type === 'user') return { ...base, message: { role: 'user', content: text } };
+  return { ...base, message: { id: `msg_c1${String(n).padStart(6, '0')}`, role: 'assistant', model: 'claude-opus-5-5', type: 'message', content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } };
+}
+
+/** What `terminalAgent` has started, held as each is acquired: the caller's `finally` stops them, A first, whatever failed. */
+type TerminalHeld = { scene: RemoteScene | null; a: MawsLaunch | null };
+
+/** The terminal session on B, listed and served, A launched over the relay with B up, and the agent's drill-in opened. */
+async function terminalAgent(opts: { root: string; aUserData: string; bEnv?: Record<string, string> }, held: TerminalHeld) {
+  const checkout = join(opts.root, 'b-terminal');
+  mkdirSync(checkout);
+  const agent = TERMINAL_AGENT.id;
+  const scene = (held.scene = await startRemoteScene({ scratch: join(opts.root, 'scene'), aUserData: opts.aUserData, ...(opts.bEnv !== undefined && { b: { env: opts.bEnv } }) }));
+  const plane = scene.sminos.laneA(PROJECT, {
+    engine: TERMINAL.engine,
+    title: TERMINAL.title,
+    cwd: checkout,
+    owners: [scene.member],
+    launch: TERMINAL.launch,
+    main: [terminalRow(1, 'user', TERMINAL_ASK, null, checkout), terminalRow(2, 'assistant', TERMINAL_REPLY, null, checkout)],
+    agents: { [agent]: [terminalRow(11, 'user', AGENT_TASK, agent, checkout), terminalRow(12, 'assistant', AGENT_OLDER, agent, checkout), terminalRow(13, 'assistant', AGENT_NEWER, agent, checkout)] },
+    subagents: [{ agentId: agent, meta: { agentType: 'general-purpose', description: TERMINAL_AGENT.description }, status: 'running', evidence: 'bridge' }],
+    agentWindow: 1, // the agent's snapshot holds its newest row: the rest page in
+  });
+  const a = (held.a = await launchMaws({ userData: opts.aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A' } }));
+  keepMainLines(a);
+  const { page } = a;
+  const { b } = scene;
+  const said = () => `${mainSaid(page)}\nB's endpoint to sminos:\n${scene.sminos.said().split('\n').slice(-30).join('\n')}`;
+  await expect.poll(async () => (await machineOf(page, b.ref))?.state ?? null, { timeout: 60_000, message: `A's link to B comes up over the relay\n${mainSaid(page)}` }).toBe('up');
+  await expect
+    .poll(async () => (await rowsOf(page)).find((row) => row.machine === b.ref && row.session === TERMINAL.engine) ?? null, { timeout: 60_000, message: `B's terminal session is a row of A's\n${said()}` })
+    .toMatchObject({ lane: 'A', title: TERMINAL.title });
+  await expandMachine(page, b.ref);
+  const row = sessionRow(page, addressOf(b.ref, TERMINAL.engine));
+  await expect(row, `the terminal session's row in A's sidebar\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
+  await row.click();
+  await quoting(expect(main(page).getByText(TERMINAL_REPLY).first(), 'the terminal session’s own transcript in A’s pane').toBeVisible({ timeout: 60_000 }), said);
+  await openSurface(page, 'Subagents');
+  const tool = surface(page, 'subagents');
+  const agentRow = tool.locator(`[data-agent-row="${agent}"]`);
+  await quoting(expect(agentRow, 'the agent in A’s Subagents tool').toBeVisible({ timeout: 60_000 }), async () => `the tool: ${await tool.innerText().catch(() => 'none')}\n${said()}`);
+  await agentRow.click();
+  const drillIn = tool.locator('[data-view="agent"]');
+  const drillInSaid = async () => `the drill-in: ${await drillIn.innerText({ timeout: 1_000 }).catch(() => 'none')}\n${said()}`;
+  return { scene, page, plane, drillIn, drillInSaid, agent, checkout };
+}
+
+test('a subagent of B’s terminal session, drilled into from A: its own rows from B’s plane, older rows paged in, a channel drop and a reset survived', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-la-agent-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-la-agent-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const { scene, page, plane, drillIn, drillInSaid, agent, checkout } = await terminalAgent({ root, aUserData }, held);
+    const { b } = scene;
+    const once = (text: string) => expect(drillIn.getByText(text, { exact: true }), `"${text}" once in the drill-in`).toHaveCount(1);
+
+    await test.step('the drill-in shows the agent’s own newest row, then pages its older ones in at the top', async () => {
+      await quoting(expect(drillIn.getByText(AGENT_NEWER, { exact: true }), 'the agent’s newest row').toBeVisible({ timeout: 60_000 }), drillInSaid);
+      await expect(drillIn.getByTestId('subagent-rows-gap'), 'no gap in place of its rows').toHaveCount(0);
+      expect(plane.subscribes(agent), 'one upstream of the agent’s own, naming it').toHaveLength(1);
+      await quoting(expect(drillIn.getByText(AGENT_OLDER, { exact: true }), 'its older row, paged in').toBeVisible({ timeout: 60_000 }), drillInSaid);
+      expect(plane.pages(agent).map((f) => f.before), 'the page asked of the agent’s transcript, before its newest row').toContain('c1c1c1c1-0000-4000-8000-000000000013');
+      await expect(main(page).getByText(AGENT_NEWER), 'nothing of the agent’s in the session’s own transcript').toHaveCount(0);
+    });
+
+    await test.step('a row the agent writes while A is cut off from B arrives once A is let back, under the same upstream', async () => {
+      scene.aHub.cut();
+      await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 60_000, message: `A's link to B goes down once cut\n${mainSaid(page)}` }).toBe('down');
+      plane.append(agent, terminalRow(14, 'assistant', AGENT_WHILE_CUT, agent, checkout));
+      scene.aHub.restore();
+      await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
+      await quoting(expect(drillIn.getByText(AGENT_WHILE_CUT, { exact: true }), 'the row written while cut off').toBeVisible({ timeout: 60_000 }), drillInSaid);
+      for (const text of [AGENT_OLDER, AGENT_NEWER, AGENT_WHILE_CUT]) await once(text);
+      expect(plane.subscribes(agent), 'the resume a replay of the same upstream').toHaveLength(1);
+    });
+
+    await test.step('when sminos ends the agent’s upstream, the view starts over under a fresh one, every row drawn kept', async () => {
+      plane.end(agent);
+      await expect.poll(() => plane.subscribes(agent).length, { timeout: 60_000, message: `a fresh upstream of the agent\n${await drillInSaid()}` }).toBe(2);
+      plane.append(agent, terminalRow(15, 'assistant', AGENT_AFTER_RESET, agent, checkout));
+      await quoting(expect(drillIn.getByText(AGENT_AFTER_RESET, { exact: true }), 'the row after the fresh snapshot').toBeVisible({ timeout: 60_000 }), drillInSaid);
+      for (const text of [AGENT_OLDER, AGENT_NEWER, AGENT_WHILE_CUT, AGENT_AFTER_RESET]) await once(text);
+      expect(plane.subscribes(agent).every((f) => f.agentId === agent), 'each upstream names the agent').toBe(true);
+      expect(plane.subscribes(null), 'the session’s own upstream untouched by the agent’s').toHaveLength(1);
+      console.log(`[e2e:remote] terminal agent drill-in: ${TERMINAL.engine}/${agent} over ${plane.subscribes(agent).length} upstreams, ${plane.pages(agent).length} pages`);
+    });
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a subagent of B’s terminal session, where B’s endpoint lists no rl2.agent-scope: the drill-in names B to update, and nothing is asked of B for the agent', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-la-old-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-la-old-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const { scene, page, plane, drillIn, drillInSaid, agent } = await terminalAgent({ root, aUserData, bEnv: { MAWS_E2E_ENDPOINT_WITHOUT: 'rl2.agent-scope' } }, held); // an endpoint of an earlier build
+    expect((await machineOf(page, scene.b.ref))?.capabilities ?? [], 'B’s endpoint lists no rl2.agent-scope').not.toContain('rl2.agent-scope');
+    await quoting(expect(drillIn.getByTestId('subagent-rows-gap'), 'the gap, naming B').toHaveText(`${B_NAME} can’t send a subagent’s own transcript to this Mac yet; update MAWS on ${B_NAME}`, { timeout: 60_000 }), drillInSaid);
+    await page.waitForTimeout(2_000); // what a watch of the agent would have asked by now
+    expect(plane.subscribes(agent), 'nothing asked of B for the agent').toEqual([]);
+    expect(plane.subscribes(null), 'the session’s own transcript still read').toHaveLength(1);
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
     rmSync(aUserData, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }

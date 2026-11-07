@@ -122,6 +122,7 @@ export class LaneAOverlay {
       this.changed();
       return;
     }
+    if (event.kind !== 'messages') return; // a subagent's watch's own (2026-11-06): the session's overlay hears none
     let changed = false;
     for (const message of event.messages) {
       if (message.kind === 'snapshot') {

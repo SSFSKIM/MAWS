@@ -31,6 +31,7 @@ import { pageScenario } from '../../test-support/shell-stores';
 import type { PanelToolContext } from '../../panel/tool';
 import { rememberListedModels, useComposerStore, type ListedModel } from '../../stores/composer';
 import { useSessions } from '../../stores/sessions';
+import { useMachines } from '../../stores/machines';
 import { useTranscriptStore, type TranscriptEntry } from '../../stores/transcript';
 import { useUsage } from '../../stores/usage';
 import { applyEvents, createState } from '../../transcript/model/reduce';
@@ -431,21 +432,33 @@ describe('session info for another machine’s terminal session', () => {
   afterEach(() => {
     resetLaneAStore();
     useSessions.setState({ listed: new Map() });
+    useMachines.getState().applyRoster([]);
   });
 
+  // 2026-11-06: an endpoint that lists no `rl2.agent-scope` (an older MAWS there) withholds a subagent's own rows, named
+  // by the machine to update; one that lists it carries them (no gap)
+  const machine = (capabilities: string[]) => useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-11-06T00:00:00Z', generation: 1, carrier: 'relay', capabilities }]);
+
   it('lists the remote gaps under Not available here, each with its reason', () => {
+    machine(['rl2.feeds']);
     useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: REMOTE }]]) });
     applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], turn: { running: true, unknown: false } }));
     mount({ ...ctxOf(REMOTE), session: null });
     const unavailable = screen.getByRole('region', { name: 'Not available here' });
     const rows = within(unavailable).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]);
     expect(rows).toEqual(expect.arrayContaining([
-      ['Subagent rows', LANE_A_WORDS.remoteSubagentRows],
+      ['Subagent rows', LANE_A_WORDS.remoteSubagentRows('mini')],
       ['Stop a background shell', LANE_A_WORDS.remoteStopTask],
       ['Take over in MAWS', LANE_A_WORDS.remoteTakeOver],
       ['Reopen', LANE_A_WORDS.remoteReopen],
       ['Attachments', LANE_A_WORDS.remoteMedia],
     ]));
+    cleanup();
+    machine(['rl2.feeds', 'rl2.agent-scope']);
+    mount({ ...ctxOf(REMOTE), session: null });
+    const terms = within(screen.getByRole('region', { name: 'Not available here' })).getAllByRole('term').map((term) => term.textContent);
+    expect(terms).not.toContain('Subagent rows');
+    expect(terms).toContain('Take over in MAWS');
   });
 
   // sminos 1.27.14: its bridge's status read says the mode the session last reported

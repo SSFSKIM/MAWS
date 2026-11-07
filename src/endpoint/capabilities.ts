@@ -48,6 +48,11 @@ export const ENDPOINT_CAPABILITIES = [
   // chat in this machine's home with no project (policy.ts' `spawnRefusal`); a device's menu offers it only on an endpoint
   // that listed it, since an older one answers it `unknown-checkout`.
   'rl2.spawn-home',
+  // 2026-11-06 (the remote lane A drill-in): a lane A session's `full` stream may name one subagent's transcript (`sub`'s
+  // `agentId`), held as an upstream subscription of that agent's own in sminos (plane-a.ts), its `rows`, `output` and
+  // `read` asked of that transcript; a device names one only to an endpoint that listed it, since an older one passes the
+  // field by and would serve the main transcript in its place.
+  'rl2.agent-scope',
   // P5 O8 M7b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Decision Log "M7b's channel feed"): a `sub` may name
   // the machine's `channel` feed with its `project` (channel-feed.ts): that project's to-human entries the member views, a
   // snapshot of the newest page and each new one after it. A device opens it only on an endpoint that listed it: an older

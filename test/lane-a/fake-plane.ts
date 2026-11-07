@@ -1,7 +1,8 @@
 // sminos's session plane and RPC ledger on RL10, for remote lane A's suite (P5 O9 M9): over O10's fake sminos connection
 // (test/endpoint/rl10/fake-sminos.ts), the side of sminos the endpoint talks to, answering on its own:
 //   - each upstream `subscribe` with its session's snapshot at n 0, numbering what it sends on it from 1 (`emit`);
-//     session-wide messages (`wide`, `raise`, `settle`) go outside any subscription;
+//     session-wide messages (`wide`, `raise`, `settle`) go outside any subscription; one naming a subagent (sminos's
+//     agent scope) with that agent's own snapshot, one row of its transcript and `more`, its stream `emitAgent`'s;
 //   - `rows`, `read`, `diff` and `output` on the subscription that asked;
 //   - `query` and `tombstone` from its ledger by opId, and each `rpc` once per opId: a copy of an op it holds is answered
 //     from the ledger under the copy's nonce, never run again (`runs` holds the effects).
@@ -45,7 +46,7 @@ export class FakePlane {
   readonly catalog = { fingerprint: 'cat-1', commands: [{ name: 'rename', route: { class: 'run' } }], models: { options: [{ value: 'opus' }, { value: 'haiku' }] } };
   readonly #ledger = new Map<string, Entry>();
   readonly #tombstoned = new Set<string>();
-  readonly #upstream = new Map<string, { session: string; n: number }>();
+  readonly #upstream = new Map<string, { session: string; n: number; agentId: string | null }>();
   readonly #depths = new Map<string, SessionDepth>();
   readonly #handlers = new Map<string, (rpc: Rpc) => Outcome | Promise<Outcome>>();
   readonly #held = new Map<string, Array<() => void>>();
@@ -65,14 +66,24 @@ export class FakePlane {
     return this.presence.get(session) ?? { record: { status: 'idle' }, bridge: true, capabilities: CAPABILITIES, launch: ({ 'la-b': 'LB', 'la-v': 'LV' } as Record<string, string>)[session] ?? 'L1' };
   }
 
-  /** The upstream subscriptions open on `session`: their epochs. */
+  /** The upstream subscriptions of `session`'s main transcript open now: their epochs. */
   upstreams(session = 'la-1'): string[] {
-    return [...this.#upstream.entries()].filter(([, u]) => u.session === session).map(([epoch]) => epoch);
+    return [...this.#upstream.entries()].filter(([, u]) => u.session === session && u.agentId === null).map(([epoch]) => epoch);
   }
 
-  /** A message on every upstream subscription of `session`, numbered; returns the numbers it took. */
+  /** The upstream subscriptions of `agentId`'s transcript of `session` open now: their epochs. */
+  agentUpstreams(agentId: string, session = 'la-1'): string[] {
+    return [...this.#upstream.entries()].filter(([, u]) => u.session === session && u.agentId === agentId).map(([epoch]) => epoch);
+  }
+
+  /** A message on every upstream subscription of `session`'s main transcript, numbered; returns the numbers it took. */
   emit(kind: string, body: unknown, session = 'la-1'): number[] {
-    return [...this.#upstream].filter(([, u]) => u.session === session).map(([sub, u]) => this.#numbered(sub, u, kind, body));
+    return [...this.#upstream].filter(([, u]) => u.session === session && u.agentId === null).map(([sub, u]) => this.#numbered(sub, u, kind, body));
+  }
+
+  /** A message on every upstream subscription of `agentId`'s transcript of `session`, numbered. */
+  emitAgent(agentId: string, kind: string, body: unknown, session = 'la-1'): number[] {
+    return [...this.#upstream].filter(([, u]) => u.session === session && u.agentId === agentId).map(([sub, u]) => this.#numbered(sub, u, kind, body));
   }
 
   /** One step of the session's bridge stream, played through the fake machine's `SessionDepth` (desk-hub's DX4 producer):
@@ -104,7 +115,7 @@ export class FakePlane {
     this.#numbered(m.sub, u, m.kind, m.body);
   }
 
-  #numbered(sub: string, u: { session: string; n: number }, kind: string, body: unknown): number {
+  #numbered(sub: string, u: { session: string; n: number; agentId: string | null }, kind: string, body: unknown): number {
     u.n += 1;
     // A frame past RL10's line limit goes as parts, as sminos's uplink sends it.
     for (const line of toWire(plane(kind, body, { session: u.session, sub, n: u.n }), LINE_LIMIT)) this.s.send(JSON.parse(line) as object);
@@ -164,16 +175,21 @@ export class FakePlane {
     const sub = typeof f.sub === 'string' ? f.sub : '';
     const session = typeof f.session === 'string' ? f.session : '';
     switch (f.t) {
-      case 'subscribe':
-        this.#upstream.set(sub, { session, n: 0 });
-        return this.#depth(session).subscribe(sub, null); // its snapshot, then its live part (#fromDepth)
+      case 'subscribe': {
+        const agentId = typeof f.agentId === 'string' ? f.agentId : null;
+        this.#upstream.set(sub, { session, n: 0, agentId });
+        if (agentId === null) return this.#depth(session).subscribe(sub, null); // its snapshot, then its live part (#fromDepth)
+        // sminos's agent scope: that agent's transcript, its own entry of the tree and no session-wide state
+        return this.s.send(plane('snapshot', { rows: [{ uuid: `${agentId}-r1` }], more: true, subagents: [], presence: this.presenceOf(session), streaming: [] }, { session, sub, n: 0 }));
+      }
       case 'unsubscribe': {
         const u = this.#upstream.get(sub);
         this.#upstream.delete(sub);
-        if (u !== undefined) this.#depths.get(u.session)?.end(sub, 'unsubscribed');
+        if (u !== undefined && u.agentId === null) this.#depths.get(u.session)?.end(sub, 'unsubscribed');
         return;
       }
       case 'rows':
+        if (f.agentId !== (this.#upstream.get(sub)?.agentId ?? null)) return; // sminos answers a sub's rows of its own transcript
         return this.#on(sub, 'rows', { rows: [{ uuid: `older-${String(f.before)}` }], before: f.before, more: false });
       case 'diff':
         return this.#on(sub, 'diff', { base: 'main', text: '' });

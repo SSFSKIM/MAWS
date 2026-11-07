@@ -97,7 +97,7 @@ export type CallsContext = {
   dispatch: EndpointServices['dispatch'];
   /** The caller's subscription by its id, and the upstream it holds (lane A). */
   subscription(channel: RemoteChannel, sub: string): Subscription | null;
-  upstreamOf(sub: SessionSubscription): { epoch: string; project: string; session: string } | null;
+  upstreamOf(sub: SessionSubscription): { epoch: string; project: string; session: string; agentId: string | null } | null;
   /** A frame down RL10 to sminos. */
   toSminos(frame: object): void;
   /** The machine's sessions as sminos reports them, each with the id it is listed under (null: not yet). */
@@ -578,10 +578,13 @@ export class Calls {
     const up = sub === null || sub.ended || !namesSession(sub) ? null : this.ctx.upstreamOf(sub);
     if (up === null) return { ok: false, code: 'unavailable' };
     if (up.session !== input.session) return { ok: false, code: 'malformed' };
+    // 2026-11-06 (`rl2.agent-scope`): a read follows its subscription's scope; a diff is the session's, asked on the main
+    // transcript's (sminos passes one on an agent's by unanswered)
+    if (!spec.agent && up.agentId !== null) return { ok: false, code: 'malformed' };
     const rest: Fields = { ...input };
     delete rest.session;
     delete rest.sub;
-    this.ctx.toSminos({ t: m.name.slice('sminos.'.length), project: up.project, session: up.session, ...(spec.agent ? { agentId: null } : {}), sub: up.epoch, ...rest });
+    this.ctx.toSminos({ t: m.name.slice('sminos.'.length), project: up.project, session: up.session, ...(spec.agent ? { agentId: up.agentId } : {}), sub: up.epoch, ...rest });
     return { ok: true, output: { requested: true } };
   }
 

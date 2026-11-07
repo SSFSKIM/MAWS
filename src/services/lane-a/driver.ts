@@ -791,7 +791,12 @@ export function registerLaneA(driver: LaneADriver, register: Register): void {
   const id = (appSessionId: string) => appSessionId as AppSessionId;
   register('laneA.list', () => ({ states: driver.list() }));
   register('laneA.state', ({ appSessionId }) => driver.state(id(appSessionId)));
-  register('laneA.watch', ({ appSessionId }, ctx) => driver.watch(id(appSessionId), ctx.client));
+  // 2026-11-06: one subagent's transcript is a remote session's watch (main's remote adapter, `rl2.agent-scope`); this
+  // machine's drill-in reads the agent's transcript from the disk, so one asked here is refused, never the main loop's
+  register('laneA.watch', ({ appSessionId, agentId }, ctx) => {
+    if (agentId !== undefined) throw new Error(`${appSessionId}: a subagent’s own transcript is read from this machine’s disk, not watched through its bridge`);
+    return driver.watch(id(appSessionId), ctx.client);
+  });
   register('laneA.unwatch', ({ appSessionId, watch }) => driver.unwatch(id(appSessionId), watch));
   register('laneA.catalog', ({ appSessionId }) => driver.catalog(id(appSessionId)));
   register('laneA.read', ({ appSessionId, kind, args }) => driver.read(id(appSessionId), kind, args));

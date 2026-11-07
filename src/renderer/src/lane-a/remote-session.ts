@@ -5,7 +5,7 @@
 // link), so before the watch's first state it reads as starting.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LaneAState } from '@shared/ipc/schema/lane-a';
-import { bareOf, machineOf } from '@shared/machine/address';
+import { bareOf, isAddress, machineOf } from '@shared/machine/address';
 import { ipc } from '../ipc/client';
 import { useMachines } from '../stores/machines';
 import { machineName } from '../stores/org-projects';
@@ -16,6 +16,16 @@ export const useRemoteLaneA = (appSessionId: AppSessionId | null): boolean => us
 
 /** What the session's machine is called, as its rows name it. */
 export const remoteMachineName = (appSessionId: AppSessionId): string => machineName(useMachines.getState().machines, machineOf(appSessionId), ipc.localMachine);
+
+/**
+ * 2026-11-06: what the session's machine's endpoint listed in its handshake (MachineState's `capabilities`); null while no
+ * channel says, and for an id that is no address (it names no machine).
+ */
+export const remoteMachineCapabilities = (appSessionId: AppSessionId): readonly string[] | null =>
+  isAddress(appSessionId) ? (useMachines.getState().machines.get(machineOf(appSessionId))?.capabilities ?? null) : null;
+/** The same, for a component: subscribed, so a channel's coming up (its list known) renders again. */
+export const useRemoteMachineCapabilities = (appSessionId: AppSessionId): string =>
+  useMachines((s) => (isAddress(appSessionId) ? (s.machines.get(machineOf(appSessionId))?.capabilities?.join(',') ?? '') : ''));
 
 /** The state a remote session reads as before its watch's first: starting, every control closed with why. */
 export function startingRemoteState(appSessionId: AppSessionId): LaneAState {
