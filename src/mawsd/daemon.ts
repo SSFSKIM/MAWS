@@ -1023,6 +1023,15 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         if (!endpoint) return { code: 2, out: NO_ENDPOINT_MODULE };
         return endpoint.cli(command, args, secret); // the secret is passed, never logged
       }
+      // P5 O8 M6b: the local door (endpoint-seam.ts' `EndpointModule.local`), `unavailable` with no module or door
+      case 'endpoint.local.act': {
+        const { action } = input as CommandInput<'endpoint.local.act'>;
+        return endpoint?.local === undefined ? { state: 'refused', reason: 'unavailable' } : endpoint.local.act(action);
+      }
+      case 'endpoint.local.call': {
+        const call = input as CommandInput<'endpoint.local.call'>;
+        return endpoint?.local === undefined ? { ok: false, code: 'unavailable' } : endpoint.local.call(call.name, call.input);
+      }
       default:
         throw new Error(`mawsd serves no ${name}`);
     }
