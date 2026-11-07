@@ -79,7 +79,8 @@ function outcomeOf(line: OrgPolicyLine, outcome: unknown, prev: number | null): 
   const state = isObject(outcome) ? outcome.state : undefined;
   if (state === 'done') {
     const result = isObject(outcome) ? outcome.result : undefined;
-    if (!isObject(result) || typeof result.changed !== 'boolean' || !Number.isInteger(result.policyRev) || (result.policyRev as number) < 0) return { line, state: 'done', changed: true, policyRev: null, elsewhere: false };
+    // a `done` that says no change and revision is read as one that may have run, never as a change: it stops the save
+    if (!isObject(result) || typeof result.changed !== 'boolean' || !Number.isInteger(result.policyRev) || (result.policyRev as number) < 0) return { line, state: 'unknown', reason: 'malformed' };
     const policyRev = result.policyRev as number;
     // a change bumps the revision by one, a no-op by none: anything past that is another's change between
     const elsewhere = prev !== null && policyRev > prev + (result.changed ? 1 : 0);
@@ -204,7 +205,7 @@ export function createOrgPolicies(deps: OrgPoliciesDeps): OrgPolicies {
       const outcome = outcomeOf(line, await signed.sends[i](), prev);
       deps.acted(machine);
       results.push(outcome);
-      if (outcome.state === 'done' && outcome.policyRev !== null) prev = outcome.policyRev;
+      if (outcome.state === 'done') prev = outcome.policyRev;
     }
     const now = await read(machine, null);
     const policy = now.ok && now.supported ? (now.policies.find((p) => p.session === session) ?? null) : null;

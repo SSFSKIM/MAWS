@@ -163,6 +163,21 @@ describe('a save', () => {
     });
   });
 
+  it('stops at a `done` that says no change and revision, as at an outcome that may have run: it invents no change', async () => {
+    const w = await world();
+    w.reading(LOCAL, answer('app-local', 4));
+    w.outcomes[LOCAL].push({ state: 'done', result: { ok: true } }, { state: 'done', result: { changed: true, policyRev: 6 } });
+    const result = await w.policies.set({ address: `${LOCAL}/app-local`, access: 'private', shares: [{ member: ANA, grade: 'view' }], policyRev: 4 });
+    expect(w.sent).toHaveLength(1);
+    expect(result).toMatchObject({
+      ok: true,
+      results: [
+        { line: { kind: 'access', access: 'private' }, state: 'unknown', reason: 'malformed' },
+        { line: { kind: 'share', member: ANA, grade: 'view' }, state: 'not-sent' },
+      ],
+    });
+  });
+
   it('sends nothing, and asks nothing, when the revision moved before Touch ID', async () => {
     const w = await world();
     w.reading(LOCAL, answer('app-local', 5));
@@ -274,7 +289,9 @@ describe('the refusals', () => {
       [{ state: 'not-sent' }, { state: 'refused', reason: 'tombstoned' }],
       [{ state: 'unknown', reason: 'expired' }, { state: 'unknown', reason: 'expired' }],
       [{ state: 'failed', error: { message: 'boom' } }, { state: 'failed', reason: 'failed' }],
-      [{ state: 'done', result: 'not a policy' }, { state: 'done', changed: true, policyRev: null, elsewhere: false }],
+      [{ state: 'done', result: 'not a policy' }, { state: 'unknown', reason: 'malformed' }],
+      [{ state: 'done', result: { changed: true } }, { state: 'unknown', reason: 'malformed' }],
+      [{ state: 'done', result: { changed: 'yes', policyRev: 5 } }, { state: 'unknown', reason: 'malformed' }],
     ] as const) {
       w.reading(MINI, answer('eng-1', 4));
       w.outcomes[MINI].push(outcome);

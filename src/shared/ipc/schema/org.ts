@@ -442,15 +442,15 @@ export const OrgPolicyLineSchema = z.discriminatedUnion('kind', [
 ]);
 export type OrgPolicyLine = z.infer<typeof OrgPolicyLineSchema>;
 /**
- * A line's outcome. `done`: it ran; `changed: false` is a no-op that bumped nothing; `policyRev`, the revision it left
- * (null when the outcome didn't say); `elsewhere`, its revision skipped one, so the policy also changed elsewhere.
- * `refused`: nothing ran, in its refuser's words: sminos's (`no-session`, `unsupported`, `bad-shape`, `read-only`), the
- * endpoint's (`not-offered`, `no-session`), the ledger's (`stale`, `expired`, `tombstoned`), step-up's (`cancelled`), the
- * link's (`offline`, `closed`, …). `unknown`: it may have run. `failed`: it was tried and failed. `not-sent`: an earlier
- * line's failure stopped the save first.
+ * A line's outcome. `done`: it ran; `changed: false` is a no-op that bumped nothing; `policyRev`, the revision it left;
+ * `elsewhere`, its revision skipped one, so the policy also changed elsewhere. `refused`: nothing ran, in its refuser's
+ * words: sminos's (`no-session`, `unsupported`, `bad-shape`, `read-only`), the endpoint's (`not-offered`, `no-session`),
+ * the ledger's (`stale`, `expired`, `tombstoned`), step-up's (`cancelled`), the link's (`offline`, `closed`, …).
+ * `unknown`: it may have run (`malformed`: it said `done` without its change and revision). `failed`: it was tried and
+ * failed. `not-sent`: an earlier line's failure stopped the save first.
  */
 export const OrgPolicyOutcomeSchema = z.union([
-  z.strictObject({ line: OrgPolicyLineSchema, state: z.literal('done'), changed: z.boolean(), policyRev: z.number().int().nonnegative().nullable(), elsewhere: z.boolean() }),
+  z.strictObject({ line: OrgPolicyLineSchema, state: z.literal('done'), changed: z.boolean(), policyRev: z.number().int().nonnegative(), elsewhere: z.boolean() }),
   z.strictObject({ line: OrgPolicyLineSchema, state: z.enum(['refused', 'unknown', 'failed']), reason: z.string() }),
   z.strictObject({ line: OrgPolicyLineSchema, state: z.literal('not-sent') }),
 ]);
