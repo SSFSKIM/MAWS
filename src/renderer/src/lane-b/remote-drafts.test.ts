@@ -12,7 +12,7 @@ import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { docOf, paragraph, textNode } from '../composer/editor/doc';
 import { rememberingRemoteDrafts, rememberRemoteDraft, resetRemoteDrafts } from '../composer/editor/drafts';
 import { readerRowsOf, resetReaderRows } from './reader-rows';
-import { REMOTE_DRAFT_WORDS } from './remote-drafts';
+import { REMOTE_DRAFT_RETRIES, REMOTE_DRAFT_RETRY_MS, REMOTE_DRAFT_WORDS } from './remote-drafts';
 import { WITHHELD_ATTACHMENTS } from '@shared/sessions/draft-fit';
 import { useNotices } from '../stores/notices';
 import { useMachines } from '../stores/machines';
@@ -131,6 +131,57 @@ describe('a machine that keeps each member’s draft', () => {
     expect(textOf(machine.kept())).toBe('newer');
     expect(landOlder()).toBe(false); // the older one, late: refused there
     expect(textOf(machine.kept())).toBe('newer');
+  });
+
+  // M6a's re-review (the enumerated draft path, test/lane-b/drafts-enumerated.test.ts): two saves both past main's
+  // bound, the older landing late first, left the newer refused there with nothing to send it again
+  it('sends the newest again a while after a save past main’s pending bound, when nothing newer is sent', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true }); // the fake client's settling, on real time
+    try {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const machine = machineKeeping();
+      const port = portOf(machine.fake);
+      port.save(draft('older'));
+      await flush();
+      const landOlder = await machine.stall();
+      await flush();
+      port.save(draft('newer'));
+      await flush();
+      const landNewer = await machine.stall();
+      await flush();
+      expect([landOlder(), landNewer()]).toEqual([true, false]); // both late: the older lands, the newer is refused there
+      expect(textOf(machine.kept())).toBe('older');
+      await vi.advanceTimersByTimeAsync(REMOTE_DRAFT_RETRY_MS);
+      await machine.take(); // the newest, on top of what is kept now
+      expect(machine.saved().map((input) => [textOf(input.draft), input.replaces])).toEqual([['older', null], ['newer', null], ['newer', machine.saved()[0]!.draft!.updatedAt]]);
+      expect(textOf(machine.kept())).toBe('newer');
+      await vi.advanceTimersByTimeAsync(10 * REMOTE_DRAFT_RETRY_MS);
+      expect(machine.saved()).toHaveLength(3); // taken: nothing more
+      warn.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sends the newest again after a save past the bound only a few times, the draft kept for this run meanwhile', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true }); // the fake client's settling, on real time
+    try {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const machine = machineKeeping();
+      const port = portOf(machine.fake);
+      port.save(draft('waiting'));
+      await flush();
+      await machine.stall();
+      for (let retry = 0; retry < 10; retry += 1) {
+        await vi.advanceTimersByTimeAsync(REMOTE_DRAFT_RETRY_MS);
+        if (machine.fake.pending('session.drafts.set') > 0) await machine.stall();
+      }
+      expect(machine.saved()).toHaveLength(1 + REMOTE_DRAFT_RETRIES);
+      expect(textOf(await portOf(machine.fake).load())).toBe('waiting');
+      warn.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('sends a newer save again on top of a late one that landed first', async () => {

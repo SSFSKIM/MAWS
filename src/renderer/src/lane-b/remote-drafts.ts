@@ -16,7 +16,8 @@
 //   saved (M6a's branch review, F1). Main answers a save still out at its pending bound `timeout`, and the act may yet
 //   land, so after one the next save reads what is kept first; the late one, landing after it, is refused there. A save
 //   refused so (it lost to a late act, or to another device of the member) reads what is kept and goes again, a few
-//   times: the newest typed here is this device's word. A clear is kept there at a stamp its machine mints (M6a's
+//   times: the newest typed here is this device's word. A `timeout` with nothing newer to send sends the newest again a
+//   while later, a few times, since a late act may yet make it stale there (M6a's re-review). A clear is kept there at a stamp its machine mints (M6a's
 //   re-review, K1), read as a draft with no document, which loads as none.
 // - A save keeps the text there whatever its attachments weigh (M6a's branch review, F3; @shared/sessions/draft-fit.ts):
 //   those past one act's bound stay in this run, which loads the draft whole, and the composer is told once; a draft
@@ -37,13 +38,19 @@ export const REMOTE_DRAFT_WORDS = {
   leftThere: (names: readonly string[], machine: string) => `${names.join(', ')} stayed on ${machine}: too large to bring here with the draft`,
 } as const;
 
-/** A session's saves not yet taken: the newest draft handed to `save`, whether a save is out, and whether one waits. */
-type Saves = { latest: Draft | null; out: boolean; waiting: boolean; refused(draft: Draft | null): void };
+/**
+ * A session's saves not yet taken: the newest draft handed to `save`, whether a save is out, whether one waits, and the
+ * newest's sending again after a `timeout` (how many times since it was handed, and the one due).
+ */
+type Saves = { latest: Draft | null; out: boolean; waiting: boolean; refused(draft: Draft | null): void; resent: number; resend: ReturnType<typeof setTimeout> | null };
 const saves = new Map<AppSessionId, Saves>();
 /** The draft kept there as this run last knew it, by its `updatedAt` (null: none); absent while not known. */
 const bases = new Map<AppSessionId, string | null>();
 /** A save refused as stale goes again this many times, each after reading what is kept. */
 const STALE_RETRIES = 3;
+/** After a `timeout` with nothing newer to send, the newest goes again this long after, at most this many times. */
+export const REMOTE_DRAFT_RETRY_MS = 15_000;
+export const REMOTE_DRAFT_RETRIES = 3;
 /** The whole draft of a session whose last save left attachments out there, for this run's loads. */
 const wholeHere = new Map<AppSessionId, Draft>();
 /** The attachments the machine's last read of a session left there, which its saves name. */
@@ -113,11 +120,12 @@ export async function loadRemoteDraft(client: MawsBridge, appSessionId: AppSessi
 /** The draft saved there after the session's saves before it; `refused` takes the newest if the machine offers none. */
 export function saveRemoteDraft(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null, refused: (draft: Draft | null) => void): void {
   const held = saves.get(appSessionId);
-  const queue = held ?? { latest: draft, out: false, waiting: false, refused };
+  const queue = held ?? { latest: draft, out: false, waiting: false, refused, resent: 0, resend: null };
   if (held === undefined) saves.set(appSessionId, queue);
   queue.latest = draft;
   queue.waiting = true;
   queue.refused = refused;
+  queue.resent = 0;
   if (!queue.out) void pump(client, appSessionId, queue);
 }
 
@@ -154,7 +162,10 @@ async function saveOnce(client: MawsBridge, appSessionId: AppSessionId, draft: D
 
 async function pump(client: MawsBridge, appSessionId: AppSessionId, queue: Saves): Promise<void> {
   queue.out = true;
+  if (queue.resend !== null) clearTimeout(queue.resend);
+  queue.resend = null;
   let taken = false;
+  let timedOut = false;
   const current = () => saves.get(appSessionId) === queue; // else dropped (a newer save went to the fallback) or reset
   while (queue.waiting && current()) {
     queue.waiting = false;
@@ -165,8 +176,21 @@ async function pump(client: MawsBridge, appSessionId: AppSessionId, queue: Saves
       return queue.refused(queue.latest);
     }
     taken = result.ok;
+    timedOut = !result.ok && result.error.code === 'timeout';
     if (!result.ok) console.warn('[composer] the draft was not kept on its machine', result.error.message);
   }
   queue.out = false;
-  if (taken && current()) saves.delete(appSessionId);
+  if (!current()) return;
+  if (taken) return void saves.delete(appSessionId);
+  // A save past main's bound may land later, after a newer one it then makes stale there: nobody would send the newest
+  // again, so it goes again itself, on top of what is kept by then (M6a's re-review, the enumerated draft path).
+  if (timedOut && queue.resent < REMOTE_DRAFT_RETRIES) {
+    queue.resent += 1;
+    queue.resend = setTimeout(() => {
+      queue.resend = null;
+      if (!current() || queue.out) return;
+      queue.waiting = true;
+      void pump(client, appSessionId, queue);
+    }, REMOTE_DRAFT_RETRY_MS);
+  }
 }
