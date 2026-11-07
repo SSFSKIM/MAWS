@@ -47,8 +47,11 @@
 #   grep-home <token> [--after <ts>]   per file under the sminos home, how many lines hold the token (with --after,
 #                                lines whose `ts` is not after it are not counted); then `total <n>`
 #   owed                         `sminos daemon owed`
+#   events <token>               each event of the project's log files holding the token (its writer, seq, ts, kind,
+#                                session, text, withheld, audience, file)
+#   row <session> <token>        the text of the first row the session was given holding the token (its frame, label)
 #   archive-ls [token…]          the run's archive (/srv/o18-archive.git) as root: `file <path>` for each file on main,
-#                                `token <t> <n>` for each token's count there
+#                                `tomb <path> <seq>` for each tombstone in them, `token <t> <n>` for each token's count
 #   mawsd-freeze | mawsd-thaw | mawsd-stop | mawsd-start   mawsd (and what it started) stopped by SIGSTOP and continued;
 #                                ended, and started again under its loop, serving
 # Nothing here names the owner, the owner's profile, sminos or daemon, or the VM's own mawsd (port 47830): a scene is
@@ -419,6 +422,35 @@ if len(sys.argv) >= 3:
 ' "$file" ${2:+"$2"}
 }
 
+# The text of the first row session $1 was given holding token $2 (as `transcript` counts them), on one line, at most
+# 600 characters: a delivery's frame and its sender's label (a reach scene's evidence of how a message arrived).
+row() {
+  local file
+  file=$(find $H/.claude/projects -name "$1.jsonl" 2>/dev/null | head -1)
+  [[ -n $file ]] || { say "row: none"; return 0; }
+  python3 -c '
+import json, sys
+def text(x):
+    if isinstance(x, str):
+        return x
+    if isinstance(x, list):
+        return " ".join(text(v) for v in x)
+    if isinstance(x, dict):
+        return " ".join(text(v) for k, v in x.items() if k in ("content", "text", "message"))
+    return ""
+for line in open(sys.argv[1], encoding="utf-8"):
+    try:
+        r = json.loads(line)
+    except ValueError:
+        continue
+    if isinstance(r, dict) and r.get("type") not in ("assistant", "queue-operation", "summary", "system") and sys.argv[2] in json.dumps(r, ensure_ascii=False):
+        print("row:", " ".join(text(r).split())[:600])
+        break
+else:
+    print("row: none")
+' "$file" "$2"
+}
+
 down() {
   local left=0 p
   runuser -u $U -- tmux -L $TX kill-server 2>/dev/null
@@ -472,6 +504,8 @@ reach_words() {
     forge-say) reach_only "$verb"; (($# == 4)) && is "$UUID_RE" "$1" && is "$UUID_RE" "$2" && is '^[a-z0-9][a-z0-9-]{0,62}$' "$3" && is "$TOKEN_RE" "$4" || fail "forge-say <writer session> <recipient session> <alias> <token>" ;;
     grep-home) reach_only "$verb"; is '^[A-Za-z0-9._:-]{4,64}$' "${1:-}" && { (($# == 1)) || { (($# == 3)) && [[ $2 == --after ]] && is "$TS_RE" "$3"; }; } || fail "grep-home <token> [--after <ts>]" ;;
     archive-ls) reach_only "$verb"; for t in "$@"; do is '^[A-Za-z0-9._:-]{4,64}$' "$t" || fail "archive-ls [token…]: not a token: $t"; done ;;
+    events) reach_only "$verb"; (($# == 1)) && is '^[A-Za-z0-9._:-]{4,64}$' "$1" || fail "events <token>" ;;
+    row) reach_only "$verb"; (($# == 2)) && is "$UUID_RE" "$1" && is "$TOKEN_RE" "$2" || fail "row <session> <token>" ;;
     log-files | uplink | streams | audiences | policy-cache | owed | mawsd-freeze | mawsd-thaw | mawsd-stop | mawsd-start) reach_only "$verb"; (($# == 0)) || fail "$verb takes no words" ;;
   esac
 }
@@ -588,6 +622,25 @@ for d, _, files in os.walk(root):
             total += n
 print("total", total)
 '
+# Each event of the project's log files holding the token: `event <json>`, its writer, seq, ts, kind, session, text
+# (at most 300 characters), withheld and audience, the run's own markers and ids alone.
+EVENTS_PY='
+import glob, json, os, sys
+for path in sorted(glob.glob(os.path.join(sys.argv[1], "*.jsonl"))):
+    for line in open(path, encoding="utf-8", errors="replace"):
+        if sys.argv[2] not in line:
+            continue
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(e, dict):
+            keep = {k: e[k] for k in ("writer", "seq", "ts", "kind", "session", "withheld", "audience") if k in e}
+            if isinstance(e.get("text"), str):
+                keep["text"] = e["text"][:300]
+            keep["file"] = os.path.basename(path)
+            print("event", json.dumps(keep, separators=(",", ":")))
+'
 # A JSON file printed on one line, or `none`.
 json_of() { if [[ -f $1 ]]; then python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",", ":")))' "$1"; else say none; fi; }
 
@@ -597,6 +650,18 @@ archive_ls() {
   if ! "${git[@]}" rev-parse -q --verify "main^{commit}" >/dev/null; then say "archive: no commit on main"; return 0; fi
   say "archive: main at $("${git[@]}" rev-parse --short=12 main)"
   "${git[@]}" ls-tree -r --name-only main | sed 's/^/file /'
+  # Each tombstone a file on main holds (`{writer, seq, withheld: true}`): `tomb <path> <seq>`.
+  "${git[@]}" ls-tree -r --name-only main | while read -r f; do
+    "${git[@]}" show "main:$f" 2>/dev/null | python3 -c '
+import json, sys
+for line in sys.stdin:
+    try:
+        e = json.loads(line)
+    except ValueError:
+        continue
+    if isinstance(e, dict) and e.get("withheld") is True:
+        print("tomb", sys.argv[1], e.get("seq"))' "$f"
+  done
   for t in "$@"; do say "token $t $("${git[@]}" grep -c -F -e "$t" main 2>/dev/null | awk -F: '{n += $NF} END {print n + 0}')"; done
 }
 
@@ -676,6 +741,8 @@ case $verb in
   operator) operator "$@" ;;
   operator-say) scene_sminos say "$(say_text "$1" "$2")" ;;
   forge-say) forge_say "$@" ;;
+  row) row "$1" "$2" ;;
+  events) h=$(project_home) || fail "$h"; python3 -c "$EVENTS_PY" "$h/log" "$1" ;;
   log-files) h=$(project_home) || fail "$h"; for f in "$h"/log/*.jsonl; do [[ -f $f ]] && say "$(basename "$f") $(stat -c %s "$f")"; done; true ;;
   uplink) h=$(project_home) || fail "$h"; json_of "$h/uplink.json" ;;
   streams) h=$(project_home) || fail "$h"; json_of "$h/streams.json" ;;
@@ -688,5 +755,5 @@ case $verb in
   mawsd-thaw) freeze CONT ;;
   mawsd-stop) mawsd_stop ;;
   mawsd-start) mawsd_start ;;
-  *) fail "scene.sh [--scene a1|a2|b1|a3] check | up | enroll <name> | mawsd <args…> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | lane-b-up <tag> | lane-b-events <app> | started | down | params | as-session <session> <sub…> | operator access|share … | operator-say <token> <tag> | forge-say <writer> <recipient> <alias> <token> | log-files | uplink | streams | audiences | policy-cache | grep-home <token> [--after <ts>] | owed | archive-ls [token…] | mawsd-freeze | mawsd-thaw | mawsd-stop | mawsd-start" ;;
+  *) fail "scene.sh [--scene a1|a2|b1|a3] check | up | enroll <name> | mawsd <args…> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | lane-b-up <tag> | lane-b-events <app> | started | down | params | as-session <session> <sub…> | operator access|share … | operator-say <token> <tag> | forge-say <writer> <recipient> <alias> <token> | row <session> <token> | events <token> | log-files | uplink | streams | audiences | policy-cache | grep-home <token> [--after <ts>] | owed | archive-ls [token…] | mawsd-freeze | mawsd-thaw | mawsd-stop | mawsd-start" ;;
 esac

@@ -603,3 +603,65 @@ describe('the endpoint step', () => {
     expect(bad.stdout).toMatch(/endpoint-vm setup <base commit> \| teardown/);
   });
 });
+
+describe('the reach step', () => {
+  // `staging-run.sh reach [args…]` (P5 O18 M6): `deployment reach-acceptance` on staging's config with the admin
+  // device's keys, the token on its stdin alone, the run's secrets listed for the search after it, production's build
+  // compared before and after; and `reach-vm setup|teardown`, which read no token. Stubs as the endpoint step's.
+  const token = `eyJ${'r'.repeat(20)}.synthetic`;
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'staging-reach-'));
+    const device = join(dir, 'device');
+    mkdirSync(device);
+    writeFileSync(join(device, 'keys.json'), '{}', { mode: 0o600 });
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'cloudflared'), `#!/bin/sh\nprintf '%s' '${token}'\n`, { mode: 0o755 });
+    writeFileSync(join(bin, 'curl'), `#!/bin/sh\ncat > /dev/null\nprintf 'X-Desk-Build: hub@0123abcd web@master.0123abcd\\r\\n'\n`, { mode: 0o755 });
+    writeFileSync(join(bin, 'pnpm'), ['#!/bin/sh', `printf '%s\\n' "$@" > '${dir}/args'`, `cat > '${dir}/stdin'`, 'echo "PASS 3a"', "echo 'a line naming a secret'", 'exit 0', ''].join('\n'), { mode: 0o755 });
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, DESK_STAGING_DIR: join(dir, 'state'), DESK_STAGING_DEVICE: device, DESK_STAGING_SECRETS: join(dir, 'secrets') };
+    return { dir, device, env };
+  };
+
+  it.skipIf(!zsh)('runs the reach acceptance on staging with the device’s keys, the token on stdin alone, production compared', () => {
+    const { dir, device, env } = setup();
+    const run = spawnSync('zsh', [runner, 'reach', '--vm', 'dc-o18', '--direct-url', 'ws://100.64.0.9', '--items', '3a'], { encoding: 'utf8', env, timeout: 60_000 });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    const args = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
+    expect(args.slice(args.indexOf('deployment'))).toEqual(['deployment', 'reach-acceptance', '--config', 'deploy/staging.json', '--device-keys', `${device}/keys.json`, '--scan', join(dir, 'state', 'reach.scan'), '--vm', 'dc-o18', '--direct-url', 'ws://100.64.0.9', '--items', '3a']);
+    expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe(`DESK_ACCESS_TOKEN=${token}\n`);
+    expect(run.stdout).toContain('PASS 3a');
+    expect(run.stdout).not.toContain('a line naming a secret');
+    expect(run.stdout).toContain('production build unchanged: X-Desk-Build: hub@0123abcd web@master.0123abcd');
+    expect(run.stdout).toContain('files holding the Access token or a secret the run handled: 0');
+    expect(run.stdout + run.stderr).not.toContain(token);
+  });
+
+  it.skipIf(!zsh)('takes no option that would move it off staging, its keys or its scan, nor the VM’s setup', () => {
+    for (const bad of ['--config', '--config=deploy/config.json', '--production', '--scan', '--vm-setup']) {
+      const { dir, env } = setup();
+      const run = spawnSync('zsh', [runner, 'reach', bad], { encoding: 'utf8', env, timeout: 60_000 });
+      expect(run.status, bad).toBe(2);
+      expect(run.stdout).toMatch(/reach takes no .* here/);
+      expect(existsSync(join(dir, 'args')), bad).toBe(false);
+    }
+  });
+
+  it.skipIf(!zsh)('sets the reach scenes up from the run’s sminos commits, or tears them down, with no token read', () => {
+    for (const [args, expected] of [
+      [['reach-vm', 'setup', '--vm', 'dc-o18', '--sminos', '0759115d'], ['reach-acceptance', '--config', 'deploy/staging.json', '--vm-setup', '--vm', 'dc-o18', '--sminos', '0759115d']],
+      [['reach-vm', 'teardown', '--vm', 'dc-o18'], ['reach-acceptance', '--config', 'deploy/staging.json', '--vm-teardown', '--vm', 'dc-o18']],
+    ] as const) {
+      const { dir, env } = setup();
+      const run = spawnSync('zsh', [runner, ...args], { encoding: 'utf8', env, timeout: 60_000 });
+      expect(run.status, run.stdout + run.stderr).toBe(0);
+      const given = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
+      expect(given.slice(given.indexOf('deployment') + 1)).toEqual(expected);
+      expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe('');
+    }
+    for (const bad of [['reach-vm'], ['reach-vm', 'setup', '--sminos', 'HEAD;rm'], ['reach-vm', 'teardown', '--sminos', '0759115d'], ['reach-vm', 'setup', '--base', 'abc1234']]) {
+      const { env } = setup();
+      expect(spawnSync('zsh', [runner, ...bad], { encoding: 'utf8', env }).status, bad.join(' ')).toBe(2);
+    }
+  });
+});

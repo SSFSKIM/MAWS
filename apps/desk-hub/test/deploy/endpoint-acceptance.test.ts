@@ -696,11 +696,12 @@ describe('production’s machine', () => {
     expect(said.filter((l) => l.startsWith('OWNER:'))).toEqual([]);
   });
 
-  it('is dialled directly at production’s own port unless the command names another address', async () => {
+  // P5 O18 M6: the VM the defaults named (dc-acceptance-7f80, its tailnet address) was deleted on 2026-11-01, so the
+  // command names the listener it dials, and nothing is assumed.
+  it('is dialled directly at the address the command names, and at none it assumes', async () => {
     const { directUrlFor } = await import('../../deploy/endpoint-acceptance.ts');
-    expect(directUrlFor('production', undefined)).toBe('ws://100.116.205.27:47830');
-    expect(directUrlFor('staging', undefined)).toBe('ws://100.116.205.27:47831');
-    expect(directUrlFor('production', 'ws://100.64.0.9:47830')).toBe('ws://100.64.0.9:47830');
+    expect(directUrlFor('ws://100.64.0.9:47830')).toEqual({ url: 'ws://100.64.0.9:47830' });
+    for (const given of [undefined, 'ws://100.64.0.9', 'http://100.64.0.9:47830', 'ws://a b:1']) expect(directUrlFor(given), String(given)).toEqual({ refused: expect.stringMatching(/--direct-url/) });
   });
 });
 

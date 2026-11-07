@@ -43,6 +43,9 @@ export const PRODUCTION_HOST = 'desk-hub.opencognita-platform.workers.dev';
  * starting with `desk-hub-staging` can be one of production's (`desk-hub-staging-desk-hub.…`). */
 export const STAGING_WORKER = 'desk-hub-staging';
 export const STAGING_HOST = 'desk-hub-staging.opencognita-platform.workers.dev';
+/** Staging's org (deploy/staging.json's), the one org a run may widen a session's reach at by a terminal it controls
+ * (P5 O18 M6's operator path). */
+export const STAGING_ORG = 'staging-ssfskim';
 /** The suites' local hubs. */
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]']);
 

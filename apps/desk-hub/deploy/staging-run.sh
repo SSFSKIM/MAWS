@@ -32,6 +32,12 @@
 #                            this script's own `deploy`; production's X-Desk-Build compared before and after
 #   endpoint-vm setup <base> | teardown
 #                            that VM's scene set up (the branch built there from a bundle cut at <base>) or removed
+#   reach [args…]            P5 O18 M6: `deployment reach-acceptance`, message reach on staging: the reach scenes on the
+#                            run's VM (--vm <vm> --direct-url ws://<its tailnet address>), a second member added for the
+#                            run, the probe machines in this process; production's X-Desk-Build compared before and after
+#   reach-vm setup [--vm <vm>] [--sminos <commit>] [--old-sminos <commit>] | teardown [--vm <vm>]
+#                            the reach scenes set up on that VM (the branch as a full bundle, each sminos the run's copy
+#                            by commit, what the VM lacks installed, pinned) or removed
 # Any further arguments go to the step's command. Environment (README "Staging runs"):
 #   DESK_STAGING_SECRETS  the directory holding CF_ACCESS_SETUP_TOKEN and CF_DESK_HUB_SERVICE_TOKENS
 #   DESK_STAGING_DIR      logs and state (default ~/.local/state/desk-hub-staging): one log per step; prod/; the
@@ -302,6 +308,54 @@ case $step in
       *) print -r -- "endpoint-vm setup <base commit> | teardown"; exit 2 ;;
     esac
     exit ${pipestatus[1]} ;;
+  reach)
+    # P5 O18 M6: `deployment reach-acceptance` (its scenes set up by `reach-vm setup`), as `endpoint` runs O10's: the token
+    # on the command's stdin alone, what else it handled (the enrollment codes, the probes' service tokens) listed in
+    # $SCAN for the search after it, production's X-Desk-Build compared before and after. It deploys nothing.
+    [[ -f $H/keys.json ]] || { print -r -- "no admin device keys at $H/keys.json (DESK_STAGING_DEVICE): stop. Nothing was changed."; exit 2; }
+    for a in "$@"; do
+      [[ $a == (--config|--device-keys|--scan|--production|--vm-setup|--vm-teardown)(|=*) ]] && { print -r -- "reach takes no $a here: the step names staging, the keys and the scan itself, and reach-vm sets the VM up: stop. Nothing was changed."; exit 2; }
+    done
+    LOG=$O/reach-$(stamp).log; : > $LOG
+    SCAN=$O/reach.scan; : > $SCAN
+    say() { print -r -- "$*" | tee -a $LOG; }
+    owner_token
+    before=$(header $PROD) || exit 3
+    say "production before: $before"
+    ran=1 finished=0
+    finish() {
+      (( finished )) && return; finished=1
+      after=$(header $PROD) || after="unread"
+      if [[ $after == "$before" ]]; then say "production build unchanged: $after"; else say "production build CHANGED or unread: $after"; fi
+      leaked=$(secret_scan <(print -r -- "$T"; cat $SCAN) $LOG)
+      unset T
+      rm -f $SCAN
+      say "files holding the Access token or a secret the run handled: $leaked; log $LOG"
+      (( ran == 0 && leaked == 0 )) && [[ $after == "$before" ]] && exit 0
+      exit $(( ran ? ran : 1 ))
+    }
+    trap finish EXIT
+    trap 'exit 130' INT TERM
+    printf 'DESK_ACCESS_TOKEN=%s\n' "$T" | deployment reach-acceptance --device-keys $H/keys.json --scan $SCAN "$@" 2>&1 | filter | tee -a $LOG
+    ran=${pipestatus[2]}
+    say "reach acceptance exit $ran"
+    exit $ran ;;
+  reach-vm)
+    # P5 O18 M6: the reach scenes' setup (vm/setup.sh's RUN=o18) or teardown on the run's VM, through `devcloud vm ssh`
+    # alone. No token is read: neither touches the hub.
+    sub=${1:-}; (( $# )) && shift
+    [[ $sub == (setup|teardown) ]] || { print -r -- "reach-vm setup [--vm <vm>] [--sminos <commit>] [--old-sminos <commit>] | teardown [--vm <vm>]"; exit 2; }
+    args=()
+    while (( $# )); do
+      case $1 in
+        --vm) [[ ${2:-} =~ '^[a-z0-9][a-z0-9-]{0,62}$' ]] || { print -r -- "--vm <name>"; exit 2; }; args+=(--vm $2); shift ;;
+        --sminos|--old-sminos) [[ $sub == setup && ${2:-} =~ '^[0-9a-f]{7,40}$' ]] || { print -r -- "$1 <commit> (setup's alone)"; exit 2; }; args+=($1 $2); shift ;;
+        *) print -r -- "reach-vm takes --vm, --sminos and --old-sminos (given: $1)"; exit 2 ;;
+      esac
+      shift
+    done
+    deployment reach-acceptance --vm-$sub "${args[@]}" < /dev/null 2>&1 | filter
+    exit ${pipestatus[1]} ;;
   phone)
     # P5 O13 M7 (Interfaces §H): test/endpoint/staging-phone.live.test.ts, the real endpoint module enrolled on staging as
     # o13-phone-<n>, the owner's cards raised there and answered from the phone (or, --rehearse, by the run's second
@@ -432,5 +486,5 @@ case $step in
       checks+=(${pipestatus[2]}); say "redeploy-check exit ${checks[-1]}"
     fi
     exit 0 ;;
-  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin [--pipe] <args…> | throwaway <n> | phone <n> [--rehearse] [--lane-b] [--device <id>] | endpoint [args…] | endpoint-vm setup <base> | teardown"; exit 2 ;;
+  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin [--pipe] <args…> | throwaway <n> | phone <n> [--rehearse] [--lane-b] [--device <id>] | endpoint [args…] | endpoint-vm setup <base> | teardown | reach [args…] | reach-vm setup|teardown [args…]"; exit 2 ;;
 esac
