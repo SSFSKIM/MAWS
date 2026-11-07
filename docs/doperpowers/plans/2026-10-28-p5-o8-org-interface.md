@@ -1,6 +1,6 @@
 # P5 O8 — The org interface (2026-10-28)
 
-> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `92141de56e15ff65c3da5baa8fa135cdecf075c7` at master `f857f0450` (P5's Decision Logs 1–238; re-pinned on 2026-11-06 at M7b's cut, where 229–238 change nothing M7b consumes: 232 sets the order, 238 lands M7a. Before that, at blob `b99c1767` and master `910539147`, re-pinned for the re-plan of the rest: 223 to 228 make M6's Share sheet O18's M5, with the `list` grade and audience streams; 154 moves the last machine, so the owner's words no longer wait; 155 waives B4's wait on M7's reader; 168 closes O3 and 222 closes O7; 190 makes the spawner an owner and leaves its residue (b) due before owners move; earlier pin blob `d07bfc4ea2466d7d5ca7ca3164aed4d93021311a` at master `6fb933626`, P5's Decision Logs 1–129, re-pinned on 2026-10-29 for M4's re-plan: 121 lands H1, 126 leaves M4 the refused attempt and the section's split, 129 lands M5 and names M4 next; earlier pin blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83`, Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
+> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `7781e2d50a7a4a5f86576f11354128d444b8fe39` at master `14ec11778` (P5's Decision Logs 1–245; re-pinned on 2026-11-07 at M6a's cut, where 239–245 change nothing M6a consumes: 239 and 240 swap both Macs to f857f0450, 241 lands #506's RL2 11 and `WIRE_MINOR` 29, 242 ends O14, 243 and 244 shape and pass O18 M6 on staging without `record`, 245 meets Decision Log 227's floor. Before that, at blob `92141de56e15ff65c3da5baa8fa135cdecf075c7` and master `f857f0450`, P5's Decision Logs 1–238, re-pinned on 2026-11-06 at M7b's cut, where 229–238 change nothing M7b consumes: 232 sets the order, 238 lands M7a. Before that, at blob `b99c1767` and master `910539147`, re-pinned for the re-plan of the rest: 223 to 228 make M6's Share sheet O18's M5, with the `list` grade and audience streams; 154 moves the last machine, so the owner's words no longer wait; 155 waives B4's wait on M7's reader; 168 closes O3 and 222 closes O7; 190 makes the spawner an owner and leaves its residue (b) due before owners move; earlier pin blob `d07bfc4ea2466d7d5ca7ca3164aed4d93021311a` at master `6fb933626`, P5's Decision Logs 1–129, re-pinned on 2026-10-29 for M4's re-plan: 121 lands H1, 126 leaves M4 the refused attempt and the section's split, 129 lands M5 and names M4 next; earlier pin blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83`, Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
 >
 > **What binds.** O8's section in P5 is this document's design, and P5's approval covers it. Binding with it:
 > - P5 §7 (people: owners, visibility, machine owners and grants, agents talk as today, credentials) and §8 (the sidebar's per-project toggle, the project channel, the Org page, attention across machines); parent acceptance 3 (its remote rows: Decision Log 93), 11 and 12.
@@ -78,6 +78,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-06) Task 4 (33098354b..daf8d4a3c): `channel.local.test.ts` cases 5 and 6, plus an older-peer case (7/7, three runs in a row), and the e2e seed's to-human entries photographed, with two layout fixes. Gates green: e2e:settings 42341855912, static,unit,probes 42343748493.
   - [x] (2026-11-07) The branch: reviewer-high on `782790d38...4e35fb15c`, one Minor (journal order across history pages) fixed at 1d3caff96 and ba7d57c92; master merged at 4e35fb15c. `--gates all --evidence` there (42344559621): 53 green, with a real `library.spec` regression fixed at 9bb79f34e. On 9bb79f34e: static, unit 1–4, e2e:library, cross-build and packaged 1/2 and 2/2 green (42357252517, 42359252532). e2e:discover is waiting on the mini's action-archive downloads (three timeouts before any step ran, passed to CI-opt).
 - [ ] M6a — Reader state and drafts per member — *executable; after M7b*
+  - [x] (2026-11-07) Refresh at the cut: branch `p5-o8-m6a` from `p5-o8-m7b` at f4f99135f (stacked on #514, the architect's ruling, since `ADDED_TABLES` exists only there). Its gates before #514 lands ran on the stacked tree and are development checks; master is merged in once #514 lands, before M6a's PR opens.
 - [ ] M6b — Visibility and shares (O18's M5) — *executable; after M6a; its live proof is the staging run it shares with O18 M6, which needs the desk track's sminos executors and a real second member (the owner)*
 - [ ] M4b — Machines and their rights — *executable; after M6b*
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
@@ -3280,6 +3281,36 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   4. **The open answer's weight** at the seed's realistic size is 42,904 bytes of JSON. The 48 log events take 37,508, the 9 to-human entries 3,591 (about 400 each), the sessions 850 and the machines 377.
   5. **M7a's `Party`** in `parts.tsx` shrinks proportionally in the same way, so a long title can cut a say's machine chip too. It was left as it is, for the architect.
   Date/Author: 2026-11-06, O8's executor (controller), from Task 4's report.
+
+- Decision: M6a's refresh at its cut (2026-11-07). The branch `p5-o8-m6a` is cut from `p5-o8-m7b` at f4f99135f, stacked on #514 by the architect's ruling: M6a's two tables are `ADDED_TABLES` entries, a mechanism M7b introduces (`git grep ADDED_TABLES origin/master -- src/services/index/` finds nothing). The conditions:
+  - no M6a PR, not even a draft, until #514 lands; then master is merged in (no rebase), so the PR's diff is M6a's alone;
+  - a move of #514's head is merged into M6a;
+  - gates on the stacked tree are development checks, not landing evidence.
+  M6a's consumed interfaces were reconciled against that tree.
+  1. **Cited lines.** `src/shared/ipc/remote-unavailable.ts:39,56-57` still hold `session.update` and `session.drafts.get`/`.set`. `applyPatch` is at `src/services/index/register.ts:37-49`. A spawn's `launchedBy`, with `action`, is built at `src/services/sessions/spawn.ts:62`, not :51-53,75. The renderer's fallbacks are `lane-b/read-marks.ts` and `composer/editor/drafts.ts:76-96` (`rememberingRemoteDrafts`).
+  2. **The command context.** The context is `HandlerContext` in `src/shared/ipc/client.ts`, which already carries `op` (a claimed remote act) and `remote: true`. `remote` is set by `mawsd`'s services front for the endpoint's dispatch alone (`src/mawsd/front.ts:611-619`), never from a request's args. `reader` joins it the same way. The endpoint names the reader through the seam's `dispatch` (`src/mawsd/endpoint-seam.ts:42`, `src/endpoint/services.ts:20`), and the front writes it into the context. A request's args never carry it, so a caller can't name another member's rows.
+  3. **The parent** is re-pinned at blob `7781e2d5` (master `14ec11778`), where Decision Logs 239–245 change nothing M6a consumes (the header).
+  Date/Author: 2026-11-07, O8's executor (controller, refresh pass).
+
+- Decision: M6a is built as three tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-medium on the branch with a confidentiality lens on the reader routing.
+  1. **The spine.**
+     - The two `ADDED_TABLES` entries;
+     - `sessions.ts` and `drafts.ts` with a reader argument, where a new turn's end marks every reader unread;
+     - `HandlerContext.reader`, written by the services front from the seam's dispatch;
+     - `register.ts` routing `session.get`, `.list`, `.update` and `session.drafts.*` by `context.reader`;
+     - the `ReaderState` schema, and the answer with a reader;
+     - `migrations.test.ts`, `sessions.test.ts`, `drafts.test.ts` and `register.test.ts`.
+  2. **The endpoint**, in commits of its own for the desk track:
+     - the offer rows and their grades;
+     - the dispatch naming the reader from `machineOwners`;
+     - mixed patches refused `malformed`;
+     - `remote-unavailable.ts` dropping the three rows, with `test/lane-b/offer-coverage.test.ts` kept true;
+     - `test/endpoint/reader-state.test.ts`.
+  3. **The renderer:**
+     - `lane-b/read-marks.ts` and the draft interception falling back only while the machine refuses;
+     - the remote path applying `ReaderState` to the record it holds;
+     - a remote lane B session's unread and draft surviving a relaunch.
+  Date/Author: 2026-11-07, O8's executor (controller).
 
 ## Outcomes & Retrospective
 
