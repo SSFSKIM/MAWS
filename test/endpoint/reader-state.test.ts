@@ -206,7 +206,7 @@ describe('every record a member is sent carries their own reading', () => {
   it('events: a `session.changed` on a checkout feed carries the owners’ to an owner, a member’s own to a member, none to one with no row', async () => {
     const { f, index, app } = await machine('view', [{ member: D, grade: 'view' }]);
     ownersRead(index, app);
-    index.sessions.markSeen(app, { messageUuid: 'm4', at: LATER }, org.B);
+    index.sessions.markSeen(app, { messageUuid: 'm4' as MessageUuid, at: LATER }, org.B);
     const [a, b, d] = [await openRemote(f, org.a1, org.A), await openRemote(f, org.b1, org.B), await openRemote(f, d1, D)];
     for (const r of [a, b, d]) await feed(r, 'f1', app);
     const changed = { record: index.sessions.get(app)!, cause: 'update', revision: 7 };
