@@ -553,7 +553,7 @@ M5 is outside O18's acceptance, which runs on the CLI setters. It is built by th
 - Two in-process probe machines on the MacBook, speaking only to the staging hub: PA, owned by the admin, whose RL1 hello lacks `audience` (an old endpoint and an old reader); and PB, owned by B, whose hello carries it.
 - One project with a fresh id. Every scene's `.smns` names it with the staging hub and a `remote` at a bare repository on the VM, the archive. The archiver is designated per item through the admin's `PUT /api/projects/<p>/archive`, with `SMINOS_ARCHIVE_EVERY=60`.
 - **Pins.** MAWS is pinned to the M6 branch's cut, before O8 M6b, so the scene's endpoints advertise no `record` and the terminal gate still widens. sminos is pinned by commit: doperpowers `0759115d` (1.39.0) or later for A1, A2 and B1, and `386c4b07` for A3. Each is copied into its scene from the run's payload, never taken from the VM's marketplace.
-- **The VM:** created for the run without the MAWS project, so no mawsd of its own is provisioned into the production org (the architect's recommendation, put to the owner 2026-11-07). It is leased for about a day. The harness brings its own MAWS checkout (a full bundle) and depends on none on the VM.
+- **The VM:** created for the run without the MAWS project, so no mawsd of its own is provisioned into the production org (the owner's answer, 2026-11-07, Decision Log). It is leased for about a day. The harness brings its own MAWS checkout (a full bundle) and depends on none on the VM, nor on devenv's MAWS setup: `vm/setup.sh` installs what devcloud's base image lacks, pinned, and `vm/check.sh` reports it.
 
 **The harness** (MAWS, `apps/desk-hub/deploy/`), built on O10 M11's pieces (`VmMachine`, `ScriptRunner`, `OrgAdmin`, `ItemReport`, `Cleanup`, `RelayDialer`). O10's own run is unchanged.
 - **`vm/scene.sh`, parametrized by scene:** user, ports, verb registry (`/run/o18-<scene>-verbs`), sminos copy and archive environment. It defaults to O10's `o10acc`, and `stop_verbs` matches its own scene's registry alone. Every new verb that starts or touches an engine runs inside the scene's namespace, which hides the VM's managed settings (the stub-model guard).
@@ -1298,6 +1298,10 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Rationale: a pre-M1 hub deployed over M1's stored tombstones and policies would put staging's logs at risk for a case the endpoint's hold tests already show. A browser can't be the second member. 6e costs one more scene.
   Rejected: two staging deploys for 6a; a real mailbox for the second member.
   Date/Author: 2026-11-07, the architect (chat 1204).
+- Decision (the owner, on the desk track's question): the run's VM is created with `devcloud vm up` without the MAWS project, so devenv's MAWS setup never runs on it and no scratch machine joins the production org (M6).
+  Rationale: a VM made with the MAWS project provisions its own mawsd into production for its lifetime, and the run needs none of it: the harness brings the branch as a full bundle and installs what the base image lacks.
+  Rejected: `--project maws`, which provisions the VM's own mawsd into production under the delegation for the VM's lifetime.
+  Date/Author: 2026-11-07, the owner, on the desk track's question.
 
 ## Outcomes & Retrospective
 
