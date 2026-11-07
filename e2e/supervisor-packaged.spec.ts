@@ -20,6 +20,8 @@
 // So the check runs both through the packaged binary as Node: `mawsd endpoint status` answers unenrolled and loads
 // nothing, and `mawsd enroll` with a code that is none loads the module from inside `app.asar`, whose own decoder
 // refuses it before anything is written or sent; a package that left the chunk out answers that it could not be loaded.
+// The O17 footprint fix: the zod the app ships (app.asar's, which electron-builder copies from the installed tree) carries
+// patches/zod@4.6.5.patch, read by the app binary as Node as mawsd and the engine host require it (e2e/support/zod-locales.ts).
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,8 +32,10 @@ import { invoke } from './support/c7-replay';
 import { canonicalDifferences, canonicalPaths, snapshotCanonical } from './support/canonical-mawsd'; // O14 residue 18
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { INSPECTOR_LINE, inspectorPortHolders, isAlive, killScratchProcesses, ps, tcpListeners } from './support/processes';
+import { resourcesOf } from './support/packaged-resolution';
 import { launchEnvironment } from './support/scratch-env';
 import { tmpSocketDirOf } from './support/supervisor-socket';
+import { runZodLocales, zodLocaleProblems } from './support/zod-locales'; // the O17 footprint fix
 
 const EXECUTABLE = process.env.MAWS_E2E_EXECUTABLE ? realpathOr(resolve(REPO_ROOT, process.env.MAWS_E2E_EXECUTABLE)) : null;
 test.skip(process.env.MAWS_SUPERVISOR_E2E !== '1' || EXECUTABLE === null, 'the packaged supervisor check runs under pnpm e2e:supervisor:packaged (a packaged MAWS_E2E_EXECUTABLE and MAWS_SUPERVISOR_E2E=1)');
@@ -252,4 +256,15 @@ test('packaged, the daemon shape: mawsd is the app binary run as Node, named maw
     rmSync(root, { recursive: true, force: true });
   }
   if (leftover !== null) throw leftover;
+});
+
+test('packaged: the app’s zod loads no non-English locale until one is read, its English messages as before', () => {
+  test.skip(DAEMON, 'the embedded shape’s check (pnpm e2e:supervisor:packaged)');
+  const exe = EXECUTABLE!;
+  const asar = join(resourcesOf(exe), 'app.asar');
+  const env: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
+  delete env.NODE_OPTIONS; // as the hosts run (src/shared/host/detached-transport.ts's supervisorEnv)
+  const result = runZodLocales(exe, env, join(asar, 'out', 'main'));
+  expect(result.zod, 'zod resolves inside app.asar').toBe(join(asar, 'node_modules', 'zod'));
+  expect(zodLocaleProblems(result)).toEqual([]);
 });
