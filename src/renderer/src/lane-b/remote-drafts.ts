@@ -17,10 +17,23 @@
 //   land, so after one the next save reads what is kept first; the late one, landing after it, is refused there. A save
 //   refused so (it lost to a late act, or to another device of the member) reads what is kept and goes again, a few
 //   times: the newest typed here is this device's word.
+// - A save keeps the text there whatever its attachments weigh (M6a's branch review, F3; @shared/sessions/draft-fit.ts):
+//   those past one act's bound stay in this run, which loads the draft whole, and the composer is told once; a draft
+//   read from the machine names those its machine left there, which is said too.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { STALE_DRAFT_WORDS, type Draft } from '@shared/ipc/schema/session';
+import { isAddress, machineOf } from '@shared/machine/address';
+import { fitDraft, takeWithheld } from '@shared/sessions/draft-fit';
+import { useMachines } from '../stores/machines';
+import { toast } from '../stores/notices';
+import { machineName } from '../stores/org-projects';
 import { heardReaderRows, isNotOffered } from './reader-rows';
+
+export const REMOTE_DRAFT_WORDS = {
+  keptHere: (names: readonly string[], machine: string) => `${names.join(', ')} stays in this window only: too large to keep with the draft on ${machine}`,
+  leftThere: (names: readonly string[], machine: string) => `${names.join(', ')} stayed on ${machine}: too large to bring here with the draft`,
+} as const;
 
 /** A session's saves not yet taken: the newest draft handed to `save`, whether a save is out, and whether one waits. */
 type Saves = { latest: Draft | null; out: boolean; waiting: boolean; refused(draft: Draft | null): void };
@@ -29,18 +42,36 @@ const saves = new Map<AppSessionId, Saves>();
 const bases = new Map<AppSessionId, string | null>();
 /** A save refused as stale goes again this many times, each after reading what is kept. */
 const STALE_RETRIES = 3;
+/** The whole draft of a session whose last save left attachments out there, for this run's loads. */
+const wholeHere = new Map<AppSessionId, Draft>();
+/** The attachments last said as kept here, per session, so the same ones are said once. */
+const said = new Map<AppSessionId, string>();
+
+function say(client: MawsBridge, appSessionId: AppSessionId, names: readonly string[], words: (names: readonly string[], machine: string) => string): void {
+  const key = `${words === REMOTE_DRAFT_WORDS.keptHere ? 'here' : 'there'}:${names.join('\n')}`;
+  if (said.get(appSessionId) === key) return;
+  said.set(appSessionId, key);
+  const machine = isAddress(appSessionId) ? machineName(useMachines.getState().machines, machineOf(appSessionId), client.localMachine) : 'its machine';
+  toast({ level: 'warning', text: words(names, machine), actions: [], dismissible: true });
+}
 
 export function resetRemoteDraftSaves(): void {
   saves.clear();
   bases.clear();
+  wholeHere.clear();
+  said.clear();
 }
 
-/** The newest draft handed to a save of the session that the machine hasn't taken; undefined when none is. */
-export const unsavedRemoteDraft = (appSessionId: AppSessionId): Draft | null | undefined => saves.get(appSessionId)?.latest;
+/** The newest draft of the session the machine doesn't hold whole: a save not yet taken, or one that left attachments out. */
+export function unsavedRemoteDraft(appSessionId: AppSessionId): Draft | null | undefined {
+  const queue = saves.get(appSessionId);
+  return queue !== undefined ? queue.latest : wholeHere.get(appSessionId);
+}
 
 /** The session's saves here end, unanswered ones included: a newer save went to the caller's fallback. */
 export function dropRemoteDraftSaves(appSessionId: AppSessionId): void {
   saves.delete(appSessionId);
+  wholeHere.delete(appSessionId);
 }
 
 const isStale = (result: CommandResult<CommandName>): boolean => !result.ok && result.error.message.includes(STALE_DRAFT_WORDS);
@@ -58,7 +89,12 @@ export async function loadRemoteDraft(client: MawsBridge, appSessionId: AppSessi
   const unsaved = unsavedRemoteDraft(appSessionId);
   if (unsaved !== undefined) return unsaved;
   const result = await readKept(client, appSessionId);
-  if (result.ok) return result.value;
+  if (result.ok) {
+    if (result.value === null) return null;
+    const { draft, withheld } = takeWithheld(result.value);
+    if (withheld.length > 0) say(client, appSessionId, withheld, REMOTE_DRAFT_WORDS.leftThere);
+    return draft;
+  }
   if (isNotOffered(result)) return refused();
   console.warn('[composer] the draft could not be read from its machine', result.error.message);
   return null;
@@ -83,11 +119,19 @@ async function saveOnce(client: MawsBridge, appSessionId: AppSessionId, draft: D
       if (!current()) return null;
       if (!read.ok) return read;
     }
-    const result = await client.invoke('session.drafts.set', { appSessionId, draft, replaces: bases.get(appSessionId) ?? null });
+    const fitted = draft === null ? { draft: null, withheld: [] } : fitDraft(draft);
+    const result = await client.invoke('session.drafts.set', { appSessionId, draft: fitted.draft, replaces: bases.get(appSessionId) ?? null });
     if (!current()) return null;
     heardReaderRows(appSessionId, result);
     if (result.ok) {
       bases.set(appSessionId, draft?.updatedAt ?? null);
+      if (draft === null || fitted.withheld.length === 0) {
+        wholeHere.delete(appSessionId);
+        said.delete(appSessionId); // what is left out next is said again
+      } else {
+        wholeHere.set(appSessionId, draft);
+        say(client, appSessionId, fitted.withheld, REMOTE_DRAFT_WORDS.keptHere);
+      }
       return result;
     }
     bases.delete(appSessionId); // `timeout` (it may still land), stale, or lost: what is kept there is read again

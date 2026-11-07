@@ -15,6 +15,7 @@ import type { Listing, Signed } from 'org-protocol';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { REGISTRY } from '@shared/ipc/registry';
 import { STALE_DRAFT_WORDS } from '@shared/ipc/schema/session';
+import { WITHHELD_ATTACHMENTS } from '@shared/sessions/draft-fit';
 import { OFFERS } from '../../src/endpoint/offers';
 import { PlaneFeeds, type OwnersRead } from '../../src/endpoint/plane-feeds';
 import type { Subscription } from '../../src/endpoint/subscriptions';
@@ -257,6 +258,20 @@ describe('a draft save that lands late', () => {
     expect(index.drafts.get(app, org.B)).toEqual(newer);
     expect((await machineAct(f, b, 'session.drafts.set', { appSessionId: app, draft: null, replaces: LATER })).outcome).toEqual({ state: 'done' });
     expect(index.drafts.get(app, org.B)).toBeNull();
+  });
+});
+
+// M6a's branch review, F3: the owners' draft saved on the machine's own app may hold attachments past one answer's bound
+// over the channel; a remote read of it is its text, the attachments that don't fit named as left out, not `too-large`.
+describe('a draft past the channel’s bound', () => {
+  it('reads remotely as its text, its oversized attachments named as left out', async () => {
+    const { f, index, app } = await machine('converse');
+    const pdf = { id: 'a1', kind: 'document', name: 'paper.pdf', mediaType: 'application/pdf', bytes: 3 * 1024 * 1024, data: 'A'.repeat(4 * 1024 * 1024), persisted: true };
+    const whole = { ...draft('read this'), doc: { ...draft('read this').doc, attrs: { attachments: [pdf] } } };
+    index.drafts.set(app, whole);
+    const a = await openRemote(f, org.a1, org.A);
+    expect(output(await call(a, 'session.drafts.get', { appSessionId: app }))).toEqual({ ...whole, doc: { ...whole.doc, attrs: { attachments: [], [WITHHELD_ATTACHMENTS]: ['paper.pdf'] } } });
+    expect(index.drafts.get(app)).toEqual(whole); // kept whole on the machine
   });
 });
 

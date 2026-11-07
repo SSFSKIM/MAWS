@@ -10,6 +10,7 @@ import { setupAddFolder, thisGuard, type SetupGuard } from '../machine/setup';
 import { addFolder } from './add-folder'; // New chat
 import { locate } from './projects';
 import type { Index } from './index';
+import { draftForLink } from '@shared/sessions/draft-fit'; // P5 O8 M6a
 
 // P5 O7 M9 round 2: a remote registration's `locate`, which never runs git (setup.ts answers its question first).
 const setupLocate = (directory: string | null) => locate(directory, () => null);
@@ -39,7 +40,12 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
   register('session.projects.addFolder', ({ directory, opened }, context) => (context.op === undefined ? addFolder(index.projects, directory) : setupAddFolder(directory, opened ?? [], setup, (checked, files) => addFolder(index.projects, checked, setupLocate, files))));
   register('session.projects.update', ({ id, patch }) => index.projects.update(id as ProjectId, patch));
   register('session.projects.remove', ({ id }) => index.projects.hide(id as ProjectId));
-  register('session.drafts.get', ({ appSessionId }, { reader }) => index.drafts.get(appSessionId as AppSessionId, reader));
+  // P5 O8 M6a (M6a's branch review, F3): a request the endpoint dispatched (it names the reader) is answered the draft as it
+  // fits one answer over the channel, naming the attachments it leaves out (@shared/sessions/draft-fit.ts)
+  register('session.drafts.get', ({ appSessionId }, { reader, remote }) => {
+    const draft = index.drafts.get(appSessionId as AppSessionId, reader);
+    return draft !== null && (remote === true || reader !== undefined) ? draftForLink(draft) : draft;
+  });
   register('session.drafts.set', ({ appSessionId, draft, replaces }, { reader }) => index.drafts.set(appSessionId as AppSessionId, draft, reader, replaces));
 }
 

@@ -7,6 +7,8 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { endableClientRef, type HandlerContext } from '@shared/ipc/client';
 import type { CommandName } from '@shared/ipc/schema';
 import { STALE_DRAFT_WORDS } from '@shared/ipc/schema/session';
+import { REMOTE_INLINE_MAX_BYTES } from '@shared/ipc/schema/remote';
+import { WITHHELD_ATTACHMENTS } from '@shared/sessions/draft-fit';
 import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from './index';
@@ -121,6 +123,21 @@ describe('main answers the record side of session.* from the index', () => {
       }
       expect(await invoke('session.drafts.set', { appSessionId: record.appId, draft: older })).toEqual({ ok: true, value: undefined });
       expect(await invoke('session.drafts.set', { appSessionId: record.appId, draft: newer })).toEqual({ ok: true, value: undefined });
+    });
+
+    // M6a's branch review, F3: a draft whose attachments are past what one answer over a machine link carries (the
+    // owners' saved by the machine's own app, up to the composer's 4 MiB of attachments, base64 in the document) is read
+    // remotely as its text and the attachments that fit, the rest named as left out; this machine's own read is whole.
+    it('session.drafts.get answers a remote reader a draft past the link’s bound without the attachments that don’t fit', async () => {
+      const { record } = index.sessions.upsertFromSummary(summary());
+      const pdf = { id: 'a1', kind: 'document', name: 'paper.pdf', mediaType: 'application/pdf', bytes: 3 * 1024 * 1024, data: 'A'.repeat(4 * 1024 * 1024), persisted: true };
+      const note = { id: 'a2', kind: 'file', name: 'note.txt', mediaType: 'text/plain', bytes: 2, data: 'aGk=', persisted: true };
+      const whole = { doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'read these' }] }], attrs: { attachments: [pdf, note] } }, attachments: [], updatedAt: at };
+      index.drafts.set(record.appId, whole);
+      expect(await invoke('session.drafts.get', { appSessionId: record.appId })).toEqual({ ok: true, value: whole });
+      const remote = await invoke('session.drafts.get', { appSessionId: record.appId }, as('owner'));
+      expect(remote).toEqual({ ok: true, value: { ...whole, doc: { ...whole.doc, attrs: { attachments: [note], [WITHHELD_ATTACHMENTS]: ['paper.pdf'] } } } });
+      expect(new TextEncoder().encode(JSON.stringify(remote.value)).length).toBeLessThanOrEqual(REMOTE_INLINE_MAX_BYTES);
     });
 
     // `session.update`'s answer is the whole record (paths, settings, a spawn's signed act), which a reader must never be

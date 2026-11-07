@@ -12,6 +12,10 @@ import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { docOf, paragraph, textNode } from '../composer/editor/doc';
 import { rememberingRemoteDrafts, rememberRemoteDraft, resetRemoteDrafts } from '../composer/editor/drafts';
 import { readerRowsOf, resetReaderRows } from './reader-rows';
+import { REMOTE_DRAFT_WORDS } from './remote-drafts';
+import { WITHHELD_ATTACHMENTS } from '@shared/sessions/draft-fit';
+import { useNotices } from '../stores/notices';
+import { useMachines } from '../stores/machines';
 
 const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
 const NOT_OFFERED = { refusal: 'not-offered' };
@@ -30,7 +34,11 @@ const relaunch = () => {
   resetReaderRows();
 };
 
-beforeEach(() => relaunch());
+beforeEach(() => {
+  relaunch();
+  useNotices.setState({ notices: [] });
+  useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-11-07T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+});
 
 describe('a machine that keeps each member’s draft', () => {
   // The machine's index: this member's own draft, which outlives the app's run, each save kept on top of the draft it
@@ -154,6 +162,41 @@ describe('a machine that keeps each member’s draft', () => {
     expect(textOf(machine.kept())).toBe('not lost, and more');
     expect(textOf(await portOf(machine.fake).load())).toBe('not lost, and more');
     warn.mockRestore();
+  });
+
+  // M6a's branch review, F3: the composer keeps up to 4 MiB of attachments in a draft, base64 in its document, past what
+  // one act carries; the text is kept there whatever they weigh, and what doesn't fit stays in this run, said once
+  it('keeps the text there and a 3 MiB PDF in this run, saying so once', async () => {
+    const machine = machineKeeping();
+    const port = portOf(machine.fake);
+    const pdf = { id: 'a1', kind: 'document', name: 'paper.pdf', mediaType: 'application/pdf', bytes: 3 * 1024 * 1024, data: 'A'.repeat(4 * 1024 * 1024), persisted: true };
+    const withPdf = (text: string): Draft => { const d = draft(text); return { ...d, doc: { ...(d.doc as object), attrs: { attachments: [pdf] } } }; };
+    const typed = withPdf('read this');
+    expect(new TextEncoder().encode(JSON.stringify({ appSessionId: REMOTE, draft: typed })).length).toBeGreaterThan(4 * 1024 * 1024); // the case that was refused
+    port.save(typed);
+    await flush();
+    const sent = machine.saved()[0]!.draft!;
+    expect([textOf(sent), (sent.doc as { attrs: { attachments: unknown[] } }).attrs.attachments]).toEqual(['read this', []]);
+    await machine.take();
+    expect(textOf(machine.kept())).toBe('read this');
+    expect(await portOf(machine.fake).load()).toEqual(typed); // this run: whole
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual([REMOTE_DRAFT_WORDS.keptHere(['paper.pdf'], 'mini')]);
+    port.save(withPdf('read this, please'));
+    await flush();
+    await machine.take();
+    expect(useNotices.getState().notices).toHaveLength(1); // said once for the same attachments
+    relaunch();
+    expect(textOf(await portOf(machine.fake).load())).toBe('read this, please'); // the text outlives the run
+  });
+
+  it('says which attachments a draft read from the machine left there', async () => {
+    const fake = fakeClient();
+    const load = portOf(fake).load();
+    const kept = draft('read this');
+    await fake.reply('session.drafts.get', { ...kept, doc: { ...(kept.doc as object), attrs: { attachments: [], [WITHHELD_ATTACHMENTS]: ['paper.pdf'] } } });
+    const loaded = await load;
+    expect([textOf(loaded), (loaded!.doc as { attrs: Record<string, unknown> }).attrs]).toEqual(['read this', { attachments: [] }]);
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual([REMOTE_DRAFT_WORDS.leftThere(['paper.pdf'], 'mini')]);
   });
 
   it('loads first the document a spawn handed the session, which its first save replaces there', async () => {
