@@ -3584,6 +3584,14 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      If it is, main dedupes a listing on its content and revision, not its signature, with a test, in Task 3's wave. No endpoint change is needed. If it's only CPU and IPC cost, it becomes residue m6b-r2.
   8. **Free-string line reasons.** Task 3 maps the known `POLICY_REFUSALS` codes and `no-session` to copy. Any other reason shows as one generic refusal line naming the machine, with the raw word secondary (a detail or a tooltip). Nothing outside the known codes ever renders blank, and Task 3's e2e photographs one unknown reason.
   9. **Commits that don't build alone.** fa42186a5, 237682977, 40b9742e6 and 656527ca8 fail the typecheck on their own, and 28eae9dfc fixes them. No squash, as with Task 1. The PR body lists them.
+  10. **The review's fixes** (dad52c414 N1, 56eaf7f55 N2, 4d95d25b6 N3; Task 2's frontier review approved, with these three Minors taken).
+      - **N1.** A step-up seals the `opCreated` that was in the request when the person was asked. `sign` and `signActions` take it before the prompt and read nothing from the request after it.
+      - **N2.** A malformed `done` reads `unknown`, reason `malformed`, and the save stops there, so the remaining lines read `not-sent`. Task 3's copy has a line for it. A `done` line's `policyRev` is no longer nullable.
+      - **N3.** The channel memberships, answers and cache are bound to the reader, `(org, member)`, as M7a's and M7b's caches are.
+        - When another member signs in to the same org, the last reader's channel memberships are dropped and every channel is read again.
+        - An answer asked for the last reader is ignored, and until then `rows()` draws only the hub's rows.
+        - `listings.json` records `member`. The channel's rows are restored only for that member; the hub's rows, memberships and marks, which are the same for every member, stay.
+        - B keeps the anti-replay marks of A-only sessions, never drawn, so replay protection isn't weakened.
   Date/Author: 2026-11-07, O8's executor (controller), from Task 2's report and the architect's rulings.
 
 - Decision: The real-member sitting (desk 634, with the architect's ruling, 2026-11-07). Task 4 plans it.
