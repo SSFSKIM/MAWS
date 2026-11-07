@@ -266,7 +266,7 @@ function askOf(src: string): string | null {
 
 /** A session as the sidebar names it: lane A by its authenticated lifecycle, else its listing; lane B by its record or listing. */
 function sessionName(host: ChannelHost, names: { sessions: ReadonlyMap<string, ChannelSession>; records: ReadonlyMap<AppSessionId, SessionRecord>; listed: ReadonlyMap<AppSessionId, ListedSession> }): { name: string; title: string | null } {
-  const id = host.lane === 'A' ? host.engineSessionId : host.appSessionId;
+  const id = host.session;
   if (id === null || id === '') return { name: CHANNEL.nobody, title: null };
   const address = addressOf(host.machine, id as AppSessionId);
   if (host.lane === 'A') {

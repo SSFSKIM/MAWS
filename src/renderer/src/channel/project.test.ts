@@ -228,7 +228,7 @@ describe('the to-human entries', () => {
   const host = (machine: typeof TEST_MACHINE, minute: number, over: Partial<ChannelHost> = {}): ChannelHost => {
     n += 1;
     const id = over.id ?? `e${n}`;
-    return { key: `${machine} ${id}`, machine, id, lane: 'A', appSessionId: null, engineSessionId: A, kind: 'message', text: `said at ${minute}`, at: T(minute), src: `${SMNS}/mini%2F${A}/${n}`, ...over };
+    return { key: `${machine} ${id}`, machine, id, lane: 'A', session: A, kind: 'message', text: `said at ${minute}`, at: T(minute), src: `${SMNS}/mini%2F${A}/${n}`, ...over };
   };
   const live = (machine: typeof TEST_MACHINE, name: string, over: Partial<ChannelMachine> = {}): ChannelMachine => ({ machine, name, state: 'live', asOf: T(0), ...over });
   const MACHINES = [live(TEST_MACHINE, 'MacBook'), live(OTHER_MACHINE, 'mini')];
@@ -240,9 +240,9 @@ describe('the to-human entries', () => {
   it('names a lane A session by its lifecycle’s alias and title, a lane B one by its record or its listing, with its machine', () => {
     const entries = named([
       host(OTHER_MACHINE, 1),
-      host(TEST_MACHINE, 2, { lane: 'B', appSessionId: 'app-1', engineSessionId: null }),
-      host(OTHER_MACHINE, 3, { lane: 'B', appSessionId: 'app-2', engineSessionId: null }),
-      host(OTHER_MACHINE, 4, { engineSessionId: 'dddddddd-4444-4444-8444-dddddddddddd' }),
+      host(TEST_MACHINE, 2, { lane: 'B', session: 'app-1' }),
+      host(OTHER_MACHINE, 3, { lane: 'B', session: 'app-2' }),
+      host(OTHER_MACHINE, 4, { session: 'dddddddd-4444-4444-8444-dddddddddddd' }),
     ]);
     expect(entries.map((e) => [e.machine, e.name, e.title])).toEqual([
       [OTHER_MACHINE, 'maws-45', 'Fix the relay'],
@@ -254,7 +254,7 @@ describe('the to-human entries', () => {
   });
 
   it('draws a question with its choices and its answer, groups one ask’s questions by their ask/<askId>/ src, and keeps an answer to no question held on its own', () => {
-    const app = { lane: 'B' as const, appSessionId: 'app-1', engineSessionId: null };
+    const app = { lane: 'B' as const, session: 'app-1' };
     const entries = named([
       host(TEST_MACHINE, 1, { ...app, kind: 'question', text: 'Which branch?', choices: ['main', 'dev'], src: lb('app-1', 'ask', 'k1', 'q1') }),
       host(TEST_MACHINE, 1, { ...app, kind: 'question', text: 'Ship it?', src: lb('app-1', 'ask', 'k1', 'q2') }),
@@ -262,7 +262,7 @@ describe('the to-human entries', () => {
       host(TEST_MACHINE, 3, { ...app, kind: 'answered', text: 'main', src: lb('app-1', 'ask', 'k1', 'q1', 'answered') }),
       host(TEST_MACHINE, 4, { ...app, kind: 'question', text: 'Need input?', choices: ['yes'], src: lb('app-1', 'text', 'u1', '0', 'q0') }),
       host(TEST_MACHINE, 5, { ...app, kind: 'answered', text: 'yes', src: lb('app-1', 'answer', 'u1', '0', 'q0', T(5)) }),
-      host(OTHER_MACHINE, 6, { ...app, appSessionId: 'app-2', kind: 'answered', text: 'not this machine’s', src: lb('app-1', 'ask', 'k2', 'q1', 'answered') }),
+      host(OTHER_MACHINE, 6, { ...app, session: 'app-2', kind: 'answered', text: 'not this machine’s', src: lb('app-1', 'ask', 'k2', 'q1', 'answered') }),
       host(OTHER_MACHINE, 7, { kind: 'answered', text: 'lane A answers stand alone' }),
     ]);
     const drawn = entries.map((e) => (e.host === 'question' ? ['question', e.questions.map((q) => [q.text, q.choices, q.answer?.text ?? null])] : [e.host, e.text]));

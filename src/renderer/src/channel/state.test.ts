@@ -71,7 +71,7 @@ describe('the words after the log', () => {
 
 // M7b: every machine's to-human entries, held by key as the events are by offset, and the machines whole.
 describe('the to-human entries', () => {
-  const h = (id: string): ChannelHost => ({ key: `${OTHER_MACHINE} ${id}`, machine: OTHER_MACHINE, id, lane: 'A', appSessionId: null, engineSessionId: 'la-1', kind: 'message', text: id, at: '2026-11-06T12:00:00.000Z', src: id });
+  const h = (id: string): ChannelHost => ({ key: `${OTHER_MACHINE} ${id}`, machine: OTHER_MACHINE, id, lane: 'A', session: 'la-1', kind: 'message', text: id, at: '2026-11-06T12:00:00.000Z', src: id });
   const mini: ChannelMachine = { machine: OTHER_MACHINE, name: 'mini', state: 'live', asOf: null };
   const keys = (held: ChannelHeld) => (held.phase === 'open' ? held.hosts.map((x) => x.id) : held.phase);
 

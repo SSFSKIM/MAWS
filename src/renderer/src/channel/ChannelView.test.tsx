@@ -280,7 +280,7 @@ describe('Channel in the project’s menu', () => {
 // M7b: every machine's to-human entries, placed by time among the log's, and a machine that shares none said greyed.
 describe('to-human entries', () => {
   const host = (id: string, minute: number, over: Partial<ChannelHost> = {}): ChannelHost => ({
-    key: `${OTHER_MACHINE} ${id}`, machine: OTHER_MACHINE, id, lane: 'A', appSessionId: null, engineSessionId: S1, kind: 'message', text: `message ${id}`, at: T(minute), src: `${SMNS}/mini%2F${S1}/${id}`, ...over,
+    key: `${OTHER_MACHINE} ${id}`, machine: OTHER_MACHINE, id, lane: 'A', session: S1, kind: 'message', text: `message ${id}`, at: T(minute), src: `${SMNS}/mini%2F${S1}/${id}`, ...over,
   });
 
   it('draws them by time among the log’s entries, each by its session and machine, and takes them by key from each change', async () => {

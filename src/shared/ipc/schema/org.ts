@@ -310,16 +310,15 @@ export type ChannelWord = z.infer<typeof ChannelWordSchema>;
  * Mac's spine and over each roster machine's link (src/main/org/channel/machines.ts) and merged into the channel beside
  * the log's events; the renderer places them by time (`channel/project.ts`). `id` is the machine's (this Mac's journal
  * id, another's opaque cursor), never compared across machines, so `key` (the machine and the id) names an entry in
- * the channel. Its session ids are plain strings, so the codec lifts nothing in it: the renderer forms an address with
- * `addressOf(machine, …)`. `src` is the journal's origin (§O), which pairs an answer with its question.
+ * the channel. Its `session` is a plain string, as a RemoteRow's is, so the codec lifts nothing in it: the renderer
+ * forms an address with `addressOf(machine, session)`. `src` is the journal's origin (§O), which pairs an answer with its question.
  */
 export const ChannelHostSchema = z.strictObject({
   key: z.string(),
   machine: MachineRefSchema,
   id: z.string(),
   lane: z.enum(['A', 'B']),
-  appSessionId: z.string().nullable(), // lane B's session
-  engineSessionId: z.string().nullable(),
+  session: z.string().nullable(), // lane A: the engine session id; lane B: the appSessionId, as a RemoteRow's `session`
   kind: z.enum(['message', 'question', 'answered']),
   text: z.string(),
   choices: z.array(z.string()).optional(),
