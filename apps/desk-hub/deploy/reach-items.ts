@@ -513,7 +513,7 @@ export async function item3a(scene: ReachScene, report: ReachReport): Promise<vo
     if ((page.body?.events?.length ?? 0) !== 0) throw new Error(`served ${page.body!.events.length} event(s)`);
     return `${stream.writer} by name: nothing (${page.status})`;
   });
-  await report.check('3a', 'the archive, A1 archiving, holds no stream and none of the private tokens', async () => {
+  await report.check('3a', 'the archive, A1 archiving, holds no stream and none of the private markers', async () => {
     const tok = token(scene, 'i3a-p');
     scene.privateTokens.push(tok);
     const r = await sayFrom(scene.T, tok, [scene.S]);
@@ -525,7 +525,7 @@ export async function item3a(scene: ReachScene, report: ReachReport): Promise<vo
     const streams = archive.files.filter((f) => f.includes('~'));
     const leaked = Object.entries(archive.tokens).filter(([, n]) => n > 0);
     if (streams.length || leaked.length) throw new Error(`the archive holds ${[...streams, ...leaked.map(([t]) => t)].join(', ')}`);
-    return `main at ${archive.head}: ${archive.files.length} file(s), no stream file, none of ${scene.privateTokens.length} private token(s)`;
+    return `main at ${archive.head}: ${archive.files.length} file(s), no stream file, none of ${scene.privateTokens.length} private marker(s)`;
   });
   report.bySuites('3a', CITED['3a']);
 }
@@ -603,7 +603,7 @@ export async function item3c(scene: ReachScene, report: ReachReport): Promise<vo
     }, `${writer}:${seq} on the owner's socket`, 60_000);
     if ((log.event as { withheld?: unknown }).withheld !== true || names(log.event, tok)) throw new Error(`stored as ${JSON.stringify(log.event).slice(0, 200)}`);
     await never(scene.S, tok, 30_000);
-    if ((await scene.machines.a1.vm.grepHome(tok)).total !== 0) throw new Error('A1’s sminos home holds the token');
+    if ((await scene.machines.a1.vm.grepHome(tok)).total !== 0) throw new Error('A1’s sminos home holds the marker');
     return `{writer, seq, withheld: true} at ${writer}:${seq}; S's transcript and A1's home hold nothing of it`;
   });
   await report.check('3c', 'the archive, B1 archiving, holds it only as its tombstone', async () => {
@@ -900,12 +900,12 @@ export async function item6e(scene: ReachScene, report: ReachReport): Promise<vo
     if (files.length) throw new Error(`A3's log holds ${files.join(', ')}`);
     return `A3's cache holds S at an audience of ${(cache.audience as string[]).length}; its log holds no stream file`;
   });
-  await report.check('6e', 'the archive A3 writes holds no stream and none of the private tokens', async () => {
+  await report.check('6e', 'the archive A3 writes holds no stream and none of the private markers', async () => {
     const archive = await archiveAfter(scene, a3.machine, before, scene.privateTokens, 360_000);
     const streams = archive.files.filter((f) => f.includes('~'));
     const leaked = Object.entries(archive.tokens).filter(([, n]) => n > 0);
     if (streams.length || leaked.length) throw new Error(`the archive holds ${[...streams, ...leaked.map(([t]) => t)].join(', ')}`);
-    return `main at ${archive.head}, A3 archiving: no stream file, none of ${scene.privateTokens.length} private token(s)`;
+    return `main at ${archive.head}, A3 archiving: no stream file, none of ${scene.privateTokens.length} private marker(s)`;
   });
 }
 

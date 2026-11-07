@@ -118,9 +118,11 @@ CLAUDE=$O/bin/claude
 # The staging org: the one org whose hub the operator's pty path (below) may widen at.
 STAGING_ORG=staging-ssfskim
 SCENE_ENV=("HOME=$H" "USER=$U" "LOGNAME=$U" "SHELL=/bin/bash" "PATH=$O/bin:$PACK/runtime/bin:/usr/bin:/bin" "LANG=C.UTF-8" "TERM=xterm-256color" "MAWS_USER_DATA=$P" "SMINOS_HOME=$S" "SMINOS_RL10=$P/mawsd/endpoint/rl10.json" "SMINOS_DERIVE_EVERY=0" "MAWS_ENDPOINT_DIRECT=1" "MAWS_ENDPOINT_PORT=$DIRECT_PORT" "CLAUDE_CONFIG_DIR=$H/.claude" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1" "ANTHROPIC_BASE_URL=http://127.0.0.1:$STUB_PORT" "ANTHROPIC_AUTH_TOKEN=o10-m11-stub-no-credential" "DISABLE_AUTOUPDATER=1" "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1" "DISABLE_TELEMETRY=1" "DISABLE_ERROR_REPORTING=1")
-# A reach scene archives every minute to the run's bare repository, which root owns and the scene users' group shares:
-# git trusts it by a command-scope safe.directory (a protected scope), never the VM's own git configuration.
-[[ -n $ARCHIVE ]] && SCENE_ENV+=("SMINOS_ARCHIVE_EVERY=60" "GIT_CONFIG_COUNT=1" "GIT_CONFIG_KEY_0=safe.directory" "GIT_CONFIG_VALUE_0=$ARCHIVE")
+# A reach scene archives every minute to the run's bare repository, which root owns and the scene users' group shares.
+# git trusts it by a safe.directory in a global config of the run's own ($R/gitconfig, written by `up`), never the VM's.
+# A command-scope one (`-c`, GIT_CONFIG_COUNT) is not enough: for a local path git starts upload-pack and receive-pack
+# with the config variables cleared, so the fetch's other end refused the repository as of dubious ownership.
+[[ -n $ARCHIVE ]] && SCENE_ENV+=("SMINOS_ARCHIVE_EVERY=60" "GIT_CONFIG_GLOBAL=$R/gitconfig")
 
 # mawsd's environment: the scene's, on its own config dir, its engine host's gateway the stub.
 MAWSD_ENV=()
@@ -184,6 +186,7 @@ up() {
   down >/dev/null 2>&1
   [[ -x $NODE && -f $MAWSD_JS ]] || fail "no mawsd pack at $PACK: run setup.sh first"
   install -d -m 700 -o $U -g $U $H/.claude $P $S $R $W
+  [[ -z $ARCHIVE ]] || { printf '[safe]\n\tdirectory = %s\n' "$ARCHIVE" > $R/gitconfig && chown $U:$U $R/gitconfig; } || fail "no $R/gitconfig"
   # The namespace's anchor: a sleep whose mount namespace has /etc/claude-code as an empty tmpfs (propagation private,
   # so the host's own mount table never sees it). Every process of the scene is started inside it.
   setsid -f unshare -m --propagation private sh -c "mount -t tmpfs -o mode=755,size=1m tmpfs /etc/claude-code && echo \$\$ > $R/anchor.pid && exec sleep infinity" </dev/null >/dev/null 2>&1

@@ -351,7 +351,7 @@ export function changeWords(change: MemberChange): string[] {
 /** A session verb as the scene's words after `as-session <session>`. */
 export function sessionWords(verb: SessionVerb): string[] {
   if ('say' in verb) {
-    if (!TOKEN.test(verb.say.token) || verb.say.tags.length === 0) throw new Error(`say: a token [a-z0-9-] and at least one tag, not ${JSON.stringify(verb.say)}`);
+    if (!TOKEN.test(verb.say.token) || verb.say.tags.length === 0) throw new Error(`say: a marker [a-z0-9-] and at least one tag, not ${JSON.stringify(verb.say)}`);
     return ['say', verb.say.token, ...verb.say.tags.map(tagWord)];
   }
   if ('spawn' in verb) {
@@ -507,7 +507,7 @@ export class VmMachine implements EndpointMachine {
   /** The operator's `sminos say` from the checkout (no session: the operator's writer). */
   async operatorSay(token: string, tag: Tag): Promise<StepResult> {
     this.#reach('operator-say');
-    if (!TOKEN.test(token)) throw new Error('operator-say: a marker token ([a-z0-9-])');
+    if (!TOKEN.test(token)) throw new Error('operator-say: a marker ([a-z0-9-])');
     return this.scene('operator-say', [token, tagWord(tag)], { ms: 120_000, allow: ANY });
   }
 
@@ -515,7 +515,7 @@ export class VmMachine implements EndpointMachine {
    * seq as sminos's log took it. */
   async forgeSay(writer: string, recipient: string, alias: string, token: string): Promise<{ writer: string; seq: number | null }> {
     this.#reach('forge-say');
-    if (!UUID_WORD.test(writer) || !UUID_WORD.test(recipient) || !NAME.test(alias) || !TOKEN.test(token)) throw new Error('forge-say: a writer session, a recipient session, an alias ([a-z0-9-]) and a token');
+    if (!UUID_WORD.test(writer) || !UUID_WORD.test(recipient) || !NAME.test(alias) || !TOKEN.test(token)) throw new Error('forge-say: a writer session, a recipient session, an alias ([a-z0-9-]) and a marker');
     const shown = jsonLine('forge-say', await this.scene('forge-say', [writer, recipient, alias, token], { ms: 60_000 }));
     return { writer: String(shown.writer), seq: typeof shown.seq === 'number' ? shown.seq : null };
   }
@@ -539,7 +539,7 @@ export class VmMachine implements EndpointMachine {
   /** How many lines of each file under the sminos home hold `token` (with `after`, those whose `ts` is after it). */
   async grepHome(token: string, after?: string): Promise<{ files: Record<string, number>; total: number }> {
     this.#reach('grep-home');
-    if (!GREP.test(token) || (after !== undefined && !ISO.test(after))) throw new Error('grep-home: a token [A-Za-z0-9._:-] and an ISO time');
+    if (!GREP.test(token) || (after !== undefined && !ISO.test(after))) throw new Error('grep-home: a marker [A-Za-z0-9._:-] and an ISO time');
     const r = await this.scene('grep-home', [token, ...(after === undefined ? [] : ['--after', after])], { ms: 120_000 });
     const files: Record<string, number> = {};
     let total: number | null = null;
@@ -564,14 +564,14 @@ export class VmMachine implements EndpointMachine {
   /** Each event of the project's log files on this machine holding `token`: its writer, seq, ts, kind and the rest. */
   async events(token: string): Promise<LoggedLine[]> {
     this.#reach('events');
-    if (!GREP.test(token)) throw new Error(`events: a token [A-Za-z0-9._:-], not ${JSON.stringify(token)}`);
+    if (!GREP.test(token)) throw new Error(`events: a marker [A-Za-z0-9._:-], not ${JSON.stringify(token)}`);
     return (await this.scene('events', [token], { ms: 60_000 })).lines.flatMap((line) => (line.startsWith('event {') ? [JSON.parse(line.slice('event '.length)) as LoggedLine] : []));
   }
 
   /** The text of the first row `session` was given that holds `token`, or null. */
   async row(session: string, token: string): Promise<string | null> {
     this.#reach('row');
-    if (!UUID_WORD.test(session) || !TOKEN.test(token)) throw new Error('row: a session id and a marker token');
+    if (!UUID_WORD.test(session) || !TOKEN.test(token)) throw new Error('row: a session id and a marker');
     const line = (await this.scene('row', [session, token], { ms: 60_000 })).lines.find((l) => l.startsWith('row: '));
     return line === undefined || line === 'row: none' ? null : line.slice('row: '.length);
   }
@@ -580,7 +580,7 @@ export class VmMachine implements EndpointMachine {
    * yet). */
   async archive(tokens: readonly string[] = []): Promise<{ head: string; files: string[]; tombs: Array<{ file: string; seq: number }>; tokens: Record<string, number> } | null> {
     this.#reach('archive-ls');
-    for (const t of tokens) if (!GREP.test(t)) throw new Error(`archive-ls: a token [A-Za-z0-9._:-], not ${JSON.stringify(t)}`);
+    for (const t of tokens) if (!GREP.test(t)) throw new Error(`archive-ls: a marker [A-Za-z0-9._:-], not ${JSON.stringify(t)}`);
     const r = await this.scene('archive-ls', [...tokens], { ms: 60_000 });
     if (r.lines.includes('archive: no commit on main')) return null;
     const counts: Record<string, number> = {};
@@ -629,7 +629,7 @@ class VmLaneA implements LaneAScene {
         return r.lines.includes('none') ? null : (jsonLine('sminos-revoked', r) as Awaited<ReturnType<SminosProbe['revoked']>>);
       },
       imported: async (token) => {
-        if (!/^[a-z0-9-]{4,64}$/.test(token)) throw new Error('imported: a marker token ([a-z0-9-])');
+        if (!/^[a-z0-9-]{4,64}$/.test(token)) throw new Error('imported: a marker ([a-z0-9-])');
         return Number((await vm.scene('imported', [token])).lines.at(-1));
       },
       logMark: async () => Number((await vm.scene('log-size', ['sminos'])).lines.at(-1)),
@@ -680,7 +680,7 @@ class VmLaneA implements LaneAScene {
   }
 
   async count(session: string, token: string): Promise<number> {
-    if (!/^[0-9a-f-]{36}$/.test(session) || !/^[a-z0-9-]{4,64}$/.test(token)) throw new Error('count: a session id and a marker token ([a-z0-9-])');
+    if (!/^[0-9a-f-]{36}$/.test(session) || !/^[a-z0-9-]{4,64}$/.test(token)) throw new Error('count: a session id and a marker ([a-z0-9-])');
     const shown = Number((await this.vm.scene('transcript', [session, token], { ms: 60_000 })).lines.at(-1));
     if (!Number.isSafeInteger(shown)) throw new Error(`count: the scene answered no number for ${token}`);
     return shown;

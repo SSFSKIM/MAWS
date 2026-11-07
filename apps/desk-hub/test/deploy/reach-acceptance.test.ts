@@ -204,6 +204,14 @@ describe('what the items read', () => {
     expect(policyRevOf(['widening reach needs its owner: run this in a terminal, or use MAWS'])).toBeNull();
   });
 
+  it('names no check in a word staging-run.sh’s filter drops (token, secret, bearer): its line would never reach the log', () => {
+    const filter = readFileSync(join(deploy, 'staging-run.sh'), 'utf8').match(/^filter\(\) \{ perl -ne .*\/(token\|secret\|bearer)\/i/m)?.[1];
+    expect(filter).toBe('token|secret|bearer');
+    const titles = [...readFileSync(join(deploy, 'reach-items.ts'), 'utf8').matchAll(/report\.check\('[0-9a-e]+', '([^']*)'/g)].map((m) => m[1]);
+    expect(titles.length).toBeGreaterThan(30);
+    expect(titles.filter((t) => new RegExp(filter as string, 'i').test(t))).toEqual([]);
+  });
+
   it('sminos’s refused-reach line, as deliver_reach writes it: the outcome’s name is never in it', () => {
     expect(refusedReachLine('2026-11-07T06:30:01Z the endpoint refused o18-b1-x/e7fe50a8:3 (o18-m6-x) reach into 80db411d: not-in-audience; nothing delivered')).toBe(true);
     expect(refusedReachLine('2026-11-07T06:30:01Z the endpoint refused o18-b1-x/e7fe50a8:3 (o18-m6-x) reach into 80db411d: no reason given; nothing delivered')).toBe(true);
