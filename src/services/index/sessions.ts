@@ -17,6 +17,7 @@ import type { Reader } from '@shared/ipc/client';
 import { branchName } from '@shared/sessions/branch';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import type { Db, Value } from './db';
+import { NOT_CLEARED } from './drafts';
 import type { SessionRecordPatch } from '@shared/engine/status';
 import { ObservedRouteSchema, RouteSchema, type Route } from '@shared/engine/route'; // P5 O7 M9
 import { countLines } from '@shared/composer/pasted-framing';
@@ -689,8 +690,9 @@ export class SessionStore {
     if ((JSON.parse(row.holder) as Holder).kind === 'self') return false;
     if (row.pinned === 1 || row.archived === 1 || row.title_override !== null || row.last_seen_uuid !== null || row.last_seen_at !== null) return false;
     if (row.launched_by !== null) return false; // P5 O7 M4: a remote spawn's requester, written once, never yielded away
-    const owned = (table: 'drafts' | 'attention_items' | 'reader_state' | 'member_drafts') => this.db.get(`SELECT 1 AS present FROM ${table} WHERE app_session_id = ? LIMIT 1`, row.app_id) !== null;
-    return !owned('drafts') && !owned('attention_items') && !owned('reader_state') && !owned('member_drafts'); // each would go with the row (ON DELETE CASCADE)
+    const owned = (table: 'drafts' | 'attention_items' | 'reader_state' | 'member_drafts', where = '') => this.db.get(`SELECT 1 AS present FROM ${table} WHERE app_session_id = ?${where} LIMIT 1`, row.app_id) !== null;
+    const drafted = (table: 'drafts' | 'member_drafts') => owned(table, ` AND ${NOT_CLEARED}`); // M6a's re-review, K1: a cleared draft's tombstone is none
+    return !drafted('drafts') && !owned('attention_items') && !owned('reader_state') && !drafted('member_drafts'); // each would go with the row (ON DELETE CASCADE)
   }
 
   private deleteRow(existing: SessionRecord): void {

@@ -356,6 +356,16 @@ describe('session records in the index', () => {
       expect(() => index.sessions.bindEngineId(claimant.appId, s2.sessionId)).toThrow(/already bound/);
       expect(index.sessions.get(marked.appId)?.engineSessionId).toBe(s2.sessionId);
     }
+    // A draft cleared (its tombstone, M6a's re-review K1), the owners' or a member's, is none: that record still yields.
+    for (const reader of ['owner', 'b'.repeat(32)]) {
+      const s3 = summary();
+      const cleared = index.sessions.upsertFromSummary(s3).record;
+      index.drafts.set(cleared.appId, { doc: { type: 'doc' }, attachments: [], updatedAt: '2026-09-28T10:00:00.000Z' }, reader);
+      index.drafts.set(cleared.appId, null, reader);
+      const taker = index.sessions.createForLaunch(LAUNCH).record;
+      expect(index.sessions.bindEngineId(taker.appId, s3.sessionId)).toMatchObject({ appId: taker.appId, engineSessionId: s3.sessionId });
+      expect(index.sessions.get(cleared.appId)).toBeNull();
+    }
 
     // Two MAWS processes claiming one engine session is a conflict to surface, not to merge.
     const other = index.sessions.createForLaunch(LAUNCH).record;

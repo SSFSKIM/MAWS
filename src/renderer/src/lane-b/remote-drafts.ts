@@ -16,7 +16,8 @@
 //   saved (M6a's branch review, F1). Main answers a save still out at its pending bound `timeout`, and the act may yet
 //   land, so after one the next save reads what is kept first; the late one, landing after it, is refused there. A save
 //   refused so (it lost to a late act, or to another device of the member) reads what is kept and goes again, a few
-//   times: the newest typed here is this device's word.
+//   times: the newest typed here is this device's word. A clear is kept there at a stamp its machine mints (M6a's
+//   re-review, K1), read as a draft with no document, which loads as none.
 // - A save keeps the text there whatever its attachments weigh (M6a's branch review, F3; @shared/sessions/draft-fit.ts):
 //   those past one act's bound stay in this run, which loads the draft whole, and the composer is told once; a draft
 //   read from the machine names those its machine left there, which is said too.
@@ -90,7 +91,7 @@ export async function loadRemoteDraft(client: MawsBridge, appSessionId: AppSessi
   if (unsaved !== undefined) return unsaved;
   const result = await readKept(client, appSessionId);
   if (result.ok) {
-    if (result.value === null) return null;
+    if (result.value === null || result.value.doc === null) return null; // none, or cleared there (its stamp now known)
     const { draft, withheld } = takeWithheld(result.value);
     if (withheld.length > 0) say(client, appSessionId, withheld, REMOTE_DRAFT_WORDS.leftThere);
     return draft;
@@ -124,7 +125,8 @@ async function saveOnce(client: MawsBridge, appSessionId: AppSessionId, draft: D
     if (!current()) return null;
     heardReaderRows(appSessionId, result);
     if (result.ok) {
-      bases.set(appSessionId, draft?.updatedAt ?? null);
+      if (draft === null) bases.delete(appSessionId); // the machine stamped the clear: read before the next save
+      else bases.set(appSessionId, draft.updatedAt);
       if (draft === null || fitted.withheld.length === 0) {
         wholeHere.delete(appSessionId);
         said.delete(appSessionId); // what is left out next is said again

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { Draft } from '@shared/ipc/schema/session';
+import { STALE_DRAFT_WORDS, type Draft } from '@shared/ipc/schema/session';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from './index';
 
@@ -62,5 +62,27 @@ describe('composer drafts', () => {
     index.drafts.set(appId, null, B);
     expect(index.drafts.get(appId, B)).toBeNull();
     expect(index.drafts.get(appId)).toEqual(DRAFT);
+  });
+
+  // M6a's re-review, K1: a clear keeps a revision of its own (a stamp the machine mints), so a save naming what was kept
+  // before it, a late one above all, is refused, for the owners and for a member alike; a load still answers null for
+  // it, and only the stamp-naming read (`kept`, a link's read) answers it, as a draft with no document.
+  it('a clear advances the kept revision, so a save naming the one before it is refused, and still loads as null', () => {
+    for (const reader of ['owner', 'b'.repeat(32)]) {
+      const delayed: Draft = { doc: { type: 'doc', text: 'already sent' }, attachments: [], updatedAt: '2026-11-07T10:00:00.000Z' };
+      index.drafts.set(appId, null, reader, null); // the send's clear, nothing kept before it
+      expect(() => index.drafts.set(appId, delayed, reader, null)).toThrow(STALE_DRAFT_WORDS); // the save sent before it, landing late
+      expect(index.drafts.get(appId, reader)).toBeNull();
+      const cleared = index.drafts.kept(appId, reader)!;
+      expect(cleared).toEqual({ doc: null, attachments: [], updatedAt: expect.any(String) });
+      index.drafts.set(appId, delayed, reader, cleared.updatedAt); // a save on top of the clear is taken
+      expect(index.drafts.get(appId, reader)).toEqual(delayed);
+      index.drafts.set(appId, null, reader, delayed.updatedAt);
+      expect(() => index.drafts.set(appId, delayed, reader, delayed.updatedAt)).toThrow(STALE_DRAFT_WORDS); // a second clear's stamp is its own
+      expect(index.drafts.kept(appId, reader)!.updatedAt).not.toBe(cleared.updatedAt);
+      index.drafts.set(appId, null, reader); // a clear naming nothing, as this Mac's own composer does, keeps one too
+      expect(() => index.drafts.set(appId, delayed, reader, null)).toThrow(STALE_DRAFT_WORDS);
+    }
+    expect(index.drafts.kept(appId, 'c'.repeat(32))).toBeNull(); // never written: no revision
   });
 });

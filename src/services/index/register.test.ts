@@ -119,8 +119,14 @@ describe('main answers the record side of session.* from the index', () => {
         expect(await invoke('session.drafts.get', { appSessionId: record.appId }, context)).toEqual({ ok: true, value: newer });
         expect(await set(null, older.updatedAt)).toMatchObject({ ok: false, error: { message: STALE_DRAFT_WORDS } });
         expect(await set(null, newer.updatedAt)).toEqual({ ok: true, value: undefined }); // cleared, on top of the kept one
-        expect(await invoke('session.drafts.get', { appSessionId: record.appId }, context)).toEqual({ ok: true, value: null });
+        // M6a's re-review, K1: read over the link, the clear is a draft with no document, carrying the stamp it was kept at
+        const cleared = await invoke('session.drafts.get', { appSessionId: record.appId }, context);
+        expect(cleared).toEqual({ ok: true, value: { doc: null, attachments: [], updatedAt: expect.any(String) } });
+        expect(await set(newer, null)).toMatchObject({ ok: false, error: { message: STALE_DRAFT_WORDS } });
+        expect(await set(newer, (cleared.value as { updatedAt: string }).updatedAt)).toEqual({ ok: true, value: undefined });
+        expect(await set(null, newer.updatedAt)).toEqual({ ok: true, value: undefined });
       }
+      expect(await invoke('session.drafts.get', { appSessionId: record.appId })).toEqual({ ok: true, value: null }); // this Mac's own read: none
       expect(await invoke('session.drafts.set', { appSessionId: record.appId, draft: older })).toEqual({ ok: true, value: undefined });
       expect(await invoke('session.drafts.set', { appSessionId: record.appId, draft: newer })).toEqual({ ok: true, value: undefined });
     });

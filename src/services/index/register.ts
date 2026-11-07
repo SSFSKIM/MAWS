@@ -41,10 +41,12 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
   register('session.projects.update', ({ id, patch }) => index.projects.update(id as ProjectId, patch));
   register('session.projects.remove', ({ id }) => index.projects.hide(id as ProjectId));
   // P5 O8 M6a (M6a's branch review, F3): a request the endpoint dispatched (it names the reader) is answered the draft as it
-  // fits one answer over the channel, naming the attachments it leaves out (@shared/sessions/draft-fit.ts)
+  // fits one answer over the channel, naming the attachments it leaves out (@shared/sessions/draft-fit.ts). M6a's
+  // re-review, K1: and a cleared draft as one with no document, so the device saving there next names the clear's stamp.
   register('session.drafts.get', ({ appSessionId }, { reader, remote }) => {
-    const draft = index.drafts.get(appSessionId as AppSessionId, reader);
-    return draft !== null && (remote === true || reader !== undefined) ? draftForLink(draft) : draft;
+    if (remote !== true && reader === undefined) return index.drafts.get(appSessionId as AppSessionId);
+    const kept = index.drafts.kept(appSessionId as AppSessionId, reader);
+    return kept === null ? null : draftForLink(kept);
   });
   register('session.drafts.set', ({ appSessionId, draft, replaces }, { reader }) => index.drafts.set(appSessionId as AppSessionId, draft, reader, replaces));
 }

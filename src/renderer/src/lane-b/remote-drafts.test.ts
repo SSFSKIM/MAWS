@@ -42,12 +42,18 @@ beforeEach(() => {
 
 describe('a machine that keeps each member’s draft', () => {
   // The machine's index: this member's own draft, which outlives the app's run, each save kept on top of the draft it
-  // replaces and refused stale otherwise, as the spine keeps it (src/services/index/drafts.ts).
+  // replaces and refused stale otherwise, as the spine keeps it (src/services/index/drafts.ts); a clear is kept as a draft
+  // with no document at a stamp the machine mints (M6a's re-review, K1), and read so over the link.
   function machineKeeping() {
     let kept: Draft | null = null;
     let answered = 0;
+    let clears = 0;
     const fake = fakeClient({ 'session.drafts.get': () => kept });
-    const land = (input: Saved) => (input.replaces === (kept?.updatedAt ?? null) ? ((kept = input.draft), true) : false);
+    const cleared = (): Draft => {
+      clears += 1;
+      return { doc: null, attachments: [], updatedAt: `2026-11-07T11:00:00.000Z#clear-${clears}` };
+    };
+    const land = (input: Saved) => (input.replaces === (kept?.updatedAt ?? null) ? ((kept = input.draft ?? cleared()), true) : false);
     const saved = () => fake.invoked('session.drafts.set') as Saved[];
     return {
       fake,
@@ -142,6 +148,32 @@ describe('a machine that keeps each member’s draft', () => {
     expect(textOf(machine.kept())).toBe('newer');
     expect(textOf(await portOf(machine.fake).load())).toBe('newer');
     warn.mockRestore();
+  });
+
+  // M6a's re-review, K1: a clear (a send's, say) is kept there with a stamp of its own, which a save sent before it can't
+  // name; this device's next save reads that stamp and goes once, on top of the clear
+  it('loads no draft after a clear there, and saves the next one on top of that clear', async () => {
+    const machine = machineKeeping();
+    const port = portOf(machine.fake);
+    port.save(draft('sent'));
+    await flush();
+    await machine.take();
+    port.save(null);
+    await flush();
+    await machine.take();
+    expect(machine.kept()).toMatchObject({ doc: null, updatedAt: expect.stringContaining('#clear-1') });
+    const after = machine.saved().length;
+    port.save(draft('next thought'));
+    await flush();
+    await machine.take();
+    expect(machine.saved().slice(after).map((input) => [textOf(input.draft), input.replaces])).toEqual([['next thought', expect.stringContaining('#clear-1')]]);
+    expect(textOf(machine.kept())).toBe('next thought');
+    port.save(null);
+    await flush();
+    await machine.take();
+    expect(await portOf(machine.fake).load()).toBeNull(); // read from the machine: the clear
+    relaunch();
+    expect(await portOf(machine.fake).load()).toBeNull();
   });
 
   it('keeps a save the machine couldn’t take for this run’s loads, until a later one is taken', async () => {
