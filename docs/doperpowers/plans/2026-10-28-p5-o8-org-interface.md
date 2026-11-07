@@ -80,6 +80,13 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
 - [ ] M6a — Reader state and drafts per member — *executable; after M7b*
   - [x] (2026-11-07) Refresh at the cut: branch `p5-o8-m6a` from `p5-o8-m7b` at f4f99135f (stacked on #514, the architect's ruling, since `ADDED_TABLES` exists only there). Task 1's gates ran on the stacked tree and are development checks. #514 landed (9353f255b), and master ba401f5b8 was merged in at ee25ea1ec: M6a's base is master from here, with no stacked condition left.
   - [x] (2026-11-07) Task 1, reviewed clean in one round (968e62c34, 72b558be3, 19623e805): the spine's `reader_state` and `member_drafts` as `ADDED_TABLES` entries; `sessions.ts` and `drafts.ts` by reader, with a new turn marking every member unread; `HandlerContext.reader`, written only by `mawsd`'s front from the seam's dispatch; `session.reader.update` at `WIRE_MINOR` 31, answering `ReaderState`; `session.update` refusing any reader. Static gate green at 19623e805 (42373324095). 72b558be3's run 42372775732 was red on one type error, fixed at 19623e805.
+  - [x] (2026-11-07) Task 2, reviewed clean. It took our task reviewer three rounds and the desk track four, closing on its delta check of 16f310a0d.
+    - Built in d6347dda2, 80ccbfc65 and ab33757ae.
+    - Fix waves: d5a4ccc3a, 00286c8ef and 54ceaa543; then 2a18c158f, 50e7c403e and d0e159f12.
+    - The endpoint now offers `session.reader.update` and the drafts. Each call carries the authorization decision's reader, and is checked again at dispatch.
+    - Every surface carries a member's own reading, proven per surface. An owner's queued change is checked at send.
+    - Also in this task: the certificates parity fix the desk track asked for (65e0532b1, outside the reader work), and the client's record re-read on a reopened checkout feed (cd5ab7f28 and 16f310a0d).
+    - Static green on every head, last 42385684134.
 - [ ] M6b — Visibility and shares (O18's M5) — *executable; after M6a; its live proof is the staging run it shares with O18 M6, which needs the desk track's sminos executors and a real second member (the owner)*
 - [ ] M4b — Machines and their rights — *executable; after M6b*
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
@@ -3396,6 +3403,12 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   6. **The `ReaderState` answer** is applied to the record held without moving its revision. The machine's later `session.changed` replaces it.
   7. **At the gate:** if `e2e:remote`'s read/unread cases (the M8 scene around `remote.spec.ts:1901`) fail or show flaky on this branch, that's red, to be fixed, not explained. The bug to look for is a late `session.changed` flipping a seen row back to unread (the architect, 2026-11-07).
   Date/Author: 2026-11-07, O8's executor (controller), from Task 3's report.
+
+- Decision: The client re-read's ordering and retry (16f310a0d, main only; the desk track's round-4 follow-ups, checked correct, which closes that thread).
+  - **Ordering.** Each reopening's read and each told record take the next number from one shared generation counter. An answer applies only while its generation is still the latest, the feed is still mine, and it's live.
+  - **Retry.** A failed read asks again under the same generation, from `feedRetryMs[0]` and doubling up to the `feedRetryMs[1]` cap, for as long as it stays current. The delay is capped and the number of tries isn't, as with the feed's own `unavailable`.
+  - **A permanent refusal** of `session.get` on an admitted feed re-asks every 30 s, with a log line each time, for the feed's life. That's residue: the exit is to stop, or to end the feed, on a refusal that isn't transient (`forbidden`, `not-offered`).
+  Date/Author: 2026-11-07, O8's executor (controller).
 
 ## Outcomes & Retrospective
 
