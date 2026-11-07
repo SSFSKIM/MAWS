@@ -134,13 +134,14 @@ function member(views: Set<string>) {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
-function start(m: ReturnType<typeof machine>, who: ReturnType<typeof member>, reach = { reaches: true }) {
+function start(m: ReturnType<typeof machine>, who: Pick<ReturnType<typeof member>, 'ranks'>, reach = { reaches: true }, settleMs?: number) {
   const feeds = new ChannelFeeds({
     dispatch: m.dispatch,
     ranks: async () => who.ranks(),
     reaches: () => reach.reaches,
     cursors: { seal: (entry) => `c${entry.id}` },
     log: () => {},
+    ...(settleMs === undefined ? {} : { settleMs }),
   });
   const sub = new Sub();
   feeds.open(sub as unknown as Subscription);
@@ -282,23 +283,73 @@ describe('the feed’s snapshot', () => {
     expect(snap.more).toBe(true);
   });
 
-  it('ends `unavailable` when every read it may take moved before it could go: never a page whose `more` it can’t vouch for', async () => {
-    const m = machine();
-    m.journal.push(laneA('la-x', 'older'));
-    for (let i = 0; i < 200; i++) m.journal.push(laneA('la-v', `shown ${i}`));
-    // la-x is hidden while each read passes it by, and viewable by the time that read would go.
-    let asked = 0;
+  /** A member for whom la-x is hidden while each read passes it by, and viewable by the time that read would go (while `flipping`). */
+  const flipping = () => {
+    const state = { flipping: true, asked: 0 };
     const ranks = (): SessionRanks => ({
-      holds: (placement) => placement !== null && (placement.target.session === 'la-v' || (placement.target.session === 'la-x' && ++asked % 2 === 0)),
+      holds: (placement) => placement !== null && (placement.target.session === 'la-v' || (placement.target.session === 'la-x' && (!state.flipping || ++state.asked % 2 === 0))),
       ownsMachine: () => false,
       holdsRight: () => false,
       current: () => true,
     });
-    const { sub } = start(m, { ranks } as unknown as ReturnType<typeof member>);
+    return { state, ranks };
+  };
+  const olderThanAPage = () => {
+    const m = machine();
+    m.journal.push(laneA('la-x', 'older'));
+    for (let i = 0; i < 200; i++) m.journal.push(laneA('la-v', `shown ${i}`));
+    return m;
+  };
+
+  it('past SNAPSHOT_READS reads that each moved, waits for a change of rights, and ends `unavailable` when none comes: never a page whose `more` it can’t vouch for', async () => {
+    const m = olderThanAPage();
+    const who = flipping();
+    const { sub } = start(m, who, { reaches: true }, 60);
     await settle();
     expect(m.reads('channel.history')).toBe(2 * SNAPSHOT_READS);
+    expect(sub.endedWith).toBeNull(); // waiting on a change of rights
+    await new Promise((resolve) => setTimeout(resolve, 100));
     expect(sub.snaps()).toEqual([]);
     expect(sub.endedWith).toBe('unavailable');
+  });
+
+  it('past SNAPSHOT_READS, reads once more at the next change of rights: a page that holds what the member views, `more` exact', async () => {
+    const m = olderThanAPage();
+    const who = flipping();
+    const { feeds, sub } = start(m, who, { reaches: true }, 60_000);
+    await settle();
+    who.state.flipping = false; // the rights settle: la-x viewable
+    feeds.accessChanged();
+    await settle();
+    expect(sub.endedWith).toBeNull();
+    const [snap] = sub.snaps();
+    expect(snap.entries).toHaveLength(200);
+    expect(snap.more).toBe(true); // la-x's entry, past the page
+    feeds.stop();
+  });
+
+  it('ends `unavailable` when the one more read moved too', async () => {
+    const m = olderThanAPage();
+    const { feeds, sub } = start(m, flipping(), { reaches: true }, 60_000);
+    await settle();
+    feeds.accessChanged(); // a change of rights, still moving
+    await settle();
+    expect(sub.snaps()).toEqual([]);
+    expect(sub.endedWith).toBe('unavailable');
+  });
+
+  it('is taken back, queued, once a session its read passed by is viewable: an empty snapshot doesn’t stay empty', async () => {
+    const m = machine({ 'app-x': 'eng-x' });
+    m.journal.push(laneB('app-x', 'x'));
+    const who = member(new Set());
+    const { feeds, sub } = start(m, who);
+    await settle();
+    expect(sub.queue.filter((out) => out.t === 'snap')).toHaveLength(1); // queued, empty, not taken
+    who.views.add('eng-x');
+    feeds.accessChanged();
+    await settle();
+    sub.take();
+    expect(sub.snaps().map((snap) => [snap.entries.map((e) => e.text), snap.more])).toEqual([[['x'], false]]);
   });
 
   it('is never queued once the project left the org meanwhile: the feed ends `removed`', async () => {
@@ -350,7 +401,7 @@ describe('the feed’s bound on what waits', () => {
     expect(sub.evs()).toEqual([{ seq: 1, text: 'shown' }]);
   });
 
-  it('never ends for hidden entries waiting to be ranked past CHANGES_HELD: it lets them go and reads the project again', async () => {
+  it('never ends, nor sends a thing, for hidden entries waiting to be ranked past CHANGES_HELD: it reads them again and none is viewable', async () => {
     const m = machine({ 'app-h': 'eng-h' });
     const who = member(new Set(['la-2']));
     const { sub, record } = start(m, who);
@@ -362,18 +413,41 @@ describe('the feed’s bound on what waits', () => {
     expect(sub.endedWith).toBeNull();
     m.release();
     await settle();
-    sub.take(); // the project read again
-    await settle();
+    expect(sub.queue).toEqual([]); // nothing the member views came: nothing goes
     record(laneA('la-2', 'shown'));
     await settle();
     sub.take();
     await settle();
     expect(sub.endedWith).toBeNull();
-    expect(sub.snaps()).toEqual([
-      { entries: [], more: false },
-      { entries: [], more: false },
-    ]);
+    expect(sub.snaps()).toEqual([{ entries: [], more: false }]);
     expect(sub.evs()).toEqual([{ seq: 1, text: 'shown' }]);
+  });
+
+  it('sends what the member views of entries it let go of unranked, in the journal’s order, ahead of what came after', async () => {
+    const m = machine({ 'app-h': 'eng-h', 'app-v': 'eng-v' });
+    const who = member(new Set(['eng-v', 'la-2']));
+    const { sub, record } = start(m, who);
+    await settle();
+    sub.take();
+    await settle();
+    m.hold('session.get');
+    for (let i = 0; i <= CHANGES_HELD; i++) record(laneB(i % 250 === 0 ? 'app-v' : 'app-h', i % 250 === 0 ? `viewed ${i}` : `hidden ${i}`));
+    record(laneA('la-2', 'after'));
+    m.release();
+    for (let i = 0; i < 6; i++) {
+      await settle();
+      sub.take();
+    }
+    expect(sub.endedWith).toBeNull();
+    expect(sub.snaps()).toHaveLength(1);
+    expect(sub.evs()).toEqual([
+      { seq: 1, text: 'viewed 0' },
+      { seq: 2, text: 'viewed 250' },
+      { seq: 3, text: 'viewed 500' },
+      { seq: 4, text: 'viewed 750' },
+      { seq: 5, text: 'viewed 1000' },
+      { seq: 6, text: 'after' },
+    ]);
   });
 
   it('ends `behind` past CHANGES_HELD entries the member views waiting', async () => {
