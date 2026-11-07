@@ -157,7 +157,7 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
         <p data-share-session className="m-0 truncate text-ui-sm text-fg-muted" title={title}>
           {title} · {machine}
         </p>
-        <div data-share-body className="flex max-h-[58vh] min-w-0 flex-col gap-3 overflow-y-auto">
+        <div data-share-body className="flex max-h-[52vh] min-w-0 flex-col gap-3 overflow-y-auto">
           {saved !== null && (
             <section aria-label={SHARE.results} data-share-results className="flex min-w-0 flex-col gap-1 rounded-sm border border-border p-2 text-ui-sm">
               <ul className="m-0 flex list-none flex-col gap-1 p-0">

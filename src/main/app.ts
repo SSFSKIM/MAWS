@@ -51,6 +51,7 @@ import { createRemoteRows } from './org/rows'; // P5 O8 M2
 import { createOrgPolicies } from './org/policy'; // P5 O8 M6b
 import { installOrgPageFixture } from './org/page-fixture'; // P5 O8 M4a Task 8: a harness build's only
 import { installChannelFixture } from './org/channel-fixture'; // P5 O8 M7a Task 3: a harness build's only
+import { installShareFixture } from './org/share-fixture'; // P5 O8 M6b Task 3: a harness build's only
 import { createRemoteLaneA, routeLaneA } from './lane-a/remote'; // P5 O9 M9
 import { createRemoteLaneB, routeLaneB } from './lane-b/remote'; // P5 O7 M2
 import { ArtifactMachines } from './artifacts/machines'; // P5 O7 M5a
@@ -377,6 +378,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   orgSession?.attach(orgFeed);
   // P5 O8 M7a: the project channels (org/channel/), composed in the production session; org.channel.changed forwarded
   // for the app's life
+  let rowsHeld = false; // P5 O8 M6b Task 3: a harness build's Share fixture seeds the rows (org/share-fixture.ts)
   const unpublishOrgStatus = registerOrgHandlers({
     register: registerMainHandler,
     emit: (name, status) => void emit(name, status),
@@ -390,6 +392,9 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     installOrgPageFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus });
     // P5 O8 M7a Task 3: the Channel tab's e2e look seeds org.status and a project's org.channel.open (org/channel-fixture.ts)
     installChannelFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus });
+    // P5 O8 M6b Task 3: the Share sheet's and the reach marks' e2e look seeds org.*, org.rows and machines.list
+    // (org/share-fixture.ts), and holds the production rows' org.rows.changed, which signed out would clear the seed
+    installShareFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus, holdRows: () => void (rowsHeld = true) });
   }
   powerMonitor.on('resume', () => orgFeed.probe());
   powerMonitor.on('unlock-screen', () => orgFeed.probe());
@@ -627,7 +632,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     link: (ref) => machines.remote(ref), // P5 O8 M6b: each roster machine's channel listings (a private session's)
     files: orgDir,
     emit: (rows) => {
-      void emit('org.rows.changed', rows);
+      if (!rowsHeld) void emit('org.rows.changed', rows);
       remoteLaneB.refresh(); // P5 O7 M2: a row's lane decides whether its tab is remote lane B's
     },
     log: (line) => console.log(`[org-rows] ${line}`),
