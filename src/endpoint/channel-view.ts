@@ -191,9 +191,9 @@ function journalPage(value: unknown): { entries: HostEntry[]; more: boolean } | 
 
 /**
  * What a member's read kept, newest first (the page's entries and the one past them), and the sessions of what it passed
- * by, each once: what `publish` checks again.
+ * by, each once: what `publish` checks again. `full`: it stopped at the page's bound, not the journal's end.
  */
-export type ViewableRead = { kept: HostEntry[]; skipped: EntrySession[] };
+export type ViewableRead = { kept: HostEntry[]; skipped: EntrySession[]; full: boolean };
 
 /**
  * A project's journal from before `before` (a journal id; none: the newest), ranked page by page as it is read: `place`
@@ -226,9 +226,9 @@ export async function readViewable(
       }
       kept.push(entry);
       keptBytes += Buffer.byteLength(JSON.stringify(entry));
-      if (kept.length > ask.limit || (kept.length > 1 && keptBytes > CHANNEL_PAGE_BYTES)) return { kept, skipped: [...skipped.values()] };
+      if (kept.length > ask.limit || (kept.length > 1 && keptBytes > CHANNEL_PAGE_BYTES)) return { kept, skipped: [...skipped.values()], full: true };
     }
-    if (!page.more || page.entries.length === 0) return { kept, skipped: [...skipped.values()] };
+    if (!page.more || page.entries.length === 0) return { kept, skipped: [...skipped.values()], full: false };
     scanned += page.entries.length;
     if (scanned >= SCAN_ENTRIES) throw new Error(`the history of ${ask.project.slice(0, 64)} runs past the scan's bound (${SCAN_ENTRIES} entries)`);
     before = page.entries[page.entries.length - 1].id;
