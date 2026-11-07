@@ -3582,3 +3582,29 @@ Retrospective (M7b). Built as four tasks, with a review at each frontier and rev
 - **The architect's binding conditions.** One extraction of a message, asks from their own record, and no start-path drops kept the channel and this machine's own to-human view from disagreeing.
 
 A future child that serves session content through a feed should state, before building, which inputs may influence each output (content, existence, frame type, end reason, paging) and test each one against a hidden-only variant. It should also key identities on an append-only id, never on a sort order.
+
+**M6a (2026-11-07, PR from `p5-o8-m6a`).** A session's unread, last seen, pinned and draft are now kept per member in the spine's index. The machine's owners keep the session row, shared among co-owners. Every other member keeps their own rows, in `reader_state` and `member_drafts`, both `ADDED_TABLES` entries. Nothing one member reads, pins or types moves what another sees.
+
+**Reaching the rows remotely.** A remote member reaches them over RL2 through a new machine command, `session.reader.update` (`WIRE_MINOR` 31, graded `list`, answering a four-field `ReaderState`), and through `session.drafts.get` and `.set`.
+- Each call carries the reader that the authorization decision named, and the reader is checked again where the call leaves for the machine.
+- Every record the endpoint sends a member carries that member's own reading, or none: answers, `session.changed`, snapshots, history pages and remote rows. An owner's queued change goes out only while the head that made them an owner still stands.
+- A reopened checkout feed reads the record again, ordered and retried.
+
+**The device.** On a machine that keeps the rows, a remote lane B session's reading, pin and draft survive a relaunch. On an older machine, today's in-run fallback runs unchanged.
+- One session's draft saves are serialized. A save names the draft it replaces (a compare-and-set on the writer's stamp), and a clear leaves a tombstone.
+- A draft's text always persists. Attachments over the link's budget stay in the run, with a note, and are never deleted just because they were left out.
+
+**Also in M6a's PR:** the certificates parity fix that the desk track asked for, outside the reader work (65e0532b1).
+
+**Evidence:**
+- the unit suites: `migrations`, `sessions`, `drafts`, `register`, `test/endpoint/reader-state` (22, every surface through real channels), `subscriptions-b`, `remote-checkout`, `test/lane-b/remote`, the renderer's `remote-reading`, `remote-drafts` and `visibility`;
+- `test/lane-b/drafts-enumerated.test.ts`: every order of up to 5 events from 7, against the real `DraftStore` and the renderer's queue, for an owner and a member. It checks that the machine never ends on an older draft, and that no attachment disappears unless removed;
+- the gates the PR body lists.
+
+**Retrospective (M6a).** Built as three tasks, each with a review at its frontier. The desk track reviewed the endpoint over four rounds, then the renderer, then each draft-path delta, and our reviewer-medium reviewed the branch.
+- **Where the rounds went.** Each fix had the same shape: authority, or currency, checked at one point and assumed at a later one. A reader named at authorize and used at dispatch. An owner checked at enqueue and sent at dequeue. A reply applied after a newer record. A save released at a timeout while its act still ran. A clear that left nothing to compare against. A transport omission read as a deletion.
+- **What found the draft-path orders.** Review found the draft-path bugs one interleaving at a time, three rounds running. The enumerating test found 361 failing orders on the tree it was written against, then 822 more once its alphabet gained an edit over the budget. Its blind spot was its alphabet, not its orders.
+- **The fork.** The spec's "`session.update` answers `ReaderState`" met the strict output check of a machine-owned wire entry. A new command at a minor resolved it; a union would have needed a major.
+
+A future child that keeps state written from more than one place over an unreliable link should write the enumerating test first, before any review. Its alphabet should include every event that changes what crosses the link: a timeout, a late landing, a read-back, and a crossing of the size budget. It should also check authority at the point where data leaves, never at the point where the decision was made.
+
