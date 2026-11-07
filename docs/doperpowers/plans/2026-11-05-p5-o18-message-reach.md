@@ -1326,6 +1326,9 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
 - Decision (M6's harness): the operator's terminal is a pty `vm/scene.sh` holds through Python's `pty.fork`, which answers `y` once sminos asks `Confirm? [y/N]`, rather than util-linux `script` fed on stdin; the pack is built once, as `o18a1`, into `/opt/o18-m6/packs`, which root then owns and every scene reads.
   Rationale: `script` ends its child on stdin's EOF, so the answer would race the prompt; the scene homes are 0700, so one build serves all four only from a shared directory.
   Date/Author: 2026-11-07, p5-desk-track-owner (M6's harness).
+- Decision (M6's harness, its review's fix wave): a reader withdrawn from private S may hold S's `unlisted` notice, written under the stream addressed to the withdrawn, and a share's stream from before it (`Project.mayRead`), so 3a's PB check refuses S's stream of its owner alone anywhere (have, backlog, inventory) and any event of S's streams after its notice but a notice, not every `/<S>~` writer (`givenPastNotice`). A probe opens the project on its socket before its hand-signed say, whatever ran first: the hub refuses events for a project the connection never opened (`not-open`). 3b's say to S and U together is no private marker: its public split reaches U and the archive keeps it by right. `staging-run.sh endpoint-vm` takes and forwards `--vm <vm>`, which the command now requires.
+  Rationale: each was a real defect reviewer-high found (P2s, 2026-11-07); the first and third would have failed a correct run, the second a lone `--items` rehearsal, the fourth O10's own setup.
+  Date/Author: 2026-11-07, p5-desk-track-owner (M6's harness).
 
 ## Outcomes & Retrospective
 

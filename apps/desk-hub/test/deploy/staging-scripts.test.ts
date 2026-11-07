@@ -585,10 +585,10 @@ describe('the endpoint step', () => {
     expect(run.stdout).toContain('files holding the Access token or a secret the run handled: 1');
   });
 
-  it.skipIf(!zsh)('sets the VM scene up from a base the VM holds, or tears it down, with no token read', () => {
+  it.skipIf(!zsh)('sets the VM scene up from a base the VM holds, or tears it down, on the VM it names, with no token read', () => {
     for (const [args, expected] of [
-      [['endpoint-vm', 'setup', 'd392c4d8c'], ['endpoint-acceptance', '--config', 'deploy/staging.json', '--vm-setup', '--base', 'd392c4d8c']],
-      [['endpoint-vm', 'teardown'], ['endpoint-acceptance', '--config', 'deploy/staging.json', '--vm-teardown']],
+      [['endpoint-vm', 'setup', 'd392c4d8c', '--vm', 'dc-o10'], ['endpoint-acceptance', '--config', 'deploy/staging.json', '--vm-setup', '--base', 'd392c4d8c', '--vm', 'dc-o10']],
+      [['endpoint-vm', 'teardown', '--vm', 'dc-o10'], ['endpoint-acceptance', '--config', 'deploy/staging.json', '--vm-teardown', '--vm', 'dc-o10']],
     ] as const) {
       const { dir, env } = setup();
       const run = spawnSync('zsh', [runner, ...args], { encoding: 'utf8', env, timeout: 60_000 });
@@ -598,9 +598,17 @@ describe('the endpoint step', () => {
       expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe('');
     }
     const { env } = setup();
-    const bad = spawnSync('zsh', [runner, 'endpoint-vm', 'setup', 'HEAD;rm'], { encoding: 'utf8', env });
-    expect(bad.status).toBe(2);
-    expect(bad.stdout).toMatch(/endpoint-vm setup <base commit> \| teardown/);
+    for (const args of [
+      ['endpoint-vm', 'setup', 'HEAD;rm', '--vm', 'dc-o10'],
+      ['endpoint-vm', 'setup', 'd392c4d8c'],
+      ['endpoint-vm', 'teardown'],
+      ['endpoint-vm', 'teardown', '--vm', 'dc;rm'],
+      ['endpoint-vm', 'teardown', '--vm', 'dc-o10', '--base', 'd392c4d8c'],
+    ]) {
+      const bad = spawnSync('zsh', [runner, ...args], { encoding: 'utf8', env });
+      expect(bad.status, args.join(' ')).toBe(2);
+      expect(bad.stdout).toMatch(/endpoint-vm setup <base commit> --vm <vm> \| teardown --vm <vm>/);
+    }
   });
 });
 

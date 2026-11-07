@@ -30,7 +30,7 @@
 #   endpoint [args…]         P5 O10 M11: `deployment endpoint-acceptance`, the scratch mawsd on the devcloud acceptance
 #                            VM enrolled and listed, items 2-5, 8 and 9 over the relay and the tailnet, the hub deploy
 #                            this script's own `deploy`; production's X-Desk-Build compared before and after
-#   endpoint-vm setup <base> | teardown
+#   endpoint-vm setup <base> --vm <vm> | teardown --vm <vm>
 #                            that VM's scene set up (the branch built there from a bundle cut at <base>) or removed
 #   reach [args…]            P5 O18 M6: `deployment reach-acceptance`, message reach on staging: the reach scenes on the
 #                            run's VM (--vm <vm> --direct-url ws://<its tailnet address>), a second member added for the
@@ -301,12 +301,17 @@ case $step in
     # P5 O10 M11: the VM scene's setup (vm/setup.sh: the scratch user, the scene's files, the branch built from a bundle
     # cut at <base>, a commit the VM's MAWS checkout holds) or teardown (vm/teardown.sh), through `devcloud vm ssh`
     # alone. No token is read: neither touches the hub.
-    case ${1:-} in
-      setup) [[ ${2:-} =~ '^[0-9a-f]{7,40}$' ]] || { print -r -- "endpoint-vm setup <base commit> | teardown"; exit 2; }
-        deployment endpoint-acceptance --vm-setup --base $2 < /dev/null 2>&1 | filter ;;
-      teardown) deployment endpoint-acceptance --vm-teardown < /dev/null 2>&1 | filter ;;
-      *) print -r -- "endpoint-vm setup <base commit> | teardown"; exit 2 ;;
+    # The VM is named (`--vm`): the command has no default since its old one was deleted.
+    usage="endpoint-vm setup <base commit> --vm <vm> | teardown --vm <vm>"
+    sub=${1:-}; (( $# )) && shift
+    args=()
+    case $sub in
+      setup) [[ ${1:-} =~ '^[0-9a-f]{7,40}$' ]] || { print -r -- $usage; exit 2; }; args=(--base $1); shift ;;
+      teardown) ;;
+      *) print -r -- $usage; exit 2 ;;
     esac
+    [[ ${1:-} == --vm && ${2:-} =~ '^[a-z0-9][a-z0-9-]{0,62}$' && $# == 2 ]] || { print -r -- $usage; exit 2; }
+    deployment endpoint-acceptance --vm-$sub $args --vm $2 < /dev/null 2>&1 | filter
     exit ${pipestatus[1]} ;;
   reach)
     # P5 O18 M6: `deployment reach-acceptance` (its scenes set up by `reach-vm setup`), as `endpoint` runs O10's: the token
@@ -486,5 +491,5 @@ case $step in
       checks+=(${pipestatus[2]}); say "redeploy-check exit ${checks[-1]}"
     fi
     exit 0 ;;
-  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin [--pipe] <args…> | throwaway <n> | phone <n> [--rehearse] [--lane-b] [--device <id>] | endpoint [args…] | endpoint-vm setup <base> | teardown | reach [args…] | reach-vm setup|teardown [args…]"; exit 2 ;;
+  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin [--pipe] <args…> | throwaway <n> | phone <n> [--rehearse] [--lane-b] [--device <id>] | endpoint [args…] | endpoint-vm setup <base> --vm <vm> | teardown --vm <vm> | reach [args…] | reach-vm setup|teardown [args…]"; exit 2 ;;
 esac

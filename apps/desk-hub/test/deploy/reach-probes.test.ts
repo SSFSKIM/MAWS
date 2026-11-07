@@ -9,11 +9,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { deviceEntry, OrgAdmin } from '../../deploy/org-admin.ts';
 import { Cleanup } from '../../deploy/proof.ts';
 import { listProbe } from '../../deploy/reach-acceptance.ts';
-import { ownerLog, probeGet, probeHello, probeSay, streamOfSession, type Probe, type ProbeAt } from '../../deploy/reach-items.ts';
+import { givenPastNotice, ownerLog, probeGet, probeHello, probeSay, streamOfSession, streamsOf, type Probe, type ProbeAt } from '../../deploy/reach-items.ts';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from '../support/local';
 import { adminKeysFile, LocalPerson } from '../support/local-person';
 import { genesis, memberId, newDevice, signedBy } from '../support/org';
-import { AUDIENCE, joined, newSession, upload } from '../support/reach';
+import { AUDIENCE, joined, newSession, unlisted, upload } from '../support/reach';
 import { Rl1Machine } from '../support/rl1';
 
 process.env.DESK_HUB_APP ??= join(import.meta.dirname, '../..');
@@ -33,6 +33,9 @@ const project = { id: '0f18a6e0-7c2d-4b5e-9a10-000000000006', name: 'o18-m6-prob
 const at = (): ProbeAt => ({ hub: hub.url, org: ORG, project });
 const S = { session: newSession(), alias: 's-probe' };
 const P = newSession();
+/** A session shared with B, then narrowed to A: its notice to B in the stream of the withdrawn. */
+const N = newSession();
+let noticeTs: string;
 
 beforeAll(async () => {
   hub = await startLocalHub();
@@ -55,6 +58,10 @@ beforeAll(async () => {
   // S private to A (its snapshot in A's stream), P plain; both on the writer, the project opened first.
   await writer.sync(project.id, project.name);
   expect(await upload(writer, project.id, [joined(writer, project.id, S.session, 1, [A], 1), joined(writer, project.id, P, 1)])).toEqual([]);
+  expect(await upload(writer, project.id, [joined(writer, project.id, N, 1, [A, B], 1)])).toEqual([]);
+  const notice = unlisted(writer, project.id, N, 1, 2, [B]);
+  noticeTs = notice.ts as string;
+  expect(await upload(writer, project.id, [notice, joined(writer, project.id, N, 1, [A], 2)])).toEqual([]);
 }, 60_000);
 afterAll(async () => {
   writer?.close();
@@ -84,6 +91,15 @@ describe('the probes on the local hub', () => {
     const plain = await probeGet<HistoryLogPage>(at(), pb, historyLogPath(project.id, `o18-a1/${P}`, 0));
     expect(plain.status).toBe(200);
     expect(plain.body!.events).toHaveLength(1);
+  });
+
+  it('PB, withdrawn from N: holds the notice’s stream and the share’s, nothing of N past the notice nor its owner-only stream', async () => {
+    const ownerOnly = streamOfSession('o18-a1', N, [A]).writer;
+    const hello = await probeHello(at(), pb, 300);
+    const held = streamsOf([...hello.have, ...hello.backlog.map((e) => e.writer)], N);
+    expect(new Set(held)).toEqual(new Set([streamOfSession('o18-a1', N, [B]).writer, streamOfSession('o18-a1', N, [A, B]).writer]));
+    expect(hello.backlog.find((e) => e.writer === streamOfSession('o18-a1', N, [B]).writer)).toMatchObject({ kind: 'unlisted', ts: noticeTs });
+    expect(givenPastNotice(N, ownerOnly, noticeTs, hello.have, hello.backlog)).toEqual([]);
   });
 
   it('PA, the owner’s old endpoint: given no stream of S, by hello or by name', async () => {

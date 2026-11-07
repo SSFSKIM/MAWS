@@ -68,7 +68,8 @@ export type ReachScene = {
   cleanup: Cleanup;
   log(line: string): void;
   tag: string;
-  /** The private tokens the run said to or from a private session: what no archive commit may hold. */
+  /** The tokens of says whose every event is private (to or from a private session, no listed recipient beside it):
+   * what no archive commit may hold. */
   privateTokens: string[];
 };
 
@@ -120,6 +121,22 @@ export const names = (value: unknown, id: string): boolean => JSON.stringify(val
 
 /** The audience streams of `session` a vector or a list of writers holds (`<machine>/<session>~<digest>`). */
 export const streamsOf = (writers: Iterable<string>, session: string): string[] => [...writers].filter((w) => w.includes(`/${session}~`));
+
+/**
+ * What a reader outside private `session`'s audience was given of it beyond what it may hold: `ownerOnly` (the stream of
+ * the owner alone) named anywhere, or an event of the session's streams written after its last `unlisted` notice
+ * (`after`, its ts) that is not a notice. The notice's own stream, addressed to the withdrawn, and a share's stream
+ * written while the reader was in it are the reader's (`Project.mayRead`); a withheld position carries nothing.
+ */
+export function givenPastNotice(session: string, ownerOnly: string, after: string, writers: Iterable<string>, events: readonly BacklogEvent[]): string[] {
+  const out = new Set<string>();
+  for (const w of [...writers, ...events.map((e) => e.writer)]) if (w === ownerOnly) out.add(w);
+  for (const e of events) {
+    if (e.writer === ownerOnly || streamsOf([e.writer], session).length === 0 || e.withheld === true || e.kind === 'unlisted') continue;
+    if (e.ts === undefined || e.ts > after) out.add(`${e.writer}:${e.seq}`);
+  }
+  return [...out];
+}
 
 // ---- the scene's means ----------------------------------------------------------------------------------------------
 
@@ -192,15 +209,18 @@ export async function probeGet<T>(scene: ProbeAt, probe: Probe, path: string): P
   return { status: response.status, body };
 }
 
+/** An event a probe was sent, as far as the checks read it. */
+export type BacklogEvent = { writer: string; seq: number; kind?: string; ts?: string; withheld?: boolean };
+
 /** A probe's project hello: the hub's vector and archive flag, and the events it sends after (its backlog), settled. */
-export async function probeHello(scene: ProbeAt, probe: Probe, settleMs = 5000): Promise<{ have: string[]; backlog: Array<{ writer: string; seq: number }> }> {
+export async function probeHello(scene: ProbeAt, probe: Probe, settleMs = 5000): Promise<{ have: string[]; backlog: BacklogEvent[] }> {
   const from = probe.endpoint.frames.length;
   const have = await probe.endpoint.project(scene.project.id, scene.project.name);
   await sleep(settleMs);
   const backlog = probe.endpoint.frames
     .slice(from)
     .filter((f) => f.t === 'events' && f.project === scene.project.id)
-    .flatMap((f) => (f.events as Array<{ writer: string; seq: number }>).map(({ writer, seq }) => ({ writer, seq })));
+    .flatMap((f) => (f.events as BacklogEvent[]).map(({ writer, seq, kind, ts, withheld }) => ({ writer, seq, kind, ts, withheld })));
   return { have: Object.keys(have.have ?? {}), backlog };
 }
 
@@ -210,10 +230,13 @@ export async function probeSay(scene: ProbeAt, probe: Probe, to: Pick<ReachSessi
   const ts = new Date().toISOString();
   const draft = { ts, created: ts, writer, seq: 1, kind: 'say', from: 'o18-probe', to: [{ session: to.session, alias: to.alias }], text: `@${to.alias} hello ${tok}` };
   const event = (await signEvent({ org: scene.org, project: scene.project.id }, draft, probe.machine.key.privateKey, probe.machine.key.pub)) as unknown as LogEvent;
+  // The project open on the probe's socket first, whatever ran before: the hub refuses events for a project the
+  // connection never said hello to (‘not-open’, naming no writer).
+  await probe.endpoint.project(scene.project.id, scene.project.name);
   const from = probe.endpoint.frames.length;
   probe.endpoint.upload(scene.project.id, [event]);
   const answer = await probe.endpoint
-    .next((f) => f.t === 'refused' && f.project === scene.project.id && (f.refusal as { writer?: string }).writer === writer, `the refusal of ${writer}`, from, 30_000)
+    .next((f) => f.t === 'refused' && f.project === scene.project.id && [writer, undefined].includes((f.refusal as { writer?: string }).writer), `the refusal of ${writer}`, from, 30_000)
     .catch(() => null);
   return { writer, seq: 1, refusal: answer === null ? null : (answer.refusal as { reason: string; message?: string }) };
 }
@@ -400,17 +423,21 @@ export async function item3a(scene: ReachScene, report: ReachReport): Promise<vo
     if (listings.some((l) => l.body.session === scene.S.session)) throw new Error('A1 lists S to b1');
     return `${listings.length} listing(s), none of S`;
   });
-  await report.check('3a', 'PB’s hello, the history route and the inventory give nothing of S’s streams', async () => {
+  await report.check('3a', 'PB’s hello, the history route and the inventory give nothing of S past its notice', async () => {
+    // B is withdrawn from S, so PB may hold the notice's stream (addressed to the withdrawn) and a share's from before
+    // it; never S's stream of its owner alone, nor anything of S written after the notice.
     const hello = await probeHello(scene, scene.pb);
-    const streams = [...streamsOf(hello.have, scene.S.session), ...streamsOf(hello.backlog.map((e) => e.writer), scene.S.session)];
-    if (streams.length) throw new Error(`PB was given ${streams.join(', ')}`);
+    const after = await noticeTs(scene.S);
+    const inventory = await probeGet<HistoryInventory>(scene, scene.pb, historyInventoryPath([scene.machines.a1.name]));
+    const listed = inventory.body?.projects.flatMap((p) => p.writers.map((w) => w.writer)) ?? [];
+    const given = givenPastNotice(scene.S.session, stream.writer, after, [...hello.have, ...listed], hello.backlog);
+    if (given.length) throw new Error(`PB was given ${given.join(', ')}`);
+    const held = streamsOf(new Set([...hello.have, ...listed]), scene.S.session);
     const page = await probeGet<HistoryLogPage>(scene, scene.pb, historyLogPath(scene.project.id, stream.writer, 0));
     if ((page.body?.events?.length ?? 0) !== 0) throw new Error(`the history route served ${page.body!.events.length} event(s) of ${stream.writer}`);
     const plain = await probeGet<HistoryLogPage>(scene, scene.pb, historyLogPath(scene.project.id, `${scene.machines.a1.name}/${scene.S.session}`, 0));
     if ((plain.body?.events?.length ?? 0) === 0) throw new Error(`the history route served S's plain writer nothing (${plain.status})`);
-    const inventory = await probeGet<HistoryInventory>(scene, scene.pb, historyInventoryPath([scene.machines.a1.name]));
-    if (names(inventory.body, '~')) throw new Error(`the inventory lists a stream: ${JSON.stringify(inventory.body).slice(0, 200)}`);
-    return `no stream in the have or backlog; ${stream.writer} by name: nothing (${page.status}); the plain writer: ${plain.body!.events.length} event(s); the inventory lists no stream`;
+    return `nothing of S after its notice (${after}) and no ${stream.writer} in the have, backlog or inventory (of S's streams PB holds ${held.length ? held.join(', ') : 'none'}); ${stream.writer} by name: nothing (${page.status}); the plain writer: ${plain.body!.events.length} event(s)`;
   });
   await report.check('3a', 'PA, the owner’s own old machine, gets no stream over HTTP either', async () => {
     const page = await probeGet<HistoryLogPage>(scene, scene.pa, historyLogPath(scene.project.id, stream.writer, 0));
@@ -457,8 +484,9 @@ export async function item3b(scene: ReachScene, report: ReachReport): Promise<vo
     return 'L1’s message reached U; on B1 nothing after the notice names S, and U’s list shows L1 with no origin naming S';
   });
   await report.check('3b', 'a say to S and U together reaches B1 only as its own, naming neither S’s alias nor short', async () => {
+    // Not a private marker: the say's public split carries it to U, which the archive keeps by right. Its private split
+    // is in S's stream, which the archive's checks find in no file.
     const tok = token(scene, 'i3b-s');
-    scene.privateTokens.push(tok);
     const r = await sayFrom(scene.T, tok, [scene.S, scene.U]);
     if (r.rc !== 0) throw new Error(`T's say exited ${r.rc}: ${said(r)}`);
     await arrives(scene.S, tok);

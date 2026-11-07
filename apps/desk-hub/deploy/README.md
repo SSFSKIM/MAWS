@@ -282,7 +282,7 @@ mount namespace that hides the VM's managed settings; every step on the VM is a 
 the tailnet (`TamperRelay` and the run's own relays in the path for item 3), and undoes all of it, the policy included.
 One `PASS <item>`, `FAIL <item>` or `NOT SHOWN <item>: <why>` per item, the suites' and other children's clauses named
 under it; then `LEFT …` for anything still there. `staging-run.sh endpoint` runs it (production compared before and
-after), `staging-run.sh endpoint-vm setup <base> | teardown` sets the scene up or removes it. Production (item 7) is a
+after), `staging-run.sh endpoint-vm setup <base> --vm <vm> | teardown --vm <vm>` sets the scene up or removes it. Production (item 7) is a
 mode of its own, refused unless asked for by `--production --confirm-production <production's host>` with production's
 config (`endpoint-production.ts`), and driven by `vm/production.sh` against the VM's own `mawsd` and sminos. Its
 machine is pinned (`PRODUCTION_MACHINE`: the VM `dc-acceptance-7f80`, its name and its ref), checked before the owner
@@ -609,10 +609,11 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     then the quick-tunnel API asked directly with a 60 s wait (cloudflared's own request gives up after 15 s, and the
     API has taken 22-33 s to answer), with cloudflared run on the credentials it answered. That credentials file is
     written 0600 into the state directory and removed when the tunnel stops; its secret is never printed.
-  - `endpoint [args…]`, `endpoint-vm setup <base> | teardown`: `endpoint-acceptance` under `staging-ssfskim` with the
+  - `endpoint [args…]`, `endpoint-vm setup <base> --vm <vm> | teardown --vm <vm>`: `endpoint-acceptance` under `staging-ssfskim` with the
     admin device's keys, its hub-deploy item this script's own `deploy`, the secrets it handled searched for in its log
     after; the VM scene set up from a bundle cut at <base> (a commit the VM's MAWS checkout holds), or removed. The
-    run names its VM and the listener it dials (`--vm <vm> --direct-url ws://<address>:<port>`): the VM the defaults
+    run names its VM and the listener it dials (`--vm <vm> --direct-url ws://<address>:<port>`), and setup and
+    teardown the VM (`--vm <vm>`, which the step forwards and checks the shape of): the VM the defaults
     named was deleted on 2026-11-01, and devcloud is the one on PATH.
   - `reach [args…]`, `reach-vm setup [--vm <vm>] [--sminos <commit>] [--old-sminos <commit>] | teardown [--vm <vm>]`:
     `reach-acceptance` (below) under `staging-ssfskim` with the admin device's keys, the secrets it handled searched

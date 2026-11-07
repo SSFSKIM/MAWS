@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { PRODUCTION_HOST, STAGING_HOST, STAGING_ORG } from '../../deploy/config.ts';
 import { operatorRefusal, REACH_SCENES, sessionWords, tagWord, VmMachine, type ReachSceneName } from '../../deploy/endpoint-machine.ts';
 import { BUNDLE_PATH, bundleSteps, nodePin, reachItemsFor, reachMode, reachSetupHead } from '../../deploy/reach-acceptance.ts';
-import { policyRevOf, REACH_ITEMS, streamOfSession, streamsOf, uplinkWithheld, withheldHolds } from '../../deploy/reach-items.ts';
+import { givenPastNotice, item3b, policyRevOf, REACH_ITEMS, streamOfSession, streamsOf, uplinkWithheld, withheldHolds, type ReachReport, type ReachScene } from '../../deploy/reach-items.ts';
 
 const deploy = join(import.meta.dirname, '../../deploy');
 const staging = { worker: 'desk-hub-staging', host: STAGING_HOST };
@@ -205,6 +205,46 @@ describe('what the items read', () => {
     const s = streamOfSession('o18-a1-x', SID, [a]);
     expect(s).toEqual({ writer: `o18-a1-x/${SID}~${audienceDigest([a])}`, file: `o18-a1-x.${SID}~${audienceDigest([a])}.jsonl` });
     expect(streamsOf([`o18-a1-x/${SID}`, s.writer, `o18-b1-x/${OTHER}~0123456789abcdef`], SID)).toEqual([s.writer]);
+  });
+
+  it('what a withdrawn reader holds of a private session: its notice and a share’s stream from before, never the owner-only stream nor anything newer', () => {
+    const a = 'a'.repeat(32);
+    const b = 'b'.repeat(32);
+    const own = streamOfSession('o18-a1-x', SID, [a]).writer;
+    const notice = streamOfSession('o18-a1-x', SID, [b]).writer;
+    const shared = streamOfSession('o18-a1-x', SID, [a, b]).writer;
+    const at = '2026-11-07T10:00:00.000Z';
+    const held = [
+      { writer: notice, seq: 1, kind: 'unlisted', ts: at },
+      { writer: shared, seq: 1, kind: 'joined', ts: '2026-11-07T09:00:00.000Z' },
+      { writer: shared, seq: 2, withheld: true },
+      { writer: `o18-a1-x/${OTHER}~0123456789abcdef`, seq: 4, kind: 'say', ts: '2026-11-07T11:00:00.000Z' },
+    ];
+    expect(givenPastNotice(SID, own, at, [notice, shared, `o18-a1-x/${SID}`], held)).toEqual([]);
+    expect(givenPastNotice(SID, own, at, [own], [])).toEqual([own]);
+    expect(givenPastNotice(SID, own, at, [], [...held, { writer: shared, seq: 3, kind: 'say', ts: '2026-11-07T10:00:01.000Z' }])).toEqual([`${shared}:3`]);
+    expect(givenPastNotice(SID, own, at, [], [{ writer: own, seq: 1, kind: 'joined', ts: '2026-11-07T09:00:00.000Z' }])).toEqual([own]);
+  });
+
+  it('3b’s say to S and U together adds no private marker: its public split, U’s, is the archive’s to keep', async () => {
+    // Every verb succeeds but a say, which exits 1: each check runs to its say and stops there.
+    const vm = { asSession: async (_s: string, change: object) => ({ rc: 'say' in change ? 1 : 0, lines: [] }), operator: async () => ({ rc: 0, lines: [] }) };
+    const session = (label: string) => ({ label, session: `${label}-id`, alias: label.toLowerCase(), machine: { vm } });
+    const S = session('S');
+    const scene = { S, U: session('U'), T: session('T'), b: { member: 'b'.repeat(32) }, seats: { L1: session('L1') }, machines: { b1: { vm } }, privateTokens: [] as string[], tag: 't', run: {} } as unknown as ReachScene;
+    const checks: string[] = [];
+    const report: ReachReport = {
+      check: async (_item, check, run) => {
+        checks.push(check);
+        await run().catch(() => {});
+        return true;
+      },
+      add: () => {},
+      bySuites: () => {},
+    };
+    await item3b(scene, report);
+    expect(checks).toHaveLength(2);
+    expect(scene.privateTokens).toEqual([]);
   });
 
   it('a withheld position, as a seq or within a run, wherever uplink.json keeps it', () => {
