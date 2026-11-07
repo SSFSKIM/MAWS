@@ -22,7 +22,8 @@
 // - A save keeps the text there whatever its attachments weigh (M6a's branch review, F3; @shared/sessions/draft-fit.ts):
 //   those past one act's bound stay in this run, which loads the draft whole, and the composer is told once; a draft
 //   read from the machine names those its machine left there, which is said too, and each save after it names them
-//   again, so the machine keeps them (M6a's re-review, K2): left out is not removed. A clear takes them off.
+//   again, so the machine keeps them (M6a's re-review, K2): left out is not removed. So are those a save's own fitting
+//   leaves out, which the machine may hold already (M6a's last pass, L1). A clear takes them off.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { STALE_DRAFT_WORDS, type Draft } from '@shared/ipc/schema/session';
@@ -138,7 +139,9 @@ async function saveOnce(client: MawsBridge, appSessionId: AppSessionId, draft: D
       if (!read.ok) return read;
     }
     const fitted = draft === null ? { draft: null, withheld: [] } : fitDraft(nameWithheld(draft, leftThere.get(appSessionId) ?? []));
-    const result = await client.invoke('session.drafts.set', { appSessionId, draft: fitted.draft, replaces: bases.get(appSessionId) ?? null });
+    // M6a's last pass, L1: those this save's own fitting leaves out are named too, since the machine may hold them already
+    const sent = fitted.draft === null || fitted.withheld.length === 0 ? fitted.draft : nameWithheld(fitted.draft, [...(leftThere.get(appSessionId) ?? []), ...fitted.withheld]);
+    const result = await client.invoke('session.drafts.set', { appSessionId, draft: sent, replaces: bases.get(appSessionId) ?? null });
     if (!current()) return null;
     heardReaderRows(appSessionId, result);
     if (result.ok) {

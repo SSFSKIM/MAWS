@@ -285,6 +285,23 @@ describe('a machine that keeps each member’s draft', () => {
 
   // M6a's re-review, K2: an attachment a read left on the machine is no removal; each save after it names those left
   // there (which the machine keeps, src/services/index/register.ts), until a clear (a send's, say) takes them off
+  // M6a's last pass, L1 (the reviewer's case): a PDF that fit the read whole, saved with text grown past the act's
+  // bound, is left out by the save's own fitting; that is no removal either, so the save names it, and the machine keeps
+  // the copy it holds (src/services/index/register.ts)
+  it('names the attachments its own fitting leaves out of a save, as it does those a read left there', async () => {
+    const fake = fakeClient();
+    const port = portOf(fake);
+    const pdf = { id: 'paper', kind: 'document', name: 'paper.pdf', mediaType: 'application/pdf', bytes: 3_000_000, data: 'A'.repeat(4_000_000), persisted: true };
+    const withText = (text: string): Draft => { const d = draft(text); return { ...d, doc: { ...(d.doc as object), attrs: { attachments: [pdf] } } }; };
+    const load = port.load();
+    await fake.reply('session.drafts.get', withText('read this')); // fits one answer whole
+    expect((await load)!.doc).toMatchObject({ attrs: { attachments: [pdf] } });
+    port.save(withText('x'.repeat(200_000)));
+    await flush();
+    const sent = (fake.invoked('session.drafts.set') as Saved[])[0]!.draft!.doc as { attrs: Record<string, unknown> };
+    expect([sent.attrs.attachments, sent.attrs[WITHHELD_ATTACHMENTS]]).toEqual([[], [{ id: 'paper', name: 'paper.pdf' }]]);
+  });
+
   it('names in each save after it the attachments a read left there, until a clear', async () => {
     const fake = fakeClient();
     const port = portOf(fake);
