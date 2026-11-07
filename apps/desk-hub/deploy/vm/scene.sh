@@ -513,7 +513,9 @@ reach_words() {
 project_id() { local p; p=$(cat $R/project 2>/dev/null) && is "$UUID_RE" "$p" && say "$p" || fail "no project: lane-a-up first"; }
 project_home() { say "$S/projects/$(project_id)"; }
 # A session the scene started (lane A's, or a seat one of its sessions spawned): the only shells as-session opens.
-known_session() { cat $R/session $R/seats 2>/dev/null | grep -qxF -- "$1" || fail "not a session of this scene: $1"; }
+# grep reads both files itself: under pipefail, `cat` failing on a seats file not written yet failed the pipeline
+# whatever grep found. With -q, a selected line exits 0 even when one file is missing.
+known_session() { grep -qxF -- "$1" $R/session $R/seats 2>/dev/null || fail "not a session of this scene: $1"; }
 # sminos, as the scene's user in its namespace, from the checkout; `env…` assignments first (none: the operator).
 scene_sminos() {
   local -a extra=()
