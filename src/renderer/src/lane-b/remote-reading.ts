@@ -9,6 +9,10 @@
 // - On screen is read: a session this app shows is marked seen there as it comes on screen, and again whenever its record
 //   says unread while it stays (a turn ended there, which marks every reader unread, since nothing there shows it). The
 //   record held reads it at once, the write on its way.
+// - A reply says the reading as of its request (M6a's branch review, F2): a record the stores take for the session while
+//   it is out (the feed's: a new turn that marked the member unread, a pin from another of their devices) is the later
+//   word, and the reply is then heard but not shown. Each session's generation moves with every write sent and every
+//   record taken while one is out.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ReaderState, SessionRecord } from '@shared/graph/session';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
@@ -20,6 +24,16 @@ import { forgetReaderRowsRefusal, heardReaderRows, isNotOffered, readerRowsOf } 
 
 type Reading = Pick<SessionRecord, 'pinned' | 'lastSeen' | 'unread'>;
 
+/** Each session's writes out, and its generation: moved by each write sent and each record taken while one is out. */
+const fences = new Map<AppSessionId, { out: number; generation: number }>();
+let showing = false; // this file's own write of a record, which moves no generation
+
+/** A record the stores took for a session with a write out (not this file's own): its replies so far are older. */
+function told(appSessionId: AppSessionId): void {
+  const fence = fences.get(appSessionId);
+  if (fence !== undefined) fence.generation += 1;
+}
+
 /** The reading on the record held for the session, if one is (one write, only when it differs). */
 function showReading(appSessionId: AppSessionId, reading: Partial<Reading>): void {
   const { records, recordsVersion } = useSessions.getState();
@@ -27,7 +41,12 @@ function showReading(appSessionId: AppSessionId, reading: Partial<Reading>): voi
   if (record === undefined) return;
   const next = { ...record, ...reading };
   if (next.pinned === record.pinned && next.unread === record.unread && next.lastSeen.messageUuid === record.lastSeen.messageUuid && next.lastSeen.at === record.lastSeen.at) return;
-  useSessions.setState({ records: new Map(records).set(appSessionId, next), recordsVersion: recordsVersion + 1 });
+  showing = true;
+  try {
+    useSessions.setState({ records: new Map(records).set(appSessionId, next), recordsVersion: recordsVersion + 1 });
+  } finally {
+    showing = false;
+  }
 }
 
 /** The machine's answer, the reader's own reading, on the record held. */
@@ -35,11 +54,18 @@ export function applyReaderState(state: ReaderState): void {
   showReading(state.appSessionId, { pinned: state.pinned, lastSeen: state.lastSeen, unread: state.unread });
 }
 
-/** The patch written there, its answer applied and what it says of the machine heard. */
+/** The patch written there, what its answer says of the machine heard, and the answer shown unless a record came since. */
 async function writeReading(appSessionId: AppSessionId, patch: ReaderPatch, client: MawsBridge): Promise<CommandResult<'session.reader.update'>> {
+  const fence = fences.get(appSessionId) ?? { out: 0, generation: 0 };
+  fences.set(appSessionId, fence);
+  fence.out += 1;
+  fence.generation += 1;
+  const sent = fence.generation;
   const result = await client.invoke('session.reader.update', { appSessionId, patch });
+  fence.out -= 1;
+  if (fence.out === 0 && fences.get(appSessionId) === fence) fences.delete(appSessionId);
   heardReaderRows(appSessionId, result);
-  if (result.ok) applyReaderState(result.value);
+  if (result.ok && fence.generation === sent) applyReaderState(result.value);
   return result;
 }
 
@@ -80,6 +106,7 @@ export function showRemote(appSessionId: AppSessionId, visible: boolean, client:
 export function connectRemoteReading(client: MawsBridge = ipc): () => void {
   const offRecords = useSessions.subscribe((state, before) => {
     if (state.records === before.records) return;
+    if (!showing) for (const appSessionId of fences.keys()) if (state.records.get(appSessionId) !== before.records.get(appSessionId)) told(appSessionId);
     for (const appSessionId of useRemoteReadMarks.getState().visible) {
       const record = state.records.get(appSessionId);
       // only where the machine's word is the record's: elsewhere the marks show it read (./read-marks.ts)

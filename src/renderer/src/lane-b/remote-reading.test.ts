@@ -16,7 +16,7 @@ import { setSessionUnread } from '../keymap/session-navigation';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { connectRemoteReadMarks, resetRemoteReadMarks, useRemoteReadMarks } from './read-marks';
-import { readerRowsOf, resetReaderRows } from './reader-rows';
+import { heardReaderRows, readerRowsOf, resetReaderRows } from './reader-rows';
 import { connectRemoteReading, pinRemote, setRemoteReading, showRemote } from './remote-reading';
 import { resetRemoteLaneBStore } from './remote-session';
 
@@ -122,6 +122,24 @@ describe('a machine that keeps each member’s reading', () => {
     relaunch();
     readAgain(reading());
     expect(held().pinned).toBe(true);
+  });
+
+  // M6a's branch review, F2: a reply says the reading as of its request; a record the feed told after the request (a new
+  // turn that marked the member unread, a pin from another of their devices) is the later word
+  it('keeps a record the feed told after a write over that write’s answer', async () => {
+    const fake = fakeClient();
+    connect(fake);
+    heardReaderRows(REMOTE, { ok: true, value: { appSessionId: REMOTE, pinned: false, unread: false, lastSeen: { messageUuid: null, at: null } } });
+    const marked = setRemoteReading(REMOTE, { unread: false, lastSeen: { messageUuid: null, at: '2026-11-07T10:00:00.000Z' } }, fake.client);
+    readAgain({ unread: true, pinned: true }); // a turn ended there, and another device pinned it
+    await fake.reply('session.reader.update', { appSessionId: REMOTE, pinned: false, unread: false, lastSeen: { messageUuid: null, at: '2026-11-07T10:00:00.000Z' } });
+    expect(await marked).toBeNull();
+    expect(held()).toMatchObject({ unread: true, pinned: true });
+    // a write with nothing told after it is shown as answered
+    const pinned = pinRemote(REMOTE, false, fake.client);
+    await fake.reply('session.reader.update', { appSessionId: REMOTE, pinned: false, unread: true, lastSeen: { messageUuid: null, at: null } });
+    expect(await pinned).toBeNull();
+    expect(held()).toMatchObject({ unread: true, pinned: false });
   });
 
   it('says a write the machine couldn’t take, and asks it again at the next', async () => {
