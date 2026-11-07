@@ -3332,6 +3332,16 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   The leak isn't live today, because the org has one member, and the second member waits on O8 M6b. The architect states in P5's Decision Log that the rule is part of what that precondition relies on.
   Date/Author: 2026-11-07, the architect, recorded by O8's executor (controller).
 
+- Decision: M6a Task 1, the spine (968e62c34, 72b558be3, 19623e805), settles these points.
+  1. **A member's write** sends no `session.changed` and takes no revision. A write by the owners, through either command, announces the change and takes a revision exactly as `session.update` does.
+  2. **A new turn** marks unread every member who has a `reader_state` row. The owners' own unread is still set by `source.ts`. A member with no row reads `unread: false`, so first sight isn't unread.
+  3. **`bare()`** treats a member's reader state or draft as state to keep, so a record holding either is never handed over to a live process.
+  4. **Schema.** The two tables have no indexes beyond their primary keys. `Reader = 'owner' | MemberId` lives in `src/shared/ipc/client.ts`.
+  5. **`session.reader.update`** is declared in `REMOTE_UNAVAILABLE` until Task 2 adds its offer row; Task 2 drops that line along with `session.update`'s and the drafts' lines. Its patch schema has no `title` or `archived`, so a patch carrying either, or an empty one, is refused `invalid_input` at the codec.
+  6. **The seam types.** `endpoint-seam.test.ts` keeps the two seam types equal apart from `dispatch`, which it checks one way (by `extends`). Task 2 restores full equality when it gives `EndpointServices.dispatch` the optional `reader`.
+  7. **Enumerated lists.** The O2 profile fixture, the spine command lists and the cross-build sample now include the new tables and command. A guard in `migrations.test.ts` runs every `ADDED_TABLES` entry on a version-9 file.
+  Date/Author: 2026-11-07, O8's executor (controller), from Task 1's report.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
