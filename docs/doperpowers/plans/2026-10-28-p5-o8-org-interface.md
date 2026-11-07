@@ -3410,6 +3410,20 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   7. **At the gate:** if `e2e:remote`'s read/unread cases (the M8 scene around `remote.spec.ts:1901`) fail or show flaky on this branch, that's red, to be fixed, not explained. The bug to look for is a late `session.changed` flipping a seen row back to unread (the architect, 2026-11-07).
   Date/Author: 2026-11-07, O8's executor (controller), from Task 3's report.
 
+- Decision: M6a's branch-review wave (167585c9e F1, 77413c1db F2, a3f4eb8d0 F3, 2a7fd43ef F4). It covers the desk track's review of Task 3 (one P1, three P2s) and our reviewer-medium on the branch (two P2s, the same as F1 and F3, plus F3's read side). The architect ruled all of them (2026-11-07). No disclosure across readers was found.
+  1. **F1: a pending timeout no longer releases the next draft save.** What decided it: the act's outcome never reaches the renderer after main's `timeout`. `settle()` returns `pendingResult` (`remote.ts:474-480`, `remote-outcomes.ts:76`) and only logs the late outcome, and `session.drafts.set` isn't an operation, so no receipt reaches the page. So the fix is machine-side, a compare-and-set.
+     - `session.drafts.set` takes an optional `replaces`, folded into the unreleased `WIRE_MINOR` 31.
+     - The spine refuses a stale save, with `STALE_DRAFT_WORDS`, in the write's own transaction.
+     - The renderer reads what is kept after a timeout or failure, and retries a stale save on top of the newer one, up to three times.
+     - The compared revision is the draft's writer-stamped `updatedAt`, compared on the machine for identity only and never ordered, so two devices' clocks never meet. A machine-assigned number would need a new `session.drafts.set` output (a wire break) or a read after every save. This deviates from the architect's "a revision the machine assigns" and is put to the architect.
+  2. **F2: a reader reply can't overwrite newer feed records.** Each session with a write out keeps a generation, moved by every write and every record the stores take for it. A reply is shown only if the generation hasn't moved.
+  3. **F3: the text of a draft always persists.**
+     - `@shared/sessions/draft-fit.ts` fits a draft to `REMOTE_INLINE_MAX_BYTES`, measured with the base64.
+     - On save, the text always goes. Attachments that don't fit stay in this run, and the composer shows a warning toast once per set left out.
+     - On a remote `drafts.get`, the spine leaves out what doesn't fit and names it, and the renderer says so.
+  4. **F4: resync reconciles what's on screen.** At resync, each of that machine's sessions on screen is marked seen again.
+  Date/Author: 2026-11-07, O8's executor (controller), from the wave's report.
+
 - Decision: The client re-read's ordering and retry (16f310a0d, main only; the desk track's round-4 follow-ups, checked correct, which closes that thread).
   - **Ordering.** Each reopening's read and each told record take the next number from one shared generation counter. An answer applies only while its generation is still the latest, the feed is still mine, and it's live.
   - **Retry.** A failed read asks again under the same generation, from `feedRetryMs[0]` and doubling up to the `feedRetryMs[1]` cap, for as long as it stays current. The delay is capped and the number of tries isn't, as with the feed's own `unavailable`.
