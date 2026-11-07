@@ -55,6 +55,12 @@ export type OfferRow = {
    * a grant-holder included, refused `owners-only`.
    */
   owners?: true;
+  /**
+   * P5 O8 M6b: the capability the machine's sminos must advertise in its RL10 hello for the row to be offered (`record`):
+   * without it the request is refused `not-offered` before anything is read or sent, and with no sminos connected
+   * `unavailable` (the machine's condition, asked again later).
+   */
+  sminos?: 'record';
 };
 
 /**
