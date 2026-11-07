@@ -1,3 +1,7 @@
+// Desk phase 1's. Since P5 O14 (M5b, then B4 on 2026-11-07) neither attack meets what this comment describes: the hub
+// answers the `steer` `refused retired`, and each machine takes the `human` as an inert v1 record, not a `bad-code`
+// refusal. deploy/README.md (`walk-console.js`) says so.
+//
 // The recomposition walk's console attacks (the desk's Parent-Level Acceptance 8, "the machine decides"; the walk
 // sheet's Part G, G1 and G3). The owner pastes this into DevTools on the desk's own origin while signed in, having set
 //
