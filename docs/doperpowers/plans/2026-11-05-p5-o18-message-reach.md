@@ -42,7 +42,7 @@ Then `sminos share <session> <member> list` (run by the owner at a terminal): th
 - [x] (2026-11-06 05:09Z) D5's restatement of a withheld own snapshot (board #492): sminos 1.37.0, branch `o18-d5-restate` on M4's head (`bccda6f1..c9850331`); all five sminos gates GREEN on `c9850331` (run 42164345530); reviewer-medium, two rounds, the second correct; merged 2026-11-07 02:01Z as doperpowers PR #465 (`2cd36862`); board #492 done.
 - [x] (2026-11-06 06:50Z) M5's sminos executors, `record.access`, `record.shares` and O8's `record.owners` (O8 M6b and M5b): sminos 1.38.0, branch `o18-record-executors` on D5's head (`c9850331..23035da7`); GREEN on `23035da7` (run 42174469720); reviewer-high with a security lens, three rounds, every finding fixed; merged 2026-11-07 02:26Z as doperpowers PR #466 (`b26ffe81`).
 - [x] (2026-11-07 03:15Z) M5's widening cutover in sminos's CLI, keyed on the endpoint's `record` welcome (P5 Decision Logs 231 and 232; the architect's ruling, chat 1164): sminos 1.39.0, branch `o18-widening-cutover` on the executors' head (`23035da7..4a0c3b89`); reviewer-high, two rounds, the second correct; all five sminos gates GREEN on `ff2c40e8` (run 42179385114), and on the merged head `213b49de` (run 42327542258) but for the known `test_manager_serve` flake, with sminos-suites GREEN on the identical tree `4a0c3b89` (run 42329436955); merged as doperpowers PR #467 (`0759115d`).
-- [ ] M6: live acceptance on the staging org.
+- [ ] M6: live acceptance on the staging org. Shape ruled 2026-11-07 (the architect, chat 1204, on the desk track's mapping); the harness on MAWS branch `p5-o18-m6` first, then the run.
 - [ ] M5 is an external contract, blocked on O8 M6 and outside O18's acceptance.
 
 ## Today (what this child changes)
@@ -288,10 +288,10 @@ On the staging org `staging-ssfskim` with a second member, added for the run and
 1. A person's own sessions message each other across machines, whatever their visibility, private included.
 2. The second member's agent resolves and messages a `listed` session. The message arrives as a peer message with its owner label and counts as nobody's words.
 3. Once a session goes `private` with no shares:
-   - **Nothing new reaches the second machine or member.** That machine and the member's browser receive none of its later events. `sminos list --org`, `find` and `@short` don't name it, the machine's log files and `uplink.json` carry none of its writers, the second machine asking the hub's HTTP history route for its writer by name gets nothing, and the project's git archive holds none of its streams.
+   - **Nothing new reaches the second machine or member.** That machine and the member's browser receive none of its later events. `sminos list --org`, `find` and `@short` don't name it, the machine's log files and `uplink.json` carry none of its audience streams and nothing of it after its `unlisted` notice (its plain history from while it was listed stays, and the notice is served to the withdrawn, D6; a session born private shows none at all), the second machine asking the hub's HTTP history route for its writer by name gets nothing, and the project's git archive holds none of its streams.
    - **Nothing else names it.** A session it spawned that stays listed doesn't name it as its spawner to the second member. A `say` from one of the owner's listed sessions tagging it and a listed session together reaches the second machine only as the listed session's event, whose text names neither the private session's alias nor its short.
-   - **A forged `say`** sent to it is refused at the hub's upload, and the sending session gets the `not-reachable` notice.
-   - **A share removed, then a stale `say`.** The second member is shared, the share is removed, and their session then sends a `say` from a view that still holds the session. The hub refuses it at upload, and the sender gets the notice; the session never receives it, and the project's git archive holds it only as its tombstone.
+   - **A forged `say`** sent to it is refused at the hub's upload, and the sending session gets the `not-reachable` notice. It goes under the sender's plain writer, so the project's git archive holds it only as its tombstone.
+   - **A share removed, then a stale `say`.** The second member is shared, the share is removed, and their session then sends a `say` from a view that still holds the session. The hub refuses it at upload, and the sender gets the notice; the session never receives it, and the project's git archive holds no file of its stream: the stale `say` carries the audience the share gave (D4), so it travels in an audience stream, which never enters the archive (D6).
    - **A share removed after admission.** A message the hub admitted while the share stood, still undelivered when the share is removed, is never delivered.
 
    P5's acceptance 3 reads "refused at the recipient's machine"; O18 meets it as "refused before delivery: at the hub's upload, with the recipient's endpoint as defense in depth" (Decision Log, 2026-11-05).
@@ -543,12 +543,69 @@ M5 is outside O18's acceptance, which runs on the CLI setters. It is built by th
 
 ### M6 — Live acceptance on the staging org
 
-**Scope.** Acceptance 1–8 run live.
-- **Who's on it:** the owner's MacBook session; a devcloud VM enrolled under a second staging member added for the run (`apps/desk-hub/deploy/staging-run.sh endpoint-vm setup|teardown` and `admin …`); the M1 hub deployed to staging; a browser signed in as the second member.
-- **What's recorded:** each item with its evidence (a transcript line, a file listing showing absence, an outcome row, the archive's file list) in this document's Surprises or Outcomes.
-- **Teardown:** the second member is removed and the VM torn down after the run.
-- **Production:** M1's production deploy is the owner's, and it waits for this proof.
-- **A second member joins the production org** only once O18 has landed and M5's step-up cutover with it (M5 says why).
+**Scope.** Acceptance 1–8 run live on `staging-ssfskim`, except the three clauses cited below, each item's evidence recorded in Outcomes. M1's production deploy, the owner's, waits for this proof. The shape is the architect's ruling (2026-11-07, Decision Log).
+
+**The scene.**
+- One devcloud VM holding four scratch scenes. Each is its own Linux user, home, mawsd profile, sminos home, ports, tmux socket and mount namespace, so the hub sees four machines:
+  - A1 (`o18a1`) and A2 (`o18a2`), owned by the staging admin member, the owner's staging identity. S runs on A1 and T on A2. S spawns L1 while listed and C1 once private.
+  - B1 (`o18b`), owned by a second member B added for the run (O10's `buildScene` member, named per run, with its device `b1`). U runs on B1.
+  - A3 (`o18a3`), owned by the admin, on sminos 1.34.0 (`386c4b07`, before M3), brought up last for 6e as the designated archiver.
+- Two in-process probe machines on the MacBook, speaking only to the staging hub: PA, owned by the admin, whose RL1 hello lacks `audience` (an old endpoint and an old reader); and PB, owned by B, whose hello carries it.
+- One project with a fresh id. Every scene's `.smns` names it with the staging hub and a `remote` at a bare repository on the VM, the archive. The archiver is designated per item through the admin's `PUT /api/projects/<p>/archive`, with `SMINOS_ARCHIVE_EVERY=60`.
+- **Pins.** MAWS is pinned to the M6 branch's cut, before O8 M6b, so the scene's endpoints advertise no `record` and the terminal gate still widens. sminos is pinned by commit: doperpowers `0759115d` (1.39.0) or later for A1, A2 and B1, and `386c4b07` for A3. Each is copied into its scene from the run's payload, never taken from the VM's marketplace.
+- **The VM:** created for the run without the MAWS project, so no mawsd of its own is provisioned into the production org (the architect's recommendation, put to the owner 2026-11-07). It is leased for about a day. The harness brings its own MAWS checkout (a full bundle) and depends on none on the VM.
+
+**The harness** (MAWS, `apps/desk-hub/deploy/`), built on O10 M11's pieces (`VmMachine`, `ScriptRunner`, `OrgAdmin`, `ItemReport`, `Cleanup`, `RelayDialer`). O10's own run is unchanged.
+- **`vm/scene.sh`, parametrized by scene:** user, ports, verb registry (`/run/o18-<scene>-verbs`), sminos copy and archive environment. It defaults to O10's `o10acc`, and `stop_verbs` matches its own scene's registry alone. Every new verb that starts or touches an engine runs inside the scene's namespace, which hides the VM's managed settings (the stub-model guard).
+  - `as-session <sid> <subverb> …`: the session's shell, with `CLAUDE_CODE_SESSION_ID` set. Its subverbs are structured (`say <token> <tag>…`, `access`, `share`, `spawn`, `list-org`, `find`), since a VM step's words admit no space and no `#` (`endpoint-machine.ts:337`).
+  - `operator <access|share …>`: the operator at the scene's terminal, under a pty the run controls, answering `y`.
+  - `operator-say`. And `forge-say <writer> <recipient> <alias> <token>`, which writes a `say` under the plain writer through `sminos.log_append`, past `stream_for`.
+  - Reads: `log-files`, `grep-home <token> [--after <ts>]`, `uplink`, `owed`, `policy-cache`, `archive-ls`.
+  - `mawsd-freeze`, `mawsd-thaw`, `mawsd-stop`, `mawsd-start`.
+- **`vm/setup.sh` and `vm/teardown.sh`:** the scene users, one shared pack build, the pinned sminos copies, and the archive's bare repository and group. Teardown removes every scene user, the repository and the ports.
+- **`endpoint-machine.ts`** gets a `scene` option on `VmMachine` and a method per new verb. **`org-admin.ts`** gets `owners?` on `enrollListed` and `listedMachine`, which today hard-code `[this.member]` (`:206`, `:249`).
+- **`reach-acceptance.ts` and `reach-items.ts`**, registered in `deploy/bin.ts`, with the scene pieces they share factored out of `buildScene` rather than bending O10's `ITEMS`. The run prints one `PASS`, `FAIL` or `NOT SHOWN` line per item and sub-item, `report.bySuites` for the cited clauses, and `LEFT` and `KEPT` lines after the undo.
+- **`staging-run.sh reach [args…]`**, modelled on `endpoint`: production's header before and after, the token on stdin, and the secret scan. Beside it, `reach-vm setup <base> | teardown`, and the README's section for both.
+- **The pty path is staging's alone.** `operator` widening is refused unless the run's hub is staging's (`staging.json`'s host and org) and the machine is one of the run's own scenes. A test pins both refusals.
+- The stale O10 defaults (the deleted VM `dc-acceptance-7f80`, its address, the 0.15.1 devcloud path) give way to required arguments and the devcloud on PATH.
+
+**Items, live, in the run's order.**
+1. The scene comes up and is preflighted: every session is in `/api/listings`, every sminos is on RL10, every `audiences.json` carries `access` and `reach`, and PB's welcome carries `audience`.
+2. Item 2, with S listed. S spawns L1.
+3. Item 8's first sentence: going private succeeds, then going listed and adding a share are both refused, with `policyRev` unchanged.
+4. 3a, with C1 born private and A1 archiving.
+5. 3b: the spawner, and the split `say`.
+6. 3c, with B1 archiving (the tombstone).
+7. Item 7.
+8. Item 1: S and T, then both private.
+9. Item 5: A2 frozen, then stopped.
+10. Item 4: shared, seen, messaged, `b1`'s transcript read refused, unshared, dropped.
+11. 3e: A1 stopped across the removal.
+12. 3d: B1 frozen across the removal.
+13. 6b and 6c from PA.
+14. 6d: a device human on the owner's socket, refused toward S and admitted toward T.
+15. 6e on A3.
+
+**Cited, not run:**
+- 6a, an old hub (`test/endpoint/rl10/audience-signing.test.ts`, the holds while the hub's welcome lacks `audience`). Running a pre-M1 hub over M1's stored tombstones would put staging's logs at risk.
+- Acceptance 8's cutover sentence (sminos `test_visibility.py` `Cutover`). The scene's MAWS predates the `record` acts, and O8 M6b's own e2e proves the step-up path.
+- 3a's browser half (`apps/desk-hub/test/audience-reads.test.ts`). The second member is `@staging.invalid`, and the hub resolves a browser's member by Access email alone.
+
+**Steps:**
+1. Prep: a MAWS worktree on the M6 branch, the sminos commits, and `staging-run.sh prod before`.
+2. `staging-run.sh deploy`, then `build`. Its `hub@` must be the worktree's HEAD, with M1's merge `ff1b9d581` as an ancestor.
+3. Bring the VM up and run `vm/check.sh`, then `reach-vm setup`.
+4. Rehearse item by item (`--items`), then run the whole sequence.
+5. Record the evidence, then `reach-vm teardown` and `devcloud vm down`.
+
+**Undo**, each step registered before the thing it undoes: shares removed and seats retired; scenes down; A1, A2, B1, A3, PA and PB taken out of the state and revoked; the archive designation cleared; B removed and `b1` revoked. Then the read-back prints `LEFT` for anything still current. Kept by design: the project and its log, the run's registry rows, the machines' names and retired keys, the state's versions, and staging at the M6 build.
+
+**Proof:**
+- The harness's tests: O10's run unchanged under the parametrized scene, the pty path's two refusals, and the new verbs' argument checks.
+- The run's lines, with every item `PASS` or cited.
+- reviewer-high with a security lens on the harness, which enrolls, signs and widens.
+
+**Production:** M1's production deploy is the owner's, after this proof. A second member joins the production org only once O18 has landed, and M5's cutover with it (M5 says why).
 
 ## Concrete Steps
 
@@ -565,10 +622,13 @@ Working directories are worktrees under `/Users/new/.local/share/p5-desk-track-o
     /Users/new/.claude/plugins/cache/doperpowers/ci-kit/<ver>/bin/ci-gate <wt> --gates sminos,sminos-suites,sminos-mods,mods-types,repo-checks
     # expected: GREEN <run-url>
 
-    # live acceptance (M6):
-    zsh <wt>/apps/desk-hub/deploy/staging-run.sh endpoint-vm setup
-    devcloud vm ssh <vm> < <script>      # the second member's session's commands
-    zsh <wt>/apps/desk-hub/deploy/staging-run.sh endpoint-vm teardown
+    # live acceptance (M6), from the M6 worktree:
+    zsh <wt>/apps/desk-hub/deploy/staging-run.sh prod before
+    zsh <wt>/apps/desk-hub/deploy/staging-run.sh deploy
+    zsh <wt>/apps/desk-hub/deploy/staging-run.sh build        # expected: hub@<the worktree's HEAD sha8>
+    zsh <wt>/apps/desk-hub/deploy/staging-run.sh reach-vm setup <base>      # the scenes on the run's VM
+    zsh <wt>/apps/desk-hub/deploy/staging-run.sh reach [--items <list>]     # expected: PASS or cited per item, then LEFT none
+    zsh <wt>/apps/desk-hub/deploy/staging-run.sh reach-vm teardown
 
 The gates run on GitHub Actions; the MacBook runs no MAWS Electron e2e.
 
@@ -803,6 +863,13 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Evidence: `publish_state` (`sminos_daemon.py:611`) against the log's last `state`; `publish_owners` (`sminos.py:3214`) against its last publishing `joined`; at sminos 1.36.0.
 - Observation (M5's executors): MAWS's RL10 conversation fixture compares sminos's hello exactly, so advertising `record` broke sminos's conformance replay until the fixture's three hello lines carried it.
   Evidence: MAWS #496 (merge `bdd6cb7db`, blob `bc2593f1`); sminos's copy re-pinned to that merge.
+
+- Observation (M6): staging serves `hub@0d43cbda` (`web@p5-o10-laneb-live`, 2026-10-30), which contains neither M1 (`ff1b9d581`), M2 (`617fde4b5`) nor M2b (`9a3848039`). M1's Proof ends in a staging deploy, so either that deploy never ran or O10's lane B live run replaced it. M6 deploys first.
+  Evidence: the credential-free `X-Desk-Build` (`staging-run.sh build`'s read), 2026-11-06; `git merge-base --is-ancestor` on each merge.
+- Observation (M6): O10 M11's scene can't show an O18 item as it stands. It has one machine, owned by the admin, and its second member owns none. Its VM `dc-acceptance-7f80` was deleted on 2026-11-01, its defaults still name that VM and its address, and its sminos is whatever the VM's marketplace holds.
+  Evidence: `endpoint-acceptance.ts:36-39`, `:70`, `:210-233`; `vm/setup.sh:20`, `:36-40`; `org-admin.ts:206`, `:249`; the friction tracker (MAWS, the scene's defaults).
+- Observation (M6): no browser can be the run's second member. O10's member is `@staging.invalid`, and the hub resolves a browser's member by its Access email alone. M6's first text also named the owner's MacBook session, which is enrolled in production.
+  Evidence: `endpoint-acceptance.ts:214`; `apps/desk-hub/src/worker.ts:182-188`; `objects/registry.ts:246-250`.
 
 ## Decision Log
 
@@ -1214,6 +1281,23 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Rationale: the app checks each outcome against the revision it caused, and a malformed act let into `ownersProof` would fail every later attestation of the session.
   Rejected: bumping `policyRev` only when a private session's audience changes, which leaves a listed session's owner add with no revision for the app to check its outcome against; taking any act as the proof, which an endpoint bug could turn into a permanent bad entry.
   Date/Author: 2026-11-06, p5-desk-track-owner, agreed with the architect for O8's §Q (reviewer-high with a security lens, three rounds, every finding fixed).
+
+- Decision (the architect's ruling, chat 1204, on the desk track's mapping): M6 runs as a new `deployment reach-acceptance` on one VM of scratch scenes (A1 and A2 the admin's, B1 a second member's, A3 on sminos 1.34.0 for 6e) with two in-process probe machines (PA without `audience`, PB with it), built on O10 M11's pieces (M6).
+  Rationale: every O18 item needs a machine of the second member's and two of the owner's, which O10's one-machine scene lacks. Scratch users on one VM are separate machines to the hub at a fraction of the cost of several VMs, and the probes show the old-endpoint and old-reader cases without an old MAWS build.
+  Rejected: extending O10's `ITEMS`, whose scene and verdicts are shaped for one machine; the owner's MacBook as the owner's machine, which is enrolled in production; a browser as the second member, which the hub can't resolve to `@staging.invalid`.
+  Date/Author: 2026-11-07, the architect (chat 1204), on p5-desk-track-owner's mapping.
+- Decision (the architect's ruling, chat 1204): the run widens on its scratch machines through a pty it controls, the staging-only path M5 allows. The harness refuses that path for any hub but staging's and any machine outside the run's own scenes, and a test pins the refusal. The scene's MAWS is pinned to the M6 branch's cut, before O8 M6b, so its endpoints advertise no `record` and the terminal path widens. The step-up path is proved by M6b's own e2e, and acceptance 8's cutover sentence is cited from `Cutover`.
+  Rationale: `devcloud vm ssh` gives no `/dev/tty`, and O8 M6b is behind M7b and M6a, so waiting for step-up acts would hold M1's production deploy on O8.
+  Rejected: waiting for M6b and widening by step-up acts; building both paths.
+  Date/Author: 2026-11-07, the architect (chat 1204).
+- Decision (the architect's ruling, chat 1204): acceptance 3a, 3c and 3d are corrected to D4 and D6, not lowered. In 3a, the second machine carries none of the session's audience streams and nothing of it after its `unlisted` notice, and C1, born private, shows the literal none. The archive's tombstone moves from 3d to 3c. 3d's archive holds no file of the stale `say`'s stream.
+  Rationale: B1 keeps the plain history from while S was listed, since D6 takes nothing back, and receives S's `unlisted` notice, which D6 serves to the withdrawn. A stale `say` after a share removal carries the audience the share gave (D4), so it travels in an audience stream, which never enters the archive. A plain-writer `say`, the forged one, is what the archive holds as a tombstone.
+  Rejected: running the clauses as first written, which would fail on behaviour the design requires.
+  Date/Author: 2026-11-07, the architect (chat 1204), on the desk track's mapping (its §8.6 and §8.7).
+- Decision (the architect's ruling, chat 1204): 6a (an old hub) and 3a's browser half are cited from suites, and 6e runs live on A3 (sminos 1.34.0, `386c4b07`).
+  Rationale: a pre-M1 hub deployed over M1's stored tombstones and policies would put staging's logs at risk for a case the endpoint's hold tests already show. A browser can't be the second member. 6e costs one more scene.
+  Rejected: two staging deploys for 6a; a real mailbox for the second member.
+  Date/Author: 2026-11-07, the architect (chat 1204).
 
 ## Outcomes & Retrospective
 
