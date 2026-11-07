@@ -8,9 +8,12 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -545,12 +548,13 @@ func TestExitIsTerminalForOutput(t *testing.T) {
 	}
 }
 
-// reapedWhileDraining launches a child that exits at once and leaves a descendant in its own process group holding
-// stdout, and returns once the child has been reaped (its pid is free for reuse) while the host still drains its output
-// and has not recorded the exit.
-func (hs *harness) reapedWhileDraining(w *client) int {
+// reapedWhileDraining launches a child that exits at once and leaves a descendant in its process group holding stdout,
+// as an engine's tool processes are, and returns once the child has been reaped (its pid is free for reuse) while the
+// host still drains its output and has not recorded the exit: with the reap recorded, or, held, before the host
+// records it.
+func (hs *harness) reapedWhileDraining(w *client, held bool) int {
 	hs.t.Helper()
-	spawned := hs.launchCat(w, "/bin/sh", "-c", "set -m; sleep 30 & echo $!")
+	spawned := hs.launchCat(w, "/bin/sh", "-c", "sleep 30 & echo $!")
 	pid := int(spawned.Raw["pid"].(float64))
 	descendant, err := strconv.Atoi(string(w.expect("out").Data))
 	if err != nil {
@@ -562,56 +566,143 @@ func (hs *harness) reapedWhileDraining(w *client) int {
 			hs.t.Fatalf("the child %d was not reaped", pid)
 		}
 	}
-	hs.h.mu.Lock()
-	recorded := hs.h.exit != nil
-	hs.h.mu.Unlock()
-	if recorded {
-		hs.t.Fatal("the exit was recorded before the output drained")
-	}
-	return pid
-}
-
-func TestASignalAfterTheReapIsRefused(t *testing.T) {
-	hs := start(t, func(l *Limits) { l.ExitDrain = 30 * time.Second })
-	w := hs.writer(1)
-	hs.reapedWhileDraining(w)
-	for _, group := range []bool{false, true} {
-		w.send(map[string]any{"t": "signal", "name": "SIGKILL", "group": group})
-		if e := w.expect("error", "exit"); e.Raw["message"] != "no running child" {
-			t.Fatalf("a signal (group %v) after the reap: %v", group, e.Raw)
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
+		hs.h.mu.Lock()
+		exitRecorded, reapRecorded := hs.h.exit != nil, !hs.h.signallable()
+		hs.h.mu.Unlock()
+		switch {
+		case exitRecorded:
+			hs.t.Fatal("the exit was recorded before the output drained")
+		case held && reapRecorded:
+			hs.t.Fatal("the reap was recorded while the host was held before it")
+		case held || reapRecorded:
+			return pid
+		case time.Now().After(deadline):
+			hs.t.Fatalf("the reap of %d was not recorded", pid)
 		}
 	}
 }
 
-func TestTheHostsSignalAfterTheReapSignalsNoOne(t *testing.T) {
-	hs := start(t, func(l *Limits) {
-		l.ExitDrain = 30 * time.Second
-		l.HostExitGrace = 20 * time.Second
-	})
-	w := hs.writer(1)
-	hs.reapedWhileDraining(w)
-	hs.signals <- syscall.SIGTERM
-	if code := hs.waitExit(3 * time.Second); code != 0 { // no grace waited out for a child already gone
-		t.Fatalf("exit code %d", code)
-	}
-	log, err := os.ReadFile(filepath.Join(hs.dir, "TESTHOST.log"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(log), "SIGTERM to group") {
-		t.Fatalf("the host signalled a reaped child's group:\n%s", log)
+// afterTheReap runs body against a child reaped while its output drains, once with the reap recorded and once held
+// between the reap and its record (a reaper the scheduler has not yet run again), until release.
+func afterTheReap(t *testing.T, tune func(*Limits), body func(t *testing.T, hs *harness, w *client, held bool, release func())) {
+	for _, held := range []bool{false, true} {
+		name := "recorded"
+		if held {
+			name = "unrecorded"
+		}
+		t.Run(name, func(t *testing.T) {
+			gate := make(chan struct{})
+			release := sync.OnceFunc(func() { close(gate) })
+			hs := startWith(t, tune, func(o *Options) {
+				if held {
+					o.afterReap = func() { <-gate }
+				}
+			})
+			t.Cleanup(release) // before the harness's own cleanup, which ends the host
+			w := hs.writer(1)
+			hs.reapedWhileDraining(w, held)
+			body(t, hs, w, held, release)
+		})
 	}
 }
 
-func TestTheHostsSignalAfterTheReapRemovesTheRosterEntry(t *testing.T) {
-	hs := start(t, func(l *Limits) { l.ExitDrain = 30 * time.Second })
-	w := hs.writer(1)
-	hs.reapedWhileDraining(w)
-	hs.signals <- syscall.SIGTERM
-	if code := hs.waitExit(3 * time.Second); code != 0 {
-		t.Fatalf("exit code %d", code)
+func (hs *harness) log() string {
+	hs.t.Helper()
+	log, err := os.ReadFile(filepath.Join(hs.dir, "TESTHOST.log"))
+	if err != nil {
+		hs.t.Fatal(err)
 	}
-	if _, err := os.Lstat(filepath.Join(hs.dir, "TESTHOST.json")); !os.IsNotExist(err) {
-		t.Fatal("the roster entry of a child already reaped survived its host")
+	return string(log)
+}
+
+// terminate sends the host its own SIGTERM and waits for its exit. Held, the reap's record goes through only once that
+// signal has found the child gone, so it is the signal of the window between the two; recorded, no signal is tried.
+func (hs *harness) terminate(held bool, release func()) {
+	hs.t.Helper()
+	hs.signals <- syscall.SIGTERM
+	for deadline := time.Now().Add(5 * time.Second); held && !strings.Contains(hs.log(), "the child had already exited"); time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			hs.t.Fatalf("the host's signal did not find the child gone:\n%s", hs.log())
+		}
+	}
+	release()
+	if code := hs.waitExit(3 * time.Second); code != 0 { // no grace waited out for a child already gone
+		hs.t.Fatalf("exit code %d", code)
+	}
+	if log := hs.log(); !held && strings.Contains(log, "the child had already exited") {
+		hs.t.Fatalf("the host signalled after the reap's record:\n%s", log)
+	}
+}
+
+func TestASignalAfterTheReapIsRefused(t *testing.T) {
+	afterTheReap(t, func(l *Limits) { l.ExitDrain = 30 * time.Second }, func(t *testing.T, hs *harness, w *client, held bool, release func()) {
+		for _, group := range []bool{false, true} {
+			w.send(map[string]any{"t": "signal", "name": "SIGKILL", "group": group})
+			if e := w.expect("error", "exit"); e.Raw["message"] != "no running child" {
+				t.Fatalf("a signal (group %v) after the reap: %v", group, e.Raw)
+			}
+		}
+		release()
+		w.quiet(300 * time.Millisecond) // no `exit`: the descendant holding stdout took no signal
+		if log := hs.log(); !held && strings.Contains(log, "signal SIGKILL to") {
+			t.Fatalf("a signal after the reap's record was sent:\n%s", log)
+		}
+	})
+}
+
+func TestTheHostsSignalAfterTheReapSignalsNoOne(t *testing.T) {
+	afterTheReap(t, func(l *Limits) {
+		l.ExitDrain = 30 * time.Second
+		l.HostExitGrace = 20 * time.Second
+	}, func(t *testing.T, hs *harness, _ *client, held bool, release func()) {
+		hs.terminate(held, release)
+		if log := hs.log(); strings.Contains(log, "SIGTERM to group") {
+			t.Fatalf("the host signalled a reaped child's group:\n%s", log)
+		}
+	})
+}
+
+func TestTheHostsSignalAfterTheReapRemovesTheRosterEntry(t *testing.T) {
+	afterTheReap(t, func(l *Limits) { l.ExitDrain = 30 * time.Second }, func(t *testing.T, hs *harness, _ *client, held bool, release func()) {
+		hs.terminate(held, release)
+		if _, err := os.Lstat(filepath.Join(hs.dir, "TESTHOST.json")); !os.IsNotExist(err) {
+			t.Fatal("the roster entry of a child already reaped survived its host")
+		}
+	})
+}
+
+// The kernel's answers signalChild reads, from a child exited and not yet reaped, then reaped: macOS refuses the
+// zombie's group (EPERM) where Linux signals it, and both refuse the reaped child (ESRCH).
+func TestASignalToAnExitedChildFindsItGone(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "exit 0")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := cmd.Process.Pid
+	io.ReadAll(out) // end of file: the child is exiting, and stays a zombie until Wait
+	gone, err := signalChild(pid, true, 0)
+	for deadline := time.Now().Add(2 * time.Second); runtime.GOOS == "darwin" && err == nil; gone, err = signalChild(pid, true, 0) {
+		if time.Now().After(deadline) {
+			t.Fatal("macOS still signals an exited child's group")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err != nil && !gone {
+		t.Fatalf("a zombie's group: %v", err)
+	}
+	if gone, err := signalChild(pid, false, 0); gone || err != nil {
+		t.Fatalf("a zombie: gone %v, %v", gone, err)
+	}
+	cmd.Wait()
+	for _, group := range []bool{false, true} {
+		if gone, err := signalChild(pid, group, 0); !gone {
+			t.Fatalf("the reaped child (group %v): %v", group, err)
+		}
 	}
 }

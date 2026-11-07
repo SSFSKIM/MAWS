@@ -41,6 +41,7 @@ type Options struct {
 
 	rosterWrite func(dir string, e roster.Entry) error // tests: a roster that cannot be written; roster.Write otherwise
 	beforeSpawn func()                                 // tests: what happens while the fork is under way
+	afterReap   func()                                 // tests: what happens between the child's reap and its record
 }
 
 const (
@@ -91,7 +92,7 @@ type Host struct {
 	child       *proto.Child
 	stdinW      *os.File
 	exit        *proto.Exit
-	reaped      bool          // the child has been waited for: its pid may be another process's, and is never signalled
+	reaped      chan struct{} // closed once the child is waited for: its pid may then be another process's, never signalled
 	exited      chan struct{} // closed at the child's exit, once it is recorded
 	spawning    chan struct{} // non-nil while a commit's fork is under way; closed once its outcome is recorded
 	spawnFailed bool
@@ -186,18 +187,22 @@ func (h *Host) onSignal(sig os.Signal) int {
 	h.awaitSpawn()
 	h.mu.Lock()
 	signallable := h.signallable()
-	pgid, exited := 0, h.exited
+	pgid, exited, reaped := 0, h.exited, h.reaped
 	if signallable {
 		pgid = h.child.Pid
 	}
 	h.mu.Unlock()
 	h.log.printf("%v: ending the child's process group", sig)
 	if signallable {
-		if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
+		wait := exited
+		if gone, err := signalChild(pgid, true, syscall.SIGTERM); gone {
+			h.log.printf("the child had already exited")
+			wait = reaped // a child gone needs no grace, only its reap recorded, as one already reaped would have
+		} else if err != nil {
 			h.log.printf("SIGTERM to group %d: %v", pgid, err)
 		}
 		select {
-		case <-exited:
+		case <-wait:
 		case <-time.After(h.lim.HostExitGrace):
 			h.log.printf("the child did not exit within %v", h.lim.HostExitGrace)
 		}
@@ -206,11 +211,20 @@ func (h *Host) onSignal(sig os.Signal) int {
 	return 0
 }
 
-// signallable says the child's pid is still the child's: it has been spawned and not yet reaped. The exit is recorded
-// only once the output has drained, after the reap, and a pid reaped in between may already be another process's. The
-// caller holds mu.
+// signallable says the child's pid is still the child's: it has been spawned and its reap not yet recorded. The exit
+// is recorded only once the output has drained, after the reap, and a pid reaped in between may already be another
+// process's. The reap is recorded just after the wait returns; a signal sent in between finds the child gone
+// (signalChild) and is treated as one sent after. The caller holds mu.
 func (h *Host) signallable() bool {
-	return h.child != nil && !h.reaped
+	if h.child == nil {
+		return false
+	}
+	select {
+	case <-h.reaped:
+		return false
+	default:
+		return true
+	}
 }
 
 // awaitSpawn closes admission (no commit starts a fork after it) and waits for a fork already under way to record its
@@ -588,7 +602,9 @@ func (h *Host) handle(c *conn, m proto.ClientMsg, payload []byte) {
 			target = -target // the child leads its own process group
 		}
 		h.log.printf("signal %s to %d", m.Name, target)
-		if err := syscall.Kill(target, sig); err != nil {
+		if gone, err := signalChild(h.child.Pid, m.Group, sig); gone {
+			c.send(proto.Error{T: "error", Message: "no running child"})
+		} else if err != nil {
 			c.send(proto.Error{T: "error", Message: "signal: " + err.Error()})
 		}
 	case "release":
