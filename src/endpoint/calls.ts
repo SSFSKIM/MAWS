@@ -634,7 +634,9 @@ export class Calls {
       if (now !== null) return now;
       if (!ranks.current()) return { ok: false, code: 'unavailable' };
       const held: readonly HeldSession[] = this.ctx.members();
-      return { ok: true, output: { supported: true, policies: policies(held, records, (target: SessionTarget) => ranks.holds({ target }, 'manage'), named) } };
+      // split by lane so each arm is one of `holds`' placements (a lane A one, a lane B one), which the union is not
+      const owns = (target: SessionTarget) => ranks.holds(target.lane === 'A' ? { target } : { target }, 'manage');
+      return { ok: true, output: { supported: true, policies: policies(held, records, owns, named) } };
     };
   }
 
