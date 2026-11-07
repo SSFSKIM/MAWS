@@ -165,16 +165,34 @@ async function recordTarget(input: unknown, action: Action | undefined, placing:
   if ((lane === undefined) === (app === undefined)) return { kind: 'refused', reason: 'no-target' };
   if (lane !== undefined) return isId(lane) ? { kind: 'session', target: { lane: 'A', session: lane } } : { kind: 'refused', reason: 'no-target' };
   if (!isId(app)) return { kind: 'refused', reason: 'no-target' };
+  const placed = await placeRecord(app, placing);
+  if (placed.kind === 'unavailable') return { kind: 'refused', reason: 'unavailable' };
+  if (placed.kind === 'unknown') return { kind: 'unknown' };
+  return { kind: 'session', target: placed.target, ...(placed.launchedBy === undefined ? {} : { launchedBy: placed.launchedBy }) };
+}
+
+/** Where a lane B listing's record is (`placeRecord`): its target, the spawner the spine records; or why there is none. */
+export type RecordPlacement = { kind: 'placed'; target: Extract<SessionTarget, { lane: 'B' }>; launchedBy?: Spawner } | { kind: 'unknown' } | { kind: 'unavailable' };
+
+/**
+ * P5 O8 M6b (the desk track's review 632, P2): the engine session a lane B listing's record is on, the one way both
+ * `record.policy` reads it and the record acts change it, so a Share sheet never shows one record and edits another: the
+ * member the join places the appSessionId on, in the order members.ts' `recordMember` takes (the engine session the spine
+ * records for it, then the one a /clear didn't supersede, then a sole one), else the spine's recorded engine session (a
+ * member yet to be joined, which `draw` refuses `no-session` to a caller who stands on it). `unknown` with neither; a
+ * spine that fails is `unavailable`, logged.
+ */
+export async function placeRecord(appSessionId: string, placing: Pick<Placing, 'dispatch' | 'log' | 'members'>): Promise<RecordPlacement> {
   let recorded: Placement;
   try {
-    recorded = await placeRecorded(app, placing.dispatch);
+    recorded = await placeRecorded(appSessionId, placing.dispatch);
   } catch (error) {
-    placing.log(`endpoint: lane B session ${app} not placed for a record act: ${(error as Error).message}`);
-    return { kind: 'refused', reason: 'unavailable' };
+    placing.log(`endpoint: lane B session ${appSessionId} not placed for its record: ${(error as Error).message}`);
+    return { kind: 'unavailable' };
   }
-  const engine = placing.members?.recordMember(app, recorded?.target.session) ?? recorded?.target.session;
+  const engine = placing.members?.recordMember(appSessionId, recorded?.target.session) ?? recorded?.target.session;
   if (engine === undefined) return { kind: 'unknown' };
-  return { kind: 'session', target: { lane: 'B', session: engine, appSessionId: app }, ...(recorded?.launchedBy === undefined ? {} : { launchedBy: recorded.launchedBy }) };
+  return { kind: 'placed', target: { lane: 'B', session: engine, appSessionId }, ...(recorded?.launchedBy === undefined ? {} : { launchedBy: recorded.launchedBy }) };
 }
 
 /** A subscription's session (`{lane, id}`: lane A the engine session id, lane B the appSessionId). */

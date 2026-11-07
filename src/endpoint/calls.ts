@@ -95,15 +95,14 @@ import type { Leases } from './leases';
 import type { SessionReport } from './listings';
 import { OFFERS, type Offers } from './offers';
 import { READER_ROUTED } from './readers';
-import { policies, type HeldSession } from './record-policy';
-import { RECORD_CAPABILITY } from './rl10/link';
+import { placeListings, policies, unsupported, type HeldSession } from './record-policy';
 import type { MachineSetup } from './policy';
 import type { Member } from './rl10/members';
 import { dispatchAs, type EndpointServices } from './services';
 import type { RecordSource, SessionTarget } from './sources';
 import { namedSessions, projectSessions, SESSION_NAMING, type SessionSafe } from './session-safe';
 import { namesSession, type SessionSubscription, type Subscription } from './subscriptions';
-import { placeRecorded, recordedPlacement, type Placement } from './targets';
+import { placeRecorded, recordedPlacement, type Placement, type RecordPlacement } from './targets';
 
 export type CallsContext = {
   dispatch: EndpointServices['dispatch'];
@@ -139,9 +138,12 @@ export type CallsContext = {
   cursors: Pick<ChannelCursors, 'seal' | 'open'>;
   /** P5 O8 M6a: a member's own reading of a session changed (their `session.reader.update`), for their other devices. */
   readerMoved?(member: string, appSessionId: string): void;
-  /** P5 O8 M6b: what the connected sminos's hello advertised (null: none connected), and RL10's members join (`record.policy`). */
+  /**
+   * P5 O8 M6b: what the connected sminos's hello advertised (null: none connected), and where a lane B listing's record is,
+   * as the record acts place it (targets.ts' `placeRecord`), for `record.policy`.
+   */
   sminos?(): readonly string[] | null;
-  recordMember?(appSessionId: string): string | null;
+  placeRecord?(appSessionId: string): Promise<RecordPlacement>;
   log(line: string): void;
 };
 
@@ -622,17 +624,19 @@ export class Calls {
 
   /** P5 O8 M6b: `record.policy`, for the sessions `member` owns, cut as the answer goes (record-policy.ts). */
   async #recordPolicy(member: string, input: unknown): Promise<Result | (() => Result)> {
-    const advertised = this.ctx.sminos?.() ?? null;
-    if (advertised === null) return { ok: false, code: 'unavailable' };
-    if (!advertised.includes(RECORD_CAPABILITY)) return { ok: true, output: { supported: false } };
+    const before = unsupported(this.ctx.sminos?.() ?? null);
+    if (before !== null) return before;
     const named = isObject(input) && typeof input.session === 'string' ? input.session : undefined;
+    const records = await placeListings(this.ctx.members(), (app) => this.ctx.placeRecord?.(app) ?? Promise.resolve({ kind: 'unknown' }), named);
     const ranks = await this.ctx.ranks(member);
     return () => {
+      const now = unsupported(this.ctx.sminos?.() ?? null);
+      if (now !== null) return now;
       if (!ranks.current()) return { ok: false, code: 'unavailable' };
-      // each lane's placement as `holds` takes it: lane A's by sminos's record, lane B's by its member's engine session
-      const owns = (target: SessionTarget) => ranks.holds(target.lane === 'A' ? { target } : { target }, 'manage');
       const held: readonly HeldSession[] = this.ctx.members();
-      return { ok: true, output: { supported: true, policies: policies(held, owns, (app) => this.ctx.recordMember?.(app) ?? null, named) } };
+      // split by lane so each arm is one of `holds`' placements (a lane A one, a lane B one), which the union is not
+      const owns = (target: SessionTarget) => ranks.holds(target.lane === 'A' ? { target } : { target }, 'manage');
+      return { ok: true, output: { supported: true, policies: policies(held, records, owns, named) } };
     };
   }
 

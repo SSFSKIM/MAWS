@@ -6,15 +6,35 @@
 //
 // The org (sub-harness.ts): A owns the machine (a1); B is a member (b1). `la-1` is a lane A session of `@machine`'s; `app-b`
 // a lane B session (engine session `eng-b`) of A's.
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { memoryOrgView, type Action } from 'org-protocol';
 import { TestDevice as Device } from '../../apps/org-protocol/test-support/test-device.ts';
 import { LocalDoor } from '../../src/endpoint/local-door';
 import { OFFERS, RECORD_ACTS, type Offers } from '../../src/endpoint/offers';
 import { stepUpRequired } from '../../src/endpoint/step-up';
-import { newDevice, type TestDevice } from './org-fixtures';
+import { newDevice, successor, type TestDevice } from './org-fixtures';
 import type { FakeSminos } from './rl10/fake-sminos';
 import { act, done, laneAMember, makeOrg, openRemote, ORG, PROJECT, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type Org, type Remote } from './sub-harness';
+
+/**
+ * The desk 632 fix wave's P1 and P3: reads of the machine's owners (grants.ts' `machineOwnerMembers`) held open. The next
+ * `armed` reads each wait for the suite's release, their answer that of the head they were asked under.
+ */
+const ownersHold = vi.hoisted(() => ({ armed: 0, held: [] as Array<() => void> }));
+vi.mock('../../src/endpoint/grants', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/endpoint/grants')>();
+  return {
+    ...actual,
+    machineOwnerMembers: async (...args: Parameters<typeof actual.machineOwnerMembers>) => {
+      const read = actual.machineOwnerMembers(...args);
+      if (ownersHold.armed === 0) return read;
+      ownersHold.armed -= 1;
+      await new Promise<void>((release) => ownersHold.held.push(release));
+      return read;
+    },
+  };
+});
+const releaseOwners = () => ownersHold.held.splice(0).forEach((release) => release());
 
 let org: Org;
 const started: Fixture[] = [];
@@ -44,6 +64,44 @@ async function withSminos(f: Fixture, capabilities: string[] = ['audience', 'rec
   const s = await sminos(f, members, capabilities);
   await until(() => f.endpoint.rl10.members.appSessionId('eng-b'), 'app-b joined');
   return s;
+}
+
+/** The machine's owners become `owners` under a successor head the endpoint adopts. */
+async function giveMachine(f: Fixture, owners: string[]): Promise<void> {
+  const next = await successor(f.chain.at(-1)!, [org.a1], (s) => void (s.machines.find((m) => m.ref === f.ref)!.owners = owners));
+  const delivered = await f.endpoint.cli('revoke', ['-'], JSON.stringify(next));
+  expect(delivered.code, delivered.out).toBe(0);
+  f.chain.push(next);
+}
+
+/** The next `ranks` read of a call (`Authorizer.ranks`, read by calls alone) waits for `release`; `reached` once it is asked. */
+function holdRanks(f: Fixture): { reached: Promise<void>; release(): void } {
+  const authorizer = f.endpoint.authorizer;
+  const ranks = authorizer.ranks.bind(authorizer);
+  let reached!: () => void;
+  let release!: () => void;
+  const at = new Promise<void>((resolve) => (reached = resolve));
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  authorizer.ranks = async (...args) => {
+    authorizer.ranks = ranks;
+    reached();
+    const out = await ranks(...args);
+    await gate;
+    return out;
+  };
+  return { reached: at, release };
+}
+
+/**
+ * A `/clear` of `app-b`: the engine host runs it on `eng-b2` now, sminos reports eng-b2's member (its own policy, revision
+ * 9) and the join places it under `app-b` beside eng-b, whose member stays. The spine still records eng-b.
+ */
+async function cleared(f: Fixture, s: FakeSminos): Promise<void> {
+  f.host.sessions.get('app-b')!.engineSessionId = 'eng-b2';
+  f.records.set({ lane: 'B', session: 'eng-b2', owners: [org.A], access: 'org-view', shares: [] }, 'app-b');
+  s.send({ t: 'member', ...laneB({ session: 'eng-b2', alias: 'b2', access: 'org-view', shares: [], policyRev: 9 }) });
+  await until(() => f.endpoint.rl10.members.appSessionId('eng-b2') === 'app-b', 'eng-b2 joined under app-b');
+  expect(f.endpoint.rl10.members.appSessionId('eng-b')).toBe('app-b');
 }
 
 const record = (r: Remote, f: Fixture, name: string, args: Record<string, unknown>): Promise<Action> => r.device.stepUp(r.device.action({ machine: f.ref, action: name, args }));
@@ -237,6 +295,61 @@ describe('record.policy', () => {
   });
 });
 
+// The desk 632 fix wave. P2: a lane B listing's policy is read from the record its acts change, placed one way for both
+// (targets.ts' `placeRecord`), so a Share sheet never shows one record and edits another. P3: the answer is sminos's as it
+// stands when the answer goes, not when the read began.
+describe('record.policy and the record acts, one record', () => {
+  const SUCCESSOR = { session: 'app-b', access: 'org-view', shares: [], policyRev: 9 };
+
+  async function readThenAct(f: Fixture, s: FakeSminos): Promise<{ policy: unknown; engine: unknown }> {
+    const a = await openRemote(f, org.a1, org.A);
+    const policy = (await call(a, 'record.policy', { session: 'app-b' })).output;
+    const { rpc } = await sent(a, s, await record(a, f, 'record.access', { appSessionId: 'app-b', access: 'listed' }));
+    return { policy, engine: (rpc.args as Record<string, unknown>).session };
+  }
+
+  it('after a `/clear`, predecessor and successor both joined while the spine still records the predecessor: both are the predecessor’s', async () => {
+    const f = await machine();
+    const s = await withSminos(f);
+    await cleared(f, s);
+    const { policy, engine } = await readThenAct(f, s);
+    expect(engine).toBe('eng-b');
+    expect(policy).toEqual({ supported: true, policies: [{ session: 'app-b', access: 'private', shares: [{ member: org.B, grade: 'list' }], policyRev: 7 }] });
+  });
+
+  it('both joined live and the spine caught up: the read answers for the act’s target, not `unavailable`', async () => {
+    const f = await machine();
+    const s = await withSminos(f);
+    await cleared(f, s);
+    f.spine.set('app-b', 'eng-b2');
+    const { policy, engine } = await readThenAct(f, s);
+    expect(engine).toBe('eng-b2');
+    expect(policy).toEqual({ supported: true, policies: [SUCCESSOR] });
+  });
+
+  it('answers as sminos stands when it answers: gone during the read `unavailable`, back without `record` `{supported: false}`', async () => {
+    const f = await machine();
+    const s = await withSminos(f);
+    const a = await openRemote(f, org.a1, org.A);
+    const gone = holdRanks(f);
+    const first = call(a, 'record.policy', null);
+    await gone.reached;
+    s.close();
+    await until(() => f.endpoint.rl10.sminosCapabilities() === null, 'sminos gone');
+    gone.release();
+    expect(await first, 'sminos gone').toMatchObject({ ok: false, error: { code: 'unavailable' } });
+    const again = await withSminos(f);
+    const back = holdRanks(f);
+    const second = call(a, 'record.policy', null);
+    await back.reached;
+    again.close();
+    await until(() => f.endpoint.rl10.sminosCapabilities() === null, 'sminos gone again');
+    await sminos(f, [laneA(), laneB()], ['audience']);
+    back.release();
+    expect((await second).output, 'sminos back without record').toEqual({ supported: false });
+  });
+});
+
 describe('the welcome’s `record`', () => {
   it('is advertised when this build serves the record acts, and not by a build without them', async () => {
     const f = await machine();
@@ -317,5 +430,44 @@ describe('the local door', () => {
     expect(await f.endpoint.local.call('record.policy', { session: 'la-b' }), 'B’s, not the owners’').toEqual({ ok: true, output: { supported: true, policies: [{ session: 'la-b', unavailable: true }] } });
     expect(await f.endpoint.local.call('endpoint.listings', null)).toEqual({ ok: false, code: 'not-offered' });
     expect(await f.endpoint.local.call('record.policy', { session: 7 })).toEqual({ ok: false, code: 'malformed' });
+  });
+
+  it('answers record.policy by the owners of the head it answers under: the machine moved to B while A’s owners were read, none of A’s own sessions (desk 632 P1)', async () => {
+    const f = await machine();
+    await withSminos(f);
+    ownersHold.armed = 1;
+    const answered = f.endpoint.local.call('record.policy', null);
+    expect(ownersHold.held, 'the owners’ read held').toHaveLength(1);
+    await giveMachine(f, [org.B]);
+    releaseOwners();
+    const answer = (await answered) as { ok: true; output: { supported: true; policies: Array<{ session: string }> } };
+    expect(answer.ok).toBe(true);
+    // la-1 is @machine's, so B's now; app-b is A's alone
+    expect(answer.output.policies.map((p) => p.session)).toEqual(['la-1']);
+  });
+
+  it('answers record.policy `unavailable` once the machine’s owners moved under each of its three reads (desk 632 P1)', async () => {
+    const f = await machine();
+    await withSminos(f);
+    ownersHold.armed = 3;
+    const answered = f.endpoint.local.call('record.policy', null);
+    for (const owners of [[org.B], [org.A], [org.B]]) {
+      await until(() => ownersHold.held.length > 0, 'a held read of the owners');
+      await giveMachine(f, owners);
+      releaseOwners();
+    }
+    expect(await answered).toEqual({ ok: false, code: 'unavailable' });
+    expect(ownersHold.armed).toBe(0);
+  });
+
+  it('answers record.policy as sminos stands when it answers: gone while the owners were read, `unavailable` (desk 632 P3)', async () => {
+    const f = await machine();
+    const s = await withSminos(f);
+    ownersHold.armed = 1;
+    const answered = f.endpoint.local.call('record.policy', null);
+    s.close();
+    await until(() => f.endpoint.rl10.sminosCapabilities() === null, 'sminos gone');
+    releaseOwners();
+    expect(await answered).toEqual({ ok: false, code: 'unavailable' });
   });
 });
