@@ -345,8 +345,9 @@ export class Authorizer {
       }
       if (moved()) continue;
       // An act's admission says whether it stands still, for an executor that awaits before its ledger (actions.ts); so
-      // does a stream's, for its opening's publication and its re-checks (streams.ts; P5 O7 M5b).
-      const stands = (decision: Decision): Decision => (decision.ok && (request.kind === 'act' || request.kind === 'stream') ? { ...decision, stands: () => !moved() } : decision);
+      // does a stream's, for its opening's publication and its re-checks (streams.ts; P5 O7 M5b); P5 O8 M6a: and a call's,
+      // whose reader its executor checks in the step a reader's request goes to the machine (calls.ts).
+      const stands = (decision: Decision): Decision => (decision.ok && request.kind !== 'query' && request.kind !== 'sub' ? { ...decision, stands: () => !moved() } : decision);
       if (standing.presence === undefined) return stands(standing.decision);
       const decision = await standing.presence();
       return moved() ? refuse('unavailable') : stands(decision);

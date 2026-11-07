@@ -65,7 +65,9 @@
 //   - P5 O8 M6a: every `machine` request a call makes is read and written as the decision's reader (readers.ts), so
 //     `session.get` answers the caller's own reading and `session.reader.update` writes and answers it. A member's
 //     update that the machine took tells that member's other devices (`readerMoved`), as the spine's own change tells
-//     the owners'.
+//     the owners'. Fix wave F1: a reader's own request (READER_ROUTED) goes to the machine only while the decision that
+//     named its reader stands, asked in the step it goes (the machine's owners may have changed since: an ex-owner must
+//     never read or write as the owners); one that moved is decided again, once, through the gate, then `unavailable`.
 // Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
 // `too-large`. For a device that listed `rl2.bytes` (P5 O7 M5a), the input came decoded (gate.ts) and the output goes in the
 // bytes codec's tagged form (bytes.ts), measured so.
@@ -89,6 +91,7 @@ import type { AssetHolds } from './asset-holds';
 import type { Leases } from './leases';
 import type { SessionReport } from './listings';
 import { OFFERS, type Offers } from './offers';
+import { READER_ROUTED } from './readers';
 import type { MachineSetup } from './policy';
 import type { Member } from './rl10/members';
 import { dispatchAs, type EndpointServices } from './services';
@@ -200,6 +203,9 @@ function pythonNumber(v: number): string {
   return e < -4 || e >= 16 ? `${mantissa}e${e < 0 ? '-' : '+'}${String(Math.abs(e)).padStart(2, '0')}` : String(v);
 }
 
+/** A reader's own request whose decision moved before it went (fix wave F1): the call is decided again. */
+class DecisionMoved extends Error {}
+
 const sessionOf = (v: unknown): string | null => (isObject(v) && isText(v.appSessionId, 512) ? v.appSessionId : null);
 
 /**
@@ -310,7 +316,8 @@ export class Calls {
       if (Buffer.byteLength(JSON.stringify(output ?? null)) > MESSAGE_MAX_BYTES - 1024) return void channel.send({ t: 'result', id: m.id, ok: false, error: { code: 'too-large' } });
       channel.send({ t: 'result', id: m.id, ok: true, output });
     };
-    const dispatch = dispatchAs(this.ctx.dispatch, channel.client, decision.reader);
+    const asReader = dispatchAs(this.ctx.dispatch, channel.client, decision.reader);
+    const dispatch: EndpointServices['dispatch'] = (owner, name, input) => (owner === 'machine' && READER_ROUTED.has(name) && decision.stands?.() === false ? Promise.reject(new DecisionMoved()) : asReader(owner, name, input));
     // an acquisition's bound, from the call's arrival (acquire.ts), read by the two rows that acquire
     const by = () => (decision.askedAt ?? this.ctx.now()) + (this.ctx.acquireWithinMs ?? ACQUIRE_WITHIN_MS);
     // What runs answers a result, or (an `each-session` row) the step that makes it, taken as the answer goes.
@@ -334,6 +341,7 @@ export class Calls {
     else if (m.name === 'endpoint.listings') run = this.#listings(channel.member).then((listings) => ({ ok: true as const, output: { listings } }));
     else run = Promise.resolve({ ok: false, code: 'unavailable' });
     run.then((result) => answer(typeof result === 'function' ? result() : result), (error: unknown) => {
+      if (error instanceof DecisionMoved) return channel.closed ? undefined : decision.again === undefined ? answer({ ok: false, code: 'unavailable' }) : decision.again();
       this.ctx.log(`endpoint: a \`${m.name.slice(0, 64)}\` call failed: ${(error as Error).message}`);
       answer({ ok: false, code: 'unavailable' });
     });

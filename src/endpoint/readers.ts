@@ -12,6 +12,12 @@ export function readerOf(member: string, owners: readonly string[]): Reader {
   return owners.includes(member) ? 'owner' : member;
 }
 
+/**
+ * The machine's commands whose answer or write is their reader's own (src/services/index/register.ts routes them by
+ * `context.reader`): a request of one goes only under a reader that still stands (calls.ts, actions.ts).
+ */
+export const READER_ROUTED: ReadonlySet<string> = new Set(['session.get', 'session.list', 'session.reader.update', 'session.drafts.get', 'session.drafts.set']);
+
 const READER_FIELDS = ['pinned', 'unread', 'lastSeen'] as const;
 /** A reader with no row reads unpinned, read and never seen (the index's own default). */
 export const NO_READING: Readonly<Record<(typeof READER_FIELDS)[number], unknown>> = { pinned: false, unread: false, lastSeen: { messageUuid: null, at: null } };

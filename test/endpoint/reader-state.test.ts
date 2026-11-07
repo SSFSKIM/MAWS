@@ -18,7 +18,7 @@ import { OFFERS } from '../../src/endpoint/offers';
 import { Index } from '../../src/services/index/index';
 import { registerIndexHandlers } from '../../src/services/index/register';
 import { summary } from '../support/index-fixture';
-import { endorsed, memberId, newDevice, type TestDevice } from './org-fixtures';
+import { endorsed, memberId, newDevice, successor, type TestDevice } from './org-fixtures';
 import { act, done, evs, laneAMember, makeOrg, openRemote, ORG, sminos, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
@@ -185,6 +185,67 @@ describe('drafts per member', () => {
     expect(output(await call(b, 'session.drafts.get', { appSessionId: app }))).toEqual(draft('b’s words'));
     // Its claimed run had the member as its reader.
     expect(f.host.calls.filter((c) => c.name === 'machine.op').map((c) => c.reader)).toEqual([org.B, 'owner']);
+  });
+});
+
+// Fix wave F1 (the desk track's P1): a reader is decided with its request, from the owners the decision read. When the
+// machine's owners change after the decision and before the machine hears the request, the request is decided again (an
+// ex-owner then reads and writes as the member they still are) or refused: never as the owners.
+describe('a reader decided before the machine’s owners change', () => {
+  /** The first `name` A asks is decided, then the machine is given to B (A stays a member) before the gate hands it on. */
+  function ownersMoveAfter(f: Fixture, name: string): { moved(): boolean } {
+    const authorizer = f.endpoint.authorizer;
+    const decide = authorizer.authorize.bind(authorizer);
+    let moved = false;
+    authorizer.authorize = async (request, who, now) => {
+      const decision = await decide(request, who, now);
+      if (!moved && request.name === name && who.member === org.A) {
+        moved = true;
+        const next = await successor(f.chain.at(-1)!, [org.a1], (s) => void (s.machines.find((m) => m.ref === f.ref)!.owners = [org.B]));
+        const delivered = await f.endpoint.cli('revoke', ['-'], JSON.stringify(next));
+        expect(delivered.code, delivered.out).toBe(0);
+        f.chain.push(next);
+      }
+      return decision;
+    };
+    return { moved: () => moved };
+  }
+
+  it('writes an ex-owner’s `session.reader.update` to their own row, never the owners’', async () => {
+    const { f, index, app } = await machine('view');
+    const a = await openRemote(f, org.a1, org.A);
+    const probe = ownersMoveAfter(f, 'session.reader.update');
+    const answer = await call(a, 'session.reader.update', { appSessionId: app, patch: { pinned: true } });
+    expect(probe.moved()).toBe(true);
+    expect(readerFields(index.sessions.get(app)!)).toEqual(NONE); // the owners' row untouched
+    expect(output(answer)).toEqual({ appSessionId: app, ...NONE, pinned: true });
+    expect(readerFields(index.sessions.get(app, org.A)!)).toEqual({ ...NONE, pinned: true });
+    expect(f.host.calls.filter((c) => c.name === 'session.reader.update').map((c) => c.reader)).toEqual([org.A]);
+  });
+
+  it('answers an ex-owner’s `session.get` and `session.drafts.get` with none of the owners’ reading or draft', async () => {
+    for (const name of ['session.get', 'session.drafts.get']) {
+      const { f, index, app } = await machine('view', [{ member: org.A, grade: 'view' }]);
+      ownersRead(index, app);
+      index.drafts.set(app, draft('the owners’ words'));
+      const a = await openRemote(f, org.a1, org.A);
+      const probe = ownersMoveAfter(f, name);
+      const answer = output(await call(a, name, { appSessionId: app }));
+      expect(probe.moved()).toBe(true);
+      expect([name, name === 'session.get' ? readerFields(answer) : answer]).toEqual([name, name === 'session.get' ? NONE : null]);
+      expect([name, f.host.calls.filter((c) => c.name === name && c.reader !== undefined).map((c) => c.reader)]).toEqual([name, [org.A]]);
+    }
+  });
+
+  it('writes an ex-owner’s `session.drafts.set` to their own draft, never the owners’', async () => {
+    const { f, index, app } = await machine('converse', [{ member: org.A, grade: 'converse' }]);
+    index.drafts.set(app, draft('the owners’ words'));
+    const a = await openRemote(f, org.a1, org.A);
+    const probe = ownersMoveAfter(f, 'session.drafts.set');
+    expect((await machineAct(f, a, 'session.drafts.set', { appSessionId: app, draft: draft('mine') })).outcome).toEqual({ state: 'done' });
+    expect(probe.moved()).toBe(true);
+    expect(index.drafts.get(app)).toEqual(draft('the owners’ words'));
+    expect(index.drafts.get(app, org.A)).toEqual(draft('mine'));
   });
 });
 
