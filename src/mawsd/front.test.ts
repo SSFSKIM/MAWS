@@ -316,6 +316,21 @@ describe('the services front', () => {
     expect(seen).toEqual([true, undefined]);
   });
 
+  // P5 O8 M6a (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §P): whose reader state a request
+  // reads is the endpoint's to name, through the dispatch's own argument; the front writes it into the context, and
+  // nothing a request carries (a machine.sock client's included) sets it.
+  it('writes the reader the endpoint’s dispatch names into the handler’s context, and no other request’s', async () => {
+    const { served, client } = front();
+    const seen: unknown[] = [];
+    served.bus.register('session.get', (_input, context) => (seen.push([context.reader, context.remote]), null as never));
+    const appSessionId = '00000000-0000-4000-8000-000000000001';
+    expect(await served.dispatch('session.get', { appSessionId }, undefined, 'b'.repeat(32))).toMatchObject({ ok: true });
+    expect(await served.dispatch('session.get', { appSessionId }, undefined, 'owner')).toMatchObject({ ok: true });
+    expect(await served.dispatch('session.get', { appSessionId })).toMatchObject({ ok: true });
+    expect(await client().request('session.get', { appSessionId })).toMatchObject({ ok: true });
+    expect(seen).toEqual([['b'.repeat(32), true], ['owner', true], [undefined, true], [undefined, undefined]]);
+  });
+
   it('a client’s end ends its refs and its events', async () => {
     const { served, client } = front();
     let ended = false;

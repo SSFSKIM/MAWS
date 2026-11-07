@@ -108,7 +108,7 @@ import { CLOSE_GRACE_MS } from '@shared/host/socket-port';
 import { ATTACHMENT_CAPABILITY, CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, ENGINE_ROUTE_MACHINE_CAPABILITY, HOST_BROWSER_WORK_CAPABILITY, HOST_RENDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL, type DocumentsOpen, type ServerRefuse } from '@shared/host/socket-protocol';
 import { serveSocketClients, type SocketClients, type SupervisorIdentity } from '@shared/host/socket-server';
 import type { AppSessionId } from '@shared/graph/ids';
-import { endableClientRef, type ClientRef } from '@shared/ipc/client';
+import { endableClientRef, type ClientRef, type Reader } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import { HostCommandError } from '@shared/host/runtime';
 import type { HostResponse } from '@shared/ipc/host-protocol';
@@ -1367,11 +1367,12 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   const endpointNeeds = new Map<number, () => void>(); // P5 O7 M5b: each open channel's park need, released at its end
   const services: DaemonServices = {
     machine: { ref, profileDir, stateDir: paths.endpoint, kind },
-    async dispatch(host, name, input, client?: ClientRef) {
+    async dispatch(host, name, input, client?: ClientRef, reader?: Reader) {
       const refused = (why: string): HostResponse => ({ t: 'res', id: 'endpoint', ok: false, error: ipcError('internal', why) });
       // P5 O3-D M4: the front's table, as a machine.sock client's request (the spine loaded for a spine command), the
       // endpoint's ref for its device the asking client (the client port answers it noClient until O7 M5)
-      if (host === 'machine') return { t: 'res', id: 'endpoint', ...(await front.dispatch(name, input, client)) } as HostResponse;
+      // (P5 O8 M6a: with the reader it names, for the front to write into the context)
+      if (host === 'machine') return { t: 'res', id: 'endpoint', ...(await front.dispatch(name, input, client, reader)) } as HostResponse;
       // P5 O7 M3: `pty.op`'s inner name and args are read by the same rules as a bare command's (belt and braces: the pty
       // host's own rule for its ledger is the authority)
       const ptyOp = host === 'pty-host' && name === 'pty.op' && isRecord(input) ? input : null;

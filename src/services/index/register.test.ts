@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
+import { endableClientRef, type HandlerContext } from '@shared/ipc/client';
 import type { CommandName } from '@shared/ipc/schema';
 import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { summary, tempDir } from '../../../test/support/index-fixture';
@@ -26,7 +27,7 @@ describe('main answers the record side of session.* from the index', () => {
     dir.dispose();
   });
 
-  const invoke = (name: CommandName, input?: unknown) => bus.invoke(name, input) as Promise<{ ok: boolean; value?: unknown; error?: { code: string; message: string } }>;
+  const invoke = (name: CommandName, input?: unknown, context?: HandlerContext) => bus.invoke(name, input, context) as Promise<{ ok: boolean; value?: unknown; error?: { code: string; message: string } }>;
 
   it('session.list and session.get answer records with the index revision; get answers null for an id with no row', async () => {
     const { record } = index.sessions.upsertFromSummary(summary());
@@ -66,6 +67,51 @@ describe('main answers the record side of session.* from the index', () => {
     const draft = { doc: { type: 'doc' }, attachments: [], updatedAt: '2026-09-28T10:00:00.000Z' };
     expect(await invoke('session.drafts.set', { appSessionId: record.appId, draft })).toEqual({ ok: true, value: undefined });
     expect(await invoke('session.drafts.get', { appSessionId: record.appId })).toEqual({ ok: true, value: draft });
+  });
+
+  // P5 O8 M6a (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §P): `context.reader`, which only
+  // mawsd's services front writes (for the endpoint's dispatch), routes the reads and drafts to the reader's own state;
+  // 'owner' and no reader alike read the session row's, the machine owners' state.
+  describe('by the context’s reader', () => {
+    const B = 'b'.repeat(32);
+    const as = (reader: string): HandlerContext => ({ client: endableClientRef('endpoint:1'), remote: true, reader });
+    const at = '2026-09-28T12:00:00.000Z';
+
+    it('session.get and session.list answer the reader’s pinned, lastSeen and unread', async () => {
+      const { record } = index.sessions.upsertFromSummary(summary());
+      index.sessions.setPinned(record.appId, true);
+      index.sessions.setUnread(record.appId, true);
+      index.sessions.markSeen(record.appId, { messageUuid: 'm1' as MessageUuid, at }, B);
+      const owners = index.sessions.get(record.appId)!;
+      const theirs = { ...owners, pinned: false, unread: false, lastSeen: { messageUuid: 'm1', at } };
+      expect(await invoke('session.get', { appSessionId: record.appId }, as(B))).toEqual({ ok: true, value: theirs });
+      expect(await invoke('session.list', {}, as(B))).toEqual({ ok: true, value: { sessions: [theirs], revision: index.revision } });
+      expect(await invoke('session.get', { appSessionId: record.appId }, as('owner'))).toEqual({ ok: true, value: owners });
+      expect(await invoke('session.list', {}, as('owner'))).toEqual({ ok: true, value: { sessions: [owners], revision: index.revision } });
+    });
+
+    it('session.drafts.get and .set read and write the reader’s own draft', async () => {
+      const { record } = index.sessions.upsertFromSummary(summary());
+      const owners = { doc: { type: 'doc' }, attachments: [], updatedAt: '2026-09-28T10:00:00.000Z' };
+      const theirs = { doc: null, attachments: [], updatedAt: '2026-09-28T11:00:00.000Z' };
+      await invoke('session.drafts.set', { appSessionId: record.appId, draft: owners });
+      expect(await invoke('session.drafts.get', { appSessionId: record.appId }, as(B))).toEqual({ ok: true, value: null });
+      expect(await invoke('session.drafts.set', { appSessionId: record.appId, draft: theirs }, as(B))).toEqual({ ok: true, value: undefined });
+      expect(await invoke('session.drafts.get', { appSessionId: record.appId }, as(B))).toEqual({ ok: true, value: theirs });
+      expect(await invoke('session.drafts.get', { appSessionId: record.appId }, as('owner'))).toEqual({ ok: true, value: owners });
+      expect(await invoke('session.drafts.get', { appSessionId: record.appId })).toEqual({ ok: true, value: owners });
+    });
+
+    // Held until the answer a reader gets is settled (Task 1's report): `session.update`'s output is the whole record,
+    // which a reader must never be answered, so it fails closed, before any write.
+    it('session.update with a reader is refused, and writes nothing', async () => {
+      const { record } = index.sessions.upsertFromSummary(summary());
+      for (const reader of [B, 'owner']) {
+        expect(await invoke('session.update', { appSessionId: record.appId, patch: { pinned: true } }, as(reader))).toMatchObject({ ok: false, error: { code: 'internal' } });
+      }
+      expect(index.sessions.get(record.appId)!.pinned).toBe(false);
+      expect(index.sessions.get(record.appId, B)!.pinned).toBe(false);
+    });
   });
 
   it('session.projects.* list, add, update and remove through the index', async () => {

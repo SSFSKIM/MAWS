@@ -4,8 +4,9 @@
 // a new entry (or a repair). An entry is added here when it is released (merged to master); an entry after the last
 // pinned one is still unreleased and free to change.
 import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { MIGRATIONS } from './migrations';
+import { ADDED_TABLES, MIGRATIONS } from './migrations';
 
 const RELEASED: readonly { version: number; sha256: string }[] = [
   { version: 1, sha256: 'f18fabc61bab429ec87adab005cfa01a8eeaa9e33b2c6253897e7ff7db5b4e02' }, // C4, amended with removed_at (REPAIRS)
@@ -31,5 +32,25 @@ describe('the index migrations', () => {
     const entry = MIGRATIONS.find((m) => m.version === version);
     expect(entry, `migration ${version} is gone`).toBeDefined();
     expect(digest(entry!.sql), `migration ${version} was edited after its release: append a new entry (or a repair) instead`).toBe(sha256);
+  });
+
+  // P5 O8 M7b and M6a (the architect's ruling on M7b Task 1): the opener runs an added table's SQL on any file that lacks
+  // the table, at any version, so each entry stands on the oldest schema a test of this line builds (version 9,
+  // e2e/library.spec.ts's template) and runs again on a file that already holds it
+  it.each(ADDED_TABLES)('added table $table is created on a version-9 file and again with no error', ({ table, sql }) => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      db.exec('PRAGMA foreign_keys = ON');
+      for (const migration of MIGRATIONS.filter((m) => m.version <= 9)) db.exec(migration.sql);
+      db.exec(sql);
+      db.exec(sql);
+      expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)).toEqual({ name: table });
+      // a foreign key names a table that file already holds (SQLite takes one to a missing table, and fails each write)
+      for (const { table: parent } of db.prepare(`PRAGMA foreign_key_list(${table})`).all() as { table: string }[]) {
+        expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(parent), `${table} references ${parent}`).toEqual({ name: parent });
+      }
+    } finally {
+      db.close();
+    }
   });
 });

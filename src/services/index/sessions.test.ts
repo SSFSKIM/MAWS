@@ -481,6 +481,92 @@ describe('session records in the index', () => {
     expect(index.sessions.list({ includeArchived: true })).toHaveLength(1);
   });
 
+  // P5 O8 M6a (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §P): the session row's reader columns
+  // are the machine's owners'; every other member reads and writes rows of their own, and neither side's writes reach the
+  // other's.
+  describe('reader state per member', () => {
+    const B = 'b'.repeat(32);
+    const C = 'c'.repeat(32);
+    const at = '2026-09-28T12:00:00.000Z';
+
+    it('a member with no row reads unpinned, read and never seen, whatever the owners hold', () => {
+      const { record } = index.sessions.upsertFromSummary(summary());
+      index.sessions.setPinned(record.appId, true);
+      index.sessions.markSeen(record.appId, { messageUuid: 'm1' as MessageUuid, at });
+      index.sessions.setUnread(record.appId, true);
+      const owners = index.sessions.get(record.appId)!;
+      expect(owners).toMatchObject({ pinned: true, unread: true, lastSeen: { messageUuid: 'm1', at } });
+      const unseen = { ...owners, pinned: false, unread: false, lastSeen: { messageUuid: null, at: null } };
+      expect(index.sessions.get(record.appId, B)).toEqual(unseen);
+      expect(index.sessions.get(record.appId, 'owner')).toEqual(owners);
+      expect(index.sessions.list({}, B)).toEqual([unseen]);
+      expect(index.sessions.list({}, 'owner')).toEqual([owners]);
+    });
+
+    it('a member’s pin, mark and unread are their own: the owners’ columns and another member’s rows are untouched, and the reverse', () => {
+      const { record } = index.sessions.upsertFromSummary(summary());
+      changes.length = 0;
+      const revision = index.revision;
+      expect(index.sessions.setPinned(record.appId, true, B)).toMatchObject({ appId: record.appId, pinned: true, unread: false });
+      expect(index.sessions.setUnread(record.appId, true, B)).toMatchObject({ pinned: true, unread: true });
+      expect(index.sessions.markSeen(record.appId, { messageUuid: 'm2' as MessageUuid, at }, B)).toMatchObject({ pinned: true, unread: false, lastSeen: { messageUuid: 'm2', at } });
+      expect(index.sessions.get(record.appId)).toMatchObject({ pinned: false, unread: false, lastSeen: { messageUuid: null, at: null } });
+      expect(index.sessions.get(record.appId, C)).toMatchObject({ pinned: false, unread: false, lastSeen: { messageUuid: null, at: null } });
+      // a member's write changes no record anyone else reads: no change announced, no revision taken
+      expect(changes).toEqual([]);
+      expect(index.revision).toBe(revision);
+
+      index.sessions.setPinned(record.appId, true);
+      index.sessions.markSeen(record.appId, { messageUuid: 'm3' as MessageUuid, at: '2026-09-28T13:00:00.000Z' });
+      index.sessions.setUnread(record.appId, true);
+      expect(index.sessions.get(record.appId, B)).toMatchObject({ pinned: true, unread: false, lastSeen: { messageUuid: 'm2', at } });
+      index.close();
+      index = new Index(join(dir.path, 'index.sqlite'));
+      expect(index.sessions.get(record.appId, B)).toMatchObject({ pinned: true, unread: false, lastSeen: { messageUuid: 'm2', at } });
+      expect(index.sessions.get(record.appId)).toMatchObject({ pinned: true, unread: true, lastSeen: { messageUuid: 'm3' } });
+    });
+
+    it('a new turn’s end marks every member with a row unread; a member who never looked stays read', () => {
+      const s = summary({ lastRecordAt: '2026-09-28T10:00:00.000Z' });
+      const { record } = index.sessions.upsertFromSummary(s);
+      index.sessions.markSeen(record.appId, { messageUuid: null, at }, B);
+      index.sessions.setPinned(record.appId, true, C);
+      expect(index.sessions.upsertFromSummary({ ...s, size: s.size + 1, lastRecordAt: '2026-09-28T11:00:00.000Z' }).advanced).toBe(true);
+      expect(index.sessions.get(record.appId, B)).toMatchObject({ unread: true, lastSeen: { at } });
+      expect(index.sessions.get(record.appId, C)).toMatchObject({ unread: true, pinned: true });
+      expect(index.sessions.get(record.appId, 'd'.repeat(32))).toMatchObject({ unread: false });
+      // the owners' unread stays the source's to set, by its visible set (source.ts)
+      expect(index.sessions.get(record.appId)!.unread).toBe(false);
+      // a summary that does not advance marks nobody
+      index.sessions.markSeen(record.appId, { messageUuid: null, at }, B);
+      expect(index.sessions.upsertFromSummary({ ...s, size: s.size + 2, lastRecordAt: '2026-09-28T11:00:00.000Z' }).advanced).toBe(false);
+      expect(index.sessions.get(record.appId, B)!.unread).toBe(false);
+    });
+
+    it('a member’s write to an app session with no record fails as the owners’ does', () => {
+      const unknown = randomUUID() as AppSessionId;
+      for (const write of [() => index.sessions.setPinned(unknown, true, B), () => index.sessions.setUnread(unknown, true, B), () => index.sessions.markSeen(unknown, { messageUuid: null, at }, B)]) expect(write).toThrow(`unknown app session: ${unknown}`);
+      expect(index.sessions.get(unknown, B)).toBeNull();
+    });
+
+    it('a record holding a member’s state never yields to a live process, and its removal takes that state with it', () => {
+      const claimant = index.sessions.createForLaunch(LAUNCH).record;
+      for (const mark of [(id: AppSessionId) => index.sessions.setPinned(id, false, B), (id: AppSessionId) => index.drafts.set(id, { doc: null, attachments: [], updatedAt: at }, B)]) {
+        const s = summary();
+        const marked = index.sessions.upsertFromSummary(s).record;
+        mark(marked.appId);
+        expect(() => index.sessions.bindEngineId(claimant.appId, s.sessionId)).toThrow(/already bound/);
+        index.sessions.remove(marked.appId);
+        const raw = new DatabaseSync(join(dir.path, 'index.sqlite'), { readOnly: true });
+        try {
+          for (const table of ['reader_state', 'member_drafts']) expect(raw.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE app_session_id = ?`).get(marked.appId)).toEqual({ n: 0 });
+        } finally {
+          raw.close();
+        }
+      }
+    });
+  });
+
   it('a transcript removed from disk archives the record and keeps it', () => {
     const s = summary();
     const { record } = index.sessions.upsertFromSummary(s);

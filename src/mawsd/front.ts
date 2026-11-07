@@ -84,7 +84,7 @@ import { eventPosition } from '@shared/host/stream-catchup';
 import type { SessionEvent } from '@shared/graph/events';
 import type { ServedRuntime } from '@shared/host/socket-server';
 import type { ClientPort } from '@shared/client/port';
-import { endableClientRef, type ClientRef, type HandlerContext } from '@shared/ipc/client';
+import { endableClientRef, type ClientRef, type HandlerContext, type Reader } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import { HostClientGoneSchema, HostReadySchema, HostRequestSchema, type HostDoc, type HostResponse } from '@shared/ipc/host-protocol';
 import { REGISTRY } from '@shared/ipc/registry';
@@ -199,8 +199,9 @@ export interface ServicesFront {
   // P5 O7 M5c: a remote device's channel as the port's target for the endpoint's `ref`, which `route` consults after its own
   // connections; the handle answers through the port's `answer` with `target` as `from`, and closes at the channel's end
   serveRemote(ref: ClientRef, target: PortTarget): RemotePortHandle;
-  // The endpoint's `dispatch('machine', …)`: a client's request in process, `client` the endpoint's ref for its device
-  dispatch(name: string, input: unknown, client?: ClientRef): Promise<CommandResult<CommandName>>;
+  // The endpoint's `dispatch('machine', …)`: a client's request in process, `client` the endpoint's ref for its device;
+  // P5 O8 M6a: `reader`, whose reader state and draft it reads and writes (HandlerContext.reader), the endpoint's to name
+  dispatch(name: string, input: unknown, client?: ClientRef, reader?: Reader): Promise<CommandResult<CommandName>>;
   // P5 O3-D M5 (D44(3)): an engine-host request through the spine's intercept for its name, the spine loaded for it if
   // cold; null when the spine intercepts no such name or is refused by the lock or yielded, for the caller to forward it
   // raw as before; host_unavailable when it fails to load otherwise. No `client` is the endpoint's own request.
@@ -609,7 +610,8 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       };
     },
     // 2026-11-06: every request through the endpoint is another machine's (`remote`), which the services' home-root rule reads
-    dispatch: (name, input, client) => answer(name, input, { client: client ?? endpointClient, remote: true }, false, null),
+    // P5 O8 M6a: and the reader it names is written into the context here, the one place one is (never from the args)
+    dispatch: (name, input, client, reader) => answer(name, input, { client: client ?? endpointClient, remote: true, ...(reader !== undefined && { reader }) }, false, null),
     async intercepted(name, rawInput, client) {
       if (!codec.isCommandName(name) || REGISTRY.commands[name].owner !== 'engine-host') return null;
       const taken = await spineIntercept(name, rawInput);

@@ -16,10 +16,17 @@ const setupLocate = (directory: string | null) => locate(directory, () => null);
 // `setup` (P5 O7 M9): where a remote setup's registration is checked again (src/services/machine/setup.ts).
 export function registerIndexHandlers(index: Index, { register }: Pick<ServicesBus, 'register'>, setup: SetupGuard = thisGuard()): void {
   register('session.search', ({ query, sessions }) => ({ hits: index.sessionSearch.search(query, undefined, sessions as AppSessionId[] | undefined), indexing: index.sessionSearch.indexing(), incomplete: index.sessionSearch.incomplete() }));
-  register('session.list', ({ includeArchived }) => ({ sessions: index.sessions.list({ includeArchived }), revision: index.revision }));
+  // P5 O8 M6a (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §P): `context.reader` (the endpoint's,
+  // written by mawsd's services front alone) routes the reads and the drafts to that reader's state; none is 'owner'.
+  register('session.list', ({ includeArchived }, { reader }) => ({ sessions: index.sessions.list({ includeArchived }, reader), revision: index.revision }));
   // An app session id with no row (an unstarted tab) is an answer, not an error.
-  register('session.get', ({ appSessionId }) => index.sessions.get(appSessionId as AppSessionId));
-  register('session.update', ({ appSessionId, patch }) => applyPatch(index, appSessionId as AppSessionId, patch as SessionPatch));
+  register('session.get', ({ appSessionId }, { reader }) => index.sessions.get(appSessionId as AppSessionId, reader));
+  register('session.update', ({ appSessionId, patch }, { reader }) => {
+    // The whole record is this command's answer, and a reader must never be answered it (it holds paths, settings and a
+    // spawn's signed act); refused before any write until a reader's answer is settled (M6a Task 1's report)
+    if (reader !== undefined) throw new Error('session.update with a reader: not answerable yet');
+    return applyPatch(index, appSessionId as AppSessionId, patch as SessionPatch);
+  });
   // W11 (I5): hidden projects included, marked `hidden`, so the renderer keeps their sessions out of Other sessions
   register('session.projects.list', () => ({ projects: index.projects.listWithRemoved(), revision: index.revision, rows: index.projects.list({ includeHidden: true }) })); // P5 O3-D: every row too (D13)
   register('session.projects.add', ({ directory }) => index.projects.add(directory));
@@ -29,8 +36,8 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
   register('session.projects.addFolder', ({ directory, opened }, context) => (context.op === undefined ? addFolder(index.projects, directory) : setupAddFolder(directory, opened ?? [], setup, (checked, files) => addFolder(index.projects, checked, setupLocate, files))));
   register('session.projects.update', ({ id, patch }) => index.projects.update(id as ProjectId, patch));
   register('session.projects.remove', ({ id }) => index.projects.hide(id as ProjectId));
-  register('session.drafts.get', ({ appSessionId }) => index.drafts.get(appSessionId as AppSessionId));
-  register('session.drafts.set', ({ appSessionId, draft }) => index.drafts.set(appSessionId as AppSessionId, draft));
+  register('session.drafts.get', ({ appSessionId }, { reader }) => index.drafts.get(appSessionId as AppSessionId, reader));
+  register('session.drafts.set', ({ appSessionId, draft }, { reader }) => index.drafts.set(appSessionId as AppSessionId, draft, reader));
 }
 
 // `pinned` → setPinned; `lastSeen` (with or without `unread: false`, "Mark all read") → markSeen, which clears unread;
