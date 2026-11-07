@@ -18,7 +18,11 @@
 // a `done` whole (`outcomeFor`); the whole outcome is the sender's by `query`.
 import { KEPT_S, type Action, type RefusalReason } from 'org-protocol';
 import type { RemoteChannel } from './channels';
-import type { QueryAnswer, Rl10, RpcResult } from './rl10/link';
+import type { DrawRefusal, QueryAnswer, Rl10, RpcResult } from './rl10/link';
+import type { SessionTarget } from './sources';
+
+/** Why a copy goes nowhere: RL4's refusals, and (P5 O8 M6b) a record act's `no-session` (rl10/link.ts' `draw`). */
+export type HandRefusal = RefusalReason | DrawRefusal;
 
 /** At most this many lane A copies are held; past it a first copy is refused `busy` until older ones age out. */
 export const LANE_A_MAX = 100_000;
@@ -77,10 +81,10 @@ export class LaneA {
 
   /**
    * A copy handed down (null), or why not: DECISION_MOVED when its decision no longer `stands` once its waits are over,
-   * asked in the step its `rpc` would go.
+   * asked in the step its `rpc` would go. `target`, the session its decision placed it on (P5 O8 M6b: a record act's).
    */
-  hand(channel: RemoteChannel, action: Action, who: { member: string; device: string }, fingerprint: string, stands: () => boolean): Promise<RefusalReason | null | typeof DECISION_MOVED> {
-    return this.#turn(action.opId, () => this.#hand(channel, action, who, fingerprint, stands));
+  hand(channel: RemoteChannel, action: Action, who: { member: string; device: string }, fingerprint: string, stands: () => boolean, target?: SessionTarget): Promise<HandRefusal | null | typeof DECISION_MOVED> {
+    return this.#turn(action.opId, () => this.#hand(channel, action, who, fingerprint, stands, target));
   }
 
   /** sminos's result: `done` to the open channels of the copies it answers. */
@@ -101,11 +105,11 @@ export class LaneA {
     for (const [nonce, copy] of this.#copies) this.#letGo(nonce, copy);
   }
 
-  async #hand(channel: RemoteChannel, action: Action, who: { member: string; device: string }, fingerprint: string, stands: () => boolean): Promise<RefusalReason | null | typeof DECISION_MOVED> {
+  async #hand(channel: RemoteChannel, action: Action, who: { member: string; device: string }, fingerprint: string, stands: () => boolean, target: SessionTarget | undefined): Promise<HandRefusal | null | typeof DECISION_MOVED> {
     const now = this.ctx.now();
     this.#expire(now);
     if (this.#copies.has(action.nonce)) return 'replayed';
-    const drawn = this.ctx.rl10.draw(action, who, fingerprint);
+    const drawn = this.ctx.rl10.draw(action, who, fingerprint, target);
     if (!drawn.ok) return drawn.reason;
     const sender = { member: who.member, fingerprint };
     const max = this.ctx.max ?? LANE_A_MAX;
@@ -122,7 +126,7 @@ export class LaneA {
     // between this and the `rpc`, which checks the launch again but not the standing.
     if (!stands()) return DECISION_MOVED;
     // Sent through `rpc`, which checks the launch again: it may have moved while sminos was asked.
-    const sent = this.ctx.rl10.rpc(action, who, fingerprint);
+    const sent = this.ctx.rl10.rpc(action, who, fingerprint, target);
     if (!sent.ok) return sent.reason;
     const copy: Copy = { ...sender, opId: action.opId, channel, until: now + KEPT_S * 1000, off: () => {}, release: this.ctx.hold('op') };
     copy.off = channel.onClose(() => {

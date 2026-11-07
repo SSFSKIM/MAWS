@@ -324,6 +324,7 @@ export class Endpoint implements EndpointModule {
       now: this.deps.now,
       log,
       ...(options.uplink === undefined ? {} : { uplink: options.uplink }),
+      ...(options.authorization?.offers === undefined ? {} : { offers: options.authorization.offers }), // P5 O8 M6b: the welcome's `record`
     });
     this.channels = new Channels({
       identity: () => this.#identity(),
@@ -376,6 +377,8 @@ export class Endpoint implements EndpointModule {
       },
       stamp: () => this.#state?.ledger,
       setup,
+      sminos: () => this.rl10.sminosCapabilities(), // P5 O8 M6b: the record acts, while sminos advertises `record`
+      members: this.rl10.members, // P5 O8 M6b: the `record` rule's lane B placement
       offers: authorization.offers,
       gradeOf: authorization.gradeOf,
       registry: authorization.registry,
@@ -446,6 +449,11 @@ export class Endpoint implements EndpointModule {
       rl10: this.rl10,
       dispatch,
       engineHostLedger: (closed) => (this.#engineHostLedger = closed),
+      // P5 O8 M6b: a record act's lane B session, as the members join holds it
+      placeSminos: (session) => {
+        const app = this.rl10.members.get(session)?.lane === 'B' ? this.rl10.members.appSessionId(session) : null;
+        return app === null ? { lane: 'A', session } : { lane: 'B', session, appSessionId: app };
+      },
       now: this.deps.now,
       log,
     });
@@ -560,6 +568,8 @@ export class Endpoint implements EndpointModule {
       reaches: (project) => orgProject(this.#org?.ready ? this.#org.head().state : null, project), // P5 O8 M7b fix wave
       cursors: channelCursors,
       readerMoved: (member, appSessionId) => this.planeFeeds.readerMoved(member, appSessionId), // P5 O8 M6a: their other devices
+      sminos: () => this.rl10.sminosCapabilities(), // P5 O8 M6b: `record.policy`
+      recordMember: (appSessionId) => this.rl10.members.recordMember(appSessionId),
       log,
     });
     this.gate.setExecutors({

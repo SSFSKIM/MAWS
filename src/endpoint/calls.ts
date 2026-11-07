@@ -68,6 +68,9 @@
 //     the owners'. Fix wave F1: a reader's own request (READER_ROUTED) goes to the machine only while the decision that
 //     named its reader stands, asked in the step it goes (the machine's owners may have changed since: an ex-owner must
 //     never read or write as the owners); one that moved is decided again, once, through the gate, then `unavailable`.
+//   - P5 O8 M6b: `record.policy` is the endpoint's own: the policies of the sessions the caller owns (`manage`), or of the
+//     one named, read from sminos's member frames (record-policy.ts), decided as the answer goes against the ranks then;
+//     `{supported: false}` while the connected sminos doesn't advertise `record`, `unavailable` with none connected.
 // Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
 // `too-large`. For a device that listed `rl2.bytes` (P5 O7 M5a), the input came decoded (gate.ts) and the output goes in the
 // bytes codec's tagged form (bytes.ts), measured so.
@@ -92,6 +95,8 @@ import type { Leases } from './leases';
 import type { SessionReport } from './listings';
 import { OFFERS, type Offers } from './offers';
 import { READER_ROUTED } from './readers';
+import { policies, type HeldSession } from './record-policy';
+import { RECORD_CAPABILITY } from './rl10/link';
 import type { MachineSetup } from './policy';
 import type { Member } from './rl10/members';
 import { dispatchAs, type EndpointServices } from './services';
@@ -134,6 +139,9 @@ export type CallsContext = {
   cursors: Pick<ChannelCursors, 'seal' | 'open'>;
   /** P5 O8 M6a: a member's own reading of a session changed (their `session.reader.update`), for their other devices. */
   readerMoved?(member: string, appSessionId: string): void;
+  /** P5 O8 M6b: what the connected sminos's hello advertised (null: none connected), and RL10's members join (`record.policy`). */
+  sminos?(): readonly string[] | null;
+  recordMember?(appSessionId: string): string | null;
   log(line: string): void;
 };
 
@@ -338,6 +346,7 @@ export class Calls {
     else if (row?.executor === 'engine-host' || (row?.executor === 'machine' && m.name !== 'daemon.status')) run = this.#forward(dispatch, row.executor, m);
     else if (row?.executor === 'sminos' && Object.hasOwn(LANE_A, m.name)) run = Promise.resolve(this.#laneA(channel, m));
     else if (row?.executor === 'machine') run = this.#daemonStatus(dispatch);
+    else if (m.name === 'record.policy' && row?.executor === 'endpoint') run = this.#recordPolicy(channel.member, m.input);
     else if (m.name === 'endpoint.listings') run = this.#listings(channel.member).then((listings) => ({ ok: true as const, output: { listings } }));
     else run = Promise.resolve({ ok: false, code: 'unavailable' });
     run.then((result) => answer(typeof result === 'function' ? result() : result), (error: unknown) => {
@@ -609,6 +618,22 @@ export class Calls {
     delete rest.sub;
     this.ctx.toSminos({ t: m.name.slice('sminos.'.length), project: up.project, session: up.session, ...(spec.agent ? { agentId: up.agentId } : {}), sub: up.epoch, ...rest });
     return { ok: true, output: { requested: true } };
+  }
+
+  /** P5 O8 M6b: `record.policy`, for the sessions `member` owns, cut as the answer goes (record-policy.ts). */
+  async #recordPolicy(member: string, input: unknown): Promise<Result | (() => Result)> {
+    const advertised = this.ctx.sminos?.() ?? null;
+    if (advertised === null) return { ok: false, code: 'unavailable' };
+    if (!advertised.includes(RECORD_CAPABILITY)) return { ok: true, output: { supported: false } };
+    const named = isObject(input) && typeof input.session === 'string' ? input.session : undefined;
+    const ranks = await this.ctx.ranks(member);
+    return () => {
+      if (!ranks.current()) return { ok: false, code: 'unavailable' };
+      // each lane's placement as `holds` takes it: lane A's by sminos's record, lane B's by its member's engine session
+      const owns = (target: SessionTarget) => ranks.holds(target.lane === 'A' ? { target } : { target }, 'manage');
+      const held: readonly HeldSession[] = this.ctx.members();
+      return { ok: true, output: { supported: true, policies: policies(held, owns, (app) => this.ctx.recordMember?.(app) ?? null, named) } };
+    };
   }
 
   /** The signed listings of every session `member` holds `list` or more on. */
