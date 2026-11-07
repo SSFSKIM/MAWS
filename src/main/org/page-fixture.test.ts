@@ -74,11 +74,11 @@ describe("the Org page's e2e fixture in main", () => {
     }
   });
 
-  it("answers org.status and org.view from the file and every act without effect, leaving org.rows and org.channel.* to main's", async () => {
+  it("answers org.status and org.view from the file and every act without effect, leaving org.rows, org.policy.get and org.channel.* to main's", async () => {
     const d = deps({ MAWS_E2E: '1', [ORG_PAGE_FIXTURE_ENV]: fixtureFile({ status: STATUS, view: VIEW }) });
     const stop = installOrgPageFixture(d);
     expect(stop).not.toBeNull();
-    expect([...d.handlers.keys()].sort()).toEqual(Object.keys(commands).filter((name) => name !== 'org.rows' && !name.startsWith('org.channel.')).sort()); // M7a: the channel stays main's
+    expect([...d.handlers.keys()].sort()).toEqual(Object.keys(commands).filter((name) => name !== 'org.rows' && name !== 'org.policy.get' && !name.startsWith('org.channel.')).sort()); // M7a: the channel stays main's; M6b: so does the policy read
     const ask = (name: string, input?: unknown) => Promise.resolve(d.handlers.get(name)!(input));
     expect(await ask('org.status')).toEqual(STATUS);
     expect(await ask('org.view')).toEqual(VIEW);
@@ -89,6 +89,8 @@ describe("the Org page's e2e fixture in main", () => {
     expect(await ask('org.pair.approve', { generation: 1, digest: 'd' })).toMatchObject({ ok: false, reason: 'busy' });
     expect(await ask('org.discardPending', { confirmed: true, hash: 'h' })).toEqual({ ok: false, reason: 'none' });
     expect(await ask('org.pair.cancel')).toBeUndefined();
+    expect(await ask('org.policy.set', { address: 'm/s', access: 'public', policyRev: 1 })).toEqual({ ok: false, reason: 'busy' });
+    expect(await ask('org.owners.add', { address: 'm/s', member: 'a1' })).toEqual({ ok: false, reason: 'busy' });
     stop!();
     expect(d.handlers.size).toBe(0);
   });

@@ -47,7 +47,7 @@ async function world(options: { confirm?: Confirm; lanes?: Record<string, 'A' | 
     },
     actMany: async (requests) => {
       batches.push([...requests]);
-      const signed = await stepUp.signActions(requests.map((r) => ({ machine: MINI, action: r.action, args: r.args })));
+      const signed = await stepUp.signActions(requests.map((r) => ({ machine: MINI, action: r.action, args: r.args as Record<string, unknown> })));
       if (!signed.ok) return { ok: false, reason: 'step-up-cancelled' };
       return {
         ok: true,

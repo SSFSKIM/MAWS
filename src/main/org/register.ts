@@ -14,6 +14,7 @@
 //
 // Electron-free: main injects its `registerMainHandler` and `emit`.
 import type { ChannelChanged, DiscardResult, OrgAttempt, OrgRows, OrgStatus, PairStartResult, PreviewResult, SignResult } from '@shared/ipc/schema/org';
+import type { MachineRef } from '@shared/machine/ref';
 import type { MainHandler } from '../ipc/router';
 import { channelHolds } from './channel/holds';
 import type { OrgSessionService } from './org-session';
@@ -117,7 +118,8 @@ export function registerRowsHandler(deps: { register(name: 'org.rows', handler: 
 
 /** M6b: a session's reach (policy.ts), and M5b's owner add, which `org.policies.changed` follows from the policies' own `emit`. */
 export function registerPolicyHandlers(deps: { register<N extends 'org.policy.get' | 'org.policy.set' | 'org.owners.add'>(name: N, handler: MainHandler<N>): void; policies: OrgPolicies }): void {
-  deps.register('org.policy.get', (input) => deps.policies.get(input));
+  // the schema's ref, validated at the boundary
+  deps.register('org.policy.get', (input) => deps.policies.get('machine' in input ? { machine: input.machine as MachineRef } : input));
   deps.register('org.policy.set', (input) => deps.policies.set(input));
   deps.register('org.owners.add', (input) => deps.policies.addOwner(input));
 }
