@@ -27,12 +27,13 @@
 // (channel-view.ts' `PlacementBook`); one that waited behind another output is read again when its turn comes, so what
 // goes is ranked by the record as it stood then, not a placement read before the record moved. An entry the member
 // doesn't view is dropped once ranked, before it counts toward what the feed holds; past CHANGES_HELD waiting to be ranked
-// (their placements slow to come), they are let go of, their ids kept, and read again from the journal once nothing is
-// queued: what the member views of them goes as `ev`s in the journal's order (nothing, when they view none of them), or,
-// when that is more than a page, the project's page again as a `snap` at the stream's place. No entry the member can't be
-// shown to view ends the feed or sends a frame. What the feed holds is what it still has to send: the snapshot's read until
-// it is taken, the entries waiting, the let-go ids, the reads ranking them, the ids of the snapshot's page (an entry it
-// holds that `channel.changed` brings again goes once).
+// (their placements slow to come), they are let go of, and the journal is read again past the feed's place (`position`:
+// the highest journal id it accounted for; ids are the journal's arrival order, so this holds whatever an entry's `at`)
+// once nothing is queued: what the member views of it goes as `ev`s in that order, nothing when they view none, and
+// past CHANGES_HELD of them the feed ends `behind` as it does for live entries. Recovery never sends a snapshot. No entry
+// the member can't be shown to view ends the feed or sends a frame. What the feed holds is what it still has to send: the
+// snapshot's read until it is taken, the entries waiting, the reads ranking them, the ids of the snapshot's page (an entry
+// it holds that `channel.changed` brings again goes once).
 //
 // It ends with its channel, `removed` once the project is no longer the org's (the reader's reach is per project), `behind`
 // past plane B's backlog or past CHANGES_HELD entries the member views waiting, and `unavailable` when the spine can't
@@ -74,8 +75,7 @@ export const SNAPSHOT_READS = 3;
  * usually lands within a second or two. Past that, the device's own reopen (its backoff from about a second) does as well.
  */
 export const SNAPSHOT_SETTLE_MS = 2_000;
-/** How many let-go entries' ids a feed keeps to read again: the journal keeps no more of a project (CHANNEL_BOUNDS.perProject). */
-export const DEFERRED_MAX = 2_000;
+
 
 /**
  * A new entry: its mark (`after`), what ranks it once its session's record read after it landed; whether the member viewed
@@ -96,12 +96,18 @@ type Feed = {
   /** The snapshot was queued: what the project records goes as `ev`s after it. */
   snapshotted: boolean;
   /**
-   * The journal ids of new entries let go of unranked (more than CHANGES_HELD waiting to be ranked), in order: read again
-   * from the journal once nothing is queued (`catchUp`), and what the member views of them goes as `ev`s.
+   * The feed's place in the journal: the highest journal id it has accounted for, in the journal's arrival order (the id
+   * is AUTOINCREMENT): its snapshot's (the highest it scanned), then each new entry's as it went or was passed by.
    */
-  deferred: number[];
-  /** The read of the let-go entries: out (`read` null) or landed; null before it is begun. */
+  position: number;
+  /**
+   * New entries were let go of unranked (more than CHANGES_HELD waiting to be ranked): every entry past `position` the
+   * journal holds is read again once nothing is queued (`catchUp`), and what the member views of them goes as `ev`s.
+   */
+  recovering: boolean;
+  /** That read: out (`read` null) or landed; null before it is begun. `reads`: how many in a row stopped full under moved rights. */
   catchUp: { after: number; read: ViewableRead | null } | null;
+  catchUpReads: number;
   /** Reads of the snapshot since one was last queued. */
   reads: number;
   /** A snapshot past SNAPSHOT_READS waiting on a change of rights (`waited`: it did, once, since one was last queued). */
@@ -135,7 +141,7 @@ export class ChannelFeeds {
   open(sub: Subscription): void {
     const project = sub.message.feed === 'channel' && 'project' in sub.message ? sub.message.project : undefined;
     if (!isId(project)) return void sub.end('no-target');
-    const feed: Feed = { sub, project, seq: 0, subbed: false, book: new PlacementBook(), snapshot: null, snapshotted: false, deferred: [], catchUp: null, reads: 0, stall: null, waited: false, known: new Set(), changes: [], pending: null, waiting: new Set(), ranks: null, rankReads: 0 };
+    const feed: Feed = { sub, project, seq: 0, subbed: false, book: new PlacementBook(), snapshot: null, snapshotted: false, position: 0, recovering: false, catchUp: null, catchUpReads: 0, reads: 0, stall: null, waited: false, known: new Set(), changes: [], pending: null, waiting: new Set(), ranks: null, rankReads: 0 };
     this.#feeds.set(sub, feed);
     sub.onRoom = () => this.#settle(feed);
     void this.#readRanks(feed);
@@ -205,7 +211,7 @@ export class ChannelFeeds {
 
   #arrive(feed: Feed, entry: HostEntry): void {
     if (feed.known.has(entry.id)) return;
-    const idle = feed.snapshotted && feed.pending === null && feed.changes.length === 0 && feed.deferred.length === 0;
+    const idle = feed.snapshotted && feed.pending === null && feed.changes.length === 0 && !feed.recovering;
     const after = feed.book.mark();
     feed.changes.push({ entry, after, ranked: false, deliverAfter: idle ? after : null });
     this.#settle(feed);
@@ -215,7 +221,7 @@ export class ChannelFeeds {
     return !feed.sub.ended && this.#feeds.get(feed.sub) === feed;
   }
 
-  /** Whether a read of the journal is out for the feed (its snapshot's, or its let-go entries'), whose sessions aren't known yet. */
+  /** Whether a read of the journal is out for the feed (its snapshot's, or its read past its place), whose sessions aren't known yet. */
   #readOut(feed: Feed): boolean {
     return (feed.snapshot !== null && feed.snapshot.read === null) || (feed.catchUp !== null && feed.catchUp.read === null);
   }
@@ -263,17 +269,17 @@ export class ChannelFeeds {
   }
 
   /**
-   * The let-go entries read again from the journal: what the member views of them (newest first, at most CHANGES_HELD and a
-   * page's bytes; `full` past either), each ranked as a snapshot's page is; then the feed settled.
+   * Every entry past the feed's position the journal holds, read again: what the member views of them (at most one past
+   * CHANGES_HELD, `full` then), each ranked as a snapshot's page is; then the feed settled.
    */
   #readCatchUp(feed: Feed, ranks: SessionRanks): void {
     const catchUp: NonNullable<Feed['catchUp']> = { after: feed.book.mark(), read: null };
     feed.catchUp = catchUp;
-    const deferred = new Set(feed.deferred);
+    const position = feed.position;
     const dispatch = dispatchAs(this.#ctx.dispatch, feed.sub.channel.client);
     const place = (ids: string[]) => Promise.all(ids.map((id) => feed.book.ensure(id, catchUp.after, dispatch))).then(() => {});
-    const views = (entry: HostEntry) => deferred.has(Number(entry.id)) && viewable(entry, feed.ranks ?? ranks, feed.book, catchUp.after);
-    readViewable(dispatch, { project: feed.project, limit: CHANGES_HELD }, views, place).then(
+    const views = (entry: HostEntry) => Number(entry.id) > position && viewable(entry, feed.ranks ?? ranks, feed.book, catchUp.after);
+    readViewable(dispatch, { project: feed.project, limit: CHANGES_HELD, pageBytes: Infinity }, views, place).then(
       (read) => {
         if (!this.#live(feed) || feed.catchUp !== catchUp) return;
         catchUp.read = read;
@@ -281,7 +287,7 @@ export class ChannelFeeds {
       },
       (error: unknown) => {
         if (!this.#live(feed) || feed.catchUp !== catchUp) return;
-        this.#ctx.log(`endpoint: a channel feed's let-go entries could not be read again: ${(error as Error).message}`);
+        this.#ctx.log(`endpoint: a channel feed could not read the journal again past its place: ${(error as Error).message}`);
         feed.sub.end('unavailable');
       },
     );
@@ -391,13 +397,14 @@ export class ChannelFeeds {
     }
     if (feed.changes.length - ranked > CHANGES_HELD) {
       // Past CHANGES_HELD waiting to be ranked, whether the member views any of them is unknown: none ends the feed. They
-      // are let go of, their ids kept, and read again from the journal once nothing is queued: what goes of them is only
-      // what the member views (a snapshot not yet queued is read again instead; a read out now may not hold them).
-      this.#ctx.log(`endpoint: a channel feed let go of ${feed.changes.length} entries waiting to be ranked; it reads them again from the journal`);
+      // are let go of, and every entry past the feed's position is read again from the journal once nothing is queued:
+      // what goes of them is only what the member views (a snapshot not yet queued is read again instead; a read out now
+      // may not hold them).
+      this.#ctx.log(`endpoint: a channel feed let go of ${feed.changes.length} entries waiting to be ranked; it reads the journal again past its place`);
       if (feed.snapshotted) {
-        feed.deferred.push(...feed.changes.map((change) => Number(change.entry.id)));
-        if (feed.deferred.length > DEFERRED_MAX) feed.deferred.splice(0, feed.deferred.length - DEFERRED_MAX);
+        feed.recovering = true;
         feed.catchUp = null;
+        feed.catchUpReads = 0;
       } else {
         feed.snapshot = null;
         feed.reads = 0;
@@ -463,20 +470,21 @@ export class ChannelFeeds {
         sub.end('unavailable');
         return false;
       }
-      // A snapshot again (taken back, or the let-go entries too many) is at the stream's place: what follows goes on from its `seq`.
+      // A snapshot again (taken back) is at the stream's place: what follows goes on from its `seq`.
       const at = { epoch: this.#epoch, seq: feed.seq };
       if (!feed.subbed) sub.subbed('snapshot', at);
       feed.subbed = true;
       feed.snapshotted = true;
       feed.reads = 0;
       feed.waited = false;
+      feed.position = Math.max(feed.position, read.top);
       feed.known = new Set(kept.slice(0, page.entries.length).map((entry) => entry.id));
       feed.changes = feed.changes.filter((change) => !feed.known.has(change.entry.id));
       feed.pending = { kind: 'snapshot', kept, skipped: read.skipped, after: snapshot.after };
       sub.snap(at, page, SNAPSHOT);
       return true;
     }
-    if (feed.deferred.length > 0) {
+    if (feed.recovering) {
       const catchUp = feed.catchUp;
       if (catchUp === null) {
         this.#readCatchUp(feed, ranks);
@@ -484,18 +492,31 @@ export class ChannelFeeds {
       }
       if (catchUp.read === null) return false;
       feed.catchUp = null;
-      feed.deferred = [];
-      if (catchUp.read.full) {
-        // More of them the member views than a page holds: the project is read again whole, a snapshot that differs from
-        // what the device holds by them.
-        feed.snapshotted = false;
-        feed.known.clear();
+      const read = catchUp.read;
+      if (read.full) {
+        // It stopped one past CHANGES_HELD by the rights as each page was read: ranked again as they stand now. Still past
+        // it, the member has that many waiting (`behind`, as live entries); else the rights moved under it and what it left
+        // unread may hold more: read again, a few times at most.
+        const viewed = read.kept.filter((entry) => this.#views(feed, entry, catchUp.after) === true).length;
+        if (viewed > CHANGES_HELD) {
+          sub.end('behind');
+          return false;
+        }
+        if (++feed.catchUpReads >= SNAPSHOT_READS) {
+          this.#ctx.log(`endpoint: a channel feed's read past its place in ${feed.project.slice(0, 64)} moved under each of its reads`);
+          sub.end('unavailable');
+          return false;
+        }
         return this.#queueNext(feed, ranks);
       }
-      // What the member views of them, in the journal's order, ahead of what came since; nothing, when they view none.
-      const found = [...catchUp.read.kept].sort((a, b) => Number(a.id) - Number(b.id));
-      const ids = new Set(found.map((entry) => entry.id));
-      feed.changes = [...found.map((entry): Change => ({ entry, after: catchUp.after, ranked: true, deliverAfter: null })), ...feed.changes.filter((change) => !ids.has(change.entry.id))];
+      feed.recovering = false;
+      feed.catchUpReads = 0;
+      // What the member views of them, ranked again as the rights stand when each goes, merged with what came since, all in
+      // the journal's arrival order; nothing, when they view none.
+      const found = new Map(read.kept.map((entry): [string, Change] => [entry.id, { entry, after: catchUp.after, ranked: false, deliverAfter: null }]));
+      for (const change of feed.changes) if (!found.has(change.entry.id)) found.set(change.entry.id, change);
+      feed.changes = [...found.values()].sort((a, b) => Number(a.entry.id) - Number(b.entry.id));
+      if (!this.#rank(feed)) return false;
     }
     while (feed.changes.length > 0) {
       const change = feed.changes[0];
@@ -507,6 +528,7 @@ export class ChannelFeeds {
         return false;
       }
       feed.changes.shift();
+      feed.position = Math.max(feed.position, Number(change.entry.id) || 0); // accounted for: sent, or passed by
       if (!views) continue;
       feed.pending = { kind: 'change', change, after: change.deliverAfter };
       sub.ev({ epoch: this.#epoch, seq: ++feed.seq }, { entry: this.#sealed(change.entry) });
