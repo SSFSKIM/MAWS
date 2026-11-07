@@ -192,7 +192,10 @@ themselves. Production went through steps 1 to 4 on 2026-10-28 (its rollout, bel
    before `y`. The staging sitting below (its steps 2 and 3) gives each tap.
 5. **Enroll each of the owner's machines** (RL §5.3). The machine runs `mawsd` with its endpoint present and unenrolled
    (`mawsd keys --json` says `"enrollment": "none"`; on a Mac the packaged MAWS installs `dev.maws.mawsd` at its first
-   launch, and on Linux `devenv up maws` installs `mawsd.service`), and its sminos is at 1.27.3 or later.
+   launch, and on Linux `devenv up maws` installs `mawsd.service`). Its `mawsd` is built from MAWS master at or after
+   617fde4b5 (`mawsd status` names the build): a production hub that carries O18's M1 needs every enrolled machine's
+   `mawsd` at that build or later (P5 Decision Log 227). Its sminos is at 1.39.0 or later, the widening cutover, which
+   a second member joining the org waits on for every enrolled machine (P5 Decision Logs 235 and 243).
    - On the machine, `mawsd enroll --name <name> --wait 600`. It waits at a hidden prompt for the code.
    - In the owner's terminal, `admin enroll <name> --wait 600`. It writes the code to the terminal and the clipboard,
      never to stdout. Paste it at the machine's prompt by hand (the clipboard, or screen sharing into another Mac), so
@@ -202,8 +205,7 @@ themselves. Production went through steps 1 to 4 on 2026-10-28 (its rollout, bel
      means another process redeemed the code first. It prints `listed: version n`, and the machine's `mawsd enroll`
      ends `enrolled: <name> in <org>, listed in the org state`.
    - Check: `admin show` lists the machine `listed`. Within 30 s its sminos is cut over at the endpoint's first
-     welcome: `sminos daemon status` says `uplink: RL10 (local-only), running (<pid>)`, and `sminos hub show` prints
-     `cut over <time>`.
+     welcome: `sminos daemon status` says `uplink: RL10 (local-only), running (<pid>)`.
 
    To re-enroll a listed machine under a new key and the same ref, both commands take `--replace`.
 6. **devcloud VMs enroll themselves** at boot under a delegation, made once per org (RL §5.3; O14 M1 and M3):
