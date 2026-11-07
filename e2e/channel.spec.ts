@@ -3,9 +3,13 @@
 // menu, over a seeded channel with real-world variety: long member names, aliases, titles and machine names; an exchange
 // of 40 messages folded, then opened in place; a phase-1 writer attested at migration, and its tail unverified from
 // before the move; an earlier question from the log; a refused word and a not-sent one; the channel offline "as of" its
-// last catch-up; and, under "Waiting on you", a permission and a question of the project's own sessions. The window, the
-// stream's head and foot and the opened exchange's head and foot are attached as PNGs for the architect's look; the case asserts
-// structure only: nothing in the tab is wider than its box, and every action is drawn whole inside its entry.
+// last catch-up; and, under "Waiting on you", a permission and a question of the project's own sessions. M7b (Task 4): the
+// sessions' to-human entries from three machines, by time among the log's: this Mac's (a long-titled session's message,
+// and a MAWS ask of two questions with their answers), `studio-mini`'s offline "as of" its last live time (a lane A
+// question with its choices, its answer on its own, a message), and `render-farm-03…`'s greyed, its MAWS older, with the
+// line that says so. The window, the stream's head and foot, its to-human entries and the opened exchange's head and foot
+// are attached as PNGs for the architect's look; the case asserts structure only: nothing in the tab is wider than its
+// box, and every action is drawn whole inside its entry. The open answer's weight in bytes of JSON is annotated.
 //
 // The channel is seeded where no real log can hold it at once: under MAWS_E2E=1 a harness build's main answers
 // `org.status` and the project's `org.channel.open` from a file the `org.*` schemas admit (src/main/org/channel-fixture.ts),
@@ -18,7 +22,9 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import type { ChannelAnswer, ChannelEvent, ChannelSession, OrgMember, OrgStatus } from '../src/shared/ipc/schema/org';
+import type { ChannelAnswer, ChannelEvent, ChannelHost, ChannelMachine, ChannelSession, OrgMember, OrgStatus } from '../src/shared/ipc/schema/org';
+import { readOrMintMachineRef } from '../src/shared/machine/identity-file';
+import type { MachineRef } from '../src/shared/machine/ref';
 import { memberNames } from '../src/shared/org/member-name';
 import { CHANNEL } from '../src/renderer/src/channel/copy';
 import { addressed } from './support/address';
@@ -39,11 +45,65 @@ const S4 = 'b3d046cf-4bef-47df-b6ab-e01986478213';
 const WAITING = ['app-3eb04b84', 'app-d095dc75']; // the scenario's permission and question sessions
 const EXCHANGE = 40;
 
+/** Two other machines, as their refs are minted (22 base64url characters). */
+const STUDIO = randomBytes(16).toString('base64url') as MachineRef;
+const RENDER = randomBytes(16).toString('base64url') as MachineRef;
+const RENDER_NAME = 'render-farm-03.clinical-research-operations.northwind-health';
+/** The MAWS ask of this Mac's question session: two questions, each answered. */
+const ASK = 'toolu_01AskNorthwind';
+
 const memberId = () => randomBytes(16).toString('hex');
 const nonce = () => randomBytes(16).toString('base64url');
 
-/** The channel as main would answer it, offline, `now` the clock the times read from. */
-function seededChannel(now: number): { status: Extract<OrgStatus, { state: 'registered' }>; answer: ChannelAnswer & { ok: true }; asOf: string } {
+/**
+ * The machines' to-human entries as main merges them (oldest first) and the machines themselves: this Mac live, `studio-mini`
+ * offline as of `asOf.studio`, `render-farm-03…` unavailable (an older MAWS) with an entry from its cache. Lane A's are
+ * keyed by `<project>/<writer>/<seq>` as the endpoint keys sminos's host events, lane B's by the spine's `lane-b` srcs.
+ */
+function seededHosts(local: MachineRef, at: (minutesAgo: number) => string): { hosts: ChannelHost[]; machines: ChannelMachine[]; asOf: { studio: string; render: string } } {
+  const asOf = { studio: at(25), render: at(3 * 60) };
+  const hosts: ChannelHost[] = [];
+  const add = (machine: MachineRef, host: Omit<ChannelHost, 'key' | 'machine' | 'id' | 'order'>) => {
+    const id = String(hosts.length + 1);
+    hosts.push({ key: `${machine} ${id}`, machine, id, ...host, order: hosts.length }); // main's place: the seed's order
+  };
+  const laneA = (session: string, machine: string, seq: number) => `${PROJECT}/${encodeURIComponent(`${machine}/${session}`)}/${seq}`;
+  const laneB = (session: string, ...rest: string[]) => [PROJECT, 'lane-b', session, ...rest].join('/');
+  const [permission, question] = WAITING;
+  add(STUDIO, {
+    lane: 'A',
+    session: S1,
+    kind: 'question',
+    text: 'Which shards should tonight’s rerun take?\n\nAnd should the merge wait for it, given the retry budget is at two of three?',
+    choices: ['All eight shards', 'Only the three that failed last night', 'None: skip the rerun and merge with the flaky shards marked as known failures in the clinical research suite'],
+    at: at(70),
+    src: laneA(S1, 'studio-mini', 41),
+  });
+  add(STUDIO, { lane: 'A', session: S1, kind: 'answered', text: 'Only the three that failed last night', at: at(68), src: laneA(S1, 'studio-mini', 42) });
+  add(local, {
+    lane: 'B',
+    session: permission,
+    kind: 'message',
+    text: 'The shard rerun needs the cluster’s write permission before the nightly window. The plan is at https://docs.northwind-health.example/clinical-research-operations/runbooks/2026-11/nightly-shard-rerun-with-the-cache-bound-fix-applied.md.',
+    at: at(60),
+    src: laneB(permission, 'call', 'toolu_01MsgNorthwind'),
+  });
+  add(local, { lane: 'B', session: question, kind: 'question', text: 'Which palette should the migration dashboard use?', choices: ['Northwind brand', 'High contrast', 'The clinical research operations palette from the 2025 style guide'], at: at(45), src: laneB(question, 'ask', ASK, 'q1') });
+  add(local, { lane: 'B', session: question, kind: 'question', text: 'Should the dashboard show retried shards?', choices: ['Yes', 'No'], at: at(45), src: laneB(question, 'ask', ASK, 'q2') });
+  add(local, { lane: 'B', session: question, kind: 'answered', text: 'High contrast', at: at(43), src: laneB(question, 'ask', ASK, 'q1', 'answered') });
+  add(local, { lane: 'B', session: question, kind: 'answered', text: 'Yes', at: at(43), src: laneB(question, 'ask', ASK, 'q2', 'answered') });
+  add(RENDER, { lane: 'A', session: S2, kind: 'message', text: 'Shards 1 to 8 are queued on the render farm; the first finishes in about twenty minutes.', at: at(30), src: laneA(S2, RENDER_NAME, 7) });
+  add(STUDIO, { lane: 'A', session: S4, kind: 'message', text: 'Migration notes are in docs/migrations/channel-cache-bound.md, with the eviction table.', at: at(12), src: laneA(S4, 'studio-mini', 9) });
+  const machines: ChannelMachine[] = [
+    { machine: local, name: 'MacBook', state: 'live', asOf: at(1) },
+    { machine: RENDER, name: RENDER_NAME, state: 'unavailable', asOf: asOf.render },
+    { machine: STUDIO, name: 'studio-mini', state: 'offline', asOf: asOf.studio },
+  ];
+  return { hosts, machines, asOf };
+}
+
+/** The channel as main would answer it, offline, `now` the clock the times read from; `local` this Mac's ref. */
+function seededChannel(now: number, local: MachineRef): { status: Extract<OrgStatus, { state: 'registered' }>; answer: ChannelAnswer & { ok: true }; asOf: string; hostsAsOf: { studio: string; render: string } } {
   const ana = { id: memberId(), email: 'ana.lopez@northwind.example' };
   const long = { id: memberId(), email: 'maximiliana.featherstonehaugh-villanueva-oyelaran@clinical-research-operations.northwind-health.example' };
   const names = memberNames([ana, long]);
@@ -88,6 +148,7 @@ function seededChannel(now: number): { status: Extract<OrgStatus, { state: 'regi
   add(`hub/${ana.id}`, { kind: 'human', from: 'human', member: ana.id, to: '*', text: 'Thanks all. I will merge once shard 3 is green.', ts: at(8), created: at(8), nonce: nonce() }, { label: 'verified', author: member(ana) });
 
   const asOf = at(7);
+  const seeded = seededHosts(local, at);
   const answer: ChannelAnswer & { ok: true } = {
     ok: true,
     rev: 1,
@@ -100,6 +161,8 @@ function seededChannel(now: number): { status: Extract<OrgStatus, { state: 'regi
     unverified: 2,
     asOf,
     live: false,
+    hosts: seeded.hosts,
+    machines: seeded.machines,
   };
   const status: Extract<OrgStatus, { state: 'registered' }> = {
     state: 'registered',
@@ -114,7 +177,7 @@ function seededChannel(now: number): { status: Extract<OrgStatus, { state: 'regi
     signer: null,
     pairing: null,
   };
-  return { status, answer, asOf };
+  return { status, answer, asOf, hostsAsOf: seeded.asOf };
 }
 
 /** C5's stub scenario: the project the channel's sminos id joins, holding the shell scenario's permission and question sessions. */
@@ -161,13 +224,19 @@ const scrollLog = (page: Page, to: 'top' | 'foot') =>
 
 test.skip(!HARNESS_BUILT, "the seeded channel needs a harness build's main (pnpm e2e:settings)");
 
-test('channel: a seeded project channel offline, its exchange of 40 opened, its words refused and not sent, its waiting cards; each photographed; nothing overflows and every action is whole', async () => {
+test('channel: a seeded project channel offline, its exchange of 40 opened, its words refused and not sent, its waiting cards, its machines’ to-human entries; each photographed; nothing overflows and every action is whole', async () => {
   test.setTimeout(120_000);
   const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-channel-')));
   try {
-    const { status, answer, asOf } = seededChannel(Date.now());
+    const local = readOrMintMachineRef(userData); // the machine the app will be, which this Mac's entries name
+    const { status, answer, asOf, hostsAsOf } = seededChannel(Date.now(), local);
     const fixture = join(userData, 'channel.json');
     writeFileSync(fixture, JSON.stringify({ status, project: PROJECT, answer }));
+    // What `org.channel.open`'s answer weighs at this seed's size, in bytes of JSON (the IPC answer's own encoding).
+    const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value), 'utf8');
+    const weight = `${bytes(answer)} bytes of JSON: ${answer.events.length} events ${bytes(answer.events)}, ${answer.sessions.length} sessions ${bytes(answer.sessions)}, ${answer.hosts!.length} to-human entries ${bytes(answer.hosts)}, ${answer.machines!.length} machines ${bytes(answer.machines)}`;
+    test.info().annotations.push({ type: 'org.channel.open answer', description: weight });
+    await test.info().attach('channel-open-answer-weight', { body: weight, contentType: 'text/plain' });
     const stub = join(userData, 'channel-scenario.json');
     writeFileSync(stub, JSON.stringify(scenario()));
     // Classic scrollbars, which take width from the view, as on any Mac with a mouse attached (org-page.spec.ts's reason).
@@ -201,12 +270,36 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       await expect(waiting.locator('[data-channel-card$="/att-3eb04b84-permission"]')).toBeVisible();
       await expect(waiting.locator('[data-channel-card$="/att-d095dc75-question"]')).toBeVisible();
 
+      // M7b: the machines' to-human entries, one ask's two questions together with their answers, lane A's answer on its own.
+      const toHuman = channel.locator('[data-channel-entry="to-human"]');
+      await expect(toHuman).toHaveCount(6);
+      const ask = toHuman.filter({ has: page.locator('[data-to-human-answer]') });
+      await expect(ask).toHaveCount(1);
+      await expect(ask.locator('[data-to-human-question]')).toHaveCount(2);
+      await expect(ask.locator('[data-to-human-answer]')).toHaveCount(2);
+      await expect(ask.locator('[data-machine-chip]')).toHaveCount(0); // this Mac's
+      const studio = toHuman.and(page.locator(`[data-machine="${STUDIO}"]`));
+      await expect(studio).toHaveCount(3);
+      await expect(studio.and(page.locator('[data-host="question"]')).locator('li')).toHaveCount(3);
+      await expect(studio.locator(`[data-channel-as-of="${hostsAsOf.studio}"]`)).toHaveCount(3);
+      await expect(studio.locator('[data-machine-chip]').first()).toHaveText('@studio-mini');
+      const render = toHuman.and(page.locator(`[data-machine="${RENDER}"]`));
+      await expect(render).toHaveAttribute('data-greyed', 'true');
+      await expect(render.locator(`[data-channel-as-of="${hostsAsOf.render}"]`)).toHaveCount(1);
+      await expect(channel.locator(`[data-channel-unavailable="${RENDER}"]`)).toHaveText(CHANNEL.toHuman.unavailable(RENDER_NAME));
+      await expect(toHuman.and(page.locator(`[data-machine="${local}"]`))).toHaveCount(2);
+
       await expect.poll(() => log.evaluate((el) => (el as HTMLElement).offsetWidth - el.clientWidth), { message: "the stream's scrollbar takes width (classic scrollbars)" }).toBeGreaterThan(0);
       await test.info().attach('channel-window', { body: await page.screenshot(), contentType: 'image/png' });
       await scrollLog(page, 'foot');
       await test.info().attach('channel-foot', { body: await channel.screenshot(), contentType: 'image/png' });
       await scrollLog(page, 'top');
       await test.info().attach('channel-head', { body: await channel.screenshot(), contentType: 'image/png' });
+      // The to-human entries, from the first to the last.
+      await toHuman.first().evaluate((el) => el.scrollIntoView({ block: 'start', behavior: 'instant' }));
+      await test.info().attach('channel-to-human-head', { body: await channel.screenshot(), contentType: 'image/png' });
+      await toHuman.last().evaluate((el) => el.scrollIntoView({ block: 'end', behavior: 'instant' }));
+      await test.info().attach('channel-to-human-foot', { body: await channel.screenshot(), contentType: 'image/png' });
 
       // The exchange opened in place: its 40 messages, each under its sender.
       await exchange.getByRole('button').first().click();

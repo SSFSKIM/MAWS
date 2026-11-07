@@ -67,6 +67,19 @@ describe('call.session and sub.feed', () => {
     expect(readMessage('device', sub({ feed: 'browser.inventory', session: B, view: 'full' })).kind).toBe('malformed');
   });
 
+  // P5 O8 M7b (`rl2.channel`, RL2 1.12): the machine's `channel` feed names the project whose to-human entries it carries,
+  // and no session; no other feed names a project
+  it('reads a channel feed with its project, and refuses one with none, with a session or a view, and a project on any other feed', () => {
+    expect(readMessage('device', sub({ feed: 'channel', project: 'proj-1' })).kind).toBe('message');
+    expect(readMessage('device', sub({ feed: 'channel', project: 'proj-1', cursor: { epoch: 'channel:boot', seq: 3 } })).kind).toBe('message');
+    for (const project of [undefined, '', 7, 'p'.repeat(513)]) expect(readMessage('device', sub({ feed: 'channel', ...(project === undefined ? {} : { project }) })).kind).toBe('malformed');
+    expect(readMessage('device', sub({ feed: 'channel', project: 'proj-1', session: B })).kind).toBe('malformed');
+    expect(readMessage('device', sub({ feed: 'channel', project: 'proj-1', view: 'full' })).kind).toBe('malformed');
+    expect(readMessage('device', sub({ feed: 'attention', project: 'proj-1' })).kind).toBe('malformed');
+    expect(readMessage('device', sub({ feed: 'checkout', session: B, project: 'proj-1' })).kind).toBe('malformed');
+    expect(readMessage('device', sub({ session: B, project: 'proj-1' })).kind).toBe('malformed');
+  });
+
   it('refuses a feed it does not name, a checkout feed with no session, an attention feed with one, a feed with a view or an idx', () => {
     expect(readMessage('device', sub({ feed: 'git', session: B })).kind).toBe('malformed');
     expect(readMessage('device', sub({ feed: 'checkout' })).kind).toBe('malformed');
@@ -184,8 +197,8 @@ describe('the pong clock', () => {
     }
   });
 
-  it('is at minor 11 of major 1 (the remote lane A drill-in: `rl2.agent-scope`, after the New chat’s `rl2.spawn-home` at 10)', () => {
-    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 11 });
+  it('is at minor 12 of major 1 (the project channel: `rl2.channel`, after the remote lane A drill-in’s `rl2.agent-scope` at 11)', () => {
+    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 12 });
   });
 });
 

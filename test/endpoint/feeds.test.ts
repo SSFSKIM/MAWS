@@ -1001,7 +1001,7 @@ describe('a checkout feed whose bounds couldn’t be read', () => {
     const home = scratch();
     const sent: unknown[] = [];
     const away = async () => ({ t: 'res', id: 'x', ok: false, error: { code: 'host_unavailable', message: 'the spine is away' } }) as never;
-    const feeds = new PlaneFeeds({ dispatch: away, bounds: new CheckoutBounds(() => [home]), ranks: (() => new Map()) as never, artifacts: { onDropped: () => () => {} } as never, leases: {} as never, browser: () => null, log: () => {} });
+    const feeds = new PlaneFeeds({ dispatch: away, bounds: new CheckoutBounds(() => [home]), ranks: (() => new Map()) as never, artifacts: { onDropped: () => () => {} } as never, leases: {} as never, browser: () => null, reaches: () => false, cursors: { seal: (entry) => entry.id }, log: () => {} });
     const sub = {
       message: { feed: 'checkout' },
       session: { lane: 'B', id: 'app-1' },

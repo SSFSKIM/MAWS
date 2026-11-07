@@ -20,6 +20,12 @@ export const CHANNEL = {
   migrated: (by: string) => `attested at migration by ${by}`,
   legacy: 'unverified (from before the move)',
   host: { message: 'to you', question: 'asks', answered: 'was answered' } as const,
+  // M7b: a session's to-human entries from every machine
+  toHuman: {
+    answer: 'Answered',
+    asOf: (time: string) => `as of ${time}`,
+    unavailable: (machine: string) => `${machine} can’t share its sessions’ messages here: its MAWS is older`,
+  },
   unverified: (count: number) => (count === 1 ? '1 event didn’t verify' : `${count} events didn’t verify`),
   empty: 'Nothing in this channel yet.',
   opening: 'Reading the channel…',

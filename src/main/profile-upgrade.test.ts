@@ -35,8 +35,9 @@ describe('a profile O2 left starts under O3-A’s build with no visible change',
 
     // The O2-era profile (test/support/o2-profile.ts)
     const { project, one, two, machineRows: before, browserRows } = await writeO2Profile(profile);
-    // every row as it was, with the columns added since, empty (P5 O7 M4: `launched_by`, ADDED_COLUMNS)
-    const rows = { ...before, sessions: before.sessions!.map((row) => ({ ...(row as object), launched_by: null })) };
+    // every row as it was, with the columns added since, empty (P5 O7 M4: `launched_by`, ADDED_COLUMNS), and the tables
+    // added since, empty (P5 O8 M7b: the project channel's journal, an ADDED_TABLES entry)
+    const rows = { ...before, sessions: before.sessions!.map((row) => ({ ...(row as object), launched_by: null })), channel_entries: [] };
 
     // O3-A's start, in main's order
     const spine = await takeSpineLock(profile, { build: '0.0.0+o3a' });

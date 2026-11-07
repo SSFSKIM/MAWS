@@ -57,6 +57,13 @@ export interface OrgTiming {
   /** A channel's changes are coalesced this long before its cache is written, and before `org.channel.changed`. */
   CHANNEL_WRITE_MS: number;
   CHANNEL_COALESCE_MS: number;
+  /**
+   * M7b's. Each machine's to-human entries a project's channel keeps, the newest by time up to both bounds (M7b's Main
+   * bullet: 500), in `<project>.machines.json`; the bytes are the entries' JSON in UTF-8, so a run of the journal's longest
+   * texts (64 KiB each) can't make one machine's share of the file or of the tab's answer more than this.
+   */
+  CHANNEL_MACHINE_ENTRIES: number;
+  CHANNEL_MACHINE_BYTES: number;
 }
 
 export const ORG_TIMING: Readonly<OrgTiming> = Object.freeze({
@@ -87,6 +94,8 @@ export const ORG_TIMING: Readonly<OrgTiming> = Object.freeze({
   CHANNEL_CACHE_BYTES: 8 * 1024 * 1024,
   CHANNEL_WRITE_MS: 1_000,
   CHANNEL_COALESCE_MS: 100,
+  CHANNEL_MACHINE_ENTRIES: 500,
+  CHANNEL_MACHINE_BYTES: 4 * 1024 * 1024,
 });
 
 export const orgTiming = (overrides: Partial<OrgTiming> = {}): OrgTiming => ({ ...ORG_TIMING, ...overrides });

@@ -97,6 +97,7 @@ import { MachineSetup, SETUP_DIRECTORY_COMMANDS, spawnRefusal, type Policy } fro
 import { dispatchAs, type EndpointServices } from './services';
 import type { CheckoutSource, RecordSource, SessionRecord, SessionTarget } from './sources';
 import { Assertions, deviceOf, stepUpRequired, verifyDeviceStepUp } from './step-up';
+import { orgProject } from './channel-view';
 import { artifactShortCut, CheckoutBounds, ownTaskList, placeArtifact, resolveSubscription, resolveTarget, withinCheckout, type HeldNames, type Placement, type Placing, type Resolved, type Spawner } from './targets';
 
 /**
@@ -125,13 +126,16 @@ export type ArtifactTarget = { artifactId: string | null };
 export type QueryBinding = { member: string; target: SessionTarget | null; launchedBy?: Spawner; artifact?: ArtifactTarget };
 /** The sender an act's ledger stored, which a stream opened under the act (or kept open) is authorized against. */
 export type StreamBinding = { member: string; device: string };
+/** A lane A session as the `session` target rule places it: its engine session id, which keys sminos's record. */
+export type LaneASession = { target: Extract<SessionTarget, { lane: 'A' }> };
 /**
  * P5 O7 M6: a member's standing on any lane B session, checked synchronously against its record as it stands when asked.
  * `current`: whether the head and everything else the machine's owners were read against still stand; a check made once
  * it doesn't holds nothing, and its holder reads the ranks again.
  */
 export type SessionRanks = {
-  holds(placement: Placement, grade: SessionRank): boolean;
+  /** P5 O8 M7b: or a lane A session by its engine session id, as the `session` rule places one (sminos's record). */
+  holds(placement: Placement | LaneASession, grade: SessionRank): boolean;
   /** P5 O7 M5a: whether the member is one of the machine's owners (the `artifact` rule's short cut), while `current`. */
   ownsMachine(): boolean;
   /** P5 O7 M5c: whether the member holds the machine grade (a right: an owner's, or a grant's), while `current`. */
@@ -366,7 +370,7 @@ export class Authorizer {
       const records = this.ctx.records;
       return {
         current,
-        holds: (placement, grade) => placement !== null && current() && rankAtLeast(sessionRank(recordOf(records, placement.target, placement.launchedBy), member, owners), grade),
+        holds: (placement, grade) => placement !== null && current() && rankAtLeast(sessionRank(recordOf(records, placement.target, 'launchedBy' in placement ? placement.launchedBy : undefined), member, owners), grade),
         ownsMachine: () => current() && owners.includes(member),
         holdsRight: (grade) => current() && rights.includes(grade),
       };
@@ -566,7 +570,10 @@ export class Authorizer {
     // The machine's own feeds (M6's `attention`, M5a's `artifacts`): `list`, cut by what they carry as it goes.
     if (isMachineFeedSub(message)) {
       if (!this.#offers.feeds.includes(message.feed)) return refuse('not-offered');
-      return who.clientClass === 'web-cards' ? refuse('class') : { ok: true };
+      if (who.clientClass === 'web-cards') return refuse('class');
+      // P5 O8 M7b: the `channel` feed reaches its project while the project is the org's (its entries are cut each).
+      if (message.feed === 'channel' && !orgProject(this.ctx.org()?.head, message.project ?? '')) return refuse('no-target');
+      return { ok: true };
     }
     const feed = message.feed;
     if (feed === undefined ? !this.#offers.subscriptions.includes(message.session.lane) : !this.#offers.feeds.includes(feed)) return refuse('not-offered');

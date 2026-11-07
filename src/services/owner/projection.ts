@@ -6,12 +6,14 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, MessageUuid, SessionId } from '@shared/graph/ids';
 import { marksOf, type BlockMark } from '@shared/owner/marks';
+import { finishedTextOf } from '@shared/owner/to-human-items';
 import type { OwnerMarkRow } from './store';
 
+// P5 O8 M7b: which text counts is the shared extraction's (`finishedTextOf`), the project channel's journal's too.
 export function blockMarksOf(event: SessionEvent): BlockMark[] {
-  if (event.kind !== 'assistant.block.complete' || event.parentToolUseId !== null || event.aborted || event.isApiErrorMessage === true) return [];
-  if (event.block.type !== 'text' || typeof event.block.text !== 'string') return [];
-  return marksOf(event.block.text, { messageUuid: event.messageUuid, blockIndex: event.blockIndex });
+  const finished = finishedTextOf(event);
+  if (finished === null || finished.aborted) return [];
+  return marksOf(finished.text, { messageUuid: finished.messageUuid, blockIndex: finished.blockIndex });
 }
 
 type OwnerKind = 'async_input' | 'essential_unread';

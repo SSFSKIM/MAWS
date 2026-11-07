@@ -39,13 +39,11 @@ export interface SessionSubscribeRequest {
    */
   agentId?: string;
 }
-/** P5 O7 M6: the machine's `attention` feed, which names no session; M5a's `artifacts` feed (behind `rl2.artifacts`) the same. */
-export interface MachineFeedRequest {
-  feed: 'attention' | 'artifacts';
-  session?: undefined;
-  view?: undefined;
-  cursor?: undefined;
-}
+/**
+ * P5 O7 M6: the machine's `attention` feed, which names no session; M5a's `artifacts` feed (behind `rl2.artifacts`) the
+ * same. P5 O8 M7b: a project's `channel` feed (behind `rl2.channel`) names its project, and no other feed does.
+ */
+export type MachineFeedRequest = { feed: 'attention' | 'artifacts'; project?: undefined; session?: undefined; view?: undefined; cursor?: undefined } | { feed: 'channel'; project: string; session?: undefined; view?: undefined; cursor?: undefined };
 export interface SubscriptionSink {
   /** A snapshot or missing starts the stream over from `at`. */
   subbed(mode: 'replay' | 'snapshot' | 'missing', at: Cursor): void;
@@ -227,11 +225,12 @@ export class SubTable {
       }
       return void this.#deps.send({ t: 'sub', sub: entry.id, session: request.session, ...(request.view === undefined ? {} : { view: request.view }), ...(agentId === undefined ? {} : { agentId }), cursor: entry.cursor, credit });
     }
-    const gated = request.feed === 'artifacts' ? 'rl2.artifacts' : request.feed === 'browser.inventory' ? 'rl2.browser-screencast' : null;
+    const gated = request.feed === 'artifacts' ? 'rl2.artifacts' : request.feed === 'browser.inventory' ? 'rl2.browser-screencast' : request.feed === 'channel' ? 'rl2.channel' : null;
     if (peers?.includes('rl2.feeds') !== true || (gated !== null && !peers.includes(gated))) {
       this.#remove(entry);
       return void queueMicrotask(() => entry.sink.ended('not-offered'));
     }
+    if (request.feed === 'channel') return void this.#deps.send({ t: 'sub', sub: entry.id, feed: request.feed, project: request.project, cursor: null, credit });
     if (request.session === undefined) return void this.#deps.send({ t: 'sub', sub: entry.id, feed: request.feed, cursor: null, credit });
     this.#deps.send({ t: 'sub', sub: entry.id, session: request.session, feed: request.feed, cursor: null, credit });
   }

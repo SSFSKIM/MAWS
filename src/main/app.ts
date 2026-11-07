@@ -38,6 +38,8 @@ import { harnessConfirmation, sheetConfirmation } from './device/step-up-sheet';
 import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
 import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
 import type { RemoteLink } from './machines/remote/link'; // P5 O8 M3: the deliveries' links
+import type { LocalAnswer } from './org/channel/machines'; // P5 O8 M7b
+import type { HostEntry } from '@shared/ipc/schema/channel'; // P5 O8 M7b
 import { powerMonitor } from 'electron'; // P5 O8 M1: the Registry feed reconnects at wake and unlock
 import { openExternalUrl } from './open-external'; // P5 O8 M1: the Access login's browser trip
 import { createOrgSession } from './org/org-session'; // P5 O8 M1
@@ -292,6 +294,11 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     return () => void rosterListeners.delete(listener);
   };
   let remoteLink: (ref: MachineRef) => RemoteLink | null = () => null;
+  // P5 O8 M7b: this Mac's spine for the project channels' to-human entries: `channel.history` through main's own route and
+  // `channel.changed` from the bus's tap, both bound once the services bus exists below (a read before answers
+  // `unavailable`, and is read again)
+  let localChannelHistory: ((input: { project: string; before?: string; limit: number }) => Promise<LocalAnswer>) | null = null;
+  const localChannelListeners = new Set<(payload: { project: string; entry: HostEntry }) => void>();
   // P5 O8 M1: this profile's org session (src/main/org/org-session.ts): the sign-in from a pairing code, the held org
   // state and the hub's credential, read from <userData>/org/ in the background; a profile that never signs in makes no
   // keys, files or requests. A development build started with MAWS_DEV_ORG=<dir> runs O7's development session instead
@@ -332,6 +339,19 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
           // key stays in step-up.ts); the weekly successor asks at a window's focus, and notifies once a day while no
           // window is in front (a click brings the app forward, whose focus may then ask); revocations go to the RL2
           // roster's machines over their links.
+          // M7b: every machine's to-human entries in the project channels: this Mac's spine and the RL2 roster's links
+          channelMachines: {
+            local,
+            localName,
+            history: (input) => localChannelHistory?.(input) ?? Promise.resolve({ ok: false, code: 'unavailable' }),
+            onChanged: (listener) => {
+              localChannelListeners.add(listener);
+              return () => void localChannelListeners.delete(listener);
+            },
+            roster: () => roster,
+            onRoster,
+            link: (ref) => remoteLink(ref),
+          },
           signing: {
             stateSigner: (keys) => createStateSigner({ key: keys.stepUp, confirm }),
             focused: () => BrowserWindow.getFocusedWindow() !== null,
@@ -486,6 +506,13 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     invoke: (name, input, context) => invokeOwn(name, input, { ...context, target: local }) as never,
   };
   remoteLink = (ref) => machines.remote(ref);
+  localChannelHistory = async (input) => {
+    const answer = await bus.invoke('channel.history', input, { client: mainClient });
+    return answer.ok ? { ok: true, value: answer.value } : { ok: false, code: answer.error.code };
+  };
+  bus.onEmitted('channel.changed', (payload) => {
+    for (const listener of [...localChannelListeners]) listener(payload);
+  });
   // E11: every will-quit step below joins one ordered list behind one listener (tracker row E10 "14 will-quit listeners");
   // a step's promise (the hosts' draining close of a kept supervisor's socket) holds the exit, bounded by the port's grace;
   // P4 W2-B: the hosts' stop is a drain, run before the rest, which stop once it has settled

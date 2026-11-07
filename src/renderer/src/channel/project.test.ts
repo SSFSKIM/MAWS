@@ -12,7 +12,9 @@ import type { OrgKey } from '@shared/machine/org-key';
 import { orgIndex } from '../stores/org-projects';
 import type { ListedSession } from '../stores/sessions';
 import { TEST_MACHINE, OTHER_MACHINE } from '../../../../test/support/machine';
-import { channelEntries, channelProjectName, waitingFor, type ChannelEntry } from './project';
+import { channelEntries, channelProjectName, placeByTime, toHumanEntries, waitingFor, type ChannelEntry, type StreamEntry, type ToHumanEntry } from './project';
+import type { ChannelHost, ChannelMachine } from '@shared/ipc/schema/org';
+import { record as recordOf, remoteRow } from '../../../../test/support/builders';
 
 const A = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
 const B = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb';
@@ -214,5 +216,94 @@ describe('waitingFor', () => {
     const index = orgIndex([mine], TEST_MACHINE);
     expect(channelProjectName(index, SMNS)).toBe('maws');
     expect(channelProjectName(index, 'nobody')).toBeNull();
+  });
+});
+
+// M7b (Interfaces §O; M7b's Renderer bullet): every machine's to-human entries, each named by its session's title and its
+// machine, a question with its choices and its answer, one ask's questions grouped by their `ask/<askId>/` src, "as of"
+// on an offline machine's and greyed on an unavailable one's, placed by time among the log's entries.
+describe('the to-human entries', () => {
+  const lb = (app: string, ...anchor: string[]) => [SMNS, 'lane-b', app, ...anchor].map(encodeURIComponent).join('/');
+  let n = 0;
+  const host = (machine: typeof TEST_MACHINE, minute: number, over: Partial<ChannelHost> = {}): ChannelHost => {
+    n += 1;
+    const id = over.id ?? `e${n}`;
+    return { key: `${machine} ${id}`, machine, id, lane: 'A', session: A, kind: 'message', text: `said at ${minute}`, at: T(minute), src: `${SMNS}/mini%2F${A}/${n}`, order: n, ...over };
+  };
+  const live = (machine: typeof TEST_MACHINE, name: string, over: Partial<ChannelMachine> = {}): ChannelMachine => ({ machine, name, state: 'live', asOf: T(0), ...over });
+  const MACHINES = [live(TEST_MACHINE, 'MacBook'), live(OTHER_MACHINE, 'mini')];
+  const mine = recordOf(addressOf(TEST_MACHINE, 'app-1'), { title: { text: 'Local chat', source: 'user' } });
+  const theirs: ListedSession = { ...remoteRow(OTHER_MACHINE, 'app-2', { title: 'Studio build' }), appId: addressOf(OTHER_MACHINE, 'app-2' as AppSessionId) };
+  const named = (hosts: ChannelHost[], machines = MACHINES) =>
+    toHumanEntries({ hosts, machines, sessions, records: new Map([[mine.appId, mine]]), listed: new Map([[theirs.appId, theirs]]) });
+
+  it('names a lane A session by its lifecycle’s alias and title, a lane B one by its record or its listing, with its machine', () => {
+    const entries = named([
+      host(OTHER_MACHINE, 1),
+      host(TEST_MACHINE, 2, { lane: 'B', session: 'app-1' }),
+      host(OTHER_MACHINE, 3, { lane: 'B', session: 'app-2' }),
+      host(OTHER_MACHINE, 4, { session: 'dddddddd-4444-4444-8444-dddddddddddd' }),
+    ]);
+    expect(entries.map((e) => [e.machine, e.machineName, e.name, e.title])).toEqual([
+      [OTHER_MACHINE, 'mini', 'maws-45', 'Fix the relay'],
+      [TEST_MACHINE, 'MacBook', 'Local chat', null],
+      [OTHER_MACHINE, 'mini', 'Studio build', null],
+      [OTHER_MACHINE, 'mini', 'dddddddd', null],
+    ]);
+    // a machine the channel's list doesn't hold has no name of its own here: the chip reads the roster's
+    expect(named([host(OTHER_MACHINE, 1)], [live(TEST_MACHINE, 'MacBook')]).map((e) => e.machineName)).toEqual([null]);
+    expect(entries.every((e) => e.kind === 'to-human' && e.host === 'message' && e.asOf === null && !e.greyed)).toBe(true);
+  });
+
+  it('draws a question with its choices and its answer, groups one ask’s questions by their ask/<askId>/ src, and keeps an answer to no question held on its own', () => {
+    const app = { lane: 'B' as const, session: 'app-1' };
+    const entries = named([
+      host(TEST_MACHINE, 1, { ...app, kind: 'question', text: 'Which branch?', choices: ['main', 'dev'], src: lb('app-1', 'ask', 'k1', 'q1') }),
+      host(TEST_MACHINE, 1, { ...app, kind: 'question', text: 'Ship it?', src: lb('app-1', 'ask', 'k1', 'q2') }),
+      host(TEST_MACHINE, 2, { ...app, kind: 'question', text: 'Another ask', src: lb('app-1', 'ask', 'k2', 'q1') }),
+      host(TEST_MACHINE, 3, { ...app, kind: 'answered', text: 'main', src: lb('app-1', 'ask', 'k1', 'q1', 'answered') }),
+      host(TEST_MACHINE, 4, { ...app, kind: 'question', text: 'Need input?', choices: ['yes'], src: lb('app-1', 'text', 'u1', '0', 'q0') }),
+      host(TEST_MACHINE, 5, { ...app, kind: 'answered', text: 'yes', src: lb('app-1', 'answer', 'u1', '0', 'q0', T(5)) }),
+      host(OTHER_MACHINE, 6, { ...app, session: 'app-2', kind: 'answered', text: 'not this machine’s', src: lb('app-1', 'ask', 'k2', 'q1', 'answered') }),
+      host(OTHER_MACHINE, 7, { kind: 'answered', text: 'lane A answers stand alone' }),
+    ]);
+    const drawn = entries.map((e) => (e.host === 'question' ? ['question', e.questions.map((q) => [q.text, q.choices, q.answer?.text ?? null])] : [e.host, e.text]));
+    expect(drawn).toEqual([
+      ['question', [['Which branch?', ['main', 'dev'], 'main'], ['Ship it?', [], null]]],
+      ['question', [['Another ask', [], null]]],
+      ['question', [['Need input?', ['yes'], 'yes']]],
+      ['answered', 'not this machine’s'],
+      ['answered', 'lane A answers stand alone'],
+    ]);
+    const first = entries[0] as Extract<ToHumanEntry, { host: 'question' }>;
+    expect(first.questions[0].answer).toEqual({ text: 'main', at: T(3) });
+  });
+
+  it('marks an offline or read-once machine’s entries "as of" its time, an unavailable one’s greyed, a live one’s neither', () => {
+    const entries = named(
+      [host(TEST_MACHINE, 1), host(OTHER_MACHINE, 2), host(OTHER_MACHINE, 3, { machine: 'ThirdMachineRef0000000' as typeof TEST_MACHINE, key: 'third e' })],
+      [live(TEST_MACHINE, 'MacBook'), live(OTHER_MACHINE, 'mini', { state: 'offline', asOf: T(40) }), live('ThirdMachineRef0000000' as typeof TEST_MACHINE, 'old', { state: 'unavailable', asOf: T(9) })],
+    );
+    expect(entries.map((e) => [e.asOf, e.greyed])).toEqual([
+      [null, false],
+      [T(40), false],
+      [T(9), true],
+    ]);
+  });
+
+  it('places them by time among the log’s entries, before the words the log doesn’t hold yet', () => {
+    const log = project([human(OWNER, 1, 'first'), say(A, [B], 5), human(ANA, 10, 'later')], { tail: [{ key: 'n1', text: 'mine', to: '*', state: 'sending' }] });
+    const toHuman = named([host(OTHER_MACHINE, 3, { text: 'at 3' }), host(OTHER_MACHINE, 7, { text: 'at 7' }), host(OTHER_MACHINE, 20, { text: 'at 20' })]);
+    const placed: StreamEntry[] = placeByTime(log, toHuman);
+    expect(placed.map((e) => (e.kind === 'to-human' ? `to-human:${e.at}` : e.kind === 'words' && e.offset === null ? 'tail' : `${e.kind}`))).toEqual([
+      'words',
+      `to-human:${T(3)}`,
+      'say',
+      `to-human:${T(7)}`,
+      'words',
+      `to-human:${T(20)}`,
+      'tail',
+    ]);
+    expect(placeByTime([], toHuman)).toEqual(toHuman);
   });
 });

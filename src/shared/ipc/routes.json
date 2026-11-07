@@ -394,6 +394,7 @@
   "catalog.icon",
   "catalog.refresh",
   "catalog.sources",
+  "channel.history",
   "clientPort.answer",
   "connectors.adoptGrant",
   "connectors.call",

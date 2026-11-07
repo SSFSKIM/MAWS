@@ -24,6 +24,10 @@
 //   refused. Main is the one source of a word's state: a channel shows only the signed-in org's, member's and device's
 //   words (words.ts), another signer's kept as they are, unsent. At release an acknowledged word is dropped and the rest
 //   go to the run's not-sent list, which that signer's next open of the project shows `not-sent` (`NotSent`).
+// - M7b: every machine's to-human entries for the project (machines.ts), opened with the channel and closed with it, go
+//   in the answer beside the events (`hosts`, `machines`); a change tells them by key (`hosts.upserts`, `hosts.removed`,
+//   whole with `hosts.reset` when the log's change is a reset or the machines' entries were replaced), the machines whole.
+//   A channel with nothing of the log's but to-human entries answers open.
 // - The cache is written CHANNEL_WRITE_MS after a change, and last at `close()`: once the channel's own work has run
 //   (joined outside the org session's commit queue), a finished snapshot is entered in that queue, and the queued write
 //   awaits nothing of the channel's (M4a's rule). `close()` resolves once every final write is entered. Only the
@@ -32,12 +36,13 @@
 //
 // Electron-free.
 import { isHubWriter, type Certificates, type HistoryAttestation, type Signed, type SignedOrgState } from '../../../../apps/org-protocol/src/index.ts';
-import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelSendResult } from '@shared/ipc/schema/org';
+import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelHost, ChannelSendResult } from '@shared/ipc/schema/org';
 import { hubClient } from '../hub-client';
 import type { HubAccess, OrgSession, SignedIn } from '../session';
 import { orgTiming, type OrgTiming } from '../timing';
 import { addressOf } from './address';
 import { emptyLog, isReaders, loadLog, type ChannelLimits, type ChannelReader, type ChannelStore, type Ground, type HeldLog } from './cache';
+import type { ChannelMachines } from './machines';
 import { CLOSE_CREDENTIALS, CLOSE_REMOVED, CLOSE_UNKNOWN_PROJECT, openProjectSocket, type ProjectSocket, type ProjectSocketDeps } from './project-socket';
 import { createNotSent, createWords } from './words';
 
@@ -57,6 +62,8 @@ export interface ChannelsDeps {
   /** The project's history attestations; null when they can't be read. The hub client's by default. */
   attestations?(hub: HubAccess, project: string): Promise<Signed<HistoryAttestation>[] | null>;
   socket?: ProjectSocketDeps['socket'];
+  /** M7b: every machine's to-human entries, opened per channel; none without it. */
+  machines?: ChannelMachines;
   fetch?: typeof fetch;
   timing?: Partial<OrgTiming>;
   now?(): number;
@@ -158,6 +165,15 @@ export function createChannels(deps: ChannelsDeps): Channels {
     let baselined = false;
     /** The next change tells everything. */
     let resetDue = false;
+    // M7b: every machine's to-human entries, told by key as the events are by offset (null told: the next tells them whole)
+    const hosts = deps.machines?.open(project) ?? null;
+    let toldHosts: Set<string> | null = null;
+    let exposedHosts = new Set<string>();
+    let hostsResetDue = false;
+    hosts?.onChanged((reset) => {
+      if (reset) hostsResetDue = true;
+      scheduleEmit();
+    });
 
     const words = createWords({
       project,
@@ -207,12 +223,13 @@ export function createChannels(deps: ChannelsDeps): Channels {
       const unverified = shown?.unverified() ?? 0;
       const asOf = shown?.asOf() ?? null;
       const pending = words.pending();
-      if (events.length === 0 && sessions.length === 0 && unverified === 0 && asOf === null && pending.length === 0) {
+      const toHuman = hosts === null ? null : { hosts: hosts.entries(), machines: hosts.machines() };
+      if (events.length === 0 && sessions.length === 0 && unverified === 0 && asOf === null && pending.length === 0 && (toHuman?.hosts.length ?? 0) === 0) {
         if (current === null) return { ok: false, reason: 'signed-out', rev };
         if (current.hub === null) return { ok: false, reason: 'no-hub', rev };
       }
       const live = socket !== null && welcomed && caughtUp && current !== null && current.hub === socketHub;
-      return { ok: true, rev, events, sessions, pending, unverified, asOf, live };
+      return { ok: true, rev, events, sessions, pending, unverified, asOf, live, ...toHuman };
     }
 
     function scheduleEmit(): void {
@@ -224,7 +241,19 @@ export function createChannels(deps: ChannelsDeps): Channels {
       (emitTimer as { unref?: () => void }).unref?.();
     }
 
-    const restOf = (a: ChannelAnswer & { ok: true }) => JSON.stringify([a.sessions, a.pending, a.unverified, a.asOf, a.live]);
+    const restOf = (a: ChannelAnswer & { ok: true }) => JSON.stringify([a.sessions, a.pending, a.unverified, a.asOf, a.live, a.machines]);
+    /** The to-human entries' change since those told: whole (`reset`) after a reset or with none told, else by key. */
+    function hostsDelta(now: readonly ChannelHost[], whole: boolean) {
+      const before = toldHosts;
+      const keys = new Set(now.map((h) => h.key));
+      const reset = whole || hostsResetDue || before === null;
+      const upserts = reset || before === null ? [...now] : now.filter((h) => !before.has(h.key));
+      const removed = reset ? [] : [...exposedHosts].filter((key) => !keys.has(key)).sort();
+      hostsResetDue = false;
+      toldHosts = keys;
+      exposedHosts = new Set(keys);
+      return { ...(reset ? { reset: true as const } : {}), upserts, removed };
+    }
 
     /** The change since what was last told, if any. */
     function tell(): void {
@@ -233,6 +262,8 @@ export function createChannels(deps: ChannelsDeps): Channels {
       if (!now.ok) {
         told = null;
         exposed = new Set(); // a tab drawing a closed answer holds no event
+        toldHosts = null;
+        exposedHosts = new Set();
         const text = now.reason;
         if (text === toldClosed) return;
         toldClosed = text;
@@ -249,10 +280,25 @@ export function createChannels(deps: ChannelsDeps): Channels {
         resetDue = false;
         told = verdicts;
         exposed = new Set(verdicts.keys());
-        if (!reset && upserts.length === 0 && removed.length === 0 && rest === toldRest) return;
+        const toHuman = now.hosts === undefined ? null : hostsDelta(now.hosts, reset);
+        const hostsMoved = toHuman !== null && (toHuman.reset === true || toHuman.upserts.length > 0 || toHuman.removed.length > 0);
+        if (!reset && upserts.length === 0 && removed.length === 0 && rest === toldRest && !hostsMoved) return;
         toldRest = rest;
-        const { sessions, pending, unverified, asOf, live } = now;
-        change = { project, ok: true, rev: (revision += 1), upserts, removed, sessions, pending, unverified, asOf, live, ...(reset ? { reset: true as const } : {}) };
+        const { sessions, pending, unverified, asOf, live, machines } = now;
+        change = {
+          project,
+          ok: true,
+          rev: (revision += 1),
+          upserts,
+          removed,
+          sessions,
+          pending,
+          unverified,
+          asOf,
+          live,
+          ...(reset ? { reset: true as const } : {}),
+          ...(toHuman === null ? {} : { hosts: toHuman, machines }),
+        };
       }
       for (const listener of [...listeners]) listener(change);
     }
@@ -260,11 +306,13 @@ export function createChannels(deps: ChannelsDeps): Channels {
     function opened(): ChannelAnswer {
       const whole = answer();
       if (whole.ok) for (const event of whole.events) exposed.add(event.offset);
+      if (whole.ok) for (const host of whole.hosts ?? []) exposedHosts.add(host.key);
       if (!baselined) {
         baselined = true;
         if (whole.ok) {
           told = verdictsOf(whole.events);
           toldRest = restOf(whole);
+          if (whole.hosts !== undefined) toldHosts = new Set(whole.hosts.map((h) => h.key));
         } else toldClosed = whole.reason;
       }
       return whole;
@@ -428,7 +476,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
       scheduleEmit();
     }
 
-    const loaded = enqueue('the cache', async () => {
+    const logLoaded = enqueue('the cache', async () => {
       const raw = await deps.store.read(project).catch((error: unknown) => {
         log(`the cache did not read: ${(error as Error).message}`);
         return null;
@@ -440,6 +488,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
       held = await loadLog(raw, { reader: current === null ? null : readerOf(current), project, limits, ground, log });
       judged = snapshot;
     }).then(() => reconcile());
+    const loaded = Promise.all([logLoaded, hosts?.loaded]).then(() => undefined);
 
     async function send(text: string): Promise<ChannelSendResult> {
       if (text.trim() === '') return { ok: false, reason: 'empty' };
@@ -481,7 +530,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
         for (const timer of [releaseTimer, writeTimer, emitTimer]) if (timer !== null) clearTimeout(timer);
         releaseTimer = writeTimer = emitTimer = null;
         dropSocket();
-        await queue;
+        await Promise.all([queue, hosts?.close()]);
         enterWrite();
       })();
       return stopping;

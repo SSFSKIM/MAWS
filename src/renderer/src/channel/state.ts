@@ -8,9 +8,12 @@
 // and change carries main's `rev`, and a change numbered at or before what the copy holds is dropped: it was told before
 // the answer (a tab hears changes from its mount on, the answer after), so it describes an older state.
 //
+// M7b: every machine's to-human entries the same way, by key (`hosts`: upserts in, removed out, `hosts.reset` whole; a
+// change without `hosts` keeps them), and the machines whole; the log's reset doesn't touch them, main tells their own.
+//
 // A word's state is main's alone (Task 2's fix round 2): main lists the signed-in member's words the log doesn't hold
 // yet, `sending`, `sent`, `not-sent` or refused, and the tab draws them as given. Nothing is remembered or inferred here.
-import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelSession, ChannelWord } from '@shared/ipc/schema/org';
+import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelHost, ChannelMachine, ChannelSession, ChannelWord } from '@shared/ipc/schema/org';
 import type { TailWord } from './project';
 
 type Closed = Extract<ChannelAnswer, { ok: false }>['reason'];
@@ -23,6 +26,8 @@ export type OpenHeld = {
   unverified: number;
   asOf: string | null;
   live: boolean;
+  hosts: ChannelHost[]; // M7b: oldest first, as main orders them
+  machines: ChannelMachine[];
 };
 export type ChannelHeld = { phase: 'opening' } | { phase: 'closed'; reason: Closed; rev: number } | OpenHeld;
 
@@ -33,7 +38,20 @@ const byOffset = (a: ChannelEvent, b: ChannelEvent) => a.offset - b.offset;
 export function openedWith(answer: ChannelAnswer): ChannelHeld {
   if (!answer.ok) return { phase: 'closed', reason: answer.reason, rev: answer.rev };
   const { rev, events, sessions, pending, unverified, asOf, live } = answer;
-  return { phase: 'open', rev, events: [...events].sort(byOffset), sessions, pending, unverified, asOf, live };
+  return { phase: 'open', rev, events: [...events].sort(byOffset), sessions, pending, unverified, asOf, live, hosts: answer.hosts ?? [], machines: answer.machines ?? [] };
+}
+
+/** The to-human entries after a change: by key over what is held, in main's order (time, machine, the machine's `order`). */
+function hostsAfter(current: ChannelHeld, change: Extract<ChannelChanged, { ok: true }>): ChannelHost[] {
+  const held = current.phase === 'open' ? current.hosts : [];
+  const delta = change.hosts;
+  if (delta === undefined) return held;
+  if (delta.reset === true || current.phase !== 'open') return [...delta.upserts];
+  const removed = new Set(delta.removed);
+  const byKey = new Map(held.filter((host) => !removed.has(host.key)).map((host) => [host.key, host]));
+  for (const host of delta.upserts) byKey.set(host.key, host);
+  const time = (host: ChannelHost) => Date.parse(host.at) || 0;
+  return [...byKey.values()].sort((a, b) => time(a) - time(b) || (a.machine < b.machine ? -1 : a.machine > b.machine ? 1 : 0) || a.order - b.order); // main's order
 }
 
 export function applyChange(current: ChannelHeld, change: ChannelChanged): ChannelHeld {
@@ -44,7 +62,8 @@ export function applyChange(current: ChannelHeld, change: ChannelChanged): Chann
   const events = new Map(base.map((event) => [event.offset, event]));
   for (const offset of removed) events.delete(offset);
   for (const event of upserts) events.set(event.offset, event);
-  return { phase: 'open', rev, events: [...events.values()].sort(byOffset), sessions, pending, unverified, asOf, live };
+  const machines = change.machines ?? (current.phase === 'open' ? current.machines : []);
+  return { phase: 'open', rev, events: [...events.values()].sort(byOffset), sessions, pending, unverified, asOf, live, hosts: hostsAfter(current, change), machines };
 }
 
 /** The words after the log: main's pending, in its order. */

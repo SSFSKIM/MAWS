@@ -2,7 +2,9 @@
 // here rather than thrown, since emitters run inside Electron and host callbacks where a throw has no one to catch it.
 // P5 O6 M2 (OX2): every event carries the machine it came from, as the message's last argument: `emit` and `emitTo` the
 // local machine (src/main/machine/local.ts), `emitFrom` another machine's, relayed by its link (M3). A main whose local
-// machine is not bound (a unit test's) sends none, which the renderer reads as local.
+// machine is not bound (a unit test's) sends none, which the renderer reads as local. P5 O8 M7b: a main-only event
+// (`MAIN_ONLY_EVENTS`, which the preload refuses) is sent to no window by any of the three, though main's taps hear it.
+import { isBridgedEventName } from '@shared/ipc/names';
 import { eventChannel, type EventName, type EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import type { MachineRef } from '@shared/machine/ref';
@@ -27,13 +29,14 @@ type Page = { send(channel: string, ...args: unknown[]): void; isDestroyed(): bo
 const send = (page: Pick<Page, 'send'>, channel: string, value: unknown, machine: MachineRef | null) =>
   machine === null ? page.send(channel, value) : page.send(channel, value, machine);
 
-// Validates and sends; an invalid payload is logged and nothing is sent.
+// Validates and sends; an invalid payload is logged and nothing is sent, and a main-only event goes to no window.
 function toWindows(name: EventName, payload: unknown, machine: MachineRef | null): ReturnType<typeof validateEventPayload> {
   const checked = validateEventPayload(name, payload);
   if (!checked.ok) {
     console.error(`[ipc] refused to emit invalid ${name}`, checked.issues);
     return checked;
   }
+  if (!isBridgedEventName(name)) return checked;
   for (const win of appWindows()) {
     if (!win.webContents.isDestroyed()) send(win.webContents, eventChannel(name), checked.value, machine);
   }
@@ -49,7 +52,7 @@ export function emitTo<N extends EventName>(page: Page, name: N, payload: EventP
     return false;
   }
   if (page.isDestroyed()) return false;
-  send(page, eventChannel(name), checked.value, boundLocalMachine());
+  if (isBridgedEventName(name)) send(page, eventChannel(name), checked.value, boundLocalMachine());
   for (const tap of taps.get(name) ?? []) tap(checked.value);
   return true;
 }

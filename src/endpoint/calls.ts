@@ -27,6 +27,14 @@
 //     nothing of another session. A session the spine can't place answers `unavailable`. `session.search` answers at most
 //     SESSION_SEARCH_LIMIT hits, so its input names the sessions the caller views (`sessions`, from `session.list`'s
 //     records), applied by the store before its limit; a full page the cut still took hits from says `incomplete`.
+//   - P5 O8 M7b: `channel.history` takes the same shape over a project's to-human entries, its cut lane-aware
+//     (channel-view.ts): a lane A entry ranked by its engine session's sminos record, a lane B one by its app session's
+//     placements; the journal is read until the caller's page is full of entries they view, or it ends. Fix wave: a
+//     project that isn't the org's answers no entries (asked, and as it goes); each entry goes under its opaque cursor
+//     (channel-cursors.ts), and a `before` is one: one the endpoint didn't seal for the project, or of an entry the
+//     caller doesn't view, answers no entries, after the one placement read either takes; the page goes only while all it
+//     read still stands and nothing it passed by is viewable (else it is read again, `unavailable` past HISTORY_READS),
+//     and a read goes on to the journal's end (or is `unavailable` past its bound), so `more` is exact.
 //   - P5 O7 M5a: `library.list` takes the same shape over its rows: each row's own sessions (`LibraryRowSchema.sessions`,
 //     the index's view of the artifact's links) are what it names, and a row is kept when the caller holds `view` on its
 //     artifact by the `artifact` rule's predicate (artifacts.ts' `holdsArtifact`): on any one of its sessions, at every
@@ -57,14 +65,18 @@
 // Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
 // `too-large`. For a device that listed `rl2.bytes` (P5 O7 M5a), the input came decoded (gate.ts) and the output goes in the
 // bytes codec's tagged form (bytes.ts), measured so.
+import { randomUUID } from 'node:crypto';
 import { MESSAGE_MAX_BYTES, type CallMessage, type Listing, type Signed } from 'org-protocol';
 import { ACQUIRE_WITHIN_MS, LATE, within } from './acquire';
 import { FOLLOW_OWNERS_CAPABILITY } from '@shared/host/socket-protocol';
 import { gradeOf } from '@shared/ipc/grades';
 import { remoteDaemonStatus, type DaemonStatus } from '@shared/ipc/schema/daemon';
 import { SESSION_SEARCH_LIMIT, SESSION_SEARCH_SESSIONS_MAX } from '@shared/ipc/schema/session';
+import { HISTORY_LIMIT_MAX, type HostEntry } from '@shared/ipc/schema/channel';
 import { holdsArtifact, type ArtifactRanks, type CachedPlacement } from './artifacts';
 import { holdsToSchema, type SessionRanks } from './authorize';
+import type { ChannelCursors } from './channel-cursors';
+import { PlacementBook, publish, readViewable, viewable, type EntrySession } from './channel-view';
 import { writeBytes } from './bytes';
 import type { RemoteChannel } from './channels';
 import type { Granted } from './gate';
@@ -110,8 +122,14 @@ export type CallsContext = {
   engineHostLists(capability: string): boolean;
   /** P5 O7 M9: the folders each member opened (the authorizer's own); absent, none is kept. */
   setup?: Pick<MachineSetup, 'listed'>;
+  /** P5 O8 M7b fix wave: whether a project is the org's now (`channel.history`'s reach), and its entries' cursors. */
+  reaches(project: string): boolean;
+  cursors: Pick<ChannelCursors, 'seal' | 'open'>;
   log(line: string): void;
 };
+
+/** How many reads a `channel.history` answer may take, what one read moving before it went, before it answers `unavailable`. */
+export const HISTORY_READS = 3;
 
 type Fields = Record<string, unknown>;
 type Result = { ok: true; output: unknown } | { ok: false; code: string; message?: string };
@@ -252,16 +270,27 @@ const EACH_SESSION: Record<string, EachSession> = {
 export class Calls {
   /** Each `each-session` call in flight: every placement its sessions' records gave since its reads began. */
   readonly #heard = new Set<Map<string, Placement[]>>();
+  /** P5 O8 M7b fix wave: each `channel.history` call in flight, its placements read by read (channel-view.ts). */
+  readonly #books = new Set<PlacementBook>();
 
   constructor(private readonly ctx: CallsContext) {}
 
-  /** A machine event (`onEvent`): a session's record moved, which every `each-session` call in flight places it by. */
+  /**
+   * A machine event (`onEvent`): a session's record moved, which every `each-session` call in flight places it by; or,
+   * for a `channel.history` call, was removed (placing the session nowhere).
+   */
   event(owner: string, message: { name: string; payload: unknown }): void {
-    if (owner !== 'machine' || message.name !== 'session.changed' || this.#heard.size === 0) return;
-    const record = isObject(message.payload) ? message.payload.record : undefined;
+    if (owner !== 'machine' || !isObject(message.payload)) return;
+    if (message.name === 'session.removed' && isText(message.payload.appSessionId, 512)) {
+      for (const book of this.#books) book.heard(message.payload.appSessionId, null);
+      return;
+    }
+    if (message.name !== 'session.changed' || (this.#heard.size === 0 && this.#books.size === 0)) return;
+    const record = message.payload.record;
     if (!isObject(record) || !isText(record.appId, 512)) return;
     const placement = recordedPlacement(record.appId, record);
     for (const heard of this.#heard) heard.set(record.appId, [...(heard.get(record.appId) ?? []), placement]);
+    for (const book of this.#books) book.heard(record.appId, placement);
   }
 
   /** An authorized call, answered by its executor; `decision.askedAt`, its arrival, bounds an acquisition (acquire.ts). */
@@ -280,7 +309,8 @@ export class Calls {
     const by = () => (decision.askedAt ?? this.ctx.now()) + (this.ctx.acquireWithinMs ?? ACQUIRE_WITHIN_MS);
     // What runs answers a result, or (an `each-session` row) the step that makes it, taken as the answer goes.
     let run: Promise<Result | (() => Result)>;
-    if (row?.target === 'each-session') run = this.#eachSession(dispatch, channel.member, m);
+    if (row?.target === 'each-session' && m.name === 'channel.history') run = this.#channelHistory(dispatch, channel.member, m);
+    else if (row?.target === 'each-session') run = this.#eachSession(dispatch, channel.member, m);
     else if (m.name === 'connectors.open' && row?.executor === 'machine') run = this.#open(dispatch, channel, m, by());
     else if (m.name === 'connectors.close' && row?.executor === 'machine') run = this.#close(dispatch, channel, m);
     else if (m.name === 'delivery.receipts' && row?.executor === 'machine') run = this.#receipts(dispatch, channel, m);
@@ -462,6 +492,55 @@ export class Calls {
       const seen = (id: string): Placement[] => [...(listed.has(id) ? [listed.get(id)!] : []), placed.get(id) ?? null, ...(heard.get(id) ?? [])];
       return { ok: true, output: filter.keep(output, (id) => id !== null && seen(id).every((placement) => ranks.holds(placement, grade)), ranks.ownsMachine(), asked) };
     };
+  }
+
+  /**
+   * P5 O8 M7b: a project's to-human entries (`channel.history`, the `each-session` shape, its cut lane-aware:
+   * channel-view.ts), answered for the sessions `member` holds `view` on: the journal read until the page is filled with
+   * such entries or it ends, each lane B session ranked at every placement the read saw of it, a lane A one by sminos's
+   * record. Fix wave: nothing for a project that isn't the org's; `before` is a cursor the endpoint sealed, of an entry
+   * the member views, else no entries (one placement read taken either way: the same answer in the same time); the page
+   * goes, in the step its answer goes in, only while the ranks are current and all the read kept still stands, else it
+   * is read again.
+   */
+  async #channelHistory(dispatch: EndpointServices['dispatch'], member: string, m: CallMessage): Promise<Result | (() => Result)> {
+    if (!holdsToSchema(m.name, m.input) || !isObject(m.input)) return { ok: false, code: 'malformed' };
+    const input = m.input as { project: string; before?: string; limit?: number };
+    const limit = input.limit ?? HISTORY_LIMIT_MAX;
+    const none: Result = { ok: true, output: { entries: [], more: false } };
+    const book = new PlacementBook();
+    this.#books.add(book);
+    const done = (result: Result): Result => (this.#books.delete(book), result);
+    const seal = (entry: HostEntry): HostEntry => ({ ...entry, id: this.ctx.cursors.seal(entry) });
+    try {
+      for (let attempt = 0; attempt < HISTORY_READS; attempt++) {
+        const ranks = await this.ctx.ranks(member);
+        const after = book.mark();
+        if (!this.ctx.reaches(input.project)) return done(none);
+        const views = (entry: EntrySession) => viewable(entry, ranks, book, after);
+        let before: string | undefined;
+        if (input.before !== undefined) {
+          const at = this.ctx.cursors.open(input.before, input.project);
+          await book.ensure(at?.lane === 'B' ? at.session : randomUUID(), after, dispatch);
+          if (at === null || !views(at.lane === 'A' ? { lane: 'A', engineSessionId: at.session, appSessionId: null } : { lane: 'B', appSessionId: at.session, engineSessionId: null })) return done(none);
+          before = at.id;
+        }
+        const place = (ids: string[]) => Promise.all(ids.map((id) => book.ensure(id, after, dispatch))).then(() => {});
+        const read = await readViewable(dispatch, { project: input.project, ...(before === undefined ? {} : { before }), limit }, views, place);
+        if (!ranks.current() || publish(read, limit, views, seal) === null) continue;
+        return () => {
+          this.#books.delete(book);
+          if (!this.ctx.reaches(input.project)) return none;
+          const page = ranks.current() ? publish(read, limit, views, seal) : null;
+          return page === null ? { ok: false, code: 'unavailable' } : { ok: true, output: page };
+        };
+      }
+      this.ctx.log(`endpoint: a \`channel.history\` read of ${input.project.slice(0, 64)} moved under each of its ${HISTORY_READS} reads`);
+      return done({ ok: false, code: 'unavailable' });
+    } catch (error) {
+      this.ctx.log(`endpoint: a \`channel.history\` call could not be answered: ${(error as Error).message}`);
+      return done({ ok: false, code: 'unavailable' });
+    }
   }
 
   /**

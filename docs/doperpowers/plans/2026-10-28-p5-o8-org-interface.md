@@ -1,6 +1,6 @@
 # P5 O8 — The org interface (2026-10-28)
 
-> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `b99c1767b471e33857dbd3dc009ead783d09daa2` at master `910539147` (P5's Decision Logs 1–228; re-pinned on 2026-11-06 for the re-plan of the rest: 223 to 228 make M6's Share sheet O18's M5, with the `list` grade and audience streams; 154 moves the last machine, so the owner's words no longer wait; 155 waives B4's wait on M7's reader; 168 closes O3 and 222 closes O7; 190 makes the spawner an owner and leaves its residue (b) due before owners move; earlier pin blob `d07bfc4ea2466d7d5ca7ca3164aed4d93021311a` at master `6fb933626`, P5's Decision Logs 1–129, re-pinned on 2026-10-29 for M4's re-plan: 121 lands H1, 126 leaves M4 the refused attempt and the section's split, 129 lands M5 and names M4 next; earlier pin blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83`, Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
+> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `92141de56e15ff65c3da5baa8fa135cdecf075c7` at master `f857f0450` (P5's Decision Logs 1–238; re-pinned on 2026-11-06 at M7b's cut, where 229–238 change nothing M7b consumes: 232 sets the order, 238 lands M7a. Before that, at blob `b99c1767` and master `910539147`, re-pinned for the re-plan of the rest: 223 to 228 make M6's Share sheet O18's M5, with the `list` grade and audience streams; 154 moves the last machine, so the owner's words no longer wait; 155 waives B4's wait on M7's reader; 168 closes O3 and 222 closes O7; 190 makes the spawner an owner and leaves its residue (b) due before owners move; earlier pin blob `d07bfc4ea2466d7d5ca7ca3164aed4d93021311a` at master `6fb933626`, P5's Decision Logs 1–129, re-pinned on 2026-10-29 for M4's re-plan: 121 lands H1, 126 leaves M4 the refused attempt and the section's split, 129 lands M5 and names M4 next; earlier pin blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83`, Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
 >
 > **What binds.** O8's section in P5 is this document's design, and P5's approval covers it. Binding with it:
 > - P5 §7 (people: owners, visibility, machine owners and grants, agents talk as today, credentials) and §8 (the sidebar's per-project toggle, the project channel, the Org page, attention across machines); parent acceptance 3 (its remote rows: Decision Log 93), 11 and 12.
@@ -71,7 +71,12 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-06) Task 2, reviewed in three rounds, the last fix checked by the controller (3d355c066..7d113efb3; fixes a21cc2653..4e74435aa): the Channel tab (the projection folding main's verified events, the stream, the composer, Not sent, "as of" offline, Waiting on you with the MAWS ask answered in place, Channel in the project's menu), and main as the one source of a word's state, bound to its signer's context. Gates green at 7d113efb3, a8c03bcbc and 4e74435aa (runs 42181546717, 42190002590, 42194136958).
   - [x] (2026-11-06) Task 3, reviewed with one fix wave, checked by the controller (d2f99da15..7bd4dcd17; fixes 68f9b8f20, ee29e26aa): `test/org/channel.local.test.ts` on the Miniflare hub (the folded exchange, DX1 attested at migration, a revoked key's event and a forgery on A's transport counted and not drawn, words signed and unmacked on B's socket and drawn back, "as of" across a relaunch), and the Channel tab's e2e case in `e2e:settings` over a harness-only fixture with its screenshots; two layout fixes from them. Gates green: e2e:settings 42208872828 and 42214481766, static,unit,probes 42219970692.
   - [x] (2026-11-06) The branch: reviewer-medium in three rounds (fixes 912fc182f..8139e7713, the last round clean); master merged at 1675f282d and 9ebbacbc5; the final `--gates all --evidence` on 9ebbacbc5, run 42259619702, 55 jobs green with packaged and unit:darwin among them. Its one flaky line, `browser-cua.spec.ts:1028`, is explained from the code: a headless O17 scene with no M7a code in it, tracked.
-- [ ] M7b — The project channel: to-human messages across machines — *executable; after M7a; the owner's week (P5 acceptance 16) starts when it lands*
+- [x] M7b — The project channel: to-human messages across machines — *executable; after M7a; the owner's week (P5 acceptance 16) starts when it lands*
+  - [x] (2026-11-06) Task 1, reviewed clean in two rounds (9327c77f2..a54248357; fixes ef3d17d7e, 832534dca): the one extraction of a message (`src/shared/owner/to-human-items.ts`), the spine's channel journal as an `ADDED_TABLES` entry, lane B from the owner channel's batches and the asks' own record, the start-path hold, the cuts, `channel.history` and the main-only `channel.changed` (`WIRE_MINOR` 29). Gates green: 42290932596, 42292712838 (cross-build, the downgrade scene whole), 42297329414.
+  - [x] (2026-11-06) Task 2, reviewed by our task reviewer in three rounds and by the desk track in six (READY, their 601) (5a6b05638..f37817c55, with the org-protocol commits 40e793791 and 9e4b67f20): the seam and lane A's `#host` hand-off, `channel.history` with the per-lane `view` cut and opaque cursors, the project-scoped `channel` feed (`rl2.channel`, RL2 1.12, `WIRE_MINOR` 30), reach checks, a bounded streamed scan, the snapshot's restarts, and recovery from the let-go ids. Gates green: 42321083327 (full), 42328732994, 42331543046.
+  - [x] (2026-11-06) Task 3, accepted by the architect (58e294092..19456cac9), with its review carried by the branch's reviewer-high: `machines.ts` (the spine and each machine's feed, gated on `rl2.channel`, with the older-peer fallback and a per-machine cache that belongs to one reader), the merge into `org.channel.*`, and `ToHumanEntry.tsx`. Gate green: 42336903199.
+  - [x] (2026-11-06) Task 4 (33098354b..daf8d4a3c): `channel.local.test.ts` cases 5 and 6, plus an older-peer case (7/7, three runs in a row), and the e2e seed's to-human entries photographed, with two layout fixes. Gates green: e2e:settings 42341855912, static,unit,probes 42343748493.
+  - [x] (2026-11-07) The branch: reviewer-high on `782790d38...4e35fb15c`, one Minor (journal order across history pages) fixed at 1d3caff96 and ba7d57c92; master merged at 4e35fb15c. `--gates all --evidence` there (42344559621): 53 green, with a real `library.spec` regression fixed at 9bb79f34e. On 9bb79f34e: static, unit 1–4, e2e:library, cross-build and packaged 1/2 and 2/2 green (42357252517, 42359252532). e2e:discover failed four times in Set up job on the mini, on codeload action-archive downloads, before any step ran (42344559621, 42357252517, 42359252532 attempts 1 and 2). CI-opt seeded the runner's action cache, and the discover job then passed: 42359252532 attempt 3, 9 passed, 1 skipped by design, no flaky line. M7b is reviewed and gated whole, and goes to the architect as #514.
 - [ ] M6a — Reader state and drafts per member — *executable; after M7b*
 - [ ] M6b — Visibility and shares (O18's M5) — *executable; after M6a; its live proof is the staging run it shares with O18 M6, which needs the desk track's sminos executors and a real second member (the owner)*
 - [ ] M4b — Machines and their rights — *executable; after M6b*
@@ -142,6 +147,7 @@ Items 1, 2, 3, 4a and 5's display half have landed. The rest became executable o
 - **Commits.** End every commit message with `Sminos-Session: GUI AI agent workspace charter#37052769 (MAWS on macbook)` as a second `-m`, or the line the executor's own session is given. Add no other trailer. Never rebase. Merge origin/master in when a branch needs it.
 - **Review.** Each milestone lands by its own PR with doperpowers:reviewer-high before it goes to the architect: M1 is the device side of the org's trust (it pins the chain, registers a device and holds a bearer credential), and M2 decides what the app believes about other machines' sessions. Later milestones are reviewed at the rung their re-plan names.
 - **Amended 2026-11-06** (Decision Log, "the constraints for the rest"): M4b, M4c, M6a, M6b and M7b change `src/endpoint/`, `src/services/` and `src/mawsd/endpoint-seam.ts`, and M4b and M4c move code into `apps/org-protocol/src/`. The desk track reviews every `src/endpoint` and `apps/org-protocol` hunk, in commits of their own. `apps/desk-hub/src/` stays as landed: the renew route M4c consumes is the desk track's PR. No milestone changes the RL4 `Action` shape (`apps/org-protocol/src/action.ts`: its keys, encodings or bounds) without telling the architect first. sminos's `record_proof` refuses `bad-shape` on any act that isn't exactly what `isAction` accepts, so a shape change must ship with a sminos release, or every `record.*` fails closed (the desk track, 2026-11-06). The bullets above stand as written for M1 to M5. For the rest, on this MacBook: eslint runs on one file at a time and never over more than one, and typechecks, broad lint and full suites go to the gate. The gates are the worktree's own `scripts/ci-gate.sh W --gates <list> --runner macos --label <label>` (Concrete Steps, "The rest"), not the class 1a lines above.
+- **Amended 2026-11-06** (Decision Log, "M7b's channel feed"): `apps/org-protocol` is touched by M4b, M4c and M7b's channel feed. M7b's change is `'channel'` in `MachineFeed` and an RL2 minor bump (12, after #506's 11), in a commit of its own for the desk track's review, and it needs no hub change.
 
 ### Orientation
 
@@ -1272,7 +1278,7 @@ Rejected:
 
 **Touches.**
 - `src/services/index/`:
-  - `migrations.ts`, a new entry: `reader_state (app_session_id, member, pinned, last_seen_uuid, last_seen_at, unread, PRIMARY KEY (app_session_id, member))` and `member_drafts (app_session_id, member, doc, attachments, updated_at, PRIMARY KEY (app_session_id, member))`, both `ON DELETE CASCADE`;
+  - `migrations.ts`, two `ADDED_TABLES` entries (not a migration: a newer `user_version` costs a downgraded build its whole index; M7b's ruling, 2026-11-06): `reader_state (app_session_id, member, pinned, last_seen_uuid, last_seen_at, unread, PRIMARY KEY (app_session_id, member))` and `member_drafts (app_session_id, member, doc, attachments, updated_at, PRIMARY KEY (app_session_id, member))`, both `ON DELETE CASCADE`;
   - `sessions.ts` and `drafts.ts`, the reader argument;
   - `register.ts`: `applyPatch` and the draft commands read `context.reader`;
   - their tests.
@@ -1563,7 +1569,7 @@ The door adds no authority. An act through it is authenticated by its step-up si
 
 **At its end.**
 - **Every session's to-human entries are in its project's channel,** from every machine, with the session's title and machine chip (Q5):
-  - messages, from lane A's to-human tool and lane B's `mcp__maws__message`;
+  - messages, from lane A's to-human tool, and lane B's message tool and `<message>` spans;
   - questions, as they were asked;
   - answers, as they were given.
 
@@ -1575,14 +1581,14 @@ The door adds no authority. An act through it is authenticated by its step-up si
 
 **Touches.**
 - **`src/services/channel/` (new, the spine):**
-  - `journal.ts`: an index table `channel_entries (id, project, app_session_id, engine_session_id, lane, kind, text, choices, at, src, UNIQUE(src))`, in a new migration entry, pruned at the bounds above;
+  - `journal.ts`: an index table `channel_entries (id, project, app_session_id, engine_session_id, lane, kind, text, choices, at, src, UNIQUE(src))`, an `ADDED_TABLES` entry in `src/services/index/migrations.ts` (created `IF NOT EXISTS` after the migrations at any version, never dropped or renamed, so a downgraded build keeps its index; revised 2026-11-06), pruned at the bounds above;
   - `register.ts`: `channel.history {project, before?, limit ≤ 200}` (newest first, paged) and the event `channel.changed {project, entry}`;
-  - **lane B's source:** the owner channel's event batches (`src/services/owner/register.ts`'s `onEvent`), taking each accepted `mcp__maws__message` call as a `message`, and each answered ask with its question and answer as `question` and `answered`;
-  - **lane A's source:** the endpoint's sub-less RL10 `host` messages (`rl10/link.ts:612-643`'s `#host`), handed in through a new `EndpointServices.channel.record(entry)` seam. Each message carries its project and its `src`, and `UNIQUE(src)` dedupes sminos's resend of the last 50;
+  - **lane B's source:** the owner channel's event batches (`src/services/owner/register.ts`'s `onEvent`), taking each accepted message-tool call as a `message` (`src/shared/owner/message-call.ts`'s `isMessageTool`, both `mcp__to-human__message` and a recorded session's `mcp__maws__message`, counted once `messageCallState` reads `sent`), each `<message>` span (the parser's `to-human` kind) as one `message`, and each answered ask with its question and answer as `question` and `answered`;
+  - **lane A's source:** the endpoint's sub-less RL10 `host` messages (`rl10/link.ts:616`'s dispatch to `#host` at :632), handed in through a new `EndpointServices.channel.record(entry)` seam, beside `notifier.hostMessage` and not behind the `hosts.json` mark, which moves only once a `wrote` reaches the hub. `src` is `<project>/<writer>/<seq>` of the host event. Each message carries its project and its `src`, and `UNIQUE(src)` dedupes sminos's resend of the last 50;
   - the project id is sminos's project id (`smnsId`), lane B's through `src/services/index/org-project.ts`'s join;
   - tests.
 - **`src/endpoint`** (desk-track reviewed): `offers.ts` rows for `channel.history`, and the feed `channel` beside `attention`. The feed's frames: `snapshot` (the newest page) and `changed`. Also the `#host` hand-off and its test.
-  - **Filtering is lane-aware.** `attention.list`'s `eachSession` path places every id as a lane B `appSessionId` through the spine (`calls.ts:179-193, 451-463`; `targets.ts:260-278`), which a lane A entry doesn't have. So a new filter ranks each entry at `view`:
+  - **Filtering is lane-aware.** `attention.list`'s `eachSession` path places every id as a lane B `appSessionId` through the spine (`calls.ts:283`'s dispatch to `#eachSession` at :419; `targets.ts:269-278`'s `recordedPlacement` and `placeRecorded`), which a lane A entry doesn't have. So a new filter ranks each entry at `view`:
     - a lane A entry by its `engineSessionId` through the RL10 member record (the `session` rule's target);
     - a lane B entry by its `appSessionId` placement.
   - The rank is re-checked at each feed frame before it is sent, so a session that becomes private, or a share removed, stops its entries at once.
@@ -1602,7 +1608,7 @@ The door adds no authority. An act through it is authenticated by its step-up si
 - **Where the journal lives.** In the spine, beside the index that already holds the owner channel's marks. The endpoint only hands lane A's entries in. Rejected:
   - asking sminos to page its host store over RL10 (a desk-track protocol change, for history the spine can keep as it arrives);
   - the endpoint's own file, which would put a second store under `mawsd/endpoint/`.
-- **What counts as an entry.** For lane B, what the report view already marks as `to_human` (P4-R7: the message tool's message), plus answered asks; plain marked text is not a message, by Q5's "each to-human message". For lane A, sminos's host kinds as they arrive (`message`, `question`, `answered`).
+- **What counts as an entry.** For lane B, each to-human message as the report view reads it: a sent message-tool call (P4-R7) and each `<message>` span (the contract's other form, one message per span), plus need-input questions and their answers. `essential` and `insight` marks are not messages, by Q5's "each to-human message" (revised 2026-11-06 at M7b's cut). For lane A, sminos's host kinds as they arrive (`message`, `question`, `answered`).
 - **Back-fill.** None. A machine's journal starts empty at the build that brings it, and earlier entries stay where they were: pre-cutover ones in the log (M7a), others only in their transcripts. The Surprises say so, and the owner's week starts after it.
 - **Grades.** `view` per session, filtered as `attention.list` is, so a member sees the to-human entries of exactly the sessions whose transcript they may read.
 
@@ -2125,7 +2131,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 - **M3 (executable):** §K: `createStateSigner`, the next keys, `checks.ts`, the signer and its pending slot, the weekly asking, deliveries, `postState`, `OrgStatus`'s `signer` and `problem: 'signing'`, `org.resign`, `org.revokeSuperseded`, `org.rekey`, `org.discardPending`, `org.resetSigning`, `signing.json` (failing closed) and `registration.json`'s `signing` and `rekey`; `deployment admin root add`. No `WIRE_MINOR`, settings version, `IpcError` code or e2e group.
 - **M5 (executable):** §L: `memberName`, `OrgMember`, `OrgRows.members`, the `sidebar.people` layout key, `ownersLabel`. No layout version, `WIRE_MINOR` or settings version.
 - **M4a (executable):** §M: `successorProblems` and `stateProblems` in `org-protocol`, the pairing judges moved there, `OrgView`, `OrgChange`, `org.view`, `org.preview`, `org.change`, `org.pair.start`, `org.pair.approve`, `org.pair.cancel`, `OrgStatus`'s `pairing`, `OrgRefusal.attempt`, `Edit.endorse` and `StateSigner.sign`'s `endorse`. No `WIRE_MINOR`, settings version or e2e group.
-- **The rest (executable, 2026-11-06):** §N (M7a), §O (M7b), §P (M6a), §Q (M6b, with M5b's `record.owners`), §R (M4b) and §S (M4c). No `WIRE_MINOR` moves: the new endpoint offers and feeds are additive rows (OX1), and the index takes a new migration entry. M7a adds the `channel` tab kind with no layout version.
+- **The rest (executable, 2026-11-06):** §N (M7a), §O (M7b), §P (M6a), §Q (M6b, with M5b's `record.owners`), §R (M4b) and §S (M4c). No `WIRE_MINOR` moves: the new endpoint offers and feeds are additive rows (OX1), and the index takes new tables as `ADDED_TABLES` entries, not migrations (revised 2026-11-06). M7b's spine commands do move `WIRE_MINOR` (to 30, after #506 took 29): they are machine-owned wire entries, not endpoint offer rows. M7a adds the `channel` tab kind with no layout version.
 
 **§K. The signer** (M3).
 
@@ -2315,7 +2321,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 
 **§P. Reader state per member** (M6a).
 
-    // src/services/index/migrations.ts (a new entry)
+    // src/services/index/migrations.ts (two ADDED_TABLES entries, revised 2026-11-06)
     reader_state  (app_session_id, member, pinned, last_seen_uuid, last_seen_at, unread, PRIMARY KEY (app_session_id, member))
     member_drafts (app_session_id, member, doc, attachments, updated_at, PRIMARY KEY (app_session_id, member))
     // the router's command context gains reader?: 'owner' | MemberId   (absent: 'owner')
@@ -2477,6 +2483,12 @@ Each is built as its recommendation when its milestone is re-planned, unless the
 - Observation (M6a's design): two members who both own a machine share its owners' reader state, because the index can't tell which owner sits at a device.
 - Observation (M7a Task 1): the hub's `fanOut` sends a member's own `human` back to the socket that sent it, so words come back through the log after their `human-ack`. `words.logged` also clears a word whose nonce appears in the log.
   Evidence: `apps/desk-hub/src/objects/project.ts:1577-1586`.
+- Observation (M7b Task 1): a numbered migration for a new table cost a downgraded build its whole index. The cross-build downgrade scene caught migration 16, so the journal became an `ADDED_TABLES` entry (`IF NOT EXISTS`, `user_version` stays 15), the rule for any table no earlier build reads, M6a's included.
+  Evidence: Decision Log, M7b Task 1's `ADDED_TABLES` ruling; run 42292712838.
+- Observation (M7b Task 1): IPC event names had no main-only list, so `channel.changed` was bridged to every renderer window by default until `mainOnlyEvents` was added.
+- Observation (M7b Task 2): `INTEGER PRIMARY KEY` reuses a pruned maximum id, so opaque cursors needed `AUTOINCREMENT`; and the `channel` feed needed an `apps/org-protocol` hunk the spec hadn't foreseen (`MachineFeed`).
+- Observation (M7b's final gate): `e2e/library.spec.ts` rewinds the index to version 9 from a template built by the numbered migrations plus `ADDED_COLUMNS`, so an `ADDED_TABLES` entry the opener creates at any version was missing from the template, and the rewound index failed "is a version-9 index". The template now takes `ADDED_TABLES` too (9bb79f34e). Any later `ADDED_TABLES` entry is covered.
+  Evidence: run 42344559621 (e2e:library, packaged 1/2 red), 42357252517 (green).
 
 ## Decision Log
 
@@ -3142,6 +3154,133 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   7. (Round 2.) Only a project's newest channel writes its cache file, under a per-project generation count. A released channel's last snapshot is dropped once the project has been opened again. Task 1 item 9's join rule is unchanged, and the cost is re-reading from the hub what the old channel held after its last write.
   Date/Author: 2026-11-06, O8's executor (controller), from the branch fix wave's report.
 
+- Decision: M7b's refresh at its cut from master `f857f0450` (M7a landed as #504). M7b's consumed interfaces were reconciled against master.
+  1. The cited lines moved: `#host` is at `rl10/link.ts:632`, dispatched at :616; `#eachSession` is at `calls.ts:419`, dispatched at :283; the lane B placement is `targets.ts:269-278`. The parent is re-pinned at blob `92141de5`, where Decision Logs 229–238 change nothing M7b consumes.
+  2. Lane A's hand-off sits beside `notifier.hostMessage`, not behind the `hosts.json` mark, since the mark moves only once a `wrote` reaches the hub. `src = <project>/<writer>/<seq>` makes sminos's resend of the last 50 idempotent through `UNIQUE(src)`. This is the architect's acceptance (2026-11-06), and it is an `src/endpoint` hunk for the desk track's review.
+  3. Lane B's messages are read the way `src/shared/owner/message-call.ts` defines them for every MAWS reader. A sent call of either message tool counts: `mcp__to-human__message` today, and `mcp__maws__message` in recorded sessions. The spec named only the second, which has left its tool server. Each `<message>` span also counts, as the contract's other form of a message, one per span. `essential` and `insight` marks don't. The old line, "plain marked text is not a message", would have dropped every message a session without the tool sends. It is read as excluding the non-message marks and plain text; the architect accepted this (2026-11-06).
+  4. M7b defines no classifier of its own; this binds (the architect, 2026-11-06). The spine's lane B entries come from the same extraction the local report view uses to count a message (the parser, `isMessageTool`, and the span and question rules). The channel and this machine's own to-human view can then never disagree about what was a message. That extraction runs in the renderer today (`owner/report/project.ts`, `transcript/model/`), so Task 1 lifts its pure core into `src/shared/owner/`, and the report view and the spine both call it. Re-listing the three kinds in the spine was rejected, since it would let the two drift.
+  Date/Author: 2026-11-06, O8's executor (refresh pass).
+
+- Decision: M7b is built as four tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-high on the branch with a confidentiality lens.
+  1. The spine: `src/services/channel/` (the journal and its migration, `channel.history` and `channel.changed`, lane B's source from the owner channel's event batches, the `smnsId` join), and `journal.test.ts`.
+  2. The endpoint, in commits of its own for the desk track's review: `endpoint-seam.ts`'s `channel`, the `#host` hand-off, the `channel.history` offer row, the `channel` feed, and the lane-aware `view` filter re-checked at each frame. Also `test/endpoint/channel-feed.test.ts`.
+  3. Main and the renderer: `src/main/org/channel/machines.ts`, its cache, and the merge into `org.channel.*`; `ToHumanEntry.tsx` and `project.ts`'s placement; `machines.test.ts`.
+  4. `test/org/channel.local.test.ts` cases 5 and 6, and the e2e seed's to-human entries, photographed.
+  Date/Author: 2026-11-06, O8's executor.
+
+- Decision: the architect's rulings on M7b Task 1's report (2026-11-06).
+  1. New index tables are `ADDED_TABLES` entries beside `ADDED_COLUMNS`, not migrations. This is the rule `migrations.ts` already states for columns (P5 O7 M4): a newer `user_version` costs a downgraded build its whole index, and every swap keeps the previous build as its rollback.
+     - A table qualifies only if no earlier build reads it.
+     - It is created `IF NOT EXISTS`, indexes included, after the migrations at any version. It is never dropped or renamed; anything else stays a migration.
+     - A downgrade leaves a gap (the old build writes no journal rows), which is accepted. `UNIQUE(src)` absorbs the resends after a re-upgrade.
+     - The cross-build downgrade scene must pass whole, so the provisional skips are reverted.
+     - The same rule applies to M6a's two tables.
+  2. Questions asked through `mcp__maws__ask` are in, since that is the contract's question form today. They are sourced from the ask's own record (the question, its choices, its answer), with `src` keyed by the ask's id, not parsed from the transcript. The same record answers the ask and feeds the journal, which keeps the one-source condition. Need-input marks stay as the older form.
+  3. No entry may be dropped on the normal start path. Entries that arrive before the project's org id is derived are held in a bounded buffer and written once the id is known; an overflow is logged.
+  4. A message's text is bounded, with a visible cut marker, at a size the hub's event limit can carry after the envelope (the number cites the hub's limit).
+  5. `WIRE_MINOR` stands as a wire entry. Whoever lands second takes the next number at the merge. #506 landed first (2026-11-06, merge 23fc8c2bd) with RL2 minor 11 and `WIRE_MINOR` 29, so M7b takes RL2 minor 12 and `WIRE_MINOR` 30 in a new commit after its master merge.
+  Date/Author: 2026-11-06, the architect, recorded by O8's executor.
+
+- Decision: M7b Task 1, the spine (9327c77f2..a54248357), settles these points.
+  1. **The one extraction is `src/shared/owner/to-human-items.ts`.** The renderer-resident part of the report view's decision was `derive.ts`'s `toHumanRow` call rule and the text-block filter, and those moved there. The renderer's `to_human` row, the owner channel's marks and lane B all call it. The report view's broader "marked" rule (which also counts essentials and insights, for folding) is not "a message" and stays as it is.
+  2. **When a call counts.** A message-tool call counts once its result reads sent, whenever that result arrives, as the renderer's row does. Pending calls are bounded at 256 per session.
+  3. **Interrupted blocks.** Message spans in an interrupted block count, since the transcript draws them. Questions in one don't, since no mark is kept for them, so no answer could follow.
+  4. **No back-fill.** Lane B reads only events with a journal row (`seq !== null`). That also keeps a terminal-held session's transcript, followed from disk, out of lane B, where lane A's entries already cover it.
+  5. **Answers to need-input questions** come from the owner channel's delivered state (`ownerChannel.changed`), and only for a question the journal recorded. A later answer is a new entry.
+  6. **MAWS asks.** They are read from the host's journaled `maws.ask.opened` and `maws.ask.answered`, since the engine host's `AskTable` forgets an answered ask.
+     - Each question is one entry (`src …/ask/<askId>/<questionId>`), with its option labels as choices. Each answer is one `answered` entry, recorded only if its question was.
+     - The answer text is written for the person (`askAnswerOf`).
+     - A subagent's asks are in, since the person answers them in the same sheet. Its words stay out.
+     - The ask's `title` and `context` aren't carried. A multi-question ask groups by its `ask/<askId>/` prefix; a title would be an optional field, added only if the person can't follow without it (the architect).
+  7. **The hold.** Entries said before a project's org id is derived are held for lane B only, at most 1,000 across every session. Past that, the oldest goes, with one logged line, and the next flush counts what went. They are written in order on the next project change.
+  8. **The cuts.** The hub refuses an event over 1 MiB (`apps/desk-hub/src/protocol/parts.ts:5`'s `FRAME_LIMIT`, refused at `objects/log-store.ts:79`). So the journal cuts text at 64 KiB of UTF-8 and an option at 512 bytes, at a character boundary with `… [cut]`, and keeps at most 32 options. The worst case on the wire is 640 KiB. The cut sits inside `ChannelJournal.record`, so both lanes and the emitted event are bounded in one place.
+  9. **Storage.** `at` is stored as epoch milliseconds and returned as UTC ISO. History's `before` is an entry id, ordered `at DESC, id DESC`, with a default and maximum page of 200. Pruning runs at each record and at start, and the age bound applies on read too. `channel_entries` has no foreign key: a deleted session's entries stay the project's history, and Task 2's `view` filter governs who reads them.
+  10. **The command's reach.** `channel.history` is main-only (the preload doesn't bridge it) and graded `view`. `channel.changed` is a link event. `ProjectStore.org(id)` reads the join. `AddedTable` is `{table, sql}`, the entry's SQL owning its indexes.
+  The architect accepted items 6–8's choices: subagents' asks, the shared hold, and the option cuts.
+  11. (The review's fixes, ef3d17d7e and 832534dca.)
+     - `channel.changed` is a main-only event: names gain `mainOnlyEvents` beside `mainOnlyCommands`. The preload refuses it, and main's emitter sends a name that isn't bridged to no window on any path (`emit`, `emitFrom`, `emitTo`), while main's taps still hear the local machine's event.
+     - Every part of a lane B `src`, anchor and hold key is passed through `encodeURIComponent`, so an id containing a separator can't collide with another identity.
+     - An answer that arrives before its question waits for it: at most 256, the oldest dropped silently (answers to questions from before the journal began land here by design). It is recorded right after its question, under either listener order and either placement. The architect accepted this.
+  Date/Author: 2026-11-06, O8's executor (controller), from Task 1's report.
+
+- Decision: M7b's channel feed (the architect, 2026-11-06, on Task 2's report).
+  1. **An org-protocol commit of its own.** M7b carries one, for the desk track's review: `'channel'` in `apps/org-protocol/src/messages.ts`'s `MachineFeed`, `RL2_PROTOCOL.minor` 10 → 11 (12 after #506's merge), an `rl2.channel` capability in `src/endpoint/capabilities.ts`, and a `messages.test.ts` case. Polling `channel.history` was rejected: the spec's feed is live, and every earlier feed came this way.
+  2. **The sub names a project:** `{t:'sub', feed:'channel', project, cursor, credit}`. The snapshot is that project's newest viewable page, and `changed` carries only that project's entries. Main opens one feed per machine and project, only while a tab holds that channel.
+     - The endpoint checks the reader's view of the project when the sub opens, and again at each change as `view` is graded today.
+     - A reader whose access is revoked mid-feed has the feed ended, as the other feeds end on revocation.
+     - Reach is per project, so the check sits in one place, and other projects' entries never go on the wire.
+  3. **Older peers.** A device never asks an endpoint that lacks `rl2.channel` for the feed: main checks the capability first. Against an older endpoint the tab falls back to `channel.history` on open, with no live updates, or to greyed words if even that is missing. Tested in that direction, and `e2e:cross-build` stays green.
+  4. **No deployed component parses the feed name.** The production hub (hub@8813921b) must need no change, since a hub deploy is the owner's. The commit cites the code showing that the hub and its carriers relay RL2 frames without validating `feed`. If the hub parses it, the work stops and the architect is told.
+  5. **The minors.** Branch `remote-lane-a-agents` will also want RL2 minor 11. Whichever lands later takes the next minor at the merge, by a new commit, never a rebase. The same holds for `WIRE_MINOR` (29 here). The PR body names the numbers taken. (Resolved: #506 landed first with 11, and M7b takes RL2 12 and `WIRE_MINOR` 30.)
+  6. **The spine's page bound.** The spine's `channel.history` page is capped at 1 MiB of JSON, as the endpoint's is, with `more` exact.
+  Date/Author: 2026-11-06, the architect, recorded by O8's executor.
+
+- Decision: M7b Task 2, the endpoint (5a6b05638..28285e413), settles these points.
+  1. **No hub change.** After the handshake an RL2 sub travels inside a sealed frame (`apps/org-protocol/src/channel.ts:20`), and the hub passes channel frames on unread: it decodes only the multiplex envelope (`decodeChannelFrame`) and forwards the payload. Nothing in `apps/desk-hub/src` imports the RL2 message parser. This was checked at the hub production carries, hub@1eeff6de (the desk track, 2026-11-06), at `relay.ts:415-470` (`decodeChannelFrame`, then `open`/forward with `payload` untouched) and its `org-protocol` imports (`relay.ts:38-57`, envelope helpers only). It was checked first at 8813921b.
+  2. **The protocol.** `MachineFeed` gains `'channel'`. The sub's `project` is required for `channel` and refused on any other feed. RL2 is 1.12 (it was 1.11 until #506 took 11), and the endpoint lists `rl2.channel` in its `h2`.
+  3. **The feed's frames.** Each open answers `subbed` (mode `snapshot`, epoch `channel:<boot>`, seq 0), then a snap of `{entries, more}`: the project's newest page that the member may view. Each later viewable entry comes as `ev {body: {entry}}`. The end reasons are `no-target` (the project isn't in the org), `class` (a web-cards device), `removed` (the project left the head), `behind` and `unavailable`.
+  4. **Reach.** The feed's reach is the project's presence in `head.projects`, so every org member reaches every org project, as the hub admits them. Each entry's session is still ranked at `view` before it is sent.
+     - A lane A entry is ranked only against sminos's lane A record.
+     - An entry whose session has no record is visible to no one, its machine's owners included.
+  5. **Paging.** `channel.history` keeps reading journal pages until the caller's page is full, so `more` is exact and paging never stalls on other members' entries. A page is at most 1 MiB of JSON, on the endpoint and in the spine. For a member who may view few sessions, a page costs up to eleven journal reads.
+  6. **The seam and lane A.**
+     - The seam's `channel` is `record` only: history and changes travel through the existing `dispatch` and `onEvent`.
+     - A lane A entry arriving while the spine is cold loads it with the endpoint's trigger. An entry that can't be kept is logged.
+     - Lane A's `src` is encoded per part. A host message with no session isn't journaled. A question's texts are joined by a blank line.
+  Date/Author: 2026-11-06, O8's executor (controller), from Task 2's report.
+
+- Decision: M7b Task 2's review waves (13d419d6d..f11aa40a0), across our task reviewer's three rounds and the desk track's three (their 581, 589 and 591). They amend Task 2's items 3–5.
+  1. **Cursors.** A channel entry's id on the wire is an opaque cursor. Its journal id, zero-padded to 20 digits, is sealed with its lane and session by deterministic SIV: an HMAC-SHA256 nonce and AES-256-GCM, with the project as associated data. The key is 64 bytes, kept 0600 in the endpoint's own state (`channel/cursor-key`). An unknown, tampered, other-project or not-viewable `before` answers the same `{entries: [], more: false}`, after one ranks read and one `session.get`. Journal ids are `AUTOINCREMENT`, so a pruned id is never reissued, and the index file's `sqlite_sequence` gains a row for the table. The spine's main-only history keeps plain ids.
+  2. **Placements only narrow.** A lane B session is ranked at every placement the reader has heard since its mark, including those heard before its first read. Each distinct placement is kept once, at its latest hearing. Past 32 distinct placements the session is placed nowhere, which fails closed. A new or waiting entry is ranked by a record read begun after it arrived. A queued entry is checked again at every record event. A removed record places no one.
+  3. **Reach and paging.**
+     - `orgProject()` reach is checked at history's admission and publication, and on the feed's snapshot.
+     - A read ranks page by page, keeping only viewable entries plus the one past the page, and goes to the journal's end. Its bound is 4,000 entries scanned, twice the journal's 2,000; past that the answer is `unavailable`, never a false `more:false`. This replaces the 16 MiB byte cap the desk track accepted in round 2, because that cap could answer `more:false` with a viewable entry beyond hidden ones (the architect, 2026-11-06).
+     - A page is published only while everything it kept still stands and no session the read passed by has become viewable. Otherwise it is read again.
+     - Measured with plain 64 KiB text through the in-process spine, 2,000 entries with 1,999 of them hidden took 1.4–1.7 s for history and 1.3–1.5 s for the snapshot, against the device's 10 s call deadline.
+  4. **The snapshot.** A snapshot is tied to the ranks it began under, and a change of ranks reads it again. After three moved reads, the feed waits up to 2 s for the next change of rights (any `accessChanged`) and takes one more read. If that read moves too, or no change comes, the feed ends `unavailable`. It never publishes a page it can't vouch for. A queued snapshot is checked against the sessions its read passed by until it is taken; one that turns viewable sends the snapshot back to be read again, or ends the feed `behind` if part of it was already sent.
+  5. **The feed's changes.** Changes are ranked before they count toward `CHANGES_HELD`, which caps viewable-waiting and unranked entries separately. Past 1,000 unranked entries, the feed keeps only their journal ids (at most 2,000) and reads them again once nothing is queued, keeping only what the member views. A member who views none of them is sent nothing. Viewable ones go as `ev`s in journal order, and a new `snap` goes only when the viewable part fills a page. Another member's private activity never makes a frame, ends a feed or counts against one. A taken-back event's seq goes to the next event. `known` is only the queued snapshot page's ids, and placements nothing held needs are evicted.
+  6. **Recovery after an overflow** (the desk track's rounds 4 and 5, their 593 and 597, and the architect's rulings, 2026-11-06). Recovery never sends a snapshot. It sends what the member views as `ev`s, under the bound where ranked > `CHANGES_HELD` ends the feed `behind`, which counts only viewable entries.
+     - It keeps the ids of the entries it let go of unranked, and only those; nothing `#rank` decided goes in. An id is forgotten only once the journal no longer holds it. Past the journal's bound, the ids the journal has pruned are dropped, which keeps the list to at most 2,000 per project.
+     - It re-reads exactly those ids and sends the viewable ones in id order, merged with live arrivals.
+     - Overturned: round 4's ruling held a journal position, the AUTOINCREMENT id. That assumed delivery runs in id order, but snapshot pages are ordered by `(at, id)`, so no single id bounds what has been accounted for. Round 5 reproduced both directions of that, and a discarded entry replayed later. The architect recorded the ruling as his mistake.
+     - Round 6 checks this version. After it, only a content leak or a silent loss of a viewable entry is fixed; anything else goes to residue. Accepted: after a burst of more than 1,000 hidden entries, a viewable lane A event waits behind the catch-up's placement reads. That is a latency that depends on hidden entries; it concerns when something is sent, not what.
+  7. **Residue, for the tech-debt tracker at landing:**
+     - A queued lane B entry can still leave if its record moves silently just before credit, before the notification is heard; the text was authorized before it was queued. Rated minor (the architect).
+     - The real-socket timing at the maximum serialized payload is unmeasured.
+     - The recovery latency in item 6.
+     - Ordering across overlapping recovery batches, rated P2 by the desk track's round 6 (their 601). A finished recovery starts sending while another batch is still let go, so a higher-id viewable entry can go out before a lower-id recovered one. Each entry still arrives once, with no gap and no audience breach. It closes when lower-id recovery candidates are considered before later ranked arrivals go out, with that case pinned. Its effect is confined to delivery order, because the Channel tab orders entries by `at`, then id (Task 3).
+  8. **The consumer dedupes** (the desk track's round 6 and the architect's ruling). Main's channel consumer dedupes by (machine, entry id) across snapshot, ev and history, since the transport dedupes stream positions only. Task 3 owns this.
+  The desk track's round 6 found the endpoint READY under the agreed final-round bar (2026-11-06).
+  Date/Author: 2026-11-06, O8's executor (controller), from Task 2's fix-wave sections.
+
+- Decision: M7b Task 3, main and the renderer (58e294092..19456cac9), settles these points. The architect accepted them (2026-11-06).
+  1. **`src/main/org/channel/machines.ts`** reads this Mac's spine and each roster machine, only while a tab holds the project's channel. For an endpoint listing `rl2.channel`, it opens the machine's `channel` feed: `subs.ts` now gates the sub on that capability, where before it gated feeds only on `rl2.feeds`. It pages older entries through `channel.history`.
+  2. **Machine states** are `live`, `read` (an older peer, read once at open), `offline` and `unavailable`, each with `asOf`. "as of" shows on a non-live machine's entries. An unavailable machine's entries are greyed, with one faint line naming it.
+  3. **Dedupe and order.** Entries dedupe on (machine, id), across snapshot, ev and history. The order shown is the entry's own `at`, then the machine's journal order, since an opaque cursor sorts nothing. That keeps the endpoint's delivery-order residue out of the tab.
+  4. **Replacement.** A whole read, to `more: false` or 500 entries, replaces the machine's entries, so a reach change takes them out of the member's view.
+  5. **The cache.** `<project>.machines.json` holds the newest 500 entries and at most 4 MiB per machine. It is checked strictly at load, and anything off reads as empty. It belongs to one reader, as M7a's cache does: signed out keeps the file's reader, the first sign-in from no reader is adopted, and any other reader resets it.
+  6. **The roster.** A machine leaves only while the reader is signed in, and at open only a non-empty roster prunes.
+  7. **The schema.** The change is additive and main-to-renderer only, so `WIRE_MINOR` doesn't move: optional `hosts` and `machines` on `org.channel.open`, and a by-key delta on `changed`. The entry carries one plain `session`, as `RemoteRow` does.
+  8. **The renderer.** To-human entries are a renderer kind of their own (`to-human`), drawn by `ToHumanEntry.tsx`. Answers pair with their question by `src` on the same machine. Lane A answers stand alone, since nothing in them names their question. A grouped ask carries no title field, because each question's own text and choices are enough to follow.
+  9. **Wiring.** This Mac's spine is late-bound in `app.ts`, because the org session is built before the services bus.
+  9a. **Journal order across pages** (the branch review's finding, fixed in 1d3caff96 and ba7d57c92). A read's first page and live entries take places above every entry already held, and its older pages take places below. The place reaches the renderer as `ChannelHost.order`, and `state.ts` orders by time, then machine, then `order`, so an ask straddling a page boundary keeps its questions in sequence.
+  10. **Residue, for the tech-debt tracker at landing.** A flapping link re-reads up to 500 entries per opening, and the open answer can carry up to 4 MiB per machine over IPC at the worst-case text size.
+  Date/Author: 2026-11-06, O8's executor (controller), from Task 3's report.
+
+- Decision: M7b Task 4, the local suite and the e2e seed (33098354b..daf8d4a3c), settles these points.
+  1. **Cases 5 and 6** sit in M7a's suite and run before case 4, which stops the hub.
+     - The endpoint and its spine journal are real, fed over their real RL10 socket. Sminos's side is `FakeSminos`, because sminos lives outside the repo.
+     - This Mac's spine is real and fed through lane B's real source. The services bus around it is a stand-in, because no `mawsd` runs in a suite.
+     - Titles come by the real paths: a lane A session's from its listing, a lane B session's from its record.
+     - Case 6 drops the link by stopping the endpoint. It proves the outcome, not which of `machines.ts`'s two paths marks the machine offline.
+  2. **The older peer** is a second real endpoint whose `h2` withholds `rl2.channel`. It is read through one `channel.history` call, and no feed is opened.
+  3. **The e2e seed** adds to-human entries from two machines, a multi-question MAWS ask with its answers, a lane A question, long titles, and one machine offline with "as of" and one unavailable. These are photographed under classic scrollbars. The screenshots caught two faults:
+     - A to-human entry's chip fell back to the raw ref. It now falls back to `ChannelMachine.name`, and the roster's name still wins.
+     - The header's title didn't give way before its machine chip. Now it does, and the chip keeps up to 24 characters.
+  4. **The open answer's weight** at the seed's realistic size is 42,904 bytes of JSON. The 48 log events take 37,508, the 9 to-human entries 3,591 (about 400 each), the sessions 850 and the machines 377.
+  5. **M7a's `Party`** in `parts.tsx` shrinks proportionally in the same way, so a long title can cut a say's machine chip too. It was left as it is, for the architect.
+  Date/Author: 2026-11-06, O8's executor (controller), from Task 4's report.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
@@ -3250,3 +3389,29 @@ Retrospective (M7a). Built as three tasks under subagent-driven execution, each 
 - **Task 3's screenshots.** They caught two layout faults that happy-dom couldn't, as M4a's did.
 
 A future child that reads hub-served content into a cache should key the cache, its cursor and every projection by the reader whose rights fetched it. It should also carry each datum's provenance to the point of display, not just to the point of judgment.
+
+**M7b (2026-11-07, PR from `p5-o8-m7b`).** A project's Channel tab shows every session's to-human entries from every machine, placed by time among M7a's entries. Each entry carries its session's title and machine chip. A machine that isn't live shows "as of", and one that can't be read is greyed. The entries are:
+- messages: lane A's to-human tool, lane B's message tool and `<message>` spans;
+- questions, MAWS asks among them, with their choices;
+- the answers given to them.
+
+Each machine keeps its own entries in its spine's journal, an `ADDED_TABLES` table, so a downgraded build keeps its index. It holds the newest 2,000 per project and 30 days. Lane B's entries come from the one extraction the report view uses. Lane A's come from sminos's host messages, handed over beside `notifier.hostMessage`.
+
+The endpoint serves a member only the entries of sessions they may `view`:
+- through `channel.history`, paged with opaque cursors;
+- through a project-scoped `channel` feed (`rl2.channel`, RL2 1.12), whose rank is re-checked at every change of rights. Another member's private activity never makes a frame.
+
+Main reads this Mac's spine and each roster machine. It falls back to history against an older endpoint, dedupes on (machine, id), and caches per machine for one reader.
+
+Evidence:
+- the unit suites: `journal`, `to-human-items`, `channel-view`, `channel-cursors`, `channel-feed-queue`, `channel-feed`, `machines`, the renderer's `state`, `project`, `ToHumanEntry` and `ChannelView`;
+- `test/org/channel.local.test.ts` 7, on desk-hub's Worker in Miniflare, with a real endpoint and a real spine journal over RL10. It covers to-human entries from both lanes with their titles and machines, "as of" after the link drops, and an older peer read through history alone;
+- `e2e/channel.spec.ts`'s to-human entries, photographed;
+- the gates the PR body lists.
+
+Retrospective (M7b). Built as four tasks, with a review at each frontier and reviewer-high on the branch. The desk track reviewed the endpoint and org-protocol commits over six rounds.
+- **Where the rounds went.** Thirteen items came down to five, then two, then two, then nothing under the agreed final-round bar. Nearly every item was one shape: an endpoint that answers a member must never let what that member can't see change what it sends, whether in content, existence, frame type, timing of an end, or completeness of a page. Such leaks hide in recovery paths that run only under load, such as overflows and restarts, where "send something reasonable" quietly depends on hidden state.
+- **A ruling that was overturned.** The round-4 position ruling held a journal position. It assumed delivery runs in id order, which snapshot pages ordered by `(at, id)` broke. Recovery from an explicit list of let-go ids replaced it.
+- **The architect's binding conditions.** One extraction of a message, asks from their own record, and no start-path drops kept the channel and this machine's own to-human view from disagreeing.
+
+A future child that serves session content through a feed should state, before building, which inputs may influence each output (content, existence, frame type, end reason, paging) and test each one against a hidden-only variant. It should also key identities on an append-only id, never on a sort order.

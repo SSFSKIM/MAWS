@@ -4,7 +4,7 @@
 // per key after the outermost commit and is dropped on rollback, which is how the stores notify only what committed.
 import { existsSync, renameSync } from 'node:fs';
 import { DatabaseSync, type SQLInputValue, type StatementSync } from 'node:sqlite';
-import type { AddedColumn, Migration, Repair } from './migrations';
+import type { AddedColumn, AddedTable, Migration, Repair } from './migrations';
 
 export type Row = Record<string, SQLInputValue>;
 // What a column may be given: SQLite's own values, plus booleans stored as 0/1.
@@ -136,8 +136,15 @@ export function moveAside(path: string): string {
 // every statement fails with `index unavailable: <reason>` rather than reading or writing it. Before the pending
 // migrations, in their transaction, each repair the file lacks is applied and logged (`Repair`); a pending entry's
 // `before` step runs just before its SQL, in the same transaction (P5 O3-A). Then each added column the file lacks is
-// added, `user_version` unmoved (`AddedColumn`; P5 O7 M4).
-export function openDb(path: string, migrations: readonly Migration[], repairs: readonly Repair[], added: readonly AddedColumn[] = []): Db {
+// added, then each added table the file lacks is created, `user_version` unmoved (`AddedColumn`, P5 O7 M4; `AddedTable`,
+// P5 O8 M7b).
+export function openDb(
+  path: string,
+  migrations: readonly Migration[],
+  repairs: readonly Repair[],
+  added: readonly AddedColumn[] = [],
+  tables: readonly AddedTable[] = [],
+): Db {
   const known = migrations.length;
   let db: DatabaseSync;
   let version: number;
@@ -195,9 +202,11 @@ export function openDb(path: string, migrations: readonly Migration[], repairs: 
   }
   try {
     const absent = added.filter((column) => !hasColumn(db, column.table, column.column));
-    if (absent.length > 0) {
+    const absentTables = tables.filter((table) => !hasTable(db, table.table));
+    if (absent.length > 0 || absentTables.length > 0) {
       db.exec('BEGIN IMMEDIATE');
       for (const column of absent) db.exec(`ALTER TABLE ${column.table} ADD COLUMN ${column.column} ${column.definition}`);
+      for (const table of absentTables) db.exec(table.sql);
       db.exec('COMMIT');
     }
   } catch (error) {
@@ -216,6 +225,10 @@ export function openDb(path: string, migrations: readonly Migration[], repairs: 
 // may be migrating nor takes a lock on it; every statement fails with `index unavailable: <reason>`, as for a newer file.
 export function refusedDb(reason: string): Db {
   return new Db(new DatabaseSync(':memory:'), [], reason);
+}
+
+function hasTable(db: DatabaseSync, table: string): boolean {
+  return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined;
 }
 
 function hasColumn(db: DatabaseSync, table: string, column: string): boolean {

@@ -100,6 +100,14 @@ describe('preload bridge', () => {
     expect(transport.on).not.toHaveBeenCalled();
   });
 
+  // P5 O8 M7b: a main-only event (`MAIN_ONLY_EVENTS`) is no window's: the raw project channel's journal is read by main and
+  // the endpoint alone, a window sees only `org.channel.*`
+  it('throws synchronously for a main-only event, channel.changed, without touching IPC', () => {
+    const { transport } = fakeTransport();
+    expect(() => loose(createBridge(transport)).on('channel.changed', () => {})).toThrow('unknown event: channel.changed');
+    expect(transport.on).not.toHaveBeenCalled();
+  });
+
   it('delivers a registered event’s payload, without the IPC event object, until unsubscribed', () => {
     const { transport, deliver, listeners } = fakeTransport();
     const listener = vi.fn();

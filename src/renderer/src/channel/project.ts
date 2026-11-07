@@ -18,6 +18,20 @@
 // `legacy` entries. A verified or migrated entry of it draws as a session the lifecycle doesn't name: its event's own
 // alias and its writer's machine, so unchecked names never stand on a checked entry.
 //
+// M7b (Interfaces §O; M7b's Renderer bullet): every machine's to-human entries (main's `hosts`), as `toHumanEntries` draws
+// them, `placeByTime` among the log's:
+// - each names its session as the sidebar does: a lane A session by its lifecycle's alias and title (an authenticated
+//   one), else its listing's title; a lane B one by this Mac's record or another machine's listing; and its machine;
+// - a message as it was sent; a question with its choices and its answer, which joins it by its `src` on the same
+//   machine (an ask's `…/ask/<askId>/<question>/answered`, a need-input's `…/answer/<message>/<block>/<span>/<at>`, the
+//   latest standing), so it isn't drawn again on its own; an answer whose question isn't held (lane A's, which sminos
+//   records apart, or one past the bound) stands alone;
+// - one ask's questions, said at once, are one entry, in the order main keeps them (its journal's), grouped by their
+//   `ask/<askId>/` src prefix; each question carries its text and choices, which is all the person needs to follow it;
+// - an entry of a machine that isn't live is "as of" the machine's time (offline, or an older one read once); one of a
+//   machine that answers neither (`unavailable`) is greyed.
+// Placement is by time: each goes before the first log entry said after it, the words the log doesn't hold yet last.
+//
 // `waitingFor` is the "Waiting on you" section's filter: the open requests of the sessions the sidebar files under this
 // org project, this Mac's and other machines' (`rowOfSession`, `rowOfListed`), a greyed machine's left out (nothing
 // there can be answered now).
@@ -25,8 +39,11 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord } from '@shared/ipc/schema';
-import type { ChannelEvent, ChannelRecipients, ChannelSession, ChannelWord, OrgMember } from '@shared/ipc/schema/org';
+import type { ChannelEvent, ChannelHost, ChannelMachine, ChannelRecipients, ChannelSession, ChannelWord, OrgMember } from '@shared/ipc/schema/org';
 import { waitsOnAnswer } from '@shared/attention/kinds';
+import { addressOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
+import { displayTitle, listedTitle } from '../sessions/title';
 import { rowOfListed, rowOfListedRecord, rowOfSession, type OrgIndex, type RowKey } from '../stores/org-projects';
 import type { ListedSession } from '../stores/sessions';
 import { CHANNEL } from './copy';
@@ -60,6 +77,21 @@ export type ExchangeEntry = Labelled & {
 };
 export type HostEntry = Labelled & { kind: 'host'; offset: number; party: ChannelParty; host: 'message' | 'question' | 'answered'; text: string; choices?: string[]; at: string };
 export type ChannelEntry = WordsEntry | SayEntry | ExchangeEntry | HostEntry;
+
+/** M7b: one question of a to-human entry, with its answer once it has one. */
+export type ToHumanQuestion = { key: string; text: string; choices: string[]; answer: { text: string; at: string } | null };
+/**
+ * M7b: a session's to-human entry from its machine's spine: `name` its alias (lane A) or title (lane B), `title` a lane A
+ * session's title beside its alias; `machineName` the machine's name as the channel's machines say it (null for one they
+ * don't hold), which its chip says when the roster doesn't name the machine (its cached entries, signed out); `asOf` its
+ * machine's time while that machine isn't live; `greyed` while the machine answers neither the feed nor the history call.
+ */
+export type ToHumanEntry = { kind: 'to-human'; key: string; machine: MachineRef; machineName: string | null; name: string; title: string | null; at: string; asOf: string | null; greyed: boolean } & (
+  | { host: 'message' | 'answered'; text: string }
+  | { host: 'question'; questions: ToHumanQuestion[] }
+);
+/** What the stream draws: the log's entries and the machines' to-human entries, placed by time. */
+export type StreamEntry = ChannelEntry | ToHumanEntry;
 
 /** A word after the log: main's pending, the signed-in member's own. */
 export type TailWord = { key: string; text: string; to: ChannelRecipients; state: WordState };
@@ -211,4 +243,126 @@ export function waitingFor(input: {
     out.push(...items.filter(waitsOnAnswer));
   }
   return out.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+}
+
+/** The parts of a lane B `src` (`<project>/lane-b/<appSessionId>/<anchor…>`, each part encoded); null for any other. */
+const laneBParts = (src: string): string[] | null => {
+  const parts = src.split('/');
+  return parts.length >= 4 && parts[1] === 'lane-b' ? parts : null;
+};
+/** The `src` of the question an answer answers, on its machine; null when its src names none. */
+function questionOf(src: string): string | null {
+  const parts = laneBParts(src);
+  if (parts === null) return null;
+  const [kind, ...anchor] = parts.slice(3);
+  if (kind === 'ask' && anchor.length === 3 && anchor[2] === 'answered') return [...parts.slice(0, 3), 'ask', anchor[0], anchor[1]].join('/');
+  if (kind === 'answer' && anchor.length === 4) return [...parts.slice(0, 3), 'text', ...anchor.slice(0, 3)].join('/');
+  return null;
+}
+/** The ask a question was asked in (`…/ask/<askId>`), which groups its questions; null for any other question. */
+function askOf(src: string): string | null {
+  const parts = laneBParts(src);
+  return parts !== null && parts[3] === 'ask' && parts.length === 6 ? parts.slice(0, 5).join('/') : null;
+}
+
+/** A session as the sidebar names it: lane A by its authenticated lifecycle, else its listing; lane B by its record or listing. */
+function sessionName(host: ChannelHost, names: { sessions: ReadonlyMap<string, ChannelSession>; records: ReadonlyMap<AppSessionId, SessionRecord>; listed: ReadonlyMap<AppSessionId, ListedSession> }): { name: string; title: string | null } {
+  const id = host.session;
+  if (id === null || id === '') return { name: CHANNEL.nobody, title: null };
+  const address = addressOf(host.machine, id as AppSessionId);
+  if (host.lane === 'A') {
+    const lifecycle = names.sessions.get(id);
+    if (lifecycle?.authenticated) return { name: lifecycle.alias || id.slice(0, 8), title: lifecycle.title };
+  } else {
+    const record = names.records.get(address);
+    if (record !== undefined) return { name: displayTitle(record), title: null };
+  }
+  const listing = names.listed.get(address);
+  return { name: listing === undefined ? id.slice(0, 8) : listedTitle(listing), title: null };
+}
+
+export function toHumanEntries(input: {
+  hosts: readonly ChannelHost[];
+  machines: readonly ChannelMachine[];
+  sessions: readonly ChannelSession[];
+  records: ReadonlyMap<AppSessionId, SessionRecord>;
+  listed: ReadonlyMap<AppSessionId, ListedSession>;
+}): ToHumanEntry[] {
+  const names = { sessions: new Map(input.sessions.map((s) => [s.session, s])), records: input.records, listed: input.listed };
+  const machines = new Map(input.machines.map((m) => [m.machine, m]));
+  const onMachine = (host: ChannelHost, src: string) => `${host.machine} ${src}`;
+  // each question by its machine and src, and the latest answer to it there
+  const asked = new Set(input.hosts.filter((h) => h.kind === 'question').map((h) => onMachine(h, h.src)));
+  const answers = new Map<string, { text: string; at: string }>();
+  const paired = new Set<string>();
+  for (const host of input.hosts) {
+    if (host.kind !== 'answered') continue;
+    const question = questionOf(host.src);
+    if (question === null || !asked.has(onMachine(host, question))) continue;
+    paired.add(host.key);
+    const key = onMachine(host, question);
+    const held = answers.get(key);
+    if (held === undefined || Date.parse(host.at) >= Date.parse(held.at)) answers.set(key, { text: host.text, at: host.at });
+  }
+  const out: ToHumanEntry[] = [];
+  const asks = new Map<string, Extract<ToHumanEntry, { host: 'question' }>>();
+  for (const host of input.hosts) {
+    if (paired.has(host.key)) continue;
+    const machine = machines.get(host.machine);
+    const base = {
+      kind: 'to-human' as const,
+      key: host.key,
+      machine: host.machine,
+      machineName: machine?.name ?? null,
+      ...sessionName(host, names),
+      at: host.at,
+      asOf: machine === undefined || machine.state === 'live' ? null : machine.asOf,
+      greyed: machine?.state === 'unavailable',
+    };
+    if (host.kind !== 'question') {
+      out.push({ ...base, host: host.kind, text: host.text });
+      continue;
+    }
+    const question: ToHumanQuestion = { key: host.key, text: host.text, choices: host.choices ?? [], answer: answers.get(onMachine(host, host.src)) ?? null };
+    const ask = askOf(host.src);
+    const group = ask === null ? undefined : asks.get(onMachine(host, ask));
+    if (group !== undefined) {
+      group.questions.push(question);
+      continue;
+    }
+    const entry: Extract<ToHumanEntry, { host: 'question' }> = { ...base, host: 'question', questions: [question] };
+    if (ask !== null) asks.set(onMachine(host, ask), entry);
+    out.push(entry);
+  }
+  return out;
+}
+
+/** When a log entry was said, for placing by time; null for a word the log doesn't hold yet, or a time that doesn't read. */
+function saidAt(entry: ChannelEntry): number | null {
+  const at = entry.kind === 'exchange' ? entry.first : entry.at;
+  const ms = at === null ? NaN : Date.parse(at);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** The to-human entries (by time) among the log's: each before the first log entry said after it; the unlogged words last. */
+export function placeByTime(log: readonly ChannelEntry[], toHuman: readonly ToHumanEntry[]): StreamEntry[] {
+  const out: StreamEntry[] = [];
+  let next = 0;
+  /** The to-human entries said before `at` (all of them for null), placed. */
+  const placeBefore = (at: number | null) => {
+    while (next < toHuman.length && (at === null || (Date.parse(toHuman[next].at) || 0) < at)) {
+      out.push(toHuman[next]);
+      next += 1;
+    }
+  };
+  for (const entry of log) {
+    if (entry.kind === 'words' && entry.offset === null) placeBefore(null);
+    else {
+      const at = saidAt(entry);
+      if (at !== null) placeBefore(at);
+    }
+    out.push(entry);
+  }
+  placeBefore(null);
+  return out;
 }

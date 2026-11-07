@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MachineRef } from '../machine/ref'; // P5 O6 M2
 import { IpcErrorSchema } from './errors';
-import { NAMES, MAIN_ONLY_COMMANDS } from './names';
+import { NAMES, MAIN_ONLY_COMMANDS, MAIN_ONLY_EVENTS } from './names';
 import { commandChannel, commands, eventChannel, events, HOST_EVENTS, MACHINE_EVENTS, NAMESPACES, type Namespace } from './schema';
 import * as attention from './schema/attention';
 import * as engine from './schema/engine';
@@ -78,9 +78,10 @@ import * as clientPort from './schema/client-port'; // P5 O3-D
 import * as render from './schema/render'; // P5 O5 M3
 import * as remote from './schema/remote'; // P5 O7 M2
 import * as browserEngine from './schema/browser-engine'; // P5 O17
+import * as channel from './schema/channel'; // P5 O8 M7b
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */, daemon /* P5 O2 M5 */, machine /* P5 O6 M1 */, machines /* P5 O6 M3 */, org /* P5 O8 M1 */, laneA /* P5 O9 M2 */, machineSettings, clientPort /* P5 O3-D */, render /* P5 O5 M3 */, remote /* P5 O7 M2 */, browserEngine /* P5 O17 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */, daemon /* P5 O2 M5 */, machine /* P5 O6 M1 */, machines /* P5 O6 M3 */, org /* P5 O8 M1 */, laneA /* P5 O9 M2 */, machineSettings, clientPort /* P5 O3-D */, render /* P5 O5 M3 */, remote /* P5 O7 M2 */, browserEngine /* P5 O17 */, channel /* P5 O8 M7b */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -103,7 +104,7 @@ describe('ipc schema validates both directions', () => {
     // Debt wave 4: the preload bridges these zod-free lists, not the registries.
     it.each(NAMESPACES)('names/%s.ts lists exactly schema/%s.ts’s keys, once each', (ns) => {
       expect([...NAMES[ns].commands]).toEqual(Object.keys(modules[ns].commands).filter((name) => !MAIN_ONLY_COMMANDS.includes(name as never)));
-      expect([...NAMES[ns].events]).toEqual(Object.keys(modules[ns].events));
+      expect([...NAMES[ns].events]).toEqual(Object.keys(modules[ns].events).filter((name) => !MAIN_ONLY_EVENTS.includes(name as never)));
     });
 
     it('merges without losing a key to a duplicate', () => {
@@ -674,7 +675,7 @@ describe('ipc schema validates both directions', () => {
       // added since; E2's `deliverables` was too, until P3-L's cutover removed it).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */, 'daemon' /* P5 O2 M5 */, 'machine' /* P5 O6 M1 */, 'machines' /* P5 O6 M3 */, 'org' /* P5 O8 M1 */, 'laneA' /* P5 O9 M2 */, 'machineSettings', 'clientPort' /* P5 O3-D */, 'render' /* P5 O5 M3 */, 'remote' /* P5 O7 M2 */, 'browserEngine' /* P5 O17 */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */, 'daemon' /* P5 O2 M5 */, 'machine' /* P5 O6 M1 */, 'machines' /* P5 O6 M3 */, 'org' /* P5 O8 M1 */, 'laneA' /* P5 O9 M2 */, 'machineSettings', 'clientPort' /* P5 O3-D */, 'render' /* P5 O5 M3 */, 'remote' /* P5 O7 M2 */, 'browserEngine' /* P5 O17 */, 'channel' /* P5 O8 M7b */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });

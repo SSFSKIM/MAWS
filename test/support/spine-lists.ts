@@ -7,6 +7,7 @@ export const SPINE_COMMANDS = [
   'artifacts.connectorGrants', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool',
   'attention.acknowledge', 'attention.list', 'attention.request',
   'catalog.engine', 'catalog.engineRefresh', // P5 O4 M3: the catalog's machine half (LIBRARY_CATALOG_COMMANDS below)
+  'channel.history', // P5 O8 M7b: the project channel's journal, composed with the owner channel while the run holds spine.lock
   'connectors.adoptGrant', 'connectors.call', 'connectors.callback' /* P5 O7 M5c */, 'connectors.close', 'connectors.connect', 'connectors.declare', 'connectors.disconnect', 'connectors.open',
   'connectors.reconnect', 'connectors.refresh', 'connectors.servers', 'connectors.signIn', 'connectors.signInCancel', 'connectors.signInServer', 'connectors.unwatch',
   'connectors.visibility', 'connectors.watch', 'connectors.windowShown',

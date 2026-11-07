@@ -6,6 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { DocumentsOpen } from '@shared/host/socket-protocol';
 import type { ClientRef } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
+import type { NewHostEntry } from '@shared/ipc/schema/channel';
 import type { MachineRef } from '@shared/machine/ref';
 import type { PortTarget, RemotePortHandle } from '../mawsd/client-port';
 
@@ -73,6 +74,13 @@ export interface EndpointServices {
    * The endpoint sends a remote device a command whose meaning a newer host changed only to a host that lists it.
    */
   engineHostLists(capability: string): boolean;
+  /**
+   * P5 O8 M7b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §O): the project channel's journal in
+   * the spine, which lane A's to-human entries are handed to as sminos's sub-less RL10 host messages arrive (rl10/link.ts),
+   * the spine loaded for one if it is cold. Its history and its changes reach the endpoint as every spine read and event
+   * does: `dispatch('machine', 'channel.history', …)` and `onEvent`'s `channel.changed`.
+   */
+  channel: { record(entry: NewHostEntry): void };
   log(line: string): void;
 }
 
