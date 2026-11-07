@@ -4,7 +4,7 @@
 // through the one extraction (`@shared/owner/to-human-items`); lane A's are sminos's sub-less RL10 host messages, which the
 // endpoint hands in. `history` pages them newest first; `changed` carries each entry once, as it is recorded. Owned by the
 // machine and main-only: main (the channel's machines, O8 M7b Task 3) and the endpoint (its view-filtered offer and feed,
-// Task 2) read them, never a window. Additive on the wire (WIRE_MINOR 29).
+// Task 2) read them, never a window. Additive on the wire (WIRE_MINOR 30).
 import * as z from 'zod';
 import { AppSessionIdSchema, SessionIdSchema } from '../../graph/ids';
 import type { CommandSpec } from './common';
