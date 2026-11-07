@@ -3256,6 +3256,7 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   7. **The schema.** The change is additive and main-to-renderer only, so `WIRE_MINOR` doesn't move: optional `hosts` and `machines` on `org.channel.open`, and a by-key delta on `changed`. The entry carries one plain `session`, as `RemoteRow` does.
   8. **The renderer.** To-human entries are a renderer kind of their own (`to-human`), drawn by `ToHumanEntry.tsx`. Answers pair with their question by `src` on the same machine. Lane A answers stand alone, since nothing in them names their question. A grouped ask carries no title field, because each question's own text and choices are enough to follow.
   9. **Wiring.** This Mac's spine is late-bound in `app.ts`, because the org session is built before the services bus.
+  9a. **Journal order across pages** (the branch review's finding, fixed in 1d3caff96 and ba7d57c92). A read's first page and live entries take places above every entry already held, and its older pages take places below. The place reaches the renderer as `ChannelHost.order`, and `state.ts` orders by time, then machine, then `order`, so an ask straddling a page boundary keeps its questions in sequence.
   10. **Residue, for the tech-debt tracker at landing.** A flapping link re-reads up to 500 entries per opening, and the open answer can carry up to 4 MiB per machine over IPC at the worst-case text size.
   Date/Author: 2026-11-06, O8's executor (controller), from Task 3's report.
 
