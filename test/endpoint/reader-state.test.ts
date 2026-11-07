@@ -93,6 +93,14 @@ function ownersRead(index: Index, app: AppSessionId): Record<string, unknown> {
   return { pinned: true, unread: true, lastSeen: { messageUuid: 'm1', at: AT } };
 }
 
+/** A successor head, delivered: the machine's owners become `owners` (A signs; every other member keeps their shares). */
+async function giveMachine(f: Fixture, owners: string[]): Promise<void> {
+  const next = await successor(f.chain.at(-1)!, [org.a1], (s) => void (s.machines.find((m) => m.ref === f.ref)!.owners = owners));
+  const delivered = await f.endpoint.cli('revoke', ['-'], JSON.stringify(next));
+  expect(delivered.code, delivered.out).toBe(0);
+  f.chain.push(next);
+}
+
 async function call(r: Remote, name: string, input: unknown): Promise<Msg> {
   const id = `c${r.inbox.length}-${Math.random().toString(36).slice(2, 8)}`;
   await r.channel.send({ t: 'call', id, name, input });
@@ -205,23 +213,20 @@ describe('drafts per member', () => {
 // machine's owners change after the decision and before the machine hears the request, the request is decided again (an
 // ex-owner then reads and writes as the member they still are) or refused: never as the owners.
 describe('a reader decided before the machine’s owners change', () => {
-  /** The first `name` A asks is decided, then the machine is given to B (A stays a member) before the gate hands it on. */
-  function ownersMoveAfter(f: Fixture, name: string): { moved(): boolean } {
+  /**
+   * Each of the first `name`s A asks is decided, then the machine's owners become the next of `moves` (by default, once,
+   * B alone: A stays a member) before the gate hands it on.
+   */
+  function ownersMoveAfter(f: Fixture, name: string, moves: string[][] = [[org.B]]): { moved(): boolean } {
     const authorizer = f.endpoint.authorizer;
     const decide = authorizer.authorize.bind(authorizer);
-    let moved = false;
+    let made = 0;
     authorizer.authorize = async (request, who, now) => {
       const decision = await decide(request, who, now);
-      if (!moved && request.name === name && who.member === org.A) {
-        moved = true;
-        const next = await successor(f.chain.at(-1)!, [org.a1], (s) => void (s.machines.find((m) => m.ref === f.ref)!.owners = [org.B]));
-        const delivered = await f.endpoint.cli('revoke', ['-'], JSON.stringify(next));
-        expect(delivered.code, delivered.out).toBe(0);
-        f.chain.push(next);
-      }
+      if (made < moves.length && request.name === name && who.member === org.A) await giveMachine(f, moves[made++]);
       return decision;
     };
-    return { moved: () => moved };
+    return { moved: () => made === moves.length };
   }
 
   it('writes an ex-owner’s `session.reader.update` to their own row, never the owners’', async () => {
@@ -260,6 +265,7 @@ describe('a reader decided before the machine’s owners change', () => {
     expect(index.drafts.get(app)).toEqual(draft('the owners’ words'));
     expect(index.drafts.get(app, org.A)).toEqual(draft('mine'));
   });
+
 });
 
 // Fix wave F2 (the desk track's P2): a checkout feed's changes wait, in order, on each member's reading; while they wait
@@ -334,6 +340,33 @@ describe('a checkout feed’s changes waiting on a reading', () => {
     await settled();
     expect(p.reads).toEqual([org.A]);
     expect(p.sent.map((body) => readerFields(body.payload.record))).toEqual([{ ...NONE, pinned: true }]);
+  });
+});
+
+// Re-review G1: an owner's record waits in its subscription for the device's credit, so the owners' reading may leave
+// only while the head that made its member an owner stands. Through a real subscription: a first change spends the
+// device's one byte of credit, a second waits for more, the machine is given to another while the former owner keeps
+// their view by a share, then credit comes.
+describe('a checkout feed’s change queued for an owner', () => {
+  it('never sends a former owner the owners’ reading queued while they were one', async () => {
+    const { f, index, app } = await machine('view', [{ member: org.A, grade: 'view' }]);
+    const owners = ownersRead(index, app);
+    const a = await openRemote(f, org.a1, org.A);
+    await a.channel.send({ t: 'sub', sub: 'f1', feed: 'checkout', session: { lane: 'B', id: app }, cursor: null, credit: 1 });
+    expect(await waitFor(a, (m) => m.sub === 'f1' && (m.t === 'subbed' || m.t === 'ended'), 'the answer to feed f1')).toMatchObject({ t: 'subbed' });
+    const record = index.sessions.get(app)!;
+    f.host.emitMachine('session.changed', { record, cause: 'update', revision: 7 });
+    await until(() => changes(a, 'f1').length === 1, 'the first change, sent while A is an owner');
+    f.host.emitMachine('session.changed', { record: { ...record, title: 'queued' }, cause: 'update', revision: 8 });
+    await new Promise((resolve) => setTimeout(resolve, 100)); // told to the owner: queued, for want of credit
+    expect(changes(a, 'f1').map((c) => c.revision)).toEqual([7]);
+    await giveMachine(f, [org.B]);
+    await new Promise((resolve) => setTimeout(resolve, 100)); // A's access checked again: granted by the share
+    const from = a.inbox.length;
+    await a.channel.send({ t: 'credit', sub: 'f1', bytes: 4 * 1024 * 1024 });
+    const next = await waitFor(a, (m) => m.sub === 'f1' && (m.t === 'ended' || m.t === 'ev'), 'the feed’s next message', from);
+    expect(changes(a, 'f1').slice(1).map((c) => readerFields(c.record))).not.toContainEqual(owners);
+    expect(next).toMatchObject({ t: 'ended', reason: 'behind' });
   });
 });
 

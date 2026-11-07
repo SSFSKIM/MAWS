@@ -257,8 +257,9 @@ export class PlaneFeeds implements Plane {
 
   /**
    * `changed` as it is to one of the owners, in a step where the head that makes them one stands (the owners read again,
-   * once, when it moved); else with the member's own reading; with no `changed` (a member's own update), the record as
-   * its member reads it now. Nothing is asked of the machine for a feed that closed or ended meanwhile.
+   * once, when it moved), and only if it still stands as it leaves the subscription's queue (else the feed ends `behind`:
+   * `Subscription.ev`); else with the member's own reading; with no `changed` (a member's own update), the record as its
+   * member reads it now. Nothing is asked of the machine for a feed that closed or ended meanwhile.
    */
   async #tellNow(open: Open, changed: Changed | null, owners: OwnersRead | null): Promise<void> {
     const member = open.sub.channel.member;
@@ -266,7 +267,8 @@ export class PlaneFeeds implements Plane {
       const held = await read.owners;
       if (!this.#live(open)) return;
       if (readerOf(member, held) !== 'owner') break;
-      if (read.stands()) return this.#told(open, changed);
+      const standing = read;
+      if (standing.stands()) return this.#told(open, changed, () => standing.stands());
     }
     if (!this.#live(open)) return;
     const reading = await this.#record(open, dispatchAs(this.#ctx.dispatch, open.sub.channel.client, member)).catch((error: unknown) => {
@@ -282,8 +284,8 @@ export class PlaneFeeds implements Plane {
     return this.#open.get(open.sub) === open && !open.sub.ended;
   }
 
-  #told(open: Open, changed: Changed): void {
-    if (this.#live(open)) this.#send(open, 'session.changed', changed);
+  #told(open: Open, changed: Changed, stands?: () => boolean): void {
+    if (this.#live(open)) this.#send(open, 'session.changed', changed, stands);
   }
 
   /**
@@ -321,10 +323,10 @@ export class PlaneFeeds implements Plane {
     return answer.ok && isObject(answer.value) ? answer.value : null;
   }
 
-  #send(open: Open, name: string, payload: unknown): void {
+  #send(open: Open, name: string, payload: unknown, stands?: () => boolean): void {
     const { sub } = open;
     if (sub.ended) return;
     if (sub.backlog > (this.#ctx.backlogBytes ?? BACKLOG_BYTES)) return void sub.end('behind');
-    sub.ev({ epoch: this.#epoch, seq: ++open.seq }, { name, payload });
+    sub.ev({ epoch: this.#epoch, seq: ++open.seq }, { name, payload }, stands);
   }
 }
