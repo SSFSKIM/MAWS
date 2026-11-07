@@ -47,6 +47,12 @@ const open = async () => {
 };
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
 const level = (sheet: HTMLElement, name: string) => within(sheet).getByRole('radio', { name: new RegExp(`^${name}`) }) as HTMLInputElement;
+/** The people's lines the sheet shows as pending, top to bottom, each as the share it would send. */
+const pending = (sheet: HTMLElement) =>
+  [...sheet.querySelectorAll<HTMLElement>('[data-share-pending]')].map((li) => ({
+    member: li.getAttribute('data-share-person')!,
+    grade: li.getAttribute('data-share-pending') === 'remove' ? null : li.querySelector('select')!.value,
+  }));
 
 beforeEach(() => {
   resetShellStores();
@@ -113,6 +119,53 @@ describe('the sheet', () => {
       },
     ]);
     expect(within(sheet).getByRole('button', { name: SHARE.saving })).toBeTruthy();
+  });
+
+  it('shows each pending line in the order it sends them, a removal kept in its place until saved', async () => {
+    install({ 'org.policy.get': read([entry({ shares: [{ member: ANA, grade: 'view' }, { member: BEN, grade: 'list' }] })]) });
+    const sheet = await open();
+    await within(sheet).findByText(SHARE.general);
+    // the review's sequence: remove Ana, change Ben, then take Ana back at another grade
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Remove Ana' }));
+    const ana = sheet.querySelector(`[data-share-person="${ANA}"]`)!;
+    expect(ana.getAttribute('data-share-pending')).toBe('remove');
+    expect(within(ana as HTMLElement).getByText(SHARE.removing)).toBeTruthy();
+    const pick = within(sheet).getByRole('combobox', { name: SHARE.addPerson }) as HTMLSelectElement;
+    expect([...pick.options].map((o) => o.value)).toEqual(['', CHEN]); // a removal is undone in its place, not added again
+    fireEvent.change(within(sheet).getByRole('combobox', { name: "Ben's access" }), { target: { value: 'view' } });
+    fireEvent.click(within(sheet).getByRole('button', { name: SHARE.undoRemove('Ana') }));
+    fireEvent.change(within(sheet).getByRole('combobox', { name: "Ana's access" }), { target: { value: 'approve' } });
+    expect(pending(sheet)).toEqual([
+      { member: ANA, grade: 'approve' },
+      { member: BEN, grade: 'view' },
+    ]);
+    // then an addition, and a removal after it: each line where the sheet shows it
+    fireEvent.change(pick, { target: { value: CHEN } });
+    fireEvent.click(within(sheet).getByRole('button', { name: SHARE.add }));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Remove Ana' }));
+    const shown = pending(sheet);
+    expect(shown).toEqual([
+      { member: ANA, grade: null },
+      { member: BEN, grade: 'view' },
+      { member: CHEN, grade: 'view' },
+    ]);
+    fireEvent.click(within(sheet).getByRole('button', { name: SHARE.save }));
+    await settle();
+    expect(fake.invoked('org.policy.set')).toEqual([{ address: ADDRESS, shares: shown, policyRev: 7 }]);
+  });
+
+  it('drops a person added and removed before saving, and sends nothing for a change taken back', async () => {
+    install({ 'org.policy.get': read([entry()]) });
+    const sheet = await open();
+    await within(sheet).findByText(SHARE.general);
+    fireEvent.change(within(sheet).getByRole('combobox', { name: SHARE.addPerson }), { target: { value: CHEN } });
+    fireEvent.click(within(sheet).getByRole('button', { name: SHARE.add }));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Remove Chen' }));
+    expect(sheet.querySelector(`[data-share-person="${CHEN}"]`)).toBeNull();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Remove Ana' }));
+    fireEvent.click(within(sheet).getByRole('button', { name: SHARE.undoRemove('Ana') }));
+    expect(pending(sheet)).toEqual([]);
+    expect((within(sheet).getByRole('button', { name: SHARE.save }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('shows each line as it went: saved, a no-op, a skipped revision, a known refusal, and the policy as it then stands', async () => {
@@ -237,9 +290,15 @@ describe('what the sheet cannot offer', () => {
 
 describe('saveOf', () => {
   const policy = { session: 'sess-1', access: 'listed' as const, shares: [{ member: ANA, grade: 'view' as const }], policyRev: 3 };
-  it('is null when nothing changed, and carries only what did', () => {
-    expect(saveOf(ADDRESS, policy, 'listed', [{ member: ANA, grade: 'view' }])).toBeNull();
-    expect(saveOf(ADDRESS, policy, 'listed', [{ member: ANA, grade: 'approve' }])).toEqual({ address: ADDRESS, shares: [{ member: ANA, grade: 'approve' }], policyRev: 3 });
-    expect(saveOf(ADDRESS, policy, 'org-view', [{ member: ANA, grade: 'view' }])).toEqual({ address: ADDRESS, access: 'org-view', policyRev: 3 });
+  it("is null when nothing changed, and carries only what did, in the people's order", () => {
+    expect(saveOf(ADDRESS, policy, 'listed', [{ member: ANA, was: 'view', grade: 'view' }])).toBeNull();
+    expect(saveOf(ADDRESS, policy, 'listed', [{ member: ANA, was: 'view', grade: 'approve' }])).toEqual({ address: ADDRESS, shares: [{ member: ANA, grade: 'approve' }], policyRev: 3 });
+    expect(saveOf(ADDRESS, policy, 'org-view', [{ member: ANA, was: 'view', grade: 'view' }])).toEqual({ address: ADDRESS, access: 'org-view', policyRev: 3 });
+    expect(
+      saveOf(ADDRESS, policy, 'listed', [
+        { member: BEN, was: null, grade: 'list' },
+        { member: ANA, was: 'view', grade: null },
+      ]),
+    ).toEqual({ address: ADDRESS, shares: [{ member: BEN, grade: 'list' }, { member: ANA, grade: null }], policyRev: 3 });
   });
 });

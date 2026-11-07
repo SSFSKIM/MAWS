@@ -60,6 +60,10 @@ export const SHARE = {
   gradeOf: (name: string) => `${name}'s access`,
   newGrade: 'Their access',
   remove: (name: string) => `Remove ${name}`,
+  /** A person removed, shown in their place until Save. */
+  removing: 'Removed when you save',
+  undo: 'Undo',
+  undoRemove: (name: string) => `Undo removing ${name}`,
   addPerson: 'Add person',
   choose: 'Choose a person',
   add: 'Add',

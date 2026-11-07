@@ -2,8 +2,9 @@
 // Q4 as O18 amended it), opened from a session's header (the Toolbar's session actions) and its row's menu, for a session
 // you own (target.ts). Shaped like a shared document's: the general access, each with its line; the people it is shared
 // with, each at Can message, View, Converse or Approve, and Add person; the foot; and Save, which main signs with one
-// Touch ID for everything it changes (`org.policy.set`), sending the acts in the sheet's order: the access, then each
-// share changed or removed in the people's order, then each added.
+// Touch ID for everything it changes (`org.policy.set`), sending the acts in the order the sheet shows them: the access,
+// then each person's change top to bottom (the policy's people in its order, then each added). A person removed stays in
+// their place, marked, until Save; a failure stops the acts after it, so the order shown is the order that matters.
 //
 // - It opens on a fresh read of the session's policy (`org.policy.get {address}`). A machine whose sminos can't keep a
 //   session's reach says so and offers nothing; a session whose reach can't be read, or a read refused, says why and
@@ -32,7 +33,11 @@ import { ACCESS_ORDER, GRADE_ORDER, lineWords, outcomeWords, refusalWords, SHARE
 const SELECT = 'rounded-sm border border-border-strong bg-bg px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2';
 
 type Policy = Extract<RecordPolicyEntry, { policyRev: number }>;
-type Share = { member: string; grade: ShareGrade };
+/**
+ * A person in the sheet's list: the grade the policy gave them (null for one added here) and the grade the sheet now
+ * gives them (null for one to remove). The list's order is the order Save sends their changes.
+ */
+export type Person = { member: string; was: ShareGrade | null; grade: ShareGrade | null };
 type Read = { state: 'reading' } | { state: 'refused'; reason: string } | { state: 'unsupported' } | { state: 'unavailable' } | { state: 'ready'; policy: Policy };
 type Saved = Extract<OrgPolicySetResult, { ok: true }>;
 
@@ -48,19 +53,18 @@ async function readPolicy(address: AppSessionId): Promise<Read> {
   return entry === undefined || 'unavailable' in entry ? { state: 'unavailable' } : { state: 'ready', policy: entry };
 }
 
+/** What a person's line will change on Save, if anything. */
+function pendingOf(person: Person): 'add' | 'change' | 'remove' | undefined {
+  if (person.grade === person.was) return undefined;
+  return person.was === null ? 'add' : person.grade === null ? 'remove' : 'change';
+}
+
 /**
- * A save's input from the policy the sheet opened on and the draft: the access if it changed, then each share changed or
- * removed in the policy's order, then each added in the order it was added. Null when nothing changed.
+ * A save's input from the policy the sheet opened on and its people: the access if it changed, then each person's change
+ * in the list's order. Null when nothing changed.
  */
-export function saveOf(address: AppSessionId, policy: Policy, access: ShareAccess, draft: readonly Share[]): OrgPolicySetInput | null {
-  const now = new Map(draft.map((s) => [s.member, s.grade]));
-  const was = new Set(policy.shares.map((s) => s.member));
-  const shares: { member: string; grade: ShareGrade | null }[] = [];
-  for (const share of policy.shares) {
-    const grade = now.get(share.member) ?? null;
-    if (grade !== share.grade) shares.push({ member: share.member, grade });
-  }
-  for (const share of draft) if (!was.has(share.member)) shares.push(share);
+export function saveOf(address: AppSessionId, policy: Policy, access: ShareAccess, people: readonly Person[]): OrgPolicySetInput | null {
+  const shares = people.filter((p) => pendingOf(p) !== undefined).map(({ member, grade }) => ({ member, grade }));
   const changedAccess = access !== policy.access;
   if (!changedAccess && shares.length === 0) return null;
   return { address, ...(changedAccess ? { access } : {}), ...(shares.length > 0 ? { shares } : {}), policyRev: policy.policyRev };
@@ -93,7 +97,7 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
   const [read, setRead] = useState<Read>({ state: 'reading' });
   const [view, setView] = useState<OrgView | null | 'reading'>('reading');
   const [access, setAccess] = useState<ShareAccess>('listed');
-  const [draft, setDraft] = useState<Share[]>([]);
+  const [people, setPeople] = useState<Person[]>([]);
   const [adding, setAdding] = useState<{ member: string; grade: ShareGrade }>({ member: '', grade: 'view' });
   const [saving, setSaving] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -103,7 +107,7 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
     setRead(next);
     if (next.state !== 'ready') return;
     setAccess(next.policy.access);
-    setDraft(next.policy.shares.map((s) => ({ ...s })));
+    setPeople(next.policy.shares.map((s) => ({ member: s.member, was: s.grade, grade: s.grade })));
   };
   const reload = () => {
     setRefusal(null);
@@ -124,9 +128,9 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
   const nameOf = (member: string) => (member === me ? SHARE.you : (names.get(member)?.name ?? rowNames.get(member)?.name ?? FORMER_MEMBER));
   const emailOf = (member: string) => names.get(member)?.email ?? rowNames.get(member)?.email ?? null;
   const ready = read.state === 'ready' ? read.policy : null;
-  const change = ready === null ? null : saveOf(address, ready, access, draft);
+  const change = ready === null ? null : saveOf(address, ready, access, people);
   const unknown = saved?.results.find((r) => r.state === 'unknown');
-  const addable = view !== null && view !== 'reading' ? view.members.filter((m) => !m.you && !draft.some((s) => s.member === m.id) && !(owners ?? []).includes(m.id)) : [];
+  const addable = view !== null && view !== 'reading' ? view.members.filter((m) => !m.you && !people.some((p) => p.member === m.id) && !(owners ?? []).includes(m.id)) : [];
 
   const save = async () => {
     if (change === null) return;
@@ -214,25 +218,45 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
               </fieldset>
               <fieldset disabled={saving} className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
                 <legend className="mb-1 p-0 text-ui-sm font-medium text-fg">{SHARE.people}</legend>
-                {draft.length === 0 ? (
+                {people.length === 0 ? (
                   <p className="m-0 text-ui-sm text-fg-muted">{SHARE.nobody}</p>
                 ) : (
                   <ul aria-label={SHARE.people} className="m-0 flex list-none flex-col gap-2 p-0">
-                    {draft.map((share) => (
-                      <li key={share.member} data-share-person={share.member} className="flex min-w-0 flex-col gap-0.5">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="flex min-w-0 flex-1 flex-col">
-                            <span className="truncate text-ui text-fg">{nameOf(share.member)}</span>
-                            {emailOf(share.member) !== null && <span className="truncate text-ui-sm text-fg-muted">{emailOf(share.member)}</span>}
-                          </span>
-                          <GradeSelect label={SHARE.gradeOf(nameOf(share.member))} grade={share.grade} onChange={(grade) => setDraft((d) => d.map((s) => (s.member === share.member ? { ...s, grade } : s)))} />
-                          <button type="button" aria-label={SHARE.remove(nameOf(share.member))} title={SHARE.remove(nameOf(share.member))} onClick={() => setDraft((d) => d.filter((s) => s.member !== share.member))} className={`${QUIET} shrink-0 px-1.5`}>
-                            ✕
-                          </button>
-                        </div>
-                        <span className="text-ui-sm text-fg-muted">{SHARE.grade[share.grade].line}</span>
-                      </li>
-                    ))}
+                    {people.map((person) => {
+                      const name = nameOf(person.member);
+                      const email = emailOf(person.member);
+                      const set = (grade: ShareGrade | null) => setPeople((ps) => ps.map((p) => (p.member === person.member ? { ...p, grade } : p)));
+                      return (
+                        <li key={person.member} data-share-person={person.member} data-share-pending={pendingOf(person)} className="flex min-w-0 flex-col gap-0.5">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className={`flex min-w-0 flex-1 flex-col ${person.grade === null ? 'line-through' : ''}`}>
+                              <span className={`truncate text-ui ${person.grade === null ? 'text-fg-muted' : 'text-fg'}`}>{name}</span>
+                              {email !== null && <span className="truncate text-ui-sm text-fg-muted">{email}</span>}
+                            </span>
+                            {person.grade === null ? (
+                              <button type="button" aria-label={SHARE.undoRemove(name)} onClick={() => set(person.was)} className={`${SECONDARY} shrink-0`}>
+                                {SHARE.undo}
+                              </button>
+                            ) : (
+                              <>
+                                <GradeSelect label={SHARE.gradeOf(name)} grade={person.grade} onChange={set} />
+                                <button
+                                  type="button"
+                                  aria-label={SHARE.remove(name)}
+                                  title={SHARE.remove(name)}
+                                  // one added here leaves the list; one the policy holds stays, marked, until Save
+                                  onClick={() => (person.was === null ? setPeople((ps) => ps.filter((p) => p.member !== person.member)) : set(null))}
+                                  className={`${QUIET} shrink-0 px-1.5`}
+                                >
+                                  ✕
+                                </button>
+                              </>
+                            )}
+                          </div>
+                          <span className="text-ui-sm text-fg-muted">{person.grade === null ? SHARE.removing : SHARE.grade[person.grade].line}</span>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
                 <div data-share-add className="flex min-w-0 flex-col gap-0.5">
@@ -256,7 +280,7 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
                       type="button"
                       disabled={adding.member === ''}
                       onClick={() => {
-                        setDraft((d) => [...d, { member: adding.member, grade: adding.grade }]);
+                        setPeople((ps) => [...ps, { member: adding.member, was: null, grade: adding.grade }]);
                         setAdding((a) => ({ ...a, member: '' }));
                       }}
                       className={`${SECONDARY} shrink-0`}
