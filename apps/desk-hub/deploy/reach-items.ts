@@ -138,6 +138,15 @@ export function givenPastNotice(session: string, ownerOnly: string, after: strin
   return [...out];
 }
 
+/**
+ * Every audience stream an HTTP inventory lists. The history routes read as the machine's HTTP reader, which is served
+ * no audience stream of another machine's at all, so any stream there is a leak: the notice's exception is the RL1
+ * connection's (`givenPastNotice`), never this one's.
+ */
+export function inventoryStreams(inventory: HistoryInventory | null | undefined): string[] {
+  return (inventory?.projects ?? []).flatMap((p) => p.writers.map((w) => w.writer)).filter((w) => w.includes('~'));
+}
+
 // ---- the scene's means ----------------------------------------------------------------------------------------------
 
 const token = (scene: ReachScene, what: string) => `o18-${what}-${scene.tag}-${randomBytes(4).toString('hex')}`;
@@ -424,20 +433,22 @@ export async function item3a(scene: ReachScene, report: ReachReport): Promise<vo
     return `${listings.length} listing(s), none of S`;
   });
   await report.check('3a', 'PB’s hello, the history route and the inventory give nothing of S past its notice', async () => {
-    // B is withdrawn from S, so PB may hold the notice's stream (addressed to the withdrawn) and a share's from before
-    // it; never S's stream of its owner alone, nor anything of S written after the notice.
+    // B is withdrawn from S, so PB's RL1 connection may hold the notice's stream (addressed to the withdrawn) and a
+    // share's from before it; never S's stream of its owner alone, nor anything of S written after the notice. The HTTP
+    // inventory, read as the machine's HTTP reader, lists no stream at all.
     const hello = await probeHello(scene, scene.pb);
     const after = await noticeTs(scene.S);
-    const inventory = await probeGet<HistoryInventory>(scene, scene.pb, historyInventoryPath([scene.machines.a1.name]));
-    const listed = inventory.body?.projects.flatMap((p) => p.writers.map((w) => w.writer)) ?? [];
-    const given = givenPastNotice(scene.S.session, stream.writer, after, [...hello.have, ...listed], hello.backlog);
+    const given = givenPastNotice(scene.S.session, stream.writer, after, hello.have, hello.backlog);
     if (given.length) throw new Error(`PB was given ${given.join(', ')}`);
-    const held = streamsOf(new Set([...hello.have, ...listed]), scene.S.session);
+    const held = streamsOf(new Set([...hello.have, ...hello.backlog.map((e) => e.writer)]), scene.S.session);
+    const inventory = await probeGet<HistoryInventory>(scene, scene.pb, historyInventoryPath([scene.machines.a1.name]));
+    const listed = inventoryStreams(inventory.body);
+    if (listed.length) throw new Error(`the inventory lists a stream: ${listed.join(', ')}`);
     const page = await probeGet<HistoryLogPage>(scene, scene.pb, historyLogPath(scene.project.id, stream.writer, 0));
     if ((page.body?.events?.length ?? 0) !== 0) throw new Error(`the history route served ${page.body!.events.length} event(s) of ${stream.writer}`);
     const plain = await probeGet<HistoryLogPage>(scene, scene.pb, historyLogPath(scene.project.id, `${scene.machines.a1.name}/${scene.S.session}`, 0));
     if ((plain.body?.events?.length ?? 0) === 0) throw new Error(`the history route served S's plain writer nothing (${plain.status})`);
-    return `nothing of S after its notice (${after}) and no ${stream.writer} in the have, backlog or inventory (of S's streams PB holds ${held.length ? held.join(', ') : 'none'}); ${stream.writer} by name: nothing (${page.status}); the plain writer: ${plain.body!.events.length} event(s)`;
+    return `nothing of S after its notice (${after}) and no ${stream.writer} in the have or backlog (of S's streams PB holds ${held.length ? held.join(', ') : 'none'}); ${stream.writer} by name: nothing (${page.status}); the plain writer: ${plain.body!.events.length} event(s); the inventory lists no stream`;
   });
   await report.check('3a', 'PA, the owner’s own old machine, gets no stream over HTTP either', async () => {
     const page = await probeGet<HistoryLogPage>(scene, scene.pa, historyLogPath(scene.project.id, stream.writer, 0));

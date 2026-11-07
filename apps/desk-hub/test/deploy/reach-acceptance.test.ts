@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { PRODUCTION_HOST, STAGING_HOST, STAGING_ORG } from '../../deploy/config.ts';
 import { operatorRefusal, REACH_SCENES, sessionWords, tagWord, VmMachine, type ReachSceneName } from '../../deploy/endpoint-machine.ts';
 import { BUNDLE_PATH, bundleSteps, nodePin, reachItemsFor, reachMode, reachSetupHead } from '../../deploy/reach-acceptance.ts';
-import { givenPastNotice, item3b, policyRevOf, REACH_ITEMS, streamOfSession, streamsOf, uplinkWithheld, withheldHolds, type ReachReport, type ReachScene } from '../../deploy/reach-items.ts';
+import { givenPastNotice, inventoryStreams, item3b, policyRevOf, REACH_ITEMS, streamOfSession, streamsOf, uplinkWithheld, withheldHolds, type ReachReport, type ReachScene } from '../../deploy/reach-items.ts';
 
 const deploy = join(import.meta.dirname, '../../deploy');
 const staging = { worker: 'desk-hub-staging', host: STAGING_HOST };
@@ -224,6 +224,16 @@ describe('what the items read', () => {
     expect(givenPastNotice(SID, own, at, [own], [])).toEqual([own]);
     expect(givenPastNotice(SID, own, at, [], [...held, { writer: shared, seq: 3, kind: 'say', ts: '2026-11-07T10:00:01.000Z' }])).toEqual([`${shared}:3`]);
     expect(givenPastNotice(SID, own, at, [], [{ writer: own, seq: 1, kind: 'joined', ts: '2026-11-07T09:00:00.000Z' }])).toEqual([own]);
+  });
+
+  it('the HTTP inventory a probe is served lists no audience stream at all, a session born private’s included', () => {
+    const C1 = '2b3c4d5e-7c1d-4b9e-9a61-2d4f6b8c0e13';
+    const c1 = streamOfSession('o18-a1-x', C1, ['a'.repeat(32)]).writer;
+    const notice = streamOfSession('o18-a1-x', SID, ['b'.repeat(32)]).writer;
+    const inventory = { projects: [{ id: 'p', writers: [{ writer: `o18-a1-x/${SID}`, upTo: 3 }, { writer: c1, upTo: 1 }] }, { id: 'q', writers: [{ writer: notice, upTo: 1 }] }] };
+    expect(inventoryStreams(inventory)).toEqual([c1, notice]);
+    expect(inventoryStreams({ projects: [{ id: 'p', writers: [{ writer: `o18-a1-x/${SID}`, upTo: 3 }] }] })).toEqual([]);
+    expect(inventoryStreams(null)).toEqual([]);
   });
 
   it('3b’s say to S and U together adds no private marker: its public split, U’s, is the archive’s to keep', async () => {

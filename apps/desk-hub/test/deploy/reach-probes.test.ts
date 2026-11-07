@@ -4,12 +4,12 @@
 // machine; then what items 3c, 6b and 6c read through the probes — a hand-signed say refused `not-reachable` and kept
 // as a tombstone on the owner's log, a hello's `have` and backlog, and the HTTP history page by writer.
 import { join } from 'node:path';
-import { historyLogPath, stateHash, type HistoryLogPage } from 'org-protocol';
+import { historyInventoryPath, historyLogPath, stateHash, type HistoryInventory, type HistoryLogPage } from 'org-protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { deviceEntry, OrgAdmin } from '../../deploy/org-admin.ts';
 import { Cleanup } from '../../deploy/proof.ts';
 import { listProbe } from '../../deploy/reach-acceptance.ts';
-import { givenPastNotice, ownerLog, probeGet, probeHello, probeSay, streamOfSession, streamsOf, type Probe, type ProbeAt } from '../../deploy/reach-items.ts';
+import { givenPastNotice, inventoryStreams, ownerLog, probeGet, probeHello, probeSay, streamOfSession, streamsOf, type Probe, type ProbeAt } from '../../deploy/reach-items.ts';
 import { ADMIN, ORG, startLocalHub, type LocalHub } from '../support/local';
 import { adminKeysFile, LocalPerson } from '../support/local-person';
 import { genesis, memberId, newDevice, signedBy } from '../support/org';
@@ -100,6 +100,11 @@ describe('the probes on the local hub', () => {
     expect(new Set(held)).toEqual(new Set([streamOfSession('o18-a1', N, [B]).writer, streamOfSession('o18-a1', N, [A, B]).writer]));
     expect(hello.backlog.find((e) => e.writer === streamOfSession('o18-a1', N, [B]).writer)).toMatchObject({ kind: 'unlisted', ts: noticeTs });
     expect(givenPastNotice(N, ownerOnly, noticeTs, hello.have, hello.backlog)).toEqual([]);
+    // Over HTTP, as the machine's HTTP reader, the inventory lists none of the streams its RL1 connection holds.
+    const inventory = await probeGet<HistoryInventory>(at(), pb, historyInventoryPath(['o18-a1']));
+    expect(inventory.status).toBe(200);
+    expect(inventory.body!.projects.find((p) => p.id === project.id)?.writers.map((w) => w.writer)).toContain(`o18-a1/${P}`);
+    expect(inventoryStreams(inventory.body)).toEqual([]);
   });
 
   it('PA, the owner’s old endpoint: given no stream of S, by hello or by name', async () => {
