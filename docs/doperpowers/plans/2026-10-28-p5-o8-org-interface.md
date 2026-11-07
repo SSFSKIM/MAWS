@@ -3626,6 +3626,25 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      6. Only if the sitting falls after about 11-25: the one-time `cloudflared` login, before step 3.
   Date/Author: 2026-11-07, the desk track and the architect, recorded by O8's executor (controller).
 
+- Decision: M6b Task 3, the renderer (f4f81e35f, 9d6a52542, 539e8b815, bc22ad7b0, 8f1b003e4, 9ed8353a6, 6546231d2). It settles these points.
+  1. **The private-listing churn (Task 2 item 7) was visible.** Every 60 s it sent an `org.rows.changed`, reset the row's age to "now", moved it to the top in recency order, bumped its mark and rewrote the cache. It touched neither `org.policies.changed`, an open sheet, nor unread.
+     - Fixed in main (f4f81e35f): a private listing re-signed with nothing new is drawn at the revision and time it was first shown. That changes what the rows draw, not what they accept, so the anti-replay mark still advances.
+     - Residue m6b-r2: each period still verifies the listing and writes `listings.json`. After a relaunch, a private row's age restarts from its last re-sign.
+  2. **Refusals (Task 2 item 8).** Every known code has its own line in `copy.ts`. Any other reason reads "<machine> refused this", with the raw word beside it. N2's `unknown`/`malformed` reads that the outcome is unknown and the lines after it weren't sent, with a Reload. The e2e photographs both.
+  3. **The sheet.**
+     - The help lines for Listed, Org can view, Org can talk, View, Converse and Approve are written from RL §6.2. Bound strings keep the spec's straight apostrophes.
+     - A machine whose sminos can't keep a reach still offers Share; the sheet reads the bound line and offers only Close.
+     - Add person draws on the `org.view` members and defaults to View.
+     - Save order: access first, then changes and removals in the policy's order, then additions.
+  4. **Where Share is offered.**
+     - "Hub project" means a listing with a `project`, or a local project with an `smnsId`.
+     - On this Mac, ownership comes from its `record.policy` read.
+     - A listed row gets a menu only when Share is offered.
+  5. **The e2e case** is `e2e/share.spec.ts` in `e2e:settings`, over a harness-only fixture (`src/main/org/share-fixture.ts`, wired in `app.ts`, which also intercepts `machines.list` and holds the production rows' events). Its six screenshots: the marks, the hover card, the sheet, the sheet after a save, an unknown outcome, and an unsupported machine. Its first run found a real overflow: the sheet's selects pushed each person's row past the sheet. That's fixed.
+  6. **`record.policy`'s serial placements (m6b-r1).** The sheet's opening never waits on them, because its read names one session. A save's result does wait: main re-reads the whole machine before answering (`policy.ts:210`). It couldn't be timed on the fixture. It stays residue.
+  7. **The unit gate was red at 89d616e78 and nobody saw it.** `coverage.test.ts` lacked Task 1's `endpoint.local.act`, and only static had run on Tasks 1 and 2. bc22ad7b0 fixes it. From here, each task's gate set includes unit.
+  Date/Author: 2026-11-07, O8's executor (controller), from Task 3's report.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
