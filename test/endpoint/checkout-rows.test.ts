@@ -188,7 +188,7 @@ describe('the checkout’s offer rows (M4)', () => {
       expect([name, (claim.input as { action?: unknown }).action]).toEqual([name, KEPT_WITHOUT_ACTION.has(name) ? undefined : admitted]);
       expect([name, code(await call(a, name, args))]).toEqual([name, 'act-required']);
     }
-    expect([...KEPT_WITHOUT_ACTION]).toEqual(['files.upload']);
+    expect(Object.keys(ACTS).filter((name) => KEPT_WITHOUT_ACTION.has(name))).toEqual(['files.upload']); // of the checkout's writes (P5 O8 M6a: a draft's too, elsewhere)
   });
 
   it('admit `session.spawn` for a member who may spawn, stepped up, its sealed action handed to the spawn with its claim; refuse it for one who may not, and unstepped', async () => {

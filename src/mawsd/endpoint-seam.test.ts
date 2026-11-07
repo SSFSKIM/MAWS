@@ -96,13 +96,9 @@ function loader() {
 
 describe('the endpoint seam', () => {
   // P5 O17 M9a: EndpointServices.browser is DaemonServices.browser (R1), so the two are equal again, member for member.
-  // P5 O8 M6a: but for `dispatch`, until M6a's endpoint task gives EndpointServices.dispatch the `reader` argument
-  // DaemonServices.dispatch takes now (the endpoint's hunks are the desk track's to review, in commits of their own); the
-  // endpoint's calls, which name none, still go to it. That task restores the whole equality here.
+  // P5 O8 M6a: `dispatch` included, with the `reader` both take.
   it('DaemonServices is O10’s EndpointServices, and the two EndpointModule shapes are one', () => {
-    expectTypeOf<Omit<DaemonServices, 'dispatch'>>().toEqualTypeOf<Omit<EndpointServices, 'dispatch'>>();
-    expectTypeOf<DaemonServices['dispatch']>().toExtend<EndpointServices['dispatch']>();
-    expectTypeOf<DaemonServices>().toExtend<EndpointServices>();
+    expectTypeOf<DaemonServices>().toEqualTypeOf<EndpointServices>();
     expectTypeOf<Omit<EndpointModule, 'start'>>().toEqualTypeOf<Omit<O10Module, 'start'>>();
     expectTypeOf<Parameters<EndpointModule['start']>[0]>().toExtend<Parameters<O10Module['start']>[0]>();
   });

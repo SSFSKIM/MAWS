@@ -13,7 +13,7 @@
 //   over, delete, rename, the setup intent, replays): a remote session starts from "+ Session" and resumes by a send;
 // - the composer's machine-side extras with no remote route yet (`!` commands, `#` memory, flag settings, the working
 //   directory, the prompt history's append, a steer's cancel, the skills' reload);
-// - what is kept per member (drafts) or per window (visibility, the mods' surfaces and their panes, a pane's answer);
+// - what is kept per window (visibility, the mods' surfaces and their panes, a pane's answer);
 // - what acts on the asking client (open or reveal a file on the machine, a screenshot's preview there);
 // - the owner channel, attention's acknowledgement, the side thread's open and its send to the main conversation, and
 //   the mods' listing and override (machine-wide: they name no one session's surface).
@@ -36,9 +36,9 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   'session.deletions.preview': notYet('deleting a session'),
   'session.rename': notYet('renaming a session'),
   'session.renameSession': notYet('renaming a session'),
-  'session.update': notYet('pinning, archiving or marking a session read'),
-  // P5 O8 M6a: until the endpoint offers it (M6a's endpoint task drops this line with session.update's and the drafts')
-  'session.reader.update': notYet('pinning or marking a session read'),
+  // P5 O8 M6a: the record's `title` and `archived`, the owners' (a reader's pin and read marks are
+  // `session.reader.update`, offered)
+  'session.update': notYet('archiving a session or changing its title'),
   'session.intent.get': notYet('setting up a new session; use + Session'),
   'session.intent.patch': notYet('setting up a new session; use + Session'),
   'session.intent.release': notYet('setting up a new session; use + Session'),
@@ -54,9 +54,7 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   'session.history.append': notYet('adding to the prompt history'),
   'session.steer.cancel': notYet('taking back a message the agent hasn’t started'),
   'session.reloadSkills': notYet('reloading skills'),
-  // per member, per window
-  'session.drafts.get': notYet('drafts are kept on the Mac you wrote them on'),
-  'session.drafts.set': notYet('drafts are kept on the Mac you wrote them on'),
+  // per window (P5 O8 M6a: a member's drafts are offered, kept per member on the machine)
   'session.setVisible': notYet('the machine’s own windows'),
   'session.ui.render': notYet('mod surfaces'),
   'session.ui.press': notYet('mod surfaces'),
