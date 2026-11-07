@@ -3,8 +3,10 @@
 // signed-in member owns there), for the rows' marks and the hover card. A machine is read when its link comes up (each new
 // generation of it, this Mac's at the sign-in), and every whole read main makes is told as `org.policies.changed` (a
 // sheet's save reads its machine again), which replaces it; an answer asked for before an event of its machine applies
-// nothing, since the event is newer. Signing out, or another member signing in, forgets every read. A down machine keeps
-// its last read, as its rows keep their last state.
+// nothing, since the event is newer. Signing out, or another member signing in, forgets every read; an answer asked under
+// an earlier sign-in (the same member's again included) applies nothing, nor does an event while signed out (main tells
+// none then: policy.ts fences each read to the sign-in it started under). A down machine keeps its last read, as its rows
+// keep their last state.
 //
 // A row's mark: a session the reads name, whose access isn't Listed or that has shares (a lock for Private, a people mark
 // otherwise); another member's private session shared with you, by its listing's `audience` (a channel listing's: a
@@ -66,17 +68,19 @@ export interface PolicyStores {
 export function connectPolicies(client: MawsBridge = ipc, stores: PolicyStores = { machines: useMachines, hub: useHubAccess }): () => void {
   let live = true;
   let member = stores.hub.getState().member;
+  let signIn = 0; // bumped at every change of who is signed in, so an answer belongs to the sign-in it was asked under
   const heard = new Map<MachineRef, number>(); // the events heard of each machine, so an older answer applies nothing
   const readAt = new Map<MachineRef, number>(); // the link generation each machine was last read at
   const offEvent = client.on('org.policies.changed', (policy) => {
+    if (member === null) return;
     heard.set(policy.machine, (heard.get(policy.machine) ?? 0) + 1);
     apply(policy);
   });
   const read = (machine: MachineRef) => {
     const at = heard.get(machine) ?? 0;
-    const asker = member;
+    const asked = signIn;
     void client.invoke('org.policy.get', { machine }).then((result) => {
-      if (!live || asker !== member || (heard.get(machine) ?? 0) !== at) return;
+      if (!live || asked !== signIn || (heard.get(machine) ?? 0) !== at) return;
       if (result.ok) apply(result.value);
       else console.warn(`[policies] org.policy.get for ${machine} failed`, result.error);
     });
@@ -93,6 +97,7 @@ export function connectPolicies(client: MawsBridge = ipc, stores: PolicyStores =
   const offHub = stores.hub.subscribe((state) => {
     if (state.member === member) return;
     member = state.member;
+    signIn++;
     readAt.clear();
     usePolicies.setState({ reads: new Map() });
     sync();

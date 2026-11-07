@@ -1,7 +1,8 @@
 // Each machine's sessions' reach (P5 O8 M6b, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M6b's "Policies"
 // and "A row's mark"): a machine read when its link comes up (each new generation; this Mac's at the sign-in), the reads
 // replaced by `org.policies.changed`, an answer older than an event applying nothing, everything forgotten at a sign-out
-// or another member's sign-in; and the mark a session's read or listing gives it.
+// or another member's sign-in, an answer asked under an earlier sign-in (the same member's included) and an event while
+// signed out applying nothing; and the mark a session's read or listing gives it.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MachineState } from '@shared/ipc/schema/machines';
@@ -78,6 +79,24 @@ describe('connectPolicies', () => {
     expect(usePolicies.getState().reads.size).toBe(0);
     await fake.reply('org.policy.get', read(TEST_MACHINE, 'for-c'));
     expect(policyAt(usePolicies.getState().reads, at(TEST_MACHINE, 'for-c'))).toBeDefined();
+  });
+
+  it('drops an answer asked before a sign-out even when the same member signs in again: that is another sign-in', async () => {
+    roster(machine(TEST_MACHINE, 'up'));
+    off = connectPolicies(fake.client);
+    useHubAccess.setState({ access: null, member: null });
+    useHubAccess.setState({ access: 'connected', member: 'member-me' });
+    await fake.reply('org.policy.get', read(TEST_MACHINE, 'asked-before'));
+    expect(usePolicies.getState().reads.size).toBe(0);
+    await fake.reply('org.policy.get', read(TEST_MACHINE, 'asked-again'));
+    expect(policyAt(usePolicies.getState().reads, at(TEST_MACHINE, 'asked-again'))).toBeDefined();
+  });
+
+  it('takes no org.policies.changed while signed out', () => {
+    useHubAccess.setState({ access: null, member: null });
+    off = connectPolicies(fake.client);
+    fake.event('org.policies.changed', read(TEST_MACHINE, 'late'));
+    expect(usePolicies.getState().reads.size).toBe(0);
   });
 });
 

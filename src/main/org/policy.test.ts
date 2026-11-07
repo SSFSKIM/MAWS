@@ -35,7 +35,18 @@ async function world(options: { confirm?: Confirm; lanes?: Record<string, 'A' | 
   const calls: Array<{ machine: string; input: unknown }> = [];
   const sent: Array<{ machine: string; action: Action }> = [];
   const batches: ActRequest[][] = [];
-  const read = (machine: string, input: unknown): CallResult => {
+  // A machine's next reads wait while it is held (`hold` returns the release).
+  const gates: Record<string, Promise<void> | undefined> = {};
+  const hold = (machine: string) => {
+    let release!: () => void;
+    gates[machine] = new Promise<void>((resolve) => (release = resolve));
+    return () => {
+      gates[machine] = undefined;
+      release();
+    };
+  };
+  const read = async (machine: string, input: unknown): Promise<CallResult> => {
+    await gates[machine];
     calls.push({ machine, input });
     const queue = reads[machine];
     return (queue.length > 1 ? queue.shift() : queue[0]) ?? { ok: false, error: { code: 'unavailable' } };
@@ -43,7 +54,7 @@ async function world(options: { confirm?: Confirm; lanes?: Record<string, 'A' | 
   const link: PolicyLink = {
     call: async (name, input) => {
       expect(name).toBe('record.policy');
-      return read(MINI, input);
+      return await read(MINI, input);
     },
     actMany: async (requests) => {
       batches.push([...requests]);
@@ -73,7 +84,7 @@ async function world(options: { confirm?: Confirm; lanes?: Record<string, 'A' | 
         return outcomes[LOCAL].shift() ?? { state: 'done', result: { changed: true, policyRev: 0 } };
       },
       call: async (input) => {
-        const result = read(LOCAL, input);
+        const result = await read(LOCAL, input);
         return result.ok ? { ok: true, output: result.output } : { ok: false, code: result.error.code };
       },
     },
@@ -85,7 +96,7 @@ async function world(options: { confirm?: Confirm; lanes?: Record<string, 'A' | 
   const reading = (machine: string, ...answers: Array<RecordPolicyAnswer | CallResult>) => {
     reads[machine] = answers.map((a) => ('ok' in a ? a : { ok: true, output: a }));
   };
-  return { policies, prompts, session, signedIn, key, reads, outcomes, calls, sent, batches, emitted, acted, reading };
+  return { policies, prompts, session, signedIn, key, reads, outcomes, calls, sent, batches, emitted, acted, reading, hold };
 }
 
 describe('the record acts', () => {
@@ -323,5 +334,48 @@ describe('the policies read', () => {
     expect(await w.policies.get({ machine: LOCAL })).toEqual({ ok: false, machine: LOCAL, reason: 'unavailable' });
     w.session.set(null);
     expect(await w.policies.get({ machine: LOCAL })).toEqual({ ok: false, machine: LOCAL, reason: 'signed-out' });
+  });
+
+  describe('belong to the sign-in they started under: one that ends before they answer tells nothing, and answers signed out', () => {
+    const whole: RecordPolicyAnswer = { supported: true, policies: [{ session: 'a', access: 'private', shares: [], policyRev: 1 }] };
+    const heldThrough = async (change: (w: Awaited<ReturnType<typeof world>>) => void) => {
+      const w = await world();
+      w.reading(MINI, whole);
+      const release = w.hold(MINI);
+      const asked = w.policies.get({ machine: MINI });
+      const one = w.policies.get({ address: `${MINI}/a` });
+      await Promise.resolve();
+      change(w);
+      release();
+      return { w, answers: await Promise.all([asked, one]) };
+    };
+    const SIGNED_OUT = { ok: false, machine: MINI, reason: 'signed-out' };
+
+    it('signed out', async () => {
+      const { w, answers } = await heldThrough((w) => w.session.set(null));
+      expect(answers).toEqual([SIGNED_OUT, SIGNED_OUT]);
+      expect(w.emitted).toEqual([]);
+    });
+
+    it('another member signed in', async () => {
+      const { w, answers } = await heldThrough((w) => w.session.set({ ...w.signedIn, identity: { ...w.signedIn.identity, member: BEN } }));
+      expect(answers).toEqual([SIGNED_OUT, SIGNED_OUT]);
+      expect(w.emitted).toEqual([]);
+    });
+
+    it('the same member signed out and in again: a new sign-in, not theirs', async () => {
+      const { w, answers } = await heldThrough((w) => {
+        w.session.set(null);
+        w.session.set(w.signedIn);
+      });
+      expect(answers).toEqual([SIGNED_OUT, SIGNED_OUT]);
+      expect(w.emitted).toEqual([]);
+    });
+
+    it('but a new head adopted under the same sign-in is no new reader: the read is told', async () => {
+      const { w, answers } = await heldThrough((w) => w.session.changed());
+      expect(answers[0]).toEqual({ ok: true, machine: MINI, ...whole });
+      expect(w.emitted).toEqual([{ ok: true, machine: MINI, ...whole }]);
+    });
   });
 });

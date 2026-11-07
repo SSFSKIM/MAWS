@@ -16,6 +16,9 @@
 //   carries the revision it left, and a line whose revision skipped one is marked `elsewhere`. After the acts the
 //   machine's policies are read again whole, told (`org.policies.changed`) and the session's returned as it stands.
 //   After each act's outcome the rows read the machine's channel listings again (a private session's audience moved).
+// - A read belongs to the sign-in it started under (who is signed in, and which sign-in it is, as rows.ts binds its
+//   channel answers to their reader): one that answers after a sign-out or another sign-in, the same member's again
+//   included, tells nothing and answers `signed-out`, so no window is refilled with a reader's policies once they're gone.
 // - A refusal is passed on in its refuser's own words (the endpoint's `no-session` is plain text, as any other): only
 //   step-up's `step-up-cancelled` reads `cancelled`, and the ledger's `not-received` (`not-sent`) reads `tombstoned`.
 //
@@ -104,6 +107,22 @@ function entryOf(answer: RecordPolicyAnswer, session: string): { ok: true; entry
 export function createOrgPolicies(deps: OrgPoliciesDeps): OrgPolicies {
   const log = (line: string) => deps.log(`[org-policy] ${line}`);
 
+  // The sign-in a read starts under: who is signed in, and its generation, bumped whenever that changes (a sign-out
+  // included), so a sign-in after one that ended is another even for the same member. A new head adopted is no change.
+  const readerOf = () => {
+    const current = deps.session.current();
+    return current === null ? null : `${current.identity.org}\n${current.identity.member}`;
+  };
+  let reader = readerOf();
+  let generation = 0;
+  deps.session.onChanged(() => {
+    if (readerOf() === reader) return;
+    reader = readerOf();
+    generation++;
+  });
+  const signIn = () => ({ reader: readerOf(), generation });
+  const stands = (at: ReturnType<typeof signIn>) => at.reader !== null && at.generation === generation && readerOf() === at.reader;
+
   /** The machine's way in, or null when it has none (signed out; no link). */
   function doorOf(machine: MachineRef): Door | null {
     const current = deps.session.current();
@@ -156,10 +175,12 @@ export function createOrgPolicies(deps: OrgPoliciesDeps): OrgPolicies {
 
   /** Reads the machine's policies whole and tells them, or reads one session's. */
   async function read(machine: MachineRef, session: string | null): Promise<OrgPolicy> {
-    if (deps.session.current() === null) return { ok: false, machine, reason: 'signed-out' };
+    const at = signIn();
+    if (at.reader === null) return { ok: false, machine, reason: 'signed-out' };
     const door = doorOf(machine);
     if (door === null) return { ok: false, machine, reason: 'offline' };
     const result = await door.read(session);
+    if (!stands(at)) return { ok: false, machine, reason: 'signed-out' };
     if (!result.ok) return { ok: false, machine, reason: result.reason };
     const policy: OrgPolicy = result.answer.supported ? { ok: true, machine, supported: true, policies: result.answer.policies } : { ok: true, machine, supported: false };
     if (session === null) deps.emit(policy);
