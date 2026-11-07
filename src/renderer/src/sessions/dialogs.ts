@@ -56,6 +56,7 @@ export type OpenDialog =
   | { kind: 'hiddenProjects' } // W11 (I5)
   | WorktreesDialogRef // C12
   | { kind: 'remoteSetup'; request: SetupRequest } // P5 O7 M9: a project set up on another machine, or its trust card
+  | { kind: 'share'; address: AppSessionId } // P5 O8 M6b: a session's reach (share/ShareSheet.tsx)
   | ({ kind: 'confirm'; answer(yes: boolean): void } & ConfirmRequest);
 
 export const useDialogs = create<{ open: OpenDialog | null }>()(() => ({ open: null }));
