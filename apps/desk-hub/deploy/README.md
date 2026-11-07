@@ -385,7 +385,7 @@ The scenes' verbs beyond O10's: `as-session <session> say|access|share|spawn|lis
 its words structured since a step's words admit no space or `#`), `operator access|share …` (the operator at the
 scene's terminal under a pty the script holds, answering sminos's confirmation; staging's org alone), `operator-say`,
 `forge-say` (a `say` under the plain writer past the stream choice, acceptance 3c), the reads (`log-files`, `uplink`,
-`streams`, `audiences`, `policy-cache`, `grep-home`, `events`, `row`, `owed`, `archive-ls`) and `mawsd-freeze|thaw|stop|start`.
+`streams`, `audiences`, `policy-cache`, `grep-home`, `events`, `row`, `owed`, `archive-ls`, `archive-evidence`) and `mawsd-freeze|thaw|stop|start`.
 Each refuses words not of its shape before anything runs. The project is fresh; its `.smns` names a `remote` at the
 bare repository `/srv/o18-archive.git` (the scenes' group `o18arch`, root its owner), the archive, which each item that
 reads it designates (`PUT /api/projects/<p>/archive`) with `SMINOS_ARCHIVE_EVERY=60`.

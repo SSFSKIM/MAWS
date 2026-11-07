@@ -52,6 +52,10 @@
 #   row <session> <token>        the text of the first row the session was given holding the token (its frame, label)
 #   archive-ls [token…]          the run's archive (/srv/o18-archive.git) as root: `file <path>` for each file on main,
 #                                `tomb <path> <seq>` for each tombstone in them, `token <t> <n>` for each token's count
+#   archive-evidence             what the scene's archive runs on, for an archive wait that timed out: uplink.json's
+#                                designation (`archive`, `archive_at`, `archive_have`), project.json's remote and hub,
+#                                daemon.json's last archive run, the running daemon's SMINOS_ARCHIVE_EVERY and groups,
+#                                `git ls-remote` of the archive as the scene's user, daemon.log's last 40 archive lines
 #   mawsd-freeze | mawsd-thaw | mawsd-stop | mawsd-start   mawsd (and what it started) stopped by SIGSTOP and continued;
 #                                ended, and started again under its loop, serving
 # Nothing here names the owner, the owner's profile, sminos or daemon, or the VM's own mawsd (port 47830): a scene is
@@ -506,7 +510,7 @@ reach_words() {
     archive-ls) reach_only "$verb"; for t in "$@"; do is '^[A-Za-z0-9._:-]{4,64}$' "$t" || fail "archive-ls [token…]: not a token: $t"; done ;;
     events) reach_only "$verb"; (($# == 1)) && is '^[A-Za-z0-9._:-]{4,64}$' "$1" || fail "events <token>" ;;
     row) reach_only "$verb"; (($# == 2)) && is "$UUID_RE" "$1" && is "$TOKEN_RE" "$2" || fail "row <session> <token>" ;;
-    log-files | uplink | streams | audiences | policy-cache | owed | mawsd-freeze | mawsd-thaw | mawsd-stop | mawsd-start) reach_only "$verb"; (($# == 0)) || fail "$verb takes no words" ;;
+    log-files | uplink | streams | audiences | policy-cache | owed | archive-evidence | mawsd-freeze | mawsd-thaw | mawsd-stop | mawsd-start) reach_only "$verb"; (($# == 0)) || fail "$verb takes no words" ;;
   esac
 }
 
@@ -646,6 +650,36 @@ for path in sorted(glob.glob(os.path.join(sys.argv[1], "*.jsonl"))):
 # A JSON file printed on one line, or `none`.
 json_of() { if [[ -f $1 ]]; then python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",", ":")))' "$1"; else say none; fi; }
 
+EVIDENCE_PY='
+import json, os, sys
+home = sys.argv[1]
+def read(name):
+    try:
+        with open(os.path.join(home, name)) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return None
+for name, label, keys in (("uplink.json", "uplink", ("archive", "archive_at", "archive_have")), ("project.json", "project", ("remote", "hub", "root")), ("daemon.json", "record", ("archive", "error", "tick"))):
+    d = read(name)
+    print(label, "none" if d is None else json.dumps({k: d.get(k) for k in keys}, separators=(",", ":")))
+'
+# What the archive runs on, read as root (the daemon's environment by name alone: the scene's stub token is in it).
+archive_evidence() {
+  local h pid every out rc
+  h=$(project_home) || fail "$h"
+  python3 -c "$EVIDENCE_PY" "$h"
+  pid=$(pgrep -u $U -f -- 'daemon run' | head -1)
+  if [[ -n $pid ]]; then
+    every=$(tr '\0' '\n' </proc/$pid/environ | sed -n 's/^SMINOS_ARCHIVE_EVERY=//p')
+    say "daemon $pid SMINOS_ARCHIVE_EVERY=${every:-unset}; $U in $(id -nG $U)"
+  else say "daemon none running for $U"; fi
+  out=$(inns runuser -u $U -- env -i "${SCENE_ENV[@]}" git ls-remote "$ARCHIVE" 2>&1); rc=$?
+  say "ls-remote $ARCHIVE as $U: rc $rc $(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
+  grep -E 'archive|have|designat' $S/daemon.log 2>/dev/null | tail -40 | sed 's/^/log /'
+  true
+}
+
 archive_ls() {
   local -a git=(git -c "safe.directory=$ARCHIVE" --git-dir="$ARCHIVE")
   [[ -d $ARCHIVE ]] || fail "no archive at $ARCHIVE: run setup.sh"
@@ -753,9 +787,10 @@ case $verb in
   grep-home) python3 -c "$GREP_PY" "$S" "$1" ${3:+"$3"} ;;
   owed) scene_sminos daemon owed ;;
   archive-ls) archive_ls "$@" ;;
+  archive-evidence) archive_evidence ;;
   mawsd-freeze) freeze STOP ;;
   mawsd-thaw) freeze CONT ;;
   mawsd-stop) mawsd_stop ;;
   mawsd-start) mawsd_start ;;
-  *) fail "scene.sh [--scene a1|a2|b1|a3] check | up | enroll <name> | mawsd <args…> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | lane-b-up <tag> | lane-b-events <app> | started | down | params | as-session <session> <sub…> | operator access|share … | operator-say <token> <tag> | forge-say <writer> <recipient> <alias> <token> | row <session> <token> | events <token> | log-files | uplink | streams | audiences | policy-cache | grep-home <token> [--after <ts>] | owed | archive-ls [token…] | mawsd-freeze | mawsd-thaw | mawsd-stop | mawsd-start" ;;
+  *) fail "scene.sh [--scene a1|a2|b1|a3] check | up | enroll <name> | mawsd <args…> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | lane-b-up <tag> | lane-b-events <app> | started | down | params | as-session <session> <sub…> | operator access|share … | operator-say <token> <tag> | forge-say <writer> <recipient> <alias> <token> | row <session> <token> | events <token> | log-files | uplink | streams | audiences | policy-cache | grep-home <token> [--after <ts>] | owed | archive-ls [token…] | archive-evidence | mawsd-freeze | mawsd-thaw | mawsd-stop | mawsd-start" ;;
 esac

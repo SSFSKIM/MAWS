@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { PRODUCTION_HOST, STAGING_HOST, STAGING_ORG } from '../../deploy/config.ts';
 import { operatorRefusal, REACH_SCENES, sessionWords, tagWord, VmMachine, type ReachSceneName } from '../../deploy/endpoint-machine.ts';
 import { BUNDLE_PATH, bundleSteps, nodePin, reachItemsFor, reachMode, reachSetupHead } from '../../deploy/reach-acceptance.ts';
-import { givenPastNotice, inventoryStreams, item3b, policyRevOf, REACH_ITEMS, streamOfSession, streamsOf, uplinkWithheld, withheldHolds, type ReachReport, type ReachScene } from '../../deploy/reach-items.ts';
+import { archiveAfter, givenPastNotice, heldPastNotice, inventoryStreams, item3b, policyRevOf, REACH_ITEMS, streamOfSession, streamsOf, uplinkWithheld, withheldHolds, type ReachReport, type ReachScene } from '../../deploy/reach-items.ts';
 
 const deploy = join(import.meta.dirname, '../../deploy');
 const staging = { worker: 'desk-hub-staging', host: STAGING_HOST };
@@ -166,6 +166,10 @@ describe('the reach scenes’ verbs', () => {
     expect(await arch.archive(['o18-t-1'])).toEqual({ head: '0123456789ab', files: ['log/m.u.jsonl'], tombs: [{ file: 'log/m.u.jsonl', seq: 4 }], tokens: { 'o18-t-1': 0 } });
     const empty = new VmMachine({ devcloud: standin('@@BEGIN\narchive: no commit on main\n@@END 0\n').bin, vm: 'vm1' }, scratch(), { directUrl: 'ws://vm1:47841', scene: 'a1' });
     expect(await empty.archive()).toBeNull();
+    const ev = standin('@@BEGIN\nuplink {"archive":false}\nlog x archive\n@@END 0\n');
+    const said = new VmMachine({ devcloud: ev.bin, vm: 'vm1' }, scratch(), { directUrl: 'ws://vm1:47843', scene: 'b1' });
+    expect(await said.archiveEvidence()).toEqual(['uplink {"archive":false}', 'log x archive']);
+    expect(sceneLine(ev.scripts()[0])).toBe('/opt/o18-m6/scene.sh --scene b1 archive-evidence');
   });
 });
 
@@ -226,6 +230,25 @@ describe('what the items read', () => {
     expect(givenPastNotice(SID, own, at, [], [{ writer: own, seq: 1, kind: 'joined', ts: '2026-11-07T09:00:00.000Z' }])).toEqual([own]);
   });
 
+  it('what B’s machine holds of private S past its notice: audiences.json judged by its entry, never by the id search', () => {
+    const a = 'a'.repeat(32);
+    const own = { v: 1, capabilities: ['access', 'reach'], sessions: { [SID]: { owners: [a], members: [a], policyRev: 5 } } };
+    const listedEntry = { v: 1, capabilities: ['access', 'reach'], sessions: { [SID]: { owners: [a], members: null, policyRev: 4 }, [OTHER]: { owners: [a], members: null, policyRev: 1 } } };
+    // The rewritten document names S (its listed entry), and the search after the notice counts it: not a leak.
+    expect(heldPastNotice({ files: { 'daemon/audiences.json': 1 }, total: 1 }, listedEntry, own, SID)).toEqual([]);
+    expect(heldPastNotice({ files: {}, total: 0 }, { v: 1, sessions: {} }, own, SID)).toEqual([]);
+    expect(heldPastNotice({ files: {}, total: 0 }, { v: 1, sessions: { [SID]: { owners: [a], policyRev: 2 } } }, own, SID)).toEqual([]);
+    // Anywhere else the search stands; and an entry carrying S's private audience, or its rev, is the leak.
+    expect(heldPastNotice({ files: { 'daemon/audiences.json': 1, 'projects/p/log/x.jsonl': 2 }, total: 3 }, listedEntry, own, SID)).toEqual(['S’s id in projects/p/log/x.jsonl (2 line(s))']);
+    expect(heldPastNotice({ files: {}, total: 0 }, { v: 1, sessions: { [SID]: { owners: [a], members: [a], policyRev: 5 } } }, own, SID)).toEqual([
+      'daemon/audiences.json gives S a member list ([' + JSON.stringify(a) + '])',
+      'daemon/audiences.json holds S at policyRev 5, not below its private 5',
+    ]);
+    expect(heldPastNotice({ files: {}, total: 0 }, { v: 1, sessions: { [SID]: { members: null, policyRev: 6 } } }, own, SID)).toEqual(['daemon/audiences.json holds S at policyRev 6, not below its private 5']);
+    // The owner's machine must hold S private for the comparison to mean anything.
+    expect(() => heldPastNotice({ files: {}, total: 0 }, listedEntry, listedEntry, SID)).toThrow(/S's own machine holds no private audience/);
+  });
+
   it('the HTTP inventory a probe is served lists no audience stream at all, a session born private’s included', () => {
     const C1 = '2b3c4d5e-7c1d-4b9e-9a61-2d4f6b8c0e13';
     const c1 = streamOfSession('o18-a1-x', C1, ['a'.repeat(32)]).writer;
@@ -234,6 +257,17 @@ describe('what the items read', () => {
     expect(inventoryStreams(inventory)).toEqual([c1, notice]);
     expect(inventoryStreams({ projects: [{ id: 'p', writers: [{ writer: `o18-a1-x/${SID}`, upTo: 3 }] }] })).toEqual([]);
     expect(inventoryStreams(null)).toEqual([]);
+  });
+
+  it('an archive wait that times out fails with the archiver’s own evidence: its uplink.json designation and daemon.log', async () => {
+    const evidence = ['uplink {"archive":true,"archive_at":1762495200.5}', 'log 2026-11-07T06:10:00Z sync o18: archive: git fetch failed'];
+    const archiver = { name: 'o18-b1-x', vm: { archiveEvidence: async () => evidence } };
+    const scene = { machines: { a1: { vm: { archive: async () => null } } } } as unknown as ReachScene;
+    await expect(archiveAfter(scene, archiver as never, null, [], 0, 0)).rejects.toThrow(
+      'no new archive commit within 0 s; the archiver o18-b1-x: uplink {"archive":true,"archive_at":1762495200.5} | log 2026-11-07T06:10:00Z sync o18: archive: git fetch failed',
+    );
+    const silent = { name: 'o18-a1-x', vm: { archiveEvidence: async () => Promise.reject(new Error('scene down')) } };
+    await expect(archiveAfter(scene, silent as never, null, [], 0, 0)).rejects.toThrow(/the archiver o18-a1-x: its evidence unread \(Error: scene down\)/);
   });
 
   it('3b’s say to S and U together adds no private marker: its public split, U’s, is the archive’s to keep', async () => {

@@ -72,10 +72,11 @@ describe('the reach verbs’ words', () => {
     refused(['--scene', 'b1', 'grep-home', 'tok1', '--after', 'yesterday'], /grep-home <token>/);
     refused(['--scene', 'b1', 'log-files', 'extra'], /takes no words/);
     refused(['--scene', 'a1', 'archive-ls', 'a b'], /not a token/);
+    refused(['--scene', 'b1', 'archive-evidence', 'extra'], /takes no words/);
   });
 
   it('are a reach scene’s alone: O10’s scene refuses each, the operator’s pty path first among them', () => {
-    for (const verb of [['operator', 'access', SID, 'listed'], ['as-session', SID, 'list-org'], ['forge-say', SID, SID, 'x', 'tok1'], ['log-files'], ['mawsd-freeze']]) refused(verb, /a reach scene's verb/);
+    for (const verb of [['operator', 'access', SID, 'listed'], ['as-session', SID, 'list-org'], ['forge-say', SID, SID, 'x', 'tok1'], ['log-files'], ['mawsd-freeze'], ['archive-evidence']]) refused(verb, /a reach scene's verb/);
   });
 });
 

@@ -597,6 +597,12 @@ export class VmMachine implements EndpointMachine {
     return { head, files: r.lines.filter((l) => l.startsWith('file ')).map((l) => l.slice(5)), tombs, tokens: counts };
   }
 
+  /** What the scene's archive runs on (scene.sh `archive-evidence`): each line it printed, for a wait that timed out. */
+  async archiveEvidence(): Promise<string[]> {
+    this.#reach('archive-evidence');
+    return (await this.scene('archive-evidence', [], { ms: 60_000 })).lines;
+  }
+
   /** mawsd frozen (SIGSTOP: connected but silent), thawed, stopped, or started again and serving. */
   async mawsdState(to: 'freeze' | 'thaw' | 'stop' | 'start'): Promise<string> {
     this.#reach(`mawsd-${to}`);

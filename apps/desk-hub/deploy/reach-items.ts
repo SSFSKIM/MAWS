@@ -147,6 +147,37 @@ export function inventoryStreams(inventory: HistoryInventory | null | undefined)
   return (inventory?.projects ?? []).flatMap((p) => p.writers.map((w) => w.writer)).filter((w) => w.includes('~'));
 }
 
+/** The file sminos keeps every session's audience in: one document, rewritten whole when any of them moves. */
+export const AUDIENCES_FILE = 'daemon/audiences.json';
+
+type AudienceEntry = { members?: unknown; policyRev?: unknown };
+const audienceEntry = (audiences: unknown, session: string): AudienceEntry | undefined => {
+  const sessions = (audiences as { sessions?: unknown } | null | undefined)?.sessions;
+  const entry = typeof sessions === 'object' && sessions !== null ? (sessions as Record<string, unknown>)[session] : undefined;
+  return typeof entry === 'object' && entry !== null ? (entry as AudienceEntry) : undefined;
+};
+
+/**
+ * What a machine outside private `session`'s audience holds of it past its notice: the id search after the notice
+ * (`grep`) in every file but daemon/audiences.json, which is rewritten whole whenever any session's audience or the
+ * capabilities change, so a copy written after the notice still keeps the session's listed entry; and in that file,
+ * the entry itself if it carries the private audience: a member list, or a policyRev not below the private one the
+ * session's own machine holds (`own`, its audiences.json).
+ */
+export function heldPastNotice(grep: { files: Record<string, number>; total?: number }, theirs: unknown, own: unknown, session: string): string[] {
+  const mine = audienceEntry(own, session);
+  if (!Array.isArray(mine?.members) || typeof mine.policyRev !== 'number') throw new Error(`S's own machine holds no private audience for it in ${AUDIENCES_FILE}: ${JSON.stringify(mine ?? null)}`);
+  const out = Object.entries(grep.files)
+    .filter(([file]) => file !== AUDIENCES_FILE)
+    .map(([file, n]) => `S’s id in ${file} (${n} line(s))`);
+  const entry = audienceEntry(theirs, session);
+  if (entry !== undefined) {
+    if (entry.members !== undefined && entry.members !== null) out.push(`${AUDIENCES_FILE} gives S a member list (${JSON.stringify(entry.members)})`);
+    if (typeof entry.policyRev !== 'number' || entry.policyRev >= mine.policyRev) out.push(`${AUDIENCES_FILE} holds S at policyRev ${String(entry.policyRev)}, not below its private ${mine.policyRev}`);
+  }
+  return out;
+}
+
 // ---- the scene's means ----------------------------------------------------------------------------------------------
 
 const token = (scene: ReachScene, what: string) => `o18-${what}-${scene.tag}-${randomBytes(4).toString('hex')}`;
@@ -268,6 +299,13 @@ async function b1Listings(scene: ReachScene): Promise<Signed<Listing>[]> {
   }
 }
 
+/** What B1 holds of private S past its notice at `after` (heldPastNotice), against A1's own audiences.json. */
+async function heldOnB1(scene: ReachScene, after: string): Promise<string[]> {
+  const b1 = scene.machines.b1.vm;
+  const grep = await b1.grepHome(scene.S.session, after);
+  return heldPastNotice(grep, await b1.json('audiences'), await scene.S.machine.vm.json('audiences'), scene.S.session);
+}
+
 /** The ts of the last `unlisted` notice of `s` its own machine holds. */
 async function noticeTs(s: ReachSession): Promise<string> {
   const notices = (await s.machine.vm.events(s.session)).filter((e) => e.kind === 'unlisted' && e.session === s.session && typeof e.ts === 'string');
@@ -277,16 +315,28 @@ async function noticeTs(s: ReachSession): Promise<string> {
 }
 
 /** The archive after `periods` archive periods of the designated machine have passed with a new commit on main. */
-async function archiveAfter(scene: ReachScene, before: string | null, tokens: readonly string[], ms = 300_000): Promise<NonNullable<Awaited<ReturnType<VmMachine['archive']>>>> {
-  return until(
-    async () => {
-      const a = await scene.machines.a1.vm.archive(tokens);
-      return a !== null && a.head !== before ? a : null;
-    },
-    'a new archive commit',
-    ms,
-    10_000,
-  );
+/**
+ * The archive once a commit past `before` is on its main, read by A1's scene (root reads the bare repository). One that
+ * does not come within `ms` fails with what `archiver`, the designated machine, says its archive runs on.
+ */
+export async function archiveAfter(scene: ReachScene, archiver: Pick<ReachMachine, 'name' | 'vm'>, before: string | null, tokens: readonly string[], ms = 300_000, every = 10_000): Promise<NonNullable<Awaited<ReturnType<VmMachine['archive']>>>> {
+  try {
+    return await until(
+      async () => {
+        const a = await scene.machines.a1.vm.archive(tokens);
+        return a !== null && a.head !== before ? a : null;
+      },
+      'new archive commit',
+      ms,
+      every,
+    );
+  } catch (error) {
+    const evidence = await archiver.vm.archiveEvidence().then(
+      (lines) => lines.join(' | '),
+      (e: unknown) => `its evidence unread (${String(e)})`,
+    );
+    throw new Error(`${error instanceof Error ? error.message : String(error)}; the archiver ${archiver.name}: ${evidence}`, { cause: error });
+  }
 }
 
 const archiveHead = async (scene: ReachScene) => (await scene.machines.a1.vm.archive())?.head ?? null;
@@ -413,10 +463,10 @@ export async function item3a(scene: ReachScene, report: ReachReport): Promise<vo
     if (files.includes(stream.file)) throw new Error(`B1 holds ${stream.file}`);
     if (names(await b1.json('uplink'), stream.writer)) throw new Error(`B1's uplink.json names ${stream.writer}`);
     const after = await noticeTs(scene.S);
-    const grep = await b1.grepHome(scene.S.session, after);
-    if (grep.total !== 0) throw new Error(`after the notice (${after}), B1 holds S's id in ${JSON.stringify(grep.files)}`);
+    const past = await heldOnB1(scene, after);
+    if (past.length) throw new Error(`after the notice (${after}), B1 holds ${past.join('; ')}`);
     const held = streamsOf(files.map((f) => f.replace('.', '/').replace(/\.jsonl$/, '')), scene.S.session);
-    return `no ${stream.file}; S's id in no line after its notice (${after}); B1 holds of S's streams ${held.length ? held.join(', ') + ' (the notice’s, served to the withdrawn)' : 'none'}`;
+    return `no ${stream.file}; S's id in no line after its notice (${after}) but ${AUDIENCES_FILE}, whose entry for S carries no private audience; B1 holds of S's streams ${held.length ? held.join(', ') + ' (the notice’s, served to the withdrawn)' : 'none'}`;
   });
   await report.check('3a', 'C1, born private, is nowhere on B1 and in no listing', async () => {
     scene.seats.C1 ??= await spawnSeat(scene, scene.S, `o18-c1-${scene.tag}`);
@@ -463,7 +513,7 @@ export async function item3a(scene: ReachScene, report: ReachReport): Promise<vo
     await arrives(scene.S, tok);
     const before = await archiveHead(scene);
     await scene.designate(scene.machines.a1.name);
-    const archive = await archiveAfter(scene, before, scene.privateTokens);
+    const archive = await archiveAfter(scene, scene.machines.a1, before, scene.privateTokens);
     const streams = archive.files.filter((f) => f.includes('~'));
     const leaked = Object.entries(archive.tokens).filter(([, n]) => n > 0);
     if (streams.length || leaked.length) throw new Error(`the archive holds ${[...streams, ...leaked.map(([t]) => t)].join(', ')}`);
@@ -487,8 +537,8 @@ export async function item3b(scene: ReachScene, report: ReachReport): Promise<vo
     if (r.rc !== 0) throw new Error(`L1's say exited ${r.rc}: ${said(r)}`);
     await arrives(scene.U, tok);
     const after = await noticeTs(scene.S);
-    const grep = await b1.grepHome(scene.S.session, after);
-    if (grep.total !== 0) throw new Error(`B1 holds S's id after its notice: ${JSON.stringify(grep.files)}`);
+    const past = await heldOnB1(scene, after);
+    if (past.length) throw new Error(`after the notice (${after}), B1 holds ${past.join('; ')}`);
     const list = await b1.asSession(scene.U.session, { listOrg: true });
     if (!list.lines.some((l) => l.includes(L1.session))) throw new Error('U does not see L1');
     if (list.lines.some((l) => l.includes(scene.S.session))) throw new Error('U’s list --org names S (L1’s origin?)');
@@ -549,7 +599,7 @@ export async function item3c(scene: ReachScene, report: ReachReport): Promise<vo
     return `{writer, seq, withheld: true} at ${writer}:${seq}; S's transcript and A1's home hold nothing of it`;
   });
   await report.check('3c', 'the archive, B1 archiving, holds it only as its tombstone', async () => {
-    const archive = await archiveAfter(scene, before, [tok]);
+    const archive = await archiveAfter(scene, scene.machines.b1, before, [tok]);
     const file = `log/${writer.replace('/', '.')}.jsonl`;
     const path = archive.files.find((f) => f.endsWith(`${writer.replace('/', '.')}.jsonl`)) ?? file;
     if (!archive.tombs.some((t) => t.file === path && t.seq === seq)) throw new Error(`no tombstone at ${path}:${seq} (${JSON.stringify(archive.tombs)})`);
@@ -760,7 +810,7 @@ export async function item3d(scene: ReachScene, report: ReachReport): Promise<vo
     await never(scene.S, tok, 60_000);
     const stored = (await ownerLog(scene)).find((e) => e.event.writer === stream && e.event.seq === seq);
     if ((stored?.event as { withheld?: unknown } | undefined)?.withheld !== true) throw new Error(`the owner reads ${stream}:${seq} as ${JSON.stringify(stored?.event).slice(0, 160)}`);
-    const archive = await archiveAfter(scene, before, [tok]);
+    const archive = await archiveAfter(scene, scene.machines.b1, before, [tok]);
     if (archive.files.some((f) => f.includes('~')) || (archive.tokens[tok] ?? 0) !== 0) throw new Error('the archive holds the stream');
     return `${stream}:${seq} refused and kept as a tombstone; U told; S never got it; the archive (main at ${archive.head}) holds no file of the stream`;
   });
@@ -842,7 +892,7 @@ export async function item6e(scene: ReachScene, report: ReachReport): Promise<vo
     return `A3's cache holds S at an audience of ${(cache.audience as string[]).length}; its log holds no stream file`;
   });
   await report.check('6e', 'the archive A3 writes holds no stream and none of the private tokens', async () => {
-    const archive = await archiveAfter(scene, before, scene.privateTokens, 360_000);
+    const archive = await archiveAfter(scene, a3.machine, before, scene.privateTokens, 360_000);
     const streams = archive.files.filter((f) => f.includes('~'));
     const leaked = Object.entries(archive.tokens).filter(([, n]) => n > 0);
     if (streams.length || leaked.length) throw new Error(`the archive holds ${[...streams, ...leaked.map(([t]) => t)].join(', ')}`);
