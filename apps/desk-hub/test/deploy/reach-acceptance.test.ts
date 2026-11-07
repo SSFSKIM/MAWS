@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { PRODUCTION_HOST, STAGING_HOST, STAGING_ORG } from '../../deploy/config.ts';
 import { operatorRefusal, REACH_SCENES, sessionWords, tagWord, VmMachine, type ReachSceneName } from '../../deploy/endpoint-machine.ts';
 import { BUNDLE_PATH, bundleSteps, nodePin, reachItemsFor, reachMode, reachSetupHead } from '../../deploy/reach-acceptance.ts';
-import { archiveAfter, givenPastNotice, heldPastNotice, inventoryStreams, item3b, policyRevOf, REACH_ITEMS, streamOfSession, streamsOf, uplinkWithheld, withheldHolds, type ReachReport, type ReachScene } from '../../deploy/reach-items.ts';
+import { archiveAfter, givenPastNotice, heldPastNotice, inventoryStreams, item3b, policyRevOf, REACH_ITEMS, refusedReachLine, streamOfSession, streamsOf, uplinkWithheld, withheldHolds, type ReachReport, type ReachScene } from '../../deploy/reach-items.ts';
 
 const deploy = join(import.meta.dirname, '../../deploy');
 const staging = { worker: 'desk-hub-staging', host: STAGING_HOST };
@@ -202,6 +202,13 @@ describe('what the items read', () => {
   it('a report line’s policyRev, the last named', () => {
     expect(policyRevOf(['S: access private, policyRev 3; its unlisted notice written, then its snapshot'])).toBe(3);
     expect(policyRevOf(['widening reach needs its owner: run this in a terminal, or use MAWS'])).toBeNull();
+  });
+
+  it('sminos’s refused-reach line, as deliver_reach writes it: the outcome’s name is never in it', () => {
+    expect(refusedReachLine('2026-11-07T06:30:01Z the endpoint refused o18-b1-x/e7fe50a8:3 (o18-m6-x) reach into 80db411d: not-in-audience; nothing delivered')).toBe(true);
+    expect(refusedReachLine('2026-11-07T06:30:01Z the endpoint refused o18-b1-x/e7fe50a8:3 (o18-m6-x) reach into 80db411d: no reason given; nothing delivered')).toBe(true);
+    expect(refusedReachLine('2026-11-07T06:30:01Z the endpoint refused o18-b1-x/e7fe50a8:3 (o18-m6-x) as words into 80db411d: nothing delivered')).toBe(false);
+    expect(refusedReachLine('settled refused-reach')).toBe(false);
   });
 
   it('a session’s stream writer and its log file, and the streams of a session among writers', () => {

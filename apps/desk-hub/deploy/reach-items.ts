@@ -96,6 +96,14 @@ export function policyRevOf(lines: readonly string[]): number | null {
   return null;
 }
 
+/**
+ * Whether a daemon.log line is sminos's `refused-reach` settlement (sminos.py `deliver_reach`): "the endpoint refused
+ * <writer:seq> (<project>) reach into <session8>: <reason>; nothing delivered". The outcome's name is never in the line.
+ */
+export function refusedReachLine(line: string): boolean {
+  return /the endpoint refused \S+ \(.*\) reach into [0-9a-f]{8}: .*; nothing delivered/.test(line);
+}
+
 /** A session's stream writer of `members` and its log file's name on a machine (`/` as `.`). */
 export function streamOfSession(machine: string, session: string, members: readonly string[]): { writer: string; file: string } {
   const writer = streamWriter(`${machine}/${session}`, members);
@@ -663,7 +671,8 @@ export async function item1(scene: ReachScene, report: ReachReport): Promise<voi
       [scene.machines.a2, marks.a2],
     ] as const) {
       const lines = await m.vm.laneA.sminos.logSince(mark);
-      if (lines.some((l) => l.includes('refused-reach'))) throw new Error(`${m.scene}: ${lines.find((l) => l.includes('refused-reach'))}`);
+      const refused = lines.find(refusedReachLine);
+      if (refused) throw new Error(`${m.scene}: ${refused}`);
     }
     return 'neither daemon.log says refused-reach since the item began';
   });
@@ -775,7 +784,7 @@ export async function item3e(scene: ReachScene, report: ReachReport): Promise<vo
     }
     await never(scene.S, tok, 60_000);
     const lines = await a1.laneA.sminos.logSince(mark);
-    if (!lines.some((l) => l.includes('refused-reach'))) throw new Error('A1’s daemon.log says no refused-reach');
+    if (!lines.some(refusedReachLine)) throw new Error(`A1’s daemon.log says no refused-reach; its lines since the mark: ${lines.slice(-12).join(' | ') || 'none'}`);
     if ((await a1.events(tok)).length === 0) throw new Error('A1 never imported the event');
     if ((await count(scene.U, 'not-reachable')) !== notices) throw new Error('U was told of a refusal at the recipient');
     return 'stored by the hub; A1 imported it, said refused-reach, and never delivered it; U was told nothing';
