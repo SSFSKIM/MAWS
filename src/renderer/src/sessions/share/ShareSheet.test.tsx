@@ -72,7 +72,7 @@ describe('the sheet', () => {
     const sheet = await open();
     await within(sheet).findByText(SHARE.general);
     expect(fake.invoked('org.policy.get')).toEqual([{ address: ADDRESS }]);
-    expect(within(sheet).getByText('Nightly import · studio-mini')).toBeTruthy();
+    expect(sheet.querySelector('[data-share-session]')!.textContent).toBe('Nightly import · studio-mini');
     expect(within(sheet).getAllByRole('radio').map((r) => (r as HTMLInputElement).value)).toEqual(['private', 'listed', 'org-view', 'org-converse']);
     expect(['Private', 'Listed', 'Org can view', 'Org can talk'].map((name) => level(sheet, name).checked)).toEqual([false, true, false, false]);
     expect(within(sheet).getByText("Only its owners, and the people it's shared with, can see it or message its agent. Its agent can message only them too.")).toBeTruthy();
@@ -96,7 +96,7 @@ describe('the sheet', () => {
     fireEvent.change(within(sheet).getByRole('combobox', { name: "Ana's access" }), { target: { value: 'converse' } });
     fireEvent.click(within(sheet).getByRole('button', { name: 'Remove Ben' }));
     fireEvent.change(within(sheet).getByRole('combobox', { name: SHARE.addPerson }), { target: { value: CHEN } });
-    fireEvent.change(within(sheet).getByRole('combobox', { name: SHARE.gradeOf(SHARE.addPerson) }), { target: { value: 'list' } });
+    fireEvent.change(within(sheet).getByRole('combobox', { name: SHARE.newGrade }), { target: { value: 'list' } });
     fireEvent.click(within(sheet).getByRole('button', { name: SHARE.add }));
     fireEvent.click(within(sheet).getByRole('button', { name: SHARE.save }));
     await settle();

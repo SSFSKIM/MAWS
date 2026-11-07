@@ -58,6 +58,7 @@ export const SHARE = {
     approve: { label: 'Approve', line: 'They can also answer its permission requests.' },
   } satisfies Record<ShareGrade, { label: string; line: string }>,
   gradeOf: (name: string) => `${name}'s access`,
+  newGrade: 'Their access',
   remove: (name: string) => `Remove ${name}`,
   addPerson: 'Add person',
   choose: 'Choose a person',

@@ -25,8 +25,11 @@ import { useHubAccess } from '../../stores/hub-access';
 import { useSessions, type ListedSession } from '../../stores/sessions';
 import { Sheet, SheetForm } from '../Sheet';
 import { displayTitle, listedTitle } from '../title';
-import { CHOICE, FIELD, PRIMARY, QUIET, SECONDARY } from '../ui';
+import { CHOICE, PRIMARY, QUIET, SECONDARY } from '../ui';
 import { ACCESS_ORDER, GRADE_ORDER, lineWords, outcomeWords, refusalWords, SHARE, type ShareAccess, type ShareGrade } from './copy';
+
+// A select drawn as the sheets' fields are (ui.ts's FIELD), sized by its row rather than taking the row's whole width.
+const SELECT = 'rounded-sm border border-border-strong bg-bg px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2';
 
 type Policy = Extract<RecordPolicyEntry, { policyRev: number }>;
 type Share = { member: string; grade: ShareGrade };
@@ -154,9 +157,10 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
   return (
     <Sheet title={SHARE.title} width="w-[min(480px,90vw)]" data-share-sheet={address}>
       <SheetForm canSubmit={change !== null && !saving} onSubmit={() => void save()} submitLabel={ready === null ? undefined : saving ? SHARE.saving : SHARE.save} submitClass={PRIMARY} cancelLabel={ready === null || saved !== null ? SHARE.close : undefined}>
-        <p data-share-session className="m-0 truncate text-ui-sm text-fg-muted" title={title}>
-          {title} · {machine}
-        </p>
+        <div data-share-session className="flex min-w-0 text-ui-sm text-fg-muted" title={title}>
+          <span className="min-w-0 truncate">{title}</span>
+          <span className="max-w-[50%] shrink-0 truncate whitespace-pre"> · {machine}</span>
+        </div>
         <div data-share-body className="flex max-h-[52vh] min-w-0 flex-col gap-3 overflow-y-auto">
           {saved !== null && (
             <section aria-label={SHARE.results} data-share-results className="flex min-w-0 flex-col gap-1 rounded-sm border border-border p-2 text-ui-sm">
@@ -238,7 +242,7 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
                       value={adding.member}
                       disabled={addable.length === 0}
                       onChange={(e) => setAdding((a) => ({ ...a, member: e.target.value }))}
-                      className={`${FIELD} min-w-0 flex-1 truncate`}
+                      className={`${SELECT} min-w-0 flex-1`}
                     >
                       <option value="">{view === null ? SHARE.noMembers : addable.length === 0 && view !== 'reading' ? SHARE.nobodyToAdd : SHARE.choose}</option>
                       {addable.map((m) => (
@@ -247,7 +251,7 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
                         </option>
                       ))}
                     </select>
-                    <GradeSelect label={SHARE.gradeOf(SHARE.addPerson)} grade={adding.grade} onChange={(grade) => setAdding((a) => ({ ...a, grade }))} />
+                    <GradeSelect label={SHARE.newGrade} grade={adding.grade} onChange={(grade) => setAdding((a) => ({ ...a, grade }))} />
                     <button
                       type="button"
                       disabled={adding.member === ''}
@@ -276,7 +280,7 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
 
 function GradeSelect({ label, grade, onChange }: { label: string; grade: ShareGrade; onChange(grade: ShareGrade): void }) {
   return (
-    <select aria-label={label} value={grade} onChange={(e) => onChange(e.target.value as ShareGrade)} className={`${FIELD} w-auto shrink-0`}>
+    <select aria-label={label} value={grade} onChange={(e) => onChange(e.target.value as ShareGrade)} className={`${SELECT} shrink-0`}>
       {GRADE_ORDER.map((g) => (
         <option key={g} value={g}>
           {SHARE.grade[g].label}
