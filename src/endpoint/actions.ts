@@ -84,8 +84,11 @@ import type { SessionSafe } from './session-safe';
 
 export const STOP_WAIT_MS = 2000;
 
-/** `machine` acts whose sealed action the services' ledger does not keep: their args are bulk bytes (P5 O7 M4). */
-export const KEPT_WITHOUT_ACTION: ReadonlySet<string> = new Set(['files.upload']);
+/**
+ * `machine` acts whose sealed action the services' ledger does not keep: their args are bulk bytes (P5 O7 M4), or (P5 O8
+ * M6a) a composer's draft, written at each pause in the typing, which no handler reads a proof from.
+ */
+export const KEPT_WITHOUT_ACTION: ReadonlySet<string> = new Set(['files.upload', 'session.drafts.set']);
 
 /**
  * P5 O7 M5a: the engine host's ledger command for an act with no session (an artifact's write), and the answer of a host
@@ -244,7 +247,8 @@ export class Actions {
     if (row === undefined) return refuse('not-offered');
     if (row.executor === 'main') return refuse('no-ledger');
     const who = { member: channel.member, device: channel.device };
-    const dispatch = dispatchAs(this.ctx.dispatch, channel.client);
+    // P5 O8 M6a: a `machine` act's claimed run reads and writes as the decision's reader (readers.ts), a draft its writer's own
+    const dispatch = dispatchAs(this.ctx.dispatch, channel.client, decision.reader);
     // Taken before the decision (`receive`): nothing is awaited from the decision to the ledger's dispatch.
     const fingerprint = this.#fingerprints.get(m);
     if (fingerprint === undefined) return refuse('unavailable');

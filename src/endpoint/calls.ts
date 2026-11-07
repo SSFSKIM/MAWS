@@ -62,6 +62,10 @@
 //   - P5 O7 M5c review 1: an acquisition (`connectors.open`, `artifacts.holdAssets`) is bounded from the call's arrival
 //     under the device's call deadline (acquire.ts): past it the call answers `timeout`, and what the machine answers
 //     after it is let go of at once (the lease closed, the hold released) under the channel's ref.
+//   - P5 O8 M6a: every `machine` request a call makes is read and written as the decision's reader (readers.ts), so
+//     `session.get` answers the caller's own reading and `session.reader.update` writes and answers it. A member's
+//     update that the machine took tells that member's other devices (`readerMoved`), as the spine's own change tells
+//     the owners'.
 // Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
 // `too-large`. For a device that listed `rl2.bytes` (P5 O7 M5a), the input came decoded (gate.ts) and the output goes in the
 // bytes codec's tagged form (bytes.ts), measured so.
@@ -125,6 +129,8 @@ export type CallsContext = {
   /** P5 O8 M7b fix wave: whether a project is the org's now (`channel.history`'s reach), and its entries' cursors. */
   reaches(project: string): boolean;
   cursors: Pick<ChannelCursors, 'seal' | 'open'>;
+  /** P5 O8 M6a: a member's own reading of a session changed (their `session.reader.update`), for their other devices. */
+  readerMoved?(member: string, appSessionId: string): void;
   log(line: string): void;
 };
 
@@ -304,7 +310,7 @@ export class Calls {
       if (Buffer.byteLength(JSON.stringify(output ?? null)) > MESSAGE_MAX_BYTES - 1024) return void channel.send({ t: 'result', id: m.id, ok: false, error: { code: 'too-large' } });
       channel.send({ t: 'result', id: m.id, ok: true, output });
     };
-    const dispatch = dispatchAs(this.ctx.dispatch, channel.client);
+    const dispatch = dispatchAs(this.ctx.dispatch, channel.client, decision.reader);
     // an acquisition's bound, from the call's arrival (acquire.ts), read by the two rows that acquire
     const by = () => (decision.askedAt ?? this.ctx.now()) + (this.ctx.acquireWithinMs ?? ACQUIRE_WITHIN_MS);
     // What runs answers a result, or (an `each-session` row) the step that makes it, taken as the answer goes.
@@ -321,6 +327,7 @@ export class Calls {
     else if (m.name === 'fs.unfollow' && row?.executor === 'engine-host' && !this.ctx.engineHostLists(FOLLOW_OWNERS_CAPABILITY)) run = Promise.resolve(this.#unownedUnfollow());
     else if (m.name === 'machine.folders.list' && row?.executor === 'machine') run = this.#folders(dispatch, channel.member, m);
     else if (m.name === 'session.trust.check' && row?.executor === 'machine') run = this.#setupTrust(dispatch, m, decision);
+    else if (m.name === 'session.reader.update' && row?.executor === 'machine') run = this.#readerUpdate(dispatch, channel.member, m, decision);
     else if (row?.executor === 'engine-host' || (row?.executor === 'machine' && m.name !== 'daemon.status')) run = this.#forward(dispatch, row.executor, m);
     else if (row?.executor === 'sminos' && Object.hasOwn(LANE_A, m.name)) run = Promise.resolve(this.#laneA(channel, m));
     else if (row?.executor === 'machine') run = this.#daemonStatus(dispatch);
@@ -336,6 +343,14 @@ export class Calls {
   #unownedUnfollow(): Result {
     this.ctx.log(`endpoint: the engine host does not list \`${FOLLOW_OWNERS_CAPABILITY}\`: a remote \`fs.unfollow\` answered unavailable, since it would stop another client's follow`);
     return { ok: false, code: 'unavailable' };
+  }
+
+  /** P5 O8 M6a: a reader's update, which a member's other devices hear of once the machine took it (an owner's, the spine says). */
+  async #readerUpdate(dispatch: EndpointServices['dispatch'], member: string, m: CallMessage, decision: Granted): Promise<Result> {
+    const result = await this.#forward(dispatch, 'machine', m);
+    const appSessionId = result.ok ? sessionOf(result.output) : null;
+    if (appSessionId !== null && decision.reader !== undefined && decision.reader !== 'owner') this.ctx.readerMoved?.(member, appSessionId);
+    return result;
   }
 
   /** P5 O7 M9: the folder list, an answered open kept as the caller's. */
