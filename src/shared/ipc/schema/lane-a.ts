@@ -185,10 +185,21 @@ export const LaneAMediaFileSchema = z.strictObject({
   data: z.string().min(1),
 });
 
+/**
+ * 2026-11-06 (the remote lane A drill-in): the RL2 capability an endpoint lists when a lane A stream may name one
+ * subagent's transcript (src/endpoint/capabilities.ts); the drill-in shows a remote terminal session's subagent's own
+ * rows only where the machine's endpoint listed it (MachineState's `capabilities`).
+ */
+export const AGENT_SCOPE_CAPABILITY = 'rl2.agent-scope';
+// An agent id as sminos's plane takes one (`AGENT_ID`, sminos_plane.py; org-protocol's `sub.agentId`).
+const AgentIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/);
+
 export const commands = {
   'laneA.list': { input: z.void(), output: z.strictObject({ states: z.array(LaneAStateSchema) }), owner: 'machine' }, // this machine's bridged foreign sessions
   'laneA.state': { input: input({}), output: LaneAStateSchema.nullable(), owner: 'machine' },
-  'laneA.watch': { input: input({}), output: z.strictObject({ watch: z.string() }), owner: 'machine' }, // its first laneA.plane message is its snapshot
+  // its first laneA.plane message is its snapshot. 2026-11-06: `agentId`, a remote session's subagent's own transcript
+  // (main's remote adapter, over `rl2.agent-scope`), which the local driver refuses (its drill-in reads the disk)
+  'laneA.watch': { input: input({ agentId: AgentIdSchema.optional() }), output: z.strictObject({ watch: z.string() }), owner: 'machine' },
   'laneA.unwatch': { input: input({ watch: z.string() }), output: z.void(), owner: 'machine' },
   'laneA.catalog': { input: input({}), output: LaneACatalogSchema.nullable(), owner: 'machine' },
   'laneA.read': {

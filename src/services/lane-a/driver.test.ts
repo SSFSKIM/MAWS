@@ -10,7 +10,7 @@ import { endableClientRef } from '@shared/ipc/client';
 import type { LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
 import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge } from '../../../test/support/fake-bridge';
 import { GitFixture } from '../../../test/support/git-fixture';
-import { createLaneADriver, type LaneADriver, type LaneAView } from './driver';
+import { createLaneADriver, registerLaneA, type LaneADriver, type LaneAView } from './driver';
 
 const MACHINE = 'machineref0123456789';
 const APP = 'app-1' as AppSessionId;
@@ -787,5 +787,20 @@ describe('media', () => {
     expect(await h.driver.media(APP, files)).toMatchObject({ state: 'refused', code: 'launch' });
     expect(b.commands).toEqual([]); // the fake fences before it records, as the child does before it acts
     expect(existsSync(join(f.root, '.claude'))).toBe(false);
+  });
+});
+
+// 2026-11-06 (the remote lane A drill-in): `laneA.watch`'s `agentId` is a remote session's (main's remote adapter, over
+// `rl2.agent-scope`); this machine's drill-in reads the agent's transcript from the disk, so the driver refuses one rather
+// than watch the main loop in its place.
+describe('registration', () => {
+  it('refuses a watch of one subagent’s transcript, watching nothing', () => {
+    const handlers = new Map<string, (input: unknown, ctx: unknown) => unknown>();
+    const watch = vi.fn(() => ({ watch: 'w1' }));
+    registerLaneA({ watch } as unknown as LaneADriver, ((name: string, handler: (input: unknown, ctx: unknown) => unknown) => void handlers.set(name, handler)) as never);
+    const ctx = { client: endableClientRef('page') };
+    expect(() => handlers.get('laneA.watch')!({ appSessionId: 'app-1', agentId: 'ab5e2e00000000001' }, ctx)).toThrow(/subagent/);
+    expect(watch).not.toHaveBeenCalled();
+    expect(handlers.get('laneA.watch')!({ appSessionId: 'app-1' }, ctx)).toEqual({ watch: 'w1' });
   });
 });

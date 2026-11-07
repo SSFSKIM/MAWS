@@ -114,6 +114,14 @@ describe('a lane B session on another machine', () => {
 });
 
 describe('useSessionControls', () => {
+  // 2026-11-06 (e2e:remote's lane B scene caught it): the hook reads the session's machine's capabilities (a remote
+  // terminal session's `subagent-rows`), and a session id that is no address (a status-only session, a tab's own id)
+  // names no machine: it reads none, as before, and never throws
+  it('reads no machine for a session id that is no address', () => {
+    const { result } = renderHook(() => useSessionControls('not-an-address' as AppSessionId, { client: fakeClient().client }));
+    expect(result.current).not.toBeUndefined();
+  });
+
   // The lane A port reads the session's catalog body when asked (the model chip, the palette, MCP's capabilities), so
   // the hook follows that body as well as the record and the state.
   it('renders again when a bridged session’s catalog arrives, with the catalog’s models', () => {

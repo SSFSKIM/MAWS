@@ -671,6 +671,8 @@ export type StartOptions = {
   owners?: string[];
   /** 2026-11-06: the machine's home as the home-root rule reads it (`EndpointOptions.authorization.home`; a fake one). */
   home?: string;
+  /** 2026-11-06: the endpoint's environment beside the direct listener's switch (an e2e seam a case reads). */
+  env?: Record<string, string>;
 };
 
 export async function startEndpoint(org: Org, started: Fixture[], options: StartOptions = {}): Promise<Fixture> {
@@ -713,7 +715,7 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
   const records = options.records ?? new Records();
   endpoint = createEndpoint({
     sleep: (ms) => sleep(Math.min(ms, 50)),
-    env: { MAWS_ENDPOINT_DIRECT: '1' },
+    env: { MAWS_ENDPOINT_DIRECT: '1', ...options.env },
     direct: { interfaces: () => ({ utun4: [{ address: TAILNET, family: 'IPv4', internal: false, netmask: '255.255.255.255', mac: '00:00:00:00:00:00', cidr: null }] }), listen, ...(options.limits === undefined ? {} : { limits: options.limits }) },
     authorization: {
       records,
@@ -818,9 +820,9 @@ export async function waitFor(r: Remote, match: (m: Msg) => boolean, what: strin
   return until(() => r.inbox.slice(from).find((m) => match(m as Msg)) as Msg | undefined, what, ms);
 }
 
-export async function subscribe(r: Remote, sub: string, session: { lane: 'A' | 'B'; id: string }, options: { view?: 'full' | 'cards'; cursor?: { epoch: string; seq: number; idx?: number } | null; credit?: number } = {}): Promise<Msg> {
+export async function subscribe(r: Remote, sub: string, session: { lane: 'A' | 'B'; id: string }, options: { view?: 'full' | 'cards'; cursor?: { epoch: string; seq: number; idx?: number } | null; credit?: number; agentId?: string } = {}): Promise<Msg> {
   const from = r.inbox.length;
-  await r.channel.send({ t: 'sub', sub, session, ...(options.view === undefined ? {} : { view: options.view }), cursor: options.cursor ?? null, credit: options.credit ?? 4 * 1024 * 1024 });
+  await r.channel.send({ t: 'sub', sub, session, ...(options.view === undefined ? {} : { view: options.view }), ...(options.agentId === undefined ? {} : { agentId: options.agentId }), cursor: options.cursor ?? null, credit: options.credit ?? 4 * 1024 * 1024 });
   return waitFor(r, (m) => m.sub === sub && (m.t === 'subbed' || m.t === 'ended'), `the answer to sub ${sub}`, from);
 }
 

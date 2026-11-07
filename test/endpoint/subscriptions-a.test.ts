@@ -6,7 +6,8 @@
 // A `full` subscription carries every plane message sminos sends for the session, its `host` messages among them; a
 // `cards` one only the session's pending requests and their settlement.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { counter, drop, evs, laneAMember, makeOrg, of, openRemote, plane, PROJECT, serve, snapshot, snapshots, sminos, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type Org, type Remote } from './sub-harness';
+import type { FakeSminos, Frame } from './rl10/fake-sminos';
+import { counter, drop, evs, laneAMember, makeOrg, of, openRemote, plane, PROJECT, serve, snapshot, snapshots, sminos, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -320,5 +321,139 @@ describe('a lane A `cards` subscription whose member frame moves its launch and 
     s.send({ t: 'member', ...laneAMember({ owners: [org.B], launch: 'L2' }) });
     await until(() => snapshots(b, 'c1').length === 2, 'the new launch');
     expect(snapshots(b, 'c1').at(-1)).toEqual({ raised: [], launch: 'L2' });
+  });
+});
+
+// ---- One subagent's transcript (2026-11-06, `rl2.agent-scope`, RL2 1.11) ----------------------------------------------
+
+/** A call's result on `r`'s channel. */
+async function call(r: Remote, name: string, input: unknown): Promise<Msg> {
+  const id = `c${r.inbox.length}-${Math.random().toString(36).slice(2, 8)}`;
+  await r.channel.send({ t: 'call', id, name, input });
+  return waitFor(r, (m) => m.t === 'result' && m.id === id, `the result of ${name}`);
+}
+
+/** sminos's snapshot for the upstream `up`, at n 0: one row of its transcript, `more` before it. */
+const served = (s: FakeSminos, up: Frame, row: string) => s.send(plane('snapshot', { rows: [{ uuid: row }], more: true, subagents: [], presence: { record: null, bridge: true }, streaming: [] }, { sub: up.sub as string, n: 0 }));
+
+describe('a lane A subscription of one subagent’s transcript', () => {
+  const AGENT = 'ab5e2e00000000001';
+
+  it('is listed in the endpoint’s handshake', async () => {
+    const f = await startEndpoint(org, started);
+    const a = await openRemote(f, org.a1, org.A);
+    expect(a.channel.peer.capabilities).toContain('rl2.agent-scope');
+  });
+
+  // e2e:remote's endpoint of an earlier build: MAWS_E2E_ENDPOINT_WITHOUT withholds what it names from the handshake, under
+  // MAWS_E2E=1 alone
+  it('is withheld from the handshake by the e2e’s old-endpoint seam, and only under MAWS_E2E', async () => {
+    const old = await startEndpoint(org, started, { env: { MAWS_E2E: '1', MAWS_E2E_ENDPOINT_WITHOUT: 'rl2.agent-scope,rl2.spawn-home' } });
+    const caps = (await openRemote(old, org.a1, org.A)).channel.peer.capabilities;
+    expect(caps).not.toContain('rl2.agent-scope');
+    expect(caps).not.toContain('rl2.spawn-home');
+    expect(caps).toContain('rl2.feeds');
+    const unset = await startEndpoint(org, started, { env: { MAWS_E2E_ENDPOINT_WITHOUT: 'rl2.agent-scope' } });
+    expect((await openRemote(unset, org.a1, org.A)).channel.peer.capabilities).toContain('rl2.agent-scope');
+  });
+
+  it('holds an upstream subscription of its own scoped to the agent beside the main one’s, and carries that upstream’s own stream alone', async () => {
+    const f = await startEndpoint(org, started);
+    const s = await sminos(f);
+    s.send({ t: 'pending', project: PROJECT, raised: [RAISED] });
+    const a = await openRemote(f, org.a1, org.A);
+    const mainAsk = subscribe(a, 'main', { lane: 'A', id: 'la-1' });
+    const main = await s.next((x) => x.t === 'subscribe', 'the main upstream');
+    expect(main).toMatchObject({ session: 'la-1', agentId: null });
+    served(s, main, 'm1');
+    await mainAsk;
+    const agentAsk = subscribe(a, 'agent', { lane: 'A', id: 'la-1' }, { agentId: AGENT });
+    const agent = await s.next((x) => x.t === 'subscribe', 'the agent’s upstream');
+    expect(agent).toMatchObject({ t: 'subscribe', project: PROJECT, session: 'la-1', agentId: AGENT });
+    expect(agent.sub).not.toBe(main.sub);
+    expect(await agentAsk).toMatchObject({ t: 'subbed', mode: 'snapshot', epoch: agent.sub, seq: 0 });
+    // what comes before sminos's snapshot of it waits for nothing of the session's
+    s.send(plane('presence', { record: null, bridge: true }));
+    served(s, agent, 'g1');
+    expect((await snapshot(a, 'agent')).body).toMatchObject({ kind: 'snapshot', body: { rows: [{ uuid: 'g1' }] } });
+    s.send(counter()(agent.sub as string, 'row', { row: { uuid: 'g2' }, agentId: AGENT }));
+    s.send(counter()(main.sub as string, 'row', { row: { uuid: 'm2' }, agentId: null }));
+    s.send(plane('raised', { ...RAISED, request: 'toolu_2' }));
+    s.send(plane('settled', { request: 'toolu_1', winner: 'terminal', outcome: 'allow', by: 'terminal' }));
+    await until(() => kinds(a, 'main').includes('settled'), 'the main stream’s settlement');
+    await sleep(30);
+    expect(kinds(a, 'agent')).toEqual(['row']);
+    expect(evs(a, 'agent').map((e) => [e.epoch, e.seq])).toEqual([[agent.sub, 1]]);
+    expect(kinds(a, 'main')).toEqual(['raised', 'presence', 'row', 'raised', 'settled']);
+  });
+
+  it('asks rows, output and read of the agent’s own transcript, and refuses its diff, sending nothing down', async () => {
+    const f = await startEndpoint(org, started);
+    const s = await sminos(f);
+    const a = await openRemote(f, org.a1, org.A);
+    const ask = subscribe(a, 'agent', { lane: 'A', id: 'la-1' }, { agentId: AGENT });
+    const up = await s.next((x) => x.t === 'subscribe', 'the agent’s upstream');
+    served(s, up, 'g1');
+    await ask;
+    expect(await call(a, 'sminos.rows', { session: 'la-1', sub: 'agent', before: 'g1', limit: 50 })).toMatchObject({ ok: true });
+    expect(await s.next((x) => x.t === 'rows', 'rows down')).toEqual({ t: 'rows', project: PROJECT, session: 'la-1', agentId: AGENT, sub: up.sub, before: 'g1', limit: 50 });
+    expect(await call(a, 'sminos.output', { session: 'la-1', sub: 'agent', taskId: 'bash_1', tail: 4096 })).toMatchObject({ ok: true });
+    expect(await s.next((x) => x.t === 'output', 'output down')).toEqual({ t: 'output', project: PROJECT, session: 'la-1', agentId: AGENT, sub: up.sub, taskId: 'bash_1', tail: 4096 });
+    expect(await call(a, 'sminos.read', { session: 'la-1', sub: 'agent', id: 'q1', what: 'status' })).toMatchObject({ ok: true });
+    expect(await s.next((x) => x.t === 'read', 'read down')).toEqual({ t: 'read', project: PROJECT, session: 'la-1', agentId: AGENT, sub: up.sub, id: 'q1', what: 'status' });
+    expect(await call(a, 'sminos.diff', { session: 'la-1', sub: 'agent' })).toMatchObject({ ok: false, error: { code: 'malformed' } });
+    await sleep(30);
+    expect(s.received.filter((x) => x.t === 'diff')).toEqual([]);
+  });
+
+  it('resumes its own cursor as a replay, and answers a cursor of the session’s other scope with a snapshot under a fresh upstream', async () => {
+    const f = await startEndpoint(org, started);
+    const s = await sminos(f);
+    const a = await openRemote(f, org.a1, org.A);
+    const mainAsk = subscribe(a, 'main', { lane: 'A', id: 'la-1' });
+    const main = await s.next((x) => x.t === 'subscribe', 'the main upstream');
+    served(s, main, 'm1');
+    await mainAsk;
+    const agentAsk = subscribe(a, 'agent', { lane: 'A', id: 'la-1' }, { agentId: AGENT });
+    const agent = await s.next((x) => x.t === 'subscribe', 'the agent’s upstream');
+    served(s, agent, 'g1');
+    await agentAsk;
+    const next = counter();
+    s.send(next(agent.sub as string, 'row', { row: { uuid: 'g2' }, agentId: AGENT }));
+    await until(() => evs(a, 'agent').length === 1, 'the agent’s row');
+    drop(a);
+    s.send(next(agent.sub as string, 'row', { row: { uuid: 'g3' }, agentId: AGENT }));
+    const b = await openRemote(f, org.a1, org.A);
+    expect(await subscribe(b, 'agent', { lane: 'A', id: 'la-1' }, { agentId: AGENT, cursor: { epoch: agent.sub as string, seq: 1 } })).toMatchObject({ mode: 'replay', epoch: agent.sub, seq: 1 });
+    await until(() => evs(b, 'agent').length === 1, 'the replay');
+    expect((evs(b, 'agent')[0].body as { body: { row: { uuid: string } } }).body.row.uuid).toBe('g3');
+    // the main upstream's cursor, asked for the agent: never its stream, and the main upstream left to its own resume
+    const crossed = subscribe(b, 'other', { lane: 'A', id: 'la-1' }, { agentId: AGENT, cursor: { epoch: main.sub as string, seq: 0 } });
+    const fresh = await s.next((x) => x.t === 'subscribe' && x.sub !== main.sub && x.sub !== agent.sub, 'a fresh upstream of the agent');
+    expect(fresh).toMatchObject({ agentId: AGENT });
+    expect(await crossed).toMatchObject({ mode: 'snapshot', epoch: fresh.sub, seq: 0 });
+    // and the agent's cursor, asked for the main transcript: a fresh main upstream; the agent's goes on under its own sub
+    const back = subscribe(b, 'main2', { lane: 'A', id: 'la-1' }, { cursor: { epoch: agent.sub as string, seq: 2 } });
+    const mainAgain = await s.next((x) => x.t === 'subscribe' && x.agentId === null, 'a fresh main upstream');
+    expect(await back).toMatchObject({ mode: 'snapshot', epoch: mainAgain.sub, seq: 0 });
+    expect(s.received.filter((x) => x.t === 'unsubscribe').map((x) => x.sub)).toEqual([]);
+    expect(await subscribe(b, 'main', { lane: 'A', id: 'la-1' }, { cursor: { epoch: main.sub as string, seq: 0 } })).toMatchObject({ mode: 'replay', epoch: main.sub, seq: 0 });
+  });
+
+  it('is authorized as the session’s main transcript is: refused where it is, and ended `removed` with it when the session is made private', async () => {
+    const f = await startEndpoint(org, started);
+    const s = await sminos(f, [laneAMember({ owners: [org.A], shares: [{ member: org.B, grade: 'view' }] }), laneAMember({ session: 'la-p', alias: 'p', owners: [org.A] })]);
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await subscribe(b, 'shut-main', { lane: 'A', id: 'la-p' })).toMatchObject({ t: 'ended', reason: 'grade' });
+    expect(await subscribe(b, 'shut-agent', { lane: 'A', id: 'la-p' }, { agentId: AGENT })).toMatchObject({ t: 'ended', reason: 'grade' });
+    const ask = subscribe(b, 'agent', { lane: 'A', id: 'la-1' }, { agentId: AGENT });
+    const up = await s.next((x) => x.t === 'subscribe', 'the agent’s upstream');
+    served(s, up, 'g1');
+    await ask;
+    s.send({ t: 'member', ...laneAMember({ owners: [org.A], access: 'private' }) });
+    await waitFor(b, (m) => m.t === 'ended' && m.sub === 'agent' && m.reason === 'removed', 'ended removed');
+    await s.next((x) => x.t === 'unsubscribe' && x.sub === up.sub, 'the upstream dropped');
+    expect(await subscribe(b, 'agent2', { lane: 'A', id: 'la-1' }, { agentId: AGENT, cursor: { epoch: up.sub as string, seq: 0 } })).toMatchObject({ t: 'ended', reason: 'grade' });
+    expect(s.received.filter((x) => x.t === 'subscribe')).toHaveLength(1);
   });
 });

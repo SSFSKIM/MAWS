@@ -35,7 +35,7 @@ import { join, resolve } from 'node:path';
 import { expect } from '@playwright/test';
 import { build } from 'esbuild';
 import type { MachineRef } from '../../src/shared/machine/ref';
-import { startFakeSminos, type FakeSminos } from './fake-sminos';
+import { startFakeSminos, type FakeSminos, type LaneAPlane, type LaneASession } from './fake-sminos';
 import { startLocalOrg, type LocalOrg } from './local-org';
 import { startProfileDaemon, type ProfileDaemon } from './profile-daemon';
 
@@ -57,6 +57,11 @@ export interface RemoteScene {
      * once B's engine host reports the session under `engine`. */
     list(session: { engine: string; app: string; owners: string[]; project: string; title?: string; cwd?: string }): Promise<void>;
     gone(engine: string): Promise<void>;
+    /** 2026-11-06: a terminal session of B's listed through sminos (the project's presence, `cwd` its checkout, then its
+     * lane A `member` frame), its session plane served by sminos (fake-sminos.ts). */
+    laneA(project: string, session: LaneASession): LaneAPlane;
+    /** What B's endpoint wrote to sminos, for a failure to quote. */
+    said(): string;
   };
   /** A's MAWS_DEV_ORG directory; `directMap` says whether the link may reach B's listener directly. P5 O7 M8: `client`
    * 'second' is the second device's (the scene started with `secondUserData`), the same member's, on the same hub pipe. */
@@ -276,6 +281,11 @@ export async function startRemoteScene(opts: { scratch: string; aUserData: strin
         async gone(engine) {
           sminos.gone(engine);
         },
+        laneA(project, session) {
+          sminos.project(project, [session.cwd]);
+          return sminos.laneA(project, session);
+        },
+        said: () => sminos.said(),
       },
       devOrgDir,
       aHub: { cut: () => aHub.cut(), restore: () => aHub.restore() },

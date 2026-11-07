@@ -3,13 +3,17 @@
 // `Stop agent` behind a confirmation; C6's `Transcript variant: 'child'` over the child's own `ipcSource`, which it
 // mounts and never builds (the store's one attachment is shared with C5's agent tab), with the registered actions and
 // C7's inline request card, so a child's permission is answered in place; then the relay composer.
+// 2026-11-06 (the remote drill-in): another machine's terminal session's child is drawn from that machine's plane, its
+// own watch of the agent (`lane-a/view/RemoteAgentTranscript.tsx`, loaded only for such a session), where its machine's
+// endpoint carries it; elsewhere its port's gap says why.
 import { Popover } from 'radix-ui';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentId, AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { SessionPhase } from '@shared/ipc/schema/session';
 import type { PanelToolContext } from '../../../panel/tool';
 import { renderInlineRequest } from '../../../composer';
 import { useSessions } from '../../../stores/sessions';
+import { useRemoteLaneA } from '../../../lane-a/remote-session';
 import { useSessionControls } from '../../../session/controls/controls-for'; // P5 O9 M5
 import type { SessionControls } from '../../../session/controls/types'; // P5 O9 M5
 import { ipcSource, SubagentGlyph, Transcript, useRegisteredActions, useTranscriptStore, type TranscriptSource } from '../../../transcript';
@@ -31,6 +35,8 @@ export function setChildSourceFor(sourceFor: ChildSourceFor | null): void {
   childSourceOverride = sourceFor;
 }
 const childSourceFor: ChildSourceFor = (appSessionId, agentId) => childSourceOverride?.(appSessionId, agentId) ?? ipcSource(appSessionId, agentId);
+
+const RemoteAgentTranscript = lazy(() => import('../../../lane-a/view/RemoteAgentTranscript').then((module) => ({ default: module.RemoteAgentTranscript })));
 
 // C5's liveness rule as its digest carries it (the one C6's shell transcript applies to its keys): a child runs in its
 // parent's process, so the parent's phase says whether the child's key may tick.
@@ -60,10 +66,14 @@ export function DrillIn({ appSessionId, agentId, handle, draft, ctx }: Props) {
   const title = node ? rowTitle(node) : agentId;
 
   // P5 O9 M9: a session whose port withholds a subagent's own rows (another machine's) shows why in their place, and no
-  // child source is built for it (this machine's reads know nothing of that session); Stop and Tell stay.
+  // child source is built for it (this machine's reads know nothing of that session); Stop and Tell stay. 2026-11-06:
+  // another machine's terminal session's child, where its port carries it, is that machine's plane's (no child source).
   const rowsGap = controls?.capability('subagent-rows') ?? null;
   const gap = rowsGap !== null && !rowsGap.available ? rowsGap.reason : null;
-  const source = useMemo(() => (gap === null ? childSourceFor(appSessionId, agentId) : null), [appSessionId, agentId, gap]);
+  const listedA = useRemoteLaneA(appSessionId);
+  const recorded = useSessions((s) => s.records.has(appSessionId));
+  const remote = listedA && !recorded; // controls-for's rule: a listed lane A row with no record here
+  const source = useMemo(() => (gap === null && !remote ? childSourceFor(appSessionId, agentId) : null), [appSessionId, agentId, gap, remote]);
   const registered = useRegisteredActions();
   const actions = useMemo(() => ({ ...registered, ...agentTranscriptActions }), [registered]);
   const renderRequest = useMemo(() => renderInlineRequest(appSessionId), [appSessionId]);
@@ -107,10 +117,14 @@ export function DrillIn({ appSessionId, agentId, handle, draft, ctx }: Props) {
           {driven && !(node && isEnded(node.status)) && <StopAgent key={agentId} appSessionId={appSessionId} node={node} title={title} driven={{ controls: driven, agentId }} />}
         </div>
       </header>
-      {source === null ? (
+      {gap !== null ? (
         <p role="status" data-testid="subagent-rows-gap" className="m-0 min-h-0 flex-1 px-4 py-3 text-ui-sm text-fg-muted">
           {gap}
         </p>
+      ) : source === null ? (
+        <Suspense fallback={null}>
+          <RemoteAgentTranscript key={agentId} appSessionId={appSessionId} agentId={agentId} actions={actions} renderRequest={renderRequest} className="min-h-0 flex-1" />
+        </Suspense>
       ) : (
         <Transcript key={source.key ?? agentId} source={source} variant="child" actions={actions} renderRequest={renderRequest} className="min-h-0 flex-1" />
       )}

@@ -255,3 +255,39 @@ describe('the browser inventory feed', () => {
   });
 });
 
+
+// 2026-11-06 (`rl2.agent-scope`): a lane A stream of one subagent's transcript names its agent only to an endpoint that
+// listed the capability, on each channel, its cursor resumed as any; to one that did not (an older endpoint, which would
+// pass the field by and serve the main transcript) it is never sent and ends `not-offered`.
+describe('a subagent’s transcript', () => {
+  it('names its agent to an endpoint that listed `rl2.agent-scope`, again from its cursor on the next channel', () => {
+    const h = harness();
+    h.channel.peer = ['rl2.agent-scope'];
+    const s = h.table.subscribe({ session: { lane: 'A', id: 'la-1' }, view: 'full', agentId: 'ab5e2e00000000001' }, h.sink, null);
+    expect(h.subs()).toEqual([{ t: 'sub', sub: s.id, session: { lane: 'A', id: 'la-1' }, view: 'full', agentId: 'ab5e2e00000000001', cursor: null, credit: 1024 * 1024 }]);
+    h.table.receive({ t: 'subbed', sub: s.id, mode: 'snapshot', epoch: 'up-1', seq: 0 });
+    h.table.receive({ t: 'snap', sub: s.id, epoch: 'up-1', seq: 0, page: 0, last: true, body: '{}' });
+    h.table.receive({ t: 'ev', sub: s.id, epoch: 'up-1', seq: 1, body: { kind: 'row' } });
+    h.table.onCurrent();
+    expect(h.subs().at(-1)).toEqual({ t: 'sub', sub: s.id, session: { lane: 'A', id: 'la-1' }, view: 'full', agentId: 'ab5e2e00000000001', cursor: { epoch: 'up-1', seq: 1 }, credit: 1024 * 1024 });
+  });
+
+  it('ends `not-offered`, never sent, for an endpoint that did not list it, at its subscribe or on the next channel', async () => {
+    const h = harness();
+    h.table.subscribe({ session: { lane: 'A', id: 'la-1' }, view: 'full', agentId: 'a1' }, h.sink, null);
+    await Promise.resolve();
+    expect(h.subs()).toEqual([]);
+    expect(h.heard).toEqual([['ended', 'not-offered']]);
+    expect(h.table.size).toBe(0);
+
+    const later = harness();
+    later.channel.peer = ['rl2.agent-scope'];
+    later.table.subscribe({ session: { lane: 'A', id: 'la-1' }, view: 'full', agentId: 'a1' }, later.sink, null);
+    later.channel.peer = []; // the next channel's peer, an older build
+    later.table.onCurrent();
+    await Promise.resolve();
+    expect(later.subs()).toHaveLength(1);
+    expect(later.heard).toEqual([['ended', 'not-offered']]);
+    expect(later.table.size).toBe(0);
+  });
+});
