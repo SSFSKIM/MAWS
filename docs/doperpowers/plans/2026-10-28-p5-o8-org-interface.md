@@ -3644,6 +3644,30 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   6. **`record.policy`'s serial placements (m6b-r1).** The sheet's opening never waits on them, because its read names one session. A save's result does wait: main re-reads the whole machine before answering (`policy.ts:210`). It couldn't be timed on the fixture. It stays residue.
   7. **The unit gate was red at 89d616e78 and nobody saw it.** `coverage.test.ts` lacked Task 1's `endpoint.local.act`, and only static had run on Tasks 1 and 2. bc22ad7b0 fixes it. From here, each task's gate set includes unit.
   Date/Author: 2026-11-07, O8's executor (controller), from Task 3's report.
+- Decision: M6b Task 3's review fixes (3c09ac206, df0e5d374, 76b97bdbd, 2ae8fbcac, 9ab1353b5, c1d33c77a, 954c74ded). The frontier review found two Important and two Minor. The architect's taste read of the screenshots added three fixes. This entry settles these points.
+  1. **The sheet's order is the order Save sends (I1).**
+     - A person removed keeps their place, struck through, with "Removed when you save" and Undo, until Save.
+     - A person added and then removed before Save leaves the list.
+     - Undo is the only way back for a removed person. The add picker never offers someone pending removal, so nobody appears twice in the order.
+     - A test pins the review's sequence (remove Ana, change Ben, re-add Ana): the pending lines shown match the payload line for line.
+  2. **A policies read belongs to the sign-in it started under (I2).**
+     - Main fences each read on `(org, member)` plus a sign-in generation.
+     - A read that ends after a sign-out, a switch to another member, or the same member's new sign-in publishes nothing and answers `signed-out`.
+     - The renderer applies replies only under the sign-in they were asked in, and takes no `org.policies.changed` while signed out.
+     - The event carries no identity. The architect accepted the fence without it (2026-11-07).
+  3. **The cache race in `rows.test.ts` was the test's (M1).** The test read the cache before `close()` flushed its deferred write. Both reader tests now read after `close()`. Nothing in `rows.ts` changed.
+  4. **The e2e check that every action is whole covers every control (M2).**
+     - It covers fields, native selects, radios, checkboxes, links and their roles. A clipped select joins its probes.
+     - It centres each control in its scroller before measuring, and allows a clipping container one pixel, since a scrollport may end mid-pixel. The first run (42419518426) named a select less than a pixel past the body's edge.
+     - Org-page and channel pass under the wider check.
+  5. **The architect's taste fixes.**
+     - Add person sits at the head of People, with the list under it. The label stays "Add person", as the spec words it.
+     - Reload is a secondary button. While a stopped save's results offer a Reload, the sheet doesn't also show the "can't be read · Reload" line. When a save's results don't offer one, that line keeps its Reload.
+     - The sheet gets a scrim: `Sheet` takes an optional `scrim`. The Share sheet uses `bg-bg-active`, the Add project dialog's scrim, and the other sheets keep the shared `bg-bg/60`.
+     - The architect accepted the 8% scrim with no new token (2026-11-07). The empty state's buttons still show faintly below a short sheet, and that is acceptable.
+     - The shared scrim is nearly invisible on light theme for the other sheets. That goes on the board with M6b's other UX residue: the unsupported copy should name its remedy, and long machine names truncate in the subtitle. The architect files these at landing.
+  6. **Gates.** Run 42420500958 is green: static, unit 1/4–4/4, e2e:settings and e2e:cross-build, every spec on its first attempt.
+  Date/Author: 2026-11-07, O8's executor (controller), from the fix wave's report and the architect's notes.
 
 ## Outcomes & Retrospective
 
