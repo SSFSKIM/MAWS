@@ -1,8 +1,12 @@
 # Deploying the hub
 
 The hub runs on the owner's Cloudflare account behind Cloudflare Access (DC3's
-plan, M5; the composite's DX7), as two deployments. Each has a configuration
-naming its account, Worker, host, owner and org:
+plan, M5), as two deployments. Access admits a person or a machine to the hub
+and nothing more: what either may do comes from the org's signed state, its
+members' devices and its machines' keys (the remote layer,
+`docs/doperpowers/specs/2026-10-26-remote-layer-design.md` §5). Each deployment
+has a configuration naming its account, Worker, host, owner and org, and the
+org's genesis (`orgGenesis`) once the org is rooted:
 
 | Configuration | Worker | Host | Org | What it is |
 | --- | --- | --- | --- | --- |
@@ -57,7 +61,7 @@ repository:
 | Name | What it is | Used by |
 | --- | --- | --- |
 | `CF_ACCESS_SETUP_TOKEN` | An API token with Access: Apps and Policies Edit, Service Tokens Edit, Organizations Read | `deploy`, `redeploy-check`, `access-sync` |
-| `DESK_MACHINE_CLIENT_ID`, `DESK_MACHINE_CLIENT_SECRET` | The service token of a machine enrolled in the deployment's org | `access-sync` |
+| `DESK_MACHINE_CLIENT_ID`, `DESK_MACHINE_CLIENT_SECRET` | The service token of a machine enrolled in the deployment's org: `credentials.clientId` and `credentials.clientSecret` in its endpoint's `enrollment.json` (`<profile>/mawsd/endpoint/`, below) | `access-sync` |
 | `CF_DESK_HUB_SERVICE_TOKENS` | An API token with Access: Service Tokens Edit only. It becomes the Worker's `CF_API_TOKEN` secret, with which the hub mints and deletes machines' service tokens | `deploy`, `probe`, `redeploy-check` |
 | `DESK_ACCESS_TOKEN` | A person's Access session as an app token for one deployment: `cloudflared access login $HUB` once (a browser sign-in), then `cloudflared access token -app=$HUB` | `probe`, `fake-check`, `redeploy-check`, `measure`, `counts`, `relay-measure`, `acceptance` |
 
@@ -112,8 +116,10 @@ Options:
 - `--access-only`: set up Access and stop.
 
 The org id is written into every project's `.smns` (`hub.org`) and into each
-machine's service-token name (`desk-<org>-<machine>`), so changing it later
-means enrolling every machine again.
+machine's service-token name (`desk-<org>-<machine>`), and it names the
+Registry that holds the org's signed state (`src/worker.ts`, one per org id).
+So changing it later makes a new, empty org: its genesis again, every device
+paired again and every machine enrolled again.
 
 ## `access-sync` (an Access change)
 
@@ -162,16 +168,67 @@ removes is refused by the Registry at once, and by Access once this runs.
     printf '%s\n' "CF_ACCESS_SETUP_TOKEN=$(cat $S/CF_ACCESS_SETUP_TOKEN)" "DESK_MACHINE_CLIENT_ID=<id>" "DESK_MACHINE_CLIENT_SECRET=<secret>" \
       | pnpm --filter desk-hub deployment access-sync --config deploy/staging.json
 
-(the machine's credentials from its enrollment, read inside a script and never
-printed). On production it changes production's Access, which waits for the
-owner.
+(the machine's credentials from its endpoint's `enrollment.json`, read inside a
+script and never printed). On production it changes production's Access, which
+waits for the owner.
 
 ## After the first deploy (the owner)
 
+Each step is the owner's, in order, at the Mac's terminal unless it says otherwise. The `admin` verbs are `deployment
+admin`'s (below); against production each runs as `zsh apps/desk-hub/deploy/production-run.sh admin <args…>`, and
+against staging as `zsh apps/desk-hub/deploy/staging-run.sh admin <args…>`, which name the deployment and the keys
+themselves. Production went through steps 1 to 4 on 2026-10-28 (its rollout, below) and its machines through step 5 or
+6 by 2026-10-30 (P5 O14's briefs); staging's org was rooted by O11 M3, and its admin device anchors it with `admin adopt`.
+`<profile>` is `~/Library/Application Support/MAWS` on macOS and `${XDG_CONFIG_HOME:-~/.config}/MAWS` on Linux.
+
 1. Open `$HUB` in a browser and sign in ("Sign in with Cloudflare"; the team allows account members, and the policy the owner's email).
-2. Set up the org key first (the web app's first unlock method, DX7). An org whose key someone else set up first cannot be unlocked by the owner.
-3. Enroll machines from the web app's "Enroll a machine" (`sminos hub enroll` on each, the code pasted at its hidden prompt).
-4. Run `cloudflared access login $HUB` once, so the commands that need `DESK_ACCESS_TOKEN` can be given one.
+2. Run `cloudflared access login $HUB` once, so the commands that need `DESK_ACCESS_TOKEN`, `admin` among them, can be given one.
+3. **Root the org.** `admin init` writes the admin device's keys. Then, with a removable drive mounted, `admin genesis
+   --recovery /Volumes/<drive>/<file>` (or `--recovery paper`) writes the recovery key there alone, reads it back,
+   asks `root <org> at <hub>? [y/N]`, and prints `genesis posted: version 1, orgGenesis <hash>`. Eject the drive and
+   keep it offline. Add `"orgGenesis": "<hash>"` to the deployment's configuration, and commit it.
+4. **Pair the phone** as the org's `web-cards` device: the desk opened from `$HUB` and added to the Home Screen, its
+   *Device* panel open; `admin pair --class web-cards`; the code pasted into the panel; the two fingerprints compared
+   before `y`. The staging sitting below (its steps 2 and 3) gives each tap.
+5. **Enroll each of the owner's machines** (RL §5.3). The machine runs `mawsd` with its endpoint present and unenrolled
+   (`mawsd keys --json` says `"enrollment": "none"`; on a Mac the packaged MAWS installs `dev.maws.mawsd` at its first
+   launch, and on Linux `devenv up maws` installs `mawsd.service`), and its sminos is at 1.27.3 or later.
+   - On the machine, `mawsd enroll --name <name> --wait 600`. It waits at a hidden prompt for the code.
+   - In the owner's terminal, `admin enroll <name> --wait 600`. It writes the code to the terminal and the clipboard,
+     never to stdout. Paste it at the machine's prompt by hand (the clipboard, or screen sharing into another Mac), so
+     no file and no agent holds it.
+   - The admin command prints `machine <name> ref <ref> key <key id>` and asks `compare with mawsd keys --json on
+     <name>, then list it? [y/N]`. Answer `y` only when the three match `mawsd keys --json` on the machine; a mismatch
+     means another process redeemed the code first. It prints `listed: version n`, and the machine's `mawsd enroll`
+     ends `enrolled: <name> in <org>, listed in the org state`.
+   - Check: `admin show` lists the machine `listed`. Within 30 s its sminos is cut over at the endpoint's first
+     welcome: `sminos daemon status` says `uplink: RL10 (local-only), running (<pid>)`, and `sminos hub show` prints
+     `cut over <time>`.
+
+   To re-enroll a listed machine under a new key and the same ref, both commands take `--replace`.
+6. **devcloud VMs enroll themselves** at boot under a delegation, made once per org (RL §5.3; O14 M1 and M3):
+
+       zsh apps/desk-hub/deploy/production-run.sh admin --pipe delegation create --label devcloud --prefix dc- --code-to-stdout | gcloud secrets create <secret id> --data-file=-
+       gcloud secrets versions access latest --secret=<secret id> | pnpm --silent --filter desk-hub deployment admin code inspect
+       zsh apps/desk-hub/deploy/production-run.sh admin delegation publish
+
+   The first signs the delegation into a pending proposal and stores its code in Secret Manager, posting nothing. Run
+   the third only once the second decodes the stored code; `delegation create` below says what to undo when it does
+   not. Then name the secret and the delegation's id in devcloud's `~/.claude/devcloud/driver.toml` (`[desk]
+   provisioning_secret_v2`, `[desk] delegation_id`; a prefix other than `dc-` goes in `[desk] name_prefix` too). A VM
+   made by `devcloud vm up … --project maws` redeems the code at its boot (`mawsd endpoint provision`), and `admin
+   show` lists it `certified`. `devcloud vm down` retires its certificate (`show` then lists it `retired`) and frees
+   its name. `admin show` prints the delegation's `expires` (`--ttl`, 90 days by default), and every certificate under
+   it lapses then.
+7. **`access-sync`** once the org state adds a member or changes one's email; before that, the people policy's owner
+   email already matches the head. It reads the state as an enrolled machine, whose service token is its endpoint's
+   (`<profile>/mawsd/endpoint/enrollment.json`, `credentials.clientId` and `credentials.clientSecret`): on production
+   the owner writes it to `$DESK_PRODUCTION_DEVICE/machine.json` (`production-run.sh access-sync`, below).
+8. **`admin refresh`** at least every 30 days: the endpoint refuses every remote action once the head is 30 days old.
+
+The web app's Machines dialog (its enrollment codes and provisioning keys) is desk phase 1's. It builds every code
+around the shared org key, which no browser can unlock since the hub purged its copies (O14 B4 step 4), so it answers
+*The org key is locked* and makes none.
 
 ## `counts` (read-only; the owner's org)
 
@@ -183,7 +240,12 @@ the log from offset 0 to `caught-up` and sends nothing else (no visibility, no
 `machine-counts.py` reads a machine's half from its log files
 (`$SMINOS_HOME/projects/<id>/log/`) and its enrolled and former names (from
 `daemon/hub.json`, nothing else of it), standard library only, so a machine with
-no MAWS checkout runs it over ssh:
+no MAWS checkout runs it over ssh. No machine has held `hub.json` since O14 B4
+step 5 (2026-11-07): a cut-over machine's names are in sminos's
+`daemon/identity.json` (`name`, and `former` keyed by name), which the script
+does not read yet. Its snapshot then names no machine and no former name:
+`--side <name>` gives it the name the audit's refusals are matched under, and a
+writer kept only under a former name reads `differs`, not `explained`.
 
     python3 apps/desk-hub/deploy/machine-counts.py --dir <checkout> > /tmp/sk.json
     ssh mini python3 - --dir <checkout on the mini> < apps/desk-hub/deploy/machine-counts.py > /tmp/mini.json
@@ -193,7 +255,7 @@ no MAWS checkout runs it over ssh:
 Per writer it prints the count and last seq on each side and a verdict:
 `agrees`; `explained`, for a position that machine refused (the audit's
 `rejected`, or its own `spent` list in the project's `uplink.json`) or a writer
-under one of the machine's own former names (`former` in its `hub.json`, the
+under one of the machine's own former names (`former` in its snapshot, the
 names it wrote under before it enrolled), which stays local; or `differs`. The
 comparison goes position by position: every position both sides hold must carry
 the same event (kind and ts), so a refusal never hides a change elsewhere, and a
@@ -392,8 +454,9 @@ set there (the runners' `--pipe`), else on stdin.
 - `show` prints the age line, the members and their devices, the roots (each with the device that holds it), the machines as a table (`NAME STATE REF KEY ONLINE
   SEEN`: a head entry `listed`; a served certificate `certified`, `retired <notAfter>`, `revoked` or `refused <code>`,
   as `org-protocol`'s checks judge it against the verified head; a hub row neither covers `unlisted` when it posted a
-  v2 key the head does not list, `phase-1` otherwise; `ONLINE` and `SEEN` are the row's DX2 presence when
-  `GET /api/machines` reports it, `-` when not, which is the hub's answer today), the delegations (and the dropped
+  v2 key the head does not list, `row` when a certificate once held its name, `phase-1` otherwise; `ONLINE` and
+  `SEEN` are the hub row's presence as `GET /api/machines` reports it, online while a project holds a fresh lease of
+  the machine's RL1 connection, and `-` with no row or for a certificate that is not live), the delegations (and the dropped
   ones, whose prefixes stay reserved), and `legacyRetired` once a head carries it. It settles a sent pending proposal
   as every verb does, and never sends an unsent one: `pending version n lists delegation <id> (prefix <p>), unsent:
   admin delegation publish sends it once its stored code decodes under code inspect`.
@@ -415,7 +478,9 @@ set there (the runners' `--pipe`), else on stdin.
   makes the delegation's key pair, signs the successor holding it, and writes the `smns-provision-v2.` code (the hub,
   the org, the roots, `recoveryPub`, the key's token, the delegation's id, prefix and private JWK) to stdout and
   nothing else there; every other line goes to stderr. With `--legacy-from-v1-code` it reads a v1 provisioning code on
-  stdin (for this hub and org) and copies its org key into the code's `legacy`. What it signs is what you approved:
+  stdin (for this hub and org) and copies its org key into the code's `legacy`: the migration window's (O14 B1 step
+  2). Since B4 the org key is retired and the v1 code's secret deleted, so a delegation made now reads nothing on
+  stdin and its code carries no `legacy`. What it signs is what you approved:
   the prefix, an expiry `--ttl` from the mint, the use limit; a mint answer that disagrees with them (another prefix,
   an expiry more than 60 s off, another limit, an id that is not 32 hex) is refused before anything is signed, naming
   the key to revoke. It posts no state: the successor is signed into the anchor's pending slot, marked `unsent`, the
@@ -428,7 +493,7 @@ set there (the runners' `--pipe`), else on stdin.
   `admin provisioning revoke <id>`, and delete the secret if it was created. A code that could not be written (the
   pipe closed) drops the proposal there and names the key to revoke. The stderr lines say these next steps. Its one
   destination is a pipe into Secret Manager:
-  `… | production-run.sh admin --pipe delegation create … | gcloud secrets create <id> --data-file=-`.
+  `zsh apps/desk-hub/deploy/production-run.sh admin --pipe delegation create … | gcloud secrets create <id> --data-file=-`.
 - `delegation publish` posts the unsent proposal `delegation create` left pending, after asking `publish delegation
   <id>? [y/N]`, and prints `delegation <id> prefix <p> in effect from version n` and `published: version n`. With none
   pending it refuses; with a stale one (another successor took its version) it refuses, naming `abandon-pending`.
@@ -449,6 +514,9 @@ set there (the runners' `--pipe`), else on stdin.
 - `keys purge` deletes every wrapped copy of the org key at the hub (`POST /api/org/keys/purge`), which cannot be
   undone: it refuses unless the head carries `legacyRetired` (as the hub does, `409 not-retired`), shows the number of
   copies and asks with that consequence. From then the retirement stands. Run again, it says the hub holds none.
+  On production both are done: the key retired at org-state version 16 (2026-10-30) and its copies purged on
+  2026-11-06 (O14 B4 steps 1 and 4), so there `keys retire` signs nothing, `--undo` is refused, and `keys purge` says
+  the hub holds none.
 - `abandon-pending` drops the anchor's pending proposal, after showing it and what the hub holds and asking with the
   consequence (a later verb may sign another successor of the same parent, which a hub that kept the abandoned bytes
   could show a machine as a fork): for a proposal the hub refused for good, once you know why. An `unsent` proposal
@@ -482,9 +550,13 @@ and closes. Both are meant to be refused: the hub holds no key, so it stores the
 audit banner), while the `steer` is forwarded and the machine refuses it
 `bad-code`, relayed back as `rpc-state` failed. It sends nothing else and never
 touches the org key, and it refuses to run against any project but the one in
-`DESK_WALK` (it checks the socket's `welcome`). Since O14 M5b the hub forwards no
-RPC: the `steer` is answered `refused retired` at the hub, so the walk's G3 half no
-longer runs as written, and its local-hub suite left with DX6.
+`DESK_WALK` (it checks the socket's `welcome`). It is desk phase 1's, and neither
+half runs as written any more. Since O14 M5b the hub forwards no RPC: the `steer`
+is answered `refused retired` at the hub, and the walk's G3 local-hub suite left
+with DX6. Since O14 B4 the head retires the org key: the hub still stores the
+`human`, but each machine's endpoint checks no v1 code and takes it as an inert
+record, which sminos shows `(unverified, legacy)` and never delivers as words, in
+place of a `bad-code` refusal; and desk-web, holding no key, stays locked.
 
 ## The checks (DC3.G2, G4, G6)
 
@@ -510,7 +582,7 @@ deletes what it minted, however it ends. It fails if any of that fails.
       printf 'DESK_ACCESS_TOKEN=%s\n' "$(cloudflared access token -app=$HUB)" \
         | pnpm --filter desk-hub deployment probe --retired --config deploy/config.json
 
-  The machine-token half (DX2's two routes) runs on the VM, whose endpoint holds a service token: `deploy/vm-dx2-retired.mjs`, fed to the VM's node on stdin (it imports nothing but node's own modules), reads the token by path from the endpoint's `enrollment.json` (`credentials.clientId`, `credentials.clientSecret`; `${XDG_CONFIG_HOME:-$HOME/.config}/MAWS/mawsd/endpoint/` on Linux) and never prints it. It asks `GET /machine/stream` and `POST /machine/frames` with no body, and passes only when both answer the Worker's `404 {"error":"not-found"}` under `BUILD`, the build step 3's `curl` named; anything else fails it, exit 1: a hub before M5b answering the VM's v2 credential `403 v2-credential` (M5a), another build's answer, or Access's redirect with no build header. `HUB` and `BUILD` reach it as arguments of their own, never spliced into the remote command:
+  The machine-token half (DX2's two routes) runs on a devcloud VM, whose endpoint holds a service token: `deploy/vm-dx2-retired.mjs`, fed to the VM's node on stdin (it imports nothing but node's own modules), reads the token by path from the endpoint's `enrollment.json` (`credentials.clientId`, `credentials.clientSecret`; `${XDG_CONFIG_HOME:-$HOME/.config}/MAWS/mawsd/endpoint/` on Linux) and never prints it. It asks `GET /machine/stream` and `POST /machine/frames` with no body, and passes only when both answer the Worker's `404 {"error":"not-found"}` under `BUILD`, the build step 3's `curl` named; anything else fails it, exit 1: a hub before M5b answering the VM's v2 credential `403 v2-credential` (M5a), another build's answer, or Access's redirect with no build header. `HUB` and `BUILD` reach it as arguments of their own, never spliced into the remote command:
 
       BUILD=$(curl -sI -X POST $HUB/machine/enroll | awk 'tolower($1) == "x-desk-build:" { sub(/^[^:]*:[ \t]*/, ""); sub(/[ \t\r]*$/, ""); print }')
       devcloud vm ssh <vm> -- env "HUB=$HUB" "BUILD=$BUILD" node --input-type=module - < apps/desk-hub/deploy/vm-dx2-retired.mjs
@@ -522,8 +594,10 @@ deletes what it minted, however it ends. It fails if any of that fails.
 - `frame-cost`: what a POST and each frame in it cost on the path from a machine to its project.
 
 `fake-check`, `redeploy-check`'s two fake machines, `measure` and `frame-cost` drive DX2's stream (the fake machine,
-`fake-machine/`), which a hub from O14 M5b on answers 404: they prove a build before it, and go once the cutover is
-done.
+`fake-machine/`), which a hub from O14 M5b on answers 404. M5b has been on master since 2026-10-30 (`1eeff6de3`) and
+the cutover is done (O14, 2026-11-07), so against any hub built from master since then these four fail at a fake
+machine's first connection (`the stream was refused: 404`). They remain in the tool until they are removed; only a
+build before M5b runs them. `probe`, `probe --rpc` and `probe --retired` drive no DX2 route.
 
 
 ## Staging runs: `staging-deploy.sh`, `staging-run.sh`, `staging-sweep.py`
@@ -566,7 +640,8 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     `staging-ssfskim`. The sweep and the restore run however the step ends, a failure or Ctrl-C included; the step
     fails unless both checks, the sweep and the restore passed and `/api/me` names `staging-ssfskim` again (read
     within 30 s; a read that fails or times out is `restore check failed: …`). An `INCONCLUSIVE` redeploy-check
-    (status 3) fails the step too.
+    (status 3) fails the step too. Both checks drive DX2 (The checks, above), so from a checkout with M5b in it (master
+    since 2026-10-30) the step fails.
   - Acceptance 8's `desk-web <n>` check, Playwright against the paused desk-web over DX2 and the org key, left with
     DX2's routes (P5 O14 M5b); O13 M7's `phone <n>` below supersedes it.
   - `phone <n> [--rehearse] [--lane-b] [--device <id>]` (P5 O13 M7): `test/endpoint/staging-phone.live.test.ts`, the
@@ -779,16 +854,17 @@ the same without `--dry-run`.
 
 ### The rollout: hub v2, the org's root and the phone on production (P5 O13 M7)
 
-Each step is the owner's, in order, at the Mac's terminal unless it says otherwise; nothing here is an agent's. It
-follows the staging sitting above, whose step 0 has shown that the owner's USB drive passes the removable-media check.
+Done on 2026-10-28 (O14 B0's check: production on `hub@1bf619c8`, `orgGenesis` pinned in `config.json` by #305, the
+phone paired), and kept as the record of how production was rooted; a deployment rooted now follows "After the first
+deploy" above. Each step is the owner's, in order, at the Mac's terminal unless it says otherwise; nothing here is an
+agent's. It follows the staging sitting above, whose step 0 has shown that the owner's USB drive passes the
+removable-media check.
 
 1. **Hub v2's first production deploy**, with the web build that carries the phone's cards (O13 M3-M6):
    `zsh apps/desk-hub/deploy/production-run.sh checkout`, then, from the checkout it names,
    `zsh <checkout>/apps/desk-hub/deploy/production-deploy.sh --checkout <checkout> --confirm <sha8> --dry-run`. Read
    it, then run the same command without `--dry-run`. The deploy ends when production's `X-Desk-Build` carries
-   `hub@<sha8>` (`production-run.sh build` shows it again). It adds no Durable Object migration, so DX2 and DX6 keep
-   working (O11 acceptance 8). The phone's DX6 cards for the machines not yet moved keep answering through the deploy:
-   acceptance 4 on production, recorded by the owner's use.
+   `hub@<sha8>` (`production-run.sh build` shows it again).
 2. **The org's root.**
    - `zsh apps/desk-hub/deploy/production-run.sh admin init` writes the admin device's keys to
      `$DESK_PRODUCTION_DEVICE/keys.json` (0600, excluded from Time Machine).
@@ -798,9 +874,8 @@ follows the staging sitting above, whose step 0 has shown that the owner's USB d
      `genesis posted: version 1, orgGenesis <hash>`.
    - Eject the drive and keep it offline: only `recoveryPub` stays on the Mac.
    - Add `"orgGenesis": "<hash>"` to `apps/desk-hub/deploy/config.json`, and commit it.
-   - The genesis lists the owner alone, so Access's policy already matches the head, and no `access-sync` is due. The
-     first `access-sync` runs once O14 enrolls a production machine and its credentials are in
-     `$DESK_PRODUCTION_DEVICE/machine.json`.
+   - The genesis lists the owner alone, so Access's policy already matches the head, and no `access-sync` is due until
+     the head adds a member or changes one's email ("After the first deploy", step 7).
 3. **The phone on production.**
    - On the phone: open production's desk-web, the installed home-screen app already signed in, and open the menu's
      *Device* panel.
@@ -808,10 +883,9 @@ follows the staging sitting above, whose step 0 has shown that the owner's USB d
      panel and let Face ID save the passkey for `desk-hub.opencognita-platform.workers.dev`.
    - Compare the two fingerprints, answer `y`, and the panel reads *Listed, version <v>*. Its push subscription is
      bound to the device from then on.
-4. **The mini's cutover** is O14's mini brief. After it, the first question a session on the mini asks reaches the
-   phone as a v2 push and is answered over the new protocol: acceptance 2 on production. A request pending across the
-   cutover closes on the DX6 side, and the endpoint's first `notify` at its welcome tells it again, so the phone gets
-   one push for it.
+4. **The machines** moved in O14's briefs: the devcloud acceptance VM, the mini, the MacBook and the last phase-1 VM,
+   each enrolled in the org state and cut over by 2026-10-30; then B4 retired the shared org key everywhere, by
+   2026-11-07. A machine joins production now as "After the first deploy" steps 5 and 6 say.
 5. **The weekly successor.** Run `zsh apps/desk-hub/deploy/production-run.sh admin refresh` before every 30th day,
    until O8's app signs the weekly successor. The endpoint refuses every remote action on a head 30 days old, and the
    Device panel warns from day 21. Every `admin` run prints `head version n, issued d days ago` first.
