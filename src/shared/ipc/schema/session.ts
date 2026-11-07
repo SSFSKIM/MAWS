@@ -269,6 +269,12 @@ export const DraftSchema = z.strictObject({
   updatedAt: z.string(),
 });
 export type Draft = z.infer<typeof DraftSchema>;
+// P5 O8 M6a (M6a's branch review, F1): `session.drafts.set`'s `replaces` names the draft a save replaces, by the `updatedAt`
+// its writer gave it (null: none kept), and a save whose replaced draft is no longer the kept one is refused with these
+// words. A remote device names it: main answers a draft act still out at the pending bound `timeout`, the act may land
+// later, and acts are decided concurrently, so an older save could otherwise land over a newer one. Each `updatedAt` is
+// compared for identity only, never ordered, so two devices' clocks never meet. A save naming none writes as before.
+export const STALE_DRAFT_WORDS = 'session.drafts.set: the draft it replaces is no longer the one kept';
 
 // A replay fixture the index lists (M5 seeds and plays them).
 export const ReplayFixtureSchema = z.strictObject({
@@ -338,7 +344,7 @@ const c4Commands = {
   // hides; rediscovery does not resurrect it
   'session.projects.remove': { input: z.strictObject({ id: ProjectIdSchema }), output: z.void(), owner: 'machine' },
   'session.drafts.get': { input: appSession, output: DraftSchema.nullable(), owner: 'machine' },
-  'session.drafts.set': { input: z.strictObject({ appSessionId: AppSessionIdSchema, draft: DraftSchema.nullable() }), output: z.void(), owner: 'machine' },
+  'session.drafts.set': { input: z.strictObject({ appSessionId: AppSessionIdSchema, draft: DraftSchema.nullable(), replaces: z.string().nullable().optional() /* P5 O8 M6a: STALE_DRAFT_WORDS */ }), output: z.void(), owner: 'machine' },
   // Main allocates the ids and the `kind: 'replay'` record, then dispatches session.replay.launch; a failed launch
   // removes the record again and fails with the launch's error (a `timeout` also cancels the launch on the host).
   'session.replay.start': {

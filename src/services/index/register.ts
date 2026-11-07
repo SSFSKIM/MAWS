@@ -40,7 +40,7 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
   register('session.projects.update', ({ id, patch }) => index.projects.update(id as ProjectId, patch));
   register('session.projects.remove', ({ id }) => index.projects.hide(id as ProjectId));
   register('session.drafts.get', ({ appSessionId }, { reader }) => index.drafts.get(appSessionId as AppSessionId, reader));
-  register('session.drafts.set', ({ appSessionId, draft }, { reader }) => index.drafts.set(appSessionId as AppSessionId, draft, reader));
+  register('session.drafts.set', ({ appSessionId, draft, replaces }, { reader }) => index.drafts.set(appSessionId as AppSessionId, draft, reader, replaces));
 }
 
 // `pinned` → setPinned; `lastSeen` (with or without `unread: false`, "Mark all read") → markSeen, which clears unread;

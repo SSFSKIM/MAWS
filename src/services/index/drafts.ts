@@ -5,7 +5,7 @@
 // write reaches another's.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Reader } from '@shared/ipc/client';
-import type { Draft } from '@shared/ipc/schema/session';
+import { STALE_DRAFT_WORDS, type Draft } from '@shared/ipc/schema/session';
 import type { Db } from './db';
 
 export class DraftStore {
@@ -20,10 +20,13 @@ export class DraftStore {
     return row ? { doc: JSON.parse(row.doc) as unknown, attachments: JSON.parse(row.attachments) as Draft['attachments'], updatedAt: row.updated_at } : null;
   }
 
-  // null deletes the draft.
-  set(appId: AppSessionId, draft: Draft | null, reader: Reader = 'owner'): void {
+  // null deletes the draft. P5 O8 M6a (M6a's branch review, F1): `replaces`, when given, is the `updatedAt` of the draft
+  // this one replaces (null: none), and a save whose replaced draft is no longer the reader's kept one is refused, in the
+  // same transaction as its write.
+  set(appId: AppSessionId, draft: Draft | null, reader: Reader = 'owner', replaces?: string | null): void {
     this.db.transaction(() => {
       this.requireSession(appId);
+      if (replaces !== undefined && (this.get(appId, reader)?.updatedAt ?? null) !== replaces) throw new Error(STALE_DRAFT_WORDS);
       if (reader !== 'owner') {
         this.setMember(appId, reader, draft);
         return;

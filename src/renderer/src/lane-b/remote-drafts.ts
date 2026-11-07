@@ -12,17 +12,27 @@
 //   hears it. A refusal may be heard first by another session's request: the caller's next save then goes to its fallback
 //   and ends this session's saves here (`dropRemoteDraftSaves`), so a save still out, answered later, hands nothing over
 //   the newer one (Task 3's review, H1).
+// - Each save names the draft it replaces there (`replaces`, by its `updatedAt`: STALE_DRAFT_WORDS), as last read or
+//   saved (M6a's branch review, F1). Main answers a save still out at its pending bound `timeout`, and the act may yet
+//   land, so after one the next save reads what is kept first; the late one, landing after it, is refused there. A save
+//   refused so (it lost to a late act, or to another device of the member) reads what is kept and goes again, a few
+//   times: the newest typed here is this device's word.
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
-import type { Draft } from '@shared/ipc/schema/session';
-import { heardReaderRows } from './reader-rows';
+import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
+import { STALE_DRAFT_WORDS, type Draft } from '@shared/ipc/schema/session';
+import { heardReaderRows, isNotOffered } from './reader-rows';
 
 /** A session's saves not yet taken: the newest draft handed to `save`, whether a save is out, and whether one waits. */
 type Saves = { latest: Draft | null; out: boolean; waiting: boolean; refused(draft: Draft | null): void };
 const saves = new Map<AppSessionId, Saves>();
+/** The draft kept there as this run last knew it, by its `updatedAt` (null: none); absent while not known. */
+const bases = new Map<AppSessionId, string | null>();
+/** A save refused as stale goes again this many times, each after reading what is kept. */
+const STALE_RETRIES = 3;
 
 export function resetRemoteDraftSaves(): void {
   saves.clear();
+  bases.clear();
 }
 
 /** The newest draft handed to a save of the session that the machine hasn't taken; undefined when none is. */
@@ -33,14 +43,23 @@ export function dropRemoteDraftSaves(appSessionId: AppSessionId): void {
   saves.delete(appSessionId);
 }
 
+const isStale = (result: CommandResult<CommandName>): boolean => !result.ok && result.error.message.includes(STALE_DRAFT_WORDS);
+
+/** The machine's draft read, what it says of the machine heard and what is kept there known. */
+async function readKept(client: MawsBridge, appSessionId: AppSessionId): Promise<CommandResult<'session.drafts.get'>> {
+  const result = await client.invoke('session.drafts.get', { appSessionId });
+  heardReaderRows(appSessionId, result);
+  if (result.ok) bases.set(appSessionId, result.value?.updatedAt ?? null);
+  return result;
+}
+
 /** The member's draft there, or the one still being saved; `refused`, the fallback's, if the machine offers none. */
 export async function loadRemoteDraft(client: MawsBridge, appSessionId: AppSessionId, refused: () => Draft | null): Promise<Draft | null> {
   const unsaved = unsavedRemoteDraft(appSessionId);
   if (unsaved !== undefined) return unsaved;
-  const result = await client.invoke('session.drafts.get', { appSessionId });
-  const heard = heardReaderRows(appSessionId, result);
+  const result = await readKept(client, appSessionId);
   if (result.ok) return result.value;
-  if (heard === 'refused') return refused();
+  if (isNotOffered(result)) return refused();
   console.warn('[composer] the draft could not be read from its machine', result.error.message);
   return null;
 }
@@ -56,14 +75,35 @@ export function saveRemoteDraft(client: MawsBridge, appSessionId: AppSessionId, 
   if (!queue.out) void pump(client, appSessionId, queue);
 }
 
+/** One draft saved on top of what is kept there: read first when that isn't known, and again after a stale refusal. */
+async function saveOnce(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null, current: () => boolean): Promise<CommandResult<CommandName> | null> {
+  for (let attempt = 0; ; attempt++) {
+    if (!bases.has(appSessionId)) {
+      const read = await readKept(client, appSessionId);
+      if (!current()) return null;
+      if (!read.ok) return read;
+    }
+    const result = await client.invoke('session.drafts.set', { appSessionId, draft, replaces: bases.get(appSessionId) ?? null });
+    if (!current()) return null;
+    heardReaderRows(appSessionId, result);
+    if (result.ok) {
+      bases.set(appSessionId, draft?.updatedAt ?? null);
+      return result;
+    }
+    bases.delete(appSessionId); // `timeout` (it may still land), stale, or lost: what is kept there is read again
+    if (!isStale(result) || attempt >= STALE_RETRIES) return result;
+  }
+}
+
 async function pump(client: MawsBridge, appSessionId: AppSessionId, queue: Saves): Promise<void> {
   queue.out = true;
   let taken = false;
-  while (queue.waiting && saves.get(appSessionId) === queue) {
+  const current = () => saves.get(appSessionId) === queue; // else dropped (a newer save went to the fallback) or reset
+  while (queue.waiting && current()) {
     queue.waiting = false;
-    const result = await client.invoke('session.drafts.set', { appSessionId, draft: queue.latest });
-    if (saves.get(appSessionId) !== queue) return; // dropped (a newer save went to the fallback) or reset: nothing to hand on
-    if (heardReaderRows(appSessionId, result) === 'refused') {
+    const result = await saveOnce(client, appSessionId, queue.latest, current);
+    if (result === null) return;
+    if (isNotOffered(result)) {
       saves.delete(appSessionId);
       return queue.refused(queue.latest);
     }
@@ -71,5 +111,5 @@ async function pump(client: MawsBridge, appSessionId: AppSessionId, queue: Saves
     if (!result.ok) console.warn('[composer] the draft was not kept on its machine', result.error.message);
   }
   queue.out = false;
-  if (taken && saves.get(appSessionId) === queue) saves.delete(appSessionId);
+  if (taken && current()) saves.delete(appSessionId);
 }

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { endableClientRef, type HandlerContext } from '@shared/ipc/client';
 import type { CommandName } from '@shared/ipc/schema';
+import { STALE_DRAFT_WORDS } from '@shared/ipc/schema/session';
 import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from './index';
@@ -100,6 +101,26 @@ describe('main answers the record side of session.* from the index', () => {
       expect(await invoke('session.drafts.get', { appSessionId: record.appId }, as(B))).toEqual({ ok: true, value: theirs });
       expect(await invoke('session.drafts.get', { appSessionId: record.appId }, as('owner'))).toEqual({ ok: true, value: owners });
       expect(await invoke('session.drafts.get', { appSessionId: record.appId })).toEqual({ ok: true, value: owners });
+    });
+
+    // M6a's branch review, F1: a remote device's draft save names the draft it replaces (its `updatedAt`, null for none),
+    // and one whose replaced draft is no longer the kept one is refused: an act main answered `timeout` that lands after a
+    // newer save can't put its older text back. A save naming none (this Mac's own composer) writes as it always has.
+    it('session.drafts.set refuses a save whose replaced draft is no longer the kept one, for every reader', async () => {
+      const { record } = index.sessions.upsertFromSummary(summary());
+      const draftAt = (text: string, updatedAt: string) => ({ doc: { type: 'doc', text }, attachments: [], updatedAt });
+      const [older, newer] = [draftAt('older', '2026-09-28T10:00:00.000Z'), draftAt('newer', '2026-09-28T10:00:01.000Z')];
+      for (const context of [as(B), as('owner')]) {
+        const set = (draft: unknown, replaces: string | null) => invoke('session.drafts.set', { appSessionId: record.appId, draft, replaces }, context);
+        expect(await set(newer, null)).toEqual({ ok: true, value: undefined }); // the newer save went first
+        expect(await set(older, null)).toEqual({ ok: false, error: { code: 'internal', message: STALE_DRAFT_WORDS } }); // the older, late
+        expect(await invoke('session.drafts.get', { appSessionId: record.appId }, context)).toEqual({ ok: true, value: newer });
+        expect(await set(null, older.updatedAt)).toMatchObject({ ok: false, error: { message: STALE_DRAFT_WORDS } });
+        expect(await set(null, newer.updatedAt)).toEqual({ ok: true, value: undefined }); // cleared, on top of the kept one
+        expect(await invoke('session.drafts.get', { appSessionId: record.appId }, context)).toEqual({ ok: true, value: null });
+      }
+      expect(await invoke('session.drafts.set', { appSessionId: record.appId, draft: older })).toEqual({ ok: true, value: undefined });
+      expect(await invoke('session.drafts.set', { appSessionId: record.appId, draft: newer })).toEqual({ ok: true, value: undefined });
     });
 
     // `session.update`'s answer is the whole record (paths, settings, a spawn's signed act), which a reader must never be

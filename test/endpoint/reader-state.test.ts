@@ -14,6 +14,7 @@ import * as z from 'zod';
 import type { Listing, Signed } from 'org-protocol';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { REGISTRY } from '@shared/ipc/registry';
+import { STALE_DRAFT_WORDS } from '@shared/ipc/schema/session';
 import { OFFERS } from '../../src/endpoint/offers';
 import { PlaneFeeds, type OwnersRead } from '../../src/endpoint/plane-feeds';
 import type { Subscription } from '../../src/endpoint/subscriptions';
@@ -241,6 +242,21 @@ describe('drafts per member', () => {
     expect(output(await call(b, 'session.drafts.get', { appSessionId: app }))).toEqual(draft('b’s words'));
     // Its claimed run had the member as its reader.
     expect(f.host.calls.filter((c) => c.name === 'machine.op').map((c) => c.reader)).toEqual([org.B, 'owner']);
+  });
+});
+
+// M6a's branch review, F1: a device's draft save names the draft it replaces, and one that lands after a newer save
+// (main answered it `timeout`, and it went on) is refused through the real gate and index, the newer draft kept.
+describe('a draft save that lands late', () => {
+  it('is refused when the draft it replaces is no longer the kept one', async () => {
+    const { f, index, app } = await machine('converse');
+    const b = await openRemote(f, org.b1, org.B);
+    const newer = { ...draft('newer'), updatedAt: LATER };
+    expect((await machineAct(f, b, 'session.drafts.set', { appSessionId: app, draft: newer, replaces: null })).outcome).toEqual({ state: 'done' });
+    expect((await machineAct(f, b, 'session.drafts.set', { appSessionId: app, draft: draft('older'), replaces: null })).outcome).toMatchObject({ state: 'failed', error: { message: STALE_DRAFT_WORDS } });
+    expect(index.drafts.get(app, org.B)).toEqual(newer);
+    expect((await machineAct(f, b, 'session.drafts.set', { appSessionId: app, draft: null, replaces: LATER })).outcome).toEqual({ state: 'done' });
+    expect(index.drafts.get(app, org.B)).toBeNull();
   });
 });
 
