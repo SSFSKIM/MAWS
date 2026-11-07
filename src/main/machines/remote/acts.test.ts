@@ -11,8 +11,9 @@ const CONTEXT = { lane: 'B' as const, launchId: 'launch-1', engineSessionId: 'en
 const SEND: ActRequest = { action: 'session.send', session: 'app-1', context: CONTEXT, args: { appSessionId: 'app-1', content: 'hi' } };
 
 type Signer = SignedIn['stepUp']['sign'];
+type ManySigner = SignedIn['stepUp']['signActions'];
 
-async function harness(options: { sign?: Signer } = {}) {
+async function harness(options: { sign?: Signer; signActions?: ManySigner } = {}) {
   const sent: DeviceMessage[] = [];
   // The current channel, and the capabilities its peer listed in `h2`.
   const channel = { current: true, peer: ['rl2.executor.machine'] as string[] };
@@ -25,10 +26,29 @@ async function harness(options: { sign?: Signer } = {}) {
       const action = { v: 1, org: 'org-1', device: 'd1', nonce: 'A'.repeat(22), created: at, opId: request.opId!, opCreated: request.opCreated!, ...request, stepUp: 'B'.repeat(86) } as Action;
       return { ok: true, action };
     });
-  const signedIn = { identity: { org: 'org-1', member: 'm1', device: 'd1', clientClass: 'native-mac', channelKey: key, build: 't', capabilities: [] }, stepUp: { sign: (r: Parameters<Signer>[0]) => (signs.push(r), sign(r)) }, view: null, hub: null } as unknown as SignedIn;
+  // M6b: several acts signed at once, each as the one-act fake signs it
+  const batches: unknown[][] = [];
+  const signActions: ManySigner =
+    options.signActions ??
+    (async (requests) => {
+      const actions: Action[] = [];
+      for (const request of requests) {
+        const one = await sign(request);
+        if (!one.ok) return one;
+        actions.push(one.action);
+      }
+      return { ok: true, actions };
+    });
+  const signedIn = {
+    identity: { org: 'org-1', member: 'm1', device: 'd1', clientClass: 'native-mac', channelKey: key, build: 't', capabilities: [] },
+    stepUp: { sign: (r: Parameters<Signer>[0]) => (signs.push(r), sign(r)), signActions: (rs: Parameters<ManySigner>[0]) => (batches.push([...rs]), signActions(rs)) },
+    view: null,
+    hub: null,
+  } as unknown as SignedIn;
+  let signedInNow: SignedIn | null = signedIn;
   const table = new ActTable({
     machine: REF,
-    signedIn: () => signedIn,
+    signedIn: () => signedInNow,
     send: (message) => (channel.current ? (sent.push(message), true) : false),
     current: () => channel.current,
     peerCapabilities: () => (channel.current ? channel.peer : null),
@@ -47,7 +67,8 @@ async function harness(options: { sign?: Signer } = {}) {
     channel.current = true;
     table.onCurrent();
   };
-  return { table, sent, acts, queries, answer, drop, reconnect, signs, channel };
+  const signOut = () => void (signedInNow = null);
+  return { table, sent, acts, queries, answer, drop, reconnect, signs, batches, channel, signOut };
 }
 
 const settled = async (outcome: Promise<ActOutcome>) => {
@@ -346,6 +367,83 @@ describe('step-up', () => {
     const handle = h.table.act({ ...SEND, stepUp: 'required' }, null);
     expect(await settled(handle.outcome)).toEqual({ state: 'refused', reason: 'step-up-cancelled' });
     expect(h.acts()).toEqual([]);
+  });
+});
+
+// P5 O8 M6b (Interfaces §Q): a Share sheet's save, several step-up acts signed under one confirmation, each then sent
+// when its caller says, in its caller's order.
+describe('several step-up acts under one confirmation', () => {
+  const RECORD = (args: Record<string, unknown>): ActRequest => ({ action: 'record.access', args: { appSessionId: 'app-1', ...args }, executor: 'sminos', stepUp: 'required' });
+  const ended = (end: 'removed' | 'closed' | null = null) => () => end;
+
+  it('signs every act at once, sends none until asked, and sends each signed act as an act of its own', async () => {
+    const h = await harness();
+    h.channel.peer = ['rl2.executor.machine', 'rl2.executor.sminos'];
+    const signed = await h.table.actMany([RECORD({ access: 'private' }), RECORD({ access: 'listed' })], ended());
+    if (!signed.ok) throw new Error(`refused: ${signed.reason}`);
+    expect(h.batches).toHaveLength(1);
+    expect(h.batches[0]).toEqual([
+      expect.objectContaining({ machine: REF, action: 'record.access', args: { appSessionId: 'app-1', access: 'private' }, opId: signed.acts[0].opId }),
+      expect.objectContaining({ machine: REF, action: 'record.access', args: { appSessionId: 'app-1', access: 'listed' }, opId: signed.acts[1].opId }),
+    ]);
+    expect(h.signs).toEqual([]); // no act signed alone
+    expect(h.sent).toEqual([]);
+    const first = signed.acts[0].send();
+    expect(h.acts().map((m) => m.action.opId)).toEqual([signed.acts[0].opId]);
+    expect(h.acts()[0].action.stepUp).toBeDefined();
+    expect(signed.acts[0].send()).toBe(first); // once
+    h.answer({ t: 'ack', opId: first.opId, state: 'accepted' });
+    h.answer({ t: 'done', opId: first.opId, outcome: { state: 'done', result: { changed: true, policyRev: 4 } } });
+    expect(await settled(first.outcome)).toEqual({ state: 'done', result: { changed: true, policyRev: 4 } });
+    const second = signed.acts[1].send();
+    expect(h.acts().map((m) => m.action.opId)).toEqual([signed.acts[0].opId, signed.acts[1].opId]);
+    h.drop();
+    h.reconnect();
+    expect(h.acts()).toHaveLength(2); // a signed act is never resealed: it is queried
+    expect(h.queries()).toEqual([{ t: 'query', opId: second.opId, opCreated: second.opCreated, executor: 'sminos' }]);
+  });
+
+  it('signs none when the person cancels, and refuses before asking an act that would not go', async () => {
+    const h = await harness({ signActions: async () => ({ ok: false, reason: 'cancelled' }) });
+    expect(await h.table.actMany([RECORD({ access: 'private' })], ended())).toEqual({ ok: false, reason: 'step-up-cancelled' });
+    expect(await h.table.actMany([RECORD({ access: 'private' }), { ...SEND, session: 'app-1', context: undefined }], ended())).toEqual({ ok: false, reason: 'malformed' });
+    expect(await h.table.actMany([RECORD({ access: 'x'.repeat(MESSAGE_MAX_BYTES) })], ended())).toEqual({ ok: false, reason: 'too-large' });
+    expect(await h.table.actMany([], ended())).toEqual({ ok: false, reason: 'malformed' });
+    expect(await h.table.actMany([RECORD({ access: 'private' })], ended('closed'))).toEqual({ ok: false, reason: 'closed' });
+    h.signOut();
+    expect(await h.table.actMany([RECORD({ access: 'private' })], ended())).toEqual({ ok: false, reason: 'offline' });
+    expect(h.batches).toHaveLength(1);
+    expect(h.sent).toEqual([]);
+  });
+
+  it('takes nothing signed for another operation, or past the message limit', async () => {
+    const swapped = await harness({ signActions: async (requests) => ({ ok: true, actions: requests.map((r) => ({ ...r, opId: 'op-other-0123456789', opCreated: r.opCreated!, v: 1, org: 'org-1', device: 'd1', nonce: 'A'.repeat(22), created: r.opCreated!, stepUp: 'B'.repeat(86) }) as Action) }) });
+    expect(await swapped.table.actMany([RECORD({ access: 'private' })], ended())).toEqual({ ok: false, reason: 'malformed' });
+    const grown = await harness({ signActions: async (requests) => ({ ok: true, actions: requests.map((r) => ({ ...r, v: 1, org: 'org-1', device: 'd1', nonce: 'A'.repeat(22), created: r.opCreated!, args: { pad: 'x'.repeat(MESSAGE_MAX_BYTES) }, stepUp: 'B'.repeat(86) }) as Action) }) });
+    expect(await grown.table.actMany([RECORD({ access: 'private' })], ended())).toEqual({ ok: false, reason: 'too-large' });
+  });
+
+  it('refuses a signed act sent after its link ended, or once its window from the signature has passed, never sending it', async () => {
+    const h = await harness();
+    let end: 'removed' | 'closed' | null = null;
+    const signed = await h.table.actMany([RECORD({ access: 'private' }), RECORD({ access: 'listed' }), RECORD({ access: 'org-view' })], () => end);
+    if (!signed.ok) throw new Error(`refused: ${signed.reason}`);
+    vi.advanceTimersByTime(timingOf().ACT_FRESH_MS);
+    expect(await settled(signed.acts[0].send().outcome)).toEqual({ state: 'refused', reason: 'stale' });
+    end = 'closed';
+    expect(await settled(signed.acts[1].send().outcome)).toEqual({ state: 'refused', reason: 'closed' });
+    expect(h.sent).toEqual([]);
+  });
+
+  it('holds a signed act for a channel within its window, as any act', async () => {
+    const h = await harness();
+    const signed = await h.table.actMany([RECORD({ access: 'private' })], ended());
+    if (!signed.ok) throw new Error(`refused: ${signed.reason}`);
+    h.drop();
+    const handle = signed.acts[0].send();
+    expect(handle.progress()).toBe('waiting');
+    h.reconnect();
+    expect(h.acts().map((m) => m.action.opId)).toEqual([handle.opId]);
   });
 });
 

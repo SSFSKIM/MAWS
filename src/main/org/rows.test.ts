@@ -89,7 +89,7 @@ class World {
     return {
       identity: { org: ORG, member, device: 'app', clientClass: 'native-mac', channelKey: this.admin.channel, build: 'test', capabilities: [] },
       view: this.view,
-      stepUp: { sign: () => Promise.reject(new Error('no step-up here')) },
+      stepUp: { sign: () => Promise.reject(new Error('no step-up here')), signActions: () => Promise.reject(new Error('no step-up here')) },
       hub: { url: 'http://127.0.0.1:1', headers: async () => ({}) },
     };
   }

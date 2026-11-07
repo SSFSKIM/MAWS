@@ -6,7 +6,7 @@
 //
 // Electron-free: it runs under vitest's node project, and step-up.ts is imported for its types only.
 import type { DeviceIdentity, OrgView } from '../../../apps/org-protocol/src/index.ts';
-import type { StepUpRequest, StepUpResult } from '../device/step-up';
+import type { StepUpSigner } from '../device/step-up';
 
 export interface OrgSession {
   /** null: signed out, or this profile's device not listed in the held state. */
@@ -23,8 +23,8 @@ export interface SignedIn {
   identity: DeviceIdentity;
   /** Verified; its provider persists what `advance` adopts, and fires `onChanged` when it adopts a head. */
   view: OrgView;
-  /** createStepUp over the same keys file's step-up key. */
-  stepUp: { sign(request: StepUpRequest): Promise<StepUpResult> };
+  /** createStepUp over the same keys file's step-up key (P5 O8 M6b: with `signActions`, several acts under one confirmation). */
+  stepUp: StepUpSigner;
   /** null: no hub; the direct carrier only. */
   hub: HubAccess | null;
 }
