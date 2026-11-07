@@ -106,6 +106,12 @@
     "src/renderer/src/attention/derive.ts",
     "src/renderer/src/attention/glyph.ts",
     "src/renderer/src/overview/derive.ts",
+    // P5 O8 M6a's re-review: test/lane-b/drafts-enumerated.test.ts runs the renderer's draft queue against the machine's
+    // index, and the graph that queue imports (DOM-free)
+    "src/renderer/src/lane-b/remote-drafts.ts",
+    "src/renderer/src/lane-b/reader-rows.ts",
+    "src/renderer/src/stores/machines.ts",
+    "src/renderer/src/stores/notices.ts",
     "src/renderer/src/sessions/title.ts",
     // E11 start: test/support/processes.test.ts runs the supervisor specs' process cleanup under vitest,
     // test/support/scratch-env.test.ts the e2e launches' environments, and test/support/p1-live.test.ts the live

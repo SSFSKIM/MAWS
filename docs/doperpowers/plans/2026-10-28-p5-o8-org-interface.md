@@ -1,6 +1,6 @@
 # P5 O8 — The org interface (2026-10-28)
 
-> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `92141de56e15ff65c3da5baa8fa135cdecf075c7` at master `f857f0450` (P5's Decision Logs 1–238; re-pinned on 2026-11-06 at M7b's cut, where 229–238 change nothing M7b consumes: 232 sets the order, 238 lands M7a. Before that, at blob `b99c1767` and master `910539147`, re-pinned for the re-plan of the rest: 223 to 228 make M6's Share sheet O18's M5, with the `list` grade and audience streams; 154 moves the last machine, so the owner's words no longer wait; 155 waives B4's wait on M7's reader; 168 closes O3 and 222 closes O7; 190 makes the spawner an owner and leaves its residue (b) due before owners move; earlier pin blob `d07bfc4ea2466d7d5ca7ca3164aed4d93021311a` at master `6fb933626`, P5's Decision Logs 1–129, re-pinned on 2026-10-29 for M4's re-plan: 121 lands H1, 126 leaves M4 the refused attempt and the section's split, 129 lands M5 and names M4 next; earlier pin blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83`, Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
+> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `7781e2d50a7a4a5f86576f11354128d444b8fe39` at master `14ec11778` (P5's Decision Logs 1–245; re-pinned on 2026-11-07 at M6a's cut, where 239–245 change nothing M6a consumes: 239 and 240 swap both Macs to f857f0450, 241 lands #506's RL2 11 and `WIRE_MINOR` 29, 242 ends O14, 243 and 244 shape and pass O18 M6 on staging without `record`, 245 meets Decision Log 227's floor. Before that, at blob `92141de56e15ff65c3da5baa8fa135cdecf075c7` and master `f857f0450`, P5's Decision Logs 1–238, re-pinned on 2026-11-06 at M7b's cut, where 229–238 change nothing M7b consumes: 232 sets the order, 238 lands M7a. Before that, at blob `b99c1767` and master `910539147`, re-pinned for the re-plan of the rest: 223 to 228 make M6's Share sheet O18's M5, with the `list` grade and audience streams; 154 moves the last machine, so the owner's words no longer wait; 155 waives B4's wait on M7's reader; 168 closes O3 and 222 closes O7; 190 makes the spawner an owner and leaves its residue (b) due before owners move; earlier pin blob `d07bfc4ea2466d7d5ca7ca3164aed4d93021311a` at master `6fb933626`, P5's Decision Logs 1–129, re-pinned on 2026-10-29 for M4's re-plan: 121 lands H1, 126 leaves M4 the refused attempt and the section's split, 129 lands M5 and names M4 next; earlier pin blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83`, Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
 >
 > **What binds.** O8's section in P5 is this document's design, and P5's approval covers it. Binding with it:
 > - P5 §7 (people: owners, visibility, machine owners and grants, agents talk as today, credentials) and §8 (the sidebar's per-project toggle, the project channel, the Org page, attention across machines); parent acceptance 3 (its remote rows: Decision Log 93), 11 and 12.
@@ -77,7 +77,23 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-06) Task 3, accepted by the architect (58e294092..19456cac9), with its review carried by the branch's reviewer-high: `machines.ts` (the spine and each machine's feed, gated on `rl2.channel`, with the older-peer fallback and a per-machine cache that belongs to one reader), the merge into `org.channel.*`, and `ToHumanEntry.tsx`. Gate green: 42336903199.
   - [x] (2026-11-06) Task 4 (33098354b..daf8d4a3c): `channel.local.test.ts` cases 5 and 6, plus an older-peer case (7/7, three runs in a row), and the e2e seed's to-human entries photographed, with two layout fixes. Gates green: e2e:settings 42341855912, static,unit,probes 42343748493.
   - [x] (2026-11-07) The branch: reviewer-high on `782790d38...4e35fb15c`, one Minor (journal order across history pages) fixed at 1d3caff96 and ba7d57c92; master merged at 4e35fb15c. `--gates all --evidence` there (42344559621): 53 green, with a real `library.spec` regression fixed at 9bb79f34e. On 9bb79f34e: static, unit 1–4, e2e:library, cross-build and packaged 1/2 and 2/2 green (42357252517, 42359252532). e2e:discover failed four times in Set up job on the mini, on codeload action-archive downloads, before any step ran (42344559621, 42357252517, 42359252532 attempts 1 and 2). CI-opt seeded the runner's action cache, and the discover job then passed: 42359252532 attempt 3, 9 passed, 1 skipped by design, no flaky line. M7b is reviewed and gated whole, and goes to the architect as #514.
-- [ ] M6a — Reader state and drafts per member — *executable; after M7b*
+- [x] M6a — Reader state and drafts per member — *executable; after M7b*
+  - [x] (2026-11-07) Refresh at the cut: branch `p5-o8-m6a` from `p5-o8-m7b` at f4f99135f (stacked on #514, the architect's ruling, since `ADDED_TABLES` exists only there). Task 1's gates ran on the stacked tree and are development checks. #514 landed (9353f255b), and master ba401f5b8 was merged in at ee25ea1ec: M6a's base is master from here, with no stacked condition left.
+  - [x] (2026-11-07) Task 1, reviewed clean in one round (968e62c34, 72b558be3, 19623e805): the spine's `reader_state` and `member_drafts` as `ADDED_TABLES` entries; `sessions.ts` and `drafts.ts` by reader, with a new turn marking every member unread; `HandlerContext.reader`, written only by `mawsd`'s front from the seam's dispatch; `session.reader.update` at `WIRE_MINOR` 31, answering `ReaderState`; `session.update` refusing any reader. Static gate green at 19623e805 (42373324095). 72b558be3's run 42372775732 was red on one type error, fixed at 19623e805.
+  - [x] (2026-11-07) Task 2, reviewed clean. It took our task reviewer three rounds and the desk track four, closing on its delta check of 16f310a0d.
+    - Built in d6347dda2, 80ccbfc65 and ab33757ae.
+    - Fix waves: d5a4ccc3a, 00286c8ef and 54ceaa543; then 2a18c158f, 50e7c403e and d0e159f12.
+    - The endpoint now offers `session.reader.update` and the drafts. Each call carries the authorization decision's reader, and is checked again at dispatch.
+    - Every surface carries a member's own reading, proven per surface. An owner's queued change is checked at send.
+    - Also in this task: the certificates parity fix the desk track asked for (65e0532b1, outside the reader work), and the client's record re-read on a reopened checkout feed (cd5ab7f28 and 16f310a0d).
+    - Static green on every head, last 42385684134.
+  - [x] (2026-11-07) Task 3, reviewed clean in two rounds (c3db6ff24, 166197fa4; fix cf5f833c5).
+    - On a machine that keeps the rows, a remote lane B session's reading, pin and draft are the member's own, through `session.reader.update`, with its `ReaderState` applied. They survive a relaunch.
+    - On a machine that refuses the rows, today's in-run fallback runs as before.
+    - One session's draft saves are serialized and coalesced, and a switch to the fallback ends the queued ones.
+    - The fix wave closed a late refusal overwriting the newest fallback draft, and a doubled seen write.
+    - Static green at cf5f833c5 (42386392490).
+  - [x] (2026-11-07) The branch, reviewed and gated as a whole. reviewer-medium ran four passes with a confidentiality lens; every data loss it found is fixed, and it found no disclosure. The desk track checked every endpoint and draft-path delta and found them correct. `--gates all --evidence` passed on b90a20de5 (run 42395007929): 55 jobs green, no flaky line. The PR is #518.
 - [ ] M6b — Visibility and shares (O18's M5) — *executable; after M6a; its live proof is the staging run it shares with O18 M6, which needs the desk track's sminos executors and a real second member (the owner)*
 - [ ] M4b — Machines and their rights — *executable; after M6b*
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
@@ -1284,7 +1300,7 @@ Rejected:
   - their tests.
 - `src/shared/spine/` or wherever the router's command context is typed: `context.reader: 'owner' | MemberId`, absent meaning `'owner'`.
 - **`src/endpoint`** (desk-track reviewed):
-  - offer rows for `session.update` (reader fields only; `title` and `archived` stay the owner's), `session.drafts.get` and `session.drafts.set`;
+  - offer rows for `session.reader.update` (revised 2026-11-07, in place of `session.update`; `title` and `archived` stay the owner's), `session.drafts.get` and `session.drafts.set`;
   - the dispatch sets `context.reader`: `'owner'` when the caller is one of the machine's owners (`machineOwners`), else the caller's member id;
   - `remote-unavailable.ts` drops the three rows;
   - tests.
@@ -1296,7 +1312,7 @@ Rejected:
 - **Reading.** A member's reader fields are their own row's, with no row reading `pinned: false`, `unread: false`, `lastSeen: null`. An `'owner'` reader reads the session row as today.
 - **Unread.** When a new turn ends, the index sets `unread` on the session row and on every `reader_state` row of the session. A member's first sight of a session is not unread. Only `markSeen` clears a member's own.
 - **Grades.** `session.update` (reader fields) is graded `list`, `session.drafts.get` and `.set` `converse`, and `title` and `archived` stay `manage`. A patch mixing reader fields with others is refused `malformed` remotely.
-- **What a remote reader update answers.** Never the record: `applyPatch` returns the whole `SessionRecord` (`register.ts:38-46`), which holds checkout paths, settings and `launchedBy.action` (a spawn's signed act, its brief included; `src/services/sessions/spawn.ts:51-53,75`), and a `list` caller must not read those. With a `reader` in the context, `session.update` answers `ReaderState {appSessionId, pinned, lastSeen, unread}` (a new schema beside `SessionRecordSchema`). The renderer's remote path applies that projection to the record it holds. Local `session.update` answers as today.
+- **What a remote reader update answers.** Never the record: `applyPatch` returns the whole `SessionRecord` (`register.ts:38-46`), which holds checkout paths, settings and `launchedBy.action` (a spawn's signed act, its brief included; `src/services/sessions/spawn.ts:51-53,75`), and a `list` caller must not read those. A reader's update goes through a new machine command, `session.reader.update {appSessionId, patch: {pinned?, lastSeen?, unread?}}`, which answers `ReaderState {appSessionId, pinned, lastSeen, unread}` (a new schema beside `SessionRecordSchema`; `WIRE_MINOR` 31). The renderer's remote path applies that projection to the record it holds. `session.update` stays local, answers as today, and is refused with any reader in the context (revised 2026-11-07, Decision Log "M6a Task 1's fork").
 - **Co-owners share.** Two members who both own a machine share its owners' reading. The index can't tell which owner sits at a device, and the case is rare. It is written in the Surprises, not hidden. Rejected: keying the local app by its signed-in member, which strands the state of a profile that signs in later, or signs out.
 - **No migration of data.** Existing rows stay the owners'. Rejected: copying them to the signed-in member, which needs an identity the daemon doesn't hold.
 - The document channel's member attribution (O7's §T, `stream-document.ts`) is outside M6a. Drafts here are the composer's.
@@ -2131,7 +2147,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 - **M3 (executable):** §K: `createStateSigner`, the next keys, `checks.ts`, the signer and its pending slot, the weekly asking, deliveries, `postState`, `OrgStatus`'s `signer` and `problem: 'signing'`, `org.resign`, `org.revokeSuperseded`, `org.rekey`, `org.discardPending`, `org.resetSigning`, `signing.json` (failing closed) and `registration.json`'s `signing` and `rekey`; `deployment admin root add`. No `WIRE_MINOR`, settings version, `IpcError` code or e2e group.
 - **M5 (executable):** §L: `memberName`, `OrgMember`, `OrgRows.members`, the `sidebar.people` layout key, `ownersLabel`. No layout version, `WIRE_MINOR` or settings version.
 - **M4a (executable):** §M: `successorProblems` and `stateProblems` in `org-protocol`, the pairing judges moved there, `OrgView`, `OrgChange`, `org.view`, `org.preview`, `org.change`, `org.pair.start`, `org.pair.approve`, `org.pair.cancel`, `OrgStatus`'s `pairing`, `OrgRefusal.attempt`, `Edit.endorse` and `StateSigner.sign`'s `endorse`. No `WIRE_MINOR`, settings version or e2e group.
-- **The rest (executable, 2026-11-06):** §N (M7a), §O (M7b), §P (M6a), §Q (M6b, with M5b's `record.owners`), §R (M4b) and §S (M4c). No `WIRE_MINOR` moves: the new endpoint offers and feeds are additive rows (OX1), and the index takes new tables as `ADDED_TABLES` entries, not migrations (revised 2026-11-06). M7b's spine commands do move `WIRE_MINOR` (to 30, after #506 took 29): they are machine-owned wire entries, not endpoint offer rows. M7a adds the `channel` tab kind with no layout version.
+- **The rest (executable, 2026-11-06):** §N (M7a), §O (M7b), §P (M6a), §Q (M6b, with M5b's `record.owners`), §R (M4b) and §S (M4c). No `WIRE_MINOR` moves: the new endpoint offers and feeds are additive rows (OX1), and the index takes new tables as `ADDED_TABLES` entries, not migrations (revised 2026-11-06). M7b's spine commands do move `WIRE_MINOR` (to 30, after #506 took 29): they are machine-owned wire entries, not endpoint offer rows. So does M6a's `session.reader.update` (to 31, revised 2026-11-07). M7a adds the `channel` tab kind with no layout version.
 
 **§K. The signer** (M3).
 
@@ -2325,8 +2341,11 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     reader_state  (app_session_id, member, pinned, last_seen_uuid, last_seen_at, unread, PRIMARY KEY (app_session_id, member))
     member_drafts (app_session_id, member, doc, attachments, updated_at, PRIMARY KEY (app_session_id, member))
     // the router's command context gains reader?: 'owner' | MemberId   (absent: 'owner')
-    // with a reader, session.update answers ReaderState {appSessionId, pinned, lastSeen, unread}, never the record
-    // src/endpoint/offers.ts: 'session.update' (reader fields only, list), 'session.drafts.get' and '.set' (converse)
+    // revised 2026-11-07: a new machine command, never the record (WIRE_MINOR 31)
+    session.reader.update {appSessionId, patch: {pinned?, lastSeen?, unread?}} -> ReaderState {appSessionId, pinned, lastSeen, unread}
+    // session.update stays local and is refused with any reader
+    // src/endpoint/offers.ts: 'session.reader.update' (list), 'session.drafts.get' and '.set' (converse)
+    // a non-owner's device never receives the owners' reader fields: every record the endpoint sends them, answer or event, carries their own
 
 **§Q. Visibility and shares** (M6b; O18's Interfaces §D).
 
@@ -3281,6 +3300,155 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   5. **M7a's `Party`** in `parts.tsx` shrinks proportionally in the same way, so a long title can cut a say's machine chip too. It was left as it is, for the architect.
   Date/Author: 2026-11-06, O8's executor (controller), from Task 4's report.
 
+- Decision: M6a's refresh at its cut (2026-11-07). The branch `p5-o8-m6a` is cut from `p5-o8-m7b` at f4f99135f, stacked on #514 by the architect's ruling: M6a's two tables are `ADDED_TABLES` entries, a mechanism M7b introduces (`git grep ADDED_TABLES origin/master -- src/services/index/` finds nothing). The conditions:
+  - no M6a PR, not even a draft, until #514 lands; then master is merged in (no rebase), so the PR's diff is M6a's alone;
+  - a move of #514's head is merged into M6a;
+  - gates on the stacked tree are development checks, not landing evidence.
+  M6a's consumed interfaces were reconciled against that tree.
+  1. **Cited lines.** `src/shared/ipc/remote-unavailable.ts:39,56-57` still hold `session.update` and `session.drafts.get`/`.set`. `applyPatch` is at `src/services/index/register.ts:37-49`. A spawn's `launchedBy`, with `action`, is built at `src/services/sessions/spawn.ts:62`, not :51-53,75. The renderer's fallbacks are `lane-b/read-marks.ts` and `composer/editor/drafts.ts:76-96` (`rememberingRemoteDrafts`).
+  2. **The command context.** The context is `HandlerContext` in `src/shared/ipc/client.ts`, which already carries `op` (a claimed remote act) and `remote: true`. `remote` is set by `mawsd`'s services front for the endpoint's dispatch alone (`src/mawsd/front.ts:611-619`), never from a request's args. `reader` joins it the same way. The endpoint names the reader through the seam's `dispatch` (`src/mawsd/endpoint-seam.ts:42`, `src/endpoint/services.ts:20`), and the front writes it into the context. A request's args never carry it, so a caller can't name another member's rows.
+  3. **The parent** is re-pinned at blob `7781e2d5` (master `14ec11778`), where Decision Logs 239–245 change nothing M6a consumes (the header).
+  Date/Author: 2026-11-07, O8's executor (controller, refresh pass).
+
+- Decision: M6a is built as three tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-medium on the branch with a confidentiality lens on the reader routing.
+  1. **The spine.**
+     - The two `ADDED_TABLES` entries;
+     - `sessions.ts` and `drafts.ts` with a reader argument, where a new turn's end marks every reader unread;
+     - `HandlerContext.reader`, written by the services front from the seam's dispatch;
+     - `register.ts` routing `session.get`, `.list`, `.update` and `session.drafts.*` by `context.reader`;
+     - the `ReaderState` schema, and the answer with a reader;
+     - `migrations.test.ts`, `sessions.test.ts`, `drafts.test.ts` and `register.test.ts`.
+  2. **The endpoint**, in commits of its own for the desk track:
+     - the offer rows and their grades;
+     - the dispatch naming the reader from `machineOwners`;
+     - mixed patches refused `malformed`;
+     - `remote-unavailable.ts` dropping the three rows, with `test/lane-b/offer-coverage.test.ts` kept true;
+     - `test/endpoint/reader-state.test.ts`.
+  3. **The renderer:**
+     - `lane-b/read-marks.ts` and the draft interception falling back only while the machine refuses;
+     - the remote path applying `ReaderState` to the record it holds;
+     - a remote lane B session's unread and draft surviving a relaunch.
+  Date/Author: 2026-11-07, O8's executor (controller).
+
+- Decision: M6a Task 1's fork. A reader's update is a new machine command, `session.reader.update`, at `WIRE_MINOR` 31, and `session.update` is not given a second output type.
+  1. **Why §P couldn't stand as written.** §P had `session.update` answer `ReaderState` when there's a reader, and also said no `WIRE_MINOR` moves. Those can't both hold. `session.update` is a machine-owned entry in the wire manifest. Its answer is checked strictly as a `SessionRecord` by `mawsd`'s front (`front.ts:383`, `validateCommandOutput`) and by the device's renderer (`renderer/src/ipc/client.ts:100`). A union output is a breaking change under `classifyWireChange`, so it would need a wire major.
+  2. **What's built.** `session.reader.update {appSessionId, patch: {pinned?, lastSeen?, unread?}} -> ReaderState`, graded `list`, is an additive command (`WIRE_MINOR` 31). The endpoint offers it in place of `session.update`, which stays local-only and is refused with any reader. A patch can't carry `title` or `archived`, because the schema has no place for them, which covers the `malformed` refusal of a mixed patch on the wire. §P, M6a's Touches and Decisions, and the notes on the rest's wire changes are revised to match. Rejected: a redacted `SessionRecord` with reader fields, which would invent paths and settings to satisfy the schema; and an endpoint-side projection, which the device's strict check of `session.update` refuses.
+  3. **The owners' reader fields on remote feeds.** Task 1 found that the endpoint forwards `session.changed`, whose records carry the owners' `pinned`, `unread` and `last_seen_*`, to remote feeds. M6a's intent is that each member's reading is kept apart, so a non-owner's device never receives the owners' reader fields. Every record the endpoint sends them, an answer or an event, carries their own, or nothing where they have no row. The mechanism is Task 2's, in its desk-track commits; its test sits in `test/endpoint/reader-state.test.ts`.
+  4. **A member's write** sends no `session.changed` and takes no revision. Their own device learns the change from the `ReaderState` answer, and the owners' views don't move.
+  Date/Author: 2026-11-07, O8's executor (controller), on Task 1's NEEDS_CONTEXT.
+
+- Decision: The architect's rulings on `session.reader.update` (2026-11-07), binding on Tasks 1–3.
+  1. **Whose row it writes.** The command writes only the caller's own reader row, and the member comes from the channel's authenticated member, never from the request (the schema has no member field). "Co-owners share" stands: an owner's write lands on the owners' row, the session row's columns, and never on a member row. A non-owner's write lands on that member's own row and never reaches the owners' row or another member's. A test pins both directions.
+  2. **An older machine.** On a machine whose endpoint offers neither `session.reader.update` nor the drafts rows, today's in-run fallback stays exactly as it is (`lane-b/read-marks.ts`, `rememberingRemoteDrafts`). No new path is added, and owners aren't split from non-owners. Where the machine offers the rows, they replace the fallback. What's ruled out is a new durable local store of reader state that drifts between devices; the in-run memory isn't one, and deleting it would cost the owner remote drafts and unread marks before a swap.
+
+     No separate non-owner case is needed, because a non-owner and an older machine never meet, by rule. An older endpoint sends the owners' reader fields to any device, and no device-side check can take them back. **So the second member's precondition (P5 Decision Log 235) includes every enrolled machine being on a build that carries M6a's endpoint rule.** The architect adds this to P5's Decision Log at M6a's landing.
+  3. **The confidentiality rule, on every surface.** Every record the endpoint sends a member, owner or not, carries that member's own reader fields, or none where they have no row. This holds for answers, `session.changed` events, snapshots, history pages and remote rows. Each surface gets its own test in Task 2, whose commits the desk track reviews.
+
+  The leak isn't live today, because the org has one member, and the second member waits on O8 M6b. The architect states in P5's Decision Log that the rule is part of what that precondition relies on.
+  Date/Author: 2026-11-07, the architect, recorded by O8's executor (controller).
+
+- Decision: M6a Task 1, the spine (968e62c34, 72b558be3, 19623e805), settles these points.
+  1. **A member's write** sends no `session.changed` and takes no revision. A write by the owners, through either command, announces the change and takes a revision exactly as `session.update` does.
+  2. **A new turn** marks unread every member who has a `reader_state` row. The owners' own unread is still set by `source.ts`. A member with no row reads `unread: false`, so first sight isn't unread.
+  3. **`bare()`** treats a member's reader state or draft as state to keep, so a record holding either is never handed over to a live process.
+  4. **Schema.** The two tables have no indexes beyond their primary keys. `Reader = 'owner' | MemberId` lives in `src/shared/ipc/client.ts`.
+  5. **`session.reader.update`** is declared in `REMOTE_UNAVAILABLE` until Task 2 adds its offer row; Task 2 drops that line along with `session.update`'s and the drafts' lines. Its patch schema has no `title` or `archived`, so strict validation refuses a patch carrying either, and an empty one. But `mawsd`'s front reads input with the tolerant reader (`readCommandInput`, `src/shared/ipc/validate.ts:49`), which strips unknown fields, so `{pinned: true, archived: true}` reaches the handler as a pin-only patch; no archive write and no other reader's row is reached (Task 1's review, a Minor). A remote mixed patch is therefore refused `malformed` by the endpoint, on the raw args before tolerant decoding, as M6a's Grades decision says. That's Task 2's, with its test. OX1's tolerance rule is not weakened.
+  6. **The seam types.** `endpoint-seam.test.ts` keeps the two seam types equal apart from `dispatch`, which it checks one way (by `extends`). Task 2 restores full equality when it gives `EndpointServices.dispatch` the optional `reader`.
+  7. **Enumerated lists.** The O2 profile fixture, the spine command lists and the cross-build sample now include the new tables and command. A guard in `migrations.test.ts` runs every `ADDED_TABLES` entry on a version-9 file.
+  Date/Author: 2026-11-07, O8's executor (controller), from Task 1's report.
+
+- Decision: A member's reader change reaches that member's other devices, and no one else's (the architect's design point, 2026-11-07, option (a)). A member's write announces no `session.changed`, so without a notice the member's other devices would stay stale until their next read.
+  - **What's built.** When the endpoint has answered a member's successful `session.reader.update`, it sends that member's channels, and only theirs, a `session.changed` carrying the record as that member reads it, re-read through the dispatch with `reader: <member>`. Every field in it goes through ruling (3)'s path. The reader rule is the same as on every other surface, and no wire entry is added.
+  - **Owners.** An owner's change already announces through the spine's own `session.changed`, which ruling (3) delivers to each owner with the owners' fields.
+  - **Drafts** have no change notice in any root today and keep none; a draft loads when its composer opens.
+  - **Rejected:** a spine event keyed by member, which would add a wire entry and a second routing table for what the endpoint already knows (the channel's member). Also rejected: leaving the member's other devices stale, on the architect's lean toward (a) where it is cheap; it is, since the endpoint already projects each record per member.
+  - **The test** (Task 2): a member's write on device 1 reaches the same member's device 2 with their fields, and reaches neither another member's channel nor an owner's.
+  Date/Author: 2026-11-07, O8's executor (controller).
+
+- Decision: M6a Task 2, the endpoint (d6347dda2, endpoint-only, for the desk track; 80ccbfc65 and ab33757ae, the rest). It settles these points.
+  1. **The reader is computed with the authorization decision.** It comes from the owners that decision already read, rather than from a second lookup at execution, since an act may await nothing between its decision check and the ledger. A machine owner reads as `'owner'`; anyone else reads as their own member id. Every `machine` request a channel makes carries that reader. The new file is `src/endpoint/readers.ts`.
+  2. **Grades.** `session.drafts.get` stays a call graded `view`, as the registry has it, and not `converse` as M6a's Grades decision said, because a call graded `converse` is refused `act-required` and would have to be a ledgered act. A member's draft row is only ever their own. Rejected: `converse`, which would turn a read into a ledgered act. The architect accepted `view` on 2026-11-07. `session.drafts.set` is a `converse` act, and it's in `KEPT_WITHOUT_ACTION`, so the ledger doesn't store each draft save's document. `session.reader.update` is graded `list`, as ruled.
+  3. **The mixed patch** is refused by authorization's existing strict schema check on the raw input, before tolerant decoding. No new code was needed, and a test pins it.
+  4. **Surfaces.**
+     - Each checkout feed's `session.changed` carries its member's own reading.
+     - If a member's re-read fails, the record goes with no reading at all, never the owners'.
+     - The feeds' owners hook is optional and fails closed: without it, every member reads as their own.
+     - The notice to a member's other devices is a `session.changed` with `cause: 'update'` and the last revision heard, on that member's checkout feeds for the session.
+     - Cost: about 15 µs per index read, and about 224 µs against 195 µs per `session.changed` end to end once a member's feed is added beside an owner's. Not measured: the per-event owners read on a delegated machine, where it verifies certificates.
+  5. **The notice's reach.** A member's other device hears of a change only while it holds that session's checkout feed open. A sidebar row for a session that isn't open picks the change up at its next read. The architect accepted this as residue (2026-11-07). The owners' path already announces to every device, so the gap touches only a shared-in member's other devices. Its exit is the notice on the listing feed, scoped to that member.
+  6. **Main's adapter** takes `session.drafts.set` as a machine act. Task 3 must send one session's draft saves one after another, because acts are decided concurrently.
+  Date/Author: 2026-11-07, O8's executor (controller), from Task 2's report.
+
+- Decision: M6a Task 2's fix wave (d5a4ccc3a, 00286c8ef, endpoint plus their tests; 54ceaa543, tests only), on the desk track's round 1 (INCORRECT: P1, P2) and our task reviewer's two Importants. The architect accepted these points (2026-11-07).
+  1. **Standing at dispatch (desk P1).** A reader-routed call reaches the machine only while the decision that named its reader still stands, checked in the step that dispatches it. This covers `session.get`, `session.list`, `session.reader.update`, `session.drafts.get` and `session.drafts.set`. A call whose decision moved goes through the gate once more; if it moved again, it answers `unavailable`. So an ex-owner never reads or writes as the owners. Before the fix, `Calls.execute()` had no `stands` check, unlike acts and streams.
+  2. **The projection queue's bound (desk P2).** Changes waiting on a reading count toward the feed's backlog, each pending notice as a nominal 1 KiB, and past the limit the feed ends `behind`. Queued work whose feed has closed or ended asks the machine nothing. A change goes to an owner unchanged only while the head and certificates that made them an owner are unchanged; otherwise it's re-read as that member.
+  3. **Each surface proven by its behaviour (our reviewer).** `reader-state.test.ts` drives every surface a member is sent through real remote channels, with distinct readings and drafts for the owners, B and D: a lane B subscription's snapshot and events, the checkout and attention feeds, the history pages, and the record's answers. No leak was found. The schema scan stays as a supplementary guard, now reading `pinned` and naming what it can't read.
+  4. **`src/services/sessions/stub-source.ts`**, the scenario mode's source, intercepts `session.get`, `.list`, `.update` and `drafts.*` without a reader. No e2e or scenario test asserts reader behaviour through it, so this is a residue row. The exit: the stub carries `context.reader` once a scenario test reads per-member state.
+  Date/Author: 2026-11-07, O8's executor (controller), from the fix wave's report.
+
+- Decision: M6a Task 2's second fix wave (2a18c158f, endpoint with its test; 50e7c403e and d0e159f12, tests only), on our task reviewer's re-review. The desk track's round 2 on the first wave (d5a4ccc3a^..54ceaa543) found it CORRECT, with no material findings. The architect accepted these points (2026-11-07).
+  1. **An owner's change is checked when it's sent (G1).** Each queued `ev` carrying an owner's change also carries its condition: the head and certificates that made its member an owner. The change leaves the subscription's queue only while that condition holds; otherwise the feed ends `behind`. So a former owner who keeps a share never receives an owners' reading queued for them earlier. It isn't invalidated on `accessChanged`, because a change of certificates alone never reaches that hook. The cost: any head or certificate move while an owner's change waits for credit ends the feed, even if the member is still an owner. That premise, that a `behind` reopen loses nothing, was wrong (the desk track's round 3, revised 2026-11-07). A reopened checkout feed never read the record again: `RemoteSession.kick()` returns at once while the transcript subscription is open, and the checkout snapshot handler was empty. So the title, pin and holder stayed stale. The bug predates G1 (backlog overflow ends the feed the same way), but G1 made it common. It's fixed client-side in cd5ab7f28 (item 6 below).
+  2. **The second move (G3).** If a call's second decision moves too, it answers `unavailable`, and the machine hears neither decision.
+  3. **History, proven with real producers (G2).** `session.appEvents` is answered by the real sessions service. `session.history.list` is answered by spine-root's handler (its line copied into the test) over a real `PromptHistory`. Both are seeded, and the test asserts that every member receives the seeded entries.
+  4. **The bound's overshoot** (the desk track's note, accepted, no row). The queue bound measures full serialized changes, and the nominal 1 KiB applies only to unread member notices. Like the existing send side, it lets one incoming record overshoot the watermark rather than capping each record.
+  5. **Out of M6a.** A change of certificates alone calls `streams.recheck()` but not `subscriptions.recheck()`. This predates M6a, G1's fix doesn't depend on it, and the architect has put it to the desk track as its own question.
+  6. **A reopened checkout feed reads the record again** (cd5ab7f28, main only, the desk track's round 3, P2). In the replay branch, the client reads `session.get` under its own member, which the reader rule projects, and hands the result to `recordChanged`. A record the feed told while the read was out wins over the read's answer. The read sits beside the watch replay, not in its per-machine queue. This covers both causes of `behind`: G1's head move and a backlog past its bound.
+     - The integration test (`test/lane-b/remote.test.ts`) queues the change behind a recheck hold, not at zero credit as the desk track asked, because the real client grants its own credit.
+     - `remote-checkout`'s unit case and the real-stack case both failed before the fix.
+  7. **The certificates parity fix** (65e0532b1, endpoint only), which the desk track asked for, is outside M6a's reader work. A certificate set changed under the same head now rechecks every subscription and resumable cursor, as a new head does, beside the streams.
+     - A caps refresh needs no recheck. Apart from a new head, which already rechecks, it fires only when a grant is kept, and a subscription's decision reads no machine right.
+     - The desk track's suggested test (a contested certificate ends an owner's subscription) would pass without the fix, because contesting this machine's own certificate also removes its standing, which closes every channel `removed`. The test instead holds a live subscription across a certificate change and checks that it is authorized again. It failed before the fix.
+     - In practice the fix only closes the short window before that async standing check lands, and keeps the two paths consistent.
+  Date/Author: 2026-11-07, O8's executor (controller), from the second wave's report and the architect's rulings.
+
+- Decision: M6a Task 3, the renderer (c3db6ff24; 166197fa4 a test's type), settles these points. The architect accepted them on 2026-11-07.
+  1. **How the device learns what a machine keeps.** It learns from the machine's answers to the three commands. Any success means the machine keeps the rows. `not-offered` means it refuses them. A refusal is forgotten at `artifacts.resync`, so a machine updated mid-run is asked again. No capability or endpoint change was needed.
+  2. **The fallback stays as it is (ruling 2).** `read-marks.ts` still records marks everywhere. Its overlay onto the record is skipped only where the machine keeps the rows, so an older machine never loses a mark while the device is still learning.
+  3. **Seen on screen.** A remote session that comes on screen is marked seen on the machine. It's marked again whenever a record arrives saying unread while the session stays on screen, because `session.setVisible` isn't offered remotely. It shows as read at once.
+  4. **Pin on a remote lane B session** is offered unless its machine refused. This follows from M6a's scope, not a new surface: `pinned` is part of the reader state approved for M6a, and M6b's live proof needs "B pins" (the architect confirmed).
+  5. **Draft saves** are serialized and coalesced per session, so only the newest waiting save is sent. A load while a save is pending, or after a save that failed, returns that save's draft. That's in-run memory, not a durable store. A spawn's handed draft stays in memory and loads first; the first save replaces it on the machine.
+  6. **The `ReaderState` answer** is applied to the record held without moving its revision. The machine's later `session.changed` replaces it.
+  7. **At the gate:** if `e2e:remote`'s read/unread cases (the M8 scene around `remote.spec.ts:1901`) fail or show flaky on this branch, that's red, to be fixed, not explained. The bug to look for is a late `session.changed` flipping a seen row back to unread (the architect, 2026-11-07).
+  Date/Author: 2026-11-07, O8's executor (controller), from Task 3's report.
+
+- Decision: M6a's branch-review wave (167585c9e F1, 77413c1db F2, a3f4eb8d0 F3, 2a7fd43ef F4). It covers the desk track's review of Task 3 (one P1, three P2s) and our reviewer-medium on the branch (two P2s, the same as F1 and F3, plus F3's read side). The architect ruled all of them (2026-11-07). No disclosure across readers was found.
+  1. **F1: a pending timeout no longer releases the next draft save.** What decided it: the act's outcome never reaches the renderer after main's `timeout`. `settle()` returns `pendingResult` (`remote.ts:474-480`, `remote-outcomes.ts:76`) and only logs the late outcome, and `session.drafts.set` isn't an operation, so no receipt reaches the page. So the fix is machine-side, a compare-and-set.
+     - `session.drafts.set` takes an optional `replaces`, folded into the unreleased `WIRE_MINOR` 31.
+     - The spine refuses a stale save, with `STALE_DRAFT_WORDS`, in the write's own transaction.
+     - The renderer reads what is kept after a timeout or failure, and retries a stale save on top of the newer one, up to three times.
+     - The compared revision is the draft's writer-stamped `updatedAt`, compared on the machine for identity only and never ordered, so two devices' clocks never meet. Rejected: a machine-assigned number, which would need a new `session.drafts.set` output (a wire break) or a read after every save. The architect accepted this deviation from "a revision the machine assigns" (2026-11-07): it keeps the reason given, since no two devices' clocks are ever compared. Also accepted is the known hole: two different drafts stamped in the same millisecond look identical, so a save replacing one could land over the other.
+  2. **F2: a reader reply can't overwrite newer feed records.** Each session with a write out keeps a generation, moved by every write and every record the stores take for it. A reply is shown only if the generation hasn't moved.
+  3. **F3: the text of a draft always persists.**
+     - `@shared/sessions/draft-fit.ts` fits a draft to `REMOTE_INLINE_MAX_BYTES`, measured with the base64.
+     - On save, the text always goes. Attachments that don't fit stay in this run, and the composer shows a warning toast once per set left out.
+     - On a remote `drafts.get`, the spine leaves out what doesn't fit and names it, and the renderer says so.
+  4. **F4: resync reconciles what's on screen.** At resync, each of that machine's sessions on screen is marked seen again.
+  Date/Author: 2026-11-07, O8's executor (controller), from the wave's report.
+
+- Decision: The branch-review wave's follow-ups (36658082a K1, f8705abf3 K2, 011af4382, e5b7717dd and aafb6be61, the enumerating test). These come from reviewer-medium's re-run, which found two P2 data-loss paths, and from the architect's call for one enumerating test over the draft path (2026-11-07). The desk track found the wave itself correct.
+  1. **K1: a clear keeps a tombstone.** A clear writes a tombstone row whose stamp the machine mints, so a late save that replaces `null`, or the old stamp, is refused as stale.
+     - The tombstone is marked by `attachments = 'null'`, not by a null `doc`, because a real draft can have a null `doc`.
+     - Only a remote read exposes it, as `{doc: null}`. Local reads and `DraftStore.get` still answer `null`.
+     - Every clear writes one, this Mac's own composer clear included. A cleared draft doesn't stop a record from yielding.
+     - The stamp contains `#`, so a future reader that orders by `updated_at` must allow for it.
+  2. **K2: a transport omission is never a deletion.** A save names the attachments its fitted read left on the machine, by `{id, name}`, and the spine restores them. A save that doesn't name an attachment removes it, which is the explicit removal. This needed no endpoint hunk and no schema change. The regression runs the round trip through `register`, the endpoint and the renderer.
+  3. **The enumerating test found one more loss.** Two saves both answered `timeout`, and then the older one landed late, so the machine kept the older text. Fix: after a `timeout` with nothing newer waiting, the renderer resends the newest draft after 15 s, at most three times. On a link that keeps timing out, that's up to three extra acts per edit.
+  4. **The enumerating test** is `test/lane-b/drafts-enumerated.test.ts`. It uses the real `DraftStore` and `remote-drafts.ts`, an alphabet of 6 events, and every order up to 5 events, for an owner and a member, starting from a kept draft and from none. It runs in about 13 s. Two invariants:
+     - (i) the machine never ends on a draft older than the newest the user produced;
+     - (ii) no attachment disappears without an explicit removal.
+
+     Before the fixes, it failed 361 of 1,650 orders per reader from a kept draft (58 on (i), 320 on (ii)) and 158 from none. It now passes with no failures. A 7-event probe that also fires the resend timer was green locally, but at 41 s it isn't committed.
+  5. **L1 (reviewer-medium's last pass, 2e822d884).** An attachment dropped only by a save's own fitting was not named for preservation, so a stored PDF that fit the read whole was deleted on the machine once a text edit took the save over the budget. Now the save names those too, alongside the read's withheld ones. The machine's restore only brings back ids it holds, so naming one it never had is harmless. One the person removes in the composer isn't named and is still removed.
+
+     The enumerating test missed this because its alphabet had no event that crossed the budget. It now has a `grow` event (7 events, every order up to 5: 5,094 runs per reader from a kept draft). With the fix stashed, 822 of those runs failed. It runs in about 20 s alone. The desk track found L1 correct, which completes its check of every draft-path change on M6a. Its non-blocking note, accepted: the second note is added after `fitDraft` has measured the draft, so a save can go over `REMOTE_INLINE_MAX_BYTES` by a few dozen bytes per withheld attachment. That stays well inside the bound's 64 KiB headroom.
+  Date/Author: 2026-11-07, O8's executor (controller), from the follow-ups' report.
+
+- Decision: The client re-read's ordering and retry (16f310a0d, main only; the desk track's round-4 follow-ups, checked correct, which closes that thread).
+  - **Ordering.** Each reopening's read and each told record take the next number from one shared generation counter. An answer applies only while its generation is still the latest, the feed is still mine, and it's live.
+  - **Retry.** A failed read asks again under the same generation, from `feedRetryMs[0]` and doubling up to the `feedRetryMs[1]` cap, for as long as it stays current. The delay is capped and the number of tries isn't, as with the feed's own `unavailable`.
+  - **A permanent refusal** of `session.get` on an admitted feed re-asks every 30 s, with a log line each time, for the feed's life. That's residue: the exit is to stop, or to end the feed, on a refusal that isn't transient (`forbidden`, `not-offered`).
+  Date/Author: 2026-11-07, O8's executor (controller).
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
@@ -3415,3 +3583,29 @@ Retrospective (M7b). Built as four tasks, with a review at each frontier and rev
 - **The architect's binding conditions.** One extraction of a message, asks from their own record, and no start-path drops kept the channel and this machine's own to-human view from disagreeing.
 
 A future child that serves session content through a feed should state, before building, which inputs may influence each output (content, existence, frame type, end reason, paging) and test each one against a hidden-only variant. It should also key identities on an append-only id, never on a sort order.
+
+**M6a (2026-11-07, PR from `p5-o8-m6a`).** A session's unread, last seen, pinned and draft are now kept per member in the spine's index. The machine's owners keep the session row, shared among co-owners. Every other member keeps their own rows, in `reader_state` and `member_drafts`, both `ADDED_TABLES` entries. Nothing one member reads, pins or types moves what another sees.
+
+**Reaching the rows remotely.** A remote member reaches them over RL2 through a new machine command, `session.reader.update` (`WIRE_MINOR` 31, graded `list`, answering a four-field `ReaderState`), and through `session.drafts.get` and `.set`.
+- Each call carries the reader that the authorization decision named, and the reader is checked again where the call leaves for the machine.
+- Every record the endpoint sends a member carries that member's own reading, or none: answers, `session.changed`, snapshots, history pages and remote rows. An owner's queued change goes out only while the head that made them an owner still stands.
+- A reopened checkout feed reads the record again, ordered and retried.
+
+**The device.** On a machine that keeps the rows, a remote lane B session's reading, pin and draft survive a relaunch. On an older machine, today's in-run fallback runs unchanged.
+- One session's draft saves are serialized. A save names the draft it replaces (a compare-and-set on the writer's stamp), and a clear leaves a tombstone.
+- A draft's text always persists. Attachments over the link's budget stay in the run, with a note, and are never deleted just because they were left out.
+
+**Also in M6a's PR:** the certificates parity fix that the desk track asked for, outside the reader work (65e0532b1).
+
+**Evidence:**
+- the unit suites: `migrations`, `sessions`, `drafts`, `register`, `test/endpoint/reader-state` (22, every surface through real channels), `subscriptions-b`, `remote-checkout`, `test/lane-b/remote`, the renderer's `remote-reading`, `remote-drafts` and `visibility`;
+- `test/lane-b/drafts-enumerated.test.ts`: every order of up to 5 events from 7, against the real `DraftStore` and the renderer's queue, for an owner and a member. It checks that the machine never ends on an older draft, and that no attachment disappears unless removed;
+- the gates the PR body lists.
+
+**Retrospective (M6a).** Built as three tasks, each with a review at its frontier. The desk track reviewed the endpoint over four rounds, then the renderer, then each draft-path delta, and our reviewer-medium reviewed the branch.
+- **Where the rounds went.** Each fix had the same shape: authority, or currency, checked at one point and assumed at a later one. A reader named at authorize and used at dispatch. An owner checked at enqueue and sent at dequeue. A reply applied after a newer record. A save released at a timeout while its act still ran. A clear that left nothing to compare against. A transport omission read as a deletion.
+- **What found the draft-path orders.** Review found the draft-path bugs one interleaving at a time, three rounds running. The enumerating test found 361 failing orders on the tree it was written against, then 822 more once its alphabet gained an edit over the budget. Its blind spot was its alphabet, not its orders.
+- **The fork.** The spec's "`session.update` answers `ReaderState`" met the strict output check of a machine-owned wire entry. A new command at a minor resolved it; a union would have needed a major.
+
+A future child that keeps state written from more than one place over an unreliable link should write the enumerating test first, before any review. Its alphabet should include every event that changes what crosses the link: a timeout, a late landing, a read-back, and a crossing of the size budget. It should also check authority at the point where data leaves, never at the point where the decision was made.
+

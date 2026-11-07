@@ -85,7 +85,7 @@ import { Notifier } from './notify';
 import { EndpointOrg, type OrgChange } from './org-sync';
 import { PlaneA } from './plane-a';
 import { PlaneB } from './plane-b';
-import { PlaneFeeds } from './plane-feeds';
+import { PlaneFeeds, type OwnersRead } from './plane-feeds';
 import { EndpointPolicy, MachineSetup, settingsDefaultMode } from './policy';
 import { completeProvisioning, provisionInto, type DelegatedInput } from './provision';
 import { retireInto, type Retired } from './retire';
@@ -313,11 +313,7 @@ export class Endpoint implements EndpointModule {
         listedSessions: () => Object.entries(this.#state?.listings ?? {}).flatMap(([session, entry]) => (isListingGone(entry.record.body) ? [] : [session])),
       },
       notifier: this.notifier,
-      machineOwners: () => {
-        const org = this.#org;
-        if (!org?.ready || this.#services === null) return Promise.resolve([]);
-        return machineOwnerMembers(org.head().state, org.certificates(), this.#services.machine.ref, new Date(this.deps.now()));
-      },
+      machineOwners: () => this.#machineOwners(),
       dispatch: (owner, name, input) => {
         if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
         return this.#services.dispatch(owner, name, input);
@@ -518,6 +514,7 @@ export class Endpoint implements EndpointModule {
       browser: () => this.#services?.browser ?? null, // P5 O17 M9a: a session's `browser.inventory` feed
       reaches: (project) => orgProject(this.#org?.ready ? this.#org.head().state : null, project), // P5 O8 M7b: the `channel` feed's
       cursors: channelCursors, // P5 O8 M7b fix wave: its entries' cursors, history's too
+      owners: () => this.#ownersRead(), // P5 O8 M6a: whose reading a `session.changed` carries as it is
       log,
       backlogBytes: seams.backlogBytes,
     });
@@ -548,11 +545,7 @@ export class Endpoint implements EndpointModule {
           return [{ member, listingId, target }];
         }),
       records: recordSource,
-      machineOwners: () => {
-        const org = this.#org;
-        if (!org?.ready || this.#services === null) return Promise.resolve([]);
-        return machineOwnerMembers(org.head().state, org.certificates(), this.#services.machine.ref, new Date(this.deps.now()));
-      },
+      machineOwners: () => this.#machineOwners(),
       recordFor: (report) => this.listings.recordFor(report),
       ranks: (member) => this.authorizer.ranks(member, this.deps.now()),
       sessionSafe,
@@ -566,6 +559,7 @@ export class Endpoint implements EndpointModule {
       setup,
       reaches: (project) => orgProject(this.#org?.ready ? this.#org.head().state : null, project), // P5 O8 M7b fix wave
       cursors: channelCursors,
+      readerMoved: (member, appSessionId) => this.planeFeeds.readerMoved(member, appSessionId), // P5 O8 M6a: their other devices
       log,
     });
     this.gate.setExecutors({
@@ -596,9 +590,11 @@ export class Endpoint implements EndpointModule {
     org.onAdopted((change) => this.#adopted(change));
     org.onCertificates(() => {
       // P5 O7 M5b: a certificate set moves every decision taken under the one before (the machine's owners read through it),
-      // so the streams are held and authorized again at once, as at a `caps` refresh, the artifact placements dropped first.
+      // so the streams are held and authorized again at once, as at a `caps` refresh, the artifact placements dropped first;
+      // and every subscription and resumable cursor, as at a new head (the desk track's certificates parity).
       this.artifactRanks.clear();
       this.streams.recheck();
+      this.subscriptions.recheck();
       void this.#judge();
       void this.rl10.adopted();
     });
@@ -811,6 +807,21 @@ export class Endpoint implements EndpointModule {
   /** A read of the hub's org state that begins after this call (`#syncAfter`): `mawsd endpoint sync`'s (P5 O7 M10). */
   syncAfter(): Promise<unknown> {
     return this.#syncAfter();
+  }
+
+  /** P5 O8 M6a: the machine's owners under the head held now, and whether that head and its certificates still stand. */
+  #ownersRead(): OwnersRead {
+    const org = this.#org;
+    const head = org?.ready ? org.head() : null;
+    const certificates = org?.ready ? org.certificates() : null;
+    return { owners: this.#machineOwners(), stands: () => (org?.ready ? org.head() : null) === head && (org?.ready ? org.certificates() : null) === certificates && this.#org === org };
+  }
+
+  /** The machine's owners as member ids, as the head and certificates give them now; none before the endpoint starts. */
+  #machineOwners(): Promise<string[]> {
+    const org = this.#org;
+    if (!org?.ready || this.#services === null) return Promise.resolve([]);
+    return machineOwnerMembers(org.head().state, org.certificates(), this.#services.machine.ref, new Date(this.deps.now()));
   }
 
   /**

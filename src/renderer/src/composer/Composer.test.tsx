@@ -25,6 +25,7 @@ import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-sess
 import { resetRemoteDrafts } from './editor/drafts'; // P5 O7 M2
 import { resetRemoteUploads } from './editor/remote-uploads'; // P5 O7 M4
 import { rememberRemoteDraft } from './editor/drafts'; // P5 O7 M4
+import { readerRowsOf, resetReaderRows } from '../lane-b/reader-rows'; // P5 O8 M6a
 import { queueFirstSend, resetRemoteSpawn, restoreHeldAttempts, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
 import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
 import { useDialogs } from '../sessions/dialogs'; // P5 O7 M9
@@ -1361,8 +1362,8 @@ describe('Send on a session with a record and no ready process', () => {
 // neither send nor start (no record; its process ended or starting) keeps the draft quietly, as a normal one does
 // P5 O7 M2: a lane B session on another machine, its commands carried over that machine's RL2 link by main's adapter.
 // A send says "Sending to <machine>…" while on its way (A4's hold can take a minute), clears the draft only once the
-// machine took it, and on an error keeps the text with main's words and Send again; the draft lives in this app's memory
-// (a draft on the machine is per member, O8 M6), so `session.drafts.*` are never asked.
+// machine took it, and on an error keeps the text with main's words and Send again. P5 O8 M6a: the draft is the member's
+// own on the machine (`session.drafts.*`), or in this app's memory where the machine offers none.
 describe('a lane B session on another machine', () => {
   const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
   let remote: FakeClient;
@@ -1378,9 +1379,10 @@ describe('a lane B session on another machine', () => {
       recordsVersion: s.recordsVersion + 1,
     });
     resetRemoteDrafts();
+    resetReaderRows(); // P5 O8 M6a
     resetRemoteUploads(); // P5 O7 M4
     resetRemoteSpawn(); // P5 O7 M4
-    remote = fakeClient({ 'session.queue.list': { entries: [], paused: false, pauseReason: null }, 'session.history.list': { entries: [] }, 'session.history.append': undefined, 'session.interrupt': { stillQueued: [], cancelled: [] } });
+    remote = fakeClient({ 'session.queue.list': { entries: [], paused: false, pauseReason: null }, 'session.history.list': { entries: [] }, 'session.history.append': undefined, 'session.interrupt': { stillQueued: [], cancelled: [] }, 'session.drafts.get': null, 'session.drafts.set': undefined });
     window.maws = preloadOf(remote);
   });
 
@@ -1652,13 +1654,36 @@ describe('a lane B session on another machine', () => {
     expect(primary().disabled).toBe(false);
   });
 
-  it('keeps the draft in this app’s memory, never asking the machine for it', async () => {
+  // P5 O8 M6a: the member's own draft on the machine, which a relaunch loads back
+  it('keeps the draft on the machine, and loads it back from there after a relaunch', async () => {
+    let kept: unknown = null;
+    remote = fakeClient({ 'session.drafts.get': () => kept, 'session.drafts.set': ({ draft }: { draft: unknown }) => void (kept = draft) });
+    window.maws = preloadOf(remote);
     const view = mount([{ index: 0, id: R }]);
+    await waitFor(() => expect(remote.invoked('session.drafts.get')).toHaveLength(1));
     await type('half a thought');
     view.unmount(); // the draft is written on unmount
+    await waitFor(() => expect(JSON.stringify(kept)).toContain('half a thought'));
+    expect(readerRowsOf(R)).toBe('kept');
+    resetRemoteDrafts(); // a relaunch: this run's memory gone
+    resetReaderRows();
     mount([{ index: 0, id: R }]);
     await waitFor(() => expect(editorOf().editor.getText()).toBe('half a thought'));
-    expect(remote.invoked('session.drafts.get')).toEqual([]);
+    expect(remote.invoked('session.drafts.get')).toEqual([{ appSessionId: 'app-r' }, { appSessionId: 'app-r' }]);
+  });
+
+  // P5 O7 M2, kept by P5 O8 M6a for a machine older than M6a: its drafts are in this app's memory for the run
+  it('keeps the draft in this app’s memory where the machine offers no drafts, asking it nothing more', async () => {
+    remote = fakeClient();
+    window.maws = preloadOf(remote);
+    const view = mount([{ index: 0, id: R }]);
+    await waitFor(() => expect(remote.pending('session.drafts.get')).toBe(1));
+    await act(() => remote.fail('session.drafts.get', 'session.drafts.get: refused not-offered by machine mini', 'internal', { refusal: 'not-offered' }));
+    await type('half a thought');
+    view.unmount();
+    mount([{ index: 0, id: R }]);
+    await waitFor(() => expect(editorOf().editor.getText()).toBe('half a thought'));
+    expect(remote.invoked('session.drafts.get')).toHaveLength(1);
     expect(remote.invoked('session.drafts.set')).toEqual([]);
   });
 });

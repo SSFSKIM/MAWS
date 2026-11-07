@@ -333,4 +333,26 @@ CREATE INDEX IF NOT EXISTS channel_entries_project_at ON channel_entries(project
 CREATE INDEX IF NOT EXISTS channel_entries_at ON channel_entries(at);
 `,
   },
+  // P5 O8 M6a (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M6a, Interfaces §P; P5 Decision Log 36): reader
+  // state and composer drafts per member. The session row's `pinned`, `last_seen_*` and `unread`, and `drafts`, stay the
+  // machine owners' (local access, and a remote member who owns the machine); every other member who reads a session over
+  // RL2 has a row here, keyed by their member id, made at their first write (a member with no row reads unpinned, read
+  // and never seen). Each goes with its session's record. The primary key serves every read (a member's row, a session's
+  // rows when a turn ends), so neither has an index of its own.
+  {
+    table: 'reader_state',
+    sql: `
+CREATE TABLE IF NOT EXISTS reader_state (app_session_id TEXT NOT NULL REFERENCES sessions(app_id) ON DELETE CASCADE, member TEXT NOT NULL,
+  pinned INTEGER NOT NULL DEFAULT 0, last_seen_uuid TEXT, last_seen_at TEXT, unread INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (app_session_id, member));
+`,
+  },
+  {
+    table: 'member_drafts',
+    sql: `
+CREATE TABLE IF NOT EXISTS member_drafts (app_session_id TEXT NOT NULL REFERENCES sessions(app_id) ON DELETE CASCADE, member TEXT NOT NULL,
+  doc TEXT NOT NULL, attachments TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL,
+  PRIMARY KEY (app_session_id, member));
+`,
+  },
 ];

@@ -107,7 +107,7 @@ function useDraftPort(appSessionId: AppSessionId, hook: SetupIntentHook | null, 
   const current = useRef(hook);
   useLayoutEffect(() => void (current.current = hook));
   return useMemo(() => {
-    const drafts = rememberingRemoteDrafts(ipcDrafts(client, appSessionId), appSessionId, () => isRemoteLaneB(appSessionId)); // P5 O7 M2
+    const drafts = rememberingRemoteDrafts(ipcDrafts(client, appSessionId), appSessionId, () => isRemoteLaneB(appSessionId), client); // P5 O7 M2; P5 O8 M6a: the machine's
     return {
       // While C10 holds an accepted first message its intent's draft may still be the sent text: nothing to restore.
       load: async () => (current.current ? (current.current.intent.message !== null ? null : current.current.intent.draft) : drafts.load()),

@@ -13,9 +13,11 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import type { AppSessionId, MessageUuid, ProjectId, SessionId } from '@shared/graph/ids';
 import type { LaunchedBy, Lineage, SessionRecord } from '@shared/graph/session';
+import type { Reader } from '@shared/ipc/client';
 import { branchName } from '@shared/sessions/branch';
 import type { Holder, TranscriptSummary } from '@shared/wire/store';
 import type { Db, Value } from './db';
+import { NOT_CLEARED } from './drafts';
 import type { SessionRecordPatch } from '@shared/engine/status';
 import { ObservedRouteSchema, RouteSchema, type Route } from '@shared/engine/route'; // P5 O7 M9
 import { countLines } from '@shared/composer/pasted-framing';
@@ -190,6 +192,21 @@ function toRecord(row: SessionRow): SessionRecord {
   };
 }
 
+// P5 O8 M6a (Interfaces §P): a member's reader state, their `reader_state` row (ADDED_TABLES); none reads unpinned, read
+// and never seen.
+interface ReaderRow {
+  pinned: number;
+  last_seen_uuid: string | null;
+  last_seen_at: string | null;
+  unread: number;
+}
+const UNSEEN: ReaderRow = { pinned: 0, last_seen_uuid: null, last_seen_at: null, unread: 0 };
+
+// The record as a member reads it: their own state in place of the session row's, which is the machine owners'.
+function readAs(record: SessionRecord, state: ReaderRow = UNSEEN): SessionRecord {
+  return { ...record, pinned: state.pinned === 1, lastSeen: { messageUuid: state.last_seen_uuid as MessageUuid | null, at: state.last_seen_at }, unread: state.unread === 1 };
+}
+
 export class SessionStore {
   private readonly changeListeners = new Set<(record: SessionRecord, cause: ChangeCause, revision: number) => void>();
   private readonly bindingListeners = new Set<(change: BindingChange) => void>();
@@ -201,9 +218,14 @@ export class SessionStore {
     private readonly stamp: () => number, // the index-wide revision, taken once per committed change
   ) {}
 
-  list(opts: { includeArchived?: boolean } = {}): SessionRecord[] {
+  // P5 O8 M6a: `reader` (Interfaces §P) reads each record's pinned, lastSeen and unread as that member's; 'owner' reads
+  // the session row's, the machine owners'. The same for `get`, `markSeen`, `setUnread` and `setPinned`.
+  list(opts: { includeArchived?: boolean } = {}, reader: Reader = 'owner'): SessionRecord[] {
     const where = opts.includeArchived ? '' : 'WHERE archived = 0';
-    return this.db.all<SessionRow>(`SELECT * FROM sessions ${where} ORDER BY last_record_at DESC, created_at DESC`).map(toRecord);
+    const records = this.db.all<SessionRow>(`SELECT * FROM sessions ${where} ORDER BY last_record_at DESC, created_at DESC`).map(toRecord);
+    if (reader === 'owner') return records;
+    const states = new Map(this.db.all<ReaderRow & { app_session_id: string }>('SELECT * FROM reader_state WHERE member = ?', reader).map((row) => [row.app_session_id, row]));
+    return records.map((record) => readAs(record, states.get(record.appId)));
   }
 
   // The last summary discovery reported for each record that has one.
@@ -223,9 +245,10 @@ export class SessionStore {
     return row?.summary ? (JSON.parse(row.summary) as TranscriptSummary) : null;
   }
 
-  get(appId: AppSessionId): SessionRecord | null {
+  get(appId: AppSessionId, reader: Reader = 'owner'): SessionRecord | null {
     const row = this.db.get<SessionRow>('SELECT * FROM sessions WHERE app_id = ?', appId);
-    return row ? toRecord(row) : null;
+    if (!row) return null;
+    return reader === 'owner' ? toRecord(row) : readAs(toRecord(row), this.readerRow(appId, reader));
   }
 
   // P5 O7 M4: the record a remote spawn claimed under `opId` launched (its `launchedBy.opId`), or null: how the services'
@@ -320,6 +343,9 @@ export class SessionStore {
       }
       const advanced = existing.last_record_at !== null && summary.lastRecordAt !== null && summary.lastRecordAt > existing.last_record_at;
       const appId = existing.app_id as AppSessionId;
+      // P5 O8 M6a: a new turn is unread for every member who has read the session here; the owners' unread is the source's
+      // to set, by what this machine's windows show (source.ts)
+      if (advanced) this.db.run('UPDATE reader_state SET unread = 1 WHERE app_session_id = ? AND unread = 0', appId);
       if ((projectId !== null && existing.transcript_path === null) || existing.project_id !== projectId) this.projects.sessionPresenceChanged();
       const family = familyKey(existing); // E3: the family it was in, before the write
       if (this.write(existing, facts)) this.changed(appId, 'facts');
@@ -465,15 +491,18 @@ export class SessionStore {
   }
 
   // The human has seen the session up to `cursor`: lastSeen moves and unread clears.
-  markSeen(appId: AppSessionId, cursor: { messageUuid: MessageUuid | null; at: string }): SessionRecord {
+  markSeen(appId: AppSessionId, cursor: { messageUuid: MessageUuid | null; at: string }, reader: Reader = 'owner'): SessionRecord {
+    if (reader !== 'owner') return this.setReader(appId, reader, { last_seen_uuid: cursor.messageUuid, last_seen_at: cursor.at, unread: 0 });
     return this.set(appId, { last_seen_uuid: cursor.messageUuid, last_seen_at: cursor.at, unread: false }, 'update');
   }
 
-  setUnread(appId: AppSessionId, unread: boolean): SessionRecord {
+  setUnread(appId: AppSessionId, unread: boolean, reader: Reader = 'owner'): SessionRecord {
+    if (reader !== 'owner') return this.setReader(appId, reader, { unread: unread ? 1 : 0 });
     return this.set(appId, { unread }, 'update');
   }
 
-  setPinned(appId: AppSessionId, pinned: boolean): SessionRecord {
+  setPinned(appId: AppSessionId, pinned: boolean, reader: Reader = 'owner'): SessionRecord {
+    if (reader !== 'owner') return this.setReader(appId, reader, { pinned: pinned ? 1 : 0 });
     return this.set(appId, { pinned }, 'update');
   }
 
@@ -584,6 +613,29 @@ export class SessionStore {
     for (const row of rows) if (this.write(row, { project_id: projectId })) this.changed(row.app_id as AppSessionId, 'facts');
   }
 
+  // A member's write, to their own row (made at their first): the session row is untouched, so no change is announced and
+  // no revision taken (the record every subscriber holds is the owners', unchanged). Answers the record as they read it.
+  private setReader(appId: AppSessionId, member: string, values: Partial<ReaderRow>): SessionRecord {
+    return this.db.transaction(() => {
+      const record = this.requireRecord(appId);
+      const next = { ...(this.readerRow(appId, member) ?? UNSEEN), ...values };
+      this.db.run(
+        'INSERT INTO reader_state (app_session_id, member, pinned, last_seen_uuid, last_seen_at, unread) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (app_session_id, member) DO UPDATE SET pinned = excluded.pinned, last_seen_uuid = excluded.last_seen_uuid, last_seen_at = excluded.last_seen_at, unread = excluded.unread',
+        appId,
+        member,
+        next.pinned,
+        next.last_seen_uuid,
+        next.last_seen_at,
+        next.unread,
+      );
+      return readAs(record, next);
+    });
+  }
+
+  private readerRow(appId: AppSessionId, member: string): ReaderRow | undefined {
+    return this.db.get<ReaderRow>('SELECT pinned, last_seen_uuid, last_seen_at, unread FROM reader_state WHERE app_session_id = ? AND member = ?', appId, member) ?? undefined;
+  }
+
   private set(appId: AppSessionId, values: Record<string, Value>, cause: ChangeCause): SessionRecord {
     return this.db.transaction(() => {
       if (this.write(this.row(appId), values)) this.changed(appId, cause);
@@ -633,13 +685,14 @@ export class SessionStore {
 
   // A record discovery made and nobody has touched: no live MAWS process, and none of the owner's own state (pin,
   // archive, a MAWS title, a draft, attention items, a last-seen cursor, a remote spawn's launchedBy), so yielding it to the process that writes its transcript loses
-  // nothing. Anything else is refused rather than deleted.
+  // nothing. Anything else is refused rather than deleted. P5 O8 M6a: nor any member's reader state or draft.
   private bare(row: SessionRow): boolean {
     if ((JSON.parse(row.holder) as Holder).kind === 'self') return false;
     if (row.pinned === 1 || row.archived === 1 || row.title_override !== null || row.last_seen_uuid !== null || row.last_seen_at !== null) return false;
     if (row.launched_by !== null) return false; // P5 O7 M4: a remote spawn's requester, written once, never yielded away
-    const owned = (table: 'drafts' | 'attention_items') => this.db.get(`SELECT 1 AS present FROM ${table} WHERE app_session_id = ?`, row.app_id) !== null;
-    return !owned('drafts') && !owned('attention_items'); // both would go with the row (ON DELETE CASCADE)
+    const owned = (table: 'drafts' | 'attention_items' | 'reader_state' | 'member_drafts', where = '') => this.db.get(`SELECT 1 AS present FROM ${table} WHERE app_session_id = ?${where} LIMIT 1`, row.app_id) !== null;
+    const drafted = (table: 'drafts' | 'member_drafts') => owned(table, ` AND ${NOT_CLEARED}`); // M6a's re-review, K1: a cleared draft's tombstone is none
+    return !drafted('drafts') && !owned('attention_items') && !owned('reader_state') && !drafted('member_drafts'); // each would go with the row (ON DELETE CASCADE)
   }
 
   private deleteRow(existing: SessionRecord): void {

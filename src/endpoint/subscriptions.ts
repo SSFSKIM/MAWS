@@ -19,7 +19,9 @@
 // plaintext each, `last` on the final one; the device joins the pages' bodies and reads them. A snapshot of a kind (a
 // lane B part, a cards set) replaces one of its kind not yet begun, so while the device's credit is out only the latest
 // of each kind waits; a snapshot begun is never cut. An `ev` whose message would be over the channel's limit goes as
-// `{omitted: 'too-large', bytes}` at its cursor, so a cursor never skips.
+// `{omitted: 'too-large', bytes}` at its cursor, so a cursor never skips. An `ev` true only while a condition stands
+// (P5 O8 M6a: a record as the machine's owners read it, told to one of them) is checked again as it goes: one whose
+// condition fell while it waited ends the subscription `behind`, so the device starts over rather than skip a cursor.
 //
 // Access is re-checked whenever it can change: on every change of a session's record (`RecordSource`) and every new
 // head, each open subscription, and each lane A cursor a dropped channel left resumable, is authorized again. A
@@ -78,8 +80,11 @@ export interface Plane<S extends Subscription = Subscription> {
   stop(): void;
 }
 
-/** A queued stream message: its credit cost (`subbed` costs none) and size; a snapshot page, its snapshot and kind. */
-type Out = { message: EndpointMessage; cost: number; bytes: number; group?: number; key?: string };
+/**
+ * A queued stream message: its credit cost (`subbed` costs none) and size; a snapshot page, its snapshot and kind; an
+ * `ev` true only while a condition stands, that condition.
+ */
+type Out = { message: EndpointMessage; cost: number; bytes: number; group?: number; key?: string; stands?: () => boolean };
 
 /** One subscription of one channel. */
 export class Subscription implements StreamSource {
@@ -177,15 +182,15 @@ export class Subscription implements StreamSource {
     }
   }
 
-  /** One message of the stream at `at`. */
-  ev(at: Position, body: unknown): void {
+  /** One message of the stream at `at`; with `stands`, one that may go only while it holds (else the stream ends `behind`). */
+  ev(at: Position, body: unknown, stands?: () => boolean): void {
     let message: EndpointMessage = { t: 'ev', sub: this.id, ...at, body };
     let bytes = byteLength(message);
     if (bytes > MESSAGE_MAX_BYTES - 1024) {
       message = { t: 'ev', sub: this.id, ...at, body: { omitted: 'too-large', bytes } };
       bytes = byteLength(message);
     }
-    this.#push({ message, cost: bytes, bytes });
+    this.#push({ message, cost: bytes, bytes, ...(stands === undefined ? {} : { stands }) });
   }
 
   /** A control message, now: never behind the stream. */
@@ -228,6 +233,10 @@ export class Subscription implements StreamSource {
     if (this.ended || this.#held || this.#out.length === 0) return null;
     const head = this.#out[0];
     if (head.cost > 0 && this.#credit <= 0) return null;
+    if (head.stands?.() === false) {
+      this.end('behind');
+      return null;
+    }
     this.#out.shift();
     this.#backlog -= head.cost;
     this.#credit -= head.cost;

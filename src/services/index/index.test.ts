@@ -48,7 +48,7 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
       tables: [
         'attention_items', 'channel_entries' /* P5 O8 M7b: an ADDED_TABLES entry */, 'drafts',
         'library_artifacts', 'library_links', 'library_spaces', 'library_text', 'library_text_config', 'library_text_content', 'library_text_data', 'library_text_docsize', 'library_text_idx', // P3-L
-        'owner_channel_marks', 'owner_channel_sessions', 'projects', 'replay_fixtures', 'session_text', 'session_text_chunks', 'session_text_config', 'session_text_content', 'session_text_data', 'session_text_docsize', 'session_text_idx', 'session_text_state', 'sessions', 'side_threads', 'sqlite_sequence',
+        'member_drafts' /* P5 O8 M6a: ADDED_TABLES */, 'owner_channel_marks', 'owner_channel_sessions', 'projects', 'reader_state' /* P5 O8 M6a */, 'replay_fixtures', 'session_text', 'session_text_chunks', 'session_text_config', 'session_text_content', 'session_text_data', 'session_text_docsize', 'session_text_idx', 'session_text_state', 'sessions', 'side_threads', 'sqlite_sequence',
       ],
       mode: 'wal',
     });
@@ -96,7 +96,11 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
   it('creates each added table and its indexes on any file that lacks it, user_version unmoved, and keeps one it holds', () => {
     const path = join(dir.path, 'index.sqlite');
     const first = open(path);
-    expect(ADDED_TABLES.map((table) => table.table)).toEqual(['channel_entries']);
+    expect(ADDED_TABLES.map((table) => table.table)).toEqual(['channel_entries', 'reader_state', 'member_drafts']); // P5 O8 M6a: a member's reader state and drafts
+    const member = 'b'.repeat(32);
+    const appId = first.sessions.upsertFromSummary(summary()).record.appId;
+    first.sessions.setPinned(appId, true, member);
+    first.drafts.set(appId, { doc: null, attachments: [], updatedAt: '2026-11-07T10:00:00.000Z' }, member);
     first.channel.record({ project: 'p', appSessionId: null, engineSessionId: null, lane: 'A', kind: 'message', text: 'kept', at: new Date().toISOString(), src: 'p/w/1' }, Date.now());
     first.close();
     opened.pop();
@@ -104,19 +108,25 @@ describe('the index opens, migrates and refuses what it cannot own', () => {
     const again = open(path);
     expect(again.applied).toEqual([]);
     expect(again.channel.history({ project: 'p', limit: 10 }, Date.now()).entries.map((entry) => entry.text)).toEqual(['kept']);
+    expect(again.sessions.get(appId, member)?.pinned).toBe(true);
+    expect(again.drafts.get(appId, member)).not.toBeNull();
     again.close();
     opened.pop();
     const raw = new DatabaseSync(path);
-    raw.exec('DROP TABLE channel_entries'); // the file as the build before leaves it
+    raw.exec('DROP TABLE channel_entries; DROP TABLE reader_state; DROP TABLE member_drafts'); // the file as the build before leaves it
     raw.close();
     const reopened = open(path);
     expect(reopened.applied).toEqual([]);
     expect(reopened.channel.history({ project: 'p', limit: 10 }, Date.now()).entries).toEqual([]);
+    expect(reopened.sessions.get(appId, member)?.pinned).toBe(false);
+    expect(reopened.drafts.get(appId, member)).toBeNull();
+    expect(reopened.sessions.get(appId)?.appId).toBe(appId); // rows elsewhere untouched
     reopened.close();
     opened.pop();
     const db = new DatabaseSync(path, { readOnly: true });
     try {
       expect((db.prepare("SELECT name FROM sqlite_master WHERE tbl_name = 'channel_entries' ORDER BY name").all() as { name: string }[]).map((row) => row.name)).toEqual(['channel_entries', 'channel_entries_at', 'channel_entries_project_at', 'sqlite_autoindex_channel_entries_1']);
+      for (const table of ['reader_state', 'member_drafts']) expect((db.prepare('SELECT name FROM sqlite_master WHERE tbl_name = ? ORDER BY name').all(table) as { name: string }[]).map((row) => row.name)).toEqual([table, `sqlite_autoindex_${table}_1`]); // its primary key
       expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(15);
     } finally {
       db.close();

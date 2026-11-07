@@ -733,12 +733,13 @@ describe('the spine (P5 O3-D M2)', () => {
     const endpoint: EndpointModule = { start: async (started) => void (services = started), stop: async () => {}, status: () => null, enrollment: () => null, cli: async () => ({ code: 0, out: '' }) };
     let unavailable: string | null = null;
     let root: SpineDeps | null = null;
+    const readers: unknown[] = [];
     const load = async (): Promise<SpineEntry> => ({
       takeSpineLock,
       openSpineData: async (_profile, { lock }) => ({ lock: lock!, refused: lock!.refused, machineSettings: null as never, paths: { client: '', machine: '' } }),
       startSpine: (started) => {
         root = started;
-        started.bus.register('session.list', () => ({ sessions: [], revision: 1 }));
+        started.bus.register('session.list', (_input, context) => (readers.push(context.reader), { sessions: [], revision: 1 }));
         const rows = [{ id: 'p1', name: 'maws', directory: '/work/maws', order: 0, createdAt: '2026-10-29T00:00:00.000Z' }];
         return { view: { engineStatuses: () => [], on: () => () => {}, unavailable: () => unavailable, projectRows: () => rows } as never, settled: async () => {}, busy: () => false, stop: () => {} };
       },
@@ -750,6 +751,9 @@ describe('the spine (P5 O3-D M2)', () => {
     expect(await services!.dispatch('machine', 'session.list', { includeArchived: false })).toMatchObject({ ok: true, value: { sessions: [], revision: 1 } });
     expect(daemon.projects.known('/work/maws')).toBe(true);
     expect(daemon.projects.known('/work/other')).toBe(false);
+    // P5 O8 M6a (Interfaces §P): the reader the endpoint names reaches the handler's context
+    expect(await services!.dispatch('machine', 'session.list', { includeArchived: false }, undefined, 'b'.repeat(32))).toMatchObject({ ok: true });
+    expect(readers).toEqual([undefined, 'b'.repeat(32)]);
     root!.bus.emit('attention.changed', { appSessionId: 'app-1' as AppSessionId, items: [] });
     expect(heard).toContainEqual(['machine', 'attention.changed']);
     unavailable = 'launch mode scenario'; // D11: a scenario's view lends the endpoint no checkout

@@ -67,6 +67,7 @@ export const grades = {
   'session.list': 'list',
   'session.get': 'view',
   'session.update': { floor: 'view', byEffect: true }, // unread, lastSeen and pinned at the floor; title and archived take manage
+  'session.reader.update': 'list', // P5 O8 M6a (Interfaces §P): the caller's own reading, which reveals nothing of the session
   'session.projects.list': 'list',
   'session.projects.add': 'spawn',
   'session.projects.update': 'machine-admin',

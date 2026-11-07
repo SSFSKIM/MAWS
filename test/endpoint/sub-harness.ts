@@ -14,6 +14,11 @@
 // `bus`), for a call and for `machine.op`'s claimed run alike, and the machine's own events (`emitMachine`: git's, the
 // files service's, scm's, `session.changed`) reach the endpoint as `mawsd`'s front sends them, whatever an app does.
 //
+// P5 O8 M6a: a `machine` dispatch's reader (the endpoint names one for a channel's call or act: the owners' or the
+// caller's own) reaches a handler in its context, as `mawsd`'s front writes it (HandlerContext.reader), a claimed run's
+// too, and is recorded with the dispatch; a registered `session.get` or `session.list` (the real index's, through `bus`)
+// answers in place of the injected records.
+//
 // P5 O12 M11: `session.list` answers every record the suite injected, by `appId` as the index lists them (the handed-off
 // mark's pruning reads it).
 //
@@ -29,11 +34,11 @@ import * as fs from 'node:fs';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import { base64urlEncode, generateSigningKey, keyId, memoryOrgView, NO_CERTIFICATES, type Action, type ByteDuplex, type Channel, type ChannelMessage, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { base64urlEncode, generateSigningKey, keyId, memoryOrgView, NO_CERTIFICATES, type Action, type ByteDuplex, type Channel, type ChannelMessage, type OrgState, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { SoftwareAuthenticator } from '../../apps/org-protocol/test-support/authenticator.ts';
 import { TestDevice as Device } from '../../apps/org-protocol/test-support/test-device.ts';
 import type { SessionEvent } from '@shared/graph/events';
-import type { ClientRef, HandlerContext, HandlerOp } from '@shared/ipc/client';
+import type { ClientRef, HandlerContext, HandlerOp, Reader } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import { OpLedger } from '@shared/host/op-ledger';
 import { createHostRuntime, thrownError, type HostPort } from '@shared/host/runtime';
@@ -115,8 +120,8 @@ const no = (code: 'unknown_command' | 'internal' | 'host_unavailable'): HostResp
 export class FakeEngineHost {
   readonly sessions = new Map<string, HostSession>();
   attached = false;
-  /** Every dispatched command's name, in order, with its owner and the client it carried (P5 O7 M2: the channel's). */
-  readonly calls: Array<{ owner: string; name: string; input: unknown; client?: ClientRef }> = [];
+  /** Every dispatched command's name, in order, with its owner and the client it carried (P5 O7 M2: the channel's), and the reader it named (P5 O8 M6a). */
+  readonly calls: Array<{ owner: string; name: string; input: unknown; client?: ClientRef; reader?: Reader }> = [];
   /**
    * The machine's services (P5 O7 M2), asked first for every `machine` command; one it doesn't serve falls to `answer`.
    * Every fake host has one, its index empty until a test records a session (the engine host then places each), since a
@@ -170,7 +175,7 @@ export class FakeEngineHost {
       },
       pending: (id, requestId) => this.#pending(this.sessions.get(id), requestId),
     });
-    services.dispatch = (owner, name, input, client) => this.dispatch(owner, name, input, client);
+    services.dispatch = (owner, name, input, client, reader) => this.dispatch(owner, name, input, client, reader);
     services.onEvent = (listener) => {
       this.#events.add(listener);
       return () => this.#events.delete(listener);
@@ -311,10 +316,10 @@ export class FakeEngineHost {
   }
 
   /** The answer is made when the command arrives; one held (`hold`) reaches the endpoint only at its `release`. */
-  async dispatch(owner: string, name: string, input: unknown, client?: ClientRef): Promise<HostResponse> {
-    this.calls.push({ owner, name, input, ...(client === undefined ? {} : { client }) });
+  async dispatch(owner: string, name: string, input: unknown, client?: ClientRef, reader?: Reader): Promise<HostResponse> {
+    this.calls.push({ owner, name, input, ...(client === undefined ? {} : { client }), ...(reader === undefined ? {} : { reader }) });
     if (owner === 'machine' && this.spine !== null && !this.#failing.has(name)) {
-      const served = await this.spine.dispatch(name, input, client);
+      const served = await this.spine.dispatch(name, input, client, reader);
       if (served !== null) return served;
     }
     if (owner === 'engine-host' && name === 'host.op' && this.#ops !== null) {
@@ -532,22 +537,23 @@ export class FakeSpine {
     return record;
   }
 
-  async dispatch(name: string, input: unknown, client?: ClientRef): Promise<HostResponse | null> {
+  async dispatch(name: string, input: unknown, client?: ClientRef, reader?: Reader): Promise<HostResponse | null> {
     const appSessionId = (input as { appSessionId?: unknown } | null | undefined)?.appSessionId;
-    if (name === 'session.get') return ok(typeof appSessionId === 'string' ? (this.records.get(appSessionId) ?? null) : null);
-    if (name === 'session.list') return ok({ sessions: [...this.records.values()].map((record) => ({ appId: record.appSessionId, ...record })), revision: 1 });
+    const context = { client: client ?? {}, ...(reader === undefined ? {} : { reader }) } as HandlerContext;
+    const handler = this.handlers.get(name);
+    if (name === 'session.get' && handler === undefined) return ok(typeof appSessionId === 'string' ? (this.records.get(appSessionId) ?? null) : null);
+    if (name === 'session.list' && handler === undefined) return ok({ sessions: [...this.records.values()].map((record) => ({ appId: record.appSessionId, ...record })), revision: 1 });
     if (name === 'machine.op' && this.#ops !== null) {
       const checked = validateCommandInput(name, input);
-      return checked.ok ? ok(await this.#ops.op(checked.value as CommandInput<'machine.op'>, { client: client ?? {} } as HandlerContext)) : no('internal');
+      return checked.ok ? ok(await this.#ops.op(checked.value as CommandInput<'machine.op'>, context)) : no('internal');
     }
     if (name === 'machine.opQuery' && this.#ops !== null) {
       const checked = validateCommandInput(name, input);
       return checked.ok ? ok(this.#ops.opQuery(checked.value as CommandInput<'machine.opQuery'>)) : no('internal');
     }
-    const handler = this.handlers.get(name);
     if (handler !== undefined) {
       try {
-        return ok(await handler(input, { client: client ?? {} } as HandlerContext));
+        return ok(await handler(input, context));
       } catch (error) {
         return { t: 'res', id: '0', ok: false, error: thrownError(error) }; // a typed refusal as the front answers it (a timeout's), any other throw `internal`
       }
@@ -675,6 +681,8 @@ export type StartOptions = {
   projects?: Array<{ id: string; name: string }>;
   /** 2026-11-06: the endpoint's environment beside the direct listener's switch (an e2e seam a case reads). */
   env?: Record<string, string>;
+  /** P5 O8 M6a: more of the org in its chain's second state (another member, a member's second device). */
+  amend?: (state: OrgState) => void;
 };
 
 export async function startEndpoint(org: Org, started: Fixture[], options: StartOptions = {}): Promise<Fixture> {
@@ -699,6 +707,7 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
       s.machines.push({ name: 'mini', ref, pub: key.pub, owners: options.owners ?? [org.A] });
       s.machineNames.push({ name: 'mini', ref });
       s.projects.push(...(options.projects ?? []));
+      options.amend?.(s);
     });
     chain = [s1, s2];
     const state = EndpointState.open(services.machine.stateDir);

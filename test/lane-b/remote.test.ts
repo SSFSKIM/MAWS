@@ -2534,3 +2534,37 @@ describe('a remote dashboard’s snapshot holds (P5 O7 M5c)', { timeout: 30_000 
     await until(() => host.released() === 3, 'the window’s end released its hold on the machine');
   });
 });
+
+// The desk track's round 3 on M6a's G1: a checkout feed the endpoint ended `behind` drops the `session.changed` it held
+// (an owner's, its head moved while it waited; or a backlog past its bound), and nothing in its reopening said what the
+// record is now. The reopening reads it, under the caller (the endpoint gives each member their own reading).
+describe('a remote session’s record across a checkout feed’s reopening', { timeout: 30_000 }, () => {
+  it('reads the record again when its feed opens after it ended `behind`, the change it held lost', async () => {
+    const l = await lab();
+    const s = l.host.add('app-1');
+    l.place('app-1');
+    await opened(l.a, 'app-1', s.launchId);
+    const told = () => l.a.emitted.filter((e) => e.name === 'session.changed' && (e.payload.record as SessionRecord).appId === 'app-1').map((e) => e.payload.record as SessionRecord);
+    await until(() => told().length > 0, 'the session’s record');
+    // The feed's subscription held: a change of the session's record is checked again, the authorizer made to wait.
+    const authorizer = l.f.endpoint.authorizer;
+    const authorize = authorizer.authorize.bind(authorizer);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    authorizer.authorize = async (request, who, now) => (await gate, authorize(request, who, now));
+    l.f.records.set({ lane: 'B', session: 'eng-app-1', owners: ['@machine'] }, 'app-1');
+    // The machine's record changes and is told to A, an owner: queued behind the hold.
+    const current = { ...record('app-1', { engineSessionId: 'eng-app-1' as never, directory: CHECKOUT }), title: { text: 'renamed on the machine', source: 'user' as const } };
+    l.f.spine.records.set('app-1', current); // what the machine's `session.get` answers now
+    l.f.host.emitMachine('session.changed', { record: current, cause: 'update', revision: 5 });
+    await sleep(100);
+    // A new head (nothing in it moves A): the owners' reading queued under the one before no longer goes.
+    const next = await successor(l.chain.at(-1)!, [org.a1], () => {});
+    const delivered = await l.f.endpoint.cli('revoke', ['-'], JSON.stringify(next));
+    expect(delivered.code, delivered.out).toBe(0);
+    l.chain.push(next);
+    release();
+    await until(() => told().at(-1)?.title.text === 'renamed on the machine', 'the record, read again at the feed’s reopening', 5000);
+    expect(told().at(-1)).toEqual(current);
+  });
+});

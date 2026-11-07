@@ -84,3 +84,16 @@ export const SessionRecordSchema = z.strictObject({
   updatedAt: z.string(),
 });
 export type SessionRecord = z.infer<typeof SessionRecordSchema>;
+
+// P5 O8 M6a (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §P): what `session.reader.update`
+// answers, a reader's own pinned, lastSeen and unread, and nothing else of the record (never its paths, settings or a
+// spawn's signed act, which a `list` caller must not read). The renderer applies it to the record it holds.
+export const ReaderStateSchema = z.strictObject({
+  appSessionId: AppSessionIdSchema,
+  pinned: SessionRecordSchema.shape.pinned,
+  lastSeen: SessionRecordSchema.shape.lastSeen,
+  unread: SessionRecordSchema.shape.unread,
+});
+export type ReaderState = z.infer<typeof ReaderStateSchema>;
+
+export const readerStateOf = (record: SessionRecord): ReaderState => ({ appSessionId: record.appId, pinned: record.pinned, lastSeen: record.lastSeen, unread: record.unread });

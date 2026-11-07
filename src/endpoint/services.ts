@@ -4,7 +4,7 @@
 import type { BrowserFeed } from '@shared/browser/screencast';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { DocumentsOpen } from '@shared/host/socket-protocol';
-import type { ClientRef } from '@shared/ipc/client';
+import type { ClientRef, Reader } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { NewHostEntry } from '@shared/ipc/schema/channel';
 import type { MachineRef } from '@shared/machine/ref';
@@ -16,8 +16,11 @@ export interface EndpointServices {
   /**
    * Raw; wakes a parked host; pty.attach goes with credit: false, pty.ack and pty.checkpoint are refused. P5 O3-D M4:
    * `machine` is `mawsd`'s services front (the daemon's own namespace and the spine's commands, which load the spine).
+   * P5 O8 M6a (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §P): `reader`, for `machine` alone,
+   * whose reading (pinned, last seen, unread) and draft the request reads and writes (readers.ts), which the services
+   * front writes into the handler's context; none is the owners'.
    */
-  dispatch(owner: 'engine-host' | 'pty-host' | 'machine', name: string, input: unknown, client?: ClientRef): Promise<HostResponse>;
+  dispatch(owner: 'engine-host' | 'pty-host' | 'machine', name: string, input: unknown, client?: ClientRef, reader?: Reader): Promise<HostResponse>;
   /**
    * Lane B events whenever they are available (`onAttachment`); P5 O3-D M4: the spine's events (owner `machine`) whenever
    * it emits them; P5 O7 M3: the pty host's state (`pty.hostState`, owner `pty-host`, a HostState) at each transition.
@@ -96,7 +99,11 @@ export interface EndpointModule {
   cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }>;
 }
 
-/** `dispatch` on behalf of `client`, a channel's ref (P5 O7 M2); `dispatch` itself without one. */
-export function dispatchAs(dispatch: EndpointServices['dispatch'], client: ClientRef | undefined): EndpointServices['dispatch'] {
-  return client === undefined ? dispatch : (owner, name, input) => dispatch(owner, name, input, client);
+/**
+ * `dispatch` on behalf of `client`, a channel's ref (P5 O7 M2), its `machine` requests read and written as `reader`'s
+ * (P5 O8 M6a: the decision's, readers.ts); `dispatch` itself with neither.
+ */
+export function dispatchAs(dispatch: EndpointServices['dispatch'], client: ClientRef | undefined, reader?: Reader): EndpointServices['dispatch'] {
+  if (client === undefined && reader === undefined) return dispatch;
+  return (owner, name, input) => (owner === 'machine' && reader !== undefined ? dispatch(owner, name, input, client, reader) : dispatch(owner, name, input, client));
 }

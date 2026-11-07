@@ -95,10 +95,10 @@ function loader() {
 }
 
 describe('the endpoint seam', () => {
-  // P5 O17 M9a: EndpointServices.browser is DaemonServices.browser (R1), so the two are equal again, member for member
+  // P5 O17 M9a: EndpointServices.browser is DaemonServices.browser (R1), so the two are equal again, member for member.
+  // P5 O8 M6a: `dispatch` included, with the `reader` both take.
   it('DaemonServices is O10’s EndpointServices, and the two EndpointModule shapes are one', () => {
     expectTypeOf<DaemonServices>().toEqualTypeOf<EndpointServices>();
-    expectTypeOf<DaemonServices>().toExtend<EndpointServices>();
     expectTypeOf<Omit<EndpointModule, 'start'>>().toEqualTypeOf<Omit<O10Module, 'start'>>();
     expectTypeOf<Parameters<EndpointModule['start']>[0]>().toExtend<Parameters<O10Module['start']>[0]>();
   });

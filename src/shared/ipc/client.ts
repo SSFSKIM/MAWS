@@ -2,6 +2,8 @@
 // says when it is gone. In main the client is an app page instance (`src/main/ipc/clients.ts`); in a daemon it will be a
 // connection's page. Per-client state is keyed by `id` and released on `onGone`. Zod-free and Electron-free, so the same
 // handler code runs in either root.
+import type { MemberId } from 'org-protocol';
+
 export type ClientId = string & { readonly __brand: 'ClientId' };
 
 export interface ClientRef {
@@ -20,7 +22,16 @@ export interface HandlerContext {
   // services front for the endpoint's dispatch alone, never from a request's args); a service narrows what it reaches for
   // it (src/shared/machine/machine-home.ts). Absent for this machine's own clients.
   readonly remote?: true;
+  // P5 O8 M6a (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §P): whose reader state (pinned, last
+  // seen, unread) and draft the request reads and writes, named by the endpoint for its dispatch and written here by
+  // `mawsd`'s services front alone, never from a request's args, so a caller can't name another member's rows. Absent
+  // (this machine's own clients) is 'owner'.
+  readonly reader?: Reader;
 }
+
+// 'owner': the machine's owners', the session row's own state (local access, and a remote member who owns the machine,
+// so one person's devices share their reading); a member id: that member's own rows (P5 Decision Log 36).
+export type Reader = 'owner' | MemberId;
 
 export interface HandlerOp {
   readonly opId: string;

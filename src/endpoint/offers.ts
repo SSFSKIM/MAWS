@@ -157,6 +157,13 @@ export const OFFERS: Offers = {
     'session.mcpStatus': laneB('call'),
     'session.getSessionCost': laneB('call'),
     'session.get': laneBMachine('call'),
+    // P5 O8 M6a (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §P): the caller's own reading and
+    // draft, kept per member on the machine (readers.ts): pinned, last seen and unread (`list`, answered as `ReaderState`,
+    // never the record), and the composer's draft, read at `view` and written at `converse` under the services' ledger.
+    // `session.update` (the record's `title` and `archived`, the owners') is not offered.
+    'session.reader.update': laneBMachine('call'),
+    'session.drafts.get': laneBMachine('call'),
+    'session.drafts.set': laneBMachine('act'),
     'session.appEvents': laneBMachine('call'),
     'session.history.list': laneBMachine('call'),
     'session.queue.hold': laneB('act'),

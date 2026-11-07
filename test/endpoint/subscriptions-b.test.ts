@@ -8,11 +8,13 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { requestDigestOf } from '@shared/host/request-digest';
+import { generateSigningKey, signRecord, SIGNING_DOMAINS } from 'org-protocol';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { MemoryJournal, scriptedTransport, type ScriptedTransport } from '../../src/engine-host/conformance/scripted-transport';
 import { OPERATION_KEPT_MS, OperationTable } from '../../src/engine-host/operations';
 import { ControlClient } from '../../src/engine-host/rpc';
-import { act, cursorOf, done, drop, evs, HUB, item, makeOrg, of, openRemote, snapshot, snapshots, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type Org, type Remote } from './sub-harness';
+import { mintRef } from './fake-services';
+import { act, cursorOf, done, drop, evs, HUB, item, makeOrg, of, openRemote, ORG, snapshot, snapshots, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -336,6 +338,38 @@ describe('access, re-checked whenever it can change', () => {
     await subscribe(b, 's1', { lane: 'B', id: 'app-1' });
     f.records.set({ lane: 'B', session: s.engineSessionId!, owners: [org.A], access: 'private' }, 'app-1');
     await waitFor(b, (m) => m.t === 'ended' && m.sub === 's1' && m.reason === 'removed', 'ended removed');
+  });
+
+  // The desk track's certificates parity: a certificate set moves every decision taken under the one before (the
+  // machine's owners are read through it), so a change of it under the same head holds every open subscription and
+  // authorizes it again at once, as a new head does.
+  it('holds a live subscription at a certificate change under the same head until a current decision grants it', async () => {
+    const f = await lab();
+    const a = await openRemote(f, org.a1, org.A);
+    await subscribe(a, 's1', { lane: 'B', id: 'app-1' });
+    await snapshot(a, 's1');
+    const authorizer = f.endpoint.authorizer;
+    const authorize = authorizer.authorize.bind(authorizer);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let subs = 0;
+    authorizer.authorize = async (request, who, now) => {
+      if (request.kind === 'sub') subs++;
+      await gate;
+      return authorize(request, who, now);
+    };
+    // A certificate of another machine added: the hub's set under the same head, changed.
+    const key = await generateSigningKey();
+    const cert = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: mintRef(), name: 'vm-other', pub: key.pub, delegation: 'd-other', use: 1, issued: new Date().toISOString() }, key.privateKey, key.pub);
+    const view = { head: f.chain.at(-1)!, chain: [], transitions: [], certificates: { certs: [cert], retirements: [] }, more: false };
+    expect((await f.endpoint.parts!.org.sync(() => Promise.resolve(view))).refused).toBeUndefined();
+    expect(subs).toBe(1);
+    const live = f.host.row('app-1', 2);
+    await sleep(60);
+    expect(evs(a, 's1')).toEqual([]);
+    release();
+    await until(() => evs(a, 's1').length === 2, 'the events, once granted');
+    sawExactly(a, 's1', live);
   });
 });
 

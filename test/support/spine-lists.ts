@@ -39,7 +39,7 @@ export const SPINE_COMMANDS = [
   'session.intent.discard', 'session.intent.get', 'session.intent.list', 'session.intent.patch', 'session.intent.release', 'session.intent.resolveWorktree',
   'session.launchMode', 'session.list', 'session.observedFacts',
   'session.projects.add', 'session.projects.addFolder', 'session.projects.list', 'session.projects.remove', 'session.projects.update',
-  'session.recentTurns', 'session.rename', 'session.replay.fixtures', 'session.replay.start', 'session.revealPath', 'session.search',
+  'session.reader.update' /* P5 O8 M6a: a reader's own pinned, lastSeen and unread */, 'session.recentTurns', 'session.rename', 'session.replay.fixtures', 'session.replay.start', 'session.revealPath', 'session.search',
   'session.setVisible', 'session.spawn', 'session.start', 'session.takeOver', 'session.takeOverPane', 'session.trust.check', 'session.update',
   'session.visible', // P5 O3-D M5b: the visible set, for main's mirror
   'settings.engineApplied', 'settings.userEngineDefaults',

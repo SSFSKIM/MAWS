@@ -18,7 +18,7 @@
 import type { BrowserFeed } from '@shared/browser/screencast';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { DocumentsOpen } from '@shared/host/socket-protocol';
-import type { ClientRef } from '@shared/ipc/client';
+import type { ClientRef, Reader } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { NewHostEntry } from '@shared/ipc/schema/channel';
 import type { MachineRef } from '@shared/machine/ref';
@@ -39,7 +39,10 @@ export const ENDPOINT_CHANNEL_BASE = 2 ** 31;
 
 export interface DaemonServices {
   machine: { ref: MachineRef; profileDir: string; stateDir: string; kind: 'unit' | 'private' }; // stateDir: <profile>/mawsd/endpoint, 0700; only `unit` binds the tailnet listener by default
-  dispatch(owner: 'engine-host' | 'pty-host' | 'machine', name: string, input: unknown, client?: ClientRef): Promise<HostResponse>; // raw; wakes a parked host; pty.attach goes with credit: false, pty.ack and pty.checkpoint are refused; P5 O3-D M4: `machine` is the services front's table (the daemon's own namespace and the spine's commands, which load it)
+  // P5 O8 M6a (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §P): `reader`, for `machine` alone, is
+  // whose reader state and draft the request reads and writes ('owner', or the caller's member id), which the services
+  // front writes into the handler's context (HandlerContext.reader); none is the owners'
+  dispatch(owner: 'engine-host' | 'pty-host' | 'machine', name: string, input: unknown, client?: ClientRef, reader?: Reader): Promise<HostResponse>; // raw; wakes a parked host; pty.attach goes with credit: false, pty.ack and pty.checkpoint are refused; P5 O3-D M4: `machine` is the services front's table (the daemon's own namespace and the spine's commands, which load it)
   onEvent(listener: (owner: 'engine-host' | 'pty-host' | 'machine', message: { name: string; payload: unknown }) => void): () => void; // lane B events whenever they are available (onAttachment); P5 O3-D M4: the spine's events (owner `machine`) whenever it emits them; P5 O7 M3: the pty host's state (`pty.hostState`) at each transition
   // whether lane B events are available (P5 O3-D M3): with the permanent client, true from its link's streaming on, app or
   // none; with O2's recycle per attachment, an app attached to, or left, engine-host.sock (a recycle: the endpoint's

@@ -236,6 +236,7 @@
   "session.queue.promote",
   "session.queue.remove",
   "session.queue.setPaused",
+  "session.reader.update",
   "session.recentTurns",
   "session.reloadPlugins",
   "session.reloadSkills",

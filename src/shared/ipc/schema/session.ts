@@ -42,7 +42,7 @@ import {
 // (AppSessionIdSchema and MessageUuidSchema come with C3's imports above.)
 import { ProjectIdSchema, SessionIdSchema } from '@shared/graph/ids';
 import { OrgKeySchema } from '@shared/machine/org-key'; // P5 O6 M5
-import { ForeignHolderSchema, SessionRecordSchema } from '@shared/graph/session';
+import { ForeignHolderSchema, ReaderStateSchema, SessionRecordSchema } from '@shared/graph/session';
 // C4 end
 // C7 start: the composer's prompt history shapes (C7 execution document, Interfaces "X2 additions")
 import { HistoryEntrySchema, PastedContentSchema } from '../../composer/history-entry';
@@ -251,6 +251,17 @@ export const SessionPatchSchema = z
   .refine((patch) => Object.values(patch).some((value) => value !== undefined), { message: 'a patch sets at least one field' });
 export type SessionPatch = z.infer<typeof SessionPatchSchema>;
 
+// P5 O8 M6a (Interfaces §P; Decision Log, "M6a Task 1's fork"): a reader's update, the reader fields of SessionPatch alone
+// (`title` and `archived` stay `session.update`'s, the owners'), at least one present; mapped as SessionPatch's are.
+export const ReaderPatchSchema = z
+  .strictObject({
+    pinned: z.boolean().optional(),
+    unread: z.boolean().optional(),
+    lastSeen: z.strictObject({ messageUuid: MessageUuidSchema.nullable(), at: z.string() }).optional(),
+  })
+  .refine((patch) => Object.values(patch).some((value) => value !== undefined), { message: 'a patch sets at least one field' });
+export type ReaderPatch = z.infer<typeof ReaderPatchSchema>;
+
 // A composer draft: C7's Tiptap document, opaque here, and its attachments.
 export const DraftSchema = z.strictObject({
   doc: z.unknown(),
@@ -258,6 +269,12 @@ export const DraftSchema = z.strictObject({
   updatedAt: z.string(),
 });
 export type Draft = z.infer<typeof DraftSchema>;
+// P5 O8 M6a (M6a's branch review, F1): `session.drafts.set`'s `replaces` names the draft a save replaces, by the `updatedAt`
+// its writer gave it (null: none kept), and a save whose replaced draft is no longer the kept one is refused with these
+// words. A remote device names it: main answers a draft act still out at the pending bound `timeout`, the act may land
+// later, and acts are decided concurrently, so an older save could otherwise land over a newer one. Each `updatedAt` is
+// compared for identity only, never ordered, so two devices' clocks never meet. A save naming none writes as before.
+export const STALE_DRAFT_WORDS = 'session.drafts.set: the draft it replaces is no longer the one kept';
 
 // A replay fixture the index lists (M5 seeds and plays them).
 export const ReplayFixtureSchema = z.strictObject({
@@ -312,6 +329,8 @@ const c4Commands = {
   'session.get': { input: appSession, output: SessionRecordSchema.nullable(), owner: 'machine' },
   // pin, archive, mark read, C10's rename with provenance
   'session.update': { input: z.strictObject({ appSessionId: AppSessionIdSchema, patch: SessionPatchSchema }), output: SessionRecordSchema, owner: 'machine' },
+  // P5 O8 M6a: the reader's own pinned, lastSeen and unread (the context's reader, the owners' when none), never the record
+  'session.reader.update': { input: z.strictObject({ appSessionId: AppSessionIdSchema, patch: ReaderPatchSchema }), output: ReaderStateSchema, owner: 'machine' },
   // P5 O3-D (D13): `rows`, every project row the index holds (hidden ones, and those with no present session), for the
   // spine's view in another process (main's mirror, Interfaces §F)
   'session.projects.list': { input: z.void(), output: z.strictObject({ projects: z.array(ProjectRecordSchema), revision: z.number().int(), rows: z.array(ProjectRecordSchema).optional() }), owner: 'machine' },
@@ -325,7 +344,7 @@ const c4Commands = {
   // hides; rediscovery does not resurrect it
   'session.projects.remove': { input: z.strictObject({ id: ProjectIdSchema }), output: z.void(), owner: 'machine' },
   'session.drafts.get': { input: appSession, output: DraftSchema.nullable(), owner: 'machine' },
-  'session.drafts.set': { input: z.strictObject({ appSessionId: AppSessionIdSchema, draft: DraftSchema.nullable() }), output: z.void(), owner: 'machine' },
+  'session.drafts.set': { input: z.strictObject({ appSessionId: AppSessionIdSchema, draft: DraftSchema.nullable(), replaces: z.string().nullable().optional() /* P5 O8 M6a: STALE_DRAFT_WORDS */ }), output: z.void(), owner: 'machine' },
   // Main allocates the ids and the `kind: 'replay'` record, then dispatches session.replay.launch; a failed launch
   // removes the record again and fails with the launch's error (a `timeout` also cancels the launch on the host).
   'session.replay.start': {

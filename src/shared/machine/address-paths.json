@@ -218,6 +218,8 @@
 "commands.session.queue.promote.input":[".appSessionId AppSessionId"],
 "commands.session.queue.remove.input":[".appSessionId AppSessionId"],
 "commands.session.queue.setPaused.input":[".appSessionId AppSessionId"],
+"commands.session.reader.update.input":[".appSessionId AppSessionId"],
+"commands.session.reader.update.output":[".appSessionId AppSessionId"],
 "commands.session.recentTurns.input":[".appSessionId AppSessionId"],
 "commands.session.reloadPlugins.input":[".appSessionId AppSessionId"],
 "commands.session.reloadSkills.input":[".appSessionId AppSessionId"],

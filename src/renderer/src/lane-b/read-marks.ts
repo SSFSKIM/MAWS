@@ -1,14 +1,17 @@
 // A lane B session on another machine, read or unread in this app's memory (P5 O7 M2, docs/doperpowers/plans/
-// 2026-10-28-p5-o7-remote-lane-b.md, "Acts"). Its record's reader fields (unread, last seen) are the owner's on that
-// machine's index until O8 M6 keys them per member, and `session.update` and `session.setVisible` are not offered over the
-// link, so the marks are kept here for the app's run, never written to the owner's record: the session read while it is
-// on screen, unread when a turn ends while it isn't, and as the person sets it (the row's dot, the keyboard toggle, Mark
-// all read). The record the stores hold says the mark, over whatever record main reads again; a session with no mark
-// shows its record's own.
+// 2026-10-28-p5-o7-remote-lane-b.md, "Acts"): the session read while it is on screen, unread when a turn ends while it
+// isn't, and as the person sets it (the row's dot, the keyboard toggle, Mark all read). The record the stores hold says
+// the mark, over whatever record main reads again; a session with no mark shows its record's own.
+//
+// P5 O8 M6a (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §P): a machine that keeps each member's
+// reading (`session.reader.update`, ./reader-rows.ts) is written instead (./remote-reading.ts), and its record says the
+// member's own; there the marks are kept but not shown. They are shown, as before, for a machine that refuses them (an
+// endpoint older than M6a, whose records' reader fields are its owners') and for one still being learnt.
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { useSessions } from '../stores/sessions';
+import { readerRowsOf } from './reader-rows';
 import { isRemoteLaneB } from './remote-session';
 
 interface RemoteReadMarks {
@@ -36,13 +39,13 @@ export function setRemoteVisible(appSessionId: AppSessionId, visible: boolean): 
   });
 }
 
-// The records the stores hold, each with its mark where it differs; one write.
+// The records the stores hold, each with its mark where it differs and its machine's word isn't the record's; one write.
 function showMarks(): void {
   const { records, recordsVersion } = useSessions.getState();
   let next: Map<AppSessionId, SessionRecord> | null = null;
   for (const [appSessionId, unread] of useRemoteReadMarks.getState().unread) {
     const record = records.get(appSessionId);
-    if (record === undefined || record.unread === unread) continue;
+    if (record === undefined || record.unread === unread || readerRowsOf(appSessionId) === 'kept') continue;
     next ??= new Map(records);
     next.set(appSessionId, { ...record, unread });
   }

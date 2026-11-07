@@ -12,7 +12,7 @@ export const commands = [
   'session.listPermissionRules', 'session.getHooksListing', 'session.getMemoryDialog', 'session.getSkillsDialog',
   'session.getSandboxDialog', 'session.getWorkspaceDiff', 'session.exportConversation', 'session.getStatus',
   'session.mcpStatus', 'session.listModels', 'session.getSessionCost', 'session.getBinaryVersion', 'session.search', 'session.list',
-  'session.get', 'session.update', 'session.projects.list', 'session.projects.add', 'session.projects.update',
+  'session.get', 'session.update', 'session.reader.update' /* P5 O8 M6a */, 'session.projects.list', 'session.projects.add', 'session.projects.update',
   'session.projects.remove', 'session.drafts.get', 'session.drafts.set', 'session.replay.start',
   'session.replay.launch', 'session.replay.control', 'session.replay.fixtures', 'session.digests',
   'session.setVisible', 'session.launchMode', 'session.appEvents', 'session.history.list', 'session.history.append', 'session.trust.check',

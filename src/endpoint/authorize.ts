@@ -85,7 +85,7 @@
 // asks it in the step it publishes the stream, and its re-checks ask it at a record change or a relink (streams.ts).
 // Any other `stream` is the act open's binding (`#stream`, above).
 import { isMachineFeedSub, type Action, type Certificates, type DeviceClass, type OrgState, type RefusalReason, type Right, type SessionRef, type SubMessage } from 'org-protocol';
-import type { ClientRef } from '@shared/ipc/client';
+import type { ClientRef, Reader } from '@shared/ipc/client';
 import { gradeOf as declaredGrade, type Grade, type GradeSpec, type MachineGrade, type SessionRank } from '@shared/ipc/grades';
 import { REGISTRY, type WireRegistry } from '@shared/ipc/registry';
 import { holdsArtifact, type ArtifactRanks, type PlacedArtifact } from './artifacts';
@@ -94,6 +94,7 @@ import { machineOwnerMembers } from './grants';
 import { higher, isMachineGrade, isRoutingClass, isSessionRank, owns, rankAtLeast, sessionRank } from './grades';
 import { OFFERS, type OfferRow, type Offers } from './offers';
 import { MachineSetup, SETUP_DIRECTORY_COMMANDS, spawnRefusal, type Policy } from './policy';
+import { readerOf } from './readers';
 import { dispatchAs, type EndpointServices } from './services';
 import type { CheckoutSource, RecordSource, SessionRecord, SessionTarget } from './sources';
 import { Assertions, deviceOf, stepUpRequired, verifyDeviceStepUp } from './step-up';
@@ -114,7 +115,7 @@ export type Who = { member: string; device: string; clientClass: DeviceClass; cl
  * placements it read, the head, the policy): an executor that must await something between the decision and the effect
  * (a lane B act's status read) asks it in the step it hands the act on.
  */
-export type Decision = { ok: true; target?: SessionTarget; artifact?: ArtifactTarget; setup?: SetupTarget; stands?: () => boolean } | { ok: false; reason: RefusalReason };
+export type Decision = { ok: true; target?: SessionTarget; artifact?: ArtifactTarget; setup?: SetupTarget; reader?: Reader; stands?: () => boolean } | { ok: false; reason: RefusalReason };
 /** P5 O7 M9: a setup row's directory as the setup policy resolved and checked it, which its executor acts on (never the input's spelling). */
 // `opened`: the asking member's opens, which the machine's guard reads by (never another member's; M9's review)
 export type SetupTarget = { directory: string; opened: string[] };
@@ -344,8 +345,9 @@ export class Authorizer {
       }
       if (moved()) continue;
       // An act's admission says whether it stands still, for an executor that awaits before its ledger (actions.ts); so
-      // does a stream's, for its opening's publication and its re-checks (streams.ts; P5 O7 M5b).
-      const stands = (decision: Decision): Decision => (decision.ok && (request.kind === 'act' || request.kind === 'stream') ? { ...decision, stands: () => !moved() } : decision);
+      // does a stream's, for its opening's publication and its re-checks (streams.ts; P5 O7 M5b); P5 O8 M6a: and a call's,
+      // whose reader its executor checks in the step a reader's request goes to the machine (calls.ts).
+      const stands = (decision: Decision): Decision => (decision.ok && request.kind !== 'query' && request.kind !== 'sub' ? { ...decision, stands: () => !moved() } : decision);
       if (standing.presence === undefined) return stands(standing.decision);
       const decision = await standing.presence();
       return moved() ? refuse('unavailable') : stands(decision);
@@ -489,7 +491,8 @@ export class Authorizer {
 
     // 8. Presence, once the decision is known to stand. A read open (P5 O7 M5b) asks no step-up: its device is the head's.
     const placed: Decision = artifact !== undefined ? { ok: true, artifact: { artifactId: artifact.artifactId } } : target === undefined ? { ok: true } : { ok: true, target };
-    const granted: Decision = setup === undefined ? placed : { ...placed, setup };
+    // P5 O8 M6a: whose reading its `machine` requests read and write, by the owners this decision read (readers.ts)
+    const granted: Decision = { ...placed, ...(setup === undefined ? {} : { setup }), reader: readerOf(who.member, owners) };
     if (kind !== 'act' && kind !== 'stream') return decided(granted);
     const device = deviceOf(org.head, who.member, who.device);
     if (device === undefined) return no('removed');
