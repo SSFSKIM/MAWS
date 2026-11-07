@@ -33,10 +33,6 @@ import { ItemReport, Secrets } from './endpoint-verdicts';
 import { loadAdminDevice, OrgAdmin, successor, type AdminDevice, type OrgScope } from './org-admin';
 import { Cleanup, interruptible, isTestTarget, STEP_MS, type InterruptOptions } from './proof';
 
-export const DEFAULT_VM = 'dc-acceptance-7f80';
-export const DEFAULT_DIRECT_URL = 'ws://100.116.205.27:47831';
-/** Production's direct listener: the VM's own mawsd, on its own port. */
-export const PRODUCTION_DIRECT_URL = 'ws://100.116.205.27:47830';
 
 /** The items a run of `mode` runs: those named, else the mode's own (production's are 2–5, and it refuses others). */
 export function itemsFor(mode: 'production' | 'staging', given: string | undefined): { items: string[] } | { refused: string } {
@@ -63,11 +59,17 @@ export function mergeSessions(sessions: string[], recorded: readonly string[]): 
   for (const id of recorded) if (!sessions.includes(id)) sessions.push(id);
 }
 
-/** The direct listener the run dials: the one the command names, else the mode's own. */
-export function directUrlFor(mode: 'production' | 'staging', given: string | undefined): string {
-  return given ?? (mode === 'production' ? PRODUCTION_DIRECT_URL : DEFAULT_DIRECT_URL);
+/**
+ * The direct listener the run dials, which the command names (`--direct-url ws://<the VM's tailnet address>:<port>`,
+ * production's the VM's own mawsd's port, staging's the scratch scene's): the run's VM is made for it, so no address is
+ * assumed (P5 O18 M6: the VM these defaults named was deleted on 2026-11-01).
+ */
+export function directUrlFor(given: string | undefined): { url: string } | { refused: string } {
+  if (given === undefined || !/^wss?:\/\/[^\s/]+:\d{1,5}$/.test(given)) return { refused: '--direct-url ws://<the VM’s tailnet address>:<port>: the direct listener the run dials' };
+  return { url: given };
 }
-const DEVCLOUD = '/Users/new/.claude/plugins/cache/doperpowers/devcloud/0.15.1/bin/devcloud';
+/** devcloud, from PATH unless `--devcloud` names one (no cached plugin path, which moves with every release). */
+const DEVCLOUD = 'devcloud';
 /** A cleanup step's bound: the scene's `down` on the VM waits out its processes, longer than a hub request's. */
 const CLEANUP_STEP_MS = 4 * STEP_MS;
 /** How long a hub deploy may take (wrangler's upload and the Worker's rollout). */
@@ -134,6 +136,76 @@ export type RunOptions = {
   tag?: string;
 };
 
+/** The org's chain and certificates as the run holds them: read whole, then extended by each state it posts. */
+export class OrgView {
+  chain: SignedOrgState[] = [];
+  certificates: Certificates = NO_CERTIFICATES;
+  constructor(readonly person: Person) {}
+
+  async reread(): Promise<void> {
+    ({ chain: this.chain, certificates: this.certificates } = await readOrgState(this.person));
+  }
+
+  /** The states after the last one held, added; the head. */
+  async refresh(): Promise<SignedOrgState> {
+    const read = await readOrgState(this.person, this.chain.at(-1)!.state.version);
+    this.chain.push(...read.chain);
+    this.certificates = read.certificates;
+    return this.chain.at(-1)!;
+  }
+}
+
+/**
+ * A member of the run's own added with one device (`deviceId`, its channel and step-up keys made here), holding nothing
+ * else; the member's removal, their device's keys revoked, registered on the cleanup before the state that adds them.
+ */
+export async function addRunMember(admin: OrgAdmin, amend: (what: string, edit: (s: OrgState) => void | boolean) => Promise<SignedOrgState | null>, cleanup: Cleanup, made: Made, { email, deviceId }: { email: string; deviceId: string }): Promise<RunDevice> {
+  const id = randomBytes(16).toString('hex');
+  const device: RunDevice = { member: id, id: deviceId, clientClass: 'native-mac', channel: await generateSigningKey(), stepUp: await generateSigningKey() };
+  made.members.push(id);
+  made.devices.push(device.id);
+  cleanup.add(`remove the member ${email}`, async () => {
+    const keys: RevokedKey[] = await Promise.all(
+      [
+        ['channel', device.channel.pub],
+        ['step-up', device.stepUp!.pub],
+      ].map(async ([key, pub]) => ({ keyId: await keyId(pub), holder: { member: id, device: device.id, class: device.clientClass, key: key as 'channel' | 'step-up' } })),
+    );
+    if (!(await admin.read()).state.members.some((m) => m.id === id)) return;
+    await amend(`the member ${email} removed, their device's keys revoked`, (s) => {
+      s.members = s.members.filter((m) => m.id !== id);
+      s.revoked.push(...keys);
+    });
+  });
+  await amend(`the member ${email} added`, (s) => void s.members.push({ id, email, role: 'member', devices: [{ id: device.id, class: 'native-mac', keyStorage: 'software', channelPub: device.channel.pub, stepUpPub: device.stepUp!.pub }] }));
+  return device;
+}
+
+/**
+ * A scratch machine enrolled under `name` by the admin's code (its secrets heard by `secret` first) and listed, owned by
+ * `owners` (the admin's member by default), its undoing registered by `enrollListed`; then the state read again.
+ */
+export async function enrollScratch(admin: OrgAdmin, view: OrgView, machine: Pick<EndpointMachine, 'enroll'>, name: string, made: Made, cleanup: Cleanup, secret: (value: string) => void, owners?: string[]): Promise<{ ref: string }> {
+  made.machines.push(name);
+  const { ref } = await admin.enrollListed(name, cleanup, (code) => machine.enroll(code, name), { admitMs: 180_000, secret, ...(owners === undefined ? {} : { owners }) });
+  await view.refresh();
+  return { ref };
+}
+
+/** Waits for the machine's endpoint to be org-listed, on the hub and listening at the head `view` holds. */
+export function endpointServing(machine: Pick<EndpointMachine, 'status' | 'listening'>, view: OrgView, ms = 120_000): Promise<{ status: Awaited<ReturnType<EndpointMachine['status']>>; bound: string }> {
+  return until(
+    async () => {
+      const s = await machine.status();
+      const ready = endpointReady(s, view.chain.at(-1)!.state.version, s.listener.bound ? [] : await machine.listening());
+      return ready === null ? null : { status: s, bound: ready };
+    },
+    'the endpoint org-listed, on the hub and listening at the head',
+    ms,
+    2000,
+  );
+}
+
 /**
  * The scene the items run against, built step by step, each undoing registered on the cleanup before what it undoes:
  * the machine's scene up, the second member, the machine enrolled and listed, its endpoint serving, the relay, and the
@@ -141,14 +213,10 @@ export type RunOptions = {
  */
 export async function buildScene(o: RunOptions & { tag: string }, made: Made, log: (line: string) => void): Promise<Scene> {
   const { person, machine, cleanup, tag } = o;
-  let { chain, certificates } = await readOrgState(person);
-  const reread = async () => void ({ chain, certificates } = await readOrgState(person));
-  const refresh = async () => {
-    const read = await readOrgState(person, chain.at(-1)!.state.version);
-    chain.push(...read.chain);
-    certificates = read.certificates;
-    return chain.at(-1)!;
-  };
+  const view = new OrgView(person);
+  await view.reread();
+  const reread = () => view.reread();
+  const refresh = () => view.refresh();
 
   let admin: OrgAdmin | null = null;
   let owner: RunDevice;
@@ -208,29 +276,7 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
         };
 
   // A second member, holding nothing on the machine: the grade refusals' asker.
-  let other: RunDevice | null = null;
-  if (amend !== null) {
-    const id = randomBytes(16).toString('hex');
-    const email = `o10-m11-${tag}@staging.invalid`;
-    other = { member: id, id: `o10-s-${tag}-b1`, clientClass: 'native-mac', channel: await generateSigningKey(), stepUp: await generateSigningKey() };
-    const b1 = other;
-    made.members.push(id);
-    made.devices.push(b1.id);
-    cleanup.add(`remove the member ${email}`, async () => {
-      const keys: RevokedKey[] = await Promise.all(
-        [
-          ['channel', b1.channel.pub],
-          ['step-up', b1.stepUp!.pub],
-        ].map(async ([key, pub]) => ({ keyId: await keyId(pub), holder: { member: id, device: b1.id, class: b1.clientClass, key: key as 'channel' | 'step-up' } })),
-      );
-      if (!(await admin!.read()).state.members.some((m) => m.id === id)) return;
-      await amend(`the member ${email} removed, their device's keys revoked`, (s) => {
-        s.members = s.members.filter((m) => m.id !== id);
-        s.revoked.push(...keys);
-      });
-    });
-    await amend(`the member ${email} added`, (s) => void s.members.push({ id, email, role: 'member', devices: [{ id: b1.id, class: 'native-mac', keyStorage: 'software', channelPub: b1.channel.pub, stepUpPub: b1.stepUp!.pub }] }));
-  }
+  const other: RunDevice | null = amend === null ? null : await addRunMember(admin!, amend, cleanup, made, { email: `o10-m11-${tag}@staging.invalid`, deviceId: `o10-s-${tag}-b1` });
 
   // Staging's machine enrolled by the admin's code and listed; production's is the VM's own, cut over and listed
   // already (O14), and only read.
@@ -238,9 +284,7 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
   let ref: string;
   if (admin !== null) {
     name = `o10-m11-${tag}`;
-    made.machines.push(name);
-    ({ ref } = await admin.enrollListed(name, cleanup, (code) => machine.enroll(code, name), { admitMs: 180_000, secret: (value) => o.secrets.add(value) }));
-    await refresh();
+    ({ ref } = await enrollScratch(admin, view, machine, name, made, cleanup, (value) => o.secrets.add(value)));
     log(`${name}: enrolled and listed, ref ${ref}`);
   } else {
     // Production's, checked against the pin before the pairing.
@@ -248,23 +292,14 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
     log(`${name}: org-listed, ref ${ref} (the authorized machine)`);
   }
   machineName = name;
-  const { status, bound } = await until(
-    async () => {
-      const s = await machine.status();
-      const ready = endpointReady(s, chain.at(-1)!.state.version, s.listener.bound ? [] : await machine.listening());
-      return ready === null ? null : { status: s, bound: ready };
-    },
-    'the endpoint org-listed, on the hub and listening at the head',
-    120_000,
-    2000,
-  );
+  const { status, bound } = await endpointServing(machine, view);
   log(`${name}: endpoint org-listed at version ${status.stateVersion}, on the hub (generation ${status.hub.generation ?? '?'}), the direct listener ${bound}`);
 
   const relay = new RelayDialer(person.hub, ref, () => person.headers);
   cleanup.add('close the relay’s Machine socket', async () => relay.close());
 
   // Lane A's project (laneAProject); the events the run writes there are admitted by `hubWrites` and kept as residue.
-  const org = chain[0].state.org;
+  const org = view.chain[0].state.org;
   const project = laneAProject(o.target, org, name);
   const hubWrites = o.target === 'production' ? HubWrites.production(project.id) : HubWrites.staging(project.id);
   cleanup.add('record what the run keeps on the hub', async () => void made.kept.push(...hubWrites.kept()));
@@ -282,8 +317,8 @@ export async function buildScene(o: RunOptions & { tag: string }, made: Made, lo
     machine,
     name,
     ref,
-    chain: () => chain,
-    certificates: () => certificates,
+    chain: () => view.chain,
+    certificates: () => view.certificates,
     owner,
     amend,
     sign,
@@ -460,7 +495,7 @@ export const OPTIONS = {
   config: { type: 'string' },
   'device-keys': { type: 'string' },
   items: { type: 'string' },
-  vm: { type: 'string', default: DEFAULT_VM },
+  vm: { type: 'string' },
   devcloud: { type: 'string', default: DEVCLOUD },
   'direct-url': { type: 'string' },
   scratch: { type: 'string' },
@@ -520,7 +555,11 @@ export async function main(argv: string[]): Promise<number> {
   const { items } = chosenItems;
   const scratch = (values.scratch as string | undefined) ?? join(process.env.HOME ?? '/tmp', '.local', 'share', 'o10-m11-scratch');
   mkdirSync(scratch, { recursive: true, mode: 0o700 });
-  const ssh = { devcloud: values.devcloud as string, vm: values.vm as string };
+  if (typeof values.vm !== 'string' || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(values.vm)) {
+    console.error('--vm <name>: the devcloud VM the scene runs on');
+    return 2;
+  }
+  const ssh = { devcloud: values.devcloud as string, vm: values.vm };
   const print = (line: string) => console.log(line);
 
   if (chosen.mode === 'vm-setup' || chosen.mode === 'vm-teardown') {
@@ -558,14 +597,19 @@ export async function main(argv: string[]): Promise<number> {
   const interruption = { gate: () => cleanup.check(), signal: cleanup.signal };
   const log = secrets.guard(print);
 
+  const direct = directUrlFor(values['direct-url'] as string | undefined);
+  if ('refused' in direct) {
+    console.error(direct.refused);
+    return 2;
+  }
   if (chosen.mode === 'production') {
     const { productionRun } = await import('./endpoint-production');
-    return productionRun({ person, items, cleanup, secrets, ssh, scratch, directUrl: directUrlFor('production', values['direct-url'] as string | undefined), log, ready: (values['code-ready'] as string | undefined) ?? join(scratch, 'code-ready'), interruption });
+    return productionRun({ person, items, cleanup, secrets, ssh, scratch, directUrl: direct.url, log, ready: (values['code-ready'] as string | undefined) ?? join(scratch, 'code-ready'), interruption });
   }
 
   if (!isTestTarget(config!)) return 2;
   const device = await loadAdminDevice(values['device-keys'] as string);
-  const machine = new VmMachine(ssh, scratch, { directUrl: directUrlFor('staging', values['direct-url'] as string | undefined), log: (line) => log(`  vm: ${line}`), ...interruption, laneB: true });
+  const machine = new VmMachine(ssh, scratch, { directUrl: direct.url, log: (line) => log(`  vm: ${line}`), ...interruption, laneB: true });
   const deployScript = values['hub-deploy'] as string | undefined;
   const hubDeploy = deployScript === undefined ? null : () => run('zsh', [deployScript, 'deploy'], log, DEPLOY_MS, { env: hubDeployEnv(process.env) });
   return runEndpointAcceptance({

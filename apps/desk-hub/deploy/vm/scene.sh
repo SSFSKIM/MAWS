@@ -29,8 +29,37 @@
 #   started                      the sessions the scene recorded starting: `session <id>` (lane A), `seat <id>`,
 #                                `lane-b <id>` (the lane B session's engine session)
 #   down                         everything of the scene ended and removed; `LEFT …` for what could not be
-# Nothing here names the owner, the owner's profile, sminos or daemon, or the VM's own mawsd (port 47830): the scene is
-# o10acc's alone, and `down` ends that user's processes and nothing else.
+#   params                       the scene's parameters (user, ports, directories, registry), read only
+# P5 O18 M6's reach scenes (`--scene a1|a2|b1|a3` before the verb; setup.sh installs this as /opt/o18-m6/scene.sh) add,
+# each verb that runs sminos or an engine inside the scene's namespace, and each refused before anything runs when its
+# words are not of its shape (a VM step's words admit no space and no `#`: endpoint-machine.ts):
+#   as-session <session> <sub…>  the session's own shell (CLAUDE_CODE_SESSION_ID set, in the checkout), as its agent's
+#                                Bash runs sminos: `say <token> <tag>…` (`<alias>[:<short>]` a tag, sent as
+#                                `@<alias>[#<short>] … hello <token>`), `access <member> <level>`, `share <member>
+#                                <person> <grade>`, `spawn <alias>`, `list-org`, `find <name>`
+#   operator access|share …      the operator at the scene's terminal: no session, under a pty this script controls,
+#                                answering `y` to sminos's confirmation. The reach scenes' alone, at staging's org alone
+#   operator-say <token> <tag>   the operator's `sminos say` in the checkout (item 5: the operator's writer asks reach?)
+#   forge-say <writer> <recipient> <alias> <token>   a `say` to <recipient> appended under the plain writer of the
+#                                scene's session <writer> through sminos.log_append, past stream_for (acceptance 3c)
+#   log-files | uplink | streams | audiences | policy-cache   the project's log files (name, size), its uplink.json and
+#                                streams.json, daemon/audiences.json, the endpoint's policy/cache.json
+#   grep-home <token> [--after <ts>]   per file under the sminos home, how many lines hold the token (with --after,
+#                                lines whose `ts` is not after it are not counted); then `total <n>`
+#   owed                         `sminos daemon owed`
+#   events <token>               each event of the project's log files holding the token (its writer, seq, ts, kind,
+#                                session, text, withheld, audience, file)
+#   row <session> <token>        the text of the first row the session was given holding the token (its frame, label)
+#   archive-ls [token…]          the run's archive (/srv/o18-archive.git) as root: `file <path>` for each file on main,
+#                                `tomb <path> <seq>` for each tombstone in them, `token <t> <n>` for each token's count
+#   archive-evidence             what the scene's archive runs on, for an archive wait that timed out: uplink.json's
+#                                designation (`archive`, `archive_at`, `archive_have`), project.json's remote and hub,
+#                                daemon.json's last archive run, the running daemon's SMINOS_ARCHIVE_EVERY and groups,
+#                                `git ls-remote` of the archive as the scene's user, daemon.log's last 40 archive lines
+#   mawsd-freeze | mawsd-thaw | mawsd-stop | mawsd-start   mawsd (and what it started) stopped by SIGSTOP and continued;
+#                                ended, and started again under its loop, serving
+# Nothing here names the owner, the owner's profile, sminos or daemon, or the VM's own mawsd (port 47830): a scene is
+# its user's alone, and `down` ends that user's processes and nothing else.
 #
 # Lane B's engine is mawsd's (its engine host's), which builds the engine's environment itself (src/engine-host/launch.ts):
 # an allowlist over its login shell's, its gateway route's ANTHROPIC_BASE_URL and token set over anything inherited. So
@@ -41,24 +70,59 @@
 # --plugin-dir; lane A keeps its own (`--plugin-dir`) and is not loaded twice. The engine's allowlist drops
 # SMINOS_HOME, so a lane B session's sminos hooks use the default home, ~/.claude/sminos: the scene's sminos lives there.
 set -uo pipefail
-U=o10acc
+# The scene: O10 M11's (no `--scene`, the scratch user o10acc), or one of P5 O18 M6's reach scenes (`--scene <name>`,
+# docs/doperpowers/plans/2026-11-05-p5-o18-message-reach.md): each its own user, home, ports, tmux socket, verb registry
+# and namespace, so the hub sees four machines; their mawsd pack, stub, `claude` binary and pinned sminos copies are
+# shared under /opt/o18-m6 (setup.sh), each scene's sminos the run's own copy by commit, never the VM's marketplace's.
+SCENE_NAME=
+if [[ ${1:-} == --scene ]]; then SCENE_NAME=${2:-}; shift; (($#)) && shift; fi
+case $SCENE_NAME in
+  "") U=o10acc DIRECT_PORT=47831 STUB_PORT=47899 ;;
+  a1) U=o18a1 DIRECT_PORT=47841 STUB_PORT=47901 ;;
+  a2) U=o18a2 DIRECT_PORT=47842 STUB_PORT=47902 ;;
+  b1) U=o18b DIRECT_PORT=47843 STUB_PORT=47903 ;;
+  a3) U=o18a3 DIRECT_PORT=47844 STUB_PORT=47904 ;;
+  *) printf '%s\n' "a scene: --scene a1, a2, b1 or a3 (none: O10's)"; exit 1 ;;
+esac
 H=/home/$U
-O=/opt/o10-m11
 P=$H/profile
 S=$H/.claude/sminos
 CB=$H/.claude-mawsd
-MARKET=$O/market
-LANE_B=$O/lane-b.mjs
 W=$H/work
 R=$H/run
-DIRECT_PORT=47831
-STUB_PORT=47899
-NODE=$H/pack/runtime/bin/node
-MAWSD_JS=$H/pack/out/main/mawsd.js
-SMINOS=$O/bin/sminos
+if [[ -z $SCENE_NAME ]]; then
+  O=/opt/o10-m11
+  SMN=$O/sminos
+  SMINOS=$O/bin/sminos
+  PACK=$H/pack
+  TX=o10-m11
+  VERBS=/run/o10-m11-scene-verbs
+  ARCHIVE=
+else
+  O=/opt/o18-m6
+  # A3 is the old sminos (6e: an owner's machine on sminos 1.34.0, the designated archiver); the others the new one.
+  if [[ $SCENE_NAME == a3 ]]; then SMN=$O/sminos-old; else SMN=$O/sminos-new; fi
+  SMINOS=$SMN/skills/sminos/scripts/sminos
+  PACK=$O/pack
+  TX=o18-$SCENE_NAME
+  VERBS=/run/o18-$SCENE_NAME-verbs
+  ARCHIVE=/srv/o18-archive.git
+fi
+# How a verb of this scene's reads in its process's command line: what `down` takes a registered pid to still be.
+SELF_MATCH="$O/scene.sh ${SCENE_NAME:+--scene $SCENE_NAME }"
+MARKET=$O/market
+LANE_B=$O/lane-b.mjs
+NODE=$PACK/runtime/bin/node
+MAWSD_JS=$PACK/out/main/mawsd.js
 CLAUDE=$O/bin/claude
-TX=o10-m11
-SCENE_ENV=("HOME=$H" "USER=$U" "LOGNAME=$U" "SHELL=/bin/bash" "PATH=$O/bin:$H/pack/runtime/bin:/usr/bin:/bin" "LANG=C.UTF-8" "TERM=xterm-256color" "MAWS_USER_DATA=$P" "SMINOS_HOME=$S" "SMINOS_RL10=$P/mawsd/endpoint/rl10.json" "SMINOS_DERIVE_EVERY=0" "MAWS_ENDPOINT_DIRECT=1" "MAWS_ENDPOINT_PORT=$DIRECT_PORT" "CLAUDE_CONFIG_DIR=$H/.claude" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1" "ANTHROPIC_BASE_URL=http://127.0.0.1:$STUB_PORT" "ANTHROPIC_AUTH_TOKEN=o10-m11-stub-no-credential" "DISABLE_AUTOUPDATER=1" "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1" "DISABLE_TELEMETRY=1" "DISABLE_ERROR_REPORTING=1")
+# The staging org: the one org whose hub the operator's pty path (below) may widen at.
+STAGING_ORG=staging-ssfskim
+SCENE_ENV=("HOME=$H" "USER=$U" "LOGNAME=$U" "SHELL=/bin/bash" "PATH=$O/bin:$PACK/runtime/bin:/usr/bin:/bin" "LANG=C.UTF-8" "TERM=xterm-256color" "MAWS_USER_DATA=$P" "SMINOS_HOME=$S" "SMINOS_RL10=$P/mawsd/endpoint/rl10.json" "SMINOS_DERIVE_EVERY=0" "MAWS_ENDPOINT_DIRECT=1" "MAWS_ENDPOINT_PORT=$DIRECT_PORT" "CLAUDE_CONFIG_DIR=$H/.claude" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1" "ANTHROPIC_BASE_URL=http://127.0.0.1:$STUB_PORT" "ANTHROPIC_AUTH_TOKEN=o10-m11-stub-no-credential" "DISABLE_AUTOUPDATER=1" "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1" "DISABLE_TELEMETRY=1" "DISABLE_ERROR_REPORTING=1")
+# A reach scene archives every minute to the run's bare repository, which root owns and the scene users' group shares.
+# git trusts it by a safe.directory in a global config of the run's own ($R/gitconfig, written by `up`), never the VM's.
+# A command-scope one (`-c`, GIT_CONFIG_COUNT) is not enough: for a local path git starts upload-pack and receive-pack
+# with the config variables cleared, so the fetch's other end refused the repository as of dubious ownership.
+[[ -n $ARCHIVE ]] && SCENE_ENV+=("SMINOS_ARCHIVE_EVERY=60" "GIT_CONFIG_GLOBAL=$R/gitconfig")
 
 # mawsd's environment: the scene's, on its own config dir, its engine host's gateway the stub.
 MAWSD_ENV=()
@@ -78,7 +142,6 @@ within() { local s=$1 i; shift; for ((i = 0; i < s * 2; i++)); do "$@" && return
 # Every verb but check and down registers its pid in $VERBS while it runs: the run's end kills a step's local ssh,
 # which is no proof that this script stopped on the VM, so down stops a verb still running here, its whole process
 # tree frozen first so nothing forks past it, and says LEFT for one it could not.
-VERBS=/run/o10-m11-scene-verbs
 register() { install -d -m 700 $VERBS && say "$1" >$VERBS/$$ && trap 'rm -f $VERBS/$$' EXIT; }
 # Pid $1 and every process beneath it.
 tree() { ps -e -o pid=,ppid= | awk -v root="$1" '{ parent[$1] = $2 } END { for (p in parent) { q = p; while (q in parent && q != root && q > 1) q = parent[q]; if (q == root) print p } }'; }
@@ -88,7 +151,7 @@ stop_verbs() {
     [[ -f $f ]] || continue
     p=${f##*/}; what=$(cat "$f" 2>/dev/null)
     [[ $p == "$$" ]] && continue
-    if ! tr '\0' ' ' </proc/"$p"/cmdline 2>/dev/null | grep -qF -- "/opt/o10-m11/scene.sh "; then rm -f "$f"; continue; fi # ended, or another process now
+    if ! tr '\0' ' ' </proc/"$p"/cmdline 2>/dev/null | grep -qF -- "$SELF_MATCH"; then rm -f "$f"; continue; fi # ended, or another process now
     for _ in 1 2 3; do pids=$(tree "$p"); [[ -n $pids ]] && kill -STOP $pids 2>/dev/null; done
     pids=$(tree "$p"); [[ -n $pids ]] && kill -KILL $pids 2>/dev/null
     if within 5 bash -c "! kill -0 $p 2>/dev/null"; then
@@ -110,7 +173,7 @@ check() {
   say "user: $(id $U 2>/dev/null || echo absent)"
   say "pack: $([[ -x $NODE && -f $MAWSD_JS ]] && "$NODE" --version || echo absent)"
   say "claude: $([[ -x $CLAUDE ]] && "$CLAUDE" --version 2>/dev/null | head -1 || echo absent)"
-  say "sminos: $([[ -x $SMINOS ]] && grep -m1 '"version"' $O/sminos/.claude-plugin/plugin.json | tr -d ' ,' || echo absent)"
+  say "sminos: $([[ -x $SMINOS ]] && grep -m1 '"version"' $SMN/.claude-plugin/plugin.json | tr -d ' ,' || echo absent)"
   say "stub: $([[ -f $O/stub-model.mjs && -f $O/stub-api.mjs ]] && echo present || echo absent)"
   say "lane B: $([[ -f $LANE_B && -f $MARKET/.claude-plugin/marketplace.json && -f $MARKET/sminos/.claude-plugin/plugin.json ]] && echo present || echo absent)"
   say "tools: $(for t in tmux python3 ss nsenter unshare runuser curl git; do command -v $t >/dev/null || printf 'missing-%s ' $t; done)ok"
@@ -121,18 +184,23 @@ check() {
 
 up() {
   down >/dev/null 2>&1
-  [[ -x $NODE && -f $MAWSD_JS ]] || fail "no mawsd pack at $H/pack: run setup.sh first"
+  [[ -x $NODE && -f $MAWSD_JS ]] || fail "no mawsd pack at $PACK: run setup.sh first"
   install -d -m 700 -o $U -g $U $H/.claude $P $S $R $W
+  [[ -z $ARCHIVE ]] || { printf '[safe]\n\tdirectory = %s\n' "$ARCHIVE" > $R/gitconfig && chown $U:$U $R/gitconfig; } || fail "no $R/gitconfig"
   # The namespace's anchor: a sleep whose mount namespace has /etc/claude-code as an empty tmpfs (propagation private,
   # so the host's own mount table never sees it). Every process of the scene is started inside it.
   setsid -f unshare -m --propagation private sh -c "mount -t tmpfs -o mode=755,size=1m tmpfs /etc/claude-code && echo \$\$ > $R/anchor.pid && exec sleep infinity" </dev/null >/dev/null 2>&1
   within 10 anchor >/dev/null || fail "the scene's namespace did not come up"
   [[ -z $(inns ls -A /etc/claude-code) ]] || fail "the namespace still shows /etc/claude-code's files"
-  # mawsd as a unit would run it, under a loop that starts it again after `mawsd restart` (its exit 75) and only then.
-  inns setsid -f runuser -u $U -- env -i "${MAWSD_ENV[@]}" bash -c 'while :; do "$0" --disable-sigusr1 "$1" run --unit --dir "$2"; rc=$?; [ $rc -eq 75 ] || exit $rc; done' \
-    $NODE $MAWSD_JS $P/mawsd </dev/null >>$R/mawsd.out 2>&1
+  start_mawsd
   within 90 served 1 || { tail -5 $R/mawsd.out; fail "mawsd did not serve within 90 s"; }
   say "serving: mawsd pid $(mawsd_pid), the direct listener on port $DIRECT_PORT once enrolled"
+}
+
+# mawsd as a unit would run it, under a loop that starts it again after `mawsd restart` (its exit 75) and only then.
+start_mawsd() {
+  inns setsid -f runuser -u $U -- env -i "${MAWSD_ENV[@]}" bash -c 'while :; do "$0" --disable-sigusr1 "$1" run --unit --dir "$2"; rc=$?; [ $rc -eq 75 ] || exit $rc; done' \
+    $NODE $MAWSD_JS $P/mawsd </dev/null >>$R/mawsd.out 2>&1
 }
 
 restart() {
@@ -178,8 +246,10 @@ lane_a_up() {
   within 60 bash -c "runuser -u $U -- env -i ${SCENE_ENV[*]} $SMINOS daemon status 2>/dev/null | grep -q 'uplink: RL10 (local-only), running'" || fail "sminos's RL10 uplink is not running"
   org=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["org"])' $S/daemon/identity.json) || fail "identity.json names no org"
   as git -c init.defaultBranch=main init -q $W || fail "git init"
-  as python3 -c 'import json,sys; json.dump({"project": sys.argv[2], "name": sys.argv[3], "hub": {"org": sys.argv[4]}}, open(sys.argv[1], "w"))' $W/.smns "$project" "$name" "$org"
-  as bash -c "cd $W && git add .smns && git -c user.name=o10-m11 -c user.email=o10-m11@scene.invalid commit -qm scene"
+  # A reach scene's project keeps its archive in the run's bare repository (its `remote`, sminos_archive.py).
+  as python3 -c 'import json,sys; d={"project": sys.argv[2], "name": sys.argv[3], "hub": {"org": sys.argv[4]}}; d.update({"remote": sys.argv[5]} if sys.argv[5] else {}); json.dump(d, open(sys.argv[1], "w"))' $W/.smns "$project" "$name" "$org" "$ARCHIVE"
+  say "$project" > $R/project
+  as bash -c "cd $W && git add .smns && git -c user.name=$TX -c user.email=$TX@scene.invalid commit -qm scene"
   as python3 -c 'import json,sys; w=sys.argv[2]; json.dump({"hasCompletedOnboarding": True, "projects": {w: {"hasTrustDialogAccepted": True}}}, open(sys.argv[1], "w"))' $H/.claude/.claude.json $W
   as python3 -c 'import json,sys; json.dump({"permissions": {"allow": ["Bash(echo:*)"]}}, open(sys.argv[1], "w"))' $H/.claude/settings.json
   start_session ""
@@ -200,12 +270,39 @@ def walk(x):
             yield from walk(v)
 print(next(walk(json.load(sys.stdin)), ""))' "$sid") || alias=
   [[ -n $alias ]] || fail "sminos lists no alias for $sid"
-  python3 -c 'import json,sys; print(json.dumps({"session": sys.argv[1], "launch": sys.argv[2], "org": sys.argv[3], "alias": sys.argv[4], "checkout": sys.argv[5]}))' "$sid" "$launch" "$org" "$alias" "$W"
+  if [[ -n $SCENE_NAME ]]; then
+    # A reach scene's session is named by `@<alias>#<short>` across machines: its short, as sminos lists it.
+    short=$(member_field "$sid" short) || short=
+    python3 -c 'import json,sys; print(json.dumps({"session": sys.argv[1], "launch": sys.argv[2], "org": sys.argv[3], "alias": sys.argv[4], "checkout": sys.argv[5], "short": sys.argv[6]}))' "$sid" "$launch" "$org" "$alias" "$W" "$short"
+  else
+    python3 -c 'import json,sys; print(json.dumps({"session": sys.argv[1], "launch": sys.argv[2], "org": sys.argv[3], "alias": sys.argv[4], "checkout": sys.argv[5]}))' "$sid" "$launch" "$org" "$alias" "$W"
+  fi
+}
+
+# A field of the member sminos lists for session $1 here (`sminos list --here --json`), or status 1.
+member_field() {
+  as bash -c "cd $W && $SMINOS list --here --json" 2>/dev/null | python3 -c '
+import json, sys
+def walk(x):
+    if isinstance(x, dict):
+        if sys.argv[1] in x.values() and isinstance(x.get(sys.argv[2]), str) and x[sys.argv[2]]:
+            yield x[sys.argv[2]]
+        for v in x.values():
+            yield from walk(v)
+    elif isinstance(x, list):
+        for v in x:
+            yield from walk(v)
+try:
+    v = next(walk(json.load(sys.stdin)), "")
+except ValueError:
+    v = ""
+print(v)
+sys.exit(0 if v else 1)' "$1" "$2"
 }
 
 # The session in its tmux pane, in the namespace; `--resume <sid>` when given. Waits for its bridge.
 start_session() {
-  local resume=$1 flags=(--plugin-dir "$O/sminos" --model sonnet -n o10-m11-lane-a)
+  local resume=$1 flags=(--plugin-dir "$SMN" --model sonnet -n "$TX-lane-a")
   [[ -n $resume ]] && flags+=(--resume "$resume")
   inns runuser -u $U -- env -i "${SCENE_ENV[@]}" tmux -L $TX new-session -d -s lane-a -x 200 -y 50 -c $W "$CLAUDE ${flags[*]}" || fail "tmux"
   # A resume waits for its own session's bridge (a lane B session's may be there too); a first start has no other.
@@ -332,6 +429,35 @@ if len(sys.argv) >= 3:
 ' "$file" ${2:+"$2"}
 }
 
+# The text of the first row session $1 was given holding token $2 (as `transcript` counts them), on one line, at most
+# 600 characters: a delivery's frame and its sender's label (a reach scene's evidence of how a message arrived).
+row() {
+  local file
+  file=$(find $H/.claude/projects -name "$1.jsonl" 2>/dev/null | head -1)
+  [[ -n $file ]] || { say "row: none"; return 0; }
+  python3 -c '
+import json, sys
+def text(x):
+    if isinstance(x, str):
+        return x
+    if isinstance(x, list):
+        return " ".join(text(v) for v in x)
+    if isinstance(x, dict):
+        return " ".join(text(v) for k, v in x.items() if k in ("content", "text", "message"))
+    return ""
+for line in open(sys.argv[1], encoding="utf-8"):
+    try:
+        r = json.loads(line)
+    except ValueError:
+        continue
+    if isinstance(r, dict) and r.get("type") not in ("assistant", "queue-operation", "summary", "system") and sys.argv[2] in json.dumps(r, ensure_ascii=False):
+        print("row:", " ".join(text(r).split())[:600])
+        break
+else:
+    print("row: none")
+' "$file" "$2"
+}
+
 down() {
   local left=0 p
   runuser -u $U -- tmux -L $TX kill-server 2>/dev/null
@@ -345,8 +471,281 @@ down() {
   return $left
 }
 
+# ---- P5 O18 M6's reach verbs ---------------------------------------------------------------------------------------
+# Their words are checked by `reach_words` before anything runs, the verb registered or sminos started; their sminos
+# runs as the scene's user, in its namespace, with the scene's environment alone.
+
+UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+TOKEN_RE='^[a-z0-9-]{4,64}$'
+# A member reference (an alias, a short, a session id) or a person (a member id, an email).
+NAME_RE='^[A-Za-z0-9._@+-]{1,128}$'
+TAG_RE='^[A-Za-z0-9._/-]{1,64}(:[0-9a-z]{1,16})?$'
+LEVELS=" private listed org-view org-converse "
+GRADES=" list view converse approve none "
+TS_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]{8,12}Z$'
+reach_only() { [[ -n $SCENE_NAME ]] || fail "$1 is a reach scene's verb (--scene a1|a2|b1|a3)"; }
+is() { [[ $2 =~ $1 ]]; }
+member_change() { # access <member> <level> | share <member> <person> <grade>
+  case ${1:-} in
+    access) (($# == 3)) && is "$NAME_RE" "$2" && [[ $LEVELS == *" $3 "* ]] || fail "access <member> <private|listed|org-view|org-converse>" ;;
+    share) (($# == 4)) && is "$NAME_RE" "$2" && is "$NAME_RE" "$3" && [[ $GRADES == *" $4 "* ]] || fail "share <member> <person> <list|view|converse|approve|none>" ;;
+    *) fail "access <member> <level> | share <member> <person> <grade>" ;;
+  esac
+}
+reach_words() {
+  local verb=$1 t; shift
+  case $verb in
+    as-session)
+      reach_only "$verb"
+      is "$UUID_RE" "${1:-}" || fail "as-session <session> <subverb> …: a session id"
+      case ${2:-} in
+        say) is "$TOKEN_RE" "${3:-}" && (($# >= 4)) || fail "as-session <session> say <token> <tag>…"; for t in "${@:4}"; do is "$TAG_RE" "$t" || fail "a tag <alias>[:<short>], not $t"; done ;;
+        access | share) member_change "${@:2}" ;;
+        spawn) (($# == 3)) && is '^[a-z0-9][a-z0-9-]{0,62}$' "$3" || fail "as-session <session> spawn <alias>" ;;
+        list-org) (($# == 2)) || fail "as-session <session> list-org" ;;
+        find) (($# == 3)) && is "$NAME_RE" "$3" || fail "as-session <session> find <name>" ;;
+        *) fail "as-session <session> say|access|share|spawn|list-org|find …" ;;
+      esac ;;
+    operator) reach_only "$verb"; member_change "$@" ;;
+    operator-say) reach_only "$verb"; (($# == 2)) && is "$TOKEN_RE" "$1" && is "$TAG_RE" "$2" || fail "operator-say <token> <tag>" ;;
+    forge-say) reach_only "$verb"; (($# == 4)) && is "$UUID_RE" "$1" && is "$UUID_RE" "$2" && is '^[a-z0-9][a-z0-9-]{0,62}$' "$3" && is "$TOKEN_RE" "$4" || fail "forge-say <writer session> <recipient session> <alias> <token>" ;;
+    grep-home) reach_only "$verb"; is '^[A-Za-z0-9._:-]{4,64}$' "${1:-}" && { (($# == 1)) || { (($# == 3)) && [[ $2 == --after ]] && is "$TS_RE" "$3"; }; } || fail "grep-home <token> [--after <ts>]" ;;
+    archive-ls) reach_only "$verb"; for t in "$@"; do is '^[A-Za-z0-9._:-]{4,64}$' "$t" || fail "archive-ls [token…]: not a token: $t"; done ;;
+    events) reach_only "$verb"; (($# == 1)) && is '^[A-Za-z0-9._:-]{4,64}$' "$1" || fail "events <token>" ;;
+    row) reach_only "$verb"; (($# == 2)) && is "$UUID_RE" "$1" && is "$TOKEN_RE" "$2" || fail "row <session> <token>" ;;
+    log-files | uplink | streams | audiences | policy-cache | owed | archive-evidence | mawsd-freeze | mawsd-thaw | mawsd-stop | mawsd-start) reach_only "$verb"; (($# == 0)) || fail "$verb takes no words" ;;
+  esac
+}
+
+project_id() { local p; p=$(cat $R/project 2>/dev/null) && is "$UUID_RE" "$p" && say "$p" || fail "no project: lane-a-up first"; }
+project_home() { say "$S/projects/$(project_id)"; }
+# A session the scene started (lane A's, or a seat one of its sessions spawned): the only shells as-session opens.
+# grep reads both files itself: under pipefail, `cat` failing on a seats file not written yet failed the pipeline
+# whatever grep found. With -q, a selected line exits 0 even when one file is missing.
+known_session() { grep -qxF -- "$1" $R/session $R/seats 2>/dev/null || fail "not a session of this scene: $1"; }
+# sminos, as the scene's user in its namespace, from the checkout; `env…` assignments first (none: the operator).
+scene_sminos() {
+  local -a extra=()
+  while [[ ${1:-} == *=* ]]; do extra+=("$1"); shift; done
+  inns runuser -u $U -- env -i "${SCENE_ENV[@]}" "${extra[@]}" bash -c 'cd "$1" && shift && exec "$@"' bash "$W" "$SMINOS" "$@"
+}
+# A say's text from its tags: `<alias>[:<short>]` as `@<alias>[#<short>]`, then `hello <token>`.
+say_text() { local token=$1 t out=""; shift; for t in "$@"; do out+="@${t/:/#} "; done; say "${out}hello $token"; }
+
+as_session() {
+  local sid=$1 sub=$2 out rc; shift 2
+  known_session "$sid"
+  case $sub in
+    say) scene_sminos "CLAUDE_CODE_SESSION_ID=$sid" say "$(say_text "$@")" ;;
+    access | share) scene_sminos "CLAUDE_CODE_SESSION_ID=$sid" "$sub" "$@" ;;
+    spawn)
+      out=$(scene_sminos "CLAUDE_CODE_SESSION_ID=$sid" spawn "$1" "$TX: a spawn; answer ok" --cwd "$W" 2>&1); rc=$?
+      say "$out"
+      sed -n 's|^seat [a-z-]*: .*\[[0-9a-z]* / \([0-9a-f-]\{36\}\)\].*|\1|p' <<<"$out" | tail -1 >>$R/seats
+      return $rc ;;
+    list-org) scene_sminos "CLAUDE_CODE_SESSION_ID=$sid" list --org --json ;;
+    find) scene_sminos "CLAUDE_CODE_SESSION_ID=$sid" find "$1" --org --json ;;
+  esac
+}
+
+# The operator at a terminal: sminos under a pty this script holds (pty.fork: the child's controlling terminal, its
+# /dev/tty, is the pty), the confirmation answered `y` once sminos asks, everything it prints passed on, its status
+# the verb's; bounded at 120 s. Staging's org alone: a scene enrolled elsewhere is refused before sminos runs.
+PTY_PY='
+import os, pty, signal, sys, time
+cwd, argv = sys.argv[1], sys.argv[2:]
+pid, fd = pty.fork()
+if pid == 0:
+    os.chdir(cwd)
+    os.execv(argv[0], argv)
+signal.signal(signal.SIGALRM, lambda *_: (os.kill(pid, signal.SIGKILL), print("operator: no end within 120 s")))
+signal.alarm(120)
+seen, answered = b"", False
+while True:
+    try:
+        chunk = os.read(fd, 4096)
+    except OSError:
+        break
+    if not chunk:
+        break
+    seen += chunk
+    if not answered and b"Confirm? [y/N]" in seen:
+        os.write(fd, b"y\n")
+        answered = True
+_, status = os.waitpid(pid, 0)
+sys.stdout.write(seen.decode("utf-8", "replace").replace("\r", ""))
+print("operator: %s" % ("confirmed" if answered else "not asked"))
+sys.exit(os.waitstatus_to_exitcode(status) if hasattr(os, "waitstatus_to_exitcode") else (status >> 8))
+'
+operator() {
+  local org
+  org=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["org"])' $S/daemon/identity.json 2>/dev/null) || fail "operator: no identity.json: the scene's sminos is not cut over"
+  [[ $org == "$STAGING_ORG" ]] || fail "operator: the pty path widens at staging's org ($STAGING_ORG) alone, and this scene is enrolled in ${org:-none}"
+  inns runuser -u $U -- env -i "${SCENE_ENV[@]}" python3 -I -c "$PTY_PY" "$W" "$SMINOS" "$@"
+}
+
+# A `say` under the plain writer of session $1, to $2 (as the alias $3), appended by sminos.log_append itself: what a
+# sender that skips stream_for would write (acceptance 3c's forged say).
+FORGE_PY='
+import json, os, sys
+sys.path.insert(0, os.path.dirname(os.path.realpath(sys.argv[1])))
+import sminos as S
+_, writer, recipient, alias, token = sys.argv[1:]
+project = S.caller_project(S.caller_seat())
+if project is None:
+    sys.exit("forge-say: the checkout is in no project")
+caller = S.caller_seat()
+e = S.log_append(project, S.writer_id(writer), "say", **{"from": caller["alias"] if caller else S.default_from(""), "to": [{"session": recipient, "alias": alias}], "text": "@%s hello %s" % (alias, token)})
+print(json.dumps({"writer": e["writer"], "seq": e["seq"]}))
+'
+forge_say() {
+  known_session "$1"
+  inns runuser -u $U -- env -i "${SCENE_ENV[@]}" "CLAUDE_CODE_SESSION_ID=$1" bash -c 'cd "$1" && shift && exec python3 -I -c "$@"' bash "$W" "$FORGE_PY" "$SMINOS" "$@"
+}
+
+GREP_PY='
+import json, os, sys
+root, token, after = sys.argv[1], sys.argv[2], (sys.argv[3] if len(sys.argv) > 3 else None)
+total = 0
+for d, _, files in os.walk(root):
+    for f in sorted(files):
+        path = os.path.join(d, f)
+        n = 0
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if token not in line:
+                        continue
+                    if after is not None:
+                        try:
+                            ts = json.loads(line).get("ts")
+                        except (ValueError, AttributeError):
+                            ts = None
+                        if isinstance(ts, str) and ts <= after:
+                            continue
+                    n += 1
+        except OSError:
+            continue
+        if n:
+            print(n, os.path.relpath(path, root))
+            total += n
+print("total", total)
+'
+# Each event of the project's log files holding the token: `event <json>`, its writer, seq, ts, kind, session, text
+# (at most 300 characters), withheld and audience, the run's own markers and ids alone.
+EVENTS_PY='
+import glob, json, os, sys
+for path in sorted(glob.glob(os.path.join(sys.argv[1], "*.jsonl"))):
+    for line in open(path, encoding="utf-8", errors="replace"):
+        if sys.argv[2] not in line:
+            continue
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(e, dict):
+            keep = {k: e[k] for k in ("writer", "seq", "ts", "kind", "session", "withheld", "audience") if k in e}
+            if isinstance(e.get("text"), str):
+                keep["text"] = e["text"][:300]
+            keep["file"] = os.path.basename(path)
+            print("event", json.dumps(keep, separators=(",", ":")))
+'
+# A JSON file printed on one line, or `none`.
+json_of() { if [[ -f $1 ]]; then python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), separators=(",", ":")))' "$1"; else say none; fi; }
+
+EVIDENCE_PY='
+import json, os, sys
+home = sys.argv[1]
+def read(name):
+    try:
+        with open(os.path.join(home, name)) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return None
+for name, label, keys in (("uplink.json", "uplink", ("archive", "archive_at", "archive_have")), ("project.json", "project", ("remote", "hub", "root")), ("daemon.json", "record", ("archive", "error", "tick"))):
+    d = read(name)
+    print(label, "none" if d is None else json.dumps({k: d.get(k) for k in keys}, separators=(",", ":")))
+'
+# What the archive runs on, read as root (the daemon's environment by name alone: the scene's stub token is in it).
+archive_evidence() {
+  local h pid every out rc
+  h=$(project_home) || fail "$h"
+  python3 -c "$EVIDENCE_PY" "$h"
+  pid=$(pgrep -u $U -f -- 'daemon run' | head -1)
+  if [[ -n $pid ]]; then
+    every=$(tr '\0' '\n' </proc/$pid/environ | sed -n 's/^SMINOS_ARCHIVE_EVERY=//p')
+    say "daemon $pid SMINOS_ARCHIVE_EVERY=${every:-unset}; $U in $(id -nG $U)"
+  else say "daemon none running for $U"; fi
+  out=$(inns runuser -u $U -- env -i "${SCENE_ENV[@]}" git ls-remote "$ARCHIVE" 2>&1); rc=$?
+  say "ls-remote $ARCHIVE as $U: rc $rc $(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
+  grep -E 'archive|have|designat' $S/daemon.log 2>/dev/null | tail -40 | sed 's/^/log /'
+  true
+}
+
+archive_ls() {
+  local -a git=(git -c "safe.directory=$ARCHIVE" --git-dir="$ARCHIVE")
+  [[ -d $ARCHIVE ]] || fail "no archive at $ARCHIVE: run setup.sh"
+  if ! "${git[@]}" rev-parse -q --verify "main^{commit}" >/dev/null; then say "archive: no commit on main"; return 0; fi
+  say "archive: main at $("${git[@]}" rev-parse --short=12 main)"
+  "${git[@]}" ls-tree -r --name-only main | sed 's/^/file /'
+  # Each tombstone a file on main holds (`{writer, seq, withheld: true}`): `tomb <path> <seq>`.
+  "${git[@]}" ls-tree -r --name-only main | while read -r f; do
+    "${git[@]}" show "main:$f" 2>/dev/null | python3 -c '
+import json, sys
+for line in sys.stdin:
+    try:
+        e = json.loads(line)
+    except ValueError:
+        continue
+    if isinstance(e, dict) and e.get("withheld") is True:
+        print("tomb", sys.argv[1], e.get("seq"))' "$f"
+  done
+  for t in "$@"; do say "token $t $("${git[@]}" grep -c -F -e "$t" main 2>/dev/null | awk -F: '{n += $NF} END {print n + 0}')"; done
+}
+
+# mawsd's process and what it started (its engine host's children), each signalled.
+mawsd_tree() { local p; p=$(mawsd_pid) && [[ -n $p ]] && tree "$p"; }
+freeze() {
+  local pids; pids=$(mawsd_tree) || fail "no scratch mawsd running"
+  kill "-$1" $pids || fail "kill -$1 failed"
+  say "mawsd pid $(mawsd_pid): SIG$1 to $(wc -w <<<"$pids" | tr -d ' ') process(es)"
+}
+mawsd_stop() {
+  local p pids; p=$(mawsd_pid); [[ -n $p ]] || fail "no scratch mawsd running"
+  pids=$(tree "$p"); [[ -n $pids ]] && kill -CONT $pids 2>/dev/null # a frozen mawsd ends on TERM only once continued
+  kill -TERM "$p"
+  within 30 bash -c "! pgrep -u $U -f -- '$MAWSD_JS run --unit' >/dev/null" || { kill -KILL "$p" 2>/dev/null; within 10 bash -c "! pgrep -u $U -f -- '$MAWSD_JS run --unit' >/dev/null" || fail "mawsd pid $p did not end"; }
+  # Its loop ends with it (any status but restart's 75); a loop left would start it again.
+  pkill -u $U -f -- "while :; do" 2>/dev/null
+  [[ $(ss -ltnH "( sport = :$DIRECT_PORT )" | wc -l) == 0 ]] || fail "mawsd ended, and something still listens on port $DIRECT_PORT"
+  say "mawsd stopped (pid $p): nothing of it runs"
+}
+mawsd_start() {
+  local before; before=$(serving)
+  [[ -z $(mawsd_pid) ]] || fail "mawsd is running already: pid $(mawsd_pid)"
+  start_mawsd
+  within 90 served $((before + 1)) || { tail -5 $R/mawsd.out; fail "mawsd did not serve again within 90 s"; }
+  say "serving again: mawsd pid $(mawsd_pid)"
+}
+
+params() {
+  say "scene: ${SCENE_NAME:-o10}"
+  say "user: $U"
+  say "home: $H"
+  say "opt: $O"
+  say "ports: direct $DIRECT_PORT, stub $STUB_PORT"
+  say "tmux: $TX"
+  say "verbs: $VERBS"
+  say "self: $SELF_MATCH"
+  say "sminos: $SMINOS"
+  say "pack: $PACK"
+  say "archive: ${ARCHIVE:-none}"
+}
+
 verb=${1:-}; (($#)) && shift
-case $verb in check | down | "") ;; *) register "$verb" || fail "cannot register the verb $verb" ;; esac
+reach_words "$verb" "$@"
+case $verb in check | down | params | "") ;; *) register "$verb" || fail "cannot register the verb $verb" ;; esac
 case $verb in
   check) check ;;
   up) up ;;
@@ -374,7 +773,27 @@ case $verb in
   retire) word "${1:-}"; as bash -c "cd $W && exec $SMINOS retire $1" ;;
   lane-b-up) lane_b_up "${1:-}" ;;
   lane-b-events) lane_b_events "${1:-}" ;;
-  started) for f in session seat.session lane-b.session; do [[ -s $R/$f ]] && say "${f%.session} $(head -1 $R/$f)"; done; true ;;
+  started) for f in session seat.session lane-b.session; do [[ -s $R/$f ]] && say "${f%.session} $(head -1 $R/$f)"; done; [[ -s $R/seats ]] && sed -n 's/^\([0-9a-f-]\{36\}\)$/seat \1/p' $R/seats; true ;;
   down) stop_verbs; v=$?; down; d=$?; exit $((v | d)) ;;
-  *) fail "scene.sh check | up | enroll <name> | mawsd <args…> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | lane-b-up <tag> | lane-b-events <app> | started | down" ;;
+  params) params ;;
+  as-session) as_session "$@" ;;
+  operator) operator "$@" ;;
+  operator-say) scene_sminos say "$(say_text "$1" "$2")" ;;
+  forge-say) forge_say "$@" ;;
+  row) row "$1" "$2" ;;
+  events) h=$(project_home) || fail "$h"; python3 -c "$EVENTS_PY" "$h/log" "$1" ;;
+  log-files) h=$(project_home) || fail "$h"; for f in "$h"/log/*.jsonl; do [[ -f $f ]] && say "$(basename "$f") $(stat -c %s "$f")"; done; true ;;
+  uplink) h=$(project_home) || fail "$h"; json_of "$h/uplink.json" ;;
+  streams) h=$(project_home) || fail "$h"; json_of "$h/streams.json" ;;
+  audiences) json_of $S/daemon/audiences.json ;;
+  policy-cache) f=$(find $P -path '*/policy/cache.json' -type f 2>/dev/null | head -1); json_of "${f:-$P/none}" ;;
+  grep-home) python3 -c "$GREP_PY" "$S" "$1" ${3:+"$3"} ;;
+  owed) scene_sminos daemon owed ;;
+  archive-ls) archive_ls "$@" ;;
+  archive-evidence) archive_evidence ;;
+  mawsd-freeze) freeze STOP ;;
+  mawsd-thaw) freeze CONT ;;
+  mawsd-stop) mawsd_stop ;;
+  mawsd-start) mawsd_start ;;
+  *) fail "scene.sh [--scene a1|a2|b1|a3] check | up | enroll <name> | mawsd <args…> | restart | cut-hub | listening | log-size <log> | log-since <log> <bytes> | lane-a-up <project> <name> | lane-a-stop | lane-a-resume | transcript <session> [token] | sminos-status | sminos-revoked | imported <token> | local-spawn <alias> | retire <alias> | lane-b-up <tag> | lane-b-events <app> | started | down | params | as-session <session> <sub…> | operator access|share … | operator-say <token> <tag> | forge-say <writer> <recipient> <alias> <token> | row <session> <token> | events <token> | log-files | uplink | streams | audiences | policy-cache | grep-home <token> [--after <ts>] | owed | archive-ls [token…] | archive-evidence | mawsd-freeze | mawsd-thaw | mawsd-stop | mawsd-start" ;;
 esac

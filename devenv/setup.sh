@@ -38,6 +38,8 @@ Linux)
     dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q 'install ok installed' || packages+=("$package")
   done
   if ((${#packages[@]})); then
+    # named before they go in: they are system-wide, and a font change moves other sessions' window metrics on a shared host
+    echo "devenv: installing system packages: ${packages[*]}" >&2
     sudo apt-get update -q
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -yq "${packages[@]}"
   fi
