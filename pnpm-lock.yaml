@@ -11,7 +11,7 @@ overrides:
   prosemirror-model: 1.25.12
 
 patchedDependencies:
-  zod@4.6.5: f02c0f61b392ab34a492de1e6b3aebbc0222217a60161e658d8d92143f275c61
+  zod@4.6.5: 7b44dc4b2ee1051fad3863cb24ed06f60136b807ef6971b77b7d9c533ae559b3
 
 importers:
 
@@ -19,13 +19,13 @@ importers:
     dependencies:
       '@modelcontextprotocol/sdk':
         specifier: 1.32.1
-        version: 1.32.1(supports-color@10.2.2)(zod@4.6.5(patch_hash=f02c0f61b392ab34a492de1e6b3aebbc0222217a60161e658d8d92143f275c61))
+        version: 1.32.1(supports-color@10.2.2)(zod@4.6.5(patch_hash=7b44dc4b2ee1051fad3863cb24ed06f60136b807ef6971b77b7d9c533ae559b3))
       node-pty:
         specifier: 1.1.0
         version: 1.1.0
       zod:
         specifier: ^4.6.5
-        version: 4.6.5(patch_hash=f02c0f61b392ab34a492de1e6b3aebbc0222217a60161e658d8d92143f275c61)
+        version: 4.6.5(patch_hash=7b44dc4b2ee1051fad3863cb24ed06f60136b807ef6971b77b7d9c533ae559b3)
     devDependencies:
       '@codemirror/commands':
         specifier: 6.11.1
@@ -6914,7 +6914,7 @@ snapshots:
     dependencies:
       '@chevrotain/types': 11.1.2
 
-  '@modelcontextprotocol/sdk@1.32.1(supports-color@10.2.2)(zod@4.6.5(patch_hash=f02c0f61b392ab34a492de1e6b3aebbc0222217a60161e658d8d92143f275c61))':
+  '@modelcontextprotocol/sdk@1.32.1(supports-color@10.2.2)(zod@4.6.5(patch_hash=7b44dc4b2ee1051fad3863cb24ed06f60136b807ef6971b77b7d9c533ae559b3))':
     dependencies:
       '@hono/node-server': 2.1.4(hono@4.13.13)
       ajv: 8.20.0
@@ -6931,8 +6931,8 @@ snapshots:
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
-      zod: 4.6.5(patch_hash=f02c0f61b392ab34a492de1e6b3aebbc0222217a60161e658d8d92143f275c61)
-      zod-to-json-schema: 3.25.2(zod@4.6.5(patch_hash=f02c0f61b392ab34a492de1e6b3aebbc0222217a60161e658d8d92143f275c61))
+      zod: 4.6.5(patch_hash=7b44dc4b2ee1051fad3863cb24ed06f60136b807ef6971b77b7d9c533ae559b3)
+      zod-to-json-schema: 3.25.2(zod@4.6.5(patch_hash=7b44dc4b2ee1051fad3863cb24ed06f60136b807ef6971b77b7d9c533ae559b3))
     transitivePeerDependencies:
       - supports-color
 
@@ -9388,8 +9388,8 @@ snapshots:
       '@babel/parser': 7.29.9
       eslint: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
       hermes-parser: 0.25.1
-      zod: 4.6.5(patch_hash=f02c0f61b392ab34a492de1e6b3aebbc0222217a60161e658d8d92143f275c61)
-      zod-validation-error: 4.0.2(zod@4.6.5(patch_hash=f02c0f61b392ab34a492de1e6b3aebbc0222217a60161e658d8d92143f275c61))
+      zod: 4.6.5(patch_hash=7b44dc4b2ee1051fad3863cb24ed06f60136b807ef6971b77b7d9c533ae559b3)
+      zod-validation-error: 4.0.2(zod@4.6.5(patch_hash=7b44dc4b2ee1051fad3863cb24ed06f60136b807ef6971b77b7d9c533ae559b3))
     transitivePeerDependencies:
       - supports-color
 
@@ -11893,15 +11893,15 @@ snapshots:
       cookie: 1.1.1
       youch-core: 0.3.3
 
-  zod-to-json-schema@3.25.2(zod@4.6.5(patch_hash=f02c0f61b392ab34a492de1e6b3aebbc0222217a60161e658d8d92143f275c61)):
+  zod-to-json-schema@3.25.2(zod@4.6.5(patch_hash=7b44dc4b2ee1051fad3863cb24ed06f60136b807ef6971b77b7d9c533ae559b3)):
     dependencies:
-      zod: 4.6.5(patch_hash=f02c0f61b392ab34a492de1e6b3aebbc0222217a60161e658d8d92143f275c61)
+      zod: 4.6.5(patch_hash=7b44dc4b2ee1051fad3863cb24ed06f60136b807ef6971b77b7d9c533ae559b3)
 
-  zod-validation-error@4.0.2(zod@4.6.5(patch_hash=f02c0f61b392ab34a492de1e6b3aebbc0222217a60161e658d8d92143f275c61)):
+  zod-validation-error@4.0.2(zod@4.6.5(patch_hash=7b44dc4b2ee1051fad3863cb24ed06f60136b807ef6971b77b7d9c533ae559b3)):
     dependencies:
-      zod: 4.6.5(patch_hash=f02c0f61b392ab34a492de1e6b3aebbc0222217a60161e658d8d92143f275c61)
+      zod: 4.6.5(patch_hash=7b44dc4b2ee1051fad3863cb24ed06f60136b807ef6971b77b7d9c533ae559b3)
 
-  zod@4.6.5(patch_hash=f02c0f61b392ab34a492de1e6b3aebbc0222217a60161e658d8d92143f275c61): {}
+  zod@4.6.5(patch_hash=7b44dc4b2ee1051fad3863cb24ed06f60136b807ef6971b77b7d9c533ae559b3): {}
 
   zustand@5.0.15(@types/react@19.3.0)(react@19.3.0)(use-sync-external-store@1.7.0(react@19.3.0)):
     optionalDependencies:
