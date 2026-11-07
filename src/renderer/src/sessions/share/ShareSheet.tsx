@@ -169,7 +169,7 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
                   <li key={i} data-share-outcome={outcome.state} data-reason={'reason' in outcome ? outcome.reason : undefined} data-elsewhere={(outcome.state === 'done' && outcome.elsewhere) || undefined} className="min-w-0 [overflow-wrap:anywhere]">
                     <span className="text-fg">{lineWords(outcome.line, nameOf)}</span>
                     <span className="text-fg-muted"> · </span>
-                    <span className={outcome.state === 'done' ? 'text-fg-muted' : 'text-danger'}>
+                    <span className={outcome.state === 'done' || outcome.state === 'not-sent' ? 'text-fg-muted' : 'text-danger'}>
                       <Words {...outcomeWords(outcome, machine)} />
                     </span>
                   </li>

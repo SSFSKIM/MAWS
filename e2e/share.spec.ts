@@ -252,12 +252,17 @@ test('share: the reach marks across machines, a row’s hover card, the private 
       await expect(marked.s1.locator('[data-reach="private"]')).toBeVisible();
       await expect(marked.s2.locator('[data-reach="shared"]')).toBeVisible();
       await expect(marked.s4.locator('[data-reach="private"]')).toBeVisible(); // another's, read from its listing's audience
+      await expect(rowOf(at(STUDIO, S3))).toBeVisible();
       await expect(rowOf(at(STUDIO, S3)).locator('[data-reach]')).toHaveCount(0); // the default: no mark
       await expect(rowOf(at(FARM, S5)).locator('[data-reach]')).toHaveCount(0); // its machine can't say a reach
       await expect(rowOf(at(STUDIO, S4))).toHaveAttribute('data-menu', 'none'); // not yours: no Share
       await expect(rowOf(at(STUDIO, S1))).toHaveAttribute('data-menu', `session:${at(STUDIO, S1)}`);
       const rows = await Promise.all(Object.values(marked).map((row) => row.elementHandle()));
       expect(await page.evaluate(marksNotWhole, rows.filter((row) => row !== null)), 'each mark lies inside its row, and no marked row is wider than its box').toEqual([]);
+      // the row the People toggle added moves the rows below it (300 ms): its motion finished, so the photograph holds them all
+      await page.evaluate(() => {
+        for (const animation of document.querySelector('[data-region="sidebar"]')?.getAnimations({ subtree: true }) ?? []) if (Number.isFinite(animation.effect?.getComputedTiming().endTime)) animation.finish();
+      });
       await test.info().attach('share-marks', { body: await sidebar.screenshot(), contentType: 'image/png' });
 
       // A marked row's hover card says its access.
@@ -287,6 +292,7 @@ test('share: the reach marks across machines, a row’s hover card, the private 
       await expect(results.locator('[data-share-outcome="refused"]')).toContainText(SHARE.refused('studio-mini'));
       await expect(results.locator('[data-share-raw]')).toHaveAttribute('title', UNKNOWN_REASON);
       await expect(results.locator('[data-share-outcome="not-sent"]')).toContainText(SHARE.notSent);
+      await sheet.locator('[data-share-body]').evaluate((el) => (el.scrollTop = 0)); // the results lead the body
       await test.info().attach('share-sheet-saved', { body: await page.screenshot(), contentType: 'image/png' });
       await checkSheet(sheet);
       await sheet.getByRole('button', { name: SHARE.close }).click();
