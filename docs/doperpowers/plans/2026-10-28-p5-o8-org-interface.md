@@ -3382,3 +3382,29 @@ Retrospective (M7a). Built as three tasks under subagent-driven execution, each 
 - **Task 3's screenshots.** They caught two layout faults that happy-dom couldn't, as M4a's did.
 
 A future child that reads hub-served content into a cache should key the cache, its cursor and every projection by the reader whose rights fetched it. It should also carry each datum's provenance to the point of display, not just to the point of judgment.
+
+**M7b (2026-11-07, PR from `p5-o8-m7b`).** A project's Channel tab shows every session's to-human entries from every machine, placed by time among M7a's entries. Each entry carries its session's title and machine chip. A machine that isn't live shows "as of", and one that can't be read is greyed. The entries are:
+- messages: lane A's to-human tool, lane B's message tool and `<message>` spans;
+- questions, MAWS asks among them, with their choices;
+- the answers given to them.
+
+Each machine keeps its own entries in its spine's journal, an `ADDED_TABLES` table, so a downgraded build keeps its index. It holds the newest 2,000 per project and 30 days. Lane B's entries come from the one extraction the report view uses. Lane A's come from sminos's host messages, handed over beside `notifier.hostMessage`.
+
+The endpoint serves a member only the entries of sessions they may `view`:
+- through `channel.history`, paged with opaque cursors;
+- through a project-scoped `channel` feed (`rl2.channel`, RL2 1.12), whose rank is re-checked at every change of rights. Another member's private activity never makes a frame.
+
+Main reads this Mac's spine and each roster machine. It falls back to history against an older endpoint, dedupes on (machine, id), and caches per machine for one reader.
+
+Evidence:
+- the unit suites: `journal`, `to-human-items`, `channel-view`, `channel-cursors`, `channel-feed-queue`, `channel-feed`, `machines`, the renderer's `state`, `project`, `ToHumanEntry` and `ChannelView`;
+- `test/org/channel.local.test.ts` 7, on desk-hub's Worker in Miniflare, with a real endpoint and a real spine journal over RL10. It covers to-human entries from both lanes with their titles and machines, "as of" after the link drops, and an older peer read through history alone;
+- `e2e/channel.spec.ts`'s to-human entries, photographed;
+- the gates the PR body lists.
+
+Retrospective (M7b). Built as four tasks, with a review at each frontier and reviewer-high on the branch. The desk track reviewed the endpoint and org-protocol commits over six rounds.
+- **Where the rounds went.** Thirteen items came down to five, then two, then two, then nothing under the agreed final-round bar. Nearly every item was one shape: an endpoint that answers a member must never let what that member can't see change what it sends, whether in content, existence, frame type, timing of an end, or completeness of a page. Such leaks hide in recovery paths that run only under load, such as overflows and restarts, where "send something reasonable" quietly depends on hidden state.
+- **A ruling that was overturned.** The round-4 position ruling held a journal position. It assumed delivery runs in id order, which snapshot pages ordered by `(at, id)` broke. Recovery from an explicit list of let-go ids replaced it.
+- **The architect's binding conditions.** One extraction of a message, asks from their own record, and no start-path drops kept the channel and this machine's own to-human view from disagreeing.
+
+A future child that serves session content through a feed should state, before building, which inputs may influence each output (content, existence, frame type, end reason, paging) and test each one against a hidden-only variant. It should also key identities on an append-only id, never on a sort order.
