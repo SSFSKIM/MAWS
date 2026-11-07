@@ -426,6 +426,21 @@ describe('the project channel journal', () => {
     });
   });
 
+  describe('an entry’s id', () => {
+    it('is never issued again once its entry is pruned: the endpoint seals cursors from it, and a device dedupes by them', () => {
+      h.channel.record(laneA({ src: 'proj-a/mini/s1/aging', at: iso(NOW - 29 * DAY), text: 'aging' }));
+      const [aged] = h.history({ project: 'proj-a' }).entries;
+      h.tick(2 * DAY);
+      h.index.channel.prune(NOW + 2 * DAY); // as a start prunes: the newest row, aged out, goes before anything is recorded
+      expect(h.rows()).toBe(0);
+      h.channel.record(laneA({ src: 'proj-a/mini/s1/new', at: iso(NOW + 2 * DAY), text: 'new' }));
+      expect(h.rows()).toBe(1);
+      const [fresh] = h.history({ project: 'proj-a' }).entries;
+      expect(fresh!.text).toBe('new');
+      expect(Number(fresh!.id)).toBeGreaterThan(Number(aged!.id));
+    });
+  });
+
   describe('an entry’s size', () => {
     it('cuts a text past CHANNEL_BOUNDS.textBytes at a character, with a visible marker, each option past choiceBytes alike, and keeps CHANNEL_BOUNDS.choices options', () => {
       const { appSessionId, engineSessionId: e } = h.session('proj-1');
