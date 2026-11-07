@@ -3201,7 +3201,7 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - Reach is per project, so the check sits in one place, and other projects' entries never go on the wire.
   3. **Older peers.** A device never asks an endpoint that lacks `rl2.channel` for the feed: main checks the capability first. Against an older endpoint the tab falls back to `channel.history` on open, with no live updates, or to greyed words if even that is missing. Tested in that direction, and `e2e:cross-build` stays green.
   4. **No deployed component parses the feed name.** The production hub (hub@8813921b) must need no change, since a hub deploy is the owner's. The commit cites the code showing that the hub and its carriers relay RL2 frames without validating `feed`. If the hub parses it, the work stops and the architect is told.
-  5. **The minors.** Branch `remote-lane-a-agents` will also want RL2 minor 11. Whichever lands later takes the next minor at the merge, by a new commit, never a rebase. The same holds for `WIRE_MINOR` (29 here). The PR body names the numbers taken.
+  5. **The minors.** Branch `remote-lane-a-agents` will also want RL2 minor 11. Whichever lands later takes the next minor at the merge, by a new commit, never a rebase. The same holds for `WIRE_MINOR` (29 here). The PR body names the numbers taken. (Resolved: #506 landed first with 11, and M7b takes RL2 12 and `WIRE_MINOR` 30.)
   6. **The spine's page bound.** The spine's `channel.history` page is capped at 1 MiB of JSON, as the endpoint's is, with `more` exact.
   Date/Author: 2026-11-06, the architect, recorded by O8's executor.
 
