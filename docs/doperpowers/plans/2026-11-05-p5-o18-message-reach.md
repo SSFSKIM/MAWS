@@ -43,6 +43,7 @@ Then `sminos share <session> <member> list` (run by the owner at a terminal): th
 - [x] (2026-11-06 06:50Z) M5's sminos executors, `record.access`, `record.shares` and O8's `record.owners` (O8 M6b and M5b): sminos 1.38.0, branch `o18-record-executors` on D5's head (`c9850331..23035da7`); GREEN on `23035da7` (run 42174469720); reviewer-high with a security lens, three rounds, every finding fixed; merged 2026-11-07 02:26Z as doperpowers PR #466 (`b26ffe81`).
 - [x] (2026-11-07 03:15Z) M5's widening cutover in sminos's CLI, keyed on the endpoint's `record` welcome (P5 Decision Logs 231 and 232; the architect's ruling, chat 1164): sminos 1.39.0, branch `o18-widening-cutover` on the executors' head (`23035da7..4a0c3b89`); reviewer-high, two rounds, the second correct; all five sminos gates GREEN on `ff2c40e8` (run 42179385114), and on the merged head `213b49de` (run 42327542258) but for the known `test_manager_serve` flake, with sminos-suites GREEN on the identical tree `4a0c3b89` (run 42329436955); merged as doperpowers PR #467 (`0759115d`).
 - [ ] M6: live acceptance on the staging org. Shape ruled 2026-11-07 (the architect, chat 1204, on the desk track's mapping); the harness on MAWS branch `p5-o18-m6` first, then the run.
+  - [x] (2026-11-07) The harness: `vm/scene.sh --scene`, its reach verbs, `vm/setup.sh` and `vm/teardown.sh`'s reach mode, `vm/check.sh`'s reach lines, `VmMachine`'s scene and verbs, `OrgAdmin`'s `owners`, `reach-acceptance.ts` and `reach-items.ts`, `staging-run.sh reach` and `reach-vm`, the README's section; unit-tested against stand-ins (`test/deploy/reach-acceptance.test.ts`, `reach-scene.test.ts`, `staging-scripts.test.ts`), O10's run unchanged under the parametrized scene. Branch `p5-o18-m6` from `4eb50d0c8`. Its review (reviewer-high, security lens) and the run follow.
 - [ ] M5 is an external contract, blocked on O8 M6 and outside O18's acceptance.
 
 ## Today (what this child changes)
@@ -565,7 +566,7 @@ M5 is outside O18's acceptance, which runs on the CLI setters. It is built by th
 - **`vm/setup.sh` and `vm/teardown.sh`:** the scene users, one shared pack build, the pinned sminos copies, and the archive's bare repository and group. Teardown removes every scene user, the repository and the ports.
 - **`endpoint-machine.ts`** gets a `scene` option on `VmMachine` and a method per new verb. **`org-admin.ts`** gets `owners?` on `enrollListed` and `listedMachine`, which today hard-code `[this.member]` (`:206`, `:249`).
 - **`reach-acceptance.ts` and `reach-items.ts`**, registered in `deploy/bin.ts`, with the scene pieces they share factored out of `buildScene` rather than bending O10's `ITEMS`. The run prints one `PASS`, `FAIL` or `NOT SHOWN` line per item and sub-item, `report.bySuites` for the cited clauses, and `LEFT` and `KEPT` lines after the undo.
-- **`staging-run.sh reach [args…]`**, modelled on `endpoint`: production's header before and after, the token on stdin, and the secret scan. Beside it, `reach-vm setup <base> | teardown`, and the README's section for both.
+- **`staging-run.sh reach [args…]`**, modelled on `endpoint`: production's header before and after, the token on stdin, and the secret scan. Beside it, `reach-vm setup [--vm <vm>] [--sminos <commit>] [--old-sminos <commit>] | teardown [--vm <vm>]` (no `<base>`: a full bundle has none; Decision Log 2026-11-07), and the README's section for both.
 - **The pty path is staging's alone.** `operator` widening is refused unless the run's hub is staging's (`staging.json`'s host and org) and the machine is one of the run's own scenes. A test pins both refusals.
 - The stale O10 defaults (the deleted VM `dc-acceptance-7f80`, its address, the 0.15.1 devcloud path) give way to required arguments and the devcloud on PATH.
 
@@ -594,7 +595,7 @@ M5 is outside O18's acceptance, which runs on the CLI setters. It is built by th
 **Steps:**
 1. Prep: a MAWS worktree on the M6 branch, the sminos commits, and `staging-run.sh prod before`.
 2. `staging-run.sh deploy`, then `build`. Its `hub@` must be the worktree's HEAD, with M1's merge `ff1b9d581` as an ancestor.
-3. Bring the VM up and run `vm/check.sh`, then `reach-vm setup`.
+3. Bring the VM up (`devcloud vm up`, no `--project`) and run `vm/check.sh`, then `reach-vm setup --vm <vm>`.
 4. Rehearse item by item (`--items`), then run the whole sequence.
 5. Record the evidence, then `reach-vm teardown` and `devcloud vm down`.
 
@@ -626,9 +627,10 @@ Working directories are worktrees under `/Users/new/.local/share/p5-desk-track-o
     zsh <wt>/apps/desk-hub/deploy/staging-run.sh prod before
     zsh <wt>/apps/desk-hub/deploy/staging-run.sh deploy
     zsh <wt>/apps/desk-hub/deploy/staging-run.sh build        # expected: hub@<the worktree's HEAD sha8>
-    zsh <wt>/apps/desk-hub/deploy/staging-run.sh reach-vm setup <base>      # the scenes on the run's VM
-    zsh <wt>/apps/desk-hub/deploy/staging-run.sh reach [--items <list>]     # expected: PASS or cited per item, then LEFT none
-    zsh <wt>/apps/desk-hub/deploy/staging-run.sh reach-vm teardown
+    zsh <wt>/apps/desk-hub/deploy/staging-run.sh reach-vm setup --vm <vm>   # the scenes on the run's VM
+    zsh <wt>/apps/desk-hub/deploy/staging-run.sh reach --vm <vm> --direct-url ws://<its tailnet address> [--items <list>]
+                                                                            # expected: PASS per item, CITED 6a, then no LEFT
+    zsh <wt>/apps/desk-hub/deploy/staging-run.sh reach-vm teardown --vm <vm>
 
 The gates run on GitHub Actions; the MacBook runs no MAWS Electron e2e.
 
@@ -870,6 +872,12 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Evidence: `endpoint-acceptance.ts:36-39`, `:70`, `:210-233`; `vm/setup.sh:20`, `:36-40`; `org-admin.ts:206`, `:249`; the friction tracker (MAWS, the scene's defaults).
 - Observation (M6): no browser can be the run's second member. O10's member is `@staging.invalid`, and the hub resolves a browser's member by its Access email alone. M6's first text also named the owner's MacBook session, which is enrolled in production.
   Evidence: `endpoint-acceptance.ts:214`; `apps/desk-hub/src/worker.ts:182-188`; `objects/registry.ts:246-250`.
+- Observation (M6, the harness): devcloud's base image (0.15.3, `image/packages.sh`) carries everything the reach scenes need of a VM made without the MAWS project but pnpm: git, tmux, python3, build-essential, iproute2, procps, util-linux and Node LTS (NodeSource), and `claude` at `/usr/local/bin/claude`. `vm/setup.sh`'s reach mode installs pnpm per build at `package.json`'s pin, any missing tool from Ubuntu's archive, and mawsd's pinned Node for the build where the VM's is below 22.12; `vm/check.sh` reports each.
+  Evidence: `~/.claude/plugins/cache/doperpowers/devcloud/0.15.3/image/packages.sh` and `image/setup.sh`; MAWS `devenv/setup.sh` (the devenv step this VM never runs).
+- Observation (M6, the harness): O14's production run still pins its machine to the deleted VM (`PRODUCTION_MACHINE` in `endpoint-production.ts`: `dc-acceptance-7f80`); the harness removed only the defaults M6 names (the VM, its address, the devcloud path), so a production endpoint run now needs `--vm` and `--direct-url` and still refuses any machine but that pin.
+  Evidence: `apps/desk-hub/deploy/endpoint-production.ts`; `endpoint-acceptance.ts`'s `directUrlFor` at `p5-o18-m6`.
+- Observation (M6, the harness): a full bundle of the branch is about 287 MB (a shallow one 171 MB), past what one composed step should carry as base64, so `reach-vm setup` stages it in 24 MiB steps and setup.sh checks its sha256.
+  Evidence: `git bundle create … HEAD` at `4eb50d0c8`, 2026-11-07.
 
 ## Decision Log
 
@@ -1302,6 +1310,20 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   Rationale: a VM made with the MAWS project provisions its own mawsd into production for its lifetime, and the run needs none of it: the harness brings the branch as a full bundle and installs what the base image lacks.
   Rejected: `--project maws`, which provisions the VM's own mawsd into production under the delegation for the VM's lifetime.
   Date/Author: 2026-11-07, the owner, on the desk track's question.
+- Decision (M6's harness, p5-desk-track-owner): `reach-vm setup` takes `--vm`, `--sminos` and `--old-sminos` and no `<base>`; `reach` takes `--vm` and `--direct-url ws://<the VM's tailnet address>`, each scene's listener its own port there (47841–47844).
+  Rationale: the branch goes as a full bundle, which has no base, and the VM is made for the run, so nothing about it can be a default.
+  Rejected: a `<base>` kept for a bundle cut from the VM's checkout, which a VM without the MAWS project does not have.
+  Date/Author: 2026-11-07, p5-desk-track-owner (M6's harness).
+- Decision (M6's harness): every item first sets the visibility it needs (narrowing from the session's own shell, widening by the operator's pty), so `--items` rehearses one alone; two items follow from it. Item 5's cross-machine variant is S → T, not U → T, and 6d makes T listed again first: item 1 leaves T private, and U, outside T's audience, could not message it.
+  Rationale: the run order makes each item's state its predecessors', which a rehearsal of one item does not have; the spec's items name what they show, not the sender of 5's variant.
+  Rejected: a fixed state machine across items, which only the whole run reaches.
+  Date/Author: 2026-11-07, p5-desk-track-owner (M6's harness).
+- Decision (M6's harness): 6a prints as its own `CITED 6a: …` line after the summary, 3a's browser half and 8's cutover sentence as `by the suites` notes under their items, and the preflight as the item `scene`.
+  Rationale: 6a has no live sub-item to hang a note on, and an item with no check would read `FAIL`.
+  Date/Author: 2026-11-07, p5-desk-track-owner (M6's harness).
+- Decision (M6's harness): the operator's terminal is a pty `vm/scene.sh` holds through Python's `pty.fork`, which answers `y` once sminos asks `Confirm? [y/N]`, rather than util-linux `script` fed on stdin; the pack is built once, as `o18a1`, into `/opt/o18-m6/packs`, which root then owns and every scene reads.
+  Rationale: `script` ends its child on stdin's EOF, so the answer would race the prompt; the scene homes are 0700, so one build serves all four only from a shared directory.
+  Date/Author: 2026-11-07, p5-desk-track-owner (M6's harness).
 
 ## Outcomes & Retrospective
 

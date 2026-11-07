@@ -299,6 +299,64 @@ declined while any other claude of the owner's runs). `down` ends it and removes
 events, the events the run's sessions wrote (counted by writer, from the offset the log stood at before lane A), the
 machine's project and its history stay, printed as `KEPT …` lines.
 
+## `reach-acceptance`: message reach live on staging (P5 O18 M6)
+
+O18's acceptance 1–8 (`docs/doperpowers/plans/2026-11-05-p5-o18-message-reach.md`) against real machines of two
+members (`reach-acceptance.ts`, its items in `reach-items.ts`). The scene, on one devcloud VM created without the MAWS
+project (no checkout, no devenv step, no mawsd of its own in production) and in this process:
+
+| Machine | Where | Owner | Session | sminos |
+|---|---|---|---|---|
+| A1 | the scene `a1` (user `o18a1`, direct 47841, stub 47901) | the staging admin | S, which spawns L1 while listed and C1 once private | the run's `--sminos` (0759115d, 1.39.0, or later) |
+| A2 | `a2` (`o18a2`, 47842, 47902) | the admin | T | the same |
+| B1 | `b1` (`o18b`, 47843, 47903) | B, a member added for the run (`o18-m6-<tag>@staging.invalid`, device `b1`) | U | the same |
+| A3 | `a3` (`o18a3`, 47844, 47904), up for 6e alone | the admin | one | `--old-sminos` (386c4b07, 1.34.0) |
+| PA | a FakeEndpoint here, its RL1 hello advertising nothing (an old endpoint, an old reader) | the admin | none | none |
+| PB | a FakeEndpoint here, its hello advertising `audience` | B | none | none |
+
+Every scene is `vm/scene.sh --scene <name>`: a user, home, mawsd profile, sminos home, ports, tmux socket, verb registry
+and mount namespace of its own (the namespace hides the VM's managed settings: every verb that runs sminos or an engine
+runs inside it), the pack and stub shared under `/opt/o18-m6`. With no `--scene` the script is O10's scene, unchanged.
+The scenes' verbs beyond O10's: `as-session <session> say|access|share|spawn|list-org|find …` (the session's own shell,
+its words structured since a step's words admit no space or `#`), `operator access|share …` (the operator at the
+scene's terminal under a pty the script holds, answering sminos's confirmation; staging's org alone), `operator-say`,
+`forge-say` (a `say` under the plain writer past the stream choice, acceptance 3c), the reads (`log-files`, `uplink`,
+`streams`, `audiences`, `policy-cache`, `grep-home`, `events`, `row`, `owed`, `archive-ls`) and `mawsd-freeze|thaw|stop|start`.
+Each refuses words not of its shape before anything runs. The project is fresh; its `.smns` names a `remote` at the
+bare repository `/srv/o18-archive.git` (the scenes' group `o18arch`, root its owner), the archive, which each item that
+reads it designates (`PUT /api/projects/<p>/archive`) with `SMINOS_ARCHIVE_EVERY=60`.
+
+The widenings the items need (listed again, a share) are confirmed by the operator at a scene's terminal through that
+pty: the staging-only path M5 allows. `VmMachine.operator` refuses it, before any step, for any hub but staging's
+(`staging.json`'s host and org, `STAGING_HOST` and `STAGING_ORG`) and for any machine outside the run's own scenes; the
+scene refuses it again for a scene enrolled at another org. The scenes' MAWS is the branch's cut, before O8 M6b, so
+their endpoints advertise no `record` and sminos's terminal gate still widens.
+
+    pnpm --filter desk-hub deployment reach-acceptance --config deploy/staging.json --device-keys <keys.json> \
+        --vm <vm> --direct-url ws://<the VM's tailnet address> [--items 2,8,3a,…] [--scan <file>]    # the token on stdin
+    pnpm --filter desk-hub deployment reach-acceptance --vm-setup --vm <vm> [--sminos <commit>] [--old-sminos <commit>] [--doperpowers <checkout>]
+    pnpm --filter desk-hub deployment reach-acceptance --vm-teardown --vm <vm>
+
+The run preflights the scene (`PASS scene`: S, T and U in `/api/listings`, every sminos on RL10 with `access` and
+`reach` in its `audiences.json`, PB's welcome carrying `audience`), then runs items 2, 8, 3a, 3b, 3c, 7, 1, 5, 4, 3e,
+3d, 6b, 6c, 6d and 6e in that order, each first setting the sessions' visibility it needs, so `--items` rehearses one
+alone. It prints one `PASS`, `FAIL` or `NOT SHOWN` line per item, the clauses the suites prove under theirs (3a's
+browser half, 8's cutover sentence) and `CITED 6a` (an old hub, which a pre-M1 deploy over M1's storage would risk).
+Then its undo, each step registered before what it undoes: S's share removed and the seats retired, the archive
+designation cleared, every scene down, A1, A2, B1, A3, PA and PB out of the state and revoked, B removed with `b1`'s
+keys; `LEFT …` for anything of the run's still current, `KEPT …` for the project and its log, the registry rows, the
+machines' names and retired keys, and the state's versions.
+
+`--vm-setup` needs no MAWS checkout on the VM: the branch goes as a full bundle (`git bundle create … HEAD`), staged
+under `/var/tmp/o18-m6-stage` in 24 MiB steps and checked by its sha256; each sminos as the run's copy by commit (`git
+archive <commit> sminos` from the doperpowers checkout, the new one refused below 0759115d), never the VM's
+marketplace's. `vm/setup.sh`'s reach mode (`RUN=o18`) makes the four users and the archive's group, installs from
+Ubuntu's archive any tool devcloud's base image lacks, builds the pack once as `o18a1` (pnpm at the version
+`package.json` pins; mawsd's pinned Node, `packaging/mawsd/node.json`, unpacked for the build where the VM's Node is
+below 22.12) into `/opt/o18-m6/packs`, and the bare repository. `vm/check.sh` reports what the reach mode needs (its
+`reach …` lines). `--vm-teardown` (`vm/teardown.sh`'s reach mode) removes the users, homes and group, `/opt/o18-m6`,
+the archive and the staged bundle, and says `LEFT` for anything that stayed or a scene port still listening.
+
 ## `admin`: the owner's hand on the org state (P5 O13 M2)
 
 Until O8's Org page, the owner roots a deployment's org, pairs a device into it, revokes one and keeps the head
@@ -553,7 +611,13 @@ production's Worker or host, or a preview alias of it (`<alias>-desk-hub.…`), 
     written 0600 into the state directory and removed when the tunnel stops; its secret is never printed.
   - `endpoint [args…]`, `endpoint-vm setup <base> | teardown`: `endpoint-acceptance` under `staging-ssfskim` with the
     admin device's keys, its hub-deploy item this script's own `deploy`, the secrets it handled searched for in its log
-    after; the VM scene set up from a bundle cut at <base> (a commit the VM's MAWS checkout holds), or removed.
+    after; the VM scene set up from a bundle cut at <base> (a commit the VM's MAWS checkout holds), or removed. The
+    run names its VM and the listener it dials (`--vm <vm> --direct-url ws://<address>:<port>`): the VM the defaults
+    named was deleted on 2026-11-01, and devcloud is the one on PATH.
+  - `reach [args…]`, `reach-vm setup [--vm <vm>] [--sminos <commit>] [--old-sminos <commit>] | teardown [--vm <vm>]`:
+    `reach-acceptance` (below) under `staging-ssfskim` with the admin device's keys, the secrets it handled searched
+    for in its log after, production's build compared before and after; it deploys nothing, and refuses `--config`,
+    `--device-keys`, `--scan`, `--production` and the VM's setup among its arguments. `reach-vm` reads no token.
   - `access-sync`: the people policy read back at the org state's head, with the machine credentials access-sync uses.
   - `admin <args…>`: `deployment admin` against `staging-ssfskim` with the admin device's `keys.json` (its anchor,
     `keys.json.org.json`, beside it once `admin adopt` ran). `adopt`, `devices` and `refresh` run unattended; `pair` and
