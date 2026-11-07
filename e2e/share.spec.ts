@@ -28,7 +28,7 @@ import { readOrMintMachineRef } from '../src/shared/machine/identity-file';
 import type { MachineRef } from '../src/shared/machine/ref';
 import { memberNames } from '../src/shared/org/member-name';
 import { SHARE } from '../src/renderer/src/sessions/share/copy';
-import { actionsNotWhole, addClippedProbes, type ActionEntry } from './support/actions-whole';
+import { actionsNotWhole, addClippedProbes, probeFaults, type ActionEntry } from './support/actions-whole';
 import { addressed } from './support/address';
 import { launchMaws, REPO_ROOT } from './support/launch';
 import { openProject, projectLine, projectRow, sidebarOf } from './support/sidebar';
@@ -207,8 +207,7 @@ async function checkSheet(sheet: Locator): Promise<void> {
   await sheet.evaluate(addClippedProbes, SHEET);
   const probed = await sheet.evaluate(actionsNotWhole, SHEET);
   await sheet.evaluate((root) => root.querySelectorAll('[data-probe]').forEach((probe) => probe.remove()));
-  const named = ['"wide probe"', '"tall probe"', '"select probe"'].filter((probe) => probed.some((line) => line.startsWith(probe)));
-  expect(named, `the check names every probe: ${probed.join('; ')}`).toEqual(['"wide probe"', '"tall probe"', '"select probe"']);
+  expect(probeFaults(probed), `the check names every clipped probe and not the mirror: ${probed.join('; ')}`).toEqual([]);
 }
 
 /** Opens the row's Share sheet from its menu, as a person does. */

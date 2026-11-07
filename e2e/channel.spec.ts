@@ -28,7 +28,7 @@ import type { MachineRef } from '../src/shared/machine/ref';
 import { memberNames } from '../src/shared/org/member-name';
 import { CHANNEL } from '../src/renderer/src/channel/copy';
 import { addressed } from './support/address';
-import { actionsNotWhole, addClippedProbes, type ActionEntry } from './support/actions-whole';
+import { actionsNotWhole, addClippedProbes, probeFaults, type ActionEntry } from './support/actions-whole';
 import { launchMaws, REPO_ROOT } from './support/launch';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now; a plain build's main lacks the seam.
@@ -319,7 +319,7 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
       await channel.evaluate(addClippedProbes, ENTRY);
       const probed = await channel.evaluate(actionsNotWhole, ENTRY);
       await channel.evaluate((root) => root.querySelectorAll('[data-probe]').forEach((probe) => probe.remove()));
-      expect(probed.some((line) => line.startsWith('"wide probe"')) && probed.some((line) => line.startsWith('"tall probe"')), `the check names both probes: ${probed.join('; ')}`).toBe(true);
+      expect(probeFaults(probed), `the check names every clipped probe and not the mirror: ${probed.join('; ')}`).toEqual([]);
     } finally {
       await maws.cleanup();
     }

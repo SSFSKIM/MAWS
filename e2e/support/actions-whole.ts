@@ -8,10 +8,13 @@
 export type ActionEntry = { selector: string; name: string; probe: string };
 
 // Every action under `root` that is not drawn whole: each control a person can operate (a button, a field, a native
-// select, a radio or checkbox, a link, anything playing one of their roles), save one hidden from everyone (`aria-hidden`,
-// as a form's mirror input is). Each is scrolled into view first (a scrolling body is no fault), then its four edges must
-// lie inside its entry (else `root`), inside every ancestor that clips (an overflow other than visible), and inside the
-// window. Each offender as `"<name>" <box> outside <what> <box>`, its name its label, else its text.
+// select, a radio or checkbox, a link, anything playing one of their roles), save a form's mirror input (Radix's bubble
+// input beside a radio or checkbox): hidden from assistive technology (`aria-hidden`), out of the tab order, taking no
+// pointer and drawn transparent, so no one sees, reaches or clicks it. `aria-hidden` alone exempts nothing, since it
+// neither hides a control from sight nor stops it working. Each is scrolled into view first (a scrolling body is no
+// fault), then its four edges must lie inside its entry (else `root`), inside every ancestor that clips (an overflow
+// other than visible), and inside the window. Each offender as `"<name>" <box> outside <what> <box>`, its name its label,
+// else its text.
 export function actionsNotWhole(root: Element, entry: ActionEntry): string[] {
   const CONTROLS = [
     'button',
@@ -25,7 +28,11 @@ export function actionsNotWhole(root: Element, entry: ActionEntry): string[] {
   type Box = { left: number; top: number; right: number; bottom: number };
   const inside = (a: Box, b: Box, slack: number) => a.left >= b.left - slack && a.top >= b.top - slack && a.right <= b.right + slack && a.bottom <= b.bottom + slack;
   const shown = (b: Box) => `${Math.round(b.left)},${Math.round(b.top)}..${Math.round(b.right)},${Math.round(b.bottom)}`;
-  const controls = Array.from(root.querySelectorAll(CONTROLS)).filter((control) => control.closest('[aria-hidden="true"]') === null);
+  const mirror = (control: Element) => {
+    const style = getComputedStyle(control);
+    return control.closest('[aria-hidden="true"]') !== null && (control as HTMLElement).tabIndex < 0 && style.pointerEvents === 'none' && Number(style.opacity) === 0;
+  };
+  const controls = Array.from(root.querySelectorAll(CONTROLS)).filter((control) => !mirror(control));
   return controls.flatMap((control) => {
     // centred where its scroller can, so a whole-pixel scroll offset never leaves it a sliver past the scrollport's edge
     control.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
@@ -52,13 +59,28 @@ export function actionsNotWhole(root: Element, entry: ActionEntry): string[] {
 }
 
 // Actions clipped on purpose, appended to `root` as entries (each marked `data-probe`, removed after): a button clipped
-// across ("wide probe") and one down ("tall probe"), and a native select clipped across ("select probe").
-// `actionsNotWhole` must name them, or it proves nothing about the surface.
+// across ("wide probe") and one down ("tall probe"), a native select clipped across ("select probe"), and a button
+// clipped across under `aria-hidden`, still drawn and still working ("hidden probe"): `actionsNotWhole` must name each
+// of CLIPPED_PROBES, or it proves nothing about the surface. Beside them a form's mirror input clipped the same way
+// ("mirror probe", MIRROR_PROBE), which it must not name: no one sees, reaches or clicks it.
 export function addClippedProbes(root: Element, entry: ActionEntry): void {
   root.insertAdjacentHTML(
     'beforeend',
     `<div data-probe ${entry.probe} style="overflow:hidden;width:40px"><button type="button" style="width:120px">wide probe</button></div>` +
       `<div data-probe ${entry.probe} style="overflow:hidden;height:8px"><button type="button" style="height:24px">tall probe</button></div>` +
-      `<div data-probe ${entry.probe} style="overflow:hidden;width:40px"><select aria-label="select probe" style="width:120px"><option>select probe</option></select></div>`,
+      `<div data-probe ${entry.probe} style="overflow:hidden;width:40px"><select aria-label="select probe" style="width:120px"><option>select probe</option></select></div>` +
+      `<div data-probe ${entry.probe} aria-hidden="true" style="overflow:hidden;width:40px"><button type="button" style="width:120px">hidden probe</button></div>` +
+      `<div data-probe ${entry.probe} style="position:relative;overflow:hidden;width:40px;height:24px"><input type="checkbox" aria-label="mirror probe" aria-hidden="true" tabindex="-1" style="position:absolute;pointer-events:none;opacity:0;margin:0;width:120px;height:24px"></div>`,
   );
+}
+
+/** The probes `actionsNotWhole` must name, as its lines begin. */
+export const CLIPPED_PROBES = ['"wide probe"', '"tall probe"', '"select probe"', '"hidden probe"'] as const;
+/** The mirror probe, which it must not. */
+export const MIRROR_PROBE = '"mirror probe"';
+
+/** What is wrong with `actionsNotWhole`'s lines over the probes: each clipped probe it doesn't name, and the mirror if it does. */
+export function probeFaults(lines: readonly string[]): string[] {
+  const named = (probe: string) => lines.some((line) => line.startsWith(probe));
+  return [...CLIPPED_PROBES.filter((probe) => !named(probe)).map((probe) => `${probe} not named`), ...(named(MIRROR_PROBE) ? [`${MIRROR_PROBE} named`] : [])];
 }
