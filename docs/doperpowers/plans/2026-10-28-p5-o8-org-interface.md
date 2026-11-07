@@ -3437,6 +3437,9 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - (ii) no attachment disappears without an explicit removal.
 
      Before the fixes, it failed 361 of 1,650 orders per reader from a kept draft (58 on (i), 320 on (ii)) and 158 from none. It now passes with no failures. A 7-event probe that also fires the resend timer was green locally, but at 41 s it isn't committed.
+  5. **L1 (reviewer-medium's last pass, 2e822d884).** An attachment dropped only by a save's own fitting was not named for preservation, so a stored PDF that fit the read whole was deleted on the machine once a text edit took the save over the budget. Now the save names those too, alongside the read's withheld ones. The machine's restore only brings back ids it holds, so naming one it never had is harmless. One the person removes in the composer isn't named and is still removed.
+
+     The enumerating test missed this because its alphabet had no event that crossed the budget. It now has a `grow` event (7 events, every order up to 5: 5,094 runs per reader from a kept draft). With the fix stashed, 822 of those runs failed. It runs in about 20 s alone.
   Date/Author: 2026-11-07, O8's executor (controller), from the follow-ups' report.
 
 - Decision: The client re-read's ordering and retry (16f310a0d, main only; the desk track's round-4 follow-ups, checked correct, which closes that thread).
