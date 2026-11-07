@@ -548,12 +548,13 @@ func TestExitIsTerminalForOutput(t *testing.T) {
 	}
 }
 
-// reapedWhileDraining launches a child that exits at once and leaves a descendant in its own process group holding
-// stdout, and returns once the child has been reaped (its pid is free for reuse) while the host still drains its output
-// and has not recorded the exit: with the reap recorded, or, held, before the host records it.
+// reapedWhileDraining launches a child that exits at once and leaves a descendant in its process group holding stdout,
+// as an engine's tool processes are, and returns once the child has been reaped (its pid is free for reuse) while the
+// host still drains its output and has not recorded the exit: with the reap recorded, or, held, before the host
+// records it.
 func (hs *harness) reapedWhileDraining(w *client, held bool) int {
 	hs.t.Helper()
-	spawned := hs.launchCat(w, "/bin/sh", "-c", "set -m; sleep 30 & echo $!")
+	spawned := hs.launchCat(w, "/bin/sh", "-c", "sleep 30 & echo $!")
 	pid := int(spawned.Raw["pid"].(float64))
 	descendant, err := strconv.Atoi(string(w.expect("out").Data))
 	if err != nil {
@@ -606,33 +607,46 @@ func afterTheReap(t *testing.T, tune func(*Limits), body func(t *testing.T, hs *
 	}
 }
 
-// terminate sends the host its own SIGTERM and waits for its exit; held, the reap's record goes through only once that
-// signal has found the child gone, so it is the signal of the window between the two.
+func (hs *harness) log() string {
+	hs.t.Helper()
+	log, err := os.ReadFile(filepath.Join(hs.dir, "TESTHOST.log"))
+	if err != nil {
+		hs.t.Fatal(err)
+	}
+	return string(log)
+}
+
+// terminate sends the host its own SIGTERM and waits for its exit. Held, the reap's record goes through only once that
+// signal has found the child gone, so it is the signal of the window between the two; recorded, no signal is tried.
 func (hs *harness) terminate(held bool, release func()) {
 	hs.t.Helper()
 	hs.signals <- syscall.SIGTERM
-	for deadline := time.Now().Add(5 * time.Second); held; time.Sleep(time.Millisecond) {
-		log, _ := os.ReadFile(filepath.Join(hs.dir, "TESTHOST.log"))
-		if strings.Contains(string(log), "the child had already exited") {
-			release()
-			break
-		}
+	for deadline := time.Now().Add(5 * time.Second); held && !strings.Contains(hs.log(), "the child had already exited"); time.Sleep(time.Millisecond) {
 		if time.Now().After(deadline) {
-			hs.t.Fatalf("the host's signal did not find the child gone:\n%s", log)
+			hs.t.Fatalf("the host's signal did not find the child gone:\n%s", hs.log())
 		}
 	}
+	release()
 	if code := hs.waitExit(3 * time.Second); code != 0 { // no grace waited out for a child already gone
 		hs.t.Fatalf("exit code %d", code)
+	}
+	if log := hs.log(); !held && strings.Contains(log, "the child had already exited") {
+		hs.t.Fatalf("the host signalled after the reap's record:\n%s", log)
 	}
 }
 
 func TestASignalAfterTheReapIsRefused(t *testing.T) {
-	afterTheReap(t, func(l *Limits) { l.ExitDrain = 30 * time.Second }, func(t *testing.T, hs *harness, w *client, _ bool, _ func()) {
+	afterTheReap(t, func(l *Limits) { l.ExitDrain = 30 * time.Second }, func(t *testing.T, hs *harness, w *client, held bool, release func()) {
 		for _, group := range []bool{false, true} {
 			w.send(map[string]any{"t": "signal", "name": "SIGKILL", "group": group})
 			if e := w.expect("error", "exit"); e.Raw["message"] != "no running child" {
 				t.Fatalf("a signal (group %v) after the reap: %v", group, e.Raw)
 			}
+		}
+		release()
+		w.quiet(300 * time.Millisecond) // no `exit`: the descendant holding stdout took no signal
+		if log := hs.log(); !held && strings.Contains(log, "signal SIGKILL to") {
+			t.Fatalf("a signal after the reap's record was sent:\n%s", log)
 		}
 	})
 }
@@ -643,11 +657,7 @@ func TestTheHostsSignalAfterTheReapSignalsNoOne(t *testing.T) {
 		l.HostExitGrace = 20 * time.Second
 	}, func(t *testing.T, hs *harness, _ *client, held bool, release func()) {
 		hs.terminate(held, release)
-		log, err := os.ReadFile(filepath.Join(hs.dir, "TESTHOST.log"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(log), "SIGTERM to group") {
+		if log := hs.log(); strings.Contains(log, "SIGTERM to group") {
 			t.Fatalf("the host signalled a reaped child's group:\n%s", log)
 		}
 	})
@@ -662,9 +672,9 @@ func TestTheHostsSignalAfterTheReapRemovesTheRosterEntry(t *testing.T) {
 	})
 }
 
-// The kernel's refusals childGone reads, on a child exited and not yet reaped, then reaped: macOS refuses the zombie's
-// group (EPERM) where Linux signals it, and both refuse the reaped child (ESRCH).
-func TestASignalRefusedToAnExitedChildReadsAsGone(t *testing.T) {
+// The kernel's answers signalChild reads, from a child exited and not yet reaped, then reaped: macOS refuses the
+// zombie's group (EPERM) where Linux signals it, and both refuse the reaped child (ESRCH).
+func TestASignalToAnExitedChildFindsItGone(t *testing.T) {
 	cmd := exec.Command("/bin/sh", "-c", "exit 0")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	out, err := cmd.StdoutPipe()
@@ -676,30 +686,23 @@ func TestASignalRefusedToAnExitedChildReadsAsGone(t *testing.T) {
 	}
 	pid := cmd.Process.Pid
 	io.ReadAll(out) // end of file: the child is exiting, and stays a zombie until Wait
-	err = syscall.Kill(-pid, 0)
-	for deadline := time.Now().Add(2 * time.Second); runtime.GOOS == "darwin" && err == nil; err = syscall.Kill(-pid, 0) {
+	gone, err := signalChild(pid, true, 0)
+	for deadline := time.Now().Add(2 * time.Second); runtime.GOOS == "darwin" && err == nil; gone, err = signalChild(pid, true, 0) {
 		if time.Now().After(deadline) {
 			t.Fatal("macOS still signals an exited child's group")
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if err != nil && !childGone(err, pid, true) {
+	if err != nil && !gone {
 		t.Fatalf("a zombie's group: %v", err)
 	}
-	if err := syscall.Kill(pid, 0); err != nil {
-		t.Fatalf("a zombie: %v", err)
+	if gone, err := signalChild(pid, false, 0); gone || err != nil {
+		t.Fatalf("a zombie: gone %v, %v", gone, err)
 	}
 	cmd.Wait()
 	for _, group := range []bool{false, true} {
-		target := pid
-		if group {
-			target = -pid
-		}
-		if err := syscall.Kill(target, 0); !childGone(err, pid, group) {
+		if gone, err := signalChild(pid, group, 0); !gone {
 			t.Fatalf("the reaped child (group %v): %v", group, err)
 		}
-	}
-	if os.Geteuid() != 0 && childGone(syscall.EPERM, 1, true) { // init's group refuses on credentials: no exited child
-		t.Fatal("a refusal on credentials read as gone")
 	}
 }

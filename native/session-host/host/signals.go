@@ -32,12 +32,19 @@ func signalName(s syscall.Signal) string {
 	return fmt.Sprintf("SIG%d", int(s))
 }
 
-// childGone says the kernel refused a signal to the child (or the group it leads) because the child has exited, though
-// the host has not yet recorded its reap: reaped (ESRCH), or, on macOS, a zombie, whose group refuses a signal (EPERM)
-// while the zombie itself still takes one, where a live child refusing on its credentials refuses both.
-func childGone(err error, pid int, group bool) bool {
-	if errors.Is(err, syscall.ESRCH) {
-		return true
+// signalChild signals the child, or the group it leads, and says whether it found the child gone though its reap is not
+// yet recorded (signallable): reaped (ESRCH), or, on macOS, a zombie, whose group refuses a signal (EPERM) while the
+// zombie itself still takes one, where a live child refusing on its credentials refuses both. The group is signalled
+// only while the child is there: a descendant left in it would take a signal the reap's record would have refused.
+func signalChild(pid int, group bool, sig syscall.Signal) (gone bool, err error) {
+	if !group {
+		err = syscall.Kill(pid, sig)
+		return errors.Is(err, syscall.ESRCH), err
 	}
-	return group && errors.Is(err, syscall.EPERM) && !errors.Is(syscall.Kill(pid, 0), syscall.EPERM)
+	probe := syscall.Kill(pid, 0)
+	if errors.Is(probe, syscall.ESRCH) {
+		return true, probe
+	}
+	err = syscall.Kill(-pid, sig)
+	return errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EPERM) && probe == nil, err
 }

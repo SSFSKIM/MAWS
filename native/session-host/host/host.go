@@ -195,7 +195,7 @@ func (h *Host) onSignal(sig os.Signal) int {
 	h.log.printf("%v: ending the child's process group", sig)
 	if signallable {
 		wait := exited
-		if err := syscall.Kill(-pgid, syscall.SIGTERM); childGone(err, pgid, true) {
+		if gone, err := signalChild(pgid, true, syscall.SIGTERM); gone {
 			h.log.printf("the child had already exited")
 			wait = reaped // a child gone needs no grace, only its reap recorded, as one already reaped would have
 		} else if err != nil {
@@ -214,7 +214,7 @@ func (h *Host) onSignal(sig os.Signal) int {
 // signallable says the child's pid is still the child's: it has been spawned and its reap not yet recorded. The exit
 // is recorded only once the output has drained, after the reap, and a pid reaped in between may already be another
 // process's. The reap is recorded just after the wait returns; a signal sent in between finds the child gone
-// (childGone) and is treated as one sent after. The caller holds mu.
+// (signalChild) and is treated as one sent after. The caller holds mu.
 func (h *Host) signallable() bool {
 	if h.child == nil {
 		return false
@@ -602,7 +602,7 @@ func (h *Host) handle(c *conn, m proto.ClientMsg, payload []byte) {
 			target = -target // the child leads its own process group
 		}
 		h.log.printf("signal %s to %d", m.Name, target)
-		if err := syscall.Kill(target, sig); childGone(err, h.child.Pid, m.Group) {
+		if gone, err := signalChild(h.child.Pid, m.Group, sig); gone {
 			c.send(proto.Error{T: "error", Message: "no running child"})
 		} else if err != nil {
 			c.send(proto.Error{T: "error", Message: "signal: " + err.Error()})
