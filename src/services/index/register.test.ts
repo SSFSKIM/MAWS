@@ -140,6 +140,43 @@ describe('main answers the record side of session.* from the index', () => {
       expect(index.sessions.get(record.appId, B)).toMatchObject({ pinned: false, unread: false });
     });
 
+    // The architect's ruling 1 on session.reader.update (Decision Log, 2026-11-07): an owner's write lands on the owners'
+    // row, the session row's columns, and never on a member row; a non-owner's lands on that member's own row alone, never
+    // the owners' or another member's. Read from the tables themselves, so no read path can stand in for a write.
+    it('session.reader.update writes exactly the caller’s row: the owners’ for an owner, the member’s own for a member', async () => {
+      const C = 'c'.repeat(32);
+      const { record } = index.sessions.upsertFromSummary(summary());
+      const tables = () => {
+        const raw = new DatabaseSync(join(dir.path, 'index.sqlite'), { readOnly: true });
+        try {
+          return {
+            owners: raw.prepare('SELECT pinned, last_seen_uuid, last_seen_at, unread FROM sessions WHERE app_id = ?').get(record.appId),
+            members: raw.prepare('SELECT member, pinned, last_seen_uuid, last_seen_at, unread FROM reader_state WHERE app_session_id = ? ORDER BY member').all(record.appId),
+          };
+        } finally {
+          raw.close();
+        }
+      };
+      const unset = { pinned: 0, last_seen_uuid: null, last_seen_at: null, unread: 0 };
+
+      await invoke('session.reader.update', { appSessionId: record.appId, patch: { pinned: true } });
+      await invoke('session.reader.update', { appSessionId: record.appId, patch: { lastSeen: { messageUuid: 'm1', at } } }, as('owner'));
+      expect(tables()).toEqual({ owners: { pinned: 1, last_seen_uuid: 'm1', last_seen_at: at, unread: 0 }, members: [] });
+
+      await invoke('session.reader.update', { appSessionId: record.appId, patch: { unread: true } }, as(B));
+      expect(tables()).toEqual({ owners: { pinned: 1, last_seen_uuid: 'm1', last_seen_at: at, unread: 0 }, members: [{ member: B, ...unset, unread: 1 }] });
+
+      await invoke('session.reader.update', { appSessionId: record.appId, patch: { pinned: true, lastSeen: { messageUuid: 'm2', at } } }, as(C));
+      await invoke('session.reader.update', { appSessionId: record.appId, patch: { unread: true } }, as('owner'));
+      expect(tables()).toEqual({
+        owners: { pinned: 1, last_seen_uuid: 'm1', last_seen_at: at, unread: 1 },
+        members: [
+          { member: B, ...unset, unread: 1 },
+          { member: C, pinned: 1, last_seen_uuid: 'm2', last_seen_at: at, unread: 0 },
+        ],
+      });
+    });
+
     it('session.reader.update takes reader fields alone, and fails for an app session with no row', async () => {
       const { record } = index.sessions.upsertFromSummary(summary());
       for (const patch of [{}, { title: { text: 'Mine', source: 'user' } }, { archived: true }, { pinned: true, archived: true }]) {

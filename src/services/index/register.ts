@@ -29,7 +29,7 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
     return applyPatch(index, appSessionId as AppSessionId, patch as SessionPatch);
   });
   // A member's write sends no session.changed and takes no revision (sessions.ts); the owners' does, as session.update's
-  register('session.reader.update', ({ appSessionId, patch }, { reader }) => readerStateOf(index.transaction(() => applyReaderFields(index, appSessionId as AppSessionId, patch, reader ?? 'owner'))));
+  register('session.reader.update', ({ appSessionId, patch }, { reader }) => readerStateOf(index.transaction(() => applyReaderFields(index, appSessionId as AppSessionId, patch as ReaderPatch, reader ?? 'owner'))));
   // W11 (I5): hidden projects included, marked `hidden`, so the renderer keeps their sessions out of Other sessions
   register('session.projects.list', () => ({ projects: index.projects.listWithRemoved(), revision: index.revision, rows: index.projects.list({ includeHidden: true }) })); // P5 O3-D: every row too (D13)
   register('session.projects.add', ({ directory }) => index.projects.add(directory));
