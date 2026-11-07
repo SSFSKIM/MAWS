@@ -3424,6 +3424,21 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   4. **F4: resync reconciles what's on screen.** At resync, each of that machine's sessions on screen is marked seen again.
   Date/Author: 2026-11-07, O8's executor (controller), from the wave's report.
 
+- Decision: The branch-review wave's follow-ups (36658082a K1, f8705abf3 K2, 011af4382, e5b7717dd and aafb6be61, the enumerating test). These come from reviewer-medium's re-run, which found two P2 data-loss paths, and from the architect's call for one enumerating test over the draft path (2026-11-07). The desk track found the wave itself correct.
+  1. **K1: a clear keeps a tombstone.** A clear writes a tombstone row whose stamp the machine mints, so a late save that replaces `null`, or the old stamp, is refused as stale.
+     - The tombstone is marked by `attachments = 'null'`, not by a null `doc`, because a real draft can have a null `doc`.
+     - Only a remote read exposes it, as `{doc: null}`. Local reads and `DraftStore.get` still answer `null`.
+     - Every clear writes one, this Mac's own composer clear included. A cleared draft doesn't stop a record from yielding.
+     - The stamp contains `#`, so a future reader that orders by `updated_at` must allow for it.
+  2. **K2: a transport omission is never a deletion.** A save names the attachments its fitted read left on the machine, by `{id, name}`, and the spine restores them. A save that doesn't name an attachment removes it, which is the explicit removal. This needed no endpoint hunk and no schema change. The regression runs the round trip through `register`, the endpoint and the renderer.
+  3. **The enumerating test found one more loss.** Two saves both answered `timeout`, and then the older one landed late, so the machine kept the older text. Fix: after a `timeout` with nothing newer waiting, the renderer resends the newest draft after 15 s, at most three times. On a link that keeps timing out, that's up to three extra acts per edit.
+  4. **The enumerating test** is `test/lane-b/drafts-enumerated.test.ts`. It uses the real `DraftStore` and `remote-drafts.ts`, an alphabet of 6 events, and every order up to 5 events, for an owner and a member, starting from a kept draft and from none. It runs in about 13 s. Two invariants:
+     - (i) the machine never ends on a draft older than the newest the user produced;
+     - (ii) no attachment disappears without an explicit removal.
+
+     Before the fixes, it failed 361 of 1,650 orders per reader from a kept draft (58 on (i), 320 on (ii)) and 158 from none. It now passes with no failures. A 7-event probe that also fires the resend timer was green locally, but at 41 s it isn't committed.
+  Date/Author: 2026-11-07, O8's executor (controller), from the follow-ups' report.
+
 - Decision: The client re-read's ordering and retry (16f310a0d, main only; the desk track's round-4 follow-ups, checked correct, which closes that thread).
   - **Ordering.** Each reopening's read and each told record take the next number from one shared generation counter. An answer applies only while its generation is still the latest, the feed is still mine, and it's live.
   - **Retry.** A failed read asks again under the same generation, from `feedRetryMs[0]` and doubling up to the `feedRetryMs[1]` cap, for as long as it stays current. The delay is capped and the number of tries isn't, as with the feed's own `unavailable`.
