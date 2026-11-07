@@ -89,6 +89,8 @@ export class Subscription implements StreamSource {
   /** Its session; null for the machine's own feeds (P5 O7 M6's `attention`, M5a's `artifacts`), which name none. */
   readonly session: SessionRef | null;
   readonly view: 'full' | 'cards';
+  /** 2026-11-06 (`rl2.agent-scope`): the subagent whose transcript a lane A `full` stream carries; null for the main one. */
+  readonly agentId: string | null;
   readonly cursor: Cursor | null;
   /** The `sub` message it answers (a later `sub` of the same id replaces it); a feed's names it (`feed`). */
   readonly message: SubMessage;
@@ -118,6 +120,7 @@ export class Subscription implements StreamSource {
     this.who = { member: channel.member, device: channel.device, clientClass: channel.clientClass };
     this.session = isMachineFeedSub(message) ? null : message.session;
     this.view = isMachineFeedSub(message) ? 'full' : (message.view ?? 'full');
+    this.agentId = isMachineFeedSub(message) ? null : (message.agentId ?? null);
     this.cursor = message.cursor;
     this.message = message;
     this.#credit = Math.min(message.credit, SUB_CREDIT_MAX);

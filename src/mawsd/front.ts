@@ -608,14 +608,15 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
         },
       };
     },
-    dispatch: (name, input, client) => answer(name, input, { client: client ?? endpointClient }, false, null),
+    // 2026-11-06: every request through the endpoint is another machine's (`remote`), which the services' home-root rule reads
+    dispatch: (name, input, client) => answer(name, input, { client: client ?? endpointClient, remote: true }, false, null),
     async intercepted(name, rawInput, client) {
       if (!codec.isCommandName(name) || REGISTRY.commands[name].owner !== 'engine-host') return null;
       const taken = await spineIntercept(name, rawInput);
       if (taken.failed) return taken.failed;
       if (!taken.handler) return null;
       const input = codec.readCommandInput(name, rawInput);
-      return input.ok ? run(name, taken.handler, input.value, { client: client ?? endpointClient }) : input;
+      return input.ok ? run(name, taken.handler, input.value, { client: client ?? endpointClient, remote: true }) : input;
     },
     intercepts: () => [...intercepts.keys()].sort() as CommandName[],
     events(listener) {

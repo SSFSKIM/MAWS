@@ -3,7 +3,8 @@
 // child answers render disabled until its handler registers. A foreign-live session offers only the opens (D-12); I2:
 // Open replaces the focused pane's session, Open in new tab keeps it. P5 O8 M5: a project's and a machine's row both
 // carry the row's People toggle where the row offers it (its `data-people`: others to show, or the toggle on), checked
-// while it draws other people's sessions.
+// while it draws other people's sessions. P5 O8 M7a (Q5): an org project's row whose sminos id the index knows offers
+// Channel, the project's one channel tab.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -15,7 +16,9 @@ import { ipc } from '../ipc/client';
 import { createSession, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { openDialog } from '../sessions/dialogs';
 import { machineKey } from '@shared/machine/org-key';
-import { orgKeyOf, sessionsOfRow, type RowKey } from '../stores/org-projects';
+import { orgKeyOf, selectOrgIndex, sessionsOfRow, type RowKey } from '../stores/org-projects';
+import { useLayout } from '../stores/layout'; // P5 O8 M7a
+import { CHANNEL } from '../channel/copy'; // P5 O8 M7a
 import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { usePeople } from '../stores/people'; // P5 O8 M5
 import { useSessions } from '../stores/sessions';
@@ -119,6 +122,8 @@ function ProjectItems({ projectId, people }: { projectId: ProjectId; people: boo
   const project = projects.get(projectId);
   // the row's sessions, from every machine
   const unread = project === undefined ? [] : sessionsOfRow({ records, projects }, ipc.localMachine, orgKeyOf(project)).filter((r) => r.unread && !r.archived);
+  // P5 O8 M7a: the org project's sminos id, which keys its channel at the hub
+  const smnsId = useSessions((s) => (project === undefined ? null : (selectOrgIndex(s, ipc.localMachine).orgs.get(orgKeyOf(project))?.smnsId ?? null)));
   return (
     <>
       <Item enabled={canCreate} onSelect={() => void createSession(projectId)}>
@@ -132,6 +137,11 @@ function ProjectItems({ projectId, people }: { projectId: ProjectId; people: boo
         Mark all read
       </Item>
       {people && project !== undefined && <PeopleItem rowKey={orgKeyOf(project)} />}
+      {smnsId !== null && (
+        <Item enabled onSelect={() => useLayout.getState().openTab({ kind: 'channel', project: smnsId })}>
+          {CHANNEL.menuItem}
+        </Item>
+      )}
       <ContextMenu.Separator className="my-1 h-px bg-border" />
       {PROJECT_ACTION_IDS.map((id) => (
         <ProjectItem key={id} id={id} projectId={projectId} />

@@ -18,7 +18,9 @@
 // L197: the slot gives the transcript the session's agents from its task graph (agent-lookup.ts), so a message to an
 // agent no loaded turn launched names it.
 // P5 O9 M9: another machine's terminal session (a listed lane A row) draws through `lane-a/view/RemoteTranscriptSlot.tsx`,
-// from its machine's plane. A subagent's own transcript there is a gap, said in its place.
+// from its machine's plane. 2026-11-06: a subagent's own transcript there draws through
+// `lane-a/view/RemoteAgentTranscript.tsx`, where its machine's endpoint carries it; elsewhere its port's gap is said in
+// its place.
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
@@ -34,7 +36,6 @@ import { useAgentLookup } from './agent-lookup'; // L197
 import type { TranscriptActions } from './context';
 import { useLaneAStreaming } from '../../lane-a/stream/use-overlay'; // P5 O9 M5
 import { useRemoteLaneA } from '../../lane-a/remote-session'; // P5 O9 M9
-import { LANE_A_WORDS } from '../../session/controls/lane-a'; // P5 O9 M9
 import { useSessionControls } from '../../session/controls/controls-for'; // P5 O9 M5
 import { useRegisteredActions, useRegisteredRequestRenderer } from './registry';
 import { storeKeyOf, Transcript } from './Transcript';
@@ -42,6 +43,7 @@ import { storeKeyOf, Transcript } from './Transcript';
 // P5 O9 M9: loaded only when another machine's session is shown, so the plane transcript it draws through stays out of
 // the chunk every local transcript loads.
 const RemoteTranscriptSlot = lazy(() => import('../../lane-a/view/RemoteTranscriptSlot').then((module) => ({ default: module.RemoteTranscriptSlot })));
+const RemoteAgentTranscript = lazy(() => import('../../lane-a/view/RemoteAgentTranscript').then((module) => ({ default: module.RemoteAgentTranscript }))); // 2026-11-06
 
 export interface TranscriptSlotProps {
   appSessionId: AppSessionId;
@@ -55,12 +57,26 @@ export interface TranscriptSlotProps {
 export function TranscriptSlot(props: TranscriptSlotProps) {
   const remote = useRemoteLaneA(props.appSessionId); // P5 O9 M9
   if (!remote) return <LocalTranscriptSlot {...props} />;
-  if (props.agentId !== undefined) {
-    return <p className={`m-0 px-4 py-3 text-ui-sm text-fg-muted ${props.className ?? ''}`} role="status" data-testid="remote-subagent-gap">{LANE_A_WORDS.remoteSubagentRows}</p>;
-  }
+  if (props.agentId !== undefined) return <RemoteAgentSlot {...props} agentId={props.agentId} />;
   return (
     <Suspense fallback={null}>
       <RemoteTranscriptSlot {...props} />
+    </Suspense>
+  );
+}
+
+// 2026-11-06: a subagent's own transcript of another machine's terminal session, where its port carries it.
+function RemoteAgentSlot({ appSessionId, agentId, className, actions: overrides }: TranscriptSlotProps & { agentId: AgentId }) {
+  const registered = useRegisteredActions();
+  const actions = useMemo(() => (overrides ? { ...registered, ...overrides } : registered), [registered, overrides]);
+  const renderRequest = useRegisteredRequestRenderer();
+  const gap = useSessionControls(appSessionId)?.capability('subagent-rows') ?? null;
+  if (gap !== null && !gap.available) {
+    return <p className={`m-0 px-4 py-3 text-ui-sm text-fg-muted ${className ?? ''}`} role="status" data-testid="remote-subagent-gap">{gap.reason}</p>;
+  }
+  return (
+    <Suspense fallback={null}>
+      <RemoteAgentTranscript appSessionId={appSessionId} agentId={agentId} actions={actions} renderRequest={renderRequest} className={className} />
     </Suspense>
   );
 }

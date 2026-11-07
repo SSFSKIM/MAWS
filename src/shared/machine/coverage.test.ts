@@ -133,6 +133,9 @@ const SESSION_TOOLS = "a tool name (artifact_screenshot, artifact_export, browse
 // SDK's own schema before it keeps them
 const OAUTH_DOCUMENT = "an OAuth document's own fields (RFC 8414 server metadata, RFC 7591 client information): no MAWS id";
 const HTTP_HEADERS = "an HTTP response's header names → their values (a consent callback's answer, P5 O7 M5c): no MAWS id";
+// P5 O8 M7a: a project log event as the hub stores it (DX1's or RL8's fields), sent once main verified it; its ids are
+// sminos's (sessions, members, machines' names), never a MAWS address, and the renderer reads them as text
+const LOG_EVENT = "a project log event's own fields (DX1/RL8, as the hub stores it): sminos's ids, no MAWS address";
 const RENDER_AUTHOR_SESSIONS = "a document comment actor's appSessionId → that session's title (the export's comment authors)";
 const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.artifacts.datasetRefreshRequest.output.request.args': TOOL_ARGUMENTS,
@@ -165,6 +168,7 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.machineSettings.get.output.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS, // P5 O3-D M1
   'commands.machineSettings.set.input.patch.artifacts.spaceDesignSystems': SPACE_SYSTEMS,
   'commands.machineSettings.set.output.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS,
+  'commands.org.channel.open.output.events[].event': LOG_EVENT, // P5 O8 M7a
   'commands.maws.artifact.exported.input.answer<ok=false>.refusal.data': "a refusal's detail fields (ArtifactRefusalSchema.data)",
   'commands.render.answer.input.answer<ok=false>.refusal.data': "a refusal's detail fields (ArtifactRefusalSchema.data), the render host's answer to the bridge's export (P5 O5 M3)",
   'commands.session.appEvents.output.events[]<kind=question.answered>.answers': ANSWERS,
@@ -198,6 +202,7 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'events.session.capabilitiesChanged.capabilities': SESSION_TOOLS, // P5 O5 M5
   'events.laneA.changed.state.pending[].input': TOOL_ARGUMENTS,
   'events.machineSettings.changed.settings.artifacts.spaceDesignSystems': SPACE_SYSTEMS, // P5 O3-D M1
+  'events.org.channel.changed.upserts[].event': LOG_EVENT, // P5 O8 M7a
   'events.plugins.operation.outcome.result': ENGINE_JSON,
   // P5 O5 M4: a Word comment's author session, by the appSessionId its actor carries in the document → that session's title;
   // mawsd posts render.request to its own machine's render host alone, so the keys are the store's, never addressed

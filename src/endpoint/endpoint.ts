@@ -117,7 +117,8 @@ export type EndpointOptions = {
   env?: Record<string, string | undefined>;
   pingMs?: readonly [number, number];
   direct?: { interfaces?(): InterfaceTable } & Pick<DirectListenerOptions, 'listen' | 'limits' | 'rescanMs'>;
-  authorization?: { records?: RecordSource; checkouts?: CheckoutSource; settingsMode?(): string; setup?: Home } & Pick<AuthorizeContext, 'offers' | 'gradeOf' | 'registry'>;
+  // `home` (2026-11-06): the machine's home as the home-root rule reads it (src/shared/machine/machine-home.ts; a suite's fake one)
+  authorization?: { records?: RecordSource; checkouts?: CheckoutSource; settingsMode?(): string; setup?: Home; home?: string } & Pick<AuthorizeContext, 'offers' | 'gradeOf' | 'registry'>;
   /** MAWS's own projects as checkouts (P5 O3-D M4, `mawsd` injects them), known beside RL10's; `authorization.checkouts` replaces both. */
   projects?: CheckoutSource;
   /** The suites' seams for subscriptions: the resume window, lane A's ring and the unsent stream's bound. */
@@ -173,7 +174,7 @@ export class Endpoint implements EndpointModule {
   /** The feeds (P5 O7 M4): a session's `checkout` feed; the machine's `attention` feed (M6). */
   readonly planeFeeds: PlaneFeeds;
   /** Lane B sessions' checkout bounds, which the `checkout` rule and the `checkout` feed both read. */
-  readonly checkoutBounds = new CheckoutBounds();
+  readonly checkoutBounds: CheckoutBounds;
   /** P5 O7 M5a: the `artifact` rule's placements per channel, which its decisions, `library.list` and the feed read. */
   readonly artifactRanks = new ArtifactRanks();
   /** P5 O7 M5a2 fix wave 1: what artifact answers say of sessions (session-safe.ts); set with the executors. */
@@ -213,9 +214,16 @@ export class Endpoint implements EndpointModule {
   readonly #retries = new RecordRetries();
   /** The changes of the enrollment begun, one after another (`EnrollContext.lifecycle`). */
   #lifecycle: Promise<unknown> = Promise.resolve();
+  /**
+   * 2026-11-06: e2e:remote's endpoint of an earlier build (MAWS_E2E=1 alone): the capabilities MAWS_E2E_ENDPOINT_WITHOUT
+   * names, a comma list, withheld from its `h2`, so a scene meets a device's old-peer path against this build.
+   */
+  readonly #withheld: ReadonlySet<string>;
 
   constructor(options: EndpointOptions = {}) {
     this.#options = options;
+    const env = options.env ?? process.env;
+    this.#withheld = new Set(env.MAWS_E2E === '1' ? (env.MAWS_E2E_ENDPOINT_WITHOUT ?? '').split(',').filter(Boolean) : []);
     this.deps = {
       fetch: options.fetch ?? ((input, init) => fetch(input, init)),
       sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
@@ -337,6 +345,8 @@ export class Endpoint implements EndpointModule {
     this.clientPorts = new ClientPorts({ services: () => this.#services, log });
     this.hub.setChannels(this.channels.relay(this.hub));
     const authorization = options.authorization ?? {};
+    const home = authorization.home;
+    this.checkoutBounds = new CheckoutBounds(home === undefined ? undefined : () => [home]);
     this.checkouts = authorization.checkouts ?? (options.projects === undefined ? this.rl10.members : anyCheckout(this.rl10.members, options.projects));
     const setupHome = authorization.setup;
     const setup = new MachineSetup(setupHome === undefined ? undefined : () => setupHome); // P5 O7 M9: the authorizer's and the folder list's
@@ -862,7 +872,7 @@ export class Endpoint implements EndpointModule {
   /** The machine as RL2's `h2` signs it, while it serves channels: it speaks for its ref, its state sound. */
   #identity(): MachineIdentity | null {
     if (this.#stopped || this.#services === null || this.#key === null || !this.#speaks || this.#state?.refusing !== null || this.#org?.ready !== true) return null;
-    return { ref: this.#services.machine.ref, key: this.#key, build: this.#options.build ?? 'unknown', capabilities: [...ENDPOINT_CAPABILITIES] };
+    return { ref: this.#services.machine.ref, key: this.#key, build: this.#options.build ?? 'unknown', capabilities: ENDPOINT_CAPABILITIES.filter((c) => !this.#withheld.has(c)) };
   }
 
   #listener(env: Record<string, string | undefined>): DirectListener {

@@ -17,11 +17,11 @@ const event = (seq: number, idx = 0, text = `${seq}.${idx}`, withSeq = true): Se
 /** A machine whose journal holds `rows`, answering `session.events` as the engine host does, and `too-large` past `max` bytes. */
 function machine(rows: SessionEvent[][], max = 4000) {
   const link = new FakeLink();
-  const asked: Array<{ afterSeq: number | null; limit: number | null }> = [];
+  const asked: Array<{ afterSeq: number | null; limit: number | null; agentId?: unknown }> = [];
   link.answers.set('session.events', (input) => {
     const afterSeq = input.afterSeq as number | null;
     const limit = input.limit as number | null;
-    asked.push({ afterSeq, limit });
+    asked.push({ afterSeq, limit, ...(input.agentId !== undefined && { agentId: input.agentId }) });
     const after = rows.filter((row) => afterSeq === null || row[0].seq! > afterSeq);
     let taken = after;
     if (limit !== null) {
@@ -30,7 +30,8 @@ function machine(rows: SessionEvent[][], max = 4000) {
       while (end < after.length && (end === 0 || count + after[end].length <= limit)) count += after[end++].length;
       taken = after.slice(0, end);
     }
-    const events = taken.flat();
+    // an agent's slice of the page, as C3 answers one: the page's rows, its own events among them
+    const events = taken.flat().filter((e) => input.agentId === undefined || e.agentId === input.agentId);
     const output = { events, lastSeq: taken.at(-1)?.[0].seq ?? afterSeq ?? 0, complete: taken.length === after.length };
     if (JSON.stringify(output).length > max) return { ok: false, error: { code: 'too-large' } };
     return { ok: true, output };
@@ -79,6 +80,38 @@ describe('readEventsInPages', () => {
     expect(said).toEqual(['older']);
     expect(await read(link, [], undefined, said)).toEqual(unavailable); // a disk page carries no seq: no read after it
     expect(said).toEqual(['older', 'newest']);
+  });
+
+  // The remote drill-in (2026-11-06): a subagent's slice of a live launch, too large for one answer, is read in pages of
+  // the launch as the session's is, each naming the agent, a page whose slice holds none of its events read past, and
+  // assembled into one answer. A row of it alone too large for the channel ends the read as history unavailable (a
+  // session's gap would mark the session's own transcript), and so does a slice with no launch to page.
+  describe('a subagent’s slice', () => {
+    const AGENT = 'agent-7';
+    const mine = (seq: number, text = 'x'.repeat(700)) => ({ ...event(seq, 0, text), agentId: AGENT }) as unknown as SessionEvent;
+    const slice = { appSessionId: APP, afterSeq: null, limit: null, agentId: AGENT };
+
+    it('reads a live launch’s slice too large for one answer in pages naming the agent, past pages with none of its events', async () => {
+      const rows = Array.from({ length: 16 }, (_, i) => [i < 8 ? event(i + 1, 0, 'x'.repeat(700)) : mine(i + 1)]);
+      const { link, asked } = machine(rows);
+      expect(await read(link, [], slice)).toEqual({ ok: true, value: { events: rows.slice(8).flat(), lastSeq: 16, complete: true } });
+      expect(asked.length).toBeGreaterThan(2);
+      expect(asked.every((a) => a.agentId === AGENT)).toBe(true);
+    });
+
+    it('ends as history unavailable at a row of it alone too large, telling no gap of the session’s', async () => {
+      const { link } = machine([[mine(1, 'y'.repeat(5000))], [event(2)]]);
+      const gaps: Array<{ launchId: string; at: { seq: number } }> = [];
+      expect(await read(link, gaps, slice)).toEqual({ ok: true, value: { events: [], lastSeq: 0, complete: true, historyUnavailable: true } });
+      expect(gaps).toEqual([]);
+    });
+
+    it('answers a slice with no launch to page (a session not live there) as history unavailable, as before', async () => {
+      const { link, asked } = machine([[mine(1)], [mine(2)], [mine(3)], [mine(4)], [mine(5)]]);
+      const deps = { launch: () => null, gap: () => {}, tooLarge: () => {}, log: () => {}, pageEvents: 8 };
+      expect(await readEventsInPages(link, slice, deps)).toEqual({ ok: true, value: { events: [], lastSeq: 0, complete: true, historyUnavailable: true } });
+      expect(asked).toEqual([{ afterSeq: null, limit: null, agentId: AGENT }]);
+    });
   });
 
   it('passes any other refusal on as the read’s', async () => {

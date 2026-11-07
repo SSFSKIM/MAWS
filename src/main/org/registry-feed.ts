@@ -100,7 +100,8 @@ export class PartJoiner {
 
 export const socketUrl = (hub: string): string => `${hub.replace(/\/+$/, '').replace(/^http/, 'ws')}${REGISTRY_APP_PATH}`;
 
-function wsSocket(url: string, headers: Record<string, string>): WebSocketLike {
+/** A `ws` socket as the feed (and M7a's Project socket, which also sends) uses one. */
+export function wsSocket(url: string, headers: Record<string, string>): WebSocketLike & { send(text: string): void } {
   const socket = new WebSocket(url, { headers, handshakeTimeout: 10_000, maxPayload: 2 * 1024 * 1024 });
   return {
     on(event: string, listener: (...args: never[]) => void) {
@@ -115,8 +116,9 @@ function wsSocket(url: string, headers: Record<string, string>): WebSocketLike {
       });
       else if (event === 'error') socket.on('error', (error) => call(error));
     },
+    send: (text: string) => socket.send(text),
     close: () => socket.close(1000, 'done'),
-  } as WebSocketLike;
+  } as WebSocketLike & { send(text: string): void };
 }
 
 export function createRegistryFeed(deps: {

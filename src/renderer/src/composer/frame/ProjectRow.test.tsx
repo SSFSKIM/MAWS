@@ -6,12 +6,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { project, record } from '../../../../../test/support/builders';
 import { addressOf } from '@shared/machine/address';
-import { at, OTHER_MACHINE } from '../../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
+import type { MachineState } from '@shared/ipc/schema/machines';
+import type { OrgKey } from '@shared/machine/org-key';
+import { HOME_CHECKOUT, SPAWN_HOME_CAPABILITY } from '@shared/ipc/schema/session';
+import { ipc } from '../../ipc/client';
+import { useDialogs } from '../../sessions/dialogs';
+import { resetRemoteSpawn, SPAWN_WORDS, spawnTargetOf, useRemoteSpawn, type SpawnTarget } from '../../sessions/remote-spawn';
+import { SETUP_WORDS } from '../../sessions/remote-setup';
+import { useMachines } from '../../stores/machines';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
 import type { HookResult } from '../setup-intent';
 import type { ProjectRowBinding } from './bindings';
-import { matchesProject, ProjectRow, recentProjects } from './ProjectRow';
+import { matchesProject, NO_PROJECT_LABEL, PLACE_WORDS, ProjectRow, recentProjects } from './ProjectRow';
 
 // P5 O6 M2: the page holds addresses; the picker lists this machine's projects (M5)
 const ALPHA = at('alpha' as ProjectId);
@@ -198,6 +206,111 @@ describe('the project row', () => {
     ]);
     expect(within(list).queryByRole('button')).toBeNull(); // read-only
     expect(rows()).not.toContain('/work/shared'); // a note, not a choice
+  });
+});
+
+// 2026-11-06 (the owner's ruling: the machine first, the place following it): with another machine chosen for a place of
+// its own, the chip and its menu are that machine's: its projects, New project there and its home, each greyed with why
+// when that machine can't offer it; This Mac chosen again, the local row as it was.
+describe('the project row on another machine', () => {
+  const TAB = at('new-1' as AppSessionId);
+  const HOME_PAGE = { entries: [{ name: 'Developer', path: '/Users/mini/Developer', protected: false }], cursor: null };
+  const theirs = (id: string, name: string, directory: string, createdAt = '2026-01-01T00:00:00.000Z') => project(addressOf(OTHER_MACHINE, id as ProjectId), 0, { name, directory, createdAt });
+  const onMini = (over: Partial<SpawnTarget> = {}) => useRemoteSpawn.getState().choose(TAB, { machine: OTHER_MACHINE, name: 'mini', checkout: null, key: null, ...over });
+  const answer = (owner = true) =>
+    vi.spyOn(ipc, 'invoke').mockImplementation((async (name: string) => {
+      if (name === 'session.projects.list') return { ok: true, value: { projects: [theirs('notes', 'notes', '/Users/mini/notes'), theirs('app', 'app', '/Users/mini/src/app', '2026-02-01T00:00:00.000Z')], revision: 1 } };
+      if (name === 'machine.folders.list') return owner ? { ok: true, value: HOME_PAGE } : { ok: false, error: { code: 'internal', message: 'refused owners-only', issues: { refusal: 'owners-only' } } };
+      return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+    }) as never);
+  const mini = (capabilities: string[] = [SPAWN_HOME_CAPABILITY]): MachineState => ({ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-11-06T00:00:00Z', generation: 1, carrier: 'relay', capabilities });
+  const roster = (capabilities?: string[]) => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-06T00:00:00Z', generation: 0 }, mini(capabilities)]);
+  afterEach(() => {
+    resetRemoteSpawn();
+    useDialogs.setState({ open: null });
+    useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
+    vi.restoreAllMocks();
+  });
+
+  it('reads Choose a project there, lists that machine’s projects newest first, and a choice is the place there, no branch or Worktree box', async () => {
+    roster();
+    const invoke = answer();
+    onMini();
+    render(<ProjectRow binding={binding({ projectId: ALPHA, label: 'Alpha', path: '/work/alpha', branch: 'main', worktree: false })} appSessionId={TAB} />);
+    const chip = screen.getByRole('button', { name: 'Choose a project' });
+    expect(chip.title).toBe(PLACE_WORDS.choose('mini'));
+    expect(screen.queryByLabelText(/^Branch /)).toBeNull();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    const user = userEvent.setup();
+    await user.click(chip);
+    await vi.waitFor(() => expect(rows()).toEqual(['app', 'notes', 'New project', "Don't work in a project"])); // app's sessions none here: by when each was added
+    expect(invoke).toHaveBeenCalledWith('session.projects.list', undefined, { machine: OTHER_MACHINE });
+    expect(invoke).toHaveBeenCalledWith('machine.folders.list', {}, { machine: OTHER_MACHINE });
+    await user.click(within(menu()).getByRole('option', { name: 'notes' }));
+    expect(spawnTargetOf(TAB, null)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: '/Users/mini/notes', key: null, label: 'notes' });
+    expect(screen.getByRole('button', { name: 'Project notes' }).title).toBe(PLACE_WORDS.change('notes', 'mini'));
+  });
+
+  it('takes the home for Don’t work in a project, and opens that machine’s folder sheet for New project', async () => {
+    roster();
+    answer();
+    onMini();
+    render(<ProjectRow binding={binding()} appSessionId={TAB} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Choose a project' }));
+    await vi.waitFor(() => expect(within(menu()).getByRole('option', { name: "Don't work in a project" }).getAttribute('aria-disabled')).toBe('false'));
+    await user.click(within(menu()).getByRole('option', { name: "Don't work in a project" }));
+    expect(spawnTargetOf(TAB, null)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: HOME_CHECKOUT, key: null, label: NO_PROJECT_LABEL });
+    await user.click(screen.getByRole('button', { name: `Project ${NO_PROJECT_LABEL}` }));
+    await vi.waitFor(() => expect(within(menu()).getByRole('option', { name: 'New project' }).getAttribute('aria-disabled')).toBe('false'));
+    expect(rows()).not.toContain("Don't work in a project"); // the choice already
+    await user.click(within(menu()).getByRole('option', { name: 'New project' }));
+    expect(useDialogs.getState().open).toEqual({ kind: 'remoteSetup', request: { kind: 'folder', tab: TAB, machine: OTHER_MACHINE, name: 'mini', key: null, home: '/Users/mini', first: HOME_PAGE, suggestions: [] } });
+  });
+
+  it('greys New project and Don’t work in a project with why: not its owner, or an endpoint that predates a chat in its home', async () => {
+    roster();
+    answer(false);
+    onMini();
+    const { unmount } = render(<ProjectRow binding={binding()} appSessionId={TAB} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Choose a project' }));
+    await vi.waitFor(() => expect(rows()).toEqual(['app', 'notes', `New project${SETUP_WORDS.notOwner('mini')}`, `Don't work in a project${SETUP_WORDS.homeNotOwner('mini')}`]));
+    expect(within(menu()).getAllByRole('option').slice(2).map((o) => o.getAttribute('aria-disabled'))).toEqual(['true', 'true']);
+    unmount();
+    roster(['rl2.feeds']);
+    vi.restoreAllMocks();
+    answer();
+    render(<ProjectRow binding={binding()} appSessionId={TAB} />);
+    await user.click(screen.getByRole('button', { name: 'Choose a project' }));
+    await vi.waitFor(() => expect(rows().at(-1)).toBe(`Don't work in a project${SPAWN_WORDS.noHome('mini')}`));
+    expect(within(menu()).getByRole('option', { name: 'New project' }).getAttribute('aria-disabled')).toBe('false');
+  });
+
+  it('keeps the local project’s words, branch and Worktree box for its checkout there, the menu that machine’s, the checkout marked', async () => {
+    const KEY = 'repo:github.com/acme/app' as OrgKey;
+    useSessions.setState({ projects: new Map(useSessions.getState().projects).set(ALPHA, project(ALPHA, 0, { name: 'Alpha', directory: '/work/alpha', org: { key: KEY, name: 'app', source: 'remote', smnsId: null } })) });
+    roster();
+    answer();
+    useRemoteSpawn.getState().choose(TAB, { machine: OTHER_MACHINE, name: 'mini', checkout: '/Users/mini/src/app', key: KEY });
+    render(<ProjectRow binding={binding({ projectId: ALPHA, label: 'Alpha', path: '/work/alpha', branch: 'main', worktree: false })} appSessionId={TAB} />);
+    expect(screen.getByLabelText('Branch main')).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: 'Worktree' })).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Project Alpha' }));
+    await vi.waitFor(() => expect(rows()).toEqual(['app✓', 'notes', 'New project', "Don't work in a project"]));
+  });
+
+  it('names the place there, and gives the local row and menu back once This Mac is chosen again', async () => {
+    roster();
+    answer();
+    render(<ProjectRow binding={binding({ projectId: ALPHA, label: 'Alpha', path: '/work/alpha', branch: 'main', worktree: false })} appSessionId={TAB} />);
+    act(() => onMini({ checkout: '/Users/mini/notes', label: 'notes' }));
+    expect(screen.getByRole('button', { name: 'Project notes' })).toBeTruthy();
+    act(() => useRemoteSpawn.getState().choose(TAB, null));
+    expect(screen.getByRole('button', { name: 'Project Alpha' })).toBeTruthy();
+    expect(screen.getByLabelText('Branch main')).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Project Alpha' }));
+    expect(rows()).toEqual(['beta', 'Alphaalpha✓', 'Alphaalpha-two', 'New project', "Don't work in a project"]);
   });
 });
 

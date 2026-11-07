@@ -102,7 +102,7 @@ export interface HeadlessScene {
   capabilities(appSessionId: AppSessionId): Promise<SessionCapabilities>;
   sessionStatus(appSessionId: AppSessionId): Promise<EngineSessionStatus>;
   start(repo: string, prompt?: string): Promise<AppSessionId>; // the ordinary start path, to its first turn's end
-  connector(repo: string): Promise<ConnectorControl>; // the session's cua host, once its control socket listens
+  connector(repo: string): Promise<ConnectorControl>; // the session's cua host, once it has heard MAWS's hello (below)
   report(repo: string): ConnectorReport | null;
   daemonSocket(appSessionId: AppSessionId): string; // the socket a launch is told
   renderSocket(appSessionId: AppSessionId): string | null; // the render host's for the session (never an engine's to dial)
@@ -170,9 +170,14 @@ export async function startHeadlessScene(o: HeadlessSceneOptions = {}): Promise<
       }, { timeout: 60_000, message: `${appSessionId}'s engine ready, its first turn ended` }).toBe(true);
       return appSessionId;
     },
+    // The connector once it can serve the scene: its control socket listens and it has heard MAWS's hello on its current
+    // connection. The two are not at once: the connector starts as the engine's child, alongside the engine's first turn,
+    // and its control socket listens as it dials MAWS, so a scene could reach it before the hello and have its first
+    // request answered `not connected`, as cua's host lists no backend before its hello (cua's client-mode.mjs)
     async connector(repo) {
       let control: ConnectorControl | null = null;
       await expect.poll(async () => (control = await connectorControl(repo).catch(() => null)) !== null, { timeout: 30_000, message: `the connector in ${repo} listens on its control socket` }).toBe(true);
+      await expect.poll(async () => (await control!.state()).greeted, { timeout: 30_000, message: `the connector in ${repo} has heard MAWS's hello` }).toBe(true);
       return control!;
     },
     report: (repo) => connectorReport(repo),

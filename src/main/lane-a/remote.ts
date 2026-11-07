@@ -14,6 +14,12 @@
 //   subscription after the endpoint ended one is a reset: `{reset: true}`, then that snapshot. An `ended` is retried with
 //   backoff from 1 s doubling to 30 s, announced as `paused` until the fresh snapshot, then `resumed`; only the link's own
 //   close ends the watch (`{ended}`). The page's end (`clientGone`) ends its watches.
+// - A subagent's own transcript (2026-11-06, the remote drill-in): a `laneA.watch` naming `agentId` is a watch of that
+//   transcript, its own subscription naming the agent (`rl2.agent-scope`; the endpoint holds an upstream of the agent's
+//   own in sminos), under the same view rules; it carries that transcript alone, so the session's state, its reads and
+//   its hydration stay its main watches'. Its `rows` and `output` are asked of it; any other read is the session's. An
+//   endpoint that doesn't list the capability is asked nothing: the watch is refused while a channel says so, and one
+//   taken while none does ends `not-offered` at the first that says so.
 // - The state. A remote session's `LaneAState` exists while a page watches it, from its oldest watch's subscription
 //   (./remote-state.ts), and `laneA.changed` follows it; the last watch's end sends `state: null`. `laneA.list` for the
 //   machine answers the states of the sessions watched there. The override and the mode the session reported (sminos
@@ -49,6 +55,7 @@ import { answerIntent, suggestionSha256 } from '@shared/lane-a/answers';
 import { modeOf } from '@shared/lane-a/mode';
 import type { MachineRef } from '@shared/machine/ref';
 import type { MainContext, RemoteDispatch } from '../ipc/router';
+import { peerLists } from '../machines/remote/capabilities';
 import type { ActOutcome, ActRequest, RemoteLink, Subscription } from '../machines/remote/link';
 import { controlOf, linkView, sendFate } from './remote-outcomes';
 import { NO_BRIDGE, RemoteFold, type StatusRead } from './remote-state';
@@ -102,6 +109,7 @@ export function routeLaneA(base: RemoteDispatch, remote: (machine: MachineRef) =
 
 type Watch = {
   id: string;
+  agentId: string | null; // a subagent's own transcript; null for the session's main one
   fold: RemoteFold;
   sub: Subscription | null;
   token: object; // the current subscription's: a callback of an earlier one is ignored
@@ -137,6 +145,9 @@ const keyOf = (key: DeliveryKey) => `${key.writer}#${key.seq}`;
 const NOT_OPEN = 'the session isn’t open here: open it to drive it';
 export const STOP_TASK_GAP = 'a background shell on another machine is stopped there: stopping one from here isn’t offered';
 export const MEDIA_GAP = 'attachments to a session on another machine wait for uploads across machines';
+/** 2026-11-06: an endpoint that lists no `rl2.agent-scope` carries no subagent's own transcript. */
+export const AGENT_SCOPE_GAP = (machine: string) => `${machine} can’t show a subagent’s own transcript here yet; update MAWS on ${machine}`;
+const AGENT_READ = 'a read is the session’s: ask it on the session’s own view';
 
 export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
   const timing: RemoteLaneATiming = { ...REMOTE_LANE_A_TIMING, ...deps.timing };
@@ -184,7 +195,8 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
     return s;
   }
 
-  const primary = (s: Session): Watch | null => s.watches.values().next().value ?? null;
+  // the session's oldest watch of its main transcript: a subagent's carries none of the session's state
+  const primary = (s: Session): Watch | null => [...s.watches.values()].find((w) => w.agentId === null) ?? null;
 
   function stateOf(s: Session): LaneAState | null {
     const w = primary(s);
@@ -243,8 +255,8 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
 
   // ---- Watches -----------------------------------------------------------------------------------------------------------
 
-  function watch(s: Session, client: MainContext['client']): string {
-    const w: Watch = { id: randomUUID(), fold: new RemoteFold(s.id), sub: null, token: {}, started: false, paused: false, backoffMs: timing.backoffMs[0], retry: null, offGone: () => {}, requests: new Map(), reads: new Map(), ended: false };
+  function watch(s: Session, client: MainContext['client'], agentId: string | null): string {
+    const w: Watch = { id: randomUUID(), agentId, fold: new RemoteFold(s.id), sub: null, token: {}, started: false, paused: false, backoffMs: timing.backoffMs[0], retry: null, offGone: () => {}, requests: new Map(), reads: new Map(), ended: false };
     s.watches.set(w.id, w);
     w.offGone = client.onGone(() => endWatch(s, w, null));
     subscribe(s, w);
@@ -257,7 +269,7 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
     w.token = token;
     const mine = () => w.token === token && !w.ended;
     w.sub = s.link.subscribe(
-      { session: { lane: 'A', id: s.id }, view: 'full', cursor: null },
+      { session: { lane: 'A', id: s.id }, view: 'full', cursor: null, ...(w.agentId !== null && { agentId: w.agentId }) },
       {
         subbed(mode) {
           if (!mine()) return;
@@ -274,20 +286,20 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
           w.started = true;
           w.backoffMs = timing.backoffMs[0];
           const message = value as PlaneMessage;
-          w.fold.message(message);
+          if (w.agentId === null) w.fold.message(message);
           emitPlane(s, { watch: w.id, messages: [message] });
           if (w.paused) {
             w.paused = false;
             emitPlane(s, { watch: w.id, resumed: true });
           }
           if (primary(s) === w) changed(s);
-          if (first) void hydrate(s);
+          if (first && w.agentId === null) void hydrate(s);
         },
         event(_at, body) {
           if (!mine()) return;
           if (record(body)?.omitted !== undefined) return reopen(s, w); // a message too large to carry: the view is no longer whole
           const message = body as PlaneMessage;
-          w.fold.message(message);
+          if (w.agentId === null) w.fold.message(message);
           emitPlane(s, { watch: w.id, messages: [message] });
           answered(w, message);
           if (primary(s) !== w) return;
@@ -309,6 +321,7 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
           if (!mine()) return;
           w.sub = null;
           if (reason === 'closed') return endWatch(s, w, reason); // the link closed for good
+          if (reason === 'not-offered') return endWatch(s, w, reason); // a subagent's, on an endpoint without rl2.agent-scope
           // The endpoint collapses every sminos end to `unavailable`: a fresh subscription, with backoff.
           if (!w.paused) {
             w.paused = true;
@@ -414,6 +427,7 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
   async function read(s: Session | null, watchId: string, kind: ReadKind, args?: Fields): Promise<ReadOutput> {
     const w = s?.watches.get(watchId);
     if (s === null || w === undefined) return { ok: false, code: 'no-bridge', message: NOT_OPEN };
+    if (w.agentId !== null && kind !== 'rows' && kind !== 'output') return { ok: false, code: 'unsupported', message: AGENT_READ };
     if (kind === 'rows' || kind === 'diff' || kind === 'output') {
       await take(w, kind);
       if (w.ended || w.sub === null) {
@@ -593,8 +607,15 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
     switch (name) {
       case 'laneA.state':
         return s === null ? null : stateOf(s);
-      case 'laneA.watch':
-        return { watch: watch(s!, ctx.client) };
+      case 'laneA.watch': {
+        const agentId = typeof input.agentId === 'string' ? input.agentId : null;
+        // an endpoint that says it lists no rl2.agent-scope is asked nothing (one met later ends the watch `not-offered`)
+        if (agentId !== null && link.peerCapabilities() !== null && !peerLists(link, 'rl2.agent-scope')) {
+          forget(s!);
+          throw new Error(AGENT_SCOPE_GAP(link.name));
+        }
+        return { watch: watch(s!, ctx.client, agentId) };
+      }
       case 'laneA.unwatch': {
         const w = s?.watches.get(String(input.watch));
         if (s !== null && w !== undefined) endWatch(s, w, null);

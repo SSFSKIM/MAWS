@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inputSha256, type JsonValue } from 'desk-hub/protocol';
 import { memoryOrgView, type ByteDuplex, type SignedOrgState } from 'org-protocol';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { endableClientRef } from '@shared/ipc/client';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import type { LaneAState } from '@shared/ipc/schema/lane-a';
@@ -25,6 +25,16 @@ import { heldOrgSession, watchedView, type SignedIn } from '../../src/main/org/s
 import { endorsed, iso, successor } from '../endpoint/org-fixtures';
 import { laneAMember, makeOrg, openRemote, ORG, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type Org } from '../endpoint/sub-harness';
 import { CAPABILITIES, FakePlane, STATUS_READ } from './fake-plane';
+
+// The endpoint's `h2` list, the build's own by default, which a case narrows to an endpoint of an earlier build (before
+// `rl2.agent-scope`); each case starts from the whole list again (test/lane-b/remote.test.ts's pattern).
+const endpointCaps = vi.hoisted(() => ({ list: [] as string[], full: [] as string[] }));
+vi.mock('../../src/endpoint/capabilities', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../src/endpoint/capabilities')>();
+  endpointCaps.full = [...real.ENDPOINT_CAPABILITIES];
+  endpointCaps.list.splice(0, Infinity, ...endpointCaps.full);
+  return { ENDPOINT_CAPABILITIES: endpointCaps.list };
+});
 
 let org: Org;
 const started: Fixture[] = [];
@@ -623,3 +633,88 @@ describe('remote lane A over a real link', { timeout: 30_000 }, () => {
   });
 });
 
+
+// 2026-11-06 (the remote lane A drill-in): `laneA.watch` with an agent target is a watch of that subagent's own
+// transcript, over an RL2 stream naming the agent (`rl2.agent-scope`) and its own upstream in sminos; it reads, pages,
+// resumes and resets as the session's watch does (M9's view rules), and the session's state stays its main watch's.
+describe('a subagent’s own transcript over a real link', { timeout: 30_000 }, () => {
+  const AGENT = 'ab5e2e00000000001';
+  async function agentWatched(l: Lab, watchMain = true): Promise<{ main: string | null; agent: string }> {
+    const main = watchMain ? await watched(l) : null;
+    const { watch: agent } = (await l.cmd('laneA.watch', { appSessionId: 'la-1', agentId: AGENT })) as { watch: string };
+    await until(() => messagesOf(l, agent).some((m) => m.kind === 'snapshot'), 'the agent’s snapshot');
+    return { main, agent };
+  }
+
+  it('holds an upstream of the agent’s own beside the session’s: its snapshot and rows under its watch alone, the state the main watch’s', async () => {
+    const l = await lab();
+    const { main, agent } = await agentWatched(l);
+    expect(l.plane.agentUpstreams(AGENT)).toHaveLength(1);
+    expect(l.plane.upstreams()).toHaveLength(1);
+    expect(l.plane.frames.find((x) => x.t === 'subscribe' && x.sub === l.plane.agentUpstreams(AGENT)[0])).toMatchObject({ session: 'la-1', agentId: AGENT });
+    expect(messagesOf(l, agent).find((m) => m.kind === 'snapshot')!.body).toMatchObject({ rows: [{ uuid: `${AGENT}-r1` }], more: true });
+    const state = JSON.stringify(stateNow(l));
+    l.plane.emitAgent(AGENT, 'row', { row: { uuid: `${AGENT}-r2` }, agentId: AGENT });
+    l.plane.emit('row', { row: { uuid: 'm2' }, agentId: null });
+    await until(() => messagesOf(l, agent).some((m) => m.kind === 'row') && messagesOf(l, main!).some((m) => m.kind === 'row'), 'each transcript’s row');
+    expect(messagesOf(l, agent).filter((m) => m.kind === 'row').map((m) => (m.body as { row: { uuid: string } }).row.uuid)).toEqual([`${AGENT}-r2`]);
+    expect(messagesOf(l, main!).filter((m) => m.kind === 'row').map((m) => (m.body as { row: { uuid: string } }).row.uuid)).toEqual(['m2']);
+    l.plane.raise(permission);
+    await until(() => stateNow(l)?.pending.length === 1, 'the request in the session’s state');
+    expect(messagesOf(l, agent).some((m) => m.kind === 'raised')).toBe(false);
+    expect(JSON.parse(state).appSessionId).toBe('la-1');
+    expect(((await l.cmd('laneA.list', undefined)) as { states: unknown[] }).states).toHaveLength(1);
+  });
+
+  it('pages the agent’s older rows through its watch, and refuses the session’s reads on it', async () => {
+    const l = await lab();
+    const { agent } = await agentWatched(l);
+    const [epoch] = l.plane.agentUpstreams(AGENT);
+    expect(await l.cmd('laneA.read', { appSessionId: 'la-1', watch: agent, kind: 'rows', args: { before: `${AGENT}-r1`, limit: 100 } })).toEqual({ ok: true, result: { requested: true } });
+    await until(() => l.plane.frames.some((x) => x.t === 'rows' && x.sub === epoch && x.agentId === AGENT), 'rows asked of the agent’s upstream');
+    await until(() => messagesOf(l, agent).some((m) => m.kind === 'rows'), 'the older rows on the agent’s watch');
+    expect(messagesOf(l, agent).find((m) => m.kind === 'rows')!.body).toEqual({ rows: [{ uuid: `older-${AGENT}-r1` }], before: `${AGENT}-r1`, more: false });
+    for (const kind of ['mcp', 'status', 'diff'] as const) expect(await l.cmd('laneA.read', { appSessionId: 'la-1', watch: agent, kind }), kind).toMatchObject({ ok: false, code: 'unsupported' });
+    expect(l.plane.frames.some((x) => (x.t === 'read' || x.t === 'diff') && x.sub === epoch)).toBe(false);
+  });
+
+  it('keeps the agent’s view across a dropped channel with no reset, and resets it cleanly when sminos ends its upstream', async () => {
+    const l = await lab();
+    const { agent } = await agentWatched(l, false);
+    const [epoch] = l.plane.agentUpstreams(AGENT);
+    l.plane.emitAgent(AGENT, 'row', { row: { uuid: `${AGENT}-r2` }, agentId: AGENT });
+    await until(() => messagesOf(l, agent).some((m) => m.kind === 'row'), 'the agent’s row');
+    let before = planeOf(l, agent).length;
+    l.carriers.at(-1)!.carrier.close('dropped');
+    await until(() => planeOf(l, agent).slice(before).some((p) => p.resumed === true), 'the resume after the drop', 15_000);
+    expect(planeOf(l, agent).slice(before).some((p) => p.reset === true)).toBe(false);
+    expect(l.plane.agentUpstreams(AGENT)).toEqual([epoch]); // the resume a replay of the same upstream
+    before = planeOf(l, agent).length;
+    l.plane.end(epoch, 'discontinuity');
+    await until(() => planeOf(l, agent).slice(before).some((p) => p.resumed === true), 'the view resumed on a fresh upstream', 10_000);
+    const tail = planeOf(l, agent).slice(before);
+    expect(tail[0]).toMatchObject({ paused: 'unavailable' });
+    expect(tail[1]).toMatchObject({ reset: true });
+    expect((tail[2].messages as Array<{ kind: string; body: unknown }>)[0]).toMatchObject({ kind: 'snapshot', body: { rows: [{ uuid: `${AGENT}-r1` }] } });
+    expect(l.plane.agentUpstreams(AGENT)).toHaveLength(1);
+    expect(l.plane.agentUpstreams(AGENT)[0]).not.toBe(epoch);
+    expect(l.plane.frames.filter((x) => x.t === 'subscribe').every((x) => x.agentId === AGENT)).toBe(true);
+  });
+
+  it('refuses a watch of the agent on an endpoint that lists no `rl2.agent-scope`, and ends one a channel to such an endpoint meets `not-offered`', async () => {
+    endpointCaps.list.splice(0, Infinity, ...endpointCaps.full.filter((c) => c !== 'rl2.agent-scope'));
+    cleanups.push(() => void endpointCaps.list.splice(0, Infinity, ...endpointCaps.full));
+    const l = await lab();
+    const refused = await l.route('laneA.watch', { appSessionId: 'la-1', agentId: AGENT });
+    expect(refused).toMatchObject({ ok: false, error: { message: expect.stringMatching(/update MAWS on mini/) } });
+    expect(l.plane.frames.some((x) => x.t === 'subscribe')).toBe(false);
+    // a watch taken while no channel says what the endpoint lists ends at the first that does
+    l.direct.dead = true;
+    l.carriers.at(-1)!.carrier.close('dropped');
+    await until(() => l.link.state() !== 'up' || l.link.peerCapabilities() === null, 'the channel down');
+    const { watch } = (await l.cmd('laneA.watch', { appSessionId: 'la-1', agentId: AGENT })) as { watch: string };
+    l.direct.dead = false;
+    await until(() => planeOf(l, watch).some((p) => p.ended === 'not-offered'), 'the watch ended not-offered', 15_000);
+    expect(l.plane.frames.some((x) => x.t === 'subscribe')).toBe(false);
+  });
+});

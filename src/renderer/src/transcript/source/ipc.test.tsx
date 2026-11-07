@@ -19,7 +19,7 @@ import { builder, tool, uuid } from '../model/test-events';
 import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../view/context';
 import { RowView } from '../view/rows/Row';
 import { Transcript } from '../view/Transcript';
-import { ipcLoadSpillOver, ipcOpenExternalOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS, REMOTE_ADOPTIONS_POLL_MS } from './ipc';
+import { ipcLoadSpillOver, ipcOpenExternalOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS, REMOTE_ADOPTIONS_POLL_MS, REMOTE_FOLLOW_POLL_MS } from './ipc';
 import type { TranscriptSource } from './types';
 import { HISTORY_GAP, HISTORY_OMITTED, HISTORY_TOO_LARGE } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED
 import { useMachines } from '../../stores/machines'; // P5 O7 M2
@@ -876,6 +876,205 @@ describe('child source provenance', () => {
     off();
     expect(fake.listeners.get('fs.followState')?.size).toBe(0);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // The remote drill-in (2026-11-06): no follow state of another machine's reaches this page (its session's stream carries
+  // the journal's events and the panels' notices), so a read of a child there that waits on one, the parent's slice still
+  // backfilling or the child's own, is asked again at REMOTE_FOLLOW_POLL_MS instead, under the same bound.
+  it('on another machine: a parent read still backfilling and an incomplete child backfill are each asked again with no follow state', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    const { parent, child } = live();
+    const disk = onDisk(child);
+    const fake = fakeClient();
+    const source = ipcSourceOver(fake.client, REMOTE, AGENT);
+    const off = source.subscribe(() => {});
+    onTestFinished(off);
+    const snapshot = source.snapshot();
+    answer(fake, 'session.events', { events: [], lastSeq: 0, complete: false });
+    await vi.advanceTimersByTimeAsync(REMOTE_FOLLOW_POLL_MS);
+    answer(fake, 'session.events', { events: parent.filter((event) => event.kind !== 'subagent.started'), lastSeq: 3, complete: true }); // an earlier launch's child
+    await vi.advanceTimersByTimeAsync(0);
+    answer(fake, 'fs.agentEvents', { events: [], complete: false });
+    await vi.advanceTimersByTimeAsync(REMOTE_FOLLOW_POLL_MS);
+    answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+    await expect(snapshot).resolves.toEqual(disk);
+    expect(fake.calls.map((call) => call.name)).toEqual(['session.events', 'session.events', 'fs.agentEvents', 'fs.agentEvents']);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // The remote drill-in: a child of another machine's session is read from the session's stream whenever its launch's
+  // slice holds the child's start, its end included (main reads that slice in pages the channel carries, while a disk
+  // window crosses as one answer), and from its disk transcript only otherwise; a start heard while it is disk-backed (a
+  // resume) is the stream's again, since that machine's disk follow sends nothing here.
+  describe('of another machine’s session', () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    const remoteChild = (fake: ReturnType<typeof fakeClient>) => ipcSourceOver(fake.client, REMOTE, AGENT);
+    const remoteBatch = (events: SessionEvent[]) => batch(events, REMOTE);
+
+    it('reads a child that ended in the launch from the stream’s slice, its end closing it, with no disk read', async () => {
+      const { parent, child } = live();
+      const done = finish(AGENT, '2026-09-28T10:00:08.000Z', 'completed');
+      const fake = fakeClient();
+      const snapshot = remoteChild(fake).snapshot();
+      answer(fake, 'session.events', { events: [...parent, ...child, done], lastSeq: 9, complete: true });
+      await expect(snapshot).resolves.toEqual([...child, done]);
+      expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
+      expect(rowsOf(applyEvents(createState(null, AGENT), [...child, done])).find((row) => row.kind === 'divider')).toMatchObject({ state: 'completed' });
+    });
+
+    it('keeps a live child on the stream at its end: the end joins its rows, no reset, no disk read', async () => {
+      const { parent, child } = live();
+      const done = finish(AGENT, '2026-09-28T10:00:08.000Z', 'completed');
+      const fake = fakeClient();
+      const source = remoteChild(fake);
+      const resets = vi.fn();
+      source.onReset!(resets);
+      const received: EventId[][] = [];
+      const off = source.subscribe((events) => received.push(events.map((event) => event.id)));
+      onTestFinished(off);
+      const snapshot = source.snapshot();
+      answer(fake, 'session.events', { events: [...parent, ...child.slice(0, 2)], lastSeq: 9, complete: true });
+      await expect(snapshot).resolves.toEqual(child.slice(0, 2));
+      fake.emit('session.eventBatch', remoteBatch([...child.slice(2), done]), OTHER_MACHINE);
+      await flush();
+      expect(received).toEqual([[...child.slice(2), done].map((event) => event.id)]);
+      expect(resets).not.toHaveBeenCalled();
+      expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
+    });
+
+    it('takes a disk-backed child back to the stream at a start it hears (a resume): the resumed run’s rows pass', async () => {
+      const { parent, child } = live();
+      const disk = onDisk(child);
+      const fake = fakeClient();
+      const source = remoteChild(fake);
+      const received: EventId[][] = [];
+      const off = source.subscribe((events) => received.push(events.map((event) => event.id)));
+      onTestFinished(off);
+      const snapshot = source.snapshot();
+      answer(fake, 'session.events', { events: parent.filter((event) => event.kind !== 'subagent.started'), lastSeq: 3, complete: true }); // an earlier launch's child
+      await flush();
+      answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+      await expect(snapshot).resolves.toEqual(disk);
+      const resumed = { ...parent.find((event) => event.kind === 'subagent.started')!, id: 'resumed' as EventId };
+      const run = child.map((event) => ({ ...event, id: `run:${event.id}` as EventId }));
+      fake.emit('session.eventBatch', remoteBatch([resumed, ...run]), OTHER_MACHINE);
+      await flush();
+      expect(received).toEqual([run.map((event) => event.id)]);
+    });
+
+    // The second review's three: an end heard only in a batch stays behind that batch's rows; a start heard while the
+    // parent's slice was on its way decides as the slice would had it held it; and a gap in the stream reads it again.
+    const REMOTE_KEY = `${REMOTE}:${AGENT}`;
+    it('leaves an end the snapshot’s slice did not hold behind the rows of the batch that carried it: one turn, completed', async () => {
+      const { parent, child } = live();
+      const done = finish(AGENT, '2026-09-28T10:00:08.000Z', 'completed');
+      const fake = fakeClient();
+      const hydrated = useTranscriptStore.getState().attach(REMOTE_KEY, remoteChild(fake), { agentId: AGENT });
+      fake.emit('session.eventBatch', remoteBatch([...child.slice(1), done]), OTHER_MACHINE); // held: the slice is on its way
+      answer(fake, 'session.events', { events: [...parent, child[0]], lastSeq: 9, complete: true });
+      await hydrated;
+      const dividers = useTranscriptStore.getState().rows(REMOTE_KEY).filter((row) => row.kind === 'divider');
+      expect(dividers.map((row) => (row as Extract<Row, { kind: 'divider' }>).state)).toEqual(['completed']);
+      useTranscriptStore.getState().detach(REMOTE_KEY);
+    });
+
+    it('takes a start held while the first slice was on its way as the stream’s: no disk read, the resumed rows pass', async () => {
+      const { parent, child } = live();
+      const fake = fakeClient();
+      const hydrated = useTranscriptStore.getState().attach(REMOTE_KEY, remoteChild(fake), { agentId: AGENT });
+      const resumed = { ...parent.find((event) => event.kind === 'subagent.started')!, id: 'resumed' as EventId };
+      fake.emit('session.eventBatch', remoteBatch([resumed, ...child]), OTHER_MACHINE);
+      answer(fake, 'session.events', { events: parent.filter((event) => event.kind !== 'subagent.started'), lastSeq: 3, complete: true });
+      await hydrated;
+      await flush();
+      expect(fake.calls.map((call) => call.name)).toEqual(['session.events']);
+      expect(useTranscriptStore.getState().entries[REMOTE_KEY].phase).toBe('live');
+      expect([...useTranscriptStore.getState().entries[REMOTE_KEY].state.seen]).toEqual(child.map((event) => event.id));
+      useTranscriptStore.getState().detach(REMOTE_KEY);
+    });
+
+    // The third review: the liveness the held batches show outlives an empty first slice (E11's host loss reads it).
+    it('keeps the liveness its held batches showed past an empty first slice: a host lost then ends the child as stopped', async () => {
+      const { parent, child } = live();
+      const fake = fakeClient();
+      const hydrated = useTranscriptStore.getState().attach(REMOTE_KEY, remoteChild(fake), { agentId: AGENT });
+      const started = parent.find((event) => event.kind === 'subagent.started')!;
+      fake.emit('session.eventBatch', remoteBatch([started, ...child.slice(0, 2)]), OTHER_MACHINE); // held: the slice is on its way
+      answer(fake, 'session.events', { events: [], lastSeq: 0, complete: true }); // read before the child started
+      await hydrated;
+      await flush();
+      expect(dividerOf(REMOTE_KEY).state).toBe('working');
+      fake.emit('engine.hostState', { state: 'restarting' } as never, OTHER_MACHINE);
+      fake.emit('engine.hostState', { state: 'ready' } as never, OTHER_MACHINE);
+      answer(fake, 'engine.sessions', []);
+      await flush();
+      answer(fake, 'host.supervisorStatus', { pid: 1 }); // no session hosts: its table stands
+      await flush();
+      expect(dividerOf(REMOTE_KEY)).toMatchObject({ state: 'stopped', cause: 'crash' });
+      useTranscriptStore.getState().detach(REMOTE_KEY);
+    });
+
+    it('keeps a disk-backed child that resumes while its slice is read again on the stream, whatever that older slice holds', async () => {
+      const { parent, child } = live();
+      const disk = onDisk(child);
+      const fake = fakeClient();
+      const source = remoteChild(fake);
+      const received: EventId[][] = [];
+      const off = source.subscribe((events) => received.push(events.map((event) => event.id)));
+      onTestFinished(off);
+      const earlier = parent.filter((event) => event.kind !== 'subagent.started'); // an earlier launch's child
+      const first = source.snapshot();
+      answer(fake, 'session.events', { events: earlier, lastSeq: 3, complete: true });
+      await flush();
+      answer(fake, 'fs.agentEvents', { events: disk, complete: true });
+      await first;
+      const again = source.snapshot(); // a Retry: its slice is read before the resume below
+      const resumed = { ...parent.find((event) => event.kind === 'subagent.started')!, id: 'resumed' as EventId };
+      const run = child.map((event) => ({ ...event, id: `run:${event.id}` as EventId }));
+      fake.emit('session.eventBatch', remoteBatch([resumed, run[0]]), OTHER_MACHINE);
+      answer(fake, 'session.events', { events: earlier, lastSeq: 3, complete: true });
+      await again;
+      fake.emit('session.eventBatch', remoteBatch(run.slice(1)), OTHER_MACHINE);
+      await flush();
+      expect(fake.calls.filter((call) => call.name === 'fs.agentEvents')).toHaveLength(1);
+      expect(received.flat()).toEqual(run.map((event) => event.id));
+    });
+
+    it('reads a child the stream carries again at a gap in the session’s stream; a disk-backed one, not', async () => {
+      const { parent, child } = live();
+      const fake = fakeClient();
+      const source = remoteChild(fake);
+      const resets = vi.fn();
+      source.onReset!(resets);
+      const off = source.subscribe(() => {});
+      onTestFinished(off);
+      const snapshot = source.snapshot();
+      answer(fake, 'session.events', { events: [...parent, child[0]], lastSeq: 9, complete: true });
+      await snapshot;
+      fake.emit('remote.gap', { appSessionId: addressOf(OTHER_MACHINE, 'app-other' as AppSessionId), launchId: 'L1' }, OTHER_MACHINE);
+      await flush();
+      expect(resets).not.toHaveBeenCalled();
+      fake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1' }, OTHER_MACHINE);
+      await flush();
+      expect(resets).toHaveBeenCalledTimes(1);
+
+      const diskFake = fakeClient();
+      const diskSource = ipcSourceOver(diskFake.client, REMOTE, AGENT);
+      const diskResets = vi.fn();
+      diskSource.onReset!(diskResets);
+      const offDisk = diskSource.subscribe(() => {});
+      onTestFinished(offDisk);
+      const read = diskSource.snapshot();
+      answer(diskFake, 'session.events', { events: parent.filter((event) => event.kind !== 'subagent.started'), lastSeq: 3, complete: true });
+      await flush();
+      answer(diskFake, 'fs.agentEvents', { events: onDisk(child), complete: true });
+      await read;
+      diskFake.emit('remote.gap', { appSessionId: REMOTE, launchId: 'L1' }, OTHER_MACHINE);
+      await flush();
+      expect(diskResets).not.toHaveBeenCalled();
+    });
   });
 
   it('waits for an incomplete empty child backfill before applying the parent completion', async () => {

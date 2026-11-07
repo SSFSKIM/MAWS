@@ -17,7 +17,7 @@ import type { LaneAState } from '@shared/ipc/schema/lane-a';
 import type { HumanPromptOptions, HumanPromptResult } from '../../composer/submit/send-human-prompt';
 import { ipc } from '../../ipc/client';
 import { holderWords } from '../../sessions/holder-words';
-import { isRemoteLaneA, remoteMachineName, startingRemoteState, useRemoteLaneA } from '../../lane-a/remote-session';
+import { isRemoteLaneA, remoteMachineCapabilities, remoteMachineName, startingRemoteState, useRemoteLaneA, useRemoteMachineCapabilities } from '../../lane-a/remote-session';
 import { laneAStateOf, useLaneACatalog, useLaneAState } from '../../stores/lane-a';
 import { isRemoteLaneB, remoteLaneBStateOf, useIsRemoteLaneB, useRemoteLaneBState } from '../../lane-b/remote-session'; // P5 O7 M2
 import { useSessions } from '../../stores/sessions';
@@ -30,7 +30,9 @@ const heldElsewhere = (record: SessionRecord | null): boolean => record?.holder.
 // `record` null: an id the renderer holds no record for (a status-only session); lane B reaches it by its status.
 export function controlsFor(record: SessionRecord | null, laneA: LaneAState | null, inputs: LaneBInputs): SessionControls | null {
   const { appSessionId, client } = inputs;
-  if (record === null && isRemoteLaneA(appSessionId)) return laneAControls(laneA ?? startingRemoteState(appSessionId), null, { appSessionId, client, remote: { machine: remoteMachineName(appSessionId) } });
+  if (record === null && isRemoteLaneA(appSessionId)) {
+    return laneAControls(laneA ?? startingRemoteState(appSessionId), null, { appSessionId, client, remote: { machine: remoteMachineName(appSessionId), capabilities: remoteMachineCapabilities(appSessionId) } });
+  }
   if (heldElsewhere(record)) return laneA?.bridge === 'live' ? laneAControls(laneA, record, { appSessionId, client }) : null;
   if (isRemoteLaneB(appSessionId)) return laneBControls(record, { ...inputs, remote: { state: remoteLaneBStateOf(appSessionId) } }); // P5 O7 M2
   return laneBControls(record, inputs);
@@ -54,6 +56,7 @@ export function useSessionControls(appSessionId: AppSessionId, options: { client
   const laneA = useLaneAState(appSessionId);
   useLaneACatalog(appSessionId); // read through the port; subscribed here so its arrival renders again
   useRemoteLaneA(appSessionId); // M9: a listed row of another machine's lane A takes the port; subscribed so its listing renders again
+  useRemoteMachineCapabilities(appSessionId); // 2026-11-06: its endpoint's capabilities lift a gap (`subagent-rows`)
   useIsRemoteLaneB(appSessionId); // P5 O7 M2: another machine's lane B session takes main's overlay; subscribed so its state renders again
   useRemoteLaneBState(appSessionId);
   return controlsFor(record, laneA, { appSessionId, client: options.client ?? ipc, ...(options.frame && { frame: options.frame }) });

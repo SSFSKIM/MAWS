@@ -2521,6 +2521,74 @@ describe('M4a: close()', () => {
   });
 });
 
+// M7a: the project channels composed over the session (Interfaces §N): a channel opened through the service reads the
+// hub's Project socket with the session's hub headers, verifies each event against the held head, and its cache under
+// org/channel/ is written through the commit queue, last at close(), which resolves only once that write landed.
+describe('M7a: the project channels', () => {
+  const PROJECT = '1f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
+  type Sent = Array<Record<string, unknown>>;
+  function channelSockets() {
+    const sockets: Array<{ url: string; headers: Record<string, string>; sent: Sent; closed: boolean; deliver(frame: unknown): void }> = [];
+    const socket = (url: string, headers: Record<string, string>) => {
+      const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+      const made = {
+        url,
+        headers,
+        sent: [] as Sent,
+        closed: false,
+        deliver: (frame: unknown) => listeners.get('message')?.forEach((l) => l(JSON.stringify(frame))),
+        on: (event: string, listener: (...args: unknown[]) => void) => void listeners.set(event, [...(listeners.get(event) ?? []), listener]),
+        send: (text: string) => void made.sent.push(JSON.parse(text) as Record<string, unknown>),
+        close: () => void (made.closed = true),
+      };
+      sockets.push(made);
+      return made as never;
+    };
+    return { sockets, socket };
+  }
+
+  it("opens a project's channel on the session's hub, draws a member's words verified, and close() joins its cache write", async () => {
+    const { sockets, socket } = channelSockets();
+    const { session } = await signedIn({ channelSocket: socket, timing: { CHANNEL_WRITE_MS: 3_600_000 } });
+    expect(await session.channelOpen(PROJECT)).toEqual({ ok: true, rev: expect.any(Number), events: [], sessions: [], pending: [], unverified: 0, asOf: null, live: false });
+    await until(() => sockets.length === 1, 'a channel socket');
+    expect(sockets[0].url).toBe(`wss://hub.example.test/api/projects/${PROJECT}/socket`);
+    expect(Object.keys(sockets[0].headers)).toContain('cf-access-token');
+    sockets[0].deliver({ t: 'welcome' });
+    expect(sockets[0].sent).toEqual([{ t: 'resume', after: 0 }]);
+    const draft = { kind: 'human', from: 'human', member: A, to: '*', text: 'from my other Mac', created: iso(Date.now()), nonce: base64urlEncode(crypto.getRandomValues(new Uint8Array(16))) };
+    const { signEvent } = await import('../../../apps/org-protocol/src/index.ts');
+    const words = { ts: iso(Date.now()), writer: `hub/${A}`, seq: 1, ...(await signEvent({ org: ORG, project: PROJECT }, draft, a1.channel.privateKey, a1.channel.pub)) };
+    const changes: unknown[] = [];
+    session.onChannel((changed) => changes.push(changed));
+    sockets[0].deliver({ t: 'log', events: [{ offset: 1, event: words }] });
+    sockets[0].deliver({ t: 'caught-up', offset: 1 });
+    await until(() => changes.length > 0 && (changes.at(-1) as { live?: boolean }).live === true, 'the channel live');
+    expect(changes.at(-1)).toMatchObject({ project: PROJECT, ok: true, live: true });
+    // told as deltas after the open's answer: the one event, once
+    expect(changes.flatMap((c) => (c as { upserts?: unknown[] }).upserts ?? [])).toMatchObject([{ offset: 1, label: 'verified', author: { id: A, email: OWNER } }]);
+    expect(await session.channelSend(PROJECT, 'hello')).toMatchObject({ ok: true });
+    expect(sockets[0].sent.at(-1)).toMatchObject({ t: 'human', event: { member: A, text: 'hello' } });
+    await session.close();
+    expect(sockets[0].closed).toBe(true);
+    const file = JSON.parse(await readFile(join(orgDir(), 'channel', `${PROJECT}.json`), 'utf8')) as { after: number; events: Array<{ offset: number }> };
+    expect(file.after).toBe(1);
+    expect(file.events.map((e) => e.offset)).toEqual([1]);
+    expect((await stat(join(orgDir(), 'channel'))).mode & 0o777).toBe(0o700);
+  });
+
+  it('answers signed-out, and opens no socket, for a profile that never signed in', async () => {
+    const { sockets, socket } = channelSockets();
+    const { session } = make({ channelSocket: socket });
+    await session.loaded;
+    expect(await session.channelOpen(PROJECT)).toEqual({ ok: false, reason: 'signed-out', rev: expect.any(Number) });
+    expect(await session.channelSend(PROJECT, 'hi')).toEqual({ ok: false, reason: 'signed-out' });
+    expect(sockets).toEqual([]);
+    await session.close();
+    await expect(stat(orgDir())).rejects.toThrow();
+  });
+});
+
 describe('M4a: a sign-out after a post the hub took (Task 5, Decision 4)', () => {
   it('reads not-root, adopts nothing late, keeps the slot\'s bytes, and the next sign-in settles it with no new confirmation', async () => {
     const read = heldStateRead();

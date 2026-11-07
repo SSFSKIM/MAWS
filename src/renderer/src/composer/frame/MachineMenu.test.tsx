@@ -1,6 +1,7 @@
 // "+ Session"'s machine menu (P5 O7 M4, "The machine menu", A5): beside the project chip of a New chat tab, this Mac by
-// default, offering each up RL2 machine whose projects hold a checkout of the same org project; another machine chosen,
-// one line under the row names where the session runs and on whose inference route. No RL2 machine up, no menu.
+// default, offering each up RL2 machine (2026-11-06: with or without a project, the local project's checkout there taken
+// when it holds one); another machine chosen, one line under the row names where the session runs and on whose inference
+// route. No RL2 machine up, no menu.
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -63,59 +64,58 @@ describe('the machine menu', () => {
     expect(screen.queryByText(/^Lane B on /)).toBeNull();
   });
 
-  it('says when no other machine can start the project', async () => {
-    // P5 O7 M9: a machine without its checkout is offered to set it up (below); one whose projects can't be read is not
-    vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: false, error: { code: 'host_unavailable', message: 'unreachable' } } as never);
-    view();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Machine This Mac' }));
-    await waitFor(() => expect(screen.getByText(MACHINE_WORDS.none)).toBeTruthy());
+  // 2026-11-06 (the owner's ruling: the machine first): the chip opens with no project, and every up RL2 machine is a
+  // choice of its own; chosen, its place there is the project chip's to choose
+  it('opens with no project chosen and offers every up RL2 machine, reading nothing of them, its place there not chosen yet', async () => {
+    const invoke = vi.spyOn(ipc, 'invoke');
+    useMachines.getState().applyRoster([{ ...up(TEST_MACHINE, 'This Mac'), local: true, carrier: undefined }, up(OTHER_MACHINE, 'mini'), up(THIRD, 'vm')]);
+    view(null);
+    const user = userEvent.setup();
+    const chip = screen.getByRole<HTMLButtonElement>('button', { name: 'Machine This Mac' });
+    expect(chip.disabled).toBe(false);
+    await user.click(chip);
+    const menu = screen.getByRole('dialog', { name: 'Choose a machine' });
+    await waitFor(() => expect(within(menu).getAllByRole('menuitemradio').map((item) => item.firstChild?.textContent)).toEqual(['This Mac', 'mini', 'vm']));
+    expect(within(menu).queryByText(MACHINE_WORDS.looking)).toBeNull();
+    expect(invoke).not.toHaveBeenCalled();
+    await user.click(within(menu).getByRole('menuitemradio', { name: 'vm' }));
+    expect(spawnTargetOf(TAB, null)).toEqual({ machine: THIRD, name: 'vm', checkout: null, key: null });
+    expect(spawnTargetOf(TAB, KEY), 'a place chosen on the machine stands whatever the local project').toEqual({ machine: THIRD, name: 'vm', checkout: null, key: null });
+    expect(screen.getByText('Lane B on vm · vm’s inference route')).toBeTruthy();
   });
 
-  // P5 O7 M9 ("Remote setup"): a machine without a checkout of the project is offered to set it up there, to its owners;
-  // anyone else sees why not, never a dead control
-  it('offers a machine with no checkout to set the project up there, and names why a machine it can’t set up isn’t offered', async () => {
-    useMachines.getState().applyRoster([{ ...up(TEST_MACHINE, 'This Mac'), local: true, carrier: undefined }, up(OTHER_MACHINE, 'mini'), up(THIRD, 'vm')]);
-    const page = { entries: [{ name: 'Developer', path: '/Users/mini/Developer', protected: false }], cursor: null };
-    vi.spyOn(ipc, 'invoke').mockImplementation((async (name: string, _input: unknown, opts?: { machine?: string }) => {
-      if (name === 'session.projects.list') return { ok: true, value: { projects: [theirs({ org: undefined })], revision: 1 } }; // no checkout of this project
-      if (name === 'machine.folders.list' && opts?.machine === OTHER_MACHINE) return { ok: true, value: page };
-      if (name === 'machine.folders.list') return { ok: false, error: { code: 'internal', message: 'refused owners-only', issues: { refusal: 'owners-only' } } };
-      return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
-    }) as never);
+  it('falls back to no place on a machine with no checkout of the local project, and greys one where the member can’t start sessions, with why', async () => {
+    useMachines.getState().applyRoster([{ ...up(TEST_MACHINE, 'This Mac'), local: true, carrier: undefined }, up(OTHER_MACHINE, 'mini'), up(THIRD, 'vm', { rights: ['shell'] })]);
+    vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { projects: [theirs({ org: undefined })], revision: 1 } } as never); // no checkout of this project
     view();
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Machine This Mac' }));
     const menu = screen.getByRole('dialog', { name: 'Choose a machine' });
-    await waitFor(() => expect(within(menu).getByRole('menuitem', { name: /^mini/ })).toBeTruthy());
-    expect(within(menu).getByRole('menuitem', { name: /^mini/ }).textContent).toBe(`mini${SETUP_WORDS.setUp}`);
+    await waitFor(() => expect(within(menu).getByRole('menuitem', { name: /^vm/ })).toBeTruthy());
     const closed = within(menu).getByRole('menuitem', { name: /^vm/ }) as HTMLButtonElement;
     expect(closed.disabled).toBe(true);
-    expect(closed.textContent).toBe(`vm${SETUP_WORDS.notOwner('vm')}`); // the reason shown, not only a tooltip
-    await user.click(within(menu).getByRole('menuitem', { name: /^mini/ }));
-    expect(useDialogs.getState().open).toEqual({
-      kind: 'remoteSetup',
-      request: { kind: 'folder', tab: TAB, machine: OTHER_MACHINE, name: 'mini', key: KEY, home: '/Users/mini', first: page, suggestions: [] },
-    });
-    expect(spawnTargetOf(TAB, KEY)).toBeNull(); // chosen only once it is set up
-    useDialogs.setState({ open: null });
+    expect(closed.textContent).toBe(`vm${SETUP_WORDS.noSpawn('vm')}`); // the reason shown, not only a tooltip
+    await user.click(within(menu).getByRole('menuitemradio', { name: 'mini' }));
+    expect(spawnTargetOf(TAB, KEY)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: null, key: null });
+    expect(useDialogs.getState().open).toBeNull(); // no sheet: the project chip offers mini's places
   });
 
-  it('keeps the trust a setup accepted when the same machine and checkout is chosen again', async () => {
+  it('keeps the place and the trust a setup accepted when the same machine is chosen again', async () => {
     vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { projects: [theirs()], revision: 1 } } as never);
-    useRemoteSpawn.getState().choose(TAB, { machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY, trust: 'accepted' });
+    useRemoteSpawn.getState().choose(TAB, { machine: OTHER_MACHINE, name: 'mini', checkout: '/Users/mini/notes', key: null, label: 'notes', trust: 'accepted' });
     view();
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Machine mini' }));
     const menu = screen.getByRole('dialog', { name: 'Choose a machine' });
     await user.click(await within(menu).findByRole('menuitemradio', { name: 'mini' }));
-    expect(spawnTargetOf(TAB, KEY)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: '/srv/app', key: KEY, trust: 'accepted' });
+    expect(spawnTargetOf(TAB, KEY)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: '/Users/mini/notes', key: null, label: 'notes', trust: 'accepted' });
   });
 
-  it('is closed until a project is chosen, and absent with no RL2 machine up', () => {
-    const { unmount } = view(null);
+  it('is closed while the row is, and absent with no RL2 machine up', () => {
+    const { unmount } = render(<MachineMenu appSessionId={TAB} projectKey={null} disabled="Starting…" />);
     const chip = screen.getByRole<HTMLButtonElement>('button', { name: 'Machine This Mac' });
     expect(chip.disabled).toBe(true);
-    expect(chip.title).toBe(MACHINE_WORDS.noProject);
+    expect(chip.title).toBe('Starting…');
     unmount();
     useMachines.getState().applyRoster([{ ...up(TEST_MACHINE, 'This Mac'), local: true, carrier: undefined }, up(OTHER_MACHINE, 'profile-b', { carrier: 'socket' })]);
     view();

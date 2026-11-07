@@ -1,7 +1,8 @@
 // The hub's HTTP routes as the app uses them (P5 O8 M1, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md,
 // Orientation's "The hub, for an app"): `GET /api/me`, `GET /api/org/state` (from a version, every page), and
 // `POST /api/devices/pending`, M3's `POST /api/org/state` (a signed successor), and M4a's `GET /api/devices/pending`
-// (`?member=`, H1: an admin's read of another member's entries). None of its answers is trusted (RL §5.9): the session
+// (`?member=`, H1: an admin's read of another member's entries), and M7a's `GET /api/projects/<id>/attestations` (a
+// project's history attestations, for the channel's migrated history). None of its answers is trusted (RL §5.9): the session
 // verifies every state against what it holds, the pairing judges every entry, and this module only reads and classifies.
 //
 // Who answered matters. Every answer of the Worker carries `X-Desk-Build` (but a `101` or an event stream); a 401, 403 or
@@ -14,10 +15,12 @@
 import {
   isCertificates,
   isCertRetirement,
+  isHistoryAttestation,
   isMachineCert,
   isMemberEmail,
   isSigned,
   type Certificates,
+  type HistoryAttestation,
   type PendingEntry as PendingDevice,
   type RootTransition,
   type Signed,
@@ -70,6 +73,12 @@ export interface HubClient {
   pendingOf(member: string | null, signal?: AbortSignal): Promise<HubResult<PendingDevice[]>>;
 }
 
+/** M7a's read beside the session's: the project channel's, which the signer's and the pairing's clients don't carry. */
+export interface ProjectReads {
+  /** The project's history attestations as the member reads them; an item that is no signed record is dropped. */
+  attestations(project: string, signal?: AbortSignal): Promise<HubResult<Signed<HistoryAttestation>[]>>;
+}
+
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 /** A Worker's error code (`not-a-member`, `too-many`): anything else is reported as `unrecognized`. */
 const ERROR_CODE = /^[a-z][a-z0-9-]{0,39}$/;
@@ -112,7 +121,7 @@ export function hubClient(input: {
   headers(): Promise<Record<string, string>>;
   fetch?: typeof fetch;
   timing?: Partial<OrgTiming>;
-}): HubClient {
+}): HubClient & ProjectReads {
   const base = input.url.replace(/\/+$/, '');
   const doFetch = input.fetch ?? fetch;
   const timing = orgTiming(input.timing);
@@ -203,6 +212,10 @@ export function hubClient(input: {
     pendingOf: (member, signal) =>
       request(member === null ? PENDING_DEVICES_PATH : `${PENDING_DEVICES_PATH}?member=${encodeURIComponent(member)}`, { signal }, (body) =>
         isObject(body) && Array.isArray(body.pending) ? body.pending.map(readPendingDevice).filter((entry) => entry !== null) : null,
+      ),
+    attestations: (project, signal) =>
+      request(`/api/projects/${encodeURIComponent(project)}/attestations`, { signal }, (body) =>
+        isObject(body) && Array.isArray(body.records) ? body.records.filter((r): r is Signed<HistoryAttestation> => isSigned(r, isHistoryAttestation)) : null,
       ),
   };
 }

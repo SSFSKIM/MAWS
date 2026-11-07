@@ -19,6 +19,7 @@ import { resetLaneAWatches, watchLaneA } from '../../lane-a/watches'; // P5 O9
 import { applyLaneAState, resetLaneAStore } from '../../stores/lane-a'; // P5 O9
 import { resetQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
+import { useMachines } from '../../stores/machines'; // 2026-11-06
 import { applyTaskEvents, emptyGraph } from '../../tools/agents/model/task-graph';
 import { useTaskGraph } from '../../tools/agents/store';
 import { DEFAULT_ACTIONS, registerRequestRenderer, registerTranscriptActions, TranscriptSlot, useTranscriptStore } from '../index';
@@ -44,7 +45,7 @@ afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offs
 // React's renders and effects): `settle` drains it inside act by yielding the event loop once, and the expectation is
 // read once, so load can slow a case but not fail it.
 beforeAll(async () => {
-  await Promise.all([import('./TranscriptSlot'), import('./Transcript'), import('./markdown/Markdown'), import('../../lane-a/view/RemoteTranscriptSlot') /* P5 O9 M9 */]);
+  await Promise.all([import('./TranscriptSlot'), import('./Transcript'), import('./markdown/Markdown'), import('../../lane-a/view/RemoteTranscriptSlot') /* P5 O9 M9 */, import('../../lane-a/view/RemoteAgentTranscript') /* 2026-11-06 */]);
 });
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
@@ -551,9 +552,121 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
-  it('says a subagent’s own transcript there isn’t shown yet', () => {
+  // 2026-11-06 (the remote drill-in): a subagent's own transcript there is drawn from its machine's plane, a watch naming
+  // the agent, where its endpoint lists `rl2.agent-scope`; where it lists its capabilities without it, the gap says so
+  const roster = (capabilities: string[]) => useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-11-06T00:00:00Z', generation: 1, carrier: 'relay', capabilities }]);
+  it('says a subagent’s own transcript there isn’t carried by an endpoint that can’t, naming the machine to update', () => {
     listed();
+    roster(['rl2.feeds']);
+    onTestFinished(() => useMachines.getState().applyRoster([]));
     render(<TranscriptSlot appSessionId={REMOTE} agentId={'a1' as AgentId} />);
-    expect(screen.getByRole('status').textContent).toBe('A subagent’s own transcript on another machine isn’t shown yet');
+    expect(screen.getByTestId('remote-subagent-gap').textContent).toBe('mini can’t send a subagent’s own transcript to this Mac yet; update MAWS on mini');
+  });
+
+  it('draws a subagent’s own transcript there through a watch naming the agent, where its endpoint carries it', async () => {
+    listed();
+    roster(['rl2.feeds', 'rl2.agent-scope']);
+    onTestFinished(() => useMachines.getState().applyRoster([]));
+    const listeners = new Map<string, (payload: unknown, machine: string) => void>();
+    const invoke = vi.fn((name: string) => Promise.resolve(name === 'laneA.watch' ? { ok: true, value: { watch: 'wa' } } : { ok: false, error: { code: 'internal', message: 'unexpected' } }));
+    const on = vi.fn((name: string, listener: (payload: unknown, machine: string) => void) => (listeners.set(name, listener), () => {}));
+    window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
+    render(<TranscriptSlot appSessionId={REMOTE} agentId={'a1' as AgentId} />);
+    for (let i = 0; i < 10 && invoke.mock.calls.length === 0; i++) await settle();
+    expect(invoke).toHaveBeenCalledWith('laneA.watch', { appSessionId: SESSION, agentId: 'a1' }, OTHER_MACHINE);
+    await settle();
+    expect(screen.getByTestId('subagent-rows-status').textContent).toBe('Reading this agent’s transcript from mini…');
+    const c = new Chain('c4a1f200', 'sminos');
+    c.prompt('Survey the checkout.');
+    c.answer('One file.');
+    const snapshot = { project: 'p', machine: OTHER_MACHINE, session: SESSION, kind: 'snapshot', sub: 'up-a', n: 0, body: { rows: [...c.rows].reverse(), more: false, subagents: [], presence: { record: { status: 'idle' }, bridge: true }, streaming: [] } };
+    act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'wa', messages: [snapshot] }, OTHER_MACHINE));
+    for (let i = 0; i < 10 && document.querySelector('[data-kind="assistant_text"]') === null; i++) await settle();
+    expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toContain('One file.');
+    expect(screen.queryByTestId('subagent-rows-status')).toBeNull();
+  });
+
+  // What the machine gives of an agent is what is drawn; where it gives nothing, words: its pause before anything came
+  // (the link down, or a subscription it ended, which main asks again), and a snapshot holding no rows.
+  it('says why a subagent’s own transcript there shows nothing: the machine’s pause, then a snapshot with no rows', async () => {
+    listed();
+    roster(['rl2.agent-scope']);
+    onTestFinished(() => useMachines.getState().applyRoster([]));
+    const listeners = new Map<string, (payload: unknown, machine: string) => void>();
+    const invoke = vi.fn((name: string) => Promise.resolve(name === 'laneA.watch' ? { ok: true, value: { watch: 'wa' } } : { ok: false, error: { code: 'internal', message: 'unexpected' } }));
+    const on = vi.fn((name: string, listener: (payload: unknown, machine: string) => void) => (listeners.set(name, listener), () => {}));
+    window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
+    render(<TranscriptSlot appSessionId={REMOTE} agentId={'a1' as AgentId} />);
+    for (let i = 0; i < 10 && invoke.mock.calls.length === 0; i++) await settle();
+    await settle();
+    const status = () => screen.getByTestId('subagent-rows-status').textContent;
+    act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'wa', paused: 'offline' }, OTHER_MACHINE));
+    expect(status()).toBe('mini isn’t reachable: this agent’s transcript shows once it is');
+    act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'wa', paused: 'unavailable' }, OTHER_MACHINE));
+    expect(status()).toBe('mini isn’t giving this agent’s transcript now; asking again');
+    const empty = { project: 'p', machine: OTHER_MACHINE, session: SESSION, kind: 'snapshot', sub: 'up-a', n: 0, body: { rows: [], more: false, subagents: [], presence: { record: { status: 'idle' }, bridge: true }, streaming: [] } };
+    act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'wa', messages: [empty] }, OTHER_MACHINE));
+    await settle();
+    expect(status()).toBe('mini holds no rows of this agent’s transcript yet');
+  });
+
+  // The desk track's note (their 578): sminos serves an agent it doesn't know as an empty stream, so where the agent's
+  // snapshot came holding nothing and the session's own transcript is live here with a tree that doesn't name it, the
+  // drill-in says what is loaded rather than wait on it. It claims no more: a main transcript reconnecting keeps a stale
+  // tree, and an agent whose own snapshot hasn't come is still being read.
+  describe('a subagent the session’s tree here doesn’t name', () => {
+    const snapshot = (subagents: unknown[]) => ({ project: 'p', machine: OTHER_MACHINE, session: SESSION, kind: 'snapshot', sub: 'up', n: 0, body: { rows: [], more: false, subagents, presence: { record: { status: 'idle' }, bridge: true }, streaming: [] } });
+    const meta = { agentId: 'a1', meta: { agentType: 'Explore', description: 'Find the config files' }, status: 'running', evidence: 'bridge' };
+    // The session's own pane and the drill-ins of a1 (in the tree) and a9 (not), each watch's plane messages sent to all.
+    const scene = async () => {
+      listed();
+      roster(['rl2.agent-scope']);
+      onTestFinished(() => useMachines.getState().applyRoster([]));
+      const planes: Array<(payload: unknown, machine: string) => void> = []; // every watch's: the page's three
+      const invoke = vi.fn((name: string, input: { agentId?: string }) => Promise.resolve(name === 'laneA.watch' ? { ok: true, value: { watch: input.agentId === undefined ? 'w1' : `w-${input.agentId}` } } : { ok: false, error: { code: 'internal', message: 'unexpected' } }));
+      const on = vi.fn((name: string, listener: (payload: unknown, machine: string) => void) => (name === 'laneA.plane' && planes.push(listener), () => {}));
+      window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
+      render(
+        <>
+          <TranscriptSlot appSessionId={REMOTE} />
+          <TranscriptSlot appSessionId={REMOTE} agentId={'a1' as AgentId} />
+          <TranscriptSlot appSessionId={REMOTE} agentId={'a9' as AgentId} />
+        </>,
+      );
+      for (let i = 0; i < 10 && invoke.mock.calls.filter(([name]) => name === 'laneA.watch').length < 3; i++) await settle();
+      await settle();
+      const plane = (payload: Record<string, unknown>) => act(() => planes.forEach((listener) => listener({ appSessionId: SESSION, ...payload }, OTHER_MACHINE)));
+      const statuses = () => screen.getAllByTestId('subagent-rows-status').map((p) => p.textContent);
+      return { plane, statuses };
+    };
+
+    it('says what is loaded where the agent’s snapshot came empty and the live tree here doesn’t name it', async () => {
+      const { plane, statuses } = await scene();
+      plane({ watch: 'w1', messages: [snapshot([meta])] });
+      for (const agent of ['a1', 'a9']) plane({ watch: `w-${agent}`, messages: [snapshot([])] });
+      await settle();
+      await settle();
+      expect(statuses()).toEqual(['mini holds no rows of this agent’s transcript yet', 'mini holds no rows of this agent’s transcript, and the session’s tree here doesn’t name it']);
+    });
+
+    it('claims no absence while the session’s own transcript reconnects: its tree is stale until the fresh snapshot', async () => {
+      const { plane, statuses } = await scene();
+      plane({ watch: 'w1', messages: [snapshot([meta])] });
+      for (const agent of ['a1', 'a9']) plane({ watch: `w-${agent}`, messages: [snapshot([])] });
+      await settle();
+      plane({ watch: 'w1', reset: true });
+      await settle();
+      await settle();
+      expect(statuses()).toEqual(['mini holds no rows of this agent’s transcript yet', 'mini holds no rows of this agent’s transcript yet']);
+    });
+
+    it('reads an agent whose own snapshot hasn’t come as still being read, though the tree here doesn’t name it', async () => {
+      const { plane, statuses } = await scene();
+      plane({ watch: 'w1', messages: [snapshot([meta])] });
+      plane({ watch: 'w-a1', messages: [snapshot([])] });
+      await settle();
+      await settle();
+      expect(statuses()).toEqual(['mini holds no rows of this agent’s transcript yet', 'Reading this agent’s transcript from mini…']);
+    });
   });
 });

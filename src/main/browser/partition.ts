@@ -108,6 +108,11 @@ export class Partitions {
     return ses;
   }
 
+  // Every partition session opened so far, for the quit's flush (lifecycle/flush-sessions.ts).
+  sessions(): Session[] {
+    return [...this.opened.values()];
+  }
+
   // The partition opened, else the default (logged): the caller tells the chrome.
   openOrDefault(partition: string): { partition: string; fellBack: boolean } {
     try {

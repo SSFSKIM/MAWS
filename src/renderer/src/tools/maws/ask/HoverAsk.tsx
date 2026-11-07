@@ -1,8 +1,11 @@
 // The hover card answers the same ask as the sheet: shared controls, drafts and submit guard, never a composer follow-up.
+// P5 O8 M7a: the project channel's waiting cards answer it here too (`RequestCard`'s `askInPlace`), another machine's
+// asks among them, so Submit is greyed as the sheet's is when that machine doesn't offer the answer.
 import { useEffect } from 'react';
 import { useStore } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../../../ipc/client';
+import { useRemoteUnavailable } from '../../../lane-b/remote-unavailable';
 import { CardButton } from '../../../request-card/controls';
 import { selectProjectOrder, useSessions } from '../../../stores/sessions';
 import { TranscriptActionsProvider } from '../../../transcript/view/context';
@@ -17,6 +20,7 @@ export function HoverAsk({ appSessionId, askId }: { appSessionId: AppSessionId; 
   const projects = useSessions(selectProjectOrder);
   const record = useSessions((s) => s.records.get(appSessionId));
   useEffect(() => ensureLoaded(appSessionId, ipc), [appSessionId]);
+  const unavailable = useRemoteUnavailable(appSessionId, 'maws.ask.answer');
   const ask = state.asks.get(askId);
   if (!ask) {
     if (state.readError !== null) return <div role="alert" className="flex items-center gap-2 text-danger">
@@ -29,7 +33,7 @@ export function HoverAsk({ appSessionId, askId }: { appSessionId: AppSessionId; 
 
   const drafts = state.drafts.get(askId);
   const busy = state.submitting !== null;
-  const ready = canSubmit(ask.questions, drafts);
+  const ready = canSubmit(ask.questions, drafts) && unavailable === null;
   const failed = state.failed?.askId === askId ? state.failed : null;
   const submit = () => void submitAsk(appSessionId, askId, ipc, projects);
   const skipped = ask.questions.filter((question) => drafts?.get(question.id ?? '')?.skip).length;
@@ -50,7 +54,7 @@ export function HoverAsk({ appSessionId, askId }: { appSessionId: AppSessionId; 
         <CardButton disabled={busy || !ready} onClick={submit}>{SHEET.retry}</CardButton>
       </div>}
       <div className="flex justify-end">
-        <CardButton tone="primary" disabled={busy || !ready} title={ready ? undefined : SHEET.incomplete} onClick={submit}>
+        <CardButton tone="primary" disabled={busy || !ready} title={ready ? undefined : (unavailable ?? SHEET.incomplete)} onClick={submit}>
           {state.submitting === askId ? SHEET.submitting : skipped > 0 ? SHEET.submitSkipping(skipped) : SHEET.submit}
         </CardButton>
       </div>

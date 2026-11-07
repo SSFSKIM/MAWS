@@ -364,10 +364,12 @@ export class ConnectorScene {
     await run.exited;
     this.note('app killed');
   }
-  // The ordinary quit: an idle app stops every engine and its supervisor's sessions with it.
+  // The ordinary quit: an idle app stops every engine and its supervisor's sessions with it. Playwright's close quits
+  // and then detaches its inspector, so main's end never waits on it (supervisor-scratch.ts's quit says why).
   async quit(run: Run): Promise<void> {
-    await run.maws.app.evaluate(({ app }) => app.quit());
+    const closing = run.maws.app.close().catch(() => {});
     await Promise.race([run.exited, new Promise<never>((_, reject) => setTimeout(() => reject(new Error('MAWS did not quit')), 30_000))]);
+    await closing;
     this.note('app quit');
   }
 

@@ -48,6 +48,7 @@ export interface ConnectorReport {
   hellos?: number;
   closes?: number;
   connected?: boolean;
+  greeted?: boolean; // MAWS's hello heard on the current connection: before it, every request answers `not connected`
   leases?: number;
   control?: string;
   events?: Record<string, number>; // cua's debugger.event notifications by CDP method

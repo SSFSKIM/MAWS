@@ -96,6 +96,17 @@
     "src/renderer/src/ipc/client.ts",
     "src/renderer/src/ipc/machine.ts",
     "src/renderer/src/artifacts/machines.ts", // P5 O7 M5a: the renderer's client asks it which machine an artifact is on
+    // P5 O8 M7a: test/org/channel.local.test.ts folds main's channel answers through the Channel tab's pure projection
+    // (channel/state.ts, channel/project.ts), and the graph those import
+    "src/renderer/src/channel/copy.ts",
+    "src/renderer/src/channel/project.ts",
+    "src/renderer/src/channel/state.ts",
+    "src/renderer/src/stores/org-projects.ts",
+    "src/renderer/src/stores/sessions.ts",
+    "src/renderer/src/attention/derive.ts",
+    "src/renderer/src/attention/glyph.ts",
+    "src/renderer/src/overview/derive.ts",
+    "src/renderer/src/sessions/title.ts",
     // E11 start: test/support/processes.test.ts runs the supervisor specs' process cleanup under vitest,
     // test/support/scratch-env.test.ts the e2e launches' environments, and test/support/p1-live.test.ts the live
     // sittings' pure parts and the OOPIF page (Task 6.1)

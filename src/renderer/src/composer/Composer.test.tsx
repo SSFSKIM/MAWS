@@ -26,6 +26,7 @@ import { resetRemoteDrafts } from './editor/drafts'; // P5 O7 M2
 import { resetRemoteUploads } from './editor/remote-uploads'; // P5 O7 M4
 import { rememberRemoteDraft } from './editor/drafts'; // P5 O7 M4
 import { queueFirstSend, resetRemoteSpawn, restoreHeldAttempts, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
+import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
 import { useDialogs } from '../sessions/dialogs'; // P5 O7 M9
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
@@ -901,6 +902,27 @@ describe('a New chat tab started on another machine', () => {
     expect(invoked('session.spawn').at(-1)).toEqual({ checkout: '/srv/app', permission_mode: 'acceptEdits', brief: 'build it', trust: 'accepted' });
     await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'unknown-checkout' })); // settled, so nothing is left starting
     await waitFor(() => expect(within(composerOf(0)).queryByRole('status', { name: 'Starting' })).toBeNull());
+  });
+
+  // 2026-11-06 (the machine first): a New chat tab with no project here starts on another machine once a place there is
+  // chosen (its home here), and its Send waits while none is
+  it('starts on the machine with no local project once a place there is chosen, and waits while none is', async () => {
+    const none = { ...chosen, projectId: null, label: null, path: null };
+    const stub = stubIntent({ permissionMode: 'default', location: null }, {}, none);
+    useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: null, key: null });
+    mount([{ index: 0, id: A }]);
+    await type('look around');
+    await key(editorOf(), { key: 'Enter' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(invoked('session.spawn')).toEqual([]);
+    expect(editorOf().editor.getText()).toBe('look around');
+    act(() => useRemoteSpawn.getState().choose(A, { machine: OTHER_MACHINE, name: 'mini', checkout: HOME_CHECKOUT, key: null, label: 'No project' }));
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(fake.pending('session.spawn')).toBe(1));
+    expect(invoked('session.spawn')).toEqual([{ checkout: HOME_CHECKOUT, permission_mode: 'default', brief: 'look around' }]);
+    expect(stub.start).not.toHaveBeenCalled();
+    await act(() => fake.reply('session.spawn', { status: 'refused', reason: 'unknown-checkout' }));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toContain(SPAWN_WORDS.noHome('mini')));
   });
 
   it('after a timeout offers Check again, which asks after the same start rather than starting another', async () => {

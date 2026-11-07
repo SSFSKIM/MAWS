@@ -7,21 +7,22 @@
 // P5 O7 M9 ("Remote setup"): a machine with no checkout of the project is offered too, to set it up there (the sheet,
 // RemoteSetupSheet.tsx, chooses the machine once the folder is registered); one whose owners alone could, or that predates
 // the setup, is listed greyed with why (sessions/remote-setup.ts).
+// 2026-11-06 (the owner's ruling: the machine first, the place following it): the menu opens with or without a project
+// and lists every up RL2 machine, one where the member can't start sessions greyed with why. A machine chosen with a
+// local project takes that project's checkout there when it holds one; otherwise its place is the project chip's to
+// choose (ProjectRow.tsx), there: its projects, a new project ("New project", RemoteSetupSheet.tsx) or its home.
 import { Popover } from 'radix-ui';
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { openDialog } from '../../sessions/dialogs';
 import { useRemoteSpawn, useSpawnTarget, type SpawnTarget } from '../../sessions/remote-spawn';
-import { readMachines, SETUP_WORDS, suggestionsFor, type MachineChoice } from '../../sessions/remote-setup';
+import { readMachines, type MachineChoice } from '../../sessions/remote-setup';
 import { useMachines } from '../../stores/machines';
 import { CHIP, NOTE, POPOVER } from './chip-style';
 
 export const MACHINE_WORDS = {
   local: 'This Mac',
   title: 'Where this chat runs',
-  noProject: 'Choose a project to start it on another machine',
   looking: 'Looking for this project on other machines…',
-  none: 'No other machine can start this project', // P5 O7 M9: one without a checkout is offered to set it up
   line: (machine: string) => `Lane B on ${machine} · ${machine}’s inference route`,
 } as const;
 
@@ -41,11 +42,11 @@ function Item({ label, checked, onSelect }: { label: string; checked: boolean; o
   );
 }
 
-// P5 O7 M9: a machine to set the project up on (`onSelect`), or one that can't be, its reason in the item itself
-function SetupItem({ label, line, onSelect }: { label: string; line: string; onSelect: (() => void) | null }) {
+// A machine that can't be chosen, its reason in the item itself (P5 O7 M9's greyed rows)
+function ClosedItem({ label, line }: { label: string; line: string }) {
   return (
-    <button type="button" role="menuitem" disabled={onSelect === null} className={`${ITEM} h-auto flex-col items-start gap-0 py-1 disabled:hover:bg-transparent`} onClick={onSelect ?? undefined}>
-      <span className={`min-w-0 truncate ${onSelect === null ? 'text-fg-muted' : ''}`}>{label}</span>
+    <button type="button" role="menuitem" disabled className={`${ITEM} h-auto flex-col items-start gap-0 py-1 disabled:hover:bg-transparent`}>
+      <span className="min-w-0 truncate text-fg-muted">{label}</span>
       <span className="text-ui-sm whitespace-normal text-fg-muted">{line}</span>
     </button>
   );
@@ -55,38 +56,32 @@ export function MachineMenu({ appSessionId, projectKey, disabled }: { appSession
   const reaches = useReachesRl2();
   const chosen = useSpawnTarget(appSessionId, projectKey);
   const [open, setOpen] = useState(false);
-  const [candidates, setCandidates] = useState<{ choices: MachineChoice[]; known: string[] } | null>(null); // null while asked
+  const [choices, setChoices] = useState<MachineChoice[] | null>(null); // null while asked
   useEffect(() => {
-    if (!open || projectKey === null) return;
+    if (!open) return;
     let live = true;
-    void readMachines(projectKey).then((found) => live && setCandidates(found));
+    void readMachines(projectKey).then((found) => live && setChoices(found));
     return () => {
       live = false;
     };
   }, [open, projectKey]);
   if (!reaches) return null;
-  const closed = disabled ?? (projectKey === null ? MACHINE_WORDS.noProject : null);
   const choose = (target: SpawnTarget | null) => {
-    // P5 O7 M9: the machine already chosen on the same checkout keeps what its setup answered (an accepted trust card)
-    const kept = target !== null && chosen?.machine === target.machine && chosen.checkout === target.checkout ? chosen : target;
+    // the machine already chosen, chosen again, keeps its place there and what its setup answered (an accepted trust card)
+    const kept = target !== null && chosen?.machine === target.machine ? chosen : target;
     useRemoteSpawn.getState().choose(appSessionId, kept);
     setOpen(false);
-  };
-  const setUp = (choice: Extract<MachineChoice, { kind: 'setup' }>) => {
-    setOpen(false);
-    const { machine, name, key, home, first } = choice;
-    openDialog({ kind: 'remoteSetup', request: { kind: 'folder', tab: appSessionId, machine, name, key, home, first, suggestions: suggestionsFor(candidates?.known ?? [], home) } });
   };
   const label = chosen?.name ?? MACHINE_WORDS.local;
   return (
     <Popover.Root
       open={open}
       onOpenChange={(next) => {
-        if (next) setCandidates(null); // asked again at each opening
+        if (next) setChoices(null); // asked again at each opening
         setOpen(next);
       }}
     >
-      <Popover.Trigger aria-label={`Machine ${label}`} title={closed ?? MACHINE_WORDS.title} disabled={closed !== null} className={`${CHIP} ${chosen ? 'text-fg' : ''}`}>
+      <Popover.Trigger aria-label={`Machine ${label}`} title={disabled ?? MACHINE_WORDS.title} disabled={disabled !== null} className={`${CHIP} ${chosen ? 'text-fg' : ''}`}>
         <span className="truncate">{label}</span>
         <span aria-hidden className="shrink-0 text-fg-faint">⌄</span>
       </Popover.Trigger>
@@ -94,22 +89,15 @@ export function MachineMenu({ appSessionId, projectKey, disabled }: { appSession
         <Popover.Content aria-label="Choose a machine" side="top" align="start" sideOffset={6} collisionPadding={8} className={`${POPOVER} w-60`}>
           <div role="menu" aria-label="Machines" className="flex flex-col">
             <Item label={MACHINE_WORDS.local} checked={chosen === null} onSelect={() => choose(null)} />
-            {(candidates?.choices ?? []).map((choice) =>
+            {(choices ?? []).map((choice) =>
               choice.kind === 'ready' ? (
                 <Item key={choice.target.machine} label={choice.target.name} checked={chosen?.machine === choice.target.machine} onSelect={() => choose(choice.target)} />
-              ) : choice.kind === 'setup' ? (
-                chosen?.machine === choice.machine ? (
-                  <Item key={choice.machine} label={choice.name} checked onSelect={() => choose(chosen)} />
-                ) : (
-                  <SetupItem key={choice.machine} label={choice.name} line={SETUP_WORDS.setUp} onSelect={() => setUp(choice)} />
-                )
               ) : (
-                <SetupItem key={choice.machine} label={choice.name} line={choice.words} onSelect={null} />
+                <ClosedItem key={choice.machine} label={choice.name} line={choice.words} />
               ),
             )}
           </div>
-          {candidates === null && <p className={`${NOTE} m-0`}>{MACHINE_WORDS.looking}</p>}
-          {candidates !== null && candidates.choices.length === 0 && <p className={`${NOTE} m-0`}>{MACHINE_WORDS.none}</p>}
+          {choices === null && projectKey !== null && <p className={`${NOTE} m-0`}>{MACHINE_WORDS.looking}</p>}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

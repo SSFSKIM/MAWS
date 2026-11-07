@@ -63,9 +63,11 @@ describe('the link and the overlay', () => {
     for (const link of [up, { ...up, state: 'down' as const, carrier: null }, { ...up, state: 'connecting' as const, carrier: null, member: null }]) {
       const overlay = controlsOverlay(state({ status: null, stream: 'idle', launch: null }), link, 'mini');
       for (const key of ['send', 'interrupt', 'answer', 'decide', 'model', 'mode', 'queue', 'btw'] as const) expect(overlay[key], key).toEqual({ available: true });
-      for (const key of ['take-over', 'reopen', 'subagent-rows'] as const) expect(overlay[key], key).toEqual({ available: false, reason: REMOTE_GAPS[key] });
+      for (const key of ['take-over', 'reopen'] as const) expect(overlay[key], key).toEqual({ available: false, reason: REMOTE_GAPS[key] });
       // P5 O7 M4: files go up as uploads and the files panel follows the checkout, so media and the rewinds are open
       for (const key of ['media', 'rewind', 'rewind-files'] as const) expect(overlay[key], key).toEqual({ available: true });
+      // the remote drill-in (2026-11-06): a subagent's rows cross the link, so the drill-in shows them
+      expect(overlay['subagent-rows']).toEqual({ available: true });
     }
   });
 });

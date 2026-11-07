@@ -11,21 +11,32 @@
 // an untrusted one shows that machine's trust card, whose answer travels as the spawn's `trust: 'accepted'` (the machine
 // runs the attested bootstrap; MAWS never writes trust). Then the folder is registered, and its project's directory is
 // the spawn's checkout.
+//
+// 2026-11-06 (the owner's ruling: the machine first, the place following it). The machine menu lists every up RL2
+// machine, with or without a project chosen: one where the member may start sessions (their rights there, once its
+// `caps` said them) to choose, any other greyed with why. A local project chosen first takes that project's checkout
+// there when the machine holds one; otherwise the machine's places are the project chip's (`readPlaces`): its own
+// projects, "New project" there (this sheet, naming no org project: any folder, git or not, registered as a project of
+// its own), and "Don't work in a project" (its home, a machine owner's alone, where its endpoint lists `rl2.spawn-home`).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { IpcError } from '@shared/ipc/errors';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { MawsBridge, ProjectRecord } from '@shared/ipc/schema';
 import type { FolderEntry } from '@shared/ipc/schema/machine';
-import { machineOf } from '@shared/machine/address';
+import { SPAWN_HOME_CAPABILITY } from '@shared/ipc/schema/session';
 import type { MachineRef } from '@shared/machine/ref';
 import type { TrustState } from '@shared/sessions/trust';
 import { ipc } from '../ipc/client';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
-import type { SpawnTarget } from './remote-spawn';
+import { SPAWN_WORDS, type SpawnTarget } from './remote-spawn';
 
-/** What the sheet is opened for: the folder of a project not set up there yet, or the trust of a registered checkout the machine refused untrusted (`then`: the Send it answers, asked again). */
+/**
+ * What the sheet is opened for: a new project's folder on the machine (`key`, the org project of the tab's local project
+ * whose other checkouts' paths it suggests, or null), or the trust of a place the machine refused untrusted (`then`: the
+ * Send it answers, asked again).
+ */
 export type SetupRequest =
-  | { kind: 'folder'; tab: AppSessionId; machine: MachineRef; name: string; key: string; home: string | null; first: FolderPage; suggestions: string[] }
+  | { kind: 'folder'; tab: AppSessionId; machine: MachineRef; name: string; key: string | null; home: string | null; first: FolderPage; suggestions: string[] }
   | { kind: 'trust'; tab: AppSessionId; target: SpawnTarget; then?: () => void };
 
 export interface FolderPage {
@@ -33,17 +44,13 @@ export interface FolderPage {
   cursor: string | null;
 }
 
-/** A machine the menu names for an org project: start there, set the project up there, or not, and why. */
-export type MachineChoice =
-  | { kind: 'ready'; target: SpawnTarget }
-  | { kind: 'setup'; machine: MachineRef; name: string; key: string; home: string | null; first: FolderPage }
-  | { kind: 'closed'; machine: MachineRef; name: string; words: string };
+/** A machine the menu names: to start on (its place there, the local project's checkout when it holds one), or not, and why. */
+export type MachineChoice = { kind: 'ready'; target: SpawnTarget } | { kind: 'closed'; machine: MachineRef; name: string; words: string };
 
 export const SETUP_WORDS = {
-  setUp: 'Set up this project there…',
-  title: (machine: string) => `Set up this project on ${machine}`,
+  title: (machine: string) => `New project on ${machine}`,
   privacy: (machine: string) =>
-    `Choose the folder on ${machine} that holds this project. Private folders macOS protects (Documents, Desktop, Downloads and the like) stay closed unless you open one, and opening one may show a privacy prompt on ${machine}.`,
+    `Choose the folder on ${machine} for the project, a git repository or not. Private folders macOS protects (Documents, Desktop, Downloads and the like) stay closed unless you open one, and opening one may show a privacy prompt on ${machine}.`,
   suggestions: 'Where the project’s other checkouts are',
   home: 'Home',
   up: 'Up',
@@ -64,6 +71,10 @@ export const SETUP_WORDS = {
   close: 'Close',
   // refusals
   notOwner: (machine: string) => `Only ${machine}’s owners can set up a project there; ask one of them, or start it on another machine`,
+  homeNotOwner: (machine: string) => `Only ${machine}’s owners can start a chat outside a project there`, // 2026-11-06
+  noSpawn: (machine: string) => `You can’t start sessions on ${machine}; ask its owner for the right to`, // 2026-11-06: no `spawn` there
+  projectsUnread: (machine: string) => `Couldn’t read ${machine}’s projects; open the menu again`, // 2026-11-06
+  reading: (machine: string) => `Reading ${machine}’s projects…`, // 2026-11-06
   notOffered: (machine: string) => `${machine} can’t set up projects from this Mac yet; update MAWS on ${machine}`,
   noFolder: (machine: string) => `That folder isn’t on ${machine} any more; choose it again`,
   outsideHome: (machine: string) => `${machine} sets up only folders in its home folder`,
@@ -122,26 +133,56 @@ export function suggestionsFor(known: readonly string[], home: string | null): s
 const rl2Machines = () => [...useMachines.getState().machines.values()].filter((m) => !m.local && m.state === 'up' && (m.carrier === 'direct' || m.carrier === 'relay'));
 
 /**
- * The machines the menu offers for the org project `key`, in the roster's order, and the checkouts of it every machine
- * reports (this Mac's included), whose paths the setup suggests. A machine whose projects can't be read is left out.
+ * The machines the menu offers, in the roster's order: each to start on, with the checkout of the org project `key` (the
+ * tab's local project's) there when its projects hold one, else no place yet; or, where the member's rights there are
+ * known and hold no `spawn`, greyed with why. Unknown rights grey nothing: the machine decides at the Send.
  */
-export async function readMachines(key: string, client: MawsBridge = ipc): Promise<{ choices: MachineChoice[]; known: string[] }> {
-  const known = [...useSessions.getState().projects.values()].filter((p) => p.org?.key === key && p.discovered !== true && machineOf(p.id) === client.localMachine).map((p) => p.directory);
-  const read = await Promise.all(
-    rl2Machines().map(async (machine): Promise<MachineChoice | null> => {
+export async function readMachines(key: string | null, client: MawsBridge = ipc): Promise<MachineChoice[]> {
+  return Promise.all(
+    rl2Machines().map(async (machine): Promise<MachineChoice> => {
+      if (machine.rights !== undefined && !machine.rights.includes('spawn')) return { kind: 'closed', machine: machine.ref, name: machine.name, words: SETUP_WORDS.noSpawn(machine.name) };
+      const none: MachineChoice = { kind: 'ready', target: { machine: machine.ref, name: machine.name, checkout: null, key: null } };
+      if (key === null) return none;
       const projects = await client.invoke('session.projects.list', undefined, { machine: machine.ref }).catch(() => null);
-      if (projects === null || !projects.ok) return null;
-      const checkouts = projects.value.projects.filter((p) => p.org?.key === key && p.discovered !== true);
-      known.push(...checkouts.map((p) => p.directory));
-      if (checkouts.length > 0) return { kind: 'ready', target: { machine: machine.ref, name: machine.name, checkout: checkouts[0].directory, key } };
-      // no checkout: the home's first page, which only the machine's owners may read, says whether the setup is offered
-      const first = await listFolders(machine.ref, machine.name, { path: null }, client);
-      if (!first.ok) return { kind: 'closed', machine: machine.ref, name: machine.name, words: first.words };
-      const home = first.page.entries.length === 0 ? null : first.page.entries[0].path.slice(0, first.page.entries[0].path.lastIndexOf('/')) || null;
-      return { kind: 'setup', machine: machine.ref, name: machine.name, key, home, first: first.page };
+      const checkout = projects?.ok === true ? projects.value.projects.find((p) => p.org?.key === key && p.discovered !== true) : undefined;
+      return checkout === undefined ? none : { kind: 'ready', target: { machine: machine.ref, name: machine.name, checkout: checkout.directory, key } };
     }),
   );
-  return { choices: read.filter((choice): choice is MachineChoice => choice !== null), known: [...new Set(known)] };
+}
+
+/** The paths the checkouts of the org project `key` have on every machine the sessions store holds (this Mac's included), which a new project's folder there is suggested by. */
+export function knownCheckouts(key: string | null): string[] {
+  if (key === null) return [];
+  return [...new Set([...useSessions.getState().projects.values()].filter((p) => p.org?.key === key && p.discovered !== true).map((p) => p.directory))];
+}
+
+/** What the project chip's menu offers on another machine (`readPlaces`): `newProject` and `noProject` null when offered, else why not. */
+export interface Places {
+  projects: ProjectRecord[] | null; // the machine's own, as its `session.projects.list` answers (null: unread, `error` says why)
+  error: string | null;
+  newProject: string | null;
+  noProject: string | null;
+  home: string | null;
+  first: FolderPage | null;
+}
+
+/**
+ * The machine's places, read when the project chip's menu opens on it: its own projects (this app's sessions store holds
+ * none of a machine its org rows cover), and its home's first page, which only its owners may read, so it says whether
+ * "New project" and "Don't work in a project" are theirs; the latter also needs its endpoint to take a chat in its home
+ * (`rl2.spawn-home`, from MachineState's `capabilities`).
+ */
+export async function readPlaces(machine: MachineRef, name: string, client: MawsBridge = ipc): Promise<Places> {
+  const spawnsHome = useMachines.getState().machines.get(machine)?.capabilities?.includes(SPAWN_HOME_CAPABILITY) === true;
+  const [listed, first] = await Promise.all([client.invoke('session.projects.list', undefined, { machine }).catch(() => null), listFolders(machine, name, { path: null }, client)]);
+  const projects = listed?.ok === true ? listed.value.projects.filter((p) => p.hidden !== true) : null;
+  const error = projects === null ? SETUP_WORDS.projectsUnread(name) : null;
+  if (!first.ok) {
+    const noProject = !spawnsHome ? SPAWN_WORDS.noHome(name) : first.words === SETUP_WORDS.notOwner(name) ? SETUP_WORDS.homeNotOwner(name) : first.words;
+    return { projects, error, newProject: first.words, noProject, home: null, first: null };
+  }
+  const home = first.page.entries.length === 0 ? null : first.page.entries[0].path.slice(0, first.page.entries[0].path.lastIndexOf('/')) || null;
+  return { projects, error, newProject: null, noProject: spawnsHome ? null : SPAWN_WORDS.noHome(name), home, first: first.page };
 }
 
 /** One page of the folders at `path` on the machine (null: its home); `open` reads inside a private folder. */
@@ -162,8 +203,8 @@ export async function checkTrust(machine: MachineRef, name: string, directory: s
   return result.ok ? { ok: true, trust: result.value } : { ok: false, words: setupErrorWords(result.error, name) };
 }
 
-/** Registers the folder as a project there (the owners' act: main steps it up); its project's directory is the checkout. */
-export async function registerFolder(machine: MachineRef, name: string, directory: string, client: MawsBridge = ipc): Promise<{ ok: true; checkout: string } | { ok: false; words: string }> {
+/** Registers the folder as a project there (the owners' act: main steps it up); its project's directory is the checkout, its name the chip's. */
+export async function registerFolder(machine: MachineRef, name: string, directory: string, client: MawsBridge = ipc): Promise<{ ok: true; checkout: string; label: string } | { ok: false; words: string }> {
   const result = await client.invoke('session.projects.addFolder', { directory }, { machine });
-  return result.ok ? { ok: true, checkout: result.value.project.directory } : { ok: false, words: setupErrorWords(result.error, name) };
+  return result.ok ? { ok: true, checkout: result.value.project.directory, label: result.value.project.name } : { ok: false, words: setupErrorWords(result.error, name) };
 }

@@ -28,6 +28,7 @@ import { createPortal } from 'react-dom';
 import { useChromeTabs } from './chrome-tabs';
 import { ProjectsView } from '../projects/ProjectsView';
 import { CustomizeView } from '../customize/CustomizeView';
+import { ChannelView } from '../channel/ChannelView'; // P5 O8 M7a
 
 type PaneIndex = 0 | 1;
 const HIDDEN = { visibility: 'hidden', overflow: 'hidden' } as const;
@@ -175,6 +176,8 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
       return <ArtifactTab tab={tab} />;
     case 'browser': // E4a
       return <BrowserTab tab={tab} />;
+    case 'channel': // P5 O8 M7a: the project's channel, held while the tab's content is mounted
+      return <ChannelView project={tab.project} />;
   }
 }
 

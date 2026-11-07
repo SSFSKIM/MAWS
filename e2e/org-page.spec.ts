@@ -21,6 +21,7 @@ import type { OrgStatus, OrgView } from '../src/shared/ipc/schema/org';
 import { readOrMintMachineRef } from '../src/shared/machine/identity-file';
 import { memberNames } from '../src/shared/org/member-name';
 import { ORG, SECTIONS } from '../src/renderer/src/settings-tab/copy';
+import { actionsNotWhole, addClippedProbes, type ActionEntry } from './support/actions-whole';
 import { launchMaws, REPO_ROOT } from './support/launch';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now; a plain build's main lacks the seam.
@@ -145,43 +146,8 @@ function overflowing(root: Element): string[] {
     .map((el) => `${el.getAttribute('role') ?? el.tagName.toLowerCase()} "${(el.textContent ?? '').slice(0, 60)}" ${el.scrollWidth} > ${el.clientWidth}`);
 }
 
-// Every action under `root` that is not drawn whole: each is scrolled into view first (the settings body scrolls, which
-// is no fault), then its four edges must lie inside its row (the Setting row, else `root`), inside every ancestor that
-// clips (an overflow other than visible), and inside the window. Each offender as `"<text>" <box> outside <what> <box>`.
-function actionsNotWhole(root: Element): string[] {
-  type Box = { left: number; top: number; right: number; bottom: number };
-  const inside = (a: Box, b: Box) => a.left >= b.left - 0.5 && a.top >= b.top - 0.5 && a.right <= b.right + 0.5 && a.bottom <= b.bottom + 0.5;
-  const shown = (b: Box) => `${Math.round(b.left)},${Math.round(b.top)}..${Math.round(b.right)},${Math.round(b.bottom)}`;
-  return Array.from(root.querySelectorAll('button')).flatMap((button) => {
-    button.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
-    const box = button.getBoundingClientRect();
-    const name = `"${(button.textContent ?? '').trim()}" ${shown(box)}`;
-    if (box.width === 0 || box.height === 0 || getComputedStyle(button).visibility !== 'visible') return [`${name} not drawn`];
-    const bounds: Array<[string, Box]> = [
-      ['its row', (button.closest('[role="group"]') ?? root).getBoundingClientRect()],
-      ['the window', { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }],
-    ];
-    for (let el = button.parentElement; el !== null; el = el.parentElement) {
-      const style = getComputedStyle(el);
-      if (style.overflowX === 'visible' && style.overflowY === 'visible') continue;
-      const r = el.getBoundingClientRect();
-      const left = r.left + el.clientLeft;
-      const top = r.top + el.clientTop;
-      bounds.push([`clipping ${el.tagName.toLowerCase()}`, { left, top, right: left + el.clientWidth, bottom: top + el.clientHeight }]);
-    }
-    return bounds.filter(([, b]) => !inside(box, b)).map(([what, b]) => `${name} outside ${what} ${shown(b)}`);
-  });
-}
-
-// Two actions clipped on purpose, one across and one down, appended to `root` (each marked `data-probe`, removed after):
-// the check above must name both, or it proves nothing about the page.
-function addClippedProbes(root: Element): void {
-  root.insertAdjacentHTML(
-    'beforeend',
-    '<div data-probe role="group" style="overflow:hidden;width:40px"><button type="button" style="width:120px">wide probe</button></div>' +
-      '<div data-probe role="group" style="overflow:hidden;height:8px"><button type="button" style="height:24px">tall probe</button></div>',
-  );
-}
+/** An action lies inside its Setting row. */
+const ROW: ActionEntry = { selector: '[role="group"]', name: 'its row', probe: 'role="group"' };
 
 test.skip(!HARNESS_BUILT, "the seeded Org page needs a harness build's main (pnpm e2e:settings)");
 
@@ -228,10 +194,10 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
 
       expect(await section.evaluate(overflowing), 'nothing in the Org section is wider than its box').toEqual([]);
       expect(await section.getByRole('button').count(), 'the seeded page offers its actions').toBeGreaterThan(0);
-      expect(await section.evaluate(actionsNotWhole), 'every action is drawn whole inside its row').toEqual([]);
+      expect(await section.evaluate(actionsNotWhole, ROW), 'every action is drawn whole inside its row').toEqual([]);
       // ...and the check sees a clipped action when there is one
-      await section.evaluate(addClippedProbes);
-      const probed = await section.evaluate(actionsNotWhole);
+      await section.evaluate(addClippedProbes, ROW);
+      const probed = await section.evaluate(actionsNotWhole, ROW);
       await section.evaluate((root) => root.querySelectorAll('[data-probe]').forEach((probe) => probe.remove()));
       expect(probed.some((line) => line.startsWith('"wide probe"')) && probed.some((line) => line.startsWith('"tall probe"')), `the check names both probes: ${probed.join('; ')}`).toBe(true);
 
@@ -241,7 +207,7 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       await expect(sheet.getByText(status.pairing!.entry!.fingerprint, { exact: true })).toBeVisible();
       await test.info().attach('org-page-pair-sheet', { body: await sheet.screenshot(), contentType: 'image/png' });
       expect(await sheet.evaluate(overflowing), 'nothing in the pairing sheet is wider than its box').toEqual([]);
-      expect(await sheet.evaluate(actionsNotWhole), "every action is drawn whole inside the pairing sheet").toEqual([]);
+      expect(await sheet.evaluate(actionsNotWhole, ROW), "every action is drawn whole inside the pairing sheet").toEqual([]);
     } finally {
       await maws.cleanup();
     }

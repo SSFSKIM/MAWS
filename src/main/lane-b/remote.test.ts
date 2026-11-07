@@ -16,7 +16,7 @@ import { BUILTIN_MODELS } from '@shared/sessions/models';
 import { project, record, status } from '../../../test/support/builders';
 import { FakeLink, MINI, type FakeAct } from '../../../test/lane-b/fake-link';
 import type { MainContext } from '../ipc/router';
-import { createRemoteLaneB, routeLaneB, type RemoteLaneB } from './remote';
+import { AGENT_TOO_LARGE, createRemoteLaneB, routeLaneB, type RemoteLaneB } from './remote';
 import { UNRESOLVED_MAX } from './remote-spawn';
 import { startNotifier } from '../attention/notifier';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
@@ -1073,6 +1073,18 @@ describe('the sitting’s failures (M8)', () => {
       { appSessionId: 'app-2', agentId: 'agent-9' },
       { appSessionId: 'app-2', agentId: 'agent-9' },
     ]);
+  });
+
+  // The remote drill-in (2026-11-06): `fs.agentEvents` takes no byte budget, so an agent's disk window past the channel's
+  // bound is refused `too-large` after the machine took the follow's hold: the drill-in is told why in words, and the
+  // follow is this device's to let go of as any other.
+  it('answers an agent’s transcript too large for the channel with its words, and lets go of the follow the machine took', async () => {
+    const l = lab();
+    l.link.answers.set('fs.agentEvents', () => ({ ok: false, error: { code: 'too-large' } }));
+    l.link.answers.set('fs.unfollow', () => ({ ok: true, output: null }));
+    expect(await l.cmd('fs.agentEvents', { appSessionId: APP, agentId: 'agent-1' })).toMatchObject({ ok: false, error: { code: 'internal', message: AGENT_TOO_LARGE(l.link.name), issues: { refusal: 'too-large' } } });
+    expect(await l.cmd('fs.unfollow', { appSessionId: APP, agentId: null })).toEqual({ ok: true, value: undefined });
+    expect(l.link.calls.filter((c) => c.name === 'fs.unfollow').map((c) => c.input)).toEqual([{ appSessionId: APP, agentId: 'agent-1' }]);
   });
 
   it('lets a session-wide unfollow cover an agent read still out when it was made (the machine took its hold before answering)', async () => {

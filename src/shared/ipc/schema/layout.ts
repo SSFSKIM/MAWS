@@ -45,9 +45,14 @@ const BrowserTabSchema = z.strictObject({ id: z.string(), kind: z.literal('brows
 // records the page does not hold yet (one not loaded in this run) is still named; optional, so a tab written without it
 // reads, and version 3 is unchanged otherwise.
 const SessionTabV3Schema = SessionTabSchema.extend({ title: z.string().optional() });
+// P5 O8 M7a (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §N): an org project's channel, one tab
+// per project, keyed by the project's sminos id (its `smnsId`, the hub's project). Version 3 only, and no layout version:
+// a build that doesn't know the kind drops the tab (`dropUnknownTabs`).
+const ChannelTabSchema = z.strictObject({ id: z.string(), kind: z.literal('channel'), project: z.string().min(1), pinned: z.boolean() });
 export const TabRefSchema = z.discriminatedUnion('kind', [
   SessionTabV3Schema, AgentTabSchema, FileTabV2Schema.extend({ machine: MachineRefSchema }), DiffTabSchema, DiagnosticsTabSchema, SettingsTabSchema,
   ArtifactsTabSchema, ProjectsTabSchema, CustomizeTabSchema, ArtifactTabV2Schema.extend({ machine: MachineRefSchema }), BrowserTabSchema,
+  ChannelTabSchema,
 ]);
 export type TabRef = z.infer<typeof TabRefSchema>;
 const TabRefV2Schema = z.discriminatedUnion('kind', [
@@ -85,6 +90,8 @@ export function tabId(tab: TabTarget): string {
     case 'browser':
       return `browser:${tab.appSessionId}:${tab.browserTabId}`;
     // E4a end
+    case 'channel': // P5 O8 M7a: one per org project
+      return `channel:${tab.project}`;
   }
 }
 

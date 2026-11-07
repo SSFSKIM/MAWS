@@ -122,7 +122,12 @@ export interface OrgFiles {
 }
 
 export function orgFiles(input: { userData: string; uid?: number; excludeFromBackup?(path: string): Promise<boolean>; log(line: string): void }): OrgFiles {
-  const dir = join(input.userData, ORG_DIR);
+  return privateFiles({ ...input, dir: join(input.userData, ORG_DIR) });
+}
+
+/** A private directory's files, under orgFiles' rules: `<userData>/org/` itself, or one beneath it (M7a's `channel/`). */
+export function privateFiles(input: { dir: string; uid?: number; excludeFromBackup?(path: string): Promise<boolean>; log(line: string): void }): OrgFiles {
+  const dir = input.dir;
   const uid = input.uid ?? process.getuid!();
   return {
     dir,

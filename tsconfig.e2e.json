@@ -107,6 +107,7 @@
     "src/renderer/src/harness/panel/api.ts",
     "src/renderer/src/harness/widgets/api.ts",
     "src/renderer/src/settings-tab/copy.ts", // P5 O8 M4a Task 8: the Org page spec reads the page's own words
+    "src/renderer/src/channel/copy.ts", // P5 O8 M7a Task 3: the channel spec reads the tab's own words
     "src/renderer/src/tools/agents/copy.ts",
     "src/renderer/src/tools/agents/model/elapsed.ts",
     "src/renderer/src/tools/agents/model/relay.ts",
@@ -157,6 +158,7 @@
     "test/support/plugins-audit.ts",
     "test/support/prerun-commands.ts",
     "test/support/probe-file.ts",
+    "test/support/process-group.ts", // the widgets spec's Stop case reads its CLI's process group through the shared probe
     "test/support/r3-surface.ts",
     "test/support/relay-health.ts",
     "test/support/replay-engine.ts",
