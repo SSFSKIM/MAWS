@@ -11,6 +11,7 @@ import { readManifestView } from '../../src/engine-host/plugins/manifest';
 import { commandLine } from '../../src/shared/plugins/cli';
 import { FIXTURE_ENGINE_VERSION } from './engine-pin';
 import { materialisePluginCli, ownerShapedState, runPluginCli, scratchMarketplace, stubCalls, writePluginCliStub, type StubState } from './plugin-cli-stub';
+import { groupAlive } from './process-group';
 
 const SHA = 'a'.repeat(64);
 const dirs: string[] = [];
@@ -312,25 +313,16 @@ describe('the plugin CLI stub', () => {
     stub.stubborn(true);
     const cli = spawn(stub.bin, ['plugin', 'install', 'e8-probe@e8-scratch', '--json'], { cwd: userData, stdio: 'ignore', detached: true });
     const gone = new Promise((resolve) => cli.once('exit', (_, signal) => resolve(signal)));
-    const alive = (pgid: number) => {
-      try {
-        process.kill(-pgid, 0);
-        return true;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
-        throw error;
-      }
-    };
     try {
       await expect.poll(() => stub.group(), { timeout: 5_000 }).not.toBeNull();
       const group = stub.group()!;
       expect(group).toEqual({ pgid: cli.pid, leader: cli.pid, member: expect.any(Number), memberPgid: cli.pid });
       process.kill(-group.pgid, 'SIGTERM');
       await expect.poll(() => stub.signals().sort(), { timeout: 5_000 }).toEqual([`${group.leader} SIGTERM`, `${group.member} SIGTERM`].sort());
-      expect(alive(group.pgid)).toBe(true);
+      expect(groupAlive(group.pgid)).toBe(true);
       process.kill(-group.pgid, 'SIGKILL');
       expect(await gone).toBe('SIGKILL');
-      await expect.poll(() => alive(group.pgid), { timeout: 5_000 }).toBe(false);
+      await expect.poll(() => groupAlive(group.pgid), { timeout: 5_000 }).toBe(false);
       expect(stub.state().installed).toEqual([]); // the mutation never completed
     } finally {
       stub.hold(false);

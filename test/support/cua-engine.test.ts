@@ -45,14 +45,17 @@ const frame = (message: unknown) => {
   return out;
 };
 
-// A backend as MAWS's primitive server answers cua: a hello at once, then each request answered from `answers` (a
-// method it does not hold is held unanswered), and every request it heard kept
-function backend(path: string, answers: Record<string, (params: Record<string, unknown>) => unknown>) {
+// A backend as MAWS's primitive server answers cua: a hello at once (or once `greet` settles, as MAWS's peer check and
+// the cold broker's load come before its hello), then each request answered from `answers` (a method it does not hold
+// is held unanswered), and every request it heard kept
+function backend(path: string, answers: Record<string, (params: Record<string, unknown>) => unknown>, greet?: Promise<void>) {
   const heard: { method: string; params: Record<string, unknown> }[] = [];
   const sockets: Socket[] = [];
   const server: Server = createServer((socket) => {
     sockets.push(socket);
-    socket.write(frame({ jsonrpc: '2.0', method: 'hello', params: { extensionId: 'maws', extensionInstanceId: 'maws:S', protocolVersion: 1, profileName: 'MAWS' } }));
+    const hello = () => socket.write(frame({ jsonrpc: '2.0', method: 'hello', params: { extensionId: 'maws', extensionInstanceId: 'maws:S', protocolVersion: 1, profileName: 'MAWS' } }));
+    if (greet) void greet.then(hello);
+    else hello();
     let buffered = Buffer.alloc(0);
     socket.on('error', () => {});
     socket.on('data', (chunk) => {
@@ -130,8 +133,25 @@ describe('the connector under a scene’s control (P5 O17 M8)', () => {
     expect(await control.call('tabs.query')).toMatchObject({ ok: false, error: 'not connected' });
     const again = await until(() => control.state(), (state) => state.hellos === 2);
     expect(Date.now() - lostAt, 'not before the retry interval').toBeGreaterThanOrEqual(350);
-    expect(again).toMatchObject({ closes: 1, connected: true });
+    expect(again).toMatchObject({ closes: 1, connected: true, greeted: true });
     expect(await control.call('tabs.query')).toMatchObject({ ok: true, result: [] });
+  });
+
+  // The O17 headless scenes' first request (e2e/browser-cua.spec.ts's scenes 3 and 4, a flaky pass each): the control
+  // socket listens as the connector dials, so a scene that drives it once that socket answers can come before MAWS's
+  // hello and have cua's creation sequence fail `not connected` at its first step; `greeted` is what it waits for
+  it('listens on its control socket before MAWS’s hello, answering a request then `not connected`, and reads `greeted` from the hello on', async () => {
+    const root = scratch();
+    const socket = join(root, 'b.sock');
+    let greet: () => void = () => {};
+    backend(socket, BROWSER, new Promise<void>((resolve) => (greet = () => resolve())));
+    startConnector(root, socket, { MAWS_CUA_CONNECTOR_RETRY: '1', MAWS_CUA_CONNECTOR_CONTROL: '1' });
+    const control = await controlOf(root);
+    expect(await until(() => control.state(), (state) => state.connected === true)).toMatchObject({ connected: true, greeted: false, hellos: 0 });
+    expect(await control.sequence('http://127.0.0.1:4000/')).toMatchObject({ ok: false, error: 'not connected', steps: [{ method: 'windows.query', error: 'not connected' }] });
+    greet();
+    await until(() => control.state(), (state) => state.greeted === true);
+    expect(await control.sequence('http://127.0.0.1:4000/')).toMatchObject({ ok: true, result: { tabId: 7 } });
   });
 
   it('probes another socket from its own process, as an engine-side peer would dial it: a hello heard, or a close without one', async () => {

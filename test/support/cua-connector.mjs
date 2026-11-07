@@ -7,10 +7,11 @@
 // P5 O5 M5 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, acceptance 3): with MAWS_CUA_CONNECTOR_RETRY=1 it does
 // what cua's host does with an unreachable or lost backend (cua's src/chrome/client-mode.mjs, CLIENT_RETRY_MS): it tries
 // again, here every RETRY_MS, for its two minutes; the report then also counts `refused` connects (nothing listened),
-// `hellos` heard and `closes` of a connection that had connected, says whether it is `connected` now, and names the
-// `socket` it was given (the CUA_BROWSER_BACKENDS of the engine's settings, through the stub). With
-// MAWS_CUA_CONNECTOR_LEASE=1 as well it takes a lease after each hello, as an agent's first browser call does (a tab
-// created and its debugger attached, e2e/browser-cua.spec.ts's fake host's first steps), and counts the `leases` it got.
+// `hellos` heard and `closes` of a connection that had connected, says whether it is `connected` now and whether it is
+// `greeted` (MAWS's hello heard on the current connection, which a request needs), and names the `socket` it was given
+// (the CUA_BROWSER_BACKENDS of the engine's settings, through the stub). With MAWS_CUA_CONNECTOR_LEASE=1 as well it
+// takes a lease after each hello, as an agent's first browser call does (a tab created and its debugger attached,
+// e2e/browser-cua.spec.ts's fake host's first steps), and counts the `leases` it got.
 //
 // P5 O17 M8 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, M8): three more switches, all set by the engine's
 // wrapper (a launch passes the engine no `MAWS_*` key of its own, so the wrapper names them):
@@ -51,7 +52,7 @@ const state = {
   pid: process.pid,
   hello: null,
   closed: false,
-  ...(retrying && { socket: socketPath, refused: 0, hellos: 0, closes: 0, connected: false }),
+  ...(retrying && { socket: socketPath, refused: 0, hellos: 0, closes: 0, connected: false, greeted: false }),
   ...(leasing && { leases: 0 }),
   ...(controlled && { control: controlPath, events: {} }),
 };
@@ -125,7 +126,10 @@ function attempt() {
       }
       if (message.method !== 'hello' || (!retrying && state.hello !== null)) continue;
       greeted = true;
-      if (retrying) state.hellos += 1;
+      if (retrying) {
+        state.hellos += 1;
+        state.greeted = true;
+      }
       state.hello = message.params ?? {};
       save();
       if (leasing) socket.write(frame({ jsonrpc: '2.0', id: 1, method: 'tabs.create', params: { url: 'about:blank', group: { key: 's', title: 'cua' } } }));
@@ -135,6 +139,7 @@ function attempt() {
   socket.on('close', () => {
     if (current === socket) {
       greeted = false;
+      if (retrying) state.greeted = false;
       lost();
     }
     if (!retrying) {
