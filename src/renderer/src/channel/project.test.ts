@@ -244,12 +244,14 @@ describe('the to-human entries', () => {
       host(OTHER_MACHINE, 3, { lane: 'B', session: 'app-2' }),
       host(OTHER_MACHINE, 4, { session: 'dddddddd-4444-4444-8444-dddddddddddd' }),
     ]);
-    expect(entries.map((e) => [e.machine, e.name, e.title])).toEqual([
-      [OTHER_MACHINE, 'maws-45', 'Fix the relay'],
-      [TEST_MACHINE, 'Local chat', null],
-      [OTHER_MACHINE, 'Studio build', null],
-      [OTHER_MACHINE, 'dddddddd', null],
+    expect(entries.map((e) => [e.machine, e.machineName, e.name, e.title])).toEqual([
+      [OTHER_MACHINE, 'mini', 'maws-45', 'Fix the relay'],
+      [TEST_MACHINE, 'MacBook', 'Local chat', null],
+      [OTHER_MACHINE, 'mini', 'Studio build', null],
+      [OTHER_MACHINE, 'mini', 'dddddddd', null],
     ]);
+    // a machine the channel's list doesn't hold has no name of its own here: the chip reads the roster's
+    expect(named([host(OTHER_MACHINE, 1)], [live(TEST_MACHINE, 'MacBook')]).map((e) => e.machineName)).toEqual([null]);
     expect(entries.every((e) => e.kind === 'to-human' && e.host === 'message' && e.asOf === null && !e.greyed)).toBe(true);
   });
 

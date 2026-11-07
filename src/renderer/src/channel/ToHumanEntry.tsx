@@ -29,7 +29,7 @@ export function ToHumanEntry({ entry }: { entry: Entry }) {
         </span>
         {entry.title !== null && <span className="min-w-0 shrink-[4] truncate text-fg-muted">{entry.title}</span>}
         <span className="inline-flex min-w-0 shrink-[2]">
-          <MachineChip address={addressOf(entry.machine, 'channel')} className="max-w-full" />
+          <MachineChip address={addressOf(entry.machine, 'channel')} name={entry.machineName ?? undefined} className="max-w-full" />
         </span>
         <span className="shrink-0 text-fg-muted">{CHANNEL.host[entry.host]}</span>
         <Time at={entry.at} />

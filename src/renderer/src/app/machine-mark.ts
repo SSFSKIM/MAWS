@@ -21,10 +21,11 @@ export interface MachineMark {
   refusal: string | null; // P5 O7 M2: the permanent verdict holding an RL2 link down (`removed`: the machine removed this device)
 }
 
-export function useMachineMark(address: string): MachineMark {
+/** `unknownName`: the name to give a machine the roster doesn't hold (P5 O8 M7b: the channel's own for it), else its ref. */
+export function useMachineMark(address: string, unknownName?: string): MachineMark {
   const machine = machineOf(address);
   const local = ipc.localMachine;
-  const name = useMachines((s) => machineName(s.machines, machine, local));
+  const name = useMachines((s) => (unknownName === undefined || s.machines.has(machine) ? machineName(s.machines, machine, local) : unknownName));
   const offline = useMachines((s) => selectOffline(s, machine));
   const since = useMachines((s) => s.machines.get(machine)?.since ?? null);
   const carrier = useMachines((s) => s.machines.get(machine)?.carrier ?? null);

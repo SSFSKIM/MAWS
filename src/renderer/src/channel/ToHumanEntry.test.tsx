@@ -5,13 +5,14 @@
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { formatDayTime } from '@shared/app/date-format';
+import type { MachineRef } from '@shared/machine/ref';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { useMachines } from '../stores/machines';
 import type { ToHumanEntry as Entry } from './project';
 import { ToHumanEntry } from './ToHumanEntry';
 
 const T = (minute: number) => new Date(Date.UTC(2026, 10, 6, 12, minute)).toISOString();
-const base = { kind: 'to-human' as const, key: `${OTHER_MACHINE} e1`, machine: OTHER_MACHINE, name: 'maws-45', title: 'Fix the relay', at: T(3), asOf: null, greyed: false };
+const base = { kind: 'to-human' as const, key: `${OTHER_MACHINE} e1`, machine: OTHER_MACHINE, machineName: 'mini', name: 'maws-45', title: 'Fix the relay', at: T(3), asOf: null, greyed: false };
 const message = (over: Partial<Entry> = {}): Entry => ({ ...base, host: 'message', text: 'The build is green.', ...over }) as Entry;
 const entry = () => document.querySelector<HTMLElement>('[data-channel-entry="to-human"]')!;
 
@@ -38,6 +39,15 @@ describe('ToHumanEntry', () => {
     expect(entry().querySelector('strong, code, h1')).toBeNull();
     expect(entry().dataset.host).toBe('message');
     expect(entry().querySelector('[data-channel-as-of]')).toBeNull();
+  });
+
+  it('names a machine the roster doesn’t hold by the channel’s name for it (its cached entries, signed out), and the roster’s name over it', () => {
+    const away = 'AwayMachineRef00000000' as MachineRef;
+    render(<ToHumanEntry entry={message({ machine: away, key: `${away} e1`, machineName: 'studio-mini' })} />);
+    expect(entry().querySelector('[data-machine-chip]')?.textContent).toBe('@studio-mini');
+    cleanup();
+    render(<ToHumanEntry entry={message({ machineName: 'an older name' })} />);
+    expect(entry().querySelector('[data-machine-chip]')?.textContent).toBe('@mini');
   });
 
   it('draws no chip for this Mac’s session', () => {

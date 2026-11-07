@@ -82,10 +82,11 @@ export type ChannelEntry = WordsEntry | SayEntry | ExchangeEntry | HostEntry;
 export type ToHumanQuestion = { key: string; text: string; choices: string[]; answer: { text: string; at: string } | null };
 /**
  * M7b: a session's to-human entry from its machine's spine: `name` its alias (lane A) or title (lane B), `title` a lane A
- * session's title beside its alias; `asOf` its machine's time while that machine isn't live; `greyed` while the machine
- * answers neither the feed nor the history call.
+ * session's title beside its alias; `machineName` the machine's name as the channel's machines say it (null for one they
+ * don't hold), which its chip says when the roster doesn't name the machine (its cached entries, signed out); `asOf` its
+ * machine's time while that machine isn't live; `greyed` while the machine answers neither the feed nor the history call.
  */
-export type ToHumanEntry = { kind: 'to-human'; key: string; machine: MachineRef; name: string; title: string | null; at: string; asOf: string | null; greyed: boolean } & (
+export type ToHumanEntry = { kind: 'to-human'; key: string; machine: MachineRef; machineName: string | null; name: string; title: string | null; at: string; asOf: string | null; greyed: boolean } & (
   | { host: 'message' | 'answered'; text: string }
   | { host: 'question'; questions: ToHumanQuestion[] }
 );
@@ -312,6 +313,7 @@ export function toHumanEntries(input: {
       kind: 'to-human' as const,
       key: host.key,
       machine: host.machine,
+      machineName: machine?.name ?? null,
       ...sessionName(host, names),
       at: host.at,
       asOf: machine === undefined || machine.state === 'live' ? null : machine.asOf,
