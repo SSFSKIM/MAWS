@@ -3488,6 +3488,23 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - The shared staging run's plan, on the desk track's answer (refresh item 4). The run itself is scheduled by the architect.
   Date/Author: 2026-11-07, O8's executor (controller).
 
+- Decision: M6b's live proof, on the desk track's answer and the architect's ruling (2026-11-07). Task 4 plans it as two layers.
+  1. **The harness path stands on its own.** O18 M6's staging harness can supply a second member for everything that member's own keys can do. `addRunMember` (`reach-acceptance.ts:215`) creates `o18-m6-<tag>@staging.invalid` with channel and step-up keys the harness makes, and scene B1 runs as its own Linux user on one devcloud VM. A reference-client channel runs as b1 to A1 over the relay (`reach-items.ts:293`, `b1ToA1`).
+     - So B's pin, read and draft are proven through the endpoint calls b1's channel makes under M6a's reader rule, with A's reading and draft read back unchanged through A's keys.
+     - The b1 client acts the harness lacks (`session.reader.update`, `session.drafts.get` and `.set`, and M6b's `record.*` where a scene needs them) are M6b's work, in Task 4.
+     - The harness can't drive B's MAWS app or browser. An app signs in through Access's login, and an `@staging.invalid` address never receives Access's one-time code. So the owner's sidebar left unchanged as drawn, and B's rows in B's app, are cited from `policy.local.test.ts` and the renderer suites on this layer.
+  2. **The real-member steps for B's app sit on top, in a section of their own,** ready if the owner chooses a real second member. The architect has asked the owner. They are the Concrete Steps' 1–2 as written:
+     - an email the owner controls, admitted by staging Access (the owner's change);
+     - the member added;
+     - a second scratch MAWS profile on a GUI Mac, signed into by that person;
+     - the VM enrolled with that member as its owner;
+     - the admission removed at teardown.
+  3. **The terms.** No fresh word from the owner is strictly needed on O18 M6's terms: the VM stays out of production, and the desk track deploys master to staging. The architect puts that line in the scheduling message.
+     - The scenes run sminos 1.40.1 or later.
+     - O18 M6's VM is gone, so the desk track sets up a fresh one at the slot.
+     - The desk track wants `test/endpoint/rl10/conversation.json`'s blob hash and its changed lines before the PR.
+  Date/Author: 2026-11-07, the desk track and the architect, recorded by O8's executor (controller).
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
