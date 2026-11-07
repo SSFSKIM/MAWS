@@ -80,6 +80,7 @@ import type { HubDeps } from './hub-http';
 import { HubLink } from './hub-link';
 import { Interest } from './interest';
 import { LaneBPending } from './lane-b-pending';
+import { LocalDoor, type DoorCallAnswer } from './local-door';
 import { EndpointRecords, Listings, RecordRetries, type RecordsContext } from './listings';
 import { Notifier } from './notify';
 import { EndpointOrg, type OrgChange } from './org-sync';
@@ -89,8 +90,10 @@ import { PlaneFeeds, type OwnersRead } from './plane-feeds';
 import { EndpointPolicy, MachineSetup, settingsDefaultMode } from './policy';
 import { completeProvisioning, provisionInto, type DelegatedInput } from './provision';
 import { retireInto, type Retired } from './retire';
+import { owns } from './grades';
 import { Queries } from './queries';
-import { Rl10 } from './rl10/link';
+import { policies, type HeldSession } from './record-policy';
+import { RECORD_CAPABILITY, Rl10 } from './rl10/link';
 import type { RelayContext } from './rl10/log-relay';
 import type { EndpointModule, EndpointServices } from './services';
 import { SessionSafe } from './session-safe';
@@ -190,6 +193,8 @@ export class Endpoint implements EndpointModule {
   readonly leases: Leases;
   /** P5 O7 M5c round 3: each channel's snapshot holds of a remote dashboard, re-authorized while they live (asset-holds.ts). */
   readonly assetHolds: AssetHolds;
+  /** P5 O8 M6b: the local door, this machine's own app's record acts and policy read, served by `mawsd` (local-door.ts). */
+  readonly local: LocalDoor;
   /** What `start` subscribed to on mawsd's seam, let go at `stop`. */
   readonly #unseam: Array<() => void> = [];
   readonly #options: EndpointOptions;
@@ -544,14 +549,7 @@ export class Endpoint implements EndpointModule {
       subscription: (channel, sub) => this.subscriptions.get(channel, sub),
       upstreamOf: (sub) => this.planeA.upstreamOf(sub),
       toSminos: (frame) => this.rl10.send(frame),
-      members: () =>
-        this.rl10.members.sessions().flatMap((session) => {
-          const member = this.rl10.members.get(session);
-          if (member === null) return [];
-          const listingId = this.rl10.members.listingId(session);
-          const target: SessionTarget = member.lane === 'A' ? { lane: 'A', session } : { lane: 'B', session, appSessionId: listingId ?? '' };
-          return [{ member, listingId, target }];
-        }),
+      members: () => this.#heldSessions(),
       records: recordSource,
       machineOwners: () => this.#machineOwners(),
       recordFor: (report) => this.listings.recordFor(report),
@@ -590,6 +588,41 @@ export class Endpoint implements EndpointModule {
       stream: (channel, m) => this.streams.receive(channel, m),
       clientAnswer: (channel, m) => this.clientPorts.answer(channel, m), // P5 O7 M5c
     });
+    // P5 O8 M6b: an act through the local door takes a channel's route once the door's own checks passed
+    this.local = new LocalDoor({
+      head: () => (this.#org?.ready ? this.#org.head().state : null),
+      act: (channel, m) => this.actions.receive(channel, m, gated.act),
+      policy: (input) => this.#localPolicy(input, authorization.records ?? this.rl10.members),
+      log,
+    });
+  }
+
+  /** The machine's sessions as sminos reports them, each with the id it is listed under (null: not yet) and its target. */
+  #heldSessions(): HeldSession[] {
+    return this.rl10.members.sessions().flatMap((session) => {
+      const member = this.rl10.members.get(session);
+      if (member === null) return [];
+      const listingId = this.rl10.members.listingId(session);
+      const target: SessionTarget = member.lane === 'A' ? { lane: 'A', session } : { lane: 'B', session, appSessionId: listingId ?? '' };
+      return [{ member, listingId, target }];
+    });
+  }
+
+  /**
+   * P5 O8 M6b: `record.policy` through the local door, as the machine's owners' member (P5 Decision Log 36's local
+   * reader): the sessions any of the machine's owners owns (record-policy.ts).
+   */
+  async #localPolicy(input: unknown, records: RecordSource): Promise<DoorCallAnswer> {
+    const advertised = this.rl10.sminosCapabilities();
+    if (advertised === null) return { ok: false, code: 'unavailable' };
+    if (!advertised.includes(RECORD_CAPABILITY)) return { ok: true, output: { supported: false } };
+    const owners = await this.#machineOwners();
+    const owned = (target: SessionTarget) => {
+      const record = records.record(target);
+      return owners.some((owner) => owns(record, owner, owners));
+    };
+    const named = typeof input === 'object' && input !== null && typeof (input as { session?: unknown }).session === 'string' ? (input as { session: string }).session : undefined;
+    return { ok: true, output: { supported: true, policies: policies(this.#heldSessions(), owned, (app) => this.rl10.members.recordMember(app), named) } };
   }
 
   async start(services: EndpointServices): Promise<void> {

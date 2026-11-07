@@ -7,11 +7,14 @@
 // The org (sub-harness.ts): A owns the machine (a1); B is a member (b1). `la-1` is a lane A session of `@machine`'s; `app-b`
 // a lane B session (engine session `eng-b`) of A's.
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import type { Action } from 'org-protocol';
+import { memoryOrgView, type Action } from 'org-protocol';
+import { TestDevice as Device } from '../../apps/org-protocol/test-support/test-device.ts';
+import { LocalDoor } from '../../src/endpoint/local-door';
 import { OFFERS, RECORD_ACTS, type Offers } from '../../src/endpoint/offers';
 import { stepUpRequired } from '../../src/endpoint/step-up';
+import { newDevice, type TestDevice } from './org-fixtures';
 import type { FakeSminos } from './rl10/fake-sminos';
-import { act, done, laneAMember, makeOrg, openRemote, PROJECT, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type Org, type Remote } from './sub-harness';
+import { act, done, laneAMember, makeOrg, openRemote, ORG, PROJECT, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -243,5 +246,76 @@ describe('the welcome’s `record`', () => {
     const g = await machine({ offers: without });
     const t = await sminos(g, [laneA()], ['audience', 'record']);
     expect(t.received.find((x) => x.t === 'welcome')?.capabilities).toEqual(['access', 'reach']);
+  });
+});
+
+describe('the local door', () => {
+  /** A device of the org's (or not), sealing actions for this machine as a channel's device would, its step-up key its own. */
+  const sealer = async (f: Fixture, who: TestDevice, member: string) => (await openRemote(f, who, member)).device;
+
+  it('takes a good record act as a channel does: authorized against the head, sent to sminos, its outcome the answer', async () => {
+    const f = await machine();
+    const s = await withSminos(f);
+    const a = await sealer(f, org.a1, org.A);
+    const access = await a.stepUp(a.action({ machine: f.ref, action: 'record.access', args: { appSessionId: 'app-b', access: 'listed' } }));
+    const answered = f.endpoint.local.act(access);
+    await s.next((x) => x.t === 'query' && x.opId === access.opId, 'the admission query');
+    s.send({ t: 'queried', opId: access.opId, state: 'not-received' });
+    const rpc = (await s.next((x) => x.t === 'rpc', 'the rpc')).rpc as Record<string, unknown>;
+    expect(rpc).toMatchObject({ rpc: 'record.access', member: org.A, device: 'a1', args: { session: 'eng-b', access: 'listed' }, proof: access });
+    s.send({ t: 'rpc-result', project: PROJECT, opId: access.opId, nonce: access.nonce, outcome: { state: 'done', result: { changed: true, policyRev: 8 } } });
+    expect(await answered).toEqual({ state: 'done', result: { changed: true, policyRev: 8 } });
+    // as a channel's: B's own device, its signature good, holds nothing on A's session; a replayed act is refused
+    const b = await sealer(f, org.b1, org.B);
+    expect(await f.endpoint.local.act(await b.stepUp(b.action({ machine: f.ref, action: 'record.access', args: { session: 'la-1', access: 'private' } })))).toEqual({ state: 'refused', reason: 'grade' });
+    expect(await f.endpoint.local.act(access)).toEqual({ state: 'refused', reason: 'replayed' });
+  });
+
+  it('refuses an act with no step-up, one whose signature doesn’t verify, anything outside record.*, and a device the head doesn’t list', async () => {
+    const f = await machine();
+    const s = await withSminos(f);
+    const a = await sealer(f, org.a1, org.A);
+    const b = await sealer(f, org.b1, org.B);
+    const access = (device = a) => device.action({ machine: f.ref, action: 'record.access', args: { session: 'la-1', access: 'private' } });
+    expect(await f.endpoint.local.act(access()), 'no step-up').toEqual({ state: 'refused', reason: 'step-up' });
+    // a present signature by another device's key (B signs what names a1), and one over other args
+    const forged = { ...access(), stepUp: (await b.stepUp(access())).stepUp };
+    expect(await f.endpoint.local.act(forged), 'another key’s signature').toEqual({ state: 'refused', reason: 'step-up' });
+    const signed = await a.stepUp(access());
+    expect(await f.endpoint.local.act({ ...signed, args: { session: 'la-1', access: 'org-converse' } }), 'args changed after signing').toEqual({ state: 'refused', reason: 'step-up' });
+    // outside record.*, its signature good or not: a command that needs no step-up over a channel, and one that does
+    const send = a.action({ machine: f.ref, action: 'sminos.send', session: 'la-1', context: { lane: 'A', session: 'la-1', launch: 'L1' }, args: { session: 'la-1', text: 'hi' } });
+    expect(await f.endpoint.local.act({ ...send, stepUp: forged.stepUp }), 'a non-step-up command, a bad signature').toEqual({ state: 'refused', reason: 'not-offered' });
+    expect(await f.endpoint.local.act(await a.stepUp(send)), 'a non-step-up command, signed').toEqual({ state: 'refused', reason: 'not-offered' });
+    expect(await f.endpoint.local.act(await a.stepUp(a.action({ machine: f.ref, action: 'sminos.spawn', args: { checkout: '/work/m8' } }))), 'a step-up command').toEqual({ state: 'refused', reason: 'not-offered' });
+    // a device of no member's
+    const stranger = await newDevice('x1');
+    const outsider = new Device({ identity: { org: ORG, member: org.A, device: 'x1', clientClass: 'native-mac', channelKey: stranger.channel, build: 'door', capabilities: [] }, org: memoryOrgView({ chain: [...f.chain] }), stepUpKey: stranger.stepUp });
+    expect(await f.endpoint.local.act(await outsider.stepUp(outsider.action({ machine: f.ref, action: 'record.access', args: { session: 'la-1', access: 'private' } }))), 'an unlisted device').toEqual({ state: 'refused', reason: 'unknown-device' });
+    expect(await f.endpoint.local.act({ nope: true }), 'no action').toEqual({ state: 'refused', reason: 'malformed' });
+    await sleep(100);
+    expect(s.received.filter((x) => x.t === 'query' || x.t === 'rpc')).toEqual([]);
+  });
+
+  it('refuses a device the head lists twice, as no one key verifies it (a head the org state refuses, held to the rule all the same)', async () => {
+    const f = await machine();
+    const head = structuredClone(f.chain.at(-1)!.state);
+    head.members.find((m) => m.id === org.A)!.devices.push(org.b1.device);
+    let handed = false;
+    const door = new LocalDoor({ head: () => head, act: () => void (handed = true), policy: async () => ({ ok: false, code: 'unused' }), log: () => {} });
+    const b = await sealer(f, org.b1, org.B);
+    expect(await door.act(await b.stepUp(b.action({ machine: f.ref, action: 'record.access', args: { session: 'la-1', access: 'private' } })))).toEqual({ state: 'refused', reason: 'unknown-device' });
+    expect(handed).toBe(false);
+  });
+
+  it('answers record.policy as the machine’s owners’ member, and no other call', async () => {
+    const f = await machine();
+    await withSminos(f, ['audience', 'record'], [laneA(), laneB(), laneAMember({ session: 'la-b', owners: [org.B], policyRev: 1, access: 'listed' })]);
+    const answer = (await f.endpoint.local.call('record.policy', null)) as { ok: true; output: { supported: true; policies: Array<{ session: string }> } };
+    expect(answer.ok).toBe(true);
+    expect(answer.output.policies.map((p) => p.session).sort()).toEqual(['app-b', 'la-1']);
+    expect(await f.endpoint.local.call('record.policy', { session: 'la-b' }), 'B’s, not the owners’').toEqual({ ok: true, output: { supported: true, policies: [{ session: 'la-b', unavailable: true }] } });
+    expect(await f.endpoint.local.call('endpoint.listings', null)).toEqual({ ok: false, code: 'not-offered' });
+    expect(await f.endpoint.local.call('record.policy', { session: 7 })).toEqual({ ok: false, code: 'malformed' });
   });
 });
