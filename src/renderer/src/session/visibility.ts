@@ -79,9 +79,12 @@ export function connectVisibility(client: MawsBridge = ipc, stores = { layout: u
     const { main } = layout;
     const windowActive = document.hasFocus() && document.visibilityState === 'visible';
     const next = visibleSessions(layout, stores.sessions.getState().records, windowActive, sideChildrenShown(stores.side.getState()));
-    for (const id of reported) if (!next.has(id)) send(id, false);
-    for (const id of next) if (!reported.has(id)) send(id, true);
+    // P5 O8 M6a (Task 3's review, H2): the set is published before any send, since a send can change what this follows (a
+    // remote session shown read at once is a records change) and the nested update must find it reported already
+    const before = reported;
     reported = next;
+    for (const id of before) if (!next.has(id)) send(id, false);
+    for (const id of next) if (!before.has(id)) send(id, true);
     const set = currentSet(main);
     const pane = set.panes[set.focusedPane];
     const tab = pane?.tabs.find((entry) => entry.id === pane.activeTabId);

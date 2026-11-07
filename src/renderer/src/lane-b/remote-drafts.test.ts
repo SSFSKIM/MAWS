@@ -95,6 +95,27 @@ describe('a machine that keeps each member’s draft', () => {
 });
 
 describe('a machine older than M6a, which offers no drafts', () => {
+  // Task 3's review, H1: another session's refusal teaches the machine's before this session's own save hears its own; a
+  // save made after that goes to memory, and the queue's late refusal must not put an older draft over it
+  it.each([['new text'], [null]])('keeps the newest save, %s, over a refusal heard late by a save before it', async (newest) => {
+    const fake = fakeClient();
+    const port = portOf(fake);
+    const other = rememberingRemoteDrafts(local(), addressOf(OTHER_MACHINE, 'app-s' as AppSessionId), () => true, fake.client);
+    port.save(draft('first'));
+    port.save(draft('second')); // waiting behind the first
+    const otherLoad = other.load();
+    await fake.fail('session.drafts.get', 'refused', 'internal', NOT_OFFERED);
+    await otherLoad;
+    expect(readerRowsOf(REMOTE)).toBe('refused');
+    expect(textOf(await port.load())).toBe('second'); // the newest handed to save, still unsaved
+    const last = newest === null ? null : draft(newest);
+    port.save(last); // into memory: the machine is known to refuse
+    expect(await port.load()).toEqual(last);
+    await fake.fail('session.drafts.set', 'refused', 'internal', NOT_OFFERED); // the first save's own refusal, late
+    expect(await port.load()).toEqual(last);
+    expect(fake.invoked('session.drafts.set')).toHaveLength(1);
+  });
+
   it('keeps the draft in this run’s memory as before, asking nothing more once it refused, and forgets it at a relaunch', async () => {
     const fake = fakeClient();
     const port = portOf(fake);

@@ -8,7 +8,7 @@ import type { JSONContent } from '@tiptap/core';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { Draft } from '@shared/ipc/schema/session';
 import { readerRowsOf } from '../../lane-b/reader-rows';
-import { loadRemoteDraft, resetRemoteDraftSaves, saveRemoteDraft } from '../../lane-b/remote-drafts';
+import { dropRemoteDraftSaves, loadRemoteDraft, resetRemoteDraftSaves, saveRemoteDraft, unsavedRemoteDraft } from '../../lane-b/remote-drafts';
 import { markPersisted } from './attachments';
 import { attachmentsOf, MENTION, type ComposerDoc, type MentionAttrs } from './doc';
 
@@ -102,12 +102,18 @@ export function rememberingRemoteDrafts<P extends { load(): Promise<Draft | null
     ...port,
     load: () => {
       if (!remote()) return port.load();
+      // the newest save first, wherever it is: one still going to the machine, then the memory
+      const unsaved = unsavedRemoteDraft(appSessionId);
+      if (unsaved !== undefined) return Promise.resolve(unsaved);
       if (remoteDrafts.has(appSessionId) || readerRowsOf(appSessionId) === 'refused') return Promise.resolve(remembered());
       return loadRemoteDraft(client, appSessionId, remembered);
     },
     save: (draft: Draft | null) => {
       if (!remote()) return port.save(draft);
-      if (readerRowsOf(appSessionId) === 'refused') return remember(draft);
+      if (readerRowsOf(appSessionId) === 'refused') {
+        dropRemoteDraftSaves(appSessionId); // a save still out, refused later, hands nothing over this one (Task 3's review, H1)
+        return remember(draft);
+      }
       remoteDrafts.delete(appSessionId); // a handed document, which this save replaces
       saveRemoteDraft(client, appSessionId, draft, remember);
     },

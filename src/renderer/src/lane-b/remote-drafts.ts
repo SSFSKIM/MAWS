@@ -9,7 +9,9 @@
 // - A load while a save waits or is out answers that save's draft, since the machine's may be older than what was typed.
 //   So does one after a save the machine didn't take, for this run, until a later save is taken.
 // - A `not-offered` (an endpoint older than M6a) hands the newest draft to the caller's fallback, and ./reader-rows.ts
-//   hears it.
+//   hears it. A refusal may be heard first by another session's request: the caller's next save then goes to its fallback
+//   and ends this session's saves here (`dropRemoteDraftSaves`), so a save still out, answered later, hands nothing over
+//   the newer one (Task 3's review, H1).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { Draft } from '@shared/ipc/schema/session';
@@ -23,10 +25,18 @@ export function resetRemoteDraftSaves(): void {
   saves.clear();
 }
 
+/** The newest draft handed to a save of the session that the machine hasn't taken; undefined when none is. */
+export const unsavedRemoteDraft = (appSessionId: AppSessionId): Draft | null | undefined => saves.get(appSessionId)?.latest;
+
+/** The session's saves here end, unanswered ones included: a newer save went to the caller's fallback. */
+export function dropRemoteDraftSaves(appSessionId: AppSessionId): void {
+  saves.delete(appSessionId);
+}
+
 /** The member's draft there, or the one still being saved; `refused`, the fallback's, if the machine offers none. */
 export async function loadRemoteDraft(client: MawsBridge, appSessionId: AppSessionId, refused: () => Draft | null): Promise<Draft | null> {
-  const unsaved = saves.get(appSessionId);
-  if (unsaved !== undefined) return unsaved.latest;
+  const unsaved = unsavedRemoteDraft(appSessionId);
+  if (unsaved !== undefined) return unsaved;
   const result = await client.invoke('session.drafts.get', { appSessionId });
   const heard = heardReaderRows(appSessionId, result);
   if (result.ok) return result.value;
@@ -52,7 +62,7 @@ async function pump(client: MawsBridge, appSessionId: AppSessionId, queue: Saves
   while (queue.waiting && saves.get(appSessionId) === queue) {
     queue.waiting = false;
     const result = await client.invoke('session.drafts.set', { appSessionId, draft: queue.latest });
-    if (saves.get(appSessionId) !== queue) return; // a reset (tests): the queue isn't this run's
+    if (saves.get(appSessionId) !== queue) return; // dropped (a newer save went to the fallback) or reset: nothing to hand on
     if (heardReaderRows(appSessionId, result) === 'refused') {
       saves.delete(appSessionId);
       return queue.refused(queue.latest);

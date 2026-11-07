@@ -12,6 +12,7 @@ import { hideSideChild, showSideChild, useSidePane } from '../side/store'; // E3
 import { hideCardThread, showCardThread, useCommentCard } from '../side/card/store'; // P2-E1
 import { closeCard, dockSplit, floatSplit, openCard, useFloatingCard } from '../shell/floating'; // P3-G; P4-B3: the split's
 import { resetRemoteReadMarks, useRemoteReadMarks } from '../lane-b/read-marks'; // P5 O7 M2
+import { heardReaderRows, resetReaderRows } from '../lane-b/reader-rows'; // P5 O8 M6a
 
 const A = at('app-a' as AppSessionId);
 const B = at('app-b' as AppSessionId);
@@ -89,6 +90,24 @@ describe('session visibility', () => {
     expect(sent()).toEqual([{ appSessionId: A, visible: true }]);
     expect(useRemoteReadMarks.getState().visible.has(REMOTE)).toBe(false);
     resetRemoteReadMarks();
+  });
+
+  // P5 O8 M6a, Task 3's review H2: opening an unread remote session on a machine that keeps the member's reading marks it
+  // seen there once, though showing it read changes the records this connection follows
+  it('marks an unread remote session seen once as it comes on screen', async () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    const reading = { appSessionId: REMOTE, pinned: false, unread: false, lastSeen: { messageUuid: null, at: null } };
+    useSessions.setState({ records: new Map([[A, record(A)], [REMOTE, record(REMOTE, { unread: true })]]), listed: new Map(), listedMachines: new Set([OTHER_MACHINE]) });
+    heardReaderRows(REMOTE, { ok: true, value: reading }); // the machine keeps it
+    stop();
+    fake = fakeClient({ 'session.setVisible': undefined, 'session.reader.update': () => reading });
+    stop = connectVisibility(fake.client);
+    useLayout.getState().openSession(REMOTE);
+    await Promise.resolve();
+    expect(fake.invoked('session.reader.update')).toHaveLength(1);
+    expect(useSessions.getState().records.get(REMOTE)?.unread).toBe(false);
+    resetRemoteReadMarks();
+    resetReaderRows();
   });
 
   it('is false for every visible session when the window blurs, and true again on focus', () => {
