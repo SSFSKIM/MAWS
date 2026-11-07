@@ -1285,7 +1285,7 @@ Rejected:
   - their tests.
 - `src/shared/spine/` or wherever the router's command context is typed: `context.reader: 'owner' | MemberId`, absent meaning `'owner'`.
 - **`src/endpoint`** (desk-track reviewed):
-  - offer rows for `session.update` (reader fields only; `title` and `archived` stay the owner's), `session.drafts.get` and `session.drafts.set`;
+  - offer rows for `session.reader.update` (revised 2026-11-07, in place of `session.update`; `title` and `archived` stay the owner's), `session.drafts.get` and `session.drafts.set`;
   - the dispatch sets `context.reader`: `'owner'` when the caller is one of the machine's owners (`machineOwners`), else the caller's member id;
   - `remote-unavailable.ts` drops the three rows;
   - tests.
@@ -1297,7 +1297,7 @@ Rejected:
 - **Reading.** A member's reader fields are their own row's, with no row reading `pinned: false`, `unread: false`, `lastSeen: null`. An `'owner'` reader reads the session row as today.
 - **Unread.** When a new turn ends, the index sets `unread` on the session row and on every `reader_state` row of the session. A member's first sight of a session is not unread. Only `markSeen` clears a member's own.
 - **Grades.** `session.update` (reader fields) is graded `list`, `session.drafts.get` and `.set` `converse`, and `title` and `archived` stay `manage`. A patch mixing reader fields with others is refused `malformed` remotely.
-- **What a remote reader update answers.** Never the record: `applyPatch` returns the whole `SessionRecord` (`register.ts:38-46`), which holds checkout paths, settings and `launchedBy.action` (a spawn's signed act, its brief included; `src/services/sessions/spawn.ts:51-53,75`), and a `list` caller must not read those. With a `reader` in the context, `session.update` answers `ReaderState {appSessionId, pinned, lastSeen, unread}` (a new schema beside `SessionRecordSchema`). The renderer's remote path applies that projection to the record it holds. Local `session.update` answers as today.
+- **What a remote reader update answers.** Never the record: `applyPatch` returns the whole `SessionRecord` (`register.ts:38-46`), which holds checkout paths, settings and `launchedBy.action` (a spawn's signed act, its brief included; `src/services/sessions/spawn.ts:51-53,75`), and a `list` caller must not read those. A reader's update goes through a new machine command, `session.reader.update {appSessionId, patch: {pinned?, lastSeen?, unread?}}`, which answers `ReaderState {appSessionId, pinned, lastSeen, unread}` (a new schema beside `SessionRecordSchema`; `WIRE_MINOR` 31). The renderer's remote path applies that projection to the record it holds. `session.update` stays local, answers as today, and is refused with any reader in the context (revised 2026-11-07, Decision Log "M6a Task 1's fork").
 - **Co-owners share.** Two members who both own a machine share its owners' reading. The index can't tell which owner sits at a device, and the case is rare. It is written in the Surprises, not hidden. Rejected: keying the local app by its signed-in member, which strands the state of a profile that signs in later, or signs out.
 - **No migration of data.** Existing rows stay the owners'. Rejected: copying them to the signed-in member, which needs an identity the daemon doesn't hold.
 - The document channel's member attribution (O7's §T, `stream-document.ts`) is outside M6a. Drafts here are the composer's.
@@ -2132,7 +2132,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
 - **M3 (executable):** §K: `createStateSigner`, the next keys, `checks.ts`, the signer and its pending slot, the weekly asking, deliveries, `postState`, `OrgStatus`'s `signer` and `problem: 'signing'`, `org.resign`, `org.revokeSuperseded`, `org.rekey`, `org.discardPending`, `org.resetSigning`, `signing.json` (failing closed) and `registration.json`'s `signing` and `rekey`; `deployment admin root add`. No `WIRE_MINOR`, settings version, `IpcError` code or e2e group.
 - **M5 (executable):** §L: `memberName`, `OrgMember`, `OrgRows.members`, the `sidebar.people` layout key, `ownersLabel`. No layout version, `WIRE_MINOR` or settings version.
 - **M4a (executable):** §M: `successorProblems` and `stateProblems` in `org-protocol`, the pairing judges moved there, `OrgView`, `OrgChange`, `org.view`, `org.preview`, `org.change`, `org.pair.start`, `org.pair.approve`, `org.pair.cancel`, `OrgStatus`'s `pairing`, `OrgRefusal.attempt`, `Edit.endorse` and `StateSigner.sign`'s `endorse`. No `WIRE_MINOR`, settings version or e2e group.
-- **The rest (executable, 2026-11-06):** §N (M7a), §O (M7b), §P (M6a), §Q (M6b, with M5b's `record.owners`), §R (M4b) and §S (M4c). No `WIRE_MINOR` moves: the new endpoint offers and feeds are additive rows (OX1), and the index takes new tables as `ADDED_TABLES` entries, not migrations (revised 2026-11-06). M7b's spine commands do move `WIRE_MINOR` (to 30, after #506 took 29): they are machine-owned wire entries, not endpoint offer rows. M7a adds the `channel` tab kind with no layout version.
+- **The rest (executable, 2026-11-06):** §N (M7a), §O (M7b), §P (M6a), §Q (M6b, with M5b's `record.owners`), §R (M4b) and §S (M4c). No `WIRE_MINOR` moves: the new endpoint offers and feeds are additive rows (OX1), and the index takes new tables as `ADDED_TABLES` entries, not migrations (revised 2026-11-06). M7b's spine commands do move `WIRE_MINOR` (to 30, after #506 took 29): they are machine-owned wire entries, not endpoint offer rows. So does M6a's `session.reader.update` (to 31, revised 2026-11-07). M7a adds the `channel` tab kind with no layout version.
 
 **§K. The signer** (M3).
 
@@ -2326,8 +2326,11 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     reader_state  (app_session_id, member, pinned, last_seen_uuid, last_seen_at, unread, PRIMARY KEY (app_session_id, member))
     member_drafts (app_session_id, member, doc, attachments, updated_at, PRIMARY KEY (app_session_id, member))
     // the router's command context gains reader?: 'owner' | MemberId   (absent: 'owner')
-    // with a reader, session.update answers ReaderState {appSessionId, pinned, lastSeen, unread}, never the record
-    // src/endpoint/offers.ts: 'session.update' (reader fields only, list), 'session.drafts.get' and '.set' (converse)
+    // revised 2026-11-07: a new machine command, never the record (WIRE_MINOR 31)
+    session.reader.update {appSessionId, patch: {pinned?, lastSeen?, unread?}} -> ReaderState {appSessionId, pinned, lastSeen, unread}
+    // session.update stays local and is refused with any reader
+    // src/endpoint/offers.ts: 'session.reader.update' (list), 'session.drafts.get' and '.set' (converse)
+    // a non-owner's device never receives the owners' reader fields: every record the endpoint sends them, answer or event, carries their own
 
 **§Q. Visibility and shares** (M6b; O18's Interfaces §D).
 
@@ -3311,6 +3314,13 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - the remote path applying `ReaderState` to the record it holds;
      - a remote lane B session's unread and draft surviving a relaunch.
   Date/Author: 2026-11-07, O8's executor (controller).
+
+- Decision: M6a Task 1's fork. A reader's update is a new machine command, `session.reader.update`, at `WIRE_MINOR` 31, and `session.update` is not given a second output type.
+  1. **Why §P couldn't stand as written.** §P had `session.update` answer `ReaderState` when there's a reader, and also said no `WIRE_MINOR` moves. Those can't both hold. `session.update` is a machine-owned entry in the wire manifest. Its answer is checked strictly as a `SessionRecord` by `mawsd`'s front (`front.ts:383`, `validateCommandOutput`) and by the device's renderer (`renderer/src/ipc/client.ts:100`). A union output is a breaking change under `classifyWireChange`, so it would need a wire major.
+  2. **What's built.** `session.reader.update {appSessionId, patch: {pinned?, lastSeen?, unread?}} -> ReaderState`, graded `list`, is an additive command (`WIRE_MINOR` 31). The endpoint offers it in place of `session.update`, which stays local-only and is refused with any reader. A patch can't carry `title` or `archived`, because the schema has no place for them, which covers the `malformed` refusal of a mixed patch on the wire. §P, M6a's Touches and Decisions, and the notes on the rest's wire changes are revised to match. Rejected: a redacted `SessionRecord` with reader fields, which would invent paths and settings to satisfy the schema; and an endpoint-side projection, which the device's strict check of `session.update` refuses.
+  3. **The owners' reader fields on remote feeds.** Task 1 found that the endpoint forwards `session.changed`, whose records carry the owners' `pinned`, `unread` and `last_seen_*`, to remote feeds. M6a's intent is that each member's reading is kept apart, so a non-owner's device never receives the owners' reader fields. Every record the endpoint sends them, an answer or an event, carries their own, or nothing where they have no row. The mechanism is Task 2's, in its desk-track commits; its test sits in `test/endpoint/reader-state.test.ts`.
+  4. **A member's write** sends no `session.changed` and takes no revision. Their own device learns the change from the `ReaderState` answer, and the owners' views don't move.
+  Date/Author: 2026-11-07, O8's executor (controller), on Task 1's NEEDS_CONTEXT.
 
 ## Outcomes & Retrospective
 
