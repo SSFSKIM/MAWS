@@ -3505,6 +3505,25 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - The desk track wants `test/endpoint/rl10/conversation.json`'s blob hash and its changed lines before the PR.
   Date/Author: 2026-11-07, the desk track and the architect, recorded by O8's executor (controller).
 
+- Decision: M6b Task 1, the endpoint and the door. The endpoint-only commits are 776b239cd, 727a103e6 and 5c24e83d1, for the desk track. 79dc87205 (shared IPC) and a35f6cf5a (mawsd) are the rest. The architect accepted these points (2026-11-07).
+  1. **`record.policy`** is a call graded `list` on the machine. It answers only for the sessions the caller owns at `manage`, keyed by listing id. A session the caller doesn't own and a session with no member frame both answer `unavailable`. So does a frame without a `policyRev`, never a default.
+  2. **sminos's absence and capability.**
+     - With no sminos connected, the acts and `record.policy` answer `unavailable`.
+     - With sminos connected but without `record`, the acts are `not-offered` and `record.policy` answers `{supported: false}`.
+     - The check is in the Authorizer's first step, and `draw` checks again.
+  3. **`no-session`** stays inside the endpoint as free text. org-protocol's refusal list is unchanged, and main treats `no-session` as a plain refusal string (Task 2).
+  4. **Lane B placement.** It goes through the spine (`placeRecorded`) and the members join, never the engine host. A caller who doesn't stand on the session hears `grade`, so no answer reveals whether a session exists: the same rule as M7b's uniform refusals. When several lane B members join one session, the order is: the one on the spine's recorded engine session, then the one not superseded, then a sole member. A lost lane B record act is looked up on lane B.
+  5. **The local door** checks, in order:
+     1. the action's name;
+     2. that a step-up is present;
+     3. that the head lists the device exactly once;
+     4. the signature.
+
+     Then it takes a channel's route. It waits 30 s for an outcome, then answers `unknown`/`timeout`. `local?` is optional on both module interfaces, so existing mawsd fakes stay valid, and the seam answers `unavailable` until a module is loaded. The door's two commands, `endpoint.local.act` and `endpoint.local.call`, are main-only on `machine.sock`, and the endpoint's own dispatch is refused them. They are machine-owned wire entries at `WIRE_MINOR` 32.
+  6. **The welcome's `record`.** `test/endpoint/rl10/conversation.json` moves to blob `790db9cad1ae09a3d541c78b5beb9f6891f02108`. On lines 82 and 298, the welcome's `capabilities` go from `["access","reach"]` to `["access","reach","record"]`. Both went to the desk track.
+  7. **The commits don't each build alone.** 776b239cd, 727a103e6, 5c24e83d1 and 79dc87205 each fail the seam's type-parity check (`src/mawsd/endpoint-seam.test.ts:102`) on their own, because the endpoint and mawsd halves are kept apart for review; 776b239cd also lacks `OfferRow.sminos`. The head is green. The architect ruled no squash: M6b lands by merge commit, the gate runs on the merged tree, and the PR body says so.
+  Date/Author: 2026-11-07, O8's executor (controller), from Task 1's report and the architect's rulings.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
