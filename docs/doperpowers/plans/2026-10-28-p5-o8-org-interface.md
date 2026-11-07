@@ -74,6 +74,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
 - [ ] M7b — The project channel: to-human messages across machines — *executable; after M7a; the owner's week (P5 acceptance 16) starts when it lands*
   - [x] (2026-11-06) Task 1, reviewed clean in two rounds (9327c77f2..a54248357; fixes ef3d17d7e, 832534dca): the one extraction of a message (`src/shared/owner/to-human-items.ts`), the spine's channel journal as an `ADDED_TABLES` entry, lane B from the owner channel's batches and the asks' own record, the start-path hold, the cuts, `channel.history` and the main-only `channel.changed` (`WIRE_MINOR` 29). Gates green: 42290932596, 42292712838 (cross-build, the downgrade scene whole), 42297329414.
   - [x] (2026-11-06) Task 2, reviewed by our task reviewer in three rounds and by the desk track in six (READY, their 601) (5a6b05638..f37817c55, with the org-protocol commits 40e793791 and 9e4b67f20): the seam and lane A's `#host` hand-off, `channel.history` with the per-lane `view` cut and opaque cursors, the project-scoped `channel` feed (`rl2.channel`, RL2 1.12, `WIRE_MINOR` 30), reach checks, a bounded streamed scan, the snapshot's restarts, and recovery from the let-go ids. Gates green: 42321083327 (full), 42328732994, 42331543046.
+  - [x] (2026-11-06) Task 3, accepted by the architect (58e294092..19456cac9), with its review carried by the branch's reviewer-high: `machines.ts` (the spine and each machine's feed, gated on `rl2.channel`, with the older-peer fallback and a per-machine cache that belongs to one reader), the merge into `org.channel.*`, and `ToHumanEntry.tsx`. Gate green: 42336903199.
 - [ ] M6a — Reader state and drafts per member — *executable; after M7b*
 - [ ] M6b — Visibility and shares (O18's M5) — *executable; after M6a; its live proof is the staging run it shares with O18 M6, which needs the desk track's sminos executors and a real second member (the owner)*
 - [ ] M4b — Machines and their rights — *executable; after M6b*
@@ -3243,6 +3244,19 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   8. **The consumer dedupes** (the desk track's round 6 and the architect's ruling). Main's channel consumer dedupes by (machine, entry id) across snapshot, ev and history, since the transport dedupes stream positions only. Task 3 owns this.
   The desk track's round 6 found the endpoint READY under the agreed final-round bar (2026-11-06).
   Date/Author: 2026-11-06, O8's executor (controller), from Task 2's fix-wave sections.
+
+- Decision: M7b Task 3, main and the renderer (58e294092..19456cac9), settles these points. The architect accepted them (2026-11-06).
+  1. **`src/main/org/channel/machines.ts`** reads this Mac's spine and each roster machine, only while a tab holds the project's channel. For an endpoint listing `rl2.channel`, it opens the machine's `channel` feed: `subs.ts` now gates the sub on that capability, where before it gated feeds only on `rl2.feeds`. It pages older entries through `channel.history`.
+  2. **Machine states** are `live`, `read` (an older peer, read once at open), `offline` and `unavailable`, each with `asOf`. "as of" shows on a non-live machine's entries. An unavailable machine's entries are greyed, with one faint line naming it.
+  3. **Dedupe and order.** Entries dedupe on (machine, id), across snapshot, ev and history. The order shown is the entry's own `at`, then the machine's journal order, since an opaque cursor sorts nothing. That keeps the endpoint's delivery-order residue out of the tab.
+  4. **Replacement.** A whole read, to `more: false` or 500 entries, replaces the machine's entries, so a reach change takes them out of the member's view.
+  5. **The cache.** `<project>.machines.json` holds the newest 500 entries and at most 4 MiB per machine. It is checked strictly at load, and anything off reads as empty. It belongs to one reader, as M7a's cache does: signed out keeps the file's reader, the first sign-in from no reader is adopted, and any other reader resets it.
+  6. **The roster.** A machine leaves only while the reader is signed in, and at open only a non-empty roster prunes.
+  7. **The schema.** The change is additive and main-to-renderer only, so `WIRE_MINOR` doesn't move: optional `hosts` and `machines` on `org.channel.open`, and a by-key delta on `changed`. The entry carries one plain `session`, as `RemoteRow` does.
+  8. **The renderer.** To-human entries are a renderer kind of their own (`to-human`), drawn by `ToHumanEntry.tsx`. Answers pair with their question by `src` on the same machine. Lane A answers stand alone, since nothing in them names their question. A grouped ask carries no title field, because each question's own text and choices are enough to follow.
+  9. **Wiring.** This Mac's spine is late-bound in `app.ts`, because the org session is built before the services bus.
+  10. **Residue, for the tech-debt tracker at landing.** A flapping link re-reads up to 500 entries per opening, and the open answer can carry up to 4 MiB per machine over IPC at the worst-case text size.
+  Date/Author: 2026-11-06, O8's executor (controller), from Task 3's report.
 
 ## Outcomes & Retrospective
 
