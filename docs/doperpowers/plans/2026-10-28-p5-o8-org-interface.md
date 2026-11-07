@@ -3524,6 +3524,27 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   7. **The commits don't each build alone.** 776b239cd, 727a103e6, 5c24e83d1 and 79dc87205 each fail the seam's type-parity check (`src/mawsd/endpoint-seam.test.ts:102`) on their own, because the endpoint and mawsd halves are kept apart for review; 776b239cd also lacks `OfferRow.sminos`. The head is green. The architect ruled no squash: M6b lands by merge commit, the gate runs on the merged tree, and the PR body says so.
   Date/Author: 2026-11-07, O8's executor (controller), from Task 1's report and the architect's rulings.
 
+- Decision: The owner's answer on the second member (2026-11-07): "Real member, one sitting (Recommended)".
+  The option the owner chose, as the architect put it to them: "As the O8 spec plans. You let a second email you control into staging's Access. Then, in one sitting of about 20–30 min, that person signs into a second scratch MAWS profile through Access. The desk track's harness does the rest, and teardown removes the admission. This is the first live sign-in by someone other than you, which only a real account can test."
+  So Task 4's staging plan keeps both layers. Layer 2 is now planned, not conditional.
+  1. **Layer 1 stands alone.** The harness's keys-only member covers scene B1 and the b1→A1 channel, with B's pin, read and draft, and A's state read back unchanged.
+  2. **Layer 2 is for the one sitting.** It needs:
+     - a second email the owner controls;
+     - the owner's admission of it to staging's Access;
+     - the member added to the staging org;
+     - a second scratch MAWS profile on a GUI Mac, signed in as that person;
+     - the VM enrolled with the right owner.
+
+     Teardown removes the admission and the member.
+  3. **The owner's steps** go in a short list for the architect to hand over: the admission, the sitting's length, and possibly a one-time `cloudflared access login`.
+  4. **Scheduling.** The sitting is scheduled when M6b's PR is near its final gate, not before. The scheduling message carries "same terms as O18 M6: the VM out of production, the desk track deploys master to staging". The desk track sets up a fresh VM at the slot, with scenes on sminos 1.40.1 or later.
+
+- Decision: The desk track found Task 1's fix wave correct (desk 633, on 5cc92783f and f443e16cd).
+  - **The fixes.** `placeRecord` is the one placement for both reads and acts, and `policies()` reads ownership on the record it places. `#localPolicy` answers only under an `ownersRead` that still stands: three reads, then `unavailable`. `unsupported()` is read again in the step the answer goes out, on both paths.
+  - **Nothing leaks.** An unnamed non-owner gets no entry. A named session that exists but isn't the caller's gets the same `unavailable` as one that doesn't exist.
+  - **Residue** (the desk track's Minor; the architect files it): `placeListings` waits for each lane B listing's spine placement in turn, so a `record.policy` call without a named session costs one spine dispatch per lane B listing, in sequence. The exit is `Promise.all`. If Task 3's Share-sheet e2e shows the sheet's opening waiting on these placements, it is fixed in Task 3's wave instead, and its endpoint hunk goes to the desk track.
+  Date/Author: 2026-11-07, the owner, the desk track and the architect, recorded by O8's executor (controller).
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
