@@ -1,6 +1,6 @@
 # P5 O8 — The org interface (2026-10-28)
 
-> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `7781e2d50a7a4a5f86576f11354128d444b8fe39` at master `14ec11778` (P5's Decision Logs 1–245; re-pinned on 2026-11-07 at M6a's cut, where 239–245 change nothing M6a consumes: 239 and 240 swap both Macs to f857f0450, 241 lands #506's RL2 11 and `WIRE_MINOR` 29, 242 ends O14, 243 and 244 shape and pass O18 M6 on staging without `record`, 245 meets Decision Log 227's floor. Before that, at blob `92141de56e15ff65c3da5baa8fa135cdecf075c7` and master `f857f0450`, P5's Decision Logs 1–238, re-pinned on 2026-11-06 at M7b's cut, where 229–238 change nothing M7b consumes: 232 sets the order, 238 lands M7a. Before that, at blob `b99c1767` and master `910539147`, re-pinned for the re-plan of the rest: 223 to 228 make M6's Share sheet O18's M5, with the `list` grade and audience streams; 154 moves the last machine, so the owner's words no longer wait; 155 waives B4's wait on M7's reader; 168 closes O3 and 222 closes O7; 190 makes the spawner an owner and leaves its residue (b) due before owners move; earlier pin blob `d07bfc4ea2466d7d5ca7ca3164aed4d93021311a` at master `6fb933626`, P5's Decision Logs 1–129, re-pinned on 2026-10-29 for M4's re-plan: 121 lands H1, 126 leaves M4 the refused attempt and the section's split, 129 lands M5 and names M4 next; earlier pin blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83`, Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
+> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `257faf80e19062a89fb24caafa28f2c448b68bac` at master `48e0ed15a` (P5's Decision Logs 1–248; re-pinned on 2026-11-07 at M6b's cut, where 246–248 change nothing M6b consumes: 246 lands M7b, 247 puts O18's build on the production hub and has sminos 1.40.0 remove phase 1's hub path, 248 lands M6a and adds M6a's endpoint rule to Decision Log 235's second-member precondition. Before that, at blob `7781e2d50a7a4a5f86576f11354128d444b8fe39` and master `14ec11778`, P5's Decision Logs 1–245, re-pinned on 2026-11-07 at M6a's cut, where 239–245 change nothing M6a consumes: 239 and 240 swap both Macs to f857f0450, 241 lands #506's RL2 11 and `WIRE_MINOR` 29, 242 ends O14, 243 and 244 shape and pass O18 M6 on staging without `record`, 245 meets Decision Log 227's floor. Before that, at blob `92141de56e15ff65c3da5baa8fa135cdecf075c7` and master `f857f0450`, P5's Decision Logs 1–238, re-pinned on 2026-11-06 at M7b's cut, where 229–238 change nothing M7b consumes: 232 sets the order, 238 lands M7a. Before that, at blob `b99c1767` and master `910539147`, re-pinned for the re-plan of the rest: 223 to 228 make M6's Share sheet O18's M5, with the `list` grade and audience streams; 154 moves the last machine, so the owner's words no longer wait; 155 waives B4's wait on M7's reader; 168 closes O3 and 222 closes O7; 190 makes the spawner an owner and leaves its residue (b) due before owners move; earlier pin blob `d07bfc4ea2466d7d5ca7ca3164aed4d93021311a` at master `6fb933626`, P5's Decision Logs 1–129, re-pinned on 2026-10-29 for M4's re-plan: 121 lands H1, 126 leaves M4 the refused attempt and the section's split, 129 lands M5 and names M4 next; earlier pin blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83`, Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
 >
 > **What binds.** O8's section in P5 is this document's design, and P5's approval covers it. Binding with it:
 > - P5 §7 (people: owners, visibility, machine owners and grants, agents talk as today, credentials) and §8 (the sidebar's per-project toggle, the project channel, the Org page, attention across machines); parent acceptance 3 (its remote rows: Decision Log 93), 11 and 12.
@@ -95,6 +95,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
     - Static green at cf5f833c5 (42386392490).
   - [x] (2026-11-07) The branch, reviewed and gated as a whole. reviewer-medium ran four passes with a confidentiality lens; every data loss it found is fixed, and it found no disclosure. The desk track checked every endpoint and draft-path delta and found them correct. `--gates all --evidence` passed on b90a20de5 (run 42395007929): 55 jobs green, no flaky line. The PR is #518.
 - [ ] M6b — Visibility and shares (O18's M5) — *executable; after M6a; its live proof is the staging run it shares with O18 M6, which needs the desk track's sminos executors and a real second member (the owner)*
+  - [x] (2026-11-07) Refresh at the cut: branch `p5-o8-m6b` from master 48e0ed15a, after M6a landed as #518. The cited lines were reconciled, the parent re-pinned at Decision Log 248, and the plan made: four tasks (Decision Log, "M6b's refresh at its cut" and "M6b is built as four tasks").
 - [ ] M4b — Machines and their rights — *executable; after M6b*
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
 - [ ] M5b — Add owner — *executable; after M4c; lands once the desk track's `record.owners` executor and DL190 (b)'s fix are on master*
@@ -3447,6 +3448,44 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   - **Ordering.** Each reopening's read and each told record take the next number from one shared generation counter. An answer applies only while its generation is still the latest, the feed is still mine, and it's live.
   - **Retry.** A failed read asks again under the same generation, from `feedRetryMs[0]` and doubling up to the `feedRetryMs[1]` cap, for as long as it stays current. The delay is capped and the number of tries isn't, as with the feed's own `unavailable`.
   - **A permanent refusal** of `session.get` on an admitted feed re-asks every 30 s, with a log line each time, for the feed's life. That's residue: the exit is to stop, or to end the feed, on a refusal that isn't transient (`forbidden`, `not-offered`).
+  Date/Author: 2026-11-07, O8's executor (controller).
+
+- Decision: M6b's refresh at its cut from master `48e0ed15a` (2026-11-07, after M6a landed as #518). M6b's consumed interfaces were reconciled against master.
+  1. **Cited lines.**
+     - Still holding: the Toolbar's session actions (`SessionMenuOverflow`, `Toolbar.tsx:218-241`, which now also reads M6a's `useReaderRowsOf`); `step-up.ts:11-31` (`record.*` already requires step-up, at :14); `action.ts:30-47` and `:108-122`; `listings.ts:17-20`, with the asker's listing at `:181-207`; `direct-listener.ts:1-5`; and the roster's exclusion of the local ref, which is `src/main/machines/remote/source.ts:47-56` (`rosterOf`, `if (ref === local) continue`).
+     - Moved: channel authorization's presence step is at `authorize.ts:492-505`, after M6a's reader work. `members.ts` is `src/endpoint/rl10/members.ts`. `ActRequest` and `executorOf` are at `src/main/machines/remote/acts.ts:40-53` and `:137`, and `ActRequest.action` already names "O8's 'record.*'". `rows.ts`'s replace rule is at `:365-374`.
+  2. **What sminos already says.** `test/endpoint/rl10/conversation.json` has sminos's hello carrying `["audience", "record"]` (sminos 1.38.0 and later) and the endpoint's welcome carrying `["access", "reach"]`. So M6b's welcome change is one capability added to the welcome lines, and their blob hash goes to the desk track before the PR.
+  3. **What M6a changed underneath.** Channel authorization now names a reader and checks again at dispatch, for the five reader-routed calls. `record.policy` is a new call. It reads the member frame, not the reader rows, so it isn't reader-routed, but it answers only for sessions the caller owns. The local door's `call` answers as the machine owners' member, as §M6b says.
+  4. **The live proof.** The desk track is asked whether O18 M6's staging harness can supply the second member again (B1, each scene its own Linux user on one devcloud VM), and whether a second run on O18 M6's terms needs a fresh word from the owner. Their answer goes to the architect. Task 4 plans the run on it.
+  5. **The parent** is re-pinned at blob `257faf80` (master 48e0ed15a), where Decision Logs 246–248 change nothing M6b consumes.
+  Date/Author: 2026-11-07, O8's executor (controller, refresh pass).
+
+- Decision: M6b is built as four tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-high on the branch with a security lens, as the rest's verification entry names.
+  1. **The endpoint and the door.** The `src/endpoint` hunks go in commits of their own, for the desk track.
+     - The three `record.*` offers and `record.policy`, behind sminos's `record` capability.
+     - `targets.ts`'s `record` rule, for either lane.
+     - `rl10/link.ts`'s record path: an `rpc` carrying the act as `proof`, refusing `no-session` when no member places it.
+     - The welcome's `record`, in the same commit as the offers.
+     - The local door, `EndpointModule.local`.
+     - `test/endpoint/record-acts.test.ts`.
+     - Then, in their own non-endpoint commits: `mawsd`'s `endpoint.local.act` and `endpoint.local.call`.
+     - Before the PR, `conversation.json`'s new blob hash and changed lines go to the desk track by `sminos say`, and the architect is told.
+  2. **Main.**
+     - `src/main/org/policy.ts` (`org.policy.get` and `set`, and M5b's `org.owners.add`).
+     - `actMany` and `signActions`: one confirmation per save.
+     - `rows.ts`'s channel listings, with two memberships per key.
+     - The shared schema and wiring.
+     - `policy.test.ts`, `step-up.test.ts`, `rows.test.ts`.
+     - From M6a's retrospective: `rows.ts`'s two memberships are state written from two sources over unreliable links, so Task 2 writes an enumerating test over their events (a hub snapshot's rows and completion, a hub `gone`, a delayed older hub `gone`, a channel answer, a channel omission, a higher-revision `gone`, a link drop). Its invariant: a row is drawn exactly while either membership holds at the newest accepted revision, and never blinks across a public → private move.
+  3. **The renderer.**
+     - The Share sheet.
+     - The marks on `ListedRow` and `SessionRow`, and the hover card.
+     - The listing-capable menus, and the Toolbar's session actions.
+     - `stores/policies.ts` and `copy.ts`.
+     - An e2e case seeding the sheet and marked rows, with screenshots.
+  4. **The local suite and the live proof.**
+     - `test/org/policy.local.test.ts`, on a Miniflare hub with a real endpoint and a sminos stand-in executing the contract.
+     - The shared staging run's plan, on the desk track's answer (refresh item 4). The run itself is scheduled by the architect.
   Date/Author: 2026-11-07, O8's executor (controller).
 
 ## Outcomes & Retrospective
