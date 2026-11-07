@@ -119,18 +119,18 @@ describe('counting and comparing', () => {
 
 describe('the machine half', () => {
   // A home whose path holds glob metacharacters, as a real SMINOS_HOME may: its log files are found all the same.
-  const machineHome = (hubJson: object) => {
+  const machineHome = (identity: object) => {
     const home = mkdtempSync(join(tmpdir(), 'counts-[x]*-'));
     const pid = randomUUID();
     const log = join(home, 'projects', pid, 'log');
     mkdirSync(log, { recursive: true });
     mkdirSync(join(home, 'daemon'));
-    writeFileSync(join(home, 'daemon', 'hub.json'), JSON.stringify(hubJson));
+    writeFileSync(join(home, 'daemon', 'identity.json'), JSON.stringify(identity));
     return { home, pid, log };
   };
 
   it('counts a log directory as the hub half counts the same events, and reads only the enrolled and former names', () => {
-    const { home, pid, log } = machineHome({ machine: 'sk', former: { 'SK.local': ['not-printed-session'] }, key: 'not printed', client_secret: 'not printed' });
+    const { home, pid, log } = machineHome({ name: 'sk', former: { 'SK.local': ['not-printed-session'] }, org: 'not printed', hub: 'not printed', ref: 'not printed' });
     try {
       const events = [ev('sk/s1', 1, 'joined'), ev('sk/s1', 2, 'message'), ev('hub/m', 1, 'human'), ev('hub/m', 3, 'human')];
       writeFileSync(join(log, 'sk.s1.jsonl'), events.slice(0, 2).map((e) => JSON.stringify({ ...e, text: 'é' })).join('\n') + '\n');
@@ -150,7 +150,7 @@ describe('the machine half', () => {
   });
 
   it('writes its snapshot over a damaged log, names each line that is not an event, and exits 1', () => {
-    const { home, pid, log } = machineHome({ machine: 'sk' });
+    const { home, pid, log } = machineHome({ name: 'sk' });
     try {
       const lines = [JSON.stringify(ev('sk/s1', 1)), '{"writer":"sk/s1","seq":2,"ki', '[]', '', JSON.stringify(ev('sk/s1', 3))];
       writeFileSync(join(log, 'sk.s1.jsonl'), lines.join('\n') + '\n');
