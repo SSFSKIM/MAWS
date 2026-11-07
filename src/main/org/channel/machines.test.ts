@@ -213,7 +213,8 @@ describe('the merge', () => {
 
   it('dedupes by entry id per machine: an id heard at two seqs, through history after an ev, and the same id on two machines kept apart', async () => {
     const page = [entry('p2', 2), entry('p1', 1)];
-    const mini = new FakeLink(MINI, 'mini', undefined, (input) => ({ ok: true, output: input.before === 'm3' ? { entries: [entry('m3', 3, 'again'), ...page], more: false } : { entries: [], more: false } }));
+    const older: Record<string, HostEntry[]> = { m3: [entry('m3', 3, 'again'), ...page], m6: [entry('m5', 5, 'through history after its ev'), entry('m4', 4), entry('m3', 3), ...page] };
+    const mini = new FakeLink(MINI, 'mini', undefined, (input) => ({ ok: true, output: { entries: older[input.before as string] ?? [], more: false } }));
     const vm = new FakeLink(VM, 'vm');
     const h = harness({ links: [mini, vm] });
     const hosts = await h.open();
@@ -221,12 +222,16 @@ describe('the merge', () => {
     await until(() => texts(hosts).length === 4, 'the snapshot and its older page');
     mini.ev(1, entry('m5', 5));
     mini.ev(2, entry('m5', 5)); // one entry at two seqs
+    mini.live().sink.ended('behind');
+    await until(() => mini.subs.length === 2, 'the feed opened again');
+    mini.snapshot([entry('m6', 6)], true, mini.subs[1]); // its older page holds m5 again
+    await until(() => mini.calls.length === 2, 'the older page');
     vm.snapshot([entry('m5', 5, 'vm’s own m5')]);
-    await until(() => hosts.entries().length === 6, 'vm’s entry');
+    await until(() => hosts.entries().length === 7, 'vm’s entry');
     const keys = hosts.entries().map((e) => e.key);
     expect(new Set(keys).size).toBe(keys.length);
-    expect(keys).toEqual([`${MINI} p1`, `${MINI} p2`, `${MINI} m3`, `${MINI} m4`, `${VM} m5`, `${MINI} m5`]); // at one time, by key
-    expect(hosts.entries().find((e) => e.key === `${MINI} m3`)?.text).toBe('m3'); // the first copy stands: an entry never changes
+    expect(keys).toEqual([`${MINI} p1`, `${MINI} p2`, `${MINI} m3`, `${MINI} m4`, `${VM} m5`, `${MINI} m5`, `${MINI} m6`]); // at one time, by machine
+    expect(hosts.entries().filter((e) => e.machine === MINI).map((e) => e.text)).toEqual(['p1', 'p2', 'm3', 'm4', 'm5', 'm6']); // the first copy stands: an entry never changes
   });
 });
 
