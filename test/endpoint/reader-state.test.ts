@@ -22,7 +22,7 @@ import { Index } from '../../src/services/index/index';
 import { registerIndexHandlers } from '../../src/services/index/register';
 import { summary } from '../support/index-fixture';
 import { endorsed, memberId, newDevice, successor, type TestDevice } from './org-fixtures';
-import { act, done, evs, laneAMember, makeOrg, openRemote, ORG, sminos, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
+import { act, done, evs, laneAMember, makeOrg, openRemote, ORG, sminos, snapshot, startEndpoint, stopAll, subscribe, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
 let b2: TestDevice;
@@ -51,6 +51,16 @@ const LATER = '2026-11-07T11:00:00.000Z';
 /** A reader with no row: unpinned, read, never seen. */
 const NONE = { pinned: false, unread: false, lastSeen: { messageUuid: null, at: null } };
 const readerFields = (record: Record<string, unknown>) => ({ pinned: record.pinned, unread: record.unread, lastSeen: record.lastSeen });
+/** Every object in `value` that holds a reader field (`unread`, `lastSeen`), as its reading. */
+function readingsIn(value: unknown, found: Array<Record<string, unknown>> = []): Array<Record<string, unknown>> {
+  if (Array.isArray(value)) for (const item of value) readingsIn(item, found);
+  else if (typeof value === 'object' && value !== null) {
+    const fields = value as Record<string, unknown>;
+    if ('unread' in fields || 'lastSeen' in fields) found.push(readerFields(fields));
+    for (const item of Object.values(fields)) readingsIn(item, found);
+  }
+  return found;
+}
 
 /** The machine, its index the real one behind `dispatch('machine', …)`, and one lane B session shared with B (and others). */
 async function machine(grade: Grade = 'view', others: Array<{ member: string; grade: Grade }> = []): Promise<{ f: Fixture; index: Index; app: AppSessionId }> {
@@ -366,20 +376,92 @@ describe('every record a member is sent carries their own reading', () => {
     expect(changes(b, 'f1').map((c) => [c.revision, c.record.title])).toEqual([1, 2, 3, 4, 5].map((n) => [n, `t${n}`]));
   });
 
-  // Snapshots (a subscription's opening state, a feed's snapshot), history pages (events, app events, the channel's
-  // journal) and remote rows are made of what the offered commands answer and what the machine emits. Of all of those,
-  // only the record's carry reader fields: `session.get`'s answer and `session.reader.update`'s (the reader's own, by the
-  // dispatch's reader), and `session.changed` (projected per member, above). `ownerChannel.changed` is the owner
-  // channel's own reading, which no feed carries (the owner channel isn't offered on another machine).
-  it('snapshots and history pages: only the record’s answers and `session.changed` carry reader fields', () => {
-    const carries = (schema: z.ZodType) => {
-      const json = JSON.stringify(z.toJSONSchema(schema, { unrepresentable: 'any', io: 'output', cycles: 'ref' }));
-      return json.includes('"unread"') || json.includes('"lastSeen"');
+  // Fix wave F3: what each member is actually sent, surface by surface, through real channels: a lane B subscription's
+  // opening snapshot and its events, the checkout and attention feeds' openings, the history pages (`session.events`,
+  // `session.appEvents`, `session.history.list`) and the record's own answers. The owners', B's and D's readings and
+  // drafts are each distinct, so a value in the wrong member's inbox is found wherever it sits.
+  it('snapshots and history pages: each member receives their own reading and draft, and nobody else’s, on every surface', async () => {
+    const { f, index, app } = await machine('converse', [{ member: D, grade: 'view' }]);
+    const OWNERS = { seen: 'owners-seen-7f3a', at: '2031-02-03T04:05:06.000Z', draft: 'OWNERS-ONLY-DRAFT' };
+    const B_ = { seen: 'b-seen-1c2d', at: '2030-01-02T03:04:05.000Z', draft: 'B-ONLY-DRAFT' };
+    index.sessions.setPinned(app, true);
+    index.sessions.markSeen(app, { messageUuid: OWNERS.seen as MessageUuid, at: OWNERS.at });
+    index.sessions.setUnread(app, true);
+    index.drafts.set(app, draft(OWNERS.draft));
+    index.sessions.markSeen(app, { messageUuid: B_.seen as MessageUuid, at: B_.at }, org.B);
+    index.drafts.set(app, draft(B_.draft), org.B);
+    const theirs = { [org.A]: { pinned: true, unread: true, lastSeen: { messageUuid: OWNERS.seen, at: OWNERS.at } }, [org.B]: { ...NONE, lastSeen: { messageUuid: B_.seen, at: B_.at } }, [D]: NONE };
+    // The session live on the engine host with a turn in its journal; its attention item, app events and prompt history.
+    f.host.add(app, index.sessions.get(app)!.engineSessionId);
+    f.host.row(app, 2);
+    f.host.attach(true);
+    const at = AT;
+    f.spine.handle('attention.list', () => [{ id: 'att-r1', appSessionId: app, sessionId: index.sessions.get(app)!.engineSessionId, kind: 'permission', request: { requestId: 'r1', toolUseId: 'tu-r1', taskId: null, agentId: null }, summary: 'permission', createdAt: at, state: 'pending', stateChangedAt: at, expiresAt: null }]);
+    f.spine.handle('session.appEvents', () => ({ events: [] }));
+    f.spine.handle('session.history.list', () => ({ entries: [] }));
+
+    const inboxes = new Map<string, Remote>();
+    for (const [member, device] of [[org.A, org.a1], [org.B, org.b1], [D, d1]] as const) {
+      const r = await openRemote(f, device, member);
+      inboxes.set(member, r);
+      await subscribe(r, 's1', { lane: 'B', id: app });
+      await snapshot(r, 's1');
+      await feed(r, 'f1', app);
+      const from = r.inbox.length;
+      await r.channel.send({ t: 'sub', sub: 'att', feed: 'attention', cursor: null, credit: 4 * 1024 * 1024 });
+      await waitFor(r, (m) => m.sub === 'att' && m.t === 'snap', 'the attention feed’s snapshot', from);
+      for (const [name, input] of [
+        ['session.events', { appSessionId: app, afterSeq: null, limit: 100 }],
+        ['session.appEvents', { appSessionId: app }],
+        ['session.history.list', { appSessionId: app, limit: 10 }],
+        ['session.get', { appSessionId: app }],
+        ['session.drafts.get', { appSessionId: app }],
+      ] as const) {
+        expect([member, name, code(await call(r, name, input))]).toEqual([member, name, 'ok']);
+      }
+    }
+    f.host.emitMachine('session.changed', { record: index.sessions.get(app)!, cause: 'update', revision: 9 });
+    await until(() => [...inboxes.values()].every((r) => changes(r, 'f1').length === 1), 'each feed’s change');
+
+    for (const [member, r] of inboxes) {
+      const sent = JSON.stringify(r.inbox);
+      // Every reader-shaped object a member was sent reads as theirs (the record's answer, its change on the feed), …
+      const readings = readingsIn(r.inbox);
+      expect([member, readings.length]).toEqual([member, 2]);
+      for (const reading of readings) expect([member, reading]).toEqual([member, theirs[member]]);
+      // … and nobody else's reading or draft is anywhere in what they were sent.
+      const others = member === org.A ? [B_.seen, B_.draft] : member === org.B ? [OWNERS.seen, OWNERS.at, OWNERS.draft] : [OWNERS.seen, OWNERS.at, OWNERS.draft, B_.seen, B_.draft];
+      for (const token of others) expect([member, token, sent.includes(token)]).toEqual([member, token, false]);
+    }
+    // Each draft reached its own writer (the scan above saw real payloads).
+    expect(JSON.stringify(inboxes.get(org.A)!.inbox)).toContain(OWNERS.draft);
+    expect(JSON.stringify(inboxes.get(org.B)!.inbox)).toContain(B_.draft);
+  });
+
+  // A supplementary guard: what the offered commands answer and the events carry, by their schemas. Only the record's
+  // carry reader fields (`unread`, `lastSeen`): `session.get`'s and `session.reader.update`'s answers and `session.changed`;
+  // `ownerChannel.changed` is the owner channel's own, which no feed carries. `pinned` beside them is also an artifact
+  // version's pin. A schema the scan can't read (beyond `void`) is named, so a new one is looked at rather than passed.
+  it('the schemas: only the record’s answers and `session.changed` carry reader fields', () => {
+    const unreadable: string[] = [];
+    const json = (name: string, schema: z.ZodType) => {
+      try {
+        return JSON.stringify(z.toJSONSchema(schema, { unrepresentable: 'throw', io: 'output', cycles: 'ref' }));
+      } catch {
+        if (!(schema instanceof z.ZodVoid)) unreadable.push(name);
+        return JSON.stringify(z.toJSONSchema(schema, { unrepresentable: 'any', io: 'output', cycles: 'ref' }));
+      }
     };
     const offered = Object.keys(OFFERS.commands).filter((name) => Object.hasOwn(REGISTRY.commands, name)) as Array<keyof typeof REGISTRY.commands>;
-    expect(offered.filter((name) => carries(REGISTRY.commands[name].output))).toEqual(['session.get', 'session.reader.update']);
-    const events = Object.keys(REGISTRY.events) as Array<keyof typeof REGISTRY.events>;
-    expect(events.filter((name) => carries(REGISTRY.events[name])).sort()).toEqual(['ownerChannel.changed', 'session.changed']);
+    const outputs = new Map(offered.map((name) => [name, json(name, REGISTRY.commands[name].output)]));
+    const events = new Map((Object.keys(REGISTRY.events) as Array<keyof typeof REGISTRY.events>).map((name) => [name, json(name, REGISTRY.events[name])]));
+    const reading = (text: string) => text.includes('"unread"') || text.includes('"lastSeen"');
+    expect([...outputs].filter(([, text]) => reading(text)).map(([name]) => name)).toEqual(['session.get', 'session.reader.update']);
+    expect([...events].filter(([, text]) => reading(text)).map(([name]) => name).sort()).toEqual(['ownerChannel.changed', 'session.changed']);
+    const ARTIFACT_PINS = ['artifacts.create', 'artifacts.duplicate', 'artifacts.get', 'artifacts.list', 'artifacts.update', 'library.get', 'library.list'];
+    expect([...outputs].filter(([, text]) => text.includes('"pinned"')).map(([name]) => name).sort()).toEqual(['session.get', 'session.reader.update', ...ARTIFACT_PINS].sort());
+    // Bytes (`pty.attach`'s, an artifact's state and attributions, a terminal's and a browser's frames): no reading in them.
+    expect(unreadable.sort()).toEqual(['artifacts.attributions', 'artifacts.versionState', 'browser.remote.frame', 'pty.attach', 'pty.data']);
   });
 
   it('remote rows: a listing carries RL6’s five fields and no reading', async () => {
