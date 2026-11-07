@@ -266,6 +266,19 @@ describe('a reader decided before the machine’s owners change', () => {
     expect(index.drafts.get(app, org.A)).toEqual(draft('mine'));
   });
 
+  // Re-review G3: the retry is spent once. A call whose second decision moved too goes nowhere and answers `unavailable`.
+  it('answers `unavailable` when the owners move again under the call’s second decision, and the machine hears neither', async () => {
+    const { f, index, app } = await machine('view', [{ member: org.A, grade: 'view' }]);
+    const a = await openRemote(f, org.a1, org.A);
+    // The first decision names A an owner, then B takes the machine; the second names A a member, then A has it back.
+    const probe = ownersMoveAfter(f, 'session.reader.update', [[org.B], [org.A]]);
+    const answer = await call(a, 'session.reader.update', { appSessionId: app, patch: { pinned: true } });
+    expect(probe.moved()).toBe(true);
+    expect(code(answer)).toBe('unavailable');
+    expect(f.host.calls.filter((c) => c.name === 'session.reader.update')).toEqual([]);
+    expect(readerFields(index.sessions.get(app)!)).toEqual(NONE);
+    expect(readerFields(index.sessions.get(app, org.A)!)).toEqual(NONE);
+  });
 });
 
 // Fix wave F2 (the desk track's P2): a checkout feed's changes wait, in order, on each member's reading; while they wait
