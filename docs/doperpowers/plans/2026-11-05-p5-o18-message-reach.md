@@ -42,7 +42,7 @@ Then `sminos share <session> <member> list` (run by the owner at a terminal): th
 - [x] (2026-11-06 05:09Z) D5's restatement of a withheld own snapshot (board #492): sminos 1.37.0, branch `o18-d5-restate` on M4's head (`bccda6f1..c9850331`); all five sminos gates GREEN on `c9850331` (run 42164345530); reviewer-medium, two rounds, the second correct; merged 2026-11-07 02:01Z as doperpowers PR #465 (`2cd36862`); board #492 done.
 - [x] (2026-11-06 06:50Z) M5's sminos executors, `record.access`, `record.shares` and O8's `record.owners` (O8 M6b and M5b): sminos 1.38.0, branch `o18-record-executors` on D5's head (`c9850331..23035da7`); GREEN on `23035da7` (run 42174469720); reviewer-high with a security lens, three rounds, every finding fixed; merged 2026-11-07 02:26Z as doperpowers PR #466 (`b26ffe81`).
 - [x] (2026-11-07 03:15Z) M5's widening cutover in sminos's CLI, keyed on the endpoint's `record` welcome (P5 Decision Logs 231 and 232; the architect's ruling, chat 1164): sminos 1.39.0, branch `o18-widening-cutover` on the executors' head (`23035da7..4a0c3b89`); reviewer-high, two rounds, the second correct; all five sminos gates GREEN on `ff2c40e8` (run 42179385114), and on the merged head `213b49de` (run 42327542258) but for the known `test_manager_serve` flake, with sminos-suites GREEN on the identical tree `4a0c3b89` (run 42329436955); merged as doperpowers PR #467 (`0759115d`).
-- [ ] M6: live acceptance on the staging org. Shape ruled 2026-11-07 (the architect, chat 1204, on the desk track's mapping); the harness on MAWS branch `p5-o18-m6` first, then the run.
+- [x] (2026-11-07 07:55Z) M6: live acceptance on the staging org. Shape ruled 2026-11-07 (the architect, chat 1204, on the desk track's mapping); the harness on MAWS branch `p5-o18-m6` first, then the run. One full run PASSED at `68c6125a4`: every item, 44 checks, none failed or skipped (Outcomes, M6).
   - [x] (2026-11-07) The harness: `vm/scene.sh --scene`, its reach verbs, `vm/setup.sh` and `vm/teardown.sh`'s reach mode, `vm/check.sh`'s reach lines, `VmMachine`'s scene and verbs, `OrgAdmin`'s `owners`, `reach-acceptance.ts` and `reach-items.ts`, `staging-run.sh reach` and `reach-vm`, the README's section; unit-tested against stand-ins (`test/deploy/reach-acceptance.test.ts`, `reach-scene.test.ts`, `staging-scripts.test.ts`) and PA and PB's own path against the suites' local hub (`reach-probes.test.ts`), O10's run unchanged under the parametrized scene. Branch `p5-o18-m6` from `4eb50d0c8`. Its review (reviewer-high, security lens) and the run follow.
 - [ ] M5 is an external contract, blocked on O8 M6 and outside O18's acceptance.
 
@@ -880,6 +880,12 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
 
 - Observation (M6, the harness, 2026-11-07): parts of `fake-machine/` are dead against any hub since O8 M5b, but not the pieces PA and PB stand on: `FakeEndpoint`, `enrollV2`'s `V2Machine` and `credentialHeaders` are what the suites' own RL1 support (`test/support/rl1.ts`) uses, and `OrgAdmin.listedMachine`'s `/api/enrollments` and `/key` routes answer. `test/deploy/reach-probes.test.ts` drives the probes' real path on the local hub: listing for their owners, the welcome's `audience`, a hand-signed say refused `not-reachable` with no message and kept as a tombstone on the owner's log, the hello's `have` and backlog, and the history page by writer (200, the stream empty, the plain writer served). No switch to another path was needed.
   Evidence: `git bundle create … HEAD` at `4eb50d0c8`, 2026-11-07.
+- Observation (M6, the rehearsals, 2026-11-07): for a local path, git starts `upload-pack` and `receive-pack` with its config variables cleared, so a command-scope `safe.directory` (`-c`, `GIT_CONFIG_COUNT`) never reaches the far end of the fetch. Every reach scene's archive fetch then failed with "detected dubious ownership in repository at '/srv/o18-archive.git'" (the repository is root's, shared by group), and 3a, 3c and 3d waited 300 s for a commit that never came. A global config file named by `GIT_CONFIG_GLOBAL` does reach it. Each reach scene now writes `$R/gitconfig` at `up` (removed with `$R` at `down`); the VM's own git configuration is untouched.
+  Evidence: on `dc-o18m6-8b03` as `o18b`, git 2.43.0: `git ls-remote /srv/o18-archive.git` under `GIT_CONFIG_COUNT` and under `-c` exited 1 (dubious ownership); under `GIT_CONFIG_GLOBAL` it exited 0. The cause was named by the timeout's own evidence (`archive-evidence`: daemon.json's `archive.error`). Fix `68c6125a4`.
+- Observation (M6, the rehearsals): `staging-run.sh`'s output filter drops every line naming `token`, `secret` or `bearer`, so a check titled "none of the private tokens" (3a's and 6e's archive checks) never reached the log, pass or fail. The item's summary said `FAIL 3a` with no failing line in view. Those checks and the scene verbs' argument errors now say "marker", and a test holds every check title clear of the filter's words.
+  Evidence: `reach-20261107T064157Z.log`, where 3a's archive check had its `archive-ls` polls and `archive-evidence` but no result line. Fix `68c6125a4`.
+- Observation (M6, the rehearsals): sminos's `refused-reach` daemon.log line never names the outcome ("the endpoint refused <writer:seq> (<project>) reach into <session8>: <reason>; nothing delivered", `deliver_reach`). 3e looked for the word `refused-reach` and failed on staging, and item 1's check that no refusal was logged could never fail. Both now match the line itself (`refusedReachLine`).
+  Evidence: `reach-20261107T062325Z.log` (3e: "A1's daemon.log says no refused-reach"); the rerun passed 3e. Fix `175f5f2b3`.
 
 ## Decision Log
 
@@ -1409,3 +1415,46 @@ sminos computes `audienceDigest` identically in Python, `hashlib.sha256(json.dum
   - Tests: `test_visibility`'s `Cutover` class (seven cases: refusal and narrowing, the sticky word, a lost file, a rebuilt file, a welcome that arrives while the terminal waits, a machine not cut over, the record acts).
   - What the review caught (two rounds, the second correct): an `audience` frame that rebuilt a lost `audiences.json` wrote `capabilities: []`, which read as a welcome without `record` and reopened the terminal; a rebuild now writes no capabilities and they read as not known yet. And the cutover was checked only before the y/N prompt, which can wait indefinitely; it is now decided again at the write, under the records lock. The lesson repeats M4's: check the condition against the data in hand at the moment of the act, and never let a file you rebuilt stand in for a word nobody said.
   - What stays open for a second member: DL 235's precondition also needs every machine's endpoint to send the `record` welcome, which waits on O8 M6b's app.
+- M6 (2026-11-07). The live acceptance passed on `staging-ssfskim` in one run, 07:29:46Z to 07:55:08Z, every item in the run's order.
+  - **What ran:**
+    - MAWS `68c6125a4` (branch `p5-o18-m6`). Staging served the M6 build, `hub@bdf8fd36` (`web@p5-o18-m6.bdf8fd36`), which contains M1, M2 and M2b.
+    - sminos `904b0a35` (1.39.0) on A1, A2 and B1, and `386c4b07` (1.34.0) on A3.
+    - The four scenes on one devcloud VM, `dc-o18m6-8b03`, made without `--project maws` (the owner's choice), so no scratch machine joined production. PA and PB ran in process.
+  - **The verdict:** PASS on the scene and on 2, 8, 3a, 3b, 3c, 7, 1, 5, 4, 3e, 3d, 6b, 6c, 6d and 6e: 44 checks ok, none failed or skipped.
+    - Cited, not run: 6a, the hold while the hub's welcome lacks `audience` (`test/endpoint/rl10/audience-signing.test.ts`), since a pre-M1 hub over M1's tombstones would put staging's logs at risk.
+    - By the suites: 8's cutover sentence (sminos `test_visibility.py` `Cutover`), and 3a's browser half (`apps/desk-hub/test/audience-reads.test.ts`), since no browser can be the second member.
+    - Cleanup: the head lists none of the run's members, devices or machines, and every scene is ended.
+    - Production was unchanged before and after (`hub@1eeff6de`), and no file holds a secret the run handled.
+    - Log: `~/.local/state/desk-hub-staging/reach-20261107T072946Z.log` on the desk track's MacBook.
+  - **The evidence, by acceptance item:**
+    - 1: across A1 and A2, S → T and T → S were each delivered once, with S private and with both private. S wrote under the stream of its owner alone, and neither daemon.log logged a refusal.
+    - 2: U (B1, the second member's) messaged listed S. It was delivered once, as a chat frame from U's lane with its owner label, nobody's words. S spawned L1 while listed.
+    - 3a, after S's notice:
+      - U's `list --org`, `find` and `@short` named nothing of S.
+      - B1's log files and uplink.json held no audience stream of S. S's id appeared after the notice only in `daemon/audiences.json`, whose entry carries no private audience.
+      - C1, born private, was in no file of B1's home and no listing, and `endpoint.listings` from A1 to b1 had no S.
+      - PB's hello, the history route and the inventory gave nothing of S past its notice, and PA got no stream by name.
+      - The archive, written by A1, held no stream file and none of the private markers.
+    - 3b: L1 named S as its spawner to no one. A `say` to S and U together reached B1 only as U's own, naming neither S's alias nor its short.
+    - 3c: a forged `say` was refused at upload and settled withheld, U was told `not-reachable`, and the owner read the position as a tombstone. The archive, written by B1, held the tombstone and not the text. PB's hand-signed `say` was refused `not-reachable`.
+    - 3d: with B1 frozen across the share's removal, U's stale `say` was refused at upload and kept as a tombstone. U was told, S never got it, and the archive held no file of the stream.
+    - 3e: a message admitted under the share, with A1 stopped and the share removed, was imported by A1, logged as refused-reach and never delivered. U was told nothing.
+    - 4: under a Can message share, U saw and messaged S, b1 was listed S with an audience of 2, and b1's transcript read was refused (`grade`). After the unshare, S dropped out of U's list, and `@short` answered "no member".
+    - 5: with A2 frozen, the operator's `say` to T stayed owed for 25 s and was delivered once after the thaw. With A2 stopped, S's `say` was delivered once after A2 started.
+    - 6b: PA's (an old endpoint's) `say` was refused `not-reachable`, and its position read as a tombstone.
+    - 6c: PA as an old reader had no stream of S in its `have`, its backlog or by name.
+    - 6d: the frozen client's human toward private S was refused and stored nowhere. Toward listed T it was admitted and delivered.
+    - 6e: A3, on sminos 1.34.0 and designated the archiver, had S's private snapshot in its endpoint's cache at an audience of 1, no stream file in its log, and no stream or private marker in the archive it wrote.
+    - 7: S's `say` to U was refused at its CLI, with A1's log and streams.json unchanged.
+    - 8: an agent's shell narrowed S to private (policyRev 1), and both widenings were refused ("widening reach needs its owner"), with policyRev unchanged.
+  - **What the rehearsals caught:** every failure was in the harness, never in sminos or MAWS. There were five:
+    - `known_session`'s pipefail;
+    - `daemon/audiences.json` judged as a leak;
+    - the archive's command-scope `safe.directory`;
+    - check lines the runner's filter dropped;
+    - the refused-reach line's wording.
+
+    The last three are in Surprises. The lesson for a live harness: hold each check against what the product actually writes and against what the runner shows. Item 1's check that no refusal was logged could never fail, and it passed silently until 3e's positive check of the same line failed.
+  - **Left for later:**
+    - O14's production run still names the deleted VM (`PRODUCTION_MACHINE`, `endpoint-production.ts`), and O10's `endpoint-vm setup` still copies the VM marketplace's sminos (friction entry `MAWS/live/endpoint-acceptance-scene-defaults-name-a-deleted-vm.md`).
+    - Two tests on master are flaky: `src/services/index/source.test.ts` (watcher-delete) and `apps/desk-hub/test/audience-reads.test.ts` (the audit record's replay).
