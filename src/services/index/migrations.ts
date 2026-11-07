@@ -320,11 +320,13 @@ export const ADDED_TABLES: readonly AddedTable[] = [
   // (sminos's id), lane B's read from the owner channel's batches and MAWS asks, lane A's handed in by the endpoint. `src`
   // is each entry's origin, so a resend or a replay adds no row; `at` is epoch milliseconds, so entries from either lane
   // order by time whatever their ISO spelling. Kept to the newest 2,000 per project and 30 days; no foreign key: an entry
-  // stays the project's history after its session goes.
+  // stays the project's history after its session goes. `id` is AUTOINCREMENT (M7b Task 2 fix wave 3): a pruned entry's id
+  // is never issued again (its row in sqlite_sequence keeps the highest), since the endpoint seals a member's cursor from it
+  // and a device dedupes entries by that cursor.
   {
     table: 'channel_entries',
     sql: `
-CREATE TABLE IF NOT EXISTS channel_entries (id INTEGER PRIMARY KEY, project TEXT NOT NULL, app_session_id TEXT, engine_session_id TEXT,
+CREATE TABLE IF NOT EXISTS channel_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, app_session_id TEXT, engine_session_id TEXT,
   lane TEXT NOT NULL CHECK (lane IN ('A','B')), kind TEXT NOT NULL CHECK (kind IN ('message','question','answered')),
   text TEXT NOT NULL, choices TEXT, at INTEGER NOT NULL, src TEXT NOT NULL, UNIQUE(src));
 CREATE INDEX IF NOT EXISTS channel_entries_project_at ON channel_entries(project, at, id);
