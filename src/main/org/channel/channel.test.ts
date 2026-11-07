@@ -10,12 +10,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NO_CERTIFICATES, type HistoryAttestation, type OrgView, type Signed } from '../../../../apps/org-protocol/src/index.ts';
 import { ChannelOrg, NOW, ORG, PROJECT, S1, S2 } from '../../../../test/org/channel-world';
-import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelSession, ChannelWord } from '@shared/ipc/schema/org';
+import type { ChannelAnswer, ChannelChanged, ChannelEvent, ChannelHost, ChannelMachine, ChannelSession, ChannelWord } from '@shared/ipc/schema/org';
+import type { MachineRef } from '@shared/machine/ref';
 import { BUILD_HEADER } from '../hub-client';
 import type { WebSocketLike } from '../registry-feed';
 import { heldOrgSession, type SignedIn } from '../session';
 import { emptyLog, type ChannelCacheFile, type ChannelStore } from './cache';
 import { createChannels, type Channels } from './channel';
+import type { ChannelMachines, ProjectHosts } from './machines';
 
 /** A judgment of an event whose text is `held.text` waits for `held.until`: a verification still in flight. */
 const held = vi.hoisted(() => ({ text: null as string | null, until: Promise.resolve() }));
@@ -98,7 +100,17 @@ afterEach(async () => {
 });
 
 async function harness(
-  options: { seed?: (o: ChannelOrg) => Promise<ChannelCacheFile>; head?: (o: ChannelOrg) => OrgView['head']; records?: Signed<HistoryAttestation>[]; signedIn?: boolean; hub?: boolean; events?: number; reading?: Promise<void>; coalesce?: number } = {},
+  options: {
+    seed?: (o: ChannelOrg) => Promise<ChannelCacheFile>;
+    head?: (o: ChannelOrg) => OrgView['head'];
+    records?: Signed<HistoryAttestation>[];
+    signedIn?: boolean;
+    hub?: boolean;
+    events?: number;
+    reading?: Promise<void>;
+    coalesce?: number;
+    machines?: ChannelMachines;
+  } = {},
 ) {
   const o = await ChannelOrg.make();
   const cache = options.seed === undefined ? undefined : await options.seed(o);
@@ -148,6 +160,7 @@ async function harness(
       return socket;
     },
     now: () => NOW,
+    ...(options.machines === undefined ? {} : { machines: options.machines }),
     timing: { CHANNEL_RELEASE_MS: 60, CHANNEL_WRITE_MS: 5, CHANNEL_COALESCE_MS: options.coalesce ?? 5, ...(options.events === undefined ? {} : { CHANNEL_CACHE_EVENTS: options.events }) },
     random: () => 0.5,
     log: () => {},
@@ -703,5 +716,79 @@ describe('a project channel', () => {
     socket.frame({ t: 'log', events: [{ offset: 4, event: await h.o.say(h.o.mini, 2, 'too late') }] });
     await sleep(30);
     expect(h.writes.length).toBe(written);
+  });
+});
+
+// M7b: every machine's to-human entries (machines.ts, stood in for here) in the answer and told by key in each change.
+describe('the machines’ to-human entries', () => {
+  const MINI = 'mini-machine-000000001' as MachineRef;
+  const host = (id: string, minute: number): ChannelHost => ({
+    key: `${MINI} ${id}`,
+    machine: MINI,
+    id,
+    lane: 'A',
+    appSessionId: null,
+    engineSessionId: 'la-1',
+    kind: 'message',
+    text: id,
+    at: new Date(NOW + minute * 60_000).toISOString(),
+    src: `p/w/${id}`,
+  });
+  function stand() {
+    let entries: ChannelHost[] = [];
+    let machines: ChannelMachine[] = [{ machine: MINI, name: 'mini', state: 'live', asOf: null }];
+    const listeners = new Set<(reset: boolean) => void>();
+    let closed = 0;
+    const hosts: ProjectHosts = {
+      loaded: Promise.resolve(),
+      entries: () => entries,
+      machines: () => machines,
+      onChanged(listener) {
+        listeners.add(listener);
+        return () => void listeners.delete(listener);
+      },
+      close: async () => void (closed += 1),
+    };
+    return {
+      machines: { open: () => hosts, close: async () => {} } satisfies ChannelMachines,
+      set(next: ChannelHost[], options: { reset?: boolean; machines?: ChannelMachine[] } = {}) {
+        entries = next;
+        machines = options.machines ?? machines;
+        for (const listener of [...listeners]) listener(options.reset ?? false);
+      },
+      closed: () => closed,
+    };
+  }
+  const hostsOf = (change: ChannelChanged | undefined) => {
+    const told = delta(change);
+    return { ...told.hosts, machines: told.machines };
+  };
+
+  it('answers them beside the events, and tells each change by key: new ones, gone ones, and the machines whole', async () => {
+    const m = stand();
+    m.set([host('a', 1)]);
+    const h = await harness({ machines: m.machines });
+    const answer = opened(await h.channels.open(PROJECT));
+    expect(answer.hosts).toEqual([host('a', 1)]);
+    expect(answer.machines).toEqual([{ machine: MINI, name: 'mini', state: 'live', asOf: null }]);
+    m.set([host('a', 1), host('b', 2)]);
+    await until(() => h.told()?.ok && delta(h.told()).hosts?.upserts.length === 1, 'b told');
+    expect(hostsOf(h.told())).toEqual({ upserts: [host('b', 2)], removed: [], machines: [{ machine: MINI, name: 'mini', state: 'live', asOf: null }] });
+    const offline: ChannelMachine[] = [{ machine: MINI, name: 'mini', state: 'offline', asOf: '2026-11-06T12:30:00.000Z' }];
+    m.set([host('b', 2)], { machines: offline });
+    await until(() => delta(h.told()).hosts?.removed.length === 1, 'a removed');
+    expect(hostsOf(h.told())).toEqual({ upserts: [], removed: [`${MINI} a`], machines: offline });
+    m.set([host('c', 3)], { reset: true });
+    await until(() => delta(h.told()).hosts?.reset === true, 'a reset');
+    expect(hostsOf(h.told())).toEqual({ reset: true, upserts: [host('c', 3)], removed: [], machines: offline });
+  });
+
+  it('answers open with to-human entries and nothing of the log’s, and closes the machines with the channel', async () => {
+    const m = stand();
+    m.set([host('a', 1)]);
+    const h = await harness({ hub: false, machines: m.machines });
+    expect(opened(await h.channels.open(PROJECT))).toMatchObject({ live: false, events: [], hosts: [host('a', 1)] });
+    h.channels.release(PROJECT);
+    await until(() => m.closed() === 1, 'the machines closed');
   });
 });

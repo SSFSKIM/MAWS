@@ -305,6 +305,39 @@ export const ChannelWordSchema = z.strictObject({
 });
 export type ChannelWord = z.infer<typeof ChannelWordSchema>;
 /**
+ * M7b (Interfaces §O; the Decision Log's "M7b's channel feed" and Task 2's shapes): a session's to-human entry, as the
+ * spine of the machine it ran on journals it (a message, a question with its choices, an answer), read by main from this
+ * Mac's spine and over each roster machine's link (src/main/org/channel/machines.ts) and merged into the channel beside
+ * the log's events; the renderer places them by time (`channel/project.ts`). `id` is the machine's (this Mac's journal
+ * id, another's opaque cursor), never compared across machines, so `key` (the machine and the id) names an entry in
+ * the channel. Its session ids are plain strings, so the codec lifts nothing in it: the renderer forms an address with
+ * `addressOf(machine, …)`. `src` is the journal's origin (§O), which pairs an answer with its question.
+ */
+export const ChannelHostSchema = z.strictObject({
+  key: z.string(),
+  machine: MachineRefSchema,
+  id: z.string(),
+  lane: z.enum(['A', 'B']),
+  appSessionId: z.string().nullable(), // lane B's session
+  engineSessionId: z.string().nullable(),
+  kind: z.enum(['message', 'question', 'answered']),
+  text: z.string(),
+  choices: z.array(z.string()).optional(),
+  at: z.string(),
+  src: z.string(),
+});
+export type ChannelHost = z.infer<typeof ChannelHostSchema>;
+/**
+ * M7b: where a machine's to-human entries stand. `live`: its feed (this Mac's spine, or another's `channel` feed) is
+ * open and caught up; `read`: an endpoint older than the feed (no `rl2.channel`), read once by `channel.history` when the
+ * tab opened, with no live updates; `offline`: not live now, its entries as of `asOf`, the last time they were; and
+ * `unavailable`: an endpoint older still, which answers neither, drawn greyed. `asOf` is null only while nothing was
+ * ever read from it.
+ */
+export const CHANNEL_MACHINE_STATES = ['live', 'read', 'offline', 'unavailable'] as const;
+export const ChannelMachineSchema = z.strictObject({ machine: MachineRefSchema, name: z.string(), state: z.enum(CHANNEL_MACHINE_STATES), asOf: z.string().nullable() });
+export type ChannelMachine = z.infer<typeof ChannelMachineSchema>;
+/**
  * Why a channel has nothing to draw: signed out, or signed in with no hub, with no cache of the project either; or a
  * project the hub doesn't hold (`unknown-project`, also any id that isn't a project's). With a cache, a channel opened
  * offline answers it, `live: false` and `asOf` its last `caught-up`.
@@ -325,6 +358,8 @@ const ChannelOpenSchema = z.strictObject({
   unverified: z.number().int().nonnegative(),
   asOf: z.string().nullable(), // the last `caught-up`'s time; null until one
   live: z.boolean(), // the socket is open and caught up
+  hosts: z.array(ChannelHostSchema).optional(), // M7b: every machine's to-human entries, oldest first
+  machines: z.array(ChannelMachineSchema).optional(), // M7b: each machine whose entries the channel reads
 });
 const ChannelClosedSchema = z.strictObject({ ok: z.literal(false), reason: z.enum(CHANNEL_CLOSED_REASONS), rev: RevSchema });
 export const ChannelAnswerSchema = z.union([ChannelOpenSchema, ChannelClosedSchema]);
@@ -352,6 +387,13 @@ export const CHANNEL_TEXT_MAX = 100_000;
  * tab holds with `upserts`: told when a judgment at a new head or certificate set changed verdicts, when another reader's
  * log was dropped, and for the first change after a closed one.
  */
+/**
+ * M7b: the to-human entries' change since the last, by `key`, beside the log's: `upserts` are new (an entry's content
+ * never changes), `removed` the keys main no longer draws (a machine gone from the roster, a bound, an entry its machine
+ * no longer shows the member); `reset` replaces every entry a tab holds with `upserts`, told with the log's `reset` and
+ * whenever main replaced them whole (another reader's cache dropped).
+ */
+const ChannelHostsDeltaSchema = z.strictObject({ reset: z.literal(true).optional(), upserts: z.array(ChannelHostSchema), removed: z.array(z.string()) });
 const ChannelDeltaSchema = z.strictObject({
   project: z.string(),
   ok: z.literal(true),
@@ -364,6 +406,8 @@ const ChannelDeltaSchema = z.strictObject({
   asOf: z.string().nullable(),
   live: z.boolean(),
   reset: z.literal(true).optional(),
+  hosts: ChannelHostsDeltaSchema.optional(), // M7b
+  machines: z.array(ChannelMachineSchema).optional(), // M7b: whole
 });
 export const ChannelChangedSchema = z.union([ChannelDeltaSchema, ChannelClosedSchema.extend({ project: z.string() })]);
 export type ChannelChanged = z.infer<typeof ChannelChangedSchema>;

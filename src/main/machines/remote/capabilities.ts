@@ -45,9 +45,11 @@ export type Capability = (typeof DEVICE_CAPABILITIES)[number];
  * `h1`: P5 O7 M8's `rl2.upload-blocks` (`session.send`'s `uploads`); 2026-11-06's `rl2.spawn-home` (`session.spawn`'s
  * `checkout: '~'`, which the machine menu offers only where the endpoint listed it: MachineState's `capabilities`), and
  * the same day's `rl2.agent-scope` (a lane A `sub`'s `agentId`, subs.ts; the drill-in shows a subagent's own transcript
- * of a terminal session only where the endpoint listed it).
+ * of a terminal session only where the endpoint listed it). P5 O8 M7b's `rl2.channel`: a project's `channel` feed, asked
+ * only of an endpoint that listed it (subs.ts); against one that didn't, the Channel tab reads `channel.history` once on
+ * open (src/main/org/channel/machines.ts).
  */
-export type EndpointCapability = 'rl2.upload-blocks' | 'rl2.spawn-home' | 'rl2.agent-scope';
+export type EndpointCapability = 'rl2.upload-blocks' | 'rl2.spawn-home' | 'rl2.agent-scope' | 'rl2.channel';
 
 /** Whether the peer of the current channel listed `capability` in its handshake; false while no channel is current. */
 export function peerLists(link: { peerCapabilities(): readonly string[] | null }, capability: Capability | EndpointCapability): boolean {

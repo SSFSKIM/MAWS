@@ -40,7 +40,8 @@
 // M7a (the project channel; Interfaces §N) composes the channels (channel/channel.ts) over the session: each project a
 // tab shows reads the hub's Project socket while `current()` has a hub, verifies against the held head, and writes its
 // cache under `org/channel/` through the commit queue; `close` stops them with its fence, joins their work, and lets
-// their final snapshots into the queue before its tail.
+// their final snapshots into the queue before its tail. M7b: each channel reads every machine's to-human entries too
+// (channel/machines.ts), this Mac's spine and the RL2 links main injects (`channelMachines`), cached beside the log's.
 //
 // Electron-free: the browser opener, the step-up signer, the state signer, focus, notifications and the RL2 links are
 // injected from main.
@@ -112,6 +113,7 @@ import {
 } from './files';
 import { channelStore } from './channel/cache';
 import { createChannels } from './channel/channel';
+import { createChannelMachines, machinesStore, type ChannelMachinesDeps } from './channel/machines';
 import type { ProjectSocketDeps } from './channel/project-socket';
 import { checkSuccessor, describeHolder, supersededRevocations, type Finding, type SupersededOffer } from './checks';
 import { createDeliveries, type Deliveries, type DeliveryLink } from './deliveries';
@@ -226,6 +228,8 @@ export interface OrgSessionDeps {
   keyFiles?: Partial<DeviceKeyFiles>;
   /** M7a: the channels' Project socket; `ws` by default (tests inject one). */
   channelSocket?: ProjectSocketDeps['socket'];
+  /** M7b: this Mac's spine and the RL2 roster's links, for every machine's to-human entries; without it, none are read. */
+  channelMachines?: Omit<ChannelMachinesDeps, 'session' | 'store' | 'commit' | 'timing' | 'now' | 'log'>;
   now?(): number;
   timing?: Partial<OrgTiming>;
   log(line: string): void;
@@ -1077,11 +1081,15 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
 
   // ---- M7a: the project channels ----
 
+  const channelSession = { current: () => computeCurrent(), onChanged };
   const channels = createChannels({
-    session: { current: () => computeCurrent(), onChanged },
+    session: channelSession,
     store: channelStore(files, log),
     commit: channelCommit,
     socket: deps.channelSocket,
+    ...(deps.channelMachines === undefined
+      ? {}
+      : { machines: createChannelMachines({ ...deps.channelMachines, session: channelSession, store: machinesStore(files, log), commit: channelCommit, timing: deps.timing, now: deps.now, log: deps.log }) }),
     fetch: deps.fetch,
     timing: deps.timing,
     now: deps.now,

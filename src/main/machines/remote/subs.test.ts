@@ -255,6 +255,38 @@ describe('the browser inventory feed', () => {
   });
 });
 
+// P5 O8 M7b (Decision Log, "M7b's channel feed" 2 and 3): a project's `channel` feed, sent naming its project only to an
+// endpoint that listed `rl2.channel` beside `rl2.feeds`, again on each channel; for any other (an older endpoint, which
+// would close the channel on a feed it can't read) it ends `not-offered`, never sent.
+describe('the channel feed', () => {
+  it('names its project to an endpoint that listed `rl2.channel`, with no session or cursor, again on each channel', () => {
+    const h = harness();
+    h.channel.peer = ['rl2.feeds', 'rl2.channel'];
+    const s = h.table.subscribe({ feed: 'channel', project: 'proj-1' }, h.sink, null);
+    expect(h.subs()).toEqual([{ t: 'sub', sub: s.id, feed: 'channel', project: 'proj-1', cursor: null, credit: 1024 * 1024 }]);
+    h.table.onCurrent();
+    expect(h.subs().at(-1)).toEqual({ t: 'sub', sub: s.id, feed: 'channel', project: 'proj-1', cursor: null, credit: 1024 * 1024 });
+  });
+
+  it('ends `not-offered`, never sent, for an endpoint without `rl2.channel`, at its subscribe or on the next channel', async () => {
+    const h = harness();
+    h.channel.peer = ['rl2.feeds'];
+    h.table.subscribe({ feed: 'channel', project: 'proj-1' }, h.sink, null);
+    await Promise.resolve();
+    expect(h.subs()).toEqual([]);
+    expect(h.heard).toEqual([['ended', 'not-offered']]);
+
+    const later = harness();
+    later.channel.peer = ['rl2.feeds', 'rl2.channel'];
+    later.table.subscribe({ feed: 'channel', project: 'proj-1' }, later.sink, null);
+    later.channel.peer = ['rl2.feeds']; // the next channel's peer, an older build
+    later.table.onCurrent();
+    await Promise.resolve();
+    expect(later.subs()).toHaveLength(1);
+    expect(later.heard).toEqual([['ended', 'not-offered']]);
+  });
+});
+
 
 // 2026-11-06 (`rl2.agent-scope`): a lane A stream of one subagent's transcript names its agent only to an endpoint that
 // listed the capability, on each channel, its cursor resumed as any; to one that did not (an older endpoint, which would
