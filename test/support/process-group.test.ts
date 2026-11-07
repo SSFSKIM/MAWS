@@ -27,7 +27,9 @@ describe('groupAlive', () => {
       const pgid = leader.pid!;
       expect(groupAlive(pgid)).toBe(true);
       process.kill(-pgid, 'SIGKILL');
-      block(200);
+      // SIGKILL does not wait for the exits: stay blocked (no await, so the leader stays unreaped) until the probe moves
+      // from ok to EPERM
+      for (const deadline = Date.now() + 5_000; probe(pgid) !== 'EPERM' && Date.now() < deadline; ) block(20);
       expect(probe(pgid), 'the dead, unreaped group: EPERM, not ESRCH').toBe('EPERM');
       expect(groupAlive(pgid), 'still there: its leader is unreaped').toBe(true);
       await reaped;
