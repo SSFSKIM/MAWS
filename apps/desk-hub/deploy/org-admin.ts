@@ -187,9 +187,10 @@ export class OrgAdmin {
    * redemption and key, the MAC over its name, key, ref and enrollment checked under `k`, then a signed successor
    * listing it. Its undoing is registered on `cleanup` before anything is made: the successor that takes it out of the
    * state, its key retired (an honest departure, so the events it signed keep verifying), and its revocation at the hub,
-   * which deletes its service token.
+   * which deletes its service token. `owners` lists it under other members than this admin's (P5 O18 M6: a second
+   * member's machine).
    */
-  async listedMachine(name: string, cleanup: Cleanup, admitMs = ADMIT_MS): Promise<V2Machine> {
+  async listedMachine(name: string, cleanup: Cleanup, admitMs = ADMIT_MS, { owners = [this.member] }: { owners?: string[] } = {}): Promise<V2Machine> {
     cleanup.add(`revoke ${name}`, () => revoke(this.person, name));
     const issued = await this.person.json<EnrollmentIssued>('/api/enrollments', { body: {} }, 201);
     const k = crypto.getRandomValues(new Uint8Array(32));
@@ -203,7 +204,7 @@ export class OrgAdmin {
     }
     cleanup.add(`take ${name} out of the org state`, async () => void (await this.unlist(machine)));
     await this.amend(`${name} (ref ${machine.ref}) listed`, (s) => {
-      s.machines.push({ name, ref: machine.ref, pub: machine.key.pub, owners: [this.member] });
+      s.machines.push({ name, ref: machine.ref, pub: machine.key.pub, owners: [...owners] });
       s.machineNames.push({ name, ref: machine.ref });
     });
     return machine;
@@ -214,9 +215,9 @@ export class OrgAdmin {
    * built the same way and handed to `deliver` (the machine's own `enroll`, which runs until the machine is org-listed),
    * the key it posts read back and its MAC checked under `k` while `deliver` waits, then the successor listing it, and
    * `deliver` awaited. `secret` hears the code's secrets (its token, `k`, the code itself) before anything carries them.
-   * Its undoing is registered on `cleanup` as `listedMachine`'s is.
+   * Its undoing is registered on `cleanup` as `listedMachine`'s is, and `owners` is as there.
    */
-  async enrollListed(name: string, cleanup: Cleanup, deliver: (code: string) => Promise<unknown>, { admitMs = ADMIT_MS, secret = () => {} }: { admitMs?: number; secret?: (value: string) => void } = {}): Promise<{ name: string; ref: string; pub: string }> {
+  async enrollListed(name: string, cleanup: Cleanup, deliver: (code: string) => Promise<unknown>, { admitMs = ADMIT_MS, secret = () => {}, owners = [this.member] }: { admitMs?: number; secret?: (value: string) => void; owners?: string[] } = {}): Promise<{ name: string; ref: string; pub: string }> {
     cleanup.add(`revoke ${name}`, () => revoke(this.person, name));
     const issued = await this.person.json<EnrollmentIssued>('/api/enrollments', { body: {} }, 201);
     const k = crypto.getRandomValues(new Uint8Array(32));
@@ -246,7 +247,7 @@ export class OrgAdmin {
     const machine = { name, ref: posted.ref, key: { pub: posted.pub } };
     cleanup.add(`take ${name} out of the org state`, async () => void (await this.unlist(machine)));
     await this.amend(`${name} (ref ${posted.ref}) listed`, (s) => {
-      s.machines.push({ name, ref: posted.ref, pub: posted.pub, owners: [this.member] });
+      s.machines.push({ name, ref: posted.ref, pub: posted.pub, owners: [...owners] });
       s.machineNames.push({ name, ref: posted.ref });
     });
     await delivering;

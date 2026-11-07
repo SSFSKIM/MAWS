@@ -12,6 +12,7 @@
 import { spawn } from 'node:child_process';
 import { closeSync, openSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { STAGING_HOST, STAGING_ORG } from './config';
 import type { LaneBEvent } from './endpoint-verdicts';
 
 /** The endpoint's `status()` as `mawsd endpoint status --json` prints it (O10 M2's shape). */
@@ -51,7 +52,7 @@ export interface SminosProbe {
 export interface LaneAScene {
   /** sminos and the session up in `project` (the machine enrolled and listed first); the session's ids, its alias and
    * its checkout. */
-  up(project: { id: string; name: string }): Promise<{ session: string; launch: string; alias: string; checkout: string }>;
+  up(project: { id: string; name: string }): Promise<{ session: string; launch: string; alias: string; checkout: string; short?: string }>;
   /**
    * A stretch of `count` rows the session goes on writing by itself (on the VM: a tool loop against the stub model,
    * asked for through `send`, the device's own `sminos.send`), so rows keep coming while the run cuts its links.
@@ -287,6 +288,83 @@ export async function stopMachineWork(run: { interrupt(why: string): void }, mac
 
 /** Where `vm/setup.sh` installs the scene's script. */
 export const SCENE = '/opt/o10-m11/scene.sh';
+
+/**
+ * P5 O18 M6's reach scenes (docs/doperpowers/plans/2026-11-05-p5-o18-message-reach.md, M6): where `vm/setup.sh`'s
+ * RUN=o18 installs their script, which takes the scene before the verb (`--scene <name>`), and the scenes: A1 and A2
+ * the staging admin's, B1 the second member's, A3 the admin's on the old sminos.
+ */
+export const REACH_SCENE = '/opt/o18-m6/scene.sh';
+export const REACH_SCENES = ['a1', 'a2', 'b1', 'a3'] as const;
+export type ReachSceneName = (typeof REACH_SCENES)[number];
+
+/** The hub a run speaks to, by host and org. */
+export type RunHub = { host: string; org: string };
+
+/**
+ * Why the operator's pty path (a widening confirmed at a terminal the run controls) is refused for the machine of
+ * `scene` in a run on `hub` whose own scenes are `runScenes`, or null: it is staging's alone (deploy/staging.json's host
+ * and org, by name) and the run's own scenes' alone, so no run widens a session anywhere else (P5 O18 M6; the
+ * architect's ruling, 2026-11-07).
+ */
+export function operatorRefusal(hub: RunHub, scene: ReachSceneName | null, runScenes: readonly string[]): string | null {
+  if (hub.host !== STAGING_HOST || hub.org !== STAGING_ORG) return `the operator's pty path widens at staging (${STAGING_HOST}, ${STAGING_ORG}) alone, not at ${hub.host} (${hub.org})`;
+  if (scene === null || !runScenes.includes(scene)) return `the operator's pty path is the run's own scenes' alone (${runScenes.join(', ') || 'none'}), not ${scene === null ? 'a machine of no scene' : `the scene ${scene}`}`;
+  return null;
+}
+
+/** A session's visibility, and a share's grade (`none` removes it): sminos access's and share's words. */
+export const LEVELS = ['private', 'listed', 'org-view', 'org-converse'] as const;
+export const GRADES = ['list', 'view', 'converse', 'approve', 'none'] as const;
+export type MemberChange = { access: { member: string; level: (typeof LEVELS)[number] } } | { share: { member: string; person: string; grade: (typeof GRADES)[number] } };
+/** A tag of a say: a member's alias, and its short where the alias alone could name another (`@<alias>#<short>`). */
+export type Tag = { alias: string; short?: string };
+/** What a session's shell runs (`as-session`): sminos's verbs, structured, since a step's words admit no space or `#`. */
+export type SessionVerb = { say: { token: string; tags: readonly Tag[] } } | MemberChange | { spawn: { alias: string } } | { listOrg: true } | { find: { name: string } };
+
+const UUID_WORD = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const TOKEN = /^[a-z0-9-]{4,64}$/;
+const MEMBER = /^[A-Za-z0-9._@+-]{1,128}$/;
+const ALIAS = /^[A-Za-z0-9._/-]{1,64}$/;
+const SHORT = /^[0-9a-z]{1,16}$/;
+const ISO = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]{8,12}Z$/;
+const GREP = /^[A-Za-z0-9._:-]{4,64}$/;
+
+/** A tag as a scene word: `<alias>[:<short>]`, which the scene sends as `@<alias>[#<short>]`. */
+export function tagWord(tag: Tag): string {
+  if (!ALIAS.test(tag.alias) || (tag.short !== undefined && !SHORT.test(tag.short))) throw new Error(`a tag: an alias [A-Za-z0-9._/-] and a short [0-9a-z], not ${JSON.stringify(tag)}`);
+  return tag.short === undefined ? tag.alias : `${tag.alias}:${tag.short}`;
+}
+
+/** A member change as the scene's words (`access <member> <level>` | `share <member> <person> <grade>`). */
+export function changeWords(change: MemberChange): string[] {
+  if ('access' in change) {
+    const { member, level } = change.access;
+    if (!MEMBER.test(member) || !LEVELS.includes(level)) throw new Error(`access: a member and a level among ${LEVELS.join(', ')}, not ${JSON.stringify(change.access)}`);
+    return ['access', member, level];
+  }
+  const { member, person, grade } = change.share;
+  if (!MEMBER.test(member) || !MEMBER.test(person) || !GRADES.includes(grade)) throw new Error(`share: a member, a person and a grade among ${GRADES.join(', ')}, not ${JSON.stringify(change.share)}`);
+  return ['share', member, person, grade];
+}
+
+/** A session verb as the scene's words after `as-session <session>`. */
+export function sessionWords(verb: SessionVerb): string[] {
+  if ('say' in verb) {
+    if (!TOKEN.test(verb.say.token) || verb.say.tags.length === 0) throw new Error(`say: a marker [a-z0-9-] and at least one tag, not ${JSON.stringify(verb.say)}`);
+    return ['say', verb.say.token, ...verb.say.tags.map(tagWord)];
+  }
+  if ('spawn' in verb) {
+    if (!NAME.test(verb.spawn.alias)) throw new Error(`spawn: an alias ([a-z0-9-]), not ${JSON.stringify(verb.spawn.alias)}`);
+    return ['spawn', verb.spawn.alias];
+  }
+  if ('listOrg' in verb) return ['list-org'];
+  if ('find' in verb) {
+    if (!MEMBER.test(verb.find.name)) throw new Error(`find: a name, not ${JSON.stringify(verb.find.name)}`);
+    return ['find', verb.find.name];
+  }
+  return changeWords(verb);
+}
 const NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const CEILINGS = new Set(['plan', 'default', 'acceptEdits', 'auto', 'dontAsk', 'bypassPermissions', 'settings']);
 /** An enrollment code's alphabet (`smns-enroll-v2.` and base64url): nothing a single-quoted word could end on. */
@@ -316,18 +394,23 @@ export class VmMachine implements EndpointMachine {
   readonly label: string;
   readonly directUrl: string;
   readonly runner: ScriptRunner;
-  readonly laneA: LaneAScene;
+  readonly laneA: LaneAScene & { sminos: SminosProbe };
   readonly laneB: LaneBScene | null;
   readonly #script: string;
+  /** The reach scene this machine is (P5 O18 M6), or null: O10's scratch scene, or production's. */
+  readonly sceneName: ReachSceneName | null;
 
   /** `options.script` is the scene's script on the VM: the scratch scene's (SCENE) unless named. */
   /** `gate` and `signal` are the run's interruption (ScriptRunner's). */
   /** `laneB`: the scene starts a lane B session (the scratch scene's verbs; staging alone asks for it). */
-  constructor(ssh: Ssh, scratchDir: string, options: { directUrl: string; log?: (line: string) => void; script?: string; label?: string; gate?: () => void; signal?: AbortSignal; laneB?: boolean }) {
+  /** `scene`: one of the reach scenes, its script REACH_SCENE unless named, every verb given `--scene <name>` first. */
+  constructor(ssh: Ssh, scratchDir: string, options: { directUrl: string; log?: (line: string) => void; script?: string; label?: string; gate?: () => void; signal?: AbortSignal; laneB?: boolean; scene?: ReachSceneName }) {
+    if (options.scene !== undefined && !REACH_SCENES.includes(options.scene)) throw new Error(`a reach scene among ${REACH_SCENES.join(', ')}, not ${JSON.stringify(options.scene)}`);
     this.runner = new ScriptRunner(ssh, scratchDir, options.log, { gate: options.gate, signal: options.signal });
     this.directUrl = options.directUrl;
-    this.#script = options.script ?? SCENE;
-    this.label = options.label ?? `the scratch mawsd on ${ssh.vm}`;
+    this.sceneName = options.scene ?? null;
+    this.#script = options.script ?? (this.sceneName === null ? SCENE : REACH_SCENE);
+    this.label = options.label ?? (this.sceneName === null ? `the scratch mawsd on ${ssh.vm}` : `the scene ${this.sceneName} on ${ssh.vm}`);
     this.laneA = new VmLaneA(this);
     this.laneB = options.laneB === true ? new VmLaneB(this) : null;
   }
@@ -335,7 +418,7 @@ export class VmMachine implements EndpointMachine {
   /** A scene verb as root, its words checked by the caller; throws on a non-zero status unless `allow` holds it. */
   async scene(verb: string, args: string[] = [], { ms, allow = [0], input, what }: { ms?: number; allow?: number[]; input?: string; what?: string } = {}): Promise<StepResult> {
     for (const arg of [verb, ...args]) if (!/^[A-Za-z0-9._:/=@+-]+$/.test(arg)) throw new Error(`a scene word, not ${JSON.stringify(arg)}`);
-    const line = `${this.#script} ${[verb, ...args].join(' ')}`;
+    const line = `${this.#script} ${[...(this.sceneName === null ? [] : ['--scene', this.sceneName]), verb, ...args].join(' ')}`;
     const body = input === undefined ? line : `printf '%s\\n' '${input}' | ${line}`;
     const result = await this.runner.step(verb, body, { root: true, ms, secret: input });
     if (!allow.includes(result.rc)) throw new Error(`${what ?? [verb, ...args].join(' ')} on ${this.runner.ssh.vm} exited ${result.rc}: ${tail(result)}`);
@@ -395,7 +478,143 @@ export class VmMachine implements EndpointMachine {
     const result = await this.scene('down', [], { ms: 180_000, allow: [0, 1] });
     return result.rc === 0 ? [] : result.lines.filter((line) => line.startsWith('LEFT '));
   }
+
+  // ---- the reach scenes' verbs (P5 O18 M6) ---------------------------------------------------------------------------
+
+  #reach(verb: string): void {
+    if (this.sceneName === null) throw new Error(`${verb} is a reach scene's verb, and ${this.label} is none`);
+  }
+
+  /** Session `session`'s own shell (its agent's Bash) running one sminos verb: its status and lines, whatever they are. */
+  async asSession(session: string, verb: SessionVerb, ms = 120_000): Promise<StepResult> {
+    this.#reach('as-session');
+    if (!UUID_WORD.test(session)) throw new Error(`as-session: a session id, not ${JSON.stringify(session)}`);
+    const words = sessionWords(verb);
+    return this.scene('as-session', [session, ...words], { ms: 'spawn' in verb ? 180_000 : ms, allow: ANY, what: `as-session ${words[0]}` });
+  }
+
+  /**
+   * The operator at the scene's terminal, under a pty the scene holds, confirming the change: refused here, before any
+   * step, unless `run` is staging's and this machine one of its own scenes (operatorRefusal), and again on the VM by the
+   * scene, for a scene enrolled at any org but staging's.
+   */
+  async operator(change: MemberChange, run: { hub: RunHub; scenes: readonly string[] }): Promise<StepResult> {
+    const refused = operatorRefusal(run.hub, this.sceneName, run.scenes);
+    if (refused !== null) throw new Error(refused);
+    return this.scene('operator', changeWords(change), { ms: 180_000, allow: ANY, what: `operator ${'access' in change ? 'access' : 'share'}` });
+  }
+
+  /** The operator's `sminos say` from the checkout (no session: the operator's writer). */
+  async operatorSay(token: string, tag: Tag): Promise<StepResult> {
+    this.#reach('operator-say');
+    if (!TOKEN.test(token)) throw new Error('operator-say: a marker ([a-z0-9-])');
+    return this.scene('operator-say', [token, tagWord(tag)], { ms: 120_000, allow: ANY });
+  }
+
+  /** A `say` to `recipient` (as `alias`) appended under `writer`'s plain writer, past the stream choice: its writer and
+   * seq as sminos's log took it. */
+  async forgeSay(writer: string, recipient: string, alias: string, token: string): Promise<{ writer: string; seq: number | null }> {
+    this.#reach('forge-say');
+    if (!UUID_WORD.test(writer) || !UUID_WORD.test(recipient) || !NAME.test(alias) || !TOKEN.test(token)) throw new Error('forge-say: a writer session, a recipient session, an alias ([a-z0-9-]) and a marker');
+    const shown = jsonLine('forge-say', await this.scene('forge-say', [writer, recipient, alias, token], { ms: 60_000 }));
+    return { writer: String(shown.writer), seq: typeof shown.seq === 'number' ? shown.seq : null };
+  }
+
+  /** The project's log files on this machine: name (`<machine>.<session>[~<digest>].jsonl`) and size. */
+  async logFiles(): Promise<Array<{ name: string; size: number }>> {
+    this.#reach('log-files');
+    return (await this.scene('log-files')).lines.flatMap((line) => {
+      const m = /^(\S+\.jsonl) (\d+)$/.exec(line);
+      return m ? [{ name: m[1], size: Number(m[2]) }] : [];
+    });
+  }
+
+  /** A JSON file of the scene's (uplink.json, streams.json, daemon/audiences.json, the endpoint's policy cache), or null. */
+  async json(which: 'uplink' | 'streams' | 'audiences' | 'policy-cache'): Promise<Record<string, unknown> | null> {
+    this.#reach(which);
+    const r = await this.scene(which, [], { ms: 60_000 });
+    return r.lines.includes('none') ? null : jsonLine(which, r);
+  }
+
+  /** How many lines of each file under the sminos home hold `token` (with `after`, those whose `ts` is after it). */
+  async grepHome(token: string, after?: string): Promise<{ files: Record<string, number>; total: number }> {
+    this.#reach('grep-home');
+    if (!GREP.test(token) || (after !== undefined && !ISO.test(after))) throw new Error('grep-home: a marker [A-Za-z0-9._:-] and an ISO time');
+    const r = await this.scene('grep-home', [token, ...(after === undefined ? [] : ['--after', after])], { ms: 120_000 });
+    const files: Record<string, number> = {};
+    let total: number | null = null;
+    for (const line of r.lines) {
+      const t = /^total (\d+)$/.exec(line);
+      if (t) total = Number(t[1]);
+      else {
+        const m = /^(\d+) (.+)$/.exec(line);
+        if (m) files[m[2]] = Number(m[1]);
+      }
+    }
+    if (total === null) throw new Error(`grep-home printed no total: ${tail(r)}`);
+    return { files, total };
+  }
+
+  /** `sminos daemon owed`'s lines. */
+  async owed(): Promise<string[]> {
+    this.#reach('owed');
+    return (await this.scene('owed', [], { ms: 60_000, allow: ANY })).lines;
+  }
+
+  /** Each event of the project's log files on this machine holding `token`: its writer, seq, ts, kind and the rest. */
+  async events(token: string): Promise<LoggedLine[]> {
+    this.#reach('events');
+    if (!GREP.test(token)) throw new Error(`events: a marker [A-Za-z0-9._:-], not ${JSON.stringify(token)}`);
+    return (await this.scene('events', [token], { ms: 60_000 })).lines.flatMap((line) => (line.startsWith('event {') ? [JSON.parse(line.slice('event '.length)) as LoggedLine] : []));
+  }
+
+  /** The text of the first row `session` was given that holds `token`, or null. */
+  async row(session: string, token: string): Promise<string | null> {
+    this.#reach('row');
+    if (!UUID_WORD.test(session) || !TOKEN.test(token)) throw new Error('row: a session id and a marker');
+    const line = (await this.scene('row', [session, token], { ms: 60_000 })).lines.find((l) => l.startsWith('row: '));
+    return line === undefined || line === 'row: none' ? null : line.slice('row: '.length);
+  }
+
+  /** The run's archive: the files on its `main`, the tombstones in them, and each token's count there (null: no commit
+   * yet). */
+  async archive(tokens: readonly string[] = []): Promise<{ head: string; files: string[]; tombs: Array<{ file: string; seq: number }>; tokens: Record<string, number> } | null> {
+    this.#reach('archive-ls');
+    for (const t of tokens) if (!GREP.test(t)) throw new Error(`archive-ls: a marker [A-Za-z0-9._:-], not ${JSON.stringify(t)}`);
+    const r = await this.scene('archive-ls', [...tokens], { ms: 60_000 });
+    if (r.lines.includes('archive: no commit on main')) return null;
+    const counts: Record<string, number> = {};
+    const tombs: Array<{ file: string; seq: number }> = [];
+    let head = '';
+    for (const line of r.lines) {
+      const m = /^token (\S+) (\d+)$/.exec(line);
+      if (m) counts[m[1]] = Number(m[2]);
+      const t = /^tomb (\S+) (\d+)$/.exec(line);
+      if (t) tombs.push({ file: t[1], seq: Number(t[2]) });
+      const h = /^archive: main at ([0-9a-f]+)$/.exec(line);
+      if (h) head = h[1];
+    }
+    return { head, files: r.lines.filter((l) => l.startsWith('file ')).map((l) => l.slice(5)), tombs, tokens: counts };
+  }
+
+  /** What the scene's archive runs on (scene.sh `archive-evidence`): each line it printed, for a wait that timed out. */
+  async archiveEvidence(): Promise<string[]> {
+    this.#reach('archive-evidence');
+    return (await this.scene('archive-evidence', [], { ms: 60_000 })).lines;
+  }
+
+  /** mawsd frozen (SIGSTOP: connected but silent), thawed, stopped, or started again and serving. */
+  async mawsdState(to: 'freeze' | 'thaw' | 'stop' | 'start'): Promise<string> {
+    this.#reach(`mawsd-${to}`);
+    return tail(await this.scene(`mawsd-${to}`, [], { ms: 180_000 }));
+  }
 }
+
+/** An event of a scene's log files as `events` prints it. */
+export type LoggedLine = { writer?: string; seq?: number; ts?: string; kind?: string; session?: string; text?: string; withheld?: boolean; audience?: string[]; file: string };
+
+/** Every status: a verb whose refusal is what an item checks. */
+const ANY = Array.from({ length: 256 }, (_, i) => i);
 
 class VmLaneA implements LaneAScene {
   readonly sminos: SminosProbe;
@@ -410,7 +629,7 @@ class VmLaneA implements LaneAScene {
         return r.lines.includes('none') ? null : (jsonLine('sminos-revoked', r) as Awaited<ReturnType<SminosProbe['revoked']>>);
       },
       imported: async (token) => {
-        if (!/^[a-z0-9-]{4,64}$/.test(token)) throw new Error('imported: a marker token ([a-z0-9-])');
+        if (!/^[a-z0-9-]{4,64}$/.test(token)) throw new Error('imported: a marker ([a-z0-9-])');
         return Number((await vm.scene('imported', [token])).lines.at(-1));
       },
       logMark: async () => Number((await vm.scene('log-size', ['sminos'])).lines.at(-1)),
@@ -428,10 +647,11 @@ class VmLaneA implements LaneAScene {
     };
   }
 
-  async up(project: { id: string; name: string }): Promise<{ session: string; launch: string; alias: string; checkout: string }> {
+  async up(project: { id: string; name: string }): Promise<{ session: string; launch: string; alias: string; checkout: string; short?: string }> {
     if (!/^[0-9a-f-]{36}$/.test(project.id) || !NAME.test(project.name)) throw new Error('a project id (a UUID) and name ([a-z0-9-])');
     const shown = jsonLine('lane-a-up', await this.vm.scene('lane-a-up', [project.id, project.name], { ms: 300_000 }));
-    return { session: String(shown.session), launch: String(shown.launch), alias: String(shown.alias), checkout: String(shown.checkout) };
+    // A reach scene names the session's short too (its `@<alias>#<short>`); O10's scene does not.
+    return { session: String(shown.session), launch: String(shown.launch), alias: String(shown.alias), checkout: String(shown.checkout), ...(typeof shown.short === 'string' && shown.short !== '' ? { short: shown.short } : {}) };
   }
 
   async ticks(count: number, tag: string, send: (text: string) => Promise<void>): Promise<void> {
@@ -460,7 +680,7 @@ class VmLaneA implements LaneAScene {
   }
 
   async count(session: string, token: string): Promise<number> {
-    if (!/^[0-9a-f-]{36}$/.test(session) || !/^[a-z0-9-]{4,64}$/.test(token)) throw new Error('count: a session id and a marker token ([a-z0-9-])');
+    if (!/^[0-9a-f-]{36}$/.test(session) || !/^[a-z0-9-]{4,64}$/.test(token)) throw new Error('count: a session id and a marker ([a-z0-9-])');
     const shown = Number((await this.vm.scene('transcript', [session, token], { ms: 60_000 })).lines.at(-1));
     if (!Number.isSafeInteger(shown)) throw new Error(`count: the scene answered no number for ${token}`);
     return shown;
