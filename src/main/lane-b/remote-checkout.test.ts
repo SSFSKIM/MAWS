@@ -155,6 +155,50 @@ describe('the checkout feed', () => {
     ]);
   });
 
+  // The desk track's round 4: the feed survives its reopenings, so two reads out at once are told apart by which began last.
+  it('keeps the record a later reopening read when an earlier reopening’s read answers after it', async () => {
+    const l = lab();
+    const answers: Array<(output: unknown) => void> = [];
+    l.link.answers.set('session.get', () => new Promise((resolve) => void answers.push((output) => resolve({ ok: true, output }))));
+    l.checkout.open(l.link, APP);
+    l.opened();
+    for (let n = 0; n < 2; n++) {
+      l.feed().sink.ended('behind');
+      await vi.advanceTimersByTimeAsync(0);
+      l.opened();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(l.reads()).toHaveLength(2);
+    const older = { ...record(APP), title: { text: 'older', source: 'user' as const } };
+    const newer = { ...record(APP), title: { text: 'newer', source: 'user' as const } };
+    answers[1](newer);
+    await vi.advanceTimersByTimeAsync(0);
+    answers[0](older);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.records).toEqual([[MINI, APP, newer]]);
+  });
+
+  it('reads the record again on the feed’s schedule when a reopening’s read fails, while nothing newer came', async () => {
+    const l = lab();
+    const now = { ...record(APP), title: { text: 'now', source: 'user' as const } };
+    let failing = true;
+    l.link.answers.set('session.get', () => (failing ? { ok: false, error: { code: 'unavailable', message: 'the spine is away' } } : { ok: true, output: now }));
+    l.checkout.open(l.link, APP);
+    l.opened();
+    l.feed().sink.ended('behind');
+    await vi.advanceTimersByTimeAsync(0);
+    l.opened();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.reads()).toHaveLength(1);
+    expect(l.records).toEqual([]);
+    failing = false;
+    await vi.advanceTimersByTimeAsync(999);
+    expect(l.reads()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(l.reads()).toHaveLength(2);
+    expect(l.records).toEqual([[MINI, APP, now]]);
+  });
+
   it('asks no feed of a peer that did not list `rl2.feeds`, and leaves the asking to the link while no channel is current', () => {
     const l = lab();
     l.link.peers = ['rl2.executor.machine'];

@@ -32,8 +32,11 @@
 //   on the machine. While a feed is open (`follows`) the session waits for it; each opening is said (`following`), since
 //   what changed before it went untold. A reopening reads the record too (`session.get`, under this device's member:
 //   the endpoint answers each member their own reading): a feed the endpoint ended `behind` dropped the change it held
-//   (P5 O8 M6a: an owner's whose head moved while it waited; or a backlog past its bound). Its answer is handed on
-//   unless a `session.changed` came on the feed meanwhile: the feed's, in the machine's order, is the later word.
+//   (P5 O8 M6a: an owner's whose head moved while it waited; or a backlog past its bound). Each read, and each record
+//   the feed tells, takes the feed's next generation, and a read's answer is handed on only while its own is the
+//   latest: a `session.changed` told meanwhile is the machine's later word, and so is a later reopening's read. A read
+//   that fails is asked again on the feed's own schedule (`feedRetryMs`, doubling to its cap) while it is the latest
+//   and the feed stays open.
 import type { ClientId, ClientRef } from '@shared/ipc/client';
 import { REGISTRY } from '@shared/ipc/registry';
 import type { CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
@@ -88,7 +91,7 @@ export interface RemoteCheckout {
 
 type Watch = { kind: 'git' | 'files'; machine: MachineRef; app: string; target: string; input: Record<string, unknown>; count: number };
 type Page = { watches: Map<string, Watch>; off(): void };
-/** `records`: the `session.changed`s its feed carried, so a record read at a reopening yields to one told meanwhile. */
+/** `records`: the feed's record generation, taken by each record it tells and each read at a reopening (the latest wins). */
 type Feed = { link: RemoteLink; app: string; sub: Subscription | null; opened: boolean; live: boolean; timer: ReturnType<typeof setTimeout> | null; backoffMs: number; refusal: string | null; records: number };
 /** Ends of a feed that say nothing will follow for this caller: the stream says so too. */
 const STOPS: ReadonlySet<string> = new Set(['removed', 'grade', 'closed']);
@@ -220,15 +223,23 @@ export function createRemoteCheckout(deps: RemoteCheckoutDeps): RemoteCheckout {
 
   // ---- The feeds -----------------------------------------------------------------------------------------------------
 
-  /** The session's record read again at a reopening, handed on unless the feed told one meanwhile. */
-  async function reread(feed: Feed, mine: () => boolean): Promise<void> {
+  /**
+   * The session's record read again at a reopening, under generation `generation` (taken as it begins): handed on while
+   * that is the feed's latest, and asked again after `delayMs` (doubling to the cap) when the read fails.
+   */
+  async function reread(feed: Feed, mine: () => boolean, generation = ++feed.records, delayMs = timing.feedRetryMs[0]): Promise<void> {
     const { link, app } = feed;
-    const told = feed.records;
+    const current = () => mine() && feed.live && feed.records === generation;
     const result = await dispatchOverLink(link, 'session.get', { appSessionId: app });
-    if (!mine() || feed.records !== told) return;
-    if (!result.ok) return deps.log(`lane B: the record of ${link.name}/${app} could not be read again at its feed's reopening: ${result.error.message}`);
-    const record = result.value as SessionRecord | null;
-    if (record !== null && record.appId === app) deps.recordChanged?.(link.machine, app, record);
+    if (!current()) return;
+    if (result.ok) {
+      const record = result.value as SessionRecord | null;
+      if (record !== null && record.appId === app) deps.recordChanged?.(link.machine, app, record);
+      return;
+    }
+    deps.log(`lane B: the record of ${link.name}/${app} could not be read again at its feed's reopening (asked again in ${delayMs} ms): ${result.error.message}`);
+    const timer = setTimeout(() => void (current() && reread(feed, mine, generation, Math.min(delayMs * 2, timing.feedRetryMs[1]))), delayMs);
+    timer.unref?.();
   }
 
   function subscribe(feed: Feed): void {
@@ -255,7 +266,7 @@ export function createRemoteCheckout(deps: RemoteCheckoutDeps): RemoteCheckout {
             const read = events.readEventPayload('session.changed', body.payload);
             if (!read.ok) return deps.log(`lane B: ${link.name}/${app}: a session.changed on the checkout feed doesn't read; left out`);
             if (read.value.record.appId !== app) return;
-            feed.records += 1;
+            feed.records += 1; // a read out meanwhile yields to it
             deps.recordChanged?.(link.machine, app, read.value.record);
             return;
           }
