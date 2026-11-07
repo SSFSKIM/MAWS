@@ -590,9 +590,11 @@ export class Endpoint implements EndpointModule {
     org.onAdopted((change) => this.#adopted(change));
     org.onCertificates(() => {
       // P5 O7 M5b: a certificate set moves every decision taken under the one before (the machine's owners read through it),
-      // so the streams are held and authorized again at once, as at a `caps` refresh, the artifact placements dropped first.
+      // so the streams are held and authorized again at once, as at a `caps` refresh, the artifact placements dropped first;
+      // and every subscription and resumable cursor, as at a new head (the desk track's certificates parity).
       this.artifactRanks.clear();
       this.streams.recheck();
+      this.subscriptions.recheck();
       void this.#judge();
       void this.rl10.adopted();
     });
