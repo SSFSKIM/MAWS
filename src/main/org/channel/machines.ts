@@ -13,7 +13,8 @@
 //     at open, with no live updates (`read`). One that answers that `not-offered` too is `unavailable`, and the tab greys it.
 // - A machine's `id`s are its own (another machine's are opaque cursors), compared only within it: each entry is held
 //   once by id per machine, whatever brings it again (a snapshot, an `ev` at another seq, a history page), and its
-//   content never changes. The tab's order is the entries' own time, then id, never their arrival.
+//   content never changes. The tab's order is the entries' own time, never when they reached this Mac; entries one
+//   machine said at the same time keep its journal's order (`byTime`).
 // - A read is whole once it reaches the machine's last entry or the bound: then what the machine holds is exactly what
 //   the read and the `ev`s since brought, so an entry the machine no longer shows the member (a share removed) goes. A
 //   read cut short (the link dropped mid-page) only adds.
@@ -79,7 +80,7 @@ export interface ChannelMachinesDeps {
 export interface ProjectHosts {
   /** The cache read, and the sources started. */
   readonly loaded: Promise<void>;
-  /** Every machine's entries, oldest first: by time, then key. */
+  /** Every machine's entries, oldest first: by time, then machine, then each machine's journal order. */
   entries(): ChannelHost[];
   /** This Mac first, then the others by name. */
   machines(): ChannelMachine[];
@@ -98,8 +99,9 @@ export interface ChannelMachines {
 type Reader = { org: string; member: string };
 type Page = { entries: HostEntry[]; more: boolean };
 type Failed = { failed: string };
-type Held = { entry: HostEntry; host: ChannelHost; bytes: number };
-type Hold = { name: string; asOf: string | null; entries: Map<string, Held>; reading: Set<string> | null };
+/** `order`: where the entry stands in its machine's journal among those it said at the same time (below). */
+type Held = { entry: HostEntry; host: ChannelHost; bytes: number; order: number };
+type Hold = { name: string; asOf: string | null; entries: Map<string, Held>; reading: Set<string> | null; next: number };
 type MachineState = ChannelMachine['state'];
 type Source = { state: MachineState; timer: ReturnType<typeof setTimeout> | null; backoff: number; stop(): void };
 type Remote = Source & {
@@ -128,7 +130,13 @@ const timeOf = (at: string): number => {
 };
 const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 /** Oldest first: the entry's own time, then (one machine's) its id. */
-const byTime = (a: HostEntry, b: HostEntry): number => timeOf(a.at) - timeOf(b.at) || compare(a.id, b.id);
+/**
+ * Oldest first: the entry's own time, then, within one machine, its place in the journal. An id from another machine
+ * is an opaque cursor that sorts nothing, so each entry takes the next of its hold's counter as it is first held, in its
+ * journal's order: a page (newest first) from its oldest, each `ev` and tap as it comes (the journal's order), a cached
+ * file in the order it was written. The questions of one ask, said at one time, keep the order they were asked in.
+ */
+const byTime = (a: Held, b: Held): number => timeOf(a.entry.at) - timeOf(b.entry.at) || a.order - b.order;
 const sameReader = (a: Reader | null, b: Reader | null): boolean => a !== null && b !== null && a.org === b.org && a.member === b.member;
 
 /** The file as this project's, within the bounds, one id per machine and one entry per machine id; else null. */
@@ -206,7 +214,7 @@ export function createChannelMachines(deps: ChannelMachinesDeps): ChannelMachine
 
     function holdOf(ref: MachineRef, name: string): Hold {
       let hold = holds.get(ref);
-      if (hold === undefined) holds.set(ref, (hold = { name, asOf: null, entries: new Map(), reading: null }));
+      if (hold === undefined) holds.set(ref, (hold = { name, asOf: null, entries: new Map(), reading: null, next: 0 }));
       hold.name = name;
       return hold;
     }
@@ -230,7 +238,7 @@ export function createChannelMachines(deps: ChannelMachinesDeps): ChannelMachine
       let bytes = 0;
       for (const held of hold.entries.values()) bytes += held.bytes;
       if (hold.entries.size <= limits.entries && bytes <= limits.bytes) return;
-      const newest = [...hold.entries.values()].sort((a, b) => byTime(b.entry, a.entry));
+      const newest = [...hold.entries.values()].sort((a, b) => byTime(b, a));
       hold.entries = new Map();
       let kept = 0;
       for (const held of newest) {
@@ -240,15 +248,18 @@ export function createChannelMachines(deps: ChannelMachinesDeps): ChannelMachine
       }
     }
 
-    /** Each entry not yet held, once by its id; true when anything was. A read in flight hears each id. */
-    function add(ref: MachineRef, entries: readonly HostEntry[]): boolean {
+    /**
+     * Each entry not yet held, once by its id, in the journal's order (`newestFirst`: a page's, read from its end); true
+     * when anything was. A read in flight hears each id.
+     */
+    function add(ref: MachineRef, entries: readonly HostEntry[], newestFirst = false): boolean {
       const hold = holds.get(ref);
       if (hold === undefined) return false;
       let added = false;
-      for (const entry of entries) {
+      for (const entry of newestFirst ? [...entries].reverse() : entries) {
         hold.reading?.add(entry.id);
         if (entry.project !== project || hold.entries.has(entry.id)) continue;
-        hold.entries.set(entry.id, { entry, host: hostOf(ref, entry), bytes: sizeOf(entry) });
+        hold.entries.set(entry.id, { entry, host: hostOf(ref, entry), bytes: sizeOf(entry), order: hold.next++ });
         added = true;
       }
       if (added) trim(hold);
@@ -286,7 +297,7 @@ export function createChannelMachines(deps: ChannelMachinesDeps): ChannelMachine
         for (;;) {
           if (!current()) return 'stopped';
           if ('failed' in next) return next;
-          if (add(ref, next.entries)) changed();
+          if (add(ref, next.entries, true)) changed();
           const before = next.entries.at(-1)?.id;
           if (!next.more || seen.size >= limits.entries || before === undefined) break;
           next = await page(before, Math.min(HISTORY_LIMIT_MAX, limits.entries - seen.size));
@@ -584,7 +595,7 @@ export function createChannelMachines(deps: ChannelMachinesDeps): ChannelMachine
           machine: ref,
           name: hold.name,
           asOf: stateOf(ref) === 'live' ? nowIso() : hold.asOf,
-          entries: [...hold.entries.values()].map((held) => held.entry).sort(byTime),
+          entries: [...hold.entries.values()].sort(byTime).map((held) => held.entry),
         })),
       };
     }
@@ -611,7 +622,7 @@ export function createChannelMachines(deps: ChannelMachinesDeps): ChannelMachine
         for (const machine of file.machines) {
           const hold = holdOf(machine.machine, machine.name);
           hold.asOf = machine.asOf;
-          for (const entry of machine.entries) hold.entries.set(entry.id, { entry, host: hostOf(machine.machine, entry), bytes: sizeOf(entry) });
+          for (const entry of machine.entries) hold.entries.set(entry.id, { entry, host: hostOf(machine.machine, entry), bytes: sizeOf(entry), order: hold.next++ });
         }
       } else reader = current;
       offs.push(
@@ -629,9 +640,9 @@ export function createChannelMachines(deps: ChannelMachinesDeps): ChannelMachine
     const hosts: ProjectHosts = {
       loaded,
       entries() {
-        const out: ChannelHost[] = [];
-        for (const hold of holds.values()) for (const held of hold.entries.values()) out.push(held.host);
-        return out.sort((a, b) => timeOf(a.at) - timeOf(b.at) || compare(a.key, b.key));
+        const out: Held[] = [];
+        for (const hold of holds.values()) for (const held of hold.entries.values()) out.push(held);
+        return out.sort((a, b) => timeOf(a.entry.at) - timeOf(b.entry.at) || compare(a.host.machine, b.host.machine) || a.order - b.order).map((held) => held.host);
       },
       machines() {
         return [...holds]

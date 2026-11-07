@@ -189,7 +189,7 @@ describe('the merge', () => {
     ]);
   });
 
-  it('orders by each entry’s own time, then its id, never by when it arrived', async () => {
+  it('orders by each entry’s own time, never by when it arrived, and one time’s entries in their journal’s order', async () => {
     const mini = new FakeLink(MINI, 'mini');
     const h = harness({ links: [mini] });
     const hosts = await h.open();
@@ -199,6 +199,16 @@ describe('the merge', () => {
     mini.ev(2, entry('a', 2, 'two, recovered late')); // a lower entry the endpoint recovered after a later one
     mini.ev(3, entry('c', 5, 'five, its id after b'));
     expect(texts(hosts)).toEqual(['two, recovered late', 'five', 'five, its id after b', 'nine']);
+  });
+
+  it('keeps the questions of one ask, said at one time, in the order they were asked: a page comes newest first', async () => {
+    const mini = new FakeLink(MINI, 'mini');
+    const h = harness({ links: [mini] });
+    const hosts = await h.open();
+    const asked = (id: string, n: number) => entry(id, 4, `question ${n}`, { kind: 'question', src: `${PROJECT}/lane-b/app-1/ask/k1/q${n}` });
+    mini.snapshot([asked('aa-cursor', 3), asked('mm-cursor', 2), asked('zz-cursor', 1)]); // ids that sort against the asking
+    await until(() => texts(hosts).length === 3, 'the ask');
+    expect(texts(hosts)).toEqual(['question 1', 'question 2', 'question 3']);
   });
 
   it('dedupes by entry id per machine: an id heard at two seqs, through history after an ev, and the same id on two machines kept apart', async () => {

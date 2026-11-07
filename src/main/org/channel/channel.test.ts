@@ -768,7 +768,8 @@ describe('the machines’ to-human entries', () => {
     const m = stand();
     m.set([host('a', 1)]);
     const h = await harness({ machines: m.machines });
-    const answer = opened(await h.channels.open(PROJECT));
+    const answer = await h.channels.open(PROJECT);
+    if (!answer.ok) throw new Error(`not open: ${answer.reason}`);
     expect(answer.hosts).toEqual([host('a', 1)]);
     expect(answer.machines).toEqual([{ machine: MINI, name: 'mini', state: 'live', asOf: null }]);
     m.set([host('a', 1), host('b', 2)]);
