@@ -270,8 +270,13 @@ describe('a draft past the channel’s bound', () => {
     const whole = { ...draft('read this'), doc: { ...draft('read this').doc, attrs: { attachments: [pdf] } } };
     index.drafts.set(app, whole);
     const a = await openRemote(f, org.a1, org.A);
-    expect(output(await call(a, 'session.drafts.get', { appSessionId: app }))).toEqual({ ...whole, doc: { ...whole.doc, attrs: { attachments: [], [WITHHELD_ATTACHMENTS]: ['paper.pdf'] } } });
+    const read = output(await call(a, 'session.drafts.get', { appSessionId: app })) as typeof whole;
+    expect(read).toEqual({ ...whole, doc: { ...whole.doc, attrs: { attachments: [], [WITHHELD_ATTACHMENTS]: [{ id: 'a1', name: 'paper.pdf' }] } } });
     expect(index.drafts.get(app)).toEqual(whole); // kept whole on the machine
+    // M6a's re-review, K2: the device's edit saved back names what its read left there, which the machine keeps
+    const edited = { ...read, doc: { ...read.doc, content: draft('read this, please').doc.content }, updatedAt: '2026-11-07T10:01:00.000Z' };
+    expect((await machineAct(f, a, 'session.drafts.set', { appSessionId: app, draft: edited, replaces: read.updatedAt })).outcome).toEqual({ state: 'done' });
+    expect(index.drafts.get(app)).toEqual({ ...edited, doc: { ...edited.doc, attrs: { attachments: [pdf] } } });
   });
 });
 

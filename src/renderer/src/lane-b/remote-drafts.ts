@@ -20,12 +20,13 @@
 //   re-review, K1), read as a draft with no document, which loads as none.
 // - A save keeps the text there whatever its attachments weigh (M6a's branch review, F3; @shared/sessions/draft-fit.ts):
 //   those past one act's bound stay in this run, which loads the draft whole, and the composer is told once; a draft
-//   read from the machine names those its machine left there, which is said too.
+//   read from the machine names those its machine left there, which is said too, and each save after it names them
+//   again, so the machine keeps them (M6a's re-review, K2): left out is not removed. A clear takes them off.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { STALE_DRAFT_WORDS, type Draft } from '@shared/ipc/schema/session';
 import { isAddress, machineOf } from '@shared/machine/address';
-import { fitDraft, takeWithheld } from '@shared/sessions/draft-fit';
+import { fitDraft, nameWithheld, takeWithheld, type Withheld } from '@shared/sessions/draft-fit';
 import { useMachines } from '../stores/machines';
 import { toast } from '../stores/notices';
 import { machineName } from '../stores/org-projects';
@@ -45,6 +46,8 @@ const bases = new Map<AppSessionId, string | null>();
 const STALE_RETRIES = 3;
 /** The whole draft of a session whose last save left attachments out there, for this run's loads. */
 const wholeHere = new Map<AppSessionId, Draft>();
+/** The attachments the machine's last read of a session left there, which its saves name. */
+const leftThere = new Map<AppSessionId, Withheld[]>();
 /** The attachments last said as kept here, per session, so the same ones are said once. */
 const said = new Map<AppSessionId, string>();
 
@@ -59,6 +62,7 @@ function say(client: MawsBridge, appSessionId: AppSessionId, names: readonly str
 export function resetRemoteDraftSaves(): void {
   saves.clear();
   bases.clear();
+  leftThere.clear();
   wholeHere.clear();
   said.clear();
 }
@@ -81,7 +85,12 @@ const isStale = (result: CommandResult<CommandName>): boolean => !result.ok && r
 async function readKept(client: MawsBridge, appSessionId: AppSessionId): Promise<CommandResult<'session.drafts.get'>> {
   const result = await client.invoke('session.drafts.get', { appSessionId });
   heardReaderRows(appSessionId, result);
-  if (result.ok) bases.set(appSessionId, result.value?.updatedAt ?? null);
+  if (result.ok) {
+    bases.set(appSessionId, result.value?.updatedAt ?? null);
+    const { withheld } = result.value === null ? { withheld: [] } : takeWithheld(result.value);
+    if (withheld.length > 0) leftThere.set(appSessionId, withheld);
+    else leftThere.delete(appSessionId);
+  }
   return result;
 }
 
@@ -93,7 +102,7 @@ export async function loadRemoteDraft(client: MawsBridge, appSessionId: AppSessi
   if (result.ok) {
     if (result.value === null || result.value.doc === null) return null; // none, or cleared there (its stamp now known)
     const { draft, withheld } = takeWithheld(result.value);
-    if (withheld.length > 0) say(client, appSessionId, withheld, REMOTE_DRAFT_WORDS.leftThere);
+    if (withheld.length > 0) say(client, appSessionId, withheld.map((entry) => entry.name), REMOTE_DRAFT_WORDS.leftThere);
     return draft;
   }
   if (isNotOffered(result)) return refused();
@@ -120,19 +129,21 @@ async function saveOnce(client: MawsBridge, appSessionId: AppSessionId, draft: D
       if (!current()) return null;
       if (!read.ok) return read;
     }
-    const fitted = draft === null ? { draft: null, withheld: [] } : fitDraft(draft);
+    const fitted = draft === null ? { draft: null, withheld: [] } : fitDraft(nameWithheld(draft, leftThere.get(appSessionId) ?? []));
     const result = await client.invoke('session.drafts.set', { appSessionId, draft: fitted.draft, replaces: bases.get(appSessionId) ?? null });
     if (!current()) return null;
     heardReaderRows(appSessionId, result);
     if (result.ok) {
-      if (draft === null) bases.delete(appSessionId); // the machine stamped the clear: read before the next save
-      else bases.set(appSessionId, draft.updatedAt);
+      if (draft === null) {
+        bases.delete(appSessionId); // the machine stamped the clear: read before the next save
+        leftThere.delete(appSessionId);
+      } else bases.set(appSessionId, draft.updatedAt);
       if (draft === null || fitted.withheld.length === 0) {
         wholeHere.delete(appSessionId);
         said.delete(appSessionId); // what is left out next is said again
       } else {
         wholeHere.set(appSessionId, draft);
-        say(client, appSessionId, fitted.withheld, REMOTE_DRAFT_WORDS.keptHere);
+        say(client, appSessionId, fitted.withheld.map((entry) => entry.name), REMOTE_DRAFT_WORDS.keptHere);
       }
       return result;
     }

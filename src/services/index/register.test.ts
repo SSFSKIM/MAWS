@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { endableClientRef, type HandlerContext } from '@shared/ipc/client';
 import type { CommandName } from '@shared/ipc/schema';
-import { STALE_DRAFT_WORDS } from '@shared/ipc/schema/session';
+import { STALE_DRAFT_WORDS, type Draft } from '@shared/ipc/schema/session';
 import { REMOTE_INLINE_MAX_BYTES } from '@shared/ipc/schema/remote';
 import { WITHHELD_ATTACHMENTS } from '@shared/sessions/draft-fit';
 import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
@@ -142,8 +142,27 @@ describe('main answers the record side of session.* from the index', () => {
       index.drafts.set(record.appId, whole);
       expect(await invoke('session.drafts.get', { appSessionId: record.appId })).toEqual({ ok: true, value: whole });
       const remote = await invoke('session.drafts.get', { appSessionId: record.appId }, as('owner'));
-      expect(remote).toEqual({ ok: true, value: { ...whole, doc: { ...whole.doc, attrs: { attachments: [note], [WITHHELD_ATTACHMENTS]: ['paper.pdf'] } } } });
+      expect(remote).toEqual({ ok: true, value: { ...whole, doc: { ...whole.doc, attrs: { attachments: [note], [WITHHELD_ATTACHMENTS]: [{ id: 'a1', name: 'paper.pdf' }] } } } });
       expect(new TextEncoder().encode(JSON.stringify(remote.value)).length).toBeLessThanOrEqual(REMOTE_INLINE_MAX_BYTES);
+    });
+
+    // M6a's re-review, K2 (the reviewer's round trip): an attachment a link's read left on the machine is no removal. The
+    // device's save names those its read left there (WITHHELD_ATTACHMENTS, as remote-drafts.ts writes it), and the machine
+    // keeps them; one the device held and saves without is removed, as before.
+    it('session.drafts.set keeps on the machine the attachments the saving device’s read left there', async () => {
+      const { record } = index.sessions.upsertFromSummary(summary());
+      const pdf = { id: 'a1', kind: 'document', name: 'paper.pdf', mediaType: 'application/pdf', bytes: 3 * 1024 * 1024, data: 'A'.repeat(4 * 1024 * 1024), persisted: true };
+      const note = { id: 'a2', kind: 'file', name: 'note.txt', mediaType: 'text/plain', bytes: 2, data: 'aGk=', persisted: true };
+      for (const context of [as('owner'), as(B)]) {
+        index.drafts.set(record.appId, { doc: { type: 'doc', text: 'read this', attrs: { attachments: [pdf, note] } }, attachments: [], updatedAt: '2026-11-07T10:00:00.000Z' }, context.reader);
+        const projected = (await invoke('session.drafts.get', { appSessionId: record.appId }, context)).value as Draft & { doc: { attrs: Record<string, unknown> } };
+        const edited = { ...projected, doc: { ...projected.doc, text: 'read this please' }, updatedAt: '2026-11-07T10:01:00.000Z' };
+        expect(await invoke('session.drafts.set', { appSessionId: record.appId, draft: edited, replaces: projected.updatedAt }, context)).toEqual({ ok: true, value: undefined });
+        expect(index.drafts.get(record.appId, context.reader)!.doc).toEqual({ type: 'doc', text: 'read this please', attrs: { attachments: [note, pdf] } });
+        const without = { ...edited, doc: { ...edited.doc, attrs: { ...edited.doc.attrs, attachments: [] } }, updatedAt: '2026-11-07T10:02:00.000Z' }; // the note taken off
+        expect(await invoke('session.drafts.set', { appSessionId: record.appId, draft: without, replaces: edited.updatedAt }, context)).toEqual({ ok: true, value: undefined });
+        expect(index.drafts.get(record.appId, context.reader)!.doc).toEqual({ type: 'doc', text: 'read this please', attrs: { attachments: [pdf] } });
+      }
     });
 
     // `session.update`'s answer is the whole record (paths, settings, a spawn's signed act), which a reader must never be

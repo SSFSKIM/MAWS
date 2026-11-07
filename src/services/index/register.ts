@@ -10,7 +10,7 @@ import { setupAddFolder, thisGuard, type SetupGuard } from '../machine/setup';
 import { addFolder } from './add-folder'; // New chat
 import { locate } from './projects';
 import type { Index } from './index';
-import { draftForLink } from '@shared/sessions/draft-fit'; // P5 O8 M6a
+import { draftForLink, restoreWithheld } from '@shared/sessions/draft-fit'; // P5 O8 M6a
 
 // P5 O7 M9 round 2: a remote registration's `locate`, which never runs git (setup.ts answers its question first).
 const setupLocate = (directory: string | null) => locate(directory, () => null);
@@ -48,7 +48,11 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
     const kept = index.drafts.kept(appSessionId as AppSessionId, reader);
     return kept === null ? null : draftForLink(kept);
   });
-  register('session.drafts.set', ({ appSessionId, draft, replaces }, { reader }) => index.drafts.set(appSessionId as AppSessionId, draft, reader, replaces));
+  // M6a's re-review, K2: the attachments a save names as left on the machine by its device's read are kept
+  register('session.drafts.set', ({ appSessionId, draft, replaces }, { reader }) => {
+    const app = appSessionId as AppSessionId;
+    index.drafts.set(app, draft === null ? null : restoreWithheld(draft, index.drafts.get(app, reader)), reader, replaces);
+  });
 }
 
 // `pinned` → setPinned; `lastSeen` (with or without `unread: false`, "Mark all read") → markSeen, which clears unread;

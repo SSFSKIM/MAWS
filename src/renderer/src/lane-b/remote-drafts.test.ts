@@ -19,6 +19,7 @@ import { useMachines } from '../stores/machines';
 
 const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
 const NOT_OFFERED = { refusal: 'not-offered' };
+const PAPER = { id: 'a1', name: 'paper.pdf' }; // an attachment a machine's read left there, as WITHHELD_ATTACHMENTS names it
 let written = 0; // each draft its own `updatedAt`, as the composer stamps each write
 const draft = (text: string): Draft => {
   written += 1;
@@ -225,10 +226,42 @@ describe('a machine that keeps each member’s draft', () => {
     const fake = fakeClient();
     const load = portOf(fake).load();
     const kept = draft('read this');
-    await fake.reply('session.drafts.get', { ...kept, doc: { ...(kept.doc as object), attrs: { attachments: [], [WITHHELD_ATTACHMENTS]: ['paper.pdf'] } } });
+    await fake.reply('session.drafts.get', { ...kept, doc: { ...(kept.doc as object), attrs: { attachments: [], [WITHHELD_ATTACHMENTS]: [PAPER] } } });
     const loaded = await load;
     expect([textOf(loaded), (loaded!.doc as { attrs: Record<string, unknown> }).attrs]).toEqual(['read this', { attachments: [] }]);
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual([REMOTE_DRAFT_WORDS.leftThere(['paper.pdf'], 'mini')]);
+  });
+
+  // M6a's re-review, K2: an attachment a read left on the machine is no removal; each save after it names those left
+  // there (which the machine keeps, src/services/index/register.ts), until a clear (a send's, say) takes them off
+  it('names in each save after it the attachments a read left there, until a clear', async () => {
+    const fake = fakeClient();
+    const port = portOf(fake);
+    const load = port.load();
+    const kept = draft('read this');
+    await fake.reply('session.drafts.get', { ...kept, doc: { ...(kept.doc as object), attrs: { attachments: [], [WITHHELD_ATTACHMENTS]: [PAPER] } } });
+    await load;
+    const noteOf = (saved: Saved) => (saved.draft?.doc as { attrs?: Record<string, unknown> } | undefined)?.attrs?.[WITHHELD_ATTACHMENTS];
+    const sent = () => fake.invoked('session.drafts.set') as Saved[];
+    port.save(draft('read this, please'));
+    await flush();
+    expect([textOf(sent()[0]!.draft), noteOf(sent()[0]!), sent()[0]!.replaces]).toEqual(['read this, please', [PAPER], kept.updatedAt]);
+    await fake.reply('session.drafts.set', undefined);
+    await flush();
+    port.save(draft('read this, please, now'));
+    await flush();
+    expect(noteOf(sent()[1]!)).toEqual([PAPER]);
+    await fake.reply('session.drafts.set', undefined);
+    await flush();
+    port.save(null);
+    await flush();
+    await fake.reply('session.drafts.set', undefined);
+    await flush();
+    port.save(draft('fresh'));
+    await flush();
+    await fake.reply('session.drafts.get', { doc: null, attachments: [], updatedAt: 'cleared#1' }); // read after the clear
+    await flush();
+    expect([textOf(sent()[3]!.draft), noteOf(sent()[3]!)]).toEqual(['fresh', undefined]);
   });
 
   it('loads first the document a spawn handed the session, which its first save replaces there', async () => {
