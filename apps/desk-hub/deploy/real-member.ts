@@ -1,0 +1,347 @@
+// `deployment real-member add | pair | remove` (P5 O8 M6b's live proof, layer 2; docs/doperpowers/plans/2026-10-28-p5-o8-
+// org-interface.md, Concrete Steps "The shared staging run" and Decision Log "The real-member sitting"): a real second
+// member on staging, for the one sitting where a person other than the owner signs into MAWS. Each step is signed by
+// the staging admin's test device (its step-up key), as the reach run's `addRunMember` is.
+//
+//   add      the owner's second email, read from a file, added to staging's org state as a member with no device; the
+//            desk track's `access-sync` then lets Access admit it.
+//   pair     a pairing code naming that member written to a new 0600 file, for the owner to paste into a second
+//            scratch MAWS profile's sign-in; once that profile, signed in through Access as the second email, posts its
+//            device, the entry answering the code (its MAC under the code's secret) is listed as the member's first
+//            device, unendorsed, as the protocol allows a member's first device (P5 Decision Log 34; the app's own
+//            edits.ts lists another member's first device so). The entries are read as the admin reads another
+//            member's (H1: `GET /api/devices/pending?member=<id>`). The code's file is removed however the step ends.
+//   remove   the member taken out of the state and every key of its devices revoked; `access-sync` then takes the
+//            admission away.
+//
+// Staging alone: production is refused by name, and every step is refused for any hub but staging's host and org
+// before the admin device is opened or anything is asked of the hub. The email is the owner's: it is read only from a
+// file of mode 0600, outside any git checkout, and no line the steps print holds it, nor the code (each is scrubbed from
+// every line, the hub's own words included, and listed for the runner's search of its log after the step).
+import { randomBytes } from 'node:crypto';
+import { appendFileSync, chmodSync, existsSync, lstatSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
+import { base64urlEncode, encodePairingCode, judgeEntry, keyId, pairingFingerprint, type Device, type OrgState, type RevokedKey } from 'org-protocol';
+import { PENDING_DEVICES_PATH, type PendingDevice } from '../src/protocol/identity';
+import { PRODUCTION_HOST, readDeployConfig, STAGING_HOST, STAGING_ORG, type DeployConfig } from './config';
+import { readSecrets } from './deploy';
+import type { RunHub } from './endpoint-machine';
+import { Person } from './hub';
+import { loadAdminDevice, OrgAdmin } from './org-admin';
+
+export const VERBS = ['add', 'pair', 'remove'] as const;
+export type Verb = (typeof VERBS)[number];
+/** How long `pair` waits for the second profile's device by default, and at most. */
+export const PAIR_WAIT_S = 1800;
+export const MAX_PAIR_WAIT_S = 3600;
+const POLL_MS = 2000;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const MEMBER = /^[0-9a-f]{32}$/;
+/** What the steps print in the email's place. */
+const SECOND_EMAIL = "the owner's second email";
+
+// ---- what the steps refuse ------------------------------------------------------------------------------------------
+
+/** Why a step is refused at `hub`, or null: staging's host and org alone (staging.json's, by name). */
+export function realMemberHubRefusal(hub: RunHub): string | null {
+  if (hub.host !== STAGING_HOST || hub.org !== STAGING_ORG) return `the real-member steps act on staging (${STAGING_HOST}, ${STAGING_ORG}) alone, not on ${hub.host} (${hub.org})`;
+  return null;
+}
+
+export type Values = { 'device-keys'?: string; 'email-file'?: string; member?: string; 'code-file'?: string; wait?: string; production?: boolean };
+
+/** The verb a command line asks for, or why it is refused. */
+export function realMemberMode(positionals: readonly string[], values: Values, config: Pick<DeployConfig, 'worker' | 'host'> & { org: { id: string } } | null): { verb: Verb } | { refused: string } {
+  const verb = positionals[0];
+  if (positionals.length !== 1 || !(VERBS as readonly string[]).includes(verb)) return { refused: `real-member add | pair | remove: one verb (given: ${positionals.join(' ') || 'none'})` };
+  if (values.production === true) return { refused: 'the real-member steps run on staging alone: production is never their hub' };
+  if (config === null) return { refused: '--config <deploy config>: the hub to act on' };
+  if (config.host === PRODUCTION_HOST || config.worker === 'desk-hub') return { refused: `the config names production (${config.host}): the real-member steps run on staging alone` };
+  const hub = realMemberHubRefusal({ host: config.host, org: config.org.id });
+  if (hub !== null) return { refused: `the config is not staging's org: ${hub}` };
+  if (!values['device-keys']) return { refused: '--device-keys <file>: the staging admin device whose step-up key signs the org state' };
+  if (values.member !== undefined && verb !== 'remove') return { refused: "--member is remove's alone: add and pair name the member by --email-file" };
+  if (!values['email-file'] && !(verb === 'remove' && values.member !== undefined)) return { refused: `--email-file <0600 file outside any checkout>: the owner's second email${verb === 'remove' ? ' (or --member <id>)' : ''}` };
+  if (verb === 'pair' && !values['code-file']) return { refused: '--code-file <a new file outside any checkout>: where the pairing code goes (0600)' };
+  return { verb: verb as Verb };
+}
+
+/** The git checkout `dir` is in (an ancestor holding `.git`, a checkout's directory or a worktree's file), or null. */
+function checkoutOf(dir: string): string | null {
+  for (let at = dir; ; at = dirname(at)) {
+    if (existsSync(join(at, '.git'))) return at;
+    if (dirname(at) === at) return null;
+  }
+}
+
+/** Why `path` can't be read as a private file (a regular file of this user's, mode 0600, in no git checkout), or null. */
+export function privateFileRefusal(path: string): string | null {
+  let stat;
+  try {
+    stat = lstatSync(path);
+  } catch {
+    return `no file at ${path}`;
+  }
+  if (stat.isSymbolicLink()) return `${path} is a symlink: name the file itself`;
+  if (!stat.isFile()) return `${path} is not a regular file`;
+  if ((stat.mode & 0o777) !== 0o600) return `${path} must be mode 0600, not 0${(stat.mode & 0o777).toString(8)}`;
+  if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return `${path} is another user's`;
+  const repo = checkoutOf(dirname(realpathSync(path)));
+  if (repo !== null) return `${path} is inside the git checkout ${repo}: keep it outside any checkout`;
+  return null;
+}
+
+/** Why the pairing code can't be written to `path` (a new file, in an existing directory in no git checkout), or null. */
+export function codeFileRefusal(path: string): string | null {
+  if (existsSync(path)) return `${path} exists: the code goes to a new file`;
+  const dir = dirname(resolve(path));
+  if (!existsSync(dir)) return `no directory ${dir}`;
+  const repo = checkoutOf(realpathSync(dir));
+  if (repo !== null) return `${path} is inside the git checkout ${repo}: keep it outside any checkout`;
+  return null;
+}
+
+/** The one email address the private file at `path` holds; a refusal never quotes what the file holds. */
+export function readEmail(path: string): string {
+  const refused = privateFileRefusal(path);
+  if (refused !== null) throw new Error(refused);
+  const text = readFileSync(path, 'utf8');
+  const email = text.endsWith('\n') ? text.slice(0, -1) : text;
+  if (!EMAIL.test(email) || email.length > 320) throw new Error(`${path} must hold one email address and nothing else`);
+  return email;
+}
+
+// ---- the steps ------------------------------------------------------------------------------------------------------
+
+/** What the steps use of the staging admin (org-admin.ts's OrgAdmin). */
+export type RealMemberAdmin = Pick<OrgAdmin, 'member' | 'read' | 'amend'>;
+
+export type RealMemberIo = {
+  /** A line for the operator and the step's log; every line passes the scrub first. */
+  print(line: string): void;
+  /** A value no line may hold: scrubbed from each, and listed for the runner's search of the log after the step. */
+  secret(value: string): void;
+  sleep(ms: number): Promise<void>;
+};
+
+export type RealMemberOptions = {
+  verb: Verb;
+  /** The hub the step acts on, by host and org: staging's alone. */
+  hub: RunHub;
+  /** Its base URL, which the pairing code names. */
+  hubUrl: string;
+  emailFile?: string;
+  member?: string;
+  codeFile?: string;
+  waitS: number;
+  /** The staging admin, opened only once the hub is staging's and the files are read. */
+  open(): Promise<RealMemberAdmin>;
+  /** The pending device entries of `member`, as an admin reads another member's (H1). */
+  pending(member: string): Promise<PendingDevice[]>;
+  io: RealMemberIo;
+};
+
+class Refused extends Error {}
+const refuse = (why: string): never => {
+  throw new Refused(why);
+};
+
+/** The member whose email is `email` in `state`, compared as Access compares them (case aside). */
+const byEmail = (state: OrgState, email: string) => state.members.find((m) => m.email.toLowerCase() === email.toLowerCase());
+
+async function add(admin: RealMemberAdmin, email: string, io: RealMemberIo): Promise<number> {
+  const { state } = await admin.read();
+  const own = state.members.find((m) => m.id === admin.member);
+  if (own !== undefined && own.email.toLowerCase() === email.toLowerCase()) refuse(`${SECOND_EMAIL} is the admin's own: a second member needs an email of its own`);
+  const held = byEmail(state, email);
+  if (held !== undefined) refuse(`${SECOND_EMAIL} is already a member (${held.id}): nothing was changed`);
+  const id = randomBytes(16).toString('hex');
+  const signed = await admin.amend(`${SECOND_EMAIL} added as the member ${id}`, (s) => {
+    if (byEmail(s, email) !== undefined) return false;
+    s.members.push({ id, email, role: 'member', devices: [] });
+  });
+  if (signed === null) refuse(`${SECOND_EMAIL} became a member meanwhile: nothing was changed`);
+  io.print(`added: ${SECOND_EMAIL} is the member ${id} (version ${signed!.state.version}), with no device yet`);
+  io.print(`next: staging-run.sh access-sync, so staging's Access admits ${SECOND_EMAIL}; then real-member pair`);
+  return 0;
+}
+
+async function pair(o: RealMemberOptions, admin: RealMemberAdmin, email: string): Promise<number> {
+  const { io } = o;
+  const codeFile = o.codeFile!;
+  const head = await admin.read();
+  const member = byEmail(head.state, email) ?? refuse(`the head (version ${head.state.version}) lists no member with ${SECOND_EMAIL}: run real-member add first`);
+  if (member.devices.length > 0) refuse(`the member ${member.id} lists a device already: this step lists a member's first device alone`);
+  const where = codeFileRefusal(codeFile);
+  if (where !== null) refuse(where);
+  const k = crypto.getRandomValues(new Uint8Array(16));
+  const { root, org } = head.state;
+  const code = encodePairingCode({ hub: o.hubUrl, org, member: member.id, roots: root.keys, recoveryPub: root.recoveryPub, k: base64urlEncode(k) });
+  io.secret(code);
+  writeFileSync(codeFile, `${code}\n`, { flag: 'wx', mode: 0o600 });
+  try {
+    chmodSync(codeFile, 0o600);
+    io.print(`the pairing code for the member ${member.id} is in ${codeFile} (0600): paste it into the second profile's Settings › Org, its Pairing code row, and Sign in`);
+    io.print(`waiting up to ${o.waitS} s for its device`);
+    const listed = new Set(head.state.members.flatMap((m) => m.devices.map((d) => d.id)));
+    const named = new Set<string>();
+    const deadline = Date.now() + o.waitS * 1000;
+    for (;;) {
+      const found: Array<Omit<Device, 'endorsement'>> = [];
+      for (const entry of await o.pending(member.id)) {
+        const judged = await judgeEntry(entry, { org, member: member.id, k, class: 'native-mac', listed });
+        if (judged.ok) found.push(judged.device);
+        else if (!named.has(`${entry.deviceId} ${entry.mac}`)) {
+          named.add(`${entry.deviceId} ${entry.mac}`);
+          io.print(`not this pairing's: ${String(entry.deviceId).slice(0, 64)} (${judged.why})`);
+        }
+      }
+      if (found.length > 1) refuse('two devices answered this code: run pair again (the code is spent)');
+      if (found.length === 1) {
+        const device = found[0];
+        io.print(`pending: ${device.id} ${device.class} ${device.keyStorage} fingerprint ${await pairingFingerprint(org, member.id, device)} (the second profile shows the same)`);
+        const signed = await admin.amend(`the member ${member.id}'s first device ${device.id} listed, unendorsed`, (s) => {
+          const m = s.members.find((x) => x.id === member.id);
+          if (m === undefined || m.devices.length > 0) return false;
+          m.devices.push({ ...device });
+        });
+        if (signed === null) refuse(`the head no longer lists the member ${member.id} without a device: nothing was listed`);
+        io.print(`listed: the member ${member.id}'s first device ${device.id} (version ${signed!.state.version}); the second profile signs in once it reads that head`);
+        return 0;
+      }
+      if (Date.now() >= deadline) refuse(`no device answered the code within ${o.waitS} s: run pair again (the code is spent)`);
+      await io.sleep(Math.min(POLL_MS, Math.max(0, deadline - Date.now())));
+    }
+  } finally {
+    rmSync(codeFile, { force: true });
+    io.print(`the pairing code's file is removed: the code is spent`);
+  }
+}
+
+async function remove(admin: RealMemberAdmin, who: { email: string } | { member: string }, io: RealMemberIo): Promise<number> {
+  const { state } = await admin.read();
+  const member = 'email' in who ? byEmail(state, who.email) : state.members.find((m) => m.id === who.member);
+  if (member === undefined) {
+    io.print(`nothing to remove: the head (version ${state.version}) lists no such member`);
+    return 0;
+  }
+  if (member.id === admin.member || member.role === 'admin') refuse(`the member ${member.id} is an admin: this step removes the second member alone`);
+  const keys: RevokedKey[] = [];
+  for (const device of member.devices) {
+    for (const [key, pub] of [
+      ['channel', device.channelPub],
+      ['step-up', device.stepUpPub],
+    ] as const) {
+      if (pub !== undefined) keys.push({ keyId: await keyId(pub), holder: { member: member.id, device: device.id, class: device.class, key } });
+    }
+  }
+  const signed = await admin.amend(`the member ${member.id} removed, its devices' keys revoked`, (s) => {
+    if (!s.members.some((m) => m.id === member.id)) return false;
+    s.members = s.members.filter((m) => m.id !== member.id);
+    s.revoked.push(...keys.filter((k) => !s.revoked.some((r) => r.keyId === k.keyId)));
+  });
+  if (signed === null) {
+    io.print(`nothing to remove: the member ${member.id} left the head meanwhile`);
+    return 0;
+  }
+  io.print(`removed: the member ${member.id}, its ${member.devices.length} device(s)' ${keys.length} key(s) revoked (version ${signed.state.version})`);
+  io.print(`next: staging-run.sh access-sync, so staging's Access no longer admits ${SECOND_EMAIL}`);
+  return 0;
+}
+
+/** One step: refused (2) before anything is read or asked unless the hub is staging's and the files are as they must be. */
+export async function runRealMember(o: RealMemberOptions): Promise<number> {
+  const { io } = o;
+  const hub = realMemberHubRefusal(o.hub);
+  if (hub !== null) {
+    io.print(`refused: ${hub}. Nothing was changed.`);
+    return 2;
+  }
+  let email: string | null = null;
+  try {
+    if (o.emailFile !== undefined) {
+      email = readEmail(o.emailFile);
+      io.secret(email);
+    }
+    if (o.verb === 'pair') {
+      const where = o.codeFile === undefined ? '--code-file is pair’s' : codeFileRefusal(o.codeFile);
+      if (where !== null) throw new Error(where);
+    }
+    if (o.member !== undefined && !MEMBER.test(o.member)) throw new Error('--member <id>: 32 lowercase hex characters');
+  } catch (error) {
+    io.print(`refused: ${(error as Error).message}. Nothing was changed.`);
+    return 2;
+  }
+  try {
+    const admin = await o.open();
+    if (o.verb === 'add') return await add(admin, email!, io);
+    if (o.verb === 'pair') return await pair(o, admin, email!);
+    return await remove(admin, email !== null ? { email } : { member: o.member! }, io);
+  } catch (error) {
+    io.print(`${error instanceof Refused ? 'refused' : 'failed'}: ${(error as Error).message}`);
+    return 1;
+  }
+}
+
+// ---- the command ----------------------------------------------------------------------------------------------------
+
+const OPTIONS = {
+  config: { type: 'string' },
+  'device-keys': { type: 'string' },
+  'email-file': { type: 'string' },
+  member: { type: 'string' },
+  'code-file': { type: 'string' },
+  wait: { type: 'string' },
+  scan: { type: 'string' },
+  production: { type: 'boolean', default: false },
+} as const;
+
+export async function main(argv: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true });
+  const app = process.env.DESK_HUB_APP!;
+  const config: DeployConfig | null = readDeployConfig((values.config as string | undefined) ?? join(app, 'deploy', 'staging.json'));
+  const chosen = realMemberMode(positionals, values as Values, config);
+  if ('refused' in chosen) {
+    console.error(chosen.refused);
+    return 2;
+  }
+  const waitS = values.wait === undefined ? PAIR_WAIT_S : Number(values.wait);
+  if (!Number.isSafeInteger(waitS) || waitS < 1 || waitS > MAX_PAIR_WAIT_S) {
+    console.error(`--wait is whole seconds, 1 to ${MAX_PAIR_WAIT_S}`);
+    return 2;
+  }
+  // Every line scrubbed of what the step must never print (the email, the code), however short; each one also listed
+  // for the runner's search of the log (staging-run.sh's secret_scan).
+  const secrets: Array<[string, string]> = [];
+  const scan = values.scan as string | undefined;
+  const print = (line: string) => console.log(secrets.reduce((out, [value, shown]) => out.split(value).join(shown), line));
+  const io: RealMemberIo = {
+    print,
+    secret: (value) => {
+      if (secrets.some(([held]) => held === value)) return;
+      secrets.push([value, value.includes('@') ? `<${SECOND_EMAIL}>` : '<the pairing code>']);
+      if (scan !== undefined) appendFileSync(scan, `${value}\n`, { mode: 0o600 });
+    },
+    sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+  };
+  const read = await readSecrets();
+  if (!read.DESK_ACCESS_TOKEN) {
+    console.error('DESK_ACCESS_TOKEN on stdin');
+    return 2;
+  }
+  const person = new Person(`https://${config!.host}`, read.DESK_ACCESS_TOKEN, () => {}, { requestMs: 30_000 });
+  return runRealMember({
+    verb: chosen.verb,
+    hub: { host: config!.host, org: config!.org.id },
+    hubUrl: person.hub,
+    emailFile: values['email-file'] as string | undefined,
+    member: values.member as string | undefined,
+    codeFile: values['code-file'] as string | undefined,
+    waitS,
+    open: async () => OrgAdmin.open(person, { org: config!.org.id, pinnedGenesis: config!.orgGenesis }, await loadAdminDevice(values['device-keys'] as string), print),
+    pending: async (member) => (await person.json<{ pending: PendingDevice[] }>(`${PENDING_DEVICES_PATH}?member=${encodeURIComponent(member)}`)).pending,
+    io,
+  });
+}
+

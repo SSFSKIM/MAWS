@@ -437,6 +437,32 @@ below 22.12) into `/opt/o18-m6/packs`, and the bare repository. `vm/check.sh` re
 `reach …` lines). `--vm-teardown` (`vm/teardown.sh`'s reach mode) removes the users, homes and group, `/opt/o18-m6`,
 the archive and the staged bundle, and says `LEFT` for anything that stayed or a scene port still listening.
 
+## `real-member`: a real second member on staging (P5 O8 M6b)
+
+The one sitting where a person other than the owner signs into MAWS (docs/doperpowers/plans/2026-10-28-p5-o8-org-
+interface.md, "The shared staging run", layer 2): the owner's second email as member B, signed in from a second scratch
+MAWS profile. Each step is signed by the staging admin's test device, as the reach run's own second member is, and runs
+through `staging-run.sh real-member`, which hands it the token on stdin and searches its log afterwards for the token,
+the email and the pairing code.
+
+    zsh apps/desk-hub/deploy/staging-run.sh real-member add --email-file <file>
+    zsh apps/desk-hub/deploy/staging-run.sh real-member pair --email-file <file> --code-file <new file> [--wait <s>]
+    zsh apps/desk-hub/deploy/staging-run.sh real-member remove (--email-file <file> | --member <id>)
+
+`add` puts the email in the state as a member with no device (then `staging-run.sh access-sync`, so Access admits it).
+`pair` writes a pairing code naming that member to `--code-file`, a new 0600 file, and waits (30 minutes by default, an
+hour at most) for the scratch profile's device: the owner pastes the code into that profile's sign-in, signed in
+through Access as the second email; the entry whose MAC answers the code's secret is listed as B's first device,
+unendorsed, as the app lists another member's first device, and its fingerprint printed to compare with the profile's.
+Any other pending entry of B's is named and passed over. The code's file is removed however the step ends. `remove`
+takes B out of the state and revokes every key of its devices (then `access-sync` again).
+
+What it refuses: any hub but staging's host and org (`--production`, a config naming production, another org), before
+the admin device is opened or the hub asked; an email file that is not a regular file of the owner's, mode 0600, in no
+git checkout (a symlink included); a code file that exists already or would land in a checkout; the admin's own email,
+or one already a member's, at `add`; a member that already has a device, at `pair`. No line it prints holds the email
+("the owner's second email" stands in) or the code.
+
 ## `admin`: the owner's hand on the org state (P5 O13 M2)
 
 Until O8's Org page, the owner roots a deployment's org, pairs a device into it, revokes one and keeps the head

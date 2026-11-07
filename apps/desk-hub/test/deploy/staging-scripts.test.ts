@@ -673,3 +673,55 @@ describe('the reach step', () => {
     }
   });
 });
+
+describe('the real-member step', () => {
+  // `staging-run.sh real-member <add|pair|remove> …` (P5 O8 M6b's real-member sitting): `deployment real-member` on
+  // staging's config with the admin device's keys, the token on its stdin alone, what the step handled (the owner's second
+  // email, the pairing code) listed for the search of its log after it. Stubs as the reach step's.
+  const token = `eyJ${'m'.repeat(20)}.synthetic`;
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'staging-real-member-'));
+    const device = join(dir, 'device');
+    mkdirSync(device);
+    writeFileSync(join(device, 'keys.json'), '{}', { mode: 0o600 });
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'cloudflared'), `#!/bin/sh\nprintf '%s' '${token}'\n`, { mode: 0o755 });
+    // The command lists what it handled in the scan it is given, as real-member.ts does, and prints one line of it: the
+    // search after the run counts the log that holds it.
+    const pnpm = ['#!/bin/sh', `printf '%s\\n' "$@" > '${dir}/args'`, `cat > '${dir}/stdin'`, 'scan=; prev=', 'for a in "$@"; do [ "$prev" = --scan ] && scan=$a; prev=$a; done', 'printf "second@example.test\\n" >> "$scan"', 'echo "added <the owner\'s second email>"', '[ -n "$LEAK" ] && echo "second@example.test"', 'exit 0', ''];
+    writeFileSync(join(bin, 'pnpm'), pnpm.join('\n'), { mode: 0o755 });
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, DESK_STAGING_DIR: join(dir, 'state'), DESK_STAGING_DEVICE: device, DESK_STAGING_SECRETS: join(dir, 'secrets') };
+    return { dir, device, env };
+  };
+
+  it.skipIf(!zsh)('runs the real-member step on staging with the device’s keys, the token on stdin alone, its log searched for what it handled', () => {
+    const { dir, device, env } = setup();
+    const run = spawnSync('zsh', [runner, 'real-member', 'add', '--email-file', '/x/second-email'], { encoding: 'utf8', env, timeout: 60_000 });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    const args = readFileSync(join(dir, 'args'), 'utf8').trim().split('\n');
+    expect(args.slice(args.indexOf('deployment'))).toEqual(['deployment', 'real-member', '--config', 'deploy/staging.json', '--device-keys', `${device}/keys.json`, '--scan', join(dir, 'state', 'real-member.scan'), 'add', '--email-file', '/x/second-email']);
+    expect(readFileSync(join(dir, 'stdin'), 'utf8')).toBe(`DESK_ACCESS_TOKEN=${token}\n`);
+    expect(run.stdout).toContain("added <the owner's second email>");
+    expect(run.stdout).toContain('files holding the Access token or a secret the run handled: 0');
+    expect(existsSync(join(dir, 'state', 'real-member.scan'))).toBe(false);
+    expect(run.stdout + run.stderr).not.toContain(token);
+  });
+
+  it.skipIf(!zsh)('fails a run whose log holds what it handled, however the command ended', () => {
+    const { env } = setup();
+    const run = spawnSync('zsh', [runner, 'real-member', 'add', '--email-file', '/x/second-email'], { encoding: 'utf8', env: { ...env, LEAK: '1' }, timeout: 60_000 });
+    expect(run.status).not.toBe(0);
+    expect(run.stdout).toContain('files holding the Access token or a secret the run handled: 1');
+  });
+
+  it.skipIf(!zsh)('takes no option that would move it off staging, its keys or its scan, and only its three verbs', () => {
+    for (const bad of [['--config'], ['--config=deploy/config.json'], ['--production'], ['--scan', 'x'], ['--device-keys', 'k'], ['add', '--hub', 'h'], [], ['delete']]) {
+      const { dir, env } = setup();
+      const run = spawnSync('zsh', [runner, 'real-member', ...bad], { encoding: 'utf8', env, timeout: 60_000 });
+      expect(run.status, bad.join(' ')).toBe(2);
+      expect(run.stdout, bad.join(' ')).toMatch(/real-member/);
+      expect(existsSync(join(dir, 'args')), bad.join(' ')).toBe(false);
+    }
+  });
+});
