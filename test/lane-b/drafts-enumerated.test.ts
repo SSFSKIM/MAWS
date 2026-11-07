@@ -1,6 +1,6 @@
 // Every order of a lane B session's draft events, up to a bound, through the renderer's queue (src/renderer/src/lane-b/
-// remote-drafts.ts, as `rememberingRemoteDrafts` drives it) and the machine's real index (`DraftStore` behind
-// `session.drafts.*`'s handlers), so the draft path's interleavings are checked together rather than found one review at a
+// remote-drafts.ts, driven as `rememberingRemoteDrafts` drives it for a machine that keeps drafts) and the machine's real
+// index (`DraftStore` behind `session.drafts.*`'s handlers), so the draft path's interleavings are checked together rather than found one review at a
 // time (P5 O8 M6a, the architect's ask in M6a's re-review). Each run starts as a composer opens on a remote session, whose kept draft is either
 // one holding an attachment past one answer's bound (a fitted read leaves it on the machine) or none; then plays its
 // events; then lets every act land (those out on time, then the late ones, then whatever the queue sends again once its
@@ -32,8 +32,8 @@ import { summary } from '../support/index-fixture';
 import { OTHER_MACHINE } from '../support/machine';
 import { Index } from '../../src/services/index/index';
 import { registerIndexHandlers } from '../../src/services/index/register';
-import { rememberingRemoteDrafts, resetRemoteDrafts } from '../../src/renderer/src/composer/editor/drafts';
 import { resetReaderRows } from '../../src/renderer/src/lane-b/reader-rows';
+import { loadRemoteDraft, resetRemoteDraftSaves, saveRemoteDraft } from '../../src/renderer/src/lane-b/remote-drafts';
 
 vi.mock('@shared/ipc/schema/remote', async (original) => ({ ...(await original<object>()), REMOTE_INLINE_MAX_BYTES: 2048 }));
 
@@ -112,13 +112,13 @@ afterEach(() => vi.useRealTimers());
 
 /** One order's run: the violations it ends with, or none; null when an event in it had nothing to act on. */
 async function play(events: readonly Event[], reader: Reader, start: 'kept' | 'none'): Promise<string[] | null> {
-  resetRemoteDrafts();
+  resetRemoteDraftSaves();
   resetReaderRows();
   const bare = index.sessions.upsertFromSummary(summary()).record.appId;
   const app = addressOf(OTHER_MACHINE, bare);
   if (start === 'kept') index.drafts.set(bare, draftOf('kept there', 0, [PDF]), reader);
   const m = machine(bus, reader);
-  const port = rememberingRemoteDrafts({ load: async () => null, save: () => {} }, app, () => true, m.client);
+  const port = { load: () => loadRemoteDraft(m.client, app, () => null), save: (draft: Draft | null) => saveRemoteDraft(m.client, app, draft, () => {}) };
   await port.load(); // the composer opens
   await settle();
   let newest: string | null = start === 'kept' ? 'kept there' : null;
