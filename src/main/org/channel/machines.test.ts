@@ -211,6 +211,20 @@ describe('the merge', () => {
     expect(texts(hosts)).toEqual(['question 1', 'question 2', 'question 3']);
   });
 
+  it('keeps an ask that straddles a page boundary in its order: an older page goes before everything already held', async () => {
+    const asked = (id: string, n: number) => entry(id, 4, `question ${n}`, { kind: 'question', src: `${PROJECT}/lane-b/app-1/ask/k1/q${n}` });
+    const mini = new FakeLink(MINI, 'mini', undefined, (input) => ({ ok: true, output: input.before === 'c2' ? { entries: [asked('c1', 1), entry('c0', 1, 'older')], more: false } : { entries: [], more: false } }));
+    const h = harness({ links: [mini] });
+    const hosts = await h.open();
+    mini.snapshot([asked('c3', 3), asked('c2', 2)], true);
+    await until(() => texts(hosts).length === 4, 'the ask across two pages');
+    expect(texts(hosts)).toEqual(['older', 'question 1', 'question 2', 'question 3']);
+    mini.ev(1, asked('c4', 4)); // said at the same time, heard live: after everything held
+    expect(texts(hosts)).toEqual(['older', 'question 1', 'question 2', 'question 3', 'question 4']);
+    const asks = hosts.entries().filter((e) => e.kind === 'question').map((e) => e.order); // what the renderer orders by
+    expect(asks).toEqual([...asks].sort((a, b) => a - b));
+  });
+
   it('dedupes by entry id per machine: an id heard at two seqs, through history after an ev, and the same id on two machines kept apart', async () => {
     const page = [entry('p2', 2), entry('p1', 1)];
     const older: Record<string, HostEntry[]> = { m3: [entry('m3', 3, 'again'), ...page], m6: [entry('m5', 5, 'through history after its ev'), entry('m4', 4), entry('m3', 3), ...page] };

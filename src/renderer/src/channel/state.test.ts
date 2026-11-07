@@ -71,7 +71,7 @@ describe('the words after the log', () => {
 
 // M7b: every machine's to-human entries, held by key as the events are by offset, and the machines whole.
 describe('the to-human entries', () => {
-  const h = (id: string): ChannelHost => ({ key: `${OTHER_MACHINE} ${id}`, machine: OTHER_MACHINE, id, lane: 'A', session: 'la-1', kind: 'message', text: id, at: '2026-11-06T12:00:00.000Z', src: id });
+  const h = (id: string, order = 0): ChannelHost => ({ key: `${OTHER_MACHINE} ${id}`, machine: OTHER_MACHINE, id, lane: 'A', session: 'la-1', kind: 'message', text: id, at: '2026-11-06T12:00:00.000Z', src: id, order });
   const mini: ChannelMachine = { machine: OTHER_MACHINE, name: 'mini', state: 'live', asOf: null };
   const keys = (held: ChannelHeld) => (held.phase === 'open' ? held.hosts.map((x) => x.id) : held.phase);
 
@@ -88,5 +88,11 @@ describe('the to-human entries', () => {
     held = applyChange(held, { project: P, ok: false, reason: 'no-hub', rev: (rev += 1) });
     held = applyChange(held, delta({ upserts: [], reset: true }));
     expect(keys(held)).toEqual([]);
+  });
+
+  it('keeps main’s order at one time across a change: an older page’s entry goes before those it already holds', () => {
+    let held = openedWith(open([], { hosts: [h('q2', 10), h('q3', 11)], machines: [mini] }));
+    held = applyChange(held, delta({ hosts: { upserts: [h('q1', -1), h('q4', 12)], removed: [] } }));
+    expect(keys(held)).toEqual(['q1', 'q2', 'q3', 'q4']);
   });
 });
