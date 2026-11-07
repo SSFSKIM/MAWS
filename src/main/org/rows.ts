@@ -77,7 +77,7 @@ export type ListingMark = { revision: number; hash: string; kid: string; delegat
 /** M6b: the revision each source last showed a held key at, null while its set lacks the key. */
 export type ListingShown = { hub: number | null; channel: number | null };
 /** `shown` (M6b) is absent from a file M2 wrote, whose records were all the hub's. */
-export type ListingsFile = { version: 1; org: string; records: Signed<Listing>[]; marks: Record<string, ListingMark>; shown?: Record<string, ListingShown> };
+export type ListingsFile = { version: 1; org: string; records: Signed<Listing>[]; marks: Record<string, ListingMark>; shown?: Record<string, ListingShown>; member?: string };
 /** What the rows read of an RL2 link (M6b): its state, and `endpoint.listings`. */
 export type ListingsLink = Pick<RemoteLink, 'call'> & { state(): LinkState; onState(listener: (state: LinkState) => void): () => void };
 type Source = keyof ListingShown;
@@ -166,6 +166,12 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
 
   /** The org the marks, rows and waiting records belong to: the signed-in org's, once one signed in. */
   let dataOrg: string | null = null;
+  /**
+   * M6b: the member the channel memberships were read for. The hub serves the org's listings alike to every member, but
+   * a machine's channel answers its reader alone (a private session reaches its owners and shares), so what the channel
+   * holds is one reader's, as M7a's and M7b's caches are: another member signed in into the org drops it.
+   */
+  let channelReader: string | null = null;
   const marks = new Map<string, ListingMark>();
   /** The accepted live records a source holds, each verified against the head and certificates last judged against. */
   const held = new Map<string, Held>();
@@ -392,9 +398,11 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
         log(`a cached record for ${shown(key)} is not its mark's, skipped`);
         continue;
       }
-      // M6b: held again by the sources that held it; a file M2 wrote held only the hub's
+      // M6b: held again by the sources that held it; a file M2 wrote held only the hub's, and the channel's is held
+      // again only for the member it was read for
       const was: unknown = sourcesOf === null ? { hub: mark.revision, channel: null } : sourcesOf[key];
-      const sources = new Set<Source>(isShown(was) ? (['hub', 'channel'] as const).filter((source) => was[source] === mark.revision) : []);
+      const channelHeld = file.member === current.identity.member;
+      const sources = new Set<Source>(isShown(was) ? (['hub', 'channel'] as const).filter((source) => was[source] === mark.revision && (source === 'hub' || channelHeld)) : []);
       await judge(current, record, sources, hash);
     }
   }
@@ -417,6 +425,15 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
       }
       dataOrg = current.identity.org;
       judgedAgainst = null;
+      askedAt = null;
+    }
+    if (channelReader !== current.identity.member) {
+      if (channelReader !== null) {
+        log('another member signed in: the channel listings read for the last one are dropped');
+        for (const key of [...held.keys()]) release(key, 'channel');
+        unwait('channel', () => false);
+      }
+      channelReader = current.identity.member;
       askedAt = null;
     }
     const head = current.view.head();
@@ -481,9 +498,10 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
   // ---- the channels (M6b) ----
 
   /** One machine's channel answer, if it is still the one asked of: its records judged, and its keys it lacked released. */
-  async function channelAnswer(watch: Watch, org: string, result: Awaited<ReturnType<ListingsLink['call']>>): Promise<void> {
+  async function channelAnswer(watch: Watch, reader: { org: string; member: string }, result: Awaited<ReturnType<ListingsLink['call']>>): Promise<void> {
     const current = signedIn();
-    if (current === null || current.identity.org !== org || watched.get(watch.ref) !== watch) return;
+    // an answer read for another reader (or org) than the one signed in now is theirs alone
+    if (current === null || current.identity.org !== reader.org || current.identity.member !== reader.member || channelReader !== reader.member || watched.get(watch.ref) !== watch) return;
     // a failed call (a dropped link, a refusal) says nothing of what the machine lists, so it releases nothing
     if (!result.ok) return void log(`${shown(watch.ref)}'s channel listings did not read: ${result.error.code}`);
     const listings = isObject(result.output) ? result.output.listings : undefined;
@@ -502,7 +520,8 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
 
   /** Reads the machine's channel listings, one call at a time; then again in ROWS_CHANNEL_MS while its link is up. */
   function ask(watch: Watch): void {
-    if (closed || !watch.up || dataOrg === null || deps.session.current()?.identity.org !== dataOrg) return;
+    const current = deps.session.current();
+    if (closed || !watch.up || dataOrg === null || channelReader === null || current?.identity.org !== dataOrg || current.identity.member !== channelReader) return;
     if (watch.asking) {
       watch.again = true;
       return;
@@ -511,12 +530,12 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     watch.again = false;
     if (watch.timer !== null) clearTimeout(watch.timer);
     watch.timer = null;
-    const org = dataOrg;
+    const reader = { org: dataOrg, member: channelReader };
     void watch.link
       .call('endpoint.listings', null)
       .catch((error: unknown) => ({ ok: false as const, error: { code: (error as Error).message } }))
       .then((result) => {
-        void enqueue('a channel answer', () => channelAnswer(watch, org, result));
+        void enqueue('a channel answer', () => channelAnswer(watch, reader, result));
         watch.asking = false;
         if (watch.again) return ask(watch);
         if (closed || !watch.up || watched.get(watch.ref) !== watch) return;
@@ -585,13 +604,15 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     const machines = [...deps.roster()];
     const current = signedIn();
     if (current === null) return { machines, rows: [], complete: false, pending: [], members: [], member: null };
+    // another reader signed in, its change not yet judged: nothing the last one's channel showed is drawn for them
+    const theirs = current.identity.member === channelReader;
     const roster = new Set<string>(machines);
     const join = joinIds(current.identity.org);
     const member = current.identity.member;
     const out: RemoteRow[] = [];
     for (const h of held.values()) {
       const body = h.record.body;
-      if (!roster.has(body.machine)) continue;
+      if (!roster.has(body.machine) || (!theirs && h.hub !== body.revision)) continue;
       out.push({
         machine: body.machine as MachineRef,
         session: body.session,
@@ -657,6 +678,7 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
       const file: ListingsFile = {
         version: 1,
         org: dataOrg,
+        ...(channelReader === null ? {} : { member: channelReader }),
         records: [...held.values()].map((h) => h.record),
         marks: Object.fromEntries(marks),
         shown: Object.fromEntries([...held].map(([key, h]) => [key, { hub: h.hub, channel: h.channel }])),

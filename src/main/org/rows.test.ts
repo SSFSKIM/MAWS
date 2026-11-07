@@ -741,6 +741,50 @@ describe('channel listings (M6b)', () => {
     expect(calls()).toBe(1); // its link up
   });
 
+  it("are one reader's: another member of the org signed in sees none of the last one's channel rows, nor an answer asked for them", async () => {
+    const w = await World.make();
+    const h = await up(w);
+    await snapshot(h, [await w.list(w.m1, 'pub', 3)]);
+    await channel(h, w.m1.ref, await w.list(w.m1, 'only-a', 12, { audience: [w.A], policyRev: 3 }));
+    expect(h.shown()).toEqual(['only-a r12', 'pub r3']);
+    // a call asked for A is out when B signs in
+    h.rows.refreshChannel(w.m1.ref as MachineRef);
+    await drain(h);
+    w.session.set(w.signedIn(w.B));
+    expect(h.rows.rows().rows.map((r) => r.session)).not.toContain('only-a'); // not even before the change is judged
+    await drain(h);
+    expect(h.rows.rows().member).toBe(w.B);
+    expect(h.shown()).toEqual(['pub r3']);
+    expect(h.links.answer(w.m1.ref, [await w.list(w.m1, 'only-a', 13, { audience: [w.A], policyRev: 4 })])).toBe(true);
+    await drain(h);
+    expect(h.shown()).toEqual(['pub r3']);
+    // B's own read follows, and holds what it answers
+    await channel(h, w.m1.ref, await w.list(w.m1, 'only-b', 7, { audience: [w.B], policyRev: 1 }));
+    expect(h.shown()).toEqual(['only-b r7', 'pub r3']);
+    await drain(h);
+    expect(h.cache()).toMatchObject({ member: w.B });
+  });
+
+  it("restore channel rows from the cache only for the member who read them; the hub's for any", async () => {
+    const w = await World.make();
+    let h = await up(w);
+    await snapshot(h, [await w.list(w.m1, 'pub', 3)]);
+    await channel(h, w.m1.ref, await w.list(w.m1, 'only-a', 12, { audience: [w.A], policyRev: 3 }));
+    expect(h.cache()).toMatchObject({ member: w.A });
+    await h.rows.close();
+    w.session.set(w.signedIn(w.B));
+    h = await start(w, { files: h.files, links: fakeLinks('down') });
+    await drain(h);
+    expect(h.rows.rows().member).toBe(w.B);
+    expect(h.shown()).toEqual(['pub r3']);
+    // and back as A, whose read the file no longer holds once B's run wrote it
+    await h.rows.close();
+    w.session.set(w.signedIn(w.A));
+    h = await start(w, { files: h.files, links: fakeLinks('down') });
+    await drain(h);
+    expect(h.shown()).toEqual(['pub r3']);
+  });
+
   it('read nothing while signed out, drop an answer that lands signed out, and read every machine again at the next sign-in', async () => {
     const w = await World.make();
     w.session.set(null);
