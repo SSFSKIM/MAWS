@@ -76,6 +76,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-06) Task 2, reviewed by our task reviewer in three rounds and by the desk track in six (READY, their 601) (5a6b05638..f37817c55, with the org-protocol commits 40e793791 and 9e4b67f20): the seam and lane A's `#host` hand-off, `channel.history` with the per-lane `view` cut and opaque cursors, the project-scoped `channel` feed (`rl2.channel`, RL2 1.12, `WIRE_MINOR` 30), reach checks, a bounded streamed scan, the snapshot's restarts, and recovery from the let-go ids. Gates green: 42321083327 (full), 42328732994, 42331543046.
   - [x] (2026-11-06) Task 3, accepted by the architect (58e294092..19456cac9), with its review carried by the branch's reviewer-high: `machines.ts` (the spine and each machine's feed, gated on `rl2.channel`, with the older-peer fallback and a per-machine cache that belongs to one reader), the merge into `org.channel.*`, and `ToHumanEntry.tsx`. Gate green: 42336903199.
   - [x] (2026-11-06) Task 4 (33098354b..daf8d4a3c): `channel.local.test.ts` cases 5 and 6, plus an older-peer case (7/7, three runs in a row), and the e2e seed's to-human entries photographed, with two layout fixes. Gates green: e2e:settings 42341855912, static,unit,probes 42343748493.
+  - [x] (2026-11-07) The branch: reviewer-high on `782790d38...4e35fb15c`, one Minor (journal order across history pages) fixed at 1d3caff96 and ba7d57c92; master merged at 4e35fb15c. `--gates all --evidence` there (42344559621): 53 green, with a real `library.spec` regression fixed at 9bb79f34e. On 9bb79f34e: static, unit 1–4, e2e:library, cross-build and packaged 1/2 and 2/2 green (42357252517, 42359252532). e2e:discover is waiting on the mini's action-archive downloads (three timeouts before any step ran, passed to CI-opt).
 - [ ] M6a — Reader state and drafts per member — *executable; after M7b*
 - [ ] M6b — Visibility and shares (O18's M5) — *executable; after M6a; its live proof is the staging run it shares with O18 M6, which needs the desk track's sminos executors and a real second member (the owner)*
 - [ ] M4b — Machines and their rights — *executable; after M6b*
@@ -2482,6 +2483,12 @@ Each is built as its recommendation when its milestone is re-planned, unless the
 - Observation (M6a's design): two members who both own a machine share its owners' reader state, because the index can't tell which owner sits at a device.
 - Observation (M7a Task 1): the hub's `fanOut` sends a member's own `human` back to the socket that sent it, so words come back through the log after their `human-ack`. `words.logged` also clears a word whose nonce appears in the log.
   Evidence: `apps/desk-hub/src/objects/project.ts:1577-1586`.
+- Observation (M7b Task 1): a numbered migration for a new table cost a downgraded build its whole index. The cross-build downgrade scene caught migration 16, so the journal became an `ADDED_TABLES` entry (`IF NOT EXISTS`, `user_version` stays 15), the rule for any table no earlier build reads, M6a's included.
+  Evidence: Decision Log, M7b Task 1's `ADDED_TABLES` ruling; run 42292712838.
+- Observation (M7b Task 1): IPC event names had no main-only list, so `channel.changed` was bridged to every renderer window by default until `mainOnlyEvents` was added.
+- Observation (M7b Task 2): `INTEGER PRIMARY KEY` reuses a pruned maximum id, so opaque cursors needed `AUTOINCREMENT`; and the `channel` feed needed an `apps/org-protocol` hunk the spec hadn't foreseen (`MachineFeed`).
+- Observation (M7b's final gate): `e2e/library.spec.ts` rewinds the index to version 9 from a template built by the numbered migrations plus `ADDED_COLUMNS`, so an `ADDED_TABLES` entry the opener creates at any version was missing from the template, and the rewound index failed "is a version-9 index". The template now takes `ADDED_TABLES` too (9bb79f34e). Any later `ADDED_TABLES` entry is covered.
+  Evidence: run 42344559621 (e2e:library, packaged 1/2 red), 42357252517 (green).
 
 ## Decision Log
 
