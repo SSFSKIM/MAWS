@@ -437,6 +437,8 @@
   "delivery.status",
   "designSystems.governing",
   "designSystems.house",
+  "endpoint.local.act",
+  "endpoint.local.call",
   "engine.binaryInfo",
   "engine.budget",
   "engine.pendingItems",
