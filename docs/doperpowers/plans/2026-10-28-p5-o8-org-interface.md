@@ -105,6 +105,10 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
     - The enumerating rows test has 5,040 permutations plus 16,807 five-event sequences.
     - Reviews: our task reviewer approved it, then approved the three Minor fixes.
     - Static green at 4d95d25b6 (42410961560). One local run of `rows.test.ts`'s crypto-heavy marks case hit its 5 s timeout at a load average near 100, then passed on the committed code. Under CI it counts as a flake to explain.
+  - [x] (2026-11-07) Task 3, reviewed clean. The commits: f4f81e35f, 9d6a52542, 539e8b815, bc22ad7b0, 8f1b003e4, 9ed8353a6 and 6546231d2; then the review's fixes, 3c09ac206 through 954c74ded.
+    - What it adds: the Share sheet, the reach marks and the row menus; the private-listing churn fix in main; and `e2e/share.spec.ts`.
+    - Reviews: the frontier review found I1, I2, M1 and M2, and its re-review closed them, with one Minor: actions-whole's blanket `aria-hidden` exemption, folded into Task 4. The architect's taste read added three fixes, all accepted.
+    - Green at 6546231d2 (42417175074), and at 954c74ded (42420500958: static, unit, e2e:settings and e2e:cross-build).
 - [ ] M4b — Machines and their rights — *executable; after M6b*
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
 - [ ] M5b — Add owner — *executable; after M4c; lands once the desk track's `record.owners` executor and DL190 (b)'s fix are on master*
