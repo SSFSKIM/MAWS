@@ -161,7 +161,7 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
   );
 
   return (
-    <Sheet title={SHARE.title} width="w-[min(480px,90vw)]" data-share-sheet={address}>
+    <Sheet title={SHARE.title} width="w-[min(480px,90vw)]" scrim="bg-bg-active" data-share-sheet={address}>
       <SheetForm canSubmit={change !== null && !saving} onSubmit={() => void save()} submitLabel={ready === null ? undefined : saving ? SHARE.saving : SHARE.save} submitClass={PRIMARY} cancelLabel={ready === null || saved !== null ? SHARE.close : undefined}>
         <div data-share-session className="flex min-w-0 text-ui-sm text-fg-muted" title={title}>
           <span className="min-w-0 truncate">{title}</span>
