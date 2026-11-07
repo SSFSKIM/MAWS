@@ -38,6 +38,8 @@
 // of its machine's keys it lacked; a call that failed (a dropped link) clears nothing. A row is drawn while either
 // holds, so a session that goes private moves from the hub's snapshot to the channel's without its row blinking. A
 // record waiting on verification remembers which sources showed it, and a held one keeps no row once neither holds.
+// When a `gone` lands for a row the channel held (the hub's withdrawal arriving before the channel's private listing),
+// the row goes, as the rule says, and the machine's channel is asked at once, so it comes back within a round trip.
 //
 // Electron-free: vitest's node project runs it, and O3 moves it with the index into `mawsd`.
 import { createHash } from 'node:crypto';
@@ -283,6 +285,12 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     const revision = record.body.revision;
     const gone = isListingGone(record.body);
     const next: Held = { record, hub: sources.has('hub') ? revision : null, channel: sources.has('channel') ? revision : null };
+    // a withdrawal of a row its machine's channel held (the hub's, as a session goes private) asks that channel at once,
+    // so the row it may still list comes back within a round trip rather than at the next period
+    if (gone && held.get(key)?.channel != null) {
+      const watch = watched.get(record.body.machine as MachineRef);
+      if (watch !== undefined) ask(watch);
+    }
     if (gone || !holds(next)) held.delete(key);
     else held.set(key, next);
     marks.set(key, { revision, hash, kid: record.sig.kid, delegation, gone });

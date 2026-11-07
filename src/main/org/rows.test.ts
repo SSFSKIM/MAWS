@@ -643,6 +643,24 @@ describe('channel listings (M6b)', () => {
     expect(h.shown()).toEqual(['p r22']);
   });
 
+  it("ask the machine's channel at once when the hub withdraws a row the channel held, so a private one comes back", async () => {
+    const w = await World.make();
+    const h = await up(w);
+    const ten = await w.list(w.m1, 's', 10);
+    await snapshot(h, [ten]);
+    await channel(h, w.m1.ref, ten); // the channel lists the public session too
+    await push(h, await w.gone(w.m1, 's', 11)); // it went private: the hub's withdrawal lands first
+    expect(h.shown()).toEqual([]);
+    expect(h.links.calls(w.m1.ref)).toHaveLength(1); // asked at once
+    expect(h.links.answer(w.m1.ref, [await w.list(w.m1, 's', 12, { audience: [w.A] })])).toBe(true);
+    await drain(h);
+    expect(h.shown()).toEqual(['s r12']);
+    // a withdrawal of a row only the hub held asks nothing
+    await push(h, await w.list(w.m1, 'pub', 1), await w.gone(w.m1, 'pub', 2));
+    await drain(h);
+    expect(h.links.calls(w.m1.ref)).toHaveLength(0);
+  });
+
   it('take nothing from a call that failed: a dropped link keeps what the last answer showed', async () => {
     const w = await World.make();
     const h = await up(w);
