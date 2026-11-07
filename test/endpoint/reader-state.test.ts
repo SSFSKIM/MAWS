@@ -15,6 +15,9 @@ import type { Listing, Signed } from 'org-protocol';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { REGISTRY } from '@shared/ipc/registry';
 import { OFFERS } from '../../src/endpoint/offers';
+import { PlaneFeeds, type OwnersRead } from '../../src/endpoint/plane-feeds';
+import type { Subscription } from '../../src/endpoint/subscriptions';
+import { CheckoutBounds } from '../../src/endpoint/targets';
 import { Index } from '../../src/services/index/index';
 import { registerIndexHandlers } from '../../src/services/index/register';
 import { summary } from '../support/index-fixture';
@@ -246,6 +249,81 @@ describe('a reader decided before the machine’s owners change', () => {
     expect(probe.moved()).toBe(true);
     expect(index.drafts.get(app)).toEqual(draft('the owners’ words'));
     expect(index.drafts.get(app, org.A)).toEqual(draft('mine'));
+  });
+});
+
+// Fix wave F2 (the desk track's P2): a checkout feed's changes wait, in order, on each member's reading; while they wait
+// they count in the feed's backlog, and none whose feed closed or ended asks the machine anything. F1's rule on a feed:
+// a change goes to an owner as it is only while the head that made them one stands. The plane alone, over a machine
+// whose member reads are held.
+describe('a checkout feed’s changes waiting on a reading', () => {
+  function plane(backlogBytes: number, owners: () => OwnersRead = () => ({ owners: Promise.resolve([]), stands: () => true }), member = org.B) {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const reads: unknown[] = [];
+    const sent: Array<{ name: string; payload: { record: Record<string, unknown> } }> = [];
+    const dispatch = async (_owner: string, _name: string, _input: unknown, _client?: unknown, reader?: unknown) => {
+      if (reader === undefined) return { t: 'res', id: 'x', ok: false, error: { code: 'host_unavailable', message: 'away' } } as never; // the bounds' reads
+      reads.push(reader);
+      if (reads.length === 1) await held;
+      return { t: 'res', id: 'x', ok: true, value: { appId: 'app-1', ...NONE, pinned: true } } as never;
+    };
+    const feeds = new PlaneFeeds({ dispatch, bounds: new CheckoutBounds(() => []), ranks: (() => new Map()) as never, artifacts: { onDropped: () => () => {} } as never, leases: {} as never, browser: () => null, reaches: () => false, cursors: { seal: (entry) => entry.id }, owners, backlogBytes, log: () => {} });
+    const sub = {
+      message: { feed: 'checkout' },
+      session: { lane: 'B', id: 'app-1' },
+      channel: { client: undefined, member },
+      ended: false,
+      endedWith: null as string | null,
+      backlog: 0,
+      subbed: () => {},
+      ev: (_cursor: unknown, body: unknown) => void sent.push(body as never),
+      end(reason: string) {
+        this.ended = true;
+        this.endedWith = reason;
+      },
+    };
+    feeds.open(sub as unknown as Subscription);
+    const change = (n: number) => feeds.event('machine', { name: 'session.changed', payload: { record: { appId: 'app-1', title: `t${n}`, ...NONE }, cause: 'update', revision: n } });
+    return { feeds, sub, reads, sent, release, change };
+  }
+  const settled = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+  it('ends the feed `behind` once the changes waiting pass its backlog, and asks the machine nothing more', async () => {
+    const p = plane(100);
+    p.change(0);
+    await settled(); // its read out, and held
+    for (let n = 1; n < 1000; n++) p.change(n);
+    expect(p.sub.endedWith).toBe('behind');
+    p.release();
+    await settled();
+    expect(p.reads).toEqual([org.B]); // the one read held when the feed ended
+    expect(p.sent).toEqual([]);
+  });
+
+  it('asks the machine nothing for the changes waiting once their feed closes', async () => {
+    const p = plane(4 * 1024 * 1024);
+    p.change(0);
+    await settled();
+    for (let n = 1; n < 1000; n++) p.change(n);
+    expect(p.sub.ended).toBe(false);
+    p.feeds.close(p.sub as unknown as Subscription);
+    p.release();
+    await settled();
+    expect(p.reads).toEqual([org.B]);
+    expect(p.sent).toEqual([]);
+  });
+
+  it('tells an owner the owners’ reading only while the head that made them one stands, else their own', async () => {
+    let read = 0;
+    // The first read finds A an owner under a head that has moved by the step it would send; read again, A is a member.
+    const owners = (): OwnersRead => (++read === 1 ? { owners: Promise.resolve([org.A]), stands: () => false } : { owners: Promise.resolve([]), stands: () => true });
+    const p = plane(4 * 1024 * 1024, owners, org.A);
+    p.release();
+    p.change(1);
+    await settled();
+    expect(p.reads).toEqual([org.A]);
+    expect(p.sent.map((body) => readerFields(body.payload.record))).toEqual([{ ...NONE, pinned: true }]);
   });
 });
 

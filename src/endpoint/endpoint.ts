@@ -85,7 +85,7 @@ import { Notifier } from './notify';
 import { EndpointOrg, type OrgChange } from './org-sync';
 import { PlaneA } from './plane-a';
 import { PlaneB } from './plane-b';
-import { PlaneFeeds } from './plane-feeds';
+import { PlaneFeeds, type OwnersRead } from './plane-feeds';
 import { EndpointPolicy, MachineSetup, settingsDefaultMode } from './policy';
 import { completeProvisioning, provisionInto, type DelegatedInput } from './provision';
 import { retireInto, type Retired } from './retire';
@@ -514,7 +514,7 @@ export class Endpoint implements EndpointModule {
       browser: () => this.#services?.browser ?? null, // P5 O17 M9a: a session's `browser.inventory` feed
       reaches: (project) => orgProject(this.#org?.ready ? this.#org.head().state : null, project), // P5 O8 M7b: the `channel` feed's
       cursors: channelCursors, // P5 O8 M7b fix wave: its entries' cursors, history's too
-      owners: () => this.#machineOwners(), // P5 O8 M6a: whose reading a `session.changed` carries as it is
+      owners: () => this.#ownersRead(), // P5 O8 M6a: whose reading a `session.changed` carries as it is
       log,
       backlogBytes: seams.backlogBytes,
     });
@@ -805,6 +805,14 @@ export class Endpoint implements EndpointModule {
   /** A read of the hub's org state that begins after this call (`#syncAfter`): `mawsd endpoint sync`'s (P5 O7 M10). */
   syncAfter(): Promise<unknown> {
     return this.#syncAfter();
+  }
+
+  /** P5 O8 M6a: the machine's owners under the head held now, and whether that head and its certificates still stand. */
+  #ownersRead(): OwnersRead {
+    const org = this.#org;
+    const head = org?.ready ? org.head() : null;
+    const certificates = org?.ready ? org.certificates() : null;
+    return { owners: this.#machineOwners(), stands: () => (org?.ready ? org.head() : null) === head && (org?.ready ? org.certificates() : null) === certificates && this.#org === org };
   }
 
   /** The machine's owners as member ids, as the head and certificates give them now; none before the endpoint starts. */

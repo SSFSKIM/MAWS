@@ -39,10 +39,12 @@
 // a feed whose member is one of the machine's owners. Any other member's carries their own, read again for them from the
 // spine (`session.get` as their reader), or none where they have no row; a feed's changes go in the order they came.
 // A member's own update takes no spine change, so `readerMoved` tells each feed of that member's on the session (their
-// other devices, and the one that asked) the record as they read it now, and nobody else's.
+// other devices, and the one that asked) the record as they read it now, and nobody else's. Fix wave: a change goes to
+// an owner as it is only in a step where the head that made them one still stands (else the owners are read again,
+// once, and then it is the member's own); the changes waiting to be told count in the feed's backlog (past it, the feed
+// ends `behind`), and one whose feed closed or ended asks the machine nothing.
 import { randomBytes } from 'node:crypto';
 import { BACKLOG_BYTES } from '@shared/host/stream-catchup';
-import type { Reader } from '@shared/ipc/client';
 import type { ArtifactRanks } from './artifacts';
 import { ArtifactsFeeds, type ArtifactsFeedsContext } from './artifacts-feed';
 import { AttentionFeeds, type AttentionFeedsContext } from './attention-feed';
@@ -68,10 +70,11 @@ export type PlaneFeedsContext = {
   reaches: ChannelFeedsContext['reaches'];
   cursors: ChannelFeedsContext['cursors'];
   /**
-   * P5 O8 M6a: the machine's owners as the head gives them now, whose reading the spine's records carry; absent, none (each
-   * feed's member is read as their own, so no record goes with the owners' reading).
+   * P5 O8 M6a: the machine's owners as the head gives them now, whose reading the spine's records carry, and whether that
+   * head (and its certificates) still stands; absent, none (each feed's member is read as their own, so no record goes
+   * with the owners' reading).
    */
-  owners?(): Promise<readonly string[]>;
+  owners?(): OwnersRead;
   log(line: string): void;
   /** The most a feed's unread stream may hold before it ends `behind`. */
   backlogBytes?: number;
@@ -100,9 +103,16 @@ type Open = {
   reads: number;
   /** P5 O8 M6a: the feed's records being told, one after another (each as its member reads it). */
   told: Promise<void>;
+  /** The bytes of those still waiting to be told, which count in the feed's backlog. */
+  telling: number;
 };
 
 type Changed = { record: Record<string, unknown>; cause?: unknown; revision?: unknown };
+/** The machine's owners read under a head, and whether that head still stands (synchronously). */
+export type OwnersRead = { owners: Promise<readonly string[]>; stands(): boolean };
+const NO_OWNERS: OwnersRead = { owners: Promise.resolve([]), stands: () => true };
+/** What a member's own notice is counted as in its feed's backlog while it waits: about a record (its read is yet to come). */
+const NOTICE_BYTES = 1024;
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 /**
@@ -141,7 +151,7 @@ export class PlaneFeeds implements Plane {
     if (sub.message.feed === 'channel') return this.#channel.open(sub);
     if (sub.message.feed === 'browser.inventory' && namesSession(sub)) return this.#inventory.open(sub);
     if (sub.message.feed === 'attention' || !namesSession(sub)) return this.#attention.open(sub);
-    const open: Open = { sub, seq: 0, bounds: null, held: new Map(), files: null, heldFiles: [], reads: 0, told: Promise.resolve() };
+    const open: Open = { sub, seq: 0, bounds: null, held: new Map(), files: null, heldFiles: [], reads: 0, told: Promise.resolve(), telling: 0 };
     this.#open.set(sub, open);
     sub.subbed('snapshot', { epoch: this.#epoch, seq: 0 });
     void this.#readBounds(open, null);
@@ -209,12 +219,11 @@ export class PlaneFeeds implements Plane {
     } else if (name === 'session.changed' && isObject(payload.record)) {
       const record = payload.record;
       if (typeof payload.revision === 'number' && payload.revision > this.#revision) this.#revision = payload.revision;
-      let owners: Promise<readonly string[]> | null = null;
+      let owners: OwnersRead | null = null;
       for (const open of this.#open.values()) {
         if (open.sub.session.id !== record.appId) continue;
-        owners ??= this.#ctx.owners?.() ?? Promise.resolve([]);
-        const member = open.sub.channel.member;
-        this.#tell(open, owners.then((held) => readerOf(member, held)), { ...payload, record });
+        owners ??= this.#owners();
+        this.#tell(open, { ...payload, record }, owners);
         void this.#readBounds(open, record);
       }
     }
@@ -225,29 +234,56 @@ export class PlaneFeeds implements Plane {
    * to nobody): each of their feeds on the session is told the record as they read it now.
    */
   readerMoved(member: string, appSessionId: string): void {
-    for (const open of this.#open.values()) if (open.sub.session.id === appSessionId && open.sub.channel.member === member) this.#tell(open, Promise.resolve(member), null);
+    for (const open of this.#open.values()) if (open.sub.session.id === appSessionId && open.sub.channel.member === member) this.#tell(open, null, null);
+  }
+
+  #owners(): OwnersRead {
+    return this.#ctx.owners?.() ?? NO_OWNERS;
   }
 
   /**
-   * A `session.changed` told on `open`, after those before it: `changed` as it is to one of the owners, else with its
-   * member's own reading; with no `changed` (a member's own update), the record as its member reads it now.
+   * A `session.changed` queued on `open`, told after those before it; one past the feed's backlog ends it `behind`
+   * instead, as a send past it does.
    */
-  #tell(open: Open, reading: Promise<Reader>, changed: Changed | null): void {
-    const told = async () => {
-      const reader = await reading;
-      if (changed !== null && reader === 'owner') return this.#told(open, changed);
-      const read = await this.#record(open, dispatchAs(this.#ctx.dispatch, open.sub.channel.client, reader)).catch((error: unknown) => {
-        this.#ctx.log(`endpoint: a member's reading of ${open.sub.session.id.slice(0, 64)} could not be read for its checkout feed: ${(error as Error).message}`);
-        return null;
-      });
-      if (changed !== null) return this.#told(open, { ...changed, record: withReading(changed.record, read) });
-      if (read !== null) this.#told(open, { record: read, cause: 'update', revision: this.#revision });
-    };
+  #tell(open: Open, changed: Changed | null, owners: OwnersRead | null): void {
+    const { sub } = open;
+    if (sub.ended) return;
+    if (sub.backlog + open.telling > (this.#ctx.backlogBytes ?? BACKLOG_BYTES)) return void sub.end('behind');
+    const bytes = changed === null ? NOTICE_BYTES : Buffer.byteLength(JSON.stringify(changed));
+    open.telling += bytes;
+    const told = () => this.#tellNow(open, changed, owners).finally(() => (open.telling -= bytes));
     open.told = open.told.then(told).catch((error: unknown) => this.#ctx.log(`endpoint: a checkout feed's record could not be told: ${(error as Error).message}`));
   }
 
+  /**
+   * `changed` as it is to one of the owners, in a step where the head that makes them one stands (the owners read again,
+   * once, when it moved); else with the member's own reading; with no `changed` (a member's own update), the record as
+   * its member reads it now. Nothing is asked of the machine for a feed that closed or ended meanwhile.
+   */
+  async #tellNow(open: Open, changed: Changed | null, owners: OwnersRead | null): Promise<void> {
+    const member = open.sub.channel.member;
+    for (let read = owners, attempt = 0; changed !== null && read !== null && attempt < 2; read = this.#owners(), attempt++) {
+      const held = await read.owners;
+      if (!this.#live(open)) return;
+      if (readerOf(member, held) !== 'owner') break;
+      if (read.stands()) return this.#told(open, changed);
+    }
+    if (!this.#live(open)) return;
+    const reading = await this.#record(open, dispatchAs(this.#ctx.dispatch, open.sub.channel.client, member)).catch((error: unknown) => {
+      this.#ctx.log(`endpoint: a member's reading of ${open.sub.session.id.slice(0, 64)} could not be read for its checkout feed: ${(error as Error).message}`);
+      return null;
+    });
+    if (changed !== null) return this.#told(open, { ...changed, record: withReading(changed.record, reading) });
+    if (reading !== null) this.#told(open, { record: reading, cause: 'update', revision: this.#revision });
+  }
+
+  /** Whether `open` is still this plane's and its subscription goes on. */
+  #live(open: Open): boolean {
+    return this.#open.get(open.sub) === open && !open.sub.ended;
+  }
+
   #told(open: Open, changed: Changed): void {
-    if (this.#open.get(open.sub) === open) this.#send(open, 'session.changed', changed);
+    if (this.#live(open)) this.#send(open, 'session.changed', changed);
   }
 
   /**
