@@ -158,6 +158,7 @@
     "test/support/plugins-audit.ts",
     "test/support/prerun-commands.ts",
     "test/support/probe-file.ts",
+    "test/support/process-group.ts", // the widgets spec's Stop case reads its CLI's process group through the shared probe
     "test/support/r3-surface.ts",
     "test/support/relay-health.ts",
     "test/support/replay-engine.ts",

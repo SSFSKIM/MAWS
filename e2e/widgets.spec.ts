@@ -18,6 +18,7 @@ import type { OperationEvent } from '@shared/engine/operations';
 import type { WidgetsHarnessApi, WidgetsPane } from '../src/renderer/src/harness/widgets/api';
 import type { WidgetBackend } from '../test/support/widget-backend';
 import { ownerShapedState, scratchMarketplace, stubCalls, writePluginCliStub, type PluginCliStub, type StubPlugin, type StubState } from '../test/support/plugin-cli-stub';
+import { groupAlive } from '../test/support/process-group';
 import { KILL_GRACE_MS } from '../src/engine-host/plugins/runner';
 import { addressed } from './support/address';
 import { invoke, launchReady, value } from './support/c7-replay';
@@ -129,16 +130,6 @@ async function openPage(page: Page, pane: WidgetsPane): Promise<void> {
 }
 
 const widget = (page: Page, name: string): Locator => page.locator(`[data-widget="${name}"]`);
-// Whether a process group still has a member: `kill(-pgid, 0)` sends nothing and throws ESRCH once none remains.
-function groupAlive(pgid: number): boolean {
-  try {
-    process.kill(-pgid, 0);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
-    throw error;
-  }
-}
 // The value beside a key of a widget's key/value list.
 const valueOf = (scope: Locator, label: string): Locator => scope.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) }).locator('xpath=following-sibling::dd[1]');
 const pick = (page: Page, name: string) => page.evaluate((n) => (window as unknown as WidgetsWindow).__maws_widgets.open(n), name);
