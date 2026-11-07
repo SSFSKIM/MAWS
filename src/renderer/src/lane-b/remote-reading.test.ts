@@ -4,7 +4,7 @@
 // they outlive the app's run; where it doesn't (an endpoint older than M6a, `not-offered`), this run's memory
 // (./read-marks.ts) keeps them exactly as before.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { ReaderState, SessionRecord } from '@shared/graph/session';
 import type { ReaderPatch } from '@shared/ipc/schema/session';
 import { addressOf } from '@shared/machine/address';
@@ -87,7 +87,7 @@ describe('a machine that keeps each member’s reading', () => {
 
   it('marks a session on screen read there, and again when a turn ends there while it stays on screen', async () => {
     const { fake, reading, endTurn } = machineKeeping({ unread: true });
-    readAgain({ unread: true, lastSeen: { messageUuid: 'm-1', at: null } });
+    readAgain({ unread: true, lastSeen: { messageUuid: 'm-1' as MessageUuid, at: null } });
     connect(fake);
     showRemote(REMOTE, true, fake.client);
     expect(held().unread).toBe(false); // on screen is read at once, its write on its way
