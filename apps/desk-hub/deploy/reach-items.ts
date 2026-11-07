@@ -5,8 +5,15 @@
 // B's, whose hello carries it). S runs on A1, T on A2, U on B1; S spawns L1 while listed and C1 once private.
 //
 // Every item sets up what it needs of the sessions' visibility first (`ensure`): narrowing from the session's own shell,
-// widening by the operator at the scene's terminal (the pty path, staging's and the run's scenes' alone), so an item can
-// be rehearsed on its own (`--items`). Every check is one report line; what the run makes is undone by its cleanup.
+// widening as the owner's MAWS widens, by a `record.*` act over the owner's channel to the session's machine (P5 O8 M6b:
+// the scenes' endpoints say `record`, so sminos 1.39.0 and later refuse widening at the terminal), so an item can be
+// rehearsed on its own (`--items`). Every check is one report line; what the run makes is undone by its cleanup.
+//
+// O8 M6b's live proof adds three items (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M6b and Concrete
+// Steps, "The shared staging run"): `m6b-cutover`, the terminal's widening refused "use MAWS" where the endpoint said
+// `record`, its narrowing kept; `m6b-visibility`, B listed S by its access and refused converse and approve at listed;
+// and `m6b-reader`, B's pin, reading and draft of a lane B session A shares with B, A's read back unchanged. Item 4's
+// Can message share is the act's too, so it shows that B's agents message S and B can't read it.
 import { randomBytes, randomUUID } from 'node:crypto';
 import { historyInventoryPath, historyLogPath, signEvent, streamWriter, type HistoryInventory, type HistoryLogPage, type Listing, type Rl1Welcome, type Signed } from 'org-protocol';
 import { ProjectSocket, type DeviceHuman, type LoggedEvent } from 'org-protocol/test-support';
@@ -16,27 +23,30 @@ import { credentialHeaders } from '../fake-machine/link';
 import type { LogEvent } from '../src/protocol/log';
 import type { OrgView } from './endpoint-acceptance';
 import type { MemberChange, RunHub, StepResult, Tag, VmMachine } from './endpoint-machine';
-import { openRemote, testDevice, type RelayDialer, type Remote, type RunDevice } from './endpoint-remote';
+import type { Remote, RunDevice } from './endpoint-remote';
 import type { ItemReport } from './endpoint-verdicts';
 import type { Person } from './hub';
 import { seatSession } from './endpoint-items';
 import type { Cleanup } from './proof';
+import { callOutput, draftOf, laneAAck, machineAct, readingOf, recordAct, recordPolicy, type Policy, type RecordChange, type RecordResult } from './reach-acts';
 
-/** The items, in the run's order (M6's "Items, live, in the run's order"); `scene` is the preflight. */
-export const REACH_ITEMS = ['2', '8', '3a', '3b', '3c', '7', '1', '5', '4', '3e', '3d', '6b', '6c', '6d', '6e'] as const;
+/** The items, in the run's order (M6's "Items, live, in the run's order"; O8 M6b's beside 8 and last); `scene` is the
+ * preflight. */
+export const REACH_ITEMS = ['2', '8', 'm6b-cutover', '3a', '3b', '3c', '7', '1', '5', '4', '3e', '3d', '6b', '6c', '6d', '6e', 'm6b-visibility', 'm6b-reader'] as const;
 export type ReachItem = (typeof REACH_ITEMS)[number];
 
 /** The clauses cited from suites, not run (M6's "Cited, not run"). */
 export const CITED = {
   '6a': 'an old hub (the endpoint holds the events): test/endpoint/rl10/audience-signing.test.ts, the holds while the hub’s welcome lacks `audience` (“holds stream events, unsigned, while the hub’s welcome lacks `audience`…”, “holds a stream position the ledger signed already…”, “sends no queued stream event over a connection whose hub lacks `audience`…”); a pre-M1 hub over M1’s stored tombstones would put staging’s logs at risk',
-  '8': 'the cutover sentence (M5’s step-up cutover closes widening to every agent): sminos test_visibility.py `Cutover` (doperpowers 0759115d); the scene’s MAWS predates the `record` acts, and O8 M6b’s own e2e proves the step-up path',
   '3a': 'the member’s browser half: apps/desk-hub/test/audience-reads.test.ts (“live and on resume: A’s browser is sent the stream, B’s never”, the audit record live and replayed, the session plane); the second member is @staging.invalid, and the hub resolves a browser’s member by its Access email alone',
 } as const;
 
 /** A machine of the scene: a VM scene's, enrolled and listed. */
 export type ReachMachine = { scene: string; vm: VmMachine; name: string; ref: string; owner: string };
-/** A session of the scene's, as its sminos lists it. */
-export type ReachSession = { label: string; session: string; alias: string; short?: string; machine: ReachMachine };
+/** A session of the scene's, as its sminos lists it; `launch`, a lane A session's, where the scene started it. */
+export type ReachSession = { label: string; session: string; alias: string; short?: string; launch?: string; machine: ReachMachine };
+/** O8 M6b's lane B session on A1, in mawsd's own engine host (vm/scene.sh's `lane-b-up`). */
+export type LaneBSession = { app: string; launch: string; engine: string; alias: string };
 /** A probe machine in this process (FakeEndpoint), speaking only to the staging hub. */
 export type Probe = { name: string; machine: V2Machine; endpoint: FakeEndpoint; welcome: Rl1Welcome };
 
@@ -59,8 +69,13 @@ export type ReachScene = {
   T: ReachSession;
   U: ReachSession;
   seats: { L1?: ReachSession; C1?: ReachSession };
-  /** The relay to A1, for b1's channels. */
-  relayA1: RelayDialer;
+  /**
+   * A channel of A's device (the staging admin's) or b1's to a machine of the scene, over the hub's relay: what a
+   * member's MAWS opens. The caller closes it.
+   */
+  channel(who: 'a' | 'b', machine: Pick<ReachMachine, 'ref'>): Promise<Remote>;
+  /** A lane B session up on A1, A's (O8 M6b's reader item); once. */
+  bringLaneB(): Promise<LaneBSession>;
   /** The project's archive designated to a machine of the run's (by name), or cleared. */
   designate(machine: string | null): Promise<void>;
   /** Where the operator's pty path may widen: this run's hub and its own scenes. */
@@ -94,6 +109,17 @@ export function policyRevOf(lines: readonly string[]): number | null {
     if (m) return Number(m[1]);
   }
   return null;
+}
+
+/**
+ * sminos's refusal of a widening once its machine's endpoint said `record` (sminos_visibility.py's THROUGH_APP, sminos
+ * 1.39.0 and later), at the terminal and in an agent's shell alike: the start of its words, which name MAWS.
+ */
+export const THROUGH_APP = "widening reach on this machine is the app's: use MAWS";
+
+/** Whether a step failed with sminos's THROUGH_APP refusal. */
+export function refusedThroughApp(r: StepResult): boolean {
+  return r.rc !== 0 && r.lines.some((l) => l.includes(THROUGH_APP));
 }
 
 /**
@@ -206,20 +232,46 @@ async function never(s: ReachSession, tok: string, ms = 60_000): Promise<void> {
   if (n !== 0) throw new Error(`${tok} reached ${s.label} ${n} time(s)`);
 }
 
-/** Sets a session's access (narrowing from its own shell; widening by the operator at its scene's terminal). */
-async function setAccess(scene: ReachScene, s: ReachSession, level: 'private' | 'listed'): Promise<StepResult> {
-  const change: MemberChange = { access: { member: s.session, level } };
-  const r = level === 'private' ? await s.machine.vm.asSession(s.session, change) : await s.machine.vm.operator(change, scene.run);
-  if (r.rc !== 0) throw new Error(`${s.label} ${level}: exited ${r.rc}: ${said(r)}`);
-  return r;
+/** `run` over a channel of `who`'s device to `machine`, closed however it ends. */
+async function withChannel<T>(scene: Pick<ReachScene, 'channel'>, who: 'a' | 'b', machine: Pick<ReachMachine, 'ref'>, run: (remote: Remote) => Promise<T>): Promise<T> {
+  const remote = await scene.channel(who, machine);
+  try {
+    return await run(remote);
+  } finally {
+    remote.close();
+  }
 }
 
-/** Shares S's session with B at `grade` (the operator: a widening) or removes the share (its own shell: narrowing). */
-async function shareS(scene: ReachScene, grade: 'list' | 'view' | 'none'): Promise<StepResult> {
-  const change: MemberChange = { share: { member: scene.S.session, person: scene.b.member, grade } };
-  const r = grade === 'none' ? await scene.S.machine.vm.asSession(scene.S.session, change) : await scene.S.machine.vm.operator(change, scene.run);
+/** A record act on lane A session `s` by its owner, A, as A's MAWS makes it: over A's channel to its machine. */
+export function ownerRecord(scene: Pick<ReachScene, 'channel'>, s: ReachSession, change: RecordChange): Promise<RecordResult> {
+  return withChannel(scene, 'a', s.machine, (remote) => recordAct(remote, s.machine.ref, { session: s.session }, change));
+}
+
+/** Lane A session `s`'s policy as its owner, A, reads it (`record.policy`). */
+export function ownerPolicy(scene: Pick<ReachScene, 'channel'>, s: ReachSession): Promise<Policy> {
+  return withChannel(scene, 'a', s.machine, (remote) => recordPolicy(remote, s.session));
+}
+
+/** Sets a session's access: narrowing from its own shell; widening by its owner's record act, as MAWS widens. */
+export async function setAccess(scene: ReachScene, s: ReachSession, level: 'private' | 'listed'): Promise<string> {
+  if (level === 'listed') {
+    const result = await ownerRecord(scene, s, { access: level });
+    return `${s.label}: access ${level} through A's record.access, policyRev ${result.policyRev}${result.changed ? '' : ' (as it was)'}`;
+  }
+  const r = await s.machine.vm.asSession(s.session, { access: { member: s.session, level } });
+  if (r.rc !== 0) throw new Error(`${s.label} ${level}: exited ${r.rc}: ${said(r)}`);
+  return said(r);
+}
+
+/** Shares S's session with B at `grade` (a widening: A's record act) or removes the share (narrowing: its own shell). */
+export async function shareS(scene: ReachScene, grade: 'list' | 'view' | 'none'): Promise<string> {
+  if (grade !== 'none') {
+    const result = await ownerRecord(scene, scene.S, { member: scene.b.member, grade });
+    return `S shared with B at ${grade} through A's record.shares, policyRev ${result.policyRev}${result.changed ? '' : ' (as it was)'}`;
+  }
+  const r = await scene.S.machine.vm.asSession(scene.S.session, { share: { member: scene.S.session, person: scene.b.member, grade } });
   if (r.rc !== 0) throw new Error(`S's share with B ${grade}: exited ${r.rc}: ${said(r)}`);
-  return r;
+  return said(r);
 }
 
 /** Whether U's `sminos list --org --json` names S. */
@@ -290,8 +342,8 @@ export async function probeSay(scene: ProbeAt, probe: Probe, to: Pick<ReachSessi
 }
 
 /** b1's channel to A1 over the relay. */
-async function b1ToA1(scene: ReachScene): Promise<Remote> {
-  return openRemote(testDevice(scene.org, scene.b.device, { chain: scene.view.chain, certificates: scene.view.certificates }, { build: 'o18-m6-acceptance' }), scene.machines.a1.ref, () => scene.relayA1.dial());
+function b1ToA1(scene: ReachScene): Promise<Remote> {
+  return scene.channel('b', scene.machines.a1);
 }
 
 /** The listings b1 is served by A1's endpoint. */
@@ -440,13 +492,13 @@ export async function item8(scene: ReachScene, report: ReachReport): Promise<voi
   ] as const) {
     await report.check('8', `an agent’s shell never widens: ${what} refused`, async () => {
       const r = await vm.asSession(scene.S.session, change as MemberChange);
-      if (r.rc === 0 || !r.lines.some((l) => l.includes('widening reach needs its owner'))) throw new Error(`exited ${r.rc}: ${said(r)}`);
+      // The machine's endpoint says `record`: sminos's words are the cutover's (THROUGH_APP), an agent's as a terminal's.
+      if (!refusedThroughApp(r)) throw new Error(`exited ${r.rc}: ${said(r)}`);
       const held = policyRevOf((await vm.asSession(scene.S.session, { access: { member: scene.S.session, level: 'private' } })).lines);
       if (held !== rev) throw new Error(`policyRev moved from ${rev} to ${held}`);
-      return `refused (“widening reach needs its owner”), policyRev still ${held}`;
+      return `refused (“use MAWS”: widening here is the app's), policyRev still ${held}`;
     });
   }
-  report.bySuites('8', CITED['8']);
 }
 
 /** 3a: nothing new of private S reaches B's machine, PB, b1 or the archive; C1, born private, shows the literal none. */
@@ -722,14 +774,14 @@ export async function item5(scene: ReachScene, report: ReachReport): Promise<voi
 /** Item 4: a Can message share opens messaging and nothing view-gated; its removal drops S. */
 export async function item4(scene: ReachScene, report: ReachReport): Promise<void> {
   await ensure(scene, scene.S, 'private');
-  await shareS(scene, 'list');
-  await report.check('4', 'shared as Can message: U sees S, and b1 is listed it with its audience', async () => {
+  const shared = await shareS(scene, 'list');
+  await report.check('4', 'shared as Can message by A’s record.shares act: U sees S, and b1 is listed it with its audience', async () => {
     await until(() => uSees(scene), 'S in U’s list --org', 90_000);
     const listing = (await b1Listings(scene)).find((l) => l.body.session === scene.S.session);
     if (listing === undefined) throw new Error('A1 lists S to b1 not');
     const fields = listing.body.fields as { audience?: string[]; policyRev?: number };
     if (!Array.isArray(fields.audience) || typeof fields.policyRev !== 'number') throw new Error(`the listing's fields: ${JSON.stringify(fields).slice(0, 200)}`);
-    return `U's list names S; A1 lists S to b1, audience of ${fields.audience.length}, policyRev ${fields.policyRev}`;
+    return `${shared}; U's list names S; A1 lists S to b1, audience of ${fields.audience.length}, policyRev ${fields.policyRev}`;
   });
   await report.check('4', 'U messages S, owned by B', async () => {
     const tok = token(scene, 'i4');
@@ -909,9 +961,156 @@ export async function item6e(scene: ReachScene, report: ReachReport): Promise<vo
   });
 }
 
+// ---- O8 M6b's items --------------------------------------------------------------------------------------------------
+
+const CUTOVER = 'm6b-cutover';
+const VISIBILITY = 'm6b-visibility';
+const READER = 'm6b-reader';
+
+/**
+ * m6b-cutover: A1's endpoint said `record` in its welcome, so its sminos takes widening from MAWS alone: the operator's
+ * widening at A1's terminal is refused “use MAWS” before anything is asked, and S's policy doesn't move; a narrowing
+ * there still runs.
+ */
+export async function itemCutover(scene: ReachScene, report: ReachReport): Promise<void> {
+  const vm = scene.S.machine.vm;
+  await report.check(CUTOVER, 'A1’s sminos keeps its endpoint’s welcome with `record`', async () => {
+    const caps = ((await vm.json('audiences'))?.capabilities as unknown[] | undefined) ?? [];
+    if (!caps.includes('record')) throw new Error(`A1's audiences.json carries ${JSON.stringify(caps)}: is the scene's MAWS at O8 M6b or later?`);
+    return `A1's audiences.json carries ${caps.join(',')}`;
+  });
+  await ensure(scene, scene.S, 'private');
+  for (const [what, change] of [
+    ['listed', { access: { member: scene.S.session, level: 'listed' } }],
+    ['a share with B', { share: { member: scene.S.session, person: scene.b.member, grade: 'view' } }],
+  ] as const) {
+    await report.check(CUTOVER, `the terminal’s widening refused “use MAWS”, nothing asked or written: ${what}`, async () => {
+      const before = await ownerPolicy(scene, scene.S);
+      const r = await vm.operator(change as MemberChange, scene.run);
+      const after = await ownerPolicy(scene, scene.S);
+      if (!refusedThroughApp(r) || !r.lines.includes('operator: not asked')) throw new Error(`exited ${r.rc}: ${said(r)}`);
+      if (after.policyRev !== before.policyRev || JSON.stringify(after) !== JSON.stringify(before)) throw new Error(`S's policy moved: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
+      return `refused (“use MAWS”), no confirmation asked; S ${after.access}, policyRev still ${after.policyRev}`;
+    });
+  }
+  await report.check(CUTOVER, 'narrowing at the terminal still runs', async () => {
+    const widened = await ownerRecord(scene, scene.S, { access: 'listed' });
+    const r = await vm.operator({ access: { member: scene.S.session, level: 'private' } }, scene.run);
+    const rev = policyRevOf(r.lines);
+    if (r.rc !== 0 || rev !== widened.policyRev + 1) throw new Error(`from listed at policyRev ${widened.policyRev}: exited ${r.rc}: ${said(r)}`);
+    const now = await ownerPolicy(scene, scene.S);
+    if (now.access !== 'private' || now.policyRev !== rev) throw new Error(`S reads ${JSON.stringify(now)} after the terminal's narrowing`);
+    return `listed (A's record.access, policyRev ${widened.policyRev}), then private at the terminal: policyRev ${rev}, as record.policy reads it`;
+  });
+}
+
+/** The listing A1 serves b1 of S, once it is (or isn't) there; within `ms`. */
+function b1Listing(scene: ReachScene, listed: boolean, ms = 90_000): Promise<{ listing: Signed<Listing> | undefined }> {
+  return until(
+    async () => {
+      const listing = (await b1Listings(scene)).find((l) => l.body.session === scene.S.session);
+      return (listing !== undefined) === listed ? { listing } : null;
+    },
+    `S ${listed ? 'listed' : 'not listed'} to b1`,
+    ms,
+    3000,
+  );
+}
+
+/**
+ * m6b-visibility: b1 is listed S by S's access alone, each level set as the Share sheet sets it (A's record.access);
+ * and at the default `listed`, with S shared with no one, b1's acts at `converse` and `approve` are refused `grade`.
+ * Item 4 shows the rest: a Can message share lets B's agents message S, and b1 can't read it.
+ */
+export async function itemVisibility(scene: ReachScene, report: ReachReport): Promise<void> {
+  await shareS(scene, 'none');
+  for (const access of ['private', 'listed', 'org-view', 'org-converse'] as const) {
+    await report.check(VISIBILITY, `b1 is listed S by its access: ${access}${access === 'private' ? ' (not shared)' : ''}`, async () => {
+      const result = await ownerRecord(scene, scene.S, { access });
+      const { listing } = await b1Listing(scene, access !== 'private');
+      if (listing === undefined) return `A's record.access, policyRev ${result.policyRev}: A1 lists S to b1 not`;
+      const fields = listing.body.fields as { audience?: unknown; policyRev?: unknown };
+      if (fields.audience !== undefined || fields.policyRev !== undefined) throw new Error(`a ${access} session's listing carries a private one's fields: ${JSON.stringify(fields).slice(0, 200)}`);
+      return `A's record.access, policyRev ${result.policyRev}: A1 lists S to b1 (revision ${listing.body.revision}), with no audience`;
+    });
+  }
+  await report.check(VISIBILITY, 'at listed, shared with no one: b1’s converse and approve acts on S refused `grade`', async () => {
+    await ensure(scene, scene.S, 'listed');
+    if (scene.S.launch === undefined) throw new Error('S has no launch the scene recorded');
+    const S = { session: scene.S.session, launch: scene.S.launch };
+    const tok = token(scene, 'm6b-v');
+    const [steer, decide] = await withChannel(scene, 'b', scene.S.machine, async (remote) => [
+      await laneAAck(remote, scene.S.machine.ref, S, 'sminos.steer', { text: `hello ${tok}` }),
+      await laneAAck(remote, scene.S.machine.ref, S, 'sminos.decide', { digest: { session: S.session, request: tok, tool: 'Bash', input_sha256: '0'.repeat(64) }, decision: 'allow' }),
+    ]);
+    if (steer !== 'grade' || decide !== 'grade') throw new Error(`sminos.steer ${steer}; sminos.decide ${decide}`);
+    return 'sminos.steer (converse) and sminos.decide (approve) refused grade by A1’s endpoint, before anything reached S';
+  });
+}
+
+/** The draft's one paragraph, as `draftOf` wrote it; null for anything else. */
+const draftText = (draft: unknown): string | null => {
+  const text = (draft as { doc?: { content?: Array<{ content?: Array<{ text?: unknown }> }> } } | null)?.doc?.content?.[0]?.content?.[0]?.text;
+  return typeof text === 'string' ? text : null;
+};
+
+/**
+ * m6b-reader: a lane B session on A1, A's, shared with B at Converse by A's record.shares act (a draft is written at
+ * `converse`). B pins it, reads it and keeps a draft of it over b1's channel, each B's own (M6a's reader rule); A's
+ * reading and draft, set before, read back unchanged over A's.
+ */
+export async function itemReader(scene: ReachScene, report: ReachReport): Promise<void> {
+  const a1 = scene.machines.a1;
+  let lane: LaneBSession | null = null;
+  const app = () => {
+    if (lane === null) throw new Error('no lane B session up');
+    return lane.app;
+  };
+  await report.check(READER, 'a lane B session on A1, shared with B at Converse by A’s record.shares act', async () => {
+    lane = await scene.bringLaneB();
+    const shared = { appSessionId: lane.app };
+    scene.cleanup.add('remove the lane B session’s share with B', async () => void (await withChannel(scene, 'a', a1, (remote) => recordAct(remote, a1.ref, shared, { member: scene.b.member, grade: null }))));
+    const result = await withChannel(scene, 'a', a1, (remote) => recordAct(remote, a1.ref, shared, { member: scene.b.member, grade: 'converse' }));
+    return `${lane.app} (engine session ${lane.engine}, ${lane.alias}): shared, policyRev ${result.policyRev}`;
+  });
+  const mine = token(scene, 'm6b-a');
+  const theirs = token(scene, 'm6b-b');
+  let before: ReturnType<typeof readingOf> | null = null;
+  await report.check(READER, 'A’s own draft and reading, before B', async () => {
+    before = await withChannel(scene, 'a', a1, async (remote) => {
+      const saved = await machineAct(remote, a1.ref, 'session.drafts.set', { appSessionId: app(), draft: draftOf(mine) });
+      if ((saved as { state?: unknown }).state !== 'done') throw new Error(`A's draft: ${JSON.stringify(saved)}`);
+      return readingOf(await callOutput(remote, 'session.get', { appSessionId: app() }));
+    });
+    return `A's draft saved; A's reading ${JSON.stringify(before)}`;
+  });
+  await report.check(READER, 'B pins it, reads it and keeps a draft of it through b1’s channel', async () => {
+    const at = new Date().toISOString();
+    return withChannel(scene, 'b', a1, async (remote) => {
+      const state = readingOf(await callOutput(remote, 'session.reader.update', { appSessionId: app(), patch: { pinned: true, unread: false, lastSeen: { messageUuid: null, at } } }));
+      if (state.pinned !== true || state.unread !== false) throw new Error(`B's reader update answered ${JSON.stringify(state)}`);
+      const saved = await machineAct(remote, a1.ref, 'session.drafts.set', { appSessionId: app(), draft: draftOf(theirs) });
+      if ((saved as { state?: unknown }).state !== 'done') throw new Error(`B's draft: ${JSON.stringify(saved)}`);
+      const draft = draftText(await callOutput(remote, 'session.drafts.get', { appSessionId: app() }));
+      if (draft !== theirs) throw new Error(`B's draft reads back as ${JSON.stringify(draft)}`);
+      const reading = readingOf(await callOutput(remote, 'session.get', { appSessionId: app() }));
+      if (reading.pinned !== true) throw new Error(`B's session.get reads ${JSON.stringify(reading)}`);
+      return 'B pinned and read it (session.reader.update), and its draft and record read back as B’s';
+    });
+  });
+  await report.check(READER, 'A’s reading and draft read back unchanged through A’s keys', async () => {
+    if (before === null) throw new Error('A’s own reading was never read');
+    const [reading, draft] = await withChannel(scene, 'a', a1, async (remote) => [readingOf(await callOutput(remote, 'session.get', { appSessionId: app() })), draftText(await callOutput(remote, 'session.drafts.get', { appSessionId: app() }))] as const);
+    if (JSON.stringify(reading) !== JSON.stringify(before)) throw new Error(`A's reading moved: ${JSON.stringify(before)} → ${JSON.stringify(reading)}`);
+    if (draft !== mine) throw new Error(`A's draft reads ${JSON.stringify(draft)}`);
+    return `A's reading still ${JSON.stringify(reading)}; A's draft still A's`;
+  });
+}
+
 const RUNS: Record<ReachItem, (scene: ReachScene, report: ReachReport) => Promise<void>> = {
   '2': item2,
   '8': item8,
+  'm6b-cutover': itemCutover,
   '3a': item3a,
   '3b': item3b,
   '3c': item3c,
@@ -925,6 +1124,8 @@ const RUNS: Record<ReachItem, (scene: ReachScene, report: ReachReport) => Promis
   '6c': item6c,
   '6d': item6d,
   '6e': item6e,
+  'm6b-visibility': itemVisibility,
+  'm6b-reader': itemReader,
 };
 
 /** What the items report to: ItemReport's checks and notes. */

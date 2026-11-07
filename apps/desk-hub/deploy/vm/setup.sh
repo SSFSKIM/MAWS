@@ -16,7 +16,8 @@
 # P5 O18 M6's reach scenes (RUN=o18, set by reach-acceptance.ts's composer with COMMIT, BUNDLE, BUNDLE_SHA256,
 # SMINOS_NEW, SMINOS_OLD and the pinned Node, NODE_PIN, NODE_SHA256_X64 and NODE_SHA256_ARM64) are set up by reach_setup below instead, and need no MAWS checkout on the VM: the branch
 # comes as a full bundle, staged at $BUNDLE by the steps before this one, and sminos as the run's own copies by commit
-# (`git archive <commit> sminos`, sminos-new.tar and sminos-old.tar in the stage), never the VM's marketplace's.
+# (`git archive <commit> sminos`, sminos-new.tar and sminos-old.tar in the stage), never the VM's marketplace's. P5 O8
+# M6b adds lane-b.mjs and a marketplace of the new sminos, for a lane B session on A1.
 set -euo pipefail
 say() { printf '%s\n' "$*"; }
 
@@ -75,7 +76,7 @@ reach_setup() {
   nodebin=$(reach_prereqs $O) || exit 3
   say "build on node $("$nodebin/node" --version) ($nodebin)"
   [[ ${BUNDLE:-} == /var/tmp/o18-m6-stage/maws.bundle && -s $BUNDLE ]] || { say "setup: no staged bundle at ${BUNDLE:-?}"; exit 2; }
-  for f in scene.sh stub-model.mjs stub-api.mjs sminos-new.tar sminos-old.tar; do [[ -s $STAGE/$f ]] || { say "setup: no $f in the stage"; exit 2; }; done
+  for f in scene.sh stub-model.mjs stub-api.mjs lane-b.mjs sminos-new.tar sminos-old.tar; do [[ -s $STAGE/$f ]] || { say "setup: no $f in the stage"; exit 2; }; done
   [[ $(sha256sum "$BUNDLE" | cut -d' ' -f1) == "$BUNDLE_SHA256" ]] || { say "setup: the staged bundle is not the one sent (sha256)"; exit 3; }
 
   # The users, one a scene, and the archive's group, which they alone share.
@@ -88,7 +89,7 @@ reach_setup() {
 
   # The scenes' shared files.
   install -m 755 $STAGE/scene.sh $O/scene.sh
-  install -m 644 $STAGE/stub-model.mjs $STAGE/stub-api.mjs $O/
+  install -m 644 $STAGE/stub-model.mjs $STAGE/stub-api.mjs $STAGE/lane-b.mjs $O/
   for sc in new old; do
     rm -rf $O/sminos-$sc.x && mkdir -p $O/sminos-$sc.x
     tar -x -f $STAGE/sminos-$sc.tar -C $O/sminos-$sc.x
@@ -96,6 +97,11 @@ reach_setup() {
     rm -rf $O/sminos-$sc && mv $O/sminos-$sc.x/sminos $O/sminos-$sc && rm -rf $O/sminos-$sc.x && chmod -R a+rX $O/sminos-$sc
   done
   say "sminos new $(grep -m1 '"version"' $O/sminos-new/.claude-plugin/plugin.json | tr -d ' ,') at ${SMINOS_NEW:0:12}, old $(grep -m1 '"version"' $O/sminos-old/.claude-plugin/plugin.json | tr -d ' ,') at ${SMINOS_OLD:0:12}: the run's copies"
+  # P5 O8 M6b: lane B's, for A1's lane B session (scene.sh's lane-b-up): the new sminos in a directory marketplace of the
+  # scenes' own, under the name lane-b-up installs from (`sminos@o10-m11`), as O10's scene keeps one.
+  rm -rf $O/market && mkdir -p $O/market/.claude-plugin && cp -R $O/sminos-new $O/market/sminos
+  printf '%s\n' '{"name": "o10-m11", "owner": {"name": "o10-m11"}, "plugins": [{"name": "sminos", "source": "./sminos", "description": "sminos, for the lane B session of the scene"}]}' > $O/market/.claude-plugin/marketplace.json
+  chmod -R a+rX $O/market
   # The image's `claude` (devcloud links it at /usr/local/bin/claude): the binary itself, never the owner's config.
   engine=$(readlink -f /usr/local/bin/claude 2>/dev/null || readlink -f /Users/new/.local/bin/claude 2>/dev/null || true)
   [[ -n $engine && -x $engine ]] || { say "setup: no claude binary on the VM"; exit 3; }
