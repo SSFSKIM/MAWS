@@ -404,7 +404,7 @@ describe('remove', () => {
     expect(await runRealMember(run.o)).toBe(0);
     const after = listed.states.at(-1)!;
     expect(after.members.map((m) => m.id)).toEqual([ADMIN_MEMBER]);
-    expect(after.revoked.map((r) => [r.holder.device, r.holder.key])).toEqual([['d-1', 'channel'], ['d-1', 'step-up'], ['d-2', 'channel'], ['d-2', 'step-up']]);
+    expect(after.revoked.map((r) => r.holder).map((h) => ('device' in h ? [h.device, h.key] : h))).toEqual([['d-1', 'channel'], ['d-1', 'step-up'], ['d-2', 'channel'], ['d-2', 'step-up']]);
     expect(after.revoked.map((r) => r.keyId)).toEqual(await Promise.all(keys.map((k) => keyId(k.pub))));
     expect(run.lines.join('\n')).toMatch(/its 2 device\(s\)' 4 key\(s\) revoked/);
 
