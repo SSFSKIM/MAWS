@@ -9,6 +9,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import { humanTurn, item, record, status } from '../../../test/support/builders';
 import { deliver, FakeLink, MINI } from '../../../test/lane-b/fake-link';
 import { READ_REFUSED } from '@shared/org/reader';
+import type { CallResult } from '../machines/remote/link';
 import { RemoteSession } from './remote-session';
 
 beforeEach(() => vi.useFakeTimers());
@@ -128,7 +129,7 @@ describe('opening', () => {
   });
 
   it('keeps READ_REFUSED through a transient answer and past the ladder, with no poll after it; a later start that reads the record clears it', async () => {
-    let answer: unknown = { ok: false, error: { code: 'grade' } };
+    let answer: CallResult = { ok: false, error: { code: 'grade' } };
     const l = lab();
     l.link.answers.set('session.get', () => answer);
     l.session.start();
