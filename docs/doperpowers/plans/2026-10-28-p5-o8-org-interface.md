@@ -129,6 +129,9 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-08) Task 4, reviewed clean. The commits: f519c4804 (Step 0), b4888335e, 556e3061b, the spec commit ce4931a7e, and the fix waves b051e0b35; 9a35790bd, 5ccc78b0c, fe2bac5c1; a8aed197c. None touches `src/endpoint`, `apps/org-protocol` or `apps/desk-hub`.
     - Reviews: our task reviewer took four rounds (Decision Log, "M4b Task 4", item 12). The architect ruled the delivery route (push, then grant; every verdict final).
     - Green: static and unit at a8aed197c (42494746695).
+  - [x] (2026-11-08) Task 5, reviewed clean. The commits: 484d9fd2f, 65a547a54, and the fix waves fccfe6803; 0d518e9a3 and f044b0e72; 7b1b1780f (0d518e9a3 and 7b1b1780f are main's scoped enrollment cancel).
+    - Reviews: our task reviewer took four rounds (Decision Log, "M4b Task 5", item 10). The architect ruled the cancel's scope.
+    - Green: static, unit and e2e:settings at fccfe6803 (42502411003, with its screenshots); static and unit at 7b1b1780f (42506305752).
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
 - [ ] M5b — Add owner — *executable; after M4c; lands once the desk track's `record.owners` executor and DL190 (b)'s fix are on master*
 - [ ] M8 — The deployment admin's end, and acceptance — *owner steps and evidence; last; needs O14's B4 steps 4 to 8 and M3's root-add sitting (its first step)*
@@ -4117,6 +4120,48 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
       - A damaged grants.json blocks grant signing on that profile (item 3).
       - The door's lag refusal asks the user to sign again, and a recovery rewind can land between the push's answer and the grant's arrival, on the fork path, where the machine's verdict is then final. The exit for both is a desk-reviewed `src/endpoint` change carrying the judging head's version on the refusal, which makes the door's lag refusal resend instead of asking again.
   Date/Author: 2026-11-08, O8's executor (controller), from Task 4's report and its review.
+
+- Decision: M4b Task 5, the renderer. The commits are 484d9fd2f (the renderer, `page-fixture.ts` and the e2e seed), 65a547a54 (its self-review) and the fix waves fccfe6803, 0d518e9a3 with f044b0e72, and 7b1b1780f. The one change to main and shared IPC is the enrollment cancel's scope (item 5, the architect's ruling). Otherwise, under `src/main`, only `page-fixture.ts` changes: its answers, plus the e2e-only `holdGrantSave`, which only the strictly parsed page fixture can set, under `MAWS_E2E=1` on an unpackaged build. These points are settled.
+  1. **Structure.** `MachineRow.tsx` is new. It holds a row, its rights, its grants read and its grant sheets. `MachinesGroup.tsx` keeps the group, the enroll row, the hub rows left, and the two org-state sheets (change and enrollment). `GrantSheet.tsx` and `EnrollSheet.tsx` are new.
+  2. **When a row reads its grants:** on mount, when one of its sheets opens, at `org.grants.changed` for its ref, and when the sign-in changes. It never reads at `org.changed`. The sheets use the row's read. Nothing a previous sign-in read ever renders.
+  3. **Gating.**
+     - Grant… follows `mayGrant` (Fork B).
+     - Enroll, Owners… and Drop… follow `maySign`. Re-enroll… also needs an admin, because the mint is admin-only.
+     - A certified machine has no Owners, Drop or Re-enroll, and its row says its owners are its delegation's.
+     - This Mac's own machine has no Drop.
+  4. **The grant sheet.**
+     - It offers no owners, unless one still holds a grant that can be withdrawn. For `'org'`, the owners are the admins.
+     - Rights show under their own names (`spawn`, `shell`, `machine-admin`), each with one line taken from RL §5.5.
+     - While `set` or `regrant` is out, a status line reads "Bringing <machine> up to date, then Touch ID shows the grant…" and the button reads "Saving…". That covers the push before the read and the confirmation (I2's ruling, condition 3). There is no cancel, so the sheet's button reads Close.
+     - A machine's verdict codes get plain lines, with the code kept secondary.
+     - A pending grant says this Mac keeps sending it until the machine answers.
+  5. **The enrollment sheet.**
+     - It shows the code once, with Copy, and the line naming `mawsd enroll`. The machine pastes the code at its hidden prompt, and `--replace` is always mentioned. Then it shows the expiry for the whole wait, including when the sheet is reopened without the code. Then the name, ref and key id to compare.
+     - The code is cleared at the state boundary when the candidate arrives, and a test pins that.
+     - The sheet belongs to the sign-in it opened under (`useOwnSignIn`, latched apart from its run). That ownership ends for good at the first different sign-in, including a sign-out and a sign-in again as the same member, and no start or Start over is offered after it. A start attaches to the first later run whose machine and name match. A newer run that isn't its own ends the start ("Another enrollment is under way"): it cancels nothing and never shows a late code. An approval's progress and answer show only beside its own run. Closing the sheet on an ended run cancels the run.
+     - **The cancel is scoped** (the architect's ruling; fix waves 2 and 3). `org.enroll.cancel {generation: number | null}` with a number ends only that run while it is the current one. `null` comes from a sheet whose start has no generation yet, and ends only the start the same window (the asking client's id) sent while its token is minted, or the run that start made while it is still current. A start refused `busy` records nothing. Anything else answers `{ok: false, reason: 'not-current'}`, and the sheet shows nothing. No window can cancel a start or a run it doesn't own. A `null` from a closing sheet, rather than nothing, keeps a minted run from being orphaned, with no code shown and enrollment blocked for up to an hour. A window closed while its run waits leaves that run to be cancelled by generation from the row, or to expire.
+  6. **The change sheet's machine fields.**
+     - Owners… waits for a non-empty list that differs from the machine's current owners. The list is bounded and scrolls, so Review and Cancel stay reachable; `Sheet.tsx` doesn't change, because about thirty sheets use it.
+     - Drop… has "Its key may be compromised".
+     - A row left in `hubRowsLeft` offers Retry.
+     - The refused-removal line "Change the machine's owners first" links to the machine's row through the `machines` and `onGoTo` props, never by parsing the refusal text.
+     - A sheet's answer reaches the page only while the sheet is open under its sign-in. An answer after its sign-in ended stays in the sheet ("Signed version N.").
+  7. **The e2e seed** (`e2e/org-page.spec.ts`, `e2e:settings`) gains the Machines group's actions, a machine with on-machine, pending and refused grants, a missing grant, an enrollment awaiting its key, and the grant sheet held while saving (`holdGrantSave`). It shows a pairing and an enrollment together, which main never allows; the header says so.
+  8. **Tests.** EnrollSheet 17, enroll 25, ChangeSheet 18, GrantSheet 10, MachinesGroup 11, PeopleGroup 9, OrgGroup 18, OrgSection 12 and page-fixture 7. Each runs on its own, under both the renderer and compiled projects. The red came first, or, for the two sheets written before their tests, 14 mutations. The fix waves' mutations are all killed (12 + 6 + 4) except one (ChangeSheet's lifetime guard, defence in depth behind the delivery path's own block, which the architect accepted).
+  9. **Gates and evidence.** The `static,unit,e2e:settings` runs are green: 42497863362 at 484d9fd2f, 42498673277 at 65a547a54 (with evidence) and 42502411003 at fccfe6803 (with evidence). `static,unit` at f044b0e72 (42504702480) and 7b1b1780f (42506305752). Every screenshot was reviewed by the executor and the task reviewer.
+  10. **The review.** Our task reviewer found four Important issues, all fixed in fccfe6803 with red regressions from the reviewer's probe:
+      - the enrollment sheet wasn't latched to one run or sign-in;
+      - a closed change sheet's late answer closed its successor;
+      - a reopened enrollment had no expiry;
+      - the owners picker overflowed.
+
+      It also found three Minor issues: the code's clearing wasn't pinned, some lines stated false things, and npm warnings showed in the test output.
+
+      Two more rounds then closed the enrollment's ownership. An ended sheet lost its sign-in latch. A start that never attached cancelled an unrelated run, because the cancel was global. A `null` cancel reached another window's mint, and left its own window's published run orphaned. The architect ruled that the cancel be scoped in main. The controller read fix wave 3's main-side diff.
+  11. **Residue.**
+      - The Org page reads each machine's ledger once when it opens. That matters once an org has enough machines that the page opens slowly; the fix is to read each row when it becomes visible.
+      - Fourteen refusal and copy lines name a condition without a clear next step ("Copy for the UX pass" in Task 5's report). They go to the UX pass as one board ticket at M4b's landing.
+  Date/Author: 2026-11-08, O8's executor (controller), from Task 5's report and its review.
 
 ## Outcomes & Retrospective
 
