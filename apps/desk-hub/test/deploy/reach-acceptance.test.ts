@@ -452,6 +452,54 @@ function fakeScene(o: { operator?: (change: Record<string, unknown>) => { rc: nu
   return { scene, policy, shell, operator, a, b, opened };
 }
 
+/** A1's lane B session APP and the run's two members, faked per member: each one's reading and draft of it, as the
+ * reader rule keeps them; `forgets` names a field of the reading an update never persists. */
+function readerScene(o: { forgets?: 'lastSeen' } = {}) {
+  // A1's endpoint, faked per member: each one's reading and draft of APP, as the reader rule keeps them.
+  const readings = new Map<string, Record<string, unknown>>([[A, { pinned: false, unread: true, lastSeen: { messageUuid: null, at: null } }]]);
+  const drafts = new Map<string, unknown>();
+  const shares: Array<Record<string, unknown>> = [];
+  const of = (member: string) => readings.get(member) ?? { pinned: false, unread: false, lastSeen: { messageUuid: null, at: null } };
+  const endpointOf = (member: string) =>
+    fakeChannel({
+      outcome: (act) => {
+        if (act.action === 'record.shares') {
+          shares.push(act.args);
+          return { state: 'done', result: { changed: true, policyRev: 2 } };
+        }
+        drafts.set(member, act.args.draft);
+        return { state: 'done' };
+      },
+      answer: (name, input) => {
+        if (input.appSessionId !== APP) return { ok: false, code: 'grade' };
+        if (name === 'session.get') return { ok: true, output: { appId: APP, title: 'notes', ...of(member) } };
+        if (name === 'session.drafts.get') return { ok: true, output: drafts.get(member) ?? null };
+        if (name === 'session.reader.update') {
+          const patch = { ...(input.patch as Record<string, unknown>) };
+          if (o.forgets !== undefined) delete patch[o.forgets];
+          readings.set(member, { ...of(member), ...patch });
+          return { ok: true, output: { appSessionId: APP, ...of(member) } };
+        }
+        return { ok: false, code: 'not-offered' };
+      },
+    });
+  const a = endpointOf(A);
+  const b = endpointOf(B);
+  const cleanups: string[] = [];
+  const a1 = { scene: 'a1', name: 'o18-a1-t', ref: 'ref-a1', owner: A };
+  const scene = {
+    a: { member: A },
+    b: { member: B },
+    machines: { a1 },
+    tag: 't1',
+    bringLaneB: async () => ({ app: APP, engine: OTHER, alias: 'notes', launch: 'L-b' }),
+    channel: async (who: 'a' | 'b') => (who === 'a' ? a.remote : b.remote),
+    cleanup: { add: (what: string) => void cleanups.push(what) },
+    log: () => {},
+  } as unknown as ReachScene;
+  return { scene, readings, shares, cleanups, a, b };
+}
+
 describe('the reach scenes on a build whose endpoint says `record` (P5 O8 M6b)', () => {
   it('widen as a member’s MAWS does, by A’s record act over A’s channel to the session’s machine; narrow from the session’s own shell; never at the terminal', async () => {
     const f = fakeScene();
@@ -568,46 +616,7 @@ describe('the reach scenes on a build whose endpoint says `record` (P5 O8 M6b)',
   });
 
   it('the reader item: A shares a lane B session with B at Converse; B’s pin, reading and draft are B’s, and A’s read back unchanged', async () => {
-    // A1's endpoint, faked per member: each one's reading and draft of APP, as the reader rule keeps them.
-    const readings = new Map<string, Record<string, unknown>>([[A, { pinned: false, unread: true, lastSeen: { messageUuid: null, at: null } }]]);
-    const drafts = new Map<string, unknown>();
-    const shares: Array<Record<string, unknown>> = [];
-    const of = (member: string) => readings.get(member) ?? { pinned: false, unread: false, lastSeen: { messageUuid: null, at: null } };
-    const endpointOf = (member: string) =>
-      fakeChannel({
-        outcome: (act) => {
-          if (act.action === 'record.shares') {
-            shares.push(act.args);
-            return { state: 'done', result: { changed: true, policyRev: 2 } };
-          }
-          drafts.set(member, act.args.draft);
-          return { state: 'done' };
-        },
-        answer: (name, input) => {
-          if (input.appSessionId !== APP) return { ok: false, code: 'grade' };
-          if (name === 'session.get') return { ok: true, output: { appId: APP, title: 'notes', ...of(member) } };
-          if (name === 'session.drafts.get') return { ok: true, output: drafts.get(member) ?? null };
-          if (name === 'session.reader.update') {
-            readings.set(member, { ...of(member), ...(input.patch as object) });
-            return { ok: true, output: { appSessionId: APP, ...of(member) } };
-          }
-          return { ok: false, code: 'not-offered' };
-        },
-      });
-    const a = endpointOf(A);
-    const b = endpointOf(B);
-    const cleanups: string[] = [];
-    const a1 = { scene: 'a1', name: 'o18-a1-t', ref: 'ref-a1', owner: A };
-    const scene = {
-      a: { member: A },
-      b: { member: B },
-      machines: { a1 },
-      tag: 't1',
-      bringLaneB: async () => ({ app: APP, engine: OTHER, alias: 'notes', launch: 'L-b' }),
-      channel: async (who: 'a' | 'b') => (who === 'a' ? a.remote : b.remote),
-      cleanup: { add: (what: string) => void cleanups.push(what) },
-      log: () => {},
-    } as unknown as ReachScene;
+    const { scene, readings, shares, cleanups, b } = readerScene();
     const report = recordingReport();
     await itemReader(scene, report);
     expect(report.checks.map((c) => [c.status, c.check])).toEqual([
@@ -618,9 +627,17 @@ describe('the reach scenes on a build whose endpoint says `record` (P5 O8 M6b)',
     ]);
     expect(shares).toEqual([{ appSessionId: APP, member: B, grade: 'converse' }]);
     expect(cleanups).toEqual(['remove the lane B session’s share with B']);
-    expect(readings.get(B)).toMatchObject({ pinned: true, unread: false });
+    expect(readings.get(B)).toEqual({ pinned: true, unread: false, lastSeen: { messageUuid: null, at: expect.stringMatching(/^\d{4}-\d\d-\d\dT/) } });
     expect(readings.get(A)).toEqual({ pinned: false, unread: true, lastSeen: { messageUuid: null, at: null } });
     expect(b.acts.map((x) => x.action)).toEqual(['session.drafts.set']);
     expect(b.calls.map((c) => c.name)).toEqual(['session.reader.update', 'session.drafts.get', 'session.get']);
+  });
+
+  it('the reader item fails a reading persisted without B’s own lastSeen', async () => {
+    const { scene } = readerScene({ forgets: 'lastSeen' });
+    const report = recordingReport();
+    await itemReader(scene, report);
+    expect(report.checks.filter((c) => c.status === 'fail').map((c) => c.check)).toEqual(['B pins it, reads it and keeps a draft of it through b1’s channel']);
+    expect(report.checks.find((c) => c.status === 'fail')!.detail).toMatch(/lastSeen/);
   });
 });

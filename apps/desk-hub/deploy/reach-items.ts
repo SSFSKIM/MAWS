@@ -1090,14 +1090,16 @@ export async function itemReader(scene: ReachScene, report: ReachReport): Promis
   await report.check(READER, 'B pins it, reads it and keeps a draft of it through b1’s channel', async () => {
     const at = new Date().toISOString();
     return withChannel(scene, 'b', a1, async (remote) => {
+      // B's reading as the update sets it, read back whole, B's own lastSeen among it
+      const expected = JSON.stringify({ pinned: true, unread: false, lastSeen: { messageUuid: null, at } });
       const state = readingOf(await callOutput(remote, 'session.reader.update', { appSessionId: app(), patch: { pinned: true, unread: false, lastSeen: { messageUuid: null, at } } }));
-      if (state.pinned !== true || state.unread !== false) throw new Error(`B's reader update answered ${JSON.stringify(state)}`);
+      if (JSON.stringify(state) !== expected) throw new Error(`B's reader update answered ${JSON.stringify(state)}, not ${expected} (pinned, unread and lastSeen)`);
       const saved = await machineAct(remote, a1.ref, 'session.drafts.set', { appSessionId: app(), draft: draftOf(theirs) });
       if ((saved as { state?: unknown }).state !== 'done') throw new Error(`B's draft: ${JSON.stringify(saved)}`);
       const draft = draftText(await callOutput(remote, 'session.drafts.get', { appSessionId: app() }));
       if (draft !== theirs) throw new Error(`B's draft reads back as ${JSON.stringify(draft)}`);
       const reading = readingOf(await callOutput(remote, 'session.get', { appSessionId: app() }));
-      if (reading.pinned !== true) throw new Error(`B's session.get reads ${JSON.stringify(reading)}`);
+      if (JSON.stringify(reading) !== expected) throw new Error(`B's session.get reads ${JSON.stringify(reading)}, not ${expected} (pinned, unread and lastSeen)`);
       return 'B pinned and read it (session.reader.update), and its draft and record read back as B’s';
     });
   });
