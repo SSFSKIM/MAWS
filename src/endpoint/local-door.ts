@@ -2,7 +2,8 @@
 // Interfaces §Q): this machine's own app changes its own sessions' reach through its own endpoint, by the same act and
 // rule as any member's device over a channel. The app has no channel to its own endpoint (the direct listener binds only
 // tailnet addresses, and the roster leaves the local ref out), so `mawsd` serves the door on its machine socket
-// (`endpoint.local.act`, `endpoint.local.call`), whose clients are this machine's user.
+// (`endpoint.local.act`, `endpoint.local.call`, and from M4b `endpoint.local.grants`), whose clients are this machine's
+// user.
 //
 // The door adds no authority. What a channel's identity proves of a device, the door proves by the act's step-up
 // signature alone, so it takes an act only through these checks, in order, the first refusal answering:
@@ -18,14 +19,26 @@
 //      is the door's answer; one that doesn't come within DOOR_DONE_MS answers `unknown`, the act left to sminos's ledger.
 // `call` answers `record.policy` alone, as the machine's owners' member (P5 Decision Log 36's local reader), and nothing
 // else (`not-offered`).
-import { isAction, type Action, type ActMessage, type EndpointMessage, type OrgState } from 'org-protocol';
+//
+// P5 O8 M4b (the architect's Fork A, an amendment to the rule above): the door takes `endpoint.grant` too, so the owner
+// of a single machine can grant rights on it from its own app. A grant carries its own signature, the authority a
+// channel's `endpoint.grant` rests on as well (it asks no step-up there), so here it takes the act's place in step 2: the
+// act asks no step-up signature, its device must still be one the head lists exactly once (`unknown-device`), and its
+// `args.grant` must pass `verifyGrant` against the held head and certificates (its verdict the refusal: `malformed`,
+// `not-listed`, `unknown-signer`, `revoked`, `bad-signature`, …), checked here before anything is handed on. Steps 3 and 4
+// are as above, the ledger's intake (grants.ts) verifying the grant again under the head it lands under. `call` answers
+// `endpoint.grants` too, as the machine's owners' member: every member's entry (grants.ts). Everything else outside
+// `record.*` stays refused.
+import { isAction, verifyGrant, type Action, type ActMessage, type Certificates, type EndpointMessage, type Grant, type OrgState, type Signed } from 'org-protocol';
 import { endableClientRef } from '@shared/ipc/client';
 import type { RemoteChannel } from './channels';
-import { isPolicyInput, RECORD_ACTS, RECORD_POLICY } from './offers';
+import { ENDPOINT_GRANTS, isGrantsInput, isPolicyInput, RECORD_ACTS, RECORD_POLICY } from './offers';
 import { verifyDeviceStepUp } from './step-up';
 
 /** How long an act the door handed on waits for its `done` before it answers `unknown`. */
 export const DOOR_DONE_MS = 30_000;
+/** P5 O8 M4b: the one act outside `record.*` the door takes, on its grant's own signature. */
+const GRANT = 'endpoint.grant';
 
 /** An act's answer as a device reads it: `done`'s outcome, or `{state: 'refused', reason}` for a refusal before it ran. */
 export type DoorOutcome = { state: string } & Record<string, unknown>;
@@ -35,10 +48,15 @@ export type DoorCallAnswer = { ok: true; output: unknown } | { ok: false; code: 
 export type LocalDoorContext = {
   /** The head now; null while none is held. */
   head(): OrgState | null;
+  /** P5 O8 M4b: the certificates held with the head, and the clock, a grant is verified under. */
+  certificates(): Certificates;
+  now(): number;
   /** The channel's `act` route (freshness, authorization, the executor), as a remote device's act takes it. */
   act(channel: RemoteChannel, m: ActMessage): void;
   /** `record.policy` for the machine's owners. */
   policy(input: unknown): Promise<DoorCallAnswer>;
+  /** P5 O8 M4b: `endpoint.grants` for the machine's owners (grants.ts). */
+  grants(): Promise<DoorCallAnswer>;
   log(line: string): void;
   /** The suites' seam (DOOR_DONE_MS). */
   doneWithinMs?: number;
@@ -51,25 +69,31 @@ export class LocalDoor {
 
   constructor(private readonly ctx: LocalDoorContext) {}
 
-  /** An act through the door: the module's four checks, then the channel's route. */
+  /** An act through the door: the module's four checks (a grant's own signature in step 2's place), then the channel's route. */
   async act(action: unknown): Promise<DoorOutcome> {
     if (!isAction(action)) return refused('malformed');
-    if (!(RECORD_ACTS as readonly string[]).includes(action.action)) return refused('not-offered');
-    if (action.stepUp === undefined) return refused('step-up');
+    const grant = action.action === GRANT;
+    if (!grant && !(RECORD_ACTS as readonly string[]).includes(action.action)) return refused('not-offered');
+    if (!grant && action.stepUp === undefined) return refused('step-up');
     const head = this.ctx.head();
     if (head === null) return refused('unavailable');
+    const certificates = this.ctx.certificates();
     const entries = head.members.flatMap((member) => member.devices.filter((device) => device.id === action.device).map((device) => ({ member: member.id, device })));
     if (entries.length !== 1) return refused('unknown-device');
     const [{ member, device }] = entries;
-    if (!(await verifyDeviceStepUp(action, device, head))) return refused('step-up');
+    if (grant) {
+      // `verifyGrant` holds the value to a signed grant's shape before anything else
+      const verdict = await verifyGrant(head, action.args.grant as Signed<Grant>, certificates, new Date(this.ctx.now()));
+      if (!verdict.ok) return refused(verdict.code);
+    } else if (!(await verifyDeviceStepUp(action, device, head))) return refused('step-up');
     return this.#run(action, { member, device: device.id, clientClass: device.class });
   }
 
-  /** A call through the door: `record.policy` alone. */
+  /** A call through the door: `record.policy` and (P5 O8 M4b) `endpoint.grants` alone. */
   call(name: string, input: unknown): Promise<DoorCallAnswer> {
-    if (name !== RECORD_POLICY) return Promise.resolve({ ok: false, code: 'not-offered' });
-    if (!isPolicyInput(input)) return Promise.resolve({ ok: false, code: 'malformed' });
-    return this.ctx.policy(input ?? null);
+    if (name === RECORD_POLICY) return isPolicyInput(input) ? this.ctx.policy(input ?? null) : Promise.resolve({ ok: false, code: 'malformed' });
+    if (name === ENDPOINT_GRANTS) return isGrantsInput(input) ? this.ctx.grants() : Promise.resolve({ ok: false, code: 'malformed' });
+    return Promise.resolve({ ok: false, code: 'not-offered' });
   }
 
   /** The act on a channel of the door's own, answered by the first `ack` refusal or `done` it carries. */

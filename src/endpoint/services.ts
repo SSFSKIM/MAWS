@@ -101,7 +101,9 @@ export interface EndpointModule {
    * P5 O8 M6b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §Q): the local door, this machine's
    * own app's way to its own sessions' record acts and their policy read (local-door.ts), which `mawsd` serves as
    * `endpoint.local.act` and `endpoint.local.call`. `act` answers the act's outcome as `done` carries it, or `{state:
-   * 'refused', reason}`; `call` answers as RL3's `result` does. Absent from a module that has none (a test's).
+   * 'refused', reason}`; `call` answers as RL3's `result` does. Absent from a module that has none (a test's). P5 O8 M4b:
+   * `act` takes `endpoint.grant` too, on the grant's own signature, and `call` `endpoint.grants` (mawsd's
+   * `endpoint.local.grants`).
    */
   local?: {
     act(action: unknown): Promise<{ state: string } & Record<string, unknown>>;

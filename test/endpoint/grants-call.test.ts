@@ -5,7 +5,7 @@
 //
 // The org (sub-harness.ts): A, the admin, owns the machine (a1); B (b1) and C (c1, a web-cards device) are members.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { endorseDevice, keyId, signRecord, SIGNING_DOMAINS, type Grant, type OrgState, type Signed } from 'org-protocol';
+import { endorseDevice, keyId, signRecord, SIGNING_DOMAINS, type Action, type Grant, type OrgState, type Signed } from 'org-protocol';
 import { GRANTS_READS, grantsAnswer, grantsView } from '../../src/endpoint/grants';
 import { OFFERS } from '../../src/endpoint/offers';
 import { iso, memberId, newDevice, revokedDevice, successor, type TestDevice } from './org-fixtures';
@@ -247,5 +247,62 @@ describe('grantsAnswer and grantsView', () => {
     const ledger = { version: 1 as const, heldKeys: [], grants: { [org.B]: forB }, highWater: { [org.B]: 1 } };
     expect(grantsView(ledger, head, [org.A], 'owners')).toEqual([entry(org.A), entry(org.B, forB), entry(org.C)]);
     expect(grantsView(ledger, head, [], 'owners')).toEqual([]);
+  });
+});
+
+describe('the local door', () => {
+  /** A device of the org's sealing actions for this machine (no channel of its own is used). */
+  const sealer = async (f: Fixture, who: TestDevice, member: string) => (await openRemote(f, who, member)).device;
+  const grantAct = (device: Awaited<ReturnType<typeof sealer>>, f: Fixture, grant: unknown): Action => device.action({ machine: f.ref, action: 'endpoint.grant', args: { grant } });
+
+  it('stores a valid grant on its own signature, with no step-up on the act, as a channel’s act does', async () => {
+    const f = await machine();
+    const a = await sealer(f, org.a1, org.A);
+    const forB = await signed(f, org.B, { rights: ['spawn', 'shell'] });
+    const act = grantAct(a, f, forB);
+    expect(act.stepUp).toBeUndefined();
+    expect(await f.endpoint.local.act(act)).toEqual({ state: 'done', result: { member: org.B, version: 1, rights: ['spawn', 'shell'] } });
+    expect(f.endpoint.parts!.state.ledger!.grants[org.B]).toEqual(forB);
+    expect(await f.endpoint.local.act(act), 'replayed').toEqual({ state: 'refused', reason: 'replayed' });
+    // the ledger's own rule after the door, its refusal the act's `failed` outcome: an equal version is not newer
+    expect(await f.endpoint.local.act(grantAct(a, f, forB))).toEqual({ state: 'failed', error: { code: 'not-newer' } });
+  });
+
+  it('refuses a forged grant at the door, before anything runs', async () => {
+    const f = await machine();
+    const a = await sealer(f, org.a1, org.A);
+    const forB = await signed(f, org.B);
+    const widened = { ...forB, body: { ...forB.body, rights: ['spawn', 'shell', 'machine-admin'] } };
+    expect(await f.endpoint.local.act(grantAct(a, f, widened)), 'rights changed after signing').toEqual({ state: 'refused', reason: 'bad-signature' });
+    expect(await f.endpoint.local.act(grantAct(a, f, { body: forB.body })), 'no signature').toEqual({ state: 'refused', reason: 'malformed' });
+    expect(await f.endpoint.local.act(a.action({ machine: f.ref, action: 'endpoint.grant', args: {} })), 'no grant').toEqual({ state: 'refused', reason: 'malformed' });
+    expect(f.endpoint.parts!.state.ledger!.grants).toEqual({});
+  });
+
+  it('refuses an ineligible grant at the door: one signed by a member who doesn’t own the machine, or for a member the head doesn’t list', async () => {
+    const f = await machine();
+    const b = await sealer(f, org.b1, org.B);
+    expect(await f.endpoint.local.act(grantAct(b, f, await signed(f, org.B, {}, org.b1))), 'B signs their own').toEqual({ state: 'refused', reason: 'unknown-signer' });
+    expect(await f.endpoint.local.act(grantAct(b, f, await signed(f, 'f'.repeat(32)))), 'no such member').toEqual({ state: 'refused', reason: 'not-listed' });
+    expect(f.endpoint.parts!.state.ledger!.grants).toEqual({});
+  });
+
+  it('refuses a grant sealed by a device the head doesn’t list, and every other act outside record.*', async () => {
+    const f = await machine();
+    const a = await sealer(f, org.a1, org.A);
+    const forB = await signed(f, org.B);
+    expect(await f.endpoint.local.act({ ...grantAct(a, f, forB), device: 'x1' })).toEqual({ state: 'refused', reason: 'unknown-device' });
+    const next = await successor(f.chain.at(-1)!, [org.a1]);
+    expect(await f.endpoint.local.act(await a.stepUp(a.action({ machine: f.ref, action: 'endpoint.state', args: { states: [next], transitions: [] } })))).toEqual({ state: 'refused', reason: 'not-offered' });
+    expect(f.endpoint.parts!.state.ledger!.grants).toEqual({});
+  });
+
+  it('answers endpoint.grants as the machine’s owners’ member, and still no other call', async () => {
+    const f = await machine();
+    const forB = await signed(f, org.B);
+    await keep(f, forB);
+    expect(await f.endpoint.local.call('endpoint.grants', null)).toEqual({ ok: true, output: { members: [entry(org.A), entry(org.B, forB), entry(org.C)] } });
+    expect(await f.endpoint.local.call('endpoint.grants', { member: org.B })).toEqual({ ok: false, code: 'malformed' });
+    expect(await f.endpoint.local.call('endpoint.listings', null)).toEqual({ ok: false, code: 'not-offered' });
   });
 });

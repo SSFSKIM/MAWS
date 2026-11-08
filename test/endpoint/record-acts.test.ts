@@ -7,7 +7,7 @@
 // The org (sub-harness.ts): A owns the machine (a1); B is a member (b1). `la-1` is a lane A session of `@machine`'s; `app-b`
 // a lane B session (engine session `eng-b`) of A's.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { memoryOrgView, type Action } from 'org-protocol';
+import { memoryOrgView, NO_CERTIFICATES, type Action } from 'org-protocol';
 import { TestDevice as Device } from '../../apps/org-protocol/test-support/test-device.ts';
 import { LocalDoor } from '../../src/endpoint/local-door';
 import { OFFERS, RECORD_ACTS, type Offers } from '../../src/endpoint/offers';
@@ -415,7 +415,8 @@ describe('the local door', () => {
     const head = structuredClone(f.chain.at(-1)!.state);
     head.members.find((m) => m.id === org.A)!.devices.push(org.b1.device);
     let handed = false;
-    const door = new LocalDoor({ head: () => head, act: () => void (handed = true), policy: async () => ({ ok: false, code: 'unused' }), log: () => {} });
+    const unused = async () => ({ ok: false as const, code: 'unused' });
+    const door = new LocalDoor({ head: () => head, certificates: () => NO_CERTIFICATES, now: Date.now, act: () => void (handed = true), policy: unused, grants: unused, log: () => {} });
     const b = await sealer(f, org.b1, org.B);
     expect(await door.act(await b.stepUp(b.action({ machine: f.ref, action: 'record.access', args: { session: 'la-1', access: 'private' } })))).toEqual({ state: 'refused', reason: 'unknown-device' });
     expect(handed).toBe(false);

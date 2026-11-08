@@ -54,7 +54,7 @@
 // every session's broker items as the engine host publishes them, subscribed or not, and the whole set read again at
 // each engine-host link `mawsd` reports.
 import { homedir, networkInterfaces } from 'node:os';
-import { importSigningKey, isListingGone, stateHash, type MachineIdentity, type OrgState, type Right, type Rl1Refusal, type SignedOrgState, type SigningKey } from 'org-protocol';
+import { importSigningKey, isListingGone, NO_CERTIFICATES, stateHash, type MachineIdentity, type OrgState, type Right, type Rl1Refusal, type SignedOrgState, type SigningKey } from 'org-protocol';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Home } from '@shared/machine/home-folders';
 import { ArtifactRanks } from './artifacts';
@@ -597,8 +597,11 @@ export class Endpoint implements EndpointModule {
     // P5 O8 M6b: an act through the local door takes a channel's route once the door's own checks passed
     this.local = new LocalDoor({
       head: () => (this.#org?.ready ? this.#org.head().state : null),
+      certificates: () => (this.#org?.ready ? this.#org.certificates() : NO_CERTIFICATES), // P5 O8 M4b: a grant's verification
+      now: this.deps.now,
       act: (channel, m) => this.actions.receive(channel, m, gated.act),
       policy: (input) => this.#localPolicy(input, authorization.records ?? this.rl10.members, placeListingRecord),
+      grants: async () => (await this.#grants('owners'))(), // P5 O8 M4b: as the machine's owners' member
       log,
     });
   }
