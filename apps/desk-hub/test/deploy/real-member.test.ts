@@ -3,7 +3,7 @@
 // member, and its first device listed once a second scratch MAWS profile has signed in with the harness's pairing code;
 // then both undone. What the steps refuse, staging's hub above all, the files they read and write (0600, outside any git
 // checkout), and that no line they print holds the email or the code.
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { base64urlDecode, base64urlEncode, decodePairingCode, encodePairingCode, generateSigningKey, keyId, pairingFingerprint, pairingMac, type Device, type OrgState, type SignedOrgState } from 'org-protocol';
@@ -149,6 +149,33 @@ describe('the files', () => {
       writeFileSync(inside, EMAIL, { mode: 0o600 });
       expect(privateFileRefusal(inside), marker).toMatch(/inside the git checkout/);
     }
+  });
+
+  it('refuses a mode with a special bit beside 0600', () => {
+    const path = emailFile(0o4600);
+    expect(statSync(path).mode & 0o7777).toBe(0o4600);
+    expect(privateFileRefusal(path)).toMatch(/mode 0600, not 04600/);
+    expect(() => readEmail(path)).toThrow(/mode 0600, not 04600/);
+  });
+
+  it('reads the file it checked: a file swapped in at the path after it is opened is never read', () => {
+    // The race the one descriptor closes: the path checked, then another file put in its place before the read.
+    const path = emailFile();
+    const other = 'someone.else@example.org';
+    const swap = () => {
+      renameSync(path, `${path}.checked`);
+      writeFileSync(path, `${other}\n`, { mode: 0o600 });
+    };
+    let thrown: Error | null = null;
+    try {
+      readEmail(path, swap);
+    } catch (error) {
+      thrown = error as Error;
+    }
+    expect(thrown?.message).toMatch(/changed while it was read/);
+    expect(thrown?.message).not.toContain(other);
+    // with nothing swapped, the same seam reads the file
+    expect(readEmail(emailFile(), () => {})).toBe(EMAIL);
   });
 
   it('reads one email, its words never in a refusal', () => {

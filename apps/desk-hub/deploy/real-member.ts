@@ -19,7 +19,7 @@
 // file of mode 0600, outside any git checkout, and no line the steps print holds it, nor the code (each is scrubbed from
 // every line, the hub's own words included, and listed for the runner's search of its log after the step).
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, chmodSync, existsSync, lstatSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, closeSync, constants, existsSync, fstatSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { base64urlEncode, encodePairingCode, judgeEntry, keyId, pairingFingerprint, type Device, type OrgState, type RevokedKey } from 'org-protocol';
@@ -75,21 +75,56 @@ function checkoutOf(dir: string): string | null {
   }
 }
 
-/** Why `path` can't be read as a private file (a regular file of this user's, mode 0600, in no git checkout), or null. */
-export function privateFileRefusal(path: string): string | null {
-  let stat;
+/**
+ * The text of the private file at `path`: a regular file of this user's, mode exactly 0600 (no special bit beside it),
+ * in no git checkout; else throws why, never quoting what the file holds. The path is opened once, never following a
+ * symlink, and every check but the checkout's is made on that descriptor and the text read from it, so a file put in the
+ * path's place after the check is never the one read; the checkout's check is made on the path the descriptor's file
+ * resolves to, which must still be that file. A parent directory swapped between those steps is outside what this
+ * guards: the file lives in the desk track's own home directory, whose parents no one else can write. `opened` runs
+ * once the descriptor is open (a suite's seam for the race).
+ */
+export function readPrivateFile(path: string, opened: () => void = () => {}): string {
+  let fd: number;
   try {
-    stat = lstatSync(path);
-  } catch {
-    return `no file at ${path}`;
+    // O_NONBLOCK: a FIFO in the file's place answers at once rather than holding the step open.
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ELOOP' || code === 'EMLINK') throw new Error(`${path} is a symlink: name the file itself`, { cause: error });
+    if (code === 'ENOENT') throw new Error(`no file at ${path}`, { cause: error });
+    throw new Error(`${path} can't be opened (${code})`, { cause: error });
   }
-  if (stat.isSymbolicLink()) return `${path} is a symlink: name the file itself`;
-  if (!stat.isFile()) return `${path} is not a regular file`;
-  if ((stat.mode & 0o777) !== 0o600) return `${path} must be mode 0600, not 0${(stat.mode & 0o777).toString(8)}`;
-  if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return `${path} is another user's`;
-  const repo = checkoutOf(dirname(realpathSync(path)));
-  if (repo !== null) return `${path} is inside the git checkout ${repo}: keep it outside any checkout`;
-  return null;
+  try {
+    opened();
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) throw new Error(`${path} is not a regular file`);
+    if ((stat.mode & 0o7777) !== 0o600) throw new Error(`${path} must be mode 0600, not 0${(stat.mode & 0o7777).toString(8)}`);
+    if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) throw new Error(`${path} is another user's`);
+    let resolved: string;
+    try {
+      resolved = realpathSync(path);
+      const now = statSync(resolved);
+      if (now.dev !== stat.dev || now.ino !== stat.ino) throw new Error('another file');
+    } catch (error) {
+      throw new Error(`${path} changed while it was read: nothing was read`, { cause: error });
+    }
+    const repo = checkoutOf(dirname(resolved));
+    if (repo !== null) throw new Error(`${path} is inside the git checkout ${repo}: keep it outside any checkout`);
+    return readFileSync(fd, 'utf8');
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Why `path` can't be read as a private file (`readPrivateFile`'s refusal), or null. */
+export function privateFileRefusal(path: string): string | null {
+  try {
+    readPrivateFile(path);
+    return null;
+  } catch (error) {
+    return (error as Error).message;
+  }
 }
 
 /** Why the pairing code can't be written to `path` (a new file, in an existing directory in no git checkout), or null. */
@@ -103,10 +138,8 @@ export function codeFileRefusal(path: string): string | null {
 }
 
 /** The one email address the private file at `path` holds; a refusal never quotes what the file holds. */
-export function readEmail(path: string): string {
-  const refused = privateFileRefusal(path);
-  if (refused !== null) throw new Error(refused);
-  const text = readFileSync(path, 'utf8');
+export function readEmail(path: string, opened?: () => void): string {
+  const text = readPrivateFile(path, opened);
   const email = text.endsWith('\n') ? text.slice(0, -1) : text;
   if (!EMAIL.test(email) || email.length > 320) throw new Error(`${path} must hold one email address and nothing else`);
   return email;
