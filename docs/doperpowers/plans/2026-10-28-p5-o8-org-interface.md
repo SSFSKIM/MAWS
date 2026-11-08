@@ -120,6 +120,9 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-08) Task 1, reviewed clean. Commits: 099c7cf77 (the move), 0ad9a8ff5 (`grantProblems`), b2ddf6b1d (a type-only fix) and 3112033dd (the review's I1, canonicalizability). All four are `apps/org-protocol` and `apps/desk-hub`, for the desk track.
     - Our task reviewer took two rounds: I1 was fixed, and I2 was dismissed under the recorded decision. Its external adversarial cases pass 6/6.
     - Static and unit are green at 3112033dd (42446714963).
+  - [x] (2026-11-08) Task 2, reviewed clean. The commits: e07f9f42c, 0537d9aff (`endpoint.local.grants`, `WIRE_MINOR` 33), 0adff8c99, then the master merge 79beb549f (#524), then 62c862351 and e086ef5a0 (the dispatch and the door).
+    - Reviews: our task reviewer approved it, with one Minor, the schema comment, which is folded into Task 3. The desk track found it READY: 674 on the projection, 683 on the dispatch and on the door as an amendment to M6b's door rule. Desk 683's two notes are folded into Task 3's first commit.
+    - Green: static and unit 1–4 at e086ef5a0 (42468417824). The e2e:cross-build job the planner added is waiting on a rerun after a CDN 504 in its setup.
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
 - [ ] M5b — Add owner — *executable; after M4c; lands once the desk track's `record.owners` executor and DL190 (b)'s fix are on master*
 - [ ] M8 — The deployment admin's end, and acceptance — *owner steps and evidence; last; needs O14's B4 steps 4 to 8 and M3's root-add sitting (its first step)*
