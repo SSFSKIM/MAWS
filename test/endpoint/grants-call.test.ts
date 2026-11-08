@@ -222,6 +222,16 @@ describe('endpoint.grants', () => {
     const b = await openRemote(f, org.b1, org.B);
     expect(await grantsOf(b), 'B, the owner now').toEqual({ members: [entry(org.A), entry(org.B, forB), entry(org.C)] });
   });
+  it('refuses a web-cards device `class`: its `endpoint.grants` call, and a door grant whose act names it', async () => {
+    const f = await machine();
+    const forB = await signed(f, org.B);
+    const c = await openRemote(f, org.c1, org.C, { passkey: org.passkey });
+    expect(await call(c, 'endpoint.grants', null)).toMatchObject({ ok: false, error: { code: 'class' } });
+    // the grant itself is A's and verifies; the act's device is attribution only, and a web-cards one may not grant
+    const act = c.device.action({ machine: f.ref, action: 'endpoint.grant', args: { grant: forB } });
+    expect(await f.endpoint.local.act(act)).toEqual({ state: 'refused', reason: 'class' });
+    expect(f.endpoint.parts!.state.ledger!.grants).toEqual({});
+  });
 });
 
 describe('grantsAnswer and grantsView', () => {

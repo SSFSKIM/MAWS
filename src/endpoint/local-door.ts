@@ -23,7 +23,9 @@
 // P5 O8 M4b (the architect's Fork A, an amendment to the rule above): the door takes `endpoint.grant` too, so the owner
 // of a single machine can grant rights on it from its own app. A grant carries its own signature, the authority a
 // channel's `endpoint.grant` rests on as well (it asks no step-up there), so here it takes the act's place in step 2: the
-// act asks no step-up signature, its device must still be one the head lists exactly once (`unknown-device`), and its
+// act asks no step-up signature, its device must still be one the head lists exactly once (`unknown-device`), though here
+// the device is attribution only (the member, device and clientClass step 3 hands on), not authentication: the grant's own
+// signature is the authority, so `unknown-device` on this path claims nothing about who sent the act. Its
 // `args.grant` must pass `verifyGrant` against the held head and certificates (its verdict the refusal: `malformed`,
 // `not-listed`, `unknown-signer`, `revoked`, `bad-signature`, …), checked here before anything is handed on. Steps 3 and 4
 // are as above, the ledger's intake (grants.ts) verifying the grant again under the head it lands under. `call` answers
