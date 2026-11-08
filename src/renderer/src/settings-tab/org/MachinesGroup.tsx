@@ -18,14 +18,11 @@ import { Setting, TEXT_ACTION } from '../parts';
 import { ChangeSheet } from './ChangeSheet';
 import { EnrollSheet } from './EnrollSheet';
 import { MachineRow } from './MachineRow';
-import { failed, OutcomeLine, type Outcome, type Registered, type ViewMachine } from './parts';
+import { failed, OutcomeLine, signInOf, type Outcome, type Registered, type ViewMachine } from './parts';
 
 type Asked = { title: string; change: OrgChange };
 /** The enrollment sheet: a new machine (`replace` null) or a re-enrollment, `follow` the running one it takes up. */
 type Enrolling = { replace: ViewMachine | null; follow: number | null };
-
-/** The sign-in a machine's grants are read under: null while none stands (signed out, removed). */
-const signInOf = (status: Registered): string | null => (status.session === 'signed-in' ? `${status.org}/${status.member.id}/${status.device}` : null);
 
 export function MachinesGroup({ view, status }: { view: OrgView; status: Registered }) {
   const [asked, setAsked] = useState<Asked | null>(null);
@@ -83,9 +80,9 @@ export function MachinesGroup({ view, status }: { view: OrgView; status: Registe
         <OutcomeLine outcome={outcome} />
       </Setting>
       {asked !== null && (
-        <ChangeSheet title={asked.title} change={asked.change} members={view.members} may={may} onClose={() => setAsked(null)} onSigned={(version) => setOutcome({ text: ORG.signed(version), refused: false })} />
+        <ChangeSheet title={asked.title} change={asked.change} members={view.members} may={may} signIn={signIn} onClose={() => setAsked(null)} onSigned={(version) => setOutcome({ text: ORG.signed(version), refused: false })} />
       )}
-      {enrollOn !== null && <EnrollSheet replace={enrollOn.replace} follow={enrollOn.follow} enrolling={enrolling} may={may} signedIn={signIn !== null} onClose={() => setEnrollOn(null)} />}
+      {enrollOn !== null && <EnrollSheet replace={enrollOn.replace} follow={enrollOn.follow} enrolling={enrolling} may={may} signIn={signIn} onClose={() => setEnrollOn(null)} />}
     </>
   );
 }

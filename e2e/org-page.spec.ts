@@ -9,7 +9,7 @@
 // one that didn't answer (as of its last answer), a certified machine (its delegation's owners), a dropped machine whose
 // hub row is still listed (Retry), and an enrollment awaiting its key. A pairing and an enrollment exclude each other in
 // main; the seed shows both, as no one session holds them at once. Each of the four groups, the window, the pairing
-// sheet and the enrollment, grant and re-grant sheets are attached as PNGs for the architect's look; the case asserts
+// sheet and the enrollment, grant and re-grant sheets, and the grant sheet saving, are attached as PNGs for the architect's look; the case asserts
 // structure only: nothing in the section or a sheet scrolls sideways, and every action is drawn whole inside its row.
 //
 // The org is seeded where no real session can hold it at once (a key file refused at load leaves this Mac nothing to
@@ -190,7 +190,7 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
     const local = readOrMintMachineRef(userData); // the machine the app will be, so the view can list it up
     const { status, view, grants, names } = seededOrg(local, userData, Date.now());
     const fixture = join(userData, 'org-page.json');
-    writeFileSync(fixture, JSON.stringify({ status, view, grants }));
+    writeFileSync(fixture, JSON.stringify({ status, view, grants, holdGrantSave: true })); // a grant saved stays saving, for its photograph
     // Classic scrollbars, which take width from the view, as on any Mac with a mouse attached, whatever the desktop's own
     // setting (the hosted lane selects overlay ones for every group).
     const maws = await launchMaws({ userData, env: { [FIXTURE_ENV]: fixture }, appKitDefaults: { AppleShowScrollBars: 'Always' } });
@@ -278,6 +278,17 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       );
       // lab-mini-02's missing grants, each shown
       await photographed(() => machineRow('lab-mini-02').getByRole('button', { name: ORG.regrant, exact: true }).click(), ORG.regrantIntro('lab-mini-02'), 'org-page-regrant-sheet');
+      // Ben's grant on studio-mini saved, machine-admin added: studio-mini brought up to date before Touch ID (held there)
+      await photographed(
+        async () => {
+          await machineRow('studio-mini').getByRole('button', { name: ORG.grant, exact: true }).click();
+          await sheet.getByRole('combobox', { name: ORG.grantPerson }).selectOption({ label: `${names.get(view.members[3]!.id)!} (${view.members[3]!.email})` });
+          await sheet.getByRole('checkbox', { name: /^machine-admin / }).check();
+          await sheet.getByRole('button', { name: ORG.grantSave, exact: true }).click();
+        },
+        ORG.grantSaving('studio-mini'),
+        'org-page-grant-saving',
+      );
     } finally {
       await maws.cleanup();
     }

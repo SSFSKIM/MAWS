@@ -15,13 +15,13 @@
 // `ineligible` with each problem `grantProblems` named, `ledger-unread` with main's detail (through this Mac's own door:
 // its endpoint hasn't seen the person yet, so try again shortly). Once this Mac may no longer sign a grant there (its
 // grants record damaged, or no longer an owner's device), Save is withdrawn and the sheet says why.
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { GRANT_RIGHTS, type GrantRegrantResult, type GrantSetResult, type GrantsView } from '@shared/ipc/schema/org';
 import { ipc } from '../../ipc/client';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { CHOICE, FIELD, PRIMARY } from '../../sessions/ui';
 import { ORG } from '../copy';
-import { failed, inWords, memberName, type Member, type Outcome, type ViewMachine } from './parts';
+import { failed, inWords, memberName, useOpen, type Member, type Outcome, type ViewMachine } from './parts';
 
 export type Right = (typeof GRANT_RIGHTS)[number];
 /** A grant the sheet opens on: the person and the rights to sign again (a refused grant's Sign again…). */
@@ -33,23 +33,12 @@ const ordered = (rights: readonly Right[]): Right[] => GRANT_RIGHTS.filter((r) =
 const same = (a: readonly Right[], b: readonly Right[]) => a.length === b.length && a.every((r) => b.includes(r));
 const isOwner = (machine: ViewMachine, member: Member) => (machine.owners === 'org' ? member.role === 'admin' : machine.owners.includes(member.id));
 
-/** Whether the sheet is still open: an answer after it closed lands nowhere. */
-function useOpen() {
-  const open = useRef(false);
-  useEffect(() => {
-    open.current = true;
-    return () => {
-      open.current = false;
-    };
-  }, []);
-  return open;
-}
-
 /** How a signed grant stands at its machine, in the row's one line. */
 function savedOutcome(machine: string, version: number, delivered: Extract<GrantSetResult, { ok: true }>['delivered']): Outcome {
   if (delivered === 'done') return { text: ORG.granted(version, machine), refused: false };
   if (delivered === 'pending') return { text: ORG.grantedPending(version, machine), refused: false };
-  return { text: delivered.refused === 'not-newer' ? ORG.grantedNotNewer(version) : ORG.grantedRefused(version, machine, delivered.refused), refused: true };
+  if (delivered.refused === 'not-newer') return { text: ORG.grantedNotNewer(version), refused: true };
+  return { text: `${ORG.grantedRefused(version, machine, ORG.grantVerdicts[delivered.refused])} · ${delivered.refused}`, refused: true };
 }
 
 function RefusedLine({ refused }: { refused: Refused }) {

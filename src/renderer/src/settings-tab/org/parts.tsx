@@ -1,7 +1,7 @@
 // The Org page's shared pieces (P5 O8 M4a, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, *The split*): a
 // group's heading, M1's pairing-code field, fingerprint and refusal line (moved unchanged from OrgSection.tsx), a
 // device's line as People and You draw it, and a sign's outcome in one line. Tokens only, at the Settings rows' weight.
-import { useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { IpcError } from '@shared/ipc/schema';
 import type { OrgRefusal, OrgStatus, OrgView, SignResult } from '@shared/ipc/schema/org';
 import { toast } from '../../stores/notices';
@@ -32,6 +32,32 @@ export function Group({ id, title, children }: { id: 'you' | 'people' | 'machine
       {children}
     </div>
   );
+}
+
+/** The sign-in the page stands under, as a sheet's owner: null while none does (signed out, removed). */
+export const signInOf = (status: Registered): string | null => (status.session === 'signed-in' ? `${status.org}/${status.member.id}/${status.device}` : null);
+
+/**
+ * A sheet's own sign-in: the one it opened under, and whether that one has ended. Once ended it stays ended, even if the
+ * same member signs in again on this Mac: an answer to the sheet's request then stays in the sheet and reaches nothing of
+ * the page.
+ */
+export function useOwnSignIn(signIn: string | null): { owner: string | null; ended: boolean } {
+  const [own, setOwn] = useState({ owner: signIn, ended: signIn === null });
+  if (!own.ended && signIn !== own.owner) setOwn({ owner: own.owner, ended: true });
+  return own;
+}
+
+/** Whether the sheet is still open: an answer after it closed lands nowhere. */
+export function useOpen() {
+  const open = useRef(false);
+  useEffect(() => {
+    open.current = true;
+    return () => {
+      open.current = false;
+    };
+  }, []);
+  return open;
 }
 
 // M4b: a machine's row on the page, by its ref, so a line elsewhere (a removal its ownership refuses) can take the

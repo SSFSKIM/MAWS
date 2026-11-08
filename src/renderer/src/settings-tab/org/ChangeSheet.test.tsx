@@ -2,10 +2,10 @@
 // *Changes*): each change opens one sheet showing what will be signed, line by line, with the checks' warnings, from
 // `org.preview`; Confirm sends `org.change` with the change as previewed (normalized: `member.add`'s id) and the digest
 // that names what was shown. A change the checks refuse is named there and never reaches Touch ID.
-import { fireEvent, screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrgChange, PreviewResult, SignResult } from '@shared/ipc/schema/org';
-import { ANA, ANA_MAC, BEN, BEN_WEB, ME, MINI, ROOT, VIEW, VM, found, group, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
+import { ANA, ANA_MAC, BEN, BEN_WEB, ME, MINI, ROOT, VIEW, VM, emit, found, group, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
 
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -236,5 +236,66 @@ describe('Settings › Org: the change sheet’s machine fields (M4b)', () => {
     expect(sought.id).toBe(`org-machine-${MINI}`);
     sought.blur();
     expect(sought.hasAttribute('data-sought')).toBe(false);
+  });
+
+  // The review's mid-flight probe (fix wave): a sheet's late answer acts only on that sheet, under its own sign-in.
+  it('a late answer from a closed sheet leaves the next sheet alone', async () => {
+    let signed: (result: SignResult) => void = () => {};
+    renderSection(signing(ROOT), {
+      'org.preview': (input: { change: OrgChange }) => previewed(input.change, ['Change mini’s owners'], [], 'owners-digest'),
+      'org.change': () => new Promise<SignResult>((resolve) => (signed = resolve)),
+    });
+    await pressOn('mini', 'Owners…');
+    const owners = await screen.findByRole('dialog', { name: 'Change mini’s owners' });
+    fireEvent.click(within(owners).getByRole('checkbox', { name: /^Ana/ }));
+    fireEvent.click(within(owners).getByRole('button', { name: 'Review…' }));
+    fireEvent.click(await within(owners).findByRole('button', { name: 'Sign' }));
+    await vi.waitFor(() => expect(sent('org.change')).toHaveLength(1));
+    fireEvent.click(within(owners).getByRole('button', { name: 'Cancel' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    fireEvent.click(within(row('mini')).getByRole('button', { name: 'Drop…' }));
+    const drop = await screen.findByRole('dialog', { name: 'Drop mini?' });
+    await act(async () => signed({ ok: true, version: 13 }));
+    expect(screen.getByRole('dialog', { name: 'Drop mini?' })).toBe(drop);
+    expect(within(drop).queryByText(/Signed version 13/)).toBeNull();
+  });
+
+  it('a sign answered after its sign-in ended stays in its sheet and reaches nothing of the page', async () => {
+    let signed: (result: SignResult) => void = () => {};
+    renderSection(signing(ROOT), { 'org.preview': (input: { change: OrgChange }) => previewed(input.change, ['Drop mini (ref MawsMiniRef000000001) from the org']), 'org.change': () => new Promise<SignResult>((resolve) => (signed = resolve)) });
+    await pressOn('mini', 'Drop…');
+    const sheet = await screen.findByRole('dialog', { name: 'Drop mini?' });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Review…' }));
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Sign' }));
+    await vi.waitFor(() => expect(sent('org.change')).toHaveLength(1));
+    emit(signing(ROOT, { session: 'signed-out' }));
+    emit(signing(ROOT)); // signed in again: another sign-in, though the same member and device
+    await act(async () => signed({ ok: true, version: 13 }));
+    expect(await within(sheet).findByText('Signed version 13.')).toBeTruthy(); // its answer stays in view (M4a's rule)
+    expect(screen.getByRole('dialog', { name: 'Drop mini?' })).toBe(sheet);
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(within(row('Enroll a machine')).queryByText('Signed version 13.')).toBeNull();
+  });
+
+  it('a long member list scrolls inside the owners field, so Review and Cancel stay in the sheet', async () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({
+      id: (i + 16).toString(16).padStart(32, '0'),
+      email: `member-${i}.with-a-rather-long-address@clinical-research-operations.northwind-health.example`,
+      name: `Member ${i}`,
+      role: 'member' as const,
+      you: false,
+      devices: [],
+    }));
+    renderSection(signing(ROOT), { 'org.view': () => viewWith({ members: [...VIEW.members, ...many] }) });
+    await pressOn('mini', 'Owners…');
+    const sheet = await screen.findByRole('dialog', { name: 'Change mini’s owners' });
+    const list = within(sheet).getByRole('group', { name: 'People' });
+    expect(within(list).getAllByRole('checkbox')).toHaveLength(44);
+    expect(list.className).toMatch(/max-h-/);
+    expect(list.className).toContain('overflow-y-auto');
+    expect(list.contains(within(sheet).getByRole('button', { name: 'Review…' }))).toBe(false);
+    expect(list.contains(within(sheet).getByRole('button', { name: 'Cancel' }))).toBe(false);
+    expect(within(list).getByText(many[0]!.email).className).toContain('[overflow-wrap:anywhere]');
   });
 });

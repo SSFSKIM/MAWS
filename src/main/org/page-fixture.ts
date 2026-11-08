@@ -2,7 +2,7 @@
 // "M4a gains Task 8"): e2e/org-page.spec.ts photographs the page over an org with real-world variety, which no one real
 // session holds at once (a refusal that names no attempt is the key file refused at load, which leaves this Mac unable to
 // run a pairing). Under MAWS_E2E=1, in a build that is not packaged, with MAWS_E2E_ORG_PAGE naming a JSON file of
-// `{status, view, grants?}` that the `org.*` schemas admit, main answers `org.status`, `org.view` and (M4b) each
+// `{status, view, grants?, holdGrantSave?}` that the `org.*` schemas admit, main answers `org.status`, `org.view` and (M4b) each
 // machine's `org.grants.view`, by its ref (signed out for any other), from it through C5's
 // `interceptCommand`, so the real renderer draws what main would send; every act is answered without effect, so the
 // production session behind it stays untouched. Its status no longer reaches the renderer either: the fixture stops the
@@ -48,10 +48,10 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
   if (deps.env.MAWS_E2E !== '1' || deps.packaged || path === undefined || !isAbsolute(path)) return null;
   // Built here, not at the module's top, so a build whose guard drops the call keeps no schema call of this module's.
   const parsed = z
-    .strictObject({ status: OrgStatusSchema, view: OrgViewSchema.nullable(), grants: z.record(z.string(), GrantsViewSchema).optional() })
+    .strictObject({ status: OrgStatusSchema, view: OrgViewSchema.nullable(), grants: z.record(z.string(), GrantsViewSchema).optional(), holdGrantSave: z.literal(true).optional() })
     .safeParse(JSON.parse(readFileSync(path, 'utf8')));
   if (!parsed.success) throw new Error(`${ORG_PAGE_FIXTURE_ENV}: ${path} is not an Org page fixture: ${parsed.error.message}`);
-  const { status, view, grants = {} } = parsed.data;
+  const { status, view, grants = {}, holdGrantSave } = parsed.data;
   deps.unpublish();
 
   const detail = 'the e2e Org page fixture is in force';
@@ -62,7 +62,8 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
   const enroll: EnrollStartResult = { ok: false, reason: 'busy', detail };
   const retry: DropRetryResult = { ok: false, reason: 'none', detail };
   const discard: DiscardResult = { ok: false, reason: 'none' };
-  // M4b's grants: each machine's view as the file seeds it; signing one has no effect, as every act here
+  // M4b's grants: each machine's view as the file seeds it; signing one has no effect, as every act here, or with
+  // `holdGrantSave` never answers, so the grant sheet stays saving
   const grant: GrantSetResult & GrantRegrantResult = { ok: false, reason: 'busy', detail };
   const save: OrgPolicySetResult = { ok: false, reason: 'busy' };
   const answers: { [N in FixtureCommand]: MainHandler<N> } = {
@@ -88,7 +89,7 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
     'org.enroll.cancel': () => {},
     'org.drop.retry': () => retry,
     'org.grants.view': ({ ref }) => (Object.hasOwn(grants, ref) ? grants[ref]! : { ok: false, ref, reason: 'signed-out' }),
-    'org.grants.set': () => grant,
+    'org.grants.set': () => (holdGrantSave === true ? new Promise<never>(() => {}) : grant),
     'org.grants.regrant': () => grant,
     'org.policy.set': () => save,
     'org.owners.add': () => save,

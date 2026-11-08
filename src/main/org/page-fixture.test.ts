@@ -138,6 +138,14 @@ describe("the Org page's e2e fixture in main", () => {
     );
   });
 
+  it('M4b: holds org.grants.set unanswered when the file asks (`holdGrantSave`), so the grant sheet can be photographed saving', async () => {
+    const d = deps({ MAWS_E2E: '1', [ORG_PAGE_FIXTURE_ENV]: fixtureFile({ status: STATUS, view: VIEW, holdGrantSave: true }) });
+    expect(installOrgPageFixture(d)).not.toBeNull();
+    const set = Promise.resolve(d.handlers.get('org.grants.set')!({ ref: 'mref-box-00000001', member: 'a1', rights: ['spawn'] }));
+    expect(await Promise.race([set, new Promise((resolve) => setTimeout(() => resolve('unanswered'), 20))])).toBe('unanswered');
+    expect(await Promise.resolve(d.handlers.get('org.grants.regrant')!({ ref: 'mref-box-00000001', digest: 'd' }))).toMatchObject({ ok: false, reason: 'busy' });
+  });
+
   it('leaves the forwarding alone when it does not install', () => {
     let unpublished = false;
     expect(installOrgPageFixture(deps({ MAWS_E2E: '1' }, false, () => void (unpublished = true)))).toBeNull();

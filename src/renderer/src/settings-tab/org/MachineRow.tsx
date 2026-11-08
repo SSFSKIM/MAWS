@@ -155,7 +155,14 @@ function Rights({ machine, view, shown, seesAll, mayGrant, signAgain, regrant }:
             {g.state === 'pending' && <Chip>{ORG.notYetOn(name)}</Chip>}
             {g.state === 'refused' && (
               <>
-                <span className="text-warning">{g.reason === 'not-newer' ? ORG.notNewer : ORG.grantRefusedBy(name, g.reason ?? 'refused')}</span>
+                {g.reason === 'not-newer' ? (
+                  <span className="text-warning">{ORG.notNewer}</span>
+                ) : (
+                  <span className="text-warning">
+                    {ORG.grantRefusedBy(name, g.reason === undefined ? undefined : ORG.grantVerdicts[g.reason])}
+                    {g.reason !== undefined && <span className="ml-1.5 font-mono text-ui-sm text-fg-muted">{g.reason}</span>}
+                  </span>
+                )}
                 {mayGrant && listed && (
                   <button type="button" className={TEXT_ACTION} onClick={() => signAgain({ member: g.member, rights: g.rights })}>
                     {ORG.signAgain}

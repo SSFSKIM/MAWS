@@ -4,7 +4,9 @@
 // naming `{generation, digest}`. Every start refusal and every end has its own line; Cancel is always there.
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { formatClock } from '@shared/app/date-format';
 import { ENROLL_PROBLEMS, ENROLL_REFUSALS, type EnrollStartResult, type OrgEnrollingStatus, type SignResult } from '@shared/ipc/schema/org';
+import { observed, type EnrollRun } from './EnrollSheet';
 import { MINI, ROOT, emit, found, group, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
 
 vi.hoisted(() => {
@@ -60,7 +62,8 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
     expect(screen.getAllByText(CODE)).toHaveLength(1);
     expect(within(sheet).getByText('mawsd enroll').className).toContain('font-mono');
     expect(within(sheet).getByText(/paste the code at its prompt, which hides it\. Never pass the code as an argument\. Add --replace while the machine is still enrolled\./)).toBeTruthy();
-    expect(within(sheet).getByText(/^Shown once, here only\. It works until /)).toBeTruthy();
+    expect(within(sheet).getByText('Shown once, here only.')).toBeTruthy();
+    expect(within(sheet).getByText(`The code works until ${formatClock(Date.parse(EXPIRES))}.`)).toBeTruthy();
     expect(within(sheet).getByText('Waiting for gpu-box to post its key…')).toBeTruthy();
     expect((within(sheet).getByRole('button', { name: 'Approve…' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(within(sheet).getByRole('button', { name: 'Copy' }));
@@ -135,7 +138,7 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
     renderSection(signing(ROOT), { 'org.enroll.start': () => started });
     const sheet = await openEnroll();
     const words = {
-      expired: 'The code expired before the machine posted its key. Start over.',
+      expired: 'The enrollment expired before it was approved. Start over.',
       'not-yours': 'The hub answers this enrollment only to the admin who started it.',
       'unknown-enrollment': 'The hub no longer knows this enrollment. Start over.',
       'key-changed': 'Another key was posted after the one shown. Start over.',
@@ -232,7 +235,7 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
     resetHarness();
     renderSection(signing(ROOT, { enrolling: enrolling({ generation: 6, problem: 'expired' }) }));
     const enroll = await found('Enroll a machine');
-    expect(within(enroll).getByText('The code expired before the machine posted its key. Start over.')).toBeTruthy();
+    expect(within(enroll).getByText('The enrollment expired before it was approved. Start over.')).toBeTruthy();
     fireEvent.click(within(enroll).getByRole('button', { name: 'Show…' }));
     const taken = await screen.findByRole('dialog', { name: 'Enroll a machine' });
     fireEvent.click(within(taken).getByRole('button', { name: 'Close' }));
@@ -253,5 +256,108 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
     expect(within(taken).queryByRole('button', { name: 'Approve…' })).toBeNull();
     expect(within(taken).getByText('This Mac can’t sign: enroll from an admin’s Mac that does.')).toBeTruthy();
     expect(within(taken).getByRole('button', { name: 'Cancel enrollment' })).toBeTruthy(); // Cancel is always there
+  });
+
+  // The review's mid-flight probe (fix wave): a sheet owns one run under one sign-in, and nothing later takes it over.
+  it('a sheet following an enrollment that ended never adopts a later one, nor cancels it', async () => {
+    const later = { name: 'other-box', ref: 'OtherBoxRef000000011', keyId: 'otherBoxKey0001', digest: 'otherDigest' };
+    renderSection(signing(ROOT, { enrolling: enrolling({ generation: 7, name: 'first-box' }) }));
+    fireEvent.click(await within(await found('Enroll a machine')).findByRole('button', { name: 'Show…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Enroll a machine' });
+    emit(signing(ROOT, { enrolling: null }));
+    expect(await within(sheet).findByText('This enrollment is no longer running.')).toBeTruthy();
+    emit(signing(ROOT, { enrolling: enrolling({ generation: 8, name: 'other-box', candidate: later }) }));
+    expect(within(sheet).queryByText(later.ref)).toBeNull();
+    expect(within(sheet).queryByRole('button', { name: 'Approve…' })).toBeNull();
+    expect(within(sheet).getByText('This enrollment is no longer running.')).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Close' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(sent('org.enroll.cancel')).toEqual([]); // generation 8 isn't this sheet's to cancel
+  });
+
+  it('a start answered after the sign-in ended leaves the sheet ended: no chooser, no refusal, no code', async () => {
+    let answer = deferred<EnrollStartResult>();
+    renderSection(signing(ROOT), { 'org.enroll.start': () => answer.promise });
+    let sheet = await openEnroll();
+    makeCode(sheet, 'first-box');
+    await vi.waitFor(() => expect(sent('org.enroll.start')).toHaveLength(1));
+    emit(signing(ROOT, { session: 'signed-out' }));
+    const ended = 'The sign-in ended, so the enrollment stopped. Nothing was signed.';
+    expect(await within(sheet).findByText(ended)).toBeTruthy();
+    await act(async () => answer.resolve({ ok: false, reason: 'cancelled', detail: 'the enrollment was cancelled while its token was minted: nothing was shown' }));
+    expect(within(sheet).getByText(ended)).toBeTruthy();
+    expect(within(sheet).queryByRole('textbox')).toBeNull();
+    expect(within(sheet).queryByRole('alert')).toBeNull();
+
+    // nor does a late code: it is never drawn
+    resetHarness();
+    answer = deferred<EnrollStartResult>();
+    renderSection(signing(ROOT), { 'org.enroll.start': () => answer.promise });
+    sheet = await openEnroll();
+    makeCode(sheet, 'first-box');
+    await vi.waitFor(() => expect(sent('org.enroll.start')).toHaveLength(1));
+    emit(signing(ROOT, { session: 'signed-out' }));
+    await act(async () => answer.resolve(started));
+    expect(within(sheet).getByText(ended)).toBeTruthy();
+    expect(document.body.innerHTML).not.toContain(CODE);
+    // and the same member signing in again doesn't revive it
+    await act(async () => emit(signing(ROOT)));
+    await vi.waitFor(() => expect(sent('org.view').length).toBeGreaterThan(1)); // the page read again under the new sign-in
+    await act(async () => {});
+    expect(within(sheet).getByText(ended)).toBeTruthy();
+    expect(within(sheet).queryByRole('button', { name: 'Start over' })).toBeNull();
+  });
+
+  it('a start’s late answer never lands on the start made after it', async () => {
+    const answers = [deferred<EnrollStartResult>(), deferred<EnrollStartResult>()];
+    renderSection(signing(ROOT), { 'org.enroll.start': () => answers[sent('org.enroll.start').length - 1]!.promise });
+    const sheet = await openEnroll();
+    makeCode(sheet, 'first-box');
+    emit(signing(ROOT, { enrolling: enrolling({ generation: 1, name: 'first-box' }) }));
+    emit(signing(ROOT, { enrolling: null }));
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Start over' }));
+    makeCode(sheet, 'second-box');
+    await vi.waitFor(() => expect(sent('org.enroll.start')).toHaveLength(2));
+    await act(async () => answers[0]!.resolve({ ok: true, code: 'mawsenroll2.the-first-start-s-code', expires: EXPIRES }));
+    expect(document.body.innerHTML).not.toContain('the-first-start-s-code');
+    await act(async () => answers[1]!.resolve(started));
+    expect(await within(sheet).findByText(CODE)).toBeTruthy();
+  });
+
+  it('a reopened enrollment waiting for its key still shows when it ends', async () => {
+    renderSection(signing(ROOT, { enrolling: enrolling({ generation: 7 }) }));
+    fireEvent.click(await within(await found('Enroll a machine')).findByRole('button', { name: 'Show…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Enroll a machine' });
+    expect(within(sheet).getByText(`The code works until ${formatClock(Date.parse(EXPIRES))}.`)).toBeTruthy();
+    expect(within(sheet).getByText('The code was shown once, when it was made. For a new one, cancel and enroll again.')).toBeTruthy();
+  });
+});
+
+describe('the enrollment sheet’s run, at the state boundary (fix wave)', () => {
+  const run = (patch: Partial<Extract<EnrollRun, { at: 'running' }>> = {}): EnrollRun => ({ at: 'running', owner: 'org/me/dev', generation: 3, token: 1, code: { value: CODE, expires: EXPIRES }, ...patch });
+  const status = (patch: Partial<NonNullable<OrgEnrollingStatus>> = {}) => enrolling({ generation: 3, ...patch });
+
+  it('drops the code once the machine posts its key, or the run ends with a problem', () => {
+    expect(observed(run(), status(), 'org/me/dev', null)).toMatchObject({ at: 'running', code: { value: CODE } });
+    expect(observed(run(), status({ candidate: CANDIDATE }), 'org/me/dev', null)).toMatchObject({ at: 'running', code: null });
+    expect(observed(run(), status({ problem: 'expired' }), 'org/me/dev', null)).toMatchObject({ at: 'running', code: null });
+  });
+
+  it('ends for good when the run leaves the status, another takes its place, or the sign-in changes', () => {
+    expect(observed(run(), null, 'org/me/dev', null)).toEqual({ at: 'ended', why: 'gone', generation: 3 });
+    expect(observed(run(), status({ generation: 4 }), 'org/me/dev', null)).toEqual({ at: 'ended', why: 'gone', generation: 3 });
+    expect(observed(run(), status(), null, null)).toEqual({ at: 'ended', why: 'signed-out', generation: 3 });
+    expect(observed(run(), status(), 'org/someone-else/dev', null)).toEqual({ at: 'ended', why: 'signed-out', generation: 3 });
+    const ended: EnrollRun = { at: 'ended', why: 'gone', generation: 3 };
+    expect(observed(ended, status({ generation: 4 }), 'org/me/dev', null)).toBe(ended);
+  });
+
+  it('a start latches the first run after it of its own machine and name, and no other', () => {
+    const starting: EnrollRun = { at: 'starting', owner: 'org/me/dev', after: 2, name: 'gpu-box', token: 1, code: null };
+    expect(observed(starting, status({ generation: 2 }), 'org/me/dev', null)).toBe(starting); // older
+    expect(observed(starting, status({ generation: 3, name: 'other-box' }), 'org/me/dev', null)).toBe(starting); // another name
+    expect(observed(starting, status({ generation: 3, replace: MINI }), 'org/me/dev', null)).toBe(starting); // a re-enrollment
+    expect(observed(starting, status({ generation: 3, name: 'GPU-Box' }), 'org/me/dev', null)).toEqual({ at: 'running', owner: 'org/me/dev', generation: 3, token: 1, code: null });
+    expect(observed(starting, null, null, null)).toEqual({ at: 'ended', why: 'signed-out', generation: null });
   });
 });

@@ -19,7 +19,7 @@ type Asked = { title: string; change: OrgChange };
 /** The pairing sheet open on a member; `follow` the generation the sheet takes up when reopened on a running pairing. */
 type Pairing = { member: Member; follow: number | null };
 
-export function PeopleGroup({ view, pairing }: { view: OrgView; pairing: OrgPairingStatus }) {
+export function PeopleGroup({ view, pairing, signIn }: { view: OrgView; pairing: OrgPairingStatus; signIn: string | null }) {
   const [asked, setAsked] = useState<Asked | null>(null);
   const [pairOn, setPairOn] = useState<Pairing | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
@@ -61,6 +61,7 @@ export function PeopleGroup({ view, pairing }: { view: OrgView; pairing: OrgPair
           title={asked.title}
           change={asked.change}
           may={may}
+          signIn={signIn}
           machines={owned(view, asked.change)}
           onGoTo={(ref) => {
             goTo.current = ref;

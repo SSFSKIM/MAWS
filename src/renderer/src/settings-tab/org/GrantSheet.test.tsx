@@ -74,14 +74,14 @@ describe('Settings › Org: the grant sheet (M4b)', () => {
 
     await act(async () => answer.resolve({ ok: true, version: 4, delivered: 'pending' }));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(within(row('mini')).getByText('Signed grant version 4. Not yet on mini: it’s sent once mini is reachable.')).toBeTruthy();
+    expect(within(row('mini')).getByText('Signed grant version 4. Not yet on mini: this Mac keeps sending it until mini answers.')).toBeTruthy();
   });
 
   it('a grant on the machine, refused, or another device’s: each answer’s line', async () => {
     for (const [delivered, words] of [
       ['done', 'Signed grant version 4. mini holds it.'],
       [{ refused: 'not-newer' }, 'Signed grant version 4. Another device changed this grant: sign again.'],
-      [{ refused: 'not-held' }, 'Signed grant version 4. mini refused it (not-held): sign again.'],
+      [{ refused: 'not-held' }, 'Signed grant version 4. mini refused it: it no longer holds the key this grant names. Sign again. · not-held'],
     ] as const) {
       renderSection(signing(notSigning), { 'org.view': () => VIEWED, 'org.grants.view': () => MINIS, 'org.grants.set': () => ({ ok: true, version: 4, delivered }) satisfies GrantSetResult });
       const sheet = await openGrant();
@@ -126,7 +126,7 @@ describe('Settings › Org: the grant sheet (M4b)', () => {
       said.set(reason, alert.textContent!);
     }
     expect(new Set(said.values()).size).toBe(GRANT_REFUSALS.length); // each its own line
-    expect(said.get('stale')).toBe('Not signed · The org state moved while this was signed. Nothing was kept or sent: sign again. · why-stale');
+    expect(said.get('stale')).toBe('Not signed · What this would sign changed meanwhile. Nothing was kept or sent: sign again. · why-stale');
 
     answer = { ok: false, reason: 'ineligible', problems: ['signer-not-owner', 'member-not-listed', 'some-new-code'] };
     fireEvent.click(within(sheet).getByRole('button', { name: 'Save…' }));
@@ -141,7 +141,7 @@ describe('Settings › Org: the grant sheet (M4b)', () => {
     answer = { ok: false, reason: 'ledger-unread', detail: "this Mac's own endpoint hasn't seen this member yet: try again shortly" };
     fireEvent.click(within(sheet).getByRole('button', { name: 'Save…' }));
     await vi.waitFor(() =>
-      expect(within(sheet).getByRole('alert').textContent).toBe("Not signed · The machine’s grants couldn’t be read, so no version was guessed. Nothing was signed. · this Mac's own endpoint hasn't seen this member yet: try again shortly"),
+      expect(within(sheet).getByRole('alert').textContent).toBe("Not signed · The machine’s grants for this person couldn’t be read, so nothing was signed. · this Mac's own endpoint hasn't seen this member yet: try again shortly"),
     );
     expect(sent('org.grants.set')).toHaveLength(GRANT_REFUSALS.length + 3);
   });
@@ -251,7 +251,7 @@ describe('Settings › Org: the re-grant sheet (M4b)', () => {
     fireEvent.click(await within(await found('mini')).findByRole('button', { name: 'Re-grant…' }));
     const sheet = await screen.findByRole('dialog', { name: 'Re-grant on mini?' });
     fireEvent.click(within(sheet).getByRole('button', { name: 'Re-grant' }));
-    expect((await within(sheet).findByRole('alert')).textContent).toBe('Not signed · The org state moved while this was signed. Nothing was kept or sent: sign again. · the missing grants are no longer the ones shown');
+    expect((await within(sheet).findByRole('alert')).textContent).toBe('Not signed · What this would sign changed meanwhile. Nothing was kept or sent: sign again. · the missing grants are no longer the ones shown');
 
     const late = deferred<GrantRegrantResult>();
     answer = late.promise;

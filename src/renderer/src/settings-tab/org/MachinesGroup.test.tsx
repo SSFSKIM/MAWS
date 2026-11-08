@@ -120,7 +120,8 @@ describe('Settings › Org: Machines’ actions and rights (M4b)', () => {
     expect(within(line('Ana')).getByText('Another device changed this grant: sign again')).toBeTruthy();
     expect(within(line('Ana')).getByRole('button', { name: 'Sign again…' })).toBeTruthy();
     expect(within(line('a former member')).getByText('every right withdrawn')).toBeTruthy();
-    expect(within(line('a former member')).getByText('mini refused it (not-held): sign again')).toBeTruthy();
+    expect(within(line('a former member')).getByText('mini refused it: it no longer holds the key this grant names. Sign again')).toBeTruthy();
+    expect(within(line('a former member')).getByText('not-held')).toBeTruthy(); // the code, beside its line
     expect(within(row('build-vm')).getByText('Only its owners have rights on it, and they hold every one.')).toBeTruthy();
     expect(sent('org.grants.view')).toEqual([{ ref: MINI }, { ref: VM }]);
 

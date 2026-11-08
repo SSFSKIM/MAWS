@@ -10,6 +10,10 @@
 // kept until unticked; Review waits for a change, since main refuses the same owners and an empty list) and Drop (the
 // "Its key may be compromised" tick, `revoke`). A removal refused because the person owns a machine shows the composer's
 // line "Change the machine's owners first", with a way to that machine's row (`machines`, `onGoTo`).
+//
+// A sign's answer reaches the page only from the sheet that sent it, still open, under the sign-in it opened under: an
+// answer after the sheet closed lands nowhere, and one after that sign-in ended stays in the sheet (`signIn`, latched by
+// `useOwnSignIn`), so it never closes a sheet opened since or tells a later sign-in's page about it.
 import { useEffect, useState } from 'react';
 import type { OrgChange, OrgView, PreviewResult, SignResult } from '@shared/ipc/schema/org';
 import { ipc } from '../../ipc/client';
@@ -17,7 +21,7 @@ import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { CHOICE, PRIMARY, QUIET } from '../../sessions/ui';
 import { ORG } from '../copy';
 import { INPUT, Segment, TEXT_ACTION } from '../parts';
-import { failed, memberName, OutcomeLine, signOutcome, type Outcome } from './parts';
+import { failed, memberName, OutcomeLine, signOutcome, useOpen, useOwnSignIn, type Outcome } from './parts';
 
 type Role = 'admin' | 'member';
 type Stage =
@@ -25,6 +29,7 @@ type Stage =
   | { at: 'composing' }
   | { at: 'shown'; preview: PreviewResult }
   | { at: 'signing'; preview: Extract<PreviewResult, { ok: true }> }
+  | { at: 'signed'; preview: Extract<PreviewResult, { ok: true }>; version: number }
   | { at: 'ended'; preview: Extract<PreviewResult, { ok: true }>; outcome: Outcome };
 
 // The fields a change takes before it is composed: Add person's email and role, Change email's new email, a machine's
@@ -40,6 +45,8 @@ type Props = {
   /** The org's members, for a machine's owners. */
   members?: OrgView['members'];
   may: boolean;
+  /** The sign-in standing now (`signInOf`); null while none does. */
+  signIn: string | null;
   /** The machines a refusal may send the person to (a member who owns one isn't removed), with the way there. */
   machines?: readonly { name: string; ref: string }[];
   onGoTo?(ref: string): void;
@@ -47,7 +54,9 @@ type Props = {
   onSigned(version: number): void;
 };
 
-export function ChangeSheet({ title, change: asked, members = [], may, machines = [], onGoTo, onClose, onSigned }: Props) {
+export function ChangeSheet({ title, change: asked, members = [], may, signIn, machines = [], onGoTo, onClose, onSigned }: Props) {
+  const open = useOpen();
+  const own = useOwnSignIn(signIn);
   const [change, setChange] = useState<OrgChange>(asked);
   const [stage, setStage] = useState<Stage>(takesFields(asked) ? { at: 'fields' } : { at: 'composing' });
   const composing = stage.at === 'composing';
@@ -72,25 +81,32 @@ export function ChangeSheet({ title, change: asked, members = [], may, machines 
   const sign = (preview: Extract<PreviewResult, { ok: true }>) => {
     setStage({ at: 'signing', preview });
     void ipc.invoke('org.change', { change: preview.change, digest: preview.digest }).then((result) => {
+      if (!open.current) return;
       if (!result.ok) {
         failed(result.error);
         setStage({ at: 'shown', preview });
         return;
       }
       const signed: SignResult = result.value;
-      if (signed.ok) {
-        onSigned(signed.version);
-        onClose();
-      } else if (signed.reason === 'cancelled') setStage({ at: 'shown', preview }); // the person's own cancel: Sign again
+      if (signed.ok) setStage({ at: 'signed', preview, version: signed.version });
+      else if (signed.reason === 'cancelled') setStage({ at: 'shown', preview }); // the person's own cancel: Sign again
       else setStage({ at: 'ended', preview, outcome: signOutcome(signed) });
     });
   };
+
+  // A signed answer goes to the page and closes the sheet while its sign-in stands; otherwise it stays here.
+  const delivered = stage.at === 'signed' && !own.ended ? stage.version : null;
+  useEffect(() => {
+    if (delivered === null) return;
+    onSigned(delivered);
+    onClose();
+  }, [delivered, onSigned, onClose]);
 
   const fields = stage.at === 'fields';
   const preview = stage.at === 'composing' || stage.at === 'fields' ? null : stage.preview;
   const shown = preview !== null && preview.ok ? preview : null;
   // Sign while what was shown can still be signed: never on a refused preview, nor once a sign has ended.
-  const signable = shown !== null && stage.at !== 'ended';
+  const signable = shown !== null && stage.at !== 'ended' && stage.at !== 'signed';
   const submit = () => {
     if (fields) {
       setChange(trimmed(change) ?? change);
@@ -108,7 +124,7 @@ export function ChangeSheet({ title, change: asked, members = [], may, machines 
         onSubmit={submit}
         cancelLabel={ORG.cancel}
         extra={
-          may && takesFields(asked) && !fields && stage.at !== 'signing' ? (
+          may && takesFields(asked) && !fields && stage.at !== 'signing' && stage.at !== 'signed' ? (
             <button type="button" onClick={() => setStage({ at: 'fields' })} className={`mr-auto ${QUIET}`}>
               {ORG.edit}
             </button>
@@ -125,6 +141,7 @@ export function ChangeSheet({ title, change: asked, members = [], may, machines 
           <Refused preview={preview} machines={machines} onGoTo={onGoTo} />
         )}
         {stage.at === 'ended' && <OutcomeLine outcome={stage.outcome} />}
+        {stage.at === 'signed' && own.ended && <OutcomeLine outcome={{ text: ORG.signed(stage.version), refused: false }} />}
         {!may && <p className="m-0 text-ui-sm text-warning">{ORG.readOnly}</p>}
       </SheetForm>
     </Sheet>
@@ -214,12 +231,12 @@ function OwnersFields({ change, members, onChange }: { change: Extract<OrgChange
         />
       </div>
       {change.owners !== 'org' && (
-        <fieldset aria-label={ORG.ownersKinds.people} className="m-0 flex min-w-0 flex-col gap-1.5 border-0 p-0">
+        <fieldset aria-label={ORG.ownersKinds.people} className="m-0 flex max-h-[min(40vh,320px)] min-w-0 flex-col gap-1.5 overflow-y-auto border-0 p-0.5">
           {listed.map((id) => (
             <label key={id} className="flex min-w-0 items-center gap-2">
               <input type="checkbox" checked={people.includes(id)} onChange={() => toggle(id)} className={`shrink-0 ${CHOICE}`} />
               <span className="min-w-0 text-fg">{memberName(members, id)}</span>
-              <span className="min-w-0 text-fg-muted">{members.find((m) => m.id === id)?.email}</span>
+              <span className="min-w-0 text-fg-muted [overflow-wrap:anywhere]">{members.find((m) => m.id === id)?.email}</span>
             </label>
           ))}
         </fieldset>
