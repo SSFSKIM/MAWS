@@ -1924,7 +1924,7 @@ These are the live run's checks, none of them verified before it:
 
 **The owner's steps** (the architect hands these over):
 1. Send the second email to the desk track directly.
-2. At the sitting, launch the scratch profile. It launches from a worktree of master at or after M6b's merge, which the architect prepares before the sitting at `/Users/new/.local/share/maws-worktrees/m6b-sitting`, with `pnpm install --frozen-lockfile` already run there:
+2. At the sitting, launch the scratch profile. It launches from a prepared worktree at or after M6b's head, which the architect prepares before the sitting at `/Users/new/.local/share/maws-worktrees/m6b-sitting`, with `pnpm install --frozen-lockfile` already run there:
 
        cd /Users/new/.local/share/maws-worktrees/m6b-sitting && mkdir -p -m 700 "$HOME/.local/share/maws-m6b-second-member" && MAWS_USER_DATA="$HOME/.local/share/maws-m6b-second-member" npx electron-vite dev
 
@@ -3835,6 +3835,11 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   - A defect the live run finds becomes a fix PR, as for M7b's live check.
   - Rationale: the owner's time. The sitting can't come before about 23:00 PST on 2026-11-08 and waits on the owner's word. Holding the PR for it would idle M4b and the rest.
   - Rejected: holding the PR for the sitting, as O18 M6 did. That sitting's date was fixed in advance; this one waits on the owner's time.
+  - **Amended 2026-11-08, the architect.**
+    - The owner answered, verbatim: "any time. I'm all available, js tell me when from your side".
+    - So the shared run starts now, during the final gate, on the branch head. That is "at or after M6b": 1d4204118 carries 169108598's gated code and differs only in the report.
+    - The landing doesn't wait for the run unless the run finds a defect. A defect it finds is fixed before landing.
+    - The sitting launches from the architect's prepared worktree at that head.
   Date/Author: 2026-11-08, the architect, recorded by O8's executor (controller).
 
 ## Outcomes & Retrospective
@@ -4018,7 +4023,7 @@ A future child that keeps state written from more than one place over an unrelia
 - the deploy suites: `reach-acceptance` (37), `real-member` (24), `staging-scripts` (33);
 - the gates the PR body lists.
 
-Still owed: the shared staging run (Concrete Steps). Layer 1 is the harness member. Layer 2 is the real-member sitting, booked by the architect. M6b lands on its gates and the shared run follows from master (Decision Log, "M6b lands before the shared run"). The run's result goes into these Outcomes in a records commit of the architect's. The live checklist:
+Still owed: the shared staging run (Concrete Steps). Layer 1 is the harness member. Layer 2 is the real-member sitting, booked by the architect. M6b lands on its gates. The shared run started during the final gate, on the branch head, and the landing waits on it only if it finds a defect (Decision Log, "M6b lands before the shared run", amended). The run's result goes into these Outcomes in a records commit of the architect's. The live checklist:
 - lane B inside the reach scenes;
 - record acts over the relays;
 - pairing through real Access with a second identity;
