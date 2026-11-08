@@ -71,6 +71,17 @@ const BLOCK = /<task-notification>[\s\S]*?<\/task-notification>/g;
 const blocks = (text: string): string[] => text.match(BLOCK) ?? [];
 
 /**
+ * The notifications' text of the engine's queue record that enqueues them, or null (2.1.319): a uuid-less record in the
+ * main loop's transcript, written for every notification the engine queues, whichever loop it is for, before that loop
+ * is handed it; one for an agent that handed back never is. Only an enqueue whose content starts as a notification's
+ * does: a `remove` repeats its text, and the queue holds a person's prompts and peers' messages too.
+ */
+function queuedNotice(row: JsonObject): string | null {
+  if (row.type !== 'queue-operation' || row.operation !== 'enqueue' || typeof row.content !== 'string') return null;
+  return row.content.startsWith(OPENING) ? row.content : null;
+}
+
+/**
  * The notifications' text a plain user row carries, or null: the form the engine writes when notifications start a
  * turn (bare in the main transcript; after its fixed preamble, then a blank line, in a subagent's). Only a row the
  * engine marked `origin.kind: task-notification` is one: a person can type the same text, and a peer's message can
@@ -153,6 +164,10 @@ export class LoopIndex {
       return;
     }
     if (row.type === 'attachment') return this.attachment(obj(row.attachment) ?? {}, at);
+    if (row.type === 'queue-operation') {
+      for (const block of blocks(queuedNotice(row) ?? '')) this.notified(block, at);
+      return;
+    }
     if (row.type !== 'user') return;
     const plain = plainNotification(row);
     if (plain !== null) {

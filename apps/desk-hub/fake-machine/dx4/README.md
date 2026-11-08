@@ -1,8 +1,9 @@
 # DX4's shared vectors (vendored)
 
 `dx4-jobs.json` is a verbatim copy of DC8's shared fixture for DX4's widened `subagents` body and its `output` answer,
-from doperpowers `sminos/tests/dx4-jobs.json` at commit `98bb6a61` (main, merge `e0b41515`, sminos 1.40.5: case 17,
-several notifications in one row; git blob `f4f3bfc72`, sha256 `8cd71c9fa74cca5f5fbcf73cd0bfa2e65bb6f896abc38b61db96e2cc1b53baa6`). DC8 owns it: it pins both producers, the plane
+from doperpowers `sminos/tests/dx4-jobs.json` at commit `4057f1d9` (branch `sminos-subagents-queued-ends`, not yet
+merged, sminos 1.40.6: case 18, notices the engine queued; git blob `a414fd58d`, sha256
+`930e1b82406b70200dadf9b31859e4fe6cd7f2c168d2965af0ae4be75c5e4666`). DC8 owns it: it pins both producers, the plane
 (doperpowers `sminos/skills/sminos/scripts/sminos_jobs.py`, run by `sminos/tests/jobs_parity.py`) and this fake machine
 (`../jobs.ts`, run by `test/fake-machine/jobs-parity.test.ts`, which mirrors `jobs_parity.py`). Its `about` field is
 normative where the composite's DX4 prose is open.
