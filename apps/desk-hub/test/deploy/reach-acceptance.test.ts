@@ -391,7 +391,7 @@ function recordingReport(): ReachReport & { checks: Array<{ item: string; check:
  * S on A1 and the run's machines, faked: S's policy as sminos keeps it (`access`, `shares`, `policyRev`), moved by the
  * session's own shell (narrowing) and by A's record acts, read back by A's `record.policy`; A1's listings to b1.
  */
-function fakeScene(o: { operator?: (change: Record<string, unknown>) => { rc: number; lines: string[] }; capabilities?: string[]; bAck?: (a: Act) => string } = {}) {
+function fakeScene(o: { operator?: (change: Record<string, unknown>) => { rc: number; lines: string[] }; capabilities?: string[]; bAck?: (a: Act) => string; ignored?: (args: Record<string, unknown>) => boolean } = {}) {
   const policy = { access: 'listed', shares: [] as Array<{ member: string; grade: string }>, policyRev: 3 };
   const shell: unknown[] = [];
   const operator: unknown[] = [];
@@ -426,7 +426,8 @@ function fakeScene(o: { operator?: (change: Record<string, unknown>) => { rc: nu
   const S = { label: 'S', session: SID, alias: 's', short: 'q1', launch: 'L-s', machine: a1 };
   const listing = () => ({ body: { org: 'staging-ssfskim', machine: 'ref-a1', session: SID, revision: 10 + policy.policyRev, issued: 't', fields: { owners: [A], project: 'p', lane: 'A', state: 'idle', title: 's', ...(policy.access === 'private' ? { audience: [A, ...policy.shares.map((s) => s.member)].sort(), policyRev: policy.policyRev } : {}) } } });
   const a = fakeChannel({
-    outcome: (act) => ({ state: 'done', result: apply(Object.fromEntries(Object.entries(act.args).filter(([k]) => k !== 'session' && k !== 'appSessionId'))) }),
+    // an act `ignored` says is answered done, unchanged, and moves nothing
+    outcome: (act) => ({ state: 'done', result: o.ignored?.(act.args) ? { changed: false, policyRev: policy.policyRev } : apply(Object.fromEntries(Object.entries(act.args).filter(([k]) => k !== 'session' && k !== 'appSessionId'))) }),
     answer: (name, input) => (name === 'record.policy' && input.session === SID ? { ok: true, output: { supported: true, policies: [{ session: SID, ...structuredClone(policy) }] } } : { ok: false, code: 'not-offered' }),
   });
   const b = fakeChannel({
@@ -553,6 +554,17 @@ describe('the reach scenes on a build whose endpoint says `record` (P5 O8 M6b)',
     const report = recordingReport();
     await itemVisibility(f.scene, report);
     expect(report.checks.at(-1)).toMatchObject({ status: 'fail', detail: 'sminos.steer accepted; sminos.decide accepted' });
+  });
+
+  it('the visibility item fails a level A’s act answered done but never set, as A’s record.policy reads it back', async () => {
+    // At org-view and org-talk the listing alone can't tell: S listed is listed at each.
+    for (const level of ['org-view', 'org-converse']) {
+      const f = fakeScene({ bAck: (a) => (a.action === 'sminos.steer' || a.action === 'sminos.decide' ? 'grade' : 'accepted'), ignored: (args) => args.access === level });
+      const report = recordingReport();
+      await itemVisibility(f.scene, report);
+      expect(report.checks.filter((c) => c.status === 'fail').map((c) => c.check), level).toEqual([`b1 is listed S by its access: ${level}`]);
+      expect(report.checks.find((c) => c.status === 'fail')!.detail, level).toMatch(new RegExp(`record\\.policy reads S at ${level === 'org-view' ? 'listed' : 'org-view'}, not ${level}$`));
+    }
   });
 
   it('the reader item: A shares a lane B session with B at Converse; B’s pin, reading and draft are B’s, and A’s read back unchanged', async () => {

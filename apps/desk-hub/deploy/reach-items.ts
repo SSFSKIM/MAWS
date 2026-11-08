@@ -1027,6 +1027,9 @@ export async function itemVisibility(scene: ReachScene, report: ReachReport): Pr
   for (const access of ['private', 'listed', 'org-view', 'org-converse'] as const) {
     await report.check(VISIBILITY, `b1 is listed S by its access: ${access}${access === 'private' ? ' (not shared)' : ''}`, async () => {
       const result = await ownerRecord(scene, scene.S, { access });
+      // read back as A reads it: at Org can view and Org can talk the listing alone can't tell an act that set nothing
+      const now = await ownerPolicy(scene, scene.S);
+      if (now.access !== access) throw new Error(`A's record.access answered policyRev ${result.policyRev}, but record.policy reads S at ${now.access}, not ${access}`);
       const { listing } = await b1Listing(scene, access !== 'private');
       if (listing === undefined) return `A's record.access, policyRev ${result.policyRev}: A1 lists S to b1 not`;
       const fields = listing.body.fields as { audience?: unknown; policyRev?: unknown };
