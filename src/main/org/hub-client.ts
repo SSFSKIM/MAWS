@@ -85,7 +85,12 @@ export interface HubClient {
   mintEnrollment(body: { ttl_s: number; machine?: string }, signal?: AbortSignal): Promise<HubResult<MintedEnrollment>>;
   /** M4b: the key posted under the enrollment `id`, for the member who minted it: `404 no-key` until then, `403 not-yours`, `404 unknown-enrollment`. */
   enrollmentKey(id: string, signal?: AbortSignal): Promise<HubResult<EnrollmentKey>>;
-  /** M4b: the machine's hub row deleted (`machine drop`'s DELETE): `deleted`, or `absent` for a row already gone (`404 unknown-machine`). */
+  /**
+   * M4b: the machine's hub row removed (`machine drop`'s DELETE). A name-only 200 is `deleted`. A keyed 200 is
+   * `acknowledged`: the hub took the removal, but under its key-bound precondition (#538) it answers 200 too when the
+   * row's posted key no longer matched and nothing was touched, so it is a completed cleanup, not a verified deletion.
+   * `absent` is a row already gone (`404 unknown-machine`).
+   */
   /**
    * `GET /api/machines` (M4b): each hub row's name, with the key its current enrollment posted, or null for none (a row
    * re-enrolled in place whose new enrollment posted nothing yet, or a certified machine's). A row out of shape fails
@@ -94,9 +99,9 @@ export interface HubClient {
   machines(signal?: AbortSignal): Promise<HubResult<HubMachineRow[]>>;
   /**
    * `key`: the dropped machine's ref and the pub the org state holds for it, sent as the hub's precondition (both or
-   * neither): a row another key enrolled since is left, answered as deleted.
+   * neither): a row another key enrolled since is left, answered as acknowledged.
    */
-  deleteMachine(name: string, key?: { ref: string; pub: string }, signal?: AbortSignal): Promise<HubResult<'deleted' | 'absent'>>;
+  deleteMachine(name: string, key?: { ref: string; pub: string }, signal?: AbortSignal): Promise<HubResult<'deleted' | 'acknowledged' | 'absent'>>;
 }
 
 /** A hub row as `GET /api/machines` lists it, for a drop's delete: its name, and the key its enrollment posted. */
@@ -277,7 +282,8 @@ export function hubClient(input: {
       }),
     async deleteMachine(name, key, signal) {
       const precondition = key === undefined ? '' : `?ref=${encodeURIComponent(key.ref)}&pub=${encodeURIComponent(key.pub)}`;
-      const answer = await request(`/api/machines/${encodeURIComponent(name)}${precondition}`, { method: 'DELETE', signal }, () => 'deleted' as const);
+      const done = key === undefined ? ('deleted' as const) : ('acknowledged' as const);
+      const answer = await request(`/api/machines/${encodeURIComponent(name)}${precondition}`, { method: 'DELETE', signal }, () => done);
       return !answer.ok && answer.kind === 'status' && answer.status === 404 && answer.error === 'unknown-machine' ? { ok: true, value: 'absent' } : answer;
     },
     attestations: (project, signal) =>

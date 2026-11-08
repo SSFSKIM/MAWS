@@ -221,7 +221,7 @@ describe('the hub client', () => {
         }) as typeof fetch,
       });
     const key = { ref: 'r/ef+1', pub: 'MCow BQ/+=' };
-    expect(await client(() => worker(200, { revoked: 'mini box' })).deleteMachine('mini box', key)).toEqual({ ok: true, value: 'deleted' });
+    expect(await client(() => worker(200, { revoked: 'mini box' })).deleteMachine('mini box', key)).toEqual({ ok: true, value: 'acknowledged' });
     expect(await client(() => worker(200, { revoked: 'mini' })).deleteMachine('mini')).toEqual({ ok: true, value: 'deleted' });
     expect(sent).toEqual(['DELETE /api/machines/mini%20box?ref=r%2Fef%2B1&pub=MCow%20BQ%2F%2B%3D', 'DELETE /api/machines/mini']);
     // a precondition out of shape is a refusal as any other status is

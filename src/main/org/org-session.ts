@@ -1140,7 +1140,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     if (ended()) return over;
     if (!rows.ok) return offerAgain(row, rows);
     const held = rows.value.find((r) => machineNameKey(r.name) === machineNameKey(row.name));
-    if (held === undefined) return gone(row, 'already gone');
+    if (held === undefined) return gone(row, 'was already gone');
     if (held.key !== null && (held.key.ref !== row.ref || held.key.pub !== row.pub)) {
       return leftAlone(row, `the hub's row for ${row.name} holds another machine's key: it is that machine's`);
     }
@@ -1150,7 +1150,11 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     if (listedAgain(row)) return leftAlone(row, `the org lists ${row.name} again: its hub row is that machine's`);
     const deleted = await hub.deleteMachine(row.name, held.key === null ? undefined : { ref: row.ref, pub: row.pub });
     if (ended()) return over;
-    return deleted.ok ? gone(row, deleted.value === 'deleted' ? 'deleted' : 'already gone') : offerAgain(row, deleted);
+    if (!deleted.ok) return offerAgain(row, deleted);
+    // A keyed 200 is the hub's acknowledgement, not proof of a deletion: under the key-bound precondition it also
+    // answers 200 when the row's key no longer matched and it touched nothing. Either way the cleanup is done.
+    const said = { deleted: 'was deleted', acknowledged: 'is cleaned up: the hub acknowledged the removal', absent: 'was already gone' }[deleted.value];
+    return gone(row, said);
   }
   const listedAgain = (row: HubRow) => (heldView()?.head().state.machines ?? []).some((m) => machineNameKey(m.name) === machineNameKey(row.name));
   /** `row` off the status, if it was there. */
@@ -1160,8 +1164,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     hubRowsLeft = left;
     changed();
   }
-  function gone(row: HubRow, how: string): DropRetryResult {
-    log(`the hub's row for ${row.name} was ${how}`);
+  function gone(row: HubRow, said: string): DropRetryResult {
+    log(`the hub's row for ${row.name} ${said}`);
     unlist(row);
     return { ok: true };
   }
