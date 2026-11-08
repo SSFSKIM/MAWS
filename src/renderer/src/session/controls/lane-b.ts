@@ -65,6 +65,16 @@ const refusalOf = (error: unknown): unknown => ((error as { cause?: { issues?: {
 
 // P5 O7 M2: content that would not fit one message on the channel, by the bound main's link checks (its UTF-8 JSON).
 const encoder = new TextEncoder();
+// board #525: whether a text block of the content starts with `/` (after leading space), which the endpoint grades by
+// the command, Manage unless it is a session-only or read-only one (src/endpoint/by-effect.ts `textGrade`; the renderer
+// may not import it)
+const hasSlashText = (content: string | readonly unknown[]): boolean =>
+  typeof content === 'string'
+    ? content.trimStart().startsWith('/')
+    : content.some((block) => {
+        const { type, text } = (block ?? {}) as { type?: unknown; text?: unknown };
+        return type === 'text' && typeof text === 'string' && text.trimStart().startsWith('/');
+      });
 const pastChannel = (content: string | readonly unknown[]): boolean => encoder.encode(JSON.stringify(content)).length > REMOTE_INLINE_MAX_BYTES;
 
 // A command's result as a control's: its value done, its failure refused with the IPC error's own code and words (a
@@ -115,8 +125,9 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
     try {
       return await sendWithoutAcquiring(appSessionId, content, options, client); // one invocation: main resumes and sends under one bound
     } catch (error) {
-      // board #525: another member's session refused the words at the member's grade: said with whom to ask, and learnt
-      if (refusalOf(error) === 'grade' && learnReaderGrade(appSessionId, 'view')) return { disposition: 'refused' as const, started: false, reason: READER.notSent(whomToAsk(appSessionId)) };
+      // board #525: another member's session refused the words at the member's grade: said with whom to ask, and learnt,
+      // but only for plain words (Converse): a slash command is graded Manage, so its refusal says nothing of Converse
+      if (refusalOf(error) === 'grade' && !hasSlashText(content) && learnReaderGrade(appSessionId, 'view')) return { disposition: 'refused' as const, started: false, reason: READER.notSent(whomToAsk(appSessionId)) };
       throw error;
     } finally {
       sent();

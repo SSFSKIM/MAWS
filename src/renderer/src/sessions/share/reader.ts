@@ -12,12 +12,14 @@
 // opens the session again (`reader-connect.ts`).
 //
 // A prompt's author: none is recorded with a send, so a prompt in a session the member doesn't own is its owners', unless
-// this app sent it (its message uuid, kept for this run).
+// this app sent it (its message uuid, kept for this run, for the member who sent it; a send queued by the host is held
+// as a tail row by its queue id until the entry is submitted and has its uuid).
 import { useMemo } from 'react';
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { OrgMember } from '@shared/ipc/schema/org';
 import { READ_REFUSED } from '@shared/org/reader';
+import { rowId } from '../../transcript/model/keys';
 import { useRemoteLaneB } from '../../lane-b/remote-session';
 import { useSessions, type ListedSession } from '../../stores/sessions';
 import { READER } from './copy';
@@ -29,12 +31,18 @@ type Learnt = { grade: ReaderGrade; revision: number; policyRev: number | undefi
 export interface ReaderState {
   learnt: ReadonlyMap<AppSessionId, Learnt>;
   sent: ReadonlyMap<AppSessionId, ReadonlySet<string>>; // the message uuids this app sent to each such session
+  queued: ReadonlyMap<AppSessionId, ReadonlySet<string>>; // the queue ids of its sends the host queued, not yet submitted
 }
 
-export const useReader = create<ReaderState>()(() => ({ learnt: new Map(), sent: new Map() }));
+export const useReader = create<ReaderState>()(() => ({ learnt: new Map(), sent: new Map(), queued: new Map() }));
 
 export function resetReader(): void {
-  useReader.setState({ learnt: new Map(), sent: new Map() });
+  useReader.setState({ learnt: new Map(), sent: new Map(), queued: new Map() });
+}
+
+/** Another member signs in: what this app sent was the previous member's, so no prompt stays the new member's own. */
+export function forgetOwnPrompts(): void {
+  useReader.setState({ sent: new Map(), queued: new Map() });
 }
 
 const SENT_KEPT = 500;
@@ -116,15 +124,33 @@ export function noteOwnPrompt(appSessionId: AppSessionId, messageUuid: string | 
   });
 }
 
+/** A send the host queued for another member's session, by its queue id: its tail row is the member's own. */
+export function noteOwnQueued(appSessionId: AppSessionId, queueId: string | null | undefined): void {
+  if (queueId === null || queueId === undefined || othersRow(useSessions.getState().listed, appSessionId) === null) return;
+  if (useReader.getState().queued.get(appSessionId)?.has(queueId)) return;
+  useReader.setState((s) => {
+    const kept = [...(s.queued.get(appSessionId) ?? []), queueId].slice(-SENT_KEPT);
+    return { queued: new Map(s.queued).set(appSessionId, new Set(kept)) };
+  });
+}
+
+/** A prompt row as the author is asked for it: a held row has no message uuid, only an id made of its queue id. */
+export type PromptRow = { id: string; messageUuid: string | null };
+
 /**
  * Who wrote each prompt of the session, as the member names them: null for their own (it reads "Your message"), else
  * the session's owners. Undefined for a session the member owns, or one no listed row names: every prompt is theirs.
  */
-export function usePromptAuthor(appSessionId: AppSessionId | null): ((messageUuid: string | null) => string | null) | undefined {
+export function usePromptAuthor(appSessionId: AppSessionId | null): ((row: PromptRow) => string | null) | undefined {
   const author = useSessions((s) => {
     const row = appSessionId === null ? null : othersRow(s.listed, appSessionId);
     return row === null ? null : READER.author(ownersNamed(row, s.member, s.members));
   });
   const sent = useReader((s) => (appSessionId === null ? undefined : s.sent.get(appSessionId)));
-  return useMemo(() => (author === null ? undefined : (messageUuid: string | null) => (messageUuid !== null && sent?.has(messageUuid) === true ? null : author)), [author, sent]);
+  const queued = useReader((s) => (appSessionId === null ? undefined : s.queued.get(appSessionId)));
+  return useMemo(() => {
+    if (author === null) return undefined;
+    const ownQueued = (id: string) => queued !== undefined && [...queued].some((queueId) => id === rowId.held(queueId));
+    return ({ id, messageUuid }: PromptRow) => ((messageUuid !== null && sent?.has(messageUuid) === true) || ownQueued(id) ? null : author);
+  }, [author, sent, queued]);
 }

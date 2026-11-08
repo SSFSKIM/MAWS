@@ -142,7 +142,7 @@ export interface TranscriptContextValue {
   presentation?: 'local';
   // additive (board #525): who wrote a prompt, as the reader names them; null, or absent, where it is the reader's own
   // ("Your message"): a session another member owns names its owners
-  promptAuthor?: (messageUuid: string | null) => string | null;
+  promptAuthor?: (row: { id: string; messageUuid: string | null }) => string | null;
 }
 
 const TranscriptContext = createContext<TranscriptContextValue>({

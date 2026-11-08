@@ -23,7 +23,7 @@ import { isRemoteLaneA, remoteMachineCapabilities, remoteMachineName, startingRe
 import { laneAStateOf, useLaneACatalog, useLaneAState } from '../../stores/lane-a';
 import { isRemoteLaneB, remoteLaneBStateOf, useIsRemoteLaneB, useRemoteLaneBState } from '../../lane-b/remote-session'; // P5 O7 M2
 import { useSessions } from '../../stores/sessions';
-import { closedWords, readerGradeOf, useReaderGrade, useWhomToAsk, whomToAsk } from '../../sessions/share/reader';
+import { closedWords, noteOwnPrompt, noteOwnQueued, readerGradeOf, useReaderGrade, useWhomToAsk, whomToAsk } from '../../sessions/share/reader';
 import { laneAControls } from './lane-a';
 import { laneBControls, type LaneBFrame, type LaneBInputs } from './lane-b';
 import type { Capability, ControlResult, SessionControls } from './types';
@@ -32,7 +32,24 @@ const heldElsewhere = (record: SessionRecord | null): boolean => record?.holder.
 
 // `record` null: an id the renderer holds no record for (a status-only session); lane B reaches it by its status.
 export function controlsFor(record: SessionRecord | null, laneA: LaneAState | null, inputs: LaneBInputs): SessionControls | null {
-  return gated(portFor(record, laneA, inputs), inputs.appSessionId);
+  return noting(gated(portFor(record, laneA, inputs), inputs.appSessionId), inputs.appSessionId);
+}
+
+// Board #525: every send goes through a port, so here a prompt the host took for another member's session is kept as the
+// member's own: by its message uuid, or, queued, by its queue id (the uuid comes when the entry is submitted).
+function noting(controls: SessionControls | null, appSessionId: AppSessionId): SessionControls | null {
+  if (controls === null) return null;
+  return {
+    ...controls,
+    send: async (content, options) => {
+      const result = await controls.send(content, options);
+      if (result.disposition !== 'refused' && result.disposition !== 'held') {
+        noteOwnPrompt(appSessionId, result.messageUuid);
+        if (result.disposition === 'queued') noteOwnQueued(appSessionId, result.queueId);
+      }
+      return result;
+    },
+  };
 }
 
 // Board #525: the port of another member's session closed at the grade its machine's refusal taught.

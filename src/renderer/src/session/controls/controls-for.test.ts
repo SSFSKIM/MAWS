@@ -19,7 +19,7 @@ import { applyRemoteSession, resetRemoteLaneBStore } from '../../lane-b/remote-s
 import { ALL_OPEN, remoteSessionState } from '../../lane-b/test-support/remote-session';
 import { answerSession, askSession, compactSession, controlsFor, drivenByBridge, sendToSession, sessionControls, stopSessionTask, useSessionControls } from './controls-for';
 import { READER } from '../../sessions/share/copy'; // board #525
-import { readerGradeOf, resetReader } from '../../sessions/share/reader'; // board #525
+import { readerGradeOf, resetReader, useReader } from '../../sessions/share/reader'; // board #525
 
 const APP = 'app-c' as AppSessionId;
 const UUID = '22222222-2222-4222-8222-222222222222' as MessageUuid;
@@ -167,6 +167,66 @@ describe('a session the member can read but not talk to', () => {
     await fake.fail('session.send', 'session.send: refused grade by machine mini', 'internal', { refusal: 'grade' });
     expect(await sent).toEqual({ disposition: 'refused', started: false, reason: READER.notSent('Ana') });
     expect(readerGradeOf(LANE_B)).toBe('view');
+  });
+
+  // The endpoint grades a message by its text: a leading `/` is Manage but for a few commands, so a refusal of such words
+  // says nothing of Converse. Plain words refused `grade` are what teach View.
+  it.each<[string, string | object[]]>([
+    ['a slash command', '/compact'],
+    ['a custom command after leading space', '  /deploy now'],
+    ['a text block that starts with one', [{ type: 'text', text: 'see this' }, { type: 'text', text: '/compact' }]],
+  ])('lane B: learns nothing from a `grade` refusal of %s, and main’s words show', async (_name, content) => {
+    listed(false);
+    applyRemoteSession(remoteSessionState(LANE_B));
+    const fake = fakeClient();
+    const port = controlsFor(record(LANE_B), null, { appSessionId: LANE_B, client: fake.client })!;
+    const sent = port.send(content as string, { origin: 'composer' });
+    const settled = expect(sent).rejects.toThrow('refused grade by machine mini');
+    await fake.fail('session.send', 'session.send: refused grade by machine mini', 'internal', { refusal: 'grade' });
+    await settled;
+    expect(readerGradeOf(LANE_B)).toBeNull();
+  });
+
+  it('lane B: learns View from a `grade` refusal of content whose text blocks are plain words', async () => {
+    listed(false);
+    applyRemoteSession(remoteSessionState(LANE_B));
+    const fake = fakeClient();
+    const port = controlsFor(record(LANE_B), null, { appSessionId: LANE_B, client: fake.client })!;
+    const sent = port.send([{ type: 'text', text: 'hello /not-a-command' }], { origin: 'composer' });
+    await fake.fail('session.send', 'session.send: refused grade by machine mini', 'internal', { refusal: 'grade' });
+    expect(await sent).toMatchObject({ disposition: 'refused' });
+    expect(readerGradeOf(LANE_B)).toBe('view');
+  });
+
+  // Every send goes through a port, whoever calls it (a quick reply, a card's thread, an answering), so the port keeps
+  // what the host took as the member's own: by uuid, or, queued, by queue id.
+  it('keeps a send the host took for another member’s session as the member’s own, through the seam outside the composer', async () => {
+    listed(false);
+    applyRemoteSession(remoteSessionState(LANE_B));
+    const fake = fakeClient({ 'session.send': { disposition: 'sent', messageUuid: UUID } });
+    expect(await sendToSession(LANE_B, 'hi', { origin: 'reply' }, fake.client)).toMatchObject({ disposition: 'sent' });
+    expect(useReader.getState().sent.get(LANE_B)).toEqual(new Set([UUID]));
+  });
+
+  it('keeps a queued send by its queue id, and a refused one not at all', async () => {
+    listed(false);
+    applyRemoteSession(remoteSessionState(LANE_B));
+    expect(await sendToSession(LANE_B, 'hi', { origin: 'reply' }, fakeClient({ 'session.send': { disposition: 'queued', queueId: 'q-1' } }).client)).toMatchObject({ disposition: 'queued' });
+    expect(useReader.getState().queued.get(LANE_B)).toEqual(new Set(['q-1']));
+    resetReader();
+    const refused = fakeClient();
+    const sent = sendToSession(LANE_B, 'hi', { origin: 'reply' }, refused.client);
+    const settled = expect(sent).rejects.toThrow('nope');
+    await refused.fail('session.send', 'nope');
+    await settled;
+    expect(useReader.getState().sent.size + useReader.getState().queued.size).toBe(0);
+  });
+
+  it('keeps nothing of a send to the member’s own session', async () => {
+    listed(true);
+    applyRemoteSession(remoteSessionState(LANE_B));
+    await sendToSession(LANE_B, 'hi', { origin: 'reply' }, fakeClient({ 'session.send': { disposition: 'sent', messageUuid: UUID } }).client);
+    expect(useReader.getState().sent.size).toBe(0);
   });
 
   it('learns nothing on the member’s own session: main’s words stand', async () => {

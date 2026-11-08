@@ -11,9 +11,11 @@ import { addressOf } from '@shared/machine/address'; // board #525
 import { remoteRow } from '../../../../../test/support/builders'; // board #525
 import { OTHER_MACHINE } from '../../../../../test/support/machine'; // board #525
 import type { SessionControls } from '../../session/controls/types'; // board #525
-import { learnReaderGrade, resetReader, usePromptAuthor } from '../../sessions/share/reader'; // board #525
+import { learnReaderGrade, resetReader, useReader } from '../../sessions/share/reader'; // board #525
 import { useSessions } from '../../stores/sessions'; // board #525
-import { renderHook } from '@testing-library/react'; // board #525
+import { controlsFor } from '../../session/controls/controls-for'; // board #525
+import { laneAState } from '../../lane-a/test-support/lane-a-state'; // board #525
+import { fakeClient } from '../../../../../test/support/fake-client'; // board #525
 
 const APP = 'app-1' as AppSessionId;
 
@@ -178,12 +180,17 @@ describe('a session on another machine with no record', () => {
     expect(toasts()).toEqual([]);
   });
 
-  it('keeps a prompt the host took for another member’s session as the member’s own', async () => {
+  // The port keeps what the host took as the member's own (controls-for.ts), so the composer's submit does not: a port
+  // handed to it directly notes nothing, one from `controlsFor` does, whoever sends.
+  it('leaves keeping the member’s own prompt to the port', async () => {
     const { bridge } = client();
     expect(await submitHumanSerialized(port({ disposition: 'sent', started: false, messageUuid: 'uuid-sent' }), bridge, REMOTE, serialized({}))).toBe(true);
-    const { result } = renderHook(() => usePromptAuthor(REMOTE));
-    expect(result.current?.('uuid-sent')).toBeNull();
-    expect(result.current?.('uuid-other')).toBe('Its owner');
+    expect(useReader.getState().sent.size).toBe(0);
+    const link = { state: 'up', refusal: null, carrier: 'direct', member: 'member-me', clientClass: 'native-mac', rights: [], reason: null } as const;
+    const fake = fakeClient({ 'laneA.send': { key: { writer: 'maws/m', seq: 1 }, state: 'entered', uuid: 'uuid-port' } });
+    const real = controlsFor(null, laneAState(REMOTE, { link, acts: [] }), { appSessionId: REMOTE, client: fake.client })!;
+    expect(await submitHumanSerialized(real, bridge, REMOTE, serialized({}))).toBe(true);
+    expect(useReader.getState().sent.get(REMOTE)).toEqual(new Set(['uuid-port']));
   });
 });
 

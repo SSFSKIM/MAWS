@@ -48,7 +48,7 @@ function segmentsOf(row: UserRowData): Segment[] {
 export function UserRow({ row }: { row: UserRowData }) {
   const actions = useActions();
   const { storeKey, variant, promptAuthor } = useTranscriptContext();
-  const author = promptAuthor?.(row.messageUuid) ?? null; // board #525
+  const author = promptAuthor?.(row) ?? null; // board #525
   const renderEditor = useRegisteredBubbleEditor();
   const [open, toggle] = useDisclosure(`bubble:${row.id}`);
   const content = useRef<HTMLDivElement>(null);

@@ -478,7 +478,7 @@ export interface TranscriptProps {
   // terminal session's reply its interrupt cut before the engine wrote it
   placed?: readonly Row[];
   // board #525, additive: who wrote a prompt, as the reader names them (null: theirs); absent, every prompt is theirs
-  promptAuthor?: (messageUuid: string | null) => string | null;
+  promptAuthor?: (row: { id: string; messageUuid: string | null }) => string | null;
 }
 
 const NO_ROWS: Row[] = [];

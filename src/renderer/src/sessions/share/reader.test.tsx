@@ -13,8 +13,12 @@ import { remoteSessionState } from '../../lane-b/test-support/remote-session';
 import { applyLaneAState, resetLaneAStore } from '../../stores/lane-a';
 import { laneAState } from '../../lane-a/test-support/lane-a-state';
 import { useSessions } from '../../stores/sessions';
+import { rowId } from '../../transcript/model/keys';
+import { EMPTY_QUEUE, resetQueueStore, useQueueStore } from '../../stores/queue';
+import type { QueueEntry } from '@shared/engine/session-state-store';
+import type { MessageUuid } from '@shared/graph/ids';
 import { READER } from './copy';
-import { closedWords, learnReaderGrade, noteOwnPrompt, readerGradeOf, resetReader, usePromptAuthor, whomToAsk } from './reader';
+import { closedWords, learnReaderGrade, noteOwnPrompt, noteOwnQueued, useReader, readerGradeOf, resetReader, usePromptAuthor, whomToAsk } from './reader';
 import { connectReaderGrades, resetReaderPanes, useReaderPane } from './reader-connect';
 
 const ME = 'member-me';
@@ -112,27 +116,64 @@ describe('asked afresh', () => {
   });
 });
 
+const prompt = (messageUuid: string | null, id = `row-${messageUuid}`) => ({ id, messageUuid });
+const entry = (queueId: string, messageUuid: string | null): QueueEntry => ({ queueId, appSessionId: S, content: 'hi', createdAt: '2026-11-07T00:00:00.000Z', state: messageUuid === null ? 'queued' : 'submitting', messageUuid: messageUuid as MessageUuid | null, submittedAt: null, uncertain: false, steer: false });
+const queue = (...entries: QueueEntry[]) => useQueueStore.setState({ bySession: new Map([[S, { ...EMPTY_QUEUE, entries, loaded: true }]]) });
+
 describe('who wrote a prompt', () => {
   it('names another member’s session’s prompts by its owners, but the ones this app sent; the member’s own sessions name none', () => {
     const { result, rerender } = renderHook(({ id }: { id: AppSessionId }) => usePromptAuthor(id), { initialProps: { id: S } });
-    expect(result.current?.('uuid-1')).toBe('Ana');
-    expect(result.current?.(null)).toBe('Ana');
+    expect(result.current?.(prompt('uuid-1'))).toBe('Ana');
+    expect(result.current?.(prompt(null))).toBe('Ana');
     act(() => noteOwnPrompt(S, 'uuid-1'));
-    expect(result.current?.('uuid-1')).toBeNull();
-    expect(result.current?.('uuid-2')).toBe('Ana');
+    expect(result.current?.(prompt('uuid-1'))).toBeNull();
+    expect(result.current?.(prompt('uuid-2'))).toBe('Ana');
     rerender({ id: MINE });
     expect(result.current).toBeUndefined();
     noteOwnPrompt(MINE, 'uuid-3'); // nothing kept for the member's own session
     act(() => rows({ owners: ['member-gone'] }));
     rerender({ id: S });
-    expect(result.current?.('uuid-2')).toBe(READER.author([]));
+    expect(result.current?.(prompt('uuid-2'))).toBe(READER.author([]));
   });
 
   it('keeps a prompt lane A says entered from this app’s send as the member’s own', () => {
     const off = connectReaderGrades(() => {});
     const { result } = renderHook(() => usePromptAuthor(S));
     act(() => applyLaneAState(S, laneAState(S, { deliveries: [{ key: { writer: 'w', seq: 1 }, at: '2026-11-07T00:00:00.000Z', state: 'entered', uuid: 'uuid-9' }] })));
-    expect(result.current?.('uuid-9')).toBeNull();
+    expect(result.current?.(prompt('uuid-9'))).toBeNull();
     off();
+  });
+
+  it('names a held row the member sent by its queue id, and takes the entry’s message uuid when it is submitted', () => {
+    const off = connectReaderGrades(() => {});
+    const { result } = renderHook(() => usePromptAuthor(S));
+    act(() => noteOwnQueued(S, 'q-1'));
+    expect(result.current?.(prompt(null, rowId.held('q-1')))).toBeNull();
+    expect(result.current?.(prompt(null, rowId.held('q-2')))).toBe('Ana'); // another's held row
+    act(() => queue(entry('q-1', null), entry('q-2', null)));
+    expect(useReader.getState().sent.size).toBe(0);
+    act(() => queue(entry('q-1', 'uuid-q1'), entry('q-2', 'uuid-q2')));
+    expect(result.current?.(prompt('uuid-q1'))).toBeNull();
+    expect(result.current?.(prompt('uuid-q2'))).toBe('Ana'); // not remembered: not this app's send
+    off();
+    resetQueueStore();
+  });
+
+  it('forgets what this app sent when another member signs in, the uuids and the queue ids both', () => {
+    const off = connectReaderGrades(() => {});
+    const { result } = renderHook(() => usePromptAuthor(S));
+    act(() => {
+      noteOwnPrompt(S, 'uuid-1');
+      noteOwnQueued(S, 'q-1');
+    });
+    expect(result.current?.(prompt('uuid-1'))).toBeNull();
+    act(() => rows({ revision: 4 }, 'member-other'));
+    expect(useReader.getState().sent.size + useReader.getState().queued.size).toBe(0);
+    expect(result.current?.(prompt('uuid-1'))).toBe('Ana');
+    expect(result.current?.(prompt(null, rowId.held('q-1')))).toBe('Ana');
+    act(() => queue(entry('q-1', 'uuid-q1')));
+    expect(result.current?.(prompt('uuid-q1'))).toBe('Ana'); // the old member's queue id is no longer followed
+    off();
+    resetQueueStore();
   });
 });
