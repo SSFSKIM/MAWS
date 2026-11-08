@@ -3986,6 +3986,27 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   - The header also records what was rejected, and why, and the timing signal that remains. Whether the machine holds entries of an id can be told from how long an answer takes. That is org-internal metadata, not content, and it is tracked as tech debt.
   Date/Author: 2026-11-08, O8's executor (controller), from #524's worker by the architect.
 
+- Decision: M4b Task 2, second half. Master ddb4ac6dd (#524, #528 and #529) was merged in at 79beb549f with no conflicts. After the merge, the wire and fingerprint checks pass with no rewrite. The commits are 62c862351 (the dispatch) and e086ef5a0 (the door), both endpoint only. The architect accepted these points (2026-11-08).
+  1. **The dispatch.** `CallsContext.grants?(member)` routes `endpoint.grants`. `endpoint.ts`'s `#grants` and `#grantsRead` are injected at `new Calls({...})`.
+  2. **The door** (Fork A) gains `certificates`, `now` and `grants` in its context. It reads the grants as the machine's owners. Everything outside `record.*` and `endpoint.grant` is still refused. `endpoint.state` is a test case.
+  3. **Two refusal shapes, corrected from the first half's item 6.**
+     - A grant the door itself refuses answers `{state: 'refused', reason: <verifyGrant's code>}`.
+     - A grant that passes the door but that the ledger then refuses answers `{state: 'failed', error: {code}}`, as it would over a channel.
+     - Main's grants (Task 4) read both shapes.
+  4. **Tests.** `grants-call.test.ts` has 16 cases:
+     - desk 674's nine, numbered in their names;
+     - the offer row;
+     - a machine moving to another owner mid-read;
+     - the door's cases: forged, ineligible, a device not in the head, `endpoint.state` refused, a valid grant stored, and `grants` read through the door.
+
+     The red evidence: 7 cases failed before the dispatch, and 5 failed against M6b's door. A mutation check confirmed that the held-read cases reach the projection's own fence.
+
+     The suite's hold on owner reads gained a `pass` count. This is test-only: a remote call's admission reads the owners once, in `authorize.ts`.
+  5. **Gates.**
+     - Static at 62c862351: 42468308490 failed on a gitleaks download 504, and the rerun, 42468632268, is green.
+     - `static,unit` at e086ef5a0 (42468417824): static and unit 1–4 are green. The planner added an e2e:cross-build job, which failed in setup on a release-CDN 504 on both attempts, before any test ran. It is to be rerun once downloads recover. It is not a review blocker (the architect).
+  Date/Author: 2026-11-08, O8's executor (controller), from Task 2's report and the architect's notes.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
