@@ -217,6 +217,7 @@ describe('the sheet', () => {
     install({ 'org.policy.set': { ok: true, results, policy: null } satisfies OrgPolicySetResult });
     const sheet = await open();
     await fake.reply('org.policy.get', read([entry()]));
+    await within(sheet).findByText(SHARE.general);
     fireEvent.click(level(sheet, 'Private'));
     fireEvent.click(within(sheet).getByRole('button', { name: 'Remove Ana' }));
     fireEvent.click(within(sheet).getByRole('button', { name: SHARE.save }));
@@ -228,7 +229,7 @@ describe('the sheet', () => {
     expect(within(sheet).getAllByRole('button', { name: SHARE.reload })).toHaveLength(1);
     fireEvent.click(within(outcomes).getByRole('button', { name: SHARE.reload }));
     await fake.reply('org.policy.get', read([entry({ access: 'private', policyRev: 8 })]));
-    expect(within(sheet).queryByRole('region', { name: SHARE.results })).toBeNull();
+    await waitFor(() => expect(within(sheet).queryByRole('region', { name: SHARE.results })).toBeNull());
     expect(level(sheet, 'Private').checked).toBe(true);
     expect(fake.invoked('org.policy.get')).toHaveLength(2);
   });
@@ -237,6 +238,7 @@ describe('the sheet', () => {
     install({ 'org.policy.set': { ok: false, reason: 'changed-elsewhere' } satisfies OrgPolicySetResult });
     const sheet = await open();
     await fake.reply('org.policy.get', read([entry()]));
+    await within(sheet).findByText(SHARE.general);
     fireEvent.click(level(sheet, 'Org can talk'));
     fireEvent.click(within(sheet).getByRole('button', { name: SHARE.save }));
     const alert = await within(sheet).findByRole('alert');
@@ -244,7 +246,7 @@ describe('the sheet', () => {
     expect(level(sheet, 'Org can talk').checked).toBe(true);
     fireEvent.click(within(alert).getByRole('button', { name: SHARE.reload }));
     await fake.reply('org.policy.get', read([entry({ access: 'org-view', policyRev: 9 })]));
-    expect(level(sheet, 'Org can view').checked).toBe(true);
+    await waitFor(() => expect(level(sheet, 'Org can view').checked).toBe(true));
     expect(within(sheet).queryByRole('alert')).toBeNull();
   });
 
@@ -294,7 +296,7 @@ describe('what the sheet cannot offer', () => {
     install({});
     const sheet = await open();
     await fake.reply('org.policy.get', read([{ session: 'sess-1', unavailable: true }]));
-    expect(within(sheet).getByText("Its reach can't be read right now")).toBeTruthy();
+    expect(await within(sheet).findByText("Its reach can't be read right now")).toBeTruthy();
     expect(within(sheet).queryAllByRole('radio')).toEqual([]);
     fireEvent.click(within(sheet).getByRole('button', { name: SHARE.reload }));
     await fake.reply('org.policy.get', read([entry()]));
@@ -305,10 +307,10 @@ describe('what the sheet cannot offer', () => {
     install({});
     const sheet = await open();
     await fake.reply('org.policy.get', { ok: false, machine: OTHER_MACHINE, reason: 'offline' } satisfies OrgPolicy);
-    expect(within(sheet).getByText(REFUSALS.offline('studio-mini'))).toBeTruthy();
+    expect(await within(sheet).findByText(REFUSALS.offline('studio-mini'))).toBeTruthy();
     fireEvent.click(within(sheet).getByRole('button', { name: SHARE.reload }));
     await fake.reply('org.policy.get', { ok: false, machine: OTHER_MACHINE, reason: 'closed' } satisfies OrgPolicy);
-    expect(within(sheet).getByText(SHARE.refused('studio-mini'))).toBeTruthy();
+    expect(await within(sheet).findByText(SHARE.refused('studio-mini'))).toBeTruthy();
     expect(within(sheet).getByText('closed')).toBeTruthy();
   });
 });
