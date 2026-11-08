@@ -1041,7 +1041,11 @@ describe('bringing a machine to a version (M4b’s head push, `bringTo`)', () =>
     const m = await machine(line.slice(0, 2));
     a.machines.set(M1, m);
     const act = m.act.bind(m);
-    m.act = (request) => ({ ...act(request), outcome: Promise.resolve<ActOutcome>({ state: 'done', result: { version: 3 } }) }); // stuck at 3
+    // Its endpoint takes each run, but answers as if stuck at 3 (each answer after the run's own, so nothing outlives it).
+    m.act = (request) => {
+      const op = act(request);
+      return { ...op, outcome: op.outcome.then((): ActOutcome => ({ state: 'done', result: { version: 3 } })) };
+    };
     expect(await a.push.bringTo(M1, 4)).toMatchObject({ ok: false });
     expect(m.runs).toEqual([[2, 3, 4], [4]]);
   });
