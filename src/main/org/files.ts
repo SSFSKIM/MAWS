@@ -100,10 +100,9 @@ export type SigningFile = {
 /**
  * M4b: a grant this app signed, and its delivery: `pending` (kept before the first send, and while no answer settles it;
  * `op`, the last act sent whose outcome is unknown), `done` (the machine's ledger holds it), or the machine's refusal.
- * `headVersion`: the version of the org state it was verified under, before which a machine's refusal of its signer,
- * member or machine is not yet final.
+ * `headVersion`: the version of the org state it was verified under, which its machine is brought to before it is sent.
  */
-export type IssuedGrant = { signed: Signed<Grant>; delivered: 'pending' | 'done' | { refused: string }; op?: string; headVersion?: number };
+export type IssuedGrant = { signed: Signed<Grant>; delivered: 'pending' | 'done' | { refused: string }; op?: string; headVersion: number };
 export type GrantsFile = { version: 1; issued: IssuedGrant[] };
 
 export type AccessFile =
@@ -329,7 +328,7 @@ function isIssuedGrant(value: unknown): value is IssuedGrant {
   if (!isObject(value) || !isSigned(value.signed, isGrant)) return false;
   const { delivered, op, headVersion } = value;
   const deliveredOk = delivered === 'pending' || delivered === 'done' || (isObject(delivered) && isText(delivered.refused) && Object.keys(delivered).length === 1);
-  return deliveredOk && (op === undefined || isText(op)) && (headVersion === undefined || isVersion(headVersion));
+  return deliveredOk && (op === undefined || isText(op)) && isVersion(headVersion);
 }
 
 /** The shape, every field, and one grant per (machine, member): the grants store reads anything else as damaged. */

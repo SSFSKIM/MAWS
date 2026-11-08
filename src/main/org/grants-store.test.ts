@@ -59,7 +59,7 @@ async function grant(machine: string, member: string, version: number): Promise<
 }
 
 const keep = (signed: Signed<Grant>) => (file: GrantsFile) => {
-  file.issued = [...file.issued.filter((i) => i.signed.body.machine !== signed.body.machine || i.signed.body.member !== signed.body.member), { signed, delivered: 'pending' as const }];
+  file.issued = [...file.issued.filter((i) => i.signed.body.machine !== signed.body.machine || i.signed.body.member !== signed.body.member), { signed, delivered: 'pending' as const, headVersion: 7 }];
   return { next: file, value: true };
 };
 
@@ -73,7 +73,7 @@ describe('the grants store', () => {
     expect(p.order).toEqual(['registration.json', GRANTS_FILE]);
     expect(p.registration.grants).toBe(true);
     expect(isGrantsFile(p.disk())).toBe(true);
-    expect(issuedFor(p.disk(), 'mref-grants-00001', BEA)).toEqual({ signed: g, delivered: 'pending' });
+    expect(issuedFor(p.disk(), 'mref-grants-00001', BEA)).toEqual({ signed: g, delivered: 'pending', headVersion: 7 });
 
     // Removed after its first write: damaged, not fresh, and nothing is written.
     rmSync(p.path);
@@ -83,7 +83,9 @@ describe('the grants store', () => {
     expect(p.order).toEqual(['registration.json', GRANTS_FILE]);
 
     // Malformed: damaged too, whatever it holds.
-    for (const text of ['{', JSON.stringify({ version: 1, issued: [{ signed: { body: {} }, delivered: 'pending' }] }), JSON.stringify({ version: 2, issued: [] })]) {
+    // An issued grant without the version of the head it was verified under is no issued grant.
+    const headless = { signed: await grant('mref-grants-00001', BEA, 3), delivered: 'pending' };
+    for (const text of ['{', JSON.stringify({ version: 1, issued: [{ signed: { body: {} }, delivered: 'pending' }] }), JSON.stringify({ version: 2, issued: [] }), JSON.stringify({ version: 1, issued: [headless] })]) {
       writeFileSync(p.path, text, { mode: 0o600 });
       expect((await p.open()).get()).toBe('damaged');
     }
@@ -93,7 +95,7 @@ describe('the grants store', () => {
     const p = await profile();
     const store = await p.open();
     await store.update(keep(await grant('mref-grants-00001', BEA, 1)));
-    const two = { version: 1, issued: [...p.disk().issued, { signed: await grant('mref-grants-00001', BEA, 2), delivered: 'done' }] };
+    const two = { version: 1, issued: [...p.disk().issued, { signed: await grant('mref-grants-00001', BEA, 2), delivered: 'done', headVersion: 7 }] };
     writeFileSync(p.path, JSON.stringify(two), { mode: 0o600 });
     expect((await p.open()).get()).toBe('damaged');
   });

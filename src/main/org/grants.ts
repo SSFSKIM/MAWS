@@ -19,9 +19,16 @@
 //     - `not-newer` is read once more first: the ledger holding this very grant is `done` (an earlier send landed),
 //       another's is "Another device changed this grant: sign again", never a silent retry;
 //     - an orphaned op (`unknown expired`, its ledger reopened) is sent again at once as a new op;
-//     - anything else (offline, not sent, unknown, the machine's head behind this Mac's) stays `pending`, sent again when
-//       the machine's link comes up and every DELIVERY_RETRY_MS. The ledger is idempotent, and a resend of a grant it
-//       kept answers `not-newer`, read as above.
+//     - every `verifyGrant` verdict too (`malformed`, `bad-signature`, `revoked`, `not-listed`, `unknown-signer`,
+//       `contested`): final, shown with "sign again", never sent again by itself;
+//     - anything else (offline, not sent, unknown) stays `pending`, sent again when the machine's link comes up and
+//       every DELIVERY_RETRY_MS. The ledger is idempotent, and a resend of a grant it kept answers `not-newer`, read as
+//       above.
+//   Over a link, the grant goes only once the machine is known to hold the head it was verified under (`headVersion`,
+//   kept with it): deliveries.ts's head push (`bringTo`) brings the app's line to it, and only a fresh `done {version}`
+//   at or above that version, on the line the app is still on as the grant goes out, lets it go; otherwise it stays
+//   `pending`. So a machine's verdict is that head's or a later one's. The door's head can't be read: it is sent at
+//   once, and its verdicts are final as they come.
 // - Missing: at each `endpoint.grants` answer, a grant this Mac issued and delivered whose version is above the ledger's
 //   mark for its member is missing (the machine was enrolled again with a new key and an empty ledger). Re-grant… shows
 //   each, signs them under one confirmation for the machine's current key, at versions above both marks, and delivers
@@ -55,6 +62,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import { shown as promptValue } from '../device/prompt-text';
 import type { RecordSigner, StepUpPrompt } from '../device/step-up';
 import type { RemoteLink } from '../machines/remote/link';
+import type { Brought } from './deliveries';
 import type { IssuedGrant } from './files';
 import { GrantsDamaged, issuedFor, type GrantsFile, type GrantsStore } from './grants-store';
 import { orgTiming, type OrgTiming } from './timing';
@@ -94,6 +102,8 @@ export interface GrantsDeps {
   onRoster(listener: () => void): () => void;
   /** `org.grants.changed`: a machine's grants moved (an issued grant kept or its outcome recorded, a ledger read). */
   changed(ref: string): void;
+  /** deliveries.ts's head push: the signing head brought to a machine before its grant goes. */
+  bringTo(ref: MachineRef, version: number): Promise<Brought>;
   timing?: Partial<OrgTiming>;
   now?(): number;
   log(line: string): void;
@@ -114,16 +124,11 @@ export interface Grants {
 /** A key id no machine holds, for a draft judged while none speaks for its machine. */
 const NO_KEY = base64urlEncode(new Uint8Array(16));
 /**
- * The refusals a resend can't change: the codes a machine's ledger gives a grant by its own state (grants.ts's intake),
- * and `verifyGrant`'s verdicts that no later head cures (a grant that isn't one, a signature that doesn't verify, a
- * signer's key revoked for good).
+ * The machine's verdicts, each final: the codes its ledger gives a grant by its own state (grants.ts's intake), and
+ * `verifyGrant`'s. Over a link a grant goes only to a machine that answered it holds the head the grant was signed
+ * under (or a later one), so a verdict is that head's; the door's is final as it comes (its head can't be read).
  */
-const FINAL = new Set(['not-newer', 'not-held', 'other-machine', 'malformed', 'bad-signature', 'revoked']);
-/**
- * `verifyGrant`'s verdicts a later head can cure (it lists the signer, the member or the machine, or settles a contest):
- * final only once the machine's head is the one the grant was verified under, or later.
- */
-const CURABLE = new Set(['not-listed', 'unknown-signer', 'contested']);
+const FINAL = new Set(['not-newer', 'not-held', 'other-machine', 'malformed', 'bad-signature', 'revoked', 'not-listed', 'unknown-signer', 'contested']);
 
 type Refusal = Extract<GrantSetResult, { ok: false }>;
 const refuse = (reason: Refusal['reason'], detail?: string, problems?: string[]): Refusal => ({
@@ -169,9 +174,9 @@ export function missingGrants(file: GrantsFile, ref: string, members: readonly G
 }
 
 /** An act's outcome, the door's or the link's, as a delivery reads it. */
-type Sent = { kind: 'done' } | { kind: 'final'; code: string } | { kind: 'curable'; code: string } | { kind: 'expired' } | { kind: 'again'; why: string };
+type Sent = { kind: 'done' } | { kind: 'final'; code: string } | { kind: 'expired' } | { kind: 'again'; why: string };
 /** A refusal's code (a door's `{state: refused, reason}`, a ledger's `{state: failed, error: {code}}`) as a delivery reads it. */
-const refusalOf = (c: string): Sent => (FINAL.has(c) ? { kind: 'final', code: c } : CURABLE.has(c) ? { kind: 'curable', code: c } : { kind: 'again', why: c });
+const refusalOf = (c: string): Sent => (FINAL.has(c) ? { kind: 'final', code: c } : { kind: 'again', why: c });
 function sentOf(outcome: unknown): Sent {
   if (!isObject(outcome)) return { kind: 'again', why: 'no outcome' };
   const code = (value: unknown) => (typeof value === 'string' ? value : 'unknown');
@@ -340,8 +345,11 @@ export function createGrants(deps: GrantsDeps): Grants {
     return isAction(action) ? action : null;
   }
 
-  /** One send of `signed` through its machine's door or link, and the op it went as (null: none went). */
-  async function sendOnce(at: GrantsContext, signed: Signed<Grant>): Promise<{ sent: Sent; op: string | null }> {
+  /**
+   * One send of `signed` through its machine's door or link, and the op it went as (null: none went). Over a link, only
+   * once the machine answered the head pushed at `headVersion` or later, on the line the app is on as the grant goes.
+   */
+  async function sendOnce(at: GrantsContext, signed: Signed<Grant>, headVersion: number): Promise<{ sent: Sent; op: string | null }> {
     const ref = signed.body.machine;
     if (ref === deps.local) {
       const action = doorAction(at, signed);
@@ -349,17 +357,22 @@ export function createGrants(deps: GrantsDeps): Grants {
       const outcome = await deps.door.act(action).catch((error: unknown) => ({ state: 'unknown', reason: (error as Error).message }));
       return { sent: sentOf(outcome), op: action.opId };
     }
+    const offline = { sent: { kind: 'again', why: 'offline' }, op: null } as const;
+    if (deps.link(ref as MachineRef)?.state() !== 'up') return offline;
+    const brought = await deps.bringTo(ref as MachineRef, headVersion);
+    if (!brought.ok || brought.version < headVersion) return { sent: { kind: 'again', why: `not known to hold version ${headVersion}${brought.ok ? '' : ` (${brought.why})`}` }, op: null };
+    // Synchronously from here to the act: the sign-in, the line the answer was given on, and the link.
+    if (!stands(at)) return { sent: { kind: 'again', why: 'signed out' }, op: null };
+    if (!brought.current()) return { sent: { kind: 'again', why: 'the org line moved since the machine answered' }, op: null };
     const link = deps.link(ref as MachineRef);
-    if (link === null || link.state() !== 'up') return { sent: { kind: 'again', why: 'offline' }, op: null };
+    if (link === null || link.state() !== 'up') return offline;
     const handle = link.act({ action: 'endpoint.grant', args: { grant: signed }, stepUp: 'never' });
     return { sent: sentOf(await handle.outcome), op: handle.opId };
   }
 
   /** In flight per grant: a pass and a sign that reach the same grant share one delivery. */
   const delivering = new Map<string, Promise<GrantDelivered>>();
-  /** A grant a machine whose head is behind refused on a curable verdict: not sent again before `until` (in memory). */
-  const behind = new Map<string, { until: number; tries: number }>();
-  function deliver(store: GrantsStore, at: GrantsContext, signed: Signed<Grant>, headVersion: number | undefined): Promise<GrantDelivered> {
+  function deliver(store: GrantsStore, at: GrantsContext, signed: Signed<Grant>, headVersion: number): Promise<GrantDelivered> {
     const key = canonicalize(signed);
     const held = delivering.get(key);
     if (held !== undefined) return held;
@@ -368,35 +381,17 @@ export function createGrants(deps: GrantsDeps): Grants {
     return run;
   }
 
-  /** The machine's head version as this Mac last heard it (its link's `caps`); null when unknown (no caps, the door). */
-  const machineVersion = (ref: string): number | null => (ref === deps.local ? null : (deps.link(ref as MachineRef)?.caps()?.stateVersion ?? null));
-
-  async function deliverNow(store: GrantsStore, at: GrantsContext, signed: Signed<Grant>, headVersion: number | undefined): Promise<GrantDelivered> {
+  async function deliverNow(store: GrantsStore, at: GrantsContext, signed: Signed<Grant>, headVersion: number): Promise<GrantDelivered> {
     const ref = signed.body.machine;
     for (let attempt = 0; ; attempt++) {
       if (!stands(at)) return 'pending';
-      const { sent, op } = await sendOnce(at, signed);
+      const { sent, op } = await sendOnce(at, signed, headVersion);
       // the sign-in it was sent under ended while the act was out: nothing is recorded for it
       if (!stands(at)) return 'pending';
       // its ledger reopened and orphaned the op: sent again at once, as a new op (once; later passes go on)
       if (sent.kind === 'expired' && attempt === 0) continue;
-      const key = canonicalize(signed);
-      if (sent.kind !== 'curable') behind.delete(key);
       let delivered: GrantDelivered;
       if (sent.kind === 'done') delivered = 'done';
-      else if (sent.kind === 'curable') {
-        // Final once the machine's head is the one the grant was verified under, or later (a grant kept with none is
-        // judged final); while it is behind, or unknown, it may yet list the signer: sent again after a backoff.
-        const version = machineVersion(ref);
-        if (headVersion === undefined || (version !== null && version >= headVersion)) delivered = { refused: sent.code };
-        else {
-          const tries = (behind.get(key)?.tries ?? 0) + 1;
-          const wait = timing.GRANT_BEHIND_MS[Math.min(tries, timing.GRANT_BEHIND_MS.length) - 1];
-          behind.set(key, { until: now() + wait, tries });
-          log(`version ${signed.body.version} for ${signed.body.member.slice(0, 8)} on ${ref}: refused ${sent.code} by a head ${version === null ? 'not known' : `at ${version}`}, behind ${headVersion}; sent again in ${wait} ms`);
-          delivered = 'pending';
-        }
-      }
       else if (sent.kind === 'final' && sent.code === 'not-newer') {
         // Read once more: this very grant in the ledger is an earlier send that landed; another's is another device's.
         const again = await read(at, ref, true);
@@ -520,12 +515,12 @@ export function createGrants(deps: GrantsDeps): Grants {
       const kept = await verifiedKept(store, at, [signed.signed]);
       if (!kept.ok) return kept;
       deps.changed(ref);
-      return { ok: true, version: body.version, delivered: await deliver(store, at, signed.signed, current.head.version) };
+      return { ok: true, version: body.version, delivered: await deliver(store, at, signed.signed, kept.headVersion) };
     });
   }
 
-  /** Each signed grant verified against the head held now, then kept; nothing kept unless all are. */
-  async function verifiedKept(store: GrantsStore, at: GrantsContext, signed: readonly Signed<Grant>[]): Promise<{ ok: true } | Refusal> {
+  /** Each signed grant verified against the head held now, then kept with that head's version; nothing kept unless all are. */
+  async function verifiedKept(store: GrantsStore, at: GrantsContext, signed: readonly Signed<Grant>[]): Promise<{ ok: true; headVersion: number } | Refusal> {
     const held = deps.context();
     if (held === null || !stands(at)) return refuse('signed-out');
     for (const s of signed) {
@@ -533,7 +528,7 @@ export function createGrants(deps: GrantsDeps): Grants {
       if (!verdict.ok) return refuse('refused', `the signed grant does not verify against the org state held now (${verdict.code}): nothing was kept or sent`);
     }
     const kept = await keep(store, at, signed, held);
-    if (kept === 'kept') return { ok: true };
+    if (kept === 'kept') return { ok: true, headVersion: held.head.version };
     if (kept === 'head-moved') return refuse('stale', 'the org state moved after the grant was verified: nothing was kept or sent, sign again');
     if (kept === 'signed-out' || kept === 'damaged') return refuse(kept);
     return refuse('storage', `grants.json could not be written (${kept.storage}): nothing was sent`);
@@ -570,7 +565,7 @@ export function createGrants(deps: GrantsDeps): Grants {
       if (!kept.ok) return kept;
       deps.changed(ref);
       const results: Extract<GrantRegrantResult, { ok: true }>['results'] = [];
-      for (const s of signed.signed) results.push({ member: s.body.member, version: s.body.version, delivered: await deliver(store, at, s, held.head.version) });
+      for (const s of signed.signed) results.push({ member: s.body.member, version: s.body.version, delivered: await deliver(store, at, s, kept.headVersion) });
       return { ok: true, results };
     });
   }
@@ -587,7 +582,6 @@ export function createGrants(deps: GrantsDeps): Grants {
       if (i.delivered !== 'pending' || i.signed.body.org !== at.org) continue;
       const ref = i.signed.body.machine;
       if (ref !== deps.local && deps.link(ref as MachineRef)?.state() !== 'up') continue;
-      if ((behind.get(canonicalize(i.signed))?.until ?? 0) > now()) continue;
       await deliver(store, at, i.signed, i.headVersion);
     }
   }

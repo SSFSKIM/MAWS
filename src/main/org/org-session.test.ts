@@ -3190,11 +3190,15 @@ function grantMachine(heldKey: () => Promise<string>) {
   };
   const acts: unknown[] = [];
   let holdAct: Promise<void> | null = null;
+  // The machine follows the hub: the head pushed before a grant (deliveries.ts's `bringTo`) is the one it holds.
+  const pushed = (version: number) => ({ opId: 'push', opCreated: new Date().toISOString(), progress: () => 'sent', onProgress: () => () => {}, outcome: Promise.resolve({ state: 'done', result: { version } }) });
   const link = {
     state: () => 'up',
     onState: () => () => {},
+    caps: () => ({ member: A, device: 'dev', clientClass: 'native-mac', machine: { grades: [] }, stateVersion: hub.head.state.version }),
     call: async () => ({ ok: true, output: answer() }),
-    act: (request: { args: unknown }) => {
+    act: (request: { action: string; args: unknown }) => {
+      if (request.action === 'endpoint.state') return pushed(hub.head.state.version);
       acts.push(request);
       const hold = holdAct;
       return {

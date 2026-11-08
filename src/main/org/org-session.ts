@@ -137,7 +137,7 @@ import { createChannels } from './channel/channel';
 import { createChannelMachines, machinesStore, type ChannelMachinesDeps } from './channel/machines';
 import type { ProjectSocketDeps } from './channel/project-socket';
 import { checkSuccessor, describeHolder, supersededRevocations, type Finding, type SupersededOffer } from './checks';
-import { createDeliveries, type Deliveries, type DeliveryLink } from './deliveries';
+import { createDeliveries, createHeadPush, type Deliveries, type DeliveryLink } from './deliveries';
 import { composeChange, normalizeChange, type ChangeEdit, type EditSelf } from './edits';
 import { rereadFrom, startHeldOrg, type HeldOrg } from './held';
 import { hubClient, type HubClient, type HubResult, type Me, type Served } from './hub-client';
@@ -1276,6 +1276,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   /** grants.json's store, loaded once, at its first need (a signed-in profile's). */
   let grantsStore: Promise<GrantsStore> | null = null;
   const grantsListeners = new Set<(ref: string) => void>();
+  /** The head pushed to a machine before a grant goes there (deliveries.ts), over the grants' links and the held view. */
+  const grantsPush = createHeadPush({ link: (ref) => deps.grants?.link(ref) ?? null, view: heldView, timing: deps.timing, log });
   const grants = createGrants({
     context: grantsContext,
     store: () => (grantsStore ??= createGrantsStore({ files, commit, registration: () => registration, markRegistration: () => markRegistration('grants'), log })),
@@ -1284,6 +1286,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     link: (ref) => deps.grants?.link(ref) ?? null,
     roster: () => deps.grants?.roster() ?? [],
     onRoster: (listener) => deps.grants?.onRoster(listener) ?? (() => {}),
+    bringTo: (ref, version) => grantsPush.bringTo(ref, version),
     changed: (ref) => {
       for (const listener of [...grantsListeners]) {
         try {
@@ -1956,7 +1959,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     //    enrollment, whose poll in flight is joined with the parts, and the grants, whose sign, read or act in flight is.
     pairing.cancel();
     const enrollmentClosed = enrollment.close();
-    const grantsClosed = grants.close();
+    const grantsClosed = grants.close().then(() => grantsPush.close());
     const c = composed;
     c?.offs.forEach((off) => off());
     const parts = c === null ? [enrollmentClosed, grantsClosed] : [enrollmentClosed, grantsClosed, c.weekly.close(), c.deliveries.close(), c.signer.close()];

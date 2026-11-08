@@ -19,7 +19,9 @@ import {
   type Grant,
   type OrgState,
   type Right,
+  type RootTransition,
   type Signed,
+  type SignedOrgState,
   type SigningKey,
 } from '../../../apps/org-protocol/src/index.ts';
 import type { MachineRef } from '@shared/machine/ref';
@@ -29,6 +31,8 @@ import type { ActOutcome, ActRequest, CallResult } from '../machines/remote/link
 import { GRANTS_FILE, orgFiles, type GrantsFile } from './files';
 import { createGrants, missingGrants, nextVersion, type GrantDoor, type GrantLink, type Grants, type GrantsContext } from './grants';
 import { createGrantsStore } from './grants-store';
+import { createHeadPush, type DeliveryLink } from './deliveries';
+import type { HeldOrg } from './held';
 
 const ORG = 'org-grants-test';
 const A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; // the owner signing here (this Mac's member)
@@ -39,14 +43,14 @@ const HOME = 'mref-home-0000001' as MachineRef; // this Mac's own machine (the d
 const STUDIO = 'mref-studio-00001' as MachineRef; // C's machine: A may not grant there
 const SHARED = 'mref-shared-00001' as MachineRef; // org-owned: its admins grant
 const NOW = Date.parse('2026-11-08T12:00:00.000Z');
-/** The tests' backoff for a grant a machine whose head is behind refused. */
-const BEHIND_MS = 60_000;
 
 let dir: string;
 let aKey: SigningKey;
 let cKey: SigningKey;
 let keys: Record<string, SigningKey>;
 let head: OrgState;
+/** The app's accepted root transitions: the line the held view is on (deliveries.ts's `lineOf`). */
+let transitions: Signed<RootTransition>[];
 
 /** A deferred: `promise`, settled by `resolve`. */
 type Deferred = { promise: Promise<void>; resolve: () => void };
@@ -92,6 +96,8 @@ async function stateWith(machineKeys: Record<string, SigningKey>): Promise<OrgSt
 
 /** A machine's grant ledger, kept by grants.ts's intake rule (src/endpoint/grants.ts's `acceptGrant`). */
 class Ledger {
+  /** The machine's own head, which its intake judges under; null: the app's (`head`). */
+  head: OrgState | null = null;
   grants: Record<string, Signed<Grant>> = {};
   highWater: Record<string, number> = {};
   heldKeys: string[];
@@ -107,7 +113,7 @@ class Ledger {
   async intake(value: unknown): Promise<{ ok: true } | { ok: false; code: string }> {
     const g = value as Signed<Grant>;
     if (g.body.machine !== this.ref) return { ok: false, code: 'other-machine' };
-    const verdict = await verifyGrant(head, g, NO_CERTIFICATES, new Date(NOW));
+    const verdict = await verifyGrant(this.head ?? head, g, NO_CERTIFICATES, new Date(NOW));
     if (!verdict.ok) return { ok: false, code: verdict.code };
     if (!this.heldKeys.includes(g.body.machineKey)) return { ok: false, code: 'not-held' };
     if ((this.highWater[g.body.member] ?? 0) >= g.body.version) return { ok: false, code: 'not-newer' };
@@ -117,11 +123,21 @@ class Ledger {
   }
 }
 
-/** A machine's RL2 link over its ledger: the call and the act as the endpoint answers them, with holds and scripts. */
-class FakeLink implements GrantLink {
+/**
+ * A machine's RL2 link over its ledger: the call and the grant's act as the endpoint answers them, with holds and
+ * scripts; and `endpoint.state` (the head pushed, deliveries.ts's `bringTo`) adopting the run's newest state when it is
+ * newer than the machine's head, `done` at the head, as endpoint.ts's `#deliver`.
+ */
+class FakeLink implements GrantLink, DeliveryLink {
   up = true;
   calls = 0;
   acts: ActRequest[] = [];
+  /** The versions of each `endpoint.state` run. */
+  pushes: number[][] = [];
+  /** Holds the next push's answer until released. */
+  holdPush: Deferred | null = null;
+  /** The answers of the next pushes, in order, before the machine's own. */
+  pushScript: ActOutcome[] = [];
   opIds: string[] = [];
   /** Answers the next call with this, once. */
   callFails: CallResult | null = null;
@@ -133,12 +149,10 @@ class FakeLink implements GrantLink {
   script: ActOutcome[] = [];
   /** Runs once an act is sent, before its outcome. */
   onAct: (() => void) | null = null;
-  /** The machine's head version as its last `caps` said it (null: no caps yet). */
-  stateVersion: number | null = null;
   readonly listeners = new Set<(state: 'up' | 'down') => void>();
   constructor(readonly ledger: Ledger) {}
   state = () => (this.up ? 'up' : 'down') as ReturnType<GrantLink['state']>;
-  caps = (() => (this.stateVersion === null ? null : { member: A, device: 'dev-a', clientClass: 'native-mac', machine: { grades: [] }, stateVersion: this.stateVersion })) as GrantLink['caps'];
+  caps = (() => ({ member: A, device: 'dev-a', clientClass: 'native-mac', machine: { grades: [] }, stateVersion: (this.ledger.head ?? head).version })) as DeliveryLink['caps'];
   onState = ((listener: (state: 'up' | 'down') => void) => {
     this.listeners.add(listener);
     return () => void this.listeners.delete(listener);
@@ -158,6 +172,7 @@ class FakeLink implements GrantLink {
     return fails ?? { ok: true, output: this.ledger.answer() };
   }) as GrantLink['call'];
   act = ((request: ActRequest) => {
+    if (request.action === 'endpoint.state') return this.push(request);
     this.acts.push(request);
     const opId = `op-${this.acts.length}-xxxxxxxxxxxxxxxx`;
     this.opIds.push(opId);
@@ -174,6 +189,24 @@ class FakeLink implements GrantLink {
     })();
     return { opId, opCreated: new Date(NOW).toISOString(), progress: () => 'sent', onProgress: () => () => {}, outcome };
   }) as GrantLink['act'];
+  push(request: ActRequest): ReturnType<GrantLink['act']> {
+    const states = (request.args as { states: SignedOrgState[] }).states;
+    this.pushes.push(states.map((s) => s.state.version));
+    const outcome = (async (): Promise<ActOutcome> => {
+      const hold = this.holdPush;
+      this.holdPush = null;
+      const scripted = this.pushScript.shift();
+      if (hold !== null) await hold.promise;
+      if (scripted !== undefined) return scripted;
+      if (!this.up) return { state: 'refused', reason: 'offline' };
+      const newest = states[states.length - 1].state;
+      const mine = this.ledger.head ?? head;
+      if (newest.version < mine.version) return { state: 'failed', error: { code: 'not-newer' } };
+      if (newest.version > mine.version) this.ledger.head = newest;
+      return { state: 'done', result: { version: newest.version } };
+    })();
+    return { opId: `push-${this.pushes.length}`, opCreated: new Date(NOW).toISOString(), progress: () => 'sent', onProgress: () => () => {}, outcome };
+  }
 }
 
 /** This Mac's endpoint through its local door (local-door.ts): a grant that fails `verifyGrant` is the door's refusal. */
@@ -187,7 +220,7 @@ class FakeDoor implements GrantDoor {
     this.acts.push(action);
     if (this.script.length > 0) return this.script.shift();
     if (!isAction(action)) return { state: 'refused', reason: 'malformed' };
-    const verdict = await verifyGrant(head, action.args.grant as Signed<Grant>, NO_CERTIFICATES, new Date(NOW));
+    const verdict = await verifyGrant(this.ledger.head ?? head, action.args.grant as Signed<Grant>, NO_CERTIFICATES, new Date(NOW));
     if (!verdict.ok) return { state: 'refused', reason: verdict.code };
     const result = await this.ledger.intake(action.args.grant);
     return result.ok ? { state: 'done', result: {} } : { state: 'failed', error: { code: result.code } };
@@ -243,6 +276,14 @@ async function harness(over: { damaged?: boolean } = {}) {
   const changed: string[] = [];
   const logs: string[] = [];
   const roster = new Set<() => void>();
+  // The held view's line as the push reads it: versions 1 … head's, the head itself last.
+  const view = () =>
+    ({
+      head: () => ({ state: head }),
+      since: () => ({ states: Array.from({ length: head.version }, (_, i) => ({ state: i === head.version - 1 ? head : { ...head, version: i + 1 }, sigs: [] })), transitions }),
+    }) as unknown as HeldOrg;
+  const push = createHeadPush({ link: (ref) => links.get(ref) ?? null, view, log: (line) => void logs.push(line) });
+  made.push(push);
   const grants = createGrants({
     context: (): GrantsContext | null => (session.signedIn ? { org: ORG, member: A, device: 'dev-a', head, certificates: NO_CERTIFICATES, signer, signIn: session.signIn } : null),
     store: () => store,
@@ -255,7 +296,7 @@ async function harness(over: { damaged?: boolean } = {}) {
       return () => void roster.delete(listener);
     },
     changed: (ref) => void changed.push(ref),
-    timing: { GRANT_BEHIND_MS: [BEHIND_MS] },
+    bringTo: (ref, version) => push.bringTo(ref, version),
     now: () => clock.now,
     log: (line) => void logs.push(line),
   });
@@ -305,13 +346,14 @@ async function signedBy(key: SigningKey, ref: string, member: string, rights: Ri
   return signRecord(SIGNING_DOMAINS.grant, body, key.privateKey, key.pub);
 }
 
-const made: Grants[] = [];
+const made: Array<Pick<Grants, 'close'>> = [];
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'maws-grants-'));
   aKey ??= await generateSigningKey();
   cKey ??= await generateSigningKey();
   keys = Object.fromEntries(await Promise.all([MINI, HOME, STUDIO, SHARED].map(async (ref) => [ref, await generateSigningKey()] as const)));
   head = await stateWith(keys);
+  transitions = [];
 });
 afterEach(async () => {
   for (const g of made.splice(0)) await g.close();
@@ -569,57 +611,122 @@ describe('delivery', () => {
     expect(h.issued(MINI, B)?.headVersion).toBe(head.version);
   });
 
-  it('records a permanent verdict (`malformed`, `bad-signature`, `revoked`) as final whatever the machine’s head, in either shape', async () => {
-    for (const code of ['malformed', 'bad-signature', 'revoked']) {
+  it('pushes the signing head to a machine one version behind (a member just added), then sends the grant: one confirmation', async () => {
+    const h = await harness();
+    h.mini.ledger.head = { ...head, members: head.members.filter((m) => m.id !== B) }; // 7: no B yet
+    head = { ...head, version: 8 }; // B added
+    expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] })).toEqual({ ok: true, version: 1, delivered: 'done' });
+    expect(h.mini.pushes).toEqual([[7, 8]]);
+    expect(h.mini.ledger.head?.version).toBe(8);
+    expect(h.mini.acts).toHaveLength(1);
+    expect(h.prompts).toHaveLength(1);
+  });
+
+  it('sends nothing while the machine’s answer is below the signing head, the push has no answer or its link dropped: pending, sent at the next pass once it is there', async () => {
+    const answers: ActOutcome[] = [
+      { state: 'done', result: { version: 6 } },
+      { state: 'unknown', reason: 'expired' },
+      { state: 'refused', reason: 'offline' },
+    ];
+    for (const answer of answers) {
+      const h = await harness();
+      h.mini.pushScript.push(answer);
+      if (answer.state === 'done') h.mini.pushScript.push(answer); // the forward run after it answers no further
+      expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] }), JSON.stringify(answer)).toMatchObject({ delivered: 'pending' });
+      expect(h.mini.acts).toEqual([]);
+      expect(h.issued(MINI, B)?.delivered).toBe('pending');
+      await h.grants.send();
+      expect(h.mini.acts).toHaveLength(1);
+      expect(h.issued(MINI, B)?.delivered).toBe('done');
+      await h.grants.close();
+    }
+  });
+
+  it('sends nothing when the app’s line moved while the push was out, and reads pending meanwhile', async () => {
+    const h = await harness();
+    const hold = (h.mini.holdPush = deferred());
+    const answer = h.grants.set({ ref: MINI, member: B, rights: ['spawn'] });
+    await until(() => h.mini.pushes.length === 1, 'the push sent');
+    expect((await okView(h, MINI)).grants).toEqual([{ member: B, rights: ['spawn'], version: 1, state: 'pending' }]);
+    // A recovery adopted while the push was out: the machine's answer is for a line the app has left.
+    transitions = [{ body: { org: ORG, fromVersion: 6, newRootKeys: [], issued: new Date(NOW).toISOString() }, kid: 'k', sig: 's' } as unknown as Signed<RootTransition>];
+    hold.resolve();
+    expect(await answer).toMatchObject({ delivered: 'pending' });
+    expect(h.mini.acts).toEqual([]);
+    await h.grants.send();
+    expect(h.mini.pushes.at(-1)).toEqual([6, 7]); // the recovery-first run on the new line
+    expect(h.issued(MINI, B)?.delivered).toBe('done');
+  });
+
+  it('records every verdict final, through the link and the door, in either shape: never sent again', async () => {
+    for (const code of ['malformed', 'bad-signature', 'revoked', 'not-listed', 'unknown-signer', 'contested', 'not-held', 'other-machine']) {
       for (const shape of ['failed', 'refused'] as const) {
         const h = await harness();
-        h.mini.stateVersion = 1; // far behind: no matter
-        h.mini.script.push(shape === 'failed' ? { state: 'failed', error: { code } } : { state: 'refused', reason: code });
+        const outcome = shape === 'failed' ? ({ state: 'failed', error: { code } } as const) : ({ state: 'refused', reason: code } as const);
+        h.mini.script.push(outcome);
         expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] }), `${code} as ${shape}`).toMatchObject({ delivered: { refused: code } });
-        h.door.script.push(shape === 'failed' ? { state: 'failed', error: { code } } : { state: 'refused', reason: code });
+        h.door.script.push(outcome);
         expect(await h.grants.set({ ref: HOME, member: B, rights: ['spawn'] }), `${code} as ${shape} at the door`).toMatchObject({ delivered: { refused: code } });
-        await h.grants.close();
-      }
-    }
-  });
-
-  it('a curable verdict (`not-listed`, `unknown-signer`, `contested`) is final once the machine’s head is the signing head or later, in either shape', async () => {
-    for (const code of ['not-listed', 'unknown-signer', 'contested']) {
-      for (const shape of ['failed', 'refused'] as const) {
-        for (const at of [head.version, head.version + 1]) {
-          const h = await harness();
-          h.mini.stateVersion = at;
-          h.mini.script.push(shape === 'failed' ? { state: 'failed', error: { code } } : { state: 'refused', reason: code });
-          expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] }), `${code} as ${shape} at ${at}`).toMatchObject({ delivered: { refused: code } });
-          await h.grants.send();
-          expect(h.mini.acts).toHaveLength(1); // final: never sent again
-          await h.grants.close();
-        }
-      }
-    }
-  });
-
-  it('a curable verdict from a machine whose head is behind the signing head (or unknown) stays pending, sent again only after a backoff', async () => {
-    for (const shape of ['failed', 'refused'] as const) {
-      for (const behind of [head.version - 1, null]) {
-        const h = await harness();
-        h.mini.stateVersion = behind;
-        h.mini.script.push(shape === 'failed' ? { state: 'failed', error: { code: 'unknown-signer' } } : { state: 'refused', reason: 'unknown-signer' });
-        expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] }), `${shape} behind at ${behind}`).toMatchObject({ delivered: 'pending' });
-        // Not on the next pass, the link's up or a feed open...
         await h.grants.send();
         h.mini.setUp(false);
         h.mini.setUp(true);
         await h.grants.send();
         expect(h.mini.acts).toHaveLength(1);
-        // ...but once the backoff has passed: the machine caught up, and its ledger takes it.
-        h.clock.now += BEHIND_MS;
-        await h.grants.send();
-        expect(h.mini.acts).toHaveLength(2);
-        expect(h.issued(MINI, B)?.delivered).toBe('done');
+        expect(h.door.acts).toHaveLength(1);
         await h.grants.close();
       }
     }
+  });
+
+  it('never resends a refused grant, though a later head would take it: signing it again is a new confirmation', async () => {
+    const h = await harness();
+    h.mini.script.push({ state: 'failed', error: { code: 'unknown-signer' } });
+    expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] })).toMatchObject({ delivered: { refused: 'unknown-signer' } });
+    head = { ...head, version: 8 }; // a later head (the ownership restored)
+    h.mini.setUp(false);
+    h.mini.setUp(true);
+    await h.grants.send();
+    expect(h.mini.acts).toHaveLength(1);
+    expect((await okView(h, MINI)).grants).toEqual([{ member: B, rights: ['spawn'], version: 1, state: 'refused', reason: 'unknown-signer' }]);
+    expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] })).toEqual({ ok: true, version: 2, delivered: 'done' });
+    expect(h.prompts).toHaveLength(2);
+    expect(h.mini.acts).toHaveLength(2);
+  });
+
+  it('sends through the door at once, with no push (its head can’t be read), and records a refusal from a door behind as final', async () => {
+    const h = await harness();
+    h.door.ledger.head = { ...head, version: 6, members: head.members.filter((m) => m.id !== B) };
+    expect(await h.grants.set({ ref: HOME, member: B, rights: ['spawn'] })).toMatchObject({ delivered: { refused: 'not-listed' } });
+    await h.grants.send();
+    expect(h.door.acts).toHaveLength(1);
+    expect(h.mini.pushes).toEqual([]);
+    h.door.ledger.heldKeys = ['AAAAAAAAAAAAAAAAAAAAAA'];
+    h.door.ledger.head = null;
+    expect(await h.grants.set({ ref: HOME, member: C, rights: ['spawn'] })).toMatchObject({ delivered: { refused: 'not-held' } });
+  });
+
+  it('delivers a grant under the head it was kept with, not the one before Touch ID', async () => {
+    const h = await harness();
+    h.mini.ledger.head = { ...head }; // 7
+    h.confirm.during = () => void (head = { ...head, version: 8 });
+    h.mini.pushScript.push({ state: 'done', result: { version: 7 } }, { state: 'done', result: { version: 7 } });
+    expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] })).toMatchObject({ delivered: 'pending' });
+    expect(h.issued(MINI, B)?.headVersion).toBe(8);
+    expect(h.mini.acts).toEqual([]);
+  });
+
+  it('delivers a re-grant under the head it was kept with, not the one before Touch ID', async () => {
+    const g = await harness();
+    await g.grants.set({ ref: MINI, member: B, rights: ['spawn'] });
+    g.mini.ledger.grants = {};
+    g.mini.ledger.highWater = {};
+    const view = await okView(g, MINI);
+    g.mini.ledger.head = { ...head }; // 8
+    g.confirm.during = () => void (head = { ...head, version: 9 });
+    g.mini.pushScript.push({ state: 'done', result: { version: 8 } }, { state: 'done', result: { version: 8 } });
+    expect(await g.grants.regrant({ ref: MINI, digest: view.digest! })).toEqual({ ok: true, results: [{ member: B, version: 2, delivered: 'pending' }] });
+    expect(g.issued(MINI, B)?.headVersion).toBe(9);
+    expect(g.mini.acts).toHaveLength(1); // the first grant's act only
   });
 
   it('goes through the local door for this Mac’s own machine, and over the link for every other one', async () => {
@@ -640,18 +747,6 @@ describe('delivery', () => {
     expect(h.mini.acts).toHaveLength(1);
   });
 
-  it('reads both door shapes: its own refusal (`{state: refused}`) and the ledger’s through it (`{state: failed}`); its head unknown, a curable one waits', async () => {
-    const h = await harness();
-    h.door.script.push({ state: 'refused', reason: 'unknown-signer' });
-    expect(await h.grants.set({ ref: HOME, member: B, rights: ['spawn'] })).toMatchObject({ delivered: 'pending' });
-    await h.grants.send();
-    expect(h.door.acts).toHaveLength(1); // its head is unknown: behind, so the backoff holds it
-    h.clock.now += BEHIND_MS;
-    await h.grants.send();
-    expect(h.issued(HOME, B)?.delivered).toBe('done');
-    h.door.ledger.heldKeys = ['AAAAAAAAAAAAAAAAAAAAAA'];
-    expect(await h.grants.set({ ref: HOME, member: C, rights: ['spawn'] })).toMatchObject({ delivered: { refused: 'not-held' } });
-  });
 });
 
 describe('missing grants', () => {
@@ -770,7 +865,6 @@ describe('missing grants', () => {
     h.mini.ledger.grants = {};
     h.mini.ledger.highWater = {};
     h.mini.ledger.heldKeys = [await keyId(fresh.pub)];
-    h.mini.stateVersion = 9;
     await h.grants.send(); // the machine judges it by verifyGrant first: the old key is not the machine's now
     expect(h.issued(MINI, B)).toMatchObject({ delivered: { refused: 'not-listed' } });
     const view = await okView(h, MINI);
