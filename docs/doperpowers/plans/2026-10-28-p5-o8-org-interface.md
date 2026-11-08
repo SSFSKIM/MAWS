@@ -3989,3 +3989,44 @@ A future child that serves session content through a feed should state, before b
 
 A future child that keeps state written from more than one place over an unreliable link should write the enumerating test first, before any review. Its alphabet should include every event that changes what crosses the link: a timeout, a late landing, a read-back, and a crossing of the size budget. It should also check authority at the point where data leaves, never at the point where the decision was made.
 
+**M6b (2026-11-08, PR from `p5-o8-m6b`; the live proof at the shared staging run, with the real-member sitting).** A member can widen or narrow a session's reach from MAWS, and nowhere else, once its machine's sminos can keep it.
+- **The Share sheet** opens from the session's header and from its row's menu, on a session you own in a hub project.
+  - It sets General access (Private, Listed, Org can view, Org can talk) and each person's grade (Can message, View, Converse, Approve), with the spec's help text word for word.
+  - It lists the changes in the order Save sends them. A removed person stays struck through, with Undo, until Save.
+  - Save asks Touch ID once for every line. Each line shows its own outcome: a refusal in words naming the machine, never blank, and an unknown outcome with Reload.
+  - A revision that moved before or after Touch ID sends nothing and reads "Changed elsewhere: reload".
+- **Rows carry marks:** a lock for Private, a people mark for shares. Your own sessions' marks are read from `record.policy`, and another member's private session shared with you is read from its listing's `audience`.
+- **Private sessions reach their people over the channel.** Their listings come from each machine's link and merge into the rows by two memberships per key, so a session going private never blinks.
+- **This Mac's own sessions** change through the local door. It verifies the step-up signature every time, derives the member from the head, then authorizes as a channel does.
+- **Reads and saves are fenced to one sign-in.** A policy read or a save that outlives its sign-in publishes and sends nothing. The sheet closes when its reader changes.
+- **The welcome's `record`** appears exactly when the offers are served. sminos keys its CLI cutover on it: widening at the terminal reads "use MAWS", and narrowing stays. That cutover and this milestone are preconditions of a second member joining production.
+- **The staging harness** widens through A's record acts, adds the items m6b-cutover, m6b-visibility and m6b-reader, and carries the real-member steps for the sitting.
+
+**Evidence:**
+- `test/endpoint/record-acts.test.ts` (23);
+- `policy.test.ts` (25), `step-up.test.ts`, `rows.test.ts` (36, with the enumerating test over 5,040 permutations and 16,807 five-event sequences), `policies.test.ts` (8), `ShareSheet.test.tsx` (15);
+- `test/org/policy.local.test.ts` (6, on desk-hub's Worker in Miniflare, with a real endpoint and a sminos stand-in that holds each rpc to sminos's proof binding and field set, with five tampering probes);
+- `e2e/share.spec.ts`, with its screenshots;
+- the deploy suites: `reach-acceptance` (37), `real-member` (24), `staging-scripts` (33);
+- the gates the PR body lists.
+
+Still owed: the shared staging run (Concrete Steps). Layer 1 is the harness member. Layer 2 is the real-member sitting, booked by the architect. The live checklist:
+- lane B inside the reach scenes;
+- record acts over the relays;
+- pairing through real Access with a second identity;
+- the profile daemon's teardown.
+
+**Retrospective (M6b).** Built as four tasks, each reviewed at its frontier. The desk track reviewed the endpoint and the deploy harness, and reviewer-high reviewed the branch.
+- **Where the rounds went.** M6a's lesson held, one layer up. Almost every material finding was an identity or authority checked once and assumed later, at a lifecycle boundary:
+  - a policy read published after its sign-out ended;
+  - a save that kept sending under a later sign-in;
+  - a sheet that outlived its reader;
+  - a shell trap that took absence at the start as ownership;
+  - a removal whose revocations came from a head `amend` had already replaced.
+
+  The enumerating test written first (Task 2's rows) found its own class early. The lifecycle boundaries had no such test, and review found them one at a time.
+- **What the tests couldn't see.** The `print` miss passed four reviews and every test: the tests injected the very function whose argument threw, and the typecheck's DOM lib hid the unbound name. Only a test that runs the real composition, in the real runtime, catches that class.
+- **A gate gap.** Running static alone on the first two tasks hid a red unit gate for two tasks.
+
+A future child should write, for each piece of state or authority that a sign-in, a head or a process owns, a test that ends that owner mid-flight: during a confirmation, between two sends, before a read-back. It should also run each operator-facing command at least once, end to end, in its real runtime, before review.
+
