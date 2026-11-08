@@ -3812,6 +3812,22 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - The second wave is green on first attempts: 42431972737 and 42432068815, then 42432343440 at 055778370 (static, unit and e2e:settings, on the hosted lane).
      - The gate's 58 advisory spec-import warnings are copied in the task report. The PR body carries them.
   Date/Author: 2026-11-07, O8's executor (controller), from both fix waves' reports, desks 641 and 642, the re-review and the architect's notes.
+- Decision: M6b's branch review (reviewer-high, with a security lens, over 48e0ed15a..7405d3629) found three P2s. The architect accepted all three fixes (2026-11-08).
+  1. **A save belongs to the sign-in it started under** (eaafe05af).
+     - `save()` captures that sign-in, using the same generation fence as the reads. It checks the sign-in still stands before Touch ID, before each send, and before the read-back.
+     - Before this fix, a sign-out followed by any new sign-in let the unsent lines go out with the first member's signed acts. The local door accepted them, since that member's device was still listed in the head.
+     - A sign-out before Touch ID refuses the whole save `signed-out`. A sign-out after Touch ID makes the first unsent line read `refused signed-out` and the rest `not-sent`. A later sign-in, even the same member's, never sends them.
+     - A stopped save returns no policy.
+     - The door's own signed-out check, which answered `offline`, is gone. The save's fence covers it.
+  2. **The Share sheet closes when its reader changes** (df906b6e9).
+     - The sheet remembers the member it opened for. When `useHubAccess.member` changes (a sign-out, a lost registration, or another member), it renders nothing and closes. Its reload and save callbacks are fenced, so a late reply draws nothing.
+     - It closes rather than rekeys. A sign-out and a sign-in as the same member pass through "signed out", so it closes then too.
+  3. **`real-member.ts` passes `io.print` to `OrgAdmin.open`** (95be41576, deploy only).
+     - It used to pass the unbound global `print`. Under Node, every real `add`, `pair` and `remove` threw a ReferenceError after loading the keys, so the sitting would have failed at its first command.
+     - The tests injected `open`, and the deploy tsconfig includes DOM globals, so neither caught it. A test now runs the CLI composition in a Node child: `main(['add', …])` against a faked hub of another org must reach `/api/me` and print the org refusal.
+     - The other bare `print`s under `apps/desk-hub/deploy` are parameters or locals in scope, or appear in comments.
+  4. **Gates.** Static is green at eaafe05af (42435153749) and df906b6e9 (42435451512). `static,unit,e2e:settings` is green at 95be41576 (42435464666), and all 18 e2e:settings tests passed on their first attempt.
+  Date/Author: 2026-11-08, O8's executor (controller), from the fix wave's report and the architect's notes.
 
 ## Outcomes & Retrospective
 
