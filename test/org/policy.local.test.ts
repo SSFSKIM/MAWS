@@ -14,20 +14,22 @@
 //    naming A and B, at the revision the share left; the hub still lists nothing of it.
 // 3. B's agent can message S but not converse with it: B's `sminos.send` act (graded `converse`) is refused `grade` by
 //    the endpoint, and nothing of it reaches sminos.
-// 4. This Mac's own sessions too: the endpoint is A's own Mac to a second `org.policy.*` (its `local`), whose acts and
+// 4. A record rpc its proof doesn't bind is refused by sminos, and A's save shows the refusal: the rpc changed between
+//    the endpoint and sminos to another change than the one signed, to a malformed proof, or to another machine's.
+// 5. This Mac's own sessions too: the endpoint is A's own Mac to a second `org.policy.*` (its `local`), whose acts and
 //    read go through the endpoint's local door (`endpoint.local.act` and `.call`, as mawsd's machine socket serves
 //    them). A widens lane B session `app-b` to Org can view; sminos's record moves, and `record.policy` reads it back.
 //
 // Stand-ins, each where no real piece runs in a suite: sminos on RL10 (the endpoint suites' `FakeSminos`, driven here by
 // `SminosRecords`, which executes §Q's contract: the admission query answered `not-received`, then each `record.*` rpc
-// applied to its own record of the session `args.session` names as `set_visibility` applies it, the revision bumped by a
+// held to its proof's binding as sminos holds it (refused `bad-shape` otherwise) and applied to its own record of the session `args.session` names as `set_visibility` applies it, the revision bumped by a
 // change and by nothing else, the session's member frame sent again with its `access`, `shares` and `policyRev`, and
 // `rpc-result` answering `done {changed, policyRev}`); the engine host and spine behind the endpoint (`FakeEngineHost`,
 // which places lane B's `app-b` on its engine session for the members join); mawsd's machine socket, whose two door
 // commands are the endpoint module's `local` called directly.
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { base64urlEncode, encodePairingCode, type Action, type Device, type Listing, type Signed } from 'org-protocol';
+import { base64urlEncode, canonicalize, encodePairingCode, isAction, type Device, type Listing, type Signed } from 'org-protocol';
 import type { PendingDevice } from 'desk-hub/protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
@@ -107,7 +109,11 @@ class SminosRecords {
   #at = 0;
   readonly #timer: ReturnType<typeof setInterval>;
 
-  constructor(readonly s: FakeSminos) {
+  constructor(
+    readonly s: FakeSminos,
+    /** The run's facts a proof is held to: this machine's ref, the run's devices, and lane B's app sessions by id. */
+    private readonly binding: { machine: () => string; devices: () => string[]; laneB: ReadonlyMap<string, string> },
+  ) {
     this.#timer = setInterval(() => this.#pump(), 10);
   }
 
@@ -143,12 +149,48 @@ class SminosRecords {
     this.s.send({ t: 'rpc-result', project: rpc.project, opId: rpc.opId, nonce: rpc.nonce, outcome });
   }
 
+  /** A change made to the next rpc before it is checked: the suite's rejection probes. */
+  tamper: ((rpc: Record<string, unknown>) => void) | undefined;
+  /** Why each rpc refused for its proof was refused, in order. */
+  readonly unbound: string[] = [];
+
+  /**
+   * Why `rpc`'s proof is not the act it carries out, or null: §Q's binding as sminos checks it (sminos_rpc.py's
+   * proof_refusal and record_proof), made here on its own, never through the endpoint's code. The proof an act in its
+   * exact shape (org-protocol's isAction) with no session or context; this machine's (the run's org and machine ref);
+   * this op's (its opId, opCreated and device, a device of the run's); a `record.*` act of this rpc's name; naming one
+   * target, `session` equal to the rpc's or, lane B, `appSessionId` the app session the rpc's `session` is (stricter
+   * than sminos, which can't resolve it); and past the target exactly the rpc's args less `session`, as canonical JSON.
+   */
+  #unbound(rpc: Record<string, unknown>): string | null {
+    const proof = rpc.proof as Record<string, unknown> | undefined;
+    const name = rpc.rpc as string;
+    if (!isAction(proof) || 'session' in proof || 'context' in proof) return 'not an act in its exact shape, or one with a session or context';
+    if (proof.org !== ORG || proof.machine !== this.binding.machine()) return 'not this machine’s';
+    if (proof.opId !== rpc.opId || proof.opCreated !== rpc.opCreated || proof.device !== rpc.device || !this.binding.devices().includes(proof.device)) return 'not this op’s';
+    if (!name.startsWith('record.') || proof.action !== name) return `not a ${name} act`;
+    const rpcArgs = rpc.args as Record<string, unknown>;
+    const targets = (['session', 'appSessionId'] as const).filter((k) => k in proof.args);
+    if (targets.length !== 1) return 'naming no one target';
+    const [target] = targets;
+    const named = proof.args[target];
+    if (target === 'session' ? named !== rpcArgs.session : this.binding.laneB.get(named as string) !== rpcArgs.session) return 'not for this session';
+    const rest = (o: Record<string, unknown>, k: string) => Object.fromEntries(Object.entries(o).filter(([key]) => key !== k));
+    if (canonicalize(rest(proof.args, target)) !== canonicalize(rest(rpcArgs, 'session'))) return 'not this change';
+    return null;
+  }
+
   /** `set_visibility` on the record `args.session` keys: a change bumps `policyRev` once and is reported; a no-op isn't. */
   #apply(rpc: Record<string, unknown>): Record<string, unknown> {
+    this.tamper?.(rpc);
+    this.tamper = undefined;
+    // the verified act is what admits a widening: no proof of this very act, bound to this rpc, no change
+    const why = this.#unbound(rpc);
+    if (why !== null) {
+      this.unbound.push(why);
+      return { state: 'refused', reason: 'bad-shape' };
+    }
     const args = rpc.args as Record<string, unknown>;
-    const proof = rpc.proof as Action | undefined;
-    // the verified act is what admits a widening: no proof of this very act, no change
-    if (proof === undefined || proof.action !== rpc.rpc || proof.opId !== rpc.opId) return { state: 'refused', reason: 'bad-shape' };
     const member = this.members.get(args.session as string);
     if (member === undefined) return { state: 'refused', reason: 'no-session' };
     const before = JSON.stringify([member.access, member.shares, member.owners]);
@@ -268,7 +310,7 @@ beforeAll(async () => {
   const welcome = await s.next((x) => x.t === 'welcome', 'welcome');
   expect(welcome.capabilities).toContain('record');
   s.send({ t: 'session', message: { project: PROJECT, machine: 'o8-policy-mini', session: null, kind: 'machine', sub: null, n: null, body: { online: true, policy, checkouts: [{ path: CHECKOUT, branch: 'main' }], desk: {} } } });
-  records = new SminosRecords(s);
+  records = new SminosRecords(s, { machine: () => ref, devices: () => [a.current()!.identity.device, b.current()!.identity.device], laneB: new Map([[APP_B, ENG_B]]) });
   records.report(laneA());
   records.report({ ...laneA(), session: ENG_B, alias: 'notes', lane: 'B', title: 'Write the notes', owners: [A] });
   s.send({ t: 'restated' });
@@ -369,6 +411,28 @@ describe('a session’s reach on the local hub', { timeout: 120_000 }, () => {
     expect(await handle.outcome).toEqual({ state: 'refused', reason: 'grade' });
     await sleep(200);
     expect(records.s.received.slice(before).filter((f) => f.t === 'query' || f.t === 'rpc' || f.t === 'send')).toEqual([]);
+  });
+
+  it('refuses a record rpc its proof doesn’t bind, and A’s save says so: another change, a malformed proof, another machine’s', async () => {
+    // Each probe changes the rpc between the endpoint and sminos, where only sminos's own check stands.
+    const probes: Array<[string, (rpc: Record<string, unknown>) => void, RegExp]> = [
+      ['a change other than the one signed', (rpc) => void ((rpc.args as Record<string, unknown>).access = 'org-converse'), /not this change/],
+      ['a malformed proof', (rpc) => void delete (rpc.proof as Record<string, unknown>).nonce, /exact shape/],
+      ['another machine’s proof', (rpc) => void ((rpc.proof as Record<string, unknown>).machine = mintRef()), /not this machine’s/],
+    ];
+    for (const [what, tamper, why] of probes) {
+      const before = structuredClone(records.members.get(S)!);
+      const rev = await revisionOf(remote, address());
+      records.tamper = tamper;
+      const saved = await remote.set({ address: address(), access: 'org-view', policyRev: rev });
+      expect(saved, what).toMatchObject({ ok: true, results: [{ line: { kind: 'access', access: 'org-view' }, state: 'refused', reason: 'bad-shape' }] });
+      expect(records.unbound.at(-1), what).toMatch(why);
+      expect(records.executed.at(-1)!.outcome, what).toEqual({ state: 'refused', reason: 'bad-shape' });
+      expect(records.members.get(S), what).toEqual(before);
+      expect(await revisionOf(remote, address()), what).toBe(rev);
+    }
+    // and the same act, unchanged, still binds
+    expect(records.tamper).toBeUndefined();
   });
 
   it('changes this Mac’s own session through the local door, by the same act and rule', async () => {
