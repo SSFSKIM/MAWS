@@ -678,8 +678,6 @@ export type StartOptions = {
   owners?: string[];
   /** 2026-11-06: the machine's home as the home-root rule reads it (`EndpointOptions.authorization.home`; a fake one). */
   home?: string;
-  /** P5 O8 M7b: the org's hub projects in the org's chain (none by default). */
-  projects?: Array<{ id: string; name: string }>;
   /** 2026-11-06: the endpoint's environment beside the direct listener's switch (an e2e seam a case reads). */
   env?: Record<string, string>;
   /** P5 O8 M6a: more of the org in its chain's second state (another member, a member's second device). */
@@ -709,7 +707,6 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
       s.members.push({ id: org.C, email: 'c@example.com', role: 'member', devices: [org.c1.device] });
       s.machines.push({ name: 'mini', ref, pub: key.pub, owners: options.owners ?? [org.A] });
       s.machineNames.push({ name: 'mini', ref });
-      s.projects.push(...(options.projects ?? []));
       options.amend?.(s);
     });
     chain = [s1, s2];
