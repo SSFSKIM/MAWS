@@ -6,7 +6,9 @@ merged, sminos 1.40.6: case 18, notices the engine queued; git blob `a414fd58d`,
 `930e1b82406b70200dadf9b31859e4fe6cd7f2c168d2965af0ae4be75c5e4666`). DC8 owns it: it pins both producers, the plane
 (doperpowers `sminos/skills/sminos/scripts/sminos_jobs.py`, run by `sminos/tests/jobs_parity.py`) and this fake machine
 (`../jobs.ts`, run by `test/fake-machine/jobs-parity.test.ts`, which mirrors `jobs_parity.py`). Its `about` field is
-normative where the composite's DX4 prose is open.
+normative where the composite's DX4 prose is open. The fake machine's live path replays only a recording's rows with a
+uuid (`../recording.ts`), so the engine's uuid-less queue records (case 18) reach `LoopIndex` only through `feed`, as the
+vectors' rows do.
 
 Never edit it here. When DC8 changes it, copy the new file over this one, update the commit and the hash above, and run
 the parity suite; a case the fake machine fails goes to the composite's writer, not into a local edit of the vectors.
