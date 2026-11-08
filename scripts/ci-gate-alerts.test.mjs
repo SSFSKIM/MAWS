@@ -657,7 +657,7 @@ test('MAC_EC2 off keeps optional hosted work clear of an EC2 alert in preflight'
 
 test('preflight respects the mini overflow switch when planning against a fresh free-lane sample', () => {
   const candidate = tree(envOf('  HOSTED_MAC_E2E: tools\n  HOSTED_MAC_ONLY_E2E: ""\n'));
-  const sample = { v: 2, at: new Date().toISOString(), hostedQueued: 30, hostedRunning: 5, ec2: 'offline', ec2Queued: 0, mini: 'idle', miniQueued: 0, miniRunning: 0, miniHost: 'free', miniVm: 'free', partial: [] };
+  const sample = { v: 2, at: new Date().toISOString(), lanesAt: new Date().toISOString(), hostedQueued: 30, hostedRunning: 5, ec2: 'offline', ec2Queued: 0, mini: 'idle', miniQueued: 0, miniRunning: 0, miniHost: 'free', miniVm: 'free', partial: [] };
   const ask = (miniOverflow) => macPlan({ ...candidate, gates: 'e2e:tools', runner: 'macos', variables: { ...today, HOSTED_MAC_ROUTE: 'direct', MAC_MINI_OVERFLOW: miniOverflow }, trailers: `Mac-Backlog: ${JSON.stringify(sample)}` });
   assert.deepEqual(ask(''), { jobs: ['e2e:tools'], guest: null, home: [] });
   assert.deepEqual(ask('off'), { jobs: [], guest: 'none', home: [] });

@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { backlogOf } from '../.github/scripts/gate-backlog.mjs';
+import { backlogOf, utcTimestampOf } from '../.github/scripts/gate-backlog.mjs';
 
 const DEFAULT_REPOS = ['SSFSKIM/MAWS', 'SSFSKIM/cua', 'SSFSKIM/doperpowers', 'SSFSKIM/ci-kit', 'SSFSKIM/manim-master'];
 const need = (condition, message) => { if (!condition) throw new Error(message); };
@@ -66,19 +66,20 @@ export async function sampleBacklog({ api = apiOf, now = Date.now, maxCalls = 60
   const ec2 = runnerInfo(ec2Runner, 'EC2', 'ci-kit-mac-ec2');
   const mini = runnerInfo(miniRunner, 'mini', 'ci-kit-mac');
   // Only the mini can see its holds and pause windows. Unreadable or stale publication never means free.
-  let miniHost = 'held', miniVm = 'held';
+  let miniHost = 'held', miniVm = 'held', lanesAt = null;
   try {
     const variable = await read(`repos/${ownRepo}/actions/variables/MAC_MINI_LANES`);
     const lanes = JSON.parse(variable.value);
-    const age = now() - Date.parse(lanes.at);
-    if (lanes.v === 1 && Number.isFinite(age) && age >= 0 && age <= 300_000 &&
+    const age = now() - utcTimestampOf(lanes.at);
+    if (lanes.v === 1 && typeof lanes.why === 'string' && Number.isFinite(age) && age >= 0 && age <= 300_000 &&
         ['free', 'held'].includes(lanes.host) && ['free', 'held'].includes(lanes.vm)) {
+      lanesAt = lanes.at;
       miniHost = lanes.host;
       miniVm = lanes.vm;
     }
   } catch { /* Missing publication or failed read holds both lanes; hosted/EC2 sampling can still succeed. */ }
   const result = { v: 2, at: new Date(start).toISOString(), hostedQueued: 0, hostedRunning: 0, ec2: ec2.state, ec2Queued: 0,
-    mini: mini.state, miniQueued: 0, miniRunning: 0, miniHost, miniVm, partial: [] };
+    mini: mini.state, miniQueued: 0, miniRunning: 0, miniHost, miniVm, lanesAt, partial: [] };
   for (const repo of repos) {
     // Reserve no estimate of missing self-hosted work: only the hosted-only repositories can truncate at the cap.
     if (calls >= maxCalls) {

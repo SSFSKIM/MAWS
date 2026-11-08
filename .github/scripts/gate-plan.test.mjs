@@ -2289,7 +2289,7 @@ test('MAC_EC2 off keeps every optional overflow hosted, including LAUNCHD_E2E, w
   assert.equal(result.overflowShadowCount, 3);
 });
 
-const miniSample = (overrides = {}) => overflowSample({ v: 2, mini: 'idle', miniQueued: 0, miniRunning: 0, miniHost: 'free', miniVm: 'free', ...overrides });
+const miniSample = (overrides = {}) => overflowSample({ v: 2, lanesAt: new Date().toISOString(), mini: 'idle', miniQueued: 0, miniRunning: 0, miniHost: 'free', miniVm: 'free', ...overrides });
 test('mini wins equal self-hosted starts, and each chosen target charges only its own queue', () => {
   const result = overflowPlan(miniSample({ hostedQueued: 4 }));
   assert.deepEqual(JSON.parse(result.outputs.e2e).map((entry) => entry.overflow || false), ['mini', 'ec2', 'mini', 'ec2']);
@@ -2354,4 +2354,18 @@ test('mini overflow requires the published availability of every lane its labels
     const result = overflowPlan(miniSample(patch), { MAC_EC2: 'off', ...extra });
     assert.equal(JSON.parse(result.outputs.e2e)[0].overflow || false, expected, JSON.stringify([extra, patch]));
   }
+});
+
+test('planning expires the original lane publication independently of the fresh backlog sample', () => {
+  const sampledAt = Date.parse('2026-11-08T12:00:00Z');
+  const scripts = { 'e2e:document': 'scripts/e2e-build.sh harness && pnpm exec playwright test' };
+  const snapshot = JSON.parse(miniSample({ at: new Date(sampledAt).toISOString(), lanesAt: new Date(sampledAt - 299_000).toISOString() }));
+  const env = { EVENT: 'push', HOSTED_MAC_ROUTE: 'direct', HOSTED_MAC_E2E: 'document', MAC_EC2: 'off' };
+  const planned = (sample, now, extra = {}) => planOf({ ...env, ...extra, HEAD_MESSAGE: `Runner: macos\nGates: e2e:document\nMac-Backlog: ${JSON.stringify(sample)}` }, scripts, now);
+  assert.equal(JSON.parse(planned(snapshot, sampledAt + 1000).outputs.e2e)[0].overflow, 'mini');
+  const expired = planned(snapshot, sampledAt + 2000);
+  assert.equal(JSON.parse(expired.outputs.e2e)[0].hosted, true);
+  assert.match(expired.summary, /host held, vm held/);
+  assert.equal(JSON.parse(planned(snapshot, sampledAt + 2000, { MAC_EC2: '' }).outputs.e2e)[0].overflow, 'ec2');
+  assert.equal(JSON.parse(planned({ ...snapshot, lanesAt: new Date(sampledAt + 1).toISOString() }, sampledAt).outputs.e2e)[0].hosted, true);
 });

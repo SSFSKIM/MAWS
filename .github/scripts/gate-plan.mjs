@@ -108,7 +108,7 @@ import { appendFileSync, readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { affected } from './gate-affected.mjs';
-import { backlogOf } from './gate-backlog.mjs';
+import { backlogOf, utcTimestampOf } from './gate-backlog.mjs';
 
 const words = (text = '') => text.split(/[\s,]+/).filter(Boolean);
 // `default` is the bare `pnpm e2e` set (after `pnpm build`, as `verify` orders them), which the e2e job narrows to the specs
@@ -365,6 +365,14 @@ export function planOf(env, scripts, now) {
   // Both self-hosted queues must be complete. Missing, failed or stale samples never move work.
   // Lane: hosted asks for the hosted Macs themselves (a trial or an admission): nothing of it moves, whatever a sample says.
   const backlog = !dispatched && direct && laneAsked !== 'hosted' ? backlogOf(trailer('Mac-Backlog'), now) : null;
+  // Sampling/cache/plan startup must not renew the mini publisher's five-minute availability lease.
+  if (backlog?.v === 2) {
+    const lanesAge = now - utcTimestampOf(backlog.lanesAt);
+    if (!Number.isFinite(lanesAge) || lanesAge < 0 || lanesAge > 300_000) {
+      backlog.miniHost = 'held';
+      backlog.miniVm = 'held';
+    }
+  }
   const hostedOnly = new Set(words(env.HOSTED_MAC_ONLY_E2E));
   // CI-opt's 2026-10-31 analysis of MAWS jobs, 2026-10-28 to 10-31: median self-hosted/hosted runtime ratio
   // over 29 groups with 3+ runs on each side (self-hosted: mini or EC2; hosted: macos-26).
