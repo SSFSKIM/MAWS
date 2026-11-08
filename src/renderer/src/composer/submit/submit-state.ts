@@ -40,6 +40,9 @@ export interface SubmitInput {
   // P5 O7 M8 review: the draft names documents for a session on another machine (uploaded PDFs), so its send is a
   // `session.send` even while a turn runs (a steer carries no uploads) and waits for the turn
   sendsDocuments?: boolean;
+  // Board 525: why the member's words don't go to another member's session (its machine refused them at the member's
+  // grade), naming whom to ask; absent or null: nothing says so
+  closed?: string | null;
 }
 
 export interface SubmitDecision {
@@ -114,6 +117,7 @@ export function submitState(i: SubmitInput): SubmitDecision {
     if (mode !== 'send') return decide('send', 'Send', false, NOT_YET);
     return decide('send', 'Send', !empty);
   }
+  if ((i.closed ?? null) !== null) return decide('send', 'Send', false, i.closed); // board 525: Stop too, whatever the turn
   // P5 O9 M5: driven through its holder (lane A). Send goes in either turn state, never as a steer: the bridge reads words
   // sent while a turn runs at the turn's next model request; with the box empty during a turn, Stop interrupts.
   if (i.driven) {

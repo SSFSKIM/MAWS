@@ -18,6 +18,8 @@ import { useSessions } from '../../stores/sessions';
 import { applyRemoteSession, resetRemoteLaneBStore } from '../../lane-b/remote-session';
 import { ALL_OPEN, remoteSessionState } from '../../lane-b/test-support/remote-session';
 import { answerSession, askSession, compactSession, controlsFor, drivenByBridge, sendToSession, sessionControls, stopSessionTask, useSessionControls } from './controls-for';
+import { READER } from '../../sessions/share/copy'; // board 525
+import { readerGradeOf, resetReader, useReader } from '../../sessions/share/reader'; // board 525
 
 const APP = 'app-c' as AppSessionId;
 const UUID = '22222222-2222-4222-8222-222222222222' as MessageUuid;
@@ -110,6 +112,128 @@ describe('a lane B session on another machine', () => {
     expect(result.current).toEqual({ available: true });
     act(() => applyRemoteSession(remoteSessionState(REMOTE, { controls: { ...ALL_OPEN, rewind: rewindGap } })));
     expect(result.current).toEqual(rewindGap);
+  });
+});
+
+// Board 525: another member's session refuses a send below Converse at the member's grade; the refusal says so with whom
+// to ask, never nothing, and from then on the port is closed in those words, a send refused without going. An owner's
+// session learns nothing from it.
+describe('a session the member can read but not talk to', () => {
+  const ANA = { id: 'member-ana', email: 'ana@example.test', name: 'Ana' };
+  const LANE_A = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+  const LANE_B = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+  const live = laneAState(LANE_A, { link: { state: 'up', refusal: null, carrier: 'direct', member: 'member-me', clientClass: 'native-mac', rights: [], reason: null }, acts: [] });
+  const listed = (mine: boolean) =>
+    useSessions.setState({
+      records: new Map([[LANE_B, record(LANE_B)]]),
+      listed: new Map([
+        [LANE_A, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held', owners: [mine ? 'member-me' : ANA.id], mine }), appId: LANE_A }],
+        [LANE_B, { ...remoteRow(OTHER_MACHINE, 'app-r', { owners: [mine ? 'member-me' : ANA.id], mine }), appId: LANE_B }],
+      ]),
+      listedMachines: new Set([OTHER_MACHINE]),
+      members: new Map([[ANA.id, ANA]]),
+      member: 'member-me',
+    });
+  const gradeRefused = { key: null, state: 'refused', reason: 'you can’t do that on this session', code: 'grade' };
+  beforeEach(() => {
+    resetReader();
+    resetRemoteLaneBStore();
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: T0, generation: 0, carrier: 'relay' }]);
+  });
+
+  it('lane A: says the refused send with whom to ask for Converse, then closes every control but a subagent’s rows and sends nothing more', async () => {
+    listed(false);
+    const fake = fakeClient({ 'laneA.send': gradeRefused });
+    const port = controlsFor(null, live, { appSessionId: LANE_A, client: fake.client })!;
+    expect(port.capability('send')).toEqual({ available: true }); // nothing says the grade before a send
+    expect(await port.send('hello', { origin: 'composer' })).toEqual({ disposition: 'refused', started: false, reason: READER.notSent('Ana') });
+    expect(readerGradeOf(LANE_A)).toBe('view');
+    const closed = controlsFor(null, live, { appSessionId: LANE_A, client: fake.client })!;
+    const words = { available: false, reason: READER.cantTalk('Ana') };
+    expect(closed.capability('send')).toEqual(words);
+    expect(closed.capability('interrupt')).toEqual(words);
+    expect(closed.capability('model')).toEqual(words);
+    expect(closed.capability('subagent-rows')).toEqual(port.capability('subagent-rows'));
+    expect(await closed.send('again', { origin: 'composer' })).toEqual({ disposition: 'refused', started: false, reason: READER.cantTalk('Ana') });
+    expect(fake.invoked('laneA.send')).toHaveLength(1);
+  });
+
+  it('lane B: says the machine’s `grade` refusal of a send with whom to ask, and learns it', async () => {
+    listed(false);
+    applyRemoteSession(remoteSessionState(LANE_B));
+    const fake = fakeClient();
+    const port = controlsFor(record(LANE_B), null, { appSessionId: LANE_B, client: fake.client })!;
+    const sent = port.send('hello', { origin: 'composer' });
+    await fake.fail('session.send', 'session.send: refused grade by machine mini', 'internal', { refusal: 'grade' });
+    expect(await sent).toEqual({ disposition: 'refused', started: false, reason: READER.notSent('Ana') });
+    expect(readerGradeOf(LANE_B)).toBe('view');
+  });
+
+  // The endpoint grades a message by its text: a leading `/` is Manage but for a few commands, so a refusal of such words
+  // says nothing of Converse. Plain words refused `grade` are what teach View.
+  it.each<[string, string | object[]]>([
+    ['a slash command', '/compact'],
+    ['a custom command after leading space', '  /deploy now'],
+    ['a text block that starts with one', [{ type: 'text', text: 'see this' }, { type: 'text', text: '/compact' }]],
+  ])('lane B: learns nothing from a `grade` refusal of %s, and main’s words show', async (_name, content) => {
+    listed(false);
+    applyRemoteSession(remoteSessionState(LANE_B));
+    const fake = fakeClient();
+    const port = controlsFor(record(LANE_B), null, { appSessionId: LANE_B, client: fake.client })!;
+    const sent = port.send(content as string, { origin: 'composer' });
+    const settled = expect(sent).rejects.toThrow('refused grade by machine mini');
+    await fake.fail('session.send', 'session.send: refused grade by machine mini', 'internal', { refusal: 'grade' });
+    await settled;
+    expect(readerGradeOf(LANE_B)).toBeNull();
+  });
+
+  it('lane B: learns View from a `grade` refusal of content whose text blocks are plain words', async () => {
+    listed(false);
+    applyRemoteSession(remoteSessionState(LANE_B));
+    const fake = fakeClient();
+    const port = controlsFor(record(LANE_B), null, { appSessionId: LANE_B, client: fake.client })!;
+    const sent = port.send([{ type: 'text', text: 'hello /not-a-command' }], { origin: 'composer' });
+    await fake.fail('session.send', 'session.send: refused grade by machine mini', 'internal', { refusal: 'grade' });
+    expect(await sent).toMatchObject({ disposition: 'refused' });
+    expect(readerGradeOf(LANE_B)).toBe('view');
+  });
+
+  // Every send goes through a port, whoever calls it (a quick reply, a card's thread, an answering), so the port keeps
+  // what the host took as the member's own: by uuid, or, queued, by queue id.
+  it('keeps a send the host took for another member’s session as the member’s own, through the seam outside the composer', async () => {
+    listed(false);
+    applyRemoteSession(remoteSessionState(LANE_B));
+    const fake = fakeClient({ 'session.send': { disposition: 'sent', messageUuid: UUID } });
+    expect(await sendToSession(LANE_B, 'hi', { origin: 'reply' }, fake.client)).toMatchObject({ disposition: 'sent' });
+    expect(useReader.getState().sent.get(LANE_B)).toEqual(new Set([UUID]));
+  });
+
+  it('keeps a queued send by its queue id, and a refused one not at all', async () => {
+    listed(false);
+    applyRemoteSession(remoteSessionState(LANE_B));
+    expect(await sendToSession(LANE_B, 'hi', { origin: 'reply' }, fakeClient({ 'session.send': { disposition: 'queued', queueId: 'q-1' } }).client)).toMatchObject({ disposition: 'queued' });
+    expect(useReader.getState().queued.get(LANE_B)).toEqual(new Set(['q-1']));
+    resetReader();
+    const refused = fakeClient();
+    const sent = sendToSession(LANE_B, 'hi', { origin: 'reply' }, refused.client);
+    const settled = expect(sent).rejects.toThrow('nope');
+    await refused.fail('session.send', 'nope');
+    await settled;
+    expect(useReader.getState().sent.size + useReader.getState().queued.size).toBe(0);
+  });
+
+  it('keeps nothing of a send to the member’s own session', async () => {
+    listed(true);
+    applyRemoteSession(remoteSessionState(LANE_B));
+    await sendToSession(LANE_B, 'hi', { origin: 'reply' }, fakeClient({ 'session.send': { disposition: 'sent', messageUuid: UUID } }).client);
+    expect(useReader.getState().sent.size).toBe(0);
+  });
+
+  it('learns nothing on the member’s own session: main’s words stand', async () => {
+    listed(true);
+    const port = controlsFor(null, live, { appSessionId: LANE_A, client: fakeClient({ 'laneA.send': gradeRefused }).client })!;
+    expect(await port.send('hello', { origin: 'composer' })).toEqual({ disposition: 'refused', started: false, reason: 'you can’t do that on this session' });
+    expect(readerGradeOf(LANE_A)).toBeNull();
   });
 });
 

@@ -49,6 +49,7 @@ import { attachmentsOf, emptyDoc, isMultiline, type ComposerDoc } from './editor
 import { ipcDrafts, type DraftPort, type EditorHandle } from './editor/controller';
 import { rememberingRemoteDrafts } from './editor/drafts'; // P5 O7 M2
 import { isRemoteLaneB, useIsRemoteLaneB, useRemoteSending } from '../lane-b/remote-session'; // P5 O7 M2
+import { useReaderClosed } from '../sessions/share/reader'; // board 525
 import { remoteUnavailableOf, useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { useMachineMark } from '../app/machine-mark'; // P5 O7 M2
 import { Editor } from './editor/Editor';
@@ -203,6 +204,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const messageHeld = setup !== null && setup.intent.message !== null;
   // P5 O7 M2: a send on its way to a session on another machine says so (A4's hold can take a minute)
   const sendingRemote = useRemoteSending(appSessionId);
+  // board 525: another member's session that refused the member's words at their grade: closed, saying whom to ask
+  const readerClosed = useReaderClosed(appSessionId);
   const machineName = useMachineMark(appSessionId).name;
   // P5 O7 M4: a lane B session on another machine takes its files as uploads to that machine (remote-uploads.ts), and so
   // does a New chat tab whose machine menu chose another machine (sessions/remote-spawn.ts), where Send spawns it
@@ -230,6 +233,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     availability, // P2-A
     heldBy, // P2-A
     driven, // P5 O9 M5
+    closed: readerClosed, // board 525
     remote: isRemoteLaneB(appSessionId), // P5 O16 M3b fix wave 2
     modeUnavailable: draft.mode === 'bash' ? bashUnavailable : draft.mode === 'memory' ? memoryUnavailable : null, // P5 O7 M8
     // P5 O7 M8 review: a remote send naming PDFs goes as `session.send`, after the running turn (editor/remote-uploads.ts)
@@ -380,7 +384,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     if (s.mode === 'send' && controls !== null && isRemoteLaneB(appSessionId)) return submitRemoteSerialized(controls, client, appSessionId, s, attachmentsOf(handle.current?.doc() ?? emptyDoc()), cwd, retry);
     if (s.mode === 'send') return controls !== null && submitHumanSerialized(controls, client, appSessionId, s, retry);
     const modeUnavailable = remoteUnavailableOf(appSessionId, s.mode === 'bash' ? 'session.bash' : 'session.memoryAppend'); // P5 O7 M8: Enter, as the button
-    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, availability: availabilityIn(useSessions.getState(), appSessionId), heldBy, driven, modeUnavailable });
+    const decided = submitState({ status, intent: null, queue, empty: s.empty, mode: s.mode, availability: availabilityIn(useSessions.getState(), appSessionId), heldBy, driven, modeUnavailable, closed: readerClosed });
     if (!decided.enabled) return false;
     // P2-A: `!` and `#` on a record with no ready process acquire it first; a card they meet docks without their text,
     // which stays in the draft (never sent to the model as a prompt by the card's continuation)
@@ -459,7 +463,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   };
 
   // The editor is read-only while C10 holds the first send (starting, or its message retained behind a card).
-  const editorDisabled = setup && (starting || messageHeld) ? decision.reason : null;
+  const editorDisabled = readerClosed ?? (setup && (starting || messageHeld) ? decision.reason : null); // board 525: or the member's grade there
   // R2: the prompt requests' view of the composer, and a suggestion gone once a turn runs or the box holds text
   const working = driven ? driven.running : isBusy(status, queue.entries); // P5 O9 M5: a driven session's turn is its holder's
   useLayoutEffect(() => {
@@ -491,6 +495,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       {spawning !== null && (
         <p role="status" aria-label="Starting" className="m-0 text-ui-sm text-fg-muted">
           {spawning}
+        </p>
+      )}
+      {/* board 525: why the member's words don't go to another member's session, and whom to ask */}
+      {readerClosed !== null && (
+        <p role="status" aria-label="Your access" className="m-0 text-ui-sm text-fg-muted">
+          {readerClosed}
         </p>
       )}
       {/* P5 O7 M2: a send on its way to a session on another machine */}

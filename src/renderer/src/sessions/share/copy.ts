@@ -127,3 +127,23 @@ export function outcomeWords(outcome: OrgPolicyOutcome, machine: string): { text
       return { text: SHARE.notSent, raw: null };
   }
 }
+
+const CANT_TALK = 'you can read this session but not talk to its agent';
+/** People in the order given, the last after "or": "Ana", "Ana or Ben", "Ana, Ben or Chen". */
+const either = (names: readonly string[]): string => (names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} or ${names.at(-1)}`);
+
+/**
+ * Board 525: the reader's side of a session another member owns (sessions/share/reader.ts). A listing never says what the
+ * reader holds there: the machine refuses a read below View and a send below Converse, and these say so with whom to ask
+ * (the session's owners by name; "its owner" when the head names none), in the grades' own labels. A prompt there is its
+ * owners' unless this app sent it, since no prompt carries its author.
+ */
+export const READER = {
+  cantRead: "Your agents can message this session. You can't read it.",
+  askForView: (whom: string) => `Ask ${whom} for ${SHARE.grade.view.label} to read it.`,
+  cantTalk: (whom: string) => `${CANT_TALK.charAt(0).toUpperCase()}${CANT_TALK.slice(1)}. Ask ${whom} for ${SHARE.grade.converse.label}.`,
+  notSent: (whom: string) => `Not sent: ${CANT_TALK}. Ask ${whom} for ${SHARE.grade.converse.label}.`,
+  whom: (names: readonly string[]) => (names.length === 0 ? 'its owner' : either(names)),
+  author: (names: readonly string[]) => (names.length === 0 ? 'Its owner' : either(names)),
+  message: (author: string) => `${author}'s message`,
+};
