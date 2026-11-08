@@ -18,6 +18,8 @@ import {
   type DiscardResult,
   type DropRetryResult,
   type EnrollStartResult,
+  type GrantRegrantResult,
+  type GrantSetResult,
   type OrgPolicySetResult,
   type OrgAttempt,
   type PairStartResult,
@@ -56,6 +58,8 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
   const enroll: EnrollStartResult = { ok: false, reason: 'busy', detail };
   const retry: DropRetryResult = { ok: false, reason: 'none', detail };
   const discard: DiscardResult = { ok: false, reason: 'none' };
+  // M4b's grants: no effect, as every act here (Task 5's seed gives the page its grants)
+  const grant: GrantSetResult & GrantRegrantResult = { ok: false, reason: 'busy', detail };
   const save: OrgPolicySetResult = { ok: false, reason: 'busy' };
   const answers: { [N in FixtureCommand]: MainHandler<N> } = {
     'org.status': () => status,
@@ -79,6 +83,9 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
     'org.enroll.approve': () => sign,
     'org.enroll.cancel': () => {},
     'org.drop.retry': () => retry,
+    'org.grants.view': ({ ref }) => ({ ok: false, ref, reason: 'signed-out' }),
+    'org.grants.set': () => grant,
+    'org.grants.regrant': () => grant,
     'org.policy.set': () => save,
     'org.owners.add': () => save,
   };

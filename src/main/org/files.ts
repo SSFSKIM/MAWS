@@ -9,17 +9,22 @@
 // registration.json says `signing: true`, a missing or malformed one is the signing store's `damaged`
 // (signing-store.ts, its one writer).
 //
+// `grants.json` (M4b, Interfaces §R) fails closed by the same rule: registration.json gains `grants: true` before its
+// first write, and from then a missing or malformed one is the grants store's `damaged` (grants-store.ts, its one
+// writer). It holds every grant this app signed, the latest per (machine, member), and how its delivery stands.
+//
 // The directory is made only by a sign-in that reached its end, so a profile that never signs in has none.
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, rename, rm, type FileHandle } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isCertificates, isSignedOrgState, type Certificates, type RootTransition, type Signed, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
+import { isCertificates, isGrant, isSigned, isSignedOrgState, type Certificates, type Grant, type RootTransition, type Signed, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
 
 export const ORG_DIR = 'org';
 export const REGISTRATION_FILE = 'registration.json';
 export const CHAIN_FILE = 'chain.json';
 export const ACCESS_FILE = 'access.json';
 export const SIGNING_FILE = 'signing.json';
+export const GRANTS_FILE = 'grants.json';
 
 /** The held head's place in the chain, by `stateHash` (base64url): what outlives `chain.json` (held.ts). */
 export type Anchor = { genesis: string; version: number; head: string };
@@ -38,6 +43,8 @@ export type RegistrationFile = {
   signing?: true;
   /** M3: a rekey's promotion under way (step 1 to step 4 of its transaction): the new device's id. */
   rekey?: { device: string };
+  /** M4b: set before grants.json is first written; from then a missing or malformed grants.json fails closed. */
+  grants?: true;
 };
 
 export type ChainFile = {
@@ -89,6 +96,13 @@ export type SigningFile = {
   lastAsked: string | null;
   lastNotified: string | null;
 };
+
+/**
+ * M4b: a grant this app signed, and its delivery: `pending` (kept before the first send, and while no answer settles it;
+ * `op`, the last act sent whose outcome is unknown), `done` (the machine's ledger holds it), or the machine's refusal.
+ */
+export type IssuedGrant = { signed: Signed<Grant>; delivered: 'pending' | 'done' | { refused: string }; op?: string };
+export type GrantsFile = { version: 1; issued: IssuedGrant[] };
 
 export type AccessFile =
   | { version: 1; hub: string; kind: 'access'; token: string; expires: string; email: string | null }
@@ -234,6 +248,7 @@ export function isRegistrationFile(value: unknown): value is RegistrationFile {
     isText(registered) &&
     typeof signedOut === 'boolean' &&
     (value.signing === undefined || value.signing === true) &&
+    (value.grants === undefined || value.grants === true) &&
     (value.rekey === undefined || (isObject(value.rekey) && isText(value.rekey.device)))
   );
 }
@@ -306,4 +321,18 @@ export function isStoredSigningFile(value: unknown): value is StoredSigningFile 
     isInstantOrNull(lastAsked) &&
     isInstantOrNull(lastNotified)
   );
+}
+
+function isIssuedGrant(value: unknown): value is IssuedGrant {
+  if (!isObject(value) || !isSigned(value.signed, isGrant)) return false;
+  const { delivered, op } = value;
+  const deliveredOk = delivered === 'pending' || delivered === 'done' || (isObject(delivered) && isText(delivered.refused) && Object.keys(delivered).length === 1);
+  return deliveredOk && (op === undefined || isText(op));
+}
+
+/** The shape, every field, and one grant per (machine, member): the grants store reads anything else as damaged. */
+export function isGrantsFile(value: unknown): value is GrantsFile {
+  if (!isObject(value) || value.version !== 1 || !Array.isArray(value.issued) || !value.issued.every(isIssuedGrant)) return false;
+  const pairs = value.issued.map((i) => `${i.signed.body.machine}\n${i.signed.body.member}`);
+  return new Set(pairs).size === pairs.length;
 }

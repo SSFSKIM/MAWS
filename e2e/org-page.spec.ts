@@ -87,9 +87,9 @@ function seededOrg(local: string, userData: string, now: number): { status: Regi
     recoveryKid: kid(),
     members: [member(ana, [thisMac, anaWeb]), member(long, []), member(ortiz, ortizDevices), member(ben, [benMac]), member(chen, [])],
     machines: [
-      { name: 'ana-mbp', ref: local, owners: [ana.id], keyId: kid(), certified: false, delegation: null },
-      { name: 'studio-mini', ref: studio, owners: 'org', keyId: kid(), certified: false, delegation: null },
-      { name: 'render-farm-03.clinical-research-operations', ref: farm, owners: [long.id, ortiz.id, memberId()], keyId: kid(), certified: false, delegation: null }, // the last a former member
+      { name: 'ana-mbp', ref: local, owners: [ana.id], keyId: kid(), certified: false, delegation: null, mayGrant: false },
+      { name: 'studio-mini', ref: studio, owners: 'org', keyId: kid(), certified: false, delegation: null, mayGrant: false },
+      { name: 'render-farm-03.clinical-research-operations', ref: farm, owners: [long.id, ortiz.id, memberId()], keyId: kid(), certified: false, delegation: null, mayGrant: false }, // the last a former member
     ],
     roots: [
       { kid: kid(), member: ana.id, device: thisMac.id },

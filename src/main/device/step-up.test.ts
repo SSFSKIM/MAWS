@@ -8,12 +8,15 @@ import {
   isAction,
   keyId,
   signOrgState,
+  SIGNING_DOMAINS,
   stateHash,
   verifyGenesis,
+  verifyGrant,
   verifyStepUp,
   verifySuccessor,
   type Action,
   type Device,
+  type Grant,
   type OrgState,
   type SignedOrgState,
   type SigningKey,
@@ -30,7 +33,7 @@ vi.mock('electron', () => ({
   },
 }));
 
-import { createStateSigner, createStepUp, promptTouchIDConfirmation, renderAction, renderActions, type Confirm, type StepUpPrompt } from './step-up';
+import { createRecordSigner, createStateSigner, createStepUp, promptTouchIDConfirmation, renderAction, renderActions, type Confirm, type StepUpPrompt } from './step-up';
 
 const DEVICE = { org: 'org-step-up', device: 'dev-mac' };
 const REF = 'mref-test-0000001';
@@ -583,5 +586,145 @@ describe('a state signer (M3: the org state, signed with the step-up key behind 
     touchID.answer = () => Promise.reject(new Error('Authentication canceled.'));
     expect(await signer.sign(state, prompt)).toEqual({ ok: false, reason: 'cancelled' });
     expect(touchID.reasons).toHaveLength(2);
+  });
+});
+
+describe('a record signer (P5 O8 M4b: a grant, signed with the step-up key behind one confirmation)', () => {
+  const MEMBER = '0123456789abcdef0123456789abcdef';
+  const OTHER = 'fedcba9876543210fedcba9876543210';
+  const MACHINE = 'mref-record-00001';
+  const prompt: StepUpPrompt = { summary: 'Grant spawn on mini to bea@example.com', text: 'Machine: mini\nMember: bea@example.com\nRights: spawn' };
+
+  /** A state whose member MEMBER owns MACHINE through a device holding `key` as its step-up key, and lists OTHER. */
+  async function owning(key: SigningKey): Promise<{ state: OrgState; machineKid: string }> {
+    const machinePub = (await generateSigningKey()).pub;
+    const device = { id: 'dev-mac', class: 'native-mac' as const, keyStorage: 'software', channelPub: (await generateSigningKey()).pub, stepUpPub: key.pub };
+    const state: OrgState = {
+      org: 'org-record-signer',
+      version: 3,
+      prev: null,
+      issued: NOW.toISOString(),
+      root: { keys: [], recoveryPub: (await generateSigningKey()).pub },
+      members: [
+        { id: MEMBER, email: 'owner@example.com', role: 'member', devices: [device] },
+        { id: OTHER, email: 'bea@example.com', role: 'member', devices: [] },
+      ],
+      machines: [{ name: 'mini', ref: MACHINE, pub: machinePub, owners: [MEMBER] }],
+      machineNames: [{ name: 'mini', ref: MACHINE }],
+      retired: [],
+      revoked: [],
+      delegations: [],
+      projects: [],
+    };
+    return { state, machineKid: await keyId(machinePub) };
+  }
+  const grantOf = (state: OrgState, machineKid: string): Grant => ({ org: state.org, machine: MACHINE, machineKey: machineKid, member: OTHER, rights: ['spawn'], version: 1, issued: NOW.toISOString() });
+
+  function signatures() {
+    const spy = vi.spyOn(crypto.subtle, 'sign');
+    return { count: () => spy.mock.calls.length, restore: () => spy.mockRestore() };
+  }
+
+  it('names its key by the step-up key id, asks once with the prompt it is given, then signs a grant that verifies under that key', async () => {
+    const { state, machineKid } = await owning(await stepUpKey());
+    const sigs = signatures();
+    try {
+      const asked: { prompt: StepUpPrompt; signedBefore: number }[] = [];
+      const signer = await createRecordSigner({ key: await stepUpKey(), confirm: async (shown) => (asked.push({ prompt: shown, signedBefore: sigs.count() }), { ok: true }) });
+      expect(signer.kid).toBe(await keyId((await stepUpKey()).pub));
+      const body = grantOf(state, machineKid);
+      const result = await signer.sign(SIGNING_DOMAINS.grant, body, prompt);
+      if (!result.ok) throw new Error(`refused: ${result.reason}`);
+      expect(asked).toEqual([{ prompt, signedBefore: 0 }]);
+      expect(sigs.count()).toBe(1);
+      expect(result.signed.body).toEqual(body);
+      expect(result.signed.sig.kid).toBe(signer.kid);
+      expect(await verifyGrant(state, result.signed, undefined, NOW)).toEqual({ ok: true });
+    } finally {
+      sigs.restore();
+    }
+  });
+
+  it('signs nothing when the person cancels, the confirmation is unavailable or fails, or it throws', async () => {
+    const { state, machineKid } = await owning(await stepUpKey());
+    const answers: Confirm[] = [
+      ...(['cancelled', 'unavailable', 'failed'] as const).map((reason): Confirm => async () => ({ ok: false, reason })),
+      () => Promise.reject(new Error('LAContext failed')),
+    ];
+    const sigs = signatures();
+    try {
+      for (const confirm of answers) {
+        const signer = await createRecordSigner({ key: await stepUpKey(), confirm });
+        expect(await signer.sign(SIGNING_DOMAINS.grant, grantOf(state, machineKid), prompt)).toEqual({ ok: false, reason: 'cancelled' });
+      }
+      expect(sigs.count()).toBe(0);
+    } finally {
+      sigs.restore();
+    }
+  });
+
+  it('signs nothing when what the person was asked about ended meanwhile (`live` says no after a yes), reading it once', async () => {
+    const { state, machineKid } = await owning(await stepUpKey());
+    const sigs = signatures();
+    try {
+      let live = true;
+      const checked: boolean[] = [];
+      const signer = await createRecordSigner({ key: await stepUpKey(), confirm: async () => ((live = false), { ok: true }) });
+      expect(await signer.sign(SIGNING_DOMAINS.grant, grantOf(state, machineKid), prompt, { live: () => (checked.push(live), live) })).toEqual({ ok: false, reason: 'cancelled' });
+      expect(checked).toEqual([false]);
+      expect(sigs.count()).toBe(0);
+    } finally {
+      sigs.restore();
+    }
+  });
+
+  it('signs the copy taken before the person was asked: a change to the caller’s body meanwhile is not signed', async () => {
+    const { state, machineKid } = await owning(await stepUpKey());
+    const body = grantOf(state, machineKid);
+    const signer = await createRecordSigner({
+      key: await stepUpKey(),
+      confirm: async () => {
+        body.rights.push('shell');
+        body.member = MEMBER;
+        return { ok: true };
+      },
+    });
+    const result = await signer.sign(SIGNING_DOMAINS.grant, body, prompt);
+    if (!result.ok) throw new Error(`refused: ${result.reason}`);
+    expect(result.signed.body).toMatchObject({ member: OTHER, rights: ['spawn'] });
+    expect(await verifyGrant(state, result.signed, undefined, NOW)).toEqual({ ok: true });
+  });
+
+  it('signs several records under one confirmation, each in the order given, or none', async () => {
+    const { state, machineKid } = await owning(await stepUpKey());
+    const first = grantOf(state, machineKid);
+    const second = { ...grantOf(state, machineKid), member: MEMBER, rights: ['shell' as const], version: 4 };
+    const h = harness();
+    const signer = await createRecordSigner({ key: await stepUpKey(), confirm: h.confirm });
+    const result = await signer.signMany(SIGNING_DOMAINS.grant, [first, second], prompt);
+    if (!result.ok) throw new Error(`refused: ${result.reason}`);
+    expect(h.prompts).toEqual([prompt]);
+    expect(result.signed.map((s) => s.body)).toEqual([first, second]);
+    for (const signed of result.signed) expect(await verifyGrant(state, signed, undefined, NOW)).toEqual({ ok: true });
+
+    const sigs = signatures();
+    try {
+      const declined = await createRecordSigner({ key: await stepUpKey(), confirm: async () => ({ ok: false, reason: 'cancelled' }) });
+      expect(await declined.signMany(SIGNING_DOMAINS.grant, [first, second], prompt)).toEqual({ ok: false, reason: 'cancelled' });
+      expect(sigs.count()).toBe(0);
+    } finally {
+      sigs.restore();
+    }
+  });
+
+  it('refuses, before asking, a domain that is not a record’s (an org state, an action) and an empty batch', async () => {
+    const { state, machineKid } = await owning(await stepUpKey());
+    const h = harness();
+    const signer = await createRecordSigner({ key: await stepUpKey(), confirm: h.confirm });
+    for (const domain of [SIGNING_DOMAINS.orgState, SIGNING_DOMAINS.action, SIGNING_DOMAINS.rl2]) {
+      await expect(signer.sign(domain as typeof SIGNING_DOMAINS.grant, grantOf(state, machineKid), prompt)).rejects.toThrow(/not a record/);
+    }
+    await expect(signer.signMany(SIGNING_DOMAINS.grant, [], prompt)).rejects.toThrow(/nothing/);
+    expect(h.prompts).toEqual([]);
   });
 });

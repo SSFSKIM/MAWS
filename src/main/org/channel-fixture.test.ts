@@ -100,9 +100,10 @@ describe("the project channel's e2e fixture in main", () => {
         return () => void (publish = () => {});
       },
       onChannel: () => () => {},
+      onGrants: () => () => {},
     } as unknown as OrgSessionService;
     const emitted: OrgStatus[] = [];
-    const unpublish = registerOrgHandlers({ register: () => {}, emit: (_name, status) => void emitted.push(status), emitChannel: () => {}, service, development: null });
+    const unpublish = registerOrgHandlers({ register: () => {}, emit: (_name, status) => void emitted.push(status), emitChannel: () => {}, emitGrants: () => {}, service, development: null });
     publish({ state: 'none' });
     expect(emitted).toEqual([{ state: 'none' }]);
 

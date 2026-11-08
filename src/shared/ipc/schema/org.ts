@@ -196,9 +196,19 @@ export const OrgViewSchema = z.strictObject({
     }),
   ),
   // M4b: `keyId`, the key the machine holds (to compare with `mawsd keys --json`); `certified`, a delegation's machine
-  // through a live certificate, its owners its delegation's (`delegation`, its id)
+  // through a live certificate, its owners its delegation's (`delegation`, its id); `mayGrant`, this Mac may sign a grant
+  // on it (the architect's Fork B: `grantProblems` admits this device's step-up key as its signer, an owner's device or
+  // an admin's for `'org'`, while signed in; not `maySign`), so the page shows Grant… there
   machines: z.array(
-    z.strictObject({ name: z.string(), ref: z.string(), owners: z.union([z.array(z.string()), z.literal('org')]), keyId: z.string(), certified: z.boolean(), delegation: z.string().nullable() }),
+    z.strictObject({
+      name: z.string(),
+      ref: z.string(),
+      owners: z.union([z.array(z.string()), z.literal('org')]),
+      keyId: z.string(),
+      certified: z.boolean(),
+      delegation: z.string().nullable(),
+      mayGrant: z.boolean(),
+    }),
   ),
   roots: z.array(z.union([z.strictObject({ kid: z.string(), member: z.string(), device: z.string() }), z.strictObject({ kid: z.string(), unlisted: z.literal(true) })])),
 });
@@ -276,6 +286,70 @@ export type EnrollStartResult = z.infer<typeof EnrollStartResultSchema>;
 /** M4b: a dropped machine's hub row deleted again. `none`: no drop of that name awaits its row's delete; `hub`: not reached. */
 export const DropRetryResultSchema = z.union([z.strictObject({ ok: z.literal(true) }), z.strictObject({ ok: z.literal(false), reason: z.enum(['none', 'hub', 'refused']), detail: z.string().optional() })]);
 export type DropRetryResult = z.infer<typeof DropRetryResultSchema>;
+
+/** M4b: a machine's rights a grant gives, in RL7's order (`spawn`, `shell`, `machine-admin`); owners hold every one. */
+export const GRANT_RIGHTS = ['spawn', 'shell', 'machine-admin'] as const;
+const GrantRightSchema = z.enum(GRANT_RIGHTS);
+const GrantVersionSchema = z.number().int().positive();
+/**
+ * M4b: how a grant this Mac signed stands at its machine: `pending` (kept, not yet on the machine: sent again when its
+ * link comes up), `done` (its ledger holds it), or `{refused}`, the machine's word (`not-newer`: another device changed
+ * this grant since its ledger was read; the page offers "Another device changed this grant: sign again", one more
+ * confirmation; `not-held`: its ledger holds no such machine key).
+ */
+export const GrantDeliveredSchema = z.union([z.literal('pending'), z.literal('done'), z.strictObject({ refused: z.string() })]);
+export type GrantDelivered = z.infer<typeof GrantDeliveredSchema>;
+/**
+ * M4b: `org.grants.view`, a machine's grants (src/main/org/grants.ts). `grants`: each member holding rights, from the
+ * machine's own ledger (`on-machine`), or from this Mac's issued record while its ledger lacks it (`pending`: "Not yet on
+ * <machine>"; `refused`, with the machine's `reason`); with no answer yet, the issued record's delivered grants read
+ * `on-machine`. `live`: this read answered now; else the view is the last answer's, `asOf` its time (null: none this
+ * sign-in). `missing`: the delivered grants this Mac issued that the ledger no longer holds (a machine enrolled again with
+ * a new key), each with the rights it gave, which Re-grant… shows and `org.grants.regrant` signs again for the machine's
+ * current key; never a withdrawal; empty while the machine's key isn't one uncontested key. `digest` names `missing` as
+ * shown (null: none). Refused: `signed-out`, `damaged` (grants.json doesn't read: no grant is signed until it does).
+ */
+export const GrantsViewSchema = z.union([
+  z.strictObject({
+    ok: z.literal(true),
+    ref: z.string(),
+    live: z.boolean(),
+    asOf: z.string().nullable(),
+    grants: z.array(
+      z.strictObject({
+        member: z.string(),
+        rights: z.array(GrantRightSchema),
+        version: GrantVersionSchema,
+        state: z.enum(['on-machine', 'pending', 'refused']),
+        reason: z.string().optional(),
+      }),
+    ),
+    missing: z.array(z.strictObject({ member: z.string(), rights: z.array(GrantRightSchema), version: GrantVersionSchema })),
+    digest: z.string().nullable(),
+  }),
+  z.strictObject({ ok: z.literal(false), ref: z.string(), reason: z.enum(['signed-out', 'damaged']) }),
+]);
+export type GrantsView = z.infer<typeof GrantsViewSchema>;
+/**
+ * M4b: why a grant was not signed. `signed-out`; `damaged` (grants.json); `busy` (another grant is being signed);
+ * `invalid` (rights named twice); `no-change` (the rights it holds or is being given already); `ineligible` (before
+ * Touch ID, `grantProblems`' codes in `problems`: this Mac's key is no owner's, or an admin's for `'org'`; the member or
+ * the machine unlisted; its key not one uncontested key); `ledger-unread` (the machine's grant ledger can't be read now,
+ * so no version is guessed); `cancelled`; `refused` (signed, then it doesn't verify against the org state held now, its
+ * verdict in `detail`: nothing kept or sent); `stale` (`org.grants.regrant`: the missing grants are no longer the ones
+ * shown); `none` (nothing missing to re-grant).
+ */
+export const GRANT_REFUSALS = ['signed-out', 'damaged', 'busy', 'invalid', 'no-change', 'ineligible', 'ledger-unread', 'cancelled', 'refused', 'stale', 'none'] as const;
+const GrantRefusedSchema = z.strictObject({ ok: z.literal(false), reason: z.enum(GRANT_REFUSALS), detail: z.string().optional(), problems: z.array(z.string()).optional() });
+/** M4b: `org.grants.set`: the grant signed, kept and sent, at `version`, and how its delivery stands. */
+export const GrantSetResultSchema = z.union([z.strictObject({ ok: z.literal(true), version: GrantVersionSchema, delivered: GrantDeliveredSchema }), GrantRefusedSchema]);
+export type GrantSetResult = z.infer<typeof GrantSetResultSchema>;
+/** M4b: `org.grants.regrant`: every missing grant signed under one confirmation, kept and sent, each as it stands. */
+export const GrantRegrantResultSchema = z.union([
+  z.strictObject({ ok: z.literal(true), results: z.array(z.strictObject({ member: z.string(), version: GrantVersionSchema, delivered: GrantDeliveredSchema })) }),
+  GrantRefusedSchema,
+]);
+export type GrantRegrantResult = z.infer<typeof GrantRegrantResultSchema>;
 
 /**
  * M2 (Interfaces §G): another machine's session as its signed listing says it, verified against the held org state. Not a
@@ -570,6 +644,10 @@ export const commands = {
   'org.enroll.approve': { input: z.strictObject({ generation: z.number().int().positive(), digest: z.string().min(1).max(128) }), output: SignResultSchema, owner: 'main' }, // M4b
   'org.enroll.cancel': { input: z.void(), output: z.void(), owner: 'main' }, // M4b
   'org.drop.retry': { input: z.strictObject({ name: MachineNameSchema }), output: DropRetryResultSchema, owner: 'main' }, // M4b: the hub row's DELETE alone
+  'org.grants.view': { input: z.strictObject({ ref: OrgMachineRefSchema }), output: GrantsViewSchema, owner: 'main' }, // M4b: read again at org.grants.changed
+  // M4b: grant, change or withdraw (`rights: []`) a member's rights on a machine, behind one confirmation that shows the grant
+  'org.grants.set': { input: z.strictObject({ ref: OrgMachineRefSchema, member: MemberIdSchema, rights: z.array(GrantRightSchema).max(GRANT_RIGHTS.length) }), output: GrantSetResultSchema, owner: 'main' },
+  'org.grants.regrant': { input: z.strictObject({ ref: OrgMachineRefSchema, digest: z.string().min(1).max(128) }), output: GrantRegrantResultSchema, owner: 'main' }, // M4b: stale on another digest
   'org.channel.open': { input: z.strictObject({ project: ChannelProjectSchema }), output: ChannelAnswerSchema, owner: 'main' }, // M7a: one per open tab
   'org.channel.close': { input: z.strictObject({ project: ChannelProjectSchema }), output: z.void(), owner: 'main' }, // M7a: released 30 s after the last
   'org.channel.send': { input: z.strictObject({ project: ChannelProjectSchema, text: z.string().max(CHANNEL_TEXT_MAX) }), output: ChannelSendResultSchema, owner: 'main' }, // M7a
@@ -583,4 +661,5 @@ export const events = {
   'org.rows.changed': OrgRowsSchema, // M2: coalesced, the whole list
   'org.channel.changed': ChannelChangedSchema, // M7a: an open channel's change since the last, coalesced
   'org.policies.changed': OrgPolicySchema, // M6b: a machine's policies, at each whole read (at a sheet's save, and when asked)
+  'org.grants.changed': z.strictObject({ ref: z.string() }), // M4b: a machine's grants moved (a delivery's outcome, a ledger read): read org.grants.view again
 } as const satisfies Record<`org.${string}`, z.ZodType>;

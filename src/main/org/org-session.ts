@@ -51,7 +51,11 @@
 // once the held head lists the name again). The delete reads the hub's rows first: a row holding the drop's posted key
 // is deleted under that key (the hub's precondition), one that posted none by name, one holding another key is left as
 // another machine's, and an absent one is gone. A delete that fails leaves its name on the status (`hubRowsLeft`) for
-// `dropRetry`, which calls the route alone.
+// `dropRetry`, which calls the route alone. The grants (grants.ts; `org.grants.*`) are a part too: signed with this
+// device's step-up key through its record signer, kept in grants.json (grants-store.ts, a writer under this commit queue
+// that fails closed by registration.json's `grants` mark), delivered through this Mac's local door or a machine's link,
+// each operation fenced by the sign-in it began under (`signIns`), sent again at each feed open and link up, and joined
+// by `close()` with the parts.
 //
 // Electron-free: the browser opener, the step-up signer, the state signer, focus, notifications and the RL2 links are
 // injected from main.
@@ -84,6 +88,9 @@ import type {
   ChannelChanged,
   ChannelSendResult,
   DiscardResult,
+  GrantRegrantResult,
+  GrantSetResult,
+  GrantsView,
   DropRetryResult,
   EnrollStartResult,
   OrgAttempt,
@@ -110,7 +117,7 @@ import {
   type DeviceKeys,
   type DeviceKeysDeps,
 } from '../device/keys';
-import type { HeldOrgView, StateSigner } from '../device/step-up';
+import type { HeldOrgView, RecordSigner, StateSigner } from '../device/step-up';
 import { DEVICE_CAPABILITIES } from '../machines/remote/capabilities';
 import { cloudflareLoginTransfer, hubAdmission, hubHeaders, standinLogin, tokenClaims, AccessLoginError, type AccessLogin, type HubCredential } from './access-login';
 import {
@@ -135,6 +142,8 @@ import { composeChange, normalizeChange, type ChangeEdit, type EditSelf } from '
 import { rereadFrom, startHeldOrg, type HeldOrg } from './held';
 import { hubClient, type HubClient, type HubResult, type Me, type Served } from './hub-client';
 import { createEnrollment } from './enroll';
+import { createGrants, type GrantDoor, type GrantLink } from './grants';
+import { createGrantsStore, type GrantsStore } from './grants-store';
 import { createPairing } from './pairing';
 import type { RegistryFeedHooks } from './registry-feed';
 import type { OrgSession, SignedIn } from './session';
@@ -189,6 +198,14 @@ export interface OrgSessionService extends OrgSession {
   enrollCancel(): void;
   /** M4b: a dropped machine's hub row deleted again (`hubRowsLeft`), the route alone. */
   dropRetry(name: string): Promise<DropRetryResult>;
+  /** M4b: a machine's grants (grants.ts): the ledger's word, this Mac's pending ones, and the missing ones. */
+  grantsView(input: { ref: string }): Promise<GrantsView>;
+  /** M4b: a member's rights on a machine granted, changed or withdrawn (`rights: []`), behind one confirmation. */
+  grantsSet(input: { ref: string; member: string; rights: readonly ('spawn' | 'shell' | 'machine-admin')[] }): Promise<GrantSetResult>;
+  /** M4b: every missing grant on a machine signed again under one confirmation, while they are the ones shown (`digest`). */
+  grantsRegrant(input: { ref: string; digest: string }): Promise<GrantRegrantResult>;
+  /** M4b: `org.grants.changed`, a machine's grants moved. */
+  onGrants(listener: (ref: string) => void): () => void;
   /** M7a: a tab shows the project's channel (`org.channel.open`). */
   channelOpen(project: string): Promise<ChannelAnswer>;
   /** M7a: a tab no longer shows it (`org.channel.close`); released 30 s after the last. */
@@ -213,6 +230,18 @@ export type OrgSigningDeps = {
   roster(): readonly MachineRef[];
   onRoster(listener: () => void): () => void;
   link(ref: MachineRef): DeliveryLink | null;
+};
+
+/** M4b: what the grants need of main: the record signer over this profile's step-up key, the local door, the links. */
+export type OrgGrantsDeps = {
+  /** The device module's record signer (step-up.ts's `createRecordSigner`: Touch ID first). */
+  recordSigner(keys: DeviceKeys): Promise<RecordSigner>;
+  /** This Mac's own endpoint's local door (mawsd's `endpoint.local.act` and `endpoint.local.grants`). */
+  door: GrantDoor;
+  /** O7's RL2 roster and its links (`Machines.onRemote`, `Machines.remote`). */
+  roster(): readonly MachineRef[];
+  onRoster(listener: () => void): () => void;
+  link(ref: MachineRef): GrantLink | null;
 };
 
 /** M3: the key files a rekey moves (src/main/device/keys.ts's; tests inject one that pauses between its steps). */
@@ -249,8 +278,10 @@ export interface OrgSessionDeps {
   keyFiles?: Partial<DeviceKeyFiles>;
   /** M7a: the channels' Project socket; `ws` by default (tests inject one). */
   channelSocket?: ProjectSocketDeps['socket'];
-  /** M4b: this Mac's own machine ref, which a drop refuses (`this-machine`): main's `machine.identity`. */
+  /** M4b: this Mac's own machine ref, which a drop refuses (`this-machine`) and whose grants go through the local door: main's `machine.identity`. */
   local?: MachineRef;
+  /** M4b: the grants' signer, door and links; without it no grant is read or signed. */
+  grants?: OrgGrantsDeps;
   /** M7b: this Mac's spine and the RL2 roster's links, for every machine's to-human entries; without it, none are read. */
   channelMachines?: Omit<ChannelMachinesDeps, 'session' | 'store' | 'commit' | 'timing' | 'now' | 'log'>;
   now?(): number;
@@ -389,6 +420,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   // ---- M3 ----
   let facts: KeyFacts | null = null;
   let stateSigner: StateSigner | null = null;
+  /** M4b: the grants' signer over these keys' step-up key. */
+  let recordSigner: RecordSigner | null = null;
   let composed: Composed | null = null;
   let composing = false;
   /** The superseded states' revocations, as the status shows them; recomputed at each change of the session. */
@@ -722,6 +755,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
           background('settling the pending state', () => c.signer.settle());
           background('delivering', () => c.deliveries.send());
         }
+        // M4b: the grants this Mac signed that no machine has acknowledged yet
+        background('delivering the grants', () => grants.send());
       }),
       feed.onClose(() => {
         feedOpen = false;
@@ -825,11 +860,14 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   const heldView = (): HeldOrg | null => (held !== null && held.ready() ? held : null);
   const sessionApi: OrgSession = { current: () => computeCurrent(), onChanged };
 
-  /** Inside the commit queue's turn (the signing store's first write): registration.json gains `signing: true`. */
-  async function markRegistration(): Promise<void> {
+  /**
+   * Inside the commit queue's turn (a fail-closed store's first write): registration.json gains `signing: true` (the
+   * signing store's) or, M4b, `grants: true` (the grants store's).
+   */
+  async function markRegistration(flag: 'signing' | 'grants' = 'signing'): Promise<void> {
     if (registration === null) throw new Error('no registration to mark');
-    await files.write(REGISTRATION_FILE, { ...registration, signing: true });
-    registration = { ...registration, signing: true };
+    await files.write(REGISTRATION_FILE, { ...registration, [flag]: true });
+    registration = { ...registration, [flag]: true };
   }
 
   /** The hub as the signer reaches it: a credential's end or a denial in its answers is the session's, as any read's. */
@@ -863,7 +901,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     if (s === undefined || composed !== null || composing || closed || registration === null || problem === 'directory') return;
     composing = true;
     void (async () => {
-      const store = await createSigningStore({ files, commit, registration: () => registration, markRegistration, log });
+      const store = await createSigningStore({ files, commit, registration: () => registration, markRegistration: () => markRegistration('signing'), log });
       if (closed) return;
       const deliveries = createDeliveries({ store, roster: s.roster, onRoster: s.onRoster, link: s.link, view: heldView, timing: deps.timing, now: deps.now, log });
       const signer = createOrgSigner({
@@ -897,6 +935,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       refreshOffer();
       background('settling the pending state', () => signer.settle());
       background('delivering', () => deliveries.send());
+      background('delivering the grants', () => grants.send());
     })()
       .catch((error: unknown) => log(`the signer did not start: ${(error as Error).message}`))
       .finally(() => (composing = false));
@@ -956,11 +995,12 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   }
 
   /** Facts of a key set, and its state signer, made before the keys are taken into use. */
-  async function prepareKeys(k: DeviceKeys, org: string, member: string): Promise<{ facts: KeyFacts; stateSigner: StateSigner | null }> {
+  async function prepareKeys(k: DeviceKeys, org: string, member: string): Promise<{ facts: KeyFacts; stateSigner: StateSigner | null; recordSigner: RecordSigner | null }> {
     const entry = await deviceEntry(k);
     return {
       facts: { channelKid: entry.id, stepUpKid: await keyId(k.stepUp.pub), fingerprint: await pairingFingerprint(org, member, entry) },
       stateSigner: deps.signing === undefined ? null : await deps.signing.stateSigner(k),
+      recordSigner: deps.grants === undefined ? null : await deps.grants.recordSigner(k),
     };
   }
 
@@ -1022,7 +1062,9 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     const reg = registration;
     const v = heldView();
     if (closed || reg === null || v === null) return null;
-    return orgView(v.head().state, selfOf(reg), composed !== null && maySign(composed.signer), v.certificates(), new Date(now()));
+    // M4b (Fork B): Grant… by the grants' own eligibility of this device's key, while it may sign a record at all
+    const grantKid = grantsContext() === null ? null : recordSigner!.kid;
+    return orgView(v.head().state, selfOf(reg), composed !== null && maySign(composed.signer), v.certificates(), new Date(now()), grantKid);
   }
 
   type Refused = Extract<PreviewResult, { ok: false }>;
@@ -1221,6 +1263,41 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     log,
   });
 
+  // ---- M4b: the grants ----
+
+  /** The sign-in a grant is made under: answering, a head held, a record signer for this profile's keys. */
+  function grantsContext() {
+    const reg = registration;
+    const v = heldView();
+    const signer = recordSigner;
+    if (closed || deps.grants === undefined || reg === null || v === null || signer === null || !answering()) return null;
+    return { org: reg.org, member: reg.member.id, device: reg.device, head: v.head().state, certificates: v.certificates(), signer, signIn: signIns };
+  }
+  /** grants.json's store, loaded once, at its first need (a signed-in profile's). */
+  let grantsStore: Promise<GrantsStore> | null = null;
+  const grantsListeners = new Set<(ref: string) => void>();
+  const grants = createGrants({
+    context: grantsContext,
+    store: () => (grantsStore ??= createGrantsStore({ files, commit, registration: () => registration, markRegistration: () => markRegistration('grants'), log })),
+    local: deps.local ?? null,
+    door: deps.grants?.door ?? { act: async () => ({ state: 'refused', reason: 'unavailable' }), grants: async () => ({ ok: false, code: 'unavailable' }) },
+    link: (ref) => deps.grants?.link(ref) ?? null,
+    roster: () => deps.grants?.roster() ?? [],
+    onRoster: (listener) => deps.grants?.onRoster(listener) ?? (() => {}),
+    changed: (ref) => {
+      for (const listener of [...grantsListeners]) {
+        try {
+          listener(ref);
+        } catch (error) {
+          log(`a grants listener failed: ${(error as Error).message}`);
+        }
+      }
+    },
+    timing: deps.timing,
+    now: deps.now,
+    log: deps.log,
+  });
+
   // ---- M7a: the project channels ----
 
   const channelSession = { current: () => computeCurrent(), onChanged };
@@ -1291,6 +1368,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
         keys = loadedKeys;
         facts = prepared.facts;
         stateSigner = prepared.stateSigner;
+        recordSigner = prepared.recordSigner;
       } catch (error) {
         refused = { code: 'keys', detail: error instanceof DeviceKeysError ? error.reason : (error as Error).message };
         log(`the device keys don't load: ${(error as Error).message}`);
@@ -1530,6 +1608,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       keys = made;
       facts = prepared.facts;
       stateSigner = prepared.stateSigner;
+      recordSigner = prepared.recordSigner;
       hubAccess = 'connecting';
       problem = null;
       refused = undefined;
@@ -1748,6 +1827,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
         keys = made;
         facts = prepared.facts;
         stateSigner = prepared.stateSigner;
+        recordSigner = prepared.recordSigner;
         let ours = true;
         try {
           fence();
@@ -1818,6 +1898,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     pairing.cancel();
     enrollment.cancel();
     hubRowsLeft = [];
+    // M4b: a grant in flight goes no further (its sign-in is `signIns`', advanced above), and the ledger reads held go
+    grants.fence();
     attempt?.abort();
     attempt = null;
     registering = null;
@@ -1871,12 +1953,13 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     attempt?.abort();
     closed = true;
     // 2. The parts stop, each answering its operation in flight; a running pairing is cancelled, and (M4b) a running
-    //    enrollment, whose poll in flight is joined with the parts.
+    //    enrollment, whose poll in flight is joined with the parts, and the grants, whose sign, read or act in flight is.
     pairing.cancel();
     const enrollmentClosed = enrollment.close();
+    const grantsClosed = grants.close();
     const c = composed;
     c?.offs.forEach((off) => off());
-    const parts = c === null ? [enrollmentClosed] : [enrollmentClosed, c.weekly.close(), c.deliveries.close(), c.signer.close()];
+    const parts = c === null ? [enrollmentClosed, grantsClosed] : [enrollmentClosed, grantsClosed, c.weekly.close(), c.deliveries.close(), c.signer.close()];
     if (tokenTimer !== null) clearTimeout(tokenTimer);
     if (certsTimer !== null) clearInterval(certsTimer);
     if (recoverTimer !== null) clearInterval(recoverTimer);
@@ -1934,6 +2017,13 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     enrollApprove: (input) => enrollment.approve(input),
     enrollCancel: () => enrollment.cancel(),
     dropRetry,
+    grantsView: (input) => grants.view(input),
+    grantsSet: (input) => grants.set(input),
+    grantsRegrant: (input) => grants.regrant(input),
+    onGrants(listener) {
+      grantsListeners.add(listener);
+      return () => void grantsListeners.delete(listener);
+    },
     channelOpen: (project) => channels.open(project),
     channelRelease: (project) => channels.release(project),
     channelSend: (project, text) => channels.send(project, text),

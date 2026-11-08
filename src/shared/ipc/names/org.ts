@@ -1,7 +1,7 @@
 // X2 `org.*` names without their schemas, which the preload bridges (`../names.ts`). Exactly the keys of
 // `../schema/org.ts`, pinned at compile time in `../schema.ts` and per namespace in `../schema.test.ts`. P5 O8 M1; M4a
 // adds the Org page's view, changes and pairing; M7a the project channel; M6b a session's reach (and M5b's owner add);
-// M4b the enrollment and a drop's retry.
+// M4b the enrollment, a drop's retry and the grants.
 export const commands = [
   'org.status',
   'org.register',
@@ -25,6 +25,9 @@ export const commands = [
   'org.enroll.approve',
   'org.enroll.cancel',
   'org.drop.retry',
+  'org.grants.view',
+  'org.grants.set',
+  'org.grants.regrant',
   'org.channel.open',
   'org.channel.close',
   'org.channel.send',
@@ -33,4 +36,4 @@ export const commands = [
   'org.owners.add',
 ] as const;
 
-export const events = ['org.changed', 'org.rows.changed', 'org.channel.changed', 'org.policies.changed'] as const;
+export const events = ['org.changed', 'org.rows.changed', 'org.channel.changed', 'org.policies.changed', 'org.grants.changed'] as const;

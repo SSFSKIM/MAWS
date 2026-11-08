@@ -97,9 +97,9 @@ describe('the Org page\'s view of the held head', () => {
       ],
       // a certified machine whose key the head revoked is not shown; a live one's owners are its delegation's
       machines: [
-        { name: 'vm-one', ref: 'r'.repeat(32), owners: [OWNER, ANA], keyId: keys.vmOne, certified: false, delegation: null },
-        { name: 'ci', ref: 's'.repeat(32), owners: 'org', keyId: keys.ci, certified: false, delegation: null },
-        { name: 'dc-live', ref: `${DELEGATION}_${'l'.repeat(22)}`, owners: [ANA], keyId: keys.live, certified: true, delegation: DELEGATION },
+        { name: 'vm-one', ref: 'r'.repeat(32), owners: [OWNER, ANA], keyId: keys.vmOne, certified: false, delegation: null, mayGrant: false },
+        { name: 'ci', ref: 's'.repeat(32), owners: 'org', keyId: keys.ci, certified: false, delegation: null, mayGrant: false },
+        { name: 'dc-live', ref: `${DELEGATION}_${'l'.repeat(22)}`, owners: [ANA], keyId: keys.live, certified: true, delegation: DELEGATION, mayGrant: false },
       ],
       roots: [
         { kid: await keyId(mini.stepUpPub!), member: OWNER, device: mini.id },
@@ -112,7 +112,7 @@ describe('the Org page\'s view of the held head', () => {
   it('carries no machine up bit: whether a machine is up is the renderer\'s, from `useMachines`', async () => {
     const { state, mac } = await fixture();
     const view = await orgView(state, { member: OWNER, device: mac.id }, false);
-    for (const machine of view.machines) expect(Object.keys(machine).sort()).toEqual(['certified', 'delegation', 'keyId', 'name', 'owners', 'ref']);
+    for (const machine of view.machines) expect(Object.keys(machine).sort()).toEqual(['certified', 'delegation', 'keyId', 'mayGrant', 'name', 'owners', 'ref']);
     expect(view.maySign).toBe(false);
   });
 
@@ -123,5 +123,27 @@ describe('the Org page\'s view of the held head', () => {
     const plain = await orgView(state, { member: OWNER, device: mac.id }, true);
     const withEndorsement = await orgView(endorsed, { member: OWNER, device: mac.id }, true);
     expect(withEndorsement.members[0].devices[1].fingerprint).toBe(plain.members[0].devices[1].fingerprint);
+  });
+
+  it('M4b (Fork B): marks the machines where `grantProblems` admits this device\'s step-up key as a grant\'s signer, not by maySign', async () => {
+    const { state, mac, mini, certificates } = await fixture();
+    const at = new Date('2026-10-29T09:00:00.000Z');
+    const mayGrant = async (kid: string | null, maySign: boolean) => (await orgView(state, { member: OWNER, device: mac.id }, maySign, certificates, at, kid)).machines.map((m) => [m.name, m.mayGrant]);
+    // This Mac's key, not a root's: an owner of vm-one, an admin for the org-owned ci; dc-live is its delegation's owners'.
+    const expected = [
+      ['vm-one', true],
+      ['ci', true],
+      ['dc-live', false],
+    ];
+    expect(await mayGrant(await keyId(mac.stepUpPub!), false)).toEqual(expected);
+    expect(await mayGrant(await keyId(mini.stepUpPub!), true)).toEqual(expected);
+    // No key (signed out, or no record signer): none.
+    expect((await mayGrant(null, true)).every(([, may]) => may === false)).toBe(true);
+    // A key no device of an owner holds: none.
+    expect((await mayGrant(await keyId((await generateSigningKey()).pub), true)).every(([, may]) => may === false)).toBe(true);
+    // A member of ci's admins no more: ci leaves; vm-one stays (an owner).
+    const demoted = structuredClone(state);
+    demoted.members[0].role = 'member';
+    expect((await orgView(demoted, { member: OWNER, device: mac.id }, false, certificates, at, await keyId(mac.stepUpPub!))).machines.map((m) => m.mayGrant)).toEqual([true, false, false]);
   });
 });

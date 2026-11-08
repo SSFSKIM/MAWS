@@ -88,8 +88,8 @@ export const VIEW: OrgView = {
     { id: CAT, email: 'cat@example.com', name: 'Cat', role: 'member', you: false, devices: [] },
   ],
   machines: [
-    { name: 'mini', ref: MINI, owners: [ME, ANA], keyId: 'miniKeyId0001', certified: false, delegation: null },
-    { name: 'build-vm', ref: VM, owners: 'org', keyId: 'buildVmKey002', certified: false, delegation: null },
+    { name: 'mini', ref: MINI, owners: [ME, ANA], keyId: 'miniKeyId0001', certified: false, delegation: null, mayGrant: false },
+    { name: 'build-vm', ref: VM, owners: 'org', keyId: 'buildVmKey002', certified: false, delegation: null, mayGrant: false },
   ],
   roots: [
     { kid: 'stepUpKid0001', member: ME, device: DEVICE },

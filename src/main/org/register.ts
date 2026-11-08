@@ -10,11 +10,25 @@
 // `emitChannel` for the app's life, apart from the status's forwarding, which the Org page's e2e fixture stops (under
 // `MAWS_DEV_ORG` a channel reads signed out). Each page's opens are held for it (channel/holds.ts), and let go when the
 // page reloads or its window is destroyed. M4b adds the enrollment's `org.enroll.*` and a drop's `org.drop.retry`
-// (under `MAWS_DEV_ORG`: each refused, as the pairing's are). M6b adds a session's reach, `org.policy.get` and `.set`, and M5b's
+// (under `MAWS_DEV_ORG`: each refused, as the pairing's are), and the grants' `org.grants.view`, `.set` and `.regrant`,
+// forwarding `org.grants.changed` through `emitGrants` (under `MAWS_DEV_ORG`: read signed out, each sign refused `busy`). M6b adds a session's reach, `org.policy.get` and `.set`, and M5b's
 // `org.owners.add` (registerPolicyHandlers), over whichever session main runs.
 //
 // Electron-free: main injects its `registerMainHandler` and `emit`.
-import type { ChannelChanged, DiscardResult, DropRetryResult, EnrollStartResult, OrgAttempt, OrgRows, OrgStatus, PairStartResult, PreviewResult, SignResult } from '@shared/ipc/schema/org';
+import type {
+  ChannelChanged,
+  DiscardResult,
+  DropRetryResult,
+  EnrollStartResult,
+  GrantRegrantResult,
+  GrantSetResult,
+  OrgAttempt,
+  OrgRows,
+  OrgStatus,
+  PairStartResult,
+  PreviewResult,
+  SignResult,
+} from '@shared/ipc/schema/org';
 import type { MachineRef } from '@shared/machine/ref';
 import type { MainHandler } from '../ipc/router';
 import { channelHolds } from './channel/holds';
@@ -44,6 +58,9 @@ type OrgCommand =
   | 'org.enroll.approve'
   | 'org.enroll.cancel'
   | 'org.drop.retry'
+  | 'org.grants.view'
+  | 'org.grants.set'
+  | 'org.grants.regrant'
   | 'org.channel.open'
   | 'org.channel.close'
   | 'org.channel.send';
@@ -53,6 +70,8 @@ export function registerOrgHandlers(deps: {
   emit(name: 'org.changed', status: OrgStatus): void;
   /** M7a: `org.channel.changed`. */
   emitChannel(changed: ChannelChanged): void;
+  /** M4b: `org.grants.changed`. */
+  emitGrants(changed: { ref: string }): void;
   /** The production session; null under `MAWS_DEV_ORG`. */
   service: OrgSessionService | null;
   /** O7's development session, when it is the one main runs. */
@@ -92,6 +111,10 @@ export function registerOrgHandlers(deps: {
     deps.register('org.enroll.approve', () => unsigned);
     deps.register('org.enroll.cancel', () => {});
     deps.register('org.drop.retry', () => unretried);
+    const ungranted: GrantSetResult & GrantRegrantResult = { ok: false, reason: 'busy', detail: 'MAWS_DEV_ORG is in force' };
+    deps.register('org.grants.view', ({ ref }) => ({ ok: false, ref, reason: 'signed-out' }));
+    deps.register('org.grants.set', () => ungranted);
+    deps.register('org.grants.regrant', () => ungranted);
     deps.register('org.channel.open', () => ({ ok: false, reason: 'signed-out', rev: 0 }));
     deps.register('org.channel.close', () => {});
     deps.register('org.channel.send', () => ({ ok: false, reason: 'signed-out' }));
@@ -118,6 +141,10 @@ export function registerOrgHandlers(deps: {
   deps.register('org.enroll.approve', (input) => service.enrollApprove(input));
   deps.register('org.enroll.cancel', () => service.enrollCancel());
   deps.register('org.drop.retry', ({ name }) => service.dropRetry(name));
+  deps.register('org.grants.view', (input) => service.grantsView(input));
+  deps.register('org.grants.set', (input) => service.grantsSet(input));
+  deps.register('org.grants.regrant', (input) => service.grantsRegrant(input));
+  service.onGrants((ref) => deps.emitGrants({ ref }));
   const holds = channelHolds({ open: (project) => service.channelOpen(project), release: (project) => service.channelRelease(project) });
   deps.register('org.channel.open', ({ project }, { client }) => holds.open(client, project));
   deps.register('org.channel.close', ({ project }, { client }) => holds.close(client, project));

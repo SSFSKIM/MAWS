@@ -95,6 +95,9 @@ describe("the Org page's e2e fixture in main", () => {
     expect(await ask('org.enroll.approve', { generation: 1, digest: 'd' })).toMatchObject({ ok: false, reason: 'busy' });
     expect(await ask('org.enroll.cancel')).toBeUndefined();
     expect(await ask('org.drop.retry', { name: 'box' })).toMatchObject({ ok: false, reason: 'none' });
+    expect(await ask('org.grants.view', { ref: 'mref-box-00000001' })).toEqual({ ok: false, ref: 'mref-box-00000001', reason: 'signed-out' });
+    expect(await ask('org.grants.set', { ref: 'mref-box-00000001', member: 'a1', rights: ['spawn'] })).toMatchObject({ ok: false, reason: 'busy' });
+    expect(await ask('org.grants.regrant', { ref: 'mref-box-00000001', digest: 'd' })).toMatchObject({ ok: false, reason: 'busy' });
     expect(await ask('org.policy.set', { address: 'm/s', access: 'public', policyRev: 1 })).toEqual({ ok: false, reason: 'busy' });
     expect(await ask('org.owners.add', { address: 'm/s', member: 'a1' })).toEqual({ ok: false, reason: 'busy' });
     stop!();
@@ -110,9 +113,10 @@ describe("the Org page's e2e fixture in main", () => {
         return () => void (publish = () => {});
       },
       onChannel: () => () => {},
+      onGrants: () => () => {},
     } as unknown as OrgSessionService;
     const emitted: OrgStatus[] = [];
-    const unpublish = registerOrgHandlers({ register: () => {}, emit: (_name, status) => void emitted.push(status), emitChannel: () => {}, service, development: null });
+    const unpublish = registerOrgHandlers({ register: () => {}, emit: (_name, status) => void emitted.push(status), emitChannel: () => {}, emitGrants: () => {}, service, development: null });
     publish({ state: 'none' });
     expect(emitted).toEqual([{ state: 'none' }]); // forwarded before the fixture
 

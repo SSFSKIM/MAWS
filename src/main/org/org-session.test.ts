@@ -13,7 +13,9 @@
 //
 // M4b (machines): an enrollment end to end through the session's hub, one at a time beside a pairing and a rekey, a
 // sign-out while its Touch ID is open and a close while its poll is out; the machine changes previewed and signed, a
-// drop's hub row deleted and retried by the route alone; the view's certified machines.
+// drop's hub row deleted and retried by the route alone; the view's certified machines. The grants: a non-root owner's
+// Grant… and grant through a link or the local door, grants.json behind its mark, a sign-out during Touch ID, a close
+// while the act is out, and grants.json failing closed.
 import { readFileSync } from 'node:fs';
 import { chmod, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -47,13 +49,17 @@ import {
   type Signed,
   type SignedOrgState,
   type SigningKey,
+  type Grant,
+  verifyGrant,
 } from '../../../apps/org-protocol/src/index.ts';
 import { OrgStatusSchema, type OrgStatus } from '@shared/ipc/schema/org';
+import type { MachineRef } from '@shared/machine/ref';
 import { createNextDeviceKeys, deviceKeyIds, DeviceKeysError, loadDeviceKeys, promoteNextDeviceKeys, type DeviceKeys } from '../device/keys';
-import type { HeldOrgView, StepUpPrompt } from '../device/step-up';
+import { createRecordSigner, type HeldOrgView, type StepUpPrompt } from '../device/step-up';
 import { DEVICE_CAPABILITIES } from '../machines/remote/capabilities';
 import { AccessLoginError, type AccessLogin, type HubCredential } from './access-login';
-import { ACCESS_FILE, CHAIN_FILE, orgFiles, REGISTRATION_FILE, SIGNING_FILE, type OrgFiles, type RegistrationFile, type SigningFile } from './files';
+import { ACCESS_FILE, CHAIN_FILE, GRANTS_FILE, orgFiles, REGISTRATION_FILE, SIGNING_FILE, type GrantsFile, type OrgFiles, type RegistrationFile, type SigningFile } from './files';
+import type { GrantDoor, GrantLink } from './grants';
 import type { PendingEntry } from './hub-client';
 import { createOrgSession, type DeviceKeyFiles, type OrgSessionDeps, type OrgSessionService, type OrgSigningDeps } from './org-session';
 import type { RegistryFeedHooks } from './registry-feed';
@@ -2669,8 +2675,9 @@ describe('M4b: the machine changes', () => {
     feed.state(hub.head.state.version);
     await until(async () => (await session.view())?.machines.length === 2, 'the certified machine');
     expect((await session.view())!.machines).toEqual([
-      { name: 'mini', ref: hub.head.state.machines[0].ref, owners: [A], keyId: await keyId(pub), certified: false, delegation: null },
-      { name: 'dc-vm1', ref: certRef, owners: [bea], keyId: await keyId(vm.pub), certified: true, delegation: id },
+      // no grants' deps here: no Grant… anywhere (M4b's grants cases have them)
+      { name: 'mini', ref: hub.head.state.machines[0].ref, owners: [A], keyId: await keyId(pub), certified: false, delegation: null, mayGrant: false },
+      { name: 'dc-vm1', ref: certRef, owners: [bea], keyId: await keyId(vm.pub), certified: true, delegation: id, mayGrant: false },
     ]);
     expect(await session.preview({ kind: 'machine.owners', ref: certRef, owners: [A] })).toMatchObject({ ok: false, reason: 'refused', findings: [{ code: 'certified-machine' }] });
   });
@@ -3160,5 +3167,165 @@ describe('M4a: a sign-out after a post the hub took (Task 5, Decision 4)', () =>
     await until(() => signerOf(session).pending === null && headVersion(session) === before + 1, 'settled at the sign-in');
     expect(signing.prompts).toHaveLength(prompts);
     expect(hub.posted).toHaveLength(1);
+  });
+});
+
+// ---- M4b: the grants ----
+
+const BEA = 'beadbeadbeadbeadbeadbeadbeadbead';
+
+/** One machine's grant ledger behind a link and the door, kept by the endpoint's intake rule (src/endpoint/grants.ts). */
+function grantMachine(heldKey: () => Promise<string>) {
+  const ledger = { grants: {} as Record<string, Signed<Grant>>, highWater: {} as Record<string, number> };
+  const answer = () => ({ members: hub.head.state.members.map((m) => ({ member: m.id, grant: ledger.grants[m.id] ?? null, highWater: ledger.highWater[m.id] ?? 0 })) });
+  const intake = async (value: unknown): Promise<{ state: string; error?: { code: string } }> => {
+    const g = value as Signed<Grant>;
+    const verdict = await verifyGrant(hub.head.state, g, NO_CERTIFICATES, new Date());
+    if (!verdict.ok) return { state: 'failed', error: { code: verdict.code } };
+    if (g.body.machineKey !== (await heldKey())) return { state: 'failed', error: { code: 'not-held' } };
+    if ((ledger.highWater[g.body.member] ?? 0) >= g.body.version) return { state: 'failed', error: { code: 'not-newer' } };
+    ledger.grants[g.body.member] = g;
+    ledger.highWater[g.body.member] = g.body.version;
+    return { state: 'done' };
+  };
+  const acts: unknown[] = [];
+  let holdAct: Promise<void> | null = null;
+  const link = {
+    state: () => 'up',
+    onState: () => () => {},
+    call: async () => ({ ok: true, output: answer() }),
+    act: (request: { args: unknown }) => {
+      acts.push(request);
+      const hold = holdAct;
+      return {
+        opId: `op-${acts.length}-xxxxxxxxxxxxxxxx`,
+        opCreated: new Date().toISOString(),
+        progress: () => 'sent',
+        onProgress: () => () => {},
+        outcome: (async () => {
+          await hold;
+          return intake((request.args as { grant: unknown }).grant);
+        })(),
+      };
+    },
+  } as unknown as GrantLink;
+  const door: GrantDoor = {
+    act: async (action) => (acts.push(action), intake(action.args.grant)),
+    grants: async () => ({ ok: true, output: answer() }),
+  };
+  return { ledger, link, door, acts, hold: (p: Promise<void> | null) => void (holdAct = p) };
+}
+
+/** The grants' deps for make(): a record signer over the profile's step-up key that records each prompt (no Touch ID). */
+function testGrants(machine: ReturnType<typeof grantMachine>, ref: () => string | null) {
+  const harness = { prompts: [] as StepUpPrompt[], during: null as (() => Promise<unknown> | unknown) | null };
+  const deps: NonNullable<OrgSessionDeps['grants']> = {
+    recordSigner: (k) =>
+      createRecordSigner({
+        key: k.stepUp,
+        confirm: async (prompt) => {
+          harness.prompts.push(prompt);
+          await harness.during?.();
+          return { ok: true };
+        },
+      }),
+    door: machine.door,
+    roster: () => (ref() === null ? [] : [ref() as MachineRef]),
+    onRoster: () => () => {},
+    link: (r) => (r === ref() ? machine.link : null),
+  };
+  return { harness, deps };
+}
+
+/** Signed in (not a root), the head listing BEA and a machine `mini` this member owns; its grants over a fake ledger. */
+async function granting(local = false) {
+  let ref: string | null = null;
+  let pub = '';
+  const machine = grantMachine(async () => keyId(pub));
+  const grants = testGrants(machine, () => (local ? null : ref));
+  const localRef = base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
+  const made = await signedIn({ grants: grants.deps, ...(local ? { local: localRef as MachineRef } : {}) });
+  const feed = fakeFeed();
+  made.session.attach(feed.hooks);
+  ref = local ? localRef : base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
+  pub = (await generateSigningKey()).pub;
+  hub.chain.push(
+    await successor(hub.head, [a1], (s) => {
+      s.members.push({ id: BEA, email: 'bea@example.com', role: 'member', devices: [] });
+      s.machines.push({ name: 'mini', ref: ref!, pub, owners: [A] });
+      s.machineNames.push({ name: 'mini', ref: ref! });
+    }),
+  );
+  await followHub(made.session, feed);
+  return { ...made, feed, machine, grants: grants.harness, ref: ref as string };
+}
+
+describe('M4b: the grants', () => {
+  it('a signed-in owner who is no root sees Grant… on its machine, grants through its link, and grants.json is written after the mark', async () => {
+    const { session, machine, grants, ref } = await granting();
+    expect(signerOf(session).maySign).toBe(false);
+    const view = await session.view();
+    expect(view?.machines.find((m) => m.ref === ref)?.mayGrant).toBe(true);
+    expect(await session.grantsSet({ ref, member: BEA, rights: ['spawn'] })).toEqual({ ok: true, version: 1, delivered: 'done' });
+    expect(grants.prompts).toHaveLength(1);
+    expect(machine.ledger.grants[BEA].body).toMatchObject({ machine: ref, member: BEA, rights: ['spawn'], version: 1 });
+    expect((await readJson<RegistrationFile>(REGISTRATION_FILE)).grants).toBe(true);
+    expect(((await stat(join(orgDir(), GRANTS_FILE))).mode & 0o777).toString(8)).toBe('600');
+    expect(await readJson<GrantsFile>(GRANTS_FILE)).toMatchObject({ version: 1, issued: [{ delivered: 'done', signed: { body: { version: 1 } } }] });
+    const grantsView = await session.grantsView({ ref });
+    expect(grantsView).toMatchObject({ ok: true, live: true, grants: [{ member: BEA, rights: ['spawn'], version: 1, state: 'on-machine' }] });
+  });
+
+  it('goes through the local door for this Mac’s own machine', async () => {
+    const { session, machine, ref } = await granting(true);
+    expect(await session.grantsSet({ ref, member: BEA, rights: ['shell'] })).toMatchObject({ ok: true, delivered: 'done' });
+    expect(machine.acts).toHaveLength(1);
+    expect(machine.acts[0]).toMatchObject({ v: 1, machine: ref, action: 'endpoint.grant' });
+  });
+
+  it('a sign-out during the grant’s Touch ID keeps and sends nothing', async () => {
+    const { session, machine, grants, ref } = await granting();
+    grants.during = () => session.signOut();
+    expect(await session.grantsSet({ ref, member: BEA, rights: ['spawn'] })).toMatchObject({ ok: false, reason: 'cancelled' });
+    expect(machine.acts).toEqual([]);
+    expect(await exists(join(orgDir(), GRANTS_FILE))).toBe(false);
+    expect(await session.grantsView({ ref })).toEqual({ ok: false, ref, reason: 'signed-out' });
+  });
+
+  it('close() while the grant’s act is out joins it: no file under org/ changes after', async () => {
+    const { session, machine, ref } = await granting();
+    let release!: () => void;
+    machine.hold(new Promise<void>((resolve) => (release = resolve)));
+    const answer = session.grantsSet({ ref, member: BEA, rights: ['spawn'] });
+    await until(() => machine.acts.length === 1, 'the act out');
+    const files = await orgSnapshot();
+    let closed = false;
+    const closing = session.close().then(() => void (closed = true));
+    await pause(30);
+    expect(closed).toBe(false);
+    release();
+    await closing;
+    expect(await answer).toMatchObject({ ok: true, delivered: 'pending' });
+    await pause(30);
+    expect(await orgSnapshot()).toEqual(files);
+  });
+
+  it('a grants.json gone after its mark is damaged: the page says so and no grant is signed', async () => {
+    const { session, grants, ref } = await granting();
+    await session.grantsSet({ ref, member: BEA, rights: ['spawn'] });
+    await session.close();
+    await rm(join(orgDir(), GRANTS_FILE));
+    const { session: again } = await restart({ grants: testGrants(grantMachine(async () => ''), () => ref).deps });
+    await until(() => isSignedIn(again), 'signed in after the restart');
+    expect(await again.grantsView({ ref })).toEqual({ ok: false, ref, reason: 'damaged' });
+    expect(await again.grantsSet({ ref, member: BEA, rights: ['shell'] })).toMatchObject({ ok: false, reason: 'damaged' });
+    expect(grants.prompts).toHaveLength(1);
+  });
+
+  it('without the grants’ deps, no machine shows Grant… and every grant reads signed out', async () => {
+    const { session, feed } = await signingRoot();
+    const { ref } = await addMachine(session, feed);
+    expect((await session.view())?.machines.every((m) => !m.mayGrant)).toBe(true);
+    expect(await session.grantsView({ ref })).toEqual({ ok: false, ref, reason: 'signed-out' });
   });
 });
