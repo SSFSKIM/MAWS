@@ -186,9 +186,9 @@ describe('a session on another machine with no record', () => {
     const { bridge } = client();
     expect(await submitHumanSerialized(port({ disposition: 'sent', started: false, messageUuid: 'uuid-sent' }), bridge, REMOTE, serialized({}))).toBe(true);
     expect(useReader.getState().sent.size).toBe(0);
-    const link = { state: 'up', refusal: null, carrier: 'direct', member: 'member-me', clientClass: 'native-mac', rights: [], reason: null } as const;
     const fake = fakeClient({ 'laneA.send': { key: { writer: 'maws/m', seq: 1 }, state: 'entered', uuid: 'uuid-port' } });
-    const real = controlsFor(null, laneAState(REMOTE, { link, acts: [] }), { appSessionId: REMOTE, client: fake.client })!;
+    const live = laneAState(REMOTE, { link: { state: 'up', refusal: null, carrier: 'direct', member: 'member-me', clientClass: 'native-mac', rights: [], reason: null }, acts: [] });
+    const real = controlsFor(null, live, { appSessionId: REMOTE, client: fake.client })!;
     expect(await submitHumanSerialized(real, bridge, REMOTE, serialized({}))).toBe(true);
     expect(useReader.getState().sent.get(REMOTE)).toEqual(new Set(['uuid-port']));
   });
