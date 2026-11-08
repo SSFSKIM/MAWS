@@ -335,3 +335,59 @@ describe('a machine resolved before its revocation or re-enrollment', () => {
     expect(await hub.asMember('storeCert', (await machineNamed('moved'))!, {})).toEqual(expect.objectContaining({ ok: false, status: 400 }));
   });
 });
+
+// An admin's removal bound to the machine's key (P5 O8 M4b): the app deletes a dropped machine's row once the drop
+// settles, which may be after another root enrolled the name anew; `?ref=&pub=` removes the row only while its
+// enrollment's posted key is the one the app dropped.
+describe("an admin's removal bound to the machine's key", () => {
+  const remove = (name: string, key?: { ref: string; pub: string }) =>
+    hub.fetchAs(ADMIN, `/api/machines/${name}${key === undefined ? '' : `?ref=${encodeURIComponent(key.ref)}&pub=${encodeURIComponent(key.pub)}`}`, { method: 'DELETE' });
+  const keyOfMachine = (m: V2Machine) => ({ ref: m.ref, pub: m.key.pub });
+
+  it('removes the row whose enrollment posted that key', async () => {
+    const machine = await enrollV2((await code()).text, 'kp-same');
+    const response = await remove('kp-same', keyOfMachine(machine));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ revoked: 'kp-same' });
+    expect(await machineNamed('kp-same')).toBeUndefined();
+  });
+
+  it('leaves a name enrolled anew in between, under another key: another machine, or the same ref re-keyed', async () => {
+    const dropped = await enrollV2((await code()).text, 'kp-moved');
+    const other = await enrollV2((await code('kp-moved')).text);
+    expect(other.ref).not.toBe(dropped.ref);
+    const response = await remove('kp-moved', keyOfMachine(dropped));
+    expect(response.status).toBe(200);
+    expect(await response.json(), 'answered as an enrollment mismatch is').toEqual({ revoked: 'kp-moved' });
+    expect(await machineNamed('kp-moved')).toMatchObject({ state: 'active', enrollment: other.enrollment, key: keyOfMachine(other) });
+    expect((await machineFetch(hub.url, other.credentials, '/machine/enrollment')).status, 'its credential still works').toBe(200);
+
+    const rekeyed = await enrollV2((await code('kp-moved')).text, undefined, { ref: other.ref });
+    expect((await remove('kp-moved', keyOfMachine(other))).status).toBe(200);
+    expect(await machineNamed('kp-moved')).toMatchObject({ enrollment: rekeyed.enrollment, key: keyOfMachine(rekeyed) });
+    expect((await machineFetch(hub.url, rekeyed.credentials, '/machine/enrollment')).status).toBe(200);
+  });
+
+  it('leaves a row whose enrollment posted no key', async () => {
+    const posted = await enrollV2((await code()).text, 'kp-elsewhere');
+    const credentials = await redeemV1('kp-keyless');
+    expect((await machineFetch(hub.url, credentials, '/machine/enrollment')).status, 'its first request confirms it').toBe(200);
+    expect((await remove('kp-keyless', keyOfMachine(posted))).status).toBe(200);
+    expect(await machineNamed('kp-keyless')).toMatchObject({ state: 'active' });
+    expect((await machineFetch(hub.url, credentials, '/machine/enrollment')).status).toBe(200);
+    expect((await machineNamed('kp-keyless'))?.key).toBeUndefined();
+  });
+
+  it('refuses one parameter alone or either out of shape, touching nothing; neither removes whatever holds the name', async () => {
+    const machine = await enrollV2((await code()).text, 'kp-shape');
+    const { ref, pub } = keyOfMachine(machine);
+    for (const query of [`?ref=${ref}`, `?pub=${pub}`, `?ref=short&pub=${pub}`, `?ref=${ref}&pub=abc`]) {
+      expect(await refusal(await hub.fetchAs(ADMIN, `/api/machines/kp-shape${query}`, { method: 'DELETE' })), query).toBe('400 bad-shape');
+    }
+    expect(await machineNamed('kp-shape')).toMatchObject({ state: 'active', enrollment: machine.enrollment });
+    expect(await refusal(await remove('kp-nobody', { ref, pub }))).toBe('404 unknown-machine');
+    expect(await refusal(await hub.fetchAs(MEMBER, `/api/machines/kp-shape?ref=${ref}&pub=${pub}`, { method: 'DELETE' }))).toMatch(/^403 /);
+    expect((await remove('kp-shape')).status).toBe(200);
+    expect(await machineNamed('kp-shape')).toBeUndefined();
+  });
+});

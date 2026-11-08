@@ -13,13 +13,15 @@ import {
   HISTORY_LOG_ROUTE,
   HISTORY_NAMES_MAX,
   isMachineName,
+  isMachineRef,
+  isPublicKey,
   MEMBER_ATTESTATIONS_ROUTE,
   REGISTRY_APP_PARAM,
 } from 'org-protocol';
 import { drain, readLimited } from './drain';
 import { CLIENT_HEADER, hubConfig, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, REF_HEADER, type Env } from './env';
 import { AccessError, certsKeySource, verifyAccessAssertion, type KeySource } from './identity/access';
-import type { Principal, Registry, Result } from './objects/registry';
+import type { PostedKey, Principal, Registry, Result } from './objects/registry';
 import { relayObjectName } from './objects/relay';
 import { lacksMethod } from './objects/retry';
 import {
@@ -214,6 +216,17 @@ function historyQuery(url: URL): { writer: string; after: number } | null {
   return { writer, after: Number(after) };
 }
 
+/**
+ * `?ref=&pub=` of an admin's removal of a machine (P5 O8 M4b): the key its enrollment must have posted for the row to
+ * go (`Registry.revoke`); undefined with neither, null with one alone or either out of shape.
+ */
+function postedKeyQuery(url: URL): PostedKey | undefined | null {
+  const ref = url.searchParams.get('ref');
+  const pub = url.searchParams.get('pub');
+  if (ref === null && pub === null) return undefined;
+  return ref !== null && pub !== null && isMachineRef(ref) && isPublicKey(pub) ? { ref, pub } : null;
+}
+
 async function member(request: Request, url: URL, env: Env, registry: DurableObjectStub<Registry>, principal: Extract<Principal, { kind: 'member' }>): Promise<Response> {
   const { pathname } = url;
   const { method } = request;
@@ -223,7 +236,11 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
   if (pathname === '/api/machines' && method === 'GET') return json(200, { machines: await registry.machines() });
   if (pathname === '/api/projects' && method === 'GET') return json(200, { projects: await registry.projects() });
   const revoke = MACHINE_PATH.exec(pathname);
-  if (revoke && method === 'DELETE') return answer(await registry.revoke(you, decodeURIComponent(revoke[1])));
+  if (revoke && method === 'DELETE') {
+    const key = postedKeyQuery(url);
+    if (key === null) return json(400, { error: 'bad-shape', message: '?ref= and ?pub= are the machine’s MachineRef and its key (an uncompressed P-256 point, base64url), both or neither' });
+    return answer(await registry.revoke(you, decodeURIComponent(revoke[1]), key));
+  }
   const archive = PROJECT_ARCHIVE.exec(pathname);
   if (archive && method === 'PUT') return answer(await registry.designateArchive(you, archive[1], await body(request)));
   if (pathname === ORG_KEYS_PATH && method === 'GET') {
