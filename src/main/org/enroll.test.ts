@@ -120,6 +120,9 @@ class FakeHub implements HubClient {
   pendingOf(): never {
     throw new Error('unused');
   }
+  machines(): never {
+    throw new Error('unused');
+  }
   deleteMachine(): never {
     throw new Error('unused');
   }

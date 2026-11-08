@@ -86,8 +86,21 @@ export interface HubClient {
   /** M4b: the key posted under the enrollment `id`, for the member who minted it: `404 no-key` until then, `403 not-yours`, `404 unknown-enrollment`. */
   enrollmentKey(id: string, signal?: AbortSignal): Promise<HubResult<EnrollmentKey>>;
   /** M4b: the machine's hub row deleted (`machine drop`'s DELETE): `deleted`, or `absent` for a row already gone (`404 unknown-machine`). */
-  deleteMachine(name: string, signal?: AbortSignal): Promise<HubResult<'deleted' | 'absent'>>;
+  /**
+   * `GET /api/machines` (M4b): each hub row's name, with the key its current enrollment posted, or null for none (a row
+   * re-enrolled in place whose new enrollment posted nothing yet, or a certified machine's). A row out of shape fails
+   * the whole read, as `malformed`.
+   */
+  machines(signal?: AbortSignal): Promise<HubResult<HubMachineRow[]>>;
+  /**
+   * `key`: the dropped machine's ref and the pub the org state holds for it, sent as the hub's precondition (both or
+   * neither): a row another key enrolled since is left, answered as deleted.
+   */
+  deleteMachine(name: string, key?: { ref: string; pub: string }, signal?: AbortSignal): Promise<HubResult<'deleted' | 'absent'>>;
 }
+
+/** A hub row as `GET /api/machines` lists it, for a drop's delete: its name, and the key its enrollment posted. */
+export type HubMachineRow = { name: string; key: { ref: string; pub: string } | null };
 
 /** M7a's read beside the session's: the project channel's, which the signer's and the pairing's clients don't carry. */
 export interface ProjectReads {
@@ -249,8 +262,22 @@ export function hubClient(input: {
         const { machine, pub, ref, mac } = answer;
         return keyField(machine) && keyField(pub) && keyField(ref) && keyField(mac) ? { machine, pub, ref, mac } : null;
       }),
-    async deleteMachine(name, signal) {
-      const answer = await request(`/api/machines/${encodeURIComponent(name)}`, { method: 'DELETE', signal }, () => 'deleted' as const);
+    machines: (signal) =>
+      request('/api/machines', { signal }, (body) => {
+        if (!isObject(body) || !Array.isArray(body.machines)) return null;
+        const rows: HubMachineRow[] = [];
+        for (const item of body.machines) {
+          if (!isObject(item) || !keyField(item.name)) return null;
+          const key = item.key;
+          if (key === undefined || key === null) rows.push({ name: item.name, key: null });
+          else if (isObject(key) && keyField(key.ref) && keyField(key.pub)) rows.push({ name: item.name, key: { ref: key.ref, pub: key.pub } });
+          else return null;
+        }
+        return rows;
+      }),
+    async deleteMachine(name, key, signal) {
+      const precondition = key === undefined ? '' : `?ref=${encodeURIComponent(key.ref)}&pub=${encodeURIComponent(key.pub)}`;
+      const answer = await request(`/api/machines/${encodeURIComponent(name)}${precondition}`, { method: 'DELETE', signal }, () => 'deleted' as const);
       return !answer.ok && answer.kind === 'status' && answer.status === 404 && answer.error === 'unknown-machine' ? { ok: true, value: 'absent' } : answer;
     },
     attestations: (project, signal) =>

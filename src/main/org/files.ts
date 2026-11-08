@@ -61,7 +61,7 @@ export type Pending = { signed: SignedOrgState; parent: string; hash: string; ex
  * M4b: the hub row a drop leaves behind (`machine drop`'s DELETE), kept with its slot, so the row is deleted once that
  * very state is on the held chain, however late it settles (a relaunch included), and never for a discarded proposal.
  */
-export type HubRow = { name: string; ref: string };
+export type HubRow = { name: string; ref: string; pub: string };
 /** signing.json as it may stand on disk: a slot written before its `hash` was kept lacks one until the store loads it. */
 export type StoredSigningFile = Omit<SigningFile, 'pending'> & { pending: (Omit<Pending, 'hash'> & { hash?: string }) | null };
 /**
@@ -273,7 +273,7 @@ function isStoredPending(value: unknown): value is StoredSigningFile['pending'] 
     (value.hash === undefined || isText(value.hash)) &&
     typeof value.exposed.hub === 'boolean' &&
     isTexts(value.exposed.machines) &&
-    (row === undefined || (isObject(row) && isText(row.name) && isText(row.ref)))
+    (row === undefined || (isObject(row) && isText(row.name) && isText(row.ref) && isText(row.pub)))
   );
 }
 

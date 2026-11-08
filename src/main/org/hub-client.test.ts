@@ -184,4 +184,47 @@ describe('the hub client', () => {
     expect(await client(() => worker(403, { error: 'not-admin' })).deleteMachine('mini')).toEqual({ ok: false, kind: 'status', status: 403, error: 'not-admin' });
     expect(await client(() => worker(503, { error: 'hub-updating' })).deleteMachine('mini')).toEqual({ ok: false, kind: 'status', status: 503, error: 'hub-updating' });
   });
+
+  it('lists the hub rows (M4b): GET /api/machines, each name with the key its enrollment posted, or none', async () => {
+    const sent: string[] = [];
+    const client = (answer: () => Response) =>
+      hubClient({
+        url: HUB,
+        headers: () => Promise.resolve({}),
+        fetch: (async (url: string, init: RequestInit) => {
+          sent.push(`${init.method} ${new URL(url).pathname}`);
+          return answer();
+        }) as typeof fetch,
+      });
+    const rows = [
+      { name: 'mini', client_id: 'c1', token_name: 't', state: 'active', enrollment: 'e1', created: 'x', confirmed: null, key: { ref: 'R', pub: 'P', listed: true } },
+      { name: 'old', client_id: 'c2', token_name: 't', state: 'active', enrollment: 'e2', created: 'x', confirmed: null },
+    ];
+    expect(await client(() => worker(200, { machines: rows })).machines()).toEqual({ ok: true, value: [{ name: 'mini', key: { ref: 'R', pub: 'P' } }, { name: 'old', key: null }] });
+    expect(sent).toEqual(['GET /api/machines']);
+    for (const bad of [{ machines: [{ name: '' }] }, { machines: [{ name: 'mini', key: { ref: 'R' } }] }, { machines: 'none' }, {}]) {
+      expect(await client(() => worker(200, bad)).machines()).toEqual({ ok: false, kind: 'status', status: 200, error: 'malformed' });
+    }
+    expect(await client(() => worker(403, { error: 'not-admin' })).machines()).toEqual({ ok: false, kind: 'status', status: 403, error: 'not-admin' });
+  });
+
+  it("sends the dropped machine's ref and pub with the DELETE, both encoded, and neither when no key is given", async () => {
+    const sent: string[] = [];
+    const client = (answer: () => Response) =>
+      hubClient({
+        url: HUB,
+        headers: () => Promise.resolve({}),
+        fetch: (async (url: string, init: RequestInit) => {
+          const at = new URL(url);
+          sent.push(`${init.method} ${at.pathname}${at.search}`);
+          return answer();
+        }) as typeof fetch,
+      });
+    const key = { ref: 'r/ef+1', pub: 'MCow BQ/+=' };
+    expect(await client(() => worker(200, { revoked: 'mini box' })).deleteMachine('mini box', key)).toEqual({ ok: true, value: 'deleted' });
+    expect(await client(() => worker(200, { revoked: 'mini' })).deleteMachine('mini')).toEqual({ ok: true, value: 'deleted' });
+    expect(sent).toEqual(['DELETE /api/machines/mini%20box?ref=r%2Fef%2B1&pub=MCow%20BQ%2F%2B%3D', 'DELETE /api/machines/mini']);
+    // a precondition out of shape is a refusal as any other status is
+    expect(await client(() => worker(400, { error: 'bad-shape' })).deleteMachine('mini', key)).toEqual({ ok: false, kind: 'status', status: 400, error: 'bad-shape' });
+  });
 });

@@ -48,7 +48,9 @@
 // `machine.add` and `machine.replace`, which only an enrollment composes from the key it checked (enroll.ts, a part as
 // the pairing is). A `machine.drop`'s slot carries the machine's hub row, which is deleted once the signer settles that
 // very state (at once, at a later settle, or at a start after a relaunch; never for a discarded or forked proposal, nor
-// once the held head lists the name again); a delete that fails leaves its name on the status (`hubRowsLeft`) for
+// once the held head lists the name again). The delete reads the hub's rows first: a row holding the drop's posted key
+// is deleted under that key (the hub's precondition), one that posted none by name, one holding another key is left as
+// another machine's, and an absent one is gone. A delete that fails leaves its name on the status (`hubRowsLeft`) for
 // `dropRetry`, which calls the route alone.
 //
 // Electron-free: the browser opener, the step-up signer, the state signer, focus, notifications and the RL2 links are
@@ -119,6 +121,7 @@ import {
   REGISTRATION_FILE,
   type AccessFile,
   type Anchor,
+  type HubRow,
   type OrgFiles,
   type RegistrationFile,
 } from './files';
@@ -399,7 +402,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   let retiredWork: Promise<void> = Promise.resolve();
   // ---- M4b ----
   /** Machines this run dropped whose hub row the delete didn't take out; the status names them, `dropRetry` deletes one. */
-  let hubRowsLeft: Array<{ name: string; ref: string }> = [];
+  /** The status shows each row's name and ref; its pub stays here, for the delete's precondition. */
+  let hubRowsLeft: HubRow[] = [];
 
   /**
    * Runs `body` after every commit queued before it. Nothing run here may wait on a held view's adoption queue, whose
@@ -491,7 +495,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       signer: signerStatus(),
       pairing: pairing.status(),
       enrolling: enrollment.status(),
-      hubRowsLeft: hubRowsLeft.map((row) => ({ ...row })),
+      hubRowsLeft: hubRowsLeft.map(({ name, ref }) => ({ name, ref })),
     };
   }
 
@@ -848,7 +852,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       pendingOf: (member, signal) => watched(inner.pendingOf(member, signal)),
       mintEnrollment: (body, signal) => watched(inner.mintEnrollment(body, signal)),
       enrollmentKey: (id, signal) => watched(inner.enrollmentKey(id, signal)),
-      deleteMachine: (name, signal) => watched(inner.deleteMachine(name, signal)),
+      machines: (signal) => watched(inner.machines(signal)),
+      deleteMachine: (name, key, signal) => watched(inner.deleteMachine(name, key, signal)),
     };
   }
 
@@ -1104,7 +1109,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       if (fresh === null || !fresh.ok || fresh.digest !== digest) throw new StaleEdit(stale);
       await fresh.edit.apply(draft);
     };
-    const hubRow = dropped === undefined ? {} : { hubRow: { name: dropped.name, ref: dropped.ref } };
+    const hubRow = dropped === undefined ? {} : { hubRow: { name: dropped.name, ref: dropped.ref, pub: dropped.pub } };
     const result = signResult(await c.signer.sign({ summary: shown.edit.summary, lines: shown.edit.lines, apply, ...hubRow }));
     // Settled at once: its delete was queued in the settlement, and the answer waits for it, so the status it leaves is said.
     if (result.ok && dropped !== undefined) await rowWork;
@@ -1115,45 +1120,64 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
 
   /** The settled drops' deletes, one at a time, in settlement order. */
   let rowWork: Promise<unknown> = Promise.resolve();
-  function queueRowDelete(row: { name: string; ref: string }): void {
+  function queueRowDelete(row: HubRow): void {
     const turn = rowWork.then(() => deleteRow(row));
     rowWork = turn.catch((error: unknown) => log(`deleting the hub's row for ${row.name} failed: ${(error as Error).message}`));
   }
 
   /** The hub row of a machine just dropped, deleted as `machine drop` deletes it: 200, or 404 for a row already gone. */
-  async function deleteRow(row: { name: string; ref: string }): Promise<DropRetryResult> {
-    // The route is keyed by name: once the held head lists the name again (a re-enrollment, adopted with the drop or
-    // after it), the row is that machine's, and deleting it would revoke its live credential. Checked just before the
-    // send, on every path (the settlement, its queue, Retry).
-    const head = heldView()?.head().state ?? null;
-    if (head !== null && head.machines.some((m) => machineNameKey(m.name) === machineNameKey(row.name))) {
-      log(`the org lists ${row.name} again: its hub row is that machine's, and is not deleted`);
-      const left = hubRowsLeft.filter((r) => r.name !== row.name);
-      if (left.length !== hubRowsLeft.length) {
-        hubRowsLeft = left;
-        changed();
-      }
-      return { ok: false, reason: 'none', detail: `the org lists ${row.name} again: its hub row is that machine's` };
-    }
+  async function deleteRow(row: HubRow): Promise<DropRetryResult> {
+    if (listedAgain(row)) return leftAlone(row, `the org lists ${row.name} again: its hub row is that machine's`);
     const hub = signerHub();
-    const asked = signIns;
-    const deleted: HubResult<'deleted' | 'absent'> = hub === null ? { ok: false, kind: 'unreachable', detail: 'no hub sign-in' } : await hub.deleteMachine(row.name);
+    if (hub === null) return offerAgain(row, { ok: false, kind: 'unreachable', detail: 'no hub sign-in' });
     // A sign-out meanwhile took the rows left with it: they were that sign-in's. A cancelled attempt is no sign-out.
-    if (asked !== signIns || closed) return { ok: false, reason: 'hub', detail: 'the sign-in ended: nothing more is offered' };
-    const left = hubRowsLeft.filter((r) => r.name !== row.name);
-    if (deleted.ok) {
-      log(`the hub's row for ${row.name} was ${deleted.value === 'deleted' ? 'deleted' : 'already gone'}`);
-      hubRowsLeft = left;
-      changed();
-      return { ok: true };
+    const asked = signIns;
+    const ended = () => asked !== signIns || closed;
+    const over: DropRetryResult = { ok: false, reason: 'hub', detail: 'the sign-in ended: nothing more is offered' };
+    // The rows first: the hub binds a keyed delete to the key the row's enrollment posted, so a row that posted none (one
+    // re-enrolled in place and never listed) would be answered `revoked` and left; it is deleted by name, as before.
+    const rows = await hub.machines();
+    if (ended()) return over;
+    if (!rows.ok) return offerAgain(row, rows);
+    const held = rows.value.find((r) => machineNameKey(r.name) === machineNameKey(row.name));
+    if (held === undefined) return gone(row, 'already gone');
+    if (held.key !== null && (held.key.ref !== row.ref || held.key.pub !== row.pub)) {
+      return leftAlone(row, `the hub's row for ${row.name} holds another machine's key: it is that machine's`);
     }
-    const why = deleted.kind === 'status' ? `${deleted.status} ${deleted.error ?? 'with no code'}` : deleted.kind;
-    log(`the hub's row for ${row.name} was not deleted (${why}): it is offered again`);
-    hubRowsLeft = [...left, row];
-    changed();
-    return deleted.kind === 'status' ? { ok: false, reason: 'refused', detail: `the hub answered ${why}` } : { ok: false, reason: 'hub', detail: 'the hub was not reached: try again' };
+    // The route is keyed by name: once the held head lists the name again (a re-enrollment, adopted with the drop or
+    // after it), the row is that machine's, and deleting it would revoke its live credential. Checked again here, just
+    // before the send, since the read was an await: on every path (the settlement, its queue, Retry).
+    if (listedAgain(row)) return leftAlone(row, `the org lists ${row.name} again: its hub row is that machine's`);
+    const deleted = await hub.deleteMachine(row.name, held.key === null ? undefined : { ref: row.ref, pub: row.pub });
+    if (ended()) return over;
+    return deleted.ok ? gone(row, deleted.value === 'deleted' ? 'deleted' : 'already gone') : offerAgain(row, deleted);
   }
-
+  const listedAgain = (row: HubRow) => (heldView()?.head().state.machines ?? []).some((m) => machineNameKey(m.name) === machineNameKey(row.name));
+  /** `row` off the status, if it was there. */
+  function unlist(row: HubRow): void {
+    const left = hubRowsLeft.filter((r) => r.name !== row.name);
+    if (left.length === hubRowsLeft.length) return;
+    hubRowsLeft = left;
+    changed();
+  }
+  function gone(row: HubRow, how: string): DropRetryResult {
+    log(`the hub's row for ${row.name} was ${how}`);
+    unlist(row);
+    return { ok: true };
+  }
+  /** Nothing sent, nothing offered again: the row is another machine's. */
+  function leftAlone(row: HubRow, why: string): DropRetryResult {
+    log(`${why}, and is not deleted`);
+    unlist(row);
+    return { ok: false, reason: 'none', detail: why };
+  }
+  function offerAgain(row: HubRow, failed: Exclude<HubResult<unknown>, { ok: true }>): DropRetryResult {
+    const why = failed.kind === 'status' ? `${failed.status} ${failed.error ?? 'with no code'}` : failed.kind;
+    log(`the hub's row for ${row.name} was not deleted (${why}): it is offered again`);
+    hubRowsLeft = [...hubRowsLeft.filter((r) => r.name !== row.name), row];
+    changed();
+    return failed.kind === 'status' ? { ok: false, reason: 'refused', detail: `the hub answered ${why}` } : { ok: false, reason: 'hub', detail: 'the hub was not reached: try again' };
+  }
   /** The route alone, for a row `hubRowsLeft` names; none once the held head lists that name again (re-enrolled since). */
   async function dropRetry(name: string): Promise<DropRetryResult> {
     const row = hubRowsLeft.find((r) => r.name === name);

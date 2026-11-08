@@ -151,10 +151,14 @@ class FakeHub {
   /** M3: the states posted to `POST /api/org/state`, and an override of the hub's answer. */
   posted: SignedOrgState[] = [];
   postAnswer?: (signed: SignedOrgState) => Answer | undefined;
-  /** M4b: minted enrollments and each one's posted key; machine rows by name; an override of the DELETE's answer. */
+  /**
+   * M4b: minted enrollments and each one's posted key; machine rows by name, each with its enrollment's posted key (null
+   * for none: one re-enrolled in place and never listed, say); overrides of the row list's and the DELETE's answers.
+   */
   enrollments: Array<{ id: string; token: string; body: unknown }> = [];
   enrollmentKeys = new Map<string, { enrollment: string; machine: string; pub: string; ref: string; mac: string; posted: string }>();
-  rows = new Set<string>();
+  rows = new Map<string, { ref: string; pub: string } | null>();
+  listAnswer?: () => Answer | undefined;
   deleteAnswer?: (name: string) => Answer | Promise<Answer | undefined> | undefined;
 
   constructor(
@@ -226,12 +230,21 @@ class FakeHub {
       const key = this.enrollmentKeys.get(keyPath[1]);
       return key === undefined ? worker(404, { error: 'no-key' }) : worker(200, key);
     }
+    if (method === 'GET' && url.pathname === '/api/machines') {
+      const listed = [...this.rows].map(([name, key]) => ({ name, state: 'active', ...(key === null ? {} : { key: { ...key, listed: true } }) }));
+      return this.listAnswer?.() ?? worker(200, { machines: listed });
+    }
     const machinePath = /^\/api\/machines\/([^/]+)$/.exec(url.pathname);
     if (method === 'DELETE' && machinePath !== null) {
       const name = decodeURIComponent(machinePath[1]);
       const override = await this.deleteAnswer?.(name);
       if (override !== undefined) return override;
-      if (!this.rows.delete(name)) return worker(404, { error: 'unknown-machine' });
+      if (!this.rows.has(name)) return worker(404, { error: 'unknown-machine' });
+      // #538's precondition: both or neither; a row whose enrollment posted no key, or another, is left as it is.
+      const [ref, pub] = [url.searchParams.get('ref'), url.searchParams.get('pub')];
+      if ((ref === null) !== (pub === null)) return worker(400, { error: 'bad-shape' });
+      const key = this.rows.get(name)!;
+      if (ref === null || (key !== null && key.ref === ref && key.pub === pub)) this.rows.delete(name);
       return worker(200, { revoked: name });
     }
     if (method === 'POST' && url.pathname === '/api/devices/pending') {
@@ -2450,7 +2463,7 @@ async function addMachine(session: OrgSessionService, feed: ReturnType<typeof fa
       s.machineNames.push({ name, ref });
     }),
   );
-  hub.rows.add(name);
+  hub.rows.set(name, { ref, pub });
   feed.state(hub.head.state.version);
   await until(() => headVersion(session) === hub.head.state.version, `${name} held`);
   return { ref, pub };
@@ -2605,7 +2618,7 @@ describe('M4b: the machine changes', () => {
     expect(await session.change(preview.change, preview.digest)).toMatchObject({ ok: true });
     expect(hub.head.state.machines.map((m) => m.name)).toEqual(['studio']);
     expect(hub.head.state.retired).toEqual([{ keyId: await keyId(pub), pub, notAfter: hub.head.state.issued, holder: { machine: ref } }]);
-    expect(hub.calls.filter((c) => c.method === 'DELETE').map((c) => c.path)).toEqual(['/api/machines/mini']);
+    expect(hub.calls.filter((c) => c.method === 'DELETE').map((c) => c.path)).toEqual([`/api/machines/mini?ref=${encodeURIComponent(ref)}&pub=${encodeURIComponent(pub)}`]);
     expect(hub.rows.has('mini')).toBe(false);
     expect(registered(session).hubRowsLeft).toEqual([]);
 
@@ -2626,7 +2639,7 @@ describe('M4b: the machine changes', () => {
     expect(registered(session).hubRowsLeft).toEqual([]);
     expect(hub.rows.has('studio')).toBe(false);
     expect([hub.posted.length, signing.prompts.length], 'no state signed or posted by a retry').toEqual([posts, prompts]);
-    expect(hub.calls.filter((c) => c.method === 'DELETE').map((c) => c.path)).toEqual(['/api/machines/mini', '/api/machines/studio', '/api/machines/studio', '/api/machines/studio']);
+    expect(hub.calls.filter((c) => c.method === 'DELETE').map((c) => c.path.split('?')[0])).toEqual(['/api/machines/mini', '/api/machines/studio', '/api/machines/studio', '/api/machines/studio']);
   });
 
   it("refuses dropping this Mac's own machine", async () => {
@@ -2667,7 +2680,7 @@ describe('M4b: a drop that settles later (the fix wave)', () => {
   /** `mini` dropped while the hub answers its post `answer`: signed and kept, unsettled, its row untouched. */
   async function pendingDrop(over: Overrides = {}, answer: () => Answer = () => worker(503, { error: 'hub-updating' })) {
     const root = await signingRoot(over);
-    const { ref } = await addMachine(root.session, root.feed);
+    const { ref, pub } = await addMachine(root.session, root.feed);
     hub.postAnswer = answer;
     const preview = await root.session.preview({ kind: 'machine.drop', ref, revoke: false });
     if (!preview.ok) throw new Error(JSON.stringify(preview));
@@ -2675,31 +2688,36 @@ describe('M4b: a drop that settles later (the fix wave)', () => {
     expect(signerOf(root.session).pending).not.toBeNull();
     expect(deletes()).toEqual([]);
     expect(registered(root.session).hubRowsLeft).toEqual([]);
-    expect((await readJson<SigningFile>(SIGNING_FILE)).pending?.hubRow, 'the row is kept with the slot').toEqual({ name: 'mini', ref });
-    return { ...root, ref };
+    expect((await readJson<SigningFile>(SIGNING_FILE)).pending?.hubRow, 'the row is kept with the slot').toEqual({ name: 'mini', ref, pub });
+    return { ...root, ref, pub };
   }
-  const deletes = () => hub.calls.filter((c) => c.method === 'DELETE').map((c) => c.path);
+  const deleteCalls = () => hub.calls.filter((c) => c.method === 'DELETE').map((c) => new URL(c.path, LOCAL_HUB));
+  const deletes = () => deleteCalls().map((u) => u.pathname);
+  /** Each DELETE's precondition: the dropped machine's ref and pub (the hub leaves a row another key enrolled). */
+  const preconditions = () => deleteCalls().map((u) => Object.fromEntries(u.searchParams));
 
   it('deletes the row once a later settle lands that very state', async () => {
-    const { session, feed } = await pendingDrop();
+    const { session, feed, ref, pub } = await pendingDrop();
     hub.postAnswer = undefined;
     feed.open();
     await until(() => signerOf(session).pending === null, 'settled');
     await until(() => !hub.rows.has('mini'), 'the row deleted');
     expect(deletes()).toEqual(['/api/machines/mini']);
+    expect(preconditions()).toEqual([{ ref, pub }]);
     expect(registered(session).hubRowsLeft).toEqual([]);
   });
 
   it("a later settlement whose delete fails puts the row on Retry, which deletes it", async () => {
-    const { session, feed, ref } = await pendingDrop();
+    const { session, feed, ref, pub } = await pendingDrop();
     hub.postAnswer = undefined;
     hub.deleteAnswer = () => worker(503, { error: 'hub-updating' });
     feed.open();
     await until(() => registered(session).hubRowsLeft.length === 1, 'the row left');
-    expect(registered(session).hubRowsLeft).toEqual([{ name: 'mini', ref }]);
+    expect(registered(session).hubRowsLeft, 'the status names the row, its pub kept inside').toEqual([{ name: 'mini', ref }]);
     hub.deleteAnswer = undefined;
     expect(await session.dropRetry('mini')).toEqual({ ok: true });
     expect(hub.rows.has('mini')).toBe(false);
+    expect(preconditions(), "the settlement's delete and Retry's both carry the dropped machine's key").toEqual([{ ref, pub }, { ref, pub }]);
   });
 
   it('a relaunch with the drop still pending deletes the row when the next start settles it', async () => {
@@ -2804,6 +2822,82 @@ describe('M4b: a drop that settles later (the fix wave)', () => {
     expect(deletes()).toEqual(['/api/machines/studio']);
     expect(hub.rows.has('mini')).toBe(true);
     expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it('the delete reads the hub rows first: a row its enrollment left with no posted key is deleted by name alone', async () => {
+    const { session, feed } = await pendingDrop();
+    hub.rows.set('mini', null); // re-enrolled in place, the new enrollment never listed
+    hub.postAnswer = undefined;
+    feed.open();
+    await until(() => !hub.rows.has('mini'), 'the row deleted');
+    expect(hub.calls.filter((c) => c.path.startsWith('/api/machines')).map((c) => `${c.method} ${c.path}`)).toEqual(['GET /api/machines', 'DELETE /api/machines/mini']);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it("a row that posted another machine's key is that machine's: nothing is sent, and nothing is offered again", async () => {
+    const { session, feed, ref } = await pendingDrop();
+    hub.rows.set('mini', { ref, pub: (await generateSigningKey()).pub });
+    hub.postAnswer = undefined;
+    feed.open();
+    await until(() => signerOf(session).pending === null && hub.calls.some((c) => c.path === '/api/machines'), 'settled, the rows read');
+    await pause(30);
+    expect(deletes()).toEqual([]);
+    expect(hub.rows.has('mini')).toBe(true);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it('a row absent from the list is already gone: settled, nothing sent, nothing offered again', async () => {
+    const { session, feed } = await pendingDrop();
+    hub.rows.delete('mini');
+    hub.postAnswer = undefined;
+    feed.open();
+    await until(() => signerOf(session).pending === null && hub.calls.some((c) => c.path === '/api/machines'), 'settled, the rows read');
+    await pause(30);
+    expect(deletes()).toEqual([]);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it('a delete answered 404 unknown-machine is already gone: settled, nothing offered again', async () => {
+    const { session, feed } = await pendingDrop();
+    hub.deleteAnswer = () => worker(404, { error: 'unknown-machine' });
+    hub.postAnswer = undefined;
+    feed.open();
+    await until(() => deletes().length === 1, 'the delete');
+    await until(() => signerOf(session).pending === null, 'settled');
+    await pause(30);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it('a row list that fails offers the row again, and Retry reads it anew', async () => {
+    const { session, feed, ref } = await pendingDrop();
+    hub.listAnswer = () => worker(503, { error: 'hub-updating' });
+    hub.postAnswer = undefined;
+    feed.open();
+    await until(() => registered(session).hubRowsLeft.length === 1, 'the row left');
+    expect(registered(session).hubRowsLeft).toEqual([{ name: 'mini', ref }]);
+    expect(deletes()).toEqual([]);
+    hub.listAnswer = undefined;
+    expect(await session.dropRetry('mini')).toEqual({ ok: true });
+    expect(hub.rows.has('mini')).toBe(false);
+  });
+
+  it("a certified machine's drop is refused before anything is signed or sent", async () => {
+    const { session, feed } = await signingRoot();
+    const bea = await addMember(session, feed);
+    const delegation = await generateSigningKey();
+    const id = memberId();
+    hub.chain.push(await successor(hub.head, [a1], (s) => void s.delegations.push({ id, pub: delegation.pub, prefix: 'dc-', expires: iso(Date.now() + 30 * DAY), maxUses: 10, offlineRevokeS: 0, owners: [bea] })));
+    const vm = await generateSigningKey();
+    const certRef = `${id}_${base64urlEncode(crypto.getRandomValues(new Uint8Array(16)))}`;
+    hub.certificates = { certs: [await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: certRef, name: 'dc-vm1', pub: vm.pub, delegation: id, use: 1, issued: iso(Date.now() - HOUR) }, delegation.privateKey, delegation.pub)], retirements: [] };
+    hub.rows.set('dc-vm1', null);
+    feed.state(hub.head.state.version);
+    await until(async () => (await session.view())?.machines.length === 1, 'the certified machine');
+    const [posts, prompts] = [hub.posted.length, signing.prompts.length];
+    expect(await session.preview({ kind: 'machine.drop', ref: certRef, revoke: false })).toMatchObject({ ok: false, reason: 'refused', findings: [{ code: 'certified-machine' }] });
+    expect([hub.posted.length, signing.prompts.length]).toEqual([posts, prompts]);
+    expect(hub.calls.filter((c) => c.path.startsWith('/api/machines'))).toEqual([]);
+    expect(hub.rows.has('dc-vm1')).toBe(true);
   });
 
   it('Retry on a name listed again sends nothing and takes the row off the status', async () => {
