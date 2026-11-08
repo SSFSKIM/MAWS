@@ -1,6 +1,7 @@
 // P5 O1 M6 (OX1): the committed wire manifest holds the code to the compatibility rule. A change to the wire between
 // builds is additive (WIRE_MINOR bumped by one and the manifest rewritten) or breaking (a major). `pnpm wire:manifest`
-// runs this file with MAWS_WIRE_MANIFEST_WRITE=1 to rewrite the manifest when the change allows it;
+// runs this file with MAWS_WIRE_MANIFEST_WRITE=1 to rewrite the manifest when the change allows it (and
+// wire-fingerprint.test.ts, which rewrites the wire fingerprint beside it);
 // MAWS_WIRE_MANIFEST_WRITE=rebase rewrites a rendering-only difference (a zod upgrade, an annotation) at the same minor.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

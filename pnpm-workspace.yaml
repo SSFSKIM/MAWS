@@ -33,3 +33,10 @@ overrides:
   lib0: 1.0.0-rc.36
   prosemirror-model: 1.25.12
 # P3-A end
+# The O17 footprint fix: zod's CommonJS entries (core/index, classic/external, mini/external) load all 62 non-English
+# locales with zod, about 0.7 MiB of heap in mawsd and in the engine host each, which read none. The patch makes each
+# entry's `locales` export a getter that loads them at its first read; English is registered as before, on the first
+# schema built. test/zod-locales.test.ts holds the installed zod to it, and the packaged check holds the app's copy (a
+# zod upgrade that drops the patch fails both). Bundling zod would not help: the MCP SDK is external and loads it itself.
+patchedDependencies:
+  zod@4.6.5: patches/zod@4.6.5.patch

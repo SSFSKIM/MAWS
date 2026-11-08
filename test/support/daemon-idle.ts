@@ -154,20 +154,46 @@ export function cpuSeconds(text: string): number {
 // The footprint reader (macOS): libproc's proc_pid_rusage, which needs no task port, no root and no TCC grant for a
 // process of the same user, so it reads a hardened-runtime binary such as Electron's. It runs through the python3 the
 // runner already has (ctypes, no package), one call for every pid, and prints per pid `<pid> <ri_phys_footprint>
-// <ri_resident_size>` in bytes, or `<pid> errno <n>`. RUSAGE_INFO_V0's struct is 12 64-bit words: the 16-byte uuid, then
-// user and system time, idle and interrupt wakeups, pageins, wired size, resident size (word 8), footprint (word 9).
+// <ri_resident_size> <ticks> <idle wakeups> <interrupt wakeups> <pageins>`, the sizes in bytes, or `<pid> errno <n>`.
+// RUSAGE_INFO_V0's struct is 12 64-bit words: the 16-byte uuid, then user and system time (words 2 and 3, summed as
+// ticks: mach absolute time units, which the timebase turns into nanoseconds), idle and interrupt wakeups (4, 5), pageins
+// (6), wired size, resident size (8), footprint (9). Before the pids, one `machine` line from the same call: the
+// kernel's memory pressure level (kern.memorystatus_vm_pressure_level: 1 normal, 2 warning, 4 critical; `-` when the
+// sysctl fails) and mach_timebase_info's numerator and denominator. The fields beyond the two sizes are recorded, read
+// by no verdict (the O17 footprint fix: what the machine and each process did while a footprint moved).
 const FOOTPRINT_READER = `
 import ctypes, sys
 libproc = ctypes.CDLL('/usr/lib/libproc.dylib', use_errno=True)
+libc = ctypes.CDLL('/usr/lib/libSystem.B.dylib', use_errno=True)
+level = ctypes.c_int(0)
+size = ctypes.c_size_t(ctypes.sizeof(level))
+read = libc.sysctlbyname(b'kern.memorystatus_vm_pressure_level', ctypes.byref(level), ctypes.byref(size), None, ctypes.c_size_t(0)) == 0
+class Timebase(ctypes.Structure): _fields_ = [('numer', ctypes.c_uint32), ('denom', ctypes.c_uint32)]
+timebase = Timebase()
+libc.mach_timebase_info(ctypes.byref(timebase))
+print('machine', level.value if read else '-', timebase.numer, timebase.denom)
 for pid in sys.argv[1:]:
     info = (ctypes.c_uint64 * 12)()
-    if libproc.proc_pid_rusage(int(pid), 0, info) == 0: print(pid, info[9], info[8])
+    if libproc.proc_pid_rusage(int(pid), 0, info) == 0: print(pid, info[9], info[8], info[2] + info[3], info[4], info[5], info[6])
     else: print(pid, 'errno', ctypes.get_errno())
 `;
 
-export interface Footprint {
+// What a process did, cumulative since its start, as proc_pid_rusage counts it; recorded per sample, read by no verdict.
+export interface ProcessActivity {
+  cpuTicks: number; // user and system time in mach absolute time units (× timebase.numer / timebase.denom = ns)
+  idleWakeups: number; // package idle wakeups
+  interruptWakeups: number;
+  pageins: number;
+}
+
+export interface Footprint extends ProcessActivity {
   footprintKiB: number;
   residentKiB: number;
+}
+
+export interface ReaderMachine {
+  pressureLevel: number | null; // kern.memorystatus_vm_pressure_level; null when the sysctl failed
+  timebase: { numer: number; denom: number };
 }
 
 // The reader's output, by pid: a pid it could not read (gone, or not ours) gives the call's errno. A pid with no line,
@@ -179,15 +205,76 @@ export function footprints(text: string, pids: readonly number[]): Map<number, F
       const line = lines.get(String(pid)) ?? '';
       const failed = new RegExp(`^${pid} errno (\\d+)$`).exec(line);
       if (failed) return [pid, { errno: Number(failed[1]) }];
-      const match = new RegExp(`^${pid} (\\d+) (\\d+)$`).exec(line);
+      const match = new RegExp(`^${pid} (\\d+) (\\d+) (\\d+) (\\d+) (\\d+) (\\d+)$`).exec(line);
       if (!match) throw new Error(`the footprint reader printed no line for pid ${pid}: ${JSON.stringify(text)}`);
-      return [pid, { footprintKiB: Number(match[1]) / 1_024, residentKiB: Number(match[2]) / 1_024 }];
+      const [footprint, resident, cpuTicks, idleWakeups, interruptWakeups, pageins] = match.slice(1).map(Number) as [number, number, number, number, number, number];
+      return [pid, { footprintKiB: footprint / 1_024, residentKiB: resident / 1_024, cpuTicks, idleWakeups, interruptWakeups, pageins }];
     }),
   );
 }
 
-export function readFootprints(pids: readonly number[]): Map<number, Footprint | { errno: number }> {
-  return footprints(execFileSync('python3', ['-I', '-c', FOOTPRINT_READER, ...pids.map(String)], { encoding: 'utf8' }), pids);
+// The reader's `machine` line. Its absence, or another form, is the reader failing, and throws quoting what it printed.
+export function readerMachine(text: string): ReaderMachine {
+  const match = /^machine (\d+|-) (\d+) (\d+)$/m.exec(text);
+  if (!match) throw new Error(`the footprint reader printed no machine line: ${JSON.stringify(text)}`);
+  return { pressureLevel: match[1] === '-' ? null : Number(match[1]), timebase: { numer: Number(match[2]), denom: Number(match[3]) } };
+}
+
+export function readFootprints(pids: readonly number[]): { processes: Map<number, Footprint | { errno: number }>; machine: ReaderMachine } {
+  const text = execFileSync('python3', ['-I', '-c', FOOTPRINT_READER, ...pids.map(String)], { encoding: 'utf8' });
+  return { processes: footprints(text, pids), machine: readerMachine(text) };
+}
+
+// The machine's paging counters (vm_stat's Pageouts and Swapouts, in pages since boot), read at a window's first and last
+// samples: the O17 footprint fix recording paging directly, since the mini's pressure level stays at 1 while it pages
+// hard. Recorded only, read by no verdict.
+export interface VmPaging {
+  pageBytes: number; // vm_stat's page size
+  pageouts: number;
+  swapouts: number;
+}
+
+// One `vm_stat`'s page size (its header) and Pageouts and Swapouts lines (`Pageouts:   60319289.`); a missing one
+// throws, quoting the output.
+export function vmPaging(text: string): VmPaging {
+  const count = (pattern: RegExp, what: string) => {
+    const match = pattern.exec(text);
+    if (!match) throw new Error(`vm_stat printed no ${what}: ${JSON.stringify(text)}`);
+    return Number(match[1]);
+  };
+  return { pageBytes: count(/\(page size of (\d+) bytes\)/, 'page size'), pageouts: count(/^Pageouts:\s+(\d+)\.$/m, 'Pageouts line'), swapouts: count(/^Swapouts:\s+(\d+)\.$/m, 'Swapouts line') };
+}
+
+// A process's activity between two of its readings, the CPU through the timebase in milliseconds to two places.
+export interface ActivityDelta {
+  cpuMs: number;
+  idleWakeups: number;
+  interruptWakeups: number;
+  pageins: number;
+}
+
+export function activityDelta(first: ProcessActivity, last: ProcessActivity, timebase: ReaderMachine['timebase']): ActivityDelta {
+  return {
+    cpuMs: Math.round(((last.cpuTicks - first.cpuTicks) * timebase.numer) / timebase.denom / 10_000) / 100,
+    idleWakeups: last.idleWakeups - first.idleWakeups,
+    interruptWakeups: last.interruptWakeups - first.interruptWakeups,
+    pageins: last.pageins - first.pageins,
+  };
+}
+
+// The window's recording-only line, printed beside the case's own: the pressure levels its samples read (each level
+// with its count), the paging vm_stat counted from its first sample to its last, and each process's CPU, wakeups and
+// pageins from its first reading to its last. No verdict reads any of it.
+export function activityLine(run: { pressureLevels: readonly (number | null)[]; paging: { pageouts: number; swapouts: number; seconds: number }; processes: readonly ({ argv0: string } & ActivityDelta)[] }): string {
+  const counts = new Map<string, number>();
+  for (const level of run.pressureLevels) counts.set(level === null ? 'unread' : String(level), (counts.get(level === null ? 'unread' : String(level)) ?? 0) + 1);
+  const pressure = [...counts].map(([level, n]) => `${level} at ${n}`).join(', ');
+  const processes = run.processes.map((p) => `${p.argv0} cpu ${p.cpuMs.toFixed(2)} ms, wakeups ${p.idleWakeups} idle and ${p.interruptWakeups} interrupt, pageins ${signed(p.pageins)}`).join('; ');
+  return `[daemon-idle] window activity (recorded only) · memory pressure level ${pressure} of ${run.pressureLevels.length} samples · vm_stat swapouts ${signed(run.paging.swapouts)}, pageouts ${signed(run.paging.pageouts)} over ${run.paging.seconds} s · ${processes}`;
+}
+
+export function readVmPaging(): VmPaging {
+  return vmPaging(execFileSync('vm_stat', { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }));
 }
 
 // The second, independent reader: top's MEM column, which top(1) documents as the physical memory footprint. It prints
