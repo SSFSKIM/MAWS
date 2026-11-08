@@ -375,6 +375,50 @@ describe('remove', () => {
     }
   });
 
+  it('removes the member as the head being amended lists it: a device listed or a promotion after the first read counts', async () => {
+    // The head moves between remove's read and its amend: the edit the amend replays sees the new head, and what it
+    // revokes, and whether it removes at all, is that head's.
+    const B = 'b'.repeat(32);
+    const keys = await Promise.all([0, 1, 2, 3].map(() => generateSigningKey()));
+    const first: Device = { id: 'd-1', class: 'native-mac', keyStorage: 'software', channelPub: keys[0].pub, stepUpPub: keys[1].pub };
+    const second: Device = { id: 'd-2', class: 'native-mac', keyStorage: 'software', channelPub: keys[2].pub, stepUpPub: keys[3].pub };
+    const moving = (move: (b: OrgState['members'][number]) => void) => {
+      const admin = fakeAdmin([{ id: B, email: EMAIL, role: 'member', devices: [first] }]);
+      const amend = admin.amend;
+      let moved = false;
+      admin.amend = async (what, edit) => {
+        if (!moved) {
+          moved = true;
+          const next = structuredClone(admin.states.at(-1)!);
+          next.version += 1;
+          move(next.members.find((m) => m.id === B)!);
+          admin.states.push(next);
+        }
+        return amend(what, edit);
+      };
+      return admin;
+    };
+
+    const listed = moving((b) => void b.devices.push(second));
+    const run = options({ verb: 'remove', admin: listed, member: B });
+    expect(await runRealMember(run.o)).toBe(0);
+    const after = listed.states.at(-1)!;
+    expect(after.members.map((m) => m.id)).toEqual([ADMIN_MEMBER]);
+    expect(after.revoked.map((r) => [r.holder.device, r.holder.key])).toEqual([['d-1', 'channel'], ['d-1', 'step-up'], ['d-2', 'channel'], ['d-2', 'step-up']]);
+    expect(after.revoked.map((r) => r.keyId)).toEqual(await Promise.all(keys.map((k) => keyId(k.pub))));
+    expect(run.lines.join('\n')).toMatch(/its 2 device\(s\)' 4 key\(s\) revoked/);
+
+    const promoted = moving((b) => {
+      b.role = 'admin';
+      b.devices.push(second);
+    });
+    const refused = options({ verb: 'remove', admin: promoted, member: B });
+    expect(await runRealMember(refused.o)).toBe(1);
+    expect(refused.lines.join('\n')).toMatch(/is an admin/);
+    expect(promoted.states.at(-1)!.members.map((m) => m.id)).toEqual([ADMIN_MEMBER, B]);
+    expect(promoted.states.at(-1)!.revoked).toEqual([]);
+  });
+
   it('says there is nothing to remove for a member the head no longer lists, and never removes the admin’s own', async () => {
     const gone = options({ verb: 'remove', emailFile: emailFile() });
     expect(await runRealMember(gone.o)).toBe(0);

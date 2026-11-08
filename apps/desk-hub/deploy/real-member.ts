@@ -290,26 +290,56 @@ async function remove(admin: RealMemberAdmin, who: { email: string } | { member:
   // Known to the scrubber and the search before anything else, whichever way the member was found (by --member, the
   // email was never read): a refusal, or the hub's own words, may quote it.
   io.secret(member.email);
-  if (member.id === admin.member || member.role === 'admin') refuse(`the member ${member.id} is an admin: this step removes the second member alone`);
-  const keys: RevokedKey[] = [];
-  for (const device of member.devices) {
-    for (const [key, pub] of [
-      ['channel', device.channelPub],
-      ['step-up', device.stepUpPub],
-    ] as const) {
-      if (pub !== undefined) keys.push({ keyId: await keyId(pub), holder: { member: member.id, device: device.id, class: device.class, key } });
+  const id = member.id;
+  const isAdmin = (m: OrgState['members'][number]) => m.id === admin.member || m.role === 'admin';
+  if (isAdmin(member)) refuse(`the member ${id} is an admin: this step removes the second member alone`);
+  // What the removal revokes and whether it removes at all are the head's being amended (amend replays the edit on a
+  // head that moved): the edit is synchronous and key ids are not, so each key id is worked out first, and an edit that
+  // meets a key it has none for (a device listed meanwhile) posts nothing, and the removal starts again from that head.
+  const kids = new Map<string, string>();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const head = attempt === 0 ? state : (await admin.read()).state;
+    for (const m of head.members.filter((x) => x.id === id)) for (const device of m.devices) for (const pub of [device.channelPub, device.stepUpPub]) if (pub !== undefined && !kids.has(pub)) kids.set(pub, await keyId(pub));
+    // Why the edit posted nothing, as the last head it was given read (amend calls it once per head).
+    let ended = null as 'gone' | 'admin' | 'unknown key' | null;
+    let counted = { devices: 0, keys: 0 };
+    const signed = await admin.amend(`the member ${id} removed, its devices' keys revoked`, (s) => {
+      ended = null;
+      const m = s.members.find((x) => x.id === id);
+      if (m === undefined || isAdmin(m)) {
+        ended = m === undefined ? 'gone' : 'admin';
+        return false;
+      }
+      const keys: RevokedKey[] = [];
+      for (const device of m.devices) {
+        for (const [key, pub] of [
+          ['channel', device.channelPub],
+          ['step-up', device.stepUpPub],
+        ] as const) {
+          if (pub === undefined) continue;
+          const kid = kids.get(pub);
+          if (kid === undefined) {
+            ended = 'unknown key';
+            return false;
+          }
+          keys.push({ keyId: kid, holder: { member: id, device: device.id, class: device.class, key } });
+        }
+      }
+      s.members = s.members.filter((x) => x.id !== id);
+      s.revoked.push(...keys.filter((k) => !s.revoked.some((r) => r.keyId === k.keyId)));
+      counted = { devices: m.devices.length, keys: keys.length };
+    });
+    if (signed !== null) {
+      io.print(`removed: the member ${id}, its ${counted.devices} device(s)' ${counted.keys} key(s) revoked (version ${signed.state.version})`);
+      break;
     }
+    if (ended === 'gone') {
+      io.print(`nothing to remove: the member ${id} left the head meanwhile`);
+      return 0;
+    }
+    if (ended === 'admin') refuse(`the member ${id} is an admin in the head now: this step removes the second member alone; nothing was removed`);
+    if (attempt === 2) refuse(`the member ${id}'s devices kept changing under the removal: run remove again; nothing was removed`);
   }
-  const signed = await admin.amend(`the member ${member.id} removed, its devices' keys revoked`, (s) => {
-    if (!s.members.some((m) => m.id === member.id)) return false;
-    s.members = s.members.filter((m) => m.id !== member.id);
-    s.revoked.push(...keys.filter((k) => !s.revoked.some((r) => r.keyId === k.keyId)));
-  });
-  if (signed === null) {
-    io.print(`nothing to remove: the member ${member.id} left the head meanwhile`);
-    return 0;
-  }
-  io.print(`removed: the member ${member.id}, its ${member.devices.length} device(s)' ${keys.length} key(s) revoked (version ${signed.state.version})`);
   io.print(`next: staging-run.sh access-sync, so staging's Access no longer admits ${SECOND_EMAIL}`);
   return 0;
 }
