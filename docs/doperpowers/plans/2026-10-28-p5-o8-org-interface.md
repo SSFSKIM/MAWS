@@ -1,6 +1,6 @@
 # P5 O8 — The org interface (2026-10-28)
 
-> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `257faf80e19062a89fb24caafa28f2c448b68bac` at master `48e0ed15a` (P5's Decision Logs 1–248; re-pinned on 2026-11-07 at M6b's cut, where 246–248 change nothing M6b consumes: 246 lands M7b, 247 puts O18's build on the production hub and has sminos 1.40.0 remove phase 1's hub path, 248 lands M6a and adds M6a's endpoint rule to Decision Log 235's second-member precondition. Before that, at blob `7781e2d50a7a4a5f86576f11354128d444b8fe39` and master `14ec11778`, P5's Decision Logs 1–245, re-pinned on 2026-11-07 at M6a's cut, where 239–245 change nothing M6a consumes: 239 and 240 swap both Macs to f857f0450, 241 lands #506's RL2 11 and `WIRE_MINOR` 29, 242 ends O14, 243 and 244 shape and pass O18 M6 on staging without `record`, 245 meets Decision Log 227's floor. Before that, at blob `92141de56e15ff65c3da5baa8fa135cdecf075c7` and master `f857f0450`, P5's Decision Logs 1–238, re-pinned on 2026-11-06 at M7b's cut, where 229–238 change nothing M7b consumes: 232 sets the order, 238 lands M7a. Before that, at blob `b99c1767` and master `910539147`, re-pinned for the re-plan of the rest: 223 to 228 make M6's Share sheet O18's M5, with the `list` grade and audience streams; 154 moves the last machine, so the owner's words no longer wait; 155 waives B4's wait on M7's reader; 168 closes O3 and 222 closes O7; 190 makes the spawner an owner and leaves its residue (b) due before owners move; earlier pin blob `d07bfc4ea2466d7d5ca7ca3164aed4d93021311a` at master `6fb933626`, P5's Decision Logs 1–129, re-pinned on 2026-10-29 for M4's re-plan: 121 lands H1, 126 leaves M4 the refused attempt and the section's split, 129 lands M5 and names M4 next; earlier pin blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83`, Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
+> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `5cb515f365cc18780df3cd8451c3c7d828ffca95` at master `bd2b59baa` (P5's Decision Logs 1–251; re-pinned on 2026-11-08 at M4b's cut. Of 249–251, only 251 bears on M4b: it lands M6b (`signActions`, `actMany`, `policy.ts`, the local door, `WIRE_MINOR` 32) and records the channel-reach fix in flight. 249 is the three machines' swaps, and 250 makes the wire fingerprint a committed file that `pnpm wire:manifest` refreshes. Before that, at blob `257faf80e19062a89fb24caafa28f2c448b68bac` and master `48e0ed15a`, P5's Decision Logs 1–248, re-pinned on 2026-11-07 at M6b's cut, where 246–248 change nothing M6b consumes: 246 lands M7b, 247 puts O18's build on the production hub and has sminos 1.40.0 remove phase 1's hub path, 248 lands M6a and adds M6a's endpoint rule to Decision Log 235's second-member precondition. Before that, at blob `7781e2d50a7a4a5f86576f11354128d444b8fe39` and master `14ec11778`, P5's Decision Logs 1–245, re-pinned on 2026-11-07 at M6a's cut, where 239–245 change nothing M6a consumes: 239 and 240 swap both Macs to f857f0450, 241 lands #506's RL2 11 and `WIRE_MINOR` 29, 242 ends O14, 243 and 244 shape and pass O18 M6 on staging without `record`, 245 meets Decision Log 227's floor. Before that, at blob `92141de56e15ff65c3da5baa8fa135cdecf075c7` and master `f857f0450`, P5's Decision Logs 1–238, re-pinned on 2026-11-06 at M7b's cut, where 229–238 change nothing M7b consumes: 232 sets the order, 238 lands M7a. Before that, at blob `b99c1767` and master `910539147`, re-pinned for the re-plan of the rest: 223 to 228 make M6's Share sheet O18's M5, with the `list` grade and audience streams; 154 moves the last machine, so the owner's words no longer wait; 155 waives B4's wait on M7's reader; 168 closes O3 and 222 closes O7; 190 makes the spawner an owner and leaves its residue (b) due before owners move; earlier pin blob `d07bfc4ea2466d7d5ca7ca3164aed4d93021311a` at master `6fb933626`, P5's Decision Logs 1–129, re-pinned on 2026-10-29 for M4's re-plan: 121 lands H1, 126 leaves M4 the refused attempt and the section's split, 129 lands M5 and names M4 next; earlier pin blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83`, Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
 >
 > **What binds.** O8's section in P5 is this document's design, and P5's approval covers it. Binding with it:
 > - P5 §7 (people: owners, visibility, machine owners and grants, agents talk as today, credentials) and §8 (the sidebar's per-project toggle, the project channel, the Org page, attention across machines); parent acceptance 3 (its remote rows: Decision Log 93), 11 and 12.
@@ -116,6 +116,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-08) Branch review clean. reviewer-high, with a security lens, found 3 P2s (eaafe05af, df906b6e9 and 95be41576, the last reviewed by the desk track as desk 644), and its re-review found the branch correct. Master 5b1f73877 merged in at 0db815f19.
   - [x] (2026-11-08) The final gate at 169108598 (`--gates all --evidence --lane hosted`, run 42438203920) is green on its first attempt: 55 jobs, with 2 matrix placeholders skipped and no flaky line. The commits after it are docs only. The PR is opened. The shared staging run is on the branch head (Decision Log, "M6b lands before the shared run", amended).
 - [ ] M4b — Machines and their rights — *executable; after M6b*
+  - [x] (2026-11-08) Refresh at the cut: branch `p5-o8-m4b`, cut from master bd2b59baa after M6b landed as #522. The cited lines were reconciled, the parent was re-pinned at Decision Log 251, and the plan made: six tasks (Decision Log, "M4b's refresh at its cut" and "M4b is built as six tasks").
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
 - [ ] M5b — Add owner — *executable; after M4c; lands once the desk track's `record.owners` executor and DL190 (b)'s fix are on master*
 - [ ] M8 — The deployment admin's end, and acceptance — *owner steps and evidence; last; needs O14's B4 steps 4 to 8 and M3's root-add sitting (its first step)*
@@ -3843,6 +3844,57 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
     - The landing doesn't wait for the run unless the run finds a defect. A defect it finds is fixed before landing.
     - The sitting launches from the architect's prepared worktree at that head.
   Date/Author: 2026-11-08, the architect, recorded by O8's executor (controller).
+
+- Decision: M4b's refresh at its cut (2026-11-08, master bd2b59baa). M4b's section and §R were reconciled against the code; a read-only pass checked every citation. Neither the move nor any grants interface has landed. These corrections bind M4b. Each keeps the section's intent.
+  1. **Citations that moved.**
+     - The v2 enrollment codec is at `identity.ts:474-510`: the type at 483, validation at 488-501, the encoder and decoder at 503-510. It uses `checkHub` (399) and `body` (413).
+     - The enrollment-key poll is `registry.ts:1460-1467`. It answers `unknown-enrollment`, `not-yours` or `no-key`. It doesn't recheck the admin role, so `403 not-admin` is not one of its outcomes. `createEnrollment` is at 295-324.
+     - The live signature check is `signedBy` (`records.ts:48-52`). `signedByIn` is 66-69.
+     - The other citations still hold: `admin.ts` 878-946, 924-943 and 1100-1131; `records.ts` 72-105; `grants.ts` 38-51 and 56-65; `endpoint-actions.ts` 15-18 and 103-108; `store.ts` 286-300; `enroll.ts` 208-225.
+  2. **The on-machine command** is `mawsd enroll`, with the code pasted at its hidden prompt, and `--replace` when the machine still holds an enrollment. It is not "`mawsd endpoint enroll <code>`": the parser refuses a code argument, and it would put the secret on the command line (`src/mawsd/cli.ts:473-498`, `enroll.ts:82-90`). The sheet's line says so.
+  3. **The name checks.**
+     - Before the mint, the composer refuses a name already listed, unless it is `replace`'s own, and a name inside a delegation's prefix.
+     - The permanent name/ref binding (`machineNames`) can only be judged once the candidate's ref is known, so it is checked at the candidate and again at approval, as `admin.ts:928-931` does.
+     - The refusal codes are the package's where it has them: `machine-name-taken`, `machine-names`, `prefix-names-machine`, `owners-unknown`, `shape` (`org-state.ts:87-125`).
+     - The mint's replace argument is the machine's **name**, and it needs an active hub row (`registry.ts:305-308`).
+     - The mint's TTL is 3600, the maximum the hub accepts. The CLI's default is 900.
+  4. **Delivery.**
+     - `endpoint.grant` goes as an act with `stepUp: 'never'`, as M3's deliveries send self-signed records (`deliveries.ts:307`). `none` is not an `ActRequest.stepUp` value.
+     - A grant intake refusal such as `not-newer` comes inside a `done` whose result is `{ok: false, error: {code}}` (`endpoint-actions.ts:84-86`, `endpoint.ts:993-1001`). An orphaned op reads `unknown`/`expired` at the link (`acts.ts:467-485`).
+  5. **Signing a grant is not a state signing.**
+     - `RecordSigner` is new. It reuses `Confirm` and `StateSigner`'s canonical-copy and `live` behaviour (`step-up.ts:209-248`).
+     - It is not routed through `OrgSigner`, `signActions` or `actMany`. Those sign root states or outer transport actions, and either would add a wrong confirmation or signature layer.
+  6. **`grantProblems`** returns its own async diagnostics, not the successor-only `Problem` union. It keeps `verifyGrant`'s verdict order and its revoked-signer semantics.
+  7. **Wiring.**
+     - The main composition is in `src/main/app.ts` (312-388), not `index.ts`.
+     - New commands also join `register.ts`'s production and development lists (89-105), and the session's wrapped `signerHub` (`org-session.ts:805-822`).
+     - Enrollment and grants join `close()` in its current order (`org-session.ts:1710-1742`) and the sign-out fence (1663-1697).
+     - `orgView` gains the certificate set, so certified machines appear.
+     - `page-fixture.ts`'s answer map gains the grants and enrollment answers for the e2e case.
+  8. **`grants.json` fails closed by an explicit rule.** `files.ts`'s `read` collapses missing, unreadable and malformed files to null. So `grants.json` takes `signing-store.ts`'s marker model (45-109) to tell a pristine absence from damage.
+  9. **Tests.**
+     - `apps/org-protocol/test/enrollment.test.ts` and `records.test.ts` are new files.
+     - `verifyGrant`'s unchanged-verdict proof is the existing vector replay (`vectors.test.ts`), the grant scenarios (`vectors/scenario.ts:743-770`) and `attest.test.ts:41-44`.
+     - `org-page.local.test.ts`'s cases 7-11 recreate member B, since case 6 removes B, and the suite's signed-change and prompt totals move with them.
+     - `local-org.ts`'s `enrollEndpoint` stays a setup helper, because it bypasses the app's enrollment. Case 7 enrolls through the app.
+  10. **No new machine-drop delivery is needed.** M3's `endsKeys` already covers a key that is retired or revoked (`deliveries.ts:96-103`).
+  11. **The endpoint call's footprint** is `src/endpoint/grants.ts` (the ledger projection, and members read from the head, not from the surviving grants), `offers.ts`, `calls.ts`, `endpoint.ts` (the callback's injection at `new Calls({...})`), and `test/endpoint/grants-call.test.ts`.
+     - `channel-view.ts` and `authorize.ts` don't change.
+     - `endpoint.ts` is also edited by the channel-reach fix (P5 Decision Log 251), so the architect is told before it is edited.
+     - `record.policy`, the pattern to follow, has no `sminos` offer gate, and `endpoint.grants` takes none.
+  Two forks went to the architect: whether this Mac's own machine gets grants through the local door, and who sees Grant…, by `verifyGrant` eligibility or by `maySign`. Task 3 waits on the rulings.
+  Date/Author: 2026-11-08, O8's executor (controller).
+
+- Decision: M4b is built as six tasks under subagent-driven execution, each reviewed at its frontier. Then reviewer-high reviews the branch with a security lens, as the rest's verification entry names. The desk track reviews every `apps/org-protocol`, `apps/desk-hub` and `src/endpoint` hunk, in commits of their own.
+  1. **The move and `grantProblems`.** The v2 codec and its validation go to `apps/org-protocol/src/enrollment.ts`, and `certificateViews`, `resolveMachine` and `machineRows` to `apps/org-protocol/src/machines.ts`. The package's structural input row is not `admin-machines.ts`'s output `MachineRow`. Then `grantProblems`, with `verifyGrant` built on it. The admin suites pass unchanged, `pnpm --filter desk-hub build` stays clean, and the strip-types import line holds.
+  2. **`endpoint.grants`**, with its test. Master is merged in before `endpoint.ts` is edited.
+  3. **Main's machine edits and enrollment.** `edits.ts`'s four kinds, `enroll.ts`, `hub-client.ts`'s three routes, the schema (`OrgView.machines`, `OrgStatus.registered.enrolling`, `org.enroll.*`), `view.ts`, the wiring, and their tests.
+  4. **Main's grants.** `RecordSigner`, `grants.ts`, `grants.json`, delivery, the missing-grant judge, `org.grants.*`, and their tests.
+  5. **The renderer.** `MachinesGroup.tsx`, `EnrollSheet.tsx`, `GrantSheet.tsx`, `ChangeSheet.tsx`'s machine fields, `copy.ts`, `page-fixture.ts`, and `e2e/org-page.spec.ts`'s seed and screenshots.
+  6. **The local suite.** `org-page.local.test.ts`'s cases 7-11.
+
+  Each task's gate set includes unit (M6b's lesson). From M6b's retrospective, each task's tests end the owning sign-in, head or process mid-flight wherever state outlives a confirmation.
+  Date/Author: 2026-11-08, O8's executor (controller).
 
 ## Outcomes & Retrospective
 
