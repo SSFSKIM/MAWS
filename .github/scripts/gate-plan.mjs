@@ -81,10 +81,12 @@
 // Mac on both), `Lane: no-hosted` keeping it on the Mac. Unsigned packaged can also take the direct Mac on a macOS lane when HOSTED_MAC_JOBS admits it, except
 // on reserved final refs. Hosted packaged runs two bare-suite shards, each building its app; self-hosted stays one
 // unsharded job. Lane moves e2e groups only, not packaged.
-// A fresh Mac-Backlog: trailer from ci-gate's account-wide count can overflow direct hosted e2e onto EC2 alone when
+// A fresh Mac-Backlog: trailer from ci-gate's account-wide count can overflow direct hosted e2e onto EC2 or the mini when
 // its speed-weighted queue starts sooner than the hosted queue (fractional rounds at HOSTED_MAC_CAP slots, default five); ties stay hosted.
-// HOSTED_MAC_ONLY_E2E excludes parity failures. Overflow retains the hosted retry policy, uses the exclusive timeout
-// and self-hosted setup, and carries overflow: true (the job name and ci-gate tail identify it). No sample: no change.
+// HOSTED_MAC_ONLY_E2E excludes parity failures. Overflow retains the hosted retry policy and uses its target
+// placement's timeout and self-hosted setup, and carries overflow: 'ec2' or 'mini' (the job name and ci-gate tail identify it). No sample: no change.
+// MAC_MINI_OVERFLOW=off disables mini moves. Its normal placement's lanes must be free in MAC_MINI_LANES,
+// published by the mini: absent, unreadable or stale publication holds both lanes, so no mini overflow before deployment.
 // The old full-round rule runs in shadow with independent queues. The entry point emits its count as the plan check's
 // `EC2 overflow shadow` notice, `old_rule_count=<n>`, readable through the Checks annotations API for EC2 release accounting.
 // The peer groups (PEER_E2E; the two-build check, e2e/cross-build.spec.ts): each runs this tree's app against another
@@ -106,7 +108,7 @@ import { appendFileSync, readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { affected } from './gate-affected.mjs';
-import { backlogOf } from './gate-backlog.mjs';
+import { backlogOf, utcTimestampOf } from './gate-backlog.mjs';
 
 const words = (text = '') => text.split(/[\s,]+/).filter(Boolean);
 // `default` is the bare `pnpm e2e` set (after `pnpm build`, as `verify` orders them), which the e2e job narrows to the specs
@@ -192,6 +194,12 @@ export function planOf(env, scripts, now) {
   const poolBox = (cpus) => ['self-hosted', 'ci-kit-pool', `cpus-${cpus}`];
   // The guest's labels: a job asking for one of these may run in the guest.
   const GUEST = [RUNNERS.macSolo, RUNNERS.macVm, RUNNERS.macVmTrial];
+  // A guest-eligible e2e job's transfers ride the Mac's uplink, Wi-Fi while its Ethernet passes no traffic: on
+  // 2026-11-08 a job spent 29 minutes in checkout, setup-node and download-artifact before its first test and was cut at
+  // its 40 (run 42453368238, e2e:connectors-oauth). The job carries this margin on top; its test step keeps the job's
+  // former limit (`test_timeout`), so a hung test is caught as soon as before. Back to 0 once the Mac's uplink is fixed
+  // (CI-opt's lesson 130, the uplink's friction entry).
+  const UPLINK_MARGIN_MINUTES = 35;
   // e2e-build's box: one `electron-vite build`, which exhausted V8's default heap (about 1 GB) in the 4 GB guest (widgets);
   // the workflow's NODE_OPTIONS lifts that limit to 5 GB, which cpus-4's c3d-highcpu-4, with 8 GB, holds.
   const E2E_BUILD_BOX = poolBox(4);
@@ -199,8 +207,9 @@ export function planOf(env, scripts, now) {
   // UNIT_CPUS. One vitest process keeps its box's cores only 55-70% busy (its main process transforms for every worker),
   // so more processes on more boxes end the suite sooner than more cores on one. Five or more shards, or 16-core shards,
   // turned suites red that wait on those transforms cold (TranscriptSlot's hooks under renderer-compiled); four shards of
-  // eight cores did not (CI-opt's critical-path arms, 2026-10-21). A selected run that tests only the related suites, and
-  // a run off the pool, is the one job `unit`.
+  // eight cores did not (CI-opt's critical-path arms, 2026-10-21). The hosted Linux lane shards the same way, each shard
+  // on its own 4-vCPU runner: the whole suite as one job there took 24 min and once ran past its 30 (runs 42454401786 and
+  // 42454693155, 2026-11-08). A selected run that tests only the related suites, and a run on macOS, is the one job `unit`.
   const UNIT_SHARDS = 4;
   const UNIT_CPUS = 8;
   const CLASS1A_RUNNERS = {
@@ -353,23 +362,47 @@ export function planOf(env, scripts, now) {
   // times over for a cold store or a slow Mac.
   const PEER_MINUTES = 15;
   // The caller counts the configured quota-sharing repos; capped hosted counts are lower bounds, favoring today's placement.
-  // EC2's queue must be complete. Missing, failed or stale samples never move work; the mini is never overflow.
+  // Both self-hosted queues must be complete. Missing, failed or stale samples never move work.
   // Lane: hosted asks for the hosted Macs themselves (a trial or an admission): nothing of it moves, whatever a sample says.
   const backlog = !dispatched && direct && laneAsked !== 'hosted' ? backlogOf(trailer('Mac-Backlog'), now) : null;
+  // Sampling/cache/plan startup must not renew the mini publisher's five-minute availability lease.
+  if (backlog?.v === 2) {
+    const lanesAge = now - utcTimestampOf(backlog.lanesAt);
+    if (!Number.isFinite(lanesAge) || lanesAge < 0 || lanesAge > 300_000) {
+      backlog.miniHost = 'held';
+      backlog.miniVm = 'held';
+    }
+  }
   const hostedOnly = new Set(words(env.HOSTED_MAC_ONLY_E2E));
   // CI-opt's 2026-10-31 analysis of MAWS jobs, 2026-10-28 to 10-31: median self-hosted/hosted runtime ratio
   // over 29 groups with 3+ runs on each side (self-hosted: mini or EC2; hosted: macos-26).
-  const EC2_HOSTED_RUNTIME_RATIO = 0.46;
-  const sent = { hosted: 0, ec2: 0 };
+  const SELF_HOSTED_RUNTIME_RATIO = 0.46;
+  // Conservative shared capacity: host and guest can each run one, but measured runs and holds take the host.
+  const MINI_SLOTS = 1;
+  const sent = { hosted: 0, ec2: 0, mini: 0 };
   const shadowSent = { hosted: 0, ec2: 0 };
   const overflowOf = (group, queue, shadow = false) => {
-    // EC2's release disables optional moves for every group; keep the old-rule shadow for accounting.
-    if ((!shadow && ec2Off) || !backlog || backlog.ec2 === 'offline' || hostedOnly.has(group)) return false;
+    if (!backlog || hostedOnly.has(group)) return false;
     const ec2Ahead = (backlog.ec2 === 'busy' ? 1 : 0) + backlog.ec2Queued + queue.ec2;
     const hostedAhead = (backlog.hostedRunning + backlog.hostedQueued + queue.hosted - hostedCap) / hostedCap;
-    // Greedy expected start in hosted-runtime units, without rounding; a tie stays hosted.
-    // The shadow preserves the old predicate, charging only its own hypothetical placements.
-    return shadow ? ec2Ahead < Math.max(0, Math.floor(hostedAhead)) : ec2Ahead * EC2_HOSTED_RUNTIME_RATIO < hostedAhead;
+    // Preserve the EC2-only old predicate and its independent queue, even after EC2's release.
+    if (shadow) return backlog.ec2 !== 'offline' && ec2Ahead < Math.max(0, Math.floor(hostedAhead)) ? 'ec2' : false;
+    let target = false, soonest = hostedAhead;
+    const ec2Start = ec2Ahead * SELF_HOSTED_RUNTIME_RATIO;
+    if (!ec2Off && backlog.ec2 !== 'offline' && ec2Start < soonest) {
+      target = 'ec2'; soonest = ec2Start;
+    }
+    const where = placed(group);
+    const lanesFree = GUEST.includes(where)
+      ? backlog.miniVm === 'free' && (where !== RUNNERS.macSolo || backlog.miniHost === 'free')
+      : backlog.miniHost === 'free';
+    // A launchd group's normal placement may be EC2 alone, which is not a mini target.
+    if (backlog.v === 2 && backlog.mini !== 'offline' && env.MAC_MINI_OVERFLOW !== 'off' && where !== RUNNERS.macEc2 && lanesFree) {
+      const miniStart = (backlog.miniRunning + backlog.miniQueued + queue.mini) * SELF_HOSTED_RUNTIME_RATIO / MINI_SLOTS;
+      // A tie with hosted stays hosted; between self-hosted targets it favors the mini.
+      if (miniStart < soonest || (target === 'ec2' && miniStart === soonest)) target = 'mini';
+    }
+    return target;
   };
   const e2e = [...gates]
     .filter((gate) => gate.startsWith('e2e:'))
@@ -379,21 +412,23 @@ export function planOf(env, scripts, now) {
       const overflow = eligible && direct && overflowOf(group, sent);
       const hosted = eligible && !overflow;
       if (eligible && direct) {
-        sent[overflow ? 'ec2' : 'hosted']++;
+        sent[overflow || 'hosted']++;
         shadowSent[overflowOf(group, shadowSent, true) ? 'ec2' : 'hosted']++;
       }
-      const where = overflow ? RUNNERS.macEc2 : hosted ? (direct ? RUNNERS.macHosted : HOSTED_WAITER) : placed(group);
+      const where = overflow === 'ec2' ? RUNNERS.macEc2 : hosted ? (direct ? RUNNERS.macHosted : HOSTED_WAITER) : placed(group);
       if (launchd.has(group) && where === RUNNERS.macEc2 && ec2Off) refuse(`LAUNCHD_E2E group ${group} needs EC2, but MAC_EC2 is off; it must never run in the home account`);
       const runner = JSON.stringify(where);
-      const guest = GUEST.includes(where) ? { variant: variantOf(group) } : {};
+      const onGuest = GUEST.includes(where);
+      const guest = onGuest ? { variant: variantOf(group) } : {};
       // A measured group's guard may wait 15 minutes, and a second after its build when its script builds out/ (gate.yml).
       const prebuild = measured.has(group) ? variantOf(group) : undefined;
       const minutes = ownMinutes.get(group) ?? (measured.has(group) ? (prebuild ? 60 : 45) : peerGroups.has(group) ? PEER_MINUTES : 30);
-      const timeout = hosted ? (direct ? minutes + HOSTED_MARGIN_MINUTES : HOSTED_TIMEOUT_MINUTES) : timeoutOn(where, minutes);
+      const testTimeout = timeoutOn(where, minutes);
+      const timeout = hosted ? (direct ? minutes + HOSTED_MARGIN_MINUTES : HOSTED_TIMEOUT_MINUTES) : testTimeout + (onGuest ? UPLINK_MARGIN_MINUTES : 0);
       // The build took 39% of the direct Macs' job time (23 jobs, 2026-10-28: 140 s of 368 s at the median), and a set larger
       // than the account's 5 Macs runs in rounds, whose later jobs can restore what the first ones built.
       const cached = hosted && direct ? variantOf(group) : undefined;
-      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(launchd.has(group) && { launchd: true }), ...(prebuild && { prebuild }), ...(hosted && { hosted }), ...(overflow && { overflow }), ...(eligible && direct && notHosted(group).length === 0 && { retry: true }), ...(cached && { cached }), runner, timeout, ...guest, ...(peerGroups.has(group) && peer && { peer }) };
+      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(launchd.has(group) && { launchd: true }), ...(prebuild && { prebuild }), ...(hosted && { hosted }), ...(overflow && { overflow }), ...(eligible && direct && notHosted(group).length === 0 && { retry: true }), ...(cached && { cached }), runner, timeout, ...(onGuest && { test_timeout: testTimeout }), ...guest, ...(peerGroups.has(group) && peer && { peer }) };
     });
   const e2eHosted = e2e.filter((entry) => entry.hosted && !direct);
   const e2eHost = e2e.filter((entry) => entry.variant === undefined && (!entry.hosted || direct));
@@ -414,7 +449,7 @@ export function planOf(env, scripts, now) {
   // The unit job's matrix: its shards, each with the `--shard` value and the suffix of its JUnit artifact's name
   // (test-results-unit-<k>of<n>-<attempt>, which ci-kit's test-history collector reads as one `unit` report), or the one
   // unsharded job.
-  const shards = class1a === 'pool' && !selection?.related ? UNIT_SHARDS : 1;
+  const shards = (class1a === 'pool' || class1a === 'linux') && !selection?.related ? UNIT_SHARDS : 1;
   const unitShards = shards > 1 ? Array.from({ length: shards }, (_, i) => ({ shard: `${i + 1}/${shards}`, slug: `-${i + 1}of${shards}` })) : [{ shard: '', slug: '' }];
   // The jobs' minutes outside the e2e matrix (whose entries carry their own); packaged's hosted bound is set below.
   const timeouts = { static: timeoutOn(runners.static, 30), unit: timeoutOn(runners.unit, 30), probes: timeoutOn(runners.probes, 30), unit_darwin: timeoutOn(unitDarwinRunner, 30) };
@@ -458,10 +493,11 @@ export function planOf(env, scripts, now) {
     (laneAsked === 'no-hosted' ? ' Lane: no-hosted, so no group of this run is hosted.' : '');
   const laneNote = !vmLane ? '' : laneJobs.length > 0 ? said(`Lane: ${vmLane}, on [${LANES[vmLane]}] alone`, laneJobs) : ` Lane: ${vmLane}, but no job of this run is on MAC_VM_E2E.`;
   const macNote =
-    said('EC2 overflow (ci-kit-mac-ec2)', e2e.filter((entry) => entry.overflow).map((entry) => `e2e:${entry.group}`)) +
+    said('EC2 overflow (ci-kit-mac-ec2)', e2e.filter((entry) => entry.overflow === 'ec2').map((entry) => `e2e:${entry.group}`)) +
+    said('mini overflow', e2e.filter((entry) => entry.overflow === 'mini').map((entry) => `e2e:${entry.group}`)) +
     said('EC2 (LAUNCHD_E2E, never the home account)', e2e.filter((entry) => launchd.has(entry.group) && !entry.overflow && entry.runner === JSON.stringify(RUNNERS.macEc2)).map((entry) => `e2e:${entry.group}`)) +
     (!vmLane ? said('Guest alone (LAUNCHD_E2E, never the home account)', jobsOn(RUNNERS.macVm)) : '') +
-    (backlog ? ` Mac backlog at ${backlog.at}: hosted ${backlog.hostedQueued} queued + ${backlog.hostedRunning} running; EC2 ${backlog.ec2}, ${backlog.ec2Queued} queued${backlog.partial.length ? `; hosted lower bound (capped: ${backlog.partial.join(', ')})` : ''}.` : '') +
+    (backlog ? ` Mac backlog at ${backlog.at}: hosted ${backlog.hostedQueued} queued + ${backlog.hostedRunning} running; EC2 ${backlog.ec2}, ${backlog.ec2Queued} queued${backlog.v === 2 ? `; mini ${backlog.mini}, ${backlog.miniQueued} queued + ${backlog.miniRunning} running (host ${backlog.miniHost}, vm ${backlog.miniVm})` : ''}${backlog.partial.length ? `; hosted lower bound (capped: ${backlog.partial.join(', ')})` : ''}.` : '') +
     said('Home Mac', jobsOn(RUNNERS.macHome)) +
     said('Shared Mac instances', jobsOn(RUNNERS.macShared)) +
     said('On MAC_SHARED_E2E but measured or foreground, so alone', inRun(keptAlone)) +

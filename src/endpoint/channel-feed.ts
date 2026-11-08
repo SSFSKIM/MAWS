@@ -1,8 +1,8 @@
 // The machine's `channel` feed (P5 O8 M7b, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M7b, Interfaces §O,
 // Decision Log "M7b's channel feed"): one org project's to-human entries on this machine, live, for a device's Channel tab.
 // The sub names the project (`{t: 'sub', feed: 'channel', project, cursor, credit}`, behind `rl2.channel`); it is admitted
-// at `list` for a member while the project is one of the org's (authorize.ts), and what it carries is cut entry by entry
-// to the sessions the member views, ranked lane by lane as `channel.history` cuts them (channel-view.ts).
+// at `list` for a member, whatever the project (authorize.ts; channel-view.ts' reach), and what it carries is cut entry by
+// entry to the sessions the member views, ranked lane by lane as `channel.history` cuts them (channel-view.ts).
 //
 // Every opening is `subbed {mode: 'snapshot', epoch: 'channel:<this endpoint's boot>', seq: 0}` with its `snap`, the
 // project's newest page the member views (`{entries, more}`, `channel.history {project}`'s first page as the member would be
@@ -38,10 +38,10 @@
 // waiting, the reads ranking them, the ids let go of, the ids of the snapshot's page (an entry it holds that
 // `channel.changed` brings again goes once).
 //
-// It ends with its channel, `removed` once the project is no longer the org's (the reader's reach is per project), `behind`
-// past plane B's backlog or past CHANGES_HELD entries the member views waiting, and `unavailable` when the spine can't
-// answer the snapshot's read (or the journal runs past the scan's bound), a session's placement or the member's ranks, or
-// the snapshot could not be vouched for (above): the device opens it again on its backoff.
+// It ends with its channel, `behind` past plane B's backlog or past CHANGES_HELD entries the member views waiting, and
+// `unavailable` when the spine can't answer the snapshot's read (or the journal runs past the scan's bound), a session's
+// placement or the member's ranks, or the snapshot could not be vouched for (above): the device opens it again on its
+// backoff.
 import { randomBytes } from 'node:crypto';
 import type { HostEntry } from '@shared/ipc/schema/channel';
 import { HISTORY_LIMIT_MAX } from '@shared/ipc/schema/channel';
@@ -57,8 +57,6 @@ export type ChannelFeedsContext = {
   dispatch: EndpointServices['dispatch'];
   /** The member's ranks on the machine's sessions as the head now gives them (`Authorizer.ranks`). */
   ranks(member: string): Promise<SessionRanks>;
-  /** Whether `project` is one of the org's projects in the head now (channel-view.ts' `orgProject`). */
-  reaches(project: string): boolean;
   /** The cursor each entry goes under (channel-cursors.ts). */
   cursors: Pick<ChannelCursors, 'seal'>;
   log(line: string): void;
@@ -354,7 +352,6 @@ export class ChannelFeeds {
     const { sub } = feed;
     for (;;) {
       if (!this.#live(feed)) return;
-      if (!this.#ctx.reaches(feed.project)) return void sub.end('removed');
       if (feed.pending !== null && sub.backlog === 0) feed.pending = null; // taken: the device holds it
       if (feed.ranks !== null && !feed.ranks.current()) void this.#readRanks(feed);
       if (!this.#rank(feed)) return;

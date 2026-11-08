@@ -103,7 +103,6 @@ import { readerOf } from './readers';
 import { dispatchAs, type EndpointServices } from './services';
 import type { CheckoutSource, RecordSource, SessionRecord, SessionTarget } from './sources';
 import { Assertions, deviceOf, stepUpRequired, verifyDeviceStepUp } from './step-up';
-import { orgProject } from './channel-view';
 import { artifactShortCut, CheckoutBounds, ownTaskList, placeArtifact, resolveSubscription, resolveTarget, withinCheckout, type HeldNames, type Placement, type Placing, type RecordMembers, type Resolved, type Spawner } from './targets';
 
 /**
@@ -589,12 +588,11 @@ export class Authorizer {
    */
   async #sub(input: unknown, who: Who, reads: Reads): Promise<Decision> {
     const message = input as SubMessage;
-    // The machine's own feeds (M6's `attention`, M5a's `artifacts`): `list`, cut by what they carry as it goes.
+    // The machine's own feeds (M6's `attention`, M5a's `artifacts`, M7b's `channel` of any project: channel-view.ts'
+    // reach): `list`, cut by what they carry as it goes.
     if (isMachineFeedSub(message)) {
       if (!this.#offers.feeds.includes(message.feed)) return refuse('not-offered');
       if (who.clientClass === 'web-cards') return refuse('class');
-      // P5 O8 M7b: the `channel` feed reaches its project while the project is the org's (its entries are cut each).
-      if (message.feed === 'channel' && !orgProject(this.ctx.org()?.head, message.project ?? '')) return refuse('no-target');
       return { ok: true };
     }
     const feed = message.feed;

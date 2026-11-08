@@ -55,11 +55,17 @@ else
   esac
   want=$(sha256_of_asset "$asset")
   cache=${MAWS_APP_GITLEAKS_CACHE:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/maws-app-gitleaks}
+  cache=$cache/$want
   archive=$cache/gitleaks_${GITLEAKS_VERSION}_$asset.tar.gz
   if [[ ! -f $archive || $(sha256 "$archive") != "$want" ]]; then
     mkdir -p "$cache"
     url=${MAWS_APP_GITLEAKS_URL:-https://github.com/gitleaks/gitleaks/releases/download}/v$GITLEAKS_VERSION/${archive##*/}
-    curl -fsSL --retry 3 --connect-timeout 20 -o "$work/download" "$url" || refuse "could not download gitleaks from $url"
+    if [[ -n ${MAWS_APP_GITLEAKS_URL:-} ]]; then
+      # An explicit test mirror is authoritative: never fall through to GitHub.
+      curl -fsSL --retry 2 --connect-timeout 20 --max-time 180 -o "$work/download" "$url" || refuse "could not download gitleaks from $url"
+    else
+      bash "$(dirname "$0")/release-fetch.sh" gitleaks/gitleaks "v$GITLEAKS_VERSION" "${archive##*/}" "$work/download" || refuse "could not download gitleaks from $url"
+    fi
     [[ $(sha256 "$work/download") == "$want" ]] || refuse "gitleaks from $url fails its checksum (want $want)"
     mv "$work/download" "$archive"
   fi

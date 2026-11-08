@@ -51,7 +51,9 @@ describe('a screencast on the link', () => {
     expect(h.heard).toEqual([['opened', { epoch: 'e1', tabId: OPEN.tabId, control: true }]]);
   });
 
-  it('reads a maximum frame and the one after it whole across chunks, refunding each chunk’s bytes as it comes, so the 1 MiB opening credit never stalls it', () => {
+  // Its own timeout: a maximum frame read across chunks and compared whole is CPU-bound, 4.0 s of the default 5 s on a
+  // 4-vCPU hosted Linux runner as the one unit job, and 5.06 s twice in a 4-way shard there (42457114696).
+  it('reads a maximum frame and the one after it whole across chunks, refunding each chunk’s bytes as it comes, so the 1 MiB opening credit never stalls it', { timeout: 20_000 }, () => {
     const h = harness();
     openBrowserStream(h.link, OPEN, h.sink);
     h.endpoint({ t: 'streamOpened', credit: 1024, browser: { epoch: 'e1', tabId: OPEN.tabId, control: false } });

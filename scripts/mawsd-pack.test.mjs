@@ -12,7 +12,8 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { URL } from 'node:url';
-import { closure, contentId, pack } from './mawsd-pack.mjs';
+import process from 'node:process';
+import { closure, contentId, fetchTo, pack } from './mawsd-pack.mjs';
 
 let dir;
 let root;
@@ -271,4 +272,27 @@ test('--render refuses a zip that is not the pin’s, leaving no pack, and refus
   await assert.rejects(pack({ root, out, platform: 'linux', arch: 'x64', commit: 'a1b2c3d4', build: false, manifest: manifest('24.21.0', sha256(archive)), render: true, download, ...quiet }), /electron-v44\.4\.5-linux-x64\.zip has sha256 [0-9a-f]{64}, not the pinned 0{64}/);
   assert.deepEqual(packs(out), []);
   await assert.rejects(pack({ root, out, platform: 'darwin', arch: 'arm64', commit: 'a1b2c3d4', build: false, render: true, ...quiet }), /--render packs the Linux render runtime/);
+});
+
+// The production downloader, not the injected pack-test downloader: GitHub web
+// failures must use the release API while Node's unrelated download stays as-is.
+test('the pack downloader uses the API release asset when GitHub web fails', async (t) => {
+  const bin = join(dir, 'bin');
+  mkdirSync(bin);
+  const previous = process.env.PATH;
+  process.env.PATH = `${bin}:${previous}`;
+  t.after(() => { process.env.PATH = previous; });
+  write(join(bin, 'curl'), `#!/bin/bash
+set -eu
+out=; prev=; for arg in "$@"; do if [[ $prev == -o ]]; then out=$arg; fi; prev=$arg; done
+case "\${!#}" in
+  https://github.com/electron/electron/releases/download/v44.4.5/electron-v44.4.5-linux-x64.zip) exit 22 ;;
+  https://api.github.com/repos/electron/electron/releases/tags/v44.4.5) printf '%s' '{"assets":[{"id":42,"name":"electron-v44.4.5-linux-x64.zip"}]}' >"$out" ;;
+  https://api.github.com/repos/electron/electron/releases/assets/42) printf 'pack zip bytes' >"$out" ;;
+  *) exit 77 ;;
+esac
+`, 0o755);
+  const dest = join(dir, 'render.zip');
+  await fetchTo('https://github.com/electron/electron/releases/download/v44.4.5/electron-v44.4.5-linux-x64.zip', dest);
+  assert.equal(readFileSync(dest, 'utf8'), 'pack zip bytes');
 });
