@@ -3945,6 +3945,30 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - **I2, dismissed.** The private copies of `checkHub` and `body` are this entry's item 1. A shared export would set a second hub check beside `isHubOrigin`. The desk track reviews the move and may weigh it.
   Date/Author: 2026-11-08, O8's executor (controller), from Task 1's report and its review.
 
+- Decision: The desk track's verdict on M4b Task 1 (69a82849c..3112033dd) is READY, from its own read and an independent reviewer-medium (2026-11-08).
+  - The move is behaviour-identical.
+  - `verifyGrant` reads `isSigned`, then `grantProblems`' first problem, then the signature. A read-only differential matched the base verdicts on all 14 grant vectors and on 416 more input combinations, and the canonicalizable gate moves no verdict.
+  - The cost change stands. It reaches only the endpoint's own certificate set, and only for an authenticated, listed device's request, so it opens no amplification path. A first-problem mode isn't worth a second code path.
+  - The `checkHub` and `body` copies stay private. At the desk track's request, a comment names `isHubOrigin` as the public check (e07f9f42c).
+  Date/Author: 2026-11-08, the desk track, recorded by O8's executor (controller).
+
+- Decision: M4b Task 2, first half, before the master merge that the channel-reach fix (#524) needs. The architect accepted these points (2026-11-08).
+  - **What is committed:**
+    - e07f9f42c, the `isHubOrigin` comment;
+    - 0537d9aff, shared IPC and mawsd;
+    - 0adff8c99, endpoint only: `grantsView` and `grantsAnswer` in `grants.ts`, and the offer row.
+  - **What waits for the merge.** The door extension and `grants-call.test.ts` are held in the worktree. They need context members (`certificates`, `now`, `grants`) that only `endpoint.ts` supplies.
+  1. **The door's grants read is a command of its own, `endpoint.local.grants`,** machine-owned, main-only, taking no input, at `WIRE_MINOR` 33. mawsd forwards it to the door's `call('endpoint.grants', null)`.
+     - Widening `endpoint.local.call`'s `name` from `const 'record.policy'` to two names is breaking under `classifyWireChange`, so it would need a wire major. That alternative was rejected.
+     - `wire-manifest.json` was regenerated. `wire-fingerprint.json` is unchanged, since it hashes engine-host commands only.
+  2. **`endpoint.grants` takes no input.**
+  3. **A non-member is answered `{members: []}`, not refused.** A member removed mid-read gets no answer, because their channel closes `removed`.
+  4. **Through the door, the reader is the machine's owners, as one.** It sees every member's entry while the head names any owner, and none otherwise.
+  5. **The judging follows `record.policy`.** The owners are read up to 3 times, and the answer is built in the step it goes out, against the head those owners were read under.
+  6. **A grant the door refuses answers `{state: 'refused', reason: <verifyGrant code>}`.** Over a channel, the same grant answers `done` with `{ok: false, error}`. The door still requires the act's device to be listed in the head exactly once.
+  - **Gates.** At 0adff8c99, static (42448460100) and static plus unit (42448470707) are green.
+  Date/Author: 2026-11-08, O8's executor (controller), from Task 2's report and the architect's notes.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
