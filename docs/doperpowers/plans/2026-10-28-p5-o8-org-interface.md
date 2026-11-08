@@ -3776,11 +3776,11 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - The open is `O_RDONLY|O_NOFOLLOW|O_NONBLOCK`. `fstat` on that descriptor checks its type, its owner and a mode of exactly 0600 (`& 0o7777`), and the text is read from the same descriptor.
      - The checkout check runs on `realpath(path)`, whose dev and ino must equal the descriptor's. A swapped file is refused.
      - A swapped parent directory is out of scope, since the file sits in the desk track's own home directory. The function's comment says so.
-     - A refusal names the file only by its directory.
+     - A refusal before the email is registered as a secret says "the email file", with no path or directory (055778370, desk 642 (a)). A directory named after an address would otherwise print it.
   2. **The pairing-code file is removed on every exit.**
      - It is created with `O_CREAT|O_EXCL|O_NOFOLLOW`, and its removal is registered at once through `withExitCleanup`. That mechanism was extracted from run-lock's signal cleanup, which `withRunLock` now builds on.
      - It covers SIGINT, SIGHUP and SIGTERM, which exit 128+n; a write that fails partway; a throw; and the end of the wait.
-     - `staging-run.sh real-member`'s trap also removes a code file the run made: an absolute path where no file was before. A file that existed before is never touched.
+     - `staging-run.sh` doesn't remove the code file itself (5ce55a8b8, the second wave). A shell-side removal judged by absence at the start could delete a file another run had made in between, as the re-review and desk 642 (b) found. So only node removes the file. A file a SIGKILL leaves makes a retry refuse with EEXIST, which is visible and safe.
      - This matters at the sitting: the desk track runs `pair` in the background and stops it with SIGTERM.
   3. **Scrubbing.** `remove` registers the member's email as soon as it resolves the member, by `--member` too. The printer, `scrubbingIo`, matches case-insensitively.
   4. **Removal from a stale head.**
@@ -3796,14 +3796,17 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
 
      Its lane B check is stricter than sminos's: `appSessionId` must resolve to the rpc's `session`.
 
-     Three probes tamper with the rpc between the endpoint and sminos: a different change, a malformed proof, and another machine's proof. Each is refused `bad-shape` and shows on A's save, with the record unmoved.
+     On top of `isAction`, it requires exactly a record act's fields, sminos's `ACT_KEYS` (a80ae3eaa, the second wave): `stepUp` must be present, `webauthn` is the only optional extra, and `session`, `context` and `requestDigest` are refused.
+
+     Five probes tamper with the rpc between the endpoint and sminos: a different change, a malformed proof, another machine's proof, `stepUp` stripped, and a `requestDigest` added. Each is refused `bad-shape` and shows on A's save, with the record unmoved.
   6. **Layer 1's assertions.** `m6b-visibility` reads each level back through A's `record.policy`. `m6b-reader` compares B's whole reading, `lastSeen` included.
   7. **Gates.**
      - 42429105079 was red on `native/session-host`'s reap-record race. Master's #517 (6f89f9d11) fixed that race, and this branch predates it, so master's merge before the final gate carries the fix.
      - 42430122324 and 42430267448 were red on a TS2339 in a test, which fc6aff4cc fixes.
      - 42430515249 at fc6aff4cc (static, unit, e2e:settings and e2e:cross-build, on the hosted lane) is green on its first attempt.
+     - The second wave is green on first attempts: 42431972737 and 42432068815, then 42432343440 at 055778370 (static, unit and e2e:settings, on the hosted lane).
      - The gate's 58 advisory spec-import warnings are copied in the task report. The PR body carries them.
-  Date/Author: 2026-11-07, O8's executor (controller), from the fix wave's report, desk 641 and the architect's notes.
+  Date/Author: 2026-11-07, O8's executor (controller), from both fix waves' reports, desks 641 and 642, the re-review and the architect's notes.
 
 ## Outcomes & Retrospective
 
