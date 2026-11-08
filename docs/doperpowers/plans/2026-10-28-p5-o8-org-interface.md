@@ -1911,7 +1911,7 @@ These are the live run's checks, none of them verified before it:
 
 **Teardown.**
 1. The desk track runs `zsh apps/desk-hub/deploy/staging-run.sh real-member remove --email-file <that file>`, which removes B and revokes the device's keys, then `staging-run.sh access-sync`.
-2. The owner quits the scratch app. The profile's mawsd outlives the app and has no stop verb, so the desk track names its pids with `pgrep -fl maws-m6b-second-member`, ends each with `kill -TERM <pid>`, and runs `rm -rf ~/.local/share/maws-m6b-second-member`. The device keys are software keys in the profile's `device/keys.json`, so the directory takes them with it.
+2. The owner quits the scratch app. The profile's mawsd outlives the app and has no stop verb, so the desk track names its pids with `pgrep -fl maws-m6b-second-member`, ends each with `kill -TERM <pid>`. A private daemon carries `--dir <its dir>` in its argv (`daemon.ts:286`), so the name matches it. After TERM, the desk track checks that no process of the profile's session is left and that its lock files are gone, rather than trusting the name match alone. Then it runs `rm -rf ~/.local/share/maws-m6b-second-member`. The device keys are software keys in the profile's `device/keys.json`, so the directory takes them with it.
 3. The email file is deleted.
 4. The owner signs back into staging Access as themselves the next time a browser needs it.
 5. The VM goes with `reach-vm teardown`.
@@ -3771,6 +3771,39 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - the profile daemon's teardown.
   10. **Gates.** Static is green after each commit: 42423743780, 42424222843 and 42425038671. Run 42425644208 (static, unit, e2e:settings, on the hosted lane) is green on its first attempt.
   Date/Author: 2026-11-07, O8's executor (controller), from Task 4's report and the architect's notes.
+- Decision: M6b Task 4's review fixes. The frontier review found five Importants and two Minors. The desk track's desk 641 found layer 1 (5bcd83565) clean and raised four P2s on layer 2. Three of those overlap the review's; the fourth is new: refusals echoed the email file's path. The fixes are 3c8fb5cdc, d0c031dbf, 23b88d6cc, a3954e3f3, 3c8d1b1e9 and fc6aff4cc in layer 2, a21c6e561 and 665e938e6 in layer 1, and f6246b4a3 in the app. They settle these points.
+  1. **The email file is opened once.**
+     - The open is `O_RDONLY|O_NOFOLLOW|O_NONBLOCK`. `fstat` on that descriptor checks its type, its owner and a mode of exactly 0600 (`& 0o7777`), and the text is read from the same descriptor.
+     - The checkout check runs on `realpath(path)`, whose dev and ino must equal the descriptor's. A swapped file is refused.
+     - A swapped parent directory is out of scope, since the file sits in the desk track's own home directory. The function's comment says so.
+     - A refusal names the file only by its directory.
+  2. **The pairing-code file is removed on every exit.**
+     - It is created with `O_CREAT|O_EXCL|O_NOFOLLOW`, and its removal is registered at once through `withExitCleanup`. That mechanism was extracted from run-lock's signal cleanup, which `withRunLock` now builds on.
+     - It covers SIGINT, SIGHUP and SIGTERM, which exit 128+n; a write that fails partway; a throw; and the end of the wait.
+     - `staging-run.sh real-member`'s trap also removes a code file the run made: an absolute path where no file was before. A file that existed before is never touched.
+     - This matters at the sitting: the desk track runs `pair` in the background and stops it with SIGTERM.
+  3. **Scrubbing.** `remove` registers the member's email as soon as it resolves the member, by `--member` too. The printer, `scrubbingIo`, matches case-insensitively.
+  4. **Removal from a stale head.**
+     - The revocations and the admin check are derived inside the edit `amend` replays, from the head being edited.
+     - A device the edit has no key id for (one listed in the meantime) makes the edit post nothing, and `remove` reads again and retries, up to 3 times.
+     - An admin in the edited head is refused. A member gone from it is nothing to remove.
+     - The desk track's alternative, refusing when the device ids changed, also met the intent. The architect preferred deriving from the edited head.
+  5. **The sminos stand-in holds each record rpc to its proof's binding,** independently of the endpoint, as `sminos_rpc.py`'s `proof_refusal` does:
+     - the proof passes `isAction`;
+     - its name equals the rpc's;
+     - its signed target and change equal the frame's;
+     - its machine and device are the run's.
+
+     Its lane B check is stricter than sminos's: `appSessionId` must resolve to the rpc's `session`.
+
+     Three probes tamper with the rpc between the endpoint and sminos: a different change, a malformed proof, and another machine's proof. Each is refused `bad-shape` and shows on A's save, with the record unmoved.
+  6. **Layer 1's assertions.** `m6b-visibility` reads each level back through A's `record.policy`. `m6b-reader` compares B's whole reading, `lastSeen` included.
+  7. **Gates.**
+     - 42429105079 was red on `native/session-host`'s reap-record race. Master's #517 (6f89f9d11) fixed that race, and this branch predates it, so master's merge before the final gate carries the fix.
+     - 42430122324 and 42430267448 were red on a TS2339 in a test, which fc6aff4cc fixes.
+     - 42430515249 at fc6aff4cc (static, unit, e2e:settings and e2e:cross-build, on the hosted lane) is green on its first attempt.
+     - The gate's 58 advisory spec-import warnings are copied in the task report. The PR body carries them.
+  Date/Author: 2026-11-07, O8's executor (controller), from the fix wave's report, desk 641 and the architect's notes.
 
 ## Outcomes & Retrospective
 
