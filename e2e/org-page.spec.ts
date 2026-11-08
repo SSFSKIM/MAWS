@@ -4,9 +4,13 @@
 // member with several devices, roots among them, a pairing this Mac runs for that long member's first device (its row's
 // line, and the sheet taken up on it showing the device's fingerprint), and a refusal that names no attempt (the key file
 // refused at load: its own "Refused" row). The Machines group shows this machine up (the renderer's `useMachines`) and
-// two others not connected. Each of the four groups, the window and the pairing sheet are attached as PNGs for the
-// architect's look; the case asserts structure only: nothing in the section scrolls sideways, and every action is drawn
-// whole inside its row.
+// the others not connected. M4b (Task 5): the Machines group's actions while this Mac may sign; a machine with several
+// grants (on the machine, not yet on it, and one another device changed), one whose grants this Mac issued are missing,
+// one that didn't answer (as of its last answer), a certified machine (its delegation's owners), a dropped machine whose
+// hub row is still listed (Retry), and an enrollment awaiting its key. A pairing and an enrollment exclude each other in
+// main; the seed shows both, as no one session holds them at once. Each of the four groups, the window, the pairing
+// sheet and the enrollment, grant and re-grant sheets are attached as PNGs for the architect's look; the case asserts
+// structure only: nothing in the section or a sheet scrolls sideways, and every action is drawn whole inside its row.
 //
 // The org is seeded where no real session can hold it at once (a key file refused at load leaves this Mac nothing to
 // pair with): under MAWS_E2E=1 a harness build's main answers `org.status` and `org.view` from a file the `org.*`
@@ -17,7 +21,7 @@ import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication } from '@playwright/test';
-import type { OrgStatus, OrgView } from '../src/shared/ipc/schema/org';
+import type { GrantsView, OrgStatus, OrgView } from '../src/shared/ipc/schema/org';
 import { readOrMintMachineRef } from '../src/shared/machine/identity-file';
 import { memberNames } from '../src/shared/org/member-name';
 import { ORG, SECTIONS } from '../src/renderer/src/settings-tab/copy';
@@ -62,7 +66,7 @@ const device = (over: Partial<Device> & Pick<Device, 'class'>): Device => ({
 });
 
 /** The org: what main's session and view would send for it, `now` the clock the ages and the pairing's end read. */
-function seededOrg(local: string, userData: string, now: number): { status: Registered; view: OrgView; names: Map<string, string> } {
+function seededOrg(local: string, userData: string, now: number): { status: Registered; view: OrgView; grants: Record<string, GrantsView>; names: Map<string, string> } {
   type Seed = Pick<OrgView['members'][number], 'id' | 'email' | 'role'>;
   const ana: Seed = { id: memberId(), email: 'ana.lopez@northwind.example', role: 'admin' };
   const long: Seed = { id: memberId(), email: 'maximiliana.featherstonehaugh-villanueva-oyelaran@clinical-research-operations.northwind-health.example', role: 'member' };
@@ -80,6 +84,8 @@ function seededOrg(local: string, userData: string, now: number): { status: Regi
   const issued = new Date(now - 6 * 86_400_000).toISOString();
   const studio = ref();
   const farm = ref();
+  const lab = ref();
+  const runner = ref();
   const view: OrgView = {
     version: 41,
     issued,
@@ -87,9 +93,11 @@ function seededOrg(local: string, userData: string, now: number): { status: Regi
     recoveryKid: kid(),
     members: [member(ana, [thisMac, anaWeb]), member(long, []), member(ortiz, ortizDevices), member(ben, [benMac]), member(chen, [])],
     machines: [
-      { name: 'ana-mbp', ref: local, owners: [ana.id], keyId: kid(), certified: false, delegation: null, mayGrant: false },
-      { name: 'studio-mini', ref: studio, owners: 'org', keyId: kid(), certified: false, delegation: null, mayGrant: false },
+      { name: 'ana-mbp', ref: local, owners: [ana.id], keyId: kid(), certified: false, delegation: null, mayGrant: true },
+      { name: 'studio-mini', ref: studio, owners: 'org', keyId: kid(), certified: false, delegation: null, mayGrant: true }, // Ana an admin: hers to grant on
       { name: 'render-farm-03.clinical-research-operations', ref: farm, owners: [long.id, ortiz.id, memberId()], keyId: kid(), certified: false, delegation: null, mayGrant: false }, // the last a former member
+      { name: 'lab-mini-02', ref: lab, owners: [ana.id], keyId: kid(), certified: false, delegation: null, mayGrant: true },
+      { name: 'ci-runner-7', ref: runner, owners: [ortiz.id], keyId: kid(), certified: true, delegation: 'dlg-ci-runners', mayGrant: false },
     ],
     roots: [
       { kid: kid(), member: ana.id, device: thisMac.id },
@@ -132,10 +140,32 @@ function seededOrg(local: string, userData: string, now: number): { status: Regi
       entry: { id: kid(), class: 'native-mac', keyStorage: 'software', fingerprint: fingerprint(), digest: randomBytes(32).toString('hex') },
       problem: null,
     },
-    enrolling: null,
-    hubRowsLeft: [],
+    enrolling: { generation: 2, name: 'gpu-box-02', replace: null, expires: new Date(now + 50 * 60_000).toISOString(), candidate: null, problem: null }, // awaiting its key
+    hubRowsLeft: [{ name: 'old-render-01', ref: ref() }],
   };
-  return { status, view, names };
+  // Each machine's rights as `org.grants.view` answers them: the machine's own word, this Mac's issued record beside it.
+  const at = new Date(now).toISOString();
+  const shown = (machine: string, patch: Partial<Extract<GrantsView, { ok: true }>>): GrantsView => ({ ok: true, ref: machine, live: true, asOf: at, grants: [], missing: [], digest: null, ...patch });
+  const grants: Record<string, GrantsView> = {
+    [local]: shown(local, { grants: [{ member: chen.id, rights: ['spawn'], version: 1, state: 'on-machine' }] }),
+    [studio]: shown(studio, {
+      grants: [
+        { member: long.id, rights: ['machine-admin'], version: 4, state: 'refused', reason: 'not-newer' },
+        { member: ben.id, rights: ['spawn', 'shell'], version: 3, state: 'on-machine' },
+        { member: chen.id, rights: ['spawn'], version: 2, state: 'pending' },
+      ],
+    }),
+    [farm]: shown(farm, { live: false, asOf: new Date(now - 3 * 3_600_000).toISOString() }), // not Ana's: her own entry, none
+    [lab]: shown(lab, {
+      missing: [
+        { member: ben.id, rights: ['spawn'], version: 3 },
+        { member: chen.id, rights: ['spawn', 'shell'], version: 2 },
+      ],
+      digest: randomBytes(32).toString('base64url'),
+    }),
+    [runner]: shown(runner, {}),
+  };
+  return { status, view, grants, names };
 }
 
 // What is wider than its box under `root`: the root, each row and each of its cells (a label past its grid column
@@ -158,9 +188,9 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
   const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-org-page-')));
   try {
     const local = readOrMintMachineRef(userData); // the machine the app will be, so the view can list it up
-    const { status, view, names } = seededOrg(local, userData, Date.now());
+    const { status, view, grants, names } = seededOrg(local, userData, Date.now());
     const fixture = join(userData, 'org-page.json');
-    writeFileSync(fixture, JSON.stringify({ status, view }));
+    writeFileSync(fixture, JSON.stringify({ status, view, grants }));
     // Classic scrollbars, which take width from the view, as on any Mac with a mouse attached, whatever the desktop's own
     // setting (the hosted lane selects overlay ones for every group).
     const maws = await launchMaws({ userData, env: { [FIXTURE_ENV]: fixture }, appKitDefaults: { AppleShowScrollBars: 'Always' } });
@@ -182,6 +212,18 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       await expect(group('you').getByRole('group', { name: ORG.refused, exact: true })).toBeVisible();
       await expect(group('machines').getByRole('group', { name: 'ana-mbp', exact: true })).toContainText(ORG.machineState.up);
       await expect(group('machines').getByRole('group', { name: 'studio-mini', exact: true })).toContainText(ORG.machineState.unknown);
+      // M4b: the Machines group's actions and rights, read from each machine's grants
+      const machineRow = (name: string) => group('machines').getByRole('group', { name, exact: true });
+      await expect(machineRow('studio-mini')).toContainText(ORG.notYetOn('studio-mini'));
+      await expect(machineRow('studio-mini')).toContainText(ORG.notNewer);
+      await expect(machineRow('studio-mini').getByRole('button', { name: ORG.grant, exact: true })).toBeVisible();
+      await expect(machineRow('lab-mini-02')).toContainText(ORG.missingGrants(2, 'lab-mini-02'));
+      await expect(machineRow('render-farm-03.clinical-research-operations')).toContainText(ORG.noRightsYou);
+      await expect(machineRow('ci-runner-7')).toContainText(ORG.certifiedOwners('dlg-ci-runners'));
+      await expect(machineRow('ana-mbp').getByRole('button', { name: ORG.drop, exact: true })).toHaveCount(0); // this Mac's own
+      await expect(machineRow('old-render-01')).toContainText(ORG.hubRowLeft('old-render-01'));
+      await expect(group('machines').getByRole('group', { name: ORG.enroll, exact: true })).toContainText('Enrolling gpu-box-02 until');
+
       const longRow = group('people').getByRole('group', { name: names.get(status.pairing!.member)!, exact: true });
       const show = longRow.getByRole('button', { name: ORG.pairingShow, exact: true });
       await expect(show).toBeVisible();
@@ -210,6 +252,32 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       await test.info().attach('org-page-pair-sheet', { body: await sheet.screenshot(), contentType: 'image/png' });
       expect(await sheet.evaluate(overflowing), 'nothing in the pairing sheet is wider than its box').toEqual([]);
       expect(await sheet.evaluate(actionsNotWhole, ROW), "every action is drawn whole inside the pairing sheet").toEqual([]);
+
+      // M4b's sheets, each opened from its row, photographed and checked as the pairing sheet is, then closed
+      const photographed = async (open: () => Promise<void>, ready: string, name: string) => {
+        await open();
+        await expect(sheet.getByText(ready, { exact: true })).toBeVisible();
+        await test.info().attach(name, { body: await sheet.screenshot(), contentType: 'image/png' });
+        expect(await sheet.evaluate(overflowing), `nothing in ${name} is wider than its box`).toEqual([]);
+        expect(await sheet.evaluate(actionsNotWhole, ROW), `every action is drawn whole inside ${name}`).toEqual([]);
+        await page.keyboard.press('Escape');
+        await expect(sheet).toHaveCount(0);
+      };
+      await page.keyboard.press('Escape');
+      await expect(sheet).toHaveCount(0);
+      // the enrollment awaiting its key, taken up without its code
+      await photographed(() => group('machines').getByRole('group', { name: ORG.enroll, exact: true }).getByRole('button', { name: ORG.enrollShow, exact: true }).click(), ORG.enrollWaiting('gpu-box-02'), 'org-page-enroll-sheet');
+      // a grant on studio-mini, Ben chosen: his rights as the machine holds them
+      await photographed(
+        async () => {
+          await machineRow('studio-mini').getByRole('button', { name: ORG.grant, exact: true }).click();
+          await sheet.getByRole('combobox', { name: ORG.grantPerson }).selectOption({ label: `${names.get(view.members[3]!.id)!} (${view.members[3]!.email})` });
+        },
+        ORG.rightLines.shell,
+        'org-page-grant-sheet',
+      );
+      // lab-mini-02's missing grants, each shown
+      await photographed(() => machineRow('lab-mini-02').getByRole('button', { name: ORG.regrant, exact: true }).click(), ORG.regrantIntro('lab-mini-02'), 'org-page-regrant-sheet');
     } finally {
       await maws.cleanup();
     }

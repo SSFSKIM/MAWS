@@ -5,7 +5,7 @@ import { act, cleanup, render, screen } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { vi } from 'vitest';
 import type { CommandName, PreloadBridge } from '@shared/ipc/schema';
-import { OrgStatusSchema, type DiscardResult, type OrgAttempt, type OrgSignerStatus, type OrgStatus, type OrgView, type PreviewResult, type SignResult } from '@shared/ipc/schema/org';
+import { OrgStatusSchema, type DiscardResult, type GrantsView, type OrgAttempt, type OrgSignerStatus, type OrgStatus, type OrgView, type PreviewResult, type SignResult } from '@shared/ipc/schema/org';
 import type { MachineRef } from '@shared/machine/ref';
 import { validateCommandInput } from '@shared/ipc/validate';
 import { useMachines } from '../../stores/machines';
@@ -98,18 +98,21 @@ export const VIEW: OrgView = {
 };
 export const viewWith = (patch: Partial<OrgView>): OrgView => ({ ...VIEW, ...patch });
 
-type Answer = () => unknown;
+type Answer = (input: never) => unknown;
 let calls: { name: string; input: unknown }[] = [];
-let listeners = new Set<(payload: unknown) => void>();
+let listeners = new Map<string, Set<(payload: unknown) => void>>();
 let current: OrgStatus = { state: 'none' };
 
 /** `org.view` as main reads it for `status`: VIEW, its `maySign` the signer's (a root, signed in, able to sign). */
 export const viewOf = (status: OrgStatus): OrgView | null => (status.state === 'registered' ? { ...VIEW, maySign: status.session === 'signed-in' && status.signer?.maySign === true } : null);
 
+/** M4b: a machine's grants as `org.grants.view` answers them, read live, none held and none missing unless `patch` says. */
+export const grantsOf = (ref: string, patch: Partial<Extract<GrantsView, { ok: true }>> = {}): GrantsView => ({ ok: true, ref, live: true, asOf: new Date().toISOString(), grants: [], missing: [], digest: null, ...patch });
+
 /** The page as main draws it: `org.status` answers `status`, and each command its default unless `answers` names it. */
 export function renderSection(status: OrgStatus, answers: Partial<Record<CommandName, Answer>> = {}, strict = false) {
   calls = [];
-  listeners = new Set();
+  listeners = new Map();
   current = status;
   const answer: Partial<Record<CommandName, Answer>> = {
     'org.status': () => status,
@@ -127,6 +130,8 @@ export function renderSection(status: OrgStatus, answers: Partial<Record<Command
     'org.preview': () => ({ ok: false, reason: 'invalid', findings: [] }) satisfies PreviewResult,
     'org.change': () => ({ ok: true, version: 13 }) satisfies SignResult,
     'org.pair.cancel': () => undefined,
+    'org.enroll.cancel': () => undefined,
+    'org.grants.view': (input: { ref: string }) => grantsOf(input.ref),
     ...answers,
   };
   window.maws = {
@@ -135,12 +140,13 @@ export function renderSection(status: OrgStatus, answers: Partial<Record<Command
       const checked = validateCommandInput(name, input);
       if (!checked.ok) return checked;
       const reply = answer[name];
-      return reply ? { ok: true, value: await reply() } : { ok: false, error: { code: 'internal', message: `no answer for ${name}` } };
+      return reply ? { ok: true, value: await reply(input as never) } : { ok: false, error: { code: 'internal', message: `no answer for ${name}` } };
     }),
     on: (name: string, listener: (payload: unknown) => void) => {
-      if (name !== 'org.changed') return () => {};
-      listeners.add(listener);
-      return () => void listeners.delete(listener);
+      const heard = listeners.get(name) ?? new Set();
+      listeners.set(name, heard);
+      heard.add(listener);
+      return () => void heard.delete(listener);
     },
     pathForFile: () => '',
     localMachine: TEST_MACHINE,
@@ -152,7 +158,12 @@ export function renderSection(status: OrgStatus, answers: Partial<Record<Command
 export const emit = (next: OrgStatus) =>
   act(() => {
     current = next;
-    listeners.forEach((listener) => listener(OrgStatusSchema.parse(next)));
+    listeners.get('org.changed')?.forEach((listener) => listener(OrgStatusSchema.parse(next)));
+  });
+/** M4b: main's `org.grants.changed` for one machine. */
+export const emitGrants = (ref: string) =>
+  act(() => {
+    listeners.get('org.grants.changed')?.forEach((listener) => listener({ ref }));
   });
 /** The inputs each call of `name` carried, in order. */
 export const sent = (name: CommandName) => calls.filter((c) => c.name === name).map((c) => c.input);

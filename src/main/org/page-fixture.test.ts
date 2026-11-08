@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { commands, type OrgStatus, type OrgView } from '@shared/ipc/schema/org';
+import { commands, type GrantsView, type OrgStatus, type OrgView } from '@shared/ipc/schema/org';
 import type { OrgSessionService } from './org-session';
 import { installOrgPageFixture, ORG_PAGE_FIXTURE_ENV, type OrgPageFixtureInstall } from './page-fixture';
 import { registerOrgHandlers } from './register';
@@ -124,6 +124,18 @@ describe("the Org page's e2e fixture in main", () => {
     expect(stop).not.toBeNull();
     publish({ state: 'none' }); // load()'s completion (`changed(true)`), landing after the page read the seeded status
     expect(emitted).toEqual([{ state: 'none' }]);
+  });
+
+  it("M4b: answers org.grants.view from the file's grants by machine, and signed out for a machine it doesn't name", async () => {
+    const shown: GrantsView = { ok: true, ref: 'mref-box-00000001', live: false, asOf: '2026-10-28T08:00:00.000Z', grants: [{ member: 'a1', rights: ['spawn'], version: 2, state: 'pending' }], missing: [], digest: null };
+    const d = deps({ MAWS_E2E: '1', [ORG_PAGE_FIXTURE_ENV]: fixtureFile({ status: STATUS, view: VIEW, grants: { 'mref-box-00000001': shown } }) });
+    expect(installOrgPageFixture(d)).not.toBeNull();
+    const ask = (input: unknown) => Promise.resolve(d.handlers.get('org.grants.view')!(input));
+    expect(await ask({ ref: 'mref-box-00000001' })).toEqual(shown);
+    expect(await ask({ ref: 'mref-other-0000002' })).toEqual({ ok: false, ref: 'mref-other-0000002', reason: 'signed-out' });
+    expect(() => installOrgPageFixture(deps({ MAWS_E2E: '1', [ORG_PAGE_FIXTURE_ENV]: fixtureFile({ status: STATUS, view: VIEW, grants: { 'mref-box-00000001': { ...shown, code: 'never' } } }) }))).toThrow(
+      /is not an Org page fixture/,
+    );
   });
 
   it('leaves the forwarding alone when it does not install', () => {

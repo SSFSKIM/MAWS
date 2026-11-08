@@ -5,7 +5,7 @@
 import { fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrgChange, PreviewResult, SignResult } from '@shared/ipc/schema/org';
-import { ANA, ANA_MAC, BEN, BEN_WEB, ROOT, group, renderSection, resetHarness, row, sent, signing } from './test-support';
+import { ANA, ANA_MAC, BEN, BEN_WEB, ME, MINI, ROOT, VIEW, VM, found, group, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
 
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -149,5 +149,88 @@ describe('Settings › Org: the change sheet (M4a)', () => {
     fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(sent('org.change')).toEqual([]);
+  });
+});
+
+describe('Settings › Org: the change sheet’s machine fields (M4b)', () => {
+  async function pressOn(machine: string, button: string) {
+    fireEvent.click(await within(await found(machine)).findByRole('button', { name: button }));
+  }
+
+  it('Owners…: the org’s admins or people ticked from the members, a former owner kept until unticked; Review waits for a change, then the preview signs it', async () => {
+    const lines = ['mini’s owners become owner@example.com, ben@example.com (were owner@example.com, ana@example.com, member ffff…)'];
+    renderSection(signing(ROOT), {
+      'org.view': () => viewWith({ machines: [{ ...VIEW.machines[0]!, owners: [ME, ANA, 'ffffffffffffffffffffffffffffffff'] }, VIEW.machines[1]!] }),
+      'org.preview': (input: { change: OrgChange }) => previewed(input.change, lines, [], 'digest-owners'),
+    });
+    await pressOn('mini', 'Owners…');
+    const sheet = await screen.findByRole('dialog', { name: 'Change mini’s owners' });
+    const ticked = () => within(sheet).getAllByRole('checkbox').filter((c) => (c as HTMLInputElement).checked).map((c) => c.closest('label')!.textContent);
+    expect((within(sheet).getByRole('radio', { name: 'People' }) as HTMLInputElement).checked).toBe(true);
+    expect(within(sheet).getAllByRole('checkbox').map((c) => c.closest('label')!.textContent)).toEqual(['youowner@example.com', 'Anaana@example.com', 'Benben@example.com', 'Catcat@example.com', 'a former member']);
+    expect(ticked()).toEqual(['youowner@example.com', 'Anaana@example.com', 'a former member']);
+    const review = within(sheet).getByRole('button', { name: 'Review…' }) as HTMLButtonElement;
+    expect(review.disabled).toBe(true); // the owners as they are: main would refuse no change
+
+    fireEvent.click(within(sheet).getByRole('checkbox', { name: /^Ana/ }));
+    fireEvent.click(within(sheet).getByRole('checkbox', { name: /^a former member/ }));
+    fireEvent.click(within(sheet).getByRole('checkbox', { name: /^Ben/ }));
+    expect(ticked()).toEqual(['youowner@example.com', 'Benben@example.com']);
+    for (const box of within(sheet).getAllByRole('checkbox').filter((c) => (c as HTMLInputElement).checked)) fireEvent.click(box);
+    expect(review.disabled).toBe(true); // no owner at all: main's `shape`
+    fireEvent.click(within(sheet).getByRole('checkbox', { name: /^you/ }));
+    fireEvent.click(within(sheet).getByRole('checkbox', { name: /^Ben/ }));
+    fireEvent.click(review);
+    await vi.waitFor(() => expect(sent('org.preview')).toEqual([{ change: { kind: 'machine.owners', ref: MINI, owners: [ME, BEN] } }]));
+    expect(await within(sheet).findByText(lines[0]!)).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Sign' }));
+    await vi.waitFor(() => expect(sent('org.change')).toEqual([{ change: { kind: 'machine.owners', ref: MINI, owners: [ME, BEN] }, digest: 'digest-owners' }]));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(within(row('Enroll a machine')).getByText('Signed version 13.')).toBeTruthy();
+  });
+
+  it('Owners…: an org-owned machine given to people, and back to the org', async () => {
+    renderSection(signing(ROOT), { 'org.preview': (input: { change: OrgChange }) => previewed(input.change, ['build-vm’s owners change']) });
+    await pressOn('build-vm', 'Owners…');
+    const sheet = await screen.findByRole('dialog', { name: 'Change build-vm’s owners' });
+    expect((within(sheet).getByRole('radio', { name: 'The org (its admins)' }) as HTMLInputElement).checked).toBe(true);
+    expect(within(sheet).queryAllByRole('checkbox')).toEqual([]);
+    fireEvent.click(within(sheet).getByRole('radio', { name: 'People' }));
+    fireEvent.click(within(sheet).getByRole('checkbox', { name: /^Ana/ }));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Review…' }));
+    await vi.waitFor(() => expect(sent('org.preview')).toEqual([{ change: { kind: 'machine.owners', ref: VM, owners: [ANA] } }]));
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Edit' }));
+    fireEvent.click(within(sheet).getByRole('radio', { name: 'The org (its admins)' }));
+    expect((within(sheet).getByRole('button', { name: 'Review…' }) as HTMLButtonElement).disabled).toBe(true); // the org's again: no change
+  });
+
+  it('Drop…: “Its key may be compromised” ticked revokes the key; left, it retires it', async () => {
+    const lines = ['Drop mini (ref MawsMiniRef000000001) from the org', 'Revoke its key miniKeyId0001: it may be compromised'];
+    renderSection(signing(ROOT), { 'org.preview': (input: { change: OrgChange }) => previewed(input.change, lines, [], 'digest-drop') });
+    await pressOn('mini', 'Drop…');
+    const sheet = await screen.findByRole('dialog', { name: 'Drop mini?' });
+    const tick = within(sheet).getByRole('checkbox', { name: /^Its key may be compromised/ }) as HTMLInputElement;
+    expect(tick.checked).toBe(false);
+    fireEvent.click(tick);
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Review…' }));
+    await vi.waitFor(() => expect(sent('org.preview')).toEqual([{ change: { kind: 'machine.drop', ref: MINI, revoke: true } }]));
+    for (const line of lines) expect(await within(sheet).findByText(line)).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Sign' }));
+    await vi.waitFor(() => expect(sent('org.change')).toEqual([{ change: { kind: 'machine.drop', ref: MINI, revoke: true }, digest: 'digest-drop' }]));
+  });
+
+  it('removing a member who owns a machine shows the composer’s line, and Go to <machine> takes the person to its row', async () => {
+    const detail = "ana@example.com owns mini: Change the machine's owners first";
+    renderSection(signing(ROOT), { 'org.preview': () => ({ ok: false, reason: 'refused', findings: [{ level: 'refuse', code: 'owners-unknown', detail }] }) satisfies PreviewResult });
+    await press('Ana', 'Remove person…');
+    const sheet = await screen.findByRole('dialog', { name: 'Remove ana@example.com?' });
+    expect(await within(sheet).findByText(detail)).toBeTruthy();
+    expect(within(sheet).queryByRole('button', { name: 'Go to build-vm' })).toBeNull(); // the org's: it blocks no one
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Go to mini' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await vi.waitFor(() => expect(document.activeElement?.id).toBe(`org-machine-${MINI}`));
+    expect(within(document.activeElement as HTMLElement).getByRole('group', { name: 'mini' })).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 20)); // the sheet's focus restore has run: the row keeps it
+    expect(document.activeElement?.id).toBe(`org-machine-${MINI}`);
   });
 });

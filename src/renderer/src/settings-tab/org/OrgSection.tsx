@@ -161,7 +161,7 @@ function RegisteredPage({ status, view, pending, placedAt, unplaced, attempt, ca
             <PeopleGroup view={view} pairing={status.pairing} />
           </Group>
           <Group id="machines" title={ORG.groups.machines}>
-            <MachinesGroup view={view} />
+            <MachinesGroup view={view} status={status} />
           </Group>
         </>
       )}

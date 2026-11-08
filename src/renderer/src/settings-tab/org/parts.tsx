@@ -11,6 +11,7 @@ import { Chip, INPUT, Setting, TEXT_ACTION } from '../parts';
 export type Registered = Extract<OrgStatus, { state: 'registered' }>;
 export type Member = OrgView['members'][number];
 export type ViewDevice = Member['devices'][number];
+export type ViewMachine = OrgView['machines'][number];
 /** The attempts a refusal can name (`refused.attempt`), each shown under the control that sent it. */
 export type Attempt = NonNullable<OrgRefusal['attempt']>;
 /** A sign's end in one line: muted when done, the warning tone when refused. */
@@ -31,6 +32,21 @@ export function Group({ id, title, children }: { id: 'you' | 'people' | 'machine
       {children}
     </div>
   );
+}
+
+// M4b: a machine's row on the page, by its ref, so a line elsewhere (a removal its ownership refuses) can take the
+// person to it. Called once the sheet that asked has gone, so its focus restore leaves the row focused.
+export const machineRowId = (ref: string) => `org-machine-${ref}`;
+export function focusMachineRow(ref: string) {
+  const row = document.getElementById(machineRowId(ref));
+  row?.scrollIntoView?.({ block: 'center' });
+  row?.focus({ preventScroll: true });
+}
+
+/** A member by the name the page gives them: you, their name, or a former member for an id the head no longer lists. */
+export function memberName(members: readonly Member[], id: string): string {
+  const member = members.find((m) => m.id === id);
+  return member === undefined ? ORG.formerMember : member.you ? ORG.youMark : member.name;
 }
 
 // "a, b and c": machine names, holders and owners in a line.
