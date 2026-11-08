@@ -715,6 +715,27 @@ describe('the real-member step', () => {
     expect(run.stdout).toContain('files holding the Access token or a secret the run handled: 1');
   });
 
+  it.skipIf(!zsh)('removes the code file pair made when the command dies without removing it, and never one that was there before', () => {
+    // A command killed outright (SIGKILL: no handler of its own runs) leaves the file it made; the step's trap removes it.
+    const { dir, env } = setup();
+    // As real-member.ts makes it: only where no file is.
+    const dying = ['#!/bin/sh', 'make() { [ -e "$1" ] || printf code > "$1"; }', 'prev=; for a in "$@"; do case $a in --code-file=*) make "${a#--code-file=}";; esac; [ "$prev" = --code-file ] && make "$a"; prev=$a; done', 'kill -KILL $$', ''];
+    writeFileSync(join(dir, 'bin', 'pnpm'), dying.join('\n'), { mode: 0o755 });
+    const made = join(dir, 'code');
+    const run = spawnSync('zsh', [runner, 'real-member', 'pair', '--email-file', '/x/second-email', '--code-file', made], { encoding: 'utf8', env, timeout: 60_000 });
+    expect(run.status).not.toBe(0);
+    expect(existsSync(made)).toBe(false);
+    for (const given of [(path: string) => ['--code-file', path], (path: string) => [`--code-file=${path}`]]) {
+      const there = join(dir, `there-${given.length}`);
+      writeFileSync(there, 'not the run’s');
+      spawnSync('zsh', [runner, 'real-member', 'pair', '--email-file', '/x/second-email', ...given(there)], { encoding: 'utf8', env, timeout: 60_000 });
+      expect(readFileSync(there, 'utf8')).toBe('not the run’s');
+    }
+    const equals = join(dir, 'code-equals');
+    spawnSync('zsh', [runner, 'real-member', 'pair', '--email-file', '/x/second-email', `--code-file=${equals}`], { encoding: 'utf8', env, timeout: 60_000 });
+    expect(existsSync(equals)).toBe(false);
+  });
+
   it.skipIf(!zsh)('takes no option that would move it off staging, its keys or its scan, and only its three verbs', () => {
     for (const bad of [['--config'], ['--config=deploy/config.json'], ['--production'], ['--scan', 'x'], ['--device-keys', 'k'], ['add', '--hub', 'h'], [], ['delete']]) {
       const { dir, env } = setup();

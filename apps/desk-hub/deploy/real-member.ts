@@ -19,7 +19,7 @@
 // file of mode 0600, outside any git checkout, and no line the steps print holds it, nor the code (each is scrubbed from
 // every line, the hub's own words included, and listed for the runner's search of its log after the step).
 import { randomBytes } from 'node:crypto';
-import { appendFileSync, chmodSync, closeSync, constants, existsSync, fstatSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, constants, existsSync, fchmodSync, fstatSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { base64urlEncode, encodePairingCode, judgeEntry, keyId, pairingFingerprint, type Device, type OrgState, type RevokedKey } from 'org-protocol';
@@ -29,6 +29,7 @@ import { readSecrets } from './deploy';
 import type { RunHub } from './endpoint-machine';
 import { Person } from './hub';
 import { loadAdminDevice, OrgAdmin } from './org-admin';
+import { withExitCleanup } from './run-lock';
 
 export const VERBS = ['add', 'pair', 'remove'] as const;
 export type Verb = (typeof VERBS)[number];
@@ -161,6 +162,8 @@ export type RealMemberIo = {
   /** A value no line may hold: scrubbed from each, and listed for the runner's search of the log after the step. */
   secret(value: string): void;
   sleep(ms: number): Promise<void>;
+  /** The pairing code's whole text written to its file's descriptor. */
+  write(fd: number, text: string): void;
 };
 
 export type RealMemberOptions = {
@@ -217,43 +220,63 @@ async function pair(o: RealMemberOptions, admin: RealMemberAdmin, email: string)
   const { root, org } = head.state;
   const code = encodePairingCode({ hub: o.hubUrl, org, member: member.id, roots: root.keys, recoveryPub: root.recoveryPub, k: base64urlEncode(k) });
   io.secret(code);
-  writeFileSync(codeFile, `${code}\n`, { flag: 'wx', mode: 0o600 });
+  // Created only if absent, never through a symlink; from here on the file is removed however the step ends: a write
+  // failing partway, a throw, the wait's end, or a SIGINT, SIGHUP or SIGTERM (run-lock.ts's withExitCleanup: the sitting
+  // runs this step in the background and stops it with SIGTERM, and a file left behind would refuse a retry at its path).
+  const fd = openSync(codeFile, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   try {
-    chmodSync(codeFile, 0o600);
-    io.print(`the pairing code for the member ${member.id} is in ${codeFile} (0600): paste it into the second profile's Settings › Org, its Pairing code row, and Sign in`);
-    io.print(`waiting up to ${o.waitS} s for its device`);
-    const listed = new Set(head.state.members.flatMap((m) => m.devices.map((d) => d.id)));
-    const named = new Set<string>();
-    const deadline = Date.now() + o.waitS * 1000;
-    for (;;) {
-      const found: Array<Omit<Device, 'endorsement'>> = [];
-      for (const entry of await o.pending(member.id)) {
-        const judged = await judgeEntry(entry, { org, member: member.id, k, class: 'native-mac', listed });
-        if (judged.ok) found.push(judged.device);
-        else if (!named.has(`${entry.deviceId} ${entry.mac}`)) {
-          named.add(`${entry.deviceId} ${entry.mac}`);
-          io.print(`not this pairing's: ${String(entry.deviceId).slice(0, 64)} (${judged.why})`);
-        }
-      }
-      if (found.length > 1) refuse('two devices answered this code: run pair again (the code is spent)');
-      if (found.length === 1) {
-        const device = found[0];
-        io.print(`pending: ${device.id} ${device.class} ${device.keyStorage} fingerprint ${await pairingFingerprint(org, member.id, device)} (the second profile shows the same)`);
-        const signed = await admin.amend(`the member ${member.id}'s first device ${device.id} listed, unendorsed`, (s) => {
-          const m = s.members.find((x) => x.id === member.id);
-          if (m === undefined || m.devices.length > 0) return false;
-          m.devices.push({ ...device });
-        });
-        if (signed === null) refuse(`the head no longer lists the member ${member.id} without a device: nothing was listed`);
-        io.print(`listed: the member ${member.id}'s first device ${device.id} (version ${signed!.state.version}); the second profile signs in once it reads that head`);
-        return 0;
-      }
-      if (Date.now() >= deadline) refuse(`no device answered the code within ${o.waitS} s: run pair again (the code is spent)`);
-      await io.sleep(Math.min(POLL_MS, Math.max(0, deadline - Date.now())));
-    }
+    return await withExitCleanup(
+      () => rmSync(codeFile, { force: true }),
+      () => waitForDevice(o, admin, { head: head.state, member, k, code, fd }),
+    );
   } finally {
-    rmSync(codeFile, { force: true });
     io.print(`the pairing code's file is removed: the code is spent`);
+  }
+}
+
+/** What pair's wait works from: the head it read, the member it pairs, the code's secret, and the code's open file. */
+type Pairing = { head: OrgState; member: OrgState['members'][number]; k: Uint8Array; code: string; fd: number };
+
+/** pair's wait, once its code's file is made: the code written, then B's pending entries read until one answers it. */
+async function waitForDevice(o: RealMemberOptions, admin: RealMemberAdmin, { head, member, k, code, fd }: Pairing): Promise<number> {
+  const { io } = o;
+  const { org } = head;
+  try {
+    fchmodSync(fd, 0o600);
+    io.write(fd, `${code}\n`);
+  } finally {
+    closeSync(fd);
+  }
+  io.print(`the pairing code for the member ${member.id} is in ${o.codeFile} (0600): paste it into the second profile's Settings › Org, its Pairing code row, and Sign in`);
+  io.print(`waiting up to ${o.waitS} s for its device`);
+  const listed = new Set(head.members.flatMap((m) => m.devices.map((d) => d.id)));
+  const named = new Set<string>();
+  const deadline = Date.now() + o.waitS * 1000;
+  for (;;) {
+    const found: Array<Omit<Device, 'endorsement'>> = [];
+    for (const entry of await o.pending(member.id)) {
+      const judged = await judgeEntry(entry, { org, member: member.id, k, class: 'native-mac', listed });
+      if (judged.ok) found.push(judged.device);
+      else if (!named.has(`${entry.deviceId} ${entry.mac}`)) {
+        named.add(`${entry.deviceId} ${entry.mac}`);
+        io.print(`not this pairing's: ${String(entry.deviceId).slice(0, 64)} (${judged.why})`);
+      }
+    }
+    if (found.length > 1) refuse('two devices answered this code: run pair again (the code is spent)');
+    if (found.length === 1) {
+      const device = found[0];
+      io.print(`pending: ${device.id} ${device.class} ${device.keyStorage} fingerprint ${await pairingFingerprint(org, member.id, device)} (the second profile shows the same)`);
+      const signed = await admin.amend(`the member ${member.id}'s first device ${device.id} listed, unendorsed`, (s) => {
+        const m = s.members.find((x) => x.id === member.id);
+        if (m === undefined || m.devices.length > 0) return false;
+        m.devices.push({ ...device });
+      });
+      if (signed === null) refuse(`the head no longer lists the member ${member.id} without a device: nothing was listed`);
+      io.print(`listed: the member ${member.id}'s first device ${device.id} (version ${signed!.state.version}); the second profile signs in once it reads that head`);
+      return 0;
+    }
+    if (Date.now() >= deadline) refuse(`no device answered the code within ${o.waitS} s: run pair again (the code is spent)`);
+    await io.sleep(Math.min(POLL_MS, Math.max(0, deadline - Date.now())));
   }
 }
 
@@ -362,6 +385,7 @@ export async function main(argv: string[]): Promise<number> {
       if (scan !== undefined) appendFileSync(scan, `${value}\n`, { mode: 0o600 });
     },
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+    write: (fd, text) => writeFileSync(fd, text),
   };
   const read = await readSecrets();
   if (!read.DESK_ACCESS_TOKEN) {

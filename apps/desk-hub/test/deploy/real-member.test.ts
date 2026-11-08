@@ -4,7 +4,10 @@
 // then both undone. What the steps refuse, staging's hub above all, the files they read and write (0600, outside any git
 // checkout), and that no line they print holds the email or the code.
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { constants as os } from 'node:os';
 import { tmpdir } from 'node:os';
+import { build } from 'esbuild';
 import { join } from 'node:path';
 import { base64urlDecode, base64urlEncode, decodePairingCode, encodePairingCode, generateSigningKey, keyId, pairingFingerprint, pairingMac, type Device, type OrgState, type SignedOrgState } from 'org-protocol';
 import { describe, expect, it } from 'vitest';
@@ -75,7 +78,7 @@ function options(o: Partial<RealMemberOptions> & { admin?: ReturnType<typeof fak
       pendingAsked++;
       return [];
     },
-    io: { print: (line) => void lines.push(line), secret: (value) => void secrets.push(value), sleep: async () => {} },
+    io: { print: (line) => void lines.push(line), secret: (value) => void secrets.push(value), sleep: async () => {}, write: (fd, text) => writeFileSync(fd, text) },
     ...o,
   };
   return { o: base, lines, secrets, admin, opened: () => opened, pendingAsked: () => pendingAsked };
@@ -381,4 +384,73 @@ describe('remove', () => {
     expect(await runRealMember(own.o)).toBe(1);
     expect(own.admin.states).toHaveLength(1);
   });
+});
+
+describe('the pairing code’s file, however pair ends', () => {
+  // `pair` in a process of its own, as the sitting runs it (in the background, stopped by SIGTERM): the step over a fake
+  // admin whose member B has no device, a pending list that never answers, and the code's write either whole or failing
+  // partway. Bundled as bin.ts bundles a command (org-protocol's imports name no extension).
+  const driver = async () => {
+    const dir = scratch();
+    const outfile = join(dir, 'pair.mjs');
+    const deploy = join(import.meta.dirname, '../../deploy');
+    const contents = `
+      import { writeFileSync, writeSync } from 'node:fs';
+      import { generateSigningKey, keyId } from 'org-protocol';
+      import { STAGING_HOST, STAGING_ORG } from './config.ts';
+      import { runRealMember } from './real-member.ts';
+      const [mode, emailFile, codeFile] = process.argv.slice(2);
+      const root = await generateSigningKey();
+      const state = { org: STAGING_ORG, version: 3, root: { keys: [await keyId(root.pub)], recoveryPub: root.pub }, revoked: [],
+        members: [{ id: '${ADMIN_MEMBER}', email: 'owner@example.org', role: 'admin', devices: [] }, { id: '${'b'.repeat(32)}', email: '${EMAIL}', role: 'member', devices: [] }] };
+      const admin = { member: '${ADMIN_MEMBER}', read: async () => ({ state }), amend: async () => null };
+      const write = mode === 'partial' ? (fd, text) => { writeSync(fd, text.slice(0, 12)); throw new Error('the disk filled'); } : (fd, text) => writeFileSync(fd, text);
+      const status = await runRealMember({ verb: 'pair', hub: { host: STAGING_HOST, org: STAGING_ORG }, hubUrl: 'https://' + STAGING_HOST, emailFile, codeFile, waitS: 120,
+        open: async () => admin, pending: async () => [],
+        io: { print: (line) => process.stdout.write(line + '\\n'), secret: () => {}, sleep: (ms) => new Promise((done) => setTimeout(done, ms)), write } });
+      process.stdout.write('status ' + status + '\\n');
+      process.exit(status);`;
+    await build({ stdin: { contents, resolveDir: deploy, loader: 'ts', sourcefile: 'pair-driver.ts' }, outfile, bundle: true, format: 'esm', platform: 'node', target: 'node22', logLevel: 'error' });
+    return outfile;
+  };
+  let bundled: Promise<string> | null = null;
+  const run = (mode: 'whole' | 'partial', codeFile: string) => {
+    bundled ??= driver();
+    return bundled.then((file) => spawn(process.execPath, [file, mode, emailFile(), codeFile], { stdio: ['ignore', 'pipe', 'inherit'] }));
+  };
+  const ended = (child: ReturnType<typeof spawn>) => new Promise<{ code: number | null; signal: NodeJS.Signals | null; out: string }>((resolve) => {
+    let out = '';
+    child.stdout!.on('data', (chunk: Buffer) => (out += chunk.toString()));
+    child.once('exit', (code, signal) => resolve({ code, signal, out }));
+  });
+
+  it.each(['SIGTERM', 'SIGINT', 'SIGHUP'] as const)('is removed when %s stops the wait, and the exit is not 0', async (signal) => {
+    const codeFile = join(scratch(), 'code');
+    const child = await run('whole', codeFile);
+    const end = ended(child);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let seen = '';
+        child.stdout!.on('data', (chunk: Buffer) => (seen += chunk.toString()).includes('waiting up to') && resolve());
+        void end.then(({ out }) => reject(new Error(`pair ended before its wait: ${out}`)));
+      });
+      expect(statSync(codeFile).mode & 0o7777).toBe(0o600);
+      expect(readFileSync(codeFile, 'utf8')).toMatch(/\n$/);
+      child.kill(signal);
+      const { code } = await Promise.race([end, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`pair still running 10 s after ${signal}`)), 10_000))]);
+      expect(code).toBe(128 + os.signals[signal]);
+      expect(existsSync(codeFile)).toBe(false);
+    } finally {
+      child.kill('SIGKILL');
+    }
+  }, 60_000);
+
+  it('is removed when its write fails partway, and the step fails', async () => {
+    const codeFile = join(scratch(), 'code');
+    const { code, out } = await ended(await run('partial', codeFile));
+    expect(code).toBe(1);
+    expect(out).toContain('failed: the disk filled');
+    expect(out).not.toContain('waiting up to');
+    expect(existsSync(codeFile)).toBe(false);
+  }, 60_000);
 });
