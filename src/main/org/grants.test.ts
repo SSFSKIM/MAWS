@@ -39,6 +39,8 @@ const HOME = 'mref-home-0000001' as MachineRef; // this Mac's own machine (the d
 const STUDIO = 'mref-studio-00001' as MachineRef; // C's machine: A may not grant there
 const SHARED = 'mref-shared-00001' as MachineRef; // org-owned: its admins grant
 const NOW = Date.parse('2026-11-08T12:00:00.000Z');
+/** The tests' backoff for a grant a machine whose head is behind refused. */
+const BEHIND_MS = 60_000;
 
 let dir: string;
 let aKey: SigningKey;
@@ -131,9 +133,12 @@ class FakeLink implements GrantLink {
   script: ActOutcome[] = [];
   /** Runs once an act is sent, before its outcome. */
   onAct: (() => void) | null = null;
+  /** The machine's head version as its last `caps` said it (null: no caps yet). */
+  stateVersion: number | null = null;
   readonly listeners = new Set<(state: 'up' | 'down') => void>();
   constructor(readonly ledger: Ledger) {}
   state = () => (this.up ? 'up' : 'down') as ReturnType<GrantLink['state']>;
+  caps = (() => (this.stateVersion === null ? null : { member: A, device: 'dev-a', clientClass: 'native-mac', machine: { grades: [] }, stateVersion: this.stateVersion })) as GrantLink['caps'];
   onState = ((listener: (state: 'up' | 'down') => void) => {
     this.listeners.add(listener);
     return () => void this.listeners.delete(listener);
@@ -204,12 +209,16 @@ async function harness(over: { damaged?: boolean } = {}) {
     writeFileSync(join(dir, 'org', GRANTS_FILE), '{ not json', { mode: 0o600 });
   }
   let commits: Promise<unknown> = Promise.resolve();
+  let turns = 0;
   const commit = <T>(body: () => Promise<T>) => {
+    turns++;
     const turn = commits.then(body);
     commits = turn.catch(() => {});
     return turn;
   };
-  const store = createGrantsStore({ files, commit, registration: () => registration, markRegistration: async () => void (registration.grants = true) });
+  const writes = { fail: false };
+  const written: typeof files = { ...files, write: async (name, value) => (writes.fail ? Promise.reject(new Error('disk full')) : files.write(name, value)) };
+  const store = createGrantsStore({ files: written, commit, registration: () => registration, markRegistration: async () => void (registration.grants = true) });
   const prompts: StepUpPrompt[] = [];
   const confirm = { answer: { ok: true } as Awaited<ReturnType<Confirm>>, during: null as (() => Promise<void> | void) | null };
   const signer = await createRecordSigner({
@@ -230,6 +239,7 @@ async function harness(over: { damaged?: boolean } = {}) {
     [SHARED, shared],
   ]);
   const session = { signIn: 1, signedIn: true };
+  const clock = { now: NOW };
   const changed: string[] = [];
   const logs: string[] = [];
   const roster = new Set<() => void>();
@@ -245,7 +255,8 @@ async function harness(over: { damaged?: boolean } = {}) {
       return () => void roster.delete(listener);
     },
     changed: (ref) => void changed.push(ref),
-    now: () => NOW,
+    timing: { GRANT_BEHIND_MS: [BEHIND_MS] },
+    now: () => clock.now,
     log: (line) => void logs.push(line),
   });
   made.push(grants);
@@ -276,6 +287,15 @@ async function harness(over: { damaged?: boolean } = {}) {
       grants.fence();
     },
     signIn: () => void (session.signedIn = true),
+    clock,
+    writes,
+    /** The commit queue held from now until the release it answers, and how many turns were asked of it. */
+    block: () => {
+      const held = deferred();
+      void commit(() => held.promise);
+      return held.resolve;
+    },
+    turns: () => turns,
   };
 }
 
@@ -434,6 +454,53 @@ describe('signing', () => {
     expect(h.mini.acts).toEqual([]);
   });
 
+  it('refuses a grant whose head moved between its verification and its keep (the queued commit): nothing kept or sent', async () => {
+    const h = await harness();
+    let release: (() => void) | null = null;
+    let turns = 0;
+    h.confirm.during = () => {
+      release = h.block(); // the commit queue busy with another writer when the keep asks for its turn
+      turns = h.turns();
+    };
+    const answer = h.grants.set({ ref: MINI, member: B, rights: ['spawn'] });
+    await until(() => release !== null && h.turns() > turns, 'the keep queued');
+    // An adoption lands first: the machine's owners change, this member and device stay listed.
+    head = { ...head, version: 8, machines: head.machines.map((m) => (m.ref === MINI ? { ...m, owners: [C] } : m)) };
+    release!();
+    expect(await answer).toMatchObject({ ok: false, reason: 'stale' });
+    expect(h.issued(MINI, B)).toBeUndefined();
+    expect(h.mini.acts).toEqual([]);
+  });
+
+  it('refuses a re-grant whose head moved between verification and keep the same way', async () => {
+    const h = await harness();
+    await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] });
+    h.mini.ledger.grants = {};
+    h.mini.ledger.highWater = {};
+    const view = await okView(h, MINI);
+    let release: (() => void) | null = null;
+    let turns = 0;
+    h.confirm.during = () => {
+      release = h.block();
+      turns = h.turns();
+    };
+    const answer = h.grants.regrant({ ref: MINI, digest: view.digest! });
+    await until(() => release !== null && h.turns() > turns, 'the keep queued');
+    head = { ...head, version: 8, machines: head.machines.map((m) => (m.ref === MINI ? { ...m, owners: [C] } : m)) };
+    release!();
+    expect(await answer).toMatchObject({ ok: false, reason: 'stale' });
+    expect(h.issued(MINI, B)?.signed.body.version).toBe(1);
+    expect(h.mini.acts).toHaveLength(1);
+  });
+
+  it('refuses `storage` when the record can’t be written, and sends nothing', async () => {
+    const h = await harness();
+    await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] }); // the file exists, its mark written
+    h.writes.fail = true;
+    expect(await h.grants.set({ ref: MINI, member: C, rights: ['spawn'] })).toMatchObject({ ok: false, reason: 'storage' });
+    expect(h.mini.acts).toHaveLength(1);
+  });
+
   it('signs nothing on a cancel, and one grant at a time', async () => {
     const h = await harness();
     h.confirm.answer = { ok: false, reason: 'cancelled' };
@@ -488,15 +555,71 @@ describe('delivery', () => {
     expect(view.grants).toEqual([{ member: B, rights: ['spawn'], version: 1, state: 'on-machine' }]);
   });
 
-  it('records the ledger’s own refusal (`not-held`) as final, and leaves the machine’s head behind this Mac’s as pending', async () => {
+  it('records the ledger’s own refusal (`not-held`) as final', async () => {
     const h = await harness();
     h.mini.ledger.heldKeys = ['AAAAAAAAAAAAAAAAAAAAAA']; // its ledger holds no such key
     expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] })).toMatchObject({ delivered: { refused: 'not-held' } });
     const view = await okView(h, MINI);
     expect(view.grants).toEqual([{ member: B, rights: ['spawn'], version: 1, state: 'refused', reason: 'not-held' }]);
-    // A verdict of the machine's own head (it doesn't list this signer yet) is no final word: sent again later.
-    h.shared.script.push({ state: 'failed', error: { code: 'unknown-signer' } });
-    expect(await h.grants.set({ ref: SHARED, member: B, rights: ['spawn'] })).toMatchObject({ delivered: 'pending' });
+  });
+
+  it('keeps the head the grant was signed under with it', async () => {
+    const h = await harness();
+    await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] });
+    expect(h.issued(MINI, B)?.headVersion).toBe(head.version);
+  });
+
+  it('records a permanent verdict (`malformed`, `bad-signature`, `revoked`) as final whatever the machine’s head, in either shape', async () => {
+    for (const code of ['malformed', 'bad-signature', 'revoked']) {
+      for (const shape of ['failed', 'refused'] as const) {
+        const h = await harness();
+        h.mini.stateVersion = 1; // far behind: no matter
+        h.mini.script.push(shape === 'failed' ? { state: 'failed', error: { code } } : { state: 'refused', reason: code });
+        expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] }), `${code} as ${shape}`).toMatchObject({ delivered: { refused: code } });
+        h.door.script.push(shape === 'failed' ? { state: 'failed', error: { code } } : { state: 'refused', reason: code });
+        expect(await h.grants.set({ ref: HOME, member: B, rights: ['spawn'] }), `${code} as ${shape} at the door`).toMatchObject({ delivered: { refused: code } });
+        await h.grants.close();
+      }
+    }
+  });
+
+  it('a curable verdict (`not-listed`, `unknown-signer`, `contested`) is final once the machine’s head is the signing head or later, in either shape', async () => {
+    for (const code of ['not-listed', 'unknown-signer', 'contested']) {
+      for (const shape of ['failed', 'refused'] as const) {
+        for (const at of [head.version, head.version + 1]) {
+          const h = await harness();
+          h.mini.stateVersion = at;
+          h.mini.script.push(shape === 'failed' ? { state: 'failed', error: { code } } : { state: 'refused', reason: code });
+          expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] }), `${code} as ${shape} at ${at}`).toMatchObject({ delivered: { refused: code } });
+          await h.grants.send();
+          expect(h.mini.acts).toHaveLength(1); // final: never sent again
+          await h.grants.close();
+        }
+      }
+    }
+  });
+
+  it('a curable verdict from a machine whose head is behind the signing head (or unknown) stays pending, sent again only after a backoff', async () => {
+    for (const shape of ['failed', 'refused'] as const) {
+      for (const behind of [head.version - 1, null]) {
+        const h = await harness();
+        h.mini.stateVersion = behind;
+        h.mini.script.push(shape === 'failed' ? { state: 'failed', error: { code: 'unknown-signer' } } : { state: 'refused', reason: 'unknown-signer' });
+        expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] }), `${shape} behind at ${behind}`).toMatchObject({ delivered: 'pending' });
+        // Not on the next pass, the link's up or a feed open...
+        await h.grants.send();
+        h.mini.setUp(false);
+        h.mini.setUp(true);
+        await h.grants.send();
+        expect(h.mini.acts).toHaveLength(1);
+        // ...but once the backoff has passed: the machine caught up, and its ledger takes it.
+        h.clock.now += BEHIND_MS;
+        await h.grants.send();
+        expect(h.mini.acts).toHaveLength(2);
+        expect(h.issued(MINI, B)?.delivered).toBe('done');
+        await h.grants.close();
+      }
+    }
   });
 
   it('goes through the local door for this Mac’s own machine, and over the link for every other one', async () => {
@@ -517,10 +640,13 @@ describe('delivery', () => {
     expect(h.mini.acts).toHaveLength(1);
   });
 
-  it('reads both door refusals: its own (`{state: refused}`, its head behind this Mac’s: sent again) and the ledger’s through it (`{state: failed}`)', async () => {
+  it('reads both door shapes: its own refusal (`{state: refused}`) and the ledger’s through it (`{state: failed}`); its head unknown, a curable one waits', async () => {
     const h = await harness();
     h.door.script.push({ state: 'refused', reason: 'unknown-signer' });
     expect(await h.grants.set({ ref: HOME, member: B, rights: ['spawn'] })).toMatchObject({ delivered: 'pending' });
+    await h.grants.send();
+    expect(h.door.acts).toHaveLength(1); // its head is unknown: behind, so the backoff holds it
+    h.clock.now += BEHIND_MS;
     await h.grants.send();
     expect(h.issued(HOME, B)?.delivered).toBe('done');
     h.door.ledger.heldKeys = ['AAAAAAAAAAAAAAAAAAAAAA'];
@@ -580,25 +706,58 @@ describe('missing grants', () => {
     expect(h.prompts.at(-1)!.text).toContain('1 of 2\nMachine: mini');
   });
 
-  it('never offers a withdrawal, a pending grant, one another device replaced, or one a kept ledger still holds', async () => {
+  it('never offers a withdrawal, a grant still deliverable for the current key, one another device replaced, or one a kept ledger still holds', async () => {
     const h = await harness();
+    const key = await keyId(keys[MINI].pub);
     await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] });
     await h.grants.set({ ref: MINI, member: B, rights: [] }); // withdrawn
     await h.grants.set({ ref: MINI, member: C, rights: ['spawn'] }); // kept by the ledger
     h.mini.ledger.grants = { [C]: h.mini.ledger.grants[C] };
     h.mini.ledger.highWater = { [C]: 1 };
-    let file = h.disk();
-    expect(missingGrants(file, MINI, h.mini.ledger.answer().members)).toEqual([]);
+    expect(missingGrants(h.disk(), MINI, h.mini.ledger.answer().members, key)).toEqual([]);
     // Another device's higher grant: the ledger's mark is past this Mac's.
     h.mini.ledger.highWater[C] = 5;
-    file = h.disk();
-    expect(missingGrants(file, MINI, h.mini.ledger.answer().members)).toEqual([]);
-    // A pending one is not delivered yet: not missing.
+    expect(missingGrants(h.disk(), MINI, h.mini.ledger.answer().members, key)).toEqual([]);
+    // A pending one for the machine's current key is still on its way: not missing.
     h.mini.script.push({ state: 'refused', reason: 'offline' });
     await h.grants.set({ ref: MINI, member: B, rights: ['shell'] });
     h.mini.ledger.highWater = {};
-    expect(missingGrants(h.disk(), MINI, h.mini.ledger.answer().members).map((i) => i.signed.body.member)).toEqual([C]);
+    expect(missingGrants(h.disk(), MINI, h.mini.ledger.answer().members, key).map((i) => i.signed.body.member)).toEqual([C]);
     expect((await okView(h, MINI)).missing).toEqual([{ member: C, rights: ['spawn'], version: 1 }]);
+  });
+
+  it('recovers a grant whose reply was lost before the machine was enrolled again: pending for the old key, re-granted for the new', async () => {
+    const h = await harness();
+    // The machine takes it, but its answer is lost: this Mac keeps it pending.
+    h.mini.script.push({ state: 'unknown', reason: 'channel-lost' });
+    expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] })).toMatchObject({ delivered: 'pending' });
+    // Enrolled again with a new key and an empty ledger.
+    const fresh = await generateSigningKey();
+    keys[MINI] = fresh;
+    head = { ...head, version: 9, machines: head.machines.map((m) => (m.ref === MINI ? { ...m, pub: fresh.pub } : m)) };
+    h.mini.ledger.grants = {};
+    h.mini.ledger.highWater = {};
+    h.mini.ledger.heldKeys = [await keyId(fresh.pub)];
+    const view = await okView(h, MINI);
+    expect(view.missing).toEqual([{ member: B, rights: ['spawn'], version: 1 }]);
+    // The same rights again are no no-change: the pending intent names a key the machine no longer holds.
+    expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] })).toEqual({ ok: true, version: 2, delivered: 'done' });
+    expect(h.mini.ledger.grants[B].body.machineKey).toBe(await keyId(fresh.pub));
+    expect((await okView(h, MINI)).missing).toEqual([]);
+  });
+
+  it('re-grants that lost-reply grant through Re-grant… too', async () => {
+    const h = await harness();
+    h.mini.script.push({ state: 'unknown', reason: 'channel-lost' });
+    await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] });
+    const fresh = await generateSigningKey();
+    keys[MINI] = fresh;
+    head = { ...head, version: 9, machines: head.machines.map((m) => (m.ref === MINI ? { ...m, pub: fresh.pub } : m)) };
+    h.mini.ledger.grants = {};
+    h.mini.ledger.highWater = {};
+    h.mini.ledger.heldKeys = [await keyId(fresh.pub)];
+    const view = await okView(h, MINI);
+    expect(await h.grants.regrant({ ref: MINI, digest: view.digest! })).toEqual({ ok: true, results: [{ member: B, version: 2, delivered: 'done' }] });
   });
 
   it('refuses a re-grant whose missing grants are not the ones shown (`stale`), or when none is missing (`none`), asking nothing', async () => {

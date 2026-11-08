@@ -336,10 +336,11 @@ export type GrantsView = z.infer<typeof GrantsViewSchema>;
  * Touch ID, `grantProblems`' codes in `problems`: this Mac's key is no owner's, or an admin's for `'org'`; the member or
  * the machine unlisted; its key not one uncontested key); `ledger-unread` (the machine's grant ledger can't be read now,
  * so no version is guessed); `cancelled`; `refused` (signed, then it doesn't verify against the org state held now, its
- * verdict in `detail`: nothing kept or sent); `stale` (`org.grants.regrant`: the missing grants are no longer the ones
- * shown); `none` (nothing missing to re-grant).
+ * verdict in `detail`: nothing kept or sent); `stale` (the org state moved between the grant's verification and its
+ * keep, or, for `org.grants.regrant`, the missing grants are no longer the ones shown: nothing kept or sent, sign
+ * again); `storage` (grants.json could not be written: nothing sent); `none` (nothing missing to re-grant).
  */
-export const GRANT_REFUSALS = ['signed-out', 'damaged', 'busy', 'invalid', 'no-change', 'ineligible', 'ledger-unread', 'cancelled', 'refused', 'stale', 'none'] as const;
+export const GRANT_REFUSALS = ['signed-out', 'damaged', 'storage', 'busy', 'invalid', 'no-change', 'ineligible', 'ledger-unread', 'cancelled', 'refused', 'stale', 'none'] as const;
 const GrantRefusedSchema = z.strictObject({ ok: z.literal(false), reason: z.enum(GRANT_REFUSALS), detail: z.string().optional(), problems: z.array(z.string()).optional() });
 /** M4b: `org.grants.set`: the grant signed, kept and sent, at `version`, and how its delivery stands. */
 export const GrantSetResultSchema = z.union([z.strictObject({ ok: z.literal(true), version: GrantVersionSchema, delivered: GrantDeliveredSchema }), GrantRefusedSchema]);
