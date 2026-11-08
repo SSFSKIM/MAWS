@@ -1920,17 +1920,15 @@ These are the live run's checks, none of them verified before it:
 3. The email file is deleted.
 4. The owner signs back into staging Access as themselves the next time a browser needs it.
 5. The VM goes with `reach-vm teardown`.
-6. The sitting's worktree goes: `git -C ~/Developer/GitHub/MAWS worktree remove ~/.local/share/maws-worktrees/m6b-sitting`.
+6. The architect removes the sitting's worktree, `/Users/new/.local/share/maws-worktrees/m6b-sitting`.
 
 **The owner's steps** (the architect hands these over):
 1. Send the second email to the desk track directly.
-2. At the sitting, launch the scratch profile. The sitting comes after M6b's landing, so it runs from a fresh worktree of master at or after the merge. Before the sitting, make the worktree and install once:
+2. At the sitting, launch the scratch profile. It launches from a worktree of master at or after M6b's merge, which the architect prepares before the sitting at `/Users/new/.local/share/maws-worktrees/m6b-sitting`, with `pnpm install --frozen-lockfile` already run there:
 
-       git -C ~/Developer/GitHub/MAWS fetch origin master && git -C ~/Developer/GitHub/MAWS worktree add --detach ~/.local/share/maws-worktrees/m6b-sitting origin/master && cd ~/.local/share/maws-worktrees/m6b-sitting && pnpm install --frozen-lockfile
+       cd /Users/new/.local/share/maws-worktrees/m6b-sitting && mkdir -p -m 700 "$HOME/.local/share/maws-m6b-second-member" && MAWS_USER_DATA="$HOME/.local/share/maws-m6b-second-member" npx electron-vite dev
 
-   At the sitting, launch it:
-
-       cd ~/.local/share/maws-worktrees/m6b-sitting && mkdir -p -m 700 "$HOME/.local/share/maws-m6b-second-member" && MAWS_USER_DATA="$HOME/.local/share/maws-m6b-second-member" npx electron-vite dev A dialog from macOS on that first launch, such as "accept incoming network connections" for Electron, is the owner's to answer. Deny is safe, since the profile connects outward to the hub, and no agent clicks through it.
+   (Earlier drafts launched from the `p5-o8-m6b` worktree, on the plan of a sitting before the landing.) A dialog from macOS on that first launch, such as "accept incoming network connections" for Electron, is the owner's to answer. Deny is safe, since the profile connects outward to the hub, and no agent clicks through it.
 3. Open `https://desk-hub-staging.opencognita-platform.workers.dev/cdn-cgi/access/logout` in the default browser.
 4. Copy the pairing code without displaying it: in a Terminal or iTerm window, run `pbcopy < <the path the desk track names>`. Paste it into the profile's Settings › Org › Pairing code row and press Sign in. Sign in with the second email and the code from its inbox. Before pairing completes, check that the member email the profile shows is the second email.
 5. Don't run `cloudflared access login` for staging until you're signed back in as yourself.
@@ -3831,6 +3829,13 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - The other bare `print`s under `apps/desk-hub/deploy` are parameters or locals in scope, or appear in comments.
   4. **Gates.** Static is green at eaafe05af (42435153749) and df906b6e9 (42435451512). `static,unit,e2e:settings` is green at 95be41576 (42435464666), and all 18 e2e:settings tests passed on their first attempt.
   Date/Author: 2026-11-08, O8's executor (controller), from the fix wave's report and the architect's notes.
+- Decision: M6b lands before the shared run. M6b lands on its gates, and the shared staging run, with its real-member sitting, follows from master at or after the merge.
+  - The spec read both ways. The rest's plan says the run waits on "M6b's offers on master", which this ruling follows. The owner's launch step assumed a sitting before the landing.
+  - The scenes' MAWS is "the branch at or after M6b", and master at or after the merge meets that. M6b changes no hub code.
+  - A defect the live run finds becomes a fix PR, as for M7b's live check.
+  - Rationale: the owner's time. The sitting can't come before about 23:00 PST on 2026-11-08 and waits on the owner's word. Holding the PR for it would idle M4b and the rest.
+  - Rejected: holding the PR for the sitting, as O18 M6 did. That sitting's date was fixed in advance; this one waits on the owner's time.
+  Date/Author: 2026-11-08, the architect, recorded by O8's executor (controller).
 
 ## Outcomes & Retrospective
 
@@ -4013,7 +4018,7 @@ A future child that keeps state written from more than one place over an unrelia
 - the deploy suites: `reach-acceptance` (37), `real-member` (24), `staging-scripts` (33);
 - the gates the PR body lists.
 
-Still owed: the shared staging run (Concrete Steps). Layer 1 is the harness member. Layer 2 is the real-member sitting, booked by the architect. The run happens after the landing, since the desk track deploys master to staging. So M6b lands before the shared run, as M7b did before its live check, and the run's result goes into these Outcomes then, in a records commit of the architect's. The live checklist:
+Still owed: the shared staging run (Concrete Steps). Layer 1 is the harness member. Layer 2 is the real-member sitting, booked by the architect. M6b lands on its gates and the shared run follows from master (Decision Log, "M6b lands before the shared run"). The run's result goes into these Outcomes in a records commit of the architect's. The live checklist:
 - lane B inside the reach scenes;
 - record acts over the relays;
 - pairing through real Access with a second identity;
