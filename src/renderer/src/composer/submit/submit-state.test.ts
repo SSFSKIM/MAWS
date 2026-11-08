@@ -218,7 +218,7 @@ describe('a session driven through its holder (lane A)', () => {
   });
 });
 
-// Board #525: another member's session whose machine refused the member's words at their grade: Send is closed with why
+// Board 525: another member's session whose machine refused the member's words at their grade: Send is closed with why
 // and whom to ask, on either lane, in every turn state (Stop too: below Converse the machine takes no interrupt either).
 describe('a session the member can read but not talk to', () => {
   const closed = 'You can read this session but not talk to its agent. Ask Ana for Converse.';

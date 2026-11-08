@@ -140,7 +140,7 @@ export interface TranscriptContextValue {
   // additive (P2-E1): 'local' draws the owner channel through MAWS's own presenter whatever the engine surface's
   // attachment (the comment card's thread, until P2-C's module takes the option over); absent, as before
   presentation?: 'local';
-  // additive (board #525): who wrote a prompt, as the reader names them; null, or absent, where it is the reader's own
+  // additive (board 525): who wrote a prompt, as the reader names them; null, or absent, where it is the reader's own
   // ("Your message"): a session another member owns names its owners
   promptAuthor?: (row: { id: string; messageUuid: string | null }) => string | null;
 }

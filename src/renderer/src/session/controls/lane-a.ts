@@ -372,7 +372,7 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
       const out = result.value;
       if (out.state === 'entered') return { disposition: stateNow().turn.running ? 'steered' : 'sent', started: false, ...(out.uuid !== undefined && { messageUuid: out.uuid as MessageUuid }) };
       if (out.state === 'refused') {
-        // board #525: another member's session refused the words at the member's grade: said with whom to ask, and learnt
+        // board 525: another member's session refused the words at the member's grade: said with whom to ask, and learnt
         if (out.code === 'grade' && learnReaderGrade(appSessionId, 'view')) return refuse(READER.notSent(whomToAsk(appSessionId)));
         const reason = out.reason ?? 'The session did not take the message';
         return refuse(files.length > 0 ? LANE_A_WORDS.wordsAfterFiles(reason) : reason);

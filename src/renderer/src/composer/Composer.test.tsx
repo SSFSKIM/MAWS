@@ -26,8 +26,8 @@ import { resetRemoteDrafts } from './editor/drafts'; // P5 O7 M2
 import { resetRemoteUploads } from './editor/remote-uploads'; // P5 O7 M4
 import { rememberRemoteDraft } from './editor/drafts'; // P5 O7 M4
 import { readerRowsOf, resetReaderRows } from '../lane-b/reader-rows'; // P5 O8 M6a
-import { READER } from '../sessions/share/copy'; // board #525
-import { resetReader } from '../sessions/share/reader'; // board #525
+import { READER } from '../sessions/share/copy'; // board 525
+import { resetReader } from '../sessions/share/reader'; // board 525
 import { queueFirstSend, resetRemoteSpawn, restoreHeldAttempts, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
 import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
 import { useDialogs } from '../sessions/dialogs'; // P5 O7 M9
@@ -1412,7 +1412,7 @@ describe('a lane B session on another machine', () => {
     expect(within(composerOf(0)).queryByRole('status', { name: 'Sending' })).toBeNull();
   });
 
-  // Board #525: another member's session refuses the words at the member's grade (View): the refusal says so with whom to
+  // Board 525: another member's session refuses the words at the member's grade (View): the refusal says so with whom to
   // ask and no Send again, and the composer closes, its line naming Converse and the owner, the editor read-only
   it('closes on another member’s session once the machine refused a send at the member’s grade, naming Converse and the owner', async () => {
     resetReader();

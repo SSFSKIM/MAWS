@@ -17,12 +17,12 @@ import { useLayout } from '../stores/layout';
 import { connectRemoteLaneB } from '../lane-b/remote-connect';
 import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session';
 import { remoteSessionState } from '../lane-b/test-support/remote-session';
-import { useEffect } from 'react'; // board #525
-import { READ_REFUSED } from '@shared/org/reader'; // board #525
-import { resetLaneAWatches, watchLaneA } from '../lane-a/watches'; // board #525
-import { READER } from '../sessions/share/copy'; // board #525
-import { resetReader } from '../sessions/share/reader'; // board #525
-import { connectReaderGrades, resetReaderPanes } from '../sessions/share/reader-connect'; // board #525
+import { useEffect } from 'react'; // board 525
+import { READ_REFUSED } from '@shared/org/reader'; // board 525
+import { resetLaneAWatches, watchLaneA } from '../lane-a/watches'; // board 525
+import { READER } from '../sessions/share/copy'; // board 525
+import { resetReader } from '../sessions/share/reader'; // board 525
+import { connectReaderGrades, resetReaderPanes } from '../sessions/share/reader-connect'; // board 525
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => pageScenario(nine).sessions.find((r) => r.title.text === title)!.appId; // P5 O6 M2: the page's id
@@ -191,7 +191,7 @@ describe('session pane', () => {
     });
   });
 
-  // Board #525: another member's session whose read its machine refused at the member's grade (Can message) says what the
+  // Board 525: another member's session whose read its machine refused at the member's grade (Can message) says what the
   // member can do there and whom to ask for View, with no transcript and no composer, and asks nothing more of the machine
   // until a listing change, a sign-in or a reopen asks afresh. An owner's `grade` is the machine not holding the record
   // yet: their pane reads on.

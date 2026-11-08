@@ -26,7 +26,7 @@ import { DEFAULT_ACTIONS, registerRequestRenderer, registerTranscriptActions, Tr
 import { BASH_RESULT, builder, request, task, tool, uuid } from '../model/test-events';
 import type { Row } from '../model/rows';
 import { registeredActions } from './registry';
-import { noteOwnPrompt, resetReader } from '../../sessions/share/reader'; // board #525
+import { noteOwnPrompt, resetReader } from '../../sessions/share/reader'; // board 525
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
 beforeAll(() => {
@@ -672,7 +672,7 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
   });
 });
 
-// Board #525: a prompt in a session another member owns is named by its author as the reader names them, lane A and lane
+// Board 525: a prompt in a session another member owns is named by its author as the reader names them, lane A and lane
 // B alike: its owners, since no prompt carries its author, but a prompt this app sent, which is the reader's own.
 describe('who wrote a prompt there', () => {
   const ANA = { id: 'member-ana', email: 'ana@example.test', name: 'Ana' };

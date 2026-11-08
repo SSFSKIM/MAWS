@@ -1,4 +1,4 @@
-// When what this page learnt of the member's reach on another member's session is asked afresh (board #525; ./reader.ts):
+// When what this page learnt of the member's reach on another member's session is asked afresh (board 525; ./reader.ts):
 // - the session's listing moves (its revision or policy revision) or another member signs in: what was learnt of it is
 //   forgotten, and a lane B session main ended as `READ_REFUSED` is opened again (`retryRemoteSession`);
 // - a pane opens the session again (its first holder): the same, for that session.

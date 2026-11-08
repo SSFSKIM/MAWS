@@ -7,15 +7,15 @@ import { useNotices } from '../../stores/notices';
 import { memoryTargetLabel, memoryTargetOptions } from '../modes/memory';
 import type { Serialized } from './serialize';
 import { submitHumanSerialized, submitSerialized } from './submit';
-import { addressOf } from '@shared/machine/address'; // board #525
-import { remoteRow } from '../../../../../test/support/builders'; // board #525
-import { OTHER_MACHINE } from '../../../../../test/support/machine'; // board #525
-import type { SessionControls } from '../../session/controls/types'; // board #525
-import { learnReaderGrade, resetReader, useReader } from '../../sessions/share/reader'; // board #525
-import { useSessions } from '../../stores/sessions'; // board #525
-import { controlsFor } from '../../session/controls/controls-for'; // board #525
-import { laneAState } from '../../lane-a/test-support/lane-a-state'; // board #525
-import { fakeClient } from '../../../../../test/support/fake-client'; // board #525
+import { addressOf } from '@shared/machine/address'; // board 525
+import { remoteRow } from '../../../../../test/support/builders'; // board 525
+import { OTHER_MACHINE } from '../../../../../test/support/machine'; // board 525
+import type { SessionControls } from '../../session/controls/types'; // board 525
+import { learnReaderGrade, resetReader, useReader } from '../../sessions/share/reader'; // board 525
+import { useSessions } from '../../stores/sessions'; // board 525
+import { controlsFor } from '../../session/controls/controls-for'; // board 525
+import { laneAState } from '../../lane-a/test-support/lane-a-state'; // board 525
+import { fakeClient } from '../../../../../test/support/fake-client'; // board 525
 
 const APP = 'app-1' as AppSessionId;
 
@@ -149,7 +149,7 @@ describe('the # target menu', () => {
   });
 });
 
-// Board #525: another machine's terminal session has no record, and a send it refused is said all the same, never
+// Board 525: another machine's terminal session has no record, and a send it refused is said all the same, never
 // nothing; one refused at the member's grade there offers no Retry. An unstarted session with no record stays quiet. A
 // prompt the host took for another member's session is kept as the member's own.
 describe('a session on another machine with no record', () => {

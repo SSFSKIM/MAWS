@@ -22,8 +22,8 @@ import { sendHumanPrompt, sendWithoutAcquiring } from '../../composer/submit/sen
 import { ENDED, REATTACHING, reattaching, STARTING } from '../../composer/submit/submit-state';
 import { availabilityIn, availabilityRefusal } from '../../sessions/availability';
 import { beginRemoteSend } from '../../lane-b/remote-session'; // P5 O7 M2
-import { READER } from '../../sessions/share/copy'; // board #525
-import { learnReaderGrade, whomToAsk } from '../../sessions/share/reader'; // board #525
+import { READER } from '../../sessions/share/copy'; // board 525
+import { learnReaderGrade, whomToAsk } from '../../sessions/share/reader'; // board 525
 import { useSessions } from '../../stores/sessions';
 import type { Capability, ControlKey, ControlResult, SessionControls } from './types';
 
@@ -60,12 +60,12 @@ const REMOTE_DIRECTORIES = 'Adding a directory isn’t offered for a session on 
 const refusedWith = (error: string) => async () => ({ ok: false as const, error });
 const unavailable = (reason: string | null): Capability => (reason === null ? AVAILABLE : { available: false, reason });
 
-// Board #525: the machine's refusal a remote send's error carries (main's `issues.refusal`, the error's cause).
+// Board 525: the machine's refusal a remote send's error carries (main's `issues.refusal`, the error's cause).
 const refusalOf = (error: unknown): unknown => ((error as { cause?: { issues?: { refusal?: unknown } } } | null)?.cause?.issues?.refusal);
 
 // P5 O7 M2: content that would not fit one message on the channel, by the bound main's link checks (its UTF-8 JSON).
 const encoder = new TextEncoder();
-// board #525: whether a text block of the content starts with `/` (after leading space), which the endpoint grades by
+// board 525: whether a text block of the content starts with `/` (after leading space), which the endpoint grades by
 // the command, Manage unless it is a session-only or read-only one (src/endpoint/by-effect.ts `textGrade`; the renderer
 // may not import it)
 const hasSlashText = (content: string | readonly unknown[]): boolean =>
@@ -125,7 +125,7 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
     try {
       return await sendWithoutAcquiring(appSessionId, content, options, client); // one invocation: main resumes and sends under one bound
     } catch (error) {
-      // board #525: another member's session refused the words at the member's grade: said with whom to ask, and learnt,
+      // board 525: another member's session refused the words at the member's grade: said with whom to ask, and learnt,
       // but only for plain words (Converse): a slash command is graded Manage, so its refusal says nothing of Converse
       if (refusalOf(error) === 'grade' && !hasSlashText(content) && learnReaderGrade(appSessionId, 'view')) return { disposition: 'refused' as const, started: false, reason: READER.notSent(whomToAsk(appSessionId)) };
       throw error;

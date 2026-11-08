@@ -106,7 +106,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 /* W1: a message waiting for the engine (Claude Desktop's dimmed tail bubble), and its caption, always shown */
 .transcript-user[data-pending] .transcript-user-bubble { opacity: 0.55; }
 .transcript-user-caption { color: var(--fg-muted); }
-/* Board #525: who wrote a prompt someone else wrote (a session another member owns), above its bubble */
+/* Board 525: who wrote a prompt someone else wrote (a session another member owns), above its bubble */
 .transcript-user-author { max-width: 70%; color: var(--fg-muted); font-size: var(--text-ui-sm); overflow-wrap: anywhere; }
 
 /* Assistant text: a long path or URL wraps rather than scrolling a narrow transcript sideways (as the bubble does) */

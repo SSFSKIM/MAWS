@@ -28,7 +28,7 @@ import { useShownEffort } from '../../composer/effective-effort';
 import { useOwnerChannel } from '../../stores/owner-channel'; // P2-C
 import { attachQueue, EMPTY_QUEUE, useQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
-import { usePromptAuthor } from '../../sessions/share/reader'; // board #525
+import { usePromptAuthor } from '../../sessions/share/reader'; // board 525
 import { useTranscriptStore } from '../../stores/transcript'; // L276
 import { askAnsweredHere, askSteerOf, heldRow } from '../model/derive';
 import type { Row } from '../model/rows';
@@ -124,7 +124,7 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
   const withdrawn = useMemo(() => new Set<string>(queue.withdrawn), [queue.withdrawn]);
   const effort = useShownEffort(appSessionId);
   const ownerLane = useOwnerChannel(agentId === undefined ? appSessionId : null)?.lane.on ?? false; // P2-C: a session's, never a child's
-  const promptAuthor = usePromptAuthor(agentId === undefined ? appSessionId : null); // board #525: another member's session names its prompts' authors
+  const promptAuthor = usePromptAuthor(agentId === undefined ? appSessionId : null); // board 525: another member's session names its prompts' authors
   return (
     <Transcript
       source={source}

@@ -27,7 +27,7 @@
 // pause (`paused`, main's word for a link down or a subscription the machine ended, which main asks again) and main's
 // refusal of the watch (`refused`, an endpoint that can't carry it).
 //
-// Board #525: a session of another member's whose read its machine refused at the member's grade (main's `paused`
+// Board 525: a session of another member's whose read its machine refused at the member's grade (main's `paused`
 // naming `grade`) can't be read by them (Can message): the watch is let go and none is opened while that stands
 // (sessions/share/reader.ts), so the page asks nothing of it until what was learnt is asked afresh. An owner's `grade`
 // is the machine not holding the record yet, which main asks again as before.
@@ -77,7 +77,7 @@ const keyOf = (appSessionId: AppSessionId, agentId: string | null) => (agentId =
 const ops = new Map<AppSessionId, Map<string, SessionMessage[]>>();
 
 const watchable = (appSessionId: AppSessionId): boolean => {
-  if (readerGradeOf(appSessionId) === 'list') return false; // board #525: its read was refused at the member's grade
+  if (readerGradeOf(appSessionId) === 'list') return false; // board 525: its read was refused at the member's grade
   const bridge = useLaneA.getState().states.get(appSessionId)?.bridge;
   return bridge === 'live' || bridge === 'starting' || isRemoteLaneA(appSessionId);
 };
@@ -131,7 +131,7 @@ function receive(appSessionId: AppSessionId, entry: Entry, payload: Payload): vo
     end(appSessionId, entry, payload.ended);
     open(appSessionId, entry);
   } else if ('paused' in payload && session && payload.paused === 'grade' && learnReaderGrade(appSessionId, 'list')) {
-    // board #525: another member's session the member can't read: let go, and asked again only once that is forgotten
+    // board 525: another member's session the member can't read: let go, and asked again only once that is forgotten
     if (entry.watch !== null) void entry.client.invoke('laneA.unwatch', { appSessionId, watch: entry.watch });
     end(appSessionId, entry, 'grade');
   } else if ('resumed' in payload) {
@@ -188,7 +188,7 @@ function entryFor(appSessionId: AppSessionId, client: MawsBridge, agentId: strin
   const offStore = useLaneA.subscribe((state, before) => {
     if (state.states.get(appSessionId) !== before.states.get(appSessionId)) open(appSessionId, entry);
   });
-  // board #525: a refused read forgotten is asked again
+  // board 525: a refused read forgotten is asked again
   const offReader = useReader.subscribe((state, before) => {
     if (before.learnt.get(appSessionId)?.grade === 'list' && state.learnt.get(appSessionId)?.grade !== 'list') open(appSessionId, entry);
   });

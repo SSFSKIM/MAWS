@@ -133,7 +133,7 @@ const CANT_TALK = 'you can read this session but not talk to its agent';
 const either = (names: readonly string[]): string => (names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} or ${names.at(-1)}`);
 
 /**
- * Board #525: the reader's side of a session another member owns (sessions/share/reader.ts). A listing never says what the
+ * Board 525: the reader's side of a session another member owns (sessions/share/reader.ts). A listing never says what the
  * reader holds there: the machine refuses a read below View and a send below Converse, and these say so with whom to ask
  * (the session's owners by name; "its owner" when the head names none), in the grades' own labels. A prompt there is its
  * owners' unless this app sent it, since no prompt carries its author.

@@ -15,7 +15,7 @@
 // `session.changed`, so the pane is a record's like a local one's); until then it reads "Opening on <machine>…", and
 // "<machine> can't place this session" (or whatever reason main says) with Try again once main gave up. The pane's mount
 // is its announcement to main (lane-b/remote-connect.ts), so a reloaded page or a second window gets the session again.
-// Board #525: another member's session on either lane whose read its machine refused at the member's grade (Can message)
+// Board 525: another member's session on either lane whose read its machine refused at the member's grade (Can message)
 // reads as what the member can do there and whom to ask for View, with no transcript and no composer; a pane opening the
 // session asks afresh (sessions/share/reader-connect.ts).
 import { useEffect, useRef, type ReactNode } from 'react';
@@ -39,10 +39,10 @@ import { HolderNotice } from './HolderNotice';
 import { useSessionControls } from './controls/controls-for'; // P5 O9 M4
 import { SessionTabNotes } from '../sessions/SessionDialogs'; // C10
 import { ReportBar } from '../owner/report/ReportBar'; // P2-C
-import { READ_REFUSED } from '@shared/org/reader'; // board #525
-import { READER } from '../sessions/share/copy'; // board #525
-import { useCantRead, useWhomToAsk } from '../sessions/share/reader'; // board #525
-import { useReaderPane } from '../sessions/share/reader-connect'; // board #525
+import { READ_REFUSED } from '@shared/org/reader'; // board 525
+import { READER } from '../sessions/share/copy'; // board 525
+import { useCantRead, useWhomToAsk } from '../sessions/share/reader'; // board 525
+import { useReaderPane } from '../sessions/share/reader-connect'; // board 525
 
 type PaneIndex = 0 | 1;
 
@@ -56,8 +56,8 @@ export function SessionPane({ appSessionId, paneIndex, compact = false }: { appS
   const remote = useRemoteLaneA(appSessionId); // P5 O9 M9
   const remoteB = useIsRemoteLaneB(appSessionId); // P5 O7 M2
   useRemotePaneOpening(appSessionId); // P5 O7 M2
-  useReaderPane(appSessionId); // board #525
-  const cantRead = useCantRead(appSessionId); // board #525
+  useReaderPane(appSessionId); // board 525
+  const cantRead = useCantRead(appSessionId); // board 525
   const envelope = useRef<HTMLDivElement>(null);
   return <div ref={envelope} className="h-full min-h-0 min-w-0"><SurfaceViewportProvider element={envelope}>
     {cantRead ? <CantReadPane appSessionId={appSessionId} /> : record || remote ? <StartedPane appSessionId={appSessionId} record={record ?? null} paneIndex={paneIndex} compact={compact} /> : remoteB ? <OpeningRemotePane appSessionId={appSessionId} /> : <UnstartedPane appSessionId={appSessionId} paneIndex={paneIndex} compact={compact} />}
@@ -71,7 +71,7 @@ function OpeningRemotePane({ appSessionId }: { appSessionId: AppSessionId }) {
   const machine = useMachineMark(appSessionId).name;
   const ended = state?.stream === 'ended';
   const retry = ended && state.link.refusal === null;
-  // board #525: main's refused read on a session the member owns is the machine not placing it yet (one word for both)
+  // board 525: main's refused read on a session the member owns is the machine not placing it yet (one word for both)
   const reason = state?.reason === READ_REFUSED ? (ended ? `${machine} can’t place this session` : null) : (state?.reason ?? null);
   return (
     <div className="flex h-full items-center justify-center p-6">
@@ -87,7 +87,7 @@ function OpeningRemotePane({ appSessionId }: { appSessionId: AppSessionId }) {
   );
 }
 
-// Board #525: another member's session the member can't read (its machine refused the read at their grade).
+// Board 525: another member's session the member can't read (its machine refused the read at their grade).
 function CantReadPane({ appSessionId }: { appSessionId: AppSessionId }) {
   const whom = useWhomToAsk(appSessionId);
   return (

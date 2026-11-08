@@ -1,4 +1,4 @@
-// Board #525: what the page learns of the member's reach on another member's session, from its machine's refusals, and
+// Board 525: what the page learns of the member's reach on another member's session, from its machine's refusals, and
 // when that is asked afresh; whom the words name; who wrote a prompt there.
 import { act, cleanup, render, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

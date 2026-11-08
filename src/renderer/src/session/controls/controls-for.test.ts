@@ -18,8 +18,8 @@ import { useSessions } from '../../stores/sessions';
 import { applyRemoteSession, resetRemoteLaneBStore } from '../../lane-b/remote-session';
 import { ALL_OPEN, remoteSessionState } from '../../lane-b/test-support/remote-session';
 import { answerSession, askSession, compactSession, controlsFor, drivenByBridge, sendToSession, sessionControls, stopSessionTask, useSessionControls } from './controls-for';
-import { READER } from '../../sessions/share/copy'; // board #525
-import { readerGradeOf, resetReader, useReader } from '../../sessions/share/reader'; // board #525
+import { READER } from '../../sessions/share/copy'; // board 525
+import { readerGradeOf, resetReader, useReader } from '../../sessions/share/reader'; // board 525
 
 const APP = 'app-c' as AppSessionId;
 const UUID = '22222222-2222-4222-8222-222222222222' as MessageUuid;
@@ -115,7 +115,7 @@ describe('a lane B session on another machine', () => {
   });
 });
 
-// Board #525: another member's session refuses a send below Converse at the member's grade; the refusal says so with whom
+// Board 525: another member's session refuses a send below Converse at the member's grade; the refusal says so with whom
 // to ask, never nothing, and from then on the port is closed in those words, a send refused without going. An owner's
 // session learns nothing from it.
 describe('a session the member can read but not talk to', () => {

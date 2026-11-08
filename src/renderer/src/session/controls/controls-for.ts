@@ -5,7 +5,7 @@
 // before. P5 O9 M9: another machine's terminal session (a listed row of lane A, which has no record) gets lane A's port
 // over main's remote adapter, its state the page's watch's (starting until the first), its gaps the remote ones.
 // P5 O7 M2: another machine's lane B session (lane-b/remote-session.ts) gets lane B's port over main's remote lane B
-// adapter, with the overlay main says for it (`remote.session`'s controls). Board #525: on another member's session whose
+// adapter, with the overlay main says for it (`remote.session`'s controls). Board 525: on another member's session whose
 // machine refused the member's read or words at their grade (sessions/share/reader.ts), every control but a subagent's
 // rows is closed with why and whom to ask, and a send is refused in those words without going.
 import type { RequestAnswer } from '@shared/engine/answers';
@@ -35,7 +35,7 @@ export function controlsFor(record: SessionRecord | null, laneA: LaneAState | nu
   return noting(gated(portFor(record, laneA, inputs), inputs.appSessionId), inputs.appSessionId);
 }
 
-// Board #525: every send goes through a port, so here a prompt the host took for another member's session is kept as the
+// Board 525: every send goes through a port, so here a prompt the host took for another member's session is kept as the
 // member's own: by its message uuid, or, queued, by its queue id (the uuid comes when the entry is submitted).
 function noting(controls: SessionControls | null, appSessionId: AppSessionId): SessionControls | null {
   if (controls === null) return null;
@@ -52,7 +52,7 @@ function noting(controls: SessionControls | null, appSessionId: AppSessionId): S
   };
 }
 
-// Board #525: the port of another member's session closed at the grade its machine's refusal taught.
+// Board 525: the port of another member's session closed at the grade its machine's refusal taught.
 function gated(controls: SessionControls | null, appSessionId: AppSessionId): SessionControls | null {
   const grade = controls === null ? null : readerGradeOf(appSessionId);
   if (controls === null || grade === null) return controls;
@@ -97,7 +97,7 @@ export function useSessionControls(appSessionId: AppSessionId, options: { client
   useRemoteMachineCapabilities(appSessionId); // 2026-11-06: its endpoint's capabilities lift a gap (`subagent-rows`)
   useIsRemoteLaneB(appSessionId); // P5 O7 M2: another machine's lane B session takes main's overlay; subscribed so its state renders again
   useRemoteLaneBState(appSessionId);
-  useReaderGrade(appSessionId); // board #525: a refusal at the member's grade closes the port; subscribed so it renders again
+  useReaderGrade(appSessionId); // board 525: a refusal at the member's grade closes the port; subscribed so it renders again
   useWhomToAsk(appSessionId);
   return controlsFor(record, laneA, { appSessionId, client: options.client ?? ipc, ...(options.frame && { frame: options.frame }) });
 }

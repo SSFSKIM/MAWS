@@ -18,8 +18,8 @@ import { startNoticeId } from '../../sessions/store'; // P2-A
 import { acquireSession, acquisitionWords } from '../../sessions/acquire'; // P2-A
 import { useSessions } from '../../stores/sessions'; // P2-A
 import { beginRemoteSend, isRemoteLaneB } from '../../lane-b/remote-session'; // P5 O7 M2; M4: beginRemoteSend
-import { isRemoteLaneA } from '../../lane-a/remote-session'; // board #525
-import { readerGradeOf } from '../../sessions/share/reader'; // board #525
+import { isRemoteLaneA } from '../../lane-a/remote-session'; // board 525
+import { readerGradeOf } from '../../sessions/share/reader'; // board 525
 import { useTranscriptStore } from '../../stores/transcript';
 import { sendSizeRefusal } from './attachments';
 import type { Attachment } from './doc';
@@ -99,7 +99,7 @@ export function appendHistory(client: MawsBridge, appSessionId: AppSessionId, s:
 // offline", the pending bound's "…hasn't confirmed it; check the transcript"), and Retry reads Send again.
 // P5 O7 M8: what a remote send with uploads adds (submitRemoteSerialized): the uploads the message names, and what a
 // failed send hears before its words are shown
-// Board #525: another machine's terminal session has no record, and its refusal is said all the same (never nothing); one
+// Board 525: another machine's terminal session has no record, and its refusal is said all the same (never nothing); one
 // at the member's grade there offers no Retry, which the same grade would refuse. (A prompt the host took is kept as the
 // member's own at the port, controls-for.ts.)
 interface RemoteExtras {

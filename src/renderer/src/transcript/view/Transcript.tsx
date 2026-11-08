@@ -477,7 +477,7 @@ export interface TranscriptProps {
   // P5 O9, additive: rows kept outside the store, each placed after the last row of its turn (`withPlacedRows`): a
   // terminal session's reply its interrupt cut before the engine wrote it
   placed?: readonly Row[];
-  // board #525, additive: who wrote a prompt, as the reader names them (null: theirs); absent, every prompt is theirs
+  // board 525, additive: who wrote a prompt, as the reader names them (null: theirs); absent, every prompt is theirs
   promptAuthor?: (row: { id: string; messageUuid: string | null }) => string | null;
 }
 

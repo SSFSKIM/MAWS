@@ -1,4 +1,4 @@
-// What this app knows of the signed-in member's reach on a session another member owns (board #525; P5 O8 M6b's shares,
+// What this app knows of the signed-in member's reach on a session another member owns (board 525; P5 O8 M6b's shares,
 // docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, §Q). A listing names a session's owners, and a private
 // one's audience, but never what the reader holds there: its machine says that only by refusing, `grade`, a read below
 // View and a send below Converse. So the page learns it from those refusals, for a listed session the member doesn't own
