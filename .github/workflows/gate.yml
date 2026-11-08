@@ -911,6 +911,8 @@ jobs:
         with:
           vm: any
       - id: e2e
+        # A guest-eligible entry's job limit carries the uplink's margin; its test step keeps the former limit (gate-plan.mjs).
+        timeout-minutes: ${{ matrix.test_timeout || matrix.timeout }}
         env:
           SCRIPT: ${{ matrix.script }}
           MAWS_E2E_RETRY: ${{ github.job == 'e2e' && matrix.retry && runner.os == 'macOS' && '1' || '' }}
