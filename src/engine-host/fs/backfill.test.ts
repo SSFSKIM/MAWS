@@ -567,6 +567,63 @@ describe('subagent sidecars map to the X1 graph', () => {
     expect(only(run('something-new'), 'subagent.finished')[0].status).toBe('completed');
   });
 
+  // The engine joins the notifications it delivers at once into one row, each block after a blank line (DX4's vectors,
+  // case "several notifications in one row"): each block is an outcome of its own, its elements read within it.
+  it('a row of several notifications finishes each agent and task it names, each from its own block', () => {
+    const block = (task: string, tool: string | null, status: string | null, summary: string, extra = '') =>
+      ['<task-notification>', `<task-id>${task}</task-id>`, ...(tool === null ? [] : [`<tool-use-id>${tool}</tool-use-id>`]),
+        ...(status === null ? [] : [`<status>${status}</status>`]), `<summary>${summary}</summary>${extra}`, '</task-notification>'].join('\n');
+    const joined = [
+      block('agent-2', 'toolu_b', 'completed', 'Agent "b" finished', '\n<result>BETA</result>'),
+      block('bmon1', null, null, 'Monitor event: "log"', '\n<event>FAIL one</event>'),
+      block('agent-1', 'toolu_a', 'failed', 'Agent "a" failed'),
+      block('bshell1', 'toolu_s', 'killed', 'Background command "serve" was stopped'),
+    ].join('\n\n');
+    const agents: Record<string, string> = { toolu_a: 'agent-1', toolu_b: 'agent-2' };
+    const subagents: SubagentLookup = {
+      byToolUseId: (id) => (id in agents ? { agentId: agents[id] as AgentId, meta: { agentType: 'general-purpose', description: id, toolUseId: id, spawnDepth: 1, requestShape: 'background' }, prompt: null } : null),
+    };
+    const launch = (id: string, n: number): TranscriptRecord[] => [
+      rec({ type: 'assistant', uuid: `a${n}`, parentUuid: null, timestamp: at(n), message: { id: `m${n}`, model: 'x', content: [{ type: 'tool_use', id, name: 'Agent', input: {} }] } }),
+      rec({ type: 'user', uuid: `r${n}`, parentUuid: `a${n}`, timestamp: at(n), toolUseResult: { isAsync: true, status: 'async_launched', agentId: agents[id] },
+        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'Async agent launched successfully.' }] } }),
+    ];
+    const run = (delivered: TranscriptRecord) => {
+      const ctx = createBackfillContext({ sessionId: SESSION, agent: null, subagents });
+      mapAll([rec({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: at(0), message: { role: 'user', content: 'go' } }), ...launch('toolu_a', 1), ...launch('toolu_b', 2)], ctx);
+      return { ctx, events: mapAll([delivered], ctx) };
+    };
+    const outcomes = (events: SessionEvent[]) => [
+      ...only(events, 'subagent.finished').map((e) => [e.taskId, e.status, e.summary]),
+      ...only(events, 'task.notification').map((e) => [e.taskId, e.toolUseId, e.status, e.summary]),
+    ];
+    const want = [['agent-2', 'completed', 'BETA'], ['agent-1', 'failed', 'Agent "a" failed'], ['bshell1', 'toolu_s', 'stopped', 'Background command "serve" was stopped']];
+
+    const plain = run(rec({ type: 'user', uuid: 'n1', parentUuid: 'r2', timestamp: at(3), origin: { kind: 'task-notification' }, message: { role: 'user', content: joined } }));
+    expect(outcomes(plain.events)).toEqual(want);
+    expect(only(plain.events, 'user.message').map((e) => [e.messageUuid, e.origin])).toEqual([['n1', 'task-notification']]); // still one message
+
+    // A subagent's transcript writes them after the engine's preamble, on a meta row the engine marked as notifications';
+    // the same text on any other row is somebody's words.
+    const preamble = `[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\n\n${joined}`;
+    const notice = (origin: Record<string, unknown> | undefined) => rec({ type: 'user', uuid: 'n1', parentUuid: 'r2', timestamp: at(3), isMeta: true, ...(origin && { origin }), message: { role: 'user', content: preamble } });
+    const engine = run(notice({ kind: 'task-notification', producer: 'session-task' }));
+    expect(outcomes(engine.events)).toEqual(want);
+    expect(only(engine.events, 'user.message').map((e) => e.origin)).toEqual(['task-notification']);
+    for (const origin of [undefined, { kind: 'human' }]) {
+      const typed = run(notice(origin));
+      expect(outcomes(typed.events)).toEqual([]);
+      expect(only(typed.events, 'user.message').map((e) => e.origin)).toEqual([origin === undefined ? null : 'human']);
+    }
+
+    // The queued form, written without source_uuid: its blocks' tool uses are its identity, so a second delivery of
+    // the same blocks is the same notification and maps to nothing.
+    const queued = rec({ type: 'attachment', uuid: 'q1', parentUuid: 'r2', timestamp: at(3), attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: joined } });
+    const first = run(queued);
+    expect(outcomes(first.events)).toEqual(want);
+    expect(mapAll([rec({ ...queued, uuid: 'q2' })], first.ctx)).toEqual([]);
+  });
+
   it('starts an agent whose meta was written after its Agent tool use was read, at the tool use\'s result (live tailing)', () => {
     // The engine appends the assistant record before it runs the tool, and the tool writes agent-<id>.meta.json when
     // it spawns the child, so a tailer reads the tool use before the meta exists.

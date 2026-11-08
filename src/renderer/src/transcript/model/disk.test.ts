@@ -118,6 +118,32 @@ describe('C4 backfill through the transcript model', () => {
   });
 });
 
+// A subagent's transcript writes its task notifications after the engine's preamble, several joined into one row when
+// delivered at once (DX4's vectors, case "several notifications in one row": agent a17p's own rows, its nested agent
+// a17n among them). Drilled into from disk, those rows are the engine's notices, never the owner's words, and the one
+// naming the nested agent's call ends it.
+describe('a subagent transcript’s notifications from disk', () => {
+  type Vector = { name: string; input: { session: { id: string }; metas: { agentId: string; meta: unknown }[]; agentFiles: Record<string, { rows: Record<string, unknown>[] }> } };
+  const vectors = JSON.parse(readFileSync(join(TEST_FIXTURE_DIR, 'lane-a/dx4-jobs.json'), 'utf8')) as { cases: Vector[] };
+  const { input } = vectors.cases.find((c) => c.name === 'several notifications in one row')!;
+  const PARENT = 'a17p0000000000001';
+
+  it('draws the preamble rows as no bubble, and the nested agent its notice names finished', async () => {
+    const metas = input.metas.map(({ agentId, meta }) => ({ agentId: agentId as AgentId, meta: AgentMetaSchema.parse(meta), prompt: null }));
+    const subagents = { byToolUseId: (toolUseId: string) => metas.find((m) => m.meta.toolUseId === toolUseId) ?? null };
+    const rows = input.agentFiles[PARENT].rows.map((row) => ({ sessionId: input.session.id, isSidechain: true, agentId: PARENT, cwd: '/work', version: '2.1.318', ...row }));
+    const events: SessionEvent[] = [];
+    const follower = new ChainFollower(new MemoryFileReader(Buffer.from(rows.map((row) => JSON.stringify(row) + '\n').join(''))), input.session.id as SessionId, { agentId: PARENT as AgentId, parentToolUseId: null }, (e) => e.t === 'events' && events.push(...e.events), { holders: () => 0, subagents });
+    await follower.start();
+    follower.stop();
+    const drawn = expanded(stateOf(events));
+    expect(ofKind(drawn, 'user').map((row) => row.text)).toEqual(['Run the mutation suites, then review the mutants.']);
+    expect(drawn.some((row) => JSON.stringify(row).includes('SYSTEM NOTIFICATION'))).toBe(false);
+    const nested = ofKind(drawn, 'subagent');
+    expect(nested.map((row) => [row.agents.map((agent) => agent.agentId), row.status])).toEqual([[['a17n0000000000002'], 'finished']]);
+  });
+});
+
 // Debt wave 4 (C8b live acceptance, owner's hands 2): the live main transcript repeated assistant text under later
 // "Continued for…"/"Working for…" dividers and drew one row over another. Reproduced over the live run's recorded
 // journal and its disk transcript: when a session's disk-form copies (C4's follower) and live-form events (C3's

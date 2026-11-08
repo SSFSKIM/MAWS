@@ -62,11 +62,30 @@ function notification(prompt: string): Record<string, string> {
 
 const PREAMBLE = '[SYSTEM NOTIFICATION - NOT USER INPUT]\n';
 const OPENING = '<task-notification>';
+const BLOCK = /<task-notification>[\s\S]*?<\/task-notification>/g;
 
 /**
- * The notification a plain user row carries, or null: the form the engine writes when a notification starts a turn
- * (bare in the main transcript; after its fixed preamble, then a blank line, in a subagent's). Only a row the engine
- * marked `origin.kind: task-notification` is one: a person can type the same text, and a peer's message can quote it.
+ * Each notification a notification's text carries, in order: every whole block, its elements read within it. The
+ * engine joins the notifications it delivers at once into one row, each block after a blank line (2.1.257 on).
+ */
+const blocks = (text: string): string[] => text.match(BLOCK) ?? [];
+
+/**
+ * The notifications' text of the engine's queue record that enqueues them, or null (2.1.319): a uuid-less record in the
+ * main loop's transcript, written for every notification the engine queues, whichever loop it is for, before that loop
+ * is handed it; one for an agent that handed back never is. Only an enqueue whose content starts as a notification's
+ * does: a `remove` repeats its text, and the queue holds a person's prompts and peers' messages too.
+ */
+function queuedNotice(row: JsonObject): string | null {
+  if (row.type !== 'queue-operation' || row.operation !== 'enqueue' || typeof row.content !== 'string') return null;
+  return row.content.startsWith(OPENING) ? row.content : null;
+}
+
+/**
+ * The notifications' text a plain user row carries, or null: the form the engine writes when notifications start a
+ * turn (bare in the main transcript; after its fixed preamble, then a blank line, in a subagent's). Only a row the
+ * engine marked `origin.kind: task-notification` is one: a person can type the same text, and a peer's message can
+ * quote it.
  */
 function plainNotification(row: JsonObject): string | null {
   if (obj(row.origin)?.kind !== 'task-notification') return null;
@@ -145,9 +164,16 @@ export class LoopIndex {
       return;
     }
     if (row.type === 'attachment') return this.attachment(obj(row.attachment) ?? {}, at);
+    if (row.type === 'queue-operation') {
+      for (const block of blocks(queuedNotice(row) ?? '')) this.notified(block, at);
+      return;
+    }
     if (row.type !== 'user') return;
     const plain = plainNotification(row);
-    if (plain !== null) return this.notified(plain, at);
+    if (plain !== null) {
+      for (const block of blocks(plain)) this.notified(block, at);
+      return;
+    }
     for (const { taskId, line } of noteStops(row)) {
       this.known.add(taskId);
       this.mentions.push({ from: 'note', taskId, toolUseId: null, raw: 'stopped', at, summary: line });
@@ -198,7 +224,10 @@ export class LoopIndex {
   }
 
   private attachment(a: JsonObject, at: string): void {
-    if (a.type === 'queued_command' && a.commandMode === 'task-notification' && typeof a.prompt === 'string') return this.notified(a.prompt, at);
+    if (a.type === 'queued_command' && a.commandMode === 'task-notification' && typeof a.prompt === 'string') {
+      for (const block of blocks(a.prompt)) this.notified(block, at);
+      return;
+    }
     if (a.type === 'task_status' && typeof a.taskId === 'string') {
       const summary = str(a.deltaSummary);
       const outputFile = str(a.outputFilePath);
@@ -358,11 +387,14 @@ export function derive(d: Derivation): Body {
 export function loopJobs(loop: LoopIndex, running: boolean, also?: LoopIndex): Pick<Body, 'jobs' | 'mcp'> {
   const naming = (index: LoopIndex, taskId: string) => index.mentions.filter((m) => m.taskId === taskId && m.from !== 'result');
   const jobs = loop.started.map((s): Job => {
-    // `also`, the main loop's index for a subagent's loop: its words on the agent's tasks count after the loop's own,
-    // since the bridge's note of a subagent's task it stopped is in the main transcript (the plane's `jobs_body`).
-    const mentions = [...naming(loop, s.taskId), ...(also ? naming(also, s.taskId) : [])];
+    // `also`, the main loop's index for a subagent's loop: its words on the agent's tasks count while the loop's own
+    // leave the task running, since the bridge's note of a subagent's task it stopped is in the main transcript, and so
+    // is the engine's notice queued for an agent that handed back before it came (the plane's `jobs_body`). Never after
+    // the loop's own end: a notice is enqueued there before the loop is handed its copy, so it is the older word.
+    const monitor = loop.monitors.has(s.taskId);
     const start: Outcome = { status: 'running', raw: 'running', at: s.startedAt, terminal: false };
-    const outcome = fold(mentions, loop.monitors.has(s.taskId), start)!;
+    let outcome = fold(naming(loop, s.taskId), monitor, start)!;
+    if (also && outcome.status === 'running') outcome = fold(naming(also, s.taskId), monitor, outcome)!;
     const status: JobStatus = outcome.terminal ? (outcome.status as JobStatus) : running ? 'running' : 'exited';
     return {
       ...s,

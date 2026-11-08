@@ -1,11 +1,15 @@
 # DX4's shared vectors (vendored)
 
 `dx4-jobs.json` is a verbatim copy of DC8's shared fixture for DX4's widened `subagents` body and its `output` answer,
-from doperpowers `tests/sminos/dx4-jobs.json` at commit `717c5b0b` (main, 7.172.0: DC10's case 16, the
-bridge's notes of tasks it stopped; sha256 `46f6c6391025fd8531663f17ca9cbd4fbb37299bafba20c9e24371c1f6d278b3`). DC8 owns it: it pins both producers, the plane
-(doperpowers `skills/sminos/scripts/sminos_jobs.py`, run by `tests/sminos/jobs_parity.py`) and this fake machine
+from doperpowers `sminos/tests/dx4-jobs.json` at merge `b0db15af` (main, PR #478, sminos 1.40.6: case 18, notices the
+engine queued, from `4057f1d9`; `jobs_body`'s `also` counting only while the loop's own rows leave a task running, from
+`400632ce`, which `../jobs.ts`'s `loopJobs` mirrors; git blob `a414fd58d`, sha256
+`930e1b82406b70200dadf9b31859e4fe6cd7f2c168d2965af0ae4be75c5e4666`). DC8 owns it: it pins both producers, the plane
+(doperpowers `sminos/skills/sminos/scripts/sminos_jobs.py`, run by `sminos/tests/jobs_parity.py`) and this fake machine
 (`../jobs.ts`, run by `test/fake-machine/jobs-parity.test.ts`, which mirrors `jobs_parity.py`). Its `about` field is
-normative where the composite's DX4 prose is open.
+normative where the composite's DX4 prose is open. The fake machine's live path replays only a recording's rows with a
+uuid (`../recording.ts`), so the engine's uuid-less queue records (case 18) reach `LoopIndex` only through `feed`, as the
+vectors' rows do.
 
 Never edit it here. When DC8 changes it, copy the new file over this one, update the commit and the hash above, and run
 the parity suite; a case the fake machine fails goes to the composite's writer, not into a local edit of the vectors.

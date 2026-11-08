@@ -26,6 +26,11 @@ const LAUNCHED = 'async_launched'; // a background agent's launch: running evide
 const EXPIRED = 'expired';
 const EXPIRY_EVENTS = ['[Monitor expired after ', '[Monitor timed out'];
 const NOTIFICATION_PREAMBLE = '[SYSTEM NOTIFICATION - NOT USER INPUT]\n';
+const NOTIFICATION = /<task-notification>[\s\S]*?<\/task-notification>/g;
+// The engine's queue record (2.1.319), no uuid, in the main loop's transcript: every notification it queues, whichever
+// loop it is for, is enqueued there before it is handed over; one for an agent that handed back never is. Only an
+// enqueue is read: a `remove` repeats its text.
+const QUEUE_RECORD = 'queue-operation';
 // The bridge's notes of tasks it stopped (a plugin's TaskStop writes no row), known by their row's whole text.
 const TASK_ID = '([A-Za-z0-9_-]{1,64})';
 const STOP_NOTE = new RegExp(`^Task ${TASK_ID}, a background task, was stopped from (?:the desk|outside the terminal): it is not running\\.$`);
@@ -70,7 +75,19 @@ function element(prompt: string, name: string): string | null {
   return m ? m[1].trim() : null;
 }
 
-// The notification text of a plain user row the engine wrote for one (origin.kind task-notification), or null.
+// Each notification a notification's text carries, in order: every whole block, its elements read within it. The
+// engine joins the notifications it delivers at once into one row, each block after a blank line (2.1.257 on).
+const notifications = (text: string): string[] => text.match(NOTIFICATION) ?? [];
+
+// The notifications' text of an engine queue record that enqueues them, or null: its content, which must start with
+// `<task-notification>` (the queue holds a person's prompts and peers' messages too).
+function queuedNotice(row: Row): string | null {
+  if (row.type !== QUEUE_RECORD || row.operation !== 'enqueue' || typeof row.content !== 'string') return null;
+  return row.content.startsWith('<task-notification>') ? row.content : null;
+}
+
+// The notification text of a plain user row the engine wrote for its notifications (origin.kind task-notification),
+// or null.
 function plainNotification(row: Row, content: unknown): string | null {
   if (row.type !== 'user' || record(row.origin)?.kind !== 'task-notification') return null;
   let body = text(content);
@@ -99,11 +116,13 @@ function stopRecords(row: Row, content: unknown): [string, string][] {
 }
 
 // The outcome a run of evidence comes to, in row order: a recognized word replaces the outcome unless the outcome is
-// terminal and the word is not; an unrecognized word replaces only `raw` of an outcome there is.
-export function fold(evidence: readonly Evidence[], outcome: Outcome): Outcome;
-export function fold(evidence: readonly Evidence[], outcome?: Outcome | null): Outcome | null;
-export function fold(evidence: readonly Evidence[], outcome: Outcome | null = null): Outcome | null {
+// terminal and the word is not; an unrecognized word replaces only `raw` of an outcome there is. An expiry notice is a
+// word only for a task the folding loop holds as a monitor (`monitor`): judged here, not where it was said.
+export function fold(evidence: readonly Evidence[], outcome: Outcome, monitor?: boolean): Outcome;
+export function fold(evidence: readonly Evidence[], outcome?: Outcome | null, monitor?: boolean): Outcome | null;
+export function fold(evidence: readonly Evidence[], outcome: Outcome | null = null, monitor = false): Outcome | null {
   for (const ev of evidence) {
+    if (ev.expiry && !monitor) continue;
     const said = ev.expiry ? (['completed', true] as [JobStatus, boolean]) : word(ev.raw);
     if (said === null) {
       if (outcome !== null) outcome = { ...outcome, raw: ev.raw };
@@ -150,9 +169,11 @@ export class Ledger {
     const at = row.timestamp;
     const attachment = record(row.attachment);
     if (attachment !== null) this.attachment(attachment, at);
+    const queued = queuedNotice(row);
+    for (const block of queued === null ? [] : notifications(queued)) this.notification(block, at);
     const content = record(row.message)?.content;
     const plain = plainNotification(row, content);
-    if (plain !== null) this.notification(plain, at);
+    for (const block of plain === null ? [] : notifications(plain)) this.notification(block, at);
     for (const [task, line] of stopRecords(row, content)) this.say(task, { raw: 'stopped', at, summary: line });
     if (!Array.isArray(content)) return;
     for (const value of content) {
@@ -170,7 +191,7 @@ export class Ledger {
   // The loop's jobs; `sessionRunning` false once the session's process is gone (a job no word ended is `exited`).
   jobsBody(sessionRunning: boolean): Job[] {
     return [...this.jobs].map(([taskId, job]) => {
-      const o = fold(this.said.get(taskId) ?? [], { status: 'running', raw: 'running', at: job.startedAt });
+      const o = fold(this.said.get(taskId) ?? [], { status: 'running', raw: 'running', at: job.startedAt }, job.kind === 'monitor');
       const ended = o.status !== 'running';
       return {
         taskId, kind: job.kind, toolUseId: job.toolUseId, startedAt: job.startedAt as string, description: job.description,
@@ -224,11 +245,11 @@ export class Ledger {
       const summary = str(att.deltaSummary);
       this.say(task, { raw: att.status, at, ...(summary !== null && { summary }), ...(path !== null && { outputFile: path }) });
     } else if (att.type === 'queued_command' && att.commandMode === 'task-notification' && typeof att.prompt === 'string') {
-      this.notification(att.prompt, at);
+      for (const block of notifications(att.prompt)) this.notification(block, at);
     }
   }
 
-  // One task-notification's text, from either form the engine writes it in.
+  // One task-notification's block, from any form the engine writes it in.
   private notification(prompt: string, at: unknown): void {
     const task = element(prompt, 'task-id') || null;
     const path = element(prompt, 'output-file') || null;
@@ -238,7 +259,7 @@ export class Ledger {
     if (raw !== null) {
       const summary = element(prompt, 'summary') || null;
       this.say(task, { raw, at, ...(summary !== null && { summary }), ...(path !== null && { outputFile: path }) });
-    } else if (this.jobs.get(task)?.kind === 'monitor') {
+    } else {
       const event = element(prompt, 'event');
       if (event && EXPIRY_EVENTS.some((line) => event.startsWith(line))) this.say(task, { raw: EXPIRED, at, expiry: true, summary: event });
     }

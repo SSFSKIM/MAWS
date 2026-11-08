@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { deriveFromRows, LoopIndex, TABLE, type BodyInput } from '../../fake-machine/jobs';
+import { deriveFromRows, indexOf, LoopIndex, loopJobs, TABLE, type BodyInput } from '../../fake-machine/jobs';
 import { answerOutput } from '../../fake-machine/output';
 import type { JsonObject } from '../../src/protocol/json';
 
@@ -61,5 +61,38 @@ describe("DX4's shared vectors", () => {
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+// `loopJobs`'s `also`, which no vector's input carries (sminos's unit test pins its side): a subagent loop's jobs fold the
+// main loop's words on its tasks, and the engine's queue records sit in the main loop's transcript whichever loop they
+// are for. Case 18's rows split so: its calls and results as a subagent's own transcript, its queue records as the main
+// loop's, its delivered copy left out, so only the main loop says how each task ended.
+describe("the main loop's queue records on a subagent loop's tasks", () => {
+  const c = VECTORS.cases.find((k) => k.name === 'notices the engine queued')!;
+  const queued = c.input.main.filter((row) => row.type === 'queue-operation');
+  const own = c.input.main.filter((row) => row.type !== 'queue-operation' && (row.origin as JsonObject | undefined)?.kind !== 'task-notification');
+  const ends = (jobs: Array<{ taskId: string; status: string; endedAt?: string }>) => jobs.map((j) => [j.taskId, j.status, j.endedAt ?? null]);
+
+  it("end them, a monitor's expiry judged by the subagent loop that started it", () => {
+    expect(ends(loopJobs(indexOf(own), false).jobs)).toEqual(['bqueue001', 'bqueue002', 'bqueue003', 'bqueue004'].map((t) => [t, 'exited', null]));
+    expect(ends(loopJobs(indexOf(own), false, indexOf(queued)).jobs)).toEqual([
+      ['bqueue001', 'completed', '2026-10-17T09:00:10.000Z'],
+      ['bqueue002', 'failed', '2026-10-17T09:00:11.000Z'],
+      ['bqueue003', 'exited', null],
+      ['bqueue004', 'completed', '2026-10-17T09:00:18.000Z'],
+    ]);
+  });
+
+  // The engine enqueues a notice before it hands the agent its copy, so the main loop's word is the older: the loop's own
+  // end stands, its word, time and summary, where an older queued word would otherwise be folded over it.
+  it("count only while the loop's own rows leave the task running", () => {
+    const summary = 'Background command "Build the app" failed with exit code 2';
+    const delivered: JsonObject = {
+      type: 'user', uuid: '00000012-0000-4000-8000-0000000000aa', timestamp: '2026-10-17T09:00:19.000Z', isMeta: true, origin: { kind: 'task-notification' },
+      message: { role: 'user', content: `<task-notification>\n<task-id>bqueue001</task-id>\n<tool-use-id>toolu_18J1</tool-use-id>\n<status>failed</status>\n<summary>${summary}</summary>\n</task-notification>` },
+    };
+    const [job] = loopJobs(indexOf([...own, delivered]), false, indexOf(queued)).jobs;
+    expect([job.taskId, job.status, job.endedAt, job.summary]).toEqual(['bqueue001', 'failed', '2026-10-17T09:00:19.000Z', summary]);
   });
 });
