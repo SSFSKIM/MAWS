@@ -199,8 +199,9 @@ export function planOf(env, scripts, now) {
   // UNIT_CPUS. One vitest process keeps its box's cores only 55-70% busy (its main process transforms for every worker),
   // so more processes on more boxes end the suite sooner than more cores on one. Five or more shards, or 16-core shards,
   // turned suites red that wait on those transforms cold (TranscriptSlot's hooks under renderer-compiled); four shards of
-  // eight cores did not (CI-opt's critical-path arms, 2026-10-21). A selected run that tests only the related suites, and
-  // a run off the pool, is the one job `unit`.
+  // eight cores did not (CI-opt's critical-path arms, 2026-10-21). The hosted Linux lane shards the same way, each shard
+  // on its own 4-vCPU runner: the whole suite as one job there took 24 min and once ran past its 30 (runs 42454401786 and
+  // 42454693155, 2026-11-08). A selected run that tests only the related suites, and a run on macOS, is the one job `unit`.
   const UNIT_SHARDS = 4;
   const UNIT_CPUS = 8;
   const CLASS1A_RUNNERS = {
@@ -414,7 +415,7 @@ export function planOf(env, scripts, now) {
   // The unit job's matrix: its shards, each with the `--shard` value and the suffix of its JUnit artifact's name
   // (test-results-unit-<k>of<n>-<attempt>, which ci-kit's test-history collector reads as one `unit` report), or the one
   // unsharded job.
-  const shards = class1a === 'pool' && !selection?.related ? UNIT_SHARDS : 1;
+  const shards = (class1a === 'pool' || class1a === 'linux') && !selection?.related ? UNIT_SHARDS : 1;
   const unitShards = shards > 1 ? Array.from({ length: shards }, (_, i) => ({ shard: `${i + 1}/${shards}`, slug: `-${i + 1}of${shards}` })) : [{ shard: '', slug: '' }];
   // The jobs' minutes outside the e2e matrix (whose entries carry their own); packaged's hosted bound is set below.
   const timeouts = { static: timeoutOn(runners.static, 30), unit: timeoutOn(runners.unit, 30), probes: timeoutOn(runners.probes, 30), unit_darwin: timeoutOn(unitDarwinRunner, 30) };
