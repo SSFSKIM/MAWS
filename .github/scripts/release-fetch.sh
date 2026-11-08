@@ -29,8 +29,10 @@ fail() {
 headers=('X-GitHub-Api-Version: 2022-11-28')
 token=${GH_TOKEN:-${GITHUB_TOKEN:-}}
 [[ -z $token ]] || headers+=("Authorization: Bearer $token")
-# curl reads these headers from stdin, never argv (visible in process listings).
-api_fetch() { printf '%s\n' "${headers[@]}" | fetch -H @- "$@"; }
+# curl reads these headers from stdin, never argv (visible in process listings). A here-string, not a pipe: the shell
+# writes it before curl starts, so a curl that exits without reading stdin can't fail the call under pipefail through
+# printf's SIGPIPE (mawsd-pack.test.mjs's fake curl, static on run 42475844068).
+api_fetch() { fetch -H @- "$@" <<<"$(printf '%s\n' "${headers[@]}")"; }
 api=https://api.github.com/repos/$repo/releases
 api_fetch -H 'Accept: application/vnd.github+json' -o "$work/release.json" "$api/tags/$tag_path" || fail 'release lookup'
 id=$(python3 -I - "$work/release.json" "$asset" <<'PY'
