@@ -11,8 +11,9 @@ it. When it changes in doperpowers, re-sync this copy and the port it pins.
 
 | File | Source | git blob | sha256 |
 |---|---|---|---|
-| `dx4-jobs.json` | doperpowers `sminos/tests/dx4-jobs.json`, sminos 1.40.5 (commit `98bb6a61`, merge `e0b41515`, PR #477: case 17, several notifications in one row) | `f4f3bfc72` | `8cd71c9fa74cca5f5fbcf73cd0bfa2e65bb6f896abc38b61db96e2cc1b53baa6` |
+| `dx4-jobs.json` | doperpowers `sminos/tests/dx4-jobs.json`, sminos 1.40.6 (commit `4057f1d9` on branch `sminos-subagents-queued-ends`, not yet merged: case 18, notices the engine queued; 1.40.5's case 17, several notifications in one row, before it) | `a414fd58d` | `930e1b82406b70200dadf9b31859e4fe6cd7f2c168d2965af0ae4be75c5e4666` |
 
 The rules it pins are `sminos/skills/sminos/scripts/sminos_jobs.py` of the same version (sha256
-`242352530fcbc5a9909d43b8e87125239c83869d2196865cffb51d4ce0c8081a`): `Ledger`, `fold` and `derive`'s `jobs`
-(`Ledger.jobs_body`). The port leaves out what the vectors' `subagents`, `mcp` and `outputCases` pin.
+`02e8c8c5bd26fd76ea7baf02914ed8ca88c50ac9f958ae988eb163b8932c7a7c`): `Ledger`, `fold` and `derive`'s `jobs`
+(`Ledger.jobs_body`). The port leaves out what the vectors' `subagents`, `mcp` and `outputCases` pin, and `jobs_body`'s
+`also` (the main loop's words on a subagent loop's tasks): main derives only the main loop's jobs.
