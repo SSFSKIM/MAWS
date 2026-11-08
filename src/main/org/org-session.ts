@@ -83,6 +83,7 @@ import {
   type Signed,
   type SignedOrgState,
 } from '../../../apps/org-protocol/src/index.ts';
+import type { ClientId } from '@shared/ipc/client';
 import type {
   ChannelAnswer,
   ChannelChanged,
@@ -194,10 +195,11 @@ export interface OrgSessionService extends OrgSession {
   pairApprove(input: { generation: number; digest: string }): Promise<SignResult>;
   pairCancel(): void;
   /** M4b: an enrollment this Mac runs (enroll.ts); the code is in this answer alone. */
-  enrollStart(input: { name: string; replace?: string }): Promise<EnrollStartResult>;
+  /** `asker`: the window that sent it (enroll.ts's `start`). */
+  enrollStart(input: { name: string; replace?: string }, asker: ClientId): Promise<EnrollStartResult>;
   enrollApprove(input: { generation: number; digest: string }): Promise<SignResult>;
   /** A window's cancel of the enrollment it owns (enroll.ts's `cancelRun`). */
-  enrollCancel(input: { generation: number | null }): EnrollCancelResult;
+  enrollCancel(input: { generation: number | null }, asker: ClientId): EnrollCancelResult;
   /** M4b: a dropped machine's hub row deleted again (`hubRowsLeft`), the route alone. */
   dropRetry(name: string): Promise<DropRetryResult>;
   /** M4b: a machine's grants (grants.ts): the ledger's word, this Mac's pending ones, and the missing ones. */
@@ -2018,9 +2020,9 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     pairStart: (input) => pairing.start(input),
     pairApprove: (input) => pairing.approve(input),
     pairCancel: () => pairing.cancel(),
-    enrollStart: (input) => enrollment.start(input),
+    enrollStart: (input, asker) => enrollment.start(input, asker),
     enrollApprove: (input) => enrollment.approve(input),
-    enrollCancel: (input) => enrollment.cancelRun(input),
+    enrollCancel: (input, asker) => enrollment.cancelRun(input, asker),
     dropRetry,
     grantsView: (input) => grants.view(input),
     grantsSet: (input) => grants.set(input),

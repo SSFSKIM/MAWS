@@ -137,9 +137,9 @@ export function registerOrgHandlers(deps: {
   deps.register('org.pair.start', (input) => service.pairStart(input));
   deps.register('org.pair.approve', (input) => service.pairApprove(input));
   deps.register('org.pair.cancel', () => service.pairCancel());
-  deps.register('org.enroll.start', (input) => service.enrollStart(input));
+  deps.register('org.enroll.start', (input, { client }) => service.enrollStart(input, client.id));
   deps.register('org.enroll.approve', (input) => service.enrollApprove(input));
-  deps.register('org.enroll.cancel', (input) => service.enrollCancel(input));
+  deps.register('org.enroll.cancel', (input, { client }) => service.enrollCancel(input, client.id));
   deps.register('org.drop.retry', ({ name }) => service.dropRetry(name));
   deps.register('org.grants.view', (input) => service.grantsView(input));
   deps.register('org.grants.set', (input) => service.grantsSet(input));

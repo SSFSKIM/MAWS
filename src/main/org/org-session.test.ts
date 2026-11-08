@@ -52,6 +52,7 @@ import {
   type Grant,
   verifyGrant,
 } from '../../../apps/org-protocol/src/index.ts';
+import type { ClientId } from '@shared/ipc/client';
 import { OrgStatusSchema, type OrgStatus } from '@shared/ipc/schema/org';
 import type { MachineRef } from '@shared/machine/ref';
 import { createNextDeviceKeys, deviceKeyIds, DeviceKeysError, loadDeviceKeys, promoteNextDeviceKeys, type DeviceKeys } from '../device/keys';
@@ -2484,9 +2485,12 @@ async function postKey(code: string, name: string, ref = base64urlEncode(crypto.
   return { ref, pub };
 }
 
+/** The window whose sheet enrolls here. */
+const WINDOW = 'window-a' as ClientId;
+
 /** An enrollment started on the session, its code, token and secret added to what no status may carry. */
 async function enrollStarted(session: OrgSessionService, name: string, replace?: string) {
-  const started = await session.enrollStart({ name, ...(replace === undefined ? {} : { replace }) });
+  const started = await session.enrollStart({ name, ...(replace === undefined ? {} : { replace }) }, WINDOW);
   if (!started.ok) throw new Error(JSON.stringify(started));
   const code = decodeEnrollmentCodeV2(started.code);
   secrets.push(started.code, code.k, code.token);
@@ -2519,29 +2523,29 @@ describe('M4b: org.enroll.*', () => {
     const { session, feed } = await signingRoot(enrollTiming);
     const bea = await addMember(session, feed);
     await enrollStarted(session, 'box');
-    expect(await session.enrollStart({ name: 'box2' })).toMatchObject({ ok: false, reason: 'busy' });
+    expect(await session.enrollStart({ name: 'box2' }, WINDOW)).toMatchObject({ ok: false, reason: 'busy' });
     expect(session.pairStart({ member: bea, class: 'native-mac' })).toEqual({ ok: false, reason: 'busy', detail: 'another org attempt is under way' });
     expect(session.rekey((await pairing()).text)).toEqual({ ok: false, reason: { code: 'busy', detail: 'an enrollment is under way: cancel it first' } });
-    expect(session.enrollCancel({ generation: registered(session).enrolling!.generation })).toEqual({ ok: true });
+    expect(session.enrollCancel({ generation: registered(session).enrolling!.generation }, WINDOW)).toEqual({ ok: true });
     expect(registered(session).enrolling).toBeNull();
 
     const paired = session.pairStart({ member: bea, class: 'native-mac' });
     if (!paired.ok) throw new Error(JSON.stringify(paired));
     secrets.push(paired.code, decodePairingCode(paired.code)!.k);
-    expect(await session.enrollStart({ name: 'box' })).toEqual({ ok: false, reason: 'busy', detail: 'another org attempt is under way' });
+    expect(await session.enrollStart({ name: 'box' }, WINDOW)).toEqual({ ok: false, reason: 'busy', detail: 'another org attempt is under way' });
     session.pairCancel();
 
     await enrollStarted(session, 'box');
     await session.signOut();
     expect(registered(session).enrolling).toBeNull();
-    expect(await session.enrollStart({ name: 'box' })).toMatchObject({ ok: false, reason: 'not-root' });
+    expect(await session.enrollStart({ name: 'box' }, WINDOW)).toMatchObject({ ok: false, reason: 'not-root' });
   });
 
   it("refuses an admin whose Mac can't sign, with the page's sentence", async () => {
     const { session } = await signedIn(enrollTiming);
     await until(() => signerOf(session) !== null, 'the signer part');
     expect(signerOf(session).maySign).toBe(false);
-    expect(await session.enrollStart({ name: 'box' })).toEqual({ ok: false, reason: 'not-root', detail: "This Mac can't sign: enroll from an admin's Mac that does" });
+    expect(await session.enrollStart({ name: 'box' }, WINDOW)).toEqual({ ok: false, reason: 'not-root', detail: "This Mac can't sign: enroll from an admin's Mac that does" });
     expect(hub.enrollments).toEqual([]);
   });
 

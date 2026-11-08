@@ -39,6 +39,7 @@ import {
   type OrgState,
   type SignedOrgState,
 } from '../../../apps/org-protocol/src/index.ts';
+import type { ClientId } from '@shared/ipc/client';
 import type { EnrollCancelResult, EnrollStartResult, OrgChange, OrgEnrollingStatus, SignResult } from '@shared/ipc/schema/org';
 import { composeChange, type EditSelf } from './edits';
 import type { EnrollmentKey, HubClient, HubResult } from './hub-client';
@@ -71,15 +72,17 @@ export interface Enrollment {
   status(): OrgEnrollingStatus;
   /** An enrollment is under way (being minted, or neither ended nor expired): the session's other attempts wait for it. */
   running(): boolean;
-  start(input: { name: string; replace?: string }): Promise<EnrollStartResult>;
+  /** `asker`: the window that sent it, whose null cancel reaches this start and the run it makes (`cancelRun`). */
+  start(input: { name: string; replace?: string }, asker: ClientId): Promise<EnrollStartResult>;
   approve(input: { generation: number; digest: string }): Promise<SignResult>;
   /** Ends it; a signing in flight sees it ended at its next check and reads `stale` (or `cancelled` after Touch ID). */
   cancel(): void;
   /**
-   * A window's cancel (`org.enroll.cancel`): ends the run of that `generation` only, or with null only a start being
-   * minted, so a window never cancels a run it doesn't own.
+   * A window's cancel (`org.enroll.cancel`): ends the run of that `generation` only; with null, only the start `asker`
+   * sent, while its token is minted, or the run that start made while it is still the current one. A window never
+   * cancels a start or a run it doesn't own.
    */
-  cancelRun(input: { generation: number | null }): EnrollCancelResult;
+  cancelRun(input: { generation: number | null }, asker: ClientId): EnrollCancelResult;
   /** Cancels it, refuses any start from now on, and resolves once the poll in flight has ended. */
   close(): Promise<void>;
 }
@@ -112,6 +115,8 @@ type Run = {
   timer: ReturnType<typeof setTimeout> | null;
   polling: Promise<void> | null;
   approving: boolean;
+  /** The window whose start made it. */
+  asker: ClientId;
 };
 
 const CHANGED = 'another key was posted after the one shown: start over';
@@ -135,8 +140,8 @@ export function createEnrollment(deps: EnrollmentDeps): Enrollment {
   const now = deps.now ?? Date.now;
   const log = (line: string) => deps.log(`enrollment: ${line}`);
   let run: Run | null = null;
-  /** A start awaiting its mint; a cancel clears it, and the start then begins nothing. */
-  let starting: symbol | null = null;
+  /** A start awaiting its mint, with the window that sent it; a cancel clears it, and the start then begins nothing. */
+  let starting: { asker: ClientId } | null = null;
   let generations = 0;
   let closed = false;
 
@@ -249,7 +254,7 @@ export function createEnrollment(deps: EnrollmentDeps): Enrollment {
     deps.changed();
   }
 
-  async function start(input: { name: string; replace?: string }): Promise<EnrollStartResult> {
+  async function start(input: { name: string; replace?: string }, asker: ClientId): Promise<EnrollStartResult> {
     const no = (reason: Extract<EnrollStartResult, { ok: false }>['reason'], detail: string): EnrollStartResult => ({ ok: false, reason, detail });
     if (closed) return no('busy', 'the org session is closed');
     if (starting !== null || (run !== null && live(run))) return no('busy', 'an enrollment is under way: cancel it first');
@@ -280,7 +285,7 @@ export function createEnrollment(deps: EnrollmentDeps): Enrollment {
     }
     if (ctx.client === null) return no('hub', 'the hub sign-in has ended: sign in again to enroll');
 
-    const mark = Symbol('starting');
+    const mark = { asker };
     starting = mark;
     let minted: Awaited<ReturnType<HubClient['mintEnrollment']>>;
     try {
@@ -303,7 +308,7 @@ export function createEnrollment(deps: EnrollmentDeps): Enrollment {
     const code = encodeEnrollmentCodeV2({ hub: at.hub, token: minted.value.token, roots: [...root.keys], recoveryPub: root.recoveryPub, k: base64urlEncode(k), machine: name });
     if (run !== null) stop(run);
     const expires = Math.min(Date.parse(minted.value.expires), now() + ENROLL_TTL_S * 1000);
-    const r: Run = { generation: ++generations, name, replace, id: minted.value.id, k, expires, candidate: null, problem: null, timer: null, polling: null, approving: false };
+    const r: Run = { generation: ++generations, name, replace, id: minted.value.id, k, expires, candidate: null, problem: null, timer: null, polling: null, approving: false, asker };
     run = r;
     schedule(r);
     log(`${r.generation}: ${replace === null ? '' : 're-'}enrolling ${name}, until ${new Date(expires).toISOString()}`);
@@ -373,12 +378,18 @@ export function createEnrollment(deps: EnrollmentDeps): Enrollment {
     deps.changed();
   }
 
-  function cancelRun({ generation }: { generation: number | null }): EnrollCancelResult {
+  function cancelRun({ generation }: { generation: number | null }, asker: ClientId): EnrollCancelResult {
     const no = (detail: string): EnrollCancelResult => ({ ok: false, reason: 'not-current', detail: `${detail}: nothing was cancelled` });
     if (generation === null) {
-      if (starting === null) return no('no enrollment is being started');
-      starting = null;
-      log('a start cancelled while its token was minted');
+      // The sender's own start: its mint, or the run it made that the window hasn't been shown yet. A start refused
+      // (busy) recorded nothing, so its window's null reaches nothing.
+      if (starting !== null && starting.asker === asker) {
+        starting = null;
+        log('a start cancelled while its token was minted');
+        return { ok: true };
+      }
+      if (run === null || run.asker !== asker) return no('no start of this window’s is under way');
+      clear(run);
       return { ok: true };
     }
     if (run === null || run.generation !== generation) return no(`enrollment ${generation} is not the one running (${run === null ? 'none' : run.generation} is)`);

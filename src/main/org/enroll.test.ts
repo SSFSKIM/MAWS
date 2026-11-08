@@ -32,6 +32,7 @@ import {
 
 vi.mock('electron', () => ({ systemPreferences: { promptTouchID: () => Promise.reject(new Error('no system prompt in the suites')) } }));
 
+import type { ClientId } from '@shared/ipc/client';
 import { OrgEnrollingStatusSchema, type OrgEnrollingStatus, type SignResult } from '@shared/ipc/schema/org';
 import { createStateSigner, type Confirmation, type StepUpPrompt } from '../device/step-up';
 import { createEnrollment, ENROLL_TTL_S, type Enrollment, type EnrollmentContext } from './enroll';
@@ -292,8 +293,13 @@ async function until(check: () => boolean | Promise<boolean>, what: string, ms =
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** An enrollment started, its code, token and secret checked against every status announced from then on. */
+// The windows that ask: the one whose sheet starts each enrollment here, and two others.
+const WINDOW = 'window-a' as ClientId;
+const OTHER = 'window-b' as ClientId;
+const THIRD = 'window-c' as ClientId;
+
 async function started(h: Harness, name: string, replace?: string) {
-  const answer = await h.enrollment.start({ name, ...(replace === undefined ? {} : { replace }) });
+  const answer = await h.enrollment.start({ name, ...(replace === undefined ? {} : { replace }) }, WINDOW);
   if (!answer.ok) throw new Error(`refused: ${JSON.stringify(answer)}`);
   const code = decodeEnrollmentCodeV2(answer.code);
   const id = h.hub.enrollments.at(-1)!.id;
@@ -363,29 +369,29 @@ describe('starting an enrollment', () => {
   it("refuses before any mint: a non-admin, a Mac that can't sign, a name out of grammar, listed, or under a prefix, a re-enrollment of no machine, while one runs, while another attempt runs, and with no hub", async () => {
     const h = await harness();
     h.self = { member: BEA, device: 'dev-bea' };
-    expect(await h.enrollment.start({ name: 'box' })).toMatchObject({ ok: false, reason: 'not-admin' });
+    expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toMatchObject({ ok: false, reason: 'not-admin' });
     h.self = { member: OWNER, device: 'dev-app' };
     h.maySign = false;
-    expect(await h.enrollment.start({ name: 'box' })).toEqual({ ok: false, reason: 'not-root', detail: "This Mac can't sign: enroll from an admin's Mac that does" });
+    expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toEqual({ ok: false, reason: 'not-root', detail: "This Mac can't sign: enroll from an admin's Mac that does" });
     h.maySign = true;
-    expect(await h.enrollment.start({ name: 'hub' })).toMatchObject({ ok: false, reason: 'shape' });
-    expect(await h.enrollment.start({ name: 'a/b' })).toMatchObject({ ok: false, reason: 'shape' });
-    expect(await h.enrollment.start({ name: 'Mini' })).toMatchObject({ ok: false, reason: 'machine-name-taken' });
-    expect(await h.enrollment.start({ name: 'DC-vm9' })).toMatchObject({ ok: false, reason: 'prefix-names-machine' });
-    expect(await h.enrollment.start({ name: 'box', replace: newRef() })).toMatchObject({ ok: false, reason: 'no-machine' });
-    expect(await h.enrollment.start({ name: 'other', replace: MINI })).toMatchObject({ ok: false, reason: 'shape' });
+    expect(await h.enrollment.start({ name: 'hub' }, WINDOW)).toMatchObject({ ok: false, reason: 'shape' });
+    expect(await h.enrollment.start({ name: 'a/b' }, WINDOW)).toMatchObject({ ok: false, reason: 'shape' });
+    expect(await h.enrollment.start({ name: 'Mini' }, WINDOW)).toMatchObject({ ok: false, reason: 'machine-name-taken' });
+    expect(await h.enrollment.start({ name: 'DC-vm9' }, WINDOW)).toMatchObject({ ok: false, reason: 'prefix-names-machine' });
+    expect(await h.enrollment.start({ name: 'box', replace: newRef() }, WINDOW)).toMatchObject({ ok: false, reason: 'no-machine' });
+    expect(await h.enrollment.start({ name: 'other', replace: MINI }, WINDOW)).toMatchObject({ ok: false, reason: 'shape' });
     h.busy = true;
-    expect(await h.enrollment.start({ name: 'box' })).toMatchObject({ ok: false, reason: 'busy' });
+    expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toMatchObject({ ok: false, reason: 'busy' });
     h.busy = false;
     h.online = false;
-    expect(await h.enrollment.start({ name: 'box' })).toMatchObject({ ok: false, reason: 'hub' });
+    expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toMatchObject({ ok: false, reason: 'hub' });
     h.signedIn = false;
-    expect(await h.enrollment.start({ name: 'box' })).toMatchObject({ ok: false, reason: 'not-root' });
+    expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toMatchObject({ ok: false, reason: 'not-root' });
     expect(h.hub.mints).toEqual([]);
     h.signedIn = true;
     h.online = true;
     await started(h, 'box');
-    expect(await h.enrollment.start({ name: 'box2' })).toMatchObject({ ok: false, reason: 'busy' });
+    expect(await h.enrollment.start({ name: 'box2' }, WINDOW)).toMatchObject({ ok: false, reason: 'busy' });
     expect(h.hub.mints).toHaveLength(1);
     h.enrollment.cancel();
     // a start after the last one ended is a new generation
@@ -397,36 +403,72 @@ describe('starting an enrollment', () => {
   it("the hub's refusal of the mint is the start's, and an enrollment cancelled while its token was minted never starts", async () => {
     const h = await harness();
     h.hub.mintAnswer = { ok: false, kind: 'status', status: 403, error: 'not-admin' };
-    expect(await h.enrollment.start({ name: 'box' })).toEqual({ ok: false, reason: 'refused', detail: 'the hub refused the enrollment: 403 not-admin' });
+    expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toEqual({ ok: false, reason: 'refused', detail: 'the hub refused the enrollment: 403 not-admin' });
     h.hub.mintAnswer = { ok: false, kind: 'unreachable', detail: 'down' };
-    expect(await h.enrollment.start({ name: 'box' })).toMatchObject({ ok: false, reason: 'hub' });
+    expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toMatchObject({ ok: false, reason: 'hub' });
     h.hub.mintAnswer = null;
-    const pending = h.enrollment.start({ name: 'box' });
-    const second = h.enrollment.start({ name: 'box2' });
+    const pending = h.enrollment.start({ name: 'box' }, WINDOW);
+    const second = h.enrollment.start({ name: 'box2' }, WINDOW);
     h.enrollment.cancel();
     expect(await second, 'one at a time, the mint included').toMatchObject({ ok: false, reason: 'busy' });
     expect(await pending).toMatchObject({ ok: false, reason: 'cancelled' });
     expect(h.enrollment.status()).toBeNull();
     expect(h.enrollment.running()).toBe(false);
   });
-  it("a window's cancel names the run it owns: a stale generation cancels nothing and says why, the current one cancels; null names only a start being minted", async () => {
+  it("a window's cancel names the run it owns: a stale generation cancels nothing and says why, the current one cancels; null names only that window's own start or the run it made", async () => {
     const h = await harness();
     await started(h, 'box');
-    expect(h.enrollment.cancelRun({ generation: 2 })).toEqual({ ok: false, reason: 'not-current', detail: 'enrollment 2 is not the one running (1 is): nothing was cancelled' });
-    expect(h.enrollment.cancelRun({ generation: null })).toEqual({ ok: false, reason: 'not-current', detail: 'no enrollment is being started: nothing was cancelled' });
+    expect(h.enrollment.cancelRun({ generation: 2 }, WINDOW)).toEqual({ ok: false, reason: 'not-current', detail: 'enrollment 2 is not the one running (1 is): nothing was cancelled' });
+    expect(h.enrollment.cancelRun({ generation: null }, OTHER)).toEqual({ ok: false, reason: 'not-current', detail: 'no start of this window’s is under way: nothing was cancelled' });
     expect(status(h).generation).toBe(1);
-    expect(h.enrollment.cancelRun({ generation: 1 })).toEqual({ ok: true });
+    expect(h.enrollment.cancelRun({ generation: 1 }, OTHER)).toEqual({ ok: true }); // a numbered cancel names its run exactly, whoever sends it
     expect(h.enrollment.status()).toBeNull();
-    expect(h.enrollment.cancelRun({ generation: 1 })).toEqual({ ok: false, reason: 'not-current', detail: 'enrollment 1 is not the one running (none is): nothing was cancelled' });
+    expect(h.enrollment.cancelRun({ generation: 1 }, WINDOW)).toEqual({ ok: false, reason: 'not-current', detail: 'enrollment 1 is not the one running (none is): nothing was cancelled' });
 
-    // a start being minted: null cancels it, and it never starts; a generation never cancels a mint
+    // a start being minted: its window's null cancels it, and it never starts; a generation never cancels a mint
     h.hub.mintAnswer = null;
-    const pending = h.enrollment.start({ name: 'box' });
-    expect(h.enrollment.cancelRun({ generation: 1 })).toMatchObject({ ok: false, reason: 'not-current' });
-    expect(h.enrollment.cancelRun({ generation: null })).toEqual({ ok: true });
+    const pending = h.enrollment.start({ name: 'box' }, WINDOW);
+    expect(h.enrollment.cancelRun({ generation: 1 }, WINDOW)).toMatchObject({ ok: false, reason: 'not-current' });
+    expect(h.enrollment.cancelRun({ generation: null }, WINDOW)).toEqual({ ok: true });
     expect(await pending).toMatchObject({ ok: false, reason: 'cancelled' });
     expect(h.enrollment.status()).toBeNull();
     expect(h.enrollment.running()).toBe(false);
+  });
+
+  // The re-review's cancel-ownership probes (fix wave 3): a null cancel is its sender's own, never the slot's.
+  it("a window refused busy cancels nothing with its null: the other window's mint goes on", async () => {
+    const h = await harness();
+    const first = h.enrollment.start({ name: 'box' }, WINDOW);
+    const second = h.enrollment.start({ name: 'box2' }, OTHER); // refused at once: the first's mint holds the slot
+    // its window closes before that answer shows, while the first's token is still being minted
+    expect(h.enrollment.cancelRun({ generation: null }, OTHER)).toMatchObject({ ok: false, reason: 'not-current' });
+    expect(await second).toMatchObject({ ok: false, reason: 'busy' });
+    expect(await first).toMatchObject({ ok: true });
+    expect(status(h)).toMatchObject({ generation: 1, name: 'box' });
+    h.enrollment.cancel();
+  });
+
+  it("a window's null after its run was published cancels that run, while it is still the current one", async () => {
+    const h = await harness();
+    await started(h, 'box'); // main has answered and published generation 1; the sheet hasn't shown it yet
+    expect(h.enrollment.cancelRun({ generation: null }, WINDOW)).toEqual({ ok: true });
+    expect(h.enrollment.status()).toBeNull();
+    expect(h.enrollment.running()).toBe(false);
+    // once another run is the current one, the first window's null reaches nothing
+    expect((await h.enrollment.start({ name: 'box' }, OTHER)).ok).toBe(true);
+    expect(h.enrollment.cancelRun({ generation: null }, WINDOW)).toMatchObject({ ok: false, reason: 'not-current' });
+    expect(status(h).generation).toBe(2);
+    h.enrollment.cancel();
+  });
+
+  it('a null from a window that started nothing cancels nothing: neither a mint nor a run', async () => {
+    const h = await harness();
+    const first = h.enrollment.start({ name: 'box' }, WINDOW);
+    expect(h.enrollment.cancelRun({ generation: null }, THIRD)).toMatchObject({ ok: false, reason: 'not-current' });
+    expect(await first).toMatchObject({ ok: true });
+    expect(h.enrollment.cancelRun({ generation: null }, THIRD)).toMatchObject({ ok: false, reason: 'not-current' });
+    expect(status(h).generation).toBe(1);
+    h.enrollment.cancel();
   });
 });
 
@@ -533,8 +575,8 @@ describe('the polling', () => {
     expect(status(h).problem).toBe('expired');
     expect(await h.enrollment.approve({ generation: 1, digest: status(h).candidate!.digest })).toMatchObject({ ok: false, reason: 'stale' });
     // a start after it, its token being minted: the ended run's window clears that run alone, never the new start
-    const next = h.enrollment.start({ name: 'box' });
-    expect(h.enrollment.cancelRun({ generation: 1 })).toEqual({ ok: true });
+    const next = h.enrollment.start({ name: 'box' }, WINDOW);
+    expect(h.enrollment.cancelRun({ generation: 1 }, WINDOW)).toEqual({ ok: true });
     expect(await next).toMatchObject({ ok: true });
     expect(status(h)).toMatchObject({ generation: 2, problem: null });
   });
@@ -569,7 +611,7 @@ describe('the polling', () => {
     h.hub.hold.release!();
     await closing;
     expect(h.enrollment.status()).toBeNull();
-    expect(await h.enrollment.start({ name: 'box' })).toMatchObject({ ok: false, reason: 'busy' });
+    expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toMatchObject({ ok: false, reason: 'busy' });
   });
 });
 

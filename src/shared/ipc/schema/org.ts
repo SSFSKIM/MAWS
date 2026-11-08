@@ -284,8 +284,9 @@ export const EnrollStartResultSchema = z.union([
 ]);
 export type EnrollStartResult = z.infer<typeof EnrollStartResultSchema>;
 /**
- * M4b fix wave: a window cancels the enrollment it owns, never another's. `generation` names its run; null, the start it
- * sent whose run isn't shown yet (a token being minted), which never cancels a run. `not-current`: that isn't the run or
+ * M4b fix wave: a window cancels the enrollment it owns, never another's. `generation` names its run; null, the start
+ * this window sent whose run it hasn't been shown: main ends that start's mint, or the run it made while still the
+ * current one, judged by the asking client (fix wave 3), never another window's. `not-current`: that isn't the run or
  * the start under way, so nothing was cancelled.
  */
 export const EnrollCancelInputSchema = z.strictObject({ generation: z.number().int().positive().nullable() });
