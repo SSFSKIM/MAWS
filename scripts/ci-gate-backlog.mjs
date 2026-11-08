@@ -1,5 +1,5 @@
 // Sample with the caller's gh token: GITHUB_TOKEN cannot read runners or the account's private repositories.
-// MAWS must be complete (undercounting EC2's queue favors EC2); other repos may be lower bounds at the call cap.
+// MAWS must be complete (undercounting a self-hosted queue favors overflow); other repos may be lower bounds at the call cap.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
-import { backlogOf } from '../.github/scripts/gate-backlog.mjs';
+import { backlogOf, utcTimestampOf } from '../.github/scripts/gate-backlog.mjs';
 
 const DEFAULT_REPOS = ['SSFSKIM/MAWS', 'SSFSKIM/cua', 'SSFSKIM/doperpowers', 'SSFSKIM/ci-kit', 'SSFSKIM/manim-master'];
 const need = (condition, message) => { if (!condition) throw new Error(message); };
@@ -41,7 +41,7 @@ export async function sampleBacklog({ api = apiOf, now = Date.now, maxCalls = 60
     for (let page = 1; ; page++) {
       const data = await read(`${path}${path.includes('?') ? '&' : '?'}per_page=100&page=${page}`);
       need(Array.isArray(data[key]) && Number.isSafeInteger(data.total_count) && data.total_count >= 0, `invalid ${key} response`);
-      // Every MAWS page must be complete: missing its EC2-compatible jobs would favor overflow incorrectly.
+      // Every MAWS page must be complete: missing its self-hosted jobs would favor overflow incorrectly.
       // Other repositories contribute only hosted counts, where a lower bound favors normal placement.
       const expected = Math.min(100, Math.max(0, data.total_count - (page - 1) * 100));
       if (path.startsWith(`repos/${ownRepo}/`)) need(data[key].length === expected,
@@ -51,14 +51,37 @@ export async function sampleBacklog({ api = apiOf, now = Date.now, maxCalls = 60
       need(data[key].length === 100, `incomplete ${key} response`);
     }
   };
-  let runner;
-  await pages(`repos/${ownRepo}/actions/runners`, 'runners', (rows) => { runner ??= rows.find((r) => r.name === 'ci-kit-mac-ec2'); });
-  need(runner && ['online', 'offline'].includes(runner.status) && typeof runner.busy === 'boolean' && Array.isArray(runner.labels), 'EC2 runner unreadable');
-  const labels = new Set(runner.labels.map((label) => label.name?.toLowerCase()));
-  need(['self-hosted', 'macos', 'arm64', 'ci-kit-mac-ec2'].every((label) => labels.has(label)), 'EC2 labels unreadable');
-  const result = { v: 1, at: new Date(start).toISOString(), hostedQueued: 0, hostedRunning: 0, ec2: runner.status === 'offline' ? 'offline' : runner.busy ? 'busy' : 'idle', ec2Queued: 0, partial: [] };
+  let ec2Runner, miniRunner;
+  await pages(`repos/${ownRepo}/actions/runners`, 'runners', (rows) => {
+    ec2Runner ??= rows.find((r) => r.name === 'ci-kit-mac-ec2');
+    miniRunner ??= rows.find((r) => r.name === 'ci-kit-mac-mini');
+  });
+  const runnerInfo = (runner, name, required) => {
+    if (!runner) return { state: 'offline', labels: new Set() };
+    need(['online', 'offline'].includes(runner.status) && typeof runner.busy === 'boolean' && Array.isArray(runner.labels), `${name} runner unreadable`);
+    const labels = new Set(runner.labels.map((label) => label.name?.toLowerCase()));
+    need(['self-hosted', 'macos', 'arm64', required].every((label) => labels.has(label)), `${name} labels unreadable`);
+    return { state: runner.status === 'offline' ? 'offline' : runner.busy ? 'busy' : 'idle', labels };
+  };
+  const ec2 = runnerInfo(ec2Runner, 'EC2', 'ci-kit-mac-ec2');
+  const mini = runnerInfo(miniRunner, 'mini', 'ci-kit-mac');
+  // Only the mini can see its holds and pause windows. Unreadable or stale publication never means free.
+  let miniHost = 'held', miniVm = 'held', lanesAt = null;
+  try {
+    const variable = await read(`repos/${ownRepo}/actions/variables/MAC_MINI_LANES`);
+    const lanes = JSON.parse(variable.value);
+    const age = now() - utcTimestampOf(lanes.at);
+    if (lanes.v === 1 && typeof lanes.why === 'string' && Number.isFinite(age) && age >= 0 && age <= 300_000 &&
+        ['free', 'held'].includes(lanes.host) && ['free', 'held'].includes(lanes.vm)) {
+      lanesAt = lanes.at;
+      miniHost = lanes.host;
+      miniVm = lanes.vm;
+    }
+  } catch { /* Missing publication or failed read holds both lanes; hosted/EC2 sampling can still succeed. */ }
+  const result = { v: 2, at: new Date(start).toISOString(), hostedQueued: 0, hostedRunning: 0, ec2: ec2.state, ec2Queued: 0,
+    mini: mini.state, miniQueued: 0, miniRunning: 0, miniHost, miniVm, lanesAt, partial: [] };
   for (const repo of repos) {
-    // Reserve no estimate of missing EC2 work: only the hosted-only repositories can truncate at the cap.
+    // Reserve no estimate of missing self-hosted work: only the hosted-only repositories can truncate at the cap.
     if (calls >= maxCalls) {
       need(repo !== ownRepo, 'backlog call cap reached before MAWS was counted');
       result.partial.push(repo);
@@ -81,7 +104,12 @@ export async function sampleBacklog({ api = apiOf, now = Date.now, maxCalls = 60
             if (!['queued', 'in_progress'].includes(job.status)) continue;
             const requested = job.labels.map((label) => label.toLowerCase());
             if (requested.some((label) => label.startsWith('macos-'))) result[job.status === 'queued' ? 'hostedQueued' : 'hostedRunning']++;
-            else if (repo === ownRepo && job.status === 'queued' && requested.length > 0 && requested.every((label) => labels.has(label))) result.ec2Queued++;
+            if (repo === ownRepo) {
+              if (job.status === 'queued' && requested.length > 0) {
+                if (requested.every((label) => ec2.labels.has(label))) result.ec2Queued++;
+                if (requested.every((label) => mini.labels.has(label)) || requested.some((label) => ['ci-kit-mac-solo', 'ci-kit-mac-vm', 'ci-kit-mac-vm-trial'].includes(label))) result.miniQueued++;
+              } else if (job.status === 'in_progress' && job.runner_name?.startsWith('ci-kit-mac-mini')) result.miniRunning++;
+            }
           }
         });
       }

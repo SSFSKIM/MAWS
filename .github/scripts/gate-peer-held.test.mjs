@@ -165,7 +165,9 @@ test('the workflow entry point authenticates the API request and writes only a v
 });
 
 test('an overflowed peer job still holds the peer verdict', async () => {
-  assert.equal((await check({ jobs: [job('plan', 'completed', 'success'), job('e2e:cross-build (EC2 overflow)', 'completed', 'success')] })).result, '90 succeeded');
+  for (const target of ['EC2', 'mini']) {
+    assert.equal((await check({ jobs: [job('plan', 'completed', 'success'), job(`e2e:cross-build (${target} overflow)`, 'completed', 'success')] })).result, '90 succeeded');
+  }
 });
 
 

@@ -7,16 +7,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { sampleBacklog, cachedBacklog } from './ci-gate-backlog.mjs';
+import { backlogOf } from '../.github/scripts/gate-backlog.mjs';
 
 const now = Date.parse('2026-10-29T02:00:00Z');
 const labels = ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac', 'ci-kit-mac-solo', 'ci-kit-mac-ec2'];
 const runner = { id: 6951, name: 'ci-kit-mac-ec2', status: 'online', busy: false, labels: labels.map((name) => ({ name })) };
 const job = (id, labels, status = 'queued') => ({ id, labels, status, conclusion: null, runner_name: '' });
-function apiFixture({ jobs = {}, runs = {}, runnerOverride = {} } = {}) {
+function apiFixture({ jobs = {}, runs = {}, runnerOverride = {}, runners } = {}) {
   const calls = [];
   return { calls, api: (path) => {
     calls.push(path);
-    if (path.includes('/runners?')) return { total_count: 1, runners: [{ ...runner, ...runnerOverride }] };
+    if (path.includes('/runners?')) return { total_count: (runners ?? [runner]).length, runners: runners ?? [{ ...runner, ...runnerOverride }] };
     const repo = path.split('/')[2];
     if (path.includes('/jobs?')) return { total_count: (jobs[repo] || []).length, jobs: jobs[repo] || [] };
     return { total_count: path.includes('status=in_progress') ? (runs[repo] || []).length : 0, workflow_runs: path.includes('status=in_progress') ? runs[repo] || [] : [] };
@@ -28,8 +29,8 @@ test('counts account-wide hosted jobs but only jobs the MAWS EC2 runner can take
     jobs: { MAWS: [job(1, ['macos-26']), job(2, ['macos-26'], 'in_progress'), job(3, ['self-hosted', 'macOS', 'ARM64']), job(4, ['ci-kit-mac-solo']), job(5, ['ci-kit-mac-home']), job(6, ['ci-kit-mac-shared']), job(7, ['ubuntu-24.04']), job(8, ['macos-26'], 'completed')],
       cua: [job(9, ['macos-14'])], doperpowers: [job(10, ['macos-latest'])], 'ci-kit': [job(11, ['macos-26'])], 'manim-master': [job(12, ['macos-26'])] },
   });
-  assert.deepEqual(await sampleBacklog({ api, now: () => now }), { v: 1, at: new Date(now).toISOString(), hostedQueued: 5, hostedRunning: 1, ec2: 'idle', ec2Queued: 2, partial: [] });
-  assert.equal(calls.length, 16);
+  assert.deepEqual(await sampleBacklog({ api, now: () => now }), { v: 2, at: new Date(now).toISOString(), hostedQueued: 5, hostedRunning: 1, ec2: 'idle', ec2Queued: 2, mini: 'offline', miniQueued: 1, miniRunning: 0, miniHost: 'held', miniVm: 'held', lanesAt: null, partial: [] });
+  assert.equal(calls.length, 17);
 });
 test('a failed or malformed read never supplies a partial success', async () => {
   for (const api of [() => { throw new Error('403'); }, () => ({}), apiFixture({ runnerOverride: { labels: [] } }).api]) {
@@ -44,13 +45,13 @@ test('pagination completes the self queue; a cap there fails open rather than un
     if (path.includes('/jobs?')) return { total_count: 101, jobs: Array.from({ length: path.includes('page=2') ? 1 : 100 }, (_, i) => job(i, ['ci-kit-mac-solo'])) };
     return { total_count: path.includes('status=in_progress') ? 1 : 0, workflow_runs: path.includes('status=in_progress') ? [{ id: 1 }] : [] };
   };
-  await assert.rejects(sampleBacklog({ api, now: () => now, maxCalls: 4 }), /cap|incomplete/);
-  assert.equal(calls, 4);
+  await assert.rejects(sampleBacklog({ api, now: () => now, maxCalls: 5 }), /cap|incomplete/);
+  assert.equal(calls, 5);
 });
 test('the call cap truncates only hosted counts after MAWS, and discloses the lower bound', async () => {
   const { api, calls } = apiFixture({ runs: { MAWS: [{ id: 1 }], cua: [{ id: 2 }] }, jobs: { MAWS: [job(1, ['macos-26'])], cua: [job(2, ['macos-26'])] } });
-  const result = await sampleBacklog({ api, now: () => now, maxCalls: 4 });
-  assert.equal(calls.length, 4);
+  const result = await sampleBacklog({ api, now: () => now, maxCalls: 5 });
+  assert.equal(calls.length, 5);
   assert.equal(result.hostedQueued, 1);
   assert.equal(result.ec2Queued, 0);
   assert.deepEqual(result.partial, ['SSFSKIM/cua', 'SSFSKIM/doperpowers', 'SSFSKIM/ci-kit', 'SSFSKIM/manim-master']);
@@ -104,12 +105,13 @@ test('pagination counts all compatible jobs and deduplicates a run seen across s
   const calls = [];
   const result = await sampleBacklog({ now: () => now, api: (path) => {
     calls.push(path);
-    if (path.includes('/runners?')) return { total_count: 1, runners: [runner] };
+    if (path.includes('/runners?')) return { total_count: 2, runners: [runner, miniRunner] };
     if (!path.includes('/MAWS/')) return { total_count: 0, workflow_runs: [] };
     if (path.includes('/jobs?')) return { total_count: 101, jobs: path.includes('page=2') ? [job(101, ['ci-kit-mac-solo'])] : Array.from({ length: 100 }, (_, i) => job(i + 1, ['SELF-HOSTED', 'MACOS', 'arm64'])) };
     return { total_count: 1, workflow_runs: [{ id: 1 }] };
   } });
   assert.equal(result.ec2Queued, 101);
+  assert.equal(result.miniQueued, 101);
   assert.equal(calls.filter((path) => path.includes('/jobs?')).length, 2);
 });
 test('the overall deadline stops reads even before the call cap', async () => {
@@ -159,7 +161,7 @@ test('the destination repo owns the runner read, completeness guard and EC2 queu
 test('MAWS is counted first and in full even when omitted or repeated in the quota list', async () => {
   for (const list of ['neworg/other', 'neworg/other, neworg/MAWS neworg/MAWS']) {
     const fixture = apiFixture({ runs: { MAWS: [{ id: 1 }] }, jobs: { MAWS: [job(1, ['ci-kit-mac-solo'])] } });
-    const result = await sampleBacklog({ ...fixture, now: () => now, maxCalls: 4, env: { REPO: 'neworg/MAWS', HOSTED_MAC_REPOS: list } });
+    const result = await sampleBacklog({ ...fixture, now: () => now, maxCalls: 5, env: { REPO: 'neworg/MAWS', HOSTED_MAC_REPOS: list } });
     assert.equal(result.ec2Queued, 1);
     assert.deepEqual(result.partial, ['neworg/other']);
     await assert.rejects(sampleBacklog({ ...fixture, maxCalls: 1, env: { REPO: 'neworg/MAWS', HOSTED_MAC_REPOS: list } }), /cap/);
@@ -243,4 +245,90 @@ test('default quota callers share the legacy fresh sample and sampling lock', ()
     assert.match(locked.stderr, /backlog unavailable/);
     assert.equal(existsSync(join(dir, 'called')), false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+const miniRunner = { ...runner, name: 'ci-kit-mac-mini', labels: ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac', 'ci-kit-mac-solo', 'ci-kit-mac-home'].map((name) => ({ name })) };
+test('v2 samples tolerate absent EC2 and mini runners and retain mini availability', async () => {
+  for (const [runners, mini] of [[[], 'offline'], [[miniRunner], 'idle'], [[{ ...miniRunner, busy: true }], 'busy'], [[{ ...miniRunner, status: 'offline' }], 'offline']]) {
+    const result = await sampleBacklog({ ...apiFixture({ runners }), now: () => now });
+    assert.deepEqual(result, { v: 2, at: new Date(now).toISOString(), hostedQueued: 0, hostedRunning: 0, ec2: 'offline', ec2Queued: 0, mini, miniQueued: 0, miniRunning: 0, miniHost: 'held', miniVm: 'held', lanesAt: null, partial: [] });
+  }
+  for (const override of [{ status: 'unknown' }, { busy: null }, { labels: [] }]) {
+    await assert.rejects(sampleBacklog({ ...apiFixture({ runners: [{ ...miniRunner, ...override }] }), now: () => now }), /mini/i);
+  }
+});
+test('mini queues include compatible host, solo and ephemeral guest requests, and running jobs by runner name', async () => {
+  const result = await sampleBacklog({ ...apiFixture({ runners: [miniRunner], runs: { MAWS: [{ id: 1 }], cua: [{ id: 2 }] }, jobs: {
+    MAWS: [job(1, ['SELF-HOSTED', 'MACOS', 'arm64', 'ci-kit-mac-home']), job(2, ['ci-kit-mac-solo']), job(3, ['ci-kit-mac-vm']), job(4, ['ci-kit-mac-vm-trial']),
+      { ...job(5, ['ci-kit-mac-solo'], 'in_progress'), runner_name: 'ci-kit-mac-mini-maws-vm-job-123' },
+      { ...job(6, ['ci-kit-mac'], 'in_progress'), runner_name: 'ci-kit-mac-mini' },
+      { ...job(7, ['ci-kit-mac-solo'], 'in_progress'), runner_name: 'ci-kit-mac-ec2' },
+      job(8, ['ci-kit-mac-shared']), job(9, []), job(10, ['ci-kit-mac-home'], 'completed'), job(11, ['macos-26'])],
+    cua: [job(12, ['ci-kit-mac-solo']), { ...job(13, ['ci-kit-mac-vm'], 'in_progress'), runner_name: 'ci-kit-mac-mini-maws-vm-job-456' }],
+  } }), now: () => now });
+  assert.deepEqual(result, { v: 2, at: new Date(now).toISOString(), hostedQueued: 1, hostedRunning: 0, ec2: 'offline', ec2Queued: 0, mini: 'idle', miniQueued: 4, miniRunning: 2, miniHost: 'held', miniVm: 'held', lanesAt: null, partial: [] });
+});
+test('backlog validator accepts legacy and v2 samples but refuses malformed mini counts and state', () => {
+  const legacy = { v: 1, at: new Date(now).toISOString(), hostedQueued: 5, hostedRunning: 5, ec2: 'offline', ec2Queued: 0, partial: [] };
+  const current = { ...legacy, v: 2, mini: 'busy', miniQueued: 2, miniRunning: 1, miniHost: 'free', miniVm: 'held', lanesAt: new Date(now).toISOString() };
+  for (const sample of [legacy, current]) assert.deepEqual(backlogOf(JSON.stringify(sample), now), sample);
+  for (const patch of [{ v: 3 }, { miniHost: 'idle' }, { miniVm: null }, { mini: 'unknown' }, { mini: null }, { miniQueued: -1 }, { miniQueued: 1.5 }, { miniRunning: null }, { miniRunning: Number.MAX_SAFE_INTEGER + 1 }]) {
+    assert.equal(backlogOf(JSON.stringify({ ...current, ...patch }), now), null, JSON.stringify(patch));
+  }
+  for (const key of ['mini', 'miniQueued', 'miniRunning', 'miniHost', 'miniVm']) {
+    const sample = { ...current }; delete sample[key];
+    assert.equal(backlogOf(JSON.stringify(sample), now), null, key);
+  }
+});
+
+test('published mini lane availability fails closed independently of runner and hosted sampling', async () => {
+  const free = { v: 1, at: new Date(now).toISOString(), host: 'free', vm: 'free', why: '' };
+  const cases = [[{ value: JSON.stringify(free) }, 'free', 'free'],
+    [{ value: JSON.stringify({ ...free, at: '2026-10-29T02:00:00Z' }) }, 'free', 'free'],
+    [{ value: JSON.stringify({ ...free, host: 'held' }) }, 'held', 'free'],
+    [{ value: JSON.stringify({ ...free, vm: 'held' }) }, 'free', 'held'],
+    [{}, 'held', 'held'], [{ value: 'garbage' }, 'held', 'held'], [new Error('404'), 'held', 'held'],
+    ...[{ v: 2 }, { at: new Date(now - 300_001).toISOString() }, { at: new Date(now + 1).toISOString() }, { at: 'bad' }, { host: 'idle' }, { vm: null }].map((patch) => [{ value: JSON.stringify({ ...free, ...patch }) }, 'held', 'held'])];
+  for (const [response, miniHost, miniVm] of cases) {
+    const fixture = apiFixture({ runners: [miniRunner], runs: { MAWS: [{ id: 1 }] }, jobs: { MAWS: [job(1, ['macos-26'])] } });
+    let reads = 0;
+    const result = await sampleBacklog({ now: () => now, api: (path) => {
+      if (path === 'repos/SSFSKIM/MAWS/actions/variables/MAC_MINI_LANES') { reads++; if (response instanceof Error) throw response; return response; }
+      return fixture.api(path);
+    } });
+    assert.equal(reads, 1);
+    assert.equal(result.miniHost, miniHost);
+    assert.equal(result.miniVm, miniVm);
+    assert.equal(result.hostedQueued, 1);
+    assert.equal(result.mini, 'idle');
+  }
+});
+
+test('the sample preserves publication time instead of renewing lane availability at collection', async () => {
+  const published = new Date(now - 299_000).toISOString();
+  const fixture = apiFixture({ runners: [miniRunner] });
+  const result = await sampleBacklog({ now: () => now, api: (path) => path.endsWith('/variables/MAC_MINI_LANES')
+    ? { value: JSON.stringify({ v: 1, at: published, host: 'free', vm: 'free', why: '' }) } : fixture.api(path) });
+  assert.equal(result.at, new Date(now).toISOString());
+  assert.equal(result.lanesAt, published);
+  assert.equal(result.miniHost, 'free');
+  assert.equal(result.miniVm, 'free');
+});
+test('publication fields are strictly typed and only ISO UTC timestamps can free lanes', async () => {
+  const valid = { v: 1, at: new Date(now).toISOString(), host: 'free', vm: 'free', why: '' };
+  for (const patch of [{ at: [valid.at] }, { at: now }, { at: null }, { at: '2026-10-29' }, { at: '2026-10-29T02:00:00+00:00' },
+    { at: '2026-10-29 02:00:00Z' }, { why: null }, { why: ['free'] }, { why: undefined }, { v: '1' }, { host: ['free'] }, { vm: ['free'] }]) {
+    const fixture = apiFixture({ runners: [miniRunner] });
+    const result = await sampleBacklog({ now: () => now, api: (path) => path.endsWith('/variables/MAC_MINI_LANES')
+      ? { value: JSON.stringify({ ...valid, ...patch }) } : fixture.api(path) });
+    assert.deepEqual([result.miniHost, result.miniVm, result.lanesAt], ['held', 'held', null], JSON.stringify(patch));
+  }
+});
+test('invalid lane timestamps hold the mini without losing valid EC2 backlog', () => {
+  const sample = { v: 2, at: new Date(now).toISOString(), hostedQueued: 20, hostedRunning: 5, ec2: 'idle', ec2Queued: 0,
+    mini: 'idle', miniQueued: 0, miniRunning: 0, miniHost: 'free', miniVm: 'free' };
+  for (const lanesAt of [undefined, null, [sample.at], now, '2026-10-29', '2026-10-29T02:00:00+00:00', '2026-10-29 02:00:00Z', '2026-02-30T02:00:00Z']) {
+    const input = { ...sample, lanesAt, partial: [] };
+    assert.deepEqual(backlogOf(JSON.stringify(input), now), { ...input, lanesAt: null, miniHost: 'held', miniVm: 'held' }, String(JSON.stringify(lanesAt)));
+  }
 });
