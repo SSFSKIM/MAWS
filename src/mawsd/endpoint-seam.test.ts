@@ -292,3 +292,33 @@ describe('the seam’s channel', () => {
     expect(lines.sort()).toEqual(['[channel] a lane A entry of p was not kept: pid 7 holds spine.lock', '[channel] a lane A entry of p was not kept: the spine holds no journal']);
   });
 });
+
+// P5 O8 M6b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §Q): the local door, the loaded module's.
+describe('the seam’s local door', () => {
+  /** A module with a door, recording what reaches it. */
+  class DoorModule extends Module {
+    readonly asked: unknown[] = [];
+    readonly local = {
+      act: async (action: unknown) => (this.asked.push(['act', action]), { state: 'done', result: { changed: true, policyRev: 2 } }),
+      call: async (name: string, input: unknown) => (this.asked.push(['call', name, input]), { ok: true as const, output: { supported: false } }),
+    };
+  }
+
+  it('is the loaded module’s, a load in flight awaited; unloaded, or a module with none, `unavailable`', async () => {
+    const unloaded = new LazyEndpoint('b1', loader().load);
+    await unloaded.start(services());
+    expect(await unloaded.local.act({ action: 'record.access' })).toEqual({ state: 'refused', reason: 'unavailable' });
+    expect(await unloaded.local.call('record.policy', null)).toEqual({ ok: false, code: 'unavailable' });
+    const doorless = new LazyEndpoint('b1', loader().load);
+    await doorless.start(services(true));
+    expect(await doorless.local.act({})).toEqual({ state: 'refused', reason: 'unavailable' });
+    const modules: DoorModule[] = [];
+    const door = new LazyEndpoint('b1', async () => ({ createEndpoint: (options) => (modules.push(new DoorModule(options)), modules.at(-1)!) }));
+    await door.start(services(true));
+    expect(await door.local.act({ action: 'record.access' })).toEqual({ state: 'done', result: { changed: true, policyRev: 2 } });
+    expect(await door.local.call('record.policy', { session: 'la-1' })).toEqual({ ok: true, output: { supported: false } });
+    expect(modules[0].asked).toEqual([['act', { action: 'record.access' }], ['call', 'record.policy', { session: 'la-1' }]]);
+    await door.stop();
+    expect(await door.local.act({ action: 'record.access' }), 'stopped').toEqual({ state: 'refused', reason: 'unavailable' });
+  });
+});

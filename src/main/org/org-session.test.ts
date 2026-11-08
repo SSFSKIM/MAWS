@@ -334,7 +334,7 @@ function make(over: Overrides = {}) {
     openExternal: () => {
       throw new Error('the tests open no browser');
     },
-    stepUp: () => ({ sign: () => Promise.reject(new Error('no step-up in these tests')) }),
+    stepUp: () => ({ sign: () => Promise.reject(new Error('no step-up in these tests')), signActions: () => Promise.reject(new Error('no step-up in these tests')) }),
     loadKeys: (profile, deps) => {
       keyLoads++;
       return loadDeviceKeys(profile, { ...deps, excludeFromBackup: async () => true });
@@ -545,7 +545,7 @@ describe('registration', () => {
   // P5 O7 M10 B: the step-up judges an owned machine's spawn on the head the session holds, read when it signs
   it('hands the step-up the view it holds, read at each signature', async () => {
     const held: Array<HeldOrgView> = [];
-    const { session } = await signedIn({ stepUp: (_keys, _device, org) => (held.push(org), { sign: () => Promise.reject(new Error('no step-up in these tests')) }) });
+    const { session } = await signedIn({ stepUp: (_keys, _device, org) => (held.push(org), { sign: () => Promise.reject(new Error('no step-up in these tests')), signActions: () => Promise.reject(new Error('no step-up in these tests')) }) });
     expect(held.length).toBeGreaterThan(0);
     expect(held.at(-1)!()).toBe(session.current()!.view);
     expect(held.at(-1)!()!.head().state.version).toBe(session.current()!.view.head().state.version);

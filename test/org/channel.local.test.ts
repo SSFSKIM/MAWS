@@ -453,6 +453,7 @@ beforeAll(async () => {
     },
     localProjects: async () => [],
     onLocalProjects: () => () => {},
+    link: () => null, // M6b's channel listings: the rows here are the hub's
     files: orgFiles({ userData: profile, log }),
     emit: (next) => void (latestRows = next),
     log,

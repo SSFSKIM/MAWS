@@ -13,6 +13,7 @@ import { closeDialog, useDialogs } from './dialogs';
 import { ForkSheet } from './ForkSheet';
 import { deleteOutcomeWords, deleteSession } from './record-ops';
 import { RemoteSetupSheet } from './RemoteSetupSheet'; // P5 O7 M9
+import { ShareSheet } from './share/ShareSheet'; // P5 O8 M6b
 import { RenameDialog } from './RenameDialog';
 import { Sheet, SheetForm } from './Sheet';
 import { useSetup } from './store';
@@ -46,6 +47,8 @@ export function SessionDialogs() {
     // C12 end
     case 'remoteSetup': // P5 O7 M9
       return <RemoteSetupSheet request={open.request} />;
+    case 'share': // P5 O8 M6b: a session's general access and shares
+      return <ShareSheet key={open.address} address={open.address} />;
     case 'confirm':
       return (
         <Sheet title={open.title}>

@@ -156,6 +156,7 @@ const REVIEWED_STRING_RECORDS: Readonly<Record<string, string>> = {
   'commands.engine.sessions.output[].modelOverrides': MODEL_OVERRIDES,
   'commands.fs.agentEvents.output.events[]<kind=question.answered>.answers': ANSWERS,
   'commands.fs.agentEvents.output.events[]<kind=usage.sample>.modelUsage': MODEL_USAGE,
+  'commands.endpoint.local.act.input.action': "an RL4 action's fields, held to their exact shape by the endpoint's isAction (P5 O8 M6b: the local door, main-only)",
   'commands.fs.tasks.output.tasks[].metadata': "a task's metadata, as the engine's task store writes it",
   'commands.host.op.input.input': JSON_OBJECT, // P5 O10 M7: an action's args (main-only, mawsd's ledger)
   'commands.host.artifactOp.input.input': JSON_OBJECT, // P5 O7 M5a: an artifact act's args, as host.op's (main-only)

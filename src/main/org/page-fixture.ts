@@ -6,7 +6,7 @@
 // `interceptCommand`, so the real renderer draws what main would send; every act is answered without effect, so the
 // production session behind it stays untouched. Its status no longer reaches the renderer either: the fixture stops the
 // session's `org.changed` forwarding (`unpublish`), since even a profile never signed in publishes once its load ends
-// (org-session.ts's `changed(true)`), which would replace the seeded status. `org.rows` and M7a's `org.channel.*` stay main's. Only a harness
+// (org-session.ts's `changed(true)`), which would replace the seeded status. `org.rows`, M6b's `org.policy.get` (reads, without effect) and M7a's `org.channel.*` stay main's. Only a harness
 // build's main contains this module at all (index.ts's guard on `__MAWS_HARNESS_BUILD__`); a production launch never installs it.
 import { readFileSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
@@ -16,6 +16,7 @@ import {
   OrgViewSchema,
   type commands,
   type DiscardResult,
+  type OrgPolicySetResult,
   type OrgAttempt,
   type PairStartResult,
   type PreviewResult,
@@ -33,7 +34,7 @@ export interface OrgPageFixtureInstall {
   unpublish(): void;
 }
 
-type FixtureCommand = Exclude<keyof typeof commands, 'org.rows' | `org.channel.${string}`>;
+type FixtureCommand = Exclude<keyof typeof commands, 'org.rows' | 'org.policy.get' | `org.channel.${string}`>;
 
 /** Null unless the fixture is asked for; throws, naming the file, when the schemas refuse it. Returns the uninstall. */
 export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void) | null {
@@ -51,6 +52,7 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
   const preview: PreviewResult = { ok: false, reason: 'invalid', detail, findings: [] };
   const pair: PairStartResult = { ok: false, reason: 'busy', detail };
   const discard: DiscardResult = { ok: false, reason: 'none' };
+  const save: OrgPolicySetResult = { ok: false, reason: 'busy' };
   const answers: { [N in FixtureCommand]: MainHandler<N> } = {
     'org.status': () => status,
     'org.view': () => view,
@@ -69,6 +71,8 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
     'org.pair.start': () => pair,
     'org.pair.approve': () => sign,
     'org.pair.cancel': () => {},
+    'org.policy.set': () => save,
+    'org.owners.add': () => save,
   };
   const offs = (Object.keys(answers) as FixtureCommand[]).map((name) => deps.intercept(name, answers[name] as MainHandler<typeof name>));
   return () => offs.forEach((off) => off());

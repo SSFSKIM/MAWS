@@ -10,6 +10,7 @@
 // without running a `finally`, so an `admin pair` interrupted in its wait (Ctrl-C, or its terminal closed) left its lock
 // behind. While any lock is held, those signals remove each lock that is still this process's own (by its token) and
 // exit with 128 plus the signal's number; once none is held, the handlers go and the signals act as they did before.
+// `withExitCleanup` is that guarantee alone, for any other undo a run must make however it ends.
 import { randomUUID } from 'node:crypto';
 import { linkSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { constants, hostname } from 'node:os';
@@ -24,15 +25,23 @@ const held = new Set<() => void>();
 /** Runs `run` holding the lock `file`; refuses (throws, `run` not called) while any lock is there. */
 export async function withRunLock<T>(file: string, run: () => Promise<T>): Promise<T> {
   const holder = take(file);
-  const release = () => {
+  return withExitCleanup(() => {
     if (tokenOf(file) === holder.token) unlinkSync(file);
-  };
-  hold(release);
+  }, run);
+}
+
+/**
+ * Runs `run`, then `undo`, however `run` ends; and while it runs, a SIGINT, SIGHUP or SIGTERM runs `undo` before the
+ * process exits, as a held lock's release runs (`undo` is synchronous for that: the exit is at once). What a run lock is
+ * built on, for anything else a run makes that must not outlive it (real-member pair's code file).
+ */
+export async function withExitCleanup<T>(undo: () => void, run: () => Promise<T>): Promise<T> {
+  hold(undo);
   try {
     return await run();
   } finally {
-    unhold(release);
-    release();
+    unhold(undo);
+    undo();
   }
 }
 

@@ -12,7 +12,8 @@
 // approval is an explicit click inside the card, and the slot offers it only for read-only tools. The project row's
 // card is `ProjectHoverCard.tsx`. P5 O8 M2: a listed row's card (`ListedHoverCard`) says what its listing does: the title,
 // the machine, the state and when it was issued, and no actions. P5 O8 M5 (Q2): a session you don't own alone, listed or a
-// record at a listed address, has its card list every owner with its email.
+// record at a listed address, has its card list every owner with its email. P5 O8 M6b: a session whose row has a reach
+// mark says its access, and how many it is shared with (or, another's private session, that it is shared with you).
 import { HoverCard as Radix } from 'radix-ui';
 import { useCallback, useContext, useEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
@@ -33,6 +34,7 @@ import { selectPendingOf, useAttention } from '../stores/attention';
 import { selectSeenAt, useSessions } from '../stores/sessions';
 import { listedTitle, rowBranch, sessionAge } from './derive';
 import { ownerEntries, ownersLabel } from './owners'; // P5 O8 M5
+import { ReachLine } from './ReachMark'; // P5 O8 M6b
 import { displayTitle } from '../sessions/title';
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
 import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
@@ -195,6 +197,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
         {machineLine(machine, now)}
       </p>
       <Owners appId={appSessionId} />
+      <ReachLine address={appSessionId} />
       {place && (
         <p data-testid="hover-place" title={place.title ?? undefined} className="m-0 truncate text-fg-muted">
           {place.text}
@@ -253,6 +256,7 @@ function ListedBody({ appId }: { appId: AppSessionId }) {
         {machineLine(machine, now)}
       </p>
       <Owners appId={appId} />
+      <ReachLine address={appId} />
     </div>
   );
 }

@@ -261,9 +261,10 @@ export class Actions {
     if (row.executor === 'sminos') {
       // Its own waits (its turn, sminos's admission query) end in the step the copy goes down: a decision that moved
       // meanwhile is taken again, as lane B's after its status read.
-      const refusal = await this.#laneA.hand(channel, action, who, fingerprint, () => decision.stands?.() !== false);
+      // P5 O8 M6b: a record act on the session its decision placed it on (`no-session` past RL4's vocabulary: rl10/link.ts)
+      const refusal = await this.#laneA.hand(channel, action, who, fingerprint, () => decision.stands?.() !== false, decision.target);
       if (refusal === DECISION_MOVED) return this.#again(m, refuse);
-      if (refusal !== null) return refuse(refusal);
+      if (refusal !== null) return this.refused(channel, m, refusal);
       accept();
       return;
     }

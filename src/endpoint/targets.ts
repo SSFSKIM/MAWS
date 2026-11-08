@@ -46,6 +46,16 @@
 // a task list's read (`fs.tasks`). A list names no session, so the call names it too (`appSessionId`), placed as the
 // `appSessionId` rule places it, and once the caller is known to view it the `listId` must be that session's own list
 // (`ownTaskList`), else `no-target`: a member who views one session reads no other session's list by its id.
+//
+// P5 O8 M6b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M6b and Interfaces §Q): `record`, a session's record
+// act (`record.*`). Its args name exactly one target beside the change: `session`, a lane A engine session id, placed as
+// the `session` rule places one; or `appSessionId`, a lane B app session, placed through RL10's members join on the member
+// that keys sminos's record (`RecordMembers`), the spine's recorded engine session telling two joined members apart. A
+// lane B session the join doesn't place yet is placed as the spine records it, so its standing is read as any lane B
+// session's is (the spawner's bridge included), and the record path refuses it `no-session` to a caller who stands on it,
+// sending nothing (rl10/link.ts); anyone else hears `grade`, as for a session that doesn't exist. Neither read wakes the
+// engine host: a record act runs against sminos's record, never a live engine session. The act carries no `session`,
+// `context` or `requestDigest` (`malformed`).
 import { realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, sep } from 'node:path';
 import type { Action, SessionRef } from 'org-protocol';
@@ -109,7 +119,14 @@ export type Spawner = Pick<LaunchedBy, 'member'>;
  * P5 O7 M5a: `artifact`, how the `artifact` rule places an artifact by its id (the asking channel's cache, artifacts.ts);
  * absent, `placeArtifact` reads it afresh.
  */
-export type Placing = { dispatch: EndpointServices['dispatch']; log(line: string): void; live?: boolean; artifact?(artifactId: string): Promise<Resolved>; held?: HeldNames };
+export type Placing = { dispatch: EndpointServices['dispatch']; log(line: string): void; live?: boolean; artifact?(artifactId: string): Promise<Resolved>; held?: HeldNames; members?: RecordMembers };
+
+/**
+ * P5 O8 M6b: the member a lane B app session's record acts go to, as RL10's members join places it (rl10/members.ts'
+ * `recordMember`; `preferred`, the engine session the spine records for it); null when the join places none, or can't tell
+ * two apart.
+ */
+export type RecordMembers = { recordMember(appSessionId: string, preferred?: string): string | null };
 
 const isId = (value: unknown): value is string => typeof value === 'string' && value !== '' && value.length <= 512;
 const field = (input: unknown, name: string): unknown => (typeof input === 'object' && input !== null ? (input as Record<string, unknown>)[name] : undefined);
@@ -132,11 +149,50 @@ export async function resolveTarget(rule: TargetRule, input: unknown, action: Ac
   }
   // A checkout is a lane B session's, named by the call (its rows are calls); lane A's checkouts are sminos's.
   if (rule === 'checkout') return action === undefined && session?.lane === 'B' && isId(session.id) ? laneB(session.id, placing) : { kind: 'refused', reason: 'no-target' };
+  if (rule === 'record') return recordTarget(input, action, placing);
   // P5 O7 M8: a task list's read names its session as an `appSessionId` (its list is checked after the rank: `ownTaskList`).
   const id = field(input, rule === 'task-list' ? 'appSessionId' : rule);
   if (!isId(id)) return { kind: 'refused', reason: 'no-target' };
   if (action?.session !== undefined && action.session !== id) return { kind: 'refused', reason: 'malformed' };
   return rule === 'session' ? { kind: 'session', target: { lane: 'A', session: id } } : laneB(id, placing);
+}
+
+/** P5 O8 M6b: the `record` rule (above). */
+async function recordTarget(input: unknown, action: Action | undefined, placing: Placing): Promise<Resolved> {
+  if (action === undefined || action.session !== undefined || action.context !== undefined || action.requestDigest !== undefined) return { kind: 'refused', reason: 'malformed' };
+  const lane = field(input, 'session');
+  const app = field(input, 'appSessionId');
+  if ((lane === undefined) === (app === undefined)) return { kind: 'refused', reason: 'no-target' };
+  if (lane !== undefined) return isId(lane) ? { kind: 'session', target: { lane: 'A', session: lane } } : { kind: 'refused', reason: 'no-target' };
+  if (!isId(app)) return { kind: 'refused', reason: 'no-target' };
+  const placed = await placeRecord(app, placing);
+  if (placed.kind === 'unavailable') return { kind: 'refused', reason: 'unavailable' };
+  if (placed.kind === 'unknown') return { kind: 'unknown' };
+  return { kind: 'session', target: placed.target, ...(placed.launchedBy === undefined ? {} : { launchedBy: placed.launchedBy }) };
+}
+
+/** Where a lane B listing's record is (`placeRecord`): its target, the spawner the spine records; or why there is none. */
+export type RecordPlacement = { kind: 'placed'; target: Extract<SessionTarget, { lane: 'B' }>; launchedBy?: Spawner } | { kind: 'unknown' } | { kind: 'unavailable' };
+
+/**
+ * P5 O8 M6b (the desk track's review 632, P2): the engine session a lane B listing's record is on, the one way both
+ * `record.policy` reads it and the record acts change it, so a Share sheet never shows one record and edits another: the
+ * member the join places the appSessionId on, in the order members.ts' `recordMember` takes (the engine session the spine
+ * records for it, then the one a /clear didn't supersede, then a sole one), else the spine's recorded engine session (a
+ * member yet to be joined, which `draw` refuses `no-session` to a caller who stands on it). `unknown` with neither; a
+ * spine that fails is `unavailable`, logged.
+ */
+export async function placeRecord(appSessionId: string, placing: Pick<Placing, 'dispatch' | 'log' | 'members'>): Promise<RecordPlacement> {
+  let recorded: Placement;
+  try {
+    recorded = await placeRecorded(appSessionId, placing.dispatch);
+  } catch (error) {
+    placing.log(`endpoint: lane B session ${appSessionId} not placed for its record: ${(error as Error).message}`);
+    return { kind: 'unavailable' };
+  }
+  const engine = placing.members?.recordMember(appSessionId, recorded?.target.session) ?? recorded?.target.session;
+  if (engine === undefined) return { kind: 'unknown' };
+  return { kind: 'placed', target: { lane: 'B', session: engine, appSessionId }, ...(recorded?.launchedBy === undefined ? {} : { launchedBy: recorded.launchedBy }) };
 }
 
 /** A subscription's session (`{lane, id}`: lane A the engine session id, lane B the appSessionId). */

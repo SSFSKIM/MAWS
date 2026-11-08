@@ -19,6 +19,10 @@
 // whose owners, in the org state main holds, include the member this step-up key belongs to (`signsUnasked`). Its
 // signature is the one a confirmed act gets, so the machines that verify it, and the ownership proof it makes (attest.ts's
 // `SPAWN_ACTIONS`), don't change. The exemption is judged here, on the action as built, and on nothing a caller says.
+//
+// P5 O8 M6b: several acts under one confirmation (`signActions`, a Share sheet's save). The person confirms every act's
+// text at once (`renderActions`), and each canonical copy is then signed, all stamped at the confirmation. Nothing in a
+// batch is ever signed unasked.
 import { systemPreferences, type SystemPreferences } from 'electron';
 import {
   base64urlEncode,
@@ -47,6 +51,14 @@ export type Confirm = (prompt: StepUpPrompt) => Promise<Confirmation>;
 /** An action as the renderer asks for it: its typed fields. A reseal names the operation's `opId` and `opCreated`. */
 export type StepUpRequest = Pick<Action, 'machine' | 'action' | 'args'> & Partial<Pick<Action, 'session' | 'context' | 'requestDigest' | 'opId' | 'opCreated'>>;
 export type StepUpResult = { ok: true; action: Action } | { ok: false; reason: Exclude<Confirmation, { ok: true }>['reason'] | 'malformed' };
+/** M6b: several acts signed under one confirmation, in the order asked; or none. */
+export type StepUpManyResult = { ok: true; actions: Action[] } | { ok: false; reason: Exclude<StepUpResult, { ok: true }>['reason'] };
+/** The signer `SignedIn.stepUp` holds. */
+export type StepUpSigner = {
+  sign(request: StepUpRequest): Promise<StepUpResult>;
+  /** M6b: every request's act confirmed at once, then each signed; `malformed` before asking if any makes no action, or none is given. */
+  signActions(requests: readonly StepUpRequest[]): Promise<StepUpManyResult>;
+};
 
 const random = (bytes: number) => base64urlEncode(crypto.getRandomValues(new Uint8Array(bytes)));
 
@@ -106,52 +118,83 @@ async function signsUnasked(action: Action, held: HeldOrgView | undefined, pub: 
  * `confirm` defaults to `promptTouchIDConfirmation(systemPreferences)`, main's confirmation. `org`: the session's held
  * view, by which a spawn on a machine the member owns is signed unasked; without it every action is confirmed.
  */
-export function createStepUp(deps: { device: { org: string; device: string }; key: SigningKey; confirm?: Confirm; now?: () => Date; org?: HeldOrgView }): {
-  sign(request: StepUpRequest): Promise<StepUpResult>;
-} {
+/** An action as built for the person to be shown, and whether its request named its own `opCreated`. */
+type Shown = { action: Action; ownOpCreated: boolean };
+
+export function createStepUp(deps: { device: { org: string; device: string }; key: SigningKey; confirm?: Confirm; now?: () => Date; org?: HeldOrgView }): StepUpSigner {
   const now = deps.now ?? (() => new Date());
   const confirm = deps.confirm ?? promptTouchIDConfirmation(systemPreferences);
+
+  /**
+   * The action a request names, as a private copy in the canonical form the signature covers (an undefined field
+   * absent), or null when its fields make no action. The fields come from the request by name, so nothing else it
+   * carries reaches the action. Taken before anything is shown: the caller keeps references to its args, context and
+   * digest, and to the device identity, and may change them while the person decides. What is shown is what is signed.
+   * `ownOpCreated`: the request named its own `opCreated` (a reseal's), which the seal keeps, as taken here.
+   */
+  function build(request: StepUpRequest): Shown | null {
+    const { machine, action, args, session, context, requestDigest, opId, opCreated } = request;
+    const at = now().toISOString();
+    const built: Action = {
+      v: 1,
+      org: deps.device.org,
+      machine,
+      device: deps.device.device,
+      opId: opId ?? random(16),
+      opCreated: opCreated ?? at,
+      action,
+      ...(session === undefined ? {} : { session }),
+      ...(context === undefined ? {} : { context }),
+      args,
+      ...(requestDigest === undefined ? {} : { requestDigest }),
+      nonce: random(NONCE_BYTES),
+      created: at,
+    };
+    return isAction(built) ? { action: JSON.parse(canonicalize(built)) as Action, ownOpCreated: opCreated !== undefined } : null;
+  }
+
+  async function ask(prompt: StepUpPrompt): Promise<Confirmation> {
+    try {
+      return await confirm(prompt);
+    } catch {
+      return { ok: false, reason: 'failed' };
+    }
+  }
+
+  /**
+   * Stamped when the person confirmed, so time spent at the prompt doesn't make it stale (RL4's 60 s). Only the nonce
+   * and times change, and they are not part of what is rendered. A request's own `opCreated` (a reseal's) is kept, as
+   * `build` took it before the person was asked: nothing is read from the request after.
+   */
+  async function seal({ action, ownOpCreated }: Shown, sealedAt: string): Promise<Action | null> {
+    const sealed: Action = { ...action, opCreated: ownOpCreated ? action.opCreated : sealedAt, nonce: random(NONCE_BYTES), created: sealedAt };
+    return isAction(sealed) ? signStepUp(sealed, deps.key) : null;
+  }
+
   return {
     async sign(request) {
-      // The fields come from the request by name, so nothing else it carries reaches the action.
-      const { machine, action, args, session, context, requestDigest, opId, opCreated } = request;
-      const at = now().toISOString();
-      const built: Action = {
-        v: 1,
-        org: deps.device.org,
-        machine,
-        device: deps.device.device,
-        opId: opId ?? random(16),
-        opCreated: opCreated ?? at,
-        action,
-        ...(session === undefined ? {} : { session }),
-        ...(context === undefined ? {} : { context }),
-        args,
-        ...(requestDigest === undefined ? {} : { requestDigest }),
-        nonce: random(NONCE_BYTES),
-        created: at,
-      };
-      if (!isAction(built)) return { ok: false, reason: 'malformed' };
-      // A private copy in the canonical form the signature covers (an undefined field absent), taken before anything
-      // is shown: the caller keeps references to its args, context and digest, and to the device identity, and may change
-      // them while the person decides. What is shown is what is signed.
-      const shown = JSON.parse(canonicalize(built)) as Action;
+      const shown = build(request);
+      if (shown === null) return { ok: false, reason: 'malformed' };
       // Judged on `shown`, the copy that is sealed below, never on the request: what is exempted is what is signed.
-      let answer: Confirmation = { ok: true };
-      if (!(await signsUnasked(shown, deps.org, deps.key.pub, now()))) {
-        try {
-          answer = await confirm(renderAction(shown));
-        } catch {
-          answer = { ok: false, reason: 'failed' };
-        }
-      }
+      const answer: Confirmation = (await signsUnasked(shown.action, deps.org, deps.key.pub, now())) ? { ok: true } : await ask(renderAction(shown.action));
       if (!answer.ok) return answer;
-      // Stamped when the person confirmed, so time spent at the prompt doesn't make it stale (RL4's 60 s). Only the
-      // nonce and times change, and they are not part of what is rendered.
+      const signed = await seal(shown, now().toISOString());
+      return signed === null ? { ok: false, reason: 'malformed' } : { ok: true, action: signed };
+    },
+    async signActions(requests) {
+      const shown = requests.map(build);
+      if (shown.length === 0 || shown.some((action) => action === null)) return { ok: false, reason: 'malformed' };
+      const asked = shown as Shown[];
+      const answer = await ask(renderActions(asked.map((one) => one.action)));
+      if (!answer.ok) return answer;
       const sealedAt = now().toISOString();
-      const sealed: Action = { ...shown, opCreated: opCreated ?? sealedAt, nonce: random(NONCE_BYTES), created: sealedAt };
-      if (!isAction(sealed)) return { ok: false, reason: 'malformed' };
-      return { ok: true, action: await signStepUp(sealed, deps.key) };
+      const signed: Action[] = [];
+      for (const one of asked) {
+        const action = await seal(one, sealedAt);
+        if (action === null) return { ok: false, reason: 'malformed' };
+        signed.push(action);
+      }
+      return { ok: true, actions: signed };
     },
   };
 }
@@ -224,6 +267,20 @@ export function renderAction(a: Action): StepUpPrompt {
   // An undefined value is absent from the canonical form the signature covers, so it is not shown either.
   for (const name of Object.keys(a.args).filter((key) => a.args[key] !== undefined).sort()) lines.push(`${/^[A-Za-z0-9_.-]+$/.test(name) ? name : json(name)}: ${json(a.args[name])}`);
   return { summary: `${shown(a.action)} on machine ${shown(a.machine)}`, text: lines.join('\n') };
+}
+
+/**
+ * M6b: the text of several acts confirmed at once: one act's own text, or each act's under its place ("1 of 3"), and a
+ * summary naming the count and each machine once.
+ */
+export function renderActions(actions: readonly Action[]): StepUpPrompt {
+  if (actions.length === 1) return renderAction(actions[0]);
+  const machines = [...new Set(actions.map((a) => shown(a.machine)))];
+  const n = actions.length;
+  return {
+    summary: `${n} actions on ${machines.length === 1 ? 'machine' : 'machines'} ${machines.join(', ')}`,
+    text: actions.map((a, i) => `${i + 1} of ${n}\n${renderAction(a).text}`).join('\n\n'),
+  };
 }
 
 // Line and paragraph separators, bidi embeddings, overrides and isolates, zero-width characters and the BOM: invisible,

@@ -84,6 +84,11 @@
 // a stream row admits needs one. Its decision says whether it stands (`stands`), as an act's does: the stream's opening
 // asks it in the step it publishes the stream, and its re-checks ask it at a record change or a relink (streams.ts).
 // Any other `stream` is the act open's binding (`#stream`, above).
+//
+// P5 O8 M6b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M6b): a row offered only under a capability of the
+// machine's sminos (`OfferRow.sminos`: the record acts, under `record`) is, at step 1, `not-offered` while the connected
+// sminos's hello doesn't advertise it, and `unavailable` while none is connected; its `record` target rule places a lane B
+// session through RL10's members join (`AuthorizeContext.members`, targets.ts).
 import { isMachineFeedSub, type Action, type Certificates, type DeviceClass, type OrgState, type RefusalReason, type Right, type SessionRef, type SubMessage } from 'org-protocol';
 import type { ClientRef, Reader } from '@shared/ipc/client';
 import { gradeOf as declaredGrade, type Grade, type GradeSpec, type MachineGrade, type SessionRank } from '@shared/ipc/grades';
@@ -98,7 +103,7 @@ import { readerOf } from './readers';
 import { dispatchAs, type EndpointServices } from './services';
 import type { CheckoutSource, RecordSource, SessionRecord, SessionTarget } from './sources';
 import { Assertions, deviceOf, stepUpRequired, verifyDeviceStepUp } from './step-up';
-import { artifactShortCut, CheckoutBounds, ownTaskList, placeArtifact, resolveSubscription, resolveTarget, withinCheckout, type HeldNames, type Placement, type Placing, type Resolved, type Spawner } from './targets';
+import { artifactShortCut, CheckoutBounds, ownTaskList, placeArtifact, resolveSubscription, resolveTarget, withinCheckout, type HeldNames, type Placement, type Placing, type RecordMembers, type Resolved, type Spawner } from './targets';
 
 /**
  * `session`: a call's own (P5 O7 M4, RL2's `call.session`), which the `checkout` target rule reads. A `stream` (P5 O7 M3)
@@ -169,6 +174,13 @@ export type AuthorizeContext = {
   leases?: { lease(client: ClientRef, leaseId: string): string | null; run(client: ClientRef, runId: string): string | null };
   /** P5 O7 M9: the setup policy's home and the folders each member opened (policy.ts); absent, this process's home. */
   setup?: MachineSetup;
+  /**
+   * P5 O8 M6b: what the connected sminos's RL10 hello advertised, null while none is connected (`OfferRow.sminos`); absent,
+   * none is.
+   */
+  sminos?(): readonly string[] | null;
+  /** P5 O8 M6b: RL10's members join, which the `record` rule places a lane B session through (targets.ts). */
+  members?: RecordMembers;
   /** The suites' seams: another offer table, grade declaration or registry (a fixture namespace). */
   offers?: Offers;
   gradeOf?(name: string): GradeSpec | undefined;
@@ -225,7 +237,8 @@ class Reads implements EffectReads {
   /** How this decision places a lane B session (`live`: targets.ts' `Placing`), or an artifact (through the cache). */
   placing(live: boolean): Placing {
     const held = this.held();
-    return { dispatch: this.dispatch, log: (line) => this.ctx.log(line), live, artifact: (artifactId) => this.artifact(artifactId), ...(held === undefined ? {} : { held }) };
+    const { members } = this.ctx;
+    return { dispatch: this.dispatch, log: (line) => this.ctx.log(line), live, artifact: (artifactId) => this.artifact(artifactId), ...(held === undefined ? {} : { held }), ...(members === undefined ? {} : { members }) };
   }
 
   /** P5 O7 M5c: the leases and runs the asking channel holds (none for the endpoint's own re-checks, which name the artifact). */
@@ -410,6 +423,12 @@ export class Authorizer {
     // P5 O7 M5b: a stream row admits its read open alone, never a call or an act of its name.
     if ((kind === 'stream') !== (row.kind === 'stream')) return no('not-offered');
     if (kind === 'act' && (action === undefined || action.action !== name || action.org !== org.head.org || action.machine !== ref || action.device !== who.device)) return no('malformed');
+    // P5 O8 M6b: a row offered only while the machine's sminos can run it
+    if (row.sminos !== undefined) {
+      const advertised = this.ctx.sminos?.() ?? null;
+      if (advertised === null) return no('unavailable');
+      if (!advertised.includes(row.sminos)) return no('not-offered');
+    }
     // An act's args as the gate read them (P5 O7 M5a: decoded from the bytes codec's form, for a device that sent it).
     const input = request.input;
     // P5 O7 M9: the setup rows, the machine's owners' alone, whatever right a grant gives.

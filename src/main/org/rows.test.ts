@@ -4,170 +4,14 @@
 // to the local org projects, coalescing and signed out. A fake feed and session over real signed states, listings and
 // certificates (the protocol package's signing), and an in-memory org directory.
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  generateSigningKey,
-  keyId,
-  LISTING_GONE,
-  NO_CERTIFICATES,
-  signRecord,
-  SIGNING_DOMAINS,
-  type Certificates,
-  type Listing,
-  type MachineCert,
-  type OrgView,
-  type Signed,
-  type SignedOrgState,
-  type SigningKey,
-} from '../../../apps/org-protocol/src/index.ts';
-import { genesis, iso, memberId, newDevice, successor, type TestDevice } from '../../../test/endpoint/org-fixtures';
+import { generateSigningKey, keyId, NO_CERTIFICATES, type Listing, type Signed } from '../../../apps/org-protocol/src/index.ts';
+import { iso } from '../../../test/endpoint/org-fixtures';
+import { fakeFeed, fakeLinks, HOUR, hex, memoryFiles, ORG, random, World } from '../../../test/org/rows-world';
 import type { OrgRows } from '@shared/ipc/schema/org';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import type { MachineRef } from '@shared/machine/ref';
 import { repoProjectId } from '@shared/machine/project-ids';
-import type { OrgFiles } from './files';
-import type { RegistryFeed } from './registry-feed';
 import { createRemoteRows, LISTINGS_FILE, listingHash, type ListingsFile, type RemoteRows } from './rows';
-import { heldOrgSession, type SignedIn } from './session';
-
-const ORG = 'org-rows';
-const HOUR = 3_600_000;
-const random = (n: number) => Array.from(crypto.getRandomValues(new Uint8Array(n)), (b) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'[b % 64]).join('');
-const hex = () => memberId();
-
-type Machine = { ref: string; key: SigningKey };
-
-/** The org as the hub serves it: a head the test moves, the certificate set it serves, and the session's clock. */
-class World {
-  admin!: TestDevice;
-  A!: string;
-  B!: string;
-  chain: SignedOrgState[] = [];
-  certs: Certificates = NO_CERTIFICATES;
-  clock = Date.now();
-  m1!: Machine;
-  m2!: Machine;
-  delegation!: { id: string; key: SigningKey; expires: string };
-  d!: Machine & { cert: Signed<MachineCert> };
-  readonly view: OrgView = {
-    head: () => this.chain[this.chain.length - 1],
-    certificates: () => this.certs,
-    since: () => ({ states: [], transitions: [] }),
-    advance: async () => {},
-  };
-  readonly session = heldOrgSession(null);
-
-  static async make(): Promise<World> {
-    const w = new World();
-    w.admin = await newDevice('app');
-    w.A = hex();
-    w.B = hex();
-    const recovery = await generateSigningKey();
-    w.m1 = { ref: `m1${random(20)}`, key: await generateSigningKey() };
-    w.m2 = { ref: `m2${random(20)}`, key: await generateSigningKey() };
-    const delegationKey = await generateSigningKey();
-    const id = hex();
-    w.delegation = { id, key: delegationKey, expires: iso(w.clock + HOUR) };
-    const dKey = await generateSigningKey();
-    const dRef = `${id}_${random(22)}`;
-    w.d = { ref: dRef, key: dKey, cert: await w.certify(dRef, dKey) };
-    w.certs = { certs: [w.d.cert], retirements: [] };
-    const bDevice = await newDevice('b-app');
-    w.chain = [await genesis(ORG, w.A, w.admin, recovery, iso(w.clock - HOUR))];
-    w.chain.push(
-      await successor(w.chain[0], [w.admin], (s) => {
-        s.members.push({ id: w.B, email: 'b@example.com', role: 'member', devices: [bDevice.device] });
-        s.machines.push({ name: 'mac-one', ref: w.m1.ref, pub: w.m1.key.pub, owners: [w.A] }, { name: 'mac-two', ref: w.m2.ref, pub: w.m2.key.pub, owners: [w.B] });
-        s.machineNames.push({ name: 'mac-one', ref: w.m1.ref }, { name: 'mac-two', ref: w.m2.ref });
-        s.delegations.push({ id, pub: delegationKey.pub, prefix: 'vm-', expires: w.delegation.expires, maxUses: 10, offlineRevokeS: 0, owners: [w.A] });
-      }),
-    );
-    w.session.set(w.signedIn());
-    return w;
-  }
-
-  signedIn(member = this.A): SignedIn {
-    return {
-      identity: { org: ORG, member, device: 'app', clientClass: 'native-mac', channelKey: this.admin.channel, build: 'test', capabilities: [] },
-      view: this.view,
-      stepUp: { sign: () => Promise.reject(new Error('no step-up here')) },
-      hub: { url: 'http://127.0.0.1:1', headers: async () => ({}) },
-    };
-  }
-
-  certify(ref: string, key: SigningKey, name = 'vm-one'): Promise<Signed<MachineCert>> {
-    const body: MachineCert = { org: ORG, machine: ref, name, pub: key.pub, delegation: this.delegation.id, use: 1, issued: iso(this.clock) };
-    return signRecord(SIGNING_DOMAINS.machineCert, body, this.delegation.key.privateKey, this.delegation.key.pub);
-  }
-
-  /** A successor head, adopted: the session says so. */
-  async adopt(edit: Parameters<typeof successor>[2] = () => {}, issued?: string): Promise<SignedOrgState> {
-    const next = await successor(this.chain[this.chain.length - 1], [this.admin], edit, issued);
-    this.chain.push(next);
-    this.session.changed();
-    return next;
-  }
-
-  head(): SignedOrgState {
-    return this.chain[this.chain.length - 1];
-  }
-
-  list(machine: Machine, session: string, revision: number, fields: Partial<Listing['fields']> = {}, org = ORG): Promise<Signed<Listing>> {
-    const body: Listing = { org, machine: machine.ref, session, revision, issued: iso(this.clock), fields: { owners: [this.A], project: null, lane: 'A', state: 'busy', title: `${session} r${revision}`, ...fields } };
-    return signRecord(SIGNING_DOMAINS.listing, body, machine.key.privateKey, machine.key.pub);
-  }
-
-  gone(machine: Machine, session: string, revision: number): Promise<Signed<Listing>> {
-    return this.list(machine, session, revision, { owners: [], project: null, title: '', state: LISTING_GONE });
-  }
-}
-
-function fakeFeed() {
-  const sets = {
-    open: new Set<() => void>(),
-    close: new Set<() => void>(),
-    state: new Set<(version: number) => void>(),
-    listings: new Set<(page: { records: Signed<Listing>[]; last: boolean }) => void>(),
-    listing: new Set<(record: Signed<Listing>) => void>(),
-  };
-  const on =
-    <T>(set: Set<T>) =>
-    (listener: T) => {
-      set.add(listener);
-      return () => void set.delete(listener);
-    };
-  const feed: RegistryFeed = {
-    onOpen: on(sets.open),
-    onClose: on(sets.close),
-    onState: on(sets.state),
-    onRemoved: () => () => {},
-    onCredentialsEnded: () => () => {},
-    onListings: on(sets.listings),
-    onListing: on(sets.listing),
-    connected: () => true,
-    probe: () => {},
-    close: () => {},
-  };
-  return {
-    feed,
-    open: () => sets.open.forEach((l) => l()),
-    close: () => sets.close.forEach((l) => l()),
-    state: (version: number) => sets.state.forEach((l) => l(version)),
-    page: (records: Signed<Listing>[], last: boolean) => sets.listings.forEach((l) => l({ records, last })),
-    push: (record: Signed<Listing>) => sets.listing.forEach((l) => l(record)),
-  };
-}
-
-function memoryFiles(store = new Map<string, string>()): OrgFiles & { store: Map<string, string> } {
-  return {
-    dir: '/profile/org',
-    store,
-    check: async () => ({ ok: true }),
-    ensure: async () => ({ ok: true }),
-    read: async (name) => (store.has(name) ? (JSON.parse(store.get(name)!) as unknown) : null),
-    write: async (name, value) => void store.set(name, JSON.stringify(value)),
-    remove: async (name) => void store.delete(name),
-  };
-}
 
 const project = (key: string, source: 'smns' | 'remote' | 'repository' | 'folder', smnsId: string | null): ProjectRecord =>
   ({ id: `p-${key}`, name: key, directory: `/src/${key}`, order: 0, createdAt: iso(0), org: { key, name: key, source, smnsId } }) as ProjectRecord;
@@ -177,9 +21,11 @@ const running: RemoteRows[] = [];
 
 async function start(
   w: World,
-  options: { files?: ReturnType<typeof memoryFiles>; roster?: string[]; projects?: ProjectRecord[]; coalesce?: number; unverifiedMax?: number; onNow?: () => void } = {},
+  options: { files?: ReturnType<typeof memoryFiles>; roster?: string[]; projects?: ProjectRecord[]; coalesce?: number; unverifiedMax?: number; onNow?: () => void; links?: ReturnType<typeof fakeLinks>; channelMs?: number } = {},
 ) {
   const feed = fakeFeed();
+  // M6b: every machine's link down unless a case brings it up, so M2's cases see the hub alone
+  const links = options.links ?? fakeLinks('down');
   const files = options.files ?? memoryFiles();
   let roster = (options.roster ?? [w.m1.ref, w.m2.ref, w.d.ref]) as MachineRef[];
   let projects = options.projects ?? [];
@@ -194,10 +40,11 @@ async function start(
     onRoster: (listener) => (rosterListeners.add(listener), () => void rosterListeners.delete(listener)),
     localProjects: async () => projects,
     onLocalProjects: (listener) => (projectListeners.add(listener), () => void projectListeners.delete(listener)),
+    link: (ref) => links.link(ref),
     files,
     emit: (next) => emitted.push(next),
     now: () => (options.onNow?.(), w.clock),
-    timing: { ROWS_COALESCE_MS: options.coalesce ?? 1, ROWS_CACHE_WRITE_MS: 1, ...(options.unverifiedMax === undefined ? {} : { UNVERIFIED_MAX: options.unverifiedMax }) },
+    timing: { ROWS_COALESCE_MS: options.coalesce ?? 1, ROWS_CACHE_WRITE_MS: 1, ROWS_CHANNEL_MS: options.channelMs ?? 3_600_000, ...(options.unverifiedMax === undefined ? {} : { UNVERIFIED_MAX: options.unverifiedMax }) },
     log: (line) => logs.push(line),
   });
   running.push(rows);
@@ -205,6 +52,7 @@ async function start(
   return {
     rows,
     feed,
+    links,
     files,
     emitted,
     logs,
@@ -244,6 +92,24 @@ async function relaunch(w: World, h: Harness, options: Parameters<typeof start>[
 }
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Lets an answered call reach the rows' queue, then waits for it. */
+async function drain(h: Harness): Promise<void> {
+  for (let i = 0; i < 3; i++) {
+    await new Promise((resolve) => setImmediate(resolve));
+    await h.settle();
+  }
+}
+
+/** M6b: the machine's channel answers with these listings (the rows asked to read again when no call is out). */
+async function channel(h: Harness, ref: string, ...records: Signed<Listing>[]): Promise<void> {
+  if (h.links.calls(ref).length === 0) {
+    h.rows.refreshChannel(ref as MachineRef);
+    await drain(h);
+  }
+  expect(h.links.answer(ref, records), 'a channel call was out').toBe(true);
+  await drain(h);
+}
 
 afterEach(async () => {
   await Promise.all(running.splice(0).map((rows) => rows.close()));
@@ -714,5 +580,252 @@ describe('the rows', () => {
     w.session.set(w.signedIn());
     await h.settle();
     expect(h.shown()).toEqual(['s r1']);
+  });
+});
+
+describe('channel listings (M6b)', () => {
+  /** Rows over links that are up, signed in as `member`. */
+  async function up(w: World, options: Parameters<typeof start>[1] = {}) {
+    const h = await start(w, { links: fakeLinks('up'), ...options });
+    await drain(h);
+    return h;
+  }
+
+  it("keep a channel-only private listing, with its audience and policyRev, across a hub snapshot that lacks it", async () => {
+    const w = await World.make();
+    const h = await up(w);
+    await channel(h, w.m1.ref, await w.list(w.m1, 'p', 20, { audience: [w.A, w.B].sort(), policyRev: 4 }));
+    await snapshot(h, [await w.list(w.m1, 'pub', 3)]);
+    expect(h.shown()).toEqual(['p r20', 'pub r3']);
+    expect(h.rows.rows().rows[0]).toMatchObject({ session: 'p', audience: [w.A, w.B].sort(), policyRev: 4 });
+    expect(h.rows.rows().rows[1]).not.toHaveProperty('audience');
+  });
+
+  it('keep a session learned from the hub through public -> private, a channel refresh, a hub reconnect and a delayed older gone', async () => {
+    const w = await World.make();
+    const h = await up(w);
+    const shown: string[][] = [];
+    const look = () => shown.push(h.shown());
+    await snapshot(h, [await w.list(w.m1, 's', 10)]);
+    look();
+    await channel(h, w.m1.ref, await w.list(w.m1, 's', 12, { audience: [w.A], policyRev: 2 })); // it went private
+    look();
+    await channel(h, w.m1.ref, await w.list(w.m1, 's', 14, { audience: [w.A], policyRev: 2 })); // a refresh, signed again
+    look();
+    await snapshot(h, []); // the hub's reconnect: the withdrawn listing is in no page
+    look();
+    await push(h, await w.gone(w.m1, 's', 11)); // the endpoint's withdrawal, delayed
+    look();
+    expect(shown).toEqual([['s r10'], ['s r12'], ['s r14'], ['s r14'], ['s r14']]);
+  });
+
+  it('draw a private listing signed again for each answer as it was first shown, emitting nothing, while the marks follow the newest (Task 3)', async () => {
+    const w = await World.make();
+    const h = await up(w);
+    const fields = { title: 'private work', audience: [w.A], policyRev: 4 };
+    const first = await w.list(w.m1, 'p', 20, fields);
+    await channel(h, w.m1.ref, first);
+    await pause(5);
+    const emitted = h.emitted.length;
+    // the endpoint keeps no private listing, so each answer signs it again at a new revision and issue time
+    for (const revision of [80, 140]) {
+      w.clock += 60_000;
+      await channel(h, w.m1.ref, await w.list(w.m1, 'p', revision, fields));
+    }
+    await pause(5);
+    expect(h.rows.rows().rows).toMatchObject([{ session: 'p', revision: 20, issued: first.body.issued, audience: [w.A], policyRev: 4 }]);
+    expect(h.emitted.length, 'no rows went out for a listing that says nothing new').toBe(emitted);
+    // the newest record is still the mark: a withdrawal below it is a replay, ignored
+    await push(h, await w.gone(w.m1, 'p', 100));
+    expect(h.shown()).toEqual(['p r20']);
+    // what it says changing shows at once, at its own revision and time
+    w.clock += 60_000;
+    const renamed = await w.list(w.m1, 'p', 200, { ...fields, title: 'renamed' });
+    await channel(h, w.m1.ref, renamed);
+    expect(h.rows.rows().rows).toMatchObject([{ session: 'p', revision: 200, issued: renamed.body.issued, title: 'renamed' }]);
+  });
+
+  it("leave at the channel's omission with no hub membership, but not while the hub holds them", async () => {
+    const w = await World.make();
+    const h = await up(w);
+    const pub = await w.list(w.m1, 'pub', 5);
+    await snapshot(h, [pub]);
+    await channel(h, w.m1.ref, pub, await w.list(w.m1, 'p', 20, { audience: [w.A] }));
+    expect(h.shown()).toEqual(['p r20', 'pub r5']);
+    await channel(h, w.m1.ref, await w.list(w.m2, 'other', 1)); // omits both, and names another machine's session
+    expect(h.shown()).toEqual(['pub r5']);
+  });
+
+  it('leave at a gone of a higher revision from the hub, whichever source held them, and never come back below it', async () => {
+    const w = await World.make();
+    const h = await up(w);
+    const p20 = await w.list(w.m1, 'p', 20, { audience: [w.A] });
+    await channel(h, w.m1.ref, p20);
+    await push(h, await w.gone(w.m1, 'p', 21));
+    expect(h.shown()).toEqual([]);
+    await channel(h, w.m1.ref, p20);
+    expect(h.shown()).toEqual([]);
+    await channel(h, w.m1.ref, await w.list(w.m1, 'p', 22, { audience: [w.A] }));
+    expect(h.shown()).toEqual(['p r22']);
+  });
+
+  it("ask the machine's channel at once when the hub withdraws a row the channel held, so a private one comes back", async () => {
+    const w = await World.make();
+    const h = await up(w);
+    const ten = await w.list(w.m1, 's', 10);
+    await snapshot(h, [ten]);
+    await channel(h, w.m1.ref, ten); // the channel lists the public session too
+    await push(h, await w.gone(w.m1, 's', 11)); // it went private: the hub's withdrawal lands first
+    expect(h.shown()).toEqual([]);
+    expect(h.links.calls(w.m1.ref)).toHaveLength(1); // asked at once
+    expect(h.links.answer(w.m1.ref, [await w.list(w.m1, 's', 12, { audience: [w.A] })])).toBe(true);
+    await drain(h);
+    expect(h.shown()).toEqual(['s r12']);
+    // a withdrawal of a row only the hub held asks nothing
+    await push(h, await w.list(w.m1, 'pub', 1), await w.gone(w.m1, 'pub', 2));
+    await drain(h);
+    expect(h.links.calls(w.m1.ref)).toHaveLength(0);
+  });
+
+  it('take nothing from a call that failed: a dropped link keeps what the last answer showed', async () => {
+    const w = await World.make();
+    const h = await up(w);
+    await channel(h, w.m1.ref, await w.list(w.m1, 'p', 20, { audience: [w.A] }));
+    h.rows.refreshChannel(w.m1.ref as MachineRef);
+    await drain(h);
+    h.links.setState(w.m1.ref, 'down');
+    expect(h.links.fail(w.m1.ref)).toBe(true);
+    await drain(h);
+    expect(h.shown()).toEqual(['p r20']);
+    // an answer that is not a list of listings says nothing either
+    h.links.setState(w.m1.ref, 'up');
+    await drain(h);
+    h.links.calls(w.m1.ref)[0].resolve({ ok: true, output: { nope: true } });
+    await drain(h);
+    expect(h.shown()).toEqual(['p r20']);
+    expect(h.logs.some((line) => line.includes('not a list'))).toBe(true);
+  });
+
+  it('judge a channel record under the same marks as a hub one: a conflict at a mark is ignored, a replay below it too', async () => {
+    const w = await World.make();
+    const h = await up(w);
+    await push(h, await w.list(w.m1, 's', 10), await w.gone(w.m1, 's', 11));
+    await channel(h, w.m1.ref, await w.list(w.m1, 's', 10));
+    expect(h.shown()).toEqual([]);
+    await channel(h, w.m1.ref, await w.list(w.m1, 's', 11, { title: 'not the gone one' }));
+    expect(h.shown()).toEqual([]);
+    expect(h.logs.some((line) => line.includes('conflicting record'))).toBe(true);
+    const stranger = { ref: w.m1.ref, key: await generateSigningKey() };
+    await channel(h, w.m1.ref, await w.list(stranger, 'forged', 1));
+    expect(h.shown()).toEqual([]);
+    expect(h.rows.rows().pending).toEqual([w.m1.ref]);
+    // the next answer lacks it: no source shows it, so it waits no more
+    await channel(h, w.m1.ref);
+    expect(h.rows.rows().pending).toEqual([]);
+  });
+
+  it('keep each source apart across a relaunch: a channel-held row stays through a snapshot that lacks it, and goes at the next omission', async () => {
+    const w = await World.make();
+    let h = await up(w);
+    await channel(h, w.m1.ref, await w.list(w.m1, 'p', 20, { audience: [w.A] }));
+    await snapshot(h, [await w.list(w.m1, 'pub', 3)]);
+    h = await relaunch(w, h, { links: fakeLinks('down') });
+    expect(h.shown()).toEqual(['p r20', 'pub r3']);
+    await snapshot(h, []);
+    expect(h.shown()).toEqual(['p r20']);
+    h.links.setState(w.m1.ref, 'up');
+    await drain(h);
+    expect(h.links.answer(w.m1.ref, [])).toBe(true);
+    await drain(h);
+    expect(h.shown()).toEqual([]);
+  });
+
+  it('read a machine at its link up, at a new head and on asking, one call at a time, and every ROWS_CHANNEL_MS while up', async () => {
+    const w = await World.make();
+    const h = await up(w, { channelMs: 40 });
+    const calls = () => h.links.calls(w.m1.ref).length;
+    expect(calls()).toBe(1); // the sign-in's
+    expect(h.links.calls(w.m1.ref)[0]).toMatchObject({ name: 'endpoint.listings', input: null });
+    h.rows.refreshChannel(w.m1.ref as MachineRef);
+    await w.adopt();
+    await drain(h);
+    expect(calls()).toBe(1); // one out at a time: the asks wait for it
+    h.links.answer(w.m1.ref, []);
+    await drain(h);
+    expect(calls()).toBe(1); // then one more for them all
+    h.links.answer(w.m1.ref, []);
+    await drain(h);
+    expect(calls()).toBe(0);
+    await pause(80);
+    expect(calls()).toBe(1); // the period's
+    h.links.setState(w.m1.ref, 'down');
+    h.links.fail(w.m1.ref);
+    await drain(h);
+    await pause(80);
+    expect(calls()).toBe(0); // nothing while down
+    h.links.setState(w.m1.ref, 'up');
+    expect(calls()).toBe(1); // its link up
+  });
+
+  it("are one reader's: another member of the org signed in sees none of the last one's channel rows, nor an answer asked for them", async () => {
+    const w = await World.make();
+    const h = await up(w);
+    await snapshot(h, [await w.list(w.m1, 'pub', 3)]);
+    await channel(h, w.m1.ref, await w.list(w.m1, 'only-a', 12, { audience: [w.A], policyRev: 3 }));
+    expect(h.shown()).toEqual(['only-a r12', 'pub r3']);
+    // a call asked for A is out when B signs in
+    h.rows.refreshChannel(w.m1.ref as MachineRef);
+    await drain(h);
+    w.session.set(w.signedIn(w.B));
+    expect(h.rows.rows().rows.map((r) => r.session)).not.toContain('only-a'); // not even before the change is judged
+    await drain(h);
+    expect(h.rows.rows().member).toBe(w.B);
+    expect(h.shown()).toEqual(['pub r3']);
+    expect(h.links.answer(w.m1.ref, [await w.list(w.m1, 'only-a', 13, { audience: [w.A], policyRev: 4 })])).toBe(true);
+    await drain(h);
+    expect(h.shown()).toEqual(['pub r3']);
+    // B's own read follows, and holds what it answers
+    await channel(h, w.m1.ref, await w.list(w.m1, 'only-b', 7, { audience: [w.B], policyRev: 1 }));
+    expect(h.shown()).toEqual(['only-b r7', 'pub r3']);
+    await h.rows.close(); // flushes the cache's deferred write
+    expect(h.cache()).toMatchObject({ member: w.B });
+  });
+
+  it("restore channel rows from the cache only for the member who read them; the hub's for any", async () => {
+    const w = await World.make();
+    let h = await up(w);
+    await snapshot(h, [await w.list(w.m1, 'pub', 3)]);
+    await channel(h, w.m1.ref, await w.list(w.m1, 'only-a', 12, { audience: [w.A], policyRev: 3 }));
+    await h.rows.close(); // flushes the cache's deferred write
+    expect(h.cache()).toMatchObject({ member: w.A });
+    w.session.set(w.signedIn(w.B));
+    h = await start(w, { files: h.files, links: fakeLinks('down') });
+    await drain(h);
+    expect(h.rows.rows().member).toBe(w.B);
+    expect(h.shown()).toEqual(['pub r3']);
+    // and back as A, whose read the file no longer holds once B's run wrote it
+    await h.rows.close();
+    w.session.set(w.signedIn(w.A));
+    h = await start(w, { files: h.files, links: fakeLinks('down') });
+    await drain(h);
+    expect(h.shown()).toEqual(['pub r3']);
+  });
+
+  it('read nothing while signed out, drop an answer that lands signed out, and read every machine again at the next sign-in', async () => {
+    const w = await World.make();
+    w.session.set(null);
+    const h = await up(w);
+    expect(h.links.calls(w.m1.ref)).toHaveLength(0);
+    w.session.set(w.signedIn());
+    await drain(h);
+    expect(h.links.calls(w.m1.ref)).toHaveLength(1);
+    w.session.set(null);
+    await drain(h);
+    h.links.answer(w.m1.ref, [await w.list(w.m1, 'p', 20)]);
+    await drain(h);
+    w.session.set(w.signedIn());
+    await drain(h);
+    expect(h.shown()).toEqual([]);
+    expect(h.links.calls(w.m1.ref)).toHaveLength(1);
   });
 });

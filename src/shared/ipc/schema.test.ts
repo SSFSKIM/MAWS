@@ -79,9 +79,10 @@ import * as render from './schema/render'; // P5 O5 M3
 import * as remote from './schema/remote'; // P5 O7 M2
 import * as browserEngine from './schema/browser-engine'; // P5 O17
 import * as channel from './schema/channel'; // P5 O8 M7b
+import * as endpoint from './schema/endpoint'; // P5 O8 M6b
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */, daemon /* P5 O2 M5 */, machine /* P5 O6 M1 */, machines /* P5 O6 M3 */, org /* P5 O8 M1 */, laneA /* P5 O9 M2 */, machineSettings, clientPort /* P5 O3-D */, render /* P5 O5 M3 */, remote /* P5 O7 M2 */, browserEngine /* P5 O17 */, channel /* P5 O8 M7b */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */, presentations /* P3-C M6 */, connectors /* P3-H H3b */, delivery /* P4-B5 */, customization /* UX2-K */, catalog /* P4-AGG M2 */, daemon /* P5 O2 M5 */, machine /* P5 O6 M1 */, machines /* P5 O6 M3 */, org /* P5 O8 M1 */, laneA /* P5 O9 M2 */, machineSettings, clientPort /* P5 O3-D */, render /* P5 O5 M3 */, remote /* P5 O7 M2 */, browserEngine /* P5 O17 */, channel /* P5 O8 M7b */, endpoint /* P5 O8 M6b */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -675,7 +676,7 @@ describe('ipc schema validates both directions', () => {
       // added since; E2's `deliverables` was too, until P3-L's cutover removed it).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */, 'daemon' /* P5 O2 M5 */, 'machine' /* P5 O6 M1 */, 'machines' /* P5 O6 M3 */, 'org' /* P5 O8 M1 */, 'laneA' /* P5 O9 M2 */, 'machineSettings', 'clientPort' /* P5 O3-D */, 'render' /* P5 O5 M3 */, 'remote' /* P5 O7 M2 */, 'browserEngine' /* P5 O17 */, 'channel' /* P5 O8 M7b */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */, 'presentations' /* P3-C M6 */, 'connectors' /* P3-H H3b */, 'delivery' /* P4-B5 */, 'customization' /* UX2-K */, 'catalog' /* P4-AGG M2 */, 'daemon' /* P5 O2 M5 */, 'machine' /* P5 O6 M1 */, 'machines' /* P5 O6 M3 */, 'org' /* P5 O8 M1 */, 'laneA' /* P5 O9 M2 */, 'machineSettings', 'clientPort' /* P5 O3-D */, 'render' /* P5 O5 M3 */, 'remote' /* P5 O7 M2 */, 'browserEngine' /* P5 O17 */, 'channel' /* P5 O8 M7b */, 'endpoint' /* P5 O8 M6b */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -2340,6 +2341,25 @@ describe('ipc schema validates both directions', () => {
       expect(daemon.DaemonStatusSchema.shape.spine.safeParse(spine).success).toBe(true);
       expect(daemon.DaemonStatusSchema.shape.spine.safeParse(undefined).success, 'a daemon before O3-D says nothing of it').toBe(true);
       expect(daemon.DaemonStatusSchema.shape.spine.safeParse({ ...spine, heldDropped: -1 }).success).toBe(false);
+    });
+  });
+
+  describe('P5 O8 M6b endpoint.*', () => {
+    it('adds the local door, machine-owned and main-only: an act answered by its outcome, record.policy answered as a call', () => {
+      expect(Object.fromEntries(Object.entries(endpoint.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'endpoint.local.act': 'machine', 'endpoint.local.call': 'machine' });
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['endpoint.local.act', 'endpoint.local.call']));
+      expect(validateCommandInput('endpoint.local.act', { action: { action: 'record.access', args: {} } }).ok).toBe(true);
+      expect(validateCommandInput('endpoint.local.act', { action: 'record.access' }).ok, 'an action is an object').toBe(false);
+      expect(validateCommandOutput('endpoint.local.act', { state: 'done', result: { changed: true, policyRev: 4 } }).ok).toBe(true);
+      expect(validateCommandOutput('endpoint.local.act', { state: 'refused', reason: 'step-up' }).ok).toBe(true);
+      expect(validateCommandInput('endpoint.local.call', { name: 'record.policy', input: null }).ok).toBe(true);
+      expect(validateCommandInput('endpoint.local.call', { name: 'record.policy', input: { session: 'la-1' } }).ok).toBe(true);
+      expect(validateCommandInput('endpoint.local.call', { name: 'endpoint.listings', input: null }).ok, 'record.policy alone').toBe(false);
+      const policy = { session: 'la-1', access: 'private', shares: [{ member: 'm-b', grade: 'list' }], policyRev: 3 };
+      expect(validateCommandOutput('endpoint.local.call', { ok: true, output: { supported: true, policies: [policy, { session: 'la-2', unavailable: true }] } }).ok).toBe(true);
+      expect(validateCommandOutput('endpoint.local.call', { ok: true, output: { supported: false } }).ok).toBe(true);
+      expect(validateCommandOutput('endpoint.local.call', { ok: false, code: 'unavailable' }).ok).toBe(true);
+      expect(validateCommandOutput('endpoint.local.call', { ok: true, output: { supported: true, policies: [{ ...policy, access: 'public' }] } }).ok, 'no such level').toBe(false);
     });
   });
 });

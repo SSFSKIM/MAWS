@@ -79,6 +79,7 @@ import type { HubDeps } from './hub-http';
 import { HubLink } from './hub-link';
 import { Interest } from './interest';
 import { LaneBPending } from './lane-b-pending';
+import { LocalDoor, type DoorCallAnswer } from './local-door';
 import { EndpointRecords, Listings, RecordRetries, type RecordsContext } from './listings';
 import { Notifier } from './notify';
 import { EndpointOrg, type OrgChange } from './org-sync';
@@ -88,7 +89,9 @@ import { PlaneFeeds, type OwnersRead } from './plane-feeds';
 import { EndpointPolicy, MachineSetup, settingsDefaultMode } from './policy';
 import { completeProvisioning, provisionInto, type DelegatedInput } from './provision';
 import { retireInto, type Retired } from './retire';
+import { owns } from './grades';
 import { Queries } from './queries';
+import { placeListings, policies, unsupported, type HeldSession } from './record-policy';
 import { Rl10 } from './rl10/link';
 import type { RelayContext } from './rl10/log-relay';
 import type { EndpointModule, EndpointServices } from './services';
@@ -97,7 +100,7 @@ import { anyCheckout, type CheckoutSource, type RecordSource, type SessionTarget
 import { EndpointState } from './state/store';
 import { Streams } from './streams';
 import { Subscriptions } from './subscriptions';
-import { CheckoutBounds } from './targets';
+import { CheckoutBounds, placeRecord, type RecordPlacement } from './targets';
 import { endpointStatus, NO_LINKS, type EndpointLinks, type EndpointStatus } from './status';
 import { directPort, type InterfaceTable } from './tailnet';
 
@@ -135,6 +138,12 @@ export const DIRECT_HANDSHAKE_MS = 10_000;
 
 /** The org state is read again this often, besides at RL1's welcome and each `state` notice (M3). */
 export const SYNC_EVERY_MS = 10 * 60_000;
+
+/**
+ * P5 O8 M6b (the desk track's review 632, P1): how many times `record.policy` through the local door reads the machine's
+ * owners again when the head or certificates moved under the read, before it answers `unavailable`.
+ */
+const LOCAL_POLICY_READS = 3;
 
 export class Endpoint implements EndpointModule {
   readonly deps: HubDeps;
@@ -189,6 +198,8 @@ export class Endpoint implements EndpointModule {
   readonly leases: Leases;
   /** P5 O7 M5c round 3: each channel's snapshot holds of a remote dashboard, re-authorized while they live (asset-holds.ts). */
   readonly assetHolds: AssetHolds;
+  /** P5 O8 M6b: the local door, this machine's own app's record acts and policy read, served by `mawsd` (local-door.ts). */
+  readonly local: LocalDoor;
   /** What `start` subscribed to on mawsd's seam, let go at `stop`. */
   readonly #unseam: Array<() => void> = [];
   readonly #options: EndpointOptions;
@@ -323,6 +334,7 @@ export class Endpoint implements EndpointModule {
       now: this.deps.now,
       log,
       ...(options.uplink === undefined ? {} : { uplink: options.uplink }),
+      ...(options.authorization?.offers === undefined ? {} : { offers: options.authorization.offers }), // P5 O8 M6b: the welcome's `record`
     });
     this.channels = new Channels({
       identity: () => this.#identity(),
@@ -375,6 +387,8 @@ export class Endpoint implements EndpointModule {
       },
       stamp: () => this.#state?.ledger,
       setup,
+      sminos: () => this.rl10.sminosCapabilities(), // P5 O8 M6b: the record acts, while sminos advertises `record`
+      members: this.rl10.members, // P5 O8 M6b: the `record` rule's lane B placement
       offers: authorization.offers,
       gradeOf: authorization.gradeOf,
       registry: authorization.registry,
@@ -385,6 +399,8 @@ export class Endpoint implements EndpointModule {
       if (this.#services === null) return Promise.reject(new Error('the endpoint has not started'));
       return this.#services.dispatch(...request);
     };
+    // P5 O8 M6b: where a lane B listing's record is, one way for `record.policy` and the record acts (desk 632 P2)
+    const placeListingRecord = (appSessionId: string) => placeRecord(appSessionId, { dispatch, log, members: this.rl10.members });
     this.leases = new Leases({
       authorize: (request, who, now) => this.authorizer.authorize(request, who, now),
       dispatch,
@@ -445,6 +461,11 @@ export class Endpoint implements EndpointModule {
       rl10: this.rl10,
       dispatch,
       engineHostLedger: (closed) => (this.#engineHostLedger = closed),
+      // P5 O8 M6b: a record act's lane B session, as the members join holds it
+      placeSminos: (session) => {
+        const app = this.rl10.members.get(session)?.lane === 'B' ? this.rl10.members.appSessionId(session) : null;
+        return app === null ? { lane: 'A', session } : { lane: 'B', session, appSessionId: app };
+      },
       now: this.deps.now,
       log,
     });
@@ -534,14 +555,7 @@ export class Endpoint implements EndpointModule {
       subscription: (channel, sub) => this.subscriptions.get(channel, sub),
       upstreamOf: (sub) => this.planeA.upstreamOf(sub),
       toSminos: (frame) => this.rl10.send(frame),
-      members: () =>
-        this.rl10.members.sessions().flatMap((session) => {
-          const member = this.rl10.members.get(session);
-          if (member === null) return [];
-          const listingId = this.rl10.members.listingId(session);
-          const target: SessionTarget = member.lane === 'A' ? { lane: 'A', session } : { lane: 'B', session, appSessionId: listingId ?? '' };
-          return [{ member, listingId, target }];
-        }),
+      members: () => this.#heldSessions(),
       records: recordSource,
       machineOwners: () => this.#machineOwners(),
       recordFor: (report) => this.listings.recordFor(report),
@@ -557,6 +571,8 @@ export class Endpoint implements EndpointModule {
       setup,
       cursors: channelCursors,
       readerMoved: (member, appSessionId) => this.planeFeeds.readerMoved(member, appSessionId), // P5 O8 M6a: their other devices
+      sminos: () => this.rl10.sminosCapabilities(), // P5 O8 M6b: `record.policy`
+      placeRecord: placeListingRecord, // the record acts' placement (desk 632 P2)
       log,
     });
     this.gate.setExecutors({
@@ -577,6 +593,53 @@ export class Endpoint implements EndpointModule {
       stream: (channel, m) => this.streams.receive(channel, m),
       clientAnswer: (channel, m) => this.clientPorts.answer(channel, m), // P5 O7 M5c
     });
+    // P5 O8 M6b: an act through the local door takes a channel's route once the door's own checks passed
+    this.local = new LocalDoor({
+      head: () => (this.#org?.ready ? this.#org.head().state : null),
+      act: (channel, m) => this.actions.receive(channel, m, gated.act),
+      policy: (input) => this.#localPolicy(input, authorization.records ?? this.rl10.members, placeListingRecord),
+      log,
+    });
+  }
+
+  /** The machine's sessions as sminos reports them, each with the id it is listed under (null: not yet) and its target. */
+  #heldSessions(): HeldSession[] {
+    return this.rl10.members.sessions().flatMap((session) => {
+      const member = this.rl10.members.get(session);
+      if (member === null) return [];
+      const listingId = this.rl10.members.listingId(session);
+      const target: SessionTarget = member.lane === 'A' ? { lane: 'A', session } : { lane: 'B', session, appSessionId: listingId ?? '' };
+      return [{ member, listingId, target }];
+    });
+  }
+
+  /**
+   * P5 O8 M6b: `record.policy` through the local door, as the machine's owners' member (P5 Decision Log 36's local
+   * reader): the sessions any of the machine's owners owns (record-policy.ts). The desk track's review 632: the owners are
+   * those of the head and certificates the answer goes under (P1: a head that moved while they were read is read again,
+   * up to LOCAL_POLICY_READS times, then `unavailable`), each lane B listing is read on the record its acts change (P2,
+   * `place`), and sminos is as it stands when the answer goes (P3).
+   */
+  async #localPolicy(input: unknown, records: RecordSource, place: (appSessionId: string) => Promise<RecordPlacement>): Promise<DoorCallAnswer> {
+    const before = unsupported(this.rl10.sminosCapabilities());
+    if (before !== null) return before;
+    const named = typeof input === 'object' && input !== null && typeof (input as { session?: unknown }).session === 'string' ? (input as { session: string }).session : undefined;
+    for (let reads = 0; reads < LOCAL_POLICY_READS; reads++) {
+      const read = this.#ownersRead();
+      const owners = await read.owners;
+      const placed = await placeListings(this.#heldSessions(), place, named);
+      if (!read.stands()) continue;
+      // from here to the answer in one step: the head, the certificates and sminos as they are when it goes
+      const now = unsupported(this.rl10.sminosCapabilities());
+      if (now !== null) return now;
+      const owned = (target: SessionTarget) => {
+        const record = records.record(target);
+        return owners.some((owner) => owns(record, owner, owners));
+      };
+      return { ok: true, output: { supported: true, policies: policies(this.#heldSessions(), placed, owned, named) } };
+    }
+    this.#services?.log(`endpoint: a local record.policy found the machine's owners moved under each of ${LOCAL_POLICY_READS} reads; answered unavailable`);
+    return { ok: false, code: 'unavailable' };
   }
 
   async start(services: EndpointServices): Promise<void> {

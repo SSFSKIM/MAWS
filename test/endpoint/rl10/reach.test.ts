@@ -190,7 +190,7 @@ describe('reach? (D1, D2)', () => {
     closers.push(() => sminos?.close());
     sminos.send({ t: 'hello', protocol: { major: 1, minor: 0 }, capabilities: ['audience'], token: info.token, sminos: { version: 'reach' }, policy: { read_only: false, ceiling: 'settings' } });
     const welcome = await sminos.next((f) => f.t === 'welcome', 'the welcome');
-    expect(welcome.capabilities).toEqual(['access', 'reach']);
+    expect(welcome.capabilities).toEqual(['access', 'reach', 'record']);
     sminos.send(memberFrame({ access: 'private', shares: [{ member: o.B, grade: 'list' }] }));
     await sminos.next((f) => f.t === 'audience' && f.session === S, 'the audience frame');
     sminos.send({ t: 'reach?', id: 'r-race', project: P, session: S, event: await remote(o, o.bm, 'bm', [o.B]) });

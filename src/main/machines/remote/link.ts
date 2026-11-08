@@ -51,7 +51,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import type { OrgSession, SignedIn } from '../../org/session';
 import type { CommandBudgets } from '../budgets';
 import type { LinkState, MachineLink } from '../manager';
-import { ActTable, type ActHandle, type ActRequest } from './acts';
+import { ActTable, type ActHandle, type ActManyResult, type ActRequest } from './acts';
 import { fromWire, needsCodec, toWire } from '@shared/host/json-bytes';
 import { ANSWERS_BYTES } from './bytes';
 import { peerLists } from './capabilities';
@@ -115,6 +115,8 @@ export interface RemoteLink extends MachineLink {
    */
   call(name: string, input: unknown, options?: CallOptions): Promise<CallResult>;
   act(request: ActRequest): ActHandle;
+  /** P5 O8 M6b: several step-up acts signed under one confirmation, each sent when its caller says (acts.ts's `actMany`). */
+  actMany(requests: readonly ActRequest[]): Promise<ActManyResult>;
   /** P5 O7 M4: the machine's ledger asked again about an op settled `unknown` (ActTable.requery): query only, never the act. */
   requery(op: { opId: string; opCreated: string; executor: Executor }): ActHandle;
   subscribe(request: SubscribeRequest, sink: SubscriptionSink): Subscription;
@@ -977,6 +979,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       });
     },
     act: (request) => acts.act(request, ended()),
+    actMany: (requests) => acts.actMany(requests, ended),
     requery: (op) => acts.requery(op, ended()),
     subscribe: (request, sink) => subs.subscribe(request, sink, ended()),
     openStream: (request, sink) => streams.open(request, sink, ended()),

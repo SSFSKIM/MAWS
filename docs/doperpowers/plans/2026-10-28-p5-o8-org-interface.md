@@ -1,6 +1,6 @@
 # P5 O8 — The org interface (2026-10-28)
 
-> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `7781e2d50a7a4a5f86576f11354128d444b8fe39` at master `14ec11778` (P5's Decision Logs 1–245; re-pinned on 2026-11-07 at M6a's cut, where 239–245 change nothing M6a consumes: 239 and 240 swap both Macs to f857f0450, 241 lands #506's RL2 11 and `WIRE_MINOR` 29, 242 ends O14, 243 and 244 shape and pass O18 M6 on staging without `record`, 245 meets Decision Log 227's floor. Before that, at blob `92141de56e15ff65c3da5baa8fa135cdecf075c7` and master `f857f0450`, P5's Decision Logs 1–238, re-pinned on 2026-11-06 at M7b's cut, where 229–238 change nothing M7b consumes: 232 sets the order, 238 lands M7a. Before that, at blob `b99c1767` and master `910539147`, re-pinned for the re-plan of the rest: 223 to 228 make M6's Share sheet O18's M5, with the `list` grade and audience streams; 154 moves the last machine, so the owner's words no longer wait; 155 waives B4's wait on M7's reader; 168 closes O3 and 222 closes O7; 190 makes the spawner an owner and leaves its residue (b) due before owners move; earlier pin blob `d07bfc4ea2466d7d5ca7ca3164aed4d93021311a` at master `6fb933626`, P5's Decision Logs 1–129, re-pinned on 2026-10-29 for M4's re-plan: 121 lands H1, 126 leaves M4 the refused attempt and the section's split, 129 lands M5 and names M4 next; earlier pin blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83`, Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
+> **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5), child **O8**, §"O8: The org interface". Parent pin: blob `257faf80e19062a89fb24caafa28f2c448b68bac` at master `48e0ed15a` (P5's Decision Logs 1–248; re-pinned on 2026-11-07 at M6b's cut, where 246–248 change nothing M6b consumes: 246 lands M7b, 247 puts O18's build on the production hub and has sminos 1.40.0 remove phase 1's hub path, 248 lands M6a and adds M6a's endpoint rule to Decision Log 235's second-member precondition. Before that, at blob `7781e2d50a7a4a5f86576f11354128d444b8fe39` and master `14ec11778`, P5's Decision Logs 1–245, re-pinned on 2026-11-07 at M6a's cut, where 239–245 change nothing M6a consumes: 239 and 240 swap both Macs to f857f0450, 241 lands #506's RL2 11 and `WIRE_MINOR` 29, 242 ends O14, 243 and 244 shape and pass O18 M6 on staging without `record`, 245 meets Decision Log 227's floor. Before that, at blob `92141de56e15ff65c3da5baa8fa135cdecf075c7` and master `f857f0450`, P5's Decision Logs 1–238, re-pinned on 2026-11-06 at M7b's cut, where 229–238 change nothing M7b consumes: 232 sets the order, 238 lands M7a. Before that, at blob `b99c1767` and master `910539147`, re-pinned for the re-plan of the rest: 223 to 228 make M6's Share sheet O18's M5, with the `list` grade and audience streams; 154 moves the last machine, so the owner's words no longer wait; 155 waives B4's wait on M7's reader; 168 closes O3 and 222 closes O7; 190 makes the spawner an owner and leaves its residue (b) due before owners move; earlier pin blob `d07bfc4ea2466d7d5ca7ca3164aed4d93021311a` at master `6fb933626`, P5's Decision Logs 1–129, re-pinned on 2026-10-29 for M4's re-plan: 121 lands H1, 126 leaves M4 the refused attempt and the section's split, 129 lands M5 and names M4 next; earlier pin blob `e74a3c5d58e682790627cf0fc54abe23e161930e` at master `1bf619c83`, Decision Logs 1–116; first drafted at `5b46682f1`, re-pinned for Decision Logs 95 to 97, and again on 2026-10-28 for M3's and M5's re-plan: Decision Log 101 refuses O3's D2, so lane B's owner changes route to sminos's member record; 105 and 113 land M1 and M2; 111 answers Q1 to Q7; 116 passes M1's staging sitting and finds the double sign-in, fixed in its own PR; the others, 114 and 115 among them, change nothing here).
 >
 > **What binds.** O8's section in P5 is this document's design, and P5's approval covers it. Binding with it:
 > - P5 §7 (people: owners, visibility, machine owners and grants, agents talk as today, credentials) and §8 (the sidebar's per-project toggle, the project channel, the Org page, attention across machines); parent acceptance 3 (its remote rows: Decision Log 93), 11 and 12.
@@ -95,6 +95,26 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
     - Static green at cf5f833c5 (42386392490).
   - [x] (2026-11-07) The branch, reviewed and gated as a whole. reviewer-medium ran four passes with a confidentiality lens; every data loss it found is fixed, and it found no disclosure. The desk track checked every endpoint and draft-path delta and found them correct. `--gates all --evidence` passed on b90a20de5 (run 42395007929): 55 jobs green, no flaky line. The PR is #518.
 - [ ] M6b — Visibility and shares (O18's M5) — *executable; after M6a; its live proof is the staging run it shares with O18 M6, which needs the desk track's sminos executors and a real second member (the owner)*
+  - [x] (2026-11-07) Refresh at the cut: branch `p5-o8-m6b` from master 48e0ed15a, after M6a landed as #518. The cited lines were reconciled, the parent re-pinned at Decision Log 248, and the plan made: four tasks (Decision Log, "M6b's refresh at its cut" and "M6b is built as four tasks").
+  - [x] (2026-11-07) Task 1, reviewed clean. The commits: 776b239cd, 727a103e6 and 5c24e83d1 (endpoint only), 79dc87205 and a35f6cf5a; then the fix wave 5cc92783f and f443e16cd, merged at 7a8e5a47b.
+    - What it adds: the `record.*` acts and `record.policy` behind sminos's `record`; the welcome's `record`; and the local door, served as `endpoint.local.act` and `.call` at `WIRE_MINOR` 32.
+    - Reviews: our task reviewer took two rounds. The desk track's desk 632 found the acts correct and raised three P2s on `record.policy`; desk 633 closed them.
+    - Static green at a35f6cf5a (42404533003) and f443e16cd (42406895430).
+  - [x] (2026-11-07) Task 2, reviewed clean. The commits: fa42186a5, 237682977, 40b9742e6, 656527ca8 and 28eae9dfc; then the review's fixes, dad52c414, 56eaf7f55 and 4d95d25b6.
+    - What it adds: `org.policy.get` and `.set` and `org.owners.add`; one confirmation per save, through `actMany` and `signActions`; and the rows reading each machine's channel listings, with two memberships per key, bound to the reader.
+    - The enumerating rows test has 5,040 permutations plus 16,807 five-event sequences.
+    - Reviews: our task reviewer approved it, then approved the three Minor fixes.
+    - Static green at 4d95d25b6 (42410961560). One local run of `rows.test.ts`'s crypto-heavy marks case hit its 5 s timeout at a load average near 100, then passed on the committed code. Under CI it counts as a flake to explain.
+  - [x] (2026-11-07) Task 3, reviewed clean. The commits: f4f81e35f, 9d6a52542, 539e8b815, bc22ad7b0, 8f1b003e4, 9ed8353a6 and 6546231d2; then the review's fixes, 3c09ac206 through 954c74ded.
+    - What it adds: the Share sheet, the reach marks and the row menus; the private-listing churn fix in main; and `e2e/share.spec.ts`.
+    - Reviews: the frontier review found I1, I2, M1 and M2, and its re-review closed them, with one Minor: actions-whole's blanket `aria-hidden` exemption, folded into Task 4. The architect's taste read added three fixes, all accepted.
+    - Green at 6546231d2 (42417175074), and at 954c74ded (42420500958: static, unit, e2e:settings and e2e:cross-build).
+  - [x] (2026-11-07) Task 4, reviewed clean. The commits: d04d960a5 and 3c13448dc (app), and 5bcd83565 and aef0c7353 (`apps/desk-hub/deploy`). Then two fix waves: d0c031dbf, 23b88d6cc, 3c8fb5cdc, a3954e3f3, 3c8d1b1e9, f6246b4a3, a21c6e561, 665e938e6 and fc6aff4cc; then 5ce55a8b8, a80ae3eaa and 055778370.
+    - What it adds: `policy.local.test.ts`, run against a stand-in that holds each rpc to sminos's proof binding and field set. It also adds the reach harness's record-act widenings, with the items m6b-cutover, m6b-visibility and m6b-reader, the real-member steps for the sitting, and actions-whole's narrowed exemption.
+    - Reviews: our task reviewer took three rounds (5 Importants, then 2, then none). The desk track took three verdicts: desk 641 (layer 1 clean, 4 P2s), desk 642 (ready, with 2 leftovers folded in) and desk 643 (ready, converged).
+    - Green at 055778370 (42432343440: static, unit, e2e:settings and e2e:cross-build, hosted).
+  - [x] (2026-11-08) Branch review clean. reviewer-high, with a security lens, found 3 P2s (eaafe05af, df906b6e9 and 95be41576, the last reviewed by the desk track as desk 644), and its re-review found the branch correct. Master 5b1f73877 merged in at 0db815f19.
+  - [x] (2026-11-08) The final gate at 169108598 (`--gates all --evidence --lane hosted`, run 42438203920) is green on its first attempt: 55 jobs, with 2 matrix placeholders skipped and no flaky line. The commits after it are docs only. The PR is opened. The shared staging run is on the branch head (Decision Log, "M6b lands before the shared run", amended).
 - [ ] M4b — Machines and their rights — *executable; after M6b*
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
 - [ ] M5b — Add owner — *executable; after M4c; lands once the desk track's `record.owners` executor and DL190 (b)'s fix are on master*
@@ -1851,17 +1871,70 @@ The live check is the owner's, in their own MAWS once a build carrying M7b is on
     npx vitest run --project node-timing test/org/policy.local.test.ts
     npx vitest run --project renderer src/renderer/src/sessions/share/ShareSheet.test.tsx
 
-**The shared staging run** (M6b with O18 M6). The architect schedules it with the owner and the desk track: from 2026-11-07, never 06:45 to 07:00Z (the mini), never in a cua_repl hold. The owner's steps:
-1. **A real second member.** The owner adds Access's admission for a second email they control (an Access change, the owner's). Then, from the owner's staging scratch profile, the Org page adds that member (Add person), and pairs a second scratch MAWS profile as their first device (Pair a device, H1).
-2. **A VM under them.** The desk track's `staging-run.sh endpoint-vm setup <base commit>` prepares a VM. The owner's Org page enrolls it (M4b's flow once M4b lands; before that, `staging-run.sh admin enroll <name>`) and sets its owners to the second member.
-3. **The builds.** The desk track deploys O18 M1's hub to staging, and puts sminos 1.38.0 or later and a MAWS at or after M6b on the staging machines.
-4. **The run.** O18's acceptance 1 to 8, then O8's 6:
+**The shared staging run** (M6b with O18 M6). The architect schedules it with the owner and the desk track: from 2026-11-07, never 06:45 to 07:00Z (the mini), never in a cua_repl hold. It has two layers. Layer 1 needs no one but the desk track. Layer 2 is one sitting with the owner. (Decision Log, "M6b Task 4, the local suite and the harness".)
+
+**Layer 1: the harness member** (the desk track, no owner step). Member B is the run's own harness member (`addRunMember`) with its b1 device, on a fresh VM at the slot, without the MAWS project:
+
+    zsh apps/desk-hub/deploy/staging-run.sh deploy                                       # O18 M1's hub, if staging lacks it
+    zsh apps/desk-hub/deploy/staging-run.sh reach-vm setup --vm <vm> --sminos a3d4a8f8   # sminos 1.40.3; refused below 9a694999 (1.40.1)
+    zsh apps/desk-hub/deploy/staging-run.sh reach --vm <vm> --direct-url ws://<the VM's tailnet address>
+    zsh apps/desk-hub/deploy/staging-run.sh reach-vm teardown --vm <vm>
+
+The scenes' MAWS is the branch at or after M6b. Their endpoints say `record`, so every widening goes through A's record acts. The run prints a PASS/FAIL line for each of O18's items 1 to 8 and for O8's three:
+- `m6b-cutover`: the terminal's widening, of the access and of a share, is refused "use MAWS", with no confirmation asked and `record.policy` unmoved; its narrowing runs;
+- `m6b-visibility`: b1 lists S by its access alone, each level set by A's act. At `listed`, `converse` and `approve` are refused `grade`;
+- `m6b-reader`: B pins, reads and drafts a lane B session A shares at Converse, and A's reading and draft read back unchanged.
+
+Item 4 is O8's "Can message: B's agents message, B can't read". Undo is the run's own (its LEFT and KEPT lines).
+
+These are the live run's checks, none of them verified before it:
+- lane B inside the reach scenes;
+- record acts over the relays;
+- layer 2's pairing through real Access with a second identity;
+- the profile daemon's teardown.
+
+**Layer 2: the real-member sitting** (the owner with the desk track, one scene). B is a real person, the owner's second email, signed in from a second scratch MAWS profile on the owner's Mac.
+
+1. **The email file.** The owner sends the second email to the desk track directly, never into a repo or a PR. The desk track writes it to a 0600 file outside any checkout, for example `~/.local/share/o8-sitting/second-email`. The records say "the owner's second email".
+2. **B joins the org.** The desk track runs `zsh apps/desk-hub/deploy/staging-run.sh real-member add --email-file <that file>`, then `staging-run.sh access-sync`. Access now admits B.
+3. **B pairs.**
+   - The owner launches the scratch profile and opens the logout URL.
+   - The desk track runs `zsh apps/desk-hub/deploy/staging-run.sh real-member pair --email-file <that file> --code-file <a new path outside any checkout>`. It writes the code there (0600) and waits up to 30 minutes.
+   - To stop a `pair` early, the desk track signals its node process or its process group, never the wrapper alone. zsh's TERM trap ends the wrapper, not node, and node would keep polling until `--wait` runs out, and could still list a device (desk 643; residue m6b-r3).
+   - The owner copies the code without displaying it, with `pbcopy < <that path>` in a Terminal or iTerm window. They paste it into the profile's Settings › Org › Pairing code row, press Sign in, and finish in the browser as the second email.
+   - The step lists the device as B's first device, unendorsed: an admin can't endorse another member's device (P5 Decision Log 34). It prints the device's fingerprint, which the profile shows too.
+4. **The run.** O8's items, with B the real member on the second profile:
    - the owner makes a session private, shares it Can message, then View;
-   - the second member's rows and agents follow;
-   - `converse` is refused;
-   - the second member pins, reads and types a draft, and the owner's sidebar and draft are unchanged;
-   - `sminos share … view` from the owner's terminal says "use MAWS" once the desk track's refusal is in.
-5. **Teardown.** The second member is removed from the Org page; the VM goes with `endpoint-vm teardown`; the Access admission goes (the owner's).
+   - B's rows and agents follow;
+   - B's `converse` is refused;
+   - B pins, reads and types a draft, and the owner's sidebar and draft are unchanged;
+   - `sminos share … view` at the owner's terminal says "use MAWS".
+
+**The pitfall.**
+- The profile's sign-in opens the default browser at the staging hub's `/cdn-cgi/access/cli` (`access-login.ts:194`). If that browser still holds the owner's staging Access session, Access likely completes the sign-in as the owner. So just before B's sign-in, the owner opens `https://desk-hub-staging.opencognita-platform.workers.dev/cdn-cgi/access/logout`.
+- That logs out of every Access app on the team, so production desk web asks for sign-in again later. MAWS's org sessions and cloudflared's CLI token are untouched.
+- Until the owner is signed back in as themselves, nobody runs `cloudflared access login` for staging.
+- The sitting checks the pass-through by reading the member email the profile shows before its pairing completes. If it shows the owner's email, stop. `pair` reads only B's pending entries (`?member=`), so an entry posted as the owner is never listed for B.
+
+**Teardown.**
+1. The desk track runs `zsh apps/desk-hub/deploy/staging-run.sh real-member remove --email-file <that file>`, which removes B and revokes the device's keys, then `staging-run.sh access-sync`.
+2. The owner quits the scratch app. The profile's mawsd outlives the app and has no stop verb, so the desk track names its pids with `pgrep -fl maws-m6b-second-member`, ends each with `kill -TERM <pid>`. A private daemon carries `--dir <its dir>` in its argv (`daemon.ts:286`), so the name matches it. After TERM, the desk track checks that no process of the profile's session is left and that its lock files are gone, rather than trusting the name match alone. Then it runs `rm -rf ~/.local/share/maws-m6b-second-member`. The device keys are software keys in the profile's `device/keys.json`, so the directory takes them with it.
+3. The email file is deleted.
+4. The owner signs back into staging Access as themselves the next time a browser needs it.
+5. The VM goes with `reach-vm teardown`.
+6. The architect removes the sitting's worktree, `/Users/new/.local/share/maws-worktrees/m6b-sitting`.
+
+**The owner's steps** (the architect hands these over):
+1. Send the second email to the desk track directly.
+2. At the sitting, launch the scratch profile. It launches from a prepared worktree at or after M6b's head, which the architect prepares before the sitting at `/Users/new/.local/share/maws-worktrees/m6b-sitting`, with `pnpm install --frozen-lockfile` already run there:
+
+       cd /Users/new/.local/share/maws-worktrees/m6b-sitting && mkdir -p -m 700 "$HOME/.local/share/maws-m6b-second-member" && MAWS_USER_DATA="$HOME/.local/share/maws-m6b-second-member" npx electron-vite dev
+
+   (Earlier drafts launched from the `p5-o8-m6b` worktree, on the plan of a sitting before the landing.) A dialog from macOS on that first launch, such as "accept incoming network connections" for Electron, is the owner's to answer. Deny is safe, since the profile connects outward to the hub, and no agent clicks through it.
+3. Open `https://desk-hub-staging.opencognita-platform.workers.dev/cdn-cgi/access/logout` in the default browser.
+4. Copy the pairing code without displaying it: in a Terminal or iTerm window, run `pbcopy < <the path the desk track names>`. Paste it into the profile's Settings › Org › Pairing code row and press Sign in. Sign in with the second email and the code from its inbox. Before pairing completes, check that the member email the profile shows is the second email.
+5. Don't run `cloudflared access login` for staging until you're signed back in as yourself.
+6. Only if the sitting falls after about 11-25: before step 3, run `cloudflared access login https://desk-hub-staging.opencognita-platform.workers.dev` once.
 
 Recorded in both documents' Outcomes: each item, with a transcript line, a screenshot or a file listing.
 
@@ -3449,6 +3522,328 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   - **A permanent refusal** of `session.get` on an admitted feed re-asks every 30 s, with a log line each time, for the feed's life. That's residue: the exit is to stop, or to end the feed, on a refusal that isn't transient (`forbidden`, `not-offered`).
   Date/Author: 2026-11-07, O8's executor (controller).
 
+- Decision: M6b's refresh at its cut from master `48e0ed15a` (2026-11-07, after M6a landed as #518). M6b's consumed interfaces were reconciled against master.
+  1. **Cited lines.**
+     - Still holding: the Toolbar's session actions (`SessionMenuOverflow`, `Toolbar.tsx:218-241`, which now also reads M6a's `useReaderRowsOf`); `step-up.ts:11-31` (`record.*` already requires step-up, at :14); `action.ts:30-47` and `:108-122`; `listings.ts:17-20`, with the asker's listing at `:181-207`; `direct-listener.ts:1-5`; and the roster's exclusion of the local ref, which is `src/main/machines/remote/source.ts:47-56` (`rosterOf`, `if (ref === local) continue`).
+     - Moved: channel authorization's presence step is at `authorize.ts:492-505`, after M6a's reader work. `members.ts` is `src/endpoint/rl10/members.ts`. `ActRequest` and `executorOf` are at `src/main/machines/remote/acts.ts:40-53` and `:137`, and `ActRequest.action` already names "O8's 'record.*'". `rows.ts`'s replace rule is at `:365-374`.
+  2. **What sminos already says.** `test/endpoint/rl10/conversation.json` has sminos's hello carrying `["audience", "record"]` (sminos 1.38.0 and later) and the endpoint's welcome carrying `["access", "reach"]`. So M6b's welcome change is one capability added to the welcome lines, and their blob hash goes to the desk track before the PR.
+  3. **What M6a changed underneath.** Channel authorization now names a reader and checks again at dispatch, for the five reader-routed calls. `record.policy` is a new call. It reads the member frame, not the reader rows, so it isn't reader-routed, but it answers only for sessions the caller owns. The local door's `call` answers as the machine owners' member, as §M6b says.
+  4. **The live proof.** The desk track is asked whether O18 M6's staging harness can supply the second member again (B1, each scene its own Linux user on one devcloud VM), and whether a second run on O18 M6's terms needs a fresh word from the owner. Their answer goes to the architect. Task 4 plans the run on it.
+  5. **The parent** is re-pinned at blob `257faf80` (master 48e0ed15a), where Decision Logs 246–248 change nothing M6b consumes.
+  Date/Author: 2026-11-07, O8's executor (controller, refresh pass).
+
+- Decision: M6b is built as four tasks under subagent-driven execution, each reviewed at its frontier, then reviewer-high on the branch with a security lens, as the rest's verification entry names.
+  1. **The endpoint and the door.** The `src/endpoint` hunks go in commits of their own, for the desk track.
+     - The three `record.*` offers and `record.policy`, behind sminos's `record` capability.
+     - `targets.ts`'s `record` rule, for either lane.
+     - `rl10/link.ts`'s record path: an `rpc` carrying the act as `proof`, refusing `no-session` when no member places it.
+     - The welcome's `record`, in the same commit as the offers.
+     - The local door, `EndpointModule.local`.
+     - `test/endpoint/record-acts.test.ts`.
+     - Then, in their own non-endpoint commits: `mawsd`'s `endpoint.local.act` and `endpoint.local.call`.
+     - Before the PR, `conversation.json`'s new blob hash and changed lines go to the desk track by `sminos say`, and the architect is told.
+  2. **Main.**
+     - `src/main/org/policy.ts` (`org.policy.get` and `set`, and M5b's `org.owners.add`).
+     - `actMany` and `signActions`: one confirmation per save.
+     - `rows.ts`'s channel listings, with two memberships per key.
+     - The shared schema and wiring.
+     - `policy.test.ts`, `step-up.test.ts`, `rows.test.ts`.
+     - From M6a's retrospective: `rows.ts`'s two memberships are state written from two sources over unreliable links, so Task 2 writes an enumerating test over their events (a hub snapshot's rows and completion, a hub `gone`, a delayed older hub `gone`, a channel answer, a channel omission, a higher-revision `gone`, a link drop). Its invariant: a row is drawn exactly while either membership holds at the newest accepted revision, and never blinks across a public → private move.
+  3. **The renderer.**
+     - The Share sheet.
+     - The marks on `ListedRow` and `SessionRow`, and the hover card.
+     - The listing-capable menus, and the Toolbar's session actions.
+     - `stores/policies.ts` and `copy.ts`.
+     - An e2e case seeding the sheet and marked rows, with screenshots.
+  4. **The local suite and the live proof.**
+     - `test/org/policy.local.test.ts`, on a Miniflare hub with a real endpoint and a sminos stand-in executing the contract.
+     - The shared staging run's plan, on the desk track's answer (refresh item 4). The run itself is scheduled by the architect.
+  Date/Author: 2026-11-07, O8's executor (controller).
+
+- Decision: M6b's live proof, on the desk track's answer and the architect's ruling (2026-11-07). Task 4 plans it as two layers.
+  1. **The harness path stands on its own.** O18 M6's staging harness can supply a second member for everything that member's own keys can do. `addRunMember` (`reach-acceptance.ts:215`) creates `o18-m6-<tag>@staging.invalid` with channel and step-up keys the harness makes, and scene B1 runs as its own Linux user on one devcloud VM. A reference-client channel runs as b1 to A1 over the relay (`reach-items.ts:293`, `b1ToA1`).
+     - So B's pin, read and draft are proven through the endpoint calls b1's channel makes under M6a's reader rule, with A's reading and draft read back unchanged through A's keys.
+     - The b1 client acts the harness lacks (`session.reader.update`, `session.drafts.get` and `.set`, and M6b's `record.*` where a scene needs them) are M6b's work, in Task 4.
+     - The harness can't drive B's MAWS app or browser. An app signs in through Access's login, and an `@staging.invalid` address never receives Access's one-time code. So the owner's sidebar left unchanged as drawn, and B's rows in B's app, are cited from `policy.local.test.ts` and the renderer suites on this layer.
+  2. **The real-member steps for B's app sit on top, in a section of their own,** ready if the owner chooses a real second member. The architect has asked the owner. They are the Concrete Steps' 1–2 as written:
+     - an email the owner controls, admitted by staging Access (the owner's change);
+     - the member added;
+     - a second scratch MAWS profile on a GUI Mac, signed into by that person;
+     - the VM enrolled with that member as its owner;
+     - the admission removed at teardown.
+  3. **The terms.** No fresh word from the owner is strictly needed on O18 M6's terms: the VM stays out of production, and the desk track deploys master to staging. The architect puts that line in the scheduling message.
+     - The scenes run sminos 1.40.1 or later.
+     - O18 M6's VM is gone, so the desk track sets up a fresh one at the slot.
+     - The desk track wants `test/endpoint/rl10/conversation.json`'s blob hash and its changed lines before the PR.
+  Date/Author: 2026-11-07, the desk track and the architect, recorded by O8's executor (controller).
+
+- Decision: M6b Task 1, the endpoint and the door. The endpoint-only commits are 776b239cd, 727a103e6 and 5c24e83d1, for the desk track. 79dc87205 (shared IPC) and a35f6cf5a (mawsd) are the rest. The architect accepted these points (2026-11-07).
+  1. **`record.policy`** is a call graded `list` on the machine. It answers only for the sessions the caller owns at `manage`, keyed by listing id. A session the caller doesn't own and a session with no member frame both answer `unavailable`. So does a frame without a `policyRev`, never a default.
+  2. **sminos's absence and capability.**
+     - With no sminos connected, the acts and `record.policy` answer `unavailable`.
+     - With sminos connected but without `record`, the acts are `not-offered` and `record.policy` answers `{supported: false}`.
+     - The check is in the Authorizer's first step, and `draw` checks again.
+  3. **`no-session`** stays inside the endpoint as free text. org-protocol's refusal list is unchanged, and main treats `no-session` as a plain refusal string (Task 2).
+  4. **Lane B placement.** It goes through the spine (`placeRecorded`) and the members join, never the engine host. A caller who doesn't stand on the session hears `grade`, so no answer reveals whether a session exists: the same rule as M7b's uniform refusals. When several lane B members join one session, the order is: the one on the spine's recorded engine session, then the one not superseded, then a sole member. A lost lane B record act is looked up on lane B.
+  5. **The local door** checks, in order:
+     1. the action's name;
+     2. that a step-up is present;
+     3. that the head lists the device exactly once;
+     4. the signature.
+
+     Then it takes a channel's route. It waits 30 s for an outcome, then answers `unknown`/`timeout`. `local?` is optional on both module interfaces, so existing mawsd fakes stay valid, and the seam answers `unavailable` until a module is loaded. The door's two commands, `endpoint.local.act` and `endpoint.local.call`, are main-only on `machine.sock`, and the endpoint's own dispatch is refused them. They are machine-owned wire entries at `WIRE_MINOR` 32.
+  6. **The welcome's `record`.** `test/endpoint/rl10/conversation.json` moves to blob `790db9cad1ae09a3d541c78b5beb9f6891f02108`. On lines 82 and 298, the welcome's `capabilities` go from `["access","reach"]` to `["access","reach","record"]`. Both went to the desk track.
+  7. **The commits don't each build alone.** 776b239cd, 727a103e6, 5c24e83d1 and 79dc87205 each fail the seam's type-parity check (`src/mawsd/endpoint-seam.test.ts:102`) on their own, because the endpoint and mawsd halves are kept apart for review; 776b239cd also lacks `OfferRow.sminos`. The head is green. The architect ruled no squash: M6b lands by merge commit, the gate runs on the merged tree, and the PR body says so.
+  Date/Author: 2026-11-07, O8's executor (controller), from Task 1's report and the architect's rulings.
+
+- Decision: The owner's answer on the second member (2026-11-07): "Real member, one sitting (Recommended)".
+  The option the owner chose, as the architect put it to them: "As the O8 spec plans. You let a second email you control into staging's Access. Then, in one sitting of about 20–30 min, that person signs into a second scratch MAWS profile through Access. The desk track's harness does the rest, and teardown removes the admission. This is the first live sign-in by someone other than you, which only a real account can test."
+  So Task 4's staging plan keeps both layers. Layer 2 is now planned, not conditional.
+  1. **Layer 1 stands alone.** The harness's keys-only member covers scene B1 and the b1→A1 channel, with B's pin, read and draft, and A's state read back unchanged.
+  2. **Layer 2 is for the one sitting.** It needs:
+     - a second email the owner controls;
+     - the owner's admission of it to staging's Access;
+     - the member added to the staging org;
+     - a second scratch MAWS profile on a GUI Mac, signed in as that person;
+     - the VM enrolled with the right owner.
+
+     Teardown removes the admission and the member.
+  3. **The owner's steps** go in a short list for the architect to hand over: the admission, the sitting's length, and possibly a one-time `cloudflared access login`.
+  4. **Scheduling.** The sitting is scheduled when M6b's PR is near its final gate, not before. The scheduling message carries "same terms as O18 M6: the VM out of production, the desk track deploys master to staging". The desk track sets up a fresh VM at the slot, with scenes on sminos 1.40.1 or later.
+
+- Decision: The desk track found Task 1's fix wave correct (desk 633, on 5cc92783f and f443e16cd).
+  - **The fixes.** `placeRecord` is the one placement for both reads and acts, and `policies()` reads ownership on the record it places. `#localPolicy` answers only under an `ownersRead` that still stands: three reads, then `unavailable`. `unsupported()` is read again in the step the answer goes out, on both paths.
+  - **Nothing leaks.** An unnamed non-owner gets no entry. A named session that exists but isn't the caller's gets the same `unavailable` as one that doesn't exist.
+  - **Residue** (the desk track's Minor; the architect files it): `placeListings` waits for each lane B listing's spine placement in turn, so a `record.policy` call without a named session costs one spine dispatch per lane B listing, in sequence. The exit is `Promise.all`. If Task 3's Share-sheet e2e shows the sheet's opening waiting on these placements, it is fixed in Task 3's wave instead, and its endpoint hunk goes to the desk track.
+  Date/Author: 2026-11-07, the owner, the desk track and the architect, recorded by O8's executor (controller).
+
+- Decision: M6b Task 2, main (fa42186a5, 237682977, 40b9742e6, 656527ca8, 28eae9dfc). It settles these points, and the architect accepted them (2026-11-07).
+  1. **The commands.**
+     - `org.policy.get` takes `{machine}` or `{address}`.
+     - `org.policy.set` answers `{ok, results, policy}`. The refusal codes are `POLICY_REFUSALS`. A line's reason is the refuser's own word, and `no-session` arrives as a plain string.
+     - "Also changed elsewhere": the returned revision is above the base plus 1 for a change, or above the base plus 0 for a no-op.
+  2. **One confirmation per save.**
+     - `actMany` only signs, and returns one sender per act.
+     - `policy.ts` sends the acts in order and stops at the first failure. A send past `ACT_FRESH_MS` is refused `stale`.
+     - `signActions` always asks for confirmation; an empty list is `malformed`. A `StepUpSigner` is required.
+  3. **Lanes.** This Mac's sessions are lane B. A remote session's lane comes from its row; with no row, a save is refused `no-session`.
+  4. **The rows' two memberships.** Each membership is scoped to revisions:
+     - an older record is ignored;
+     - a failed call releases nothing;
+     - a machine answers only for its own sessions.
+
+     `listings.json` gains `shown`, and a file without it reads as hub-held. There's at most one channel call per machine at a time. The channel is read:
+     - at link up and at each new head;
+     - at sign-in;
+     - after each act (`refreshChannel`);
+     - every 60 s;
+     - and at once on a hub `gone` for a row the channel held.
+  5. **The enumerating test** (in 237682977) covers 5,040 permutations plus 16,807 five-event sequences, in about 30 s.
+     - Its first run failed 4,284 of 5,040 orders: every order where the channel spoke first, `hubRows chanAnswer` (stuck at revision 10), and `gone11 chanAnswer`.
+     - Three mutations show it catches the faults it targets.
+     - The architect keeps length 5, since that's what this test proves (M6a's resend fault showed only at five events). The unit gate's four shards absorb the 30 s. If that shard becomes the long pole, the test moves to its own shard; it is not shortened.
+  6. **The e2e Org page fixture** answers `set` and `owners.add` `busy`, and leaves `policy.get` to main.
+  7. **Private-listing churn.** The endpoint re-signs a private listing on every call. Task 3 finds out whether that churn is visible:
+     - an `org.policies.changed` or row-changed broadcast every 60 s;
+     - a re-render or reset of an open Share sheet;
+     - a flap of unread or of membership;
+     - a bump of a membership revision.
+
+     If it is, main dedupes a listing on its content and revision, not its signature, with a test, in Task 3's wave. No endpoint change is needed. If it's only CPU and IPC cost, it becomes residue m6b-r2.
+  8. **Free-string line reasons.** Task 3 maps the known `POLICY_REFUSALS` codes and `no-session` to copy. Any other reason shows as one generic refusal line naming the machine, with the raw word secondary (a detail or a tooltip). Nothing outside the known codes ever renders blank, and Task 3's e2e photographs one unknown reason.
+  9. **Commits that don't build alone.** fa42186a5, 237682977, 40b9742e6 and 656527ca8 fail the typecheck on their own, and 28eae9dfc fixes them. No squash, as with Task 1. The PR body lists them.
+  10. **The review's fixes** (dad52c414 N1, 56eaf7f55 N2, 4d95d25b6 N3; Task 2's frontier review approved, with these three Minors taken).
+      - **N1.** A step-up seals the `opCreated` that was in the request when the person was asked. `sign` and `signActions` take it before the prompt and read nothing from the request after it.
+      - **N2.** A malformed `done` reads `unknown`, reason `malformed`, and the save stops there, so the remaining lines read `not-sent`. Task 3's copy has a line for it. A `done` line's `policyRev` is no longer nullable.
+      - **N3.** The channel memberships, answers and cache are bound to the reader, `(org, member)`, as M7a's and M7b's caches are.
+        - When another member signs in to the same org, the last reader's channel memberships are dropped and every channel is read again.
+        - An answer asked for the last reader is ignored, and until then `rows()` draws only the hub's rows.
+        - `listings.json` records `member`. The channel's rows are restored only for that member; the hub's rows, memberships and marks, which are the same for every member, stay.
+        - B keeps the anti-replay marks of A-only sessions, never drawn, so replay protection isn't weakened.
+  Date/Author: 2026-11-07, O8's executor (controller), from Task 2's report and the architect's rulings.
+
+- Decision: The real-member sitting (desk 634, with the architect's ruling, 2026-11-07). Task 4 plans it.
+  1. **cloudflared.** No login is needed. The owner's staging Access token, the one `staging-run.sh`'s admin and reach steps use, is valid until 2026-11-26T01:36Z and names the owner's staging email. Only if the sitting falls after about 11-25 does the owner run `cloudflared access login https://desk-hub-staging.opencognita-platform.workers.dev` once, before the logout step.
+  2. **The Access admission** takes no dashboard step. `staging-run.sh access-sync` (O11 M3) sets staging's Access people policy to exactly the emails of the org state head's members. Once the run adds B to staging's org state, the desk track runs `access-sync` and Access admits B. At teardown B is removed and `access-sync` runs again. The owner's only input is the address itself, sent to the desk track directly, never into a repo or a PR. The records say "the owner's second email".
+  3. **A pitfall in B's sign-in.** The scratch profile's org sign-in opens the default browser at the staging hub's `/cdn-cgi/access/cli` (`access-login.ts:194`). If that browser still holds the owner's staging Access session, Access likely completes the transfer as the owner. So just before B's sign-in, the owner opens `https://desk-hub-staging.opencognita-platform.workers.dev/cdn-cgi/access/logout`.
+     - That logs out of every Access app on the team, so production desk web asks for sign-in again later. The MAWS apps' org sessions and cloudflared's CLI token are untouched.
+     - Until the owner signs back in as themselves, they must not run `cloudflared access login` for staging, or the CLI token would name B.
+     - The pass-through is unverified live. The sitting checks it by reading the member email the scratch profile shows before its pairing completes.
+  4. **The harness path** (the architect's ruling, keeping "your harness does the rest"). Task 4 adds two harness steps, both signed by the staging admin's test keys, as `addRunMember` is:
+     - (a) adding B with the real email, read at run time from a 0600 file outside the repo, never committed or logged;
+     - (b) endorsing the second profile's device programmatically.
+
+     A test pins both to refuse any hub but staging's, as O18 M6's harness does. A pairing code goes to a 0600 file, never into chat. The owner's admin flows in the app aren't part of M6b's acceptance. The scratch profile lives under a path Task 4 names, outside the repo, which the desk track can delete at teardown. Launching it is the owner's one command at the sitting, not an Electron app an agent runs on the MacBook.
+  5. **Teardown.**
+     - The run removes B and revokes the device.
+     - The desk track runs `access-sync`.
+     - The second scratch profile's directory is deleted.
+     - The owner signs back into staging Access as themselves the next time a browser needs it.
+     - The VM is a fresh one at the slot, without the MAWS project; its scenes run sminos 1.40.3.
+  6. **The owner's steps**, for the architect to hand over:
+     1. Send the second email to the desk track directly.
+     2. At the sitting, launch the scratch profile with the given command.
+     3. Open the logout URL in the default browser.
+     4. Sign in with the second email and the code from its inbox, and check the member email the profile shows before pairing completes.
+     5. Don't run `cloudflared access login` for staging until signed back in as yourself.
+     6. Only if the sitting falls after about 11-25: the one-time `cloudflared` login, before step 3.
+  Date/Author: 2026-11-07, the desk track and the architect, recorded by O8's executor (controller).
+
+- Decision: M6b Task 3, the renderer (f4f81e35f, 9d6a52542, 539e8b815, bc22ad7b0, 8f1b003e4, 9ed8353a6, 6546231d2). It settles these points.
+  1. **The private-listing churn (Task 2 item 7) was visible.** Every 60 s it sent an `org.rows.changed`, reset the row's age to "now", moved it to the top in recency order, bumped its mark and rewrote the cache. It touched neither `org.policies.changed`, an open sheet, nor unread.
+     - Fixed in main (f4f81e35f): a private listing re-signed with nothing new is drawn at the revision and time it was first shown. That changes what the rows draw, not what they accept, so the anti-replay mark still advances.
+     - Residue m6b-r2: each period still verifies the listing and writes `listings.json`. After a relaunch, a private row's age restarts from its last re-sign.
+  2. **Refusals (Task 2 item 8).** Every known code has its own line in `copy.ts`. Any other reason reads "<machine> refused this", with the raw word beside it. N2's `unknown`/`malformed` reads that the outcome is unknown and the lines after it weren't sent, with a Reload. The e2e photographs both.
+  3. **The sheet.**
+     - The help lines for Listed, Org can view, Org can talk, View, Converse and Approve are written from RL §6.2. Bound strings keep the spec's straight apostrophes.
+     - A machine whose sminos can't keep a reach still offers Share; the sheet reads the bound line and offers only Close.
+     - Add person draws on the `org.view` members and defaults to View.
+     - Save order: access first, then changes and removals in the policy's order, then additions.
+  4. **Where Share is offered.**
+     - "Hub project" means a listing with a `project`, or a local project with an `smnsId`.
+     - On this Mac, ownership comes from its `record.policy` read.
+     - A listed row gets a menu only when Share is offered.
+  5. **The e2e case** is `e2e/share.spec.ts` in `e2e:settings`, over a harness-only fixture (`src/main/org/share-fixture.ts`, wired in `app.ts`, which also intercepts `machines.list` and holds the production rows' events). Its six screenshots: the marks, the hover card, the sheet, the sheet after a save, an unknown outcome, and an unsupported machine. Its first run found a real overflow: the sheet's selects pushed each person's row past the sheet. That's fixed.
+  6. **`record.policy`'s serial placements (m6b-r1).** The sheet's opening never waits on them, because its read names one session. A save's result does wait: main re-reads the whole machine before answering (`policy.ts:210`). It couldn't be timed on the fixture. It stays residue.
+  7. **The unit gate was red at 89d616e78 and nobody saw it.** `coverage.test.ts` lacked Task 1's `endpoint.local.act`, and only static had run on Tasks 1 and 2. bc22ad7b0 fixes it. From here, each task's gate set includes unit.
+  Date/Author: 2026-11-07, O8's executor (controller), from Task 3's report.
+- Decision: M6b Task 3's review fixes (3c09ac206, df0e5d374, 76b97bdbd, 2ae8fbcac, 9ab1353b5, c1d33c77a, 954c74ded). The frontier review found two Important and two Minor. The architect's taste read of the screenshots added three fixes. This entry settles these points.
+  1. **The sheet's order is the order Save sends (I1).**
+     - A person removed keeps their place, struck through, with "Removed when you save" and Undo, until Save.
+     - A person added and then removed before Save leaves the list.
+     - Undo is the only way back for a removed person. The add picker never offers someone pending removal, so nobody appears twice in the order.
+     - A test pins the review's sequence (remove Ana, change Ben, re-add Ana): the pending lines shown match the payload line for line.
+  2. **A policies read belongs to the sign-in it started under (I2).**
+     - Main fences each read on `(org, member)` plus a sign-in generation.
+     - A read that ends after a sign-out, a switch to another member, or the same member's new sign-in publishes nothing and answers `signed-out`.
+     - The renderer applies replies only under the sign-in they were asked in, and takes no `org.policies.changed` while signed out.
+     - The event carries no identity. The architect accepted the fence without it (2026-11-07).
+  3. **The cache race in `rows.test.ts` was the test's (M1).** The test read the cache before `close()` flushed its deferred write. Both reader tests now read after `close()`. Nothing in `rows.ts` changed.
+  4. **The e2e check that every action is whole covers every control (M2).**
+     - It covers fields, native selects, radios, checkboxes, links and their roles. A clipped select joins its probes.
+     - It centres each control in its scroller before measuring, and allows a clipping container one pixel, since a scrollport may end mid-pixel. The first run (42419518426) named a select less than a pixel past the body's edge.
+     - Org-page and channel pass under the wider check.
+  5. **The architect's taste fixes.**
+     - Add person sits at the head of People, with the list under it. The label stays "Add person", as the spec words it.
+     - Reload is a secondary button. While a stopped save's results offer a Reload, the sheet doesn't also show the "can't be read · Reload" line. When a save's results don't offer one, that line keeps its Reload.
+     - The sheet gets a scrim: `Sheet` takes an optional `scrim`. The Share sheet uses `bg-bg-active`, the Add project dialog's scrim, and the other sheets keep the shared `bg-bg/60`.
+     - The architect accepted the 8% scrim with no new token (2026-11-07). The empty state's buttons still show faintly below a short sheet, and that is acceptable.
+     - The shared scrim is nearly invisible on light theme for the other sheets. That goes on the board with M6b's other UX residue: the unsupported copy should name its remedy, and long machine names truncate in the subtitle. The architect files these at landing.
+  6. **Gates.** Run 42420500958 is green: static, unit 1/4–4/4, e2e:settings and e2e:cross-build, every spec on its first attempt.
+  Date/Author: 2026-11-07, O8's executor (controller), from the fix wave's report and the architect's notes.
+- Decision: M6b Task 4, the local suite and the harness. The commits:
+  - d04d960a5, actions-whole;
+  - 3c13448dc, `policy.local.test.ts`;
+  - 5bcd83565 and aef0c7353, `apps/desk-hub/deploy` only, which go to the desk track for review.
+
+  The architect accepted all of the executor's decisions (2026-11-07). Two of them change earlier text. The rest settle these points.
+  1. **Every widening in the reach scenes is A's record act. This changes the harness as O18 M6 left it.**
+     - From sminos 1.39.0, once an endpoint's welcome says `record`, sminos refuses widening at the terminal and at the agent shell ("use MAWS", `sminos_visibility.py`'s THROUGH_APP), and keeps narrowing. Every M6b build says `record`. So O18 M6's scenes, which widened at the terminal, would break on M6b. Their README said "the branch's cut, before O8 M6b".
+     - Every widening now goes through A's `record.access` or `record.shares` act over A's relayed channel, and every narrowing stays in the shell. That is the product path, so the scenes prove it rather than route around it.
+     - Item 8 expects THROUGH_APP's refusal. Item 4's Can message share is A's act, and item 8 runs again rather than being cited.
+  2. **"Endorse the second profile's device" becomes "list it unendorsed". This overturns the wording of the ruling in "The real-member sitting", item 4(b).**
+     - An admin can't endorse another member's device: endorsement is that member's own step-up signature (P5 Decision Log 34; `src/main/org/edits.ts:70`, the path `sign-in.local.test.ts` proves). So the protocol lists another member's first device unendorsed.
+     - The ruling's intent holds: B's device takes no owner step.
+     - The architect, 2026-11-07, who made the ruling without that fact.
+  3. **`real-member add | pair | remove` is a deploy command of its own.**
+     - It is not `admin pair --member`. `admin pair` pairs the admin's own device, endorses it with the admin's key, prints its code and confirms at `/dev/tty`.
+     - `real-member` reuses org-protocol's `judgeEntry` and `pairingFingerprint`. `staging-run.sh real-member` hands it the token on stdin.
+     - The refusals:
+       - a hub that isn't staging's, refused before the admin device opens;
+       - an email file that is not a regular 0600 file of the user's, is a symlink, or has a `.git` in any ancestor;
+       - a code file that already exists or lies in a checkout;
+       - adding the admin's own email or an existing member's;
+       - pairing a member who already lists a device;
+       - removing an admin.
+     - The email and the code are scrubbed from every line, the hub's own text included. They are also added to `--scan`, and `secret_scan` fails the run if its log holds either.
+  4. **The pitfall's guard.** `pair` reads `GET /api/devices/pending?member=<B>` (H1), so an entry posted under the owner's Access identity is never listed for B. The step times out instead.
+  5. **The scratch profile** is `~/.local/share/maws-m6b-second-member`. The name is fixed, not `mktemp`, so teardown can name it. `MAWS_USER_DATA` sets it (`src/main/index.ts:22`), as M1's sitting did.
+     - Its mawsd outlives the app and has no stop verb. Teardown names its pids with `pgrep -f` and ends them with `kill -TERM`, not `pkill`, which auto mode refuses in some sessions (the architect).
+     - The owner copies the pairing code with `pbcopy < <file>` and never displays it.
+     - A dialog macOS raises at the first launch is the owner's to answer. No agent clicks one.
+  6. **The scenes.**
+     - Lane B runs on A1 only. M6a's reader offers are lane B's, and A1 is the scene the reader item needs.
+     - The sminos floor is 9a694999 (1.40.1), and the default is a3d4a8f8 (1.40.3).
+     - The capability is read once from A1's `audiences.json`, which is written at welcome.
+     - The new items are `m6b-cutover` (after item 8), `m6b-visibility` and `m6b-reader`.
+  7. **`policy.local.test.ts`**, five cases on the Miniflare hub with a real endpoint and a sminos stand-in executing §Q. It is registered in node-timing.
+     - B is added with no devices. B's app registers from a code naming B, and is listed unendorsed.
+     - `ROWS_CHANNEL_MS` is a 1 s timing seam.
+     - The stand-in answers the admission query from its own ledger, refuses a bad shape or a missing session, and sends the member frame before `rpc-result`.
+     - Discovery: `rows.ts` draws only roster machines (`rows.ts:626`).
+  8. **actions-whole** exempts only a form's mirror input: a control under `aria-hidden` that also has `tabIndex < 0`, `pointer-events: none` and opacity 0, all four together. Probes cover a visible clipped button under `aria-hidden`, which must be named, and a clipped mirror input, which must not be. This closes Task 3's re-review Minor.
+  9. **Not verified live.** These are the shared run's checklist (Concrete Steps):
+     - lane B inside the reach scenes;
+     - record acts over the relays;
+     - pairing through real Access with a second identity;
+     - the profile daemon's teardown.
+  10. **Gates.** Static is green after each commit: 42423743780, 42424222843 and 42425038671. Run 42425644208 (static, unit, e2e:settings, on the hosted lane) is green on its first attempt.
+  Date/Author: 2026-11-07, O8's executor (controller), from Task 4's report and the architect's notes.
+- Decision: M6b Task 4's review fixes. The frontier review found five Importants and two Minors. The desk track's desk 641 found layer 1 (5bcd83565) clean and raised four P2s on layer 2. Three of those overlap the review's; the fourth is new: refusals echoed the email file's path. The fixes are 3c8fb5cdc, d0c031dbf, 23b88d6cc, a3954e3f3, 3c8d1b1e9 and fc6aff4cc in layer 2, a21c6e561 and 665e938e6 in layer 1, and f6246b4a3 in the app. They settle these points.
+  1. **The email file is opened once.**
+     - The open is `O_RDONLY|O_NOFOLLOW|O_NONBLOCK`. `fstat` on that descriptor checks its type, its owner and a mode of exactly 0600 (`& 0o7777`), and the text is read from the same descriptor.
+     - The checkout check runs on `realpath(path)`, whose dev and ino must equal the descriptor's. A swapped file is refused.
+     - A swapped parent directory is out of scope, since the file sits in the desk track's own home directory. The function's comment says so.
+     - A refusal before the email is registered as a secret says "the email file", with no path or directory (055778370, desk 642 (a)). A directory named after an address would otherwise print it.
+  2. **The pairing-code file is removed on every exit.**
+     - It is created with `O_CREAT|O_EXCL|O_NOFOLLOW`, and its removal is registered at once through `withExitCleanup`. That mechanism was extracted from run-lock's signal cleanup, which `withRunLock` now builds on.
+     - It covers SIGINT, SIGHUP and SIGTERM, which exit 128+n; a write that fails partway; a throw; and the end of the wait.
+     - `staging-run.sh` doesn't remove the code file itself (5ce55a8b8, the second wave). A shell-side removal judged by absence at the start could delete a file another run had made in between, as the re-review and desk 642 (b) found. So only node removes the file. A file a SIGKILL leaves makes a retry refuse with EEXIST, which is visible and safe.
+     - This matters at the sitting: the desk track runs `pair` in the background and stops it with SIGTERM.
+  3. **Scrubbing.** `remove` registers the member's email as soon as it resolves the member, by `--member` too. The printer, `scrubbingIo`, matches case-insensitively.
+  4. **Removal from a stale head.**
+     - The revocations and the admin check are derived inside the edit `amend` replays, from the head being edited.
+     - A device the edit has no key id for (one listed in the meantime) makes the edit post nothing, and `remove` reads again and retries, up to 3 times.
+     - An admin in the edited head is refused. A member gone from it is nothing to remove.
+     - The desk track's alternative, refusing when the device ids changed, also met the intent. The architect preferred deriving from the edited head.
+  5. **The sminos stand-in holds each record rpc to its proof's binding,** independently of the endpoint, as `sminos_rpc.py`'s `proof_refusal` does:
+     - the proof passes `isAction`;
+     - its name equals the rpc's;
+     - its signed target and change equal the frame's;
+     - its machine and device are the run's.
+
+     Its lane B check is stricter than sminos's: `appSessionId` must resolve to the rpc's `session`.
+
+     On top of `isAction`, it requires exactly a record act's fields, sminos's `ACT_KEYS` (a80ae3eaa, the second wave): `stepUp` must be present, `webauthn` is the only optional extra, and `session`, `context` and `requestDigest` are refused.
+
+     Five probes tamper with the rpc between the endpoint and sminos: a different change, a malformed proof, another machine's proof, `stepUp` stripped, and a `requestDigest` added. Each is refused `bad-shape` and shows on A's save, with the record unmoved.
+  6. **Layer 1's assertions.** `m6b-visibility` reads each level back through A's `record.policy`. `m6b-reader` compares B's whole reading, `lastSeen` included.
+  7. **Gates.**
+     - 42429105079 was red on `native/session-host`'s reap-record race. Master's #517 (6f89f9d11) fixed that race, and this branch predates it, so master's merge before the final gate carries the fix.
+     - 42430122324 and 42430267448 were red on a TS2339 in a test, which fc6aff4cc fixes.
+     - 42430515249 at fc6aff4cc (static, unit, e2e:settings and e2e:cross-build, on the hosted lane) is green on its first attempt.
+     - The second wave is green on first attempts: 42431972737 and 42432068815, then 42432343440 at 055778370 (static, unit and e2e:settings, on the hosted lane).
+     - The gate's 58 advisory spec-import warnings are copied in the task report. The PR body carries them.
+  Date/Author: 2026-11-07, O8's executor (controller), from both fix waves' reports, desks 641 and 642, the re-review and the architect's notes.
+- Decision: M6b's branch review (reviewer-high, with a security lens, over 48e0ed15a..7405d3629) found three P2s. The architect accepted all three fixes (2026-11-08).
+  1. **A save belongs to the sign-in it started under** (eaafe05af).
+     - `save()` captures that sign-in, using the same generation fence as the reads. It checks the sign-in still stands before Touch ID, before each send, and before the read-back.
+     - Before this fix, a sign-out followed by any new sign-in let the unsent lines go out with the first member's signed acts. The local door accepted them, since that member's device was still listed in the head.
+     - A sign-out before Touch ID refuses the whole save `signed-out`. A sign-out after Touch ID makes the first unsent line read `refused signed-out` and the rest `not-sent`. A later sign-in, even the same member's, never sends them.
+     - A stopped save returns no policy.
+     - The door's own signed-out check, which answered `offline`, is gone. The save's fence covers it.
+  2. **The Share sheet closes when its reader changes** (df906b6e9).
+     - The sheet remembers the member it opened for. When `useHubAccess.member` changes (a sign-out, a lost registration, or another member), it renders nothing and closes. Its reload and save callbacks are fenced, so a late reply draws nothing.
+     - It closes rather than rekeys. A sign-out and a sign-in as the same member pass through "signed out", so it closes then too.
+  3. **`real-member.ts` passes `io.print` to `OrgAdmin.open`** (95be41576, deploy only).
+     - It used to pass the unbound global `print`. Under Node, every real `add`, `pair` and `remove` threw a ReferenceError after loading the keys, so the sitting would have failed at its first command.
+     - The tests injected `open`, and the deploy tsconfig includes DOM globals, so neither caught it. A test now runs the CLI composition in a Node child: `main(['add', …])` against a faked hub of another org must reach `/api/me` and print the org refusal.
+     - The other bare `print`s under `apps/desk-hub/deploy` are parameters or locals in scope, or appear in comments.
+  4. **Gates.** Static is green at eaafe05af (42435153749) and df906b6e9 (42435451512). `static,unit,e2e:settings` is green at 95be41576 (42435464666), and all 18 e2e:settings tests passed on their first attempt.
+  Date/Author: 2026-11-08, O8's executor (controller), from the fix wave's report and the architect's notes.
+- Decision: M6b lands before the shared run. M6b lands on its gates, and the shared staging run, with its real-member sitting, follows from master at or after the merge.
+  - The spec read both ways. The rest's plan says the run waits on "M6b's offers on master", which this ruling follows. The owner's launch step assumed a sitting before the landing.
+  - The scenes' MAWS is "the branch at or after M6b", and master at or after the merge meets that. M6b changes no hub code.
+  - A defect the live run finds becomes a fix PR, as for M7b's live check.
+  - Rationale: the owner's time. The sitting can't come before about 23:00 PST on 2026-11-08 and waits on the owner's word. Holding the PR for it would idle M4b and the rest.
+  - Rejected: holding the PR for the sitting, as O18 M6 did. That sitting's date was fixed in advance; this one waits on the owner's time.
+  - **Amended 2026-11-08, the architect.**
+    - The owner answered, verbatim: "any time. I'm all available, js tell me when from your side".
+    - So the shared run starts now, during the final gate, on the branch head. That is "at or after M6b": 1d4204118 carries 169108598's gated code and differs only in the report.
+    - The landing doesn't wait for the run unless the run finds a defect. A defect it finds is fixed before landing.
+    - The sitting launches from the architect's prepared worktree at that head.
+  Date/Author: 2026-11-08, the architect, recorded by O8's executor (controller).
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
@@ -3608,4 +4003,45 @@ A future child that serves session content through a feed should state, before b
 - **The fork.** The spec's "`session.update` answers `ReaderState`" met the strict output check of a machine-owned wire entry. A new command at a minor resolved it; a union would have needed a major.
 
 A future child that keeps state written from more than one place over an unreliable link should write the enumerating test first, before any review. Its alphabet should include every event that changes what crosses the link: a timeout, a late landing, a read-back, and a crossing of the size budget. It should also check authority at the point where data leaves, never at the point where the decision was made.
+
+**M6b (2026-11-08, PR from `p5-o8-m6b`; the live proof at the shared staging run, with the real-member sitting).** A member can widen or narrow a session's reach from MAWS, and nowhere else, once its machine's sminos can keep it.
+- **The Share sheet** opens from the session's header and from its row's menu, on a session you own in a hub project.
+  - It sets General access (Private, Listed, Org can view, Org can talk) and each person's grade (Can message, View, Converse, Approve), with the spec's help text word for word.
+  - It lists the changes in the order Save sends them. A removed person stays struck through, with Undo, until Save.
+  - Save asks Touch ID once for every line. Each line shows its own outcome: a refusal in words naming the machine, never blank, and an unknown outcome with Reload.
+  - A revision that moved before or after Touch ID sends nothing and reads "Changed elsewhere: reload".
+- **Rows carry marks:** a lock for Private, a people mark for shares. Your own sessions' marks are read from `record.policy`, and another member's private session shared with you is read from its listing's `audience`.
+- **Private sessions reach their people over the channel.** Their listings come from each machine's link and merge into the rows by two memberships per key, so a session going private never blinks.
+- **This Mac's own sessions** change through the local door. It verifies the step-up signature every time, derives the member from the head, then authorizes as a channel does.
+- **Reads and saves are fenced to one sign-in.** A policy read or a save that outlives its sign-in publishes and sends nothing. The sheet closes when its reader changes.
+- **The welcome's `record`** appears exactly when the offers are served. sminos keys its CLI cutover on it: widening at the terminal reads "use MAWS", and narrowing stays. That cutover and this milestone are preconditions of a second member joining production.
+- **The staging harness** widens through A's record acts, adds the items m6b-cutover, m6b-visibility and m6b-reader, and carries the real-member steps for the sitting.
+
+**Evidence:**
+- `test/endpoint/record-acts.test.ts` (23);
+- `policy.test.ts` (25), `step-up.test.ts`, `rows.test.ts` (36, with the enumerating test over 5,040 permutations and 16,807 five-event sequences), `policies.test.ts` (8), `ShareSheet.test.tsx` (15);
+- `test/org/policy.local.test.ts` (6, on desk-hub's Worker in Miniflare, with a real endpoint and a sminos stand-in that holds each rpc to sminos's proof binding and field set, with five tampering probes);
+- `e2e/share.spec.ts`, with its screenshots;
+- the deploy suites: `reach-acceptance` (37), `real-member` (24), `staging-scripts` (33);
+- the gates the PR body lists.
+
+Still owed: the shared staging run (Concrete Steps). Layer 1 is the harness member. Layer 2 is the real-member sitting, booked by the architect. M6b lands on its gates. The shared run started during the final gate, on the branch head, and the landing waits on it only if it finds a defect (Decision Log, "M6b lands before the shared run", amended). The run's result goes into these Outcomes in a records commit of the architect's. The live checklist:
+- lane B inside the reach scenes;
+- record acts over the relays;
+- pairing through real Access with a second identity;
+- the profile daemon's teardown.
+
+**Retrospective (M6b).** Built as four tasks, each reviewed at its frontier. The desk track reviewed the endpoint and the deploy harness, and reviewer-high reviewed the branch.
+- **Where the rounds went.** M6a's lesson held, one layer up. Almost every material finding was an identity or authority checked once and assumed later, at a lifecycle boundary:
+  - a policy read published after its sign-out ended;
+  - a save that kept sending under a later sign-in;
+  - a sheet that outlived its reader;
+  - a shell trap that took absence at the start as ownership;
+  - a removal whose revocations came from a head `amend` had already replaced.
+
+  The enumerating test written first (Task 2's rows) found its own class early. The lifecycle boundaries had no such test, and review found them one at a time.
+- **What the tests couldn't see.** The `print` miss passed four reviews and every test: the tests injected the very function whose argument threw, and the typecheck's DOM lib hid the unbound name. Only a test that runs the real composition, in the real runtime, catches that class.
+- **A gate gap.** Running static alone on the first two tasks hid a red unit gate for two tasks.
+
+A future child should write, for each piece of state or authority that a sign-in, a head or a process owns, a test that ends that owner mid-flight: during a confirmation, between two sends, before a read-back. It should also run each operator-facing command at least once, end to end, in its real runtime, before review.
 

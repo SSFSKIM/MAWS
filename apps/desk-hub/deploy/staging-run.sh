@@ -38,6 +38,10 @@
 #   reach-vm setup [--vm <vm>] [--sminos <commit>] [--old-sminos <commit>] | teardown [--vm <vm>]
 #                            the reach scenes set up on that VM (the branch as a full bundle, each sminos the run's copy
 #                            by commit, what the VM lacks installed, pinned) or removed
+#   real-member add|pair|remove [args…]
+#                            P5 O8 M6b: the owner's second email added as member B, read from a 0600 file outside any
+#                            checkout; the second scratch profile's device listed once it signs in with the pairing code
+#                            (written to a 0600 file, never printed); B removed and its devices revoked
 # Any further arguments go to the step's command. Environment (README "Staging runs"):
 #   DESK_STAGING_SECRETS  the directory holding CF_ACCESS_SETUP_TOKEN and CF_DESK_HUB_SERVICE_TOKENS
 #   DESK_STAGING_DIR      logs and state (default ~/.local/state/desk-hub-staging): one log per step; prod/; the
@@ -344,6 +348,41 @@ case $step in
     printf 'DESK_ACCESS_TOKEN=%s\n' "$T" | deployment reach-acceptance --device-keys $H/keys.json --scan $SCAN "$@" 2>&1 | filter | tee -a $LOG
     ran=${pipestatus[2]}
     say "reach acceptance exit $ran"
+    exit $ran ;;
+  real-member)
+    # P5 O8 M6b's real-member sitting: `deployment real-member` (real-member.ts) adds the owner's second email as member B,
+    # lists the second scratch profile's device once it signs in with the pairing code (written to a 0600 file, never
+    # printed), or removes B and revokes its devices. The token on the command's stdin alone; what it handled (the email,
+    # the code) listed in $SCAN for the search of its log after it. It deploys nothing and touches no production.
+    sub=${1:-}
+    [[ $sub == (add|pair|remove) ]] || { print -r -- "real-member add --email-file <0600 file> | pair --email-file <file> --code-file <new file> [--wait <s>] | remove (--email-file <file> | --member <id>): stop. Nothing was changed."; exit 2; }
+    [[ -f $H/keys.json ]] || { print -r -- "real-member: no admin device keys at $H/keys.json (DESK_STAGING_DEVICE): stop. Nothing was changed."; exit 2; }
+    for a in "$@"; do
+      [[ $a == (--config|--device-keys|--scan|--production|--hub)(|=*) ]] && { print -r -- "real-member takes no $a here: the step names staging, the keys and the scan itself: stop. Nothing was changed."; exit 2; }
+    done
+    # pair's code file is the command's alone to remove (real-member.ts's withExitCleanup, at any end but SIGKILL): this
+    # step can't tell a file its run made from one another run made at the same path, so it removes none. A file a killed
+    # run left refuses a retry at that path (EEXIST), which is visible and safe.
+    LOG=$O/real-member-$sub-$(stamp).log; : > $LOG
+    SCAN=$O/real-member.scan; : > $SCAN
+    say() { print -r -- "$*" | tee -a $LOG; }
+    owner_token
+    ran=1 finished=0
+    finish() {
+      (( finished )) && return; finished=1
+      leaked=$(secret_scan <(print -r -- "$T"; cat $SCAN) $LOG)
+      unset T
+      rm -f $SCAN
+      say "files holding the Access token or a secret the run handled: $leaked; log $LOG"
+      (( ran == 0 && leaked == 0 )) && exit 0
+      exit $(( ran ? ran : 1 ))
+    }
+    trap finish EXIT
+    trap 'exit 130' INT TERM
+    trap 'exit 129' HUP
+    printf 'DESK_ACCESS_TOKEN=%s\n' "$T" | deployment real-member --device-keys $H/keys.json --scan $SCAN "$@" 2>&1 | filter | tee -a $LOG
+    ran=${pipestatus[2]}
+    say "real-member $sub exit $ran"
     exit $ran ;;
   reach-vm)
     # P5 O18 M6: the reach scenes' setup (vm/setup.sh's RUN=o18) or teardown on the run's VM, through `devcloud vm ssh`

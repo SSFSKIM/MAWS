@@ -73,6 +73,7 @@ import * as render from './schema/render'; // P5 O5 M3
 import * as remote from './schema/remote'; // P5 O7 M2
 import * as browserEngine from './schema/browser-engine'; // P5 O17
 import * as channel from './schema/channel'; // P5 O8 M7b
+import * as endpoint from './schema/endpoint'; // P5 O8 M6b
 export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint } from './schema/customization';
 
 export {
@@ -183,6 +184,7 @@ export const commands = {
   ...remote.commands, // P5 O7 M2
   ...browserEngine.commands, // P5 O17
   ...channel.commands, // P5 O8 M7b
+  ...endpoint.commands, // P5 O8 M6b
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -241,6 +243,7 @@ export const events = {
   ...remote.events, // P5 O7 M2
   ...browserEngine.events, // P5 O17
   ...channel.events, // P5 O8 M7b
+  ...endpoint.events, // P5 O8 M6b
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;

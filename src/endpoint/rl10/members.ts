@@ -227,6 +227,20 @@ export class Members implements RecordSource, CheckoutSource {
     return this.#apps.get(session) ?? null;
   }
 
+  /**
+   * P5 O8 M6b: the member a lane B app session's record acts go to, the one keying sminos's record: of the members joined to
+   * `appSessionId`, `preferred` (the engine session the spine records for it) when it is one, else the one a superseded
+   * record doesn't stand for (Decision Log 190 (b)), else the only one; null when none is joined, or two can't be told
+   * apart.
+   */
+  recordMember(appSessionId: string, preferred?: string): string | null {
+    const joined = [...this.#apps].flatMap(([session, app]) => (app === appSessionId && this.#members.get(session)?.lane === 'B' ? [session] : []));
+    if (preferred !== undefined && joined.includes(preferred)) return preferred;
+    const standing = joined.filter((session) => !this.#superseded.has(session));
+    if (standing.length === 1) return standing[0];
+    return joined.length === 1 ? joined[0] : null;
+  }
+
   /** The project whose presence lists `checkout`, or null (a spawn's project, Interfaces §D). */
   projectOfCheckout(checkout: string): string | null {
     for (const [project, paths] of this.#checkouts) if (paths.includes(checkout)) return project;

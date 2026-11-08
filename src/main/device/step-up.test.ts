@@ -30,7 +30,7 @@ vi.mock('electron', () => ({
   },
 }));
 
-import { createStateSigner, createStepUp, promptTouchIDConfirmation, renderAction, type Confirm, type StepUpPrompt } from './step-up';
+import { createStateSigner, createStepUp, promptTouchIDConfirmation, renderAction, renderActions, type Confirm, type StepUpPrompt } from './step-up';
 
 const DEVICE = { org: 'org-step-up', device: 'dev-mac' };
 const REF = 'mref-test-0000001';
@@ -160,6 +160,28 @@ describe('a step-up', () => {
     expect(await verifyStepUp(signed.action, (await stepUpKey()).pub)).toEqual({ ok: true });
   });
 
+  it('seals the opCreated the request had when the person was asked, whatever the caller sets it to meanwhile', async () => {
+    const given = new Date(NOW.getTime() - 30_000).toISOString();
+    const resealed: { machine: string; action: string; args: Record<string, unknown>; opId: string; opCreated?: string } = { ...spawn, opId: 'op-reseal-0123456789', opCreated: given };
+    const fresh: { machine: string; action: string; args: Record<string, unknown>; opCreated?: string } = { ...spawn };
+    const stepUp = createStepUp({
+      device: DEVICE,
+      key: await stepUpKey(),
+      now: () => NOW,
+      confirm: async () => {
+        resealed.opCreated = '2020-01-01T00:00:00.000Z';
+        fresh.opCreated = '2020-01-01T00:00:00.000Z';
+        return { ok: true };
+      },
+    });
+    // both are built before either confirmation runs
+    const [kept, stamped] = await Promise.all([stepUp.sign(resealed), stepUp.sign(fresh)]);
+    if (!kept.ok || !stamped.ok) throw new Error('refused');
+    expect(kept.action.opCreated).toBe(given);
+    expect(stamped.action.opCreated).toBe(NOW.toISOString());
+    expect(await verifyStepUp(kept.action, (await stepUpKey()).pub)).toEqual({ ok: true });
+  });
+
   it('treats an arg whose value is undefined as absent, as the canonical form the signature covers does', async () => {
     const h = harness();
     const stepUp = createStepUp({ device: DEVICE, key: await stepUpKey(), confirm: h.confirm, now: h.now });
@@ -178,6 +200,121 @@ describe('a step-up', () => {
     expect(await stepUp.sign({ ...spawn, session: 'sess-1' })).toEqual({ ok: false, reason: 'malformed' }); // a session needs its context
     expect(await stepUp.sign({ ...spawn, args: { ...spawn.args, extra: 1n } as unknown as Record<string, unknown> })).toEqual({ ok: false, reason: 'malformed' });
     expect(h.prompts).toEqual([]);
+  });
+});
+
+// P5 O8 M6b: a Share sheet's save is several record acts, signed under one confirmation (Interfaces §Q, `signActions`).
+describe('several step-ups under one confirmation', () => {
+  const MREF = 'mini_0000000000000000000000';
+  const access = { machine: MREF, action: 'record.access', args: { appSessionId: 'app-1', access: 'private' } };
+  const share = { machine: MREF, action: 'record.shares', args: { appSessionId: 'app-1', member: 'm-ana', grade: 'view' } };
+  const unshare = { machine: MREF, action: 'record.shares', args: { appSessionId: 'app-1', member: 'm-ben', grade: null } };
+
+  it('asks once, listing every act, then signs each in order, each verifying under the step-up key', async () => {
+    const h = harness();
+    const stepUp = createStepUp({ device: DEVICE, key: await stepUpKey(), confirm: h.confirm, now: h.now });
+    const signed = await stepUp.signActions([access, share, unshare]);
+    if (!signed.ok) throw new Error(`refused: ${signed.reason}`);
+    expect(h.prompts).toHaveLength(1);
+    expect(signed.actions.map((a) => [a.action, a.args])).toEqual([access, share, unshare].map((r) => [r.action, r.args]));
+    for (const action of signed.actions) {
+      expect(isAction(action)).toBe(true);
+      expect(action).toMatchObject({ org: DEVICE.org, device: DEVICE.device, machine: MREF, created: NOW.toISOString() });
+      expect(await verifyStepUp(action, (await stepUpKey()).pub)).toEqual({ ok: true });
+    }
+    expect(new Set(signed.actions.map((a) => a.opId)).size).toBe(3);
+    expect(new Set(signed.actions.map((a) => a.nonce)).size).toBe(3);
+    // what was confirmed is every signed act's own rendering
+    expect(h.prompts).toEqual([renderActions(signed.actions)]);
+    for (const action of signed.actions) expect(h.prompts[0].text).toContain(renderAction(action).text);
+    expect(h.prompts[0].summary).toBe(`3 actions on machine ${MREF}`);
+  });
+
+  it('signs none when the person cancels, the confirmation is unavailable, fails or throws', async () => {
+    for (const reason of ['cancelled', 'unavailable', 'failed'] as const) {
+      const h = harness({ ok: false, reason });
+      const stepUp = createStepUp({ device: DEVICE, key: await stepUpKey(), confirm: h.confirm, now: h.now });
+      expect(await stepUp.signActions([access, share])).toEqual({ ok: false, reason });
+      expect(h.prompts).toHaveLength(1);
+    }
+    const stepUp = createStepUp({ device: DEVICE, key: await stepUpKey(), confirm: () => Promise.reject(new Error('LAContext failed')), now: () => NOW });
+    expect(await stepUp.signActions([access])).toEqual({ ok: false, reason: 'failed' });
+  });
+
+  it('refuses before asking when any request makes no action, or there is none', async () => {
+    const h = harness();
+    const stepUp = createStepUp({ device: DEVICE, key: await stepUpKey(), confirm: h.confirm, now: h.now });
+    expect(await stepUp.signActions([access, { ...share, machine: 'no' }])).toEqual({ ok: false, reason: 'malformed' });
+    expect(await stepUp.signActions([])).toEqual({ ok: false, reason: 'malformed' });
+    expect(h.prompts).toEqual([]);
+  });
+
+  it('signs what was shown, keeps each opId it is given, and stamps every act when the person confirms', async () => {
+    let clock = NOW.getTime();
+    const later = NOW.getTime() + 90_000;
+    const request = { ...share, args: { ...share.args }, opId: 'op-given-0123456789', opCreated: NOW.toISOString() };
+    const prompts: StepUpPrompt[] = [];
+    const stepUp = createStepUp({
+      device: DEVICE,
+      key: await stepUpKey(),
+      now: () => new Date(clock),
+      confirm: async (prompt) => {
+        prompts.push(prompt);
+        request.args.grade = 'approve';
+        clock = later;
+        return { ok: true };
+      },
+    });
+    const signed = await stepUp.signActions([access, request]);
+    if (!signed.ok) throw new Error(`refused: ${signed.reason}`);
+    expect(signed.actions[1]).toMatchObject({ args: { grade: 'view' }, opId: 'op-given-0123456789', opCreated: NOW.toISOString(), created: new Date(later).toISOString() });
+    expect(signed.actions[0]).toMatchObject({ opCreated: new Date(later).toISOString(), created: new Date(later).toISOString() });
+    expect(prompts).toEqual([renderActions(signed.actions)]);
+  });
+
+  it('seals each opCreated as it was when the person was asked, whatever the caller sets meanwhile', async () => {
+    const given = new Date(NOW.getTime() - 30_000).toISOString();
+    const later = NOW.getTime() + 5_000;
+    let clock = NOW.getTime();
+    const resealed: { machine: string; action: string; args: Record<string, unknown>; opId: string; opCreated?: string } = { ...share, opId: 'op-given-0123456789', opCreated: given };
+    const fresh: { machine: string; action: string; args: Record<string, unknown>; opCreated?: string } = { ...access };
+    const stepUp = createStepUp({
+      device: DEVICE,
+      key: await stepUpKey(),
+      now: () => new Date(clock),
+      confirm: async () => {
+        resealed.opCreated = '2020-01-01T00:00:00.000Z';
+        fresh.opCreated = '2020-01-01T00:00:00.000Z';
+        clock = later;
+        return { ok: true };
+      },
+    });
+    const signed = await stepUp.signActions([fresh, resealed]);
+    if (!signed.ok) throw new Error(`refused: ${signed.reason}`);
+    expect(signed.actions.map((a) => a.opCreated)).toEqual([new Date(later).toISOString(), given]);
+  });
+
+  it('never signs unasked, not even a spawn the single path would exempt', async () => {
+    const h = harness();
+    const stepUp = createStepUp({ device: DEVICE, key: await stepUpKey(), confirm: h.confirm, now: h.now, org: () => null });
+    expect((await stepUp.signActions([{ machine: REF, action: 'session.spawn', args: { checkout: '/w' } }])).ok).toBe(true);
+    expect(h.prompts).toHaveLength(1);
+  });
+});
+
+describe('the rendered text of several acts', () => {
+  it('is one act’s own text for one, and each act’s text under its place for more, naming each machine once', async () => {
+    const h = harness();
+    const stepUp = createStepUp({ device: DEVICE, key: await stepUpKey(), confirm: h.confirm, now: h.now });
+    const signed = await stepUp.signActions([
+      { machine: 'mini_0000000000000000000000', action: 'record.access', args: { session: 'eng-1', access: 'listed' } },
+      { machine: 'vm_00000000000000000000000', action: 'record.access', args: { session: 'eng-2', access: 'listed' } },
+    ]);
+    if (!signed.ok) throw new Error(`refused: ${signed.reason}`);
+    expect(renderActions(signed.actions.slice(0, 1))).toEqual(renderAction(signed.actions[0]));
+    const both = renderActions(signed.actions);
+    expect(both.summary).toBe('2 actions on machines mini_0000000000000000000000, vm_00000000000000000000000');
+    expect(both.text).toBe(`1 of 2\n${renderAction(signed.actions[0]).text}\n\n2 of 2\n${renderAction(signed.actions[1]).text}`);
   });
 });
 

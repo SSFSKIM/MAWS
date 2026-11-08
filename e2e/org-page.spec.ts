@@ -21,7 +21,7 @@ import type { OrgStatus, OrgView } from '../src/shared/ipc/schema/org';
 import { readOrMintMachineRef } from '../src/shared/machine/identity-file';
 import { memberNames } from '../src/shared/org/member-name';
 import { ORG, SECTIONS } from '../src/renderer/src/settings-tab/copy';
-import { actionsNotWhole, addClippedProbes, type ActionEntry } from './support/actions-whole';
+import { actionsNotWhole, addClippedProbes, probeFaults, type ActionEntry } from './support/actions-whole';
 import { launchMaws, REPO_ROOT } from './support/launch';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now; a plain build's main lacks the seam.
@@ -199,7 +199,7 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       await section.evaluate(addClippedProbes, ROW);
       const probed = await section.evaluate(actionsNotWhole, ROW);
       await section.evaluate((root) => root.querySelectorAll('[data-probe]').forEach((probe) => probe.remove()));
-      expect(probed.some((line) => line.startsWith('"wide probe"')) && probed.some((line) => line.startsWith('"tall probe"')), `the check names both probes: ${probed.join('; ')}`).toBe(true);
+      expect(probeFaults(probed), `the check names every clipped probe and not the mirror: ${probed.join('; ')}`).toEqual([]);
 
       // The sheet taken up on the running pairing: the new device's fingerprint to compare, Approve and Cancel pairing.
       await show.click();
