@@ -109,6 +109,10 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
     - What it adds: the Share sheet, the reach marks and the row menus; the private-listing churn fix in main; and `e2e/share.spec.ts`.
     - Reviews: the frontier review found I1, I2, M1 and M2, and its re-review closed them, with one Minor: actions-whole's blanket `aria-hidden` exemption, folded into Task 4. The architect's taste read added three fixes, all accepted.
     - Green at 6546231d2 (42417175074), and at 954c74ded (42420500958: static, unit, e2e:settings and e2e:cross-build).
+  - [x] (2026-11-07) Task 4, reviewed clean. The commits: d04d960a5 and 3c13448dc (app), and 5bcd83565 and aef0c7353 (`apps/desk-hub/deploy`). Then two fix waves: d0c031dbf, 23b88d6cc, 3c8fb5cdc, a3954e3f3, 3c8d1b1e9, f6246b4a3, a21c6e561, 665e938e6 and fc6aff4cc; then 5ce55a8b8, a80ae3eaa and 055778370.
+    - What it adds: `policy.local.test.ts`, run against a stand-in that holds each rpc to sminos's proof binding and field set. It also adds the reach harness's record-act widenings, with the items m6b-cutover, m6b-visibility and m6b-reader, the real-member steps for the sitting, and actions-whole's narrowed exemption.
+    - Reviews: our task reviewer took three rounds (5 Importants, then 2, then none). The desk track took three verdicts: desk 641 (layer 1 clean, 4 P2s), desk 642 (ready, with 2 leftovers folded in) and desk 643 (ready, converged).
+    - Green at 055778370 (42432343440: static, unit, e2e:settings and e2e:cross-build, hosted).
 - [ ] M4b — Machines and their rights — *executable; after M6b*
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
 - [ ] M5b — Add owner — *executable; after M4c; lands once the desk track's `record.owners` executor and DL190 (b)'s fix are on master*
@@ -1894,6 +1898,7 @@ These are the live run's checks, none of them verified before it:
 3. **B pairs.**
    - The owner launches the scratch profile and opens the logout URL.
    - The desk track runs `zsh apps/desk-hub/deploy/staging-run.sh real-member pair --email-file <that file> --code-file <a new path outside any checkout>`. It writes the code there (0600) and waits up to 30 minutes.
+   - To stop a `pair` early, the desk track signals its node process or its process group, never the wrapper alone. zsh's TERM trap ends the wrapper, not node, and node would keep polling until `--wait` runs out, and could still list a device (desk 643; residue m6b-r3).
    - The owner copies the code without displaying it, with `pbcopy < <that path>` in a Terminal or iTerm window. They paste it into the profile's Settings › Org › Pairing code row, press Sign in, and finish in the browser as the second email.
    - The step lists the device as B's first device, unendorsed: an admin can't endorse another member's device (P5 Decision Log 34). It prints the device's fingerprint, which the profile shows too.
 4. **The run.** O8's items, with B the real member on the second profile:
