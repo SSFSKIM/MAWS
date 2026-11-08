@@ -62,11 +62,19 @@ function notification(prompt: string): Record<string, string> {
 
 const PREAMBLE = '[SYSTEM NOTIFICATION - NOT USER INPUT]\n';
 const OPENING = '<task-notification>';
+const BLOCK = /<task-notification>[\s\S]*?<\/task-notification>/g;
 
 /**
- * The notification a plain user row carries, or null: the form the engine writes when a notification starts a turn
- * (bare in the main transcript; after its fixed preamble, then a blank line, in a subagent's). Only a row the engine
- * marked `origin.kind: task-notification` is one: a person can type the same text, and a peer's message can quote it.
+ * Each notification a notification's text carries, in order: every whole block, its elements read within it. The
+ * engine joins the notifications it delivers at once into one row, each block after a blank line (2.1.257 on).
+ */
+const blocks = (text: string): string[] => text.match(BLOCK) ?? [];
+
+/**
+ * The notifications' text a plain user row carries, or null: the form the engine writes when notifications start a
+ * turn (bare in the main transcript; after its fixed preamble, then a blank line, in a subagent's). Only a row the
+ * engine marked `origin.kind: task-notification` is one: a person can type the same text, and a peer's message can
+ * quote it.
  */
 function plainNotification(row: JsonObject): string | null {
   if (obj(row.origin)?.kind !== 'task-notification') return null;
@@ -147,7 +155,10 @@ export class LoopIndex {
     if (row.type === 'attachment') return this.attachment(obj(row.attachment) ?? {}, at);
     if (row.type !== 'user') return;
     const plain = plainNotification(row);
-    if (plain !== null) return this.notified(plain, at);
+    if (plain !== null) {
+      for (const block of blocks(plain)) this.notified(block, at);
+      return;
+    }
     for (const { taskId, line } of noteStops(row)) {
       this.known.add(taskId);
       this.mentions.push({ from: 'note', taskId, toolUseId: null, raw: 'stopped', at, summary: line });
@@ -198,7 +209,10 @@ export class LoopIndex {
   }
 
   private attachment(a: JsonObject, at: string): void {
-    if (a.type === 'queued_command' && a.commandMode === 'task-notification' && typeof a.prompt === 'string') return this.notified(a.prompt, at);
+    if (a.type === 'queued_command' && a.commandMode === 'task-notification' && typeof a.prompt === 'string') {
+      for (const block of blocks(a.prompt)) this.notified(block, at);
+      return;
+    }
     if (a.type === 'task_status' && typeof a.taskId === 'string') {
       const summary = str(a.deltaSummary);
       const outputFile = str(a.outputFilePath);
