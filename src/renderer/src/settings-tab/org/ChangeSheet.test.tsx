@@ -230,7 +230,11 @@ describe('Settings › Org: the change sheet’s machine fields (M4b)', () => {
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await vi.waitFor(() => expect(document.activeElement?.id).toBe(`org-machine-${MINI}`));
     expect(within(document.activeElement as HTMLElement).getByRole('group', { name: 'mini' })).toBeTruthy();
+    expect(document.activeElement?.hasAttribute('data-sought')).toBe(true); // marked while it holds the focus
     await new Promise((resolve) => setTimeout(resolve, 20)); // the sheet's focus restore has run: the row keeps it
-    expect(document.activeElement?.id).toBe(`org-machine-${MINI}`);
+    const sought = document.activeElement as HTMLElement;
+    expect(sought.id).toBe(`org-machine-${MINI}`);
+    sought.blur();
+    expect(sought.hasAttribute('data-sought')).toBe(false);
   });
 });

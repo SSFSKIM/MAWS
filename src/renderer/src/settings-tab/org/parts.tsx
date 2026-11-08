@@ -35,12 +35,16 @@ export function Group({ id, title, children }: { id: 'you' | 'people' | 'machine
 }
 
 // M4b: a machine's row on the page, by its ref, so a line elsewhere (a removal its ownership refuses) can take the
-// person to it. Called once the sheet that asked has gone, so its focus restore leaves the row focused.
+// person to it, marked (`data-sought`) until focus leaves it. Called once the sheet that asked has gone, so its focus
+// restore leaves the row focused.
 export const machineRowId = (ref: string) => `org-machine-${ref}`;
 export function focusMachineRow(ref: string) {
   const row = document.getElementById(machineRowId(ref));
-  row?.scrollIntoView?.({ block: 'center' });
-  row?.focus({ preventScroll: true });
+  if (row === null) return;
+  row.scrollIntoView?.({ block: 'center' });
+  row.setAttribute('data-sought', '');
+  row.addEventListener('blur', () => row.removeAttribute('data-sought'), { once: true });
+  row.focus({ preventScroll: true });
 }
 
 /** A member by the name the page gives them: you, their name, or a former member for an id the head no longer lists. */

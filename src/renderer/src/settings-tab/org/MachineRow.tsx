@@ -29,6 +29,7 @@ type Sheet = { at: 'grant'; draft: GrantDraft | null; signIn: string } | { at: '
 /** The machine's grants as main last answered them under `signIn`, and a read of them again. */
 function useGrantsView(ref: string, signIn: string | null): { view: GrantsView | null; reload(): void } {
   const [held, setHeld] = useState<{ signIn: string | null; view: GrantsView | null }>({ signIn, view: null });
+  if (held.signIn !== signIn) setHeld({ signIn, view: null }); // another sign-in: nothing read under the last one shows
   const latest = useRef(0); // the read whose answer may land; any earlier one is dropped
   const scope = useRef({ live: false }); // the row as mounted for this sign-in: a read still out after it lands nowhere
   const reload = useCallback(() => {
@@ -92,7 +93,7 @@ export function MachineRow({ machine, view, signIn, admin, enrolling, ask, reenr
   const grant = (draft: GrantDraft | null) => signIn !== null && open({ at: 'grant', draft, signIn });
   const owners = (owned: ViewMachine['owners']): string => (owned === 'org' ? ORG.ownedByOrg : ORG.ownedBy(inWords(owned.map((id) => memberName(view.members, id)))));
   return (
-    <div id={machineRowId(ref)} tabIndex={-1} className="rounded-sm outline-accent focus:outline-2">
+    <div id={machineRowId(ref)} tabIndex={-1} className="rounded-sm outline-accent data-sought:outline-2">
       <Setting label={name}>
         <span className={linked === 'up' ? 'text-fg' : 'text-fg-muted'}>{ORG.machineState[linked]}</span>
         {thisMac && <Chip>{ORG.thisMacMark}</Chip>}

@@ -10,8 +10,8 @@
 //   shown (`digest`), signed again for the machine's current key under one confirmation.
 //
 // Before Touch ID, main may bring the machine up to date (push the org's head to it) and read its ledger again, so from
-// the press until the answer the sheet says so: never a dead button. Main offers no cancel for either, so none is shown;
-// the sheet can still close, and an answer that comes after it closed lands nowhere. Every refusal reads in its own words,
+// the press until the answer the sheet says so: never a dead button. Main offers no cancel for either, so none is shown:
+// the sheet's own button reads Close meanwhile, and an answer that comes after it closed lands nowhere. Every refusal reads in its own words,
 // `ineligible` with each problem `grantProblems` named, `ledger-unread` with main's detail (through this Mac's own door:
 // its endpoint hasn't seen the person yet, so try again shortly). Once this Mac may no longer sign a grant there (its
 // grants record damaged, or no longer an owner's device), Save is withdrawn and the sheet says why.
@@ -131,7 +131,7 @@ export function GrantSheet({ machine, members, grants, may, draft, onClose, onSa
         submitClass={PRIMARY}
         canSubmit={member !== '' && changed && !saving}
         onSubmit={save}
-        cancelLabel={ORG.cancel}
+        cancelLabel={saving ? ORG.close : ORG.cancel}
       >
         <div className="flex flex-col gap-3 text-ui-sm leading-normal">
           {choices.length === 0 ? (
@@ -204,7 +204,7 @@ export function RegrantSheet({ machine, members, grants, may, onClose, onSaved }
   const offered = may && missing.length > 0 && digest !== null;
   return (
     <Sheet title={ORG.regrantTitle(name)} width="w-[min(520px,90vw)]" onClose={onClose}>
-      <SheetForm submitLabel={!offered ? undefined : saving ? ORG.saving : ORG.regrantConfirm} submitClass={PRIMARY} canSubmit={!saving} onSubmit={confirm} focusSubmit cancelLabel={ORG.cancel}>
+      <SheetForm submitLabel={!offered ? undefined : saving ? ORG.saving : ORG.regrantConfirm} submitClass={PRIMARY} canSubmit={!saving} onSubmit={confirm} focusSubmit cancelLabel={saving ? ORG.close : ORG.cancel}>
         <div className="flex flex-col gap-2 text-ui-sm leading-normal">
           {missing.length === 0 ? (
             <p className="m-0 text-fg-muted">{ORG.grantRefusals.none}</p>

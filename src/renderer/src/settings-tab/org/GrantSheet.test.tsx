@@ -68,7 +68,8 @@ describe('Settings › Org: the grant sheet (M4b)', () => {
     // main pushes the head, reads the ledger again and asks for Touch ID: the sheet says so, never a dead button
     expect(within(sheet).getByRole('status').textContent).toBe(SAVING);
     expect((within(sheet).getByRole('button', { name: 'Saving…' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(within(sheet).queryByRole('button', { name: /cancel/i })).toBeTruthy(); // the sheet's own Cancel: it can still close
+    expect(within(sheet).queryByRole('button', { name: /cancel/i })).toBeNull(); // main offers no cancel for a grant: none is shown
+    expect(within(sheet).getByRole('button', { name: 'Close' })).toBeTruthy(); // the sheet can still close
     expect(box(sheet, 'spawn').disabled).toBe(true);
 
     await act(async () => answer.resolve({ ok: true, version: 4, delivered: 'pending' }));
@@ -175,7 +176,7 @@ describe('Settings › Org: the grant sheet (M4b)', () => {
     fireEvent.click(box(sheet, 'spawn'));
     fireEvent.click(within(sheet).getByRole('button', { name: 'Save…' }));
     await vi.waitFor(() => expect(sent('org.grants.set')).toHaveLength(1));
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Close' }));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await act(async () => answer.resolve({ ok: true, version: 4, delivered: 'done' }));
     expect(within(row('mini')).queryByText(/Signed grant/)).toBeNull();
@@ -230,6 +231,7 @@ describe('Settings › Org: the re-grant sheet (M4b)', () => {
     await vi.waitFor(() => expect(sent('org.grants.regrant')).toEqual([{ ref: MINI, digest: 'missing-digest-1' }]));
     expect(within(sheet).getByRole('status').textContent).toBe(SAVING);
     expect((within(sheet).getByRole('button', { name: 'Saving…' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(sheet).queryByRole('button', { name: 'Cancel' })).toBeNull();
     await act(async () =>
       answer.resolve({
         ok: true,
@@ -255,7 +257,7 @@ describe('Settings › Org: the re-grant sheet (M4b)', () => {
     answer = late.promise;
     fireEvent.click(within(sheet).getByRole('button', { name: 'Re-grant' }));
     await vi.waitFor(() => expect(sent('org.grants.regrant')).toHaveLength(2));
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Close' }));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await act(async () => late.resolve({ ok: true, results: [{ member: BEN, version: 4, delivered: 'done' }] }));
     expect(within(row('mini')).queryByText(/again for mini/)).toBeNull();

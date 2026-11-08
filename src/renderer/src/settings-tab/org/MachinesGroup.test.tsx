@@ -192,6 +192,15 @@ describe('Settings › Org: Machines’ actions and rights (M4b)', () => {
     emit(signing(ROOT));
     expect(await within(row('mini')).findByText('Cat')).toBeTruthy();
     expect(sent('org.grants.view')).toHaveLength(2);
+
+    // signed out and in again as the same member and device: what the last sign-in read is gone until the new read lands
+    held = true;
+    emit(signing(ROOT, { session: 'signed-out' }));
+    emit(signing(ROOT));
+    await vi.waitFor(() => expect(sent('org.grants.view')).toHaveLength(3));
+    expect(within(row('mini')).queryByText('Cat')).toBeNull();
+    await act(async () => release(grantsOf(MINI, { grants: [{ member: BEN, rights: ['spawn'], version: 2, state: 'on-machine' }] })));
+    expect(within(row('mini')).getByText('Ben')).toBeTruthy();
   });
 
   it('a dropped machine whose hub row is still listed reads “Signed. The hub still lists <name>: Retry”, and Retry sends the route alone', async () => {
