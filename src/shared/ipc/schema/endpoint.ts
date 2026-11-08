@@ -41,7 +41,11 @@ export type RecordPolicyAnswer = z.infer<typeof RecordPolicyAnswerSchema>;
 export const LocalOutcomeSchema = z.looseObject({ state: z.string().min(1) });
 export type LocalOutcome = z.infer<typeof LocalOutcomeSchema>;
 
-/** A signed grant as the ledger keeps it (org-protocol's `Signed<Grant>`; a reader verifies it with `verifyGrant`). */
+/**
+ * A signed grant as the ledger keeps it (org-protocol's `Signed<Grant>`). A stored grant stays in force until a higher
+ * version replaces it or its signer's key is revoked, whatever its signer's later standing; `verifyGrant` judges one at
+ * arrival, not a stored one.
+ */
 const SignedGrantSchema = z.strictObject({
   body: z.strictObject({
     org: z.string().min(1),
