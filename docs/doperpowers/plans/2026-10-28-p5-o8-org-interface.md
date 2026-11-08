@@ -126,6 +126,9 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-08) Task 3, reviewed clean. The commits: 1f82a49ff (endpoint only), 1b9c48fa6, ca3f145ce, 7f7ba3acb, then the master merge 4050bb5ec (#534); fix wave 1, a610c538f and 309cf86e6; the master merge 4fdd40cd7 (#535, #536); fix wave 2, 65f17c80c, c79c19683 and 2822e9be9.
     - Reviews: the desk track found 1f82a49ff and 1b9c48fa6 READY (684). Our task reviewer took three rounds: an Important and a Minor, fixed in wave 1; an Important (the settlement delete revoking a re-listed name), fixed in wave 2; then approved, with one Minor left (a keyed 200 is logged as "deleted"), which Task 4 rewords.
     - Green: static and unit at 2822e9be9 (42480136294).
+  - [x] (2026-11-08) Task 4, reviewed clean. The commits: f519c4804 (Step 0), b4888335e, 556e3061b, the spec commit ce4931a7e, and the fix waves b051e0b35; 9a35790bd, 5ccc78b0c, fe2bac5c1; a8aed197c. None touches `src/endpoint`, `apps/org-protocol` or `apps/desk-hub`.
+    - Reviews: our task reviewer took four rounds (Decision Log, "M4b Task 4", item 12). The architect ruled the delivery route (push, then grant; every verdict final).
+    - Green: static and unit at a8aed197c (42494746695).
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
 - [ ] M5b — Add owner — *executable; after M4c; lands once the desk track's `record.owners` executor and DL190 (b)'s fix are on master*
 - [ ] M8 — The deployment admin's end, and acceptance — *owner steps and evidence; last; needs O14's B4 steps 4 to 8 and M3's root-add sitting (its first step)*
@@ -2073,7 +2076,7 @@ Live: at the staging run, or the next sitting after it: the owner adds the secon
     listings.json      { "version": 1, "org": "<org id>", "records": Signed<Listing>[],                           (M2)
                          "marks": { "<ref>/<session>": { "revision": <n>, "hash": "<SHA-256 of the canonical record, B64>", "kid": "<sig.kid>", "delegation": "<id>" | null, "gone": <boolean> } } }
                                                                    // delegation: the certificate's, when a delegated machine signed it
-    grants.json        { "version": 1, "issued": [{ "signed": Signed<Grant>, "delivered": "pending" | "done" | { "refused": "<code>" }, "op"?: "<op id>" }] }   (M4b)
+    grants.json        { "version": 1, "issued": [{ "signed": Signed<Grant>, "headVersion": <the version it was verified and kept under>, "delivered": "pending" | "done" | { "refused": "<code>" }, "op"?: "<op id>" }] }   (M4b)
                                                                    // every grant this app signed, the latest per (machine, member); fails closed: registration.json's
                                                                    // "grants": true, set before its first write, makes a missing or unreadable file `damaged` (no grant signed)
 
@@ -4062,6 +4065,58 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - **Residue, recorded and not closed in M4b** (the architect, 2026-11-08): a key posted between the read and a name-only delete of a row with no key. It needs a re-enrollment in place that never lists and a key post landing in that interval. Its exit is a `revokeKeyed` form that requires the row to hold no posted key.
      - Tests: org-session 143, hub-client 11, signing-store 10, signer 46, each with red first; a mutation reading 503 as gone fails. Gates: 65f17c80c (42478399402), c79c19683 (42479689946) and 2822e9be9 (42480136294) green.
   Date/Author: 2026-11-08, O8's executor (controller), from Task 3's report.
+
+- Decision: M4b Task 4, main's grants. The commits are f519c4804 (Step 0, Task 3's last Minor), b4888335e (Task 4), 556e3061b (the fixtures' types), the spec commit ce4931a7e, and the three fix waves: b051e0b35; 9a35790bd, 5ccc78b0c and fe2bac5c1; and a8aed197c. None touches `src/endpoint`, `apps/org-protocol` or `apps/desk-hub`, and the RL4 `Action` shape is unchanged. These points are settled.
+  1. **The hub row's keyed delete** answers `acknowledged` for a keyed 200 and `deleted` for a name-only one, and is logged "cleaned up: the hub acknowledged the removal". Under #538 a keyed 200 can also mean the hub touched nothing, so neither answer claims a verified deletion. Both settle as gone.
+  2. **`RecordSigner`** (`src/main/device/step-up.ts`).
+     - `sign` and `signMany` take several records under one confirmation, so Re-grant… is one Touch ID for a machine's missing grants, following M6b's `signActions` batch. `sign` is `signMany` of one.
+     - It signs only `RECORD_DOMAINS` (`grant`) and throws before asking otherwise, so the device module's third signer can sign neither a state, an action nor a channel input.
+     - It confirms once, checks `live`, then calls `signRecord` on canonical private copies.
+     - The prompt escaping moves to `prompt-text.ts`, so `grants.ts`, which composes the grant prompt, stays Electron-free.
+  3. **`grants.json`** (`src/main/org/grants-store.ts`, its one writer) follows the signing store's marker model, as a lean copy rather than a generalization.
+     - The mark is `registration.json`'s `grants: true`, written before the file's first write.
+     - `isGrantsFile` refuses two grants for one (machine, member).
+     - Each record also stores `headVersion`, the version of the head the grant was verified and kept under. It is required, and a file without it reads `damaged` (§C).
+     - There is no `org.grants.reset`. A reset that drops the file would forget withdrawals and pending grants. That would re-offer what the design never re-offers. A rebuild from the ledger can't restore what the ledger no longer holds, or what an offline machine holds. So a damaged file blocks grant signing on that profile (residue).
+  4. **The IPC** (`src/shared/ipc/schema/org.ts`), refining §R:
+     - `org.grants.view {ref}` → `{ok: true, ref, live, asOf, grants: {member, rights, version, state: 'on-machine' | 'pending' | 'refused', reason?}[], missing: {member, rights, version}[], digest} | {ok: false, ref, reason: 'signed-out' | 'damaged'}`.
+       - `missing` is a list with the digest that names it, not a count, because Re-grant… shows each grant.
+       - `live` is false when the view comes from the last answer; `asOf` is that answer's time.
+       - It reads the ledger on each call, so the page reads it when a sheet or row opens and at `org.grants.changed`, not at every `org.changed`.
+     - `org.grants.set {ref, member, rights}` (withdraw: `[]`) takes no digest, because the confirmation renders the grant itself, version included. `org.grants.regrant {ref, digest}` names the missing list shown (M4a's rule).
+     - The refusals are `signed-out`, `damaged`, `storage`, `busy`, `invalid`, `no-change`, `ineligible` (with `grantProblems` codes), `ledger-unread`, `cancelled`, `refused`, `stale` and `none`.
+     - The event `org.grants.changed {ref}` fires when a background delivery's outcome moves a row.
+  5. **Fork B** is `OrgView.machines[].mayGrant`. It is `grantProblems` on a probe draft (the machine's current key, the signed-in member, no rights, version 1) with this device's step-up kid. It is false without a record signer, and independent of `maySign`.
+  6. **Signing.**
+     - `grantProblems` judges the draft before any ledger read or confirmation.
+     - The ledger read needs the member's entry. The endpoint answers only the members its own head lists, so over a link, an answer that lacks a needed member first brings the machine to the held head through the delivery push (below) and then reads once more. `regrant` checks the members its issued grants name that the held head lists. An entry still absent refuses `ledger-unread`, and no mark is guessed. Through the door there is nothing to push, so the refusal says this Mac's own endpoint hasn't seen the member yet and to try again shortly.
+     - The draft is rebuilt at `max(issued, highWater) + 1` on the head held after the read and judged again.
+     - Then one confirmation, then `verifyGrant` against the head held then.
+     - The keep is fenced on head identity (fix wave): `head` and `certificates` are compared by identity inside the store update that persists the grant, with no await between. A moved head or certificate set answers `stale`, keeping and sending nothing. Stored grants are never judged again (verify-once).
+     - Only one sign runs at a time (`busy`).
+     - `no-change` compares with what the machine can hold under its current key: a pending grant above the mark for the current key, else the ledger's grant.
+  7. **Delivery** (the architect's ruling, 2026-11-08, replacing the first build's retry of `verifyGrant` verdicts and fix wave 1's curable class).
+     - Through the local door, for this Mac's own machine, the grant goes as an unsigned act checked by `isAction`, sent at once. Over a link it goes with `stepUp: 'never'`.
+     - **Push, then grant.** Over a link a grant is sent, the first time and every time after, only on a fresh `done {version}` at or above the record's `headVersion`. That answer comes from the machine's endpoint adopting the app's line, pushed as `endpoint.state` by `createHeadPush` (deliveries.ts), which shares M3's planner (`planRun`, `takeRun`, `answerOf`, `lineOf`). Concurrent grants to one ref share the push in flight. A regrant batch makes one serialized push per grant, each byte-bounded. The send is gated, synchronously with the act, on the answer's line being the app's current line, the sign-in standing and the link being up. Anything else keeps the grant `pending` under the ordinary resend: an answer below `headVersion`, a moved line, a dropped link, a timeout, or a machine past the app's held line, which is sent once the app adopts that line.
+       - Why: neither a link's cached `caps().stateVersion` nor M3's per-machine cursor is a lower bound on the machine's head. Caps isn't re-sent when grades are unchanged (`src/endpoint/channels.ts:524-531`). A recovery rewind lowers the head (`org-sync.ts:233-239`). M3's `known[ref]` exists only while a revocation is owed. A fresh adoption answer on the checked line is the only bound that is both current and line-safe without an endpoint change, and it keeps add-member-then-grant to one Touch ID.
+     - **Every verdict is final**: the ledger's `not-newer`, `not-held` and `other-machine`, and all of `verifyGrant`'s (`malformed`, `bad-signature`, `revoked`, `not-listed`, `unknown-signer`, `contested`). The machine judged it under the signing head or later, so nothing is resent after a verdict, and a refused grant shows its reason with "sign again". This is RL's verify-once: the machine judges once at arrival.
+     - The door takes no `endpoint.state` and answers no version (`src/endpoint/local-door.ts:10, 23-31`), so its verdicts are final as sent. A refusal caused by a moment's lag shows as refused, with "sign again".
+     - Both refusal shapes are read: the door's own `{state: 'refused', reason}`, and `{state: 'failed', error: {code}}` from the ledger behind the door or over a link.
+     - On `not-newer`, the ledger is read once more. This very grant there is `done`; anything else is `{refused: 'not-newer'}`, shown as "Another device changed this grant: sign again".
+     - An `expired` op is resent at once as a new op, and a down link resends at link up, at feed open and at `DELIVERY_RETRY_MS`. Neither is a verdict. `op` is the last unknown act's id, kept while `pending`.
+  8. **Missing grants** are judged from the fresh ledger and the machine's current key, of this org, on a machine one uncontested key speaks for. A grant this Mac issued with rights is missing when its member is listed and the ledger lacks it. That covers a `done` grant the ledger lost, and a `pending` grant, or one refused `not-listed` or `not-held`, for a dead key, which a lost reply followed by a re-enrollment leaves behind. `verifyGrant` answers `not-listed` for an old machine key before the ledger's held-key check (`src/endpoint/grants.ts:53-56`). A withdrawal is never offered, and neither is a grant another device replaced or one a kept ledger holds.
+  9. **The fence** is the session's `signIns` with the org, member and device, so a rekey fences too. A sign-out drops the held ledger answers. `close()` joins the grants part.
+  10. **Tests.** grants 46, deliveries 30, grants-store 4, step-up 39, view 4, org-session 149, plus the fixture, schema and route suites, each run on its own with red first. Each guard is mutation-checked, 23 of them across the fix waves, including the push removed (the member-add test goes red, `not-listed` at delivery and `ledger-unread` at the read), the line check, and `not-listed` made non-final. `grants.ts` was drafted before its suite, so its red is the suite failing with the module absent, then one mutation per guard.
+  11. **Gates.** Static at f519c4804 (42481994420). `static,unit` at b4888335e failed on test-fixture types (42484094541), fixed in 556e3061b. `static,unit` at 556e3061b (42485370595), b051e0b35 (42487911146), fe2bac5c1 (42492571560) and a8aed197c (42494746695) are green. 5ccc78b0c's (42491547957) was red on a new deliveries test that answered before the run's adoption, fixed in fe2bac5c1.
+  12. **The review** took four rounds with our task reviewer:
+      - Round 1, three Important and one Minor: the keep wasn't fenced on its verification head; every `verifyGrant` verdict was resent forever; a pending dead-key grant couldn't be recovered; a storage failure read `signed-out`.
+      - Round 2: the fence and the storage refusal fixed. Finality still rested on stale caps or no version at all, so a refused grant could land later with no confirmation. Recovery missed the real old-key verdict (`not-listed`). Two Minors (the context for `no-change`, and the kept `headVersion` on both paths).
+      - Round 3: the push-then-grant route met the architect's conditions, but the member-add flow stopped at the ledger read before signing, which the fixture had hidden by projecting the app's head.
+      - The fix wave a8aed197c closed it. The controller read that diff.
+  13. **Residue.**
+      - A damaged grants.json blocks grant signing on that profile (item 3).
+      - The door's lag refusal asks the user to sign again, and a recovery rewind can land between the push's answer and the grant's arrival, on the fork path, where the machine's verdict is then final. The exit for both is a desk-reviewed `src/endpoint` change carrying the judging head's version on the refusal, which makes the door's lag refusal resend instead of asking again.
+  Date/Author: 2026-11-08, O8's executor (controller), from Task 4's report and its review.
 
 ## Outcomes & Retrospective
 
