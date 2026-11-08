@@ -150,7 +150,7 @@ describe('the files', () => {
       mkdirSync(join(repo, 'a', 'b'), { recursive: true });
       const inside = join(repo, 'a', 'b', 'second-email');
       writeFileSync(inside, EMAIL, { mode: 0o600 });
-      expect(privateFileRefusal(inside), marker).toMatch(/inside the git checkout/);
+      expect(privateFileRefusal(inside), marker).toMatch(/inside a git checkout/);
     }
   });
 
@@ -181,38 +181,42 @@ describe('the files', () => {
     expect(readEmail(emailFile(), () => {})).toBe(EMAIL);
   });
 
-  it('names no email file by its name in any refusal, only its directory: the name may itself be the address', async () => {
+  it('names no email file in any refusal, by path or directory: its name, or a directory above it, may be the address', async () => {
+    // Every case's file is named after the address, in a directory named after it too.
+    const home = () => {
+      const dir = join(scratch(), EMAIL);
+      mkdirSync(dir);
+      return dir;
+    };
     const named = (mode: number, body = `${EMAIL}\n`) => {
-      const dir = scratch();
-      const path = join(dir, EMAIL);
+      const path = join(home(), EMAIL);
       writeFileSync(path, body);
       chmodSync(path, mode);
-      return { dir, path };
+      return { path };
     };
-    const cases: Array<{ path: string; dir: string; swap?: () => void }> = [named(0o644), named(0o4600), named(0o600, 'not an email\n'), { path: join(scratch(), EMAIL), dir: '' }];
-    const link = named(0o600);
-    const linked = join(scratch(), `${EMAIL}.link`);
-    symlinkSync(link.path, linked);
-    cases.push({ path: linked, dir: '' });
-    const folder = join(scratch(), EMAIL);
+    const cases: Array<{ path: string; swap?: () => void }> = [named(0o644), named(0o4600), named(0o600, 'not an email\n'), { path: join(home(), EMAIL) }];
+    const linked = join(home(), EMAIL);
+    symlinkSync(named(0o600).path, linked);
+    cases.push({ path: linked });
+    const folder = join(home(), EMAIL);
     mkdirSync(folder);
-    cases.push({ path: folder, dir: '' });
-    const repo = scratch();
+    cases.push({ path: folder });
+    const repo = home();
     mkdirSync(join(repo, '.git'));
     writeFileSync(join(repo, EMAIL), EMAIL, { mode: 0o600 });
-    cases.push({ path: join(repo, EMAIL), dir: repo });
+    cases.push({ path: join(repo, EMAIL) });
     const swapped = named(0o600);
     cases.push({ ...swapped, swap: () => renameSync(swapped.path, `${swapped.path}.gone`) });
-    for (const { path, dir, swap } of cases) {
+    for (const { path, swap } of cases) {
       let refusal = '';
       try {
         readEmail(path, swap);
       } catch (error) {
         refusal = (error as Error).message;
       }
-      expect(refusal, path).not.toBe('');
+      expect(refusal, path).toMatch(/^the email file /);
       expect(refusal, path).not.toContain(EMAIL);
-      if (dir !== '') expect(refusal, path).toContain(dir);
+      expect(refusal, path).not.toContain(tmpdir());
       // and through a step, whose lines are printed before the email is known
       const run = options({ verb: 'add', emailFile: path });
       expect(await runRealMember(run.o), path).toBe(2);

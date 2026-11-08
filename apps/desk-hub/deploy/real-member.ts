@@ -76,21 +76,18 @@ function checkoutOf(dir: string): string | null {
   }
 }
 
-/** A file as a refusal names it: by its directory alone, since its name may be what the file must keep. */
-const namedByDirectory = (path: string) => `the file in ${dirname(resolve(path))}`;
-
 /**
  * The text of the private file at `path`: a regular file of this user's, mode exactly 0600 (no special bit beside it),
- * in no git checkout; else throws why, never quoting what the file holds nor naming it but by its directory (its name
- * may be the address itself). The path is opened once, never following a
+ * in no git checkout; else throws why, never quoting what the file holds nor naming its path, its directory or the
+ * checkout it is in (`file` names it: its name, or a directory above it, may be the very address it holds, and a refusal
+ * is printed before that is known to the scrubber). The path is opened once, never following a
  * symlink, and every check but the checkout's is made on that descriptor and the text read from it, so a file put in the
  * path's place after the check is never the one read; the checkout's check is made on the path the descriptor's file
  * resolves to, which must still be that file. A parent directory swapped between those steps is outside what this
  * guards: the file lives in the desk track's own home directory, whose parents no one else can write. `opened` runs
  * once the descriptor is open (a suite's seam for the race).
  */
-export function readPrivateFile(path: string, opened: () => void = () => {}): string {
-  const file = namedByDirectory(path);
+export function readPrivateFile(path: string, opened: () => void = () => {}, file = 'the file'): string {
   let fd: number;
   try {
     // O_NONBLOCK: a FIFO in the file's place answers at once rather than holding the step open.
@@ -116,7 +113,7 @@ export function readPrivateFile(path: string, opened: () => void = () => {}): st
       throw new Error(`${file} changed while it was read: nothing was read`, { cause: error });
     }
     const repo = checkoutOf(dirname(resolved));
-    if (repo !== null) throw new Error(`${file} is inside the git checkout ${repo}: keep it outside any checkout`);
+    if (repo !== null) throw new Error(`${file} is inside a git checkout: keep it outside any checkout`);
     return readFileSync(fd, 'utf8');
   } finally {
     closeSync(fd);
@@ -143,11 +140,11 @@ export function codeFileRefusal(path: string): string | null {
   return null;
 }
 
-/** The one email address the private file at `path` holds; a refusal never quotes what the file holds, nor its name. */
+/** The one email address the private file at `path` holds; a refusal never quotes what the file holds, nor its path. */
 export function readEmail(path: string, opened?: () => void): string {
-  const text = readPrivateFile(path, opened);
+  const text = readPrivateFile(path, opened, 'the email file');
   const email = text.endsWith('\n') ? text.slice(0, -1) : text;
-  if (!EMAIL.test(email) || email.length > 320) throw new Error(`${namedByDirectory(path)} must hold one email address and nothing else`);
+  if (!EMAIL.test(email) || email.length > 320) throw new Error('the email file must hold one email address and nothing else');
   return email;
 }
 
