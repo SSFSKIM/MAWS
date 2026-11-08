@@ -21,15 +21,16 @@ import { useMachines } from '../../stores/machines';
 import { ORG } from '../copy';
 import { Chip, Setting, TEXT_ACTION } from '../parts';
 import { GrantSheet, RegrantSheet, type GrantDraft } from './GrantSheet';
-import { failed, inWords, machineRowId, memberName, OUTCOME_UNKNOWN, OutcomeLine, type Outcome, type ViewMachine } from './parts';
+import { failed, inWords, machineRowId, memberName, OUTCOME_UNKNOWN, OutcomeLine, Unread, type Outcome, type ViewMachine } from './parts';
 
 type Shown = Extract<GrantsView, { ok: true }>;
 type Sheet = { at: 'grant'; draft: GrantDraft | null; signIn: string } | { at: 'regrant'; signIn: string };
 
 /** The machine's grants as main last answered them under `signIn`, and a read of them again. */
-function useGrantsView(ref: string, signIn: string | null): { view: GrantsView | null; reload(): void } {
-  const [held, setHeld] = useState<{ signIn: string | null; view: GrantsView | null }>({ signIn, view: null });
-  if (held.signIn !== signIn) setHeld({ signIn, view: null }); // another sign-in: nothing read under the last one shows
+function useGrantsView(ref: string, signIn: string | null): { view: GrantsView | null; failed: boolean; reload(): void } {
+  // `failed`: the last read failed as a command (said by its toast), so a view never answered can't pass for one still read
+  const [held, setHeld] = useState<{ signIn: string | null; view: GrantsView | null; failed: boolean }>({ signIn, view: null, failed: false });
+  if (held.signIn !== signIn) setHeld({ signIn, view: null, failed: false }); // another sign-in: nothing read under the last one shows
   const latest = useRef(0); // the read whose answer may land; any earlier one is dropped
   const scope = useRef({ live: false }); // the row as mounted for this sign-in: a read still out after it lands nowhere
   const reload = useCallback(() => {
@@ -38,8 +39,11 @@ function useGrantsView(ref: string, signIn: string | null): { view: GrantsView |
     const mine = ++latest.current;
     void ipc.invoke('org.grants.view', { ref }).then((result) => {
       if (!under.live || latest.current !== mine) return;
-      if (result.ok) setHeld({ signIn, view: result.value });
-      else failed(result.error);
+      if (result.ok) setHeld({ signIn, view: result.value, failed: false });
+      else {
+        failed(result.error);
+        setHeld((last) => ({ ...last, failed: true }));
+      }
     });
   }, [ref, signIn]);
   useEffect(() => {
@@ -54,7 +58,8 @@ function useGrantsView(ref: string, signIn: string | null): { view: GrantsView |
       off();
     };
   }, [reload, ref]);
-  return { view: held.signIn === signIn ? held.view : null, reload };
+  const current = held.signIn === signIn;
+  return { view: current ? held.view : null, failed: current && held.failed, reload };
 }
 
 type RowProps = {
@@ -82,6 +87,9 @@ export function MachineRow({ machine, view, signIn, admin, enrolling, ask, reenr
   const damaged = grants.view?.ok === false && grants.view.reason === 'damaged';
   const mayGrant = machine.mayGrant && !damaged;
   const shown = grants.view?.ok === true ? grants.view : null;
+  // Why the machine's grants are unknown, said with Retry in the row and in its sheets: main's refusal of the read, or a
+  // read that failed before any answered. Nothing signs against grants not known.
+  const unread = grants.view?.ok === false ? (damaged ? ORG.grantsDamaged : ORG.grantsUnread(name, ORG.grantRefusals[grants.view.reason])) : shown === null && grants.failed ? ORG.grantsUnread(name) : null;
   const me = view.members.find((m) => m.you)?.id;
   // Who may read every member's entry: an owner, or an admin for an org-owned machine; anyone else reads their own.
   const seesAll = machine.owners === 'org' ? admin : me !== undefined && machine.owners.includes(me);
@@ -128,14 +136,14 @@ export function MachineRow({ machine, view, signIn, admin, enrolling, ask, reenr
             </button>
           </div>
         )}
-        {damaged && <span className="basis-full text-warning">{ORG.grantsDamaged}</span>}
+        {unread !== null && <Unread line={unread} retry={grants.reload} />}
         {shown !== null && <Rights machine={machine} view={view} shown={shown} seesAll={seesAll} mayGrant={mayGrant} signAgain={grant} regrant={() => signIn !== null && open({ at: 'regrant', signIn })} />}
         <OutcomeLine outcome={outcome} />
       </Setting>
       {sheet?.at === 'grant' && (
-        <GrantSheet machine={machine} members={view.members} grants={shown} may={mayGrant} draft={sheet.draft} onClose={() => setSheet(null)} onSaved={setOutcome} />
+        <GrantSheet machine={machine} members={view.members} grants={shown} unread={unread} onRetry={grants.reload} may={mayGrant} draft={sheet.draft} onClose={() => setSheet(null)} onSaved={setOutcome} />
       )}
-      {sheet?.at === 'regrant' && <RegrantSheet machine={machine} members={view.members} grants={shown} may={mayGrant} onClose={() => setSheet(null)} onSaved={setOutcome} />}
+      {sheet?.at === 'regrant' && <RegrantSheet machine={machine} members={view.members} grants={shown} unread={unread} onRetry={grants.reload} may={mayGrant} onClose={() => setSheet(null)} onSaved={setOutcome} />}
     </div>
   );
 }

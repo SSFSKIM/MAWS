@@ -21,7 +21,7 @@ import { ipc } from '../../ipc/client';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { CHOICE, FIELD, PRIMARY } from '../../sessions/ui';
 import { ORG } from '../copy';
-import { failed, inWords, memberName, OUTCOME_UNKNOWN, useOpen, type Member, type Outcome, type ViewMachine } from './parts';
+import { failed, inWords, memberName, OUTCOME_UNKNOWN, Unread, useOpen, type Member, type Outcome, type ViewMachine } from './parts';
 
 export type Right = (typeof GRANT_RIGHTS)[number];
 /** A grant the sheet opens on: the person and the rights to sign again (a refused grant's Sign again…). */
@@ -61,8 +61,11 @@ function RefusedLine({ refused }: { refused: Refused }) {
 type GrantProps = {
   machine: ViewMachine;
   members: readonly Member[];
-  /** The machine's grants as the row last read them; null before the first answer. */
+  /** The machine's grants as the row last read them; null until a read answers. */
   grants: Shown | null;
+  /** Why they are unknown while `grants` is null (a read refused or failed), said with Retry; null while one is out. */
+  unread: string | null;
+  onRetry(): void;
   /** This Mac may sign a grant on it now. */
   may: boolean;
   draft: GrantDraft | null;
@@ -70,7 +73,7 @@ type GrantProps = {
   onSaved(outcome: Outcome): void;
 };
 
-export function GrantSheet({ machine, members, grants, may, draft, onClose, onSaved }: GrantProps) {
+export function GrantSheet({ machine, members, grants, unread, onRetry, may, draft, onClose, onSaved }: GrantProps) {
   const open = useOpen();
   const [member, setMember] = useState(draft?.member ?? '');
   // The rights chosen here; null while they follow the person's as the machine's grants show them.
@@ -80,7 +83,7 @@ export function GrantSheet({ machine, members, grants, may, draft, onClose, onSa
   // The person chosen stopped being offered (made an owner, or removed) while the sheet was open: chosen no longer.
   const [noLonger, setNoLonger] = useState(false);
   const { name } = machine;
-  // Before the machine's grants are first read, nothing is known to compare with: no right to tick, no Save.
+  // Until a read of the machine's grants answers, nothing is known to compare with: no right to tick, no Save.
   const reading = grants === null;
   const holding = (id: string) => grants?.grants.find((g) => g.member === id) ?? null;
   const choices = members.filter((m) => !isOwner(machine, m) || holding(m.id) !== null);
@@ -161,7 +164,7 @@ export function GrantSheet({ machine, members, grants, may, draft, onClose, onSa
                   </label>
                 ))}
               </fieldset>
-              {reading && <p className="m-0 text-fg-muted">{ORG.grantReading(name)}</p>}
+              {reading && (unread === null ? <p className="m-0 text-fg-muted">{ORG.grantReading(name)}</p> : <Unread line={unread} retry={onRetry} />)}
               {noLonger && <p className="m-0 text-warning">{ORG.grantNoLonger}</p>}
               {withdraws && <p className="m-0 text-fg-muted">{ORG.grantWithdrawLine(email, name)}</p>}
               <p className="m-0 text-fg-muted">{ORG.grantIntro}</p>
@@ -182,7 +185,7 @@ export function GrantSheet({ machine, members, grants, may, draft, onClose, onSa
 
 type RegrantProps = Omit<GrantProps, 'draft'>;
 
-export function RegrantSheet({ machine, members, grants, may, onClose, onSaved }: RegrantProps) {
+export function RegrantSheet({ machine, members, grants, unread, onRetry, may, onClose, onSaved }: RegrantProps) {
   const open = useOpen();
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Extract<GrantRegrantResult, { ok: false }> | null>(null);
@@ -209,7 +212,13 @@ export function RegrantSheet({ machine, members, grants, may, onClose, onSaved }
     <Sheet title={ORG.regrantTitle(name)} width="w-[min(520px,90vw)]" onClose={onClose}>
       <SheetForm submitLabel={!offered ? undefined : saving ? ORG.saving : ORG.regrantConfirm} submitClass={PRIMARY} canSubmit={!saving} onSubmit={confirm} focusSubmit cancelLabel={saving ? ORG.close : ORG.cancel}>
         <div className="flex flex-col gap-2 text-ui-sm leading-normal">
-          {missing.length === 0 ? (
+          {grants === null ? (
+            unread === null ? (
+              <p className="m-0 text-fg-muted">{ORG.grantReading(name)}</p>
+            ) : (
+              <Unread line={unread} retry={onRetry} />
+            )
+          ) : missing.length === 0 ? (
             <p className="m-0 text-fg-muted">{ORG.grantRefusals.none}</p>
           ) : (
             <>

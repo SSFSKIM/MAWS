@@ -169,7 +169,7 @@ describe('Settings › Org: Machines’ actions and rights (M4b)', () => {
     });
     const mini = await found('mini');
     expect(await within(mini).findByText('Grants can’t be signed on this Mac: its record of the grants it issued is damaged.')).toBeTruthy();
-    expect(buttons('mini')).toEqual(['Owners…', 'Re-enroll…', 'Drop…']);
+    expect(buttons('mini')).toEqual(['Owners…', 'Re-enroll…', 'Drop…', 'Retry']); // Retry reads again; nothing signs
   });
 
   it('missing grants are counted on the row with Re-grant…; none is offered where this Mac may not grant', async () => {

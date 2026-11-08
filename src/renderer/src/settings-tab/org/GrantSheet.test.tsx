@@ -198,8 +198,41 @@ describe('Settings › Org: the grant sheet (M4b)', () => {
     expect(save.disabled).toBe(true); // nothing changed yet
   });
 
+  it('a refused read of the grants says why in the row and the sheet, with Retry, and nothing signs until a read answers', async () => {
+    let refuse = true;
+    let reads = 0;
+    renderSection(signing(notSigning), {
+      'org.view': () => VIEWED,
+      'org.grants.view': (input: { ref: string }) => {
+        reads += 1;
+        return refuse ? ({ ok: false, ref: input.ref, reason: 'signed-out' } satisfies GrantsView) : MINIS;
+      },
+      'org.grants.set': () => ({ ok: true, version: 4, delivered: 'done' }) satisfies GrantSetResult,
+    });
+    const UNREAD = 'mini’s grants can’t be read now. This Mac isn’t signed in to the org.';
+    expect(await within(await found('mini')).findByText(UNREAD)).toBeTruthy();
+    expect(within(row('mini')).getByRole('button', { name: 'Retry' })).toBeTruthy();
+    const sheet = await openGrant();
+    await vi.waitFor(() => expect(reads).toBe(2)); // read again as the sheet opened, refused again
+    expect(within(sheet).getByText(UNREAD)).toBeTruthy();
+    expect(within(sheet).queryByText('Reading mini’s grants…')).toBeNull(); // it says why, never that it is still reading
+    fireEvent.change(person(sheet), { target: { value: BEN } });
+    expect((within(sheet).getByRole('button', { name: 'Save…' }) as HTMLButtonElement).disabled).toBe(true);
+    // Retry reads again, and the sheet recovers once a read answers
+    refuse = false;
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Retry' }));
+    await vi.waitFor(() => expect(box(sheet, 'spawn').checked).toBe(true));
+    expect(reads).toBe(3);
+    expect(within(sheet).queryByText(UNREAD)).toBeNull();
+    fireEvent.click(box(sheet, 'shell'));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Save…' }));
+    await vi.waitFor(() => expect(sent('org.grants.set')).toEqual([{ ref: MINI, member: BEN, rights: ['spawn', 'shell'] }]));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(within(row('mini')).queryByText(UNREAD)).toBeNull();
+  });
+
   it('opened on a draft before the grants are read (Sign again on a row read again), it still waits: no Save, whatever is ticked', () => {
-    render(<GrantSheet machine={MINE} members={VIEWED.members} grants={null} may draft={{ member: BEN, rights: ['spawn', 'shell'] }} onClose={() => {}} onSaved={() => {}} />);
+    render(<GrantSheet machine={MINE} members={VIEWED.members} grants={null} unread={null} onRetry={() => {}} may draft={{ member: BEN, rights: ['spawn', 'shell'] }} onClose={() => {}} onSaved={() => {}} />);
     const sheet = screen.getByRole('dialog', { name: 'Rights on mini' });
     expect(within(sheet).getByText('Reading mini’s grants…')).toBeTruthy();
     expect(box(sheet, 'spawn').checked).toBe(true);

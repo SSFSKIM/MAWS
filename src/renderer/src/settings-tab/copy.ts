@@ -570,6 +570,8 @@ export const ORG = {
   missingGrants: (count: number, machine: string) => `${count === 1 ? '1 grant this Mac issued is' : `${count} grants this Mac issued are`} missing on ${machine}`,
   regrant: 'Re-grant…',
   grantsDamaged: 'Grants can’t be signed on this Mac: its record of the grants it issued is damaged.',
+  // A read of a machine's grants that main refused (`why`, its refusal's line) or that failed: nothing to sign against
+  grantsUnread: (machine: string, why?: string) => [`${machine}’s grants can’t be read now.`, why].filter((part) => part !== undefined).join(' '),
   roots: 'Roots',
   rootHolder: (email: string, device: string, cls: string) => `${email} · device ${device} (${cls})`,
   unlistedRoot: 'no listed device',

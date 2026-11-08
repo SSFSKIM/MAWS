@@ -93,6 +93,18 @@ export function signOutcome(result: SignResult): Outcome {
   return { text: [ORG.notSigned, ORG.signReasons[result.reason], result.detail].filter((part) => part !== undefined && part !== '').join(' · '), refused: true };
 }
 
+/** Why a machine's grants are unknown (`ORG.grantsUnread`, `grantsDamaged`), with Retry, which reads them again. */
+export function Unread({ line, retry }: { line: string; retry(): void }) {
+  return (
+    <span className="flex basis-full flex-wrap items-center gap-2">
+      <span className="text-warning">{line}</span>
+      <button type="button" className={TEXT_ACTION} onClick={retry}>
+        {ORG.retry}
+      </button>
+    </span>
+  );
+}
+
 export function OutcomeLine({ outcome }: { outcome: Outcome }) {
   if (outcome === null) return null;
   return (
