@@ -3,8 +3,10 @@
 // `POST /api/devices/pending`, M3's `POST /api/org/state` (a signed successor), and M4a's `GET /api/devices/pending`
 // (`?member=`, H1: an admin's read of another member's entries), M7a's `GET /api/projects/<id>/attestations` (a
 // project's history attestations, for the channel's migrated history), and M4b's enrollment and drop: `POST
-// /api/enrollments`, `GET /api/enrollments/<id>/key` and `DELETE /api/machines/<name>`. None of its answers is trusted (RL §5.9): the session
-// verifies every state against what it holds, the pairing judges every entry, and this module only reads and classifies.
+// /api/enrollments`, `GET /api/enrollments/<id>/key`, and the DELETE of a dropped machine's Registry row (the one
+// machine path outside the remote module, boundary.test.ts's allowance). None of its answers is trusted (RL §5.9): the
+// session verifies every state against what it holds, the pairing judges every entry, and this module only reads and
+// classifies.
 //
 // Who answered matters. Every answer of the Worker carries `X-Desk-Build` (but a `101` or an event stream); a 401, 403 or
 // redirect without it came from Access, so the hub credential has ended (`credentials`). A Worker's
