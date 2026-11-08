@@ -409,6 +409,7 @@ jobs:
           HOSTED_MAC_ROUTE: ${{ vars.HOSTED_MAC_ROUTE }}
           HOSTED_MAC_CAP: ${{ vars.HOSTED_MAC_CAP }}
           MAC_EC2: ${{ vars.MAC_EC2 }}
+          MAC_MINI_OVERFLOW: ${{ vars.MAC_MINI_OVERFLOW }}
           GITHUB_TOKEN: ${{ github.token }}
         run: node .github/scripts/gate-peer-held.mjs
       - id: plan
@@ -424,6 +425,7 @@ jobs:
           HOSTED_MAC_ROUTE: ${{ vars.HOSTED_MAC_ROUTE }}
           HOSTED_MAC_CAP: ${{ vars.HOSTED_MAC_CAP }}
           MAC_EC2: ${{ vars.MAC_EC2 }}
+          MAC_MINI_OVERFLOW: ${{ vars.MAC_MINI_OVERFLOW }}
           HEAD_MESSAGE: ${{ github.event.head_commit.message }}
           GATE_RUNNER: ${{ vars.GATE_RUNNER }}
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
@@ -792,7 +794,7 @@ jobs:
   e2e:
     needs: plan
     if: needs.plan.outputs.e2e_host != '[]'
-    name: e2e:${{ matrix.group }}${{ matrix.overflow && ' (EC2 overflow)' || '' }}
+    name: e2e:${{ matrix.group }}${{ matrix.overflow == 'mini' && ' (mini overflow)' || matrix.overflow == 'ec2' && ' (EC2 overflow)' || '' }}
     runs-on: ${{ fromJSON(matrix.runner) }}
     # 30, a measured group's 45, a group's own on E2E_MINUTES, and on the Mac the wait bound of its instance's start on top
     # (gate-plan.mjs).
@@ -915,7 +917,7 @@ jobs:
         timeout-minutes: ${{ matrix.test_timeout || matrix.timeout }}
         env:
           SCRIPT: ${{ matrix.script }}
-          MAWS_E2E_RETRY: ${{ github.job == 'e2e' && matrix.retry && runner.os == 'macOS' && '1' || '' }}
+          MAWS_E2E_RETRY: ${{ (github.job == 'e2e' || github.job == 'e2e-vm') && matrix.retry && runner.os == 'macOS' && '1' || '' }}
           MAWS_E2E_FLAKY_FILE: ${{ runner.temp }}/maws-e2e-flaky.txt
           VARIANT: ${{ matrix.variant }}
           CACHED: ${{ matrix.cached }}
@@ -942,7 +944,7 @@ jobs:
       # One aggregate notice in its own step: GitHub caps annotations per step, so even a group with many flakes keeps
       # every location, without competing with the test command's other warnings. The summary above stays one per line.
       - name: Publish flaky tests
-        if: always() && github.job == 'e2e' && matrix.retry && runner.os == 'macOS' && steps.checkout.outcome == 'success'
+        if: always() && (github.job == 'e2e' || github.job == 'e2e-vm') && matrix.retry && runner.os == 'macOS' && steps.checkout.outcome == 'success'
         run: node scripts/ci-flaky-reporter.mjs "$RUNNER_TEMP/maws-e2e-flaky.txt"
       # LAUNCHD_E2E groups load LaunchAgents into this account. Boot out every e2e unit before stopping peer
       # processes: a spec that died before unit.remove() leaves KeepAlive set, which would relaunch a killed daemon.
@@ -987,7 +989,7 @@ jobs:
   e2e-vm:
     needs: [plan, e2e-build]
     if: needs.plan.outputs.e2e_vm != '[]'
-    name: e2e:${{ matrix.group }}
+    name: e2e:${{ matrix.group }}${{ matrix.overflow == 'mini' && ' (mini overflow)' || matrix.overflow == 'ec2' && ' (EC2 overflow)' || '' }}
     runs-on: ${{ fromJSON(matrix.runner) }}
     # As the e2e job's: 30, and on the exclusive instance's labels or the solo label its wait bound on top (gate-plan.mjs).
     timeout-minutes: ${{ matrix.timeout }}

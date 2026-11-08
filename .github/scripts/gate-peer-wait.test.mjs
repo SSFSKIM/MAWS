@@ -143,5 +143,7 @@ test('normal polling fits a sibling batch within the repository API quota; error
 });
 
 test('a peer waiter follows an overflowed peer job rather than losing its verdict', async () => {
-  assert.equal((await wait([snapshot('completed', 'success', [plan, job('e2e:cross-build (EC2 overflow)', 'completed', 'success')])])).status, 0);
+  for (const target of ['EC2', 'mini']) {
+    assert.equal((await wait([snapshot('completed', 'success', [plan, job(`e2e:cross-build (${target} overflow)`, 'completed', 'success')])])).status, 0);
+  }
 });

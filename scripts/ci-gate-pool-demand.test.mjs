@@ -296,6 +296,6 @@ test('targetOutputs passes the configured hosted quota to the committed planner'
     console.log(JSON.stringify(targetOutputs(process.argv[1], process.argv[2])));
   `, tree, sha], { encoding: 'utf8', env: { ...process.env, ...variables, HOSTED_MAC_ROUTE: 'direct', HOSTED_MAC_CAP: cap,
     HEAD_MESSAGE: `Gates: e2e:tools\nMac-Backlog: ${JSON.stringify(sample)}` } }));
-  assert.equal(JSON.parse(outputs('5').e2e)[0].overflow, true);
+  assert.equal(JSON.parse(outputs('5').e2e)[0].overflow, 'ec2');
   assert.equal(JSON.parse(outputs('50').e2e)[0].runner, '"macos-26"');
 }));

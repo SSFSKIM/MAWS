@@ -57,6 +57,7 @@ function plan(scenarioEnv) {
         MAC_HOME_E2E: '',
         LAUNCHD_E2E: '',
         MAC_EC2: '',
+        MAC_MINI_OVERFLOW: '',
         E2E_MINUTES: '',
         // The run's ref: a test chooses its own, never the ref the tests themselves run on.
         GITHUB_REF: '',
@@ -1986,7 +1987,7 @@ test('a full hosted queue overflows only to the EC2 labels, with exclusive wait 
   assert.equal(entries.length, 4);
   for (const entry of entries) {
     assert.deepEqual(JSON.parse(entry.runner), ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-ec2']);
-    assert.equal(entry.overflow, true);
+    assert.equal(entry.overflow, 'ec2');
     assert.equal(entry.hosted, undefined);
     assert.equal(entry.cached, undefined);
     assert.equal(entry.variant, undefined);
@@ -2004,7 +2005,7 @@ test('weighted expected start charges each placement to its own queue in gate or
     [10, [true, true, true, true]],
   ]) {
     const { outputs } = overflowPlan(overflowSample({ hostedQueued }));
-    assert.deepEqual(JSON.parse(outputs.e2e).map((e) => e.overflow || false), expected, `hosted queued: ${hostedQueued}`);
+    assert.deepEqual(JSON.parse(outputs.e2e).map((e) => e.overflow || false), expected.map((value) => value ? 'ec2' : false), `hosted queued: ${hostedQueued}`);
   }
 });
 test('busy EC2 with one queued stays hosted behind five busy hosted slots and one queued', () => {
@@ -2014,7 +2015,7 @@ test('busy EC2 with one queued stays hosted behind five busy hosted slots and on
 test('ties stay hosted, but an earlier weighted EC2 start overflows', () => {
   for (const [hostedQueued, ec2Queued, expected] of [[0, 0, false], [23, 10, false], [24, 10, true]]) {
     const { outputs } = overflowPlan(overflowSample({ hostedQueued, ec2Queued }));
-    assert.equal(JSON.parse(outputs.e2e)[0].overflow || false, expected);
+    assert.equal(JSON.parse(outputs.e2e)[0].overflow || false, expected ? 'ec2' : false);
   }
 });
 // API contract: the plan check's annotations expose this count without downloading its logs.
@@ -2060,14 +2061,14 @@ test('absent, invalid, failed, future and stale backlog samples fail open byte f
 test('hosted-only groups stay hosted and still count toward that queue', () => {
   const result = overflowPlan(overflowSample(), { HOSTED_MAC_ONLY_E2E: 'document settings' });
   const entries = JSON.parse(result.outputs.e2e);
-  assert.deepEqual(entries.map((e) => e.overflow || false), [false, false, true, true]);
+  assert.deepEqual(entries.map((e) => e.overflow || false), [false, false, 'ec2', 'ec2']);
   assert.equal(shadowCount(result), 2);
 });
 test('overflow never moves home, measured, live, unlisted, hosted-lane, no-hosted, final, mirror or dispatched groups', () => {
   const message = `Runner: macos\nGates: e2e:discover,e2e:artifacts-perf,e2e:default,e2e:document\nMac-Backlog: ${overflowSample()}`;
   const { outputs } = overflowPlan(overflowSample(), { HOSTED_MAC_E2E: 'document', MAC_HOME_E2E: 'discover', MEASURED_E2E: 'artifacts-perf', HEAD_MESSAGE: message });
   const entries = JSON.parse(outputs.e2e);
-  assert.deepEqual(entries.map((e) => e.overflow || false), [false, false, false, true]);
+  assert.deepEqual(entries.map((e) => e.overflow || false), [false, false, false, 'ec2']);
   assert.ok(entries.slice(0, 2).every((e) => JSON.parse(e.runner).includes('ci-kit-mac-home')));
   for (const extra of [
     { HOSTED_MAC_ROUTE: 'mirror' }, { HOSTED_MAC_E2E: '' },
@@ -2126,19 +2127,20 @@ test('e2e uploads green flaky reports and every measured JSON set, but never a p
   }
 });
 
-test('the workflow runs the same retry and flaky notice on hosted and overflow, and names overflow placement', () => {
-  const body = jobBody(readWorkflow(), 'e2e');
-  const retry = /MAWS_E2E_RETRY: \$\{\{ (.+) \}\}/.exec(body)[1];
-  const notice = /- name: Publish flaky tests\n +if: (.+)/.exec(body)[1];
-  const name = /^ +name: (.+)$/m.exec(body)[1];
-  for (const [environment, overflow] of [['github-hosted', false], ['self-hosted', true]]) {
-    const runner = { os: 'macOS', environment };
+test('the workflow names both overflow targets and retains retries on host and guest jobs', () => {
+  const workflow = readWorkflow();
+  const steps = jobBody(workflow, 'e2e');
+  const retry = /MAWS_E2E_RETRY: \$\{\{ (.+) \}\}/.exec(steps)[1];
+  const notice = /- name: Publish flaky tests\n +if: (.+)/.exec(steps)[1];
+  for (const job of ['e2e', 'e2e-vm']) for (const overflow of [false, 'ec2', 'mini']) {
+    const runner = { os: 'macOS', environment: overflow ? 'self-hosted' : 'github-hosted' };
     const matrix = { group: 'document', retry: true, overflow };
-    const github = { job: 'e2e' };
+    const github = { job };
     assert.equal(Function('matrix', 'runner', 'github', `return (${retry})`)(matrix, runner, github), '1');
     assert.equal(Function('matrix', 'runner', 'github', 'steps', 'always', `return (${notice})`)(matrix, runner, github, { checkout: { outcome: 'success' } }, () => true), true);
+    const name = /^ +name: (.+)$/m.exec(jobBody(workflow, job))[1];
     const rendered = name.replace(/\$\{\{ (.*?) \}\}/g, (_, expression) => Function('matrix', `return (${expression})`)(matrix));
-    assert.equal(rendered, `e2e:document${overflow ? ' (EC2 overflow)' : ''}`);
+    assert.equal(rendered, `e2e:document${overflow ? ` (${overflow === 'ec2' ? 'EC2' : 'mini'} overflow)` : ''}`);
     assert.equal(Function('matrix', 'runner', 'github', `return (${retry})`)({ ...matrix, retry: false }, runner, github), '');
   }
 });
@@ -2240,7 +2242,7 @@ test('listed hosted and overflow entries retain their placement and carry the sw
     const { outputs } = launchdPlan(env);
     for (const key of ['e2e', 'e2e_host']) for (const entry of JSON.parse(outputs[key])) {
       assert.equal(entry.launchd === true, entry.group !== 'library');
-      assert.equal(entry.overflow === true, overflow);
+      assert.equal(entry.overflow === 'ec2', overflow);
       assert.deepEqual(JSON.parse(entry.runner), overflow ? ec2Mac : 'macos-26');
       assert.equal(entry.retry, true);
     }
@@ -2285,4 +2287,71 @@ test('MAC_EC2 off keeps every optional overflow hosted, including LAUNCHD_E2E, w
     assert.equal(entry.launchd === true, entry.group !== 'library');
   }
   assert.equal(result.overflowShadowCount, 3);
+});
+
+const miniSample = (overrides = {}) => overflowSample({ v: 2, mini: 'idle', miniQueued: 0, miniRunning: 0, miniHost: 'free', miniVm: 'free', ...overrides });
+test('mini wins equal self-hosted starts, and each chosen target charges only its own queue', () => {
+  const result = overflowPlan(miniSample({ hostedQueued: 4 }));
+  assert.deepEqual(JSON.parse(result.outputs.e2e).map((entry) => entry.overflow || false), ['mini', 'ec2', 'mini', 'ec2']);
+  assert.match(result.summary, /mini overflow.*e2e:document.*e2e:tools/);
+  assert.match(result.summary, /mini idle, 0 queued \+ 0 running/);
+  assert.equal(shadowCount(result), 1);
+});
+test('released EC2 leaves mini overflow enabled with normal host placement and hosted retry', () => {
+  const entries = JSON.parse(overflowPlan(miniSample(), { MAC_EC2: 'off' }).outputs.e2e);
+  assert.equal(entries.length, 4);
+  for (const entry of entries) {
+    assert.equal(entry.overflow, 'mini');
+    assert.deepEqual(JSON.parse(entry.runner), ['self-hosted', 'macOS', 'ARM64']);
+    assert.equal(entry.timeout, 40);
+    assert.equal(entry.retry, true);
+    assert.equal(entry.hosted, undefined);
+  }
+});
+test('mini running, queued and assigned jobs delay its start, and ties stay hosted', () => {
+  for (const [patch, expected] of [[{ hostedQueued: 0 }, false], [{ hostedQueued: 23, miniRunning: 1, miniQueued: 9 }, false], [{ hostedQueued: 24, miniRunning: 1, miniQueued: 9 }, 'mini'], [{ miniRunning: 9 }, false], [{ miniQueued: 9 }, false]]) {
+    const entries = JSON.parse(overflowPlan(miniSample(patch), { MAC_EC2: 'off' }).outputs.e2e);
+    assert.equal(entries[0].overflow || false, expected, JSON.stringify(patch));
+  }
+  assert.equal(JSON.parse(overflowPlan(miniSample({ miniRunning: 1 })).outputs.e2e)[0].overflow, 'ec2');
+});
+test('mini off, offline, legacy samples and hosted-only groups cannot overflow to mini', () => {
+  for (const [sample, extra] of [[miniSample(), { MAC_MINI_OVERFLOW: 'off' }], [miniSample({ mini: 'offline' }), {}], [overflowSample(), {}], [miniSample(), { HOSTED_MAC_ONLY_E2E: 'document settings tools library' }]]) {
+    assert.ok(JSON.parse(overflowPlan(sample, { MAC_EC2: 'off', ...extra }).outputs.e2e).every((entry) => entry.hosted && !entry.overflow));
+  }
+});
+test('mini overflow uses guest placement, build variant and uplink timeout for MAC_VM_E2E', () => {
+  const outputs = overflowPlan(miniSample(), { MAC_EC2: 'off', MAC_VM_E2E: 'document' }).outputs;
+  const [entry] = JSON.parse(outputs.e2e_vm);
+  assert.equal(entry.group, 'document');
+  assert.equal(entry.overflow, 'mini');
+  assert.deepEqual(JSON.parse(entry.runner), ['ci-kit-mac-solo']);
+  assert.equal(entry.variant, 'harness');
+  assert.equal(entry.retry, true);
+  assert.equal(entry.test_timeout, 40);
+  assert.equal(entry.timeout, 75);
+  assert.deepEqual(JSON.parse(outputs.e2e_build), ['harness']);
+});
+test('mini overflow preserves lane, final, dispatch and eligibility exclusions', () => {
+  const sample = miniSample();
+  const message = `Runner: macos\nGates: e2e:document\nMac-Backlog: ${sample}`;
+  for (const extra of [{ HEAD_MESSAGE: `${message}\nLane: hosted` }, { HEAD_MESSAGE: `${message}\nLane: no-hosted` }, { GITHUB_REF: 'refs/heads/ci/h-final-test' }, { EVENT: 'workflow_dispatch', INPUT_RUNNER: 'macos', INPUT_GATES: 'e2e:document' }, { HOSTED_MAC_ROUTE: 'mirror' }, { HOSTED_MAC_E2E: '', MAC_HOME_E2E: 'document' }, { HOSTED_MAC_E2E: '', MEASURED_E2E: 'document' }]) {
+    assert.ok(JSON.parse(overflowPlan(sample, { HEAD_MESSAGE: message, MAC_EC2: 'off', ...extra }).outputs.e2e).every((entry) => !entry.overflow));
+  }
+});
+test('a launchd group requiring EC2 cannot be mislabeled as mini overflow', () => {
+  const result = overflowPlan(miniSample(), { MAC_EC2: 'off', LAUNCHD_E2E: 'document' });
+  assert.equal(JSON.parse(result.outputs.e2e)[0].hosted, true);
+});
+
+test('mini overflow requires the published availability of every lane its labels can reach', () => {
+  for (const [extra, patch, expected] of [
+    [{}, { miniHost: 'held' }, false], [{}, { miniVm: 'held' }, 'mini'],
+    [{ MAC_VM_E2E: 'document' }, { miniHost: 'held' }, false], [{ MAC_VM_E2E: 'document' }, { miniVm: 'held' }, false],
+    [{ MAC_VM_E2E: 'document', LAUNCHD_E2E: 'document' }, { miniHost: 'held' }, 'mini'],
+    [{ MAC_VM_E2E: 'document', LAUNCHD_E2E: 'document' }, { miniVm: 'held' }, false],
+  ]) {
+    const result = overflowPlan(miniSample(patch), { MAC_EC2: 'off', ...extra });
+    assert.equal(JSON.parse(result.outputs.e2e)[0].overflow || false, expected, JSON.stringify([extra, patch]));
+  }
 });

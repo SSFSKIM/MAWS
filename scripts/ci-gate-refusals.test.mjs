@@ -200,9 +200,11 @@ test('a refused admission run relaunches with its explicit hosted route', () => 
 });
 
 test('overflow placement stays visible but relaunch gates and default-beside use bare group names', () => {
-  const out = refusals(['failure\te2e:default', 'failure\te2e:tools (EC2 overflow)', 'success\te2e:side (EC2 overflow)'], [refusal('e2e:default'), red('e2e:tools (EC2 overflow)')]);
-  assert.match(out, /red \(1\): e2e:tools \(EC2 overflow\)/);
-  assert.match(out, / --gates e2e:default,e2e:tools --default-beside tools,side --label /);
+  for (const target of ['EC2', 'mini']) {
+    const out = refusals(['failure\te2e:default', `failure\te2e:tools (${target} overflow)`, `success\te2e:side (${target} overflow)`], [refusal('e2e:default'), red(`e2e:tools (${target} overflow)`)]);
+    assert.ok(out.includes(`red (1): e2e:tools (${target} overflow)`));
+    assert.match(out, / --gates e2e:default,e2e:tools --default-beside tools,side --label /);
+  }
 });
 
 // A mixed run can have a refused mini job beside failed hosted packaged shards.
