@@ -2761,6 +2761,67 @@ describe('M4b: a drop that settles later (the fix wave)', () => {
     expect(await session.dropRetry('mini')).toEqual({ ok: true });
   });
 
+  /** `name` listed again under its bound ref (a new key), as another root's re-enrollment lands it. */
+  const relisted = async (name: string, ref: string) =>
+    successor(hub.head, [a1], async (s) => void s.machines.push({ name, ref, pub: (await generateSigningKey()).pub, owners: [A] }));
+
+  it('a drop adopted in the same chain read as a re-enrollment of its name sends no delete: the row is the new listing\'s', async () => {
+    const { session, feed, ref } = await pendingDrop();
+    // the drop reached the hub another way, and another root re-enrolled mini after it: one read takes both
+    hub.chain.push((await readJson<SigningFile>(SIGNING_FILE)).pending!.signed);
+    hub.chain.push(await relisted('mini', ref));
+    hub.postAnswer = undefined;
+    feed.state(hub.head.state.version);
+    await until(() => signerOf(session).pending === null && headVersion(session) === hub.head.state.version, 'settled under the re-listing');
+    await pause(50);
+    expect(deletes()).toEqual([]);
+    expect(hub.rows.has('mini')).toBe(true);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it('a re-listing that lands while a settled drop\'s delete waits its turn sends no delete for it', async () => {
+    const { session, feed } = await signingRoot();
+    const { ref: studio } = await addMachine(session, feed, 'studio');
+    const { ref } = await addMachine(session, feed);
+    const gate = { open: () => {} };
+    const held = new Promise<void>((resolve) => (gate.open = resolve));
+    hub.deleteAnswer = async (name) => (name === 'studio' ? (await held, undefined) : undefined);
+    const drop = async (target: string) => {
+      const preview = await session.preview({ kind: 'machine.drop', ref: target, revoke: false });
+      if (!preview.ok) throw new Error(JSON.stringify(preview));
+      return session.change(preview.change, preview.digest);
+    };
+    const first = drop(studio);
+    await until(() => deletes().length === 1, "studio's delete out");
+    const second = drop(ref);
+    await until(() => signerOf(session).pending === null && !hub.head.state.machines.some((m) => m.name === 'mini') && headVersion(session) === hub.head.state.version, "mini's drop settled, its delete queued");
+    hub.chain.push(await relisted('mini', ref));
+    feed.state(hub.head.state.version);
+    await until(() => headVersion(session) === hub.head.state.version, 'the re-listing held');
+    gate.open();
+    expect(await first).toMatchObject({ ok: true });
+    expect(await second).toMatchObject({ ok: true });
+    expect(deletes()).toEqual(['/api/machines/studio']);
+    expect(hub.rows.has('mini')).toBe(true);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it('Retry on a name listed again sends nothing and takes the row off the status', async () => {
+    const { session, feed, ref } = await pendingDrop();
+    hub.postAnswer = undefined;
+    hub.deleteAnswer = () => worker(503, { error: 'hub-updating' });
+    feed.open();
+    await until(() => registered(session).hubRowsLeft.length === 1, 'the row left');
+    hub.chain.push(await relisted('mini', ref));
+    feed.state(hub.head.state.version);
+    await until(() => headVersion(session) === hub.head.state.version, 'the re-listing held');
+    hub.deleteAnswer = undefined;
+    expect(await session.dropRetry('mini')).toMatchObject({ ok: false, reason: 'none' });
+    expect(registered(session).hubRowsLeft).toEqual([]);
+    expect(deletes()).toEqual(['/api/machines/mini']); // the settlement's failed one alone
+    expect(hub.rows.has('mini')).toBe(true);
+  });
+
   it('a sign-out between the sign and the settlement: the row goes when the next sign-in settles the drop', async () => {
     const { session, feed } = await pendingDrop();
     await session.signOut();

@@ -47,8 +47,9 @@
 // do, with the held certificates (a certified machine is its delegation's) and this Mac's own machine ref (`local`), but
 // `machine.add` and `machine.replace`, which only an enrollment composes from the key it checked (enroll.ts, a part as
 // the pairing is). A `machine.drop`'s slot carries the machine's hub row, which is deleted once the signer settles that
-// very state (at once, at a later settle, or at a start after a relaunch; never for a discarded or forked proposal); a
-// delete that fails leaves its name on the status (`hubRowsLeft`) for `dropRetry`, which calls the route alone.
+// very state (at once, at a later settle, or at a start after a relaunch; never for a discarded or forked proposal, nor
+// once the held head lists the name again); a delete that fails leaves its name on the status (`hubRowsLeft`) for
+// `dropRetry`, which calls the route alone.
 //
 // Electron-free: the browser opener, the step-up signer, the state signer, focus, notifications and the RL2 links are
 // injected from main.
@@ -1121,6 +1122,19 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
 
   /** The hub row of a machine just dropped, deleted as `machine drop` deletes it: 200, or 404 for a row already gone. */
   async function deleteRow(row: { name: string; ref: string }): Promise<DropRetryResult> {
+    // The route is keyed by name: once the held head lists the name again (a re-enrollment, adopted with the drop or
+    // after it), the row is that machine's, and deleting it would revoke its live credential. Checked just before the
+    // send, on every path (the settlement, its queue, Retry).
+    const head = heldView()?.head().state ?? null;
+    if (head !== null && head.machines.some((m) => machineNameKey(m.name) === machineNameKey(row.name))) {
+      log(`the org lists ${row.name} again: its hub row is that machine's, and is not deleted`);
+      const left = hubRowsLeft.filter((r) => r.name !== row.name);
+      if (left.length !== hubRowsLeft.length) {
+        hubRowsLeft = left;
+        changed();
+      }
+      return { ok: false, reason: 'none', detail: `the org lists ${row.name} again: its hub row is that machine's` };
+    }
     const hub = signerHub();
     const asked = signIns;
     const deleted: HubResult<'deleted' | 'absent'> = hub === null ? { ok: false, kind: 'unreachable', detail: 'no hub sign-in' } : await hub.deleteMachine(row.name);
@@ -1144,12 +1158,6 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   async function dropRetry(name: string): Promise<DropRetryResult> {
     const row = hubRowsLeft.find((r) => r.name === name);
     if (row === undefined) return { ok: false, reason: 'none', detail: "no dropped machine of that name awaits its hub row's delete" };
-    const head = heldView()?.head().state ?? null;
-    if (head !== null && head.machines.some((m) => machineNameKey(m.name) === machineNameKey(name))) {
-      hubRowsLeft = hubRowsLeft.filter((r) => r !== row);
-      changed();
-      return { ok: false, reason: 'none', detail: `the org lists ${name} again: its hub row is that machine's` };
-    }
     return deleteRow(row);
   }
 
