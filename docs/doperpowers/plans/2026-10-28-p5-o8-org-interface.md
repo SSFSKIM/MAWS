@@ -117,6 +117,9 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-08) The final gate at 169108598 (`--gates all --evidence --lane hosted`, run 42438203920) is green on its first attempt: 55 jobs, with 2 matrix placeholders skipped and no flaky line. The commits after it are docs only. The PR is opened. The shared staging run is on the branch head (Decision Log, "M6b lands before the shared run", amended).
 - [ ] M4b — Machines and their rights — *executable; after M6b*
   - [x] (2026-11-08) Refresh at the cut: branch `p5-o8-m4b`, cut from master bd2b59baa after M6b landed as #522. The cited lines were reconciled, the parent was re-pinned at Decision Log 251, and the plan made: six tasks (Decision Log, "M4b's refresh at its cut" and "M4b is built as six tasks").
+  - [x] (2026-11-08) Task 1, reviewed clean. Commits: 099c7cf77 (the move), 0ad9a8ff5 (`grantProblems`), b2ddf6b1d (a type-only fix) and 3112033dd (the review's I1, canonicalizability). All four are `apps/org-protocol` and `apps/desk-hub`, for the desk track.
+    - Our task reviewer took two rounds: I1 was fixed, and I2 was dismissed under the recorded decision. Its external adversarial cases pass 6/6.
+    - Static and unit are green at 3112033dd (42446714963).
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
 - [ ] M5b — Add owner — *executable; after M4c; lands once the desk track's `record.owners` executor and DL190 (b)'s fix are on master*
 - [ ] M8 — The deployment admin's end, and acceptance — *owner steps and evidence; last; needs O14's B4 steps 4 to 8 and M3's root-add sitting (its first step)*
