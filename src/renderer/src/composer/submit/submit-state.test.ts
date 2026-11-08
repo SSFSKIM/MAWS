@@ -218,6 +218,19 @@ describe('a session driven through its holder (lane A)', () => {
   });
 });
 
+// Board 525: another member's session whose machine refused the member's words at their grade: Send is closed with why
+// and whom to ask, on either lane, in every turn state (Stop too: below Converse the machine takes no interrupt either).
+describe('a session the member can read but not talk to', () => {
+  const closed = 'You can read this session but not talk to its agent. Ask Ana for Converse.';
+  it('closes Send with the words, idle or running, empty or not, lane A or lane B', () => {
+    const shut = ['send', 'Send', false, closed, false];
+    expect(row({ closed })).toEqual(shut);
+    expect(row({ closed, status: turning, empty: true })).toEqual(shut);
+    expect(row({ closed, status: null, availability: 'foreign_held', driven: { running: true, send: { available: true }, stop: { available: true } } })).toEqual(shut);
+    expect(row({ closed: null })).toEqual(['send', 'Send', true, null, false]);
+  });
+});
+
 // P5 O7 M8 ("The offer audit and its contract"): `session.bash` and `session.memoryAppend` are declared not offered on
 // another machine (REMOTE_UNAVAILABLE); the composer answers why for the mode it is in, and Run and Save to memory are
 // greyed with those words, ready, busy, or with no ready process to acquire

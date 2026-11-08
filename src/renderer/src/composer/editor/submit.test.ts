@@ -6,7 +6,16 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { useNotices } from '../../stores/notices';
 import { memoryTargetLabel, memoryTargetOptions } from '../modes/memory';
 import type { Serialized } from './serialize';
-import { submitSerialized } from './submit';
+import { submitHumanSerialized, submitSerialized } from './submit';
+import { addressOf } from '@shared/machine/address'; // board 525
+import { remoteRow } from '../../../../../test/support/builders'; // board 525
+import { OTHER_MACHINE } from '../../../../../test/support/machine'; // board 525
+import type { SessionControls } from '../../session/controls/types'; // board 525
+import { learnReaderGrade, resetReader, useReader } from '../../sessions/share/reader'; // board 525
+import { useSessions } from '../../stores/sessions'; // board 525
+import { controlsFor } from '../../session/controls/controls-for'; // board 525
+import { laneAState } from '../../lane-a/test-support/lane-a-state'; // board 525
+import { fakeClient } from '../../../../../test/support/fake-client'; // board 525
 
 const APP = 'app-1' as AppSessionId;
 
@@ -139,3 +148,49 @@ describe('the # target menu', () => {
     expect(memoryTargetLabel({ kind: 'user', path: null }, [])).toBe('User memory');
   });
 });
+
+// Board 525: another machine's terminal session has no record, and a send it refused is said all the same, never
+// nothing; one refused at the member's grade there offers no Retry. An unstarted session with no record stays quiet. A
+// prompt the host took for another member's session is kept as the member's own.
+describe('a session on another machine with no record', () => {
+  const REMOTE = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+  const port = (result: object) => ({ send: vi.fn(async () => result) }) as unknown as SessionControls;
+  const actions = () => useNotices.getState().notices.map((n) => n.actions.map((a) => a.label));
+  beforeEach(() => {
+    resetReader();
+    useSessions.setState({ records: new Map(), listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', owners: ['member-ana'], mine: false }), appId: REMOTE }]]), member: 'member-me' });
+  });
+
+  it('says a refused send, with Retry, and without it once the member’s grade there refused it', async () => {
+    const { bridge } = client();
+    const retry = () => {};
+    expect(await submitHumanSerialized(port({ disposition: 'refused', started: false, reason: 'mini isn’t reachable' }), bridge, REMOTE, serialized({}), retry)).toBe(false);
+    expect(toasts()).toEqual(['mini isn’t reachable']);
+    expect(actions()[0]).toHaveLength(1);
+    useNotices.setState({ notices: [] });
+    learnReaderGrade(REMOTE, 'view');
+    await submitHumanSerialized(port({ disposition: 'refused', started: false, reason: 'Not sent: no' }), bridge, REMOTE, serialized({}), retry);
+    expect(toasts()).toEqual(['Not sent: no']);
+    expect(actions()[0]).toEqual([]);
+  });
+
+  it('stays quiet for a session that is neither recorded nor on another machine', async () => {
+    const { bridge } = client();
+    await submitHumanSerialized(port({ disposition: 'refused', started: false, reason: 'held' }), bridge, 'app-unstarted' as AppSessionId, serialized({}));
+    expect(toasts()).toEqual([]);
+  });
+
+  // The port keeps what the host took as the member's own (controls-for.ts), so the composer's submit does not: a port
+  // handed to it directly notes nothing, one from `controlsFor` does, whoever sends.
+  it('leaves keeping the member’s own prompt to the port', async () => {
+    const { bridge } = client();
+    expect(await submitHumanSerialized(port({ disposition: 'sent', started: false, messageUuid: 'uuid-sent' }), bridge, REMOTE, serialized({}))).toBe(true);
+    expect(useReader.getState().sent.size).toBe(0);
+    const fake = fakeClient({ 'laneA.send': { key: { writer: 'maws/m', seq: 1 }, state: 'entered', uuid: 'uuid-port' } });
+    const live = laneAState(REMOTE, { link: { state: 'up', refusal: null, carrier: 'direct', member: 'member-me', clientClass: 'native-mac', rights: [], reason: null }, acts: [] });
+    const real = controlsFor(null, live, { appSessionId: REMOTE, client: fake.client })!;
+    expect(await submitHumanSerialized(real, bridge, REMOTE, serialized({}))).toBe(true);
+    expect(useReader.getState().sent.get(REMOTE)).toEqual(new Set(['uuid-port']));
+  });
+});
+

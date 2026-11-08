@@ -21,6 +21,7 @@ import { UNRESOLVED_MAX } from './remote-spawn';
 import { startNotifier } from '../attention/notifier';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { READ_REFUSED } from '@shared/org/reader'; // board #525
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -35,7 +36,7 @@ const tabsOf = (...apps: string[]) => {
 };
 const permission: SessionEvent = { id: `${APP}:L1:3:0`, sessionId: `eng-${APP}`, at: '2026-10-31T00:00:00.000Z', seq: 3, agentId: null, parentToolUseId: null, kind: 'permission.requested', requestId: 'req-1', toolUseId: 'tu-1', toolName: 'Bash', displayName: null, input: { command: 'ls' }, description: null, decisionReasonType: null, suggestions: [], blockedPath: null } as unknown as SessionEvent;
 
-function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemoteLaneB>[0]['timing']; laneA?: string[] } = {}) {
+function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemoteLaneB>[0]['timing']; laneA?: string[]; others?: string[] } = {}) {
   const link = new FakeLink();
   let links: Map<MachineRef, FakeLink> = new Map([[MINI, link]]);
   const remoteListeners = new Set<(machines: readonly MachineRef[]) => void>();
@@ -55,6 +56,7 @@ function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemote
       emitted.push({ machine, name, payload: payload as Record<string, unknown> });
     },
     laneOf: (machine, session) => (machine === MINI && options.laneA?.includes(session) ? 'A' : null),
+    othersOf: (machine, session) => machine === MINI && options.others?.includes(session) === true, // board #525
     timing: { sendPendingMs: 60_000, ...options.timing },
     log: (line) => void logs.push(line),
   });
@@ -516,6 +518,17 @@ describe('the checkout and the spawn (M4)', () => {
     expect(reasonOf('app-new')).toBeNull();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(reasonOf('app-unplaced')).toBe('mini can’t place this session');
+  });
+
+  // Board #525: a session the org rows list as another member's says its refused read as the reader's grade, at once.
+  it('says a `grade` refusal of another member’s session’s record as READ_REFUSED, and of the member’s own as not placed yet', async () => {
+    const l = lab({ tabs: [], others: ['app-theirs'] });
+    l.link.answers.set('session.get', () => ({ ok: false, error: { code: 'grade' } }));
+    const reasonOf = (app: string) => l.of('remote.session').filter((p) => p.address === app).at(-1)?.reason;
+    l.setTabs('app-theirs', 'app-mine');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(reasonOf('app-theirs')).toBe(READ_REFUSED);
+    expect(reasonOf('app-mine')).toBe('Opening on mini…');
   });
 
   // M4c fix wave 2 (the architect's rulings): a New chat tab's spawn is one attempt, kept by the tab it is made from (the

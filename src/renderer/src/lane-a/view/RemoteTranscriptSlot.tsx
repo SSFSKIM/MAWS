@@ -18,6 +18,7 @@ import { drawnRows } from './drawn-rows';
 import { useKeepPlaceThroughOlderRows } from './keep-place';
 import { useOlderPages } from './older-pages';
 import { LANE_A_WORDS } from '../../session/controls/lane-a';
+import { usePromptAuthor } from '../../sessions/share/reader'; // board 525
 
 const NO_ROWS: readonly Row[] = [];
 
@@ -35,6 +36,7 @@ export function RemoteTranscriptSlot({ appSessionId, className, startAt, present
   const filesReason = filesGap !== null && !filesGap.available ? filesGap.reason : null;
   const rewind = useMemo(() => ({ ...ipcRewind(appSessionId), unavailable: filesReason }), [appSessionId, filesReason]);
   const streaming = useLaneAStreaming(appSessionId, storeKey);
+  const promptAuthor = usePromptAuthor(appSessionId); // board 525: another member's session names its prompts' authors
   // Older rows when the reader reaches the top, while what is drawn does not fill the pane, and after a page that drew
   // nothing new; the reader's place kept through each (the desk's own rules, lifted with the plane transcript).
   const list = useRef<TranscriptListHandle>(null);
@@ -71,6 +73,7 @@ export function RemoteTranscriptSlot({ appSessionId, className, startAt, present
         presentation={presentation}
         atRest={atRest}
         placed={streaming.kept}
+        promptAuthor={promptAuthor}
       />
     </>
   );

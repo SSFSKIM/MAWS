@@ -26,6 +26,7 @@ import { DEFAULT_ACTIONS, registerRequestRenderer, registerTranscriptActions, Tr
 import { BASH_RESULT, builder, request, task, tool, uuid } from '../model/test-events';
 import type { Row } from '../model/rows';
 import { registeredActions } from './registry';
+import { noteOwnPrompt, resetReader } from '../../sessions/share/reader'; // board 525
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
 beforeAll(() => {
@@ -670,3 +671,67 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
     });
   });
 });
+
+// Board 525: a prompt in a session another member owns is named by its author as the reader names them, lane A and lane
+// B alike: its owners, since no prompt carries its author, but a prompt this app sent, which is the reader's own.
+describe('who wrote a prompt there', () => {
+  const ANA = { id: 'member-ana', email: 'ana@example.test', name: 'Ana' };
+  const owners = (mine: boolean) => ({ owners: [mine ? 'member-me' : ANA.id], mine });
+  const people = { members: new Map([[ANA.id, ANA]]), member: 'member-me' };
+  afterEach(() => {
+    resetReader();
+    resetRemoteTranscripts();
+    resetLaneAWatches();
+    resetLaneAStore();
+    useSessions.setState({ listed: new Map(), records: new Map(), members: new Map(), member: null });
+  });
+  const named = () => screen.getAllByRole('region').filter((r) => r.classList.contains('transcript-user')).map((r) => [r.getAttribute('aria-label'), r.querySelector('.transcript-user-author')?.textContent ?? null]);
+
+  it('lane B: names another member’s prompts by their owner, a prompt this app sent as “Your message”', async () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-b' as AppSessionId);
+    useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'app-b', owners(false)), appId: REMOTE }]]), ...people });
+    const b = builder();
+    b.turn('u1', 'Rename the module');
+    b.text('m1', 0, 'Renamed.');
+    b.end(['u1']);
+    b.turn('u2', 'And its tests');
+    b.text('m2', 0, 'Done.');
+    b.end(['u2']);
+    noteOwnPrompt(REMOTE, uuid('u2'));
+    const answers: Record<string, unknown> = { 'session.events': { events: b.events, lastSeq: b.events.length, complete: true }, 'session.appEvents': { events: [] }, 'session.queue.list': { entries: [], paused: false, pauseReason: null, steers: [], withdrawn: [] } };
+    const invoke = vi.fn((name: string) => Promise.resolve(name in answers ? { ok: true, value: answers[name] } : { ok: false, error: { code: 'internal', message: 'unexpected' } }));
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
+    render(<TranscriptSlot appSessionId={REMOTE} />);
+    await settle();
+    await settle();
+    expect(named()).toEqual([["Ana's message", 'Ana'], ['Your message', null]]);
+  });
+
+  it('lane A: names another member’s terminal prompts by their owner; the member’s own session’s read “Your message”', async () => {
+    const REMOTE = addressOf(OTHER_MACHINE, SESSION as AppSessionId);
+    const show = async (mine: boolean) => {
+      useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, SESSION, { lane: 'A', availability: 'foreign_held', ...owners(mine) }), appId: REMOTE }]]), ...people });
+      const listeners = new Map<string, (payload: unknown, machine: string) => void>();
+      const invoke = vi.fn((name: string) => Promise.resolve(name === 'laneA.watch' ? { ok: true, value: { watch: 'w1' } } : { ok: false, error: { code: 'internal', message: 'unexpected' } }));
+      const on = vi.fn((name: string, listener: (payload: unknown, machine: string) => void) => (listeners.set(name, listener), () => {}));
+      window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
+      const view = render(<TranscriptSlot appSessionId={REMOTE} />);
+      await settle();
+      const c = new Chain(mine ? 'c4a1f300' : 'c4a1f200', 'sminos');
+      c.prompt('List the files.');
+      c.answer('Two files.');
+      const snapshot = { project: 'p', machine: OTHER_MACHINE, session: SESSION, kind: 'snapshot', sub: 'up-1', n: 0, body: { rows: [...c.rows].reverse(), more: false, subagents: [], presence: { record: { status: 'idle' }, bridge: true }, streaming: [] } };
+      act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'w1', messages: [snapshot] }, OTHER_MACHINE));
+      await settle();
+      await settle();
+      const seen = named();
+      view.unmount();
+      resetRemoteTranscripts();
+      resetLaneAWatches();
+      return seen;
+    };
+    expect(await show(false)).toEqual([["Ana's message", 'Ana']]);
+    expect(await show(true)).toEqual([['Your message', null]]);
+  });
+});
+

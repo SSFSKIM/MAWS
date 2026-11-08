@@ -160,6 +160,8 @@ export interface RemoteLaneBDeps {
    * spawned may be listed later). `refresh` reads the tabs again once the rows changed.
    */
   laneOf?(machine: MachineRef, session: string): 'A' | 'B' | null;
+  /** Board #525: whether the org rows list the machine's session as another member's (not the signed-in member's). */
+  othersOf?(machine: MachineRef, session: string): boolean;
   /** P5 O7 M3: a forwarded port's local listener; src/main/forwards.ts's by default. */
   listen?(onConnection: (socket: Socket) => void): Promise<LocalListener>;
   /** P5 O7 M5a: which machine an artifact is on, written here alone (a table of its own by default). */
@@ -398,6 +400,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
         followed: () => checkout.follows(machine, app), // its record, which an idle stream waits for
         attentionFed: () => attention.fed(machine), // fix waves 1, 5: the feed's items are the session's attention once fed
         attentionChanged: () => attention.streamsChanged(machine, app), // fix wave 4: the badge and the notifier hear them
+        othersSession: () => deps.othersOf?.(machine, app) ?? false, // board #525: a refused read is a reader's grade only there
         log: deps.log,
       });
       lanes.set(app, (lane = { session, open: false, sends: [], sending: false, acquiring: null }));

@@ -17,6 +17,12 @@ import { useLayout } from '../stores/layout';
 import { connectRemoteLaneB } from '../lane-b/remote-connect';
 import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session';
 import { remoteSessionState } from '../lane-b/test-support/remote-session';
+import { useEffect } from 'react'; // board 525
+import { READ_REFUSED } from '@shared/org/reader'; // board 525
+import { resetLaneAWatches, watchLaneA } from '../lane-a/watches'; // board 525
+import { READER } from '../sessions/share/copy'; // board 525
+import { resetReader } from '../sessions/share/reader'; // board 525
+import { connectReaderGrades, resetReaderPanes } from '../sessions/share/reader-connect'; // board 525
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => pageScenario(nine).sessions.find((r) => r.title.text === title)!.appId; // P5 O6 M2: the page's id
@@ -182,6 +188,101 @@ describe('session pane', () => {
       render(<SessionPane appSessionId={REMOTE} paneIndex={0} />);
       expect(screen.getByRole('status').textContent).toContain('This Mac is no longer allowed on mini');
       expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    });
+  });
+
+  // Board 525: another member's session whose read its machine refused at the member's grade (Can message) says what the
+  // member can do there and whom to ask for View, with no transcript and no composer, and asks nothing more of the machine
+  // until a listing change, a sign-in or a reopen asks afresh. An owner's `grade` is the machine not holding the record
+  // yet: their pane reads on.
+  describe('a session the member can only message', () => {
+    const ANA = { id: 'member-ana', email: 'ana@example.test', name: 'Ana' };
+    const REMOTE = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+    let fake: ReturnType<typeof fakeClient>;
+    let off: () => void = () => {};
+    const listA = (over: { mine?: boolean; revision?: number } = {}) =>
+      useSessions.setState({
+        listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held', owners: over.mine ? ['member-me'] : [ANA.id], mine: over.mine ?? false, revision: over.revision ?? 1 }), appId: REMOTE }]]),
+        members: new Map([[ANA.id, ANA]]),
+        member: 'member-me',
+      });
+    // the transcript slot holds the page's watch of the session, as the real one does
+    function WatchingTranscript({ appSessionId }: { appSessionId: AppSessionId }) {
+      useEffect(() => watchLaneA(appSessionId, () => {}, { client: fake.client }), [appSessionId]);
+      return <p>transcript {appSessionId}</p>;
+    }
+    beforeEach(() => {
+      fake = fakeClient({ 'laneA.watch': { watch: 'w1' }, 'laneA.unwatch': undefined, 'session.get': null, 'layout.set': undefined });
+      registerSlot('transcript', WatchingTranscript);
+      off = connectReaderGrades(() => {});
+    });
+    afterEach(() => {
+      off();
+      resetLaneAWatches();
+      resetReader();
+      resetReaderPanes();
+      resetRemoteLaneBStore();
+      useSessions.setState({ listed: new Map(), members: new Map(), member: null });
+    });
+    const refuse = async () => {
+      await act(async () => {});
+      act(() => fake.event('laneA.plane', { appSessionId: REMOTE, watch: 'w1', paused: 'grade' }, OTHER_MACHINE));
+    };
+
+    it('lane A: says the member can’t read it and whom to ask for View, lets the watch go and opens none', async () => {
+      listA();
+      render(<SessionPane appSessionId={REMOTE} paneIndex={0} />);
+      expect(screen.getByText(`transcript ${REMOTE}`)).toBeTruthy();
+      await refuse();
+      const notice = screen.getByRole('status', { name: 'Your access' });
+      expect(notice.textContent).toContain(READER.cantRead);
+      expect(notice.textContent).toContain('Ask Ana for View to read it.');
+      expect(screen.queryByText(`transcript ${REMOTE}`)).toBeNull();
+      expect(screen.queryByText('Composer unavailable')).toBeNull();
+      expect(fake.invoked('laneA.unwatch')).toEqual([{ appSessionId: REMOTE, watch: 'w1' }]);
+      await act(async () => {});
+      expect(fake.invoked('laneA.watch')).toHaveLength(1);
+    });
+
+    it('lane A: reads on for an owner, whose `grade` is the machine not holding the record yet', async () => {
+      listA({ mine: true });
+      render(<SessionPane appSessionId={REMOTE} paneIndex={0} />);
+      await refuse();
+      expect(screen.getByText(`transcript ${REMOTE}`)).toBeTruthy();
+      expect(screen.queryByRole('status', { name: 'Your access' })).toBeNull();
+      expect(fake.invoked('laneA.unwatch')).toEqual([]);
+    });
+
+    it('lane A: reads again when the session’s listing moves (a share raised), and at a reopen', async () => {
+      listA();
+      const pane = render(<SessionPane appSessionId={REMOTE} paneIndex={0} />);
+      await refuse();
+      act(() => listA({ revision: 2 }));
+      await act(async () => {});
+      expect(screen.getByText(`transcript ${REMOTE}`)).toBeTruthy();
+      expect(fake.invoked('laneA.watch')).toHaveLength(2);
+      await refuse();
+      expect(screen.getByRole('status', { name: 'Your access' })).toBeTruthy();
+      pane.unmount();
+      render(<SessionPane appSessionId={REMOTE} paneIndex={0} />);
+      await act(async () => {});
+      expect(screen.getByText(`transcript ${REMOTE}`)).toBeTruthy();
+      expect(fake.invoked('laneA.watch')).toHaveLength(3);
+    });
+
+    it('lane B: main’s refused read is the same notice for another member’s session, and placing words for an owner’s', () => {
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: T0, generation: 0, carrier: 'relay' }]);
+      const others = { ...remoteRow(OTHER_MACHINE, 'eng-r', { owners: [ANA.id], mine: false }), appId: REMOTE };
+      useSessions.setState({ listed: new Map([[REMOTE, others]]), listedMachines: new Set([OTHER_MACHINE]), members: new Map([[ANA.id, ANA]]), member: 'member-me' });
+      applyRemoteSession(remoteSessionState(REMOTE, { stream: 'opening', reason: READ_REFUSED }));
+      const pane = render(<SessionPane appSessionId={REMOTE} paneIndex={0} />);
+      expect(screen.getByRole('status', { name: 'Your access' }).textContent).toContain('Ask Ana for View to read it.');
+      pane.unmount();
+      act(() => useSessions.setState({ listed: new Map([[REMOTE, { ...others, owners: ['member-me'], mine: true }]]) }));
+      render(<SessionPane appSessionId={REMOTE} paneIndex={0} />);
+      expect(screen.getByRole('status').textContent).toBe('Opening on mini…');
+      act(() => applyRemoteSession(remoteSessionState(REMOTE, { stream: 'ended', reason: READ_REFUSED })));
+      expect(screen.getByRole('status').textContent).toContain('mini can’t place this session');
     });
   });
 });

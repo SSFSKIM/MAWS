@@ -114,7 +114,7 @@ type Watch = {
   sub: Subscription | null;
   token: object; // the current subscription's: a callback of an earlier one is ignored
   started: boolean; // a snapshot came: a later `snapshot` or `missing` start is a reset
-  paused: boolean;
+  paused: string | null; // the pause last told, by its reason; null while not paused
   backoffMs: number;
   retry: ReturnType<typeof setTimeout> | null;
   offGone: () => void;
@@ -256,7 +256,7 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
   // ---- Watches -----------------------------------------------------------------------------------------------------------
 
   function watch(s: Session, client: MainContext['client'], agentId: string | null): string {
-    const w: Watch = { id: randomUUID(), agentId, fold: new RemoteFold(s.id), sub: null, token: {}, started: false, paused: false, backoffMs: timing.backoffMs[0], retry: null, offGone: () => {}, requests: new Map(), reads: new Map(), ended: false };
+    const w: Watch = { id: randomUUID(), agentId, fold: new RemoteFold(s.id), sub: null, token: {}, started: false, paused: null, backoffMs: timing.backoffMs[0], retry: null, offGone: () => {}, requests: new Map(), reads: new Map(), ended: false };
     s.watches.set(w.id, w);
     w.offGone = client.onGone(() => endWatch(s, w, null));
     subscribe(s, w);
@@ -277,7 +277,7 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
           if (mode !== 'replay') return reset(s, w);
           // A replay after a drop (only what followed the cursor comes next, maybe nothing): the view went on as it was,
           // so the page hears a resume, never a reset, and asks again what the drop lost (P5 O9 M9 landing fix wave).
-          w.paused = false;
+          w.paused = null;
           emitPlane(s, { watch: w.id, resumed: true });
         },
         snapshot(_at, value) {
@@ -288,8 +288,8 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
           const message = value as PlaneMessage;
           if (w.agentId === null) w.fold.message(message);
           emitPlane(s, { watch: w.id, messages: [message] });
-          if (w.paused) {
-            w.paused = false;
+          if (w.paused !== null) {
+            w.paused = null;
             emitPlane(s, { watch: w.id, resumed: true });
           }
           if (primary(s) === w) changed(s);
@@ -309,12 +309,12 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
         },
         paused(reason) {
           if (!mine()) return;
-          w.paused = true;
+          w.paused = reason;
           emitPlane(s, { watch: w.id, paused: reason });
         },
         resumed() {
           if (!mine()) return;
-          w.paused = false;
+          w.paused = null;
           emitPlane(s, { watch: w.id, resumed: true });
         },
         ended(reason) {
@@ -322,9 +322,10 @@ export function createRemoteLaneA(deps: RemoteLaneADeps): RemoteLaneA {
           w.sub = null;
           if (reason === 'closed') return endWatch(s, w, reason); // the link closed for good
           if (reason === 'not-offered') return endWatch(s, w, reason); // a subagent's, on an endpoint without rl2.agent-scope
-          // The endpoint collapses every sminos end to `unavailable`: a fresh subscription, with backoff.
-          if (!w.paused) {
-            w.paused = true;
+          // The endpoint collapses every sminos end to `unavailable`: a fresh subscription, with backoff. A pause is told
+          // again when its reason changes (board #525: a `grade` after the link's own pause is the page's to hear).
+          if (w.paused !== reason) {
+            w.paused = reason;
             emitPlane(s, { watch: w.id, paused: reason });
           }
           const delay = w.backoffMs;

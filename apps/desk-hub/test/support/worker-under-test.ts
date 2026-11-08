@@ -172,6 +172,12 @@ export class Registry extends DeployedRegistry {
     return super.renewProvisioningKey(member, id);
   }
 
+  /** Armed, refused as a Registry on the code before an admin's key-bound removal of a machine (P5 O8 M4b) would refuse it. */
+  revokeKeyed(member: MemberRecord, name: string, key: Parameters<DeployedRegistry['revokeKeyed']>[2]): ReturnType<DeployedRegistry['revokeKeyed']> {
+    if (this.ctx.storage.kv.get<string>('lacks') === 'revokeKeyed') throw new TypeError('The RPC receiver does not implement the method "revokeKeyed".');
+    return super.revokeKeyed(member, name, key);
+  }
+
   /** Armed, refused as a Registry on the code before the policy registry (P5 O18), as an unreadable one fails. */
   policies(request: Parameters<DeployedRegistry['policies']>[0]): ReturnType<DeployedRegistry['policies']> {
     if (this.ctx.storage.kv.get<string>('lacks') === 'policies') throw new TypeError('The RPC receiver does not implement the method "policies".');

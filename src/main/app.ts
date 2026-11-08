@@ -443,6 +443,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // sessions. It writes no file either.
   // The org rows (made below, over the spine's view) say which of a machine's sessions are lane A: O9's, never placed here.
   let laneOfRow: (machine: MachineRef, session: string) => 'A' | 'B' | null = () => null;
+  let othersRow: (machine: MachineRef, session: string) => boolean = () => false; // board #525
   const artifactMachines = new ArtifactMachines(); // P5 O7 M5a (src/main/artifacts/machines.ts)
   // P5 O4 M2: the window that shows a page, for the connectors' window veto (P5 O7 M5c: per RL2 machine too)
   const windowShownOf = (client: ClientRef) => {
@@ -454,6 +455,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     local,
     layout,
     laneOf: (machine, session) => laneOfRow(machine, session),
+    othersOf: (machine, session) => othersRow(machine, session), // board #525
     remote: (ref) => machines.remote(ref),
     onRemote: (listener) => machines.onRemote(listener),
     emit: (machine, name, payload) => void emitFrom(machine, name, payload),
@@ -664,6 +666,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     log: (line) => console.log(`[org-rows] ${line}`),
   });
   laneOfRow = (machine, session) => remoteRows.rows().rows.find((row) => row.machine === machine && row.session === session)?.lane ?? null;
+  othersRow = (machine, session) => remoteRows.rows().rows.some((row) => row.machine === machine && row.session === session && !row.mine); // board #525
   void remoteRows.loaded.then(() => remoteLaneB.refresh());
   registerRowsHandler({ register: registerMainHandler, rows: remoteRows });
   // P5 O8 M6b: a session's reach (src/main/org/policy.ts): another machine's over its link, this Mac's over its own

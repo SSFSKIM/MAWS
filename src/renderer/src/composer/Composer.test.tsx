@@ -26,6 +26,8 @@ import { resetRemoteDrafts } from './editor/drafts'; // P5 O7 M2
 import { resetRemoteUploads } from './editor/remote-uploads'; // P5 O7 M4
 import { rememberRemoteDraft } from './editor/drafts'; // P5 O7 M4
 import { readerRowsOf, resetReaderRows } from '../lane-b/reader-rows'; // P5 O8 M6a
+import { READER } from '../sessions/share/copy'; // board 525
+import { resetReader } from '../sessions/share/reader'; // board 525
 import { queueFirstSend, resetRemoteSpawn, restoreHeldAttempts, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
 import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
 import { useDialogs } from '../sessions/dialogs'; // P5 O7 M9
@@ -1408,6 +1410,26 @@ describe('a lane B session on another machine', () => {
     await waitFor(() => expect(useNotices.getState().notices.map((n) => [n.text, n.actions.map((a) => a.label)])).toEqual([['Not sent: mini is offline', ['Send again']]]));
     expect(editorOf().editor.getText()).toBe('over there');
     expect(within(composerOf(0)).queryByRole('status', { name: 'Sending' })).toBeNull();
+  });
+
+  // Board 525: another member's session refuses the words at the member's grade (View): the refusal says so with whom to
+  // ask and no Send again, and the composer closes, its line naming Converse and the owner, the editor read-only
+  it('closes on another member’s session once the machine refused a send at the member’s grade, naming Converse and the owner', async () => {
+    resetReader();
+    const ana = { id: 'member-ana', email: 'ana@example.test', name: 'Ana' };
+    useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r', { owners: [ana.id], mine: false }), appId: R }]]), members: new Map([[ana.id, ana]]), member: 'member-me' });
+    mount([{ index: 0, id: R }]);
+    await type('over there');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(remote.pending('session.send')).toBe(1));
+    await act(() => remote.fail('session.send', 'session.send: refused grade by machine mini', 'internal', { refusal: 'grade' }));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => [n.text, n.actions.map((a) => a.label)])).toEqual([[READER.notSent('Ana'), []]]));
+    expect(within(composerOf(0)).getByRole('status', { name: 'Your access' }).textContent).toBe(READER.cantTalk('Ana'));
+    expect(primary().disabled).toBe(true);
+    expect(primary().title).toContain(READER.cantTalk('Ana'));
+    await waitFor(() => expect(editorOf().getAttribute('contenteditable')).toBe('false'));
+    expect(editorOf().editor.getText()).toBe('over there'); // the words stay
+    resetReader();
   });
 
   // The overlay rule: a link down closes nothing (A4 holds the act), so a running turn keeps its Stop, and Stop reaches it

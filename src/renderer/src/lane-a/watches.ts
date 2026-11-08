@@ -26,12 +26,18 @@
 // usage, jobs or ops are taken from it. Its consumers hear what they need to say why it shows nothing: the machine's
 // pause (`paused`, main's word for a link down or a subscription the machine ended, which main asks again) and main's
 // refusal of the watch (`refused`, an endpoint that can't carry it).
+//
+// Board 525: a session of another member's whose read its machine refused at the member's grade (main's `paused`
+// naming `grade`) can't be read by them (Can message): the watch is let go and none is opened while that stands
+// (sessions/share/reader.ts), so the page asks nothing of it until what was learnt is asked afresh. An owner's `grade`
+// is the machine not holding the record yet, which main asks again as before.
 import type { SessionMessage } from 'desk-hub/protocol';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, CommandResult, EventPayload, MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import type { Job } from 'desk-hub/protocol';
 import { laneAJobsWatchEnded, noteLaneAJobs, noteLaneAUsage, useLaneA, type LaneAUsage } from '../stores/lane-a';
+import { learnReaderGrade, readerGradeOf, useReader } from '../sessions/share/reader';
 import { isRemoteLaneA } from './remote-session';
 
 // `resumed` (P5 O9 M9): a remote link's transport is back after a pause, the watch going on as it was (never a reset).
@@ -71,6 +77,7 @@ const keyOf = (appSessionId: AppSessionId, agentId: string | null) => (agentId =
 const ops = new Map<AppSessionId, Map<string, SessionMessage[]>>();
 
 const watchable = (appSessionId: AppSessionId): boolean => {
+  if (readerGradeOf(appSessionId) === 'list') return false; // board 525: its read was refused at the member's grade
   const bridge = useLaneA.getState().states.get(appSessionId)?.bridge;
   return bridge === 'live' || bridge === 'starting' || isRemoteLaneA(appSessionId);
 };
@@ -121,18 +128,26 @@ function receive(appSessionId: AppSessionId, entry: Entry, payload: Payload): vo
     entry.overflowed = false; // the fresh snapshot follows
     tell(entry, { kind: 'reset' });
   } else if ('ended' in payload) {
-    entry.watch = null;
-    entry.log = null;
-    entry.overflowed = false;
-    if (session) laneAJobsWatchEnded(appSessionId);
-    tell(entry, { kind: 'ended', reason: payload.ended });
+    end(appSessionId, entry, payload.ended);
     open(appSessionId, entry);
+  } else if ('paused' in payload && session && payload.paused === 'grade' && learnReaderGrade(appSessionId, 'list')) {
+    // board 525: another member's session the member can't read: let go, and asked again only once that is forgotten
+    if (entry.watch !== null) void entry.client.invoke('laneA.unwatch', { appSessionId, watch: entry.watch });
+    end(appSessionId, entry, 'grade');
   } else if ('resumed' in payload) {
     tell(entry, { kind: 'resumed' }); // the replay log stands: nothing was lost
   } else if ('paused' in payload && !session) {
     tell(entry, { kind: 'paused', reason: payload.paused }); // a subagent's drill-in says why it shows nothing yet
   }
   // the session's `paused` is a remote link's transport state (M9): the state's link reason says it, and nothing is redrawn
+}
+
+function end(appSessionId: AppSessionId, entry: Entry, reason: string): void {
+  entry.watch = null;
+  entry.log = null;
+  entry.overflowed = false;
+  if (entry.agentId === null) laneAJobsWatchEnded(appSessionId);
+  tell(entry, { kind: 'ended', reason });
 }
 
 function open(appSessionId: AppSessionId, entry: Entry): void {
@@ -173,9 +188,14 @@ function entryFor(appSessionId: AppSessionId, client: MawsBridge, agentId: strin
   const offStore = useLaneA.subscribe((state, before) => {
     if (state.states.get(appSessionId) !== before.states.get(appSessionId)) open(appSessionId, entry);
   });
+  // board 525: a refused read forgotten is asked again
+  const offReader = useReader.subscribe((state, before) => {
+    if (before.learnt.get(appSessionId)?.grade === 'list' && state.learnt.get(appSessionId)?.grade !== 'list') open(appSessionId, entry);
+  });
   entry.off = () => {
     offPlane();
     offStore();
+    offReader();
   };
   entries.set(key, entry);
   return entry;
