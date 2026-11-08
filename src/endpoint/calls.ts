@@ -129,8 +129,7 @@ export type CallsContext = {
   engineHostLists(capability: string): boolean;
   /** P5 O7 M9: the folders each member opened (the authorizer's own); absent, none is kept. */
   setup?: Pick<MachineSetup, 'listed'>;
-  /** P5 O8 M7b fix wave: whether a project is the org's now (`channel.history`'s reach), and its entries' cursors. */
-  reaches(project: string): boolean;
+  /** P5 O8 M7b fix wave: `channel.history`'s entries' cursors. */
   cursors: Pick<ChannelCursors, 'seal' | 'open'>;
   /** P5 O8 M6a: a member's own reading of a session changed (their `session.reader.update`), for their other devices. */
   readerMoved?(member: string, appSessionId: string): void;
@@ -521,8 +520,8 @@ export class Calls {
    * P5 O8 M7b: a project's to-human entries (`channel.history`, the `each-session` shape, its cut lane-aware:
    * channel-view.ts), answered for the sessions `member` holds `view` on: the journal read until the page is filled with
    * such entries or it ends, each lane B session ranked at every placement the read saw of it, a lane A one by sminos's
-   * record. Fix wave: nothing for a project that isn't the org's; `before` is a cursor the endpoint sealed, of an entry
-   * the member views, else no entries (one placement read taken either way: the same answer in the same time); the page
+   * record. Any project's (channel-view.ts' reach). Fix wave: `before` is a cursor the endpoint sealed, of an entry the
+   * member views, else no entries (one placement read taken either way: the same answer in the same time); the page
    * goes, in the step its answer goes in, only while the ranks are current and all the read kept still stands, else it
    * is read again.
    */
@@ -539,7 +538,6 @@ export class Calls {
       for (let attempt = 0; attempt < HISTORY_READS; attempt++) {
         const ranks = await this.ctx.ranks(member);
         const after = book.mark();
-        if (!this.ctx.reaches(input.project)) return done(none);
         const views = (entry: EntrySession) => viewable(entry, ranks, book, after);
         let before: string | undefined;
         if (input.before !== undefined) {
@@ -553,7 +551,6 @@ export class Calls {
         if (!ranks.current() || publish(read, limit, views, seal) === null) continue;
         return () => {
           this.#books.delete(book);
-          if (!this.ctx.reaches(input.project)) return none;
           const page = ranks.current() ? publish(read, limit, views, seal) : null;
           return page === null ? { ok: false, code: 'unavailable' } : { ok: true, output: page };
         };

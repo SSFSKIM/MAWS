@@ -24,7 +24,23 @@
 // Placements only narrow within a read: none heard can widen what the member views. A page is published only while
 // everything its read kept still stands, the entry past it too, and no session it passed by is viewable now (`publish`):
 // else it is read again, since what it passed by may belong on the page.
-import type { OrgState } from 'org-protocol';
+//
+// The reach (2026-11-08, M7b's live check): a member reads any project's channel on this machine, the feed admitted and
+// `channel.history` answered for every project id, and the `view` rank above is the only gate. A project's channel is no
+// wider than its sessions: an entry goes only for a session whose transcript the member may read already, and no rank
+// reads the project (grades.ts' `sessionRank`). An id the machine holds nothing of is answered as a project whose
+// sessions the member views none of: an empty page, an empty snapshot, then only what they view, so probing ids learns
+// nothing from the answers. Rejected:
+//   - the project in the org head's `projects`, as M7b landed: no production code writes that list (genesis writes it
+//     empty and nothing adds to it), so every member's read was refused for every project;
+//   - that, or a project this machine knows (its index joins a checkout to it, or its journal holds entries of it): its
+//     refusal withholds no entry, since a project the machine knows nothing of has none to send. What it adds is a
+//     signal: refused or not tells the member whether the machine knows the id, entries of sessions they may not view
+//     counting toward it. Decided as the feed opens, while main takes a refusal as final on its channel, it would also
+//     keep out a project the machine first comes to know after the tab opened (a session's first question there); and
+//     the index and the journal answer only asynchronously, where the feed asks its reach at every step;
+//   - the hub's registry, which admits a member to a project's socket: a hub read on the machine's path, and where the
+//     org's project list comes from is still open (MAWS board #521).
 import { HISTORY_LIMIT_MAX, type HostEntry } from '@shared/ipc/schema/channel';
 import type { SessionRanks } from './authorize';
 import type { EndpointServices } from './services';
@@ -48,15 +64,6 @@ export const HEARD_MAX = 32;
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const isId = (value: unknown): value is string => typeof value === 'string' && value !== '' && value.length <= 512;
-
-/**
- * Whether `project` (sminos's project id) is one of the org's projects in `head`: the reach of a `channel` feed and of
- * `channel.history`, which every member of the org holds while the project stands, as the hub admits a member to a
- * project's socket.
- */
-export function orgProject(head: OrgState | null | undefined, project: string): boolean {
-  return head?.projects.some((p) => p.id === project) === true;
-}
 
 /** The lane B app sessions `entries` name: the placements their cut needs. */
 export function laneBSessions(entries: readonly HostEntry[]): string[] {

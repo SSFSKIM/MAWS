@@ -17,7 +17,6 @@ import { startChannel, type ProjectChannel } from '../../src/services/channel/re
 import { Index } from '../../src/services/index/index';
 import { tempDir } from '../support/index-fixture';
 import { fakeServices } from './fake-services';
-import { successor } from './org-fixtures';
 import { evs, laneAMember, makeOrg, of, openRemote, plane, PROJECT, sminos, snapshot, startEndpoint, stopAll, until, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
 let org: Org;
@@ -86,12 +85,8 @@ async function call(r: Remote, name: string, input: unknown): Promise<Msg> {
   return waitFor(r, (m) => m.t === 'result' && m.id === id, `the result of ${name}`);
 }
 
+/** Another project of the machine's. Every case's org head lists no project, as no production head does (channel-view.ts' reach). */
 const OTHER = 'proj-other';
-/** The org's hub projects: the channel's, and another. */
-const PROJECTS = [
-  { id: PROJECT, name: 'm8' },
-  { id: OTHER, name: 'other' },
-];
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 /** The `channel` feed of `project` opened (its `subbed`, or its `ended`). */
@@ -156,7 +151,7 @@ describe('channel.history, view-filtered lane by lane', () => {
   });
 
   it('answers a member the entries of the sessions they view, a lane A one by sminos’s record and a lane B one by the spine’s, and the machine’s owner every one', async () => {
-    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const f = await startEndpoint(org, started);
     const channel = journal(f);
     const s = await sminos(f, laneAMembers());
     shared(f, 'app-1', 'view');
@@ -185,7 +180,7 @@ describe('channel.history, view-filtered lane by lane', () => {
   });
 
   it('fills a page with the entries the member views, past a full page of others’, and pages on from its last', async () => {
-    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const f = await startEndpoint(org, started);
     const channel = journal(f);
     shared(f, 'app-1', 'view');
     shared(f, 'app-2', null);
@@ -203,24 +198,23 @@ describe('channel.history, view-filtered lane by lane', () => {
     expect(second).toMatchObject({ ok: true, output: { more: false } });
     expect(texts(second)).toEqual(['mine 1']);
   });
-  it('answers nothing for a project the org has none of, or one that left its head', async () => {
-    const f = await startEndpoint(org, started, { projects: PROJECTS });
+  it('answers each project’s own entries though the org’s head lists no project, and an id the machine holds nothing of as an empty page', async () => {
+    const f = await startEndpoint(org, started);
+    expect(f.chain[f.chain.length - 1].state.projects).toEqual([]); // production's shape: no head lists a project
     const channel = journal(f);
     shared(f, 'app-1', 'view');
+    shared(f, 'app-2', null);
     channel.record(laneB('app-1', 1, 'B shared'));
-    channel.record({ ...laneB('app-1', 2, 'B unknown'), project: 'proj-unknown', src: 'proj-unknown/lane-b/app-1/call/t2' });
+    channel.record(laneB('app-2', 2, 'B listed'));
+    channel.record({ ...laneB('app-1', 3, 'B elsewhere'), project: OTHER, src: `${OTHER}/lane-b/app-1/call/t3` });
     const b = await openRemote(f, org.b1, org.B);
-    expect(await call(b, 'channel.history', { project: 'proj-unknown' })).toMatchObject({ ok: true, output: { entries: [], more: false } });
     expect(texts(await call(b, 'channel.history', { project: PROJECT }))).toEqual(['B shared']);
-    const next = await successor(f.chain[f.chain.length - 1], [org.a1], (st) => void (st.projects = st.projects.filter((p) => p.id !== PROJECT)));
-    const out = await f.endpoint.cli('revoke', ['-'], JSON.stringify(next));
-    expect(out.code, out.out).toBe(0);
-    f.chain.push(next);
-    expect(await call(b, 'channel.history', { project: PROJECT })).toMatchObject({ ok: true, output: { entries: [], more: false } });
+    expect(texts(await call(b, 'channel.history', { project: OTHER }))).toEqual(['B elsewhere']);
+    expect(await call(b, 'channel.history', { project: 'proj-unknown' })).toMatchObject({ ok: true, output: { entries: [], more: false } });
   });
 
   it('names each entry by an opaque cursor, the feed’s as history’s, and pages nothing from one it didn’t give the member, one placement read whatever it is', async () => {
-    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const f = await startEndpoint(org, started);
     const channel = journal(f);
     shared(f, 'app-1', 'view');
     shared(f, 'app-2', null);
@@ -250,7 +244,7 @@ describe('channel.history, view-filtered lane by lane', () => {
     expect(texts(second)).toEqual(['mine 1']);
   });
   it('holds a member to a placement heard while the call reads, before it read the session: a record placing no engine for a moment hides its entries', async () => {
-    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const f = await startEndpoint(org, started);
     const channel = journal(f);
     shared(f, 'app-1', 'view');
     channel.record(laneB('app-1', 1, 'B shared'));
@@ -268,7 +262,7 @@ describe('channel.history, view-filtered lane by lane', () => {
   });
 
   it('pages exactly past the most the journal holds of others’ largest entries, within the device’s call deadline, as the feed’s snapshot does', { timeout: 120_000 }, async () => {
-    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const f = await startEndpoint(org, started);
     const channel = journal(f);
     shared(f, 'app-1', 'view');
     shared(f, 'app-2', null);
@@ -298,7 +292,7 @@ describe('channel.history, view-filtered lane by lane', () => {
 
 describe('the channel feed: a project’s entries, live', () => {
   it('opens as a snapshot of the project’s newest entries the member views, then carries each of its new entries they view, and no other project’s', async () => {
-    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const f = await startEndpoint(org, started);
     const channel = journal(f);
     const s = await sminos(f, laneAMembers());
     shared(f, 'app-1', 'view');
@@ -332,7 +326,7 @@ describe('the channel feed: a project’s entries, live', () => {
   });
 
   it('takes back an entry queued while the device read nothing once its share goes, on either lane, and goes on', async () => {
-    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const f = await startEndpoint(org, started);
     const channel = journal(f);
     const s = await sminos(f, laneAMembers());
     shared(f, 'app-1', 'view');
@@ -364,25 +358,34 @@ describe('the channel feed: a project’s entries, live', () => {
     expect(of(b, 'ch').filter((m) => m.t === 'ended')).toEqual([]);
   });
 
-  it('ends `removed` once the project leaves the org’s head, and is refused for a project the org has none of', async () => {
-    const f = await startEndpoint(org, started, { projects: PROJECTS });
-    journal(f);
+  it('is admitted for a project the org’s head doesn’t list, and for an id the machine holds nothing of yet, whose first entry it carries once it comes', async () => {
+    const f = await startEndpoint(org, started);
+    expect(f.chain[f.chain.length - 1].state.projects).toEqual([]); // production's shape: no head lists a project
+    const channel = journal(f);
+    shared(f, 'app-1', 'view');
+    shared(f, 'app-2', null);
+    channel.record(laneB('app-1', 1, 'B shared'));
     const b = await openRemote(f, org.b1, org.B);
-    expect(await channelFeed(b, 'none', 'proj-unknown')).toMatchObject({ t: 'ended', reason: 'no-target' });
     expect(await channelFeed(b, 'ch', PROJECT)).toMatchObject({ t: 'subbed' });
-    await snapshot(b, 'ch');
-    const next = await successor(f.chain[f.chain.length - 1], [org.a1], (st) => void (st.projects = st.projects.filter((p) => p.id !== PROJECT)));
-    const out = await f.endpoint.cli('revoke', ['-'], JSON.stringify(next));
-    expect(out.code, out.out).toBe(0);
-    f.chain.push(next);
-    expect(await waitFor(b, (m) => m.sub === 'ch' && m.t === 'ended', 'the feed’s end')).toMatchObject({ reason: 'removed' });
+    expect(((await snapshot(b, 'ch')).body.entries as HostEntry[]).map((e) => e.text)).toEqual(['B shared']);
+    expect(await channelFeed(b, 'new', 'proj-new')).toMatchObject({ t: 'subbed' });
+    expect((await snapshot(b, 'new')).body).toEqual({ entries: [], more: false });
+    // The machine's first entries of that project, after the feed opened (a session's first question there): what the
+    // member views goes, the rest is cut as in any project.
+    channel.record({ ...laneB('app-2', 2, 'hidden here'), project: 'proj-new', src: 'proj-new/lane-b/app-2/call/t2' });
+    channel.record({ ...laneB('app-1', 2, 'first here'), project: 'proj-new', src: 'proj-new/lane-b/app-1/call/t2' });
+    await until(() => changed(b, 'new').length >= 1, 'the new project’s first entry');
+    await settle();
+    expect(changed(b, 'new')).toEqual(['first here']);
+    expect(changed(b, 'ch')).toEqual([]);
+    expect([...of(b, 'ch'), ...of(b, 'new')].filter((m) => m.t === 'ended')).toEqual([]);
   });
 
   it('is offered behind `rl2.channel`, refused to a web-cards device, and a sub that names no project closes the channel `malformed`', async () => {
     const { ENDPOINT_CAPABILITIES } = await import('../../src/endpoint/capabilities');
     expect(ENDPOINT_CAPABILITIES).toContain('rl2.channel');
     expect(OFFERS.feeds).toContain('channel');
-    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const f = await startEndpoint(org, started);
     journal(f);
     const c = await openRemote(f, org.c1, org.C, { passkey: org.passkey });
     expect(await channelFeed(c, 'ch', PROJECT)).toMatchObject({ t: 'ended', reason: 'class' });
@@ -394,7 +397,7 @@ describe('the channel feed: a project’s entries, live', () => {
     expect(closed).toBe('malformed');
   });
   it('takes back a queued lane B entry once its session’s record is removed, and the next entry takes its seq', async () => {
-    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const f = await startEndpoint(org, started);
     const channel = journal(f);
     const s = await sminos(f, laneAMembers());
     shared(f, 'app-1', 'view');
@@ -416,7 +419,7 @@ describe('the channel feed: a project’s entries, live', () => {
   });
 
   it('ranks a new lane B entry by its session’s record as it stands, not a placement it read before the record moved', async () => {
-    const f = await startEndpoint(org, started, { projects: PROJECTS });
+    const f = await startEndpoint(org, started);
     const channel = journal(f);
     const s = await sminos(f, laneAMembers());
     shared(f, 'app-1', 'view');
