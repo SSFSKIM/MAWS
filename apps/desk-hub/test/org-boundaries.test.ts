@@ -45,6 +45,7 @@ const adminCalls: Array<[string, ...unknown[]]> = [
   ['revokeProvisioningKey', 'no-such-key'],
   ['renewProvisioningKey', 'no-such-key'],
   ['revoke', 'no-such-machine'],
+  ['revokeKeyed', 'no-such-machine', { ref: 'm'.repeat(26), pub: 'p' }],
   ['designateArchive', '0a1b2c3d-0000-4000-8000-000000000000', { machine: null }],
   ['purgeOrgKeys'],
   ['pendingDevicesOf', B],

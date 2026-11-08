@@ -378,6 +378,16 @@ describe("an admin's removal bound to the machine's key", () => {
     expect((await machineNamed('kp-keyless'))?.key).toBeUndefined();
   });
 
+  it('answers 503 hub-updating from a Registry before the keyed method, touching nothing: the older revoke would ignore the key', async () => {
+    const machine = await enrollV2((await code()).text, 'kp-older');
+    await hub.registryLacks('revokeKeyed');
+    const response = await remove('kp-older', keyOfMachine(machine));
+    await hub.registryLacks(null);
+    expect([response.status, ((await response.json()) as { error: string }).error]).toEqual([503, 'hub-updating']);
+    expect(await machineNamed('kp-older')).toMatchObject({ state: 'active', enrollment: machine.enrollment });
+    expect((await machineFetch(hub.url, machine.credentials, '/machine/enrollment')).status).toBe(200);
+  });
+
   it('refuses one parameter alone or either out of shape, touching nothing; neither removes whatever holds the name', async () => {
     const machine = await enrollV2((await code()).text, 'kp-shape');
     const { ref, pub } = keyOfMachine(machine);

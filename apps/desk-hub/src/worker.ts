@@ -218,7 +218,7 @@ function historyQuery(url: URL): { writer: string; after: number } | null {
 
 /**
  * `?ref=&pub=` of an admin's removal of a machine (P5 O8 M4b): the key its enrollment must have posted for the row to
- * go (`Registry.revoke`); undefined with neither, null with one alone or either out of shape.
+ * go (`Registry.revokeKeyed`); undefined with neither, null with one alone or either out of shape.
  */
 function postedKeyQuery(url: URL): PostedKey | undefined | null {
   const ref = url.searchParams.get('ref');
@@ -239,7 +239,9 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
   if (revoke && method === 'DELETE') {
     const key = postedKeyQuery(url);
     if (key === null) return json(400, { error: 'bad-shape', message: '?ref= and ?pub= are the machine’s MachineRef and its key (an uncompressed P-256 point, base64url), both or neither' });
-    return answer(await registry.revoke(you, decodeURIComponent(revoke[1]), key));
+    // The key-bound form is a method a Registry before it lacks (`hub-updating`), never `revoke` with an argument it would ignore.
+    const name = decodeURIComponent(revoke[1]);
+    return answer(await (key === undefined ? registry.revoke(you, name) : registry.revokeKeyed(you, name, key)));
   }
   const archive = PROJECT_ARCHIVE.exec(pathname);
   if (archive && method === 'PUT') return answer(await registry.designateArchive(you, archive[1], await body(request)));

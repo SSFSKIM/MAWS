@@ -573,17 +573,33 @@ export class Registry extends DurableObject<Env> {
     }
   }
 
+  /** An admin's removal of a machine: whatever holds the name now (`revokeMachine`). */
+  async revoke(member: MemberRecord, name: string): Promise<Result<{ revoked: string }>> {
+    const refused = this.removable(member, name);
+    if (refused) return refused;
+    return ok(await this.revokeMachine(name));
+  }
+
   /**
-   * An admin's removal of a machine: whatever holds the name now (`revokeMachine`); with `key` (P5 O8 M4b: an app's drop
-   * of a machine, settled after the sign), only a row whose enrollment posted that key, since another root may have
-   * enrolled the name anew in between.
+   * An admin's removal of a machine bound to its key (P5 O8 M4b: an app's drop of a machine, settled after the sign):
+   * only a row whose enrollment posted `key`, since another root may have enrolled the name anew in between. A method of
+   * its own, not a third argument of `revoke`: a deploy reaches this object minutes after the Worker, and a Registry
+   * before it, handed the key, would ignore it and remove whatever holds the name; with a method it lacks, the Worker's
+   * call fails as `hub-updating` and the app asks again.
    */
-  async revoke(member: MemberRecord, name: string, key?: PostedKey): Promise<Result<{ revoked: string }>> {
-    // Checked in the step that begins the revocation (its first await is the fence at the machine's object).
+  async revokeKeyed(member: MemberRecord, name: string, key: PostedKey): Promise<Result<{ revoked: string }>> {
+    const refused = this.removable(member, name);
+    if (refused) return refused;
+    return ok(await this.revokeMachine(name, { key }));
+  }
+
+  /** What an admin's removal of a machine checks before it begins, in the step that begins it (its first await is the
+   * fence at the machine's object): the refusal, or null. */
+  private removable(member: MemberRecord, name: string): Result<never> | null {
     const admin = this.current(member, 'admin');
     if (!admin.ok) return admin;
     if (this.sql.exec('SELECT 1 FROM machines WHERE name_key = ?', machineNameKey(name)).toArray().length === 0) return fail(404, 'unknown-machine');
-    return ok(await this.revokeMachine(name, key === undefined ? undefined : { key }));
+    return null;
   }
 
   /** A machine's revocation of its own enrollment (`DELETE /machine/enrollment`), bound to the enrollment the Worker
