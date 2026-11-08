@@ -50,6 +50,12 @@ export type LaneBSession = { app: string; launch: string; engine: string; alias:
 /** A probe machine in this process (FakeEndpoint), speaking only to the staging hub. */
 export type Probe = { name: string; machine: V2Machine; endpoint: FakeEndpoint; welcome: Rl1Welcome };
 
+/** `text` for the run's log with A's and B's emails masked. A is staging's admin, a real person; a chat frame's owner
+ * label carries the owner's email, which the checks read and the log never prints. */
+export function masked(scene: Pick<ReachScene, 'a' | 'b'>, text: string): string {
+  return text.replaceAll(scene.a.email, '<A’s email>').replaceAll(scene.b.email, '<B’s email>');
+}
+
 export type ReachScene = {
   hub: string;
   org: string;
@@ -458,9 +464,9 @@ export async function item2(scene: ReachScene, report: ReachReport): Promise<voi
   await report.check('2', 'as a peer message with its owner label, nobody’s words', async () => {
     const row = await scene.S.machine.vm.row(scene.S.session, tok);
     if (row === null) throw new Error('no row holds it');
-    if (!row.includes(scene.U.alias) || !row.includes(scene.b.email)) throw new Error(`the row names neither U's alias and B's email: ${row.slice(0, 200)}`);
+    if (!row.includes(scene.U.alias) || !row.includes(scene.b.email)) throw new Error(`the row names neither U's alias and B's email: ${masked(scene, row.slice(0, 200))}`);
     if (!/\[sminos/.test(row)) throw new Error(`the row is not a chat frame: ${row.slice(0, 200)}`);
-    return `the row is a chat frame from ${scene.U.alias}, owned by ${scene.b.email}`;
+    return `the row is a chat frame from ${scene.U.alias}, owned by B (its label B's email)`;
   });
   await report.check('2', 'S spawns L1 while listed', async () => {
     scene.seats.L1 = await spawnSeat(scene, scene.S, `o18-l1-${scene.tag}`);
@@ -704,8 +710,8 @@ export async function item1(scene: ReachScene, report: ReachReport): Promise<voi
         if (r.rc !== 0) throw new Error(`exited ${r.rc}: ${said(r)}`);
         if ((await arrives(to, tok)) !== 1) throw new Error('delivered more than once');
         const row = await to.machine.vm.row(to.session, tok);
-        if (row === null || !row.includes(from.alias) || !row.includes(scene.a.email)) throw new Error(`the row: ${row?.slice(0, 200)}`);
-        return `delivered once, from ${from.alias}, owned by ${scene.a.email}`;
+        if (row === null || !row.includes(from.alias) || !row.includes(scene.a.email)) throw new Error(`the row: ${masked(scene, row?.slice(0, 200) ?? 'none')}`);
+        return `delivered once, from ${from.alias}, owned by A (its label A's email)`;
       });
     }
   };
@@ -789,8 +795,8 @@ export async function item4(scene: ReachScene, report: ReachReport): Promise<voi
     if (r.rc !== 0) throw new Error(`exited ${r.rc}: ${said(r)}`);
     await arrives(scene.S, tok);
     const row = await scene.S.machine.vm.row(scene.S.session, tok);
-    if (row === null || !row.includes(scene.b.email)) throw new Error(`the row: ${row?.slice(0, 200)}`);
-    return `delivered, owned by ${scene.b.email}`;
+    if (row === null || !row.includes(scene.b.email)) throw new Error(`the row: ${masked(scene, row?.slice(0, 200) ?? 'none')}`);
+    return `delivered, owned by B (its label B's email)`;
   });
   await report.check('4', 'b1’s transcript read is refused', async () => {
     const remote = await b1ToA1(scene);
