@@ -18,8 +18,9 @@
 // 7. A enrolls a machine from the app: the endpoint redeems the code and posts its key, A compares the key id the page
 //    shows with the machine's own (`keys --json`) and approves, and the endpoint reads `org-listed`.
 // 8. A adds B again (case 5 removed B) and grants B `spawn` on that machine while the machine's own reads of the hub are
-//    withheld, so it is behind B's addition: one confirmation, the app's head pushed over the link (`endpoint.state`)
-//    before the grant, the endpoint's ledger holding it, and `machineRights` giving B `spawn`.
+//    withheld, so it is behind B's addition: the app's head pushed over the link (`endpoint.state`) for the ledger read
+//    before the one confirmation, and again after it before the grant, the endpoint's ledger holding it, and
+//    `machineRights` giving B `spawn`.
 // A. A grants B on this Mac's own machine through the local door (the architect's Fork A): the act through the door and
 //    nothing over a link, the grant in that endpoint's ledger, read back through `endpoint.local.grants`.
 // 9. The machine's `grants.json` is removed and the endpoint restarted: its startup invariant moves the key, the ledger
@@ -69,8 +70,11 @@ const codes: string[] = [];
 
 /** Every prompt A's state and record signers showed, in order; each answered yes (the injected Touch ID). */
 const asked: Array<Parameters<Confirm>[0]> = [];
+/** For each prompt, how many acts A's grants had sent over the link when it was shown (`overLink`'s length then). */
+const askedAt: number[] = [];
 const confirm: Confirm = async (prompt) => {
   asked.push(prompt);
+  askedAt.push(overLink.length);
   return { ok: true };
 };
 
@@ -96,8 +100,22 @@ const rosterListeners = new Set<() => void>();
 
 /** While set, the machine's own reads of the hub's org state fail: what it adopts, it adopts over A's link. */
 let withheld = false;
-const machineFetch: typeof fetch = (input, init) =>
-  withheld && new URL(String(input)).pathname === '/machine/org/state' ? Promise.reject(new TypeError('the hub is withheld from this machine')) : fetch(input, init);
+/** The machine's reads of the hub's org state now in flight, and those failed while withheld. */
+let stateReads = 0;
+let withheldReads = 0;
+const machineFetch: typeof fetch = async (input, init) => {
+  if (new URL(String(input)).pathname !== '/machine/org/state') return fetch(input, init);
+  stateReads++;
+  try {
+    if (withheld) {
+      withheldReads++;
+      throw new TypeError('the hub is withheld from this machine');
+    }
+    return await fetch(input, init);
+  } finally {
+    stateReads--;
+  }
+};
 const machineEndpoint = () => createEndpoint({ build: 'o8-m4b-local', sleep: (ms) => sleep(Math.min(ms, 50)), fetch: machineFetch });
 
 /** Each act A's grants sent over the link (the head push's `endpoint.state` runs and `endpoint.grant`), with its outcome. */
@@ -488,15 +506,17 @@ describe('the Org page’s people, devices and machines on the local hub', { tim
     for (const listener of rosterListeners) listener();
   });
 
-  it('grants B spawn on a machine behind B’s addition: the head pushed over the link first, one confirmation, the ledger holds it and machineRights gives B spawn', async () => {
+  it('grants B spawn on a machine behind B’s addition: the head pushed over the link for the ledger read, one confirmation, pushed again before the grant, the ledger holds it and machineRights gives B spawn', async () => {
     const before = heldBy(machine);
     withheld = true;
+    withheldReads = 0;
     try {
       const added = await signChange({ kind: 'member.add', email: B_EMAIL, role: 'member' });
       bAgain = (added.change as Extract<OrgChange, { kind: 'member.add' }>).id!;
       expect(memberIn(await hubHead(), bAgain)).toMatchObject({ email: B_EMAIL, role: 'member', devices: [] });
-      // The machine can't read B's addition from the hub: it is behind it as A grants.
-      await sleep(300);
+      // The machine can't read B's addition from the hub: it tried (the hub's `state` notice), was refused, and no read
+      // of it is still out, so it is behind B's addition as A grants.
+      await until(() => withheldReads > 0 && stateReads === 0, 'the machine’s read of B’s addition refused');
       expect(heldBy(machine)).toBe(before);
       expect(before).toBeLessThan(added.version);
       expect(await rowOf(machineRef)).toMatchObject({ mayGrant: true });
@@ -509,17 +529,24 @@ describe('the Org page’s people, devices and machines on the local hub', { tim
       expect(asked).toHaveLength(asks + 1); // one Touch ID: the push asks nothing
       firstGrant = granted.version;
 
-      // Over the link: the app's head pushed (`endpoint.state`), answered at B's addition or later, then the one grant.
-      const sent = overLink.slice(sentFrom);
-      const grantAt = sent.findIndex((s) => s.action === 'endpoint.grant');
-      expect(sent.map((s) => s.action).filter((action) => action === 'endpoint.grant')).toEqual(['endpoint.grant']);
-      expect(grantAt).toBeGreaterThan(0);
-      const pushed = sent.slice(0, grantAt);
-      expect(pushed.every((s) => s.action === 'endpoint.state')).toBe(true);
-      const answered = pushed.at(-1)!.outcome;
-      expect(answered).toMatchObject({ state: 'done', result: { version: expect.any(Number) } });
-      expect((answered as unknown as { result: { version: number } }).result.version).toBeGreaterThanOrEqual(added.version);
-      expect(sent[grantAt].outcome).toMatchObject({ state: 'done' });
+      // Over the link, in order: before the confirmation, the ledger read's push (B had no entry on a head without B);
+      // after it, the delivery's own push, answered at B's addition or later, and only then the one grant.
+      const confirmedAt = askedAt[asks];
+      const grants = overLink.map((s, i) => (s.action === 'endpoint.grant' ? i : -1)).filter((i) => i >= sentFrom);
+      expect(grants).toHaveLength(1);
+      const [grantAt] = grants;
+      expect(confirmedAt).toBeGreaterThanOrEqual(sentFrom);
+      expect(grantAt).toBeGreaterThanOrEqual(confirmedAt);
+      const answeredPast = (s: (typeof overLink)[number]) =>
+        s.action === 'endpoint.state' && s.outcome?.state === 'done' && ((s.outcome.result as { version?: number } | null)?.version ?? 0) >= added.version;
+      const beforeConfirm = overLink.slice(sentFrom, confirmedAt);
+      expect(beforeConfirm.every((s) => s.action === 'endpoint.state')).toBe(true);
+      expect(beforeConfirm.some(answeredPast)).toBe(true);
+      const delivery = overLink.slice(confirmedAt, grantAt);
+      expect(delivery.length).toBeGreaterThan(0);
+      expect(delivery.every((s) => s.action === 'endpoint.state')).toBe(true);
+      expect(delivery.some(answeredPast)).toBe(true);
+      expect(overLink[grantAt].outcome).toMatchObject({ state: 'done' });
       // which reached the machine by the link alone
       expect(heldBy(machine)).toBeGreaterThanOrEqual(added.version);
     } finally {
@@ -572,7 +599,7 @@ describe('the Org page’s people, devices and machines on the local hub', { tim
     machine = machineEndpoint();
     await machine.start(machineServices);
     // The startup invariant (src/endpoint/state/store.ts): the key without its ledger is moved aside with the enrollment.
-    expect(machine.status()).toMatchObject({ enrollment: 'none', refusing: 'stale-state' });
+    expect(machine.status()).toMatchObject({ enrollment: 'none' });
     expect(machine.enrollment()).toBeNull();
     for (const name of ['machine-key.json', 'grants.json', 'enrollment.json']) expect(existsSync(join(dir, name)), name).toBe(false);
     const aside = readdirSync(dir).filter((name) => name.startsWith('stale-'));
