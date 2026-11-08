@@ -1865,17 +1865,68 @@ The live check is the owner's, in their own MAWS once a build carrying M7b is on
     npx vitest run --project node-timing test/org/policy.local.test.ts
     npx vitest run --project renderer src/renderer/src/sessions/share/ShareSheet.test.tsx
 
-**The shared staging run** (M6b with O18 M6). The architect schedules it with the owner and the desk track: from 2026-11-07, never 06:45 to 07:00Z (the mini), never in a cua_repl hold. The owner's steps:
-1. **A real second member.** The owner adds Access's admission for a second email they control (an Access change, the owner's). Then, from the owner's staging scratch profile, the Org page adds that member (Add person), and pairs a second scratch MAWS profile as their first device (Pair a device, H1).
-2. **A VM under them.** The desk track's `staging-run.sh endpoint-vm setup <base commit>` prepares a VM. The owner's Org page enrolls it (M4b's flow once M4b lands; before that, `staging-run.sh admin enroll <name>`) and sets its owners to the second member.
-3. **The builds.** The desk track deploys O18 M1's hub to staging, and puts sminos 1.38.0 or later and a MAWS at or after M6b on the staging machines.
-4. **The run.** O18's acceptance 1 to 8, then O8's 6:
+**The shared staging run** (M6b with O18 M6). The architect schedules it with the owner and the desk track: from 2026-11-07, never 06:45 to 07:00Z (the mini), never in a cua_repl hold. It has two layers. Layer 1 needs no one but the desk track. Layer 2 is one sitting with the owner. (Decision Log, "M6b Task 4, the local suite and the harness".)
+
+**Layer 1: the harness member** (the desk track, no owner step). Member B is the run's own harness member (`addRunMember`) with its b1 device, on a fresh VM at the slot, without the MAWS project:
+
+    zsh apps/desk-hub/deploy/staging-run.sh deploy                                       # O18 M1's hub, if staging lacks it
+    zsh apps/desk-hub/deploy/staging-run.sh reach-vm setup --vm <vm> --sminos a3d4a8f8   # sminos 1.40.3; refused below 9a694999 (1.40.1)
+    zsh apps/desk-hub/deploy/staging-run.sh reach --vm <vm> --direct-url ws://<the VM's tailnet address>
+    zsh apps/desk-hub/deploy/staging-run.sh reach-vm teardown --vm <vm>
+
+The scenes' MAWS is the branch at or after M6b. Their endpoints say `record`, so every widening goes through A's record acts. The run prints a PASS/FAIL line for each of O18's items 1 to 8 and for O8's three:
+- `m6b-cutover`: the terminal's widening, of the access and of a share, is refused "use MAWS", with no confirmation asked and `record.policy` unmoved; its narrowing runs;
+- `m6b-visibility`: b1 lists S by its access alone, each level set by A's act. At `listed`, `converse` and `approve` are refused `grade`;
+- `m6b-reader`: B pins, reads and drafts a lane B session A shares at Converse, and A's reading and draft read back unchanged.
+
+Item 4 is O8's "Can message: B's agents message, B can't read". Undo is the run's own (its LEFT and KEPT lines).
+
+These are the live run's checks, none of them verified before it:
+- lane B inside the reach scenes;
+- record acts over the relays;
+- layer 2's pairing through real Access with a second identity;
+- the profile daemon's teardown.
+
+**Layer 2: the real-member sitting** (the owner with the desk track, one scene). B is a real person, the owner's second email, signed in from a second scratch MAWS profile on the owner's Mac.
+
+1. **The email file.** The owner sends the second email to the desk track directly, never into a repo or a PR. The desk track writes it to a 0600 file outside any checkout, for example `~/.local/share/o8-sitting/second-email`. The records say "the owner's second email".
+2. **B joins the org.** The desk track runs `zsh apps/desk-hub/deploy/staging-run.sh real-member add --email-file <that file>`, then `staging-run.sh access-sync`. Access now admits B.
+3. **B pairs.**
+   - The owner launches the scratch profile and opens the logout URL.
+   - The desk track runs `zsh apps/desk-hub/deploy/staging-run.sh real-member pair --email-file <that file> --code-file <a new path outside any checkout>`. It writes the code there (0600) and waits up to 30 minutes.
+   - The owner copies the code without displaying it, with `pbcopy < <that path>` in a Terminal or iTerm window. They paste it into the profile's Settings › Org › Pairing code row, press Sign in, and finish in the browser as the second email.
+   - The step lists the device as B's first device, unendorsed: an admin can't endorse another member's device (P5 Decision Log 34). It prints the device's fingerprint, which the profile shows too.
+4. **The run.** O8's items, with B the real member on the second profile:
    - the owner makes a session private, shares it Can message, then View;
-   - the second member's rows and agents follow;
-   - `converse` is refused;
-   - the second member pins, reads and types a draft, and the owner's sidebar and draft are unchanged;
-   - `sminos share … view` from the owner's terminal says "use MAWS" once the desk track's refusal is in.
-5. **Teardown.** The second member is removed from the Org page; the VM goes with `endpoint-vm teardown`; the Access admission goes (the owner's).
+   - B's rows and agents follow;
+   - B's `converse` is refused;
+   - B pins, reads and types a draft, and the owner's sidebar and draft are unchanged;
+   - `sminos share … view` at the owner's terminal says "use MAWS".
+
+**The pitfall.**
+- The profile's sign-in opens the default browser at the staging hub's `/cdn-cgi/access/cli` (`access-login.ts:194`). If that browser still holds the owner's staging Access session, Access likely completes the sign-in as the owner. So just before B's sign-in, the owner opens `https://desk-hub-staging.opencognita-platform.workers.dev/cdn-cgi/access/logout`.
+- That logs out of every Access app on the team, so production desk web asks for sign-in again later. MAWS's org sessions and cloudflared's CLI token are untouched.
+- Until the owner is signed back in as themselves, nobody runs `cloudflared access login` for staging.
+- The sitting checks the pass-through by reading the member email the profile shows before its pairing completes. If it shows the owner's email, stop. `pair` reads only B's pending entries (`?member=`), so an entry posted as the owner is never listed for B.
+
+**Teardown.**
+1. The desk track runs `zsh apps/desk-hub/deploy/staging-run.sh real-member remove --email-file <that file>`, which removes B and revokes the device's keys, then `staging-run.sh access-sync`.
+2. The owner quits the scratch app. The profile's mawsd outlives the app and has no stop verb, so the desk track names its pids with `pgrep -fl maws-m6b-second-member`, ends each with `kill -TERM <pid>`, and runs `rm -rf ~/.local/share/maws-m6b-second-member`. The device keys are software keys in the profile's `device/keys.json`, so the directory takes them with it.
+3. The email file is deleted.
+4. The owner signs back into staging Access as themselves the next time a browser needs it.
+5. The VM goes with `reach-vm teardown`.
+
+**The owner's steps** (the architect hands these over):
+1. Send the second email to the desk track directly.
+2. At the sitting, launch the scratch profile with one command:
+
+       cd /Users/new/.local/share/maws-worktrees/p5-o8-m6b && mkdir -p -m 700 "$HOME/.local/share/maws-m6b-second-member" && MAWS_USER_DATA="$HOME/.local/share/maws-m6b-second-member" npx electron-vite dev
+
+   That worktree exists while M6b is unlanded, which is the plan for the sitting. If the sitting falls after M6b's merge, use a fresh worktree of master at or after the merge instead, run `pnpm install --frozen-lockfile` in it once, and run the same command from it. A dialog from macOS on that first launch, such as "accept incoming network connections" for Electron, is the owner's to answer. Deny is safe, since the profile connects outward to the hub, and no agent clicks through it.
+3. Open `https://desk-hub-staging.opencognita-platform.workers.dev/cdn-cgi/access/logout` in the default browser.
+4. Copy the pairing code without displaying it: in a Terminal or iTerm window, run `pbcopy < <the path the desk track names>`. Paste it into the profile's Settings › Org › Pairing code row and press Sign in. Sign in with the second email and the code from its inbox. Before pairing completes, check that the member email the profile shows is the second email.
+5. Don't run `cloudflared access login` for staging until you're signed back in as yourself.
+6. Only if the sitting falls after about 11-25: before step 3, run `cloudflared access login https://desk-hub-staging.opencognita-platform.workers.dev` once.
 
 Recorded in both documents' Outcomes: each item, with a transcript line, a screenshot or a file listing.
 
@@ -3672,6 +3723,54 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - The shared scrim is nearly invisible on light theme for the other sheets. That goes on the board with M6b's other UX residue: the unsupported copy should name its remedy, and long machine names truncate in the subtitle. The architect files these at landing.
   6. **Gates.** Run 42420500958 is green: static, unit 1/4–4/4, e2e:settings and e2e:cross-build, every spec on its first attempt.
   Date/Author: 2026-11-07, O8's executor (controller), from the fix wave's report and the architect's notes.
+- Decision: M6b Task 4, the local suite and the harness. The commits:
+  - d04d960a5, actions-whole;
+  - 3c13448dc, `policy.local.test.ts`;
+  - 5bcd83565 and aef0c7353, `apps/desk-hub/deploy` only, which go to the desk track for review.
+
+  The architect accepted all of the executor's decisions (2026-11-07). Two of them change earlier text. The rest settle these points.
+  1. **Every widening in the reach scenes is A's record act. This changes the harness as O18 M6 left it.**
+     - From sminos 1.39.0, once an endpoint's welcome says `record`, sminos refuses widening at the terminal and at the agent shell ("use MAWS", `sminos_visibility.py`'s THROUGH_APP), and keeps narrowing. Every M6b build says `record`. So O18 M6's scenes, which widened at the terminal, would break on M6b. Their README said "the branch's cut, before O8 M6b".
+     - Every widening now goes through A's `record.access` or `record.shares` act over A's relayed channel, and every narrowing stays in the shell. That is the product path, so the scenes prove it rather than route around it.
+     - Item 8 expects THROUGH_APP's refusal. Item 4's Can message share is A's act, and item 8 runs again rather than being cited.
+  2. **"Endorse the second profile's device" becomes "list it unendorsed". This overturns the wording of the ruling in "The real-member sitting", item 4(b).**
+     - An admin can't endorse another member's device: endorsement is that member's own step-up signature (P5 Decision Log 34; `src/main/org/edits.ts:70`, the path `sign-in.local.test.ts` proves). So the protocol lists another member's first device unendorsed.
+     - The ruling's intent holds: B's device takes no owner step.
+     - The architect, 2026-11-07, who made the ruling without that fact.
+  3. **`real-member add | pair | remove` is a deploy command of its own.**
+     - It is not `admin pair --member`. `admin pair` pairs the admin's own device, endorses it with the admin's key, prints its code and confirms at `/dev/tty`.
+     - `real-member` reuses org-protocol's `judgeEntry` and `pairingFingerprint`. `staging-run.sh real-member` hands it the token on stdin.
+     - The refusals:
+       - a hub that isn't staging's, refused before the admin device opens;
+       - an email file that is not a regular 0600 file of the user's, is a symlink, or has a `.git` in any ancestor;
+       - a code file that already exists or lies in a checkout;
+       - adding the admin's own email or an existing member's;
+       - pairing a member who already lists a device;
+       - removing an admin.
+     - The email and the code are scrubbed from every line, the hub's own text included. They are also added to `--scan`, and `secret_scan` fails the run if its log holds either.
+  4. **The pitfall's guard.** `pair` reads `GET /api/devices/pending?member=<B>` (H1), so an entry posted under the owner's Access identity is never listed for B. The step times out instead.
+  5. **The scratch profile** is `~/.local/share/maws-m6b-second-member`. The name is fixed, not `mktemp`, so teardown can name it. `MAWS_USER_DATA` sets it (`src/main/index.ts:22`), as M1's sitting did.
+     - Its mawsd outlives the app and has no stop verb. Teardown names its pids with `pgrep -f` and ends them with `kill -TERM`, not `pkill`, which auto mode refuses in some sessions (the architect).
+     - The owner copies the pairing code with `pbcopy < <file>` and never displays it.
+     - A dialog macOS raises at the first launch is the owner's to answer. No agent clicks one.
+  6. **The scenes.**
+     - Lane B runs on A1 only. M6a's reader offers are lane B's, and A1 is the scene the reader item needs.
+     - The sminos floor is 9a694999 (1.40.1), and the default is a3d4a8f8 (1.40.3).
+     - The capability is read once from A1's `audiences.json`, which is written at welcome.
+     - The new items are `m6b-cutover` (after item 8), `m6b-visibility` and `m6b-reader`.
+  7. **`policy.local.test.ts`**, five cases on the Miniflare hub with a real endpoint and a sminos stand-in executing §Q. It is registered in node-timing.
+     - B is added with no devices. B's app registers from a code naming B, and is listed unendorsed.
+     - `ROWS_CHANNEL_MS` is a 1 s timing seam.
+     - The stand-in answers the admission query from its own ledger, refuses a bad shape or a missing session, and sends the member frame before `rpc-result`.
+     - Discovery: `rows.ts` draws only roster machines (`rows.ts:626`).
+  8. **actions-whole** exempts only a form's mirror input: a control under `aria-hidden` that also has `tabIndex < 0`, `pointer-events: none` and opacity 0, all four together. Probes cover a visible clipped button under `aria-hidden`, which must be named, and a clipped mirror input, which must not be. This closes Task 3's re-review Minor.
+  9. **Not verified live.** These are the shared run's checklist (Concrete Steps):
+     - lane B inside the reach scenes;
+     - record acts over the relays;
+     - pairing through real Access with a second identity;
+     - the profile daemon's teardown.
+  10. **Gates.** Static is green after each commit: 42423743780, 42424222843 and 42425038671. Run 42425644208 (static, unit, e2e:settings, on the hosted lane) is green on its first attempt.
+  Date/Author: 2026-11-07, O8's executor (controller), from Task 4's report and the architect's notes.
 
 ## Outcomes & Retrospective
 
