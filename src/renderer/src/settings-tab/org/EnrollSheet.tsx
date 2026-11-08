@@ -19,7 +19,10 @@
 // - The sheet owns one run under one sign-in (`EnrollRun`, judged against each status by `observed`): a start latches the
 //   first run after it of its own machine and name, and a run taken up is latched at its generation. Once that run leaves
 //   the status, another takes its place, or the sign-in changes, the sheet's run has ended for good: it never adopts a
-//   later run, cancels nothing but its own, and only an explicit Start over begins again (none once the sign-in ended).
+//   later run, cancels nothing but its own, and only an explicit Start over begins again. A start that sees a newer run
+//   not its own ends there (another enrollment is under way), so it never cancels that run nor shows a late code.
+// - The sheet's own sign-in (`useOwnSignIn`) is latched apart from its run: once it ends, even after the run ended, the
+//   sheet offers no start again under any later sign-in, the same member's included.
 //   Every answer is fenced to the run that asked: a start's to its token, an approval's to its generation.
 import { useRef, useState } from 'react';
 import { formatClock } from '@shared/app/date-format';
@@ -29,7 +32,7 @@ import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { PRIMARY } from '../../sessions/ui';
 import { ORG } from '../copy';
 import { INPUT, TEXT_ACTION } from '../parts';
-import { failed, OutcomeLine, useOpen, type Outcome, type ViewMachine } from './parts';
+import { failed, OutcomeLine, useOpen, useOwnSignIn, type Outcome, type ViewMachine } from './parts';
 
 type Refused = Extract<EnrollStartResult, { ok: false }>;
 type Code = { value: string; expires: string };
@@ -40,13 +43,13 @@ const SAID = new Set<Refused['reason']>(['not-root', 'not-admin']);
  * The sheet's own enrollment. `choosing`: none yet, a refused start's answer with it. `starting`: a start this sheet sent
  * (`token`), under `owner`, waiting for the first run after generation `after` of its machine and `name` to show.
  * `running`: that run, latched at `generation` (`token` null for a run taken up), and the code while it may show.
- * `ended`: its run left the status or the sign-in ended; final.
+ * `ended`: its run left the status, the sign-in ended, or (`elsewhere`) a newer run not its own showed before its own; final.
  */
 export type EnrollRun =
   | { at: 'choosing'; refused: Refused | null }
   | { at: 'starting'; owner: string; after: number; name: string; token: number; code: Code | null }
   | { at: 'running'; owner: string; generation: number; token: number | null; code: Code | null }
-  | { at: 'ended'; why: 'gone' | 'signed-out'; generation: number | null };
+  | { at: 'ended'; why: 'gone' | 'signed-out' | 'elsewhere'; generation: number | null };
 
 /**
  * The run as the status `enrolling` and the sign-in `signIn` leave it, `replace` the sheet's machine (null for a new one).
@@ -57,7 +60,8 @@ export function observed(run: EnrollRun, enrolling: OrgEnrollingStatus, signIn: 
   if (signIn !== run.owner) return { at: 'ended', why: 'signed-out', generation: run.at === 'running' ? run.generation : null };
   if (run.at === 'starting') {
     const ours = enrolling !== null && enrolling.replace === replace && enrolling.generation > run.after && enrolling.name.toLowerCase() === run.name.toLowerCase();
-    return ours ? observed({ at: 'running', owner: run.owner, generation: enrolling.generation, token: run.token, code: run.code }, enrolling, signIn, replace) : run;
+    if (ours) return observed({ at: 'running', owner: run.owner, generation: enrolling.generation, token: run.token, code: run.code }, enrolling, signIn, replace);
+    return enrolling !== null && enrolling.generation > run.after ? { at: 'ended', why: 'elsewhere', generation: null } : run;
   }
   if (enrolling === null || enrolling.generation !== run.generation) return { at: 'ended', why: 'gone', generation: run.generation };
   if (run.code !== null && (enrolling.candidate !== null || enrolling.problem !== null)) return { ...run, code: null };
@@ -94,6 +98,7 @@ type Props = {
 
 export function EnrollSheet({ replace, follow, enrolling, may, signIn, onClose }: Props) {
   const open = useOpen();
+  const own = useOwnSignIn(signIn);
   const tokens = useRef(0);
   const [name, setName] = useState('');
   const [run, setRun] = useState<EnrollRun>(() => (follow !== null && signIn !== null ? { at: 'running', owner: signIn, generation: follow, token: null, code: null } : { at: 'choosing', refused: null }));
@@ -113,7 +118,7 @@ export function EnrollSheet({ replace, follow, enrolling, may, signIn, onClose }
 
   const machineName = replace?.name ?? name.trim();
   const start = () => {
-    if (machineName === '' || signIn === null) return;
+    if (machineName === '' || own.ended || signIn === null) return;
     const token = ++tokens.current;
     setCopied(false);
     setOutcome(null);
@@ -168,13 +173,15 @@ export function EnrollSheet({ replace, follow, enrolling, may, signIn, onClose }
   const candidate = ours?.candidate ?? null;
   const code = seen.at === 'starting' || seen.at === 'running' ? seen.code : null;
   const pending = approving !== null && approving === generation;
+  // A start, or a start again, only under the sheet's own sign-in, and never over another enrollment under way.
+  const mayStart = may && !own.ended;
   const form =
     seen.at === 'choosing'
-      ? { submit: may ? ORG.makeCode : undefined, can: machineName !== '', act: start, cancel: ORG.cancel }
+      ? { submit: mayStart ? ORG.makeCode : undefined, can: machineName !== '', act: start, cancel: ORG.cancel }
       : done !== null
         ? { submit: ORG.done, can: true, act: onClose, cancel: ORG.close }
         : seen.at === 'ended' || problem !== null
-          ? { submit: may && signIn !== null && !(seen.at === 'ended' && seen.why === 'signed-out') ? ORG.startOver : undefined, can: !pending, act: startOver, cancel: ORG.close }
+          ? { submit: mayStart && !(seen.at === 'ended' && seen.why === 'elsewhere') ? ORG.startOver : undefined, can: !pending, act: startOver, cancel: ORG.close }
           : { submit: may ? ORG.approve : undefined, can: candidate !== null && !pending, act: approve, cancel: ORG.cancelEnrollment };
   const expires = ours?.expires ?? code?.expires ?? null;
 
@@ -206,7 +213,7 @@ export function EnrollSheet({ replace, follow, enrolling, may, signIn, onClose }
               {ORG.enrollApproved(done.name, done.version)}
             </p>
           ) : seen.at === 'ended' ? (
-            <p className="m-0 text-fg-muted">{seen.why === 'signed-out' ? ORG.enrollSignedOut : ORG.enrollGone}</p>
+            <p className="m-0 text-fg-muted">{seen.why === 'signed-out' ? ORG.enrollSignedOut : seen.why === 'elsewhere' ? ORG.enrollElsewhere : ORG.enrollGone}</p>
           ) : problem !== null ? (
             <p role="alert" className="m-0 text-warning">
               {ORG.enrollProblems[problem]}
@@ -248,6 +255,7 @@ export function EnrollSheet({ replace, follow, enrolling, may, signIn, onClose }
           {/* What a cancel can't withdraw once signed: beside Approve, and while an approval is pending however the enrollment stands */}
           {done === null && (pending || (candidate !== null && problem === null && seen.at === 'running')) && <p className="m-0 text-fg-muted">{ORG.pairDurable}</p>}
           <OutcomeLine outcome={said} />
+          {own.ended && done === null && !(seen.at === 'ended' && seen.why === 'signed-out') && <p className="m-0 text-fg-muted">{ORG.enrollSignInEnded}</p>}
           {!may && done === null && <p className="m-0 text-warning">{ORG.enrollCantSign}</p>}
         </div>
       </SheetForm>
