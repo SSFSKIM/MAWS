@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 
-const COMMANDS = ['deploy', 'probe', 'fake-check', 'redeploy-check', 'measure', 'frame-cost', 'counts', 'access-sync', 'relay-measure', 'acceptance', 'endpoint-acceptance', 'reach-acceptance', 'admin'];
+const COMMANDS = ['deploy', 'probe', 'fake-check', 'redeploy-check', 'measure', 'frame-cost', 'counts', 'access-sync', 'relay-measure', 'acceptance', 'endpoint-acceptance', 'reach-acceptance', 'real-member', 'admin'];
 const [command, ...args] = process.argv.slice(2);
 if (!COMMANDS.includes(command)) {
   console.error(`usage: deployment <${COMMANDS.join('|')}> [options]; see apps/desk-hub/deploy/README.md`);

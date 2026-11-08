@@ -8,9 +8,15 @@
 // designation cleared, the member removed) and a read-back of the head and the hub's machines: `LEFT` for anything of the
 // run's still current, `KEPT` for what stays by design.
 //
-// Staging alone: production is refused by name, and the operator's pty path (a widening at a terminal the run controls)
-// is refused for any hub but staging's and any machine outside the run's own scenes (endpoint-machine.ts's
-// operatorRefusal). `--vm-setup` and `--vm-teardown` run vm/setup.sh and vm/teardown.sh's reach mode (RUN=o18) on the
+// P5 O8 M6b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The shared staging run", layer 1): the scenes'
+// MAWS is the branch at or after M6b, so each endpoint says `record` and sminos takes widening from MAWS alone. The run
+// widens as a member's MAWS does, by A's `record.*` acts over A's channel to the session's machine (the hub's relay), and
+// runs M6b's items beside O18's: the terminal's cutover, B's listings by access, and B's reading and draft of a lane B
+// session on A1 (vm/scene.sh's `lane-b-up`, which the reach setup now installs).
+//
+// Staging alone: production is refused by name, and the operator's pty path (now only ever refused at a scene, the
+// cutover item's check) is refused for any hub but staging's and any machine outside the run's own scenes
+// (endpoint-machine.ts's operatorRefusal). `--vm-setup` and `--vm-teardown` run vm/setup.sh and vm/teardown.sh's reach mode (RUN=o18) on the
 // VM, which needs no MAWS checkout: the branch goes as a full bundle, staged in bounded steps, and each sminos as the
 // run's own copy by commit (`git archive <commit> sminos` from the doperpowers checkout).
 import { spawn } from 'node:child_process';
@@ -23,16 +29,20 @@ import { checkTestHub, PRODUCTION_HOST, readDeployConfig } from './config';
 import { readSecrets } from './deploy';
 import { addRunMember, afterEndpointCleanup, enrollScratch, endpointServing, OrgView, type Made } from './endpoint-acceptance';
 import { composeScript, REACH_SCENES, ScriptRunner, VmMachine, type ReachSceneName } from './endpoint-machine';
-import { RelayDialer, type RunDevice } from './endpoint-remote';
+import { openRemote, RelayDialer, testDevice, type RunDevice } from './endpoint-remote';
 import { ItemReport, Secrets } from './endpoint-verdicts';
 import { Person } from './hub';
 import { loadAdminDevice, OrgAdmin } from './org-admin';
 import { Cleanup, interruptible, isTestTarget, STEP_MS, type InterruptOptions } from './proof';
-import { CITED, REACH_ITEMS, runReachItems, type Probe, type ReachItem, type ReachMachine, type ReachScene, type ReachSession } from './reach-items';
+import { CITED, REACH_ITEMS, runReachItems, type LaneBSession, type Probe, type ReachItem, type ReachMachine, type ReachScene, type ReachSession } from './reach-items';
 import { connectEndpoint, echoingEndpoint } from './rl1';
 
-/** The sminos the scenes run, by commit (M6's pins): 1.39.0 or later for A1, A2 and B1; 1.34.0 for A3. */
-export const SMINOS_FLOOR = '0759115d';
+/**
+ * The sminos the scenes run, by commit (M6's pins; O8 M6b's run, the desk track's terms): 1.40.1 or later for A1, A2
+ * and B1 (1.39.0's cutover, 1.40.1's whole-input checks), 1.40.3 by default; 1.34.0 for A3.
+ */
+export const SMINOS_FLOOR = '9a694999';
+export const SMINOS_NEW = 'a3d4a8f8';
 export const SMINOS_OLD = '386c4b07';
 export const DOPERPOWERS = '/Users/new/Developer/GitHub/doperpowers';
 /** Where the bundle is staged on the VM, root's alone, before setup.sh takes it. */
@@ -57,7 +67,7 @@ export const OPTIONS = {
   'vm-teardown': { type: 'boolean', default: false },
   repo: { type: 'string' },
   doperpowers: { type: 'string', default: DOPERPOWERS },
-  sminos: { type: 'string', default: SMINOS_FLOOR },
+  sminos: { type: 'string', default: SMINOS_NEW },
   'old-sminos': { type: 'string', default: SMINOS_OLD },
   production: { type: 'boolean', default: false },
 } as const;
@@ -116,12 +126,13 @@ export function bundleSteps(bundle: Buffer, chunk = CHUNK): string[] {
   return steps;
 }
 
-/** The files setup.sh's reach stage holds. */
+/** The files setup.sh's reach stage holds (lane-b.mjs: O8 M6b's lane B session on A1). */
 export function reachSetupPayload(app: string, repo: string, sminos: { new: Buffer; old: Buffer }): Record<string, Buffer> {
   const vm = join(app, 'deploy', 'vm');
   return {
     'scene.sh': readFileSync(join(vm, 'scene.sh')),
     'stub-model.mjs': readFileSync(join(vm, 'stub-model.mjs')),
+    'lane-b.mjs': readFileSync(join(vm, 'lane-b.mjs')),
     'stub-api.mjs': readFileSync(join(repo, 'spikes', 'protocol-probe', 'stub-api.mjs')),
     'sminos-new.tar': sminos.new,
     'sminos-old.tar': sminos.old,
@@ -145,7 +156,7 @@ async function vmSetup(o: { app: string; repo: string; doperpowers: string; smin
   const sminosOld = await gitId(o.doperpowers, o.oldSminos);
   const floor = await gitId(o.doperpowers, SMINOS_FLOOR);
   if (sminosNew !== floor && (await output('git', ['-C', o.doperpowers, 'merge-base', '--is-ancestor', floor, sminosNew]).then(() => false, () => true))) {
-    o.print(`--sminos ${o.sminos} is not ${SMINOS_FLOOR} (sminos 1.39.0) or later`);
+    o.print(`--sminos ${o.sminos} is not ${SMINOS_FLOOR} (sminos 1.40.1) or later`);
     return 2;
   }
   const tar = async (id: string) => output('git', ['-C', o.doperpowers, 'archive', '--format=tar', id, 'sminos'], { binary: true });
@@ -240,7 +251,7 @@ export async function buildReachScene(o: ReachRunOptions & { tag: string }, made
     const up = await m.vm.laneA.up(project);
     sessions.push(up.session);
     log(`${label}: session ${up.session} (${up.alias}${up.short ? `#${up.short}` : ''}) on ${m.name}`);
-    return { label, session: up.session, alias: up.alias, ...(up.short === undefined ? {} : { short: up.short }), machine: m };
+    return { label, session: up.session, alias: up.alias, ...(up.short === undefined ? {} : { short: up.short }), launch: up.launch, machine: m };
   };
   const probe = async (name: string, owner: string, capabilities: string[] | undefined): Promise<Probe> => {
     made.machines.push(name);
@@ -264,8 +275,18 @@ export async function buildReachScene(o: ReachRunOptions & { tag: string }, made
   for (const m of Object.values(machines)) await endpointServing(m.vm, view);
   const pa = await probe(`o18-pa-${tag}`, a.member, undefined);
   const pb = await probe(`o18-pb-${tag}`, b.member, ['audience']);
-  const relayA1 = new RelayDialer(person.hub, machines.a1.ref, () => person.headers);
-  cleanup.add('close the relay to A1', async () => relayA1.close());
+  // The relays to A1 and A2, which A's and b1's channels ride, each closed after every undoing that acts through them.
+  const relays = new Map<string, RelayDialer>();
+  for (const m of [machines.a1, machines.a2]) {
+    const relay = new RelayDialer(person.hub, m.ref, () => person.headers);
+    relays.set(m.ref, relay);
+    cleanup.add(`close the relay to ${m.scene.toUpperCase()}`, async () => relay.close());
+  }
+  const channel = (who: 'a' | 'b', m: Pick<ReachMachine, 'ref'>) => {
+    const relay = relays.get(m.ref);
+    if (relay === undefined) throw new Error(`no relay to ${m.ref}: the run's channels go to A1 and A2`);
+    return openRemote(testDevice(view.chain[0].state.org, who === 'a' ? a.device : b.device, { chain: view.chain, certificates: view.certificates }, { build: 'o18-m6-acceptance' }), m.ref, () => relay.dial());
+  };
 
   cleanup.add('clear the archive designation', async () => void (designated && (await designate(null))));
   const S = await sessionUp('S', machines.a1);
@@ -280,6 +301,15 @@ export async function buildReachScene(o: ReachRunOptions & { tag: string }, made
   });
 
   let a3: ReachSession | null = null;
+  let laneB: LaneBSession | null = null;
+  const laneBUp = async (): Promise<LaneBSession> => {
+    const source = machines.a1.vm.laneB;
+    if (!source) throw new Error('A1 has no lane B source');
+    const up = await source.up(tag);
+    sessions.push(up.engine);
+    log(`lane B: app session ${up.app} (engine session ${up.engine}, ${up.alias}) on ${machines.a1.name}`);
+    return up;
+  };
   const run = { hub: { host: new URL(person.hub).host, org: o.config.org.id }, scenes: [...REACH_SCENES] as string[] };
   const scene: ReachScene = {
     hub: person.hub,
@@ -290,6 +320,7 @@ export async function buildReachScene(o: ReachRunOptions & { tag: string }, made
     b,
     machines,
     bringA3: async () => (a3 ??= await sessionUp('A3', await sceneUp('a3', a.member))),
+    bringLaneB: async () => (laneB ??= await laneBUp()),
     pa,
     pb,
     project,
@@ -297,7 +328,7 @@ export async function buildReachScene(o: ReachRunOptions & { tag: string }, made
     T,
     U,
     seats,
-    relayA1,
+    channel,
     designate,
     run,
     cleanup,
@@ -403,7 +434,7 @@ export async function main(argv: string[]): Promise<number> {
     person,
     config: config!,
     device: await loadAdminDevice(values['device-keys'] as string),
-    vm: (scene) => new VmMachine(ssh, scratch, { directUrl: `ws://${host}:${PORTS[scene]}`, scene, log: (line) => log(`  vm ${scene}: ${line}`), gate: () => cleanup.check(), signal: cleanup.signal }),
+    vm: (scene) => new VmMachine(ssh, scratch, { directUrl: `ws://${host}:${PORTS[scene]}`, scene, laneB: scene === 'a1', log: (line) => log(`  vm ${scene}: ${line}`), gate: () => cleanup.check(), signal: cleanup.signal }),
     items: chosenItems.items,
     cleanup,
     secrets,

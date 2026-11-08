@@ -4,7 +4,8 @@
 // Open replaces the focused pane's session, Open in new tab keeps it. P5 O8 M5: a project's and a machine's row both
 // carry the row's People toggle where the row offers it (its `data-people`: others to show, or the toggle on), checked
 // while it draws other people's sessions. P5 O8 M7a (Q5): an org project's row whose sminos id the index knows offers
-// Channel, the project's one channel tab.
+// Channel, the project's one channel tab. P5 O8 M6b: a session's menu offers Share for a session you own, a listed row's
+// with no record here included (its row's `data-menu` names it only then).
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -28,6 +29,8 @@ import { KEEP_RUNNING } from './copy'; // P5 O2 M2
 import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O7 M2
 import { setRemoteReading } from '../lane-b/remote-reading'; // P5 O8 M6a
 import { useReaderRowsOf } from '../lane-b/reader-rows'; // P5 O8 M6a
+import { openShare, useCanShare } from '../sessions/share/target'; // P5 O8 M6b
+import { SHARE } from '../sessions/share/copy'; // P5 O8 M6b
 
 // P5 O8 M5: a project's or machine's `people` says whether its row offers the People toggle.
 export type MenuTarget = { kind: 'machine'; machine: MachineRef; people: boolean } | { kind: 'session'; appSessionId: AppSessionId } | { kind: 'project'; projectId: ProjectId; people: boolean };
@@ -75,18 +78,31 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
   );
 }
 
+// P5 O8 M6b: the listing-capable session menu. A record's actions, then Share for a session you own (sessions/share/
+// target.ts); another machine's listed session with no record here offers Share alone.
 function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSessionId; dropdown?: boolean }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5
   const kept = useSessions((s) => s.engine.get(appSessionId)?.kept); // P5 O2 M2: undefined while no status reports it
   const remoteReading = useReaderRowsOf(appSessionId) !== 'refused'; // P5 O8 M6a
-  if (!record) return null;
+  const shareable = useCanShare(appSessionId); // P5 O8 M6b
+  if (!record) return shareable ? <ShareItem appSessionId={appSessionId} dropdown={dropdown} /> : null;
   const foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job'; // D-12: the opens only
   return (
     <>
       {sessionActionsFor(record, { bridged, remote: isRemoteLaneB(appSessionId) /* P5 O7 M2 */, remoteReading }).map((id) => <SessionItem key={id} id={id} record={record} dropdown={dropdown} />)}
       {kept !== undefined && !foreign && <KeepItem appSessionId={appSessionId} kept={kept} dropdown={dropdown} />}
+      {shareable && <ShareItem appSessionId={appSessionId} dropdown={dropdown} />}
     </>
+  );
+}
+
+// P5 O8 M6b: the session's Share sheet
+export function ShareItem({ appSessionId, dropdown }: { appSessionId: AppSessionId; dropdown?: boolean }) {
+  return (
+    <Item dropdown={dropdown} enabled onSelect={() => openShare(appSessionId)}>
+      {SHARE.menuItem}
+    </Item>
   );
 }
 

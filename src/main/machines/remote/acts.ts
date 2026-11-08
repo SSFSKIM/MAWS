@@ -29,6 +29,10 @@
 //   that lists `rl2.bytes` (else `not-offered`, as an executor it doesn't read); an act may name a capability its peer must
 //   list (`requires`: an artifact write's `rl2.artifacts`), judged the same way at each transmission; and a result from a
 //   peer that lists `rl2.bytes` is read back from the tagged form.
+// - P5 O8 M6b: several step-up acts under one confirmation (`actMany`, a Share sheet's save). Each is built and checked
+//   as `act` builds it, all are signed at once (the step-up sheet lists them all), and each is then entered and sent only
+//   when its caller says (`SignedAct.send`), so a caller sends them in its order and stops at a failure. A signed act's
+//   window runs from the confirmation; one sent past it is refused `stale`, never sent.
 import { base64urlEncode, isAction, MESSAGE_MAX_BYTES, NONCE_BYTES, OP_HORIZON_S, type Action, type ActionContext, type DeviceMessage, type EndpointMessage, type Executor, type RefusalReason, type RequestDigest } from '../../../../apps/org-protocol/src/index.ts';
 import type { MachineRef } from '@shared/machine/ref';
 import type { SignedIn } from '../../org/session';
@@ -61,6 +65,13 @@ export interface ActRequest {
    */
   oneChannel?: true;
 }
+/** P5 O8 M6b: one act of a batch, signed under the batch's one confirmation; `send` enters it in the table, once. */
+export interface SignedAct {
+  readonly opId: string;
+  send(): ActHandle;
+}
+/** P5 O8 M6b: a batch signed (its acts in the order asked), or why nothing was asked or signed. */
+export type ActManyResult = { ok: true; acts: SignedAct[] } | { ok: false; reason: 'removed' | 'closed' | 'offline' | 'malformed' | 'too-large' | 'step-up-cancelled' };
 /** waiting: not yet on a channel; unknown: lost track, querying. */
 export type ActProgress = 'waiting' | 'sent' | 'accepted' | 'unknown';
 export type ActOutcome =
@@ -92,6 +103,9 @@ export interface ActTableDeps {
   now(): number;
   log(line: string): void;
 }
+
+/** An act as built, before its table entry: its creation (ms) and whether its args are sealed in the tagged form. */
+type Built = { action: Action; createdAt: number; tagged: boolean };
 
 type Entry = {
   opId: string;
@@ -159,20 +173,83 @@ export class ActTable {
 
   /** A new act; `ended` names the link's permanent end (`removed`, `closed`) when it holds one. */
   act(request: ActRequest, ended: 'removed' | 'closed' | null): ActHandle {
-    const { now } = this.#deps;
-    let resolve!: (outcome: ActOutcome) => void;
-    const outcome = new Promise<ActOutcome>((done) => (resolve = done));
-    const opId = random(16);
-    const createdAt = now();
-    const opCreated = new Date(createdAt).toISOString();
     const signedIn = this.#deps.signedIn();
+    const { entry, handle } = this.#enter(request, this.#build(request, signedIn));
+    // Refused locally, as the endpoint would refuse it: a session without its context, a shape it would not read (which
+    // would close the channel), or a link already ended.
+    const refusal = ended ?? (signedIn === null ? 'offline' : this.#unsendable(request, entry.action));
+    if (refusal !== null) this.#settle(entry, { state: 'refused', reason: refusal });
+    else if (entry.mode === 'required') void this.#sign(entry);
+    else this.#trySend(entry);
+    this.#armHorizon(entry);
+    return handle;
+  }
+
+  /**
+   * P5 O8 M6b: several step-up acts under one confirmation (the module's header). Each is built and judged as `act` does
+   * before anyone is asked, and any refusal refuses the batch; then all are signed at once, whatever their `stepUp`.
+   * `ended` is read again at each act's send.
+   */
+  async actMany(requests: readonly ActRequest[], ended: () => 'removed' | 'closed' | null): Promise<ActManyResult> {
+    const end = ended();
+    if (end !== null) return { ok: false, reason: end };
+    const signedIn = this.#deps.signedIn();
+    if (signedIn === null) return { ok: false, reason: 'offline' };
+    if (requests.length === 0) return { ok: false, reason: 'malformed' };
+    const built = requests.map((request) => this.#build(request, signedIn));
+    for (let i = 0; i < built.length; i++) {
+      const refusal = this.#unsendable(requests[i], built[i].action);
+      if (refusal !== null) return { ok: false, reason: refusal };
+    }
+    let result: Awaited<ReturnType<SignedIn['stepUp']['signActions']>>;
+    try {
+      result = await signedIn.stepUp.signActions(built.map(({ action: a }) => ({ machine: a.machine, action: a.action, args: a.args, session: a.session, context: a.context, requestDigest: a.requestDigest, opId: a.opId, opCreated: a.opCreated })));
+    } catch {
+      result = { ok: false, reason: 'failed' };
+    }
+    if (!result.ok) return { ok: false, reason: result.reason === 'malformed' ? 'malformed' : 'step-up-cancelled' };
+    const actions = result.actions;
+    if (actions.length !== built.length || actions.some((a, i) => a.opId !== built[i].action.opId || a.opCreated !== built[i].action.opCreated)) return { ok: false, reason: 'malformed' };
+    if (actions.some((a) => !fits(a))) return { ok: false, reason: 'too-large' };
+    const signedAt = this.#deps.now();
+    return {
+      ok: true,
+      acts: requests.map((request, i) => {
+        let handle: ActHandle | null = null;
+        return {
+          opId: actions[i].opId,
+          send: () => (handle ??= this.#sendSigned(request, built[i], actions[i], signedAt, ended())),
+        };
+      }),
+    };
+  }
+
+  /** A batch's signed act entered and sent: refused if its link ended, signed out, or its window has passed. */
+  #sendSigned(request: ActRequest, built: Built, action: Action, signedAt: number, ended: 'removed' | 'closed' | null): ActHandle {
+    const { entry, handle } = this.#enter(request, built);
+    entry.mode = 'required';
+    entry.action = action;
+    entry.signed = true;
+    entry.windowFrom = signedAt;
+    if (ended !== null) this.#settle(entry, { state: 'refused', reason: ended });
+    else if (this.#deps.signedIn() === null) this.#settle(entry, { state: 'refused', reason: 'offline' });
+    else if (!this.#inWindow(entry)) this.#settle(entry, { state: 'refused', reason: 'stale' });
+    else this.#trySend(entry);
+    this.#armHorizon(entry);
+    return handle;
+  }
+
+  /** The act a request names, from the session's identity: its opId and creation now, its args sealed as the peer reads them. */
+  #build(request: ActRequest, signedIn: SignedIn | null): Built {
+    const createdAt = this.#deps.now();
+    const opCreated = new Date(createdAt).toISOString();
     const tagged = needsCodec(request.args);
     const action = {
       v: 1,
       org: signedIn?.identity.org ?? '',
       machine: this.#deps.machine,
       device: signedIn?.identity.device ?? '',
-      opId,
+      opId: random(16),
       opCreated,
       action: request.action,
       ...(request.session === undefined ? {} : { session: request.session }),
@@ -182,9 +259,23 @@ export class ActTable {
       nonce: random(NONCE_BYTES),
       created: opCreated,
     } as Action;
+    return { action, createdAt, tagged };
+  }
+
+  /** Why the endpoint would refuse the act as built, before anything is sent or asked: a session without its context, a shape it would not read (which would close the channel), or a size past the message limit; else null. */
+  #unsendable(request: ActRequest, action: Action): 'malformed' | 'too-large' | null {
+    if ((request.session !== undefined && request.context === undefined) || !isAction(action)) return 'malformed';
+    return fits(action) ? null : 'too-large';
+  }
+
+  /** The table's entry for a built act, and its caller's handle. */
+  #enter(request: ActRequest, built: Built): { entry: Entry; handle: ActHandle } {
+    const { action, createdAt, tagged } = built;
+    let resolve!: (outcome: ActOutcome) => void;
+    const outcome = new Promise<ActOutcome>((done) => (resolve = done));
     const entry: Entry = {
-      opId,
-      opCreated,
+      opId: action.opId,
+      opCreated: action.opCreated,
       executor: request.executor ?? executorOf(request.action),
       needs: [...(request.requires === undefined ? [] : [request.requires]), ...(tagged ? [BYTES_CAPABILITY] : [])],
       oneChannel: request.oneChannel === true,
@@ -208,7 +299,7 @@ export class ActTable {
       resolve,
     };
     const handle: ActHandle = {
-      opId,
+      opId: entry.opId,
       get opCreated() {
         return entry.opCreated;
       },
@@ -219,24 +310,18 @@ export class ActTable {
       },
       outcome,
     };
-    this.#entries.set(opId, entry);
-    // Refused locally, as the endpoint would refuse it: a session without its context, a shape it would not read (which
-    // would close the channel), or a link already ended.
-    if (ended !== null) this.#settle(entry, { state: 'refused', reason: ended });
-    else if (signedIn === null) this.#settle(entry, { state: 'refused', reason: 'offline' });
-    else if ((request.session !== undefined && request.context === undefined) || !isAction(action)) this.#settle(entry, { state: 'refused', reason: 'malformed' });
-    else if (!fits(action)) this.#settle(entry, { state: 'refused', reason: 'too-large' });
-    else if (entry.mode === 'required') void this.#sign(entry);
-    else this.#trySend(entry);
-    // Past the horizon the executor's ledger no longer answers (`#query`), and a lost channel may never come back to ask.
-    if (!entry.settled) {
-      entry.horizon = setTimeout(
-        () => this.#settle(entry, entry.outstanding ? { state: 'unknown', reason: 'expired' } : { state: 'refused', reason: 'expired' }),
-        createdAt + OP_HORIZON_S * 1000 + 1 - now(),
-      );
-      entry.horizon.unref?.();
-    }
-    return handle;
+    this.#entries.set(entry.opId, entry);
+    return { entry, handle };
+  }
+
+  /** Past the horizon the executor's ledger no longer answers (`#query`), and a lost channel may never come back to ask. */
+  #armHorizon(entry: Entry): void {
+    if (entry.settled) return;
+    entry.horizon = setTimeout(
+      () => this.#settle(entry, entry.outstanding ? { state: 'unknown', reason: 'expired' } : { state: 'refused', reason: 'expired' }),
+      Date.parse(entry.opCreated) + OP_HORIZON_S * 1000 + 1 - this.#deps.now(),
+    );
+    entry.horizon.unref?.();
   }
 
   /**

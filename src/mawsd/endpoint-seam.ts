@@ -107,6 +107,16 @@ export interface EndpointModule {
   status(): unknown; // daemon.status's endpoint.detail; no paths, addresses or key material
   enrollment(): { name: string; org: string } | null; // the enrollment held, null while unenrolled: machine.identity's project id (P5 O3-D D38)
   cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }>;
+  // P5 O8 M6b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §Q): the local door, this machine's own
+  // app's way to its own sessions' record acts (`act`: the three record.* actions alone, each's step-up verified every time,
+  // its member from its device's one head entry, then authorized as a channel's act) and their policy read (`call`:
+  // record.policy alone, as the machine's owners'), served on machine.sock as `endpoint.local.act` and `endpoint.local.call`.
+  // `act` answers the outcome as RL4's `done` carries it, or `{state: 'refused', reason}`; `call` as RL3's `result` does.
+  // Absent from a module that has none (a test's); the daemon then answers `unavailable`
+  local?: {
+    act(action: unknown): Promise<{ state: string } & Record<string, unknown>>;
+    call(name: string, input: unknown): Promise<{ ok: true; output: unknown } | { ok: false; code: string }>;
+  };
 }
 
 // O10's endpoint module (P5 O10 M10), one for each daemon, loaded when it is needed; `build` is the daemon's build id,
@@ -162,6 +172,28 @@ export class LazyEndpoint implements EndpointModule {
   // loads it at its command), and its start reads the state that `enrollment()` then reports.
   enrollment(): { name: string; org: string } | null {
     return this.#module === null ? null : this.#module.enrollment();
+  }
+
+  /**
+   * P5 O8 M6b: the module's local door once it is loaded (a load in flight awaited). Unloaded, nothing is enrolled here
+   * (an enrollment on disk loads the module at the daemon's start), so there is no head to authorize an act against:
+   * `unavailable`, as from a module with no door.
+   */
+  readonly local: NonNullable<EndpointModule['local']> = {
+    act: async (action) => {
+      const module = await this.#loaded();
+      return module?.local === undefined ? { state: 'refused', reason: 'unavailable' } : module.local.act(action);
+    },
+    call: async (name, input) => {
+      const module = await this.#loaded();
+      return module?.local === undefined ? { ok: false, code: 'unavailable' } : module.local.call(name, input);
+    },
+  };
+
+  /** The module as loaded now, or by the load in flight; null when none is or will be (a failed load included). */
+  async #loaded(): Promise<EndpointModule | null> {
+    if (this.#stopped) return null;
+    return this.#module ?? (await this.#loading?.catch(() => null)) ?? null;
   }
 
   async cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }> {

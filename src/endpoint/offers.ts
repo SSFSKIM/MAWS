@@ -22,9 +22,10 @@ import type { GradeSpec } from '@shared/ipc/grades';
  * `artifact` (P5 O7 M5a: an artifact by its id, ranked the highest of its linked sessions' ranks, the machine's owners
  * holding `manage` on every one: targets.ts, artifacts.ts), or `task-list` (P5 O7 M8: a task list's read, `fs.tasks`: the
  * input's `appSessionId` names the session, placed as an `appSessionId`, and its `listId` must be that session's own
- * list: targets.ts).
+ * list: targets.ts), or `record` (P5 O8 M6b: a session's record act, `record.*`, naming exactly one of `session`, a lane A
+ * engine session id, or `appSessionId`, a lane B app session id, placed through RL10's members join: targets.ts).
  */
-export type TargetRule = 'appSessionId' | 'session' | 'machine' | 'checkout' | 'each-session' | 'artifact' | 'task-list';
+export type TargetRule = 'appSessionId' | 'session' | 'machine' | 'checkout' | 'each-session' | 'artifact' | 'task-list' | 'record';
 
 /** Who runs an authorized request (M7 routes acts by it, M8 calls): a lane, the endpoint itself, or one of mawsd's hosts. */
 export type OfferExecutor = 'engine-host' | 'sminos' | 'endpoint' | 'machine' | 'pty-host' | 'main';
@@ -54,6 +55,12 @@ export type OfferRow = {
    * a grant-holder included, refused `owners-only`.
    */
   owners?: true;
+  /**
+   * P5 O8 M6b: the capability the machine's sminos must advertise in its RL10 hello for the row to be offered (`record`):
+   * without it the request is refused `not-offered` before anything is read or sent, and with no sminos connected
+   * `unavailable` (the machine's condition, asked again later).
+   */
+  sminos?: 'record';
 };
 
 /**
@@ -127,6 +134,33 @@ const namesAnAgent = (input: unknown): boolean => typeof input === 'object' && i
 /** `forward.open`'s args: exactly a port. */
 const isForwardArgs = (input: unknown): boolean =>
   typeof input === 'object' && input !== null && !Array.isArray(input) && Object.keys(input).length === 1 && Number.isInteger((input as { port?: unknown }).port) && (input as { port: number }).port >= 1 && (input as { port: number }).port <= 65535;
+
+/**
+ * P5 O8 M6b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M6b and Interfaces §Q, agreed with the desk track):
+ * the record acts, a session's general access, its shares and (M5b's) an owner added. Each act names its target in its
+ * `args`, exactly one of `session` (lane A's engine session id) or `appSessionId` (lane B's), beside the change, and
+ * carries no `session` and no `context`: a record act doesn't depend on how the session was launched.
+ */
+export const RECORD_ACTS = ['record.access', 'record.shares', 'record.owners'] as const;
+/** The call that reads the policies the record acts change (`{session?}`: one session, by its listing's id). */
+export const RECORD_POLICY = 'record.policy';
+const RECORD_ACCESS: readonly string[] = ['private', 'listed', 'org-view', 'org-converse'];
+const SHARE_GRADES: readonly unknown[] = ['list', 'view', 'converse', 'approve', null];
+const isRecordId = (value: unknown): boolean => typeof value === 'string' && value !== '' && value.length <= 512;
+/** A record act's args: exactly one target key, a non-empty id, and exactly the change's own keys, each by `change`'s rule. */
+const isRecordArgs =
+  (change: Readonly<Record<string, (value: unknown) => boolean>>) =>
+  (input: unknown): boolean => {
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) return false;
+    const fields = input as Readonly<Record<string, unknown>>;
+    const targets = ['session', 'appSessionId'].filter((key) => Object.hasOwn(fields, key));
+    if (targets.length !== 1 || !isRecordId(fields[targets[0]])) return false;
+    const keys = Object.keys(fields).filter((key) => key !== targets[0]);
+    return keys.length === Object.keys(change).length && keys.every((key) => Object.hasOwn(change, key) && change[key](fields[key]));
+  };
+/** `record.policy`'s input: none, or exactly the one session it names. */
+export const isPolicyInput = (input: unknown): boolean => input === null || input === undefined || (isFields(input, ['session']) && (input.session === undefined || isRecordId(input.session)));
+const recordAct = (change: Readonly<Record<string, (value: unknown) => boolean>>): OfferRow => ({ kind: 'act', executor: 'sminos', target: 'record', grade: 'manage', accepts: isRecordArgs(change), sminos: 'record' });
 
 export const OFFERS: Offers = {
   commands: {
@@ -261,6 +295,15 @@ export const OFFERS: Offers = {
     'sminos.diff': laneA('call', 'view'),
     'sminos.output': laneA('call', 'view'),
     'sminos.read': laneA('call', 'view'),
+    // P5 O8 M6b (Interfaces §Q): a session's reach, changed by its owners through sminos's executors (`set_visibility`)
+    // as an RL10 `rpc` carrying the act as its proof, on either lane (rl10/link.ts), each with a step-up (step-up.ts:
+    // every `record.*`); offered only while the machine's sminos advertises `record`. And the policies they change, read
+    // from sminos's member frames for the sessions the caller owns (record-policy.ts): admitted at `list` on the machine,
+    // its answer cut to `manage`, as an `each-session` row's is to its grade (a call graded above `view` is an act).
+    'record.access': recordAct({ access: (value) => typeof value === 'string' && RECORD_ACCESS.includes(value) }),
+    'record.shares': recordAct({ member: isRecordId, grade: (value) => SHARE_GRADES.includes(value) }),
+    'record.owners': recordAct({ add: (value) => value === true, member: isRecordId }),
+    'record.policy': { kind: 'call', executor: 'endpoint', target: 'machine', grade: 'list', accepts: isPolicyInput },
     // The endpoint's own, and mawsd's content-free reads (O2 grades `daemon.status` `list`; O6's is `ungraded` until it lands).
     'endpoint.grant': { kind: 'act', executor: 'endpoint', target: 'machine', grade: null },
     'endpoint.state': { kind: 'act', executor: 'endpoint', target: 'machine', grade: null },

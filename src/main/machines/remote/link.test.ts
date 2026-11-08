@@ -152,7 +152,7 @@ async function harness(options: { addresses?: string[]; hub?: boolean; timing?: 
   const signedIn: SignedIn = {
     identity: { org: 'org-l', member: o.A, device: 'a1', clientClass: 'native-mac', channelKey: o.a1.channel, build: 't', capabilities: [] },
     view,
-    stepUp: { sign: async () => ({ ok: false, reason: 'cancelled' }) },
+    stepUp: { sign: async () => ({ ok: false, reason: 'cancelled' }), signActions: async () => ({ ok: false, reason: 'cancelled' }) },
     hub: options.hub === false ? null : { url: 'http://127.0.0.1:9', headers: async () => ({}) },
   };
   session.set(signedIn);

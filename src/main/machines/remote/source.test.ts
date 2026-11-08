@@ -63,7 +63,7 @@ async function signedIn(o: Awaited<ReturnType<typeof org>>, onAdopted: () => voi
   return {
     identity: { org: 'org-s', member: o.A, device: 'a1', clientClass: 'native-mac', channelKey: o.a1.channel, build: 't', capabilities: [] },
     view: watchedView(memoryOrgView({ chain: [o.s1, o.head], certificates: o.certificates }), onAdopted),
-    stepUp: { sign: async () => ({ ok: false, reason: 'cancelled' }) },
+    stepUp: { sign: async () => ({ ok: false, reason: 'cancelled' }), signActions: async () => ({ ok: false, reason: 'cancelled' }) },
     hub: null,
   };
 }

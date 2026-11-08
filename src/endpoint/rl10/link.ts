@@ -35,6 +35,16 @@
 // holds, all of them after each welcome, and asks `snapshots?` while the cache's rebuild is incomplete; to any other,
 // neither, and no stream writer goes down (log-relay.ts). Each local session's audience by `policyRev` is kept in the
 // cache as its record moves, which an `unlisted` notice is checked against.
+//
+// Record acts (P5 O8 M6b, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M6b and Interfaces §Q, agreed with the
+// desk track). The welcome advertises `record` too exactly when this build serves the three `record.*` offers
+// (`welcomeCapabilities`): "this machine's sessions can be widened from any member's MAWS through this endpoint", which
+// sminos keys its terminal's "use MAWS" on, whether or not the machine has an app. A record act goes down as DX2's `rpc`
+// on either lane, its `rpc` keeping the `record.` prefix, only to an sminos whose hello advertised `record` (else
+// `not-offered`, nothing sent): its `args` are `{session: <the id keying sminos's record>, …the change}` (lane A the act's
+// own `session`; lane B the member the members join placed its `appSessionId` on, which authorization ranked: else
+// `no-session`, nothing sent, never queued), its `proof` the act verbatim as signed, and no `context` or `requestDigest`:
+// a record act doesn't depend on how the session was launched. Its result comes back as a lane A action's does.
 import { RL1_CAPABILITIES, type Action, type Certificates, type OrgState, type SigningKey } from 'org-protocol';
 import type { EndpointPolicy, Policy } from '../policy';
 import { isCeiling } from '../policy';
@@ -52,11 +62,27 @@ import { decideReach } from './reach';
 import { Rebuild } from './rebuild';
 import { formerNames, orgDirectory, revocationSet, type RevocationSet } from './org-directory';
 import { RL10_PROTOCOL, Rl10Server, type Frame, type Rl10Connection } from './server';
+import { OFFERS, RECORD_ACTS, type Offers } from '../offers';
+import type { SessionTarget } from '../sources';
 import { SignatureLedger } from './signature-ledger';
 import { decideWords } from './words';
 
 /** What the welcome advertises to sminos (P5 O18 D9): a member frame's `access`, `shares`, `policyRev`, and `reach?`. */
 export const RL10_CAPABILITIES = ['access', 'reach'] as const;
+
+/**
+ * P5 O8 M6b: the capability of record acts: sminos's hello advertises it once its executors are in, and the endpoint's
+ * welcome once this build serves the three `record.*` offers.
+ */
+export const RECORD_CAPABILITY = 'record';
+
+/** The welcome's capabilities: RL10_CAPABILITIES, and `record` exactly when `offers` serve every record act. */
+export function welcomeCapabilities(offers: Offers = OFFERS): string[] {
+  return [...RL10_CAPABILITIES, ...(RECORD_ACTS.every((name) => Object.hasOwn(offers.commands, name)) ? [RECORD_CAPABILITY] : [])];
+}
+
+/** Why `draw` sends nothing (P5 O8 M6b: `not-offered` and `no-session`, a record act's). */
+export type DrawRefusal = 'unavailable' | 'malformed' | 'context' | 'not-offered' | 'no-session';
 
 /** How long a `query` or `tombstone` waits for sminos's answer before it is `unavailable`. */
 export const ANSWER_MS = 10_000;
@@ -107,6 +133,8 @@ export type Rl10Context = {
   log(line: string): void;
   /** The uplink's cap, reserve and ask wait (the suites'; uplink.ts's defaults unless given). */
   uplink?: RelayContext['uplink'];
+  /** P5 O8 M6b: the offer table the welcome's `record` follows (the suites' seam; OFFERS unless given). */
+  offers?: Offers;
 };
 
 /** A lane A action's result, as sminos reports it. */
@@ -247,6 +275,11 @@ export class Rl10 {
     return this.#sminos.includes('audience');
   }
 
+  /** P5 O8 M6b: what the welcomed sminos's hello advertised, null while none is connected and welcomed. */
+  sminosCapabilities(): readonly string[] | null {
+    return this.connected ? this.#sminos : null;
+  }
+
   /** Whether RL10 is wanted served (the last `serve` or `unserve` called); the socket follows, one change at a time. */
   get serving(): boolean {
     return this.#wanted;
@@ -377,17 +410,20 @@ export class Rl10 {
    * digest disagree with its args, an action on a session carries no lane A context, or a `send`'s text is no string, is
    * blank or is longer than `SEND_TEXT_MAX`; `context` (M7) when the launch it
    * was sealed for is not the session's launch now (the bridge rechecks it at the effect, for a relaunch after this).
+   * P5 O8 M6b: or a record act (`record.*`, `#drawRecord`), on the session authorization placed it on (`target`).
    */
-  rpc(action: Action, who: { member: string; device: string }, fingerprint: string): { ok: true; frame: Frame } | { ok: false; reason: 'unavailable' | 'malformed' | 'context' } {
-    const drawn = this.draw(action, who, fingerprint);
+  rpc(action: Action, who: { member: string; device: string }, fingerprint: string, target?: SessionTarget): { ok: true; frame: Frame } | { ok: false; reason: DrawRefusal } {
+    const drawn = this.draw(action, who, fingerprint, target);
     if (drawn.ok) this.send(drawn.frame);
     return drawn;
   }
 
   /** `rpc`'s checks and frame, sent nowhere: what M7 checks before it asks sminos whose an op is. */
-  draw(action: Action, who: { member: string; device: string }, fingerprint: string): { ok: true; frame: Frame } | { ok: false; reason: 'unavailable' | 'malformed' | 'context' } {
+  draw(action: Action, who: { member: string; device: string }, fingerprint: string, target?: SessionTarget): { ok: true; frame: Frame } | { ok: false; reason: DrawRefusal } {
     const identity = this.#ctx.identity();
-    if (!this.connected || identity === null || !action.action.startsWith('sminos.')) return { ok: false, reason: 'unavailable' };
+    if (!this.connected || identity === null) return { ok: false, reason: 'unavailable' };
+    if (action.action.startsWith('record.')) return this.#drawRecord(action, who, fingerprint, identity, target);
+    if (!action.action.startsWith('sminos.')) return { ok: false, reason: 'unavailable' };
     const name = action.action.slice('sminos.'.length);
     const args = action.args;
     let project: string | null;
@@ -422,6 +458,38 @@ export class Rl10 {
       ...(action.context === undefined ? {} : { context: action.context }),
       fingerprint,
       ...(name === 'spawn' ? { proof: action } : {}),
+    };
+    return { ok: true, frame: { t: 'rpc', rpc } };
+  }
+
+  /**
+   * P5 O8 M6b: a record act's frame (the module's header): to an sminos that advertised `record` alone, on the member that
+   * keys sminos's record, which for lane B is the one authorization ranked (`target`) while the join still places the app
+   * session there.
+   */
+  #drawRecord(action: Action, who: { member: string; device: string }, fingerprint: string, identity: Identity, target: SessionTarget | undefined): { ok: true; frame: Frame } | { ok: false; reason: DrawRefusal } {
+    if (!(RECORD_ACTS as readonly string[]).includes(action.action) || !this.#sminos.includes(RECORD_CAPABILITY)) return { ok: false, reason: 'not-offered' };
+    if (action.session !== undefined || action.context !== undefined || action.requestDigest !== undefined) return { ok: false, reason: 'malformed' };
+    const { session: laneA, appSessionId, ...change } = action.args;
+    if ((laneA === undefined) === (appSessionId === undefined)) return { ok: false, reason: 'malformed' };
+    let sid: string | null = null;
+    if (typeof laneA === 'string') sid = this.members.get(laneA)?.lane === 'A' ? laneA : null;
+    else if (typeof appSessionId === 'string' && target?.lane === 'B' && target.appSessionId === appSessionId && this.members.appSessionId(target.session) === appSessionId) sid = target.session;
+    const member = sid === null ? null : this.members.get(sid);
+    if (sid === null || member === null) return { ok: false, reason: 'no-session' };
+    const rpc = {
+      rpc: action.action,
+      project: member.project,
+      machine: identity.name,
+      member: who.member,
+      device: who.device,
+      created: action.created,
+      nonce: action.nonce,
+      opId: action.opId,
+      opCreated: action.opCreated,
+      args: { session: sid, ...change },
+      fingerprint,
+      proof: action,
     };
     return { ok: true, frame: { t: 'rpc', rpc } };
   }
@@ -490,8 +558,9 @@ export class Rl10 {
     connection.send({
       t: 'welcome',
       protocol: RL10_PROTOCOL,
-      // P5 O18 D9: sminos may send a member's access, shares and policyRev, and ask `reach?`.
-      capabilities: [...RL10_CAPABILITIES],
+      // P5 O18 D9: sminos may send a member's access, shares and policyRev, and ask `reach?`; P5 O8 M6b: `record`, while
+      // this build serves the record acts.
+      capabilities: welcomeCapabilities(this.#ctx.offers),
       build: this.#ctx.build,
       identity: { org: identity.org, hub: identity.hub, name: identity.name, former: formerNames(head.state, identity.ref, identity.name), ref: identity.ref, enrolled: identity.enrolled },
       policy: { read_only: current.read_only, ceiling: current.ceiling },

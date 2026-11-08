@@ -5,6 +5,7 @@ import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import type { Cursor, SessionRef } from 'org-protocol';
 import type { LinkState } from '../../src/main/machines/manager';
+import type { ActManyResult } from '../../src/main/machines/remote/acts';
 import type { ActHandle, ActOutcome, ActProgress, ActRequest, CallOptions, CallResult, ClientRequest, DeviceCaps, PongStamps, RemoteLink, RemoteStream, StreamRequest, StreamSink, SubscribeRequest, Subscription, SubscriptionSink } from '../../src/main/machines/remote/link';
 
 export const MINI = 'MiniMachineRef00000000' as MachineRef;
@@ -245,6 +246,11 @@ export class FakeLink implements RemoteLink {
         if (act.settled === null && act.progress() === 'waiting') act.settle({ state: 'refused', reason: 'offline' });
       }, Math.max(0, request.sendBy - Date.now()));
     return act;
+  }
+
+  /** P5 O8 M6b: every act signed at once, each sent as `act` sends it when the suite's caller says. */
+  actMany(requests: readonly ActRequest[]): Promise<ActManyResult> {
+    return Promise.resolve({ ok: true, acts: requests.map((request, i) => ({ opId: `signed-${this.acts.length + i}`, send: () => this.act(request) })) });
   }
 
   /** P5 O7 M4: each op asked about again (`requery`), as an act the suite answers; it never sends the act. */

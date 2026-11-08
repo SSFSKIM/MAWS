@@ -22,6 +22,9 @@
 // carries to authorization as the artifact, placed again there through the `artifact` rule (`view` on it still, the orphan
 // form the machine's owners'); an artifact the rule can't place now (the store or the spine away) answers `unavailable`, as
 // an unplaceable session does. An outcome's `result` goes to a device that listed `rl2.bytes` tagged (bytes.ts).
+//
+// P5 O8 M6b: a record act goes to sminos on either lane, so sminos's binding names a session that may be a lane B one,
+// which is checked as the lane B session RL10's members join holds it (`placeSminos`).
 import { OP_HORIZON_S, type DeviceClass, type QueriedMessage, type QueryMessage } from 'org-protocol';
 import type { ClientRef } from '@shared/ipc/client';
 import { ARTIFACT_TARGET, closedLedgerOf, outcomeOf } from './actions';
@@ -46,6 +49,11 @@ export type QueriesContext = {
   log(line: string): void;
   /** P5 O7 M5a2 fix wave 1: what an artifact op's result says of sessions (session-safe.ts). */
   sessionSafe?: SessionSafe;
+  /**
+   * P5 O8 M6b: the session sminos's binding names, as authorization reads it: a lane B member joined to its app session
+   * as that lane B session, anything else as lane A's. Absent, lane A's.
+   */
+  placeSminos?(session: string): SessionTarget;
 };
 
 /** An executor's answer, as read here: its state, the op's outcome, and the binding it stored (absent: none). */
@@ -169,7 +177,7 @@ export class Queries {
       // since a failed tombstone carries no outcome.
       answer = stone.state === 'done' || stone.state === 'refused' ? await this.ctx.rl10.query(opId, opCreated) : stone;
     }
-    return { state: answer.state, ...(answer.outcome === undefined ? {} : { outcome: answer.outcome }), binding: sminosBinding(answer, clientClass) };
+    return { state: answer.state, ...(answer.outcome === undefined ? {} : { outcome: answer.outcome }), binding: sminosBinding(answer, clientClass, this.ctx.placeSminos) };
   }
 }
 
@@ -181,10 +189,11 @@ export class Queries {
  * device id proves nothing, since the org may have replaced another class's device with web-cards keys under the same
  * id. Carrying the RPC's name in the binding is O12's contract to change.
  */
-function sminosBinding(answer: QueryAnswer, clientClass: DeviceClass): Answer['binding'] {
+function sminosBinding(answer: QueryAnswer, clientClass: DeviceClass, place?: (session: string) => SessionTarget): Answer['binding'] {
   const { member, target } = answer;
   if (!isText(member) || !isObject(target)) return null;
   if (target.kind === 'machine') return { member, target: null, name: 'sminos.spawn' };
   if (target.kind !== 'session' || !isText(target.session) || clientClass === 'web-cards') return null;
-  return { member, target: { lane: 'A', session: target.session }, name: 'sminos.steer' };
+  // P5 O8 M6b: a record act's session may be lane B's
+  return { member, target: place?.(target.session) ?? { lane: 'A', session: target.session }, name: 'sminos.steer' };
 }

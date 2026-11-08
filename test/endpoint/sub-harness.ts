@@ -50,6 +50,7 @@ import { opCommands } from '../../src/engine-host/ops';
 import { machineOps } from '../../src/services/machine-ops';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
 import type { EndpointOptions } from '../../src/endpoint/endpoint';
+import type { Offers } from '../../src/endpoint/offers';
 import { waitingCount } from '../../src/endpoint/lane-b-pending';
 import { EndpointOrg } from '../../src/endpoint/org-sync';
 import type { RecordSource, SessionRecord, SessionTarget } from '../../src/endpoint/sources';
@@ -683,6 +684,8 @@ export type StartOptions = {
   env?: Record<string, string>;
   /** P5 O8 M6a: more of the org in its chain's second state (another member, a member's second device). */
   amend?: (state: OrgState) => void;
+  /** P5 O8 M6b: another offer table (`EndpointOptions.authorization.offers`: a build without the record acts). */
+  offers?: Offers;
 };
 
 export async function startEndpoint(org: Org, started: Fixture[], options: StartOptions = {}): Promise<Fixture> {
@@ -735,6 +738,7 @@ export async function startEndpoint(org: Org, started: Fixture[], options: Start
       settingsMode: () => 'default',
       ...(options.setup === undefined ? {} : { setup: options.setup }),
       ...(options.home === undefined ? {} : { home: options.home }),
+      ...(options.offers === undefined ? {} : { offers: options.offers }),
     },
     subscriptions: options.subscriptions,
     ...(options.acquireWithinMs === undefined ? {} : { acquireWithinMs: options.acquireWithinMs }),
@@ -757,13 +761,16 @@ export async function stopAll(started: Fixture[]): Promise<void> {
 
 // ---- sminos on RL10 ---------------------------------------------------------------------------------------------------
 
-/** The fake sminos on the endpoint's RL10 socket, welcomed, reporting lane A session `la-1` (owned by `@machine`). */
-export async function sminos(f: Fixture, members: Array<Record<string, unknown>> = [laneAMember()]): Promise<FakeSminos> {
+/**
+ * The fake sminos on the endpoint's RL10 socket, welcomed, reporting lane A session `la-1` (owned by `@machine`);
+ * `capabilities`, what its hello advertises (P5 O8 M6b: `record`).
+ */
+export async function sminos(f: Fixture, members: Array<Record<string, unknown>> = [laneAMember()], capabilities: string[] = []): Promise<FakeSminos> {
   const path = join(f.services.machine.stateDir, 'rl10.json');
   await until(() => fs.existsSync(path), 'rl10.json');
   const info = JSON.parse(fs.readFileSync(path, 'utf8')) as { socket: string; token: string };
   const s = await FakeSminos.open(info.socket);
-  s.send({ t: 'hello', protocol: { major: 1, minor: 0 }, capabilities: [], token: info.token, sminos: { version: 'test' }, policy: { read_only: false, ceiling: 'settings' } });
+  s.send({ t: 'hello', protocol: { major: 1, minor: 0 }, capabilities, token: info.token, sminos: { version: 'test' }, policy: { read_only: false, ceiling: 'settings' } });
   await s.next((x) => x.t === 'welcome', 'welcome');
   s.send({ t: 'session', message: { project: PROJECT, machine: 'mini', session: null, kind: 'machine', sub: null, n: null, body: { online: true, policy: { read_only: false, ceiling: 'settings' }, checkouts: [{ path: CHECKOUT, branch: 'main' }], desk: {} } } });
   for (const m of members) s.send({ t: 'member', ...m });

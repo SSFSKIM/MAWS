@@ -97,6 +97,16 @@ export interface EndpointModule {
   /** The enrollment held (its name and org), null while unenrolled: `machine.identity`'s project id (P5 O3-D D38). */
   enrollment(): { name: string; org: string } | null;
   cli(command: string, args: readonly string[], secret?: string): Promise<{ code: number; out: string }>;
+  /**
+   * P5 O8 M6b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §Q): the local door, this machine's
+   * own app's way to its own sessions' record acts and their policy read (local-door.ts), which `mawsd` serves as
+   * `endpoint.local.act` and `endpoint.local.call`. `act` answers the act's outcome as `done` carries it, or `{state:
+   * 'refused', reason}`; `call` answers as RL3's `result` does. Absent from a module that has none (a test's).
+   */
+  local?: {
+    act(action: unknown): Promise<{ state: string } & Record<string, unknown>>;
+    call(name: string, input: unknown): Promise<{ ok: true; output: unknown } | { ok: false; code: string }>;
+  };
 }
 
 /**

@@ -49,7 +49,7 @@ async function setup(options: { listKey?: 'mine' | 'other'; hub?: { url: string;
   );
   writeFileSync(join(dir, 'chain.json'), JSON.stringify({ chain, transitions: [] }));
   const logs: string[] = [];
-  const refusing: Parameters<typeof createDevOrgSession>[0]['stepUp'] = () => ({ sign: async () => ({ ok: false, reason: 'cancelled' }) });
+  const refusing: Parameters<typeof createDevOrgSession>[0]['stepUp'] = () => ({ sign: async () => ({ ok: false, reason: 'cancelled' }), signActions: async () => ({ ok: false, reason: 'cancelled' }) });
   const made = (packaged = false, stepUp = refusing) => createDevOrgSession({ dir, userData, packaged, build: 'dev', stepUp, loadKeys, log: (l) => void logs.push(l) });
   return { made, logs, keys, A };
 }
@@ -87,7 +87,7 @@ describe('the development org session', () => {
   it('hands the step-up the view it holds', async () => {
     const s = await setup();
     const held: HeldOrgView[] = [];
-    const session = s.made(false, (_keys, _device, org) => (held.push(org), { sign: async () => ({ ok: false, reason: 'cancelled' }) }));
+    const session = s.made(false, (_keys, _device, org) => (held.push(org), { sign: async () => ({ ok: false, reason: 'cancelled' }), signActions: async () => ({ ok: false, reason: 'cancelled' }) }));
     await session.loaded;
     expect(held).toHaveLength(1);
     expect(held[0]!()).toBe(session.current()!.view);

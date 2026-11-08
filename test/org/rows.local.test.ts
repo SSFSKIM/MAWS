@@ -73,6 +73,7 @@ beforeAll(async () => {
     onRoster: () => () => {},
     localProjects: async () => [checkout],
     onLocalProjects: () => () => {},
+    link: () => null, // M6b's channel listings: no RL2 link in this suite, the hub's alone
     files: orgFiles({ userData: profile, log: (l) => void logs.push(l) }),
     emit: (next) => void (latest = next),
     log: (l) => void logs.push(l),

@@ -9,13 +9,16 @@
 // adds the project channel's `org.channel.open`, `.close` and `.send`, and forwards `org.channel.changed` through
 // `emitChannel` for the app's life, apart from the status's forwarding, which the Org page's e2e fixture stops (under
 // `MAWS_DEV_ORG` a channel reads signed out). Each page's opens are held for it (channel/holds.ts), and let go when the
-// page reloads or its window is destroyed.
+// page reloads or its window is destroyed. M6b adds a session's reach, `org.policy.get` and `.set`, and M5b's
+// `org.owners.add` (registerPolicyHandlers), over whichever session main runs.
 //
 // Electron-free: main injects its `registerMainHandler` and `emit`.
 import type { ChannelChanged, DiscardResult, OrgAttempt, OrgRows, OrgStatus, PairStartResult, PreviewResult, SignResult } from '@shared/ipc/schema/org';
+import type { MachineRef } from '@shared/machine/ref';
 import type { MainHandler } from '../ipc/router';
 import { channelHolds } from './channel/holds';
 import type { OrgSessionService } from './org-session';
+import type { OrgPolicies } from './policy';
 import type { OrgSession } from './session';
 
 type OrgCommand =
@@ -111,4 +114,12 @@ export function registerOrgHandlers(deps: {
 /** M2: `org.rows`, the remote rows main holds (rows.ts); `org.rows.changed` goes out from the rows source's own `emit`. */
 export function registerRowsHandler(deps: { register(name: 'org.rows', handler: MainHandler<'org.rows'>): void; rows: { rows(): OrgRows } }): void {
   deps.register('org.rows', () => deps.rows.rows());
+}
+
+/** M6b: a session's reach (policy.ts), and M5b's owner add, which `org.policies.changed` follows from the policies' own `emit`. */
+export function registerPolicyHandlers(deps: { register<N extends 'org.policy.get' | 'org.policy.set' | 'org.owners.add'>(name: N, handler: MainHandler<N>): void; policies: OrgPolicies }): void {
+  // the schema's ref, validated at the boundary
+  deps.register('org.policy.get', (input) => deps.policies.get('machine' in input ? { machine: input.machine as MachineRef } : input));
+  deps.register('org.policy.set', (input) => deps.policies.set(input));
+  deps.register('org.owners.add', (input) => deps.policies.addOwner(input));
 }

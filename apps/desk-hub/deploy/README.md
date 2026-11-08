@@ -372,7 +372,7 @@ project (no checkout, no devenv step, no mawsd of its own in production) and in 
 
 | Machine | Where | Owner | Session | sminos |
 |---|---|---|---|---|
-| A1 | the scene `a1` (user `o18a1`, direct 47841, stub 47901) | the staging admin | S, which spawns L1 while listed and C1 once private | the run's `--sminos` (0759115d, 1.39.0, or later) |
+| A1 | the scene `a1` (user `o18a1`, direct 47841, stub 47901) | the staging admin | S, which spawns L1 while listed and C1 once private; for O8 M6b, a lane B session in its mawsd's engine host | the run's `--sminos` (a3d4a8f8, 1.40.3, by default; 9a694999, 1.40.1, or later) |
 | A2 | `a2` (`o18a2`, 47842, 47902) | the admin | T | the same |
 | B1 | `b1` (`o18b`, 47843, 47903) | B, a member added for the run (`o18-m6-<tag>@staging.invalid`, device `b1`) | U | the same |
 | A3 | `a3` (`o18a3`, 47844, 47904), up for 6e alone | the admin | one | `--old-sminos` (386c4b07, 1.34.0) |
@@ -391,11 +391,24 @@ Each refuses words not of its shape before anything runs. The project is fresh; 
 bare repository `/srv/o18-archive.git` (the scenes' group `o18arch`, root its owner), the archive, which each item that
 reads it designates (`PUT /api/projects/<p>/archive`) with `SMINOS_ARCHIVE_EVERY=60`.
 
-The widenings the items need (listed again, a share) are confirmed by the operator at a scene's terminal through that
-pty: the staging-only path M5 allows. `VmMachine.operator` refuses it, before any step, for any hub but staging's
-(`staging.json`'s host and org, `STAGING_HOST` and `STAGING_ORG`) and for any machine outside the run's own scenes; the
-scene refuses it again for a scene enrolled at another org. The scenes' MAWS is the branch's cut, before O8 M6b, so
-their endpoints advertise no `record` and sminos's terminal gate still widens.
+The scenes' MAWS is the branch's cut, at or after O8 M6b, so each endpoint says `record` in its RL10 welcome and sminos
+(1.39.0 and later) takes widening from MAWS alone: at a terminal and in an agent's shell alike it refuses "use MAWS"
+and keeps narrowing. So the widenings the items need (listed again, a share) are made as a member's MAWS makes them:
+`record.access` and `record.shares` acts signed by the staging admin's device (its step-up key) over A's channel to the
+session's machine, through the hub's relay (`reach-acts.ts`); narrowing stays the session's own shell. The operator's
+pty path is now only the cutover item's check, refused at the scene. `VmMachine.operator` refuses it, before any step,
+for any hub but staging's (`staging.json`'s host and org, `STAGING_HOST` and `STAGING_ORG`) and for any machine outside
+the run's own scenes; the scene refuses it again for a scene enrolled at another org.
+
+O8 M6b's items (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The shared staging run", layer 1) run
+beside O18's: `m6b-cutover` (after 8: A1's `audiences.json` keeps `record`; the operator's widening of S at A1's
+terminal, its access and a share, refused "use MAWS" with no confirmation asked and S's `record.policy` unmoved; a
+narrowing there still runs), `m6b-visibility` (b1's `endpoint.listings` from A1 lists S by its access alone, each level
+set by A's act: private and unshared not listed, listed, Org can view and Org can talk listed with no audience; at
+listed, b1's `sminos.steer` and `sminos.decide` on S refused `grade`) and `m6b-reader` (a lane B session on A1, from
+`lane-b-up`, shared with B at Converse by A's act: B pins and reads it with `session.reader.update` and keeps a draft
+with `session.drafts.set`, each read back as B's; A's reading (`session.get`) and draft, set first, read back unchanged
+over A's channel). Item 4's Can message share is A's act too, so it shows B's agents messaging S and b1's read refused.
 
     pnpm --filter desk-hub deployment reach-acceptance --config deploy/staging.json --device-keys <keys.json> \
         --vm <vm> --direct-url ws://<the VM's tailnet address> [--items 2,8,3a,…] [--scan <file>]    # the token on stdin
@@ -403,24 +416,55 @@ their endpoints advertise no `record` and sminos's terminal gate still widens.
     pnpm --filter desk-hub deployment reach-acceptance --vm-teardown --vm <vm>
 
 The run preflights the scene (`PASS scene`: S, T and U in `/api/listings`, every sminos on RL10 with `access` and
-`reach` in its `audiences.json`, PB's welcome carrying `audience`), then runs items 2, 8, 3a, 3b, 3c, 7, 1, 5, 4, 3e,
-3d, 6b, 6c, 6d and 6e in that order, each first setting the sessions' visibility it needs, so `--items` rehearses one
-alone. It prints one `PASS`, `FAIL` or `NOT SHOWN` line per item, the clauses the suites prove under theirs (3a's
-browser half, 8's cutover sentence) and `CITED 6a` (an old hub, which a pre-M1 deploy over M1's storage would risk).
-Then its undo, each step registered before what it undoes: S's share removed and the seats retired, the archive
+`reach` in its `audiences.json`, PB's welcome carrying `audience`), then runs items 2, 8, m6b-cutover, 3a, 3b, 3c, 7,
+1, 5, 4, 3e, 3d, 6b, 6c, 6d, 6e, m6b-visibility and m6b-reader in that order, each first setting the sessions'
+visibility it needs, so `--items` rehearses one alone. It prints one `PASS`, `FAIL` or `NOT SHOWN` line per item, the
+clauses the suites prove under theirs (3a's browser half) and `CITED 6a` (an old hub, which a pre-M1 deploy over M1's
+storage would risk).
+Then its undo, each step registered before what it undoes: the lane B session's share with B removed (A's act), S's
+share removed and the seats retired, the archive
 designation cleared, every scene down, A1, A2, B1, A3, PA and PB out of the state and revoked, B removed with `b1`'s
 keys; `LEFT …` for anything of the run's still current, `KEPT …` for the project and its log, the registry rows, the
 machines' names and retired keys, and the state's versions.
 
 `--vm-setup` needs no MAWS checkout on the VM: the branch goes as a full bundle (`git bundle create … HEAD`), staged
 under `/var/tmp/o18-m6-stage` in 24 MiB steps and checked by its sha256; each sminos as the run's copy by commit (`git
-archive <commit> sminos` from the doperpowers checkout, the new one refused below 0759115d), never the VM's
+archive <commit> sminos` from the doperpowers checkout, the new one refused below 9a694999, 1.40.1), never the VM's
 marketplace's. `vm/setup.sh`'s reach mode (`RUN=o18`) makes the four users and the archive's group, installs from
 Ubuntu's archive any tool devcloud's base image lacks, builds the pack once as `o18a1` (pnpm at the version
 `package.json` pins; mawsd's pinned Node, `packaging/mawsd/node.json`, unpacked for the build where the VM's Node is
 below 22.12) into `/opt/o18-m6/packs`, and the bare repository. `vm/check.sh` reports what the reach mode needs (its
 `reach …` lines). `--vm-teardown` (`vm/teardown.sh`'s reach mode) removes the users, homes and group, `/opt/o18-m6`,
 the archive and the staged bundle, and says `LEFT` for anything that stayed or a scene port still listening.
+
+## `real-member`: a real second member on staging (P5 O8 M6b)
+
+The one sitting where a person other than the owner signs into MAWS (docs/doperpowers/plans/2026-10-28-p5-o8-org-
+interface.md, "The shared staging run", layer 2): the owner's second email as member B, signed in from a second scratch
+MAWS profile. Each step is signed by the staging admin's test device, as the reach run's own second member is, and runs
+through `staging-run.sh real-member`, which hands it the token on stdin and searches its log afterwards for the token,
+the email and the pairing code.
+
+    zsh apps/desk-hub/deploy/staging-run.sh real-member add --email-file <file>
+    zsh apps/desk-hub/deploy/staging-run.sh real-member pair --email-file <file> --code-file <new file> [--wait <s>]
+    zsh apps/desk-hub/deploy/staging-run.sh real-member remove (--email-file <file> | --member <id>)
+
+`add` puts the email in the state as a member with no device (then `staging-run.sh access-sync`, so Access admits it).
+`pair` writes a pairing code naming that member to `--code-file`, a new 0600 file, and waits (30 minutes by default, an
+hour at most) for the scratch profile's device: the owner pastes the code into that profile's sign-in, signed in
+through Access as the second email; the entry whose MAC answers the code's secret is listed as B's first device,
+unendorsed, as the app lists another member's first device, and its fingerprint printed to compare with the profile's.
+Any other pending entry of B's is named and passed over. The code's file is removed however the step ends: a write
+failing partway, the wait's end, a SIGINT, SIGHUP or SIGTERM (the sitting runs `pair` in the background and stops it
+with SIGTERM; a file left behind would refuse a retry at its path). Only a SIGKILL leaves it, and a retry at that path
+is then refused, visibly; `staging-run.sh` removes no code file itself, since it can't tell its run's from another's. `remove`
+takes B out of the state and revokes every key of its devices (then `access-sync` again).
+
+What it refuses: any hub but staging's host and org (`--production`, a config naming production, another org), before
+the admin device is opened or the hub asked; an email file that is not a regular file of the owner's, mode 0600, in no
+git checkout (a symlink included); a code file that exists already or would land in a checkout; the admin's own email,
+or one already a member's, at `add`; a member that already has a device, at `pair`. No line it prints holds the email
+("the owner's second email" stands in) or the code.
 
 ## `admin`: the owner's hand on the org state (P5 O13 M2)
 

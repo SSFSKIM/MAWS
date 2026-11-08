@@ -1,7 +1,7 @@
 // UX1 D7: titles own the row; worktree at left, status and age at right, detail in the hover card. P5 O6 M5 (P5 Decision
 // Log 28): another machine's row carries `@<name>` after its title (T1); an offline machine's greys in place, "offline"
 // where the chip was (T2). P5 O8 M5: a record at a listed address names the listing's owners after its title when they
-// aren't you alone.
+// aren't you alone. P5 O8 M6b: its reach mark (a lock for Private, a people mark for wider access or shares).
 import type { SessionRecord } from '@shared/graph/session';
 import { PinIcon } from '../app/IconButton';
 import { MachineChip } from '../app/MachineChip';
@@ -19,6 +19,7 @@ import { SessionHoverCard } from './HoverCard';
 import { ReleasedMark } from '../budget/ReleasedMark'; // C12
 import { sessionNodeId, useTree } from './tree';
 import { RowTitle, useOwnersLabel } from './RowTitle'; // P5 O8 M5
+import { ReachMark } from './ReachMark'; // P5 O8 M6b
 import { setSessionUnread } from '../keymap/session-navigation';
 import { displayTitle } from '../sessions/title';
 import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O7 M2
@@ -90,6 +91,8 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
         )}
         {/* C12: the memory budget's released mark */}
         <ReleasedMark released={digest?.released} />
+        {/* P5 O8 M6b: its reach, when it isn't Listed or it has shares */}
+        <ReachMark address={id} />
         {record.pinned && (
           <span role="img" aria-label="Pinned" className={`shrink-0 text-fg-faint`}>
             <PinIcon className="size-[11px]" />

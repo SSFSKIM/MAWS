@@ -3,6 +3,8 @@
 // sheet keeps disabled until its acknowledgement is checked, so Enter alone never destroys anything; Escape, the
 // overlay and Cancel close it. A sheet closes through C10's dialog store (`closeDialog`) unless its opener passes
 // `onClose`: a sheet whose answer is owed to a caller (C11's route switch, `pickDirectModel`) hears its dismissal there.
+// `scrim` is the overlay's ground, a token class: the default's faint wash, or a sheet's own deeper one (the Share sheet's,
+// which opens over the window's empty state and must read as modal over it).
 import { useDialogFocus } from '../app/dialog-focus';
 import { Dialog } from 'radix-ui';
 import { createContext, useContext, type FormEvent, type ReactNode } from 'react';
@@ -16,14 +18,15 @@ export function Sheet({
   title,
   width = 'w-[min(440px,90vw)]',
   onClose = closeDialog,
+  scrim = 'bg-bg/60',
   children,
   ...data
-}: { title: string; width?: string; onClose?: () => void; children: ReactNode } & Record<`data-${string}`, string>) {
+}: { title: string; width?: string; onClose?: () => void; scrim?: string; children: ReactNode } & Record<`data-${string}`, string>) {
   const focus = useDialogFocus();
   return (
     <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-bg/60" />
+        <Dialog.Overlay data-sheet-scrim className={`fixed inset-0 z-50 ${scrim}`} />
         <Dialog.Content
           {...focus}
           {...data}

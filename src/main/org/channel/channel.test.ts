@@ -119,7 +119,7 @@ async function harness(
   const signedIn = (withHub = options.hub ?? true): SignedIn => ({
     identity: { org: ORG, member: o.A, device: 'app', clientClass: 'native-mac', channelKey: o.app.channel, build: 'test', capabilities: [] },
     view,
-    stepUp: { sign: () => Promise.reject(new Error('no step-up here')) },
+    stepUp: { sign: () => Promise.reject(new Error('no step-up here')), signActions: () => Promise.reject(new Error('no step-up here')) },
     hub: withHub ? hub : null,
   });
   const session = heldOrgSession(options.signedIn === false ? null : signedIn());
