@@ -71,6 +71,9 @@
 //   - P5 O8 M6b: `record.policy` is the endpoint's own: the policies of the sessions the caller owns (`manage`), or of the
 //     one named, read from sminos's member frames (record-policy.ts), decided as the answer goes against the ranks then;
 //     `{supported: false}` while the connected sminos doesn't advertise `record`, `unavailable` with none connected.
+//   - P5 O8 M4b: `endpoint.grants` is the endpoint's own: the machine's grant ledger read back, the caller's own entry, or
+//     every member's for an owner of the machine (an admin, for an org-owned one), made as the answer goes from the head
+//     the owners were read under (grants.ts' `grantsAnswer`), `unavailable` once that head moved.
 // Every dispatch carries the asking channel's `ClientRef` (P5 O7 M2). A result over the channel's message limit answers
 // `too-large`. For a device that listed `rl2.bytes` (P5 O7 M5a), the input came decoded (gate.ts) and the output goes in the
 // bytes codec's tagged form (bytes.ts), measured so.
@@ -143,6 +146,8 @@ export type CallsContext = {
    */
   sminos?(): readonly string[] | null;
   placeRecord?(appSessionId: string): Promise<RecordPlacement>;
+  /** P5 O8 M4b: `endpoint.grants` for `member`, the step that makes its answer as it goes (grants.ts' `grantsAnswer`). */
+  grants?(member: string): Promise<() => Result>;
   log(line: string): void;
 };
 
@@ -348,6 +353,7 @@ export class Calls {
     else if (row?.executor === 'sminos' && Object.hasOwn(LANE_A, m.name)) run = Promise.resolve(this.#laneA(channel, m));
     else if (row?.executor === 'machine') run = this.#daemonStatus(dispatch);
     else if (m.name === 'record.policy' && row?.executor === 'endpoint') run = this.#recordPolicy(channel.member, m.input);
+    else if (m.name === 'endpoint.grants' && row?.executor === 'endpoint') run = this.ctx.grants?.(channel.member) ?? Promise.resolve({ ok: false, code: 'unavailable' });
     else if (m.name === 'endpoint.listings') run = this.#listings(channel.member).then((listings) => ({ ok: true as const, output: { listings } }));
     else run = Promise.resolve({ ok: false, code: 'unavailable' });
     run.then((result) => answer(typeof result === 'function' ? result() : result), (error: unknown) => {

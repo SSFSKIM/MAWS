@@ -74,7 +74,7 @@ import { Forwards } from './forwards';
 import { current, speaksFor, syncAndPromote, type EnrollContext, type EnrollmentState } from './enroll';
 import { Freshness } from './freshness';
 import { Gate } from './gate';
-import { acceptGrant, dropRevokedGrants, machineOwnerMembers, machineRights } from './grants';
+import { acceptGrant, dropRevokedGrants, grantsAnswer, machineOwnerMembers, machineRights, type GrantsRead, type GrantsReader, type GrantsResult } from './grants';
 import type { HubDeps } from './hub-http';
 import { HubLink } from './hub-link';
 import { Interest } from './interest';
@@ -573,6 +573,7 @@ export class Endpoint implements EndpointModule {
       readerMoved: (member, appSessionId) => this.planeFeeds.readerMoved(member, appSessionId), // P5 O8 M6a: their other devices
       sminos: () => this.rl10.sminosCapabilities(), // P5 O8 M6b: `record.policy`
       placeRecord: placeListingRecord, // the record acts' placement (desk 632 P2)
+      grants: (member) => this.#grants({ member }), // P5 O8 M4b
       log,
     });
     this.gate.setExecutors({
@@ -867,6 +868,17 @@ export class Endpoint implements EndpointModule {
   /** A read of the hub's org state that begins after this call (`#syncAfter`): `mawsd endpoint sync`'s (P5 O7 M10). */
   syncAfter(): Promise<unknown> {
     return this.#syncAfter();
+  }
+
+  /** P5 O8 M4b: `endpoint.grants` for `reader`, judged as its answer goes (grants.ts' `grantsAnswer`). */
+  #grants(reader: GrantsReader): Promise<() => GrantsResult> {
+    return grantsAnswer(() => this.#grantsRead(), () => this.#state?.ledger ?? null, reader, (line) => this.#services?.log(line));
+  }
+
+  /** The machine's owners under the head held now, with that head (null: none held). */
+  #grantsRead(): GrantsRead {
+    const org = this.#org;
+    return { head: org?.ready ? org.head().state : null, ...this.#ownersRead() };
   }
 
   /** P5 O8 M6a: the machine's owners under the head held now, and whether that head and its certificates still stand. */
