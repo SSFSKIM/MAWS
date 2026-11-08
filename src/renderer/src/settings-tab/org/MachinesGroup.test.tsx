@@ -22,7 +22,7 @@ const machinesChanged = (machines: MachineState[]) => act(() => useMachines.getS
 
 describe('Settings › Org: Machines (M4a)', () => {
   it('each machine draws its row: its name, its owners by name, the org’s named so, a former member so', async () => {
-    renderSection(signing(ROOT), { 'org.view': () => viewWith({ machines: [...VIEW.machines, { name: 'old-box', ref: 'OldBoxRef00000000003', owners: ['ffffffffffffffffffffffffffffffff'] }] }) });
+    renderSection(signing(ROOT), { 'org.view': () => viewWith({ machines: [...VIEW.machines, { name: 'old-box', ref: 'OldBoxRef00000000003', owners: ['ffffffffffffffffffffffffffffffff'], keyId: 'oldBoxKeyId03', certified: false, delegation: null }] }) });
     const machines = await group('machines');
     expect(within(await found('mini')).getByText('Owned by you and Ana')).toBeTruthy();
     expect(within(row('build-vm')).getByText('Owned by the org')).toBeTruthy();

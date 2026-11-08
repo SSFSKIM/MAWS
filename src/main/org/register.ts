@@ -9,11 +9,12 @@
 // adds the project channel's `org.channel.open`, `.close` and `.send`, and forwards `org.channel.changed` through
 // `emitChannel` for the app's life, apart from the status's forwarding, which the Org page's e2e fixture stops (under
 // `MAWS_DEV_ORG` a channel reads signed out). Each page's opens are held for it (channel/holds.ts), and let go when the
-// page reloads or its window is destroyed. M6b adds a session's reach, `org.policy.get` and `.set`, and M5b's
+// page reloads or its window is destroyed. M4b adds the enrollment's `org.enroll.*` and a drop's `org.drop.retry`
+// (under `MAWS_DEV_ORG`: each refused, as the pairing's are). M6b adds a session's reach, `org.policy.get` and `.set`, and M5b's
 // `org.owners.add` (registerPolicyHandlers), over whichever session main runs.
 //
 // Electron-free: main injects its `registerMainHandler` and `emit`.
-import type { ChannelChanged, DiscardResult, OrgAttempt, OrgRows, OrgStatus, PairStartResult, PreviewResult, SignResult } from '@shared/ipc/schema/org';
+import type { ChannelChanged, DiscardResult, DropRetryResult, EnrollStartResult, OrgAttempt, OrgRows, OrgStatus, PairStartResult, PreviewResult, SignResult } from '@shared/ipc/schema/org';
 import type { MachineRef } from '@shared/machine/ref';
 import type { MainHandler } from '../ipc/router';
 import { channelHolds } from './channel/holds';
@@ -39,6 +40,10 @@ type OrgCommand =
   | 'org.pair.start'
   | 'org.pair.approve'
   | 'org.pair.cancel'
+  | 'org.enroll.start'
+  | 'org.enroll.approve'
+  | 'org.enroll.cancel'
+  | 'org.drop.retry'
   | 'org.channel.open'
   | 'org.channel.close'
   | 'org.channel.send';
@@ -81,6 +86,12 @@ export function registerOrgHandlers(deps: {
     deps.register('org.pair.start', () => unpaired);
     deps.register('org.pair.approve', () => unsigned);
     deps.register('org.pair.cancel', () => {});
+    const unenrolled: EnrollStartResult = { ok: false, reason: 'busy', detail: 'MAWS_DEV_ORG is in force' };
+    const unretried: DropRetryResult = { ok: false, reason: 'none', detail: 'MAWS_DEV_ORG is in force' };
+    deps.register('org.enroll.start', () => unenrolled);
+    deps.register('org.enroll.approve', () => unsigned);
+    deps.register('org.enroll.cancel', () => {});
+    deps.register('org.drop.retry', () => unretried);
     deps.register('org.channel.open', () => ({ ok: false, reason: 'signed-out', rev: 0 }));
     deps.register('org.channel.close', () => {});
     deps.register('org.channel.send', () => ({ ok: false, reason: 'signed-out' }));
@@ -103,6 +114,10 @@ export function registerOrgHandlers(deps: {
   deps.register('org.pair.start', (input) => service.pairStart(input));
   deps.register('org.pair.approve', (input) => service.pairApprove(input));
   deps.register('org.pair.cancel', () => service.pairCancel());
+  deps.register('org.enroll.start', (input) => service.enrollStart(input));
+  deps.register('org.enroll.approve', (input) => service.enrollApprove(input));
+  deps.register('org.enroll.cancel', () => service.enrollCancel());
+  deps.register('org.drop.retry', ({ name }) => service.dropRetry(name));
   const holds = channelHolds({ open: (project) => service.channelOpen(project), release: (project) => service.channelRelease(project) });
   deps.register('org.channel.open', ({ project }, { client }) => holds.open(client, project));
   deps.register('org.channel.close', ({ project }, { client }) => holds.close(client, project));

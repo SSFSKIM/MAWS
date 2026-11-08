@@ -117,4 +117,71 @@ describe('the hub client', () => {
     expect(paths).toEqual([`/api/projects/${project}/attestations`]);
     expect(await over(() => worker(200, { records: 'x' })).attestations(project)).toEqual({ ok: false, kind: 'status', status: 200, error: 'malformed' });
   });
+
+  it("mints an enrollment (M4b): POST {ttl_s, machine?}, the token and the enrollment's id and end kept only in their grammar", async () => {
+    const sent: Array<{ method: string; path: string; body: unknown }> = [];
+    const client = (answer: () => Response) =>
+      hubClient({
+        url: HUB,
+        headers: () => Promise.resolve({}),
+        fetch: (async (url: string, init: RequestInit) => {
+          sent.push({ method: init.method!, path: new URL(url).pathname, body: init.body === undefined ? undefined : JSON.parse(String(init.body)) });
+          return answer();
+        }) as typeof fetch,
+      });
+    const id = 'e'.repeat(32);
+    const record = { id, created_by: 'a'.repeat(32), created: '2026-11-08T12:00:00.000Z', expires: '2026-11-08T13:00:00.000Z', state: 'open', machine: null };
+    const token = 'T'.repeat(43);
+    expect(await client(() => worker(201, { enrollment: record, token })).mintEnrollment({ ttl_s: 3600, machine: 'mini' })).toEqual({
+      ok: true,
+      value: { id, expires: '2026-11-08T13:00:00.000Z', token },
+    });
+    expect(await client(() => worker(201, { enrollment: record, token })).mintEnrollment({ ttl_s: 3600 })).toMatchObject({ ok: true });
+    expect(sent).toEqual([
+      { method: 'POST', path: '/api/enrollments', body: { ttl_s: 3600, machine: 'mini' } },
+      { method: 'POST', path: '/api/enrollments', body: { ttl_s: 3600 } },
+    ]);
+    for (const bad of [{ enrollment: { ...record, id: TOKEN }, token }, { enrollment: { ...record, expires: TOKEN }, token }, { enrollment: record, token: TOKEN }, { enrollment: record }]) {
+      expect(JSON.stringify(await client(() => worker(201, bad)).mintEnrollment({ ttl_s: 3600 }))).toBe(JSON.stringify({ ok: false, kind: 'status', status: 201, error: 'malformed' }));
+    }
+    expect(await client(() => worker(403, { error: 'not-admin' })).mintEnrollment({ ttl_s: 3600 })).toEqual({ ok: false, kind: 'status', status: 403, error: 'not-admin' });
+  });
+
+  it("reads an enrollment's posted key (M4b): its name, ref, pub and MAC as strings, unjudged (the MAC check is the enrollment's)", async () => {
+    const paths: string[] = [];
+    const client = (answer: () => Response) =>
+      hubClient({
+        url: HUB,
+        headers: () => Promise.resolve({}),
+        fetch: (async (url: string) => {
+          paths.push(new URL(url).pathname);
+          return answer();
+        }) as typeof fetch,
+      });
+    const id = 'e'.repeat(32);
+    const key = { enrollment: id, machine: 'mini', pub: 'P'.repeat(87), ref: 'R'.repeat(22), mac: 'M'.repeat(43), posted: '2026-11-08T12:01:00.000Z' };
+    expect(await client(() => worker(200, key)).enrollmentKey(id)).toEqual({ ok: true, value: { machine: 'mini', pub: key.pub, ref: key.ref, mac: key.mac } });
+    expect(paths).toEqual([`/api/enrollments/${id}/key`]);
+    expect(await client(() => worker(404, { error: 'no-key' })).enrollmentKey(id)).toEqual({ ok: false, kind: 'status', status: 404, error: 'no-key' });
+    expect(await client(() => worker(200, { ...key, mac: 7 })).enrollmentKey(id)).toEqual({ ok: false, kind: 'status', status: 200, error: 'malformed' });
+    expect(await client(() => worker(200, { ...key, pub: 'P'.repeat(4096) })).enrollmentKey(id)).toEqual({ ok: false, kind: 'status', status: 200, error: 'malformed' });
+  });
+
+  it("deletes a machine's hub row (M4b): DELETE /api/machines/<name>, 200 deleted and 404 already absent", async () => {
+    const sent: string[] = [];
+    const client = (answer: () => Response) =>
+      hubClient({
+        url: HUB,
+        headers: () => Promise.resolve({}),
+        fetch: (async (url: string, init: RequestInit) => {
+          sent.push(`${init.method} ${new URL(url).pathname}`);
+          return answer();
+        }) as typeof fetch,
+      });
+    expect(await client(() => worker(200, { revoked: 'mini box' })).deleteMachine('mini box')).toEqual({ ok: true, value: 'deleted' });
+    expect(await client(() => worker(404, { error: 'unknown-machine' })).deleteMachine('mini')).toEqual({ ok: true, value: 'absent' });
+    expect(sent).toEqual(['DELETE /api/machines/mini%20box', 'DELETE /api/machines/mini']);
+    expect(await client(() => worker(403, { error: 'not-admin' })).deleteMachine('mini')).toEqual({ ok: false, kind: 'status', status: 403, error: 'not-admin' });
+    expect(await client(() => worker(503, { error: 'hub-updating' })).deleteMachine('mini')).toEqual({ ok: false, kind: 'status', status: 503, error: 'hub-updating' });
+  });
 });

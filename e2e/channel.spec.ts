@@ -176,6 +176,8 @@ function seededChannel(now: number, local: MachineRef): { status: Extract<OrgSta
     problem: null,
     signer: null,
     pairing: null,
+    enrolling: null,
+    hubRowsLeft: [],
   };
   return { status, answer, asOf, hostsAsOf: seeded.asOf };
 }

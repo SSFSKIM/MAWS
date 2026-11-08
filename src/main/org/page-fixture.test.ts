@@ -20,6 +20,8 @@ const STATUS: OrgStatus = {
   refused: { code: 'keys', detail: 'keys.json is gone' },
   signer: null,
   pairing: null,
+  enrolling: null,
+  hubRowsLeft: [],
 };
 const VIEW: OrgView = {
   version: 7,
@@ -89,6 +91,10 @@ describe("the Org page's e2e fixture in main", () => {
     expect(await ask('org.pair.approve', { generation: 1, digest: 'd' })).toMatchObject({ ok: false, reason: 'busy' });
     expect(await ask('org.discardPending', { confirmed: true, hash: 'h' })).toEqual({ ok: false, reason: 'none' });
     expect(await ask('org.pair.cancel')).toBeUndefined();
+    expect(await ask('org.enroll.start', { name: 'box' })).toMatchObject({ ok: false, reason: 'busy' });
+    expect(await ask('org.enroll.approve', { generation: 1, digest: 'd' })).toMatchObject({ ok: false, reason: 'busy' });
+    expect(await ask('org.enroll.cancel')).toBeUndefined();
+    expect(await ask('org.drop.retry', { name: 'box' })).toMatchObject({ ok: false, reason: 'none' });
     expect(await ask('org.policy.set', { address: 'm/s', access: 'public', policyRev: 1 })).toEqual({ ok: false, reason: 'busy' });
     expect(await ask('org.owners.add', { address: 'm/s', member: 'a1' })).toEqual({ ok: false, reason: 'busy' });
     stop!();

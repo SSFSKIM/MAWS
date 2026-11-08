@@ -31,6 +31,8 @@ export const REGISTERED: Registered = {
   problem: null,
   signer: null,
   pairing: null,
+  enrolling: null,
+  hubRowsLeft: [],
 };
 
 export type Signer = NonNullable<OrgSignerStatus>;
@@ -86,8 +88,8 @@ export const VIEW: OrgView = {
     { id: CAT, email: 'cat@example.com', name: 'Cat', role: 'member', you: false, devices: [] },
   ],
   machines: [
-    { name: 'mini', ref: MINI, owners: [ME, ANA] },
-    { name: 'build-vm', ref: VM, owners: 'org' },
+    { name: 'mini', ref: MINI, owners: [ME, ANA], keyId: 'miniKeyId0001', certified: false, delegation: null },
+    { name: 'build-vm', ref: VM, owners: 'org', keyId: 'buildVmKey002', certified: false, delegation: null },
   ],
   roots: [
     { kid: 'stepUpKid0001', member: ME, device: DEVICE },

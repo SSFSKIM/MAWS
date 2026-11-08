@@ -117,6 +117,15 @@ class FakeHub implements HubClient {
   postPending(): never {
     throw new Error('unused');
   }
+  mintEnrollment(): never {
+    throw new Error('unused');
+  }
+  enrollmentKey(): never {
+    throw new Error('unused');
+  }
+  deleteMachine(): never {
+    throw new Error('unused');
+  }
 }
 
 const OWNER = memberId();

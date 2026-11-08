@@ -16,6 +16,8 @@ import {
   OrgViewSchema,
   type commands,
   type DiscardResult,
+  type DropRetryResult,
+  type EnrollStartResult,
   type OrgPolicySetResult,
   type OrgAttempt,
   type PairStartResult,
@@ -51,6 +53,8 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
   const sign: SignResult = { ok: false, reason: 'busy', detail };
   const preview: PreviewResult = { ok: false, reason: 'invalid', detail, findings: [] };
   const pair: PairStartResult = { ok: false, reason: 'busy', detail };
+  const enroll: EnrollStartResult = { ok: false, reason: 'busy', detail };
+  const retry: DropRetryResult = { ok: false, reason: 'none', detail };
   const discard: DiscardResult = { ok: false, reason: 'none' };
   const save: OrgPolicySetResult = { ok: false, reason: 'busy' };
   const answers: { [N in FixtureCommand]: MainHandler<N> } = {
@@ -71,6 +75,10 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
     'org.pair.start': () => pair,
     'org.pair.approve': () => sign,
     'org.pair.cancel': () => {},
+    'org.enroll.start': () => enroll,
+    'org.enroll.approve': () => sign,
+    'org.enroll.cancel': () => {},
+    'org.drop.retry': () => retry,
     'org.policy.set': () => save,
     'org.owners.add': () => save,
   };

@@ -94,6 +94,33 @@ export const OrgPairingStatusSchema = z
   .nullable();
 export type OrgPairingStatus = z.infer<typeof OrgPairingStatusSchema>;
 
+/**
+ * M4b (Interfaces §R): an enrollment this Mac runs (src/main/org/enroll.ts), as `deployment admin enroll` makes one.
+ * `generation` counts enrollments in this run; `replace`, the ref of the machine a re-enrollment replaces; `candidate`,
+ * the first key posted under it whose MAC is under the code's secret and whose name is this enrollment's, frozen, with
+ * its key id to compare with `mawsd keys --json` on the machine and the digest `org.enroll.approve` names. Never the code,
+ * its token or its secret: those are in `org.enroll.start`'s answer alone. `problem`: why it ended (`expired`, the hub's
+ * `not-yours` and `unknown-enrollment`, `key-changed`: another key posted after the one shown, `machine-names`: the
+ * name is bound to another ref for the life of the org).
+ */
+export const ENROLL_PROBLEMS = ['expired', 'not-yours', 'unknown-enrollment', 'key-changed', 'machine-names'] as const;
+export const OrgEnrollingStatusSchema = z
+  .strictObject({
+    generation: z.number().int().positive(),
+    name: z.string(),
+    replace: z.string().nullable(),
+    expires: z.string(),
+    candidate: z.strictObject({ name: z.string(), ref: z.string(), keyId: z.string(), digest: z.string() }).nullable(),
+    problem: z.enum(ENROLL_PROBLEMS).nullable(),
+  })
+  .nullable();
+export type OrgEnrollingStatus = z.infer<typeof OrgEnrollingStatusSchema>;
+/**
+ * M4b: machines this run dropped whose hub row the delete didn't take out ("Signed. The hub still lists <name>: Retry");
+ * `org.drop.retry` names one.
+ */
+export const OrgHubRowLeftSchema = z.strictObject({ name: z.string(), ref: z.string() });
+
 const RegisteredSchema = z.strictObject({
   state: z.literal('registered'),
   org: z.string(),
@@ -109,6 +136,8 @@ const RegisteredSchema = z.strictObject({
   refused: OrgRefusalSchema.optional(),
   signer: OrgSignerStatusSchema, // M3: null until a head is held
   pairing: OrgPairingStatusSchema, // M4a: null while this Mac pairs no device
+  enrolling: OrgEnrollingStatusSchema, // M4b: null while this Mac enrolls no machine
+  hubRowsLeft: z.array(OrgHubRowLeftSchema), // M4b: dropped, their hub rows still listed
 });
 export const OrgStatusSchema = z.discriminatedUnion('state', [NoneSchema, DevelopmentSchema, RegisteringSchema, RegisteredSchema]);
 export type OrgStatus = z.infer<typeof OrgStatusSchema>;
@@ -166,7 +195,11 @@ export const OrgViewSchema = z.strictObject({
       devices: z.array(z.strictObject({ id: z.string(), class: DeviceClassSchema, keyStorage: z.string(), root: z.boolean(), thisMac: z.boolean(), fingerprint: z.string() })),
     }),
   ),
-  machines: z.array(z.strictObject({ name: z.string(), ref: z.string(), owners: z.union([z.array(z.string()), z.literal('org')]) })),
+  // M4b: `keyId`, the key the machine holds (to compare with `mawsd keys --json`); `certified`, a delegation's machine
+  // through a live certificate, its owners its delegation's (`delegation`, its id)
+  machines: z.array(
+    z.strictObject({ name: z.string(), ref: z.string(), owners: z.union([z.array(z.string()), z.literal('org')]), keyId: z.string(), certified: z.boolean(), delegation: z.string().nullable() }),
+  ),
   roots: z.array(z.union([z.strictObject({ kid: z.string(), member: z.string(), device: z.string() }), z.strictObject({ kid: z.string(), unlisted: z.literal(true) })])),
 });
 export type OrgView = z.infer<typeof OrgViewSchema>;
@@ -174,6 +207,12 @@ export type OrgView = z.infer<typeof OrgViewSchema>;
 const MemberIdSchema = z.string().min(1).max(64);
 const DeviceIdSchema = z.string().min(1).max(128);
 const EmailSchema = z.string().min(1).max(320);
+/** M4b: a machine as the org state names it; the package's grammar (`isMachineName`, `isMachineRef`) is the composers'. */
+const MachineNameSchema = z.string().min(1).max(64);
+const OrgMachineRefSchema = z.string().min(1).max(64);
+const PubSchema = z.string().min(1).max(256);
+/** A machine's owners: member ids, or `'org'` (its admins). An empty list is the package's `shape`, refused before Touch ID. */
+const OwnersSchema = z.union([z.array(MemberIdSchema).max(256), z.literal('org')]);
 /**
  * M4a: a change the Org page asks for (src/main/org/edits.ts composes each). `member.add`'s `id` is set by the preview,
  * so the id signed is the id shown; a change sent without it reads `stale`.
@@ -185,6 +224,11 @@ export const OrgChangeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('member.email'), member: MemberIdSchema, email: EmailSchema }),
   z.strictObject({ kind: z.literal('device.remove'), member: MemberIdSchema, device: DeviceIdSchema }),
   z.strictObject({ kind: z.literal('root.add'), member: MemberIdSchema, device: DeviceIdSchema }),
+  // M4b: `machine.add` and `machine.replace` are an enrollment's (org.enroll.*), composed from the key it checked
+  z.strictObject({ kind: z.literal('machine.add'), name: MachineNameSchema, ref: OrgMachineRefSchema, pub: PubSchema, owners: OwnersSchema }),
+  z.strictObject({ kind: z.literal('machine.replace'), ref: OrgMachineRefSchema, pub: PubSchema }),
+  z.strictObject({ kind: z.literal('machine.owners'), ref: OrgMachineRefSchema, owners: OwnersSchema }),
+  z.strictObject({ kind: z.literal('machine.drop'), ref: OrgMachineRefSchema, revoke: z.boolean() }),
 ]);
 export type OrgChange = z.infer<typeof OrgChangeSchema>;
 
@@ -214,6 +258,24 @@ export const PairStartResultSchema = z.union([
   z.strictObject({ ok: z.literal(false), reason: z.enum(PAIR_REFUSALS), detail: z.string().optional() }),
 ]);
 export type PairStartResult = z.infer<typeof PairStartResultSchema>;
+
+/**
+ * M4b: an enrollment started. `code` is the v2 enrollment code (its token and secret within), shown once: in this answer
+ * alone, never in a status. Refused before anything is minted: this Mac can't sign (`not-root`), its member isn't an
+ * admin (`not-admin`), an enrollment, a pairing or another attempt running (`busy`), no hub (`hub`), a name outside the
+ * grammar (`shape`), a name listed (`machine-name-taken`) or under a delegation's prefix (`prefix-names-machine`), a
+ * re-enrollment of a certified machine (`certified-machine`) or of no listed machine (`no-machine`); after it, the hub's
+ * refusal of the mint (`refused`, its status and code in `detail`), or a cancel while it was minted (`cancelled`).
+ */
+export const ENROLL_REFUSALS = ['not-root', 'not-admin', 'busy', 'hub', 'shape', 'machine-name-taken', 'prefix-names-machine', 'certified-machine', 'no-machine', 'refused', 'cancelled'] as const;
+export const EnrollStartResultSchema = z.union([
+  z.strictObject({ ok: z.literal(true), code: z.string(), expires: z.string() }),
+  z.strictObject({ ok: z.literal(false), reason: z.enum(ENROLL_REFUSALS), detail: z.string().optional() }),
+]);
+export type EnrollStartResult = z.infer<typeof EnrollStartResultSchema>;
+/** M4b: a dropped machine's hub row deleted again. `none`: no drop of that name awaits its row's delete; `hub`: not reached. */
+export const DropRetryResultSchema = z.union([z.strictObject({ ok: z.literal(true) }), z.strictObject({ ok: z.literal(false), reason: z.enum(['none', 'hub', 'refused']), detail: z.string().optional() })]);
+export type DropRetryResult = z.infer<typeof DropRetryResultSchema>;
 
 /**
  * M2 (Interfaces §G): another machine's session as its signed listing says it, verified against the held org state. Not a
@@ -504,6 +566,10 @@ export const commands = {
   'org.pair.start': { input: z.strictObject({ member: MemberIdSchema, class: DeviceClassSchema }), output: PairStartResultSchema, owner: 'main' }, // M4a
   'org.pair.approve': { input: z.strictObject({ generation: z.number().int().positive(), digest: z.string().min(1).max(128) }), output: SignResultSchema, owner: 'main' }, // M4a
   'org.pair.cancel': { input: z.void(), output: z.void(), owner: 'main' }, // M4a
+  'org.enroll.start': { input: z.strictObject({ name: MachineNameSchema, replace: OrgMachineRefSchema.optional() }), output: EnrollStartResultSchema, owner: 'main' }, // M4b
+  'org.enroll.approve': { input: z.strictObject({ generation: z.number().int().positive(), digest: z.string().min(1).max(128) }), output: SignResultSchema, owner: 'main' }, // M4b
+  'org.enroll.cancel': { input: z.void(), output: z.void(), owner: 'main' }, // M4b
+  'org.drop.retry': { input: z.strictObject({ name: MachineNameSchema }), output: DropRetryResultSchema, owner: 'main' }, // M4b: the hub row's DELETE alone
   'org.channel.open': { input: z.strictObject({ project: ChannelProjectSchema }), output: ChannelAnswerSchema, owner: 'main' }, // M7a: one per open tab
   'org.channel.close': { input: z.strictObject({ project: ChannelProjectSchema }), output: z.void(), owner: 'main' }, // M7a: released 30 s after the last
   'org.channel.send': { input: z.strictObject({ project: ChannelProjectSchema, text: z.string().max(CHANNEL_TEXT_MAX) }), output: ChannelSendResultSchema, owner: 'main' }, // M7a

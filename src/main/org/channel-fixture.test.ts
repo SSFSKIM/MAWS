@@ -20,6 +20,8 @@ const STATUS: OrgStatus = {
   problem: null,
   signer: null,
   pairing: null,
+  enrolling: null,
+  hubRowsLeft: [],
 };
 const ANSWER: ChannelAnswer = {
   ok: true,

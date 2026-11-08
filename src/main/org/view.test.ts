@@ -1,9 +1,10 @@
 // The Org page's reading of the held head (P5 O8 M4a, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M4a's
 // "The view"; Interfaces §M): members with their names, roles and devices (roots and this Mac marked, each device's
 // fingerprint to compare by eye), machines with their owners and no up bit, the roots as `rootLines` reads them, and
-// the recovery key's id. Over a state built with the package's own key and fingerprint functions.
+// the recovery key's id. M4b: each machine's key id, and the certified machines (a delegation's, through a live
+// certificate), their owners their delegation's. Over a state built with the package's own key and fingerprint functions.
 import { describe, expect, it } from 'vitest';
-import { generateSigningKey, keyId, pairingFingerprint, type Device, type OrgState } from '../../../apps/org-protocol/src/index.ts';
+import { generateSigningKey, keyId, pairingFingerprint, signRecord, SIGNING_DOMAINS, type Certificates, type Device, type OrgState } from '../../../apps/org-protocol/src/index.ts';
 import { OrgViewSchema } from '@shared/ipc/schema/org';
 import { orgView } from './view';
 
@@ -28,6 +29,16 @@ async function fixture() {
   };
   const recovery = await generateSigningKey();
   const stray = await keyId((await generateSigningKey()).pub);
+  const vmOne = await generateSigningKey();
+  const ci = await generateSigningKey();
+  // M4b: the delegation `dc-` (ANA's), whose certificates name `dc-live` (live) and `dc-old` (its key revoked)
+  const delegation = await generateSigningKey();
+  const DELEGATION = 'd'.repeat(32);
+  const certKey = await generateSigningKey();
+  const oldKey = await generateSigningKey();
+  const cert = (name: string, ref: string, pub: string) =>
+    signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: ref, name, pub, delegation: DELEGATION, use: 1, issued: '2026-10-28T08:00:00.000Z' }, delegation.privateKey, delegation.pub);
+  const certificates: Certificates = { certs: [await cert('dc-live', `${DELEGATION}_${'l'.repeat(22)}`, certKey.pub), await cert('dc-old', `${DELEGATION}_${'o'.repeat(22)}`, oldKey.pub)], retirements: [] };
   const state: OrgState = {
     org: ORG,
     version: 7,
@@ -40,22 +51,22 @@ async function fixture() {
       { id: ANA_TOO, email: 'ana@other.example', role: 'member', devices: [] },
     ],
     machines: [
-      { name: 'vm-one', ref: 'r'.repeat(32), pub: (await generateSigningKey()).pub, owners: [OWNER, ANA] },
-      { name: 'ci', ref: 's'.repeat(32), pub: (await generateSigningKey()).pub, owners: 'org' },
+      { name: 'vm-one', ref: 'r'.repeat(32), pub: vmOne.pub, owners: [OWNER, ANA] },
+      { name: 'ci', ref: 's'.repeat(32), pub: ci.pub, owners: 'org' },
     ],
     machineNames: [],
     retired: [],
-    revoked: [],
-    delegations: [],
+    revoked: [{ keyId: await keyId(oldKey.pub), holder: { machine: `${DELEGATION}_${'o'.repeat(22)}` } }],
+    delegations: [{ id: DELEGATION, pub: delegation.pub, prefix: 'dc-', expires: '2026-12-01T00:00:00.000Z', maxUses: 10, offlineRevokeS: 0, owners: [ANA] }],
     projects: [],
   };
-  return { state, mac, mini, phone, recovery, stray };
+  return { state, mac, mini, phone, recovery, stray, certificates, keys: { vmOne: await keyId(vmOne.pub), ci: await keyId(ci.pub), live: await keyId(certKey.pub) }, DELEGATION };
 }
 
 describe('the Org page\'s view of the held head', () => {
   it('reads members, devices, machines, roots and the recovery key\'s id from the signed state alone', async () => {
-    const { state, mac, mini, phone, recovery, stray } = await fixture();
-    const view = await orgView(state, { member: OWNER, device: mac.id }, true);
+    const { state, mac, mini, phone, recovery, stray, certificates, keys, DELEGATION } = await fixture();
+    const view = await orgView(state, { member: OWNER, device: mac.id }, true, certificates, new Date('2026-10-29T09:00:00.000Z'));
     expect(view).toEqual({
       version: 7,
       issued: '2026-10-29T08:00:00.000Z',
@@ -84,9 +95,11 @@ describe('the Org page\'s view of the held head', () => {
         },
         { id: ANA_TOO, email: 'ana@other.example', name: 'ana@other.example', role: 'member', you: false, devices: [] },
       ],
+      // a certified machine whose key the head revoked is not shown; a live one's owners are its delegation's
       machines: [
-        { name: 'vm-one', ref: 'r'.repeat(32), owners: [OWNER, ANA] },
-        { name: 'ci', ref: 's'.repeat(32), owners: 'org' },
+        { name: 'vm-one', ref: 'r'.repeat(32), owners: [OWNER, ANA], keyId: keys.vmOne, certified: false, delegation: null },
+        { name: 'ci', ref: 's'.repeat(32), owners: 'org', keyId: keys.ci, certified: false, delegation: null },
+        { name: 'dc-live', ref: `${DELEGATION}_${'l'.repeat(22)}`, owners: [ANA], keyId: keys.live, certified: true, delegation: DELEGATION },
       ],
       roots: [
         { kid: await keyId(mini.stepUpPub!), member: OWNER, device: mini.id },
@@ -99,7 +112,7 @@ describe('the Org page\'s view of the held head', () => {
   it('carries no machine up bit: whether a machine is up is the renderer\'s, from `useMachines`', async () => {
     const { state, mac } = await fixture();
     const view = await orgView(state, { member: OWNER, device: mac.id }, false);
-    for (const machine of view.machines) expect(Object.keys(machine).sort()).toEqual(['name', 'owners', 'ref']);
+    for (const machine of view.machines) expect(Object.keys(machine).sort()).toEqual(['certified', 'delegation', 'keyId', 'name', 'owners', 'ref']);
     expect(view.maySign).toBe(false);
   });
 

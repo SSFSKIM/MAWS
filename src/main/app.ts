@@ -337,6 +337,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
           stepUp: (keys, device, org) => createStepUp({ device, key: keys.stepUp, confirm, org }),
           // `<userData>/org/` stays out of Time Machine, as the device keys do: a restored token or chain is no one's
           excludeFromBackup: (path) => excludeFromBackup(path),
+          local, // M4b: this Mac's own machine, which a drop refuses
           // M3: the app as the org's signer. Org states are signed with the device's step-up key behind Touch ID (the
           // key stays in step-up.ts); the weekly successor asks at a window's focus, and notifies once a day while no
           // window is in front (a click brings the app forward, whose focus may then ask); revocations go to the RL2

@@ -50,6 +50,8 @@ export interface OrgTiming {
   PAIR_TTL_MS: number;
   /** How often a pairing reads the target member's pending entries (`pair`'s 2 s). */
   PAIR_POLL_MS: number;
+  /** M4b's. How often an enrollment reads its machine's posted key (`enroll`'s 5 s, `ENROLL_POLL_MS` in admin.ts). */
+  ENROLL_POLL_MS: number;
   /** M7a's. A project's channel lives this long after its last tab closes. */
   CHANNEL_RELEASE_MS: number;
   /** A project's cache keeps the newest events up to both bounds, by offset (M7a's *The cache*). */
@@ -92,6 +94,7 @@ export const ORG_TIMING: Readonly<OrgTiming> = Object.freeze({
   DELIVERY_MAX_BYTES: 524_288,
   PAIR_TTL_MS: 600_000,
   PAIR_POLL_MS: 2_000,
+  ENROLL_POLL_MS: 5_000,
   CHANNEL_RELEASE_MS: 30_000,
   CHANNEL_CACHE_EVENTS: 5_000,
   CHANNEL_CACHE_BYTES: 8 * 1024 * 1024,

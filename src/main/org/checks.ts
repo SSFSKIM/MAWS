@@ -47,9 +47,10 @@ export type CheckCode =
 /**
  * What a change may not do whatever the state says (edits.ts's composers, M4a): change or remove yourself, remove this
  * Mac's own device or its member, sign a change that changes nothing, take an email outside the grammar, make a root of
- * a device that can't sign org states.
+ * a device that can't sign org states; M4b: change a certified machine, whose owners are its delegation's, or drop this
+ * Mac's own machine.
  */
-export type ChangeCode = 'self' | 'this-mac' | 'no-change' | 'bad-email' | 'not-signing-device';
+export type ChangeCode = 'self' | 'this-mac' | 'no-change' | 'bad-email' | 'not-signing-device' | 'certified-machine' | 'this-machine';
 export type FindingCode = CheckCode | ProblemCode | ChangeCode;
 export type Finding = { level: 'refuse' | 'warn'; code: FindingCode; detail: string };
 

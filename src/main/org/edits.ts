@@ -10,9 +10,30 @@
 // the package's `successorProblems` on the composed successor before Touch ID. A target gone from the draft, or words
 // that changed, is `StaleEdit`: the head moved under the sheet.
 //
-// Lines name members by email and devices by their first 8 characters with their class, as `deployment admin show`
-// does. Electron-free: vitest's node project runs it.
-import { isMemberEmail, keyId, pairingFingerprint, type Device, type Member, type OrgState, type RevokedKey } from '../../../apps/org-protocol/src/index.ts';
+// M4b adds the machines (M4b's "Owners and drop" and "The enrollment"): `machine.add` and `machine.replace`, which an
+// enrollment's approval composes (enroll.ts) as `deployment admin enroll [--replace]` signs them; `machine.owners`; and
+// `machine.drop`, as `machine drop [--revoke]` signs it, its key retired, or revoked. A certified machine (a devcloud VM)
+// is none of these: its owners are its delegation's, and it retires through `mawsd endpoint retire` on it or by
+// dropping its delegation (`certified-machine`). This Mac's own machine leaves through `mawsd endpoint unenroll` on it
+// (`this-machine`). The rest is the package's: a name taken (`machine-name-taken`) or bound to another ref for the life
+// of the org (`machine-names`), a name under a delegation's prefix (`prefix-names-machine`), owners that are no members
+// (`owners-unknown`) or no list at all (`shape`). A member who owns a machine is removed only once its owners changed.
+//
+// Lines name members by email, devices by their first 8 characters with their class, as `deployment admin show` does,
+// machines by name and their keys by key id. Electron-free: vitest's node project runs it.
+import {
+  isMemberEmail,
+  keyId,
+  machineNameKey,
+  pairingFingerprint,
+  type Certificates,
+  type Device,
+  type MachineEntry,
+  type Member,
+  type OrgState,
+  type Owners,
+  type RevokedKey,
+} from '../../../apps/org-protocol/src/index.ts';
 import type { OrgChange } from '@shared/ipc/schema/org';
 import type { ChangeCode } from './checks';
 import { RefusedEdit, StaleEdit, type Edit } from './signer';
@@ -23,8 +44,11 @@ import { RefusedEdit, StaleEdit, type Edit } from './signer';
  */
 export type { OrgChange };
 
-/** This Mac in the org: the registration's member and this profile's device. */
-export type EditSelf = { member: string; device: string };
+/** This Mac in the org: the registration's member and this profile's device; M4b: this Mac's own machine ref, when known. */
+export type EditSelf = { member: string; device: string; machine?: string };
+
+/** No certificates: what a composer is given when the held view has none. */
+const NO_CERTIFICATES: Certificates = { certs: [], retirements: [] };
 
 /** An `Edit` composed from a change, with the change as it was composed (normalized). */
 export type ChangeEdit = Edit & { change: OrgChange };
@@ -47,16 +71,17 @@ export function normalizeChange(change: OrgChange): OrgChange {
 /**
  * The change as an edit of a successor of `state` (the held head's, or a draft of it). Throws `RefusedEdit` for what no
  * state makes right and `StaleEdit` for a target `state` doesn't hold; `apply` throws the same on the draft it is
- * given, and `StaleEdit` when the words composed there differ from these.
+ * given, and `StaleEdit` when the words composed there differ from these. `certificates`, the held view's, say which refs
+ * are certified machines (M4b), which no change here touches.
  */
-export async function composeChange(state: OrgState, change: OrgChange, self: EditSelf): Promise<ChangeEdit> {
-  const shown = await planChange(state, change, self);
+export async function composeChange(state: OrgState, change: OrgChange, self: EditSelf, certificates: Certificates = NO_CERTIFICATES): Promise<ChangeEdit> {
+  const shown = await planChange(state, change, self, certificates);
   return {
     change,
     summary: shown.summary,
     lines: shown.lines,
     async apply(draft) {
-      const now = await planChange(draft, change, self);
+      const now = await planChange(draft, change, self, certificates);
       sameWords(shown, now);
       await now.edit();
     },
@@ -160,7 +185,29 @@ async function rootsOf(state: OrgState, devices: readonly Device[]): Promise<Arr
 
 const leavesRoots = (state: OrgState, kids: readonly string[]) => () => void (state.root.keys = state.root.keys.filter((k) => !kids.includes(k)));
 
-async function planChange(state: OrgState, change: OrgChange, self: EditSelf): Promise<Plan> {
+// --- Machines ---------------------------------------------------------------------------------------------------------
+
+/** The owners in words: each member by email (an id the state doesn't list, as it stands), or the org's admins. */
+function ownersText(state: OrgState, owners: Owners): string {
+  if (owners === 'org') return 'the org (its admins)';
+  return owners.map((id) => state.members.find((m) => m.id === id)?.email ?? `member ${id}`).join(', ');
+}
+
+const sameOwners = (a: Owners, b: Owners) => (a === 'org' || b === 'org' ? a === b : a.length === b.length && a.every((id, i) => id === b[i]));
+
+/**
+ * The listed machine `ref` names. A certified machine's ref (a served certificate's, with no entry) is refused
+ * `certified-machine` with `why`; any other ref the state doesn't list is gone (`StaleEdit`).
+ */
+function machineOf(state: OrgState, ref: string, certificates: Certificates, why: string): MachineEntry {
+  const entry = state.machines.find((m) => m.ref === ref);
+  if (entry !== undefined) return entry;
+  const cert = certificates.certs.find((c) => c.body.machine === ref);
+  if (cert !== undefined) refused('certified-machine', `${cert.body.name} is a certified machine of delegation ${cert.body.delegation}: ${why}`);
+  return gone(`machine ${ref} is no longer in the org state`);
+}
+
+async function planChange(state: OrgState, change: OrgChange, self: EditSelf, certificates: Certificates): Promise<Plan> {
   switch (change.kind) {
     case 'member.add': {
       const { email, role, id } = change;
@@ -180,6 +227,10 @@ async function planChange(state: OrgState, change: OrgChange, self: EditSelf): P
       const member = memberOf(state, change.member);
       if (member.id === self.member) refused('self', 'you are not removed from here: another admin removes you');
       if (member.devices.some((d) => d.id === self.device)) refused('this-mac', `${member.email} holds this Mac's device, which leaves only through New keys`);
+      const owned = state.machines.filter((m) => m.owners !== 'org' && m.owners.includes(member.id));
+      if (owned.length > 0) {
+        throw new RefusedEdit(owned.map((m) => ({ level: 'refuse', code: 'owners-unknown', detail: `${member.email} owns ${m.name}: Change the machine's owners first` })));
+      }
       const keys = await Promise.all(member.devices.map((d) => revocations(member, d)));
       const roots = await rootsOf(state, member.devices);
       return {
@@ -259,6 +310,66 @@ async function planChange(state: OrgState, change: OrgChange, self: EditSelf): P
         summary: `make ${member.email}'s device ${short(device)} a root`,
         lines: [`Make ${member.email}'s device ${describe(device)} a root of the org: its step-up key ${kid} signs org states (fingerprint ${fingerprint})`],
         edit: () => void state.root.keys.push(kid),
+      };
+    }
+
+    case 'machine.add': {
+      const { name, ref, pub, owners } = change;
+      const kid = await keyId(pub);
+      const bound = state.machineNames.some((n) => machineNameKey(n.name) === machineNameKey(name) && n.ref === ref);
+      return {
+        summary: `enroll machine ${name}`,
+        lines: [`Enroll ${name} (ref ${ref}) with its key ${kid}`, `Owned by ${ownersText(state, owners)}`],
+        edit() {
+          state.machines.push({ name, ref, pub, owners: owners === 'org' ? 'org' : [...owners] });
+          // the name's binding to its ref, for the life of the org (RL DL 25), unless the state holds it already
+          if (!bound) state.machineNames.push({ name, ref });
+        },
+      };
+    }
+
+    case 'machine.replace': {
+      const entry = machineOf(state, change.ref, certificates, 'it is enrolled again through its delegation, never from here');
+      if (entry.pub === change.pub) refused('no-change', `${entry.name} holds that key already`);
+      const [was, now] = [await keyId(entry.pub), await keyId(change.pub)];
+      return {
+        summary: `re-enroll ${entry.name} with a new key`,
+        lines: [`Re-enroll ${entry.name} (ref ${entry.ref}): its new key ${now} replaces ${was}, which is retired`, `Its ref and its owners (${ownersText(state, entry.owners)}) are kept`],
+        edit() {
+          // as `enroll --replace` does (admin.ts): the old key retired as of the successor's issue, its private half gone
+          state.retired.push({ keyId: was, pub: entry.pub, notAfter: state.issued, holder: { machine: entry.ref } });
+          entry.pub = change.pub;
+        },
+      };
+    }
+
+    case 'machine.owners': {
+      const entry = machineOf(state, change.ref, certificates, "its owners are its delegation's, and change with the delegation");
+      if (sameOwners(entry.owners, change.owners)) refused('no-change', `${entry.name} is owned by ${ownersText(state, entry.owners)} already`);
+      const owners = change.owners === 'org' ? 'org' : [...change.owners];
+      return {
+        summary: `change ${entry.name}'s owners`,
+        lines: [`${entry.name}'s owners become ${ownersText(state, owners)} (were ${ownersText(state, entry.owners)})`],
+        edit: () => void (entry.owners = owners),
+      };
+    }
+
+    case 'machine.drop': {
+      if (change.ref === self.machine) refused('this-machine', "this Mac's own machine leaves the org through `mawsd endpoint unenroll` on it, never from here");
+      const entry = machineOf(state, change.ref, certificates, 'it retires through `mawsd endpoint retire` on the machine, or by dropping its delegation');
+      const kid = await keyId(entry.pub);
+      return {
+        summary: `drop machine ${entry.name}`,
+        lines: [
+          `Drop ${entry.name} (ref ${entry.ref}) from the org`,
+          change.revoke ? `Revoke its key ${kid}: it may be compromised` : `Retire its key ${kid}`,
+          `Its name stays bound to its ref for the life of the org; the hub's row for ${entry.name} is deleted once this is signed`,
+        ],
+        edit() {
+          state.machines = state.machines.filter((m) => m.ref !== entry.ref);
+          if (change.revoke) state.revoked.push({ keyId: kid, holder: { machine: entry.ref } });
+          else state.retired.push({ keyId: kid, pub: entry.pub, notAfter: state.issued, holder: { machine: entry.ref } });
+        },
       };
     }
   }

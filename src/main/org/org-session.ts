@@ -43,6 +43,12 @@
 // their final snapshots into the queue before its tail. M7b: each channel reads every machine's to-human entries too
 // (channel/machines.ts), this Mac's spine and the RL2 links main injects (`channelMachines`), cached beside the log's.
 //
+// M4b (machines; M4b's Decisions, Interfaces §R): the machine changes go through `preview` and `change` as the people's
+// do, with the held certificates (a certified machine is its delegation's) and this Mac's own machine ref (`local`), but
+// `machine.add` and `machine.replace`, which only an enrollment composes from the key it checked (enroll.ts, a part as
+// the pairing is). A signed `machine.drop` then deletes the machine's hub row; a delete that fails leaves its name on
+// the status (`hubRowsLeft`) for `dropRetry`, which calls the route alone.
+//
 // Electron-free: the browser opener, the step-up signer, the state signer, focus, notifications and the RL2 links are
 // injected from main.
 import { lstat } from 'node:fs/promises';
@@ -55,6 +61,7 @@ import {
   decodePairingCode,
   isSignedOrgState,
   keyId,
+  machineNameKey,
   pairingFingerprint,
   pairingMac,
   stateHash,
@@ -73,6 +80,8 @@ import type {
   ChannelChanged,
   ChannelSendResult,
   DiscardResult,
+  DropRetryResult,
+  EnrollStartResult,
   OrgAttempt,
   OrgChange,
   OrgRefusal,
@@ -120,6 +129,7 @@ import { createDeliveries, type Deliveries, type DeliveryLink } from './deliveri
 import { composeChange, normalizeChange, type ChangeEdit, type EditSelf } from './edits';
 import { rereadFrom, startHeldOrg, type HeldOrg } from './held';
 import { hubClient, type HubClient, type HubResult, type Me, type Served } from './hub-client';
+import { createEnrollment } from './enroll';
 import { createPairing } from './pairing';
 import type { RegistryFeedHooks } from './registry-feed';
 import type { OrgSession, SignedIn } from './session';
@@ -168,6 +178,12 @@ export interface OrgSessionService extends OrgSession {
   pairStart(input: { member: string; class: 'native-mac' | 'web-cards' }): PairStartResult;
   pairApprove(input: { generation: number; digest: string }): Promise<SignResult>;
   pairCancel(): void;
+  /** M4b: an enrollment this Mac runs (enroll.ts); the code is in this answer alone. */
+  enrollStart(input: { name: string; replace?: string }): Promise<EnrollStartResult>;
+  enrollApprove(input: { generation: number; digest: string }): Promise<SignResult>;
+  enrollCancel(): void;
+  /** M4b: a dropped machine's hub row deleted again (`hubRowsLeft`), the route alone. */
+  dropRetry(name: string): Promise<DropRetryResult>;
   /** M7a: a tab shows the project's channel (`org.channel.open`). */
   channelOpen(project: string): Promise<ChannelAnswer>;
   /** M7a: a tab no longer shows it (`org.channel.close`); released 30 s after the last. */
@@ -228,6 +244,8 @@ export interface OrgSessionDeps {
   keyFiles?: Partial<DeviceKeyFiles>;
   /** M7a: the channels' Project socket; `ws` by default (tests inject one). */
   channelSocket?: ProjectSocketDeps['socket'];
+  /** M4b: this Mac's own machine ref, which a drop refuses (`this-machine`): main's `machine.identity`. */
+  local?: MachineRef;
   /** M7b: this Mac's spine and the RL2 roster's links, for every machine's to-human entries; without it, none are read. */
   channelMachines?: Omit<ChannelMachinesDeps, 'session' | 'store' | 'commit' | 'timing' | 'now' | 'log'>;
   now?(): number;
@@ -375,6 +393,9 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   /** One rekey's key files at a time: an attempt a cancel ended may still be cleaning up when the next one starts. */
   let keyWork: Promise<void> = Promise.resolve();
   let retiredWork: Promise<void> = Promise.resolve();
+  // ---- M4b ----
+  /** Machines this run dropped whose hub row the delete didn't take out; the status names them, `dropRetry` deletes one. */
+  let hubRowsLeft: Array<{ name: string; ref: string }> = [];
 
   /**
    * Runs `body` after every commit queued before it. Nothing run here may wait on a held view's adoption queue, whose
@@ -465,6 +486,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       ...(refused === undefined ? {} : { refused }),
       signer: signerStatus(),
       pairing: pairing.status(),
+      enrolling: enrollment.status(),
+      hubRowsLeft: hubRowsLeft.map((row) => ({ ...row })),
     };
   }
 
@@ -819,6 +842,9 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       postPending: (entry, signal) => watched(inner.postPending(entry, signal)),
       postState: (signed, signal) => watched(inner.postState(signed, signal)),
       pendingOf: (member, signal) => watched(inner.pendingOf(member, signal)),
+      mintEnrollment: (body, signal) => watched(inner.mintEnrollment(body, signal)),
+      enrollmentKey: (id, signal) => watched(inner.enrollmentKey(id, signal)),
+      deleteMachine: (name, signal) => watched(inner.deleteMachine(name, signal)),
     };
   }
 
@@ -977,14 +1003,14 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
 
   // ---- M4a: the Org page's surface ----
 
-  const selfOf = (reg: RegistrationFile): EditSelf => ({ member: reg.member.id, device: reg.device });
+  const selfOf = (reg: RegistrationFile): EditSelf => ({ member: reg.member.id, device: reg.device, ...(deps.local === undefined ? {} : { machine: deps.local }) });
 
   /** The Org page's view of the held head: read again by the renderer at each `org.changed`. */
   async function view(): Promise<OrgView | null> {
     const reg = registration;
     const v = heldView();
     if (closed || reg === null || v === null) return null;
-    return orgView(v.head().state, selfOf(reg), composed !== null && maySign(composed.signer));
+    return orgView(v.head().state, selfOf(reg), composed !== null && maySign(composed.signer), v.certificates(), new Date(now()));
   }
 
   type Refused = Extract<PreviewResult, { ok: false }>;
@@ -1003,14 +1029,16 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
    * checks' warnings, and the digest of `{change, lines, warnings}`, which a confirmation names. A composer's own refusal
    * or a refuse finding reads `refused`; a target the head doesn't hold, `stale`.
    */
-  async function shownChange(head: SignedOrgState, change: OrgChange, superseded: readonly SignedOrgState[]): Promise<{ ok: true; edit: ChangeEdit; warnings: string[]; digest: string } | Refused> {
+  async function shownChange(view: HeldOrg, change: OrgChange): Promise<{ ok: true; edit: ChangeEdit; warnings: string[]; digest: string } | Refused> {
     const reg = registration;
     if (reg === null) return { ok: false, reason: 'not-root', detail: 'this Mac is not signed in to the org', findings: [] };
+    const head = view.head();
+    const superseded = view.superseded();
     const at = now();
     let edit: ChangeEdit;
     let draft: OrgState;
     try {
-      edit = await composeChange(head.state, change, selfOf(reg));
+      edit = await composeChange(head.state, change, selfOf(reg), view.certificates());
       draft = await successorDraft(head, at);
       await edit.apply(draft);
     } catch (error) {
@@ -1024,12 +1052,18 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     return { ok: true, edit, warnings, digest: await digestOf(canonicalize({ change, lines: edit.lines, warnings })) };
   }
 
+  /** M4b: a machine is listed only by an enrollment's approval, which composes it from the key it checked. */
+  const enrolledOnly = (change: OrgChange): Refused | null =>
+    change.kind === 'machine.add' || change.kind === 'machine.replace'
+      ? { ok: false, reason: 'invalid', detail: "a machine is enrolled through Enroll, which checks the machine's key: nothing was composed", findings: [] }
+      : null;
+
   async function preview(raw: OrgChange): Promise<PreviewResult> {
-    const standing = changeStanding();
+    const standing = changeStanding() ?? enrolledOnly(raw);
     if (standing !== null) return standing;
     const change = normalizeChange(raw);
     const v = heldView()!;
-    const shown = await shownChange(v.head(), change, v.superseded());
+    const shown = await shownChange(v, change);
     if (!shown.ok) return shown;
     return { ok: true, change, lines: [...shown.edit.lines], warnings: shown.warnings, digest: shown.digest };
   }
@@ -1041,26 +1075,66 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       : { ok: false, reason: refusal.reason, ...(refusal.detail === undefined ? {} : { detail: refusal.detail }) };
 
   async function change(raw: OrgChange, digest: string): Promise<SignResult> {
-    const standing = changeStanding();
+    const standing = changeStanding() ?? enrolledOnly(raw);
     if (standing !== null) return asSign(standing);
     const c = composed!;
     // Normalizing keeps a previewed change as it was; one sent without the id its preview gave reads `stale` below.
     const change = normalizeChange(raw);
     const stale = 'the change, or the org state it changes, is not the one shown: nothing was signed';
     const v = heldView()!;
-    const shown = await shownChange(v.head(), change, v.superseded());
+    const shown = await shownChange(v, change);
     if (!shown.ok) return asSign(shown);
     if (shown.digest !== digest) return { ok: false, reason: 'stale', detail: stale };
+    // M4b: the machine a drop takes out, by the name the sheet showed it under (its lines name it), for its hub row.
+    const dropped = change.kind === 'machine.drop' ? v.head().state.machines.find((m) => m.ref === change.ref) : undefined;
     // Composed again on the head the signer drafts from (the hub's, after its read), and signed only if it still says
     // what was shown, as `revokeSuperseded` does: `stale` before Touch ID.
     const apply = async (draft: OrgState): Promise<void> => {
       const at = heldView();
-      const fresh = at === null ? null : await shownChange(at.head(), change, at.superseded());
+      const fresh = at === null ? null : await shownChange(at, change);
       if (fresh !== null && !fresh.ok && fresh.reason === 'refused') throw new RefusedEdit(fresh.findings as Finding[]);
       if (fresh === null || !fresh.ok || fresh.digest !== digest) throw new StaleEdit(stale);
       await fresh.edit.apply(draft);
     };
-    return signResult(await c.signer.sign({ summary: shown.edit.summary, lines: shown.edit.lines, apply }));
+    const result = signResult(await c.signer.sign({ summary: shown.edit.summary, lines: shown.edit.lines, apply }));
+    if (result.ok && dropped !== undefined) await deleteRow({ name: dropped.name, ref: dropped.ref });
+    return result;
+  }
+
+  // ---- M4b: a dropped machine's hub row ----
+
+  /** The hub row of a machine just dropped, deleted as `machine drop` deletes it: 200, or 404 for a row already gone. */
+  async function deleteRow(row: { name: string; ref: string }): Promise<DropRetryResult> {
+    const hub = signerHub();
+    const asked = generation;
+    const deleted: HubResult<'deleted' | 'absent'> = hub === null ? { ok: false, kind: 'unreachable', detail: 'no hub sign-in' } : await hub.deleteMachine(row.name);
+    // A sign-out meanwhile took the rows left with it: they were that sign-in's.
+    if (asked !== generation || closed) return { ok: false, reason: 'hub', detail: 'the sign-in ended: nothing more is offered' };
+    const left = hubRowsLeft.filter((r) => r.name !== row.name);
+    if (deleted.ok) {
+      log(`the hub's row for ${row.name} was ${deleted.value === 'deleted' ? 'deleted' : 'already gone'}`);
+      hubRowsLeft = left;
+      changed();
+      return { ok: true };
+    }
+    const why = deleted.kind === 'status' ? `${deleted.status} ${deleted.error ?? 'with no code'}` : deleted.kind;
+    log(`the hub's row for ${row.name} was not deleted (${why}): it is offered again`);
+    hubRowsLeft = [...left, row];
+    changed();
+    return deleted.kind === 'status' ? { ok: false, reason: 'refused', detail: `the hub answered ${why}` } : { ok: false, reason: 'hub', detail: 'the hub was not reached: try again' };
+  }
+
+  /** The route alone, for a row `hubRowsLeft` names; none once the held head lists that name again (re-enrolled since). */
+  async function dropRetry(name: string): Promise<DropRetryResult> {
+    const row = hubRowsLeft.find((r) => r.name === name);
+    if (row === undefined) return { ok: false, reason: 'none', detail: "no dropped machine of that name awaits its hub row's delete" };
+    const head = heldView()?.head().state ?? null;
+    if (head !== null && head.machines.some((m) => machineNameKey(m.name) === machineNameKey(name))) {
+      hubRowsLeft = hubRowsLeft.filter((r) => r !== row);
+      changed();
+      return { ok: false, reason: 'none', detail: `the org lists ${name} again: its hub row is that machine's` };
+    }
+    return deleteRow(row);
   }
 
   /** M4a's pairing: this Mac as the approving device, one at a time, never beside another of the session's attempts. */
@@ -1071,7 +1145,23 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       if (closed || reg === null || v === null || !answering()) return null;
       return { hub: reg.hub, self: selfOf(reg), head: v.head(), maySign: composed !== null && maySign(composed.signer), client: signerHub() };
     },
-    busy: () => attempt !== null || signingOut,
+    busy: () => attempt !== null || signingOut || enrollment.running(),
+    sign: async (edit) => (composed === null ? notSigning : signResult(await composed.signer.sign(edit))),
+    changed: () => changed(),
+    timing: deps.timing,
+    now: deps.now,
+    log,
+  });
+
+  /** M4b's enrollment: this Mac as the enrolling admin's device, one at a time, never beside another of the session's attempts. */
+  const enrollment = createEnrollment({
+    context: () => {
+      const reg = registration;
+      const v = heldView();
+      if (closed || reg === null || v === null || !answering()) return null;
+      return { hub: reg.hub, self: selfOf(reg), head: v.head(), certificates: v.certificates(), maySign: composed !== null && maySign(composed.signer), client: signerHub() };
+    },
+    busy: () => attempt !== null || signingOut || pairing.running(),
     sign: async (edit) => (composed === null ? notSigning : signResult(await composed.signer.sign(edit))),
     changed: () => changed(),
     timing: deps.timing,
@@ -1503,6 +1593,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     if (closed || !ready || attempt !== null || signingOut) return { ok: false, reason: { code: 'busy' } };
     // M4a: a pairing this Mac runs is the session's attempt too, and the two never run side by side.
     if (pairing.running()) return { ok: false, reason: { code: 'busy', detail: 'a pairing is under way: cancel it first' } };
+    if (enrollment.running()) return { ok: false, reason: { code: 'busy', detail: 'an enrollment is under way: cancel it first' } };
     const reg = registration;
     if (reg === null || reg.signedOut) return { ok: false, reason: { code: 'busy', detail: 'sign in to the org first' } };
     // A promotion that failed after its intent was written is the next start's to finish: new keys now would replace its own.
@@ -1669,8 +1760,11 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     // M3: a sign, settle or discard in flight goes no further (no Touch ID, no slot, no post); a slot already written
     // stays and settles at the next sign-in.
     composed?.signer.fence();
-    // M4a: a pairing ends with the sign-in; an approval already in the signer was fenced above.
+    // M4a: a pairing ends with the sign-in; an approval already in the signer was fenced above. M4b: an enrollment too,
+    // and the hub rows left to delete are the sign-in's.
     pairing.cancel();
+    enrollment.cancel();
+    hubRowsLeft = [];
     attempt?.abort();
     attempt = null;
     registering = null;
@@ -1723,11 +1817,13 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     generation++;
     attempt?.abort();
     closed = true;
-    // 2. The parts stop, each answering its operation in flight; a running pairing is cancelled.
+    // 2. The parts stop, each answering its operation in flight; a running pairing is cancelled, and (M4b) a running
+    //    enrollment, whose poll in flight is joined with the parts.
     pairing.cancel();
+    const enrollmentClosed = enrollment.close();
     const c = composed;
     c?.offs.forEach((off) => off());
-    const parts = c === null ? [] : [c.weekly.close(), c.deliveries.close(), c.signer.close()];
+    const parts = c === null ? [enrollmentClosed] : [enrollmentClosed, c.weekly.close(), c.deliveries.close(), c.signer.close()];
     if (tokenTimer !== null) clearTimeout(tokenTimer);
     if (certsTimer !== null) clearInterval(certsTimer);
     if (recoverTimer !== null) clearInterval(recoverTimer);
@@ -1781,6 +1877,10 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     pairStart: (input) => pairing.start(input),
     pairApprove: (input) => pairing.approve(input),
     pairCancel: () => pairing.cancel(),
+    enrollStart: (input) => enrollment.start(input),
+    enrollApprove: (input) => enrollment.approve(input),
+    enrollCancel: () => enrollment.cancel(),
+    dropRetry,
     channelOpen: (project) => channels.open(project),
     channelRelease: (project) => channels.release(project),
     channelSend: (project, text) => channels.send(project, text),
