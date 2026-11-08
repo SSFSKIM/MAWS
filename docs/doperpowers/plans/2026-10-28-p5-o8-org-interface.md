@@ -2082,9 +2082,11 @@ Live: at the staging run, or the next sitting after it: the owner adds the secon
     listings.json      { "version": 1, "org": "<org id>", "records": Signed<Listing>[],                           (M2)
                          "marks": { "<ref>/<session>": { "revision": <n>, "hash": "<SHA-256 of the canonical record, B64>", "kid": "<sig.kid>", "delegation": "<id>" | null, "gone": <boolean> } } }
                                                                    // delegation: the certificate's, when a delegated machine signed it
-    grants.json        { "version": 1, "issued": [{ "signed": Signed<Grant>, "headVersion": <the version it was verified and kept under>, "delivered": "pending" | "done" | { "refused": "<code>" }, "op"?: "<op id>" }] }   (M4b)
+    grants.json        { "version": 1, "issued": [{ "signed": Signed<Grant>, "headVersion": <the version it was verified and kept under>, "delivered": "pending" | "sending" | "done" | { "refused": "<code>" }, "op"?: "<op id>" }] }   (M4b)
                                                                    // every grant this app signed, the latest per (machine, member); fails closed: registration.json's
                                                                    // "grants": true, set before its first write, makes a missing or unreadable file `damaged` (no grant signed)
+                                                                   // "sending": written before each act (write-ahead); an entry a start finds "sending" becomes
+                                                                   // { "refused": "outcome-unknown" } and is never sent again
 
 The directory is excluded from Time Machine at its creation, best effort. Nothing in it is a key: the device's keys stay in `<userData>/device/` (O10 M9).
 
@@ -4186,6 +4188,44 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - The exit: `status.ts` reports `refusing` only while a refusal applies, with the unenrolled state outranking the startup flag, pinned by a status unit test.
      - It goes to the tracker at M4b's landing. It is a CLI status contract, not renderer copy, and case 9 no longer pins it.
   Date/Author: 2026-11-08, O8's executor (controller), from Task 6's report and its review.
+
+- Decision: M4b's branch review, at the verification entry's rung. reviewer-high took the production code (src/main, src/endpoint, src/mawsd, src/shared, apps; 41 files, about 2,700 lines) with a security lens, and reviewer-medium took the renderer, e2e and the local suite, both on the net diff against master d7586dada. Each had one re-review round on its own wave. After that, only a finding that broke finality, authority, secrets or a silent wrong action got a fix; anything smaller went to the PR's residue or the UX ticket (the architect, 2026-11-08).
+  1. **Grants: a refused grant never lands without a new confirmation** (reviewer-high found three P1s; fixed in a5f07d5c7). It reproduced each with production `createGrants` and real `signRecord`/`verifyGrant`:
+     - `pass()` sent from a snapshot taken before a concurrent `regrant` had recorded a refusal;
+     - a verdict that arrived after a sign-out or a `close()` was dropped, leaving `pending` to be resent;
+     - a failed outcome write was swallowed, again leaving `pending`.
+     The fixes:
+     - **A write-ahead.** Before each act, through the door or a link, the grant is written `sending`. That write happens only while the grant is still the latest of its (machine, member) and still `pending`; over a link, it comes after the head push. `pass()` judges each entry against the store as it stands at that moment.
+     - **Outcomes belong to the record, not to the sign-in.** A terminal outcome is written after a sign-out too, onto the exact signed grant, while new signing and sends stay fenced to the sign-in. `close()` joins the work in flight through the grants' own door into the commit queue, so an act that is already out writes its outcome before the store closes. This replaces Task 4's first rule ("outcome not recorded, the next sign-in's pass settles it"), for terminal verdicts.
+     - **A failed outcome write** is held in memory and retried at each pass; the grant itself is never resent. `set` and `regrant` answer `storage`.
+     - **On start,** an entry still `sending` becomes `{refused: 'outcome-unknown'}` and is never sent, failing closed under the finality rule. A plain `pending` entry still resends. Within one process, an outcome that isn't terminal returns the entry to `pending`, and it is resent as before.
+     - **grants.json is one member's:** a profile's registered member never changes (`register` becomes `signIn`; `signIn` checks the registered member; re-anchor and rekey refuse another member; rekey changes only the device: `src/main/org/org-session.ts:1510-1513, 1646, 1674, 1743, 1833`). So a late verdict always lands in its issuer's file.
+     - Tests: grants 51, org-session 149, grants-store 4, red first. The guard mutations are caught; the snapshot one survives alone only because the write-ahead check also blocks it, and removing both turns both tests red. Gate: 42519527995.
+     - The re-review closed all three sequences with probes pinned to the commit, and confirmed that every act it observed had `sending` written first.
+  2. **Residue from it.**
+     - A crash after the write-ahead, or while an outcome is held unwritten, comes back as `outcome-unknown` and asks the person to sign again. That is safe and rare.
+     - A write-ahead whose rename lands but whose directory sync then fails leaves the entry `sending` with no act sent. The row reads pending and the same rights answer `no-change` until the next start makes the entry `outcome-unknown`. It fails closed. Its exit is to reconcile a `sending` entry this process knows it never sent, or to surface it as a recoverable `storage` state.
+  3. **The renderer** (reviewer-medium found five P2 and two P3; all fixed in 3da222810 and 69b23d6c3, with nothing changed under `src/main`).
+     - **Save before the first read.** It sent `rights: []`, a withdrawal, with no Withdraw label. Now the grant sheet reads as loading until the first grants read answers: every right is disabled and Save is off. Empty rights can be sent only under Withdraw.
+     - **A refused or failed grants read** shows its reason with Retry in the row and in both sheets, never "Reading…" forever. Nothing signs until a read has answered ok (the architect: the same class as #525's "loads forever").
+     - **An enrollment start adopted a run by name** before its own answer arrived, so a window refused as `busy` could approve, or cancel by number, another window's run. Now a start attaches only after its own answer brings the code, and before that closing sends only the sender-scoped `null`.
+     - **A recipient who stops being offered** (made a co-owner, or removed) resets the selection, with a line saying so. The person shown can never differ from the grant's recipient.
+     - **A ticked owner who leaves the org mid-edit** stays listed as a former member.
+     - **The re-grant list** is bounded and scrolls, with the footer outside it.
+     - **`outcome-unknown`** reads "This Mac stopped before <machine>'s answer came: sign again", and doesn't blame the machine.
+     - **The refusal-uniqueness tests** now hold with a shared detail and with no detail.
+     - **Two fixed sleeps are gone.** ChangeSheet.test now waits for Radix's focus-restore event. `test/endpoint/grants-call.test.ts` now joins B's own answer; that confirms the endpoint finished, but doesn't make the check stricter.
+     - Gates: 42521609003 and 42523055883 (`static,unit,e2e:settings`, with evidence).
+  4. **Enrollment ownership is bound to main's answer** (the architect, 2026-11-08, closing the line after a fourth round; d48d740b1 and 8ab88725b).
+     - Every earlier fix had the renderer infer which run was its own, from generation order and then from name and machine. Each inference left an ordering in which a late answer adopted another run. The reproduced cases were an ended run's code shown again, and another window's run of the same name approved or cancelled by number.
+     - Now `org.enroll.start`'s ok answer carries the exact `generation` of the run it made (required in `EnrollStartResultSchema`).
+     - The sheet owns exactly that generation and ignores every other one. While the answer is still out, it owns none, and its only cancel is the sender-scoped `null`.
+     - An answer whose generation isn't the current one ends the sheet with "This enrollment is no longer running.": no code, no Approve, nothing cancelled. Main publishes the run before it answers, so a mismatch means that run has already ended or been replaced.
+     - A numbered cancel can only name the sheet's own generation.
+     - The name match, the `elsewhere` end and its copy are gone. Another window's blocking run comes back as main's `busy`.
+     - Tests: EnrollSheet 21, enroll 26, each red first where the old code allowed it. Gates: 42524547829 and 42524844058 (`static,unit,e2e:settings`, with evidence).
+     - The short round reran the reviewer's own three page-level probes against 8ab88725b, and all three pass.
+  Date/Author: 2026-11-08, O8's executor (controller), from the branch reviews and the fix waves' reports, under the architect's rulings.
 
 ## Outcomes & Retrospective
 
