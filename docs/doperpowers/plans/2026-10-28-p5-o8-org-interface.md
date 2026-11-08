@@ -3896,6 +3896,45 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   Each task's gate set includes unit (M6b's lesson). From M6b's retrospective, each task's tests end the owning sign-in, head or process mid-flight wherever state outlives a confirmation.
   Date/Author: 2026-11-08, O8's executor (controller).
 
+- Decision: The architect's rulings on M4b's two forks (2026-11-08).
+  - **Fork B: Grant… follows `verifyGrant`'s eligibility, not `maySign`.**
+    - Grant… shows when `grantProblems` would admit this device's step-up kid as the signer for this machine.
+    - Enroll, Owners and Drop, which change the org state, stay read-only without `maySign`.
+    - The deciding case: most members aren't admins. `maySign` means a root, and a typical member is a non-root owner of their own Mac. Gating Grant… on `maySign` would leave that member unable ever to grant rights on their own machine. That contradicts M4b's own rule ("an owner of the machine, or an admin when its owners are `'org'`") and P5's privacy model, in which each person controls their own machine.
+    - Rejected: gating Grant… on `maySign` as well. It is simpler, but it shuts out the ordinary owner.
+  - **Fork A: M4b extends the local door with `endpoint.grant` and `endpoint.grants`.** Fork B forces this. A non-root member with one Mac has no other device, so pointing them to one would leave the only machine they own with no way to grant on it, failing acceptance 4b for that machine.
+    - **The boundary barely moves.** A grant carries its own signature, and the same signed grant is already accepted over any link with `stepUp: 'never'`.
+    - **What the door admits.** It admits `endpoint.grant` only when the grant passes `verifyGrant` against the endpoint's held head, checked at the door before dispatch. It asks no act step-up signature as well: the grant's signature is the authority, and a second Touch ID adds nothing. Everything else outside `record.*` stays refused.
+    - **Reads.** `endpoint.grants` through the door's `call` answers as the machine owners' member, as M6b's `record.policy` does.
+    - **Main.** Main's grants use the door when the target is this Mac's own machine and the link otherwise, as `policy.ts` does.
+    - **Review.** This is part of Task 2's endpoint commit. The desk track reviews it as an amendment to M6b's door rule ("the local door takes the three `record.*` acts only").
+    - **Tests:**
+      - a forged or ineligible grant is refused at the door;
+      - a valid grant is stored;
+      - `grants` is read through the door;
+      - one local-suite case grants on this Mac's own machine.
+    - Rejected: keeping the door closed and pointing to another device, which strands the single-Mac owner.
+  - **The `endpoint.ts` collision.** Task 2 follows the move and merges master before editing `endpoint.ts`. If the channel-reach fix hasn't landed by then, the hunk stays at the one injection site, and the architect is told before the commit.
+  - **The refresh's corrections** are all accepted. That includes the enrollment sheet's line, which names `mawsd enroll` with its hidden-prompt paste, and `--replace` for a machine already enrolled.
+  Date/Author: 2026-11-08, the architect, recorded by O8's executor (controller).
+
+- Decision: M4b Task 1, the move and `grantProblems`. The commits are 099c7cf77 (the move), 0ad9a8ff5 (`grantProblems`) and b2ddf6b1d (a type-only fix to it), all `apps/org-protocol` and `apps/desk-hub`, for the desk track. They settle these points.
+  1. **The v2 codec** (`EnrollmentCodeV2`, its encoder, decoder and validation) moves unchanged to `apps/org-protocol/src/enrollment.ts`.
+     - Its two helpers, `checkHub` and `body`, are copied in as private functions, because the hub's v1 codecs still use them. Exporting them would set a second hub check with other rules beside `isHubOrigin`.
+     - `identity.ts` re-exports the codec, so its importers don't change. `admin.ts` imports it from the package.
+  2. **The machine helpers.** `certificateViews`, `resolveMachine` and `machineRows`, with `CertView` and the table's `MachineRow`, move to `apps/org-protocol/src/machines.ts`. Their input is a new package row, `HubMachine`, which the hub's `MachineView` satisfies. `resolveMachine` is typed on it, not made generic, because `admin.ts` reads only the name. `admin-machines.ts` keeps `table`.
+  3. **`grantProblems(state, certificates, body, signerKid, now?)`** returns `Promise<GrantProblem[]>`, its own union, so §R's `-> Problem[]` reads that way.
+     - The codes are `malformed`, `unknown-rights`, `other-org`, `member-not-listed`, `machine-contested`, `machine-not-listed`, `machine-key-not-current`, `signer-not-owner` and `signer-revoked`, in `verifyGrant`'s order.
+     - It collects every problem rather than stopping at the first, except after a shape failure, a contested machine, or a machine with no known owners.
+     - `verifyGrant` is now shape, then the first problem as its verdict, then the signature. Its verdicts and their order are unchanged, revoked signers included.
+     - One cost moves: a grant whose member isn't listed is now judged against the machine's certificates before it is refused. The cost is bounded by the endpoint's own certificate set, and the architect accepts it. A first-problem mode could restore the early exit if the desk track asks.
+  4. **Evidence.**
+     - `enrollment.test.ts` 19 and `records.test.ts` 20 are new. They check `grantProblems` against all 14 grant vectors, the `'org'` admin case and an ordered multi-problem draft.
+     - These pass unchanged: `vectors` 11, `attest` 40, `admin` 41, `admin-verbs` 39, `production-scripts` 57, `identity` 72.
+     - `pnpm --filter desk-hub build` is clean, and the strip-types line prints `function` five times.
+     - Static is green at 099c7cf77 (42444964311). 42445146111 was red on a type error, fixed in b2ddf6b1d. Static and unit are green at b2ddf6b1d (42445527550).
+  Date/Author: 2026-11-08, O8's executor (controller), from Task 1's report.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
