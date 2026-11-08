@@ -67,6 +67,8 @@ describe('grantProblems', () => {
     ['a body that is not a grant', () => codes(V2, { ...draft(), extra: 1 }, 'a1StepUp'), ['malformed']],
     ['an unknown right', () => codes(V2, draft({ rights: ['root' as Grant['rights'][number]] }), 'a1StepUp'), ['unknown-rights']],
     ['a right named twice', () => codes(V2, draft({ rights: ['spawn', 'spawn'] }), 'a1StepUp'), ['unknown-rights']],
+    // A sparse list passes the shape's walk, which skips the hole, but no signature covers it: canonicalize refuses it.
+    ['rights with a hole', () => codes(V2, draft({ rights: new Array(1) }), 'a1StepUp'), ['malformed']],
     ['certificates that are not a set', () => grantProblems(V2, { certs: 'none' } as unknown as Certificates, draft(), kid('a1StepUp'), NOW).then((ps) => ps.map((p) => p.code)), ['malformed']],
     ["another org's grant", () => codes(V2, draft({ org: 'org-other' }), 'a1StepUp'), ['other-org']],
     ['a member the state does not list', () => codes(V2, draft({ member: 'ffffffffffffffffffffffffffffffff' }), 'a1StepUp'), ['member-not-listed']],

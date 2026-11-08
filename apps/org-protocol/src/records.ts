@@ -19,7 +19,7 @@
 // enrolls later. The hub serving only certificates `verifyMachineCert` accepted on arrival (M4) is defence in depth.
 import { keyId, signBody, signingInput, verifyInput, type B64 } from './keys.ts';
 import { machineNameKey, type MemberId } from './names.ts';
-import { isCertRetirement, isCertificates, isEndpointRecord, isGrant, isListing, isMachineCert, isSigned } from './shapes.ts';
+import { canonicalizable, isCertRetirement, isCertificates, isEndpointRecord, isGrant, isListing, isMachineCert, isSigned } from './shapes.ts';
 import {
   SIGNING_DOMAINS,
   type CertRetirement,
@@ -85,7 +85,8 @@ export async function verifyGrant(state: OrgState, g: Signed<Grant>, certs: Cert
 
 /**
  * What makes a grant ineligible before its signature, each with the verdict `verifyGrant` reads it as:
- *   malformed                not a grant body, or certificates that are not a set              malformed
+ *   malformed                not a grant body, one that doesn't canonicalize, or certificates
+ *                            that are not a set                                                malformed
  *   unknown-rights           rights that are not a set of known rights                         malformed
  *   other-org                a grant of another org                                            malformed
  *   member-not-listed        a member the state does not list                                  not-listed
@@ -133,6 +134,8 @@ export async function grantProblems(state: OrgState, certs: Certificates, body: 
 async function grantEligibility(state: OrgState, certs: Certificates, body: Grant, signerKid: string, now: Date): Promise<{ problems: GrantProblem[]; signers: B64[] }> {
   const only = (code: GrantProblemCode) => ({ problems: [{ code }], signers: [] });
   if (!isGrant(body)) return only(onlyRightsWrong(body) ? 'unknown-rights' : 'malformed');
+  // What passes here is exactly what can be signed: `isGrant` walks a sparse list past its holes, which canonicalize refuses.
+  if (!canonicalizable(body)) return only('malformed');
   if (!isCertificates(certs)) return only('malformed');
   const problems: GrantProblem[] = [];
   if (body.org !== state.org) problems.push({ code: 'other-org' });
