@@ -146,9 +146,11 @@ export function EnrollSheet({ replace, follow, enrolling, may, signIn, onClose }
   };
   const close = () => {
     // Its own run alone is cancelled (a running one, since its code can't be shown again; one ended with a problem, to
-    // clear it from the page): `observed` has already ended the run that left the status or outlived its sign-in.
+    // clear it from the page), by its generation, or a start whose run isn't shown yet as null: main cancels nothing
+    // else (`not-current`, which needs no word once the sheet has closed). `observed` has already ended the run that left
+    // the status or outlived its sign-in.
     if ((seen.at === 'starting' || seen.at === 'running') && done === null) {
-      void ipc.invoke('org.enroll.cancel', undefined).then((result) => {
+      void ipc.invoke('org.enroll.cancel', { generation: seen.at === 'running' ? seen.generation : null }).then((result) => {
         if (!result.ok) failed(result.error);
       });
     }

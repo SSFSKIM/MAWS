@@ -283,6 +283,14 @@ export const EnrollStartResultSchema = z.union([
   z.strictObject({ ok: z.literal(false), reason: z.enum(ENROLL_REFUSALS), detail: z.string().optional() }),
 ]);
 export type EnrollStartResult = z.infer<typeof EnrollStartResultSchema>;
+/**
+ * M4b fix wave: a window cancels the enrollment it owns, never another's. `generation` names its run; null, the start it
+ * sent whose run isn't shown yet (a token being minted), which never cancels a run. `not-current`: that isn't the run or
+ * the start under way, so nothing was cancelled.
+ */
+export const EnrollCancelInputSchema = z.strictObject({ generation: z.number().int().positive().nullable() });
+export const EnrollCancelResultSchema = z.union([z.strictObject({ ok: z.literal(true) }), z.strictObject({ ok: z.literal(false), reason: z.literal('not-current'), detail: z.string() })]);
+export type EnrollCancelResult = z.infer<typeof EnrollCancelResultSchema>;
 /** M4b: a dropped machine's hub row deleted again. `none`: no drop of that name awaits its row's delete; `hub`: not reached. */
 export const DropRetryResultSchema = z.union([z.strictObject({ ok: z.literal(true) }), z.strictObject({ ok: z.literal(false), reason: z.enum(['none', 'hub', 'refused']), detail: z.string().optional() })]);
 export type DropRetryResult = z.infer<typeof DropRetryResultSchema>;
@@ -643,7 +651,7 @@ export const commands = {
   'org.pair.cancel': { input: z.void(), output: z.void(), owner: 'main' }, // M4a
   'org.enroll.start': { input: z.strictObject({ name: MachineNameSchema, replace: OrgMachineRefSchema.optional() }), output: EnrollStartResultSchema, owner: 'main' }, // M4b
   'org.enroll.approve': { input: z.strictObject({ generation: z.number().int().positive(), digest: z.string().min(1).max(128) }), output: SignResultSchema, owner: 'main' }, // M4b
-  'org.enroll.cancel': { input: z.void(), output: z.void(), owner: 'main' }, // M4b
+  'org.enroll.cancel': { input: EnrollCancelInputSchema, output: EnrollCancelResultSchema, owner: 'main' }, // M4b; scoped to its run in the fix wave
   'org.drop.retry': { input: z.strictObject({ name: MachineNameSchema }), output: DropRetryResultSchema, owner: 'main' }, // M4b: the hub row's DELETE alone
   'org.grants.view': { input: z.strictObject({ ref: OrgMachineRefSchema }), output: GrantsViewSchema, owner: 'main' }, // M4b: read again at org.grants.changed
   // M4b: grant, change or withdraw (`rights: []`) a member's rights on a machine, behind one confirmation that shows the grant

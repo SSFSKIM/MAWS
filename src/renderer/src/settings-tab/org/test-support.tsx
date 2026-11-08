@@ -130,7 +130,7 @@ export function renderSection(status: OrgStatus, answers: Partial<Record<Command
     'org.preview': () => ({ ok: false, reason: 'invalid', findings: [] }) satisfies PreviewResult,
     'org.change': () => ({ ok: true, version: 13 }) satisfies SignResult,
     'org.pair.cancel': () => undefined,
-    'org.enroll.cancel': () => undefined,
+    'org.enroll.cancel': () => ({ ok: true }),
     'org.grants.view': (input: { ref: string }) => grantsOf(input.ref),
     ...answers,
   };

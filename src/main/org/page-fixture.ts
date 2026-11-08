@@ -86,7 +86,7 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
     'org.pair.cancel': () => {},
     'org.enroll.start': () => enroll,
     'org.enroll.approve': () => sign,
-    'org.enroll.cancel': () => {},
+    'org.enroll.cancel': () => ({ ok: false, reason: 'not-current', detail }),
     'org.drop.retry': () => retry,
     'org.grants.view': ({ ref }) => (Object.hasOwn(grants, ref) ? grants[ref]! : { ok: false, ref, reason: 'signed-out' }),
     'org.grants.set': () => (holdGrantSave === true ? new Promise<never>(() => {}) : grant),

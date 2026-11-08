@@ -92,6 +92,7 @@ import type {
   GrantSetResult,
   GrantsView,
   DropRetryResult,
+  EnrollCancelResult,
   EnrollStartResult,
   OrgAttempt,
   OrgChange,
@@ -195,7 +196,8 @@ export interface OrgSessionService extends OrgSession {
   /** M4b: an enrollment this Mac runs (enroll.ts); the code is in this answer alone. */
   enrollStart(input: { name: string; replace?: string }): Promise<EnrollStartResult>;
   enrollApprove(input: { generation: number; digest: string }): Promise<SignResult>;
-  enrollCancel(): void;
+  /** A window's cancel of the enrollment it owns (enroll.ts's `cancelRun`). */
+  enrollCancel(input: { generation: number | null }): EnrollCancelResult;
   /** M4b: a dropped machine's hub row deleted again (`hubRowsLeft`), the route alone. */
   dropRetry(name: string): Promise<DropRetryResult>;
   /** M4b: a machine's grants (grants.ts): the ledger's word, this Mac's pending ones, and the missing ones. */
@@ -2018,7 +2020,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     pairCancel: () => pairing.cancel(),
     enrollStart: (input) => enrollment.start(input),
     enrollApprove: (input) => enrollment.approve(input),
-    enrollCancel: () => enrollment.cancel(),
+    enrollCancel: (input) => enrollment.cancelRun(input),
     dropRetry,
     grantsView: (input) => grants.view(input),
     grantsSet: (input) => grants.set(input),

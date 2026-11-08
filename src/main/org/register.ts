@@ -109,7 +109,7 @@ export function registerOrgHandlers(deps: {
     const unretried: DropRetryResult = { ok: false, reason: 'none', detail: 'MAWS_DEV_ORG is in force' };
     deps.register('org.enroll.start', () => unenrolled);
     deps.register('org.enroll.approve', () => unsigned);
-    deps.register('org.enroll.cancel', () => {});
+    deps.register('org.enroll.cancel', () => ({ ok: false, reason: 'not-current', detail: 'MAWS_DEV_ORG is in force' }));
     deps.register('org.drop.retry', () => unretried);
     const ungranted: GrantSetResult & GrantRegrantResult = { ok: false, reason: 'busy', detail: 'MAWS_DEV_ORG is in force' };
     deps.register('org.grants.view', ({ ref }) => ({ ok: false, ref, reason: 'signed-out' }));
@@ -139,7 +139,7 @@ export function registerOrgHandlers(deps: {
   deps.register('org.pair.cancel', () => service.pairCancel());
   deps.register('org.enroll.start', (input) => service.enrollStart(input));
   deps.register('org.enroll.approve', (input) => service.enrollApprove(input));
-  deps.register('org.enroll.cancel', () => service.enrollCancel());
+  deps.register('org.enroll.cancel', (input) => service.enrollCancel(input));
   deps.register('org.drop.retry', ({ name }) => service.dropRetry(name));
   deps.register('org.grants.view', (input) => service.grantsView(input));
   deps.register('org.grants.set', (input) => service.grantsSet(input));

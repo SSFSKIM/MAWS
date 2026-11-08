@@ -99,7 +99,7 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
     expect(within(sheet).getByText('Waiting for mini to post its key…')).toBeTruthy();
 
     fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel enrollment' }));
-    await vi.waitFor(() => expect(sent('org.enroll.cancel')).toEqual([undefined]));
+    await vi.waitFor(() => expect(sent('org.enroll.cancel')).toEqual([{ generation: 1 }]));
 
     // a page drawn while it runs: its line on the machine's row, and Show… takes it up without the code
     resetHarness();
@@ -227,7 +227,7 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
     await vi.waitFor(() => expect(sent('org.enroll.start')).toHaveLength(1));
     fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel enrollment' }));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(sent('org.enroll.cancel')).toEqual([undefined]); // main reads the mint's answer as cancelled
+    expect(sent('org.enroll.cancel')).toEqual([{ generation: null }]); // the start whose run isn't shown yet: main reads the mint's answer as cancelled
     await act(async () => answer.resolve(started));
     expect(document.body.innerHTML).not.toContain(CODE);
 
@@ -239,7 +239,7 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
     fireEvent.click(within(enroll).getByRole('button', { name: 'Show…' }));
     const taken = await screen.findByRole('dialog', { name: 'Enroll a machine' });
     fireEvent.click(within(taken).getByRole('button', { name: 'Close' }));
-    await vi.waitFor(() => expect(sent('org.enroll.cancel')).toEqual([undefined]));
+    await vi.waitFor(() => expect(sent('org.enroll.cancel')).toEqual([{ generation: 6 }]));
   });
 
   it('once this Mac can’t sign, Make a code and Approve are withdrawn and the sheet says why', async () => {

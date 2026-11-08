@@ -2522,7 +2522,7 @@ describe('M4b: org.enroll.*', () => {
     expect(await session.enrollStart({ name: 'box2' })).toMatchObject({ ok: false, reason: 'busy' });
     expect(session.pairStart({ member: bea, class: 'native-mac' })).toEqual({ ok: false, reason: 'busy', detail: 'another org attempt is under way' });
     expect(session.rekey((await pairing()).text)).toEqual({ ok: false, reason: { code: 'busy', detail: 'an enrollment is under way: cancel it first' } });
-    session.enrollCancel();
+    expect(session.enrollCancel({ generation: registered(session).enrolling!.generation })).toEqual({ ok: true });
     expect(registered(session).enrolling).toBeNull();
 
     const paired = session.pairStart({ member: bea, class: 'native-mac' });

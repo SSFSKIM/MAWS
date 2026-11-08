@@ -93,7 +93,7 @@ describe("the Org page's e2e fixture in main", () => {
     expect(await ask('org.pair.cancel')).toBeUndefined();
     expect(await ask('org.enroll.start', { name: 'box' })).toMatchObject({ ok: false, reason: 'busy' });
     expect(await ask('org.enroll.approve', { generation: 1, digest: 'd' })).toMatchObject({ ok: false, reason: 'busy' });
-    expect(await ask('org.enroll.cancel')).toBeUndefined();
+    expect(await ask('org.enroll.cancel', { generation: 1 })).toMatchObject({ ok: false, reason: 'not-current' });
     expect(await ask('org.drop.retry', { name: 'box' })).toMatchObject({ ok: false, reason: 'none' });
     expect(await ask('org.grants.view', { ref: 'mref-box-00000001' })).toEqual({ ok: false, ref: 'mref-box-00000001', reason: 'signed-out' });
     expect(await ask('org.grants.set', { ref: 'mref-box-00000001', member: 'a1', rights: ['spawn'] })).toMatchObject({ ok: false, reason: 'busy' });

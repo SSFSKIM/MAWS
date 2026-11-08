@@ -39,7 +39,7 @@ import {
   type OrgState,
   type SignedOrgState,
 } from '../../../apps/org-protocol/src/index.ts';
-import type { EnrollStartResult, OrgChange, OrgEnrollingStatus, SignResult } from '@shared/ipc/schema/org';
+import type { EnrollCancelResult, EnrollStartResult, OrgChange, OrgEnrollingStatus, SignResult } from '@shared/ipc/schema/org';
 import { composeChange, type EditSelf } from './edits';
 import type { EnrollmentKey, HubClient, HubResult } from './hub-client';
 import { RefusedEdit, StaleEdit, type Edit } from './signer';
@@ -75,6 +75,11 @@ export interface Enrollment {
   approve(input: { generation: number; digest: string }): Promise<SignResult>;
   /** Ends it; a signing in flight sees it ended at its next check and reads `stale` (or `cancelled` after Touch ID). */
   cancel(): void;
+  /**
+   * A window's cancel (`org.enroll.cancel`): ends the run of that `generation` only, or with null only a start being
+   * minted, so a window never cancels a run it doesn't own.
+   */
+  cancelRun(input: { generation: number | null }): EnrollCancelResult;
   /** Cancels it, refuses any start from now on, and resolves once the poll in flight has ended. */
   close(): Promise<void>;
 }
@@ -357,12 +362,28 @@ export function createEnrollment(deps: EnrollmentDeps): Enrollment {
 
   function cancel(): void {
     starting = null;
-    const r = run;
-    if (r === null) return;
+    if (run !== null) clear(run);
+  }
+
+  /** Clears `r`, the current run, and says so. */
+  function clear(r: Run): void {
     stop(r);
     run = null;
     log(`${r.generation} cancelled`);
     deps.changed();
+  }
+
+  function cancelRun({ generation }: { generation: number | null }): EnrollCancelResult {
+    const no = (detail: string): EnrollCancelResult => ({ ok: false, reason: 'not-current', detail: `${detail}: nothing was cancelled` });
+    if (generation === null) {
+      if (starting === null) return no('no enrollment is being started');
+      starting = null;
+      log('a start cancelled while its token was minted');
+      return { ok: true };
+    }
+    if (run === null || run.generation !== generation) return no(`enrollment ${generation} is not the one running (${run === null ? 'none' : run.generation} is)`);
+    clear(run); // its run alone: a start being minted after it is another window's to cancel
+    return { ok: true };
   }
 
   async function close(): Promise<void> {
@@ -386,5 +407,5 @@ export function createEnrollment(deps: EnrollmentDeps): Enrollment {
     };
   }
 
-  return { status, running: () => starting !== null || (run !== null && live(run)), start, approve, cancel, close };
+  return { status, running: () => starting !== null || (run !== null && live(run)), start, approve, cancel, cancelRun, close };
 }

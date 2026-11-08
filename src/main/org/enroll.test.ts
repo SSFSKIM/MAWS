@@ -409,6 +409,25 @@ describe('starting an enrollment', () => {
     expect(h.enrollment.status()).toBeNull();
     expect(h.enrollment.running()).toBe(false);
   });
+  it("a window's cancel names the run it owns: a stale generation cancels nothing and says why, the current one cancels; null names only a start being minted", async () => {
+    const h = await harness();
+    await started(h, 'box');
+    expect(h.enrollment.cancelRun({ generation: 2 })).toEqual({ ok: false, reason: 'not-current', detail: 'enrollment 2 is not the one running (1 is): nothing was cancelled' });
+    expect(h.enrollment.cancelRun({ generation: null })).toEqual({ ok: false, reason: 'not-current', detail: 'no enrollment is being started: nothing was cancelled' });
+    expect(status(h).generation).toBe(1);
+    expect(h.enrollment.cancelRun({ generation: 1 })).toEqual({ ok: true });
+    expect(h.enrollment.status()).toBeNull();
+    expect(h.enrollment.cancelRun({ generation: 1 })).toEqual({ ok: false, reason: 'not-current', detail: 'enrollment 1 is not the one running (none is): nothing was cancelled' });
+
+    // a start being minted: null cancels it, and it never starts; a generation never cancels a mint
+    h.hub.mintAnswer = null;
+    const pending = h.enrollment.start({ name: 'box' });
+    expect(h.enrollment.cancelRun({ generation: 1 })).toMatchObject({ ok: false, reason: 'not-current' });
+    expect(h.enrollment.cancelRun({ generation: null })).toEqual({ ok: true });
+    expect(await pending).toMatchObject({ ok: false, reason: 'cancelled' });
+    expect(h.enrollment.status()).toBeNull();
+    expect(h.enrollment.running()).toBe(false);
+  });
 });
 
 describe('the polling', () => {
@@ -513,6 +532,11 @@ describe('the polling', () => {
     await until(() => status(h).problem !== null, 'the end');
     expect(status(h).problem).toBe('expired');
     expect(await h.enrollment.approve({ generation: 1, digest: status(h).candidate!.digest })).toMatchObject({ ok: false, reason: 'stale' });
+    // a start after it, its token being minted: the ended run's window clears that run alone, never the new start
+    const next = h.enrollment.start({ name: 'box' });
+    expect(h.enrollment.cancelRun({ generation: 1 })).toEqual({ ok: true });
+    expect(await next).toMatchObject({ ok: true });
+    expect(status(h)).toMatchObject({ generation: 2, problem: null });
   });
 
   it('a poll in flight when the sign-in ends sets no candidate, and reads no more', async () => {
