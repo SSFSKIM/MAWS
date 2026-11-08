@@ -21,7 +21,7 @@ import { useMachines } from '../../stores/machines';
 import { ORG } from '../copy';
 import { Chip, Setting, TEXT_ACTION } from '../parts';
 import { GrantSheet, RegrantSheet, type GrantDraft } from './GrantSheet';
-import { failed, inWords, machineRowId, memberName, OutcomeLine, type Outcome, type ViewMachine } from './parts';
+import { failed, inWords, machineRowId, memberName, OUTCOME_UNKNOWN, OutcomeLine, type Outcome, type ViewMachine } from './parts';
 
 type Shown = Extract<GrantsView, { ok: true }>;
 type Sheet = { at: 'grant'; draft: GrantDraft | null; signIn: string } | { at: 'regrant'; signIn: string };
@@ -157,6 +157,8 @@ function Rights({ machine, view, shown, seesAll, mayGrant, signAgain, regrant }:
               <>
                 {g.reason === 'not-newer' ? (
                   <span className="text-warning">{ORG.notNewer}</span>
+                ) : g.reason === OUTCOME_UNKNOWN ? (
+                  <span className="text-warning">{ORG.grantOutcomeUnknown(name)}</span>
                 ) : (
                   <span className="text-warning">
                     {ORG.grantRefusedBy(name, g.reason === undefined ? undefined : ORG.grantVerdicts[g.reason])}

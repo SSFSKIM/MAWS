@@ -98,6 +98,18 @@ describe('Settings › Org: Machines’ actions and rights (M4b)', () => {
     expect(within(await found('Enroll a machine')).getByText('An admin enrolls machines from their Org page.')).toBeTruthy();
   });
 
+  it('a grant left sending across a restart reads that this Mac stopped, not that the machine refused it', async () => {
+    renderSection(signing(ROOT), {
+      'org.view': () => viewWith({ machines: [machine({ name: 'mini', ref: MINI, mayGrant: true })] }),
+      'org.grants.view': (input: { ref: string }) => grantsOf(input.ref, { grants: [{ member: BEN, rights: ['spawn'], version: 3, state: 'refused', reason: 'outcome-unknown' }] }),
+    });
+    const mini = await found('mini');
+    expect(await within(mini).findByText('This Mac stopped before mini’s answer came: sign again')).toBeTruthy();
+    expect(within(mini).queryByText(/refused it/)).toBeNull();
+    expect(within(mini).queryByText('outcome-unknown')).toBeNull(); // no machine's code to show beside it
+    expect(within(mini).getByRole('button', { name: 'Sign again…' })).toBeTruthy();
+  });
+
   it('each row lists who holds a grant and their rights, from org.grants.view read once when the row opens, again at its org.grants.changed, never at org.changed', async () => {
     let answer: GrantsView = grantsOf(MINI, {
       grants: [

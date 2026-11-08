@@ -9,17 +9,23 @@ import { endorseDevice, keyId, signRecord, SIGNING_DOMAINS, type Action, type Gr
 import { GRANTS_READS, grantsAnswer, grantsView } from '../../src/endpoint/grants';
 import { OFFERS } from '../../src/endpoint/offers';
 import { iso, memberId, newDevice, revokedDevice, successor, type TestDevice } from './org-fixtures';
-import { makeOrg, openRemote, ORG, sleep, startEndpoint, stopAll, until, type Fixture, type Org, type Remote, type StartOptions } from './sub-harness';
+import { makeOrg, openRemote, ORG, startEndpoint, stopAll, until, type Fixture, type Org, type Remote, type StartOptions } from './sub-harness';
 
 /**
  * Reads of the machine's owners (grants.ts' `machineOwnerMembers`) held open: after the next `pass` (a remote call's own
  * admission, which the gate reads once), the next `armed` wait for the suite's release.
  */
-const ownersHold = vi.hoisted(() => ({ pass: 0, armed: 0, held: [] as Array<() => void> }));
+const ownersHold = vi.hoisted(() => ({ pass: 0, armed: 0, held: [] as Array<() => void>, answers: [] as Array<Promise<unknown>> }));
 vi.mock('../../src/endpoint/grants', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/endpoint/grants')>();
   return {
     ...actual,
+    // Each endpoint.grants answer as it is judged, so a test can join it rather than wait a while.
+    grantsAnswer: (...args: Parameters<typeof actual.grantsAnswer>) => {
+      const answer = actual.grantsAnswer(...args);
+      ownersHold.answers.push(answer);
+      return answer;
+    },
     machineOwnerMembers: async (...args: Parameters<typeof actual.machineOwnerMembers>) => {
       const read = actual.machineOwnerMembers(...args);
       if (ownersHold.pass > 0) {
@@ -44,6 +50,7 @@ beforeAll(async () => {
 afterEach(async () => {
   ownersHold.pass = 0;
   ownersHold.armed = 0;
+  ownersHold.answers = [];
   releaseOwners();
   await stopAll(started);
 });
@@ -144,9 +151,12 @@ describe('endpoint.grants', () => {
     const id = await ask(b, 'endpoint.grants', null);
     await until(() => ownersHold.held.length === 1 || null, 'B’s read of the owners held');
     await removeB(f);
+    const answers = ownersHold.answers.length;
     releaseOwners();
     await until(() => b.channel.closed || null, 'B’s channel closed');
-    await sleep(100);
+    // joined: B's read answered (the call's own reply runs before this await resumes, its handler having been attached
+    // first), so any answer the endpoint would send has been sent by now
+    await Promise.allSettled(ownersHold.answers.slice(0, answers));
     expect(resultOf(b, id), 'no answer reached B').toBeUndefined();
   });
 

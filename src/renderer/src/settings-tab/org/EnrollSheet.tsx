@@ -17,10 +17,12 @@
 //   takes it up without the code, and still says when it ends. Once this Mac can't sign (`may`), Make a code, Approve
 //   and Start over are withdrawn and the sheet says why; an approval in flight still answers.
 // - The sheet owns one run under one sign-in (`EnrollRun`, judged against each status by `observed`): a start latches the
-//   first run after it of its own machine and name, and a run taken up is latched at its generation. Once that run leaves
-//   the status, another takes its place, or the sign-in changes, the sheet's run has ended for good: it never adopts a
-//   later run, cancels nothing but its own, and only an explicit Start over begins again. A start that sees a newer run
-//   not its own ends there (another enrollment is under way), so it never cancels that run nor shows a late code.
+//   first run after it of its own machine and name once its own answer came (before that, a run of the name may be
+//   another window's), and a run taken up is latched at its generation. Once that run leaves the status, another takes
+//   its place, or the sign-in changes, the sheet's run has ended for good: it never adopts a later run, cancels nothing
+//   but its own (a start not yet answered only by the sender's null), and only an explicit Start over begins again. A
+//   start that sees a newer run not its own ends there (another enrollment is under way), so it never cancels that run
+//   nor shows a late code.
 // - The sheet's own sign-in (`useOwnSignIn`) is latched apart from its run: once it ends, even after the run ended, the
 //   sheet offers no start again under any later sign-in, the same member's included.
 //   Every answer is fenced to the run that asked: a start's to its token, an approval's to its generation.
@@ -59,8 +61,11 @@ export function observed(run: EnrollRun, enrolling: OrgEnrollingStatus, signIn: 
   if (run.at === 'choosing' || run.at === 'ended') return run;
   if (signIn !== run.owner) return { at: 'ended', why: 'signed-out', generation: run.at === 'running' ? run.generation : null };
   if (run.at === 'starting') {
-    const ours = enrolling !== null && enrolling.replace === replace && enrolling.generation > run.after && enrolling.name.toLowerCase() === run.name.toLowerCase();
-    if (ours) return observed({ at: 'running', owner: run.owner, generation: enrolling.generation, token: run.token, code: run.code }, enrolling, signIn, replace);
+    const named = enrolling !== null && enrolling.replace === replace && enrolling.generation > run.after && enrolling.name.toLowerCase() === run.name.toLowerCase();
+    // A run of its own name is its own only once its start answered with the code: before that it may be another
+    // window's start of the same name, which this sheet must neither approve nor cancel by number.
+    if (named && run.code === null) return run;
+    if (named) return observed({ at: 'running', owner: run.owner, generation: enrolling.generation, token: run.token, code: run.code }, enrolling, signIn, replace);
     return enrolling !== null && enrolling.generation > run.after ? { at: 'ended', why: 'elsewhere', generation: null } : run;
   }
   if (enrolling === null || enrolling.generation !== run.generation) return { at: 'ended', why: 'gone', generation: run.generation };
@@ -69,7 +74,7 @@ export function observed(run: EnrollRun, enrolling: OrgEnrollingStatus, signIn: 
 }
 
 /** A start's answer (null: the command failed), taken only by the start that sent it while its run hasn't ended. */
-function started(run: EnrollRun, token: number, answer: EnrollStartResult | null): EnrollRun {
+export function started(run: EnrollRun, token: number, answer: EnrollStartResult | null): EnrollRun {
   if ((run.at !== 'starting' && run.at !== 'running') || run.token !== token) return run;
   if (answer === null || !answer.ok) return run.at === 'starting' ? { at: 'choosing', refused: answer } : run;
   return { ...run, code: { value: answer.code, expires: answer.expires } };

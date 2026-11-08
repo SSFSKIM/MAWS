@@ -21,7 +21,7 @@ import { ipc } from '../../ipc/client';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { CHOICE, FIELD, PRIMARY } from '../../sessions/ui';
 import { ORG } from '../copy';
-import { failed, inWords, memberName, useOpen, type Member, type Outcome, type ViewMachine } from './parts';
+import { failed, inWords, memberName, OUTCOME_UNKNOWN, useOpen, type Member, type Outcome, type ViewMachine } from './parts';
 
 export type Right = (typeof GRANT_RIGHTS)[number];
 /** A grant the sheet opens on: the person and the rights to sign again (a refused grant's Sign again…). */
@@ -38,6 +38,7 @@ function savedOutcome(machine: string, version: number, delivered: Extract<Grant
   if (delivered === 'done') return { text: ORG.granted(version, machine), refused: false };
   if (delivered === 'pending') return { text: ORG.grantedPending(version, machine), refused: false };
   if (delivered.refused === 'not-newer') return { text: ORG.grantedNotNewer(version), refused: true };
+  if (delivered.refused === OUTCOME_UNKNOWN) return { text: ORG.grantedOutcomeUnknown(version, machine), refused: true };
   return { text: `${ORG.grantedRefused(version, machine, ORG.grantVerdicts[delivered.refused])} · ${delivered.refused}`, refused: true };
 }
 
@@ -76,9 +77,18 @@ export function GrantSheet({ machine, members, grants, may, draft, onClose, onSa
   const [chosen, setChosen] = useState<readonly Right[] | null>(draft?.rights ?? null);
   const [saving, setSaving] = useState(false);
   const [refused, setRefused] = useState<Refused | null>(null);
+  // The person chosen stopped being offered (made an owner, or removed) while the sheet was open: chosen no longer.
+  const [noLonger, setNoLonger] = useState(false);
   const { name } = machine;
+  // Before the machine's grants are first read, nothing is known to compare with: no right to tick, no Save.
+  const reading = grants === null;
   const holding = (id: string) => grants?.grants.find((g) => g.member === id) ?? null;
   const choices = members.filter((m) => !isOwner(machine, m) || holding(m.id) !== null);
+  if (member !== '' && !saving && !reading && !choices.some((m) => m.id === member)) {
+    setMember('');
+    setChosen(null);
+    setNoLonger(true);
+  }
   const row = member === '' ? null : holding(member);
   // What the person holds now, to compare with: unknown before an answer, and for a grant the machine refused.
   const held: readonly Right[] | null = row === null ? (grants === null ? null : []) : row.state === 'refused' ? null : row.rights;
@@ -92,6 +102,7 @@ export function GrantSheet({ machine, members, grants, may, draft, onClose, onSa
     setMember(id);
     setChosen(null);
     setRefused(null);
+    setNoLonger(false);
   };
   const toggle = (right: Right) => {
     setChosen(rights.includes(right) ? rights.filter((r) => r !== right) : [...rights, right]);
@@ -118,7 +129,8 @@ export function GrantSheet({ machine, members, grants, may, draft, onClose, onSa
       <SheetForm
         submitLabel={!offered ? undefined : saving ? ORG.saving : withdraws ? ORG.grantWithdraw : ORG.grantSave}
         submitClass={PRIMARY}
-        canSubmit={member !== '' && changed && !saving}
+        // No rights go only under Withdraw: a person who holds none is never sent none.
+        canSubmit={member !== '' && !reading && changed && !saving && (rights.length > 0 || withdraws)}
         onSubmit={save}
         cancelLabel={saving ? ORG.close : ORG.cancel}
       >
@@ -142,13 +154,15 @@ export function GrantSheet({ machine, members, grants, may, draft, onClose, onSa
                 <legend className="mb-1 p-0 text-fg-muted">{ORG.grantRights}</legend>
                 {GRANT_RIGHTS.map((right) => (
                   <label key={right} className="flex min-w-0 items-start gap-2">
-                    <input type="checkbox" checked={rights.includes(right)} disabled={saving || member === '' || !may} onChange={() => toggle(right)} className={`mt-0.5 shrink-0 ${CHOICE}`} />
+                    <input type="checkbox" checked={rights.includes(right)} disabled={saving || reading || member === '' || !may} onChange={() => toggle(right)} className={`mt-0.5 shrink-0 ${CHOICE}`} />
                     <span className="min-w-0">
                       <span className="font-mono text-fg">{right}</span> <span className="text-fg-muted">{ORG.rightLines[right]}</span>
                     </span>
                   </label>
                 ))}
               </fieldset>
+              {reading && <p className="m-0 text-fg-muted">{ORG.grantReading(name)}</p>}
+              {noLonger && <p className="m-0 text-warning">{ORG.grantNoLonger}</p>}
               {withdraws && <p className="m-0 text-fg-muted">{ORG.grantWithdrawLine(email, name)}</p>}
               <p className="m-0 text-fg-muted">{ORG.grantIntro}</p>
             </>
@@ -200,7 +214,7 @@ export function RegrantSheet({ machine, members, grants, may, onClose, onSaved }
           ) : (
             <>
               <p className="m-0 text-fg">{ORG.regrantIntro(name)}</p>
-              <ul className="m-0 list-disc pl-5 text-fg">
+              <ul className="m-0 max-h-[min(40vh,320px)] list-disc overflow-y-auto pl-5 text-fg">
                 {missing.map((g) => (
                   <li key={g.member}>
                     {memberName(members, g.member)}: {inWords(g.rights)}

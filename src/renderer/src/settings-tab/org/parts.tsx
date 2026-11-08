@@ -34,6 +34,9 @@ export function Group({ id, title, children }: { id: 'you' | 'people' | 'machine
   );
 }
 
+/** A grant left `sending` across a restart, as main's grants.ts refuses it: no verdict of the machine's. */
+export const OUTCOME_UNKNOWN = 'outcome-unknown';
+
 /** The sign-in the page stands under, as a sheet's owner: null while none does (signed out, removed). */
 export const signInOf = (status: Registered): string | null => (status.session === 'signed-in' ? `${status.org}/${status.member.id}/${status.device}` : null);
 

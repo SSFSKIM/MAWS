@@ -206,11 +206,15 @@ function Fields({ change, members, onChange }: { change: OrgChange; members: Org
 }
 
 // A machine's owners: the org (its admins), or people ticked from the members, in the members' order. An owner the head
-// no longer lists stays ticked, as a former member, until unticked.
+// no longer lists stays ticked, as a former member, until unticked; so does a person ticked here who leaves the org while
+// the sheet is open, since the change still names them.
 function OwnersFields({ change, members, onChange }: { change: Extract<OrgChange, { kind: 'machine.owners' }>; members: OrgView['members']; onChange(next: OrgChange): void }) {
   const [people, setPeople] = useState<string[]>(change.owners === 'org' ? [] : [...change.owners]); // kept across a switch to the org and back
-  const [formerly] = useState(() => (change.owners === 'org' ? [] : change.owners.filter((id) => !members.some((m) => m.id === id))));
-  const listed = [...members.map((m) => m.id), ...formerly];
+  const ids = members.map((m) => m.id);
+  const [formerly, setFormerly] = useState(() => people.filter((id) => !ids.includes(id)));
+  const departed = people.filter((id) => !ids.includes(id) && !formerly.includes(id)); // ticked here, then gone from the org
+  if (departed.length > 0) setFormerly([...formerly, ...departed]);
+  const listed = [...ids, ...formerly.filter((id) => !ids.includes(id))];
   const pick = (chosen: string[]) => {
     setPeople(chosen);
     onChange({ ...change, owners: chosen });

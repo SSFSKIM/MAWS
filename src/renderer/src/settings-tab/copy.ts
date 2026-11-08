@@ -697,6 +697,8 @@ export const ORG = {
   grantTitle: (machine: string) => `Rights on ${machine}`,
   grantPerson: 'Person',
   grantChoose: 'Choose a person',
+  grantReading: (machine: string) => `Reading ${machine}’s grants…`,
+  grantNoLonger: 'The person chosen is no longer offered here. Choose a person again.',
   grantRights: 'Rights',
   grantIntro: 'One signed grant at its next version, delivered to the machine. Touch ID shows it first.',
   grantNobody: 'Everyone in the org owns this machine, and owners hold every right.',
@@ -709,6 +711,9 @@ export const ORG = {
   granted: (version: number, machine: string) => `Signed grant version ${version}. ${machine} holds it.`,
   grantedPending: (version: number, machine: string) => `Signed grant version ${version}. Not yet on ${machine}: this Mac keeps sending it until ${machine} answers.`,
   grantedRefused: (version: number, machine: string, line: string | undefined) => `Signed grant version ${version}. ${line === undefined ? `${machine} refused it` : `${machine} refused it: ${line}`}. Sign again.`,
+  // A grant left `sending` across a restart (main's `outcome-unknown`): no verdict of the machine's
+  grantOutcomeUnknown: (machine: string) => `This Mac stopped before ${machine}’s answer came: sign again`,
+  grantedOutcomeUnknown: (version: number, machine: string) => `Signed grant version ${version}. This Mac stopped before ${machine}’s answer came: sign again.`,
   grantedNotNewer: (version: number) => `Signed grant version ${version}. Another device changed this grant: sign again.`,
   grantRefusals: {
     'signed-out': 'This Mac isn’t signed in to the org.',

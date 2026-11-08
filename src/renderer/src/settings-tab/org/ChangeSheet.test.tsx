@@ -5,7 +5,7 @@
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { OrgChange, PreviewResult, SignResult } from '@shared/ipc/schema/org';
-import { ANA, ANA_MAC, BEN, BEN_WEB, ME, MINI, ROOT, VIEW, VM, emit, found, group, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
+import { ANA, ANA_MAC, BEN, BEN_WEB, CAT, ME, MINI, ROOT, VIEW, VM, emit, found, group, renderSection, resetHarness, row, sent, signing, viewWith } from './test-support';
 
 vi.hoisted(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -189,6 +189,31 @@ describe('Settings › Org: the change sheet’s machine fields (M4b)', () => {
     expect(within(row('Enroll a machine')).getByText('Signed version 13.')).toBeTruthy();
   });
 
+  it('Owners…: a person ticked who leaves the org mid-edit stays listed and ticked, as a former member, never hidden in the change', async () => {
+    let view = VIEW;
+    renderSection(signing(ROOT), { 'org.view': () => view, 'org.preview': (input: { change: OrgChange }) => previewed(input.change, ['mini’s owners change'], [], 'digest-owners') });
+    await pressOn('mini', 'Owners…');
+    const sheet = await screen.findByRole('dialog', { name: 'Change mini’s owners' });
+    const labels = () => within(sheet).getAllByRole('checkbox').map((c) => c.closest('label')!.textContent);
+    const ticked = () => within(sheet).getAllByRole('checkbox').filter((c) => (c as HTMLInputElement).checked).map((c) => c.closest('label')!.textContent);
+    fireEvent.click(within(sheet).getByRole('checkbox', { name: /^Cat/ }));
+    expect(ticked()).toContain('Catcat@example.com');
+    // Cat is removed from the org while the sheet is open
+    const reads = sent('org.view').length;
+    view = viewWith({ members: VIEW.members.filter((m) => m.id !== CAT) });
+    emit(signing(ROOT, { head: { version: 13, issued: new Date().toISOString() } }));
+    await vi.waitFor(() => expect(sent('org.view').length).toBeGreaterThan(reads));
+    await vi.waitFor(() => expect(labels()).not.toContain('Catcat@example.com'));
+    expect(labels().at(-1)).toBe('a former member');
+    expect(ticked().at(-1)).toBe('a former member'); // still ticked, as the change still names her
+    fireEvent.click(within(sheet).getByRole('checkbox', { name: /^a former member/ })); // and unticked like any owner
+    expect(ticked()).not.toContain('a former member');
+    fireEvent.click(within(sheet).getByRole('checkbox', { name: /^a former member/ }));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Review…' }));
+    await vi.waitFor(() => expect(sent('org.preview')).toHaveLength(1));
+    expect((sent('org.preview')[0] as { change: { owners: string[] } }).change.owners).toContain(CAT);
+  });
+
   it('Owners…: an org-owned machine given to people, and back to the org', async () => {
     renderSection(signing(ROOT), { 'org.preview': (input: { change: OrgChange }) => previewed(input.change, ['build-vm’s owners change']) });
     await pressOn('build-vm', 'Owners…');
@@ -225,13 +250,19 @@ describe('Settings › Org: the change sheet’s machine fields (M4b)', () => {
     await press('Ana', 'Remove person…');
     const sheet = await screen.findByRole('dialog', { name: 'Remove ana@example.com?' });
     expect(await within(sheet).findByText(detail)).toBeTruthy();
+    // Radix's focus restore runs in a timer after the sheet unmounts, as the event below: the test joins it, never a sleep
+    let owner: object = document.body; // the prototype the DOM's elements dispatch through
+    while (!Object.hasOwn(owner, 'dispatchEvent')) owner = Object.getPrototypeOf(owner) as object;
+    const dispatched = vi.spyOn(owner as EventTarget, 'dispatchEvent');
+    const restored = () => dispatched.mock.calls.some(([event]) => event.type === 'focusScope.autoFocusOnUnmount');
     expect(within(sheet).queryByRole('button', { name: 'Go to build-vm' })).toBeNull(); // the org's: it blocks no one
     fireEvent.click(within(sheet).getByRole('button', { name: 'Go to mini' }));
     await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await vi.waitFor(() => expect(document.activeElement?.id).toBe(`org-machine-${MINI}`));
     expect(within(document.activeElement as HTMLElement).getByRole('group', { name: 'mini' })).toBeTruthy();
     expect(document.activeElement?.hasAttribute('data-sought')).toBe(true); // marked while it holds the focus
-    await new Promise((resolve) => setTimeout(resolve, 20)); // the sheet's focus restore has run: the row keeps it
+    await vi.waitFor(() => expect(restored()).toBe(true)); // the sheet's focus restore has run: the row keeps it
+    dispatched.mockRestore();
     const sought = document.activeElement as HTMLElement;
     expect(sought.id).toBe(`org-machine-${MINI}`);
     sought.blur();
