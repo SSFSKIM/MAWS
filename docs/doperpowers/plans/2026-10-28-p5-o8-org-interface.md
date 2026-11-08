@@ -3933,7 +3933,14 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - These pass unchanged: `vectors` 11, `attest` 40, `admin` 41, `admin-verbs` 39, `production-scripts` 57, `identity` 72.
      - `pnpm --filter desk-hub build` is clean, and the strip-types line prints `function` five times.
      - Static is green at 099c7cf77 (42444964311). 42445146111 was red on a type error, fixed in b2ddf6b1d. Static and unit are green at b2ddf6b1d (42445527550).
-  Date/Author: 2026-11-08, O8's executor (controller), from Task 1's report.
+  5. **The frontier review's fixes.**
+     - **I1 (3112033dd).** `grantProblems` admitted a body that `isGrant` accepts but the canonicalizer refuses: a sparse `rights` array, which the shape check iterates past. `verifyGrant` answered `malformed` on it, and signing would have thrown.
+       - `grantProblems` now requires `canonicalizable(body)`, the check `isSigned` makes, and answers `malformed` otherwise. So what passes before Touch ID is exactly what can be signed.
+       - `verifyGrant` is unchanged, since it already refused such a body at `isSigned`.
+       - `records.test.ts` 21 includes the red-first "rights with a hole" case.
+       - 42446714780 (static) and 42446714963 (static, unit) are green.
+     - **I2, dismissed.** The private copies of `checkHub` and `body` are this entry's item 1. A shared export would set a second hub check beside `isHubOrigin`. The desk track reviews the move and may weigh it.
+  Date/Author: 2026-11-08, O8's executor (controller), from Task 1's report and its review.
 
 ## Outcomes & Retrospective
 
