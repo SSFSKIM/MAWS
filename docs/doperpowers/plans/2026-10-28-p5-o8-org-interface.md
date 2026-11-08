@@ -3979,6 +3979,13 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   - The architect notes it in P5's Decision Log at M4b's landing.
   Date/Author: 2026-11-08, the architect, on the desk track's question, recorded by O8's executor (controller).
 
+- Decision: The channel's project gate is gone (#524, merge 2600f3732, 2026-11-08; P5 Decision Log 252). This amends items 3 and 4 of the entry "M7b Task 2, the endpoint".
+  - The feed and `channel.history` now admit any project id. Each entry's `view` rank is the only gate.
+  - The `removed` end reason and the authorize refusal are gone. The `no-target` end no longer answers a project absent from the head.
+  - The reasons are in `src/endpoint/channel-view.ts`'s header. The M7b live check found every cross-machine channel read refused, because no production head has ever carried a project (genesis writes `projects` empty, and nothing adds to it). A project's channel is no wider than its sessions: an entry goes only for a session whose transcript the member may already read.
+  - The header also records what was rejected, and why, and the timing signal that remains. Whether the machine holds entries of an id can be told from how long an answer takes. That is org-internal metadata, not content, and it is tracked as tech debt.
+  Date/Author: 2026-11-08, O8's executor (controller), from #524's worker by the architect.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
