@@ -521,3 +521,50 @@ describe('the pairing code’s file, however pair ends', () => {
     expect(existsSync(codeFile)).toBe(false);
   }, 60_000);
 });
+
+describe('the command as the sitting runs it', () => {
+  // `main` itself in a Node process of its own (no DOM, so no global `print`), bundled as bin.ts bundles a command: the
+  // staging config, an admin device's keys, the token, and the hub faked at fetch, which says it serves another org. The
+  // step must get as far as the hub (OrgAdmin.open asking `/api/me`) and print the hub's refusal through its own printer.
+  const driver = async () => {
+    const dir = scratch();
+    const outfile = join(dir, 'main.mjs');
+    const deploy = join(import.meta.dirname, '../../deploy');
+    const contents = `
+      import { writeFileSync } from 'node:fs';
+      import { join } from 'node:path';
+      import { STAGING_HOST, STAGING_ORG } from './config.ts';
+      import { main } from './real-member.ts';
+      const [dir, emailFile] = process.argv.slice(2);
+      const jwk = async () => crypto.subtle.exportKey('jwk', (await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])).privateKey);
+      const keys = join(dir, 'admin-keys.json');
+      writeFileSync(keys, JSON.stringify({ keys: { 'a1.channel': await jwk(), 'a1.stepUp': await jwk(), recovery: await jwk() } }), { mode: 0o600 });
+      const config = join(dir, 'staging.json');
+      writeFileSync(config, JSON.stringify({ worker: 'desk-hub-staging', host: STAGING_HOST, org: { id: STAGING_ORG }, orgGenesis: 'g' }));
+      globalThis.fetch = async (url) => {
+        process.stdout.write('asked ' + url + '\\n');
+        const body = String(url).endsWith('/api/me') ? { org: { id: 'another-org' }, member: { id: '${ADMIN_MEMBER}', email: 'owner@example.org' } } : {};
+        return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+      };
+      process.env.DESK_ACCESS_TOKEN = 'a-token';
+      const status = await main(['add', '--config', config, '--device-keys', keys, '--email-file', emailFile]);
+      process.stdout.write('status ' + status + '\\n');`;
+    await build({ stdin: { contents, resolveDir: deploy, loader: 'ts', sourcefile: 'main-driver.ts' }, outfile, bundle: true, format: 'esm', platform: 'node', target: 'node22', logLevel: 'error' });
+    return { dir, outfile };
+  };
+
+  it('opens the admin through the hub under Node, its lines printed by its own printer', async () => {
+    const { dir, outfile } = await driver();
+    const child = spawn(process.execPath, [outfile, dir, emailFile()], { stdio: ['ignore', 'pipe', 'inherit'] });
+    const out = await new Promise<string>((resolve) => {
+      let text = '';
+      child.stdout!.on('data', (chunk: Buffer) => (text += chunk.toString()));
+      child.once('exit', () => resolve(text));
+    });
+    expect(out).not.toMatch(/print is not defined/);
+    expect(out).toContain(`asked https://${STAGING_HOST}/api/me`);
+    expect(out).toMatch(/the deployment serves the org another-org, not /);
+    expect(out).toContain('status 1');
+    expect(printedSecrets(out.split('\n'), EMAIL)).toEqual([]);
+  }, 60_000);
+});

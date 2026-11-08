@@ -437,7 +437,7 @@ export async function main(argv: string[]): Promise<number> {
     member: values.member as string | undefined,
     codeFile: values['code-file'] as string | undefined,
     waitS,
-    open: async () => OrgAdmin.open(person, { org: config!.org.id, pinnedGenesis: config!.orgGenesis }, await loadAdminDevice(values['device-keys'] as string), print),
+    open: async () => OrgAdmin.open(person, { org: config!.org.id, pinnedGenesis: config!.orgGenesis }, await loadAdminDevice(values['device-keys'] as string), io.print),
     pending: async (member) => (await person.json<{ pending: PendingDevice[] }>(`${PENDING_DEVICES_PATH}?member=${encodeURIComponent(member)}`)).pending,
     io,
   });
