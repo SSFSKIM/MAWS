@@ -52,6 +52,17 @@ describe('TranscriptJobs', () => {
     expect(jobs.running('bsleep01')).toBe(false);
   });
 
+  // The engine's queue record has no uuid; one enqueuing a notice is the only word that a task whose notice was never
+  // handed over ended (DX4's vectors, case "notices the engine queued"), so the follower must not keep rows by uuid.
+  it('feeds the engine’s queue records, which carry no uuid, to the ledger', async () => {
+    const path = join(scratch(), 'session.jsonl');
+    const notice = '<task-notification>\n<task-id>bqueued1</task-id>\n<status>completed</status>\n<summary>done</summary>\n</task-notification>';
+    writeFileSync(path, call('toolu_1', 'make', 'T1') + started('toolu_1', 'bqueued1', 'T2') + line({ type: 'queue-operation', operation: 'enqueue', timestamp: 'T3', sessionId: 's', content: notice }));
+    const jobs = new TranscriptJobs(async () => path);
+    await jobs.read();
+    expect(jobs.body(false)[0]).toMatchObject({ taskId: 'bqueued1', status: 'completed', endedAt: 'T3', summary: 'done' });
+  });
+
   it('starts over when the file is replaced or cut short', async () => {
     const dir = scratch();
     const path = join(dir, 'session.jsonl');

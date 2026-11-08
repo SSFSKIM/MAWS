@@ -24,6 +24,22 @@ describe('the jobs port over dx4-jobs.json', () => {
     expect(derive(ledger, { sessionRunning: c.input.session.running })).toEqual({ subagents: [], jobs: c.expect.jobs, mcp: [] });
   });
 
+  // The vectors join notifications in plain rows only; `about` reads either form alike, so the same blocks queued as one
+  // attachment's prompt end the same jobs.
+  it('reads several notifications in one queued_command prompt as in one plain row', () => {
+    const c = vectors.cases.find((k) => k.name === 'several notifications in one row')!;
+    const queued = (c.input.main as Record<string, unknown>[]).map((row) => {
+      if ((row.origin as { kind?: unknown } | undefined)?.kind !== 'task-notification') return row;
+      const body = (row.message as { content: string }).content;
+      const prompt = body.slice(body.indexOf('<task-notification>'));
+      return { type: 'attachment', uuid: row.uuid, timestamp: row.timestamp, attachment: { type: 'queued_command', commandMode: 'task-notification', prompt } };
+    });
+    expect(queued.filter((row) => row.type === 'attachment')).toHaveLength(2);
+    const ledger = new Ledger();
+    ledger.feed(queued);
+    expect(derive(ledger, { sessionRunning: c.input.session.running }).jobs).toEqual(c.expect.jobs);
+  });
+
   it('the cases hold background shells and monitors, ended and running', () => {
     const jobs = vectors.cases.flatMap((c) => c.expect.jobs as { kind: string; status: string }[]);
     expect(new Set(jobs.map((j) => j.kind))).toEqual(new Set(['shell', 'monitor']));
