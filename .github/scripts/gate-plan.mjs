@@ -192,6 +192,12 @@ export function planOf(env, scripts, now) {
   const poolBox = (cpus) => ['self-hosted', 'ci-kit-pool', `cpus-${cpus}`];
   // The guest's labels: a job asking for one of these may run in the guest.
   const GUEST = [RUNNERS.macSolo, RUNNERS.macVm, RUNNERS.macVmTrial];
+  // A guest-eligible e2e job's transfers ride the Mac's uplink, Wi-Fi while its Ethernet passes no traffic: on
+  // 2026-11-08 a job spent 29 minutes in checkout, setup-node and download-artifact before its first test and was cut at
+  // its 40 (run 42453368238, e2e:connectors-oauth). The job carries this margin on top; its test step keeps the job's
+  // former limit (`test_timeout`), so a hung test is caught as soon as before. Back to 0 once the Mac's uplink is fixed
+  // (CI-opt's lesson 130, the uplink's friction entry).
+  const UPLINK_MARGIN_MINUTES = 35;
   // e2e-build's box: one `electron-vite build`, which exhausted V8's default heap (about 1 GB) in the 4 GB guest (widgets);
   // the workflow's NODE_OPTIONS lifts that limit to 5 GB, which cpus-4's c3d-highcpu-4, with 8 GB, holds.
   const E2E_BUILD_BOX = poolBox(4);
@@ -386,15 +392,17 @@ export function planOf(env, scripts, now) {
       const where = overflow ? RUNNERS.macEc2 : hosted ? (direct ? RUNNERS.macHosted : HOSTED_WAITER) : placed(group);
       if (launchd.has(group) && where === RUNNERS.macEc2 && ec2Off) refuse(`LAUNCHD_E2E group ${group} needs EC2, but MAC_EC2 is off; it must never run in the home account`);
       const runner = JSON.stringify(where);
-      const guest = GUEST.includes(where) ? { variant: variantOf(group) } : {};
+      const onGuest = GUEST.includes(where);
+      const guest = onGuest ? { variant: variantOf(group) } : {};
       // A measured group's guard may wait 15 minutes, and a second after its build when its script builds out/ (gate.yml).
       const prebuild = measured.has(group) ? variantOf(group) : undefined;
       const minutes = ownMinutes.get(group) ?? (measured.has(group) ? (prebuild ? 60 : 45) : peerGroups.has(group) ? PEER_MINUTES : 30);
-      const timeout = hosted ? (direct ? minutes + HOSTED_MARGIN_MINUTES : HOSTED_TIMEOUT_MINUTES) : timeoutOn(where, minutes);
+      const testTimeout = timeoutOn(where, minutes);
+      const timeout = hosted ? (direct ? minutes + HOSTED_MARGIN_MINUTES : HOSTED_TIMEOUT_MINUTES) : testTimeout + (onGuest ? UPLINK_MARGIN_MINUTES : 0);
       // The build took 39% of the direct Macs' job time (23 jobs, 2026-10-28: 140 s of 368 s at the median), and a set larger
       // than the account's 5 Macs runs in rounds, whose later jobs can restore what the first ones built.
       const cached = hosted && direct ? variantOf(group) : undefined;
-      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(launchd.has(group) && { launchd: true }), ...(prebuild && { prebuild }), ...(hosted && { hosted }), ...(overflow && { overflow }), ...(eligible && direct && notHosted(group).length === 0 && { retry: true }), ...(cached && { cached }), runner, timeout, ...guest, ...(peerGroups.has(group) && peer && { peer }) };
+      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default', libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(launchd.has(group) && { launchd: true }), ...(prebuild && { prebuild }), ...(hosted && { hosted }), ...(overflow && { overflow }), ...(eligible && direct && notHosted(group).length === 0 && { retry: true }), ...(cached && { cached }), runner, timeout, ...(onGuest && { test_timeout: testTimeout }), ...guest, ...(peerGroups.has(group) && peer && { peer }) };
     });
   const e2eHosted = e2e.filter((entry) => entry.hosted && !direct);
   const e2eHost = e2e.filter((entry) => entry.variant === undefined && (!entry.hosted || direct));
