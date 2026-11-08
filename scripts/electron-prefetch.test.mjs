@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { URL, fileURLToPath } from 'node:url';
 
 const script = fileURLToPath(new URL('./electron-prefetch.mjs', import.meta.url));
 const postinstall = fileURLToPath(new URL('./postinstall.mjs', import.meta.url));

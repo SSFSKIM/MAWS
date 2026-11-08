@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { URL, fileURLToPath } from 'node:url';
 
 export const gitleaksTestCache = process.env.MAWS_APP_GITLEAKS_CACHE || join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'maws-app-gitleaks');
 

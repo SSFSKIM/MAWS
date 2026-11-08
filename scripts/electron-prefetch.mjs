@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath } from 'node:url';
+import { URL, fileURLToPath } from 'node:url';
 
 // Match electron/install.js's isInstalled() before touching the download cache.
 // A working dist does not need the zip to remain cached after installation.
