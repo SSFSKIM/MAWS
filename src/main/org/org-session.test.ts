@@ -2868,6 +2868,22 @@ describe('M4b: a drop that settles later (the fix wave)', () => {
     expect(registered(session).hubRowsLeft).toEqual([]);
   });
 
+  it('a keyed delete answered 503 hub-updating (a Registry mid-deploy) is never gone: offered again, on the settlement and on Retry', async () => {
+    const { session, feed, ref, pub } = await pendingDrop();
+    hub.deleteAnswer = () => worker(503, { error: 'hub-updating' });
+    hub.postAnswer = undefined;
+    feed.open();
+    await until(() => registered(session).hubRowsLeft.length === 1, 'the row left');
+    expect(registered(session).hubRowsLeft).toEqual([{ name: 'mini', ref }]);
+    expect(await session.dropRetry('mini')).toEqual({ ok: false, reason: 'refused', detail: 'the hub answered 503 hub-updating' });
+    expect(registered(session).hubRowsLeft).toEqual([{ name: 'mini', ref }]);
+    expect(hub.rows.has('mini')).toBe(true);
+    expect(preconditions(), 'both keyed').toEqual([{ ref, pub }, { ref, pub }]);
+    hub.deleteAnswer = undefined;
+    expect(await session.dropRetry('mini')).toEqual({ ok: true });
+    expect(hub.rows.has('mini')).toBe(false);
+  });
+
   it('a row list that fails offers the row again, and Retry reads it anew', async () => {
     const { session, feed, ref } = await pendingDrop();
     hub.listAnswer = () => worker(503, { error: 'hub-updating' });
