@@ -132,7 +132,7 @@ export async function grantProblems(state: OrgState, certs: Certificates, body: 
 /** `grantProblems`, with the step-up keys allowed to sign the grant (none when its machine's owners are unknown). */
 async function grantEligibility(state: OrgState, certs: Certificates, body: Grant, signerKid: string, now: Date): Promise<{ problems: GrantProblem[]; signers: B64[] }> {
   const only = (code: GrantProblemCode) => ({ problems: [{ code }], signers: [] });
-  if (!isGrant(body)) return only(isRecord(body) && isGrant({ ...body, rights: [] }) ? 'unknown-rights' : 'malformed');
+  if (!isGrant(body)) return only(onlyRightsWrong(body) ? 'unknown-rights' : 'malformed');
   if (!isCertificates(certs)) return only('malformed');
   const problems: GrantProblem[] = [];
   if (body.org !== state.org) problems.push({ code: 'other-org' });
@@ -153,6 +153,8 @@ async function grantEligibility(state: OrgState, certs: Certificates, body: Gran
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+/** A grant body in every field but its rights. */
+const onlyRightsWrong = (value: unknown) => isRecord(value) && isGrant({ ...value, rights: [] });
 
 /** The member ids `owners` names in `state`: its admins for `'org'`. */
 export function ownerMembers(state: OrgState, owners: Owners): MemberId[] {
