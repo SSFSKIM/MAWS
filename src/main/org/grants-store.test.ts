@@ -73,6 +73,7 @@ describe('the grants store', () => {
     expect(p.order).toEqual(['registration.json', GRANTS_FILE]);
     expect(p.registration.grants).toBe(true);
     expect(isGrantsFile(p.disk())).toBe(true);
+    expect(isGrantsFile({ ...p.disk(), issued: p.disk().issued.map((i) => ({ ...i, delivered: 'sending' })) })).toBe(true); // the write-ahead's
     expect(issuedFor(p.disk(), 'mref-grants-00001', BEA)).toEqual({ signed: g, delivered: 'pending', headVersion: 7 });
 
     // Removed after its first write: damaged, not fresh, and nothing is written.
@@ -85,7 +86,8 @@ describe('the grants store', () => {
     // Malformed: damaged too, whatever it holds.
     // An issued grant without the version of the head it was verified under is no issued grant.
     const headless = { signed: await grant('mref-grants-00001', BEA, 3), delivered: 'pending' };
-    for (const text of ['{', JSON.stringify({ version: 1, issued: [{ signed: { body: {} }, delivered: 'pending' }] }), JSON.stringify({ version: 2, issued: [] }), JSON.stringify({ version: 1, issued: [headless] })]) {
+    const unknownState = { signed: await grant('mref-grants-00001', BEA, 3), delivered: 'sent', headVersion: 7 };
+    for (const text of [JSON.stringify({ version: 1, issued: [unknownState] }), '{', JSON.stringify({ version: 1, issued: [{ signed: { body: {} }, delivered: 'pending' }] }), JSON.stringify({ version: 2, issued: [] }), JSON.stringify({ version: 1, issued: [headless] })]) {
       writeFileSync(p.path, text, { mode: 0o600 });
       expect((await p.open()).get()).toBe('damaged');
     }

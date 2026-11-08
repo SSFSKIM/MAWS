@@ -3300,20 +3300,22 @@ describe('M4b: the grants', () => {
     expect(await session.grantsView({ ref })).toEqual({ ok: false, ref, reason: 'signed-out' });
   });
 
-  it('close() while the grant’s act is out joins it: no file under org/ changes after', async () => {
+  it('close() while the grant’s act is out joins it: its outcome is written before the close resolves, nothing after', async () => {
     const { session, machine, ref } = await granting();
     let release!: () => void;
     machine.hold(new Promise<void>((resolve) => (release = resolve)));
     const answer = session.grantsSet({ ref, member: BEA, rights: ['spawn'] });
     await until(() => machine.acts.length === 1, 'the act out');
-    const files = await orgSnapshot();
+    expect(await readJson<GrantsFile>(GRANTS_FILE)).toMatchObject({ issued: [{ delivered: 'sending' }] }); // the write-ahead
     let closed = false;
     const closing = session.close().then(() => void (closed = true));
     await pause(30);
     expect(closed).toBe(false);
     release();
     await closing;
-    expect(await answer).toMatchObject({ ok: true, delivered: 'pending' });
+    expect(await answer).toMatchObject({ ok: true, delivered: 'done' });
+    expect(await readJson<GrantsFile>(GRANTS_FILE)).toMatchObject({ issued: [{ delivered: 'done' }] });
+    const files = await orgSnapshot();
     await pause(30);
     expect(await orgSnapshot()).toEqual(files);
   });

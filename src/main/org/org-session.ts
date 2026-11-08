@@ -466,6 +466,16 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     return enterCommit(body);
   }
 
+  /**
+   * M4b: the grants' door into the queue, as the channels' is: a grant whose act is out when the session closes writes
+   * its outcome (the record's, joined by `grants.close`) before this closes, once the grants are joined.
+   */
+  let grantsFenced = false;
+  function grantsCommit<T>(body: () => Promise<T>): Promise<T> {
+    if (grantsFenced) return Promise.reject(new Error('the org session is closed'));
+    return enterCommit(body);
+  }
+
   /** Every held view's guard (held.ts's `open`): no adoption writes once the session is closed. */
   const open = (): boolean => !closed;
 
@@ -1284,7 +1294,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   const grantsPush = createHeadPush({ link: (ref) => deps.grants?.link(ref) ?? null, view: heldView, timing: deps.timing, log });
   const grants = createGrants({
     context: grantsContext,
-    store: () => (grantsStore ??= createGrantsStore({ files, commit, registration: () => registration, markRegistration: () => markRegistration('grants'), log })),
+    store: () => (grantsStore ??= createGrantsStore({ files, commit: grantsCommit, registration: () => registration, markRegistration: () => markRegistration('grants'), log })),
     local: deps.local ?? null,
     door: deps.grants?.door ?? { act: async () => ({ state: 'refused', reason: 'unavailable' }), grants: async () => ({ ok: false, code: 'unavailable' }) },
     link: (ref) => deps.grants?.link(ref) ?? null,
@@ -1963,7 +1973,10 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     //    enrollment, whose poll in flight is joined with the parts, and the grants, whose sign, read or act in flight is.
     pairing.cancel();
     const enrollmentClosed = enrollment.close();
-    const grantsClosed = grants.close().then(() => grantsPush.close());
+    const grantsClosed = grants
+      .close()
+      .then(() => grantsPush.close())
+      .finally(() => (grantsFenced = true));
     const c = composed;
     c?.offs.forEach((off) => off());
     const parts = c === null ? [enrollmentClosed, grantsClosed] : [enrollmentClosed, grantsClosed, c.weekly.close(), c.deliveries.close(), c.signer.close()];

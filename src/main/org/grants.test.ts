@@ -3,7 +3,7 @@
 // another machine's link, each outcome read; the missing-grant judge and Re-grant…; grants.json failing closed; and every
 // operation fenced by the sign-in it began under, ended during Touch ID, the ledger read or the act.
 import { mkdtemp, rm } from 'node:fs/promises';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -568,7 +568,7 @@ describe('delivery', () => {
     h.mini.onAct = () => (atSend = h.issued(MINI, B)?.delivered);
     const answer = h.grants.set({ ref: MINI, member: B, rights: ['spawn'] });
     await until(() => h.mini.acts.length === 1, 'the act sent');
-    expect(atSend).toBe('pending');
+    expect(atSend).toBe('sending'); // the write-ahead, just before the act
     expect(h.mini.acts[0]).toMatchObject({ action: 'endpoint.grant', stepUp: 'never' });
     hold.resolve();
     expect(await answer).toMatchObject({ delivered: 'done' });
@@ -1000,7 +1000,7 @@ describe('a sign-in that ends mid-flight', () => {
     expect(h.mini.acts).toEqual([]);
   });
 
-  it('while the act is out: its outcome is not recorded for the ended sign-in, and the next sign-in sends it again', async () => {
+  it('while the act is out: its outcome is recorded all the same (the record’s, not the sign-in’s)', async () => {
     const h = await harness();
     h.mini.holdAct = deferred();
     const hold = h.mini.holdAct;
@@ -1008,12 +1008,29 @@ describe('a sign-in that ends mid-flight', () => {
     await until(() => h.mini.acts.length === 1, 'the act out');
     h.signOut();
     hold.resolve();
-    expect(await answer).toMatchObject({ ok: true, delivered: 'pending' });
-    expect(h.issued(MINI, B)?.delivered).toBe('pending');
-    expect(h.mini.ledger.grants[B]).toBeDefined(); // it landed, but this sign-in never heard
+    expect(await answer).toMatchObject({ ok: true, delivered: 'done' });
+    expect(h.issued(MINI, B)?.delivered).toBe('done');
+  });
+
+  it('a refusal that lands after a sign-out stays final: the next sign-in, ownership restored, never resends it', async () => {
+    const h = await harness();
+    h.mini.holdAct = deferred();
+    const hold = h.mini.holdAct;
+    h.mini.script.push({ state: 'failed', error: { code: 'unknown-signer' } });
+    const answer = h.grants.set({ ref: MINI, member: B, rights: ['spawn'] });
+    await until(() => h.mini.acts.length === 1, 'the act out');
+    h.signOut();
+    hold.resolve();
+    expect(await answer).toMatchObject({ delivered: { refused: 'unknown-signer' } });
+    head = { ...head, version: 8 }; // the ownership restored
     h.signIn();
     await h.grants.send();
-    expect(h.issued(MINI, B)?.delivered).toBe('done'); // not-newer, this very grant: done
+    h.mini.setUp(false);
+    h.mini.setUp(true);
+    await h.grants.send();
+    expect(h.mini.acts).toHaveLength(1);
+    expect(h.issued(MINI, B)?.delivered).toEqual({ refused: 'unknown-signer' });
+    expect((await okView(h, MINI)).grants).toEqual([{ member: B, rights: ['spawn'], version: 1, state: 'refused', reason: 'unknown-signer' }]);
   });
 
   it('a quit (close) during Touch ID, the read or the act joins it and writes nothing after', async () => {
@@ -1033,8 +1050,100 @@ describe('a sign-in that ends mid-flight', () => {
       hold.resolve();
       await closing;
       await answer;
-      if (at === 'act') expect(JSON.stringify(h.disk())).toBe(before);
+      // The act's outcome is the record's: written before the close resolves, nothing after it.
+      if (at === 'act') expect(before).toContain('"sending"');
+      if (at === 'act') expect(h.issued(MINI, B)?.delivered).toBe('done');
       else expect(h.issued(MINI, B)).toBeUndefined();
+      const after = existsSync(join(dir, 'org', GRANTS_FILE)) ? readFileSync(join(dir, 'org', GRANTS_FILE), 'utf8') : null;
+      await new Promise((r) => setTimeout(r, 10));
+      expect(existsSync(join(dir, 'org', GRANTS_FILE)) ? readFileSync(join(dir, 'org', GRANTS_FILE), 'utf8') : null).toBe(after);
     }
   });
 });
+
+describe('a refused grant never lands without a new confirmation (the branch review)', () => {
+  it('a pass holding an old snapshot sends nothing a re-grant has since replaced or refused', async () => {
+    const h = await harness();
+    h.shared.script.push({ state: 'refused', reason: 'offline' });
+    await h.grants.set({ ref: SHARED, member: B, rights: ['spawn'] }); // pending, first in the file
+    h.mini.script.push({ state: 'unknown', reason: 'channel-lost' }, { state: 'unknown', reason: 'channel-lost' });
+    await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] });
+    await h.grants.set({ ref: MINI, member: C, rights: ['shell'] }); // both pending: their answers lost
+    const fresh = await generateSigningKey();
+    keys[MINI] = fresh;
+    head = { ...head, version: 9, machines: head.machines.map((m) => (m.ref === MINI ? { ...m, pub: fresh.pub } : m)) };
+    h.mini.ledger.grants = {};
+    h.mini.ledger.highWater = {};
+    h.mini.ledger.heldKeys = [await keyId(fresh.pub)];
+    const view = await okView(h, MINI);
+    expect(view.missing.map((m) => m.member)).toEqual([B, C]);
+    // A pass takes its snapshot, then waits on the slow machine...
+    const slow = (h.shared.holdAct = deferred());
+    const passing = h.grants.send();
+    await until(() => h.shared.acts.length === 2, 'the pass on the slow machine');
+    // ...while the re-grant replaces both, B's refused.
+    h.mini.script.push({ state: 'failed', error: { code: 'unknown-signer' } });
+    const regranted = await h.grants.regrant({ ref: MINI, digest: view.digest! });
+    expect(regranted).toMatchObject({ ok: true, results: [{ member: B, delivered: { refused: 'unknown-signer' } }, { member: C, delivered: 'done' }] });
+    const acts = h.mini.acts.length;
+    slow.resolve();
+    await passing;
+    expect(h.mini.acts).toHaveLength(acts); // neither the replaced grants nor the refused one
+    expect(h.issued(MINI, B)?.delivered).toEqual({ refused: 'unknown-signer' });
+  });
+
+  it('a pass sends nothing a re-grant replaced while the pass’s head push was out (the write-ahead finds it no longer the latest)', async () => {
+    const h = await harness();
+    h.mini.script.push({ state: 'unknown', reason: 'channel-lost' });
+    await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] }); // pending: its answer lost
+    const fresh = await generateSigningKey();
+    keys[MINI] = fresh;
+    head = { ...head, version: 9, machines: head.machines.map((m) => (m.ref === MINI ? { ...m, pub: fresh.pub } : m)) };
+    h.mini.ledger.grants = {};
+    h.mini.ledger.highWater = {};
+    h.mini.ledger.heldKeys = [await keyId(fresh.pub)];
+    const view = await okView(h, MINI);
+    const pushed = (h.mini.holdPush = deferred());
+    const passing = h.grants.send(); // the pass reads version 1 pending, and pushes
+    await until(() => h.mini.pushes.length === 2, 'the pass’s push out');
+    const regranted = h.grants.regrant({ ref: MINI, digest: view.digest! }); // keeps version 2, then joins that push
+    await until(() => h.issued(MINI, B)?.signed.body.version === 2, 'the re-grant kept');
+    const acts = h.mini.acts.length;
+    pushed.resolve();
+    expect(await regranted).toMatchObject({ ok: true, results: [{ member: B, version: 2, delivered: 'done' }] });
+    await passing;
+    expect(h.mini.acts.slice(acts).map((a) => (a.args as { grant: Signed<Grant> }).grant.body.version)).toEqual([2]);
+  });
+
+  it('a refusal whose outcome write fails is never resent: the write is retried, never the grant', async () => {
+    const h = await harness();
+    h.mini.script.push({ state: 'failed', error: { code: 'unknown-signer' } });
+    h.mini.onAct = () => void (h.writes.fail = true); // the write-ahead landed; the outcome's write fails
+    expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] })).toMatchObject({ ok: false, reason: 'storage' });
+    h.mini.onAct = null;
+    h.writes.fail = false;
+    head = { ...head, version: 8 }; // the ownership restored
+    await h.grants.send();
+    expect(h.mini.acts).toHaveLength(1);
+    expect(h.issued(MINI, B)?.delivered).toEqual({ refused: 'unknown-signer' }); // written at the pass
+  });
+
+  it('an entry left `sending` across a restart is final (`outcome-unknown`) and never sent; a `pending` one is sent', async () => {
+    const h = await harness();
+    h.shared.script.push({ state: 'refused', reason: 'offline' });
+    await h.grants.set({ ref: SHARED, member: B, rights: ['spawn'] }); // pending: nothing ran
+    const out = (h.mini.holdAct = deferred()); // the act out when the process ends
+    void h.grants.set({ ref: MINI, member: B, rights: ['spawn'] });
+    await until(() => h.mini.acts.length === 1, 'the act out');
+    expect(h.disk().issued.map((i) => i.delivered)).toEqual(['pending', 'sending']);
+
+    const again = await harness(); // the next start, over the same files
+    await again.grants.send();
+    expect(again.mini.acts).toEqual([]);
+    expect(again.issued(MINI, B)?.delivered).toEqual({ refused: 'outcome-unknown' });
+    expect(again.shared.acts).toHaveLength(1);
+    expect(again.issued(SHARED, B)?.delivered).toBe('done');
+    out.resolve(); // (the old process is gone in life; here it is let end)
+  });
+});
+

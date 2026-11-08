@@ -9,7 +9,7 @@
 // - Before Touch ID, `grantProblems` judges the unsigned draft with this device's step-up key as its signer (a refusal
 //   asks nothing). One confirmation names the machine, the member and each right (`RecordSigner`, step-up.ts); then the
 //   full `verifyGrant` runs against the head held then, before the grant is kept or sent.
-// - Delivery: the record notes `pending` before the send, and the outcome after it. This Mac's own machine (the
+// - Delivery: the record notes `pending` when kept, `sending` just before each send, and the outcome after it. This Mac's own machine (the
 //   session's `local`) takes the grant through its endpoint's local door (an `endpoint.local.act` carrying an RL4
 //   `endpoint.grant`, no step-up: the grant's signature is its authority, the act's device attribution only); every other
 //   machine over its RL2 link (`act`, `stepUp: 'never'`). Outcomes:
@@ -36,7 +36,12 @@
 // - Verify once: a grant this Mac keeps is never judged again against a later head (RL §6.3), and none lapses by its
 //   signer's later standing; the machine decides at arrival.
 // - Each operation belongs to the sign-in it started under: once that sign-in ends (a sign-out, a quit), during Touch ID,
-//   while the ledger read or the act is out, nothing more is kept, sent or recorded for it.
+//   while the ledger read or the act is out, nothing more is kept or sent for it. An act's outcome, once the act went,
+//   is the record's: written all the same (this profile's grants.json is one member's), and a close waits for it.
+// - A refused grant never lands without a new confirmation: each send is preceded by a write-ahead (`sending`) that finds
+//   the grant still the latest of its pair and `pending`, so nothing a pass read earlier, a re-grant replaced or an
+//   answer settled goes; an outcome whose write fails is held, its grant never sent again, the write retried at each
+//   pass; and an entry a restart finds `sending` is refused `outcome-unknown`, to be signed again.
 //
 // Electron-free: the session injects the context, the store, the door and the links.
 import {
@@ -130,6 +135,11 @@ const NO_KEY = base64urlEncode(new Uint8Array(16));
  */
 const FINAL = new Set(['not-newer', 'not-held', 'other-machine', 'malformed', 'bad-signature', 'revoked', 'not-listed', 'unknown-signer', 'contested']);
 
+/** The refusal a grant reads when its act went and its outcome is lost to a stop (left `sending`): sign again. */
+export const OUTCOME_UNKNOWN = 'outcome-unknown';
+/** A grant still to be delivered: never sent (`pending`), or its act out (`sending`). */
+const inFlight = (d: IssuedGrant['delivered']): d is 'pending' | 'sending' => d === 'pending' || d === 'sending';
+
 type Refusal = Extract<GrantSetResult, { ok: false }>;
 const refuse = (reason: Refusal['reason'], detail?: string, problems?: string[]): Refusal => ({
   ok: false,
@@ -169,12 +179,12 @@ export function missingGrants(file: GrantsFile, ref: string, members: readonly G
     if (entry === undefined || entry.highWater >= i.signed.body.version) return false;
     if (i.delivered === 'done') return true;
     const deadKey = i.signed.body.machineKey !== key;
-    return deadKey && (i.delivered === 'pending' || DEAD_KEY.has(i.delivered.refused));
+    return deadKey && (inFlight(i.delivered) || DEAD_KEY.has(i.delivered.refused));
   });
 }
 
 /** An act's outcome, the door's or the link's, as a delivery reads it. */
-type Sent = { kind: 'done' } | { kind: 'final'; code: string } | { kind: 'expired' } | { kind: 'again'; why: string };
+type Sent = { kind: 'done' } | { kind: 'final'; code: string } | { kind: 'expired' } | { kind: 'again'; why: string } | { kind: 'gone' };
 /** A refusal's code (a door's `{state: refused, reason}`, a ledger's `{state: failed, error: {code}}`) as a delivery reads it. */
 const refusalOf = (c: string): Sent => (FINAL.has(c) ? { kind: 'final', code: c } : { kind: 'again', why: c });
 function sentOf(outcome: unknown): Sent {
@@ -342,20 +352,62 @@ export function createGrants(deps: GrantsDeps): Grants {
     }
   }
 
-  /** The outcome recorded on the issued grant, while it is still the latest for its pair and the sign-in stands. */
-  async function record(store: GrantsStore, at: GrantsContext, signed: Signed<Grant>, delivered: GrantDelivered, op: string | null): Promise<void> {
-    if (closed) return;
-    const changed = await store
-      .update((file) => {
-        const held = issuedFor(file, signed.body.machine, signed.body.member);
-        if (!stands(at) || held === undefined || !sameGrant(held.signed, signed)) return { next: file, value: false };
+  /** The issued grant `signed` is the latest of its pair, in `file`, still to be delivered (`pending` or `sending`). */
+  const latestInFlight = (file: GrantsFile, signed: Signed<Grant>) => {
+    const held = issuedFor(file, signed.body.machine, signed.body.member);
+    return held !== undefined && sameGrant(held.signed, signed) && inFlight(held.delivered) ? held : undefined;
+  };
+  /**
+   * Outcomes whose write failed, by grant, retried at each pass: until one is written the grant is never sent again
+   * (a terminal verdict held only here must not read `pending` on disk to a pass).
+   */
+  const unwritten = new Map<string, { store: GrantsStore; signed: Signed<Grant>; delivered: GrantDelivered; op: string | null }>();
+
+  /**
+   * The outcome written on the issued grant while it is still the latest of its pair and in flight. The record's, not
+   * the sign-in's: written after a sign-out or during a close too, into this profile's grants.json (one member's: a
+   * registration's member never changes). Null once written (or nothing to write); the write's error otherwise, the
+   * outcome then held in `unwritten`.
+   */
+  async function record(store: GrantsStore, signed: Signed<Grant>, delivered: GrantDelivered, op: string | null): Promise<string | null> {
+    const key = canonicalize(signed);
+    try {
+      const changed = await store.update((file) => {
+        const held = latestInFlight(file, signed);
+        if (held === undefined) return { next: file, value: false };
         held.delivered = delivered;
         if (delivered === 'pending' && op !== null) held.op = op;
         else delete held.op;
         return { next: file, value: true };
-      })
-      .catch((error: unknown) => (log(`the outcome was not recorded: ${(error as Error).message}`), false));
-    if (changed) deps.changed(signed.body.machine);
+      });
+      unwritten.delete(key);
+      if (changed) deps.changed(signed.body.machine);
+      return null;
+    } catch (error) {
+      const message = (error as Error).message;
+      log(`the outcome of version ${signed.body.version} for ${signed.body.member.slice(0, 8)} on ${signed.body.machine} was not written (${message}): held, and never sent again until it is`);
+      unwritten.set(key, { store, signed, delivered, op });
+      return message;
+    }
+  }
+
+  /**
+   * The write-ahead: the grant written `sending` just before its act, while it is still the latest of its pair and
+   * `pending` (a pass's snapshot, a re-grant since, a withdrawal: whatever replaced or settled it is never sent).
+   */
+  async function writeAhead(store: GrantsStore, signed: Signed<Grant>): Promise<'sending' | 'not-current' | 'unwritten'> {
+    if (unwritten.has(canonicalize(signed))) return 'not-current';
+    try {
+      return await store.update((file) => {
+        const held = latestInFlight(file, signed);
+        if (held === undefined || held.delivered !== 'pending') return { next: file, value: 'not-current' as const };
+        held.delivered = 'sending';
+        return { next: file, value: 'sending' as const };
+      });
+    } catch (error) {
+      log(`version ${signed.body.version} for ${signed.body.member.slice(0, 8)} was not written as sending (${(error as Error).message}): not sent`);
+      return 'unwritten';
+    }
   }
 
   /** The RL4 act the door takes: no step-up, its device this Mac's (attribution), stamped now. */
@@ -368,31 +420,43 @@ export function createGrants(deps: GrantsDeps): Grants {
   /**
    * One send of `signed` through its machine's door or link, and the op it went as (null: none went). Over a link, only
    * once the machine answered the head pushed at `headVersion` or later, on the line the app is on as the grant goes.
+   * Either way only after the write-ahead, which finds it still the latest of its pair and `pending`. `ahead`: whether
+   * the write-ahead landed (its `sending` is then the caller's to settle).
    */
-  async function sendOnce(at: GrantsContext, signed: Signed<Grant>, headVersion: number): Promise<{ sent: Sent; op: string | null }> {
+  async function sendOnce(store: GrantsStore, at: GrantsContext, signed: Signed<Grant>, headVersion: number): Promise<{ sent: Sent; op: string | null; ahead: boolean }> {
     const ref = signed.body.machine;
+    const not = (sent: Sent, ahead = false) => ({ sent, op: null, ahead });
     if (ref === deps.local) {
       const action = doorAction(at, signed);
-      if (action === null) return { sent: { kind: 'again', why: 'the door act does not build' }, op: null };
+      if (action === null) return not({ kind: 'again', why: 'the door act does not build' });
+      if (!stands(at)) return not({ kind: 'again', why: 'signed out' });
+      const ahead = await writeAhead(store, signed);
+      if (ahead !== 'sending') return not(ahead === 'not-current' ? { kind: 'gone' } : { kind: 'again', why: 'storage' });
+      if (!stands(at)) return not({ kind: 'again', why: 'signed out' }, true);
       const outcome = await deps.door.act(action).catch((error: unknown) => ({ state: 'unknown', reason: (error as Error).message }));
-      return { sent: sentOf(outcome), op: action.opId };
+      return { sent: sentOf(outcome), op: action.opId, ahead: true };
     }
-    const offline = { sent: { kind: 'again', why: 'offline' }, op: null } as const;
-    if (deps.link(ref as MachineRef)?.state() !== 'up') return offline;
+    const offline: Sent = { kind: 'again', why: 'offline' };
+    if (deps.link(ref as MachineRef)?.state() !== 'up') return not(offline);
     const brought = await deps.bringTo(ref as MachineRef, headVersion);
-    if (!brought.ok || brought.version < headVersion) return { sent: { kind: 'again', why: `not known to hold version ${headVersion}${brought.ok ? '' : ` (${brought.why})`}` }, op: null };
+    if (!brought.ok || brought.version < headVersion) return not({ kind: 'again', why: `not known to hold version ${headVersion}${brought.ok ? '' : ` (${brought.why})`}` });
+    if (!stands(at)) return not({ kind: 'again', why: 'signed out' });
+    const ahead = await writeAhead(store, signed);
+    if (ahead !== 'sending') return not(ahead === 'not-current' ? { kind: 'gone' } : { kind: 'again', why: 'storage' });
     // Synchronously from here to the act: the sign-in, the line the answer was given on, and the link.
-    if (!stands(at)) return { sent: { kind: 'again', why: 'signed out' }, op: null };
-    if (!brought.current()) return { sent: { kind: 'again', why: 'the org line moved since the machine answered' }, op: null };
+    if (!stands(at)) return not({ kind: 'again', why: 'signed out' }, true);
+    if (!brought.current()) return not({ kind: 'again', why: 'the org line moved since the machine answered' }, true);
     const link = deps.link(ref as MachineRef);
-    if (link === null || link.state() !== 'up') return offline;
+    if (link === null || link.state() !== 'up') return not(offline, true);
     const handle = link.act({ action: 'endpoint.grant', args: { grant: signed }, stepUp: 'never' });
-    return { sent: sentOf(await handle.outcome), op: handle.opId };
+    return { sent: sentOf(await handle.outcome), op: handle.opId, ahead: true };
   }
 
+  /** A delivery's outcome, and the error of its outcome's write when it couldn't be written. */
+  type Delivery = { delivered: GrantDelivered; unwritten?: string };
   /** In flight per grant: a pass and a sign that reach the same grant share one delivery. */
-  const delivering = new Map<string, Promise<GrantDelivered>>();
-  function deliver(store: GrantsStore, at: GrantsContext, signed: Signed<Grant>, headVersion: number): Promise<GrantDelivered> {
+  const delivering = new Map<string, Promise<Delivery>>();
+  function deliver(store: GrantsStore, at: GrantsContext, signed: Signed<Grant>, headVersion: number): Promise<Delivery> {
     const key = canonicalize(signed);
     const held = delivering.get(key);
     if (held !== undefined) return held;
@@ -401,44 +465,87 @@ export function createGrants(deps: GrantsDeps): Grants {
     return run;
   }
 
-  async function deliverNow(store: GrantsStore, at: GrantsContext, signed: Signed<Grant>, headVersion: number): Promise<GrantDelivered> {
+  async function deliverNow(store: GrantsStore, at: GrantsContext, signed: Signed<Grant>, headVersion: number): Promise<Delivery> {
     const ref = signed.body.machine;
     for (let attempt = 0; ; attempt++) {
-      if (!stands(at)) return 'pending';
-      const { sent, op } = await sendOnce(at, signed, headVersion);
-      // the sign-in it was sent under ended while the act was out: nothing is recorded for it
-      if (!stands(at)) return 'pending';
+      // New sends are the sign-in's; an outcome, once an act went, is the record's.
+      if (!stands(at)) return { delivered: 'pending' };
+      const { sent, op, ahead } = await sendOnce(store, at, signed, headVersion);
+      // replaced or settled meanwhile: nothing was sent, nothing is written
+      if (sent.kind === 'gone') return { delivered: 'pending' };
       // its ledger reopened and orphaned the op: sent again at once, as a new op (once; later passes go on)
-      if (sent.kind === 'expired' && attempt === 0) continue;
+      if (sent.kind === 'expired' && attempt === 0 && stands(at)) {
+        const back = await record(store, signed, 'pending', op);
+        if (back !== null) return { delivered: 'pending', unwritten: back };
+        continue;
+      }
       let delivered: GrantDelivered;
       if (sent.kind === 'done') delivered = 'done';
       else if (sent.kind === 'final' && sent.code === 'not-newer') {
         // Read once more: this very grant in the ledger is an earlier send that landed; another's is another device's.
-        const again = await read(at, ref, true);
-        if (again === null) return 'pending';
-        const entry = again.ok ? again.members.find((m) => m.member === signed.body.member) : undefined;
-        if (!again.ok) delivered = 'pending';
+        // With the sign-in ended there is no read: `pending`, which a resend can't land (the mark is at its version).
+        const again = stands(at) ? await read(at, ref, true) : null;
+        const entry = again !== null && again.ok ? again.members.find((m) => m.member === signed.body.member) : undefined;
+        if (again === null || !again.ok) delivered = 'pending';
         else delivered = entry?.grant !== null && entry?.grant !== undefined && sameGrant(entry.grant, signed) ? 'done' : { refused: 'not-newer' };
       } else if (sent.kind === 'final') delivered = { refused: sent.code };
       else {
         log(`version ${signed.body.version} for ${signed.body.member.slice(0, 8)} on ${ref}: not delivered (${sent.kind === 'again' ? sent.why : 'expired'}); sent again later`);
         delivered = 'pending';
       }
-      await record(store, at, signed, delivered, op);
-      return delivered;
+      if (!ahead) return { delivered };
+      const failed = await record(store, signed, delivered, op);
+      return failed === null ? { delivered } : { delivered, unwritten: failed };
     }
   }
 
+  /** The outcomes held unwritten, written again: each one written lets its grant be judged by the file again. */
+  async function writeHeld(): Promise<void> {
+    for (const u of [...unwritten.values()]) await record(u.store, u.signed, u.delivered, u.op);
+  }
+
+  /**
+   * The store, once per start: an entry a previous process left `sending` (its act went, its outcome never written) is
+   * never sent again but refused `outcome-unknown`, to be signed again. Fails closed: a send is retried, a verdict never.
+   */
+  let started: Promise<void> | null = null;
+  async function storeOf(): Promise<GrantsStore> {
+    const store = await deps.store();
+    started ??= (async () => {
+      const file = store.get();
+      if (file === 'damaged' || !file.issued.some((i) => i.delivered === 'sending')) return;
+      const n = await store.update((f) => {
+        const left = f.issued.filter((i) => i.delivered === 'sending');
+        for (const i of left) {
+          i.delivered = { refused: OUTCOME_UNKNOWN };
+          delete i.op;
+        }
+        return { next: f, value: left.length };
+      });
+      log(`${n} grant(s) were being sent when this app last stopped: their outcome is unknown, each to be signed again`);
+      for (const ref of new Set(file.issued.filter((i) => i.delivered === 'sending').map((i) => i.signed.body.machine))) deps.changed(ref);
+    })().catch((error: unknown) => {
+      started = null;
+      log(`the grants left sending could not be settled (${(error as Error).message}): none is sent`);
+    });
+    await started;
+    return store;
+  }
+
+  /** A delivery whose outcome couldn't be written: `storage`, the grant held from any resend until it is. */
+  const unrecorded = (ref: string, d: Delivery): Refusal =>
+    refuse('storage', `${ref} answered ${typeof d.delivered === 'string' ? d.delivered : `refused (${d.delivered.refused})`}, but grants.json could not record it (${d.unwritten}): it is not sent again, and the record is written again at the next pass`);
+
   /** The store, or why nothing can be signed. */
   async function storeFor(): Promise<GrantsStore | Refusal> {
-    const store = await deps.store();
+    const store = await storeOf();
     return store.get() === 'damaged' ? refuse('damaged') : store;
   }
 
   async function view({ ref }: { ref: string }): Promise<GrantsView> {
     const at = deps.context();
     if (at === null) return { ok: false, ref, reason: 'signed-out' };
-    const store = await deps.store();
+    const store = await storeOf();
     const file = store.get();
     if (file === 'damaged') return { ok: false, ref, reason: 'damaged' };
     const fresh = await read(at, ref, false);
@@ -459,7 +566,7 @@ export function createGrants(deps: GrantsDeps): Grants {
       }
       const mark = members?.find((e) => e.member === member)?.highWater ?? 0;
       if (mark >= version) continue; // the ledger is past it: its own word is shown
-      rows.set(member, i.delivered === 'pending' ? { member, rights: [...rights], version, state: 'pending' } : { member, rights: [...rights], version, state: 'refused', reason: i.delivered.refused });
+      rows.set(member, inFlight(i.delivered) ? { member, rights: [...rights], version, state: 'pending' } : { member, rights: [...rights], version, state: 'refused', reason: i.delivered.refused });
     }
     const order = new Map(at.head.members.map((m, n) => [m.id, n]));
     const grants = [...rows.values()].sort((a, b) => (order.get(a.member) ?? Infinity) - (order.get(b.member) ?? Infinity));
@@ -524,7 +631,7 @@ export function createGrants(deps: GrantsDeps): Grants {
       // The rights the member holds or is being given: a pending grant above the ledger's mark, for the key speaking for
       // the machine now, is the latest word (one for a key the machine no longer has can never be held).
       const key = await currentKey(current, ref);
-      const pending = issued !== undefined && issued.delivered === 'pending' && issued.signed.body.version > entry.highWater && issued.signed.body.machineKey === key ? issued : undefined;
+      const pending = issued !== undefined && inFlight(issued.delivered) && issued.signed.body.version > entry.highWater && issued.signed.body.machineKey === key ? issued : undefined;
       const standing = pending !== undefined ? pending.signed.body.rights : (entry.grant?.body.rights ?? []);
       if (sameRights(standing, rights)) return refuse('no-change', 'the member holds these rights already');
       // Judged again on that head, with the version above both marks.
@@ -536,7 +643,9 @@ export function createGrants(deps: GrantsDeps): Grants {
       const kept = await verifiedKept(store, at, [signed.signed]);
       if (!kept.ok) return kept;
       deps.changed(ref);
-      return { ok: true, version: body.version, delivered: await deliver(store, at, signed.signed, kept.headVersion) };
+      const d = await deliver(store, at, signed.signed, kept.headVersion);
+      if (d.unwritten !== undefined) return unrecorded(ref, d);
+      return { ok: true, version: body.version, delivered: d.delivered };
     });
   }
 
@@ -589,21 +698,34 @@ export function createGrants(deps: GrantsDeps): Grants {
       if (!kept.ok) return kept;
       deps.changed(ref);
       const results: Extract<GrantRegrantResult, { ok: true }>['results'] = [];
-      for (const s of signed.signed) results.push({ member: s.body.member, version: s.body.version, delivered: await deliver(store, at, s, kept.headVersion) });
+      const failed: Delivery[] = [];
+      for (const s of signed.signed) {
+        const d = await deliver(store, at, s, kept.headVersion);
+        if (d.unwritten !== undefined) failed.push(d);
+        results.push({ member: s.body.member, version: s.body.version, delivered: d.delivered });
+      }
+      if (failed.length > 0) return unrecorded(ref, failed[0]);
       return { ok: true, results };
     });
   }
 
-  /** One pass over the pending grants whose machine can be reached now, for the sign-in standing at its start. */
+  /**
+   * One pass over the pending grants whose machine can be reached now, for the sign-in standing at its start: the
+   * outcomes held unwritten first. Each grant is judged by the file as it stands at its turn (and again by the
+   * write-ahead just before its act), never by the pass's first read.
+   */
   async function pass(): Promise<void> {
     const at = deps.context();
     if (at === null || closed) return;
-    const store = await deps.store();
-    const file = store.get();
-    if (file === 'damaged') return;
-    for (const i of file.issued) {
+    const store = await storeOf();
+    await writeHeld();
+    const first = store.get();
+    if (first === 'damaged') return;
+    for (const { signed } of first.issued) {
       if (!stands(at)) return;
-      if (i.delivered !== 'pending' || i.signed.body.org !== at.org) continue;
+      const latest = store.get();
+      const i = latest === 'damaged' ? undefined : latestInFlight(latest, signed);
+      if (i === undefined || i.delivered !== 'pending' || unwritten.has(canonicalize(i.signed)) || i.signed.body.org !== at.org) continue;
       const ref = i.signed.body.machine;
       if (ref !== deps.local && deps.link(ref as MachineRef)?.state() !== 'up') continue;
       await deliver(store, at, i.signed, i.headVersion);
