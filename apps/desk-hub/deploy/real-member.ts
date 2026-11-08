@@ -75,9 +75,13 @@ function checkoutOf(dir: string): string | null {
   }
 }
 
+/** A file as a refusal names it: by its directory alone, since its name may be what the file must keep. */
+const namedByDirectory = (path: string) => `the file in ${dirname(resolve(path))}`;
+
 /**
  * The text of the private file at `path`: a regular file of this user's, mode exactly 0600 (no special bit beside it),
- * in no git checkout; else throws why, never quoting what the file holds. The path is opened once, never following a
+ * in no git checkout; else throws why, never quoting what the file holds nor naming it but by its directory (its name
+ * may be the address itself). The path is opened once, never following a
  * symlink, and every check but the checkout's is made on that descriptor and the text read from it, so a file put in the
  * path's place after the check is never the one read; the checkout's check is made on the path the descriptor's file
  * resolves to, which must still be that file. A parent directory swapped between those steps is outside what this
@@ -85,32 +89,33 @@ function checkoutOf(dir: string): string | null {
  * once the descriptor is open (a suite's seam for the race).
  */
 export function readPrivateFile(path: string, opened: () => void = () => {}): string {
+  const file = namedByDirectory(path);
   let fd: number;
   try {
     // O_NONBLOCK: a FIFO in the file's place answers at once rather than holding the step open.
     fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ELOOP' || code === 'EMLINK') throw new Error(`${path} is a symlink: name the file itself`, { cause: error });
-    if (code === 'ENOENT') throw new Error(`no file at ${path}`, { cause: error });
-    throw new Error(`${path} can't be opened (${code})`, { cause: error });
+    if (code === 'ELOOP' || code === 'EMLINK') throw new Error(`${file} is a symlink: name the file itself`, { cause: error });
+    if (code === 'ENOENT') throw new Error(`${file} does not exist`, { cause: error });
+    throw new Error(`${file} can't be opened (${code})`, { cause: error });
   }
   try {
     opened();
     const stat = fstatSync(fd);
-    if (!stat.isFile()) throw new Error(`${path} is not a regular file`);
-    if ((stat.mode & 0o7777) !== 0o600) throw new Error(`${path} must be mode 0600, not 0${(stat.mode & 0o7777).toString(8)}`);
-    if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) throw new Error(`${path} is another user's`);
+    if (!stat.isFile()) throw new Error(`${file} is not a regular file`);
+    if ((stat.mode & 0o7777) !== 0o600) throw new Error(`${file} must be mode 0600, not 0${(stat.mode & 0o7777).toString(8)}`);
+    if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) throw new Error(`${file} is another user's`);
     let resolved: string;
     try {
       resolved = realpathSync(path);
       const now = statSync(resolved);
       if (now.dev !== stat.dev || now.ino !== stat.ino) throw new Error('another file');
     } catch (error) {
-      throw new Error(`${path} changed while it was read: nothing was read`, { cause: error });
+      throw new Error(`${file} changed while it was read: nothing was read`, { cause: error });
     }
     const repo = checkoutOf(dirname(resolved));
-    if (repo !== null) throw new Error(`${path} is inside the git checkout ${repo}: keep it outside any checkout`);
+    if (repo !== null) throw new Error(`${file} is inside the git checkout ${repo}: keep it outside any checkout`);
     return readFileSync(fd, 'utf8');
   } finally {
     closeSync(fd);
@@ -137,11 +142,11 @@ export function codeFileRefusal(path: string): string | null {
   return null;
 }
 
-/** The one email address the private file at `path` holds; a refusal never quotes what the file holds. */
+/** The one email address the private file at `path` holds; a refusal never quotes what the file holds, nor its name. */
 export function readEmail(path: string, opened?: () => void): string {
   const text = readPrivateFile(path, opened);
   const email = text.endsWith('\n') ? text.slice(0, -1) : text;
-  if (!EMAIL.test(email) || email.length > 320) throw new Error(`${path} must hold one email address and nothing else`);
+  if (!EMAIL.test(email) || email.length > 320) throw new Error(`${namedByDirectory(path)} must hold one email address and nothing else`);
   return email;
 }
 

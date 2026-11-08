@@ -134,7 +134,7 @@ describe('the files', () => {
     expect(privateFileRefusal(emailFile())).toBeNull();
     expect(privateFileRefusal(emailFile(0o644))).toMatch(/mode 0600, not 0644/);
     expect(privateFileRefusal(emailFile(0o400))).toMatch(/mode 0600, not 0400/);
-    expect(privateFileRefusal(join(scratch(), 'none'))).toMatch(/no file/);
+    expect(privateFileRefusal(join(scratch(), 'none'))).toMatch(/does not exist/);
     expect(privateFileRefusal(scratch())).toMatch(/not a regular file/);
     const link = join(scratch(), 'link');
     symlinkSync(emailFile(), link);
@@ -176,6 +176,45 @@ describe('the files', () => {
     expect(thrown?.message).not.toContain(other);
     // with nothing swapped, the same seam reads the file
     expect(readEmail(emailFile(), () => {})).toBe(EMAIL);
+  });
+
+  it('names no email file by its name in any refusal, only its directory: the name may itself be the address', async () => {
+    const named = (mode: number, body = `${EMAIL}\n`) => {
+      const dir = scratch();
+      const path = join(dir, EMAIL);
+      writeFileSync(path, body);
+      chmodSync(path, mode);
+      return { dir, path };
+    };
+    const cases: Array<{ path: string; dir: string; swap?: () => void }> = [named(0o644), named(0o4600), named(0o600, 'not an email\n'), { path: join(scratch(), EMAIL), dir: '' }];
+    const link = named(0o600);
+    const linked = join(scratch(), `${EMAIL}.link`);
+    symlinkSync(link.path, linked);
+    cases.push({ path: linked, dir: '' });
+    const folder = join(scratch(), EMAIL);
+    mkdirSync(folder);
+    cases.push({ path: folder, dir: '' });
+    const repo = scratch();
+    mkdirSync(join(repo, '.git'));
+    writeFileSync(join(repo, EMAIL), EMAIL, { mode: 0o600 });
+    cases.push({ path: join(repo, EMAIL), dir: repo });
+    const swapped = named(0o600);
+    cases.push({ ...swapped, swap: () => renameSync(swapped.path, `${swapped.path}.gone`) });
+    for (const { path, dir, swap } of cases) {
+      let refusal = '';
+      try {
+        readEmail(path, swap);
+      } catch (error) {
+        refusal = (error as Error).message;
+      }
+      expect(refusal, path).not.toBe('');
+      expect(refusal, path).not.toContain(EMAIL);
+      if (dir !== '') expect(refusal, path).toContain(dir);
+      // and through a step, whose lines are printed before the email is known
+      const run = options({ verb: 'add', emailFile: path });
+      expect(await runRealMember(run.o), path).toBe(2);
+      expect(printedSecrets(run.lines, EMAIL), path).toEqual([]);
+    }
   });
 
   it('reads one email, its words never in a refusal', () => {
