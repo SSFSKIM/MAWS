@@ -287,14 +287,15 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     return;
   }
   if (typeof content === 'string') {
-    const notification = parseTaskNotification(content);
-    if (notification !== null) {
-      const duplicate = sourceUuid !== null ? ctx.notificationSources.has(sourceUuid) : notification.toolUseId !== null && ctx.notificationTools.has(notification.toolUseId);
+    const notifications = parseTaskNotifications(content);
+    if (notifications !== null) {
+      const tools = notifications.flatMap((n) => (n.toolUseId === null ? [] : [n.toolUseId]));
+      const duplicate = sourceUuid !== null ? ctx.notificationSources.has(sourceUuid) : tools.length > 0 && tools.every((tool) => ctx.notificationTools.has(tool));
       if (duplicate) return;
       if (sourceUuid !== null) ctx.notificationSources.add(sourceUuid);
-      if (notification.toolUseId !== null) ctx.notificationTools.add(notification.toolUseId);
+      for (const tool of tools) ctx.notificationTools.add(tool);
     }
-    const origin = notification === null ? humanOrigin : 'task-notification'; // preserve typed provenance; notifications are engine-initiated
+    const origin = notifications === null ? humanOrigin : 'task-notification'; // preserve typed provenance; notifications are engine-initiated
     const bash = parseBash(content);
     const command = localCommandTurn(record, ctx);
     turn(origin);
@@ -302,7 +303,8 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     if (command) events.push(endedOf(base, uuid, null));
     if (record.isMeta === true) hookFeedback(content, uuid, base, events);
     // The real completion of a background agent: the notification naming the tool use that started it.
-    if (notification !== null && notification.toolUseId !== null) {
+    for (const notification of notifications ?? []) {
+      if (notification.toolUseId === null) continue;
       const started = ctx.seenToolUses.get(notification.toolUseId) ?? startPendingSubagent(ctx, notification.toolUseId, base, events);
       if (started !== undefined) {
         const summary = notification.result ?? notification.summary;
@@ -829,14 +831,22 @@ interface TaskNotification {
 // The same disk shape used by the follower's response-delivery classification.
 export function isTaskNotification(record: TranscriptRecord): boolean {
   const content = messageContent(record);
-  return record.type === 'user' && typeof content === 'string' && parseTaskNotification(content) !== null;
+  return record.type === 'user' && typeof content === 'string' && parseTaskNotifications(content) !== null;
 }
 
-// The engine's `<task-notification>` block (SPEC 20.9): the outcome of a background task, delivered as a user record.
-function parseTaskNotification(content: string): TaskNotification | null {
+const NOTIFICATION_BLOCK = /<task-notification>[\s\S]*?<\/task-notification>/g;
+
+// The engine's `<task-notification>` blocks (SPEC 20.9), each the outcome of a background task, delivered as a user
+// record: null for a text that is no notification. The engine joins the notifications it delivers at once into one
+// record, each block after a blank line (DX4's vectors, "several notifications in one row"): each block is read alone.
+function parseTaskNotifications(content: string): TaskNotification[] | null {
   if (!content.trimStart().startsWith('<task-notification>')) return null;
+  return (content.match(NOTIFICATION_BLOCK) ?? []).map(parseTaskNotification);
+}
+
+function parseTaskNotification(block: string): TaskNotification {
   const element = (name: string): string | null => {
-    const match = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(content);
+    const match = new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(block);
     return match === null ? null : match[1].trim();
   };
   const status = element('status');

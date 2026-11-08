@@ -26,6 +26,7 @@ const LAUNCHED = 'async_launched'; // a background agent's launch: running evide
 const EXPIRED = 'expired';
 const EXPIRY_EVENTS = ['[Monitor expired after ', '[Monitor timed out'];
 const NOTIFICATION_PREAMBLE = '[SYSTEM NOTIFICATION - NOT USER INPUT]\n';
+const NOTIFICATION = /<task-notification>[\s\S]*?<\/task-notification>/g;
 // The bridge's notes of tasks it stopped (a plugin's TaskStop writes no row), known by their row's whole text.
 const TASK_ID = '([A-Za-z0-9_-]{1,64})';
 const STOP_NOTE = new RegExp(`^Task ${TASK_ID}, a background task, was stopped from (?:the desk|outside the terminal): it is not running\\.$`);
@@ -70,7 +71,12 @@ function element(prompt: string, name: string): string | null {
   return m ? m[1].trim() : null;
 }
 
-// The notification text of a plain user row the engine wrote for one (origin.kind task-notification), or null.
+// Each notification a notification's text carries, in order: every whole block, its elements read within it. The
+// engine joins the notifications it delivers at once into one row, each block after a blank line (2.1.257 on).
+const notifications = (text: string): string[] => text.match(NOTIFICATION) ?? [];
+
+// The notification text of a plain user row the engine wrote for its notifications (origin.kind task-notification),
+// or null.
 function plainNotification(row: Row, content: unknown): string | null {
   if (row.type !== 'user' || record(row.origin)?.kind !== 'task-notification') return null;
   let body = text(content);
@@ -152,7 +158,7 @@ export class Ledger {
     if (attachment !== null) this.attachment(attachment, at);
     const content = record(row.message)?.content;
     const plain = plainNotification(row, content);
-    if (plain !== null) this.notification(plain, at);
+    for (const block of plain === null ? [] : notifications(plain)) this.notification(block, at);
     for (const [task, line] of stopRecords(row, content)) this.say(task, { raw: 'stopped', at, summary: line });
     if (!Array.isArray(content)) return;
     for (const value of content) {
@@ -224,11 +230,11 @@ export class Ledger {
       const summary = str(att.deltaSummary);
       this.say(task, { raw: att.status, at, ...(summary !== null && { summary }), ...(path !== null && { outputFile: path }) });
     } else if (att.type === 'queued_command' && att.commandMode === 'task-notification' && typeof att.prompt === 'string') {
-      this.notification(att.prompt, at);
+      for (const block of notifications(att.prompt)) this.notification(block, at);
     }
   }
 
-  // One task-notification's text, from either form the engine writes it in.
+  // One task-notification's block, from either form the engine writes it in.
   private notification(prompt: string, at: unknown): void {
     const task = element(prompt, 'task-id') || null;
     const path = element(prompt, 'output-file') || null;
