@@ -1,0 +1,51 @@
+diff --git a/v4/classic/external.cjs b/v4/classic/external.cjs
+index 15a0faa24a5c93733b21ae9553f5d11271ef7cb6..015ff0b5f4b527c3cba1d5b1397a2dd2f26d1195 100644
+--- a/v4/classic/external.cjs
++++ b/v4/classic/external.cjs
+@@ -67,7 +67,11 @@ Object.defineProperty(exports, "deepPartial", { enumerable: true, get: function
+ var in_out_js_1 = require("./in-out.cjs");
+ Object.defineProperty(exports, "input", { enumerable: true, get: function () { return in_out_js_1.input; } });
+ Object.defineProperty(exports, "output", { enumerable: true, get: function () { return in_out_js_1.output; } });
+-exports.locales = __importStar(require("../locales/index.cjs"));
++// MAWS (patches/zod@4.6.5.patch): the locales load at the first read of `locales` rather than with zod, about 0.7 MiB
++// of heap in every process that never reads them. English, the default, is its own module (classic/schemas.cjs loads
++// it). The getter is not configurable, so the seal at the end of this file leaves it unread.
++var lazyLocales;
++Object.defineProperty(exports, "locales", { enumerable: true, configurable: false, get: function () { return lazyLocales || (lazyLocales = __importStar(require("../locales/index.cjs"))); } });
+ // iso must be exported from top-level https://github.com/colinhacks/zod/issues/4491
+ var iso_js_1 = require("./iso.cjs");
+ Object.defineProperty(exports, "ZodISODateTime", { enumerable: true, get: function () { return iso_js_1.ZodISODateTime; } });
+diff --git a/v4/core/index.cjs b/v4/core/index.cjs
+index 26253eec2ab0680c6a8f72782e935b7638cd97e3..dccb374a99af82f5e3a09a5ce446583a4d18d2be 100644
+--- a/v4/core/index.cjs
++++ b/v4/core/index.cjs
+@@ -38,7 +38,11 @@ exports.util = __importStar(require("./util.cjs"));
+ var util_js_1 = require("./util.cjs");
+ Object.defineProperty(exports, "toZod", { enumerable: true, get: function () { return util_js_1.toZod; } });
+ exports.regexes = __importStar(require("./regexes.cjs"));
+-exports.locales = __importStar(require("../locales/index.cjs"));
++// MAWS (patches/zod@4.6.5.patch): the locales load at the first read of `locales` rather than with zod, about 0.7 MiB
++// of heap in every process that never reads them. English, the default, is its own module (classic/schemas.cjs loads
++// it). The getter is not configurable, so the seal at the end of this file leaves it unread.
++var lazyLocales;
++Object.defineProperty(exports, "locales", { enumerable: true, configurable: false, get: function () { return lazyLocales || (lazyLocales = __importStar(require("../locales/index.cjs"))); } });
+ __exportStar(require("./registries.cjs"), exports);
+ __exportStar(require("./doc.cjs"), exports);
+ __exportStar(require("./compile.cjs"), exports);
+diff --git a/v4/mini/external.cjs b/v4/mini/external.cjs
+index 935d793565c46def1af0f700cf9fb8f585f4fcf9..9998228ffb3b1a09ab5c9c652ed5b0a487645934 100644
+--- a/v4/mini/external.cjs
++++ b/v4/mini/external.cjs
+@@ -62,7 +62,11 @@ Object.defineProperty(exports, "ZodCompileUnsupportedError", { enumerable: true,
+ Object.defineProperty(exports, "getDiscriminatedOption", { enumerable: true, get: function () { return index_js_1.getDiscriminatedOption; } });
+ var json_schema_processors_js_1 = require("../core/json-schema-processors.cjs");
+ Object.defineProperty(exports, "toJSONSchema", { enumerable: true, get: function () { return json_schema_processors_js_1.toJSONSchema; } });
+-exports.locales = __importStar(require("../locales/index.cjs"));
++// MAWS (patches/zod@4.6.5.patch): the locales load at the first read of `locales` rather than with zod, about 0.7 MiB
++// of heap in every process that never reads them. English, the default, is its own module (classic/schemas.cjs loads
++// it). The getter is not configurable, so the seal at the end of this file leaves it unread.
++var lazyLocales;
++Object.defineProperty(exports, "locales", { enumerable: true, configurable: false, get: function () { return lazyLocales || (lazyLocales = __importStar(require("../locales/index.cjs"))); } });
+ /** A special constant with type `never` */
+ // export const NEVER = {} as never;
+ // iso

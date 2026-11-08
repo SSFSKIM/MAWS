@@ -15,8 +15,11 @@
 // sample also records two diagnostics no verdict reads: the cores' cumulative CPU times (os.cpus()), which give each
 // interval's busy share, and the process outside the measured set that used the most CPU over the interval, from the
 // one process table the sample reads to tell that each measured process is still the one the window started with. The
-// measured processes are those of the profile whose argv0 is `maws-supervisor`; the replay has no `claude` child, and a
-// real one is the session's cost, not the daemon's.
+// O17 footprint fix adds more, recorded only: from the footprint reader's same call, the machine's memory pressure level
+// and each process's cumulative CPU ticks, idle and interrupt wakeups and pageins at every sample, and vm_stat's
+// swapouts and pageouts from the window's first sample to its last, which the JSON keeps and one line per window
+// prints (`window activity`). The measured processes are those of the profile whose argv0 is `maws-supervisor`; the
+// replay has no `claude` child, and a real one is the session's cost, not the daemon's.
 //
 // The scene runs on the shape `MAWS_HOST_MODE` names, as e2e/supervisor.spec.ts does. `detached` is M1's, which recorded
 // the baseline; `daemon` is M9's (acceptance 7): main reaches the engine host through a private `mawsd` on the profile,
@@ -100,7 +103,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { daemonPaths } from '@shared/daemon/files';
 import { machineSettingsDefaults } from '@shared/settings/defaults';
-import { abaDeltas, abaLine, mawsdSpineLine, boundMisses, busyShare, cpuSeconds, cpuTimes, DAEMON_IDLE_BOUND, ENROLLED_INCREMENT_BUDGET_KIB, enrolledLine, floorLine, IDLE_RUN, idleLine, invalidReasons, loadPair, mawsdLine, measured, median, readerMismatches, readFootprints, readProcessTable, readTopMem, SESSION_HOST_BOUND_KIB, SESSION_HOST_RUN, sessionHostLine, sessionHostMisses, sessionHosts, SPINE_RELEASED_RUN, spineLine, topOutside, type CpuTimes, type MeasuredProcess, type ProcessRow, type ShapeReading, type SpineWindow, type TopMem, type TopProcess } from '../test/support/daemon-idle';
+import { abaDeltas, abaLine, activityDelta, activityLine, mawsdSpineLine, boundMisses, busyShare, cpuSeconds, cpuTimes, DAEMON_IDLE_BOUND, ENROLLED_INCREMENT_BUDGET_KIB, enrolledLine, floorLine, IDLE_RUN, idleLine, invalidReasons, loadPair, mawsdLine, measured, median, readerMismatches, readFootprints, readProcessTable, readTopMem, readVmPaging, SESSION_HOST_BOUND_KIB, SESSION_HOST_RUN, sessionHostLine, sessionHostMisses, sessionHosts, SPINE_RELEASED_RUN, spineLine, topOutside, type CpuTimes, type MeasuredProcess, type ProcessActivity, type ProcessRow, type ReaderMachine, type ShapeReading, type SpineWindow, type TopMem, type TopProcess, type VmPaging } from '../test/support/daemon-idle';
 import { writeSpineFixture } from '../test/support/spine-fixture';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { invoke, launchReady, value } from './support/c7-replay';
@@ -145,8 +148,10 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 interface JournalRow { seq: number; direction: string; frame: Record<string, unknown> }
 // A sample's readings, then its diagnostics: the cores' cumulative CPU times, the interval's busy share and the top
-// process outside the measured set over the interval (both null at the window's first sample, which has no interval).
-interface Sample { atS: number; load: number; footprintKiB: Record<number, number | null>; rssKiB: Record<number, number | null>; cpuTimesMs: CpuTimes; busyShare: number | null; topProcess: TopProcess | null }
+// process outside the measured set over the interval (both null at the window's first sample, which has no interval);
+// then what the footprint reader's call also gave (recorded only): the memory pressure level and each process's
+// cumulative CPU ticks, wakeups and pageins.
+interface Sample { atS: number; load: number; footprintKiB: Record<number, number | null>; rssKiB: Record<number, number | null>; cpuTimesMs: CpuTimes; busyShare: number | null; topProcess: TopProcess | null; pressureLevel: number | null; activity: Record<number, ProcessActivity | null> }
 interface CrossCheck { atS: number; readings: { pid: number; argv0: string; footprintKiB: number; top: TopMem | null }[] }
 
 function firstPrompt(): string {
@@ -955,6 +960,8 @@ async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = I
   let crossCheck: CrossCheck | null = null;
   let lastTable: Map<number, ProcessRow> | null = null; // the previous sample's, for the interval's top process
   let lastTimes: CpuTimes | null = null; // the previous sample's, for the interval's busy share
+  let timebase: ReaderMachine['timebase'] | null = null; // the first sample's, for the CPU ticks
+  const paging: { first: (VmPaging & { atS: number }) | null; last: (VmPaging & { atS: number }) | null } = { first: null, last: null }; // vm_stat at the first and last samples
   const windowStart = Date.now();
   for (let k = 0; k < run.samples; k += 1) {
     await sleep(Math.max(0, windowStart + k * run.everyS * 1_000 - Date.now()));
@@ -964,8 +971,13 @@ async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = I
     const topProcess = topOutside(lastTable, table, procs.map((p) => p.pid));
     lastTable = table;
     const live = procs.filter((p) => table.get(p.pid)?.started === started.get(p.pid));
-    const read = readFootprints(live.map((p) => p.pid));
+    const reading = readFootprints(live.map((p) => p.pid));
+    const read = reading.processes;
+    if (k === 0) paging.first = { atS, ...readVmPaging() };
+    if (k === run.samples - 1) paging.last = { atS, ...readVmPaging() };
+    timebase ??= reading.machine.timebase;
     const footprintOf = (pid: number) => { const f = read.get(pid); return f === undefined || 'errno' in f ? null : f.footprintKiB; };
+    const activityOf = (pid: number): ProcessActivity | null => { const f = read.get(pid); return f === undefined || 'errno' in f ? null : { cpuTicks: f.cpuTicks, idleWakeups: f.idleWakeups, interruptWakeups: f.interruptWakeups, pageins: f.pageins }; };
     if (k === 0 && live.length > 0) {
       const top = readTopMem(live.map((p) => p.pid)); // back to back with the first reader
       crossCheck = { atS, readings: live.filter((p) => footprintOf(p.pid) !== null).map((p) => ({ pid: p.pid, argv0: p.argv0, footprintKiB: footprintOf(p.pid)!, top: top.get(p.pid) ?? null })) };
@@ -973,16 +985,18 @@ async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = I
     }
     const footprintKiB: Record<number, number | null> = {};
     const rssKiB: Record<number, number | null> = {};
+    const activity: Record<number, ProcessActivity | null> = {};
     for (const p of procs) {
       const alive = live.includes(p) && ps(p.pid, 'lstart') === started.get(p.pid); // still the same process after the read
       if (alive && footprintOf(p.pid) === null) throw new Error(`proc_pid_rusage could not read ${p.argv0} pid ${p.pid}, which is alive (${JSON.stringify(read.get(p.pid))})`);
       footprintKiB[p.pid] = alive ? footprintOf(p.pid) : null;
       rssKiB[p.pid] = alive ? Number(ps(p.pid, 'rss')) : null;
+      activity[p.pid] = alive ? activityOf(p.pid) : null;
       if (!alive && !lost.some((l) => l.pid === p.pid)) lost.push({ pid: p.pid, argv0: p.argv0, atS });
       if (alive && k === run.samples - 1) cpuAtEnd.set(p.pid, cpuSeconds(ps(p.pid, 'time')));
     }
     const cpuTimesMs = cpuTimes();
-    samples.push({ atS, load: loadavg()[0]!, footprintKiB, rssKiB, cpuTimesMs, busyShare: lastTimes === null ? null : busyShare(lastTimes, cpuTimesMs), topProcess });
+    samples.push({ atS, load: loadavg()[0]!, footprintKiB, rssKiB, cpuTimesMs, busyShare: lastTimes === null ? null : busyShare(lastTimes, cpuTimesMs), topProcess, pressureLevel: reading.machine.pressureLevel, activity });
     lastTimes = cpuTimesMs;
   }
 
@@ -998,9 +1012,19 @@ async function measureWindow(procs: readonly MeasuredProcess[], run: IdleRun = I
   const load = Math.max(...samples.map((s) => s.load));
   const pair = loadPair(samples.map((s) => s.load));
   const processes = procs.map((p) => ({ ...p, started: started.get(p.pid), cpuStartS: cpuAtStart.get(p.pid), cpuEndS: cpuAtEnd.get(p.pid) ?? null }));
+  // Recorded only (the O17 footprint fix): vm_stat's paging from the first sample to the last, and each process's
+  // activity from its first reading to its last; no verdict reads them.
+  const first = paging.first!;
+  const last = paging.last!;
+  const pagingDelta = { first, last, pageouts: last.pageouts - first.pageouts, swapouts: last.swapouts - first.swapouts };
+  const activity = procs.flatMap((p) => {
+    const readings = samples.map((s) => s.activity[p.pid]).filter((a): a is ProcessActivity => a !== null && a !== undefined);
+    return readings.length === 0 || timebase === null ? [] : [{ argv0: p.argv0, pid: p.pid, ...activityDelta(readings[0]!, readings.at(-1)!, timebase) }];
+  });
+  console.log(activityLine({ pressureLevels: samples.map((s) => s.pressureLevel), paging: { pageouts: pagingDelta.pageouts, swapouts: pagingDelta.swapouts, seconds: last.atS - first.atS }, processes: activity }));
   return {
     samples, lost, mismatches, names, whole: whole.length, footprintKiB, rssKiB, perProcess, cpuS, load, loadPair: pair,
-    record: { run, footprintKiB, rssKiB, perProcess, cpuS, load, loadPair: pair, processes, crossCheck, mismatches, lost, samples },
+    record: { run, footprintKiB, rssKiB, perProcess, cpuS, load, loadPair: pair, processes, crossCheck, mismatches, lost, timebase, paging: pagingDelta, activity, samples },
   };
 }
 

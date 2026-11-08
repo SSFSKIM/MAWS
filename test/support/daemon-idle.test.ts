@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   abaDeltas,
   abaLine,
+  activityDelta,
+  activityLine,
   baselineProblems,
   boundMisses,
   busyShare,
@@ -26,6 +28,7 @@ import {
   measured,
   median,
   processTable,
+  readerMachine,
   readerMismatches,
   SESSION_HOST_BOUND_KIB,
   SESSION_HOST_RUN,
@@ -39,6 +42,7 @@ import {
   browserWindowProblems,
   topMem,
   topOutside,
+  vmPaging,
 } from './daemon-idle';
 
 describe('the idle statistics (P5 O2, M1)', () => {
@@ -100,20 +104,27 @@ describe('the idle statistics (P5 O2, M1)', () => {
 });
 
 describe('the physical footprint, read by pid without privilege (P5 Decision Log 48)', () => {
-  it("reads the proc_pid_rusage reader's lines: the footprint and the resident size in KiB, or the errno for a pid it could not read", () => {
-    const text = '11 51200000 79425536\n12 errno 3\n13 1023 2048\n';
+  it("reads the proc_pid_rusage reader's lines: the footprint and the resident size in KiB with the CPU ticks, wakeups and pageins, or the errno for a pid it could not read", () => {
+    const text = 'machine 1 125 3\n11 51200000 79425536 9453054 0 9 253\n12 errno 3\n13 1023 2048 0 1 2 3\n';
     expect(footprints(text, [11, 12, 13])).toEqual(
       new Map([
-        [11, { footprintKiB: 50_000, residentKiB: 77_564 }],
+        [11, { footprintKiB: 50_000, residentKiB: 77_564, cpuTicks: 9_453_054, idleWakeups: 0, interruptWakeups: 9, pageins: 253 }],
         [12, { errno: 3 }],
-        [13, { footprintKiB: 1023 / 1024, residentKiB: 2 }],
+        [13, { footprintKiB: 1023 / 1024, residentKiB: 2, cpuTicks: 0, idleWakeups: 1, interruptWakeups: 2, pageins: 3 }],
       ]),
     );
   });
 
   it('refuses reader output that misses a pid asked for or says something else, quoting it', () => {
-    expect(() => footprints('11 51200000 79425536\n', [11, 12])).toThrow('the footprint reader printed no line for pid 12: "11 51200000 79425536\\n"');
-    expect(() => footprints('11 lots 79425536\n', [11])).toThrow('the footprint reader printed no line for pid 11: "11 lots 79425536\\n"');
+    expect(() => footprints('11 51200000 79425536 1 2 3 4\n', [11, 12])).toThrow('the footprint reader printed no line for pid 12: "11 51200000 79425536 1 2 3 4\\n"');
+    expect(() => footprints('11 lots 79425536 1 2 3 4\n', [11])).toThrow('the footprint reader printed no line for pid 11: "11 lots 79425536 1 2 3 4\\n"');
+    expect(() => footprints('11 51200000 79425536\n', [11])).toThrow('the footprint reader printed no line for pid 11'); // the two sizes alone are the old form
+  });
+
+  it("reads the reader's machine line: the memory pressure level (none when the sysctl failed) and the timebase", () => {
+    expect(readerMachine('machine 4 125 3\n11 errno 3\n')).toEqual({ pressureLevel: 4, timebase: { numer: 125, denom: 3 } });
+    expect(readerMachine('machine - 1 1\n')).toEqual({ pressureLevel: null, timebase: { numer: 1, denom: 1 } });
+    expect(() => readerMachine('11 errno 3\n')).toThrow('the footprint reader printed no machine line: "11 errno 3\\n"');
   });
 
   it("reads top's MEM column, each value with its unit and the resolution it prints to, past top's header and its change markers", () => {
@@ -282,6 +293,30 @@ describe("the window's diagnostics, recorded beside the readings and read by no 
     expect(topOutside(before, new Map([...after, row(40, 4, 'mds', 'Wed Oct 28 20:10:00 2026')]), [11])).toEqual({ pid: 40, name: 'mds', cpuS: 4 }); // a reused pid: not 4 less 2
     expect(topOutside(before, new Map([...after, row(60, 3.5, 'spotlightknowledged')]), [11])).toEqual({ pid: 60, name: 'spotlightknowledged', cpuS: 3.5 });
     expect(topOutside(null, after, [11])).toBeNull(); // the window's first sample has no interval behind it
+  });
+
+  it("reads vm_stat's page size, Pageouts and Swapouts, and refuses output without them", () => {
+    const text = [
+      'Mach Virtual Memory Statistics: (page size of 16384 bytes)',
+      'Pages free:                                     4064.',
+      'Pageins:                                   212930071.',
+      'Pageouts:                                   60319289.',
+      'Swapins:                                   870002147.',
+      'Swapouts:                                 1091808328.',
+      '',
+    ].join('\n');
+    expect(vmPaging(text)).toEqual({ pageBytes: 16_384, pageouts: 60_319_289, swapouts: 1_091_808_328 });
+    expect(() => vmPaging(text.replace(/^Swapouts.*$/m, ''))).toThrow('vm_stat printed no Swapouts line');
+  });
+
+  it("takes a process's activity between two readings, its CPU ticks through the timebase, and prints the window's recording-only line", () => {
+    const first = { cpuTicks: 9_453_054, idleWakeups: 0, interruptWakeups: 9, pageins: 253 };
+    const last = { cpuTicks: 11_637_236, idleWakeups: 2, interruptWakeups: 23, pageins: 253 };
+    const delta = activityDelta(first, last, { numer: 125, denom: 3 });
+    expect(delta).toEqual({ cpuMs: 91.01, idleWakeups: 2, interruptWakeups: 14, pageins: 0 }); // 2,184,182 ticks of 41.67 ns
+    expect(activityLine({ pressureLevels: [1, 1, 2, null], paging: { pageouts: 0, swapouts: 4_096, seconds: 600 }, processes: [{ argv0: 'mawsd', ...delta }] })).toBe(
+      '[daemon-idle] window activity (recorded only) · memory pressure level 1 at 2, 2 at 1, unread at 1 of 4 samples · vm_stat swapouts +4096, pageouts +0 over 600 s · mawsd cpu 91.01 ms, wakeups 2 idle and 14 interrupt, pageins +0',
+    );
   });
 });
 
