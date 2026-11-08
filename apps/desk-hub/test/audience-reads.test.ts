@@ -232,8 +232,13 @@ describe('to browsers', () => {
     await waitFor(() => (refusedOf(liveB, theirs.writer).length === 1 ? true : undefined));
     expect(refusedOf(liveB, theirs.writer)[0].refusal.message).toBeUndefined();
     expect(refusedOf(liveB, stream)).toEqual([]);
+    // A resume sends `caught-up`, then the audit record's latest (project.ts `resume`), and `following` returns at the
+    // first: each replay is read once its own entry has come. The record goes oldest first, so once B's refusal is in,
+    // the stream's refusal before it would have come too, were B shown it.
     const replayedA = await following(ADMIN, project);
     const replayedB = await following(o.bEmail, project);
+    await waitFor(() => (refusedOf(replayedA, stream).length === 1 ? true : undefined));
+    await waitFor(() => (refusedOf(replayedB, theirs.writer).length === 1 ? true : undefined));
     expect(refusedOf(replayedA, stream)).toHaveLength(1);
     expect(refusedOf(replayedB, stream)).toEqual([]);
     expect(refusedOf(replayedB, theirs.writer)).toHaveLength(1);

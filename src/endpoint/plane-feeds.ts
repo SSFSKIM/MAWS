@@ -66,8 +66,7 @@ export type PlaneFeedsContext = {
   leases: ArtifactsFeedsContext['leases'];
   /** P5 O17 M9a: the machine's agent browser (the `browser.inventory` feed's inventories), null before the endpoint starts. */
   browser: InventoryFeedsContext['browser'];
-  /** P5 O8 M7b: whether a project is the org's now (the `channel` feed's reach), and the cursors its entries go under. */
-  reaches: ChannelFeedsContext['reaches'];
+  /** P5 O8 M7b: the cursors the `channel` feed's entries go under. */
   cursors: ChannelFeedsContext['cursors'];
   /**
    * P5 O8 M6a: the machine's owners as the head gives them now, whose reading the spine's records carry, and whether that
@@ -143,7 +142,7 @@ export class PlaneFeeds implements Plane {
     this.#attention = new AttentionFeeds({ dispatch: ctx.dispatch, ranks: ctx.ranks, log: ctx.log, backlogBytes: ctx.backlogBytes });
     this.#artifacts = new ArtifactsFeeds({ dispatch: ctx.dispatch, ranks: ctx.ranks, artifacts: ctx.artifacts, leases: ctx.leases, log: ctx.log, backlogBytes: ctx.backlogBytes });
     this.#inventory = new InventoryFeeds({ browser: ctx.browser, backlogBytes: ctx.backlogBytes });
-    this.#channel = new ChannelFeeds({ dispatch: ctx.dispatch, ranks: ctx.ranks, reaches: ctx.reaches, cursors: ctx.cursors, log: ctx.log, backlogBytes: ctx.backlogBytes });
+    this.#channel = new ChannelFeeds({ dispatch: ctx.dispatch, ranks: ctx.ranks, cursors: ctx.cursors, log: ctx.log, backlogBytes: ctx.backlogBytes });
   }
 
   open(sub: Subscription): void {
