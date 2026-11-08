@@ -83,4 +83,16 @@ describe("the main loop's queue records on a subagent loop's tasks", () => {
       ['bqueue004', 'completed', '2026-10-17T09:00:18.000Z'],
     ]);
   });
+
+  // The engine enqueues a notice before it hands the agent its copy, so the main loop's word is the older: the loop's own
+  // end stands, its word, time and summary, where an older queued word would otherwise be folded over it.
+  it("count only while the loop's own rows leave the task running", () => {
+    const summary = 'Background command "Build the app" failed with exit code 2';
+    const delivered: JsonObject = {
+      type: 'user', uuid: '00000012-0000-4000-8000-0000000000aa', timestamp: '2026-10-17T09:00:19.000Z', isMeta: true, origin: { kind: 'task-notification' },
+      message: { role: 'user', content: `<task-notification>\n<task-id>bqueue001</task-id>\n<tool-use-id>toolu_18J1</tool-use-id>\n<status>failed</status>\n<summary>${summary}</summary>\n</task-notification>` },
+    };
+    const [job] = loopJobs(indexOf([...own, delivered]), false, indexOf(queued)).jobs;
+    expect([job.taskId, job.status, job.endedAt, job.summary]).toEqual(['bqueue001', 'failed', '2026-10-17T09:00:19.000Z', summary]);
+  });
 });

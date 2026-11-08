@@ -387,11 +387,14 @@ export function derive(d: Derivation): Body {
 export function loopJobs(loop: LoopIndex, running: boolean, also?: LoopIndex): Pick<Body, 'jobs' | 'mcp'> {
   const naming = (index: LoopIndex, taskId: string) => index.mentions.filter((m) => m.taskId === taskId && m.from !== 'result');
   const jobs = loop.started.map((s): Job => {
-    // `also`, the main loop's index for a subagent's loop: its words on the agent's tasks count after the loop's own,
-    // since the bridge's note of a subagent's task it stopped is in the main transcript (the plane's `jobs_body`).
-    const mentions = [...naming(loop, s.taskId), ...(also ? naming(also, s.taskId) : [])];
+    // `also`, the main loop's index for a subagent's loop: its words on the agent's tasks count while the loop's own
+    // leave the task running, since the bridge's note of a subagent's task it stopped is in the main transcript, and so
+    // is the engine's notice queued for an agent that handed back before it came (the plane's `jobs_body`). Never after
+    // the loop's own end: a notice is enqueued there before the loop is handed its copy, so it is the older word.
+    const monitor = loop.monitors.has(s.taskId);
     const start: Outcome = { status: 'running', raw: 'running', at: s.startedAt, terminal: false };
-    const outcome = fold(mentions, loop.monitors.has(s.taskId), start)!;
+    let outcome = fold(naming(loop, s.taskId), monitor, start)!;
+    if (also && outcome.status === 'running') outcome = fold(naming(also, s.taskId), monitor, outcome)!;
     const status: JobStatus = outcome.terminal ? (outcome.status as JobStatus) : running ? 'running' : 'exited';
     return {
       ...s,
