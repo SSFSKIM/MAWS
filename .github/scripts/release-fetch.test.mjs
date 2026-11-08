@@ -11,12 +11,14 @@ const script = fileURLToPath(new URL('./release-fetch.sh', import.meta.url));
 function fixture(t, env = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'release-fetch-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const dest = join(dir, 'asset.zip'), log = join(dir, 'calls');
+  const dest = join(dir, 'asset.zip'), log = join(dir, 'calls'), headers = join(dir, 'headers');
   writeFileSync(dest, 'old destination');
   writeFileSync(log, '');
+  writeFileSync(headers, '');
   writeFileSync(join(dir, 'curl'), `#!/bin/bash
 set -eu
 printf '%s\\n' "$*" >>"$CALLS"
+for arg in "$@"; do if [[ $arg == @- ]]; then cat >>"$HEADER_INPUT"; fi; done
 out=; prev=; for arg in "$@"; do if [[ $prev == -o ]]; then out=$arg; fi; prev=$arg; done
 url=\${!#}
 case "$url" in
@@ -34,9 +36,9 @@ case "$url" in
 esac
 `, { mode: 0o755 });
   return {
-    dest, dir, calls: () => readFileSync(log, 'utf8'),
+    dest, dir, calls: () => readFileSync(log, 'utf8'), headers: () => readFileSync(headers, 'utf8'),
     run: () => spawnSync('/bin/bash', [script, 'o/r', 'v1', 'asset.zip', dest], {
-      encoding: 'utf8', env: { ...process.env, GH_TOKEN: '', GITHUB_TOKEN: '', PATH: `${dir}:${process.env.PATH}`, CALLS: log, ...env },
+      encoding: 'utf8', env: { ...process.env, GH_TOKEN: '', GITHUB_TOKEN: '', PATH: `${dir}:${process.env.PATH}`, CALLS: log, HEADER_INPUT: headers, ...env },
     }),
   };
 }
@@ -61,10 +63,11 @@ for (const tokens of [{}, { GH_TOKEN: 'preferred-token', GITHUB_TOKEN: 'other-to
     assert.match(calls[2], /-fsSL/);
     const token = tokens.GH_TOKEN || tokens.GITHUB_TOKEN;
     if (token) {
-      assert.ok(calls.slice(1).every((line) => line.includes(`Authorization: Bearer ${token}`)));
-      assert.ok(!calls[0].includes(token));
+      assert.ok(!f.calls().includes(token), "curl argv exposes the token");
+      assert.equal(f.headers().split(`Authorization: Bearer ${token}`).length - 1, 2, "both API requests receive authentication on stdin");
+      if (tokens.GH_TOKEN && tokens.GITHUB_TOKEN) assert.ok(!f.headers().includes(tokens.GITHUB_TOKEN));
       assert.ok(!(r.stdout + r.stderr).includes(token));
-    } else assert.doesNotMatch(f.calls(), /Authorization/);
+    } else assert.doesNotMatch(f.calls() + f.headers(), /Authorization/);
   });
 }
 
@@ -75,8 +78,8 @@ for (const failure of ['API_FAIL', 'METADATA_FAIL']) {
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /web.*failed/i);
     assert.match(r.stderr, /API.*failed/i);
-    assert.ok(!(r.stdout + r.stderr).includes('secret-token'));
+    assert.ok(!(r.stdout + r.stderr + f.calls()).includes('secret-token'));
     assert.equal(readFileSync(f.dest, 'utf8'), 'old destination');
-    assert.deepEqual(readdirSync(f.dir).sort(), ['asset.zip', 'calls', 'curl']);
+    assert.deepEqual(readdirSync(f.dir).sort(), ['asset.zip', 'calls', 'curl', 'headers']);
   });
 }

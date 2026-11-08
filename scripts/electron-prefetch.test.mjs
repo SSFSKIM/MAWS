@@ -26,7 +26,7 @@ printf 'zip bytes' >"$out"
 `, { mode: 0o755 });
   writeFileSync(join(bin, 'install-electron'), '#!/bin/bash\necho installer >>"$CALLS"\n', { mode: 0o755 });
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, CALLS: log, electron_config_cache: cache, ELECTRON_INSTALL_PLATFORM: 'linux', ELECTRON_INSTALL_ARCH: 'x64', ELECTRON_SKIP_BINARY_DOWNLOAD: '0' };
-  return { cache, log, run: (entry = script, overrides = {}) => spawnSync(process.execPath, [entry], { cwd: dir, env: { ...env, ...overrides }, encoding: 'utf8' }) };
+  return { dir, cache, log, run: (entry = script, overrides = {}) => spawnSync(process.execPath, [entry], { cwd: dir, env: { ...env, ...overrides }, encoding: 'utf8' }) };
 }
 
 test('prefetch uses the Electron v5 cache key and reuses a cached zip without the network', (t) => {
@@ -60,4 +60,46 @@ test('skip binary download avoids both the prefetch and the installer', (t) => {
   const f = fixture(t);
   assert.equal(f.run(postinstall, { ELECTRON_SKIP_BINARY_DOWNLOAD: '1', NO_NETWORK: '1' }).status, 0);
   assert.equal(readFileSync(f.log, 'utf8'), '');
+});
+
+for (const entry of [script, postinstall]) {
+  test(`${entry === script ? 'setup prefetch' : 'postinstall'} succeeds offline with installed Electron and an empty cache`, (t) => {
+    const f = fixture(t);
+    const electron = join(f.dir, 'node_modules/electron');
+    mkdirSync(join(electron, 'dist'), { recursive: true });
+    writeFileSync(join(electron, 'dist/version'), '44.4.5');
+    writeFileSync(join(electron, 'path.txt'), 'electron');
+    writeFileSync(join(electron, 'dist/electron'), 'installed binary');
+    const r = f.run(entry, { NO_NETWORK: '1' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(f.log, 'utf8'), entry === script ? '' : 'installer\n');
+  });
+}
+
+for (const damage of ['version', 'path', 'binary']) {
+  test(`an installed Electron with a wrong ${damage} still needs a prefetch`, (t) => {
+    const f = fixture(t);
+    const electron = join(f.dir, 'node_modules/electron');
+    mkdirSync(join(electron, 'dist'), { recursive: true });
+    writeFileSync(join(electron, 'dist/version'), damage === 'version' ? '43.0.0' : '44.4.5');
+    writeFileSync(join(electron, 'path.txt'), damage === 'path' ? 'wrong' : 'electron');
+    if (damage !== 'binary') writeFileSync(join(electron, 'dist/electron'), 'installed binary');
+    const r = f.run(postinstall, { NO_NETWORK: '1' });
+    assert.notEqual(r.status, 0);
+    assert.match(readFileSync(f.log, 'utf8'), /https:\/\/github.com/);
+    assert.doesNotMatch(readFileSync(f.log, 'utf8'), /installer/);
+  });
+}
+
+test('the installed check matches Electron’s platform path, v-prefixed version and override path', (t) => {
+  const f = fixture(t);
+  const electron = join(f.dir, 'node_modules/electron');
+  mkdirSync(join(electron, 'dist'), { recursive: true });
+  writeFileSync(join(electron, 'dist/version'), 'v44.4.5');
+  writeFileSync(join(electron, 'path.txt'), 'Electron.app/Contents/MacOS/Electron');
+  const override = join(f.dir, 'custom-dist');
+  mkdirSync(override);
+  const r = f.run(postinstall, { NO_NETWORK: '1', ELECTRON_INSTALL_PLATFORM: 'darwin', ELECTRON_OVERRIDE_DIST_PATH: override });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(f.log, 'utf8'), 'installer\n');
 });

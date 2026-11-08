@@ -9,10 +9,29 @@ import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+// Match electron/install.js's isInstalled() before touching the download cache.
+// A working dist does not need the zip to remain cached after installation.
+function isInstalled(version, platform) {
+  const platformPath = {
+    darwin: 'Electron.app/Contents/MacOS/Electron',
+    mas: 'Electron.app/Contents/MacOS/Electron',
+    linux: 'electron', freebsd: 'electron', openbsd: 'electron', win32: 'electron.exe',
+  }[platform];
+  const electron = join(process.cwd(), 'node_modules/electron');
+  try {
+    if (readFileSync(join(electron, 'dist/version'), 'utf8').replace(/^v/, '') !== version) return false;
+    if (readFileSync(join(electron, 'path.txt'), 'utf8') !== platformPath) return false;
+  } catch {
+    return false;
+  }
+  return existsSync(process.env.ELECTRON_OVERRIDE_DIST_PATH || join(electron, 'dist', platformPath));
+}
+
 export function prefetchElectron() {
   if (process.env.ELECTRON_SKIP_BINARY_DOWNLOAD === '1') return;
   const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).devDependencies.electron;
   const platform = process.env.ELECTRON_INSTALL_PLATFORM || process.env.npm_config_platform || process.platform;
+  if (isInstalled(version, platform)) return;
   let arch = process.env.ELECTRON_INSTALL_ARCH || process.env.npm_config_arch || process.arch;
   // Match install.js's Rosetta selection when Node itself is x64 on an arm64 Mac.
   if (platform === 'darwin' && process.platform === 'darwin' && arch === 'x64' && process.env.npm_config_arch === undefined) {

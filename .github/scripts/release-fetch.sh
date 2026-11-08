@@ -26,11 +26,13 @@ fail() {
   echo "release-fetch: web download failed (curl $web_status): $web; API $1 failed for $repo $tag $asset" >&2
   exit 1
 }
-headers=(-H 'X-GitHub-Api-Version: 2022-11-28')
+headers=('X-GitHub-Api-Version: 2022-11-28')
 token=${GH_TOKEN:-${GITHUB_TOKEN:-}}
-[[ -z $token ]] || headers+=(-H "Authorization: Bearer $token")
+[[ -z $token ]] || headers+=("Authorization: Bearer $token")
+# curl reads these headers from stdin, never argv (visible in process listings).
+api_fetch() { printf '%s\n' "${headers[@]}" | fetch -H @- "$@"; }
 api=https://api.github.com/repos/$repo/releases
-fetch "${headers[@]}" -H 'Accept: application/vnd.github+json' -o "$work/release.json" "$api/tags/$tag_path" || fail 'release lookup'
+api_fetch -H 'Accept: application/vnd.github+json' -o "$work/release.json" "$api/tags/$tag_path" || fail 'release lookup'
 id=$(python3 -I - "$work/release.json" "$asset" <<'PY'
 import json, sys
 assets = json.load(open(sys.argv[1]))['assets']
@@ -40,5 +42,5 @@ if len(ids) != 1 or type(ids[0]) is not int or ids[0] <= 0:
 print(ids[0])
 PY
 ) 2>/dev/null || fail 'asset lookup'
-fetch "${headers[@]}" -H 'Accept: application/octet-stream' -o "$work/asset" "$api/assets/$id" || fail 'asset download'
+api_fetch -H 'Accept: application/octet-stream' -o "$work/asset" "$api/assets/$id" || fail 'asset download'
 mv -f "$work/asset" "$dest"
