@@ -107,8 +107,9 @@ class Ledger {
   ) {
     this.heldKeys = [heldKey];
   }
+  /** `endpoint.grants`' answer: an entry for each member the machine's own head lists (src/endpoint/grants.ts). */
   answer() {
-    return { members: head.members.map((m) => ({ member: m.id, grant: this.grants[m.id] ?? null, highWater: this.highWater[m.id] ?? 0 })) };
+    return { members: (this.head ?? head).members.map((m) => ({ member: m.id, grant: this.grants[m.id] ?? null, highWater: this.highWater[m.id] ?? 0 })) };
   }
   async intake(value: unknown): Promise<{ ok: true } | { ok: false; code: string }> {
     const g = value as Signed<Grant>;
@@ -616,10 +617,46 @@ describe('delivery', () => {
     h.mini.ledger.head = { ...head, members: head.members.filter((m) => m.id !== B) }; // 7: no B yet
     head = { ...head, version: 8 }; // B added
     expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] })).toEqual({ ok: true, version: 1, delivered: 'done' });
-    expect(h.mini.pushes).toEqual([[7, 8]]);
+    // Its ledger answered no entry for B (its head doesn't list B): the head pushed, the ledger read once more.
+    expect(h.mini.calls).toBe(2);
+    expect(h.mini.pushes[0]).toEqual([7, 8]);
     expect(h.mini.ledger.head?.version).toBe(8);
     expect(h.mini.acts).toHaveLength(1);
     expect(h.prompts).toHaveLength(1);
+  });
+
+  it('refuses `ledger-unread`, asking nothing, when the push can’t bring the machine to the member: no mark is guessed', async () => {
+    const h = await harness();
+    h.mini.ledger.head = { ...head, members: head.members.filter((m) => m.id !== B) };
+    head = { ...head, version: 8 };
+    h.mini.pushScript.push({ state: 'refused', reason: 'offline' });
+    expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] })).toMatchObject({ ok: false, reason: 'ledger-unread' });
+    expect(h.mini.pushes).toHaveLength(1);
+    expect(h.prompts).toEqual([]);
+    expect(h.issued(MINI, B)).toBeUndefined();
+  });
+
+  it('refuses `ledger-unread` through the door when this Mac’s own endpoint hasn’t seen the member yet: nothing to push, try again shortly', async () => {
+    const h = await harness();
+    h.door.ledger.head = { ...head, members: head.members.filter((m) => m.id !== B) };
+    head = { ...head, version: 8 };
+    const answer = await h.grants.set({ ref: HOME, member: B, rights: ['spawn'] });
+    expect(answer).toMatchObject({ ok: false, reason: 'ledger-unread' });
+    expect(!answer.ok && answer.detail).toMatch(/hasn’t seen this member yet/);
+    expect(h.prompts).toEqual([]);
+  });
+
+  it('pushes the held head before a re-grant too, when the machine’s ledger answers none of the missing members', async () => {
+    const h = await harness();
+    await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] });
+    h.mini.ledger.grants = {};
+    h.mini.ledger.highWater = {};
+    const view = await okView(h, MINI);
+    const pushed = h.mini.pushes.length;
+    h.mini.ledger.head = { ...head, version: 6, members: head.members.filter((m) => m.id !== B) }; // behind, as one enrolled again from an older head
+    expect(await h.grants.regrant({ ref: MINI, digest: view.digest! })).toEqual({ ok: true, results: [{ member: B, version: 2, delivered: 'done' }] });
+    expect(h.mini.pushes[pushed]).toEqual([6, 7]); // before the read, then the delivery's own
+    expect(h.prompts).toHaveLength(2);
   });
 
   it('sends nothing while the machine’s answer is below the signing head, the push has no answer or its link dropped: pending, sent at the next pass once it is there', async () => {
@@ -695,8 +732,9 @@ describe('delivery', () => {
 
   it('sends through the door at once, with no push (its head can’t be read), and records a refusal from a door behind as final', async () => {
     const h = await harness();
-    h.door.ledger.head = { ...head, version: 6, members: head.members.filter((m) => m.id !== B) };
-    expect(await h.grants.set({ ref: HOME, member: B, rights: ['spawn'] })).toMatchObject({ delivered: { refused: 'not-listed' } });
+    // Its head lags the one this Mac signs under: it still lists another owner for its machine.
+    h.door.ledger.head = { ...head, version: 6, machines: head.machines.map((m) => (m.ref === HOME ? { ...m, owners: [C] } : m)) };
+    expect(await h.grants.set({ ref: HOME, member: B, rights: ['spawn'] })).toMatchObject({ delivered: { refused: 'unknown-signer' } });
     await h.grants.send();
     expect(h.door.acts).toHaveLength(1);
     expect(h.mini.pushes).toEqual([]);

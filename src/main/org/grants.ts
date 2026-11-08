@@ -284,6 +284,26 @@ export function createGrants(deps: GrantsDeps): Grants {
     }
     return result;
   }
+  /**
+   * The ledger read just before signing, with an entry for each of `members`. The endpoint answers only the members its
+   * own head lists, so over a link a ledger that answers none for one of them has its machine brought to the held head
+   * first (the same push as a delivery's, deliveries.ts), then read once more. Through the door there is nothing to push.
+   * An entry still absent is the caller's `ledger-unread`: no mark is guessed.
+   */
+  async function readFor(at: GrantsContext, ref: string, members: readonly string[]): ReturnType<typeof read> {
+    const first = await read(at, ref, true);
+    const lacks = (r: NonNullable<typeof first>) => r.ok && members.some((m) => !r.members.some((e) => e.member === m));
+    if (first === null || !lacks(first) || ref === deps.local) return first;
+    const held = deps.context();
+    if (held === null || !stands(at)) return null;
+    const brought = await deps.bringTo(ref as MachineRef, held.head.version);
+    if (!stands(at)) return null;
+    if (!brought.ok) {
+      log(`${ref}'s ledger answers no entry for a member its head doesn't list yet, and it couldn't be brought to version ${held.head.version} (${brought.why})`);
+      return first;
+    }
+    return read(at, ref, true);
+  }
   const heldAnswer = (at: GrantsContext, ref: string) => {
     const held = answers.get(ref);
     return held !== undefined && held.signIn === at.signIn ? held : null;
@@ -491,10 +511,11 @@ export function createGrants(deps: GrantsDeps): Grants {
       // Judged before anything is read or asked, on the version the issued record alone would give.
       const before = await problemsOf(at, await draft(nextVersion(issuedNow(), 0), at));
       if (before.length > 0) return refuse('ineligible', `this grant can't be signed here: ${before.join(', ')}`, before);
-      const ledger = await read(at, ref, true);
+      const ledger = await readFor(at, ref, [member]);
       if (ledger === null) return refuse('signed-out');
       if (!ledger.ok) return refuse('ledger-unread', `${ref}'s grant ledger can't be read (${ledger.reason}): no version is guessed`);
       const entry = ledger.members.find((m) => m.member === member);
+      if (entry === undefined && ref === deps.local) return refuse('ledger-unread', 'this Mac’s own endpoint hasn’t seen this member yet: try again shortly');
       if (entry === undefined) return refuse('ledger-unread', `${ref}'s grant ledger answered nothing for this member: no version is guessed`);
       // The head held now (the read was an await): the key speaking for the machine, and the judge again below.
       const current = deps.context();
@@ -540,7 +561,10 @@ export function createGrants(deps: GrantsDeps): Grants {
     return exclusive(async () => {
       const store = await storeFor();
       if ('ok' in store) return store;
-      const ledger = await read(at, ref, true);
+      // The members this Mac granted on the machine with rights that the held head lists: each needs its ledger entry.
+      const before = store.get();
+      const granted = before === 'damaged' ? [] : before.issued.filter((i) => i.signed.body.machine === ref && i.signed.body.org === at.org && i.signed.body.rights.length > 0).map((i) => i.signed.body.member);
+      const ledger = await readFor(at, ref, granted.filter((m) => at.head.members.some((x) => x.id === m)));
       if (ledger === null) return refuse('signed-out');
       if (!ledger.ok) return refuse('ledger-unread', `${ref}'s grant ledger can't be read (${ledger.reason}): no version is guessed`);
       const file = store.get();
