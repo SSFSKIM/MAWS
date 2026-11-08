@@ -676,7 +676,6 @@ export const ORG = {
   },
   enrollSignedOut: 'The sign-in ended, so the enrollment stopped. Nothing was signed.',
   enrollGone: 'This enrollment is no longer running.',
-  enrollElsewhere: 'Another enrollment is under way, so this one stopped. Nothing was signed.',
   enrollSignInEnded: 'The sign-in this sheet opened under ended. Close it to enroll again.',
   enrollRefusals: {
     'not-root': 'This Mac can’t sign: enroll from an admin’s Mac that does.',
