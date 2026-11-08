@@ -1918,9 +1918,9 @@ These are the live run's checks, none of them verified before it:
    - `sminos share … view` at the owner's terminal says "use MAWS".
 
 **The pitfall.**
-- The profile's sign-in opens the default browser at the staging hub's `/cdn-cgi/access/cli` (`access-login.ts:194`). If that browser still holds the owner's staging Access session, Access likely completes the sign-in as the owner. So just before B's sign-in, the owner opens `https://desk-hub-staging.opencognita-platform.workers.dev/cdn-cgi/access/logout`.
-- That logs out of every Access app on the team, so production desk web asks for sign-in again later. MAWS's org sessions and cloudflared's CLI token are untouched.
-- Until the owner is signed back in as themselves, nobody runs `cloudflared access login` for staging.
+- The profile's sign-in opens the default browser at the staging hub's `/cdn-cgi/access/cli` (`access-login.ts:194`). If that browser holds the owner's staging Access session, or a stored Google session of the owner's, Access completes the sign-in as the owner; on 2026-11-08 the Google session did. So just before B's sign-in, the owner clears that browser's site data for the staging hub's domain and for the team's Access domain, then signs in with the one-time PIN and B's email.
+- Never open Access's logout URL for this. It revokes every Access session of that identity, cloudflared's CLI token included: on 2026-11-08 it ended the pair and the harness's admin calls until the owner ran `cloudflared access login` again, in a private window as themselves (Outcomes, M6b).
+- While that browser is signed in as B, nobody runs `cloudflared access login` for staging, or the CLI token would name B.
 - The sitting checks the pass-through by reading the member email the profile shows before its pairing completes. If it shows the owner's email, stop. `pair` reads only B's pending entries (`?member=`), so an entry posted as the owner is never listed for B.
 
 **Teardown.**
@@ -4226,11 +4226,12 @@ A future child that keeps state written from more than one place over an unrelia
 - the deploy suites: `reach-acceptance` (37), `real-member` (24), `staging-scripts` (33);
 - the gates the PR body lists.
 
-Still owed: the shared staging run (Concrete Steps). Layer 1 is the harness member. Layer 2 is the real-member sitting, booked by the architect. M6b lands on its gates. The shared run started during the final gate, on the branch head, and the landing waits on it only if it finds a defect (Decision Log, "M6b lands before the shared run", amended). The run's result goes into these Outcomes in a records commit of the architect's. The live checklist:
-- lane B inside the reach scenes;
-- record acts over the relays;
-- pairing through real Access with a second identity;
-- the profile daemon's teardown.
+The shared staging run (Concrete Steps), 2026-11-08, on the branch head 169108598, whose code is the gated tree; it found no defect in what M6b admits, so the landing stood (P5 Decision Log 252):
+- **Layer 1, the harness member,** passed every item, among them lane B inside the reach scenes and the record acts over the relays. The first pass from 02:51Z failed on infrastructure: the MacBook couldn't resolve the staging names for about a minute at a load near 147. The rerun from 03:25Z passed all but 3d, an archive-window flake that passed alone at 03:54Z. Nothing was left behind, the secret scan was clean, and production was unchanged.
+- **Layer 2, the real-member sitting,** from about 04:40Z. A was the harness, kept up by the desk track's driver, and the owner played B, signed in through real Access with their second email and paired as B's first device. A private session left B's sidebar. Shared at Can message, it came back as "Private · shared with you" with no transcript. At View, its transcript showed. At View, B's Send sent nothing, and A's endpoint logged no act from B. At Converse on a lane B session, B pinned, read and drafted, and A's reading and draft were unchanged. `sminos share` at a terminal answered "use MAWS".
+- **Three reader-side defects,** board #525: the pane at Can message never settles, the owner's prompts read "Your message" to a reader, and View's Send fails without a word. They join the second-member precondition.
+- **The sign-in pitfall was wrong twice** (Concrete Steps, corrected). Access's logout URL revoked the owner's cloudflared CLI token too, which ended the pair until the owner signed in again. Afterwards, a stored Google session still completed Access as the owner, until the browser's site data was cleared and the one-time PIN was used.
+- **Teardown** was complete at 05:27Z: B was removed and its keys revoked, Access admits only the owner, the run's entries were swept, the VM was deleted, and the profile's daemon was ended and its directory removed.
 
 **Retrospective (M6b).** Built as four tasks, each reviewed at its frontier. The desk track reviewed the endpoint and the deploy harness, and reviewer-high reviewed the branch.
 - **Where the rounds went.** M6a's lesson held, one layer up. Almost every material finding was an identity or authority checked once and assumed later, at a lifecycle boundary:
