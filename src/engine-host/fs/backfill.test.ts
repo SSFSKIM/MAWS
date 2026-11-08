@@ -603,6 +603,19 @@ describe('subagent sidecars map to the X1 graph', () => {
     expect(outcomes(plain.events)).toEqual(want);
     expect(only(plain.events, 'user.message').map((e) => [e.messageUuid, e.origin])).toEqual([['n1', 'task-notification']]); // still one message
 
+    // A subagent's transcript writes them after the engine's preamble, on a meta row the engine marked as notifications';
+    // the same text on any other row is somebody's words.
+    const preamble = `[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\n\n${joined}`;
+    const notice = (origin: Record<string, unknown> | undefined) => rec({ type: 'user', uuid: 'n1', parentUuid: 'r2', timestamp: at(3), isMeta: true, ...(origin && { origin }), message: { role: 'user', content: preamble } });
+    const engine = run(notice({ kind: 'task-notification', producer: 'session-task' }));
+    expect(outcomes(engine.events)).toEqual(want);
+    expect(only(engine.events, 'user.message').map((e) => e.origin)).toEqual(['task-notification']);
+    for (const origin of [undefined, { kind: 'human' }]) {
+      const typed = run(notice(origin));
+      expect(outcomes(typed.events)).toEqual([]);
+      expect(only(typed.events, 'user.message').map((e) => e.origin)).toEqual([origin === undefined ? null : 'human']);
+    }
+
     // The queued form, written without source_uuid: its blocks' tool uses are its identity, so a second delivery of
     // the same blocks is the same notification and maps to nothing.
     const queued = rec({ type: 'attachment', uuid: 'q1', parentUuid: 'r2', timestamp: at(3), attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: joined } });

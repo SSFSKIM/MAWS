@@ -287,7 +287,7 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillCo
     return;
   }
   if (typeof content === 'string') {
-    const notifications = parseTaskNotifications(content);
+    const notifications = parseTaskNotifications(record, content);
     if (notifications !== null) {
       const tools = notifications.flatMap((n) => (n.toolUseId === null ? [] : [n.toolUseId]));
       const duplicate = sourceUuid !== null ? ctx.notificationSources.has(sourceUuid) : tools.length > 0 && tools.every((tool) => ctx.notificationTools.has(tool));
@@ -831,17 +831,28 @@ interface TaskNotification {
 // The same disk shape used by the follower's response-delivery classification.
 export function isTaskNotification(record: TranscriptRecord): boolean {
   const content = messageContent(record);
-  return record.type === 'user' && typeof content === 'string' && parseTaskNotifications(content) !== null;
+  return record.type === 'user' && typeof content === 'string' && parseTaskNotifications(record, content) !== null;
 }
 
+const NOTIFICATION_OPENING = '<task-notification>';
 const NOTIFICATION_BLOCK = /<task-notification>[\s\S]*?<\/task-notification>/g;
+const NOTIFICATION_PREAMBLE = '[SYSTEM NOTIFICATION - NOT USER INPUT]\n';
 
 // The engine's `<task-notification>` blocks (SPEC 20.9), each the outcome of a background task, delivered as a user
-// record: null for a text that is no notification. The engine joins the notifications it delivers at once into one
-// record, each block after a blank line (DX4's vectors, "several notifications in one row"): each block is read alone.
-function parseTaskNotifications(content: string): TaskNotification[] | null {
-  if (!content.trimStart().startsWith('<task-notification>')) return null;
-  return (content.match(NOTIFICATION_BLOCK) ?? []).map(parseTaskNotification);
+// record: null for a text that is no notification. A subagent's transcript writes them after the engine's preamble and
+// a blank line, on a record the engine marked `origin.kind: task-notification` (DX4's reading rule: a person can type
+// the preamble's words). The engine joins the notifications it delivers at once into one record, each block after a
+// blank line (DX4's vectors, "several notifications in one row"): each block is read alone.
+function parseTaskNotifications(record: TranscriptRecord, content: string): TaskNotification[] | null {
+  const text = notificationText(record, content);
+  return text === null ? null : (text.match(NOTIFICATION_BLOCK) ?? []).map(parseTaskNotification);
+}
+
+function notificationText(record: TranscriptRecord, content: string): string | null {
+  if (content.trimStart().startsWith(NOTIFICATION_OPENING)) return content;
+  if ((record.origin as { kind?: unknown } | undefined)?.kind !== 'task-notification' || !content.startsWith(NOTIFICATION_PREAMBLE)) return null;
+  const cut = content.indexOf(`\n\n${NOTIFICATION_OPENING}`);
+  return cut < 0 ? null : content.slice(cut + 2);
 }
 
 function parseTaskNotification(block: string): TaskNotification {
