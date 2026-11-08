@@ -715,25 +715,35 @@ describe('the real-member step', () => {
     expect(run.stdout).toContain('files holding the Access token or a secret the run handled: 1');
   });
 
-  it.skipIf(!zsh)('removes the code file pair made when the command dies without removing it, and never one that was there before', () => {
-    // A command killed outright (SIGKILL: no handler of its own runs) leaves the file it made; the step's trap removes it.
+  it.skipIf(!zsh)('never removes a code file itself: one there before, one another run makes meanwhile, or one a killed command left', () => {
+    // The command's own cleanup (real-member.ts, withExitCleanup) removes the file it made at any end but SIGKILL; the step
+    // removes none, since it can't tell its run's file from another's. A file a killed run left refuses a retry
+    // (EEXIST), which is visible and safe.
     const { dir, env } = setup();
-    // As real-member.ts makes it: only where no file is.
-    const dying = ['#!/bin/sh', 'make() { [ -e "$1" ] || printf code > "$1"; }', 'prev=; for a in "$@"; do case $a in --code-file=*) make "${a#--code-file=}";; esac; [ "$prev" = --code-file ] && make "$a"; prev=$a; done', 'kill -KILL $$', ''];
-    writeFileSync(join(dir, 'bin', 'pnpm'), dying.join('\n'), { mode: 0o755 });
-    const made = join(dir, 'code');
-    const run = spawnSync('zsh', [runner, 'real-member', 'pair', '--email-file', '/x/second-email', '--code-file', made], { encoding: 'utf8', env, timeout: 60_000 });
-    expect(run.status).not.toBe(0);
-    expect(existsSync(made)).toBe(false);
+    const at = (name: string) => join(dir, name);
+    const pair = (code: string[]) => spawnSync('zsh', [runner, 'real-member', 'pair', '--email-file', '/x/second-email', ...code], { encoding: 'utf8', env, timeout: 60_000 });
+    const stub = (lines: string[]) => writeFileSync(join(dir, 'bin', 'pnpm'), ['#!/bin/sh', 'file=; prev=; for a in "$@"; do case $a in --code-file=*) file=${a#--code-file=};; esac; [ "$prev" = --code-file ] && file=$a; prev=$a; done', ...lines, ''].join('\n'), { mode: 0o755 });
+
+    // there before the run: refused by the command (EEXIST), kept, in either spelling of the option
+    stub(['[ -e "$file" ] && exit 1', 'printf code > "$file"', 'exit 0']);
     for (const given of [(path: string) => ['--code-file', path], (path: string) => [`--code-file=${path}`]]) {
-      const there = join(dir, `there-${given.length}`);
+      const there = at(`there-${given.length}`);
       writeFileSync(there, 'not the run’s');
-      spawnSync('zsh', [runner, 'real-member', 'pair', '--email-file', '/x/second-email', ...given(there)], { encoding: 'utf8', env, timeout: 60_000 });
+      expect(pair(given(there)).status).not.toBe(0);
       expect(readFileSync(there, 'utf8')).toBe('not the run’s');
     }
-    const equals = join(dir, 'code-equals');
-    spawnSync('zsh', [runner, 'real-member', 'pair', '--email-file', '/x/second-email', `--code-file=${equals}`], { encoding: 'utf8', env, timeout: 60_000 });
-    expect(existsSync(equals)).toBe(false);
+
+    // another run makes it after this step starts and before the command's exclusive open, which then refuses
+    stub(['printf "another run’s" > "$file"', 'exit 1']);
+    const raced = at('raced');
+    expect(pair(['--code-file', raced]).status).not.toBe(0);
+    expect(readFileSync(raced, 'utf8')).toBe('another run’s');
+
+    // the command made it and was killed outright, its own cleanup never run: left for the retry to refuse
+    stub(['printf code > "$file"', 'kill -KILL $$']);
+    const killed = at('killed');
+    expect(pair(['--code-file', killed]).status).not.toBe(0);
+    expect(readFileSync(killed, 'utf8')).toBe('code');
   });
 
   it.skipIf(!zsh)('takes no option that would move it off staging, its keys or its scan, and only its three verbs', () => {

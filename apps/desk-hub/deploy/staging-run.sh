@@ -360,18 +360,9 @@ case $step in
     for a in "$@"; do
       [[ $a == (--config|--device-keys|--scan|--production|--hub)(|=*) ]] && { print -r -- "real-member takes no $a here: the step names staging, the keys and the scan itself: stop. Nothing was changed."; exit 2; }
     done
-    # pair's code file, when this run is the one to make it (an absolute path where no file is: the command refuses any
-    # other, and keeps a file that was there): the trap removes it too, should the command die without its own cleanup.
-    CODE=
-    if [[ $sub == pair ]]; then
-      prev=
-      for a in "$@"; do
-        [[ $prev == --code-file ]] && CODE=$a
-        [[ $a == --code-file=* ]] && CODE=${a#--code-file=}
-        prev=$a
-      done
-      [[ $CODE == /* && ! -e $CODE && ! -L $CODE ]] || CODE=
-    fi
+    # pair's code file is the command's alone to remove (real-member.ts's withExitCleanup, at any end but SIGKILL): this
+    # step can't tell a file its run made from one another run made at the same path, so it removes none. A file a killed
+    # run left refuses a retry at that path (EEXIST), which is visible and safe.
     LOG=$O/real-member-$sub-$(stamp).log; : > $LOG
     SCAN=$O/real-member.scan; : > $SCAN
     say() { print -r -- "$*" | tee -a $LOG; }
@@ -379,7 +370,6 @@ case $step in
     ran=1 finished=0
     finish() {
       (( finished )) && return; finished=1
-      [[ -n $CODE ]] && rm -f -- $CODE
       leaked=$(secret_scan <(print -r -- "$T"; cat $SCAN) $LOG)
       unset T
       rm -f $SCAN

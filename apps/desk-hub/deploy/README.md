@@ -456,8 +456,8 @@ through Access as the second email; the entry whose MAC answers the code's secre
 unendorsed, as the app lists another member's first device, and its fingerprint printed to compare with the profile's.
 Any other pending entry of B's is named and passed over. The code's file is removed however the step ends: a write
 failing partway, the wait's end, a SIGINT, SIGHUP or SIGTERM (the sitting runs `pair` in the background and stops it
-with SIGTERM; a file left behind would refuse a retry at its path); and `staging-run.sh` removes it as well should the
-command die without its own cleanup, when the run made it (an absolute path where no file was). `remove`
+with SIGTERM; a file left behind would refuse a retry at its path). Only a SIGKILL leaves it, and a retry at that path
+is then refused, visibly; `staging-run.sh` removes no code file itself, since it can't tell its run's from another's. `remove`
 takes B out of the state and revokes every key of its devices (then `access-sync` again).
 
 What it refuses: any hub but staging's host and org (`--production`, a config naming production, another org), before
