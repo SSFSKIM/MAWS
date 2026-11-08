@@ -6,4 +6,5 @@ import type { CommandGrades } from '../grades';
 export const grades = {
   'endpoint.local.act': 'internal',
   'endpoint.local.call': 'internal',
+  'endpoint.local.grants': 'internal', // P5 O8 M4b
 } as const satisfies CommandGrades<'endpoint'>;

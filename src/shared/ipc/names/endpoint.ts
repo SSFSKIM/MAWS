@@ -4,4 +4,4 @@ export const commands = [] as const;
 
 export const events = [] as const;
 
-export const mainOnlyCommands = ['endpoint.local.act', 'endpoint.local.call'] as const;
+export const mainOnlyCommands = ['endpoint.local.act', 'endpoint.local.call', 'endpoint.local.grants' /* P5 O8 M4b */] as const;

@@ -88,25 +88,29 @@ describe('the seam’s life', () => {
     expect(scene.logs.join('\n')).not.toContain('s3cret');
   });
 
-  it('the local door (P5 O8 M6b): machine.sock’s endpoint.local.act and endpoint.local.call reach the module’s door; the endpoint’s own dispatch is refused them; no door answers unavailable', async () => {
+  it('the local door (P5 O8 M6b, M4b): machine.sock’s endpoint.local.act, endpoint.local.call and endpoint.local.grants reach the module’s door; the endpoint’s own dispatch is refused them; no door answers unavailable', async () => {
     const acts: unknown[] = [];
     const calls: unknown[][] = [];
     const { endpoint } = await started();
     const app = await scene.app('machine');
     await expect(app.request('endpoint.local.act', { action: { action: 'record.access' } })).resolves.toMatchObject({ ok: true, value: { state: 'refused', reason: 'unavailable' } });
     await expect(app.request('endpoint.local.call', { name: 'record.policy', input: null })).resolves.toMatchObject({ ok: true, value: { ok: false, code: 'unavailable' } });
+    await expect(app.request('endpoint.local.grants', undefined)).resolves.toMatchObject({ ok: true, value: { ok: false, code: 'unavailable' } }); // P5 O8 M4b
     Object.assign(endpoint, {
       local: {
         act: async (action: unknown) => (acts.push(action), { state: 'done', result: { changed: true, policyRev: 3 } }),
-        call: async (name: string, input: unknown) => (calls.push([name, input]), { ok: true, output: { supported: false } }),
+        call: async (name: string, input: unknown) => (calls.push([name, input]), { ok: true, output: name === 'endpoint.grants' ? { members: [] } : { supported: false } }),
       },
     });
     await expect(app.request('endpoint.local.act', { action: { action: 'record.access' } })).resolves.toMatchObject({ ok: true, value: { state: 'done', result: { changed: true, policyRev: 3 } } });
     await expect(app.request('endpoint.local.call', { name: 'record.policy', input: { session: 's-1' } })).resolves.toMatchObject({ ok: true, value: { ok: true, output: { supported: false } } });
     expect(acts).toEqual([{ action: 'record.access' }]);
-    expect(calls).toEqual([['record.policy', { session: 's-1' }]]);
+    // P5 O8 M4b: endpoint.local.grants is the door's `endpoint.grants` call
+    await expect(app.request('endpoint.local.grants', undefined)).resolves.toMatchObject({ ok: true, value: { ok: true, output: { members: [] } } });
+    expect(calls).toEqual([['record.policy', { session: 's-1' }], ['endpoint.grants', null]]);
     await expect(endpoint.s.dispatch('machine', 'endpoint.local.act', { action: { action: 'record.access' } })).resolves.toMatchObject({ ok: false, error: { code: 'internal' } });
     await expect(endpoint.s.dispatch('machine', 'endpoint.local.call', { name: 'record.policy', input: null })).resolves.toMatchObject({ ok: false, error: { code: 'internal' } });
+    await expect(endpoint.s.dispatch('machine', 'endpoint.local.grants', undefined)).resolves.toMatchObject({ ok: false, error: { code: 'internal' } });
     expect(acts).toHaveLength(1);
   });
 

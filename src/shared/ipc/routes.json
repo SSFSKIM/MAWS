@@ -442,6 +442,7 @@
   "designSystems.house",
   "endpoint.local.act",
   "endpoint.local.call",
+  "endpoint.local.grants",
   "engine.binaryInfo",
   "engine.budget",
   "engine.pendingItems",
