@@ -82,6 +82,29 @@ export function commandOf(line: string): Command | null {
   return null;
 }
 
+/** A reader of the control file's commands: each call returns the complete lines appended since the last, none of those
+ * written before the reader was made. The offset is in bytes and only whole lines are decoded: the file's size counts
+ * bytes while a decoded string counts UTF-16 units, so the text sliced at the size would cut the command after a
+ * non-ASCII line; and a line not yet ended by its newline is left for a later call, since an append may land in parts. */
+export function controlReader(path: string): () => string[] {
+  let offset = statSync(path).size;
+  return () => {
+    const fresh = readFileSync(path).subarray(offset);
+    const end = fresh.lastIndexOf(0x0a);
+    if (end < 0) return [];
+    offset += end + 1;
+    return fresh.subarray(0, end).toString('utf8').split('\n').map((x) => x.trim()).filter(Boolean);
+  };
+}
+
+/** `line` as keep-a1 prints it: each of the head's member emails replaced, since every control line is echoed and a
+ * draft's text printed, to stdout and the run's log, and a member may type an email into a draft. The longest first, so
+ * an email that ends another is not masked inside it. (Secrets is not for these: it passes values under 16 characters
+ * and writes each to the token scan list.) */
+export function maskEmails(emails: readonly string[], line: string): string {
+  return [...emails].filter(Boolean).sort((x, y) => y.length - x.length).reduce((out, email) => out.replaceAll(email, '<a member’s email>'), line);
+}
+
 export async function main(argv: string[]): Promise<number> {
   const { values } = parseArgs({ args: argv, options: OPTIONS }) as unknown as { values: Values };
   const config = readDeployConfig(values.config ?? join(process.env.DESK_HUB_APP!, 'deploy', 'staging.json'));
@@ -99,7 +122,9 @@ export async function main(argv: string[]): Promise<number> {
     return 2;
   }
   secrets.add(read.DESK_ACCESS_TOKEN);
-  const print = secrets.guard((line: string) => console.log(line));
+  // Filled once the head is read; the lines printed before that name no member's email.
+  const emails: string[] = [];
+  const print = secrets.guard((line: string) => console.log(maskEmails(emails, line)));
   const cleanup = new Cleanup(4 * STEP_MS);
   const person = new Person(`https://${config.host}`, read.DESK_ACCESS_TOKEN, () => cleanup.check(), { requestMs: 30_000, signal: cleanup.signal });
   checkTestHub(person.hub, 'keep scene A1 up against it');
@@ -113,6 +138,7 @@ export async function main(argv: string[]): Promise<number> {
       const admin = await OrgAdmin.open(person, { org: config.org.id, pinnedGenesis: config.orgGenesis }, device, print);
       const view = new OrgView(person);
       await view.reread();
+      emails.push(...view.chain.at(-1)!.state.members.map((m) => m.email));
       if (!view.chain.at(-1)!.state.members.some((m) => m.id === b)) throw new Error(`the head lists no member ${b}: run real-member add first`);
       const a: RunDevice = { member: admin.member, id: device.id, clientClass: 'native-mac', channel: device.channel, stepUp: device.stepUp } as RunDevice;
       const vm = new VmMachine({ devcloud: values.devcloud ?? 'devcloud', vm: given.vm }, join(process.env.HOME ?? '/tmp', '.local', 'share', 'o18-m6-scratch'), {
@@ -156,17 +182,15 @@ export async function main(argv: string[]): Promise<number> {
       const run = { hub: { host: new URL(person.hub).host, org: config.org.id }, scenes: [...REACH_SCENES] as string[] };
       print(`keep-a1: READY. Commands, one a line in ${given.control}: access <${LEVELS.join('|')}> <S|L> · share <${GRADES.join('|')}|none> <S|L> · policy <S|L> · adraft <text> · aread · terminal-share · down`);
 
-      let offset = statSync(given.control).size;
+      const control = controlReader(given.control);
       let before = '';
       while (!cleanup.signal.aborted) {
-        const size = statSync(given.control).size;
-        if (size <= offset) {
+        const lines = control();
+        if (lines.length === 0) {
           await new Promise((done) => setTimeout(done, 1000));
           continue;
         }
-        const text = readFileSync(given.control, 'utf8').slice(offset);
-        offset = size;
-        for (const line of text.split('\n').map((x) => x.trim()).filter(Boolean)) {
+        for (const line of lines) {
           print(`> ${line}`);
           const c = commandOf(line);
           if (c === null) {

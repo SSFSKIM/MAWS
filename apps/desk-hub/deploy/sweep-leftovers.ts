@@ -25,6 +25,31 @@ export function sweepMode(values: { 'device-keys'?: string }, names: readonly st
   return { names: [...new Set(names)] };
 }
 
+/** One name's two undoings: `unlist` takes it out of the org state and says what it found there, `revoke` revokes its hub
+ * credential. */
+export type SweepSteps = { unlist: (name: string) => Promise<string>; revoke: (name: string) => Promise<void> };
+
+/** One name swept, true when both its steps held. The unlisting and the revoking are attempted each on its own, as the
+ * harness registers them as two cleanup steps: a head that cannot be read or signed leaves the hub credential no less
+ * usable, so it is revoked all the same. */
+export async function sweepName(name: string, steps: SweepSteps, print: (line: string) => void): Promise<boolean> {
+  let held = true;
+  try {
+    print(`${name}: ${await steps.unlist(name)}`);
+  } catch (error) {
+    held = false;
+    print(`${name}: FAILED taking it out of the org state: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  try {
+    await steps.revoke(name);
+    print(`${name}: its hub credential revoked`);
+  } catch (error) {
+    held = false;
+    print(`${name}: FAILED revoking its hub credential: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return held;
+}
+
 export async function main(argv: string[]): Promise<number> {
   const { values, positionals } = parseArgs({ args: argv, options: { config: { type: 'string' }, 'device-keys': { type: 'string' } }, allowPositionals: true });
   const config = readDeployConfig((values.config as string | undefined) ?? join(process.env.DESK_HUB_APP!, 'deploy', 'staging.json'));
@@ -42,22 +67,16 @@ export async function main(argv: string[]): Promise<number> {
   const person = new Person(`https://${config.host}`, read.DESK_ACCESS_TOKEN, () => {}, { requestMs: 30_000 });
   checkTestHub(person.hub, 'sweep the reach runs’ leftovers from it');
   const admin = await OrgAdmin.open(person, { org: config.org.id, pinnedGenesis: config.orgGenesis }, await loadAdminDevice(values['device-keys'] as string), (line) => console.log(line));
+  const unlist = async (name: string): Promise<string> => {
+    const { state } = await admin.read();
+    const machine = state.machines.find((m) => m.name === name);
+    if (machine === undefined) return `not listed in the head (version ${state.version})`;
+    const signed = await admin.unlist({ name: machine.name, ref: machine.ref, key: { pub: machine.pub } });
+    return signed === null ? 'already out' : `taken out, its key retired (version ${signed.state.version})`;
+  };
   let failed = 0;
   for (const name of mode.names) {
-    try {
-      const { state } = await admin.read();
-      const machine = state.machines.find((m) => m.name === name);
-      if (machine === undefined) console.log(`${name}: not listed in the head (version ${state.version})`);
-      else {
-        const signed = await admin.unlist({ name: machine.name, ref: machine.ref, key: { pub: machine.pub } });
-        console.log(`${name}: ${signed === null ? 'already out' : `taken out, its key retired (version ${signed.state.version})`}`);
-      }
-      await revoke(person, name);
-      console.log(`${name}: its hub credential revoked`);
-    } catch (error) {
-      failed += 1;
-      console.log(`${name}: FAILED ${error instanceof Error ? error.message : String(error)}`);
-    }
+    if (!(await sweepName(name, { unlist, revoke: (n) => revoke(person, n) }, (line) => console.log(line)))) failed += 1;
   }
   return failed ? 1 : 0;
 }

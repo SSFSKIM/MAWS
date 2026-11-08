@@ -1,13 +1,14 @@
 // The real-member runs' drivers (deploy/keep-a1.ts, deploy/sweep-leftovers.ts): what their command lines admit before a
 // secret is read or anything reaches the hub or the VM, the commands keep-a1 reads from its control file, and the reach
-// items' log lines with the members' emails masked.
-import { readFileSync } from 'node:fs';
+// items' and keep-a1's log lines with the members' emails masked, and sweep-leftovers's two steps for each name.
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { PRODUCTION_HOST, STAGING_HOST } from '../../deploy/config.ts';
-import { commandOf, keepA1Mode } from '../../deploy/keep-a1.ts';
+import { commandOf, controlReader, keepA1Mode, maskEmails } from '../../deploy/keep-a1.ts';
 import { masked } from '../../deploy/reach-items.ts';
-import { LEFTOVER, sweepMode } from '../../deploy/sweep-leftovers.ts';
+import { LEFTOVER, sweepMode, sweepName } from '../../deploy/sweep-leftovers.ts';
 
 const deploy = join(import.meta.dirname, '../../deploy');
 const staging = JSON.parse(readFileSync(join(deploy, 'staging.json'), 'utf8')) as { worker: string; host: string };
@@ -59,6 +60,57 @@ describe('keep-a1’s control lines', () => {
   });
 });
 
+describe('keep-a1’s control file', () => {
+  let dir: string | undefined;
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+  const file = (initial: string) => {
+    dir = mkdtempSync(join(tmpdir(), 'keep-a1-control-'));
+    const path = join(dir, 'keep-a1.control');
+    writeFileSync(path, initial);
+    return path;
+  };
+
+  it('reads only what is appended after it starts, and the command after a non-ASCII line whole', () => {
+    const path = file('adraft from an earlier run, é\n');
+    const read = controlReader(path);
+    expect(read()).toEqual([]);
+    appendFileSync(path, 'adraft A’s café — naïve 🙂\n');
+    expect(read()).toEqual(['adraft A’s café — naïve 🙂']);
+    appendFileSync(path, 'down\n');
+    expect(read()).toEqual(['down']);
+    appendFileSync(path, 'adraft ü\n  share view S \n\ndown\n');
+    expect(read()).toEqual(['adraft ü', 'share view S', 'down']);
+  });
+
+  it('holds a line until its newline lands, a character split across the appends included', () => {
+    const path = file('');
+    const read = controlReader(path);
+    appendFileSync(path, 'do');
+    expect(read()).toEqual([]);
+    appendFileSync(path, 'wn\naccess list');
+    expect(read()).toEqual(['down']);
+    appendFileSync(path, 'ed S\n');
+    expect(read()).toEqual(['access listed S']);
+    const e = Buffer.from('é');
+    appendFileSync(path, Buffer.concat([Buffer.from('adraft caf'), e.subarray(0, 1)]));
+    expect(read()).toEqual([]);
+    appendFileSync(path, Buffer.concat([e.subarray(1), Buffer.from('\n')]));
+    expect(read()).toEqual(['adraft café']);
+    expect(read()).toEqual([]);
+  });
+});
+
+describe('keep-a1’s printed lines', () => {
+  it('mask every member email the head lists, however short, and print as given before the head is read', () => {
+    const line = '> adraft ask jo@ex.io, or kjo@ex.io (cc owner@example.invalid)';
+    expect(maskEmails([], line)).toBe(line);
+    expect(maskEmails(['jo@ex.io', 'owner@example.invalid', 'kjo@ex.io', ''], line)).toBe('> adraft ask <a member’s email>, or <a member’s email> (cc <a member’s email>)');
+  });
+});
+
 describe('sweep-leftovers’s command line', () => {
   it('sweeps only the reach run’s scene and probe machines, each once', () => {
     expect(sweepMode({ 'device-keys': '/k' }, ['o18-a1-5eb586', 'o18-pa-3c09d1', 'o18-a1-5eb586'], staging)).toEqual({ names: ['o18-a1-5eb586', 'o18-pa-3c09d1'] });
@@ -72,6 +124,29 @@ describe('sweep-leftovers’s command line', () => {
     for (const name of ['macbook', 'mini', 'o10-acceptance-1', 'o18-a4-5eb586', 'o18-a1-5EB586', 'o18-a1-5eb58', 'o18-a1-5eb5867', 'o18-l1-5eb586', ' o18-a1-5eb586']) {
       expect(sweepMode({ 'device-keys': '/k' }, ['o18-a1-5eb586', name], staging), name).toEqual({ refused: expect.stringContaining(name) });
     }
+  });
+});
+
+describe('sweep-leftovers’s steps for a name', () => {
+  const sweep = async (unlist: () => Promise<string>, revoke: () => Promise<void>) => {
+    const lines: string[] = [];
+    const revoked: string[] = [];
+    const held = await sweepName('o18-a1-5eb586', { unlist, revoke: async (name) => (revoked.push(name), revoke()) }, (line) => lines.push(line));
+    return { held, lines, revoked };
+  };
+
+  it('revokes the hub credential when the unlisting fails, and says both failed or held', async () => {
+    expect(await sweep(() => Promise.reject(new Error('the head did not verify')), async () => {})).toEqual({
+      held: false,
+      lines: ['o18-a1-5eb586: FAILED taking it out of the org state: the head did not verify', 'o18-a1-5eb586: its hub credential revoked'],
+      revoked: ['o18-a1-5eb586'],
+    });
+    expect(await sweep(async () => 'already out', () => Promise.reject(new Error('revoking o18-a1-5eb586: 500')))).toEqual({
+      held: false,
+      lines: ['o18-a1-5eb586: already out', 'o18-a1-5eb586: FAILED revoking its hub credential: revoking o18-a1-5eb586: 500'],
+      revoked: ['o18-a1-5eb586'],
+    });
+    expect(await sweep(async () => 'taken out, its key retired (version 9)', async () => {})).toMatchObject({ held: true, lines: ['o18-a1-5eb586: taken out, its key retired (version 9)', 'o18-a1-5eb586: its hub credential revoked'] });
   });
 });
 
