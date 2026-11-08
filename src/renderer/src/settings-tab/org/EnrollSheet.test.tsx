@@ -25,7 +25,7 @@ const CODE = 'mawsenroll2.eyJodWIiOiJodHRwczovL2h1YiJ9-the-secret-k-within';
 const EXPIRES = '2026-10-28T13:00:00.000Z';
 const CANDIDATE = { name: 'gpu-box', ref: 'GpuBoxRef00000000011', keyId: 'gpuBoxKeyId0011', digest: 'candidateDigest0011' };
 const enrolling = (patch: Partial<NonNullable<OrgEnrollingStatus>> = {}): OrgEnrollingStatus => ({ generation: 1, name: 'gpu-box', replace: null, expires: EXPIRES, candidate: null, problem: null, ...patch });
-const started: EnrollStartResult = { ok: true, code: CODE, expires: EXPIRES };
+const started: EnrollStartResult = { ok: true, code: CODE, expires: EXPIRES, generation: 1 };
 const DURING = 'The enrollment ended while Touch ID was open. Nothing was signed.';
 const BEFORE = 'The enrollment ended, or its key changed, before Touch ID. Nothing was signed.';
 
@@ -418,7 +418,7 @@ describe('the enrollment sheet’s run, at the state boundary (fix wave)', () =>
   // meet a later start through the sheet; the token fence stands behind that, pinned here.
   it('a start’s answer lands only on the start that sent it, while that start’s run hasn’t ended', () => {
     const second: EnrollRun = { at: 'starting', owner: 'org/me/dev', after: 1, name: 'second-box', token: 2, code: null };
-    expect(startedRun(second, 1, { ok: true, code: 'mawsenroll2.the-first-start-s-code', expires: EXPIRES })).toBe(second);
+    expect(startedRun(second, 1, { ok: true, code: 'mawsenroll2.the-first-start-s-code', expires: EXPIRES, generation: 1 })).toBe(second);
     expect(startedRun(second, 1, { ok: false, reason: 'busy' })).toBe(second);
     expect(startedRun(second, 2, started)).toEqual({ ...second, code: { value: CODE, expires: EXPIRES } });
     const ended: EnrollRun = { at: 'ended', why: 'gone', generation: 1 };

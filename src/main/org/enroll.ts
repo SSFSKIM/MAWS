@@ -313,7 +313,7 @@ export function createEnrollment(deps: EnrollmentDeps): Enrollment {
     schedule(r);
     log(`${r.generation}: ${replace === null ? '' : 're-'}enrolling ${name}, until ${new Date(expires).toISOString()}`);
     deps.changed();
-    return { ok: true, code, expires: new Date(expires).toISOString() };
+    return { ok: true, code, expires: new Date(expires).toISOString(), generation: r.generation };
   }
 
   async function approve(input: { generation: number; digest: string }): Promise<SignResult> {

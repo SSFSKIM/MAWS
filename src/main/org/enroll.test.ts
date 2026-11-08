@@ -357,6 +357,18 @@ describe('starting an enrollment', () => {
     expect(h.enrollment.status()).toBeNull();
   });
 
+  it("a start's answer names the run it made: its generation is the one the status publishes", async () => {
+    const h = await harness();
+    const first = await h.enrollment.start({ name: 'box' }, WINDOW);
+    expect(first).toMatchObject({ ok: true, generation: 1 });
+    expect(status(h).generation).toBe(1);
+    h.enrollment.cancel();
+    const second = await h.enrollment.start({ name: 'box' }, WINDOW);
+    expect(second).toMatchObject({ ok: true, generation: 2 });
+    expect(status(h).generation).toBe(2);
+    h.enrollment.cancel();
+  });
+
   it("a re-enrollment names the machine it replaces: the mint's `machine` is its name, the code's too", async () => {
     const h = await harness();
     const enroll = await started(h, 'mini', MINI);

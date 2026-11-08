@@ -279,7 +279,8 @@ export type PairStartResult = z.infer<typeof PairStartResultSchema>;
  */
 export const ENROLL_REFUSALS = ['not-root', 'not-admin', 'busy', 'hub', 'shape', 'machine-name-taken', 'prefix-names-machine', 'certified-machine', 'no-machine', 'refused', 'cancelled'] as const;
 export const EnrollStartResultSchema = z.union([
-  z.strictObject({ ok: z.literal(true), code: z.string(), expires: z.string() }),
+  // `generation`: the run this start made, so the sheet that sent it owns exactly that run (fix wave 4)
+  z.strictObject({ ok: z.literal(true), code: z.string(), expires: z.string(), generation: z.number().int().positive() }),
   z.strictObject({ ok: z.literal(false), reason: z.enum(ENROLL_REFUSALS), detail: z.string().optional() }),
 ]);
 export type EnrollStartResult = z.infer<typeof EnrollStartResultSchema>;
