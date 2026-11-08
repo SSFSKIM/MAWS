@@ -479,7 +479,9 @@ jobs:
       # The gate scripts' own tests (gate-plan, e2e-default-specs, ci-gate-alerts) have no lane of their own: vitest
       # collects no .github/ file, and e2e-default-specs pins default's own specs at the head, so a branch that adds a spec
       # or a group without moving the pin goes red here rather than unseen (P3-HD's 73 against the tree's 74, 2026-10-17).
-      - run: |
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
           bg=.github/scripts/gate-bg.sh
           $bg start-parts typecheck 'error TS|problems?\b' typecheck
           $bg start lint 'error TS|problems?\b' pnpm lint

@@ -100,7 +100,14 @@ export function contentId(dir) {
 
 const sha256Of = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 
-async function fetchTo(url, to) {
+export async function fetchTo(url, to) {
+  const release = /^https:\/\/github\.com\/([^/]+\/[^/]+)\/releases\/download\/([^/]+)\/([^/]+)$/.exec(url);
+  if (release) {
+    const fetched = spawnSync('bash', [join(REPO, '.github/scripts/release-fetch.sh'), release[1], decodeURIComponent(release[2]), decodeURIComponent(release[3]), to], { encoding: 'utf8' });
+    if (fetched.error) throw fetched.error;
+    if (fetched.status !== 0) throw new Error(fetched.stderr.trim() || `Release download failed: ${url}`);
+    return;
+  }
   const response = await globalThis.fetch(url);
   if (!response.ok) throw new Error(`${url}: ${response.status} ${response.statusText}`);
   writeFileSync(to, Buffer.from(await response.arrayBuffer()));
