@@ -258,6 +258,28 @@ describe('the sheet', () => {
   });
 });
 
+describe("the sheet's reader", () => {
+  for (const [what, next] of [
+    ['signs out (or loses the registration)', null],
+    ['gives way to another member', 'member-other'],
+  ] as const) {
+    it(`closes the sheet when its reader ${what}, showing none of their audience, and a late answer draws nothing`, async () => {
+      install({ 'org.policy.get': read([entry({ shares: [{ member: ANA, grade: 'view' }, { member: BEN, grade: 'list' }] })]) });
+      const sheet = await open();
+      await within(sheet).findByText(SHARE.general);
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Remove Ben' }));
+      fireEvent.click(within(sheet).getByRole('button', { name: SHARE.save }));
+      act(() => useHubAccess.setState({ member: next }));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(document.body.textContent).not.toMatch(/Ana|Ben|ana@|ben@/);
+      await fake.reply('org.policy.set', { ok: true, results: [{ line: { kind: 'share', member: BEN, grade: null }, state: 'done', changed: true, policyRev: 8, elsewhere: false }], policy: entry({ policyRev: 8 }) } satisfies OrgPolicySetResult);
+      await settle();
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(document.body.textContent).not.toMatch(/Ana|Ben/);
+    });
+  }
+});
+
 describe('what the sheet cannot offer', () => {
   it("says the machine's sminos can't keep a session's reach yet, and offers nothing", async () => {
     install({ 'org.policy.get': { ok: true, machine: OTHER_MACHINE, supported: false } satisfies OrgPolicy });

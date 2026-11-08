@@ -16,7 +16,7 @@
 //   is unknown stopped the save: it says so, the lines after it weren't sent, and a reload reads the reach as it stands.
 // - Every refusal reads in its own words (copy.ts); a reason no line knows shows one line naming the machine, the raw word
 //   beside it.
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { RecordPolicyEntry } from '@shared/ipc/schema/endpoint';
 import { FORMER_MEMBER, type OrgPolicySetInput, type OrgPolicySetResult, type OrgView } from '@shared/ipc/schema/org';
@@ -25,6 +25,7 @@ import { useMachineMark } from '../../app/machine-mark';
 import { ipc } from '../../ipc/client';
 import { useHubAccess } from '../../stores/hub-access';
 import { useSessions, type ListedSession } from '../../stores/sessions';
+import { closeDialog } from '../dialogs';
 import { Sheet, SheetForm } from '../Sheet';
 import { displayTitle, listedTitle } from '../title';
 import { CHOICE, PRIMARY, QUIET, SECONDARY } from '../ui';
@@ -85,7 +86,22 @@ function Words({ text, raw }: { text: string; raw: string | null }) {
   );
 }
 
+/**
+ * The sheet belongs to the reader it opened for: what it holds (the policy, the people, the org's directory, a save's
+ * results) is theirs. When who is signed in changes (a sign-out, here or in another window; a registration lost; another
+ * member) the sheet closes at once, drawing none of it, and nothing it asked for lands anywhere.
+ */
 export function ShareSheet({ address }: { address: AppSessionId }) {
+  const me = useHubAccess((s) => s.member);
+  const [reader] = useState(me);
+  const ended = me !== reader;
+  useEffect(() => {
+    if (ended) closeDialog();
+  }, [ended]);
+  return ended ? null : <ReaderSheet address={address} me={reader} />;
+}
+
+function ReaderSheet({ address, me }: { address: AppSessionId; me: string | null }) {
   const machine = useMachineMark(address).name;
   const title = useSessions((s) => {
     const record = s.records.get(address);
@@ -94,7 +110,6 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
   });
   const owners = useSessions((s) => s.listed.get(address as ListedSession['appId'])?.owners);
   const rowNames = useSessions((s) => s.members);
-  const me = useHubAccess((s) => s.member);
   const [read, setRead] = useState<Read>({ state: 'reading' });
   const [view, setView] = useState<OrgView | null | 'reading'>('reading');
   const [access, setAccess] = useState<ShareAccess>('listed');
@@ -104,6 +119,14 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
   const [refusal, setRefusal] = useState<string | null>(null);
   const [saved, setSaved] = useState<Saved | null>(null);
 
+  // whether the sheet is still open for its reader: an answer after it closed is dropped
+  const live = useRef(false);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
   const take = (next: Read) => {
     setRead(next);
     if (next.state !== 'ready') return;
@@ -114,7 +137,7 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
     setRefusal(null);
     setSaved(null);
     setRead({ state: 'reading' });
-    void readPolicy(address).then(take);
+    void readPolicy(address).then((next) => live.current && take(next));
   };
   useEffect(() => {
     let live = true;
@@ -139,6 +162,7 @@ export function ShareSheet({ address }: { address: AppSessionId }) {
     setRefusal(null);
     setSaved(null);
     const result = await ipc.invoke('org.policy.set', change);
+    if (!live.current) return;
     setSaving(false);
     if (!result.ok) return setRefusal(result.error.code);
     if (!result.value.ok) return setRefusal(result.value.reason);
