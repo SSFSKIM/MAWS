@@ -94,6 +94,8 @@ let remote: OrgPolicies;
 let local: OrgPolicies;
 const told: OrgPolicy[] = [];
 
+/** A record act's fields, as sminos requires them all (sminos_rpc.py's ACT_KEYS); `webauthn` may stand beside them. */
+const RECORD_ACT_FIELDS = ['v', 'org', 'machine', 'device', 'opId', 'opCreated', 'action', 'args', 'nonce', 'created', 'stepUp'] as const;
 type Share = { member: string; grade: string };
 type Member = Record<string, unknown> & { session: string; access: string; shares: Share[]; owners: string[]; policyRev: number };
 
@@ -157,7 +159,8 @@ class SminosRecords {
   /**
    * Why `rpc`'s proof is not the act it carries out, or null: §Q's binding as sminos checks it (sminos_rpc.py's
    * proof_refusal and record_proof), made here on its own, never through the endpoint's code. The proof an act in its
-   * exact shape (org-protocol's isAction) with no session or context; this machine's (the run's org and machine ref);
+   * exact shape (org-protocol's isAction) with exactly a record act's fields (a step-up; no session, context or
+   * requestDigest); this machine's (the run's org and machine ref);
    * this op's (its opId, opCreated and device, a device of the run's); a `record.*` act of this rpc's name; naming one
    * target, `session` equal to the rpc's or, lane B, `appSessionId` the app session the rpc's `session` is (stricter
    * than sminos, which can't resolve it); and past the target exactly the rpc's args less `session`, as canonical JSON.
@@ -165,7 +168,11 @@ class SminosRecords {
   #unbound(rpc: Record<string, unknown>): string | null {
     const proof = rpc.proof as Record<string, unknown> | undefined;
     const name = rpc.rpc as string;
-    if (!isAction(proof) || 'session' in proof || 'context' in proof) return 'not an act in its exact shape, or one with a session or context';
+    if (!isAction(proof)) return 'not an act in its exact shape';
+    // a record act's fields, every one required, `webauthn` alone beside them: a step-up, and no session, context or
+    // requestDigest (sminos_rpc.py's ACT_KEYS), where isAction leaves stepUp optional and admits the other three
+    const fields = Object.keys(proof).filter((k) => k !== 'webauthn');
+    if (fields.length !== RECORD_ACT_FIELDS.length || !RECORD_ACT_FIELDS.every((k) => k in proof)) return 'not a record act’s fields: a step-up, and no session, context or requestDigest';
     if (proof.org !== ORG || proof.machine !== this.binding.machine()) return 'not this machine’s';
     if (proof.opId !== rpc.opId || proof.opCreated !== rpc.opCreated || proof.device !== rpc.device || !this.binding.devices().includes(proof.device)) return 'not this op’s';
     if (!name.startsWith('record.') || proof.action !== name) return `not a ${name} act`;
@@ -413,12 +420,14 @@ describe('a session’s reach on the local hub', { timeout: 120_000 }, () => {
     expect(records.s.received.slice(before).filter((f) => f.t === 'query' || f.t === 'rpc' || f.t === 'send')).toEqual([]);
   });
 
-  it('refuses a record rpc its proof doesn’t bind, and A’s save says so: another change, a malformed proof, another machine’s', async () => {
+  it('refuses a record rpc its proof doesn’t bind, and A’s save says so: another change, a malformed proof, another machine’s, no step-up, a requestDigest', async () => {
     // Each probe changes the rpc between the endpoint and sminos, where only sminos's own check stands.
     const probes: Array<[string, (rpc: Record<string, unknown>) => void, RegExp]> = [
       ['a change other than the one signed', (rpc) => void ((rpc.args as Record<string, unknown>).access = 'org-converse'), /not this change/],
-      ['a malformed proof', (rpc) => void delete (rpc.proof as Record<string, unknown>).nonce, /exact shape/],
+      ['a malformed proof', (rpc) => void delete (rpc.proof as Record<string, unknown>).nonce, /not an act in its exact shape/],
       ['another machine’s proof', (rpc) => void ((rpc.proof as Record<string, unknown>).machine = mintRef()), /not this machine’s/],
+      ['a proof stripped of its step-up', (rpc) => void delete (rpc.proof as Record<string, unknown>).stepUp, /a record act’s fields/],
+      ['a proof given a requestDigest', (rpc) => void ((rpc.proof as Record<string, unknown>).requestDigest = { session: S, request: 'r1', tool: 'Bash', input_sha256: '0'.repeat(64) }), /a record act’s fields/],
     ];
     for (const [what, tamper, why] of probes) {
       const before = structuredClone(records.members.get(S)!);
