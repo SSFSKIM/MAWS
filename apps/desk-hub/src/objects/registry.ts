@@ -94,6 +94,8 @@ export type Principal = { kind: 'member'; org: OrgRecord; member: MemberRecord }
 
 /** An answer for the Worker to send: a value, or an HTTP status with DX7's `{error, message?}`. */
 export type Result<T> = { ok: true; value: T } | { ok: false; status: number; error: string; message?: string; conflicts?: CertConflict[] };
+/** A v2 machine's key as its enrollment posted it (`OrgRecords.keepMachineKey`): its MachineRef and its public key. */
+export type PostedKey = { ref: string; pub: string };
 
 const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 const fail = (status: number, error: string, message?: string): Result<never> => ({ ok: false, status, error, ...(message ? { message } : {}) });
@@ -573,11 +575,31 @@ export class Registry extends DurableObject<Env> {
 
   /** An admin's removal of a machine: whatever holds the name now (`revokeMachine`). */
   async revoke(member: MemberRecord, name: string): Promise<Result<{ revoked: string }>> {
-    // Checked in the step that begins the revocation (its first await is the fence at the machine's object).
+    const refused = this.removable(member, name);
+    if (refused) return refused;
+    return ok(await this.revokeMachine(name));
+  }
+
+  /**
+   * An admin's removal of a machine bound to its key (P5 O8 M4b: an app's drop of a machine, settled after the sign):
+   * only a row whose enrollment posted `key`, since another root may have enrolled the name anew in between. A method of
+   * its own, not a third argument of `revoke`: a deploy reaches this object minutes after the Worker, and a Registry
+   * before it, handed the key, would ignore it and remove whatever holds the name; with a method it lacks, the Worker's
+   * call fails as `hub-updating` and the app asks again.
+   */
+  async revokeKeyed(member: MemberRecord, name: string, key: PostedKey): Promise<Result<{ revoked: string }>> {
+    const refused = this.removable(member, name);
+    if (refused) return refused;
+    return ok(await this.revokeMachine(name, { key }));
+  }
+
+  /** What an admin's removal of a machine checks before it begins, in the step that begins it (its first await is the
+   * fence at the machine's object): the refusal, or null. */
+  private removable(member: MemberRecord, name: string): Result<never> | null {
     const admin = this.current(member, 'admin');
     if (!admin.ok) return admin;
     if (this.sql.exec('SELECT 1 FROM machines WHERE name_key = ?', machineNameKey(name)).toArray().length === 0) return fail(404, 'unknown-machine');
-    return ok(await this.revokeMachine(name));
+    return null;
   }
 
   /** A machine's revocation of its own enrollment (`DELETE /machine/enrollment`), bound to the enrollment the Worker
@@ -598,14 +620,18 @@ export class Registry extends DurableObject<Env> {
    * the object took it completes when the admin asks again.
    *
    * With `expected`, the caller read the enrollment in an earlier step (a machine's own credential resolved by the
-   * Worker; a sweep's candidate), and the name may have been revoked and enrolled anew since: a row that is gone, or is
-   * another enrollment's, is answered as revoked and nothing of the name's is touched. The check and the call that fences
-   * the credential are one synchronous step.
+   * Worker; a sweep's candidate), or holds the key of the machine it means (an admin's app dropping a machine the state
+   * listed), and the name may have been revoked and enrolled anew since: a row that is gone, or is another enrollment's,
+   * or whose enrollment posted another key or none, is answered as revoked and nothing of the name's is touched. The
+   * check and the call that fences the credential are one synchronous step. A key names one machine across enrollments:
+   * the state never makes a dropped key current again (retired or revoked), and `keepMachineKey` posts no key another
+   * ref holds, nor a retired or revoked one; and an enrollment keeps its first key, so the loop below, which follows
+   * that enrollment, still holds it.
    */
-  private async revokeMachine(name: string, expected?: { enrollment: string }): Promise<{ revoked: string }> {
+  private async revokeMachine(name: string, expected?: { enrollment: string } | { key: PostedKey }): Promise<{ revoked: string }> {
     const org = this.ensureOrg();
     let machine = this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE name_key = ?`, machineNameKey(name)).toArray()[0];
-    if (!machine || (expected && machine.enrollment !== expected.enrollment)) return { revoked: name };
+    if (!machine || (expected && !this.holds(machine, expected))) return { revoked: name };
     const object = this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org.id}:${machine.name}`));
     let generation = await object.revoke(machine.client_id);
     // A credential minted for it while its object answered (a pending machine's token redeemed again) is refused there too.
@@ -640,6 +666,13 @@ export class Registry extends DurableObject<Env> {
     await this.sweepOrphans();
     await this.scheduleAlarm();
     return { revoked: revoked.name };
+  }
+
+  /** Whether `machine` is the one `expected` names: its enrollment, or the key its enrollment posted (`keepMachineKey`). */
+  private holds(machine: MachineRecord, expected: { enrollment: string } | { key: PostedKey }): boolean {
+    if ('enrollment' in expected) return machine.enrollment === expected.enrollment;
+    const posted = this.records.machineKey(machine.enrollment);
+    return posted !== null && posted.ref === expected.key.ref && posted.pub === expected.key.pub;
   }
 
   /** Every machine, a v2 one with the key it posted and whether the head lists that key for its ref (O11 M4). */
