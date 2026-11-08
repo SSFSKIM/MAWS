@@ -132,6 +132,9 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-08) Task 5, reviewed clean. The commits: 484d9fd2f, 65a547a54, and the fix waves fccfe6803; 0d518e9a3 and f044b0e72; 7b1b1780f (0d518e9a3 and 7b1b1780f are main's scoped enrollment cancel).
     - Reviews: our task reviewer took four rounds (Decision Log, "M4b Task 5", item 10). The architect ruled the cancel's scope.
     - Green: static, unit and e2e:settings at fccfe6803 (42502411003, with its screenshots); static and unit at 7b1b1780f (42506305752).
+  - [x] (2026-11-08) Task 6, reviewed clean. The commits: 63409dab2 and its fix wave f098db1ee, both test-only.
+    - Reviews: our task reviewer found case 8 masked by the ledger read's push, which was fixed. The controller read the fix.
+    - Green: `org-page.local.test.ts` 12/12 in unit 3/4 on three CI attempts at f098db1ee (42515095022).
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
 - [ ] M5b — Add owner — *executable; after M4c; lands once the desk track's `record.owners` executor and DL190 (b)'s fix are on master*
 - [ ] M8 — The deployment admin's end, and acceptance — *owner steps and evidence; last; needs O14's B4 steps 4 to 8 and M3's root-add sitting (its first step)*
@@ -4162,6 +4165,27 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
       - The Org page reads each machine's ledger once when it opens. That matters once an org has enough machines that the page opens slowly; the fix is to read each row when it becomes visible.
       - Fourteen refusal and copy lines name a condition without a clear next step ("Copy for the UX pass" in Task 5's report). They go to the UX pass as one board ticket at M4b's landing.
   Date/Author: 2026-11-08, O8's executor (controller), from Task 5's report and its review.
+
+- Decision: M4b Task 6, the local suite. The commits are 63409dab2 and the fix wave f098db1ee. Both are test-only: `test/org/org-page.local.test.ts`, and the suite's comment in `vitest.config.ts`. These points are settled.
+  1. **The cases**, against desk-hub's Worker in Miniflare and real endpoints, driven through the session's surface:
+     - **7.** A enrolls a machine from the app. The code is passed as secret input, A compares the candidate with the endpoint's own key display and approves under one confirmation, and the endpoint reads `org-listed`.
+     - **8.** B is recreated as a member only, then granted `spawn` on a machine held behind B's addition. Its own `/machine/org/state` reads are refused, and the case waits until one has been refused and none is in flight. Under one confirmation, the link carries:
+       - before the confirmation, only `endpoint.state`, one of them answered at or past B's addition (the ledger read's push);
+       - after the confirmation and before the one `endpoint.grant`, at least one more `endpoint.state` answered there (the delivery's own push).
+       The ledger holds the grant, and `machineRights` gives B `spawn`.
+     - **A (Fork A).** A grant on this Mac's own machine goes through the real local door, as one unsigned act with nothing over a link. The ledger holds it, and `endpoint.local.grants` reads it back. The own machine is a second endpoint enrolled at setup, before `root add`, under A's `local` ref. Case 10 drops the first machine, and the composer refuses to drop this Mac's own.
+     - **9.** The endpoint is stopped, its `grants.json` removed, and a fresh endpoint started over the same state directory. The startup invariant moves the key, the ledger and the enrollment aside, and the endpoint reads `enrollment: 'none'`. A re-enrolls it (Re-enroll, `machine.replace`, a new key). The page shows B's grant missing under the earlier key and re-grants it for the new key above the mark, and the new ledger holds it.
+     - **10.** The owners change to B and back. The drop's DELETE carries `?ref=&pub=`, and #538's Registry removes the row.
+     - **11.** Every state the hub accepted verifies from genesis: 14 states and 17 confirmations. No pairing or enrollment code, token or `k` appears in A's logs, either endpoint's logs or any status.
+  2. **No red-first run.** The suite covers behaviour that Tasks 1–5 built and unit-tested, and it doesn't run on the MacBook. Its review read each case against the regression it names.
+     - The first draft's case 8 was masked: the ledger read's push, before the confirmation, satisfied it, so removing the delivery's push would have stayed green. The fix wave splits the link's acts at the confirmation.
+     - The fix wave also replaced a fixed 300 ms wait with the counted, refused reads.
+  3. **Runs.** `static,unit` on macOS. The suite runs in unit 3/4, 12/12, at 63409dab2 (42508559657, 42513559429, 42513571450) and at f098db1ee (42515095022, three attempts: 4114, 4223 and 4334 ms).
+  4. **Residue (owner: the MAWS architect, as O8's; the desk track reviews the endpoint change).**
+     - The problem: after the startup move-aside, an unenrolled endpoint's status reads `refusing: 'stale-state'` beside `enrollment: 'none'`, although nothing is refused (`src/endpoint/status.ts:47-59`, from the startup `stale` flag). A person reading `mawsd endpoint status` or `mawsd status` sees "refusing".
+     - The exit: `status.ts` reports `refusing` only while a refusal applies, with the unenrolled state outranking the startup flag, pinned by a status unit test.
+     - It goes to the tracker at M4b's landing. It is a CLI status contract, not renderer copy, and case 9 no longer pins it.
+  Date/Author: 2026-11-08, O8's executor (controller), from Task 6's report and its review.
 
 ## Outcomes & Retrospective
 
