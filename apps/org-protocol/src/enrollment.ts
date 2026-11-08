@@ -67,6 +67,10 @@ const CODE_V2_PREFIX = 'smns-enroll-v2.';
 const CODE_V2_FIELDS = ['hub', 'token', 'roots', 'recoveryPub', 'k', 'machine'];
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
 
+// `checkHub` and `body` are private copies of the hub identity file's helpers, which its v1 codecs still use, and they stay
+// private on purpose: the package's public hub check is `isHubOrigin` (pairing.ts), and exporting these would set a second
+// one beside it, with other rules.
+
 /** The hub is a URL, https (http only on a loopback host, for the local runtime). */
 function checkHub(kind: string, hub: string): void {
   let url: URL;
