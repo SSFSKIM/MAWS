@@ -2073,6 +2073,9 @@ Live: at the staging run, or the next sitting after it: the owner adds the secon
     listings.json      { "version": 1, "org": "<org id>", "records": Signed<Listing>[],                           (M2)
                          "marks": { "<ref>/<session>": { "revision": <n>, "hash": "<SHA-256 of the canonical record, B64>", "kid": "<sig.kid>", "delegation": "<id>" | null, "gone": <boolean> } } }
                                                                    // delegation: the certificate's, when a delegated machine signed it
+    grants.json        { "version": 1, "issued": [{ "signed": Signed<Grant>, "delivered": "pending" | "done" | { "refused": "<code>" }, "op"?: "<op id>" }] }   (M4b)
+                                                                   // every grant this app signed, the latest per (machine, member); fails closed: registration.json's
+                                                                   // "grants": true, set before its first write, makes a missing or unreadable file `damaged` (no grant signed)
 
 The directory is excluded from Time Machine at its creation, best effort. Nothing in it is a key: the device's keys stay in `<userData>/device/` (O10 M9).
 
@@ -3869,7 +3872,7 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - The mint's TTL is 3600, the maximum the hub accepts. The CLI's default is 900.
   4. **Delivery.**
      - `endpoint.grant` goes as an act with `stepUp: 'never'`, as M3's deliveries send self-signed records (`deliveries.ts:307`). `none` is not an `ActRequest.stepUp` value.
-     - A grant intake refusal such as `not-newer` comes inside a `done` whose result is `{ok: false, error: {code}}` (`endpoint-actions.ts:84-86`, `endpoint.ts:993-1001`). An orphaned op reads `unknown`/`expired` at the link (`acts.ts:467-485`).
+     - A grant intake refusal such as `not-newer` arrives as `{state: 'failed', error: {code}}`, over the link and through the door once the door has passed the grant (`src/endpoint/actions.ts:116-120`, `src/main/machines/remote/acts.ts:154-159`; corrected 2026-11-08 from "inside a `done` whose result is `{ok: false, error}`", which Task 2's decision 6 and Task 4 found wrong). The door's own refusal is `{state: 'refused', reason}`. An orphaned op reads `unknown`/`expired` at the link (`acts.ts:467-485`).
   5. **Signing a grant is not a state signing.**
      - `RecordSigner` is new. It reuses `Confirm` and `StateSigner`'s canonical-copy and `live` behaviour (`step-up.ts:209-248`).
      - It is not routed through `OrgSigner`, `signActions` or `actMany`. Those sign root states or outer transport actions, and either would add a wrong confirmation or signature layer.
