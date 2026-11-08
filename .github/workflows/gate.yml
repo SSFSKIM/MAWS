@@ -469,6 +469,8 @@ jobs:
       - id: checkout
         uses: actions/checkout@v7
       - uses: ./.github/actions/setup
+        with:
+          electron: 'false' # no check starts Electron (the setup action's input)
       # The checks run at once (gate-bg.sh), each still a step of its own below, with its log and its gate-run summary:
       # tsc and eslint are single-threaded, and in series they held class 1a's critical path on a box whose other cores
       # sat idle. Each project of `pnpm typecheck` is a process of its own, read from the script. At once only on a
@@ -536,6 +538,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           apt: zsh # the shell suites start /bin/zsh, macOS's login shell
+          electron: 'false' # no suite starts Electron (the setup action's input)
       # The two suites that read a build, the engine-host bundle guard (out/main) and the preload bundle suite
       # (out/preload), need electron-vite's main and preloads only; static runs the whole `pnpm build`.
       - run: .github/scripts/gate-run.sh 'built in|error' pnpm build:main-preload

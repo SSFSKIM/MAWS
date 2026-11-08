@@ -22,6 +22,12 @@ inputs:
   apt:
     description: More apt packages for a Linux runner, space-separated.
     default: ''
+  electron:
+    description: >-
+      Install Electron's binary. The Linux static and unit jobs pass 'false': neither starts Electron, and GitHub's release
+      CDN answered 504 for the linux-x64 zip for hours on 2026-11-08 while it served darwin-arm64, failing every Linux
+      setup at the postinstall (scripts/postinstall.mjs reads ELECTRON_SKIP_BINARY_DOWNLOAD).
+    default: 'true'
 runs:
   using: composite
   steps:
@@ -100,12 +106,15 @@ runs:
         echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
         echo COREPACK_ENABLE_DOWNLOAD_PROMPT=0 >>"$GITHUB_ENV"
         COREPACK_ENABLE_DOWNLOAD_PROMPT=0 "$RUNNER_TEMP/bin/pnpm" --version
+    - if: runner.os == 'Linux' && inputs.electron == 'false'
+      shell: bash
+      run: echo ELECTRON_SKIP_BINARY_DOWNLOAD=1 >>"$GITHUB_ENV"
     - id: electron
       shell: bash
       run: echo "version=$(node -p "require('./package.json').devDependencies.electron")" >> "$GITHUB_OUTPUT"
     # The pool's caches are baked into its box and shared, so a restore there would unpack under other jobs.
     - uses: actions/cache@v6
-      if: runner.environment == 'github-hosted' && runner.os == 'Linux'
+      if: runner.environment == 'github-hosted' && runner.os == 'Linux' && inputs.electron != 'false'
       with:
         path: ~/.cache/electron
         key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
