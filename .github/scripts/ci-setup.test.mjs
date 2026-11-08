@@ -40,7 +40,7 @@ function fixture(t, { platform = 'Darwin', mode = '1777', engine = 'working', do
     fonts: () => readdirSync(fonts),
     run: () => spawnSync('/bin/bash', [script], {
       cwd: root,
-      env: { ...process.env, HOME: home, PATH: `${bin}:/usr/bin:/bin`, CALLS: log, INSTALLER: installer, CI: 'true' },
+      env: { ...process.env, GH_TOKEN: '', GITHUB_TOKEN: '', HOME: home, PATH: `${bin}:/usr/bin:/bin`, CALLS: log, INSTALLER: installer, CI: 'true' },
       encoding: 'utf8',
     }),
     calls: () => readFileSync(log, 'utf8'),
@@ -126,7 +126,8 @@ test('a font download that fails fails setup', (t) => {
   const f = fixture(t, { font: 'missing', fontDownload: 22 });
   const result = f.run();
   assert.notEqual(result.status, 0);
-  assert.match(f.calls(), MESLO_URL);
+  assert.match(f.calls(), /https:\/\/github\.com\/ryanoasis\/nerd-fonts\/releases\/download\/v3\.5\.1\/Meslo\.tar\.xz/);
+  assert.match(f.calls(), /https:\/\/api\.github\.com\/repos\/ryanoasis\/nerd-fonts\/releases\/tags\/v3\.5\.1/);
   assert.match(result.stderr, /MAWS setup: could not download/);
   assert.deepEqual(f.fonts(), []);
 });

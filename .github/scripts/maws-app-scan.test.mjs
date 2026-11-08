@@ -1,5 +1,5 @@
-// node --test .github/scripts/maws-app-scan.test.mjs (from anywhere; needs git, tar, python3, curl and the network to
-// github.com for the pinned gitleaks). maws-app-scan.sh, the secret scan a push to SSFSKIM/maws-app passes first (ci-kit's
+// node --test .github/scripts/maws-app-scan.test.mjs (from anywhere; needs git, tar, python3, curl and a cold-cache download
+// of the pinned gitleaks; warm runs need no network). maws-app-scan.sh, the secret scan a push to SSFSKIM/maws-app passes first (ci-kit's
 // docs/doperpowers/specs/2026-10-26-maws-hosted-mac-design.md, The secret scan): a planted credential is found and named
 // without its value, this checkout's filtered tree is clean under .github/maws-app/gitleaks.toml, and a scanner that
 // cannot be had refuses. The planted values are made here at run time, so this file holds none for the scan to find.
@@ -12,14 +12,15 @@ import { dirname, join } from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { URL, fileURLToPath } from 'node:url';
+import { gitleaksTestCache, primeGitleaksTestCache } from './gitleaks-test-cache.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const scan = join(root, '.github/scripts/maws-app-scan.sh');
 const filter = join(root, '.github/scripts/maws-app-tree.sh');
 
-// One download of the pinned gitleaks for the whole file.
-const cache = mkdtempSync(join(tmpdir(), 'maws-app-scan-cache-'));
-test.after(() => rmSync(cache, { recursive: true, force: true }));
+// Shared across these two files, repeat runs and worktrees; every use checks the pin.
+const cache = gitleaksTestCache;
+test.before(primeGitleaksTestCache);
 
 function scratch(t, prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));

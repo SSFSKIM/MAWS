@@ -1,5 +1,5 @@
-// node --test .github/scripts/hosted-mac.test.mjs (from anywhere; needs git, jq, curl, tar, python3 and the network to
-// github.com for the pinned gitleaks). hosted-mac.sh, the waiter of one hosted e2e group (ci-kit's
+// node --test .github/scripts/hosted-mac.test.mjs (from anywhere; needs git, jq, curl, tar, python3 and a cold-cache download
+// of the pinned gitleaks; warm runs need no network). hosted-mac.sh, the waiter of one hosted e2e group (ci-kit's
 // docs/doperpowers/specs/2026-10-26-maws-hosted-mac-design.md, The flow of one hosted group), against a local bare
 // repository as SSFSKIM/maws-app (MAWS_APP_REMOTE, a file:// URL so that git honours --depth and --filter) and a small
 // MAWS repository as the private run's checkout. This file plays the hosted run: it answers a request with the result
@@ -14,14 +14,15 @@ import process from 'node:process';
 import test from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { URL, fileURLToPath } from 'node:url';
+import { gitleaksTestCache, primeGitleaksTestCache } from './gitleaks-test-cache.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const waiterScript = join(root, '.github/scripts/hosted-mac.sh');
 const filter = join(root, '.github/scripts/maws-app-tree.sh');
 
-// One download of the pinned gitleaks for the whole file.
-const cache = mkdtempSync(join(tmpdir(), 'hosted-mac-gitleaks-'));
-test.after(() => rmSync(cache, { recursive: true, force: true }));
+// Shared across these two files, repeat runs and worktrees; every use checks the pin.
+const cache = gitleaksTestCache;
+test.before(primeGitleaksTestCache);
 
 const identity = Object.fromEntries(['AUTHOR', 'COMMITTER'].flatMap((role) => [[`GIT_${role}_NAME`, 'hosted test'], [`GIT_${role}_EMAIL`, 'hosted@test.invalid']]));
 // The environment without the caller's git identity or git dir, so the waiter's own settings are what it runs on.

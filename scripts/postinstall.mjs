@@ -6,6 +6,7 @@
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, statSync } from 'node:fs';
 import process from 'node:process';
+import { prefetchElectron } from './electron-prefetch.mjs';
 
 const helper = 'node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper';
 if (existsSync(helper)) chmodSync(helper, statSync(helper).mode | 0o111);
@@ -15,6 +16,7 @@ if (process.env.ELECTRON_SKIP_BINARY_DOWNLOAD === '1') {
   process.exit(0);
 }
 
+prefetchElectron();
 const install = spawnSync('install-electron', { stdio: 'inherit' });
 if (install.error) throw install.error;
 process.exit(install.status ?? 1);
