@@ -3969,6 +3969,16 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   - **Gates.** At 0adff8c99, static (42448460100) and static plus unit (42448470707) are green.
   Date/Author: 2026-11-08, O8's executor (controller), from Task 2's report and the architect's notes.
 
+- Decision: A grant's force doesn't depend on its signer's later standing. The desk track asked this, and RL already answers it: RL §6.3 (`docs/doperpowers/specs/2026-10-26-remote-layer-design.md:558-560`) and RL Decision Log 24 (:953).
+  - The question: should a grant end when its signer stops being an owner of the machine, or an admin for an `'org'` machine, without a key revocation?
+  - RL's answer is no. A machine verifies a grant once, when it arrives. The grant stays in force when its signer later stops being an owner or an admin, or retires the device that signed it. It ends only when a higher version replaces it or its signer's key is revoked.
+  - RL's reason holds. Re-checking at each head would put a lower grant back in force once the signer of its replacement was demoted.
+  - The code agrees. `acceptGrant` judges a grant at arrival, `machineRights` reads the ledger, and at each new head and at startup `dropRevokedGrants` ends only the grants whose signing kid is revoked, keeping `highWater`.
+  - **Left in force by design.** A demotion, or an owner change with no key revocation, leaves that person's grants in force. Removing a member or a device revokes its keys, and that ends the grants it signed, so the common case already closes.
+  - **Rejected:** lapsing grants by their signer's standing. It would be an RL amendment, not part of M4b. It would also need a durable lapsed reason in the ledger, a shared stored-grant judge in `org-protocol`, and a permanent end, so that a re-added owner wouldn't revive the grant. Nothing in M4b changes.
+  - The architect notes it in P5's Decision Log at M4b's landing.
+  Date/Author: 2026-11-08, the architect, on the desk track's question, recorded by O8's executor (controller).
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
