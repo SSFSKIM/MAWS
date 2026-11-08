@@ -287,6 +287,9 @@ async function remove(admin: RealMemberAdmin, who: { email: string } | { member:
     io.print(`nothing to remove: the head (version ${state.version}) lists no such member`);
     return 0;
   }
+  // Known to the scrubber and the search before anything else, whichever way the member was found (by --member, the
+  // email was never read): a refusal, or the hub's own words, may quote it.
+  io.secret(member.email);
   if (member.id === admin.member || member.role === 'admin') refuse(`the member ${member.id} is an admin: this step removes the second member alone`);
   const keys: RevokedKey[] = [];
   for (const device of member.devices) {
@@ -345,6 +348,26 @@ export async function runRealMember(o: RealMemberOptions): Promise<number> {
   }
 }
 
+/**
+ * The command's printing: every line scrubbed of what the step must never print (the email, in any case, and the code),
+ * however short, before `out` has it; each one also appended to `scan` for the runner's search of the log after the step
+ * (staging-run.sh's secret_scan).
+ */
+export function scrubbingIo(out: (line: string) => void, scan?: string): Pick<RealMemberIo, 'print' | 'secret' | 'write'> {
+  const secrets: Array<[RegExp, string]> = [];
+  const held = new Set<string>();
+  return {
+    print: (line) => out(secrets.reduce((text, [value, shown]) => text.replace(value, shown), line)),
+    secret: (value) => {
+      if (held.has(value)) return;
+      held.add(value);
+      secrets.push([new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), value.includes('@') ? `<${SECOND_EMAIL}>` : '<the pairing code>']);
+      if (scan !== undefined) appendFileSync(scan, `${value}\n`, { mode: 0o600 });
+    },
+    write: (fd, text) => writeFileSync(fd, text),
+  };
+}
+
 // ---- the command ----------------------------------------------------------------------------------------------------
 
 const OPTIONS = {
@@ -372,21 +395,7 @@ export async function main(argv: string[]): Promise<number> {
     console.error(`--wait is whole seconds, 1 to ${MAX_PAIR_WAIT_S}`);
     return 2;
   }
-  // Every line scrubbed of what the step must never print (the email, the code), however short; each one also listed
-  // for the runner's search of the log (staging-run.sh's secret_scan).
-  const secrets: Array<[string, string]> = [];
-  const scan = values.scan as string | undefined;
-  const print = (line: string) => console.log(secrets.reduce((out, [value, shown]) => out.split(value).join(shown), line));
-  const io: RealMemberIo = {
-    print,
-    secret: (value) => {
-      if (secrets.some(([held]) => held === value)) return;
-      secrets.push([value, value.includes('@') ? `<${SECOND_EMAIL}>` : '<the pairing code>']);
-      if (scan !== undefined) appendFileSync(scan, `${value}\n`, { mode: 0o600 });
-    },
-    sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
-    write: (fd, text) => writeFileSync(fd, text),
-  };
+  const io: RealMemberIo = { ...scrubbingIo((line) => console.log(line), values.scan as string | undefined), sleep: (ms) => new Promise((done) => setTimeout(done, ms)) };
   const read = await readSecrets();
   if (!read.DESK_ACCESS_TOKEN) {
     console.error('DESK_ACCESS_TOKEN on stdin');

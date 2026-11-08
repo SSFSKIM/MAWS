@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { base64urlDecode, base64urlEncode, decodePairingCode, encodePairingCode, generateSigningKey, keyId, pairingFingerprint, pairingMac, type Device, type OrgState, type SignedOrgState } from 'org-protocol';
 import { describe, expect, it } from 'vitest';
 import { PRODUCTION_HOST, STAGING_HOST, STAGING_ORG } from '../../deploy/config.ts';
-import { codeFileRefusal, privateFileRefusal, readEmail, realMemberHubRefusal, realMemberMode, runRealMember, type RealMemberAdmin, type RealMemberOptions } from '../../deploy/real-member.ts';
+import { codeFileRefusal, privateFileRefusal, readEmail, realMemberHubRefusal, realMemberMode, runRealMember, scrubbingIo, type RealMemberAdmin, type RealMemberOptions } from '../../deploy/real-member.ts';
 import type { PendingDevice } from '../../src/protocol/identity.ts';
 
 const EMAIL = 'second.person@example.org';
@@ -383,6 +383,25 @@ describe('remove', () => {
     const own = options({ verb: 'remove', member: ADMIN_MEMBER });
     expect(await runRealMember(own.o)).toBe(1);
     expect(own.admin.states).toHaveLength(1);
+  });
+});
+
+describe('the printer the command prints through', () => {
+  it('keeps the email of a member removed by its id out of every line, the hub’s own words included, and lists it for the search', async () => {
+    const lines: string[] = [];
+    const scan = join(scratch(), 'scan');
+    const io = { ...scrubbingIo((line) => void lines.push(line), scan), sleep: async () => {} };
+    const member = { id: 'b'.repeat(32), email: EMAIL, role: 'member' as const, devices: [] };
+    const admin = fakeAdmin([member]);
+    // the hub refuses the successor, quoting the state it was sent (the address in another case among it)
+    admin.amend = async () => {
+      throw new Error(`org state (removal): 400 {"error":"bad member ${EMAIL.toUpperCase()}","state":{"email":"${EMAIL}"}}`);
+    };
+    const run = options({ verb: 'remove', member: member.id, admin, io });
+    expect(await runRealMember(run.o)).toBe(1);
+    expect(lines.join('\n')).toMatch(/failed: org state \(removal\): 400/);
+    expect(lines.filter((line) => line.toLowerCase().includes(EMAIL))).toEqual([]);
+    expect(readFileSync(scan, 'utf8').split('\n')).toContain(EMAIL);
   });
 });
 
