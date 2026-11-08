@@ -1920,14 +1920,17 @@ These are the live run's checks, none of them verified before it:
 3. The email file is deleted.
 4. The owner signs back into staging Access as themselves the next time a browser needs it.
 5. The VM goes with `reach-vm teardown`.
+6. The sitting's worktree goes: `git -C ~/Developer/GitHub/MAWS worktree remove ~/.local/share/maws-worktrees/m6b-sitting`.
 
 **The owner's steps** (the architect hands these over):
 1. Send the second email to the desk track directly.
-2. At the sitting, launch the scratch profile with one command:
+2. At the sitting, launch the scratch profile. The sitting comes after M6b's landing, so it runs from a fresh worktree of master at or after the merge. Before the sitting, make the worktree and install once:
 
-       cd /Users/new/.local/share/maws-worktrees/p5-o8-m6b && mkdir -p -m 700 "$HOME/.local/share/maws-m6b-second-member" && MAWS_USER_DATA="$HOME/.local/share/maws-m6b-second-member" npx electron-vite dev
+       git -C ~/Developer/GitHub/MAWS fetch origin master && git -C ~/Developer/GitHub/MAWS worktree add --detach ~/.local/share/maws-worktrees/m6b-sitting origin/master && cd ~/.local/share/maws-worktrees/m6b-sitting && pnpm install --frozen-lockfile
 
-   That worktree exists while M6b is unlanded, which is the plan for the sitting. If the sitting falls after M6b's merge, use a fresh worktree of master at or after the merge instead, run `pnpm install --frozen-lockfile` in it once, and run the same command from it. A dialog from macOS on that first launch, such as "accept incoming network connections" for Electron, is the owner's to answer. Deny is safe, since the profile connects outward to the hub, and no agent clicks through it.
+   At the sitting, launch it:
+
+       cd ~/.local/share/maws-worktrees/m6b-sitting && mkdir -p -m 700 "$HOME/.local/share/maws-m6b-second-member" && MAWS_USER_DATA="$HOME/.local/share/maws-m6b-second-member" npx electron-vite dev A dialog from macOS on that first launch, such as "accept incoming network connections" for Electron, is the owner's to answer. Deny is safe, since the profile connects outward to the hub, and no agent clicks through it.
 3. Open `https://desk-hub-staging.opencognita-platform.workers.dev/cdn-cgi/access/logout` in the default browser.
 4. Copy the pairing code without displaying it: in a Terminal or iTerm window, run `pbcopy < <the path the desk track names>`. Paste it into the profile's Settings › Org › Pairing code row and press Sign in. Sign in with the second email and the code from its inbox. Before pairing completes, check that the member email the profile shows is the second email.
 5. Don't run `cloudflared access login` for staging until you're signed back in as yourself.
@@ -4010,7 +4013,7 @@ A future child that keeps state written from more than one place over an unrelia
 - the deploy suites: `reach-acceptance` (37), `real-member` (24), `staging-scripts` (33);
 - the gates the PR body lists.
 
-Still owed: the shared staging run (Concrete Steps). Layer 1 is the harness member. Layer 2 is the real-member sitting, booked by the architect. The live checklist:
+Still owed: the shared staging run (Concrete Steps). Layer 1 is the harness member. Layer 2 is the real-member sitting, booked by the architect. The run happens after the landing, since the desk track deploys master to staging. So M6b lands before the shared run, as M7b did before its live check, and the run's result goes into these Outcomes then, in a records commit of the architect's. The live checklist:
 - lane B inside the reach scenes;
 - record acts over the relays;
 - pairing through real Access with a second identity;
