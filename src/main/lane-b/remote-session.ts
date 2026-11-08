@@ -6,7 +6,9 @@
 // - The record. `session.get` over the link (a `view` call), emitted as `session.changed {record, cause: 'live'}`, so the
 //   sessions store holds a record under the address and the pane takes its started branch. A session the machine can't
 //   place yet (null, or `grade`: a fresh session whose engine hasn't reported its id) is asked again at 0.5, 1, 2 and 4 s,
-//   then the stream ends "can't place"; a later `start` (a click: the tab's interest read again) tries again. A read the
+//   then the stream ends "can't place"; a later `start` (a click: the tab's interest read again) tries again. Board #525:
+//   `grade` is also the word for a member below View there, so its first one is said at once (`readRefused`, the reason
+//   `READ_REFUSED`, which the renderer words with whom to ask) while the ladder asks on, quietly. A read the
 //   link could not carry (offline, a timeout, the machine's index unavailable) is asked again on the idle backoff without
 //   counting. The subscription opens once the record is had.
 // - The stream. One `full` subscription. Its parts become `session.status`, `session.queue`, `session.catalogChanged`
@@ -86,6 +88,11 @@ export interface RemoteSessionState {
   sends: number;
   /** Why the stream ended, while it has: `unplaced`, `closed`, `removed`, or the endpoint's reason. */
   ended: string | null;
+  /**
+   * Board #525: the record read was refused `grade`, its latest answer: the member holds less than View there, or the
+   * machine hasn't placed a just-started session (one word for both). Said at once; the ladder asks on, quietly.
+   */
+  readRefused?: true;
 }
 
 export interface RemoteSessionTiming {
@@ -349,6 +356,10 @@ export class RemoteSession {
     const { timing } = this.#deps;
     const answer = await this.link.call('session.get', { appSessionId: this.state.app });
     if (this.#token !== token || !this.#running) return;
+    // board #525: a refusal at the member's grade is said at once; any later answer about the session (never a transient
+    // one, which says nothing of it) takes its place
+    const refused = !answer.ok && answer.error.code === 'grade';
+    if (this.state.readRefused && !refused && (answer.ok || !TRANSIENT.has(answer.error.code))) delete this.state.readRefused;
     if (answer.ok) {
       const read = link.readCommandOutput('session.get', answer.output);
       if (read.ok && read.value !== null) {
@@ -363,6 +374,9 @@ export class RemoteSession {
       return this.stop(answer.error.code);
     } else if (TRANSIENT.has(answer.error.code)) {
       return this.#later(() => void this.#readRecord(attempt, token));
+    } else if (refused && !this.state.readRefused) {
+      this.state.readRefused = true;
+      this.publish();
     }
     if (attempt >= timing.recordRetryMs.length) {
       this.state.stream = 'ended';

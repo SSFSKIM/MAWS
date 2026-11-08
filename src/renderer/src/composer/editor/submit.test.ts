@@ -6,7 +6,14 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { useNotices } from '../../stores/notices';
 import { memoryTargetLabel, memoryTargetOptions } from '../modes/memory';
 import type { Serialized } from './serialize';
-import { submitSerialized } from './submit';
+import { submitHumanSerialized, submitSerialized } from './submit';
+import { addressOf } from '@shared/machine/address'; // board #525
+import { remoteRow } from '../../../../../test/support/builders'; // board #525
+import { OTHER_MACHINE } from '../../../../../test/support/machine'; // board #525
+import type { SessionControls } from '../../session/controls/types'; // board #525
+import { learnReaderGrade, resetReader, usePromptAuthor } from '../../sessions/share/reader'; // board #525
+import { useSessions } from '../../stores/sessions'; // board #525
+import { renderHook } from '@testing-library/react'; // board #525
 
 const APP = 'app-1' as AppSessionId;
 
@@ -139,3 +146,44 @@ describe('the # target menu', () => {
     expect(memoryTargetLabel({ kind: 'user', path: null }, [])).toBe('User memory');
   });
 });
+
+// Board #525: another machine's terminal session has no record, and a send it refused is said all the same, never
+// nothing; one refused at the member's grade there offers no Retry. An unstarted session with no record stays quiet. A
+// prompt the host took for another member's session is kept as the member's own.
+describe('a session on another machine with no record', () => {
+  const REMOTE = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+  const port = (result: object) => ({ send: vi.fn(async () => result) }) as unknown as SessionControls;
+  const actions = () => useNotices.getState().notices.map((n) => n.actions.map((a) => a.label));
+  beforeEach(() => {
+    resetReader();
+    useSessions.setState({ records: new Map(), listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', owners: ['member-ana'], mine: false }), appId: REMOTE }]]), member: 'member-me' });
+  });
+
+  it('says a refused send, with Retry, and without it once the member’s grade there refused it', async () => {
+    const { bridge } = client();
+    const retry = () => {};
+    expect(await submitHumanSerialized(port({ disposition: 'refused', started: false, reason: 'mini isn’t reachable' }), bridge, REMOTE, serialized({}), retry)).toBe(false);
+    expect(toasts()).toEqual(['mini isn’t reachable']);
+    expect(actions()[0]).toHaveLength(1);
+    useNotices.setState({ notices: [] });
+    learnReaderGrade(REMOTE, 'view');
+    await submitHumanSerialized(port({ disposition: 'refused', started: false, reason: 'Not sent: no' }), bridge, REMOTE, serialized({}), retry);
+    expect(toasts()).toEqual(['Not sent: no']);
+    expect(actions()[0]).toEqual([]);
+  });
+
+  it('stays quiet for a session that is neither recorded nor on another machine', async () => {
+    const { bridge } = client();
+    await submitHumanSerialized(port({ disposition: 'refused', started: false, reason: 'held' }), bridge, 'app-unstarted' as AppSessionId, serialized({}));
+    expect(toasts()).toEqual([]);
+  });
+
+  it('keeps a prompt the host took for another member’s session as the member’s own', async () => {
+    const { bridge } = client();
+    expect(await submitHumanSerialized(port({ disposition: 'sent', started: false, messageUuid: 'uuid-sent' }), bridge, REMOTE, serialized({}))).toBe(true);
+    const { result } = renderHook(() => usePromptAuthor(REMOTE));
+    expect(result.current?.('uuid-sent')).toBeNull();
+    expect(result.current?.('uuid-other')).toBe('Its owner');
+  });
+});
+

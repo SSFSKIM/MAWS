@@ -10,6 +10,8 @@
 // Edit edits the bubble in place: C7's registered editor stands in the bubble's place while its session edits it.
 // E3: an anchored comment opens with a chip naming what it is about (its kind's glyph and label; a chip with a path
 // opens the file at the line), above the comment, its screenshot drawn as the image attachment it is.
+// Board #525: a prompt someone else wrote (the context's `promptAuthor`: a session another member owns) is named by its
+// author, as a line above the bubble and in the region's name; the reader's own reads "Your message".
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { Anchor } from '@shared/anchor/anchor'; // E3
 import { NOT_SENT, PENDING_CAPTION, STEERED_CAPTION } from '../../model/copy';
@@ -45,7 +47,8 @@ function segmentsOf(row: UserRowData): Segment[] {
 
 export function UserRow({ row }: { row: UserRowData }) {
   const actions = useActions();
-  const { storeKey, variant } = useTranscriptContext();
+  const { storeKey, variant, promptAuthor } = useTranscriptContext();
+  const author = promptAuthor?.(row.messageUuid) ?? null; // board #525
   const renderEditor = useRegisteredBubbleEditor();
   const [open, toggle] = useDisclosure(`bubble:${row.id}`);
   const content = useRef<HTMLDivElement>(null);
@@ -117,7 +120,8 @@ export function UserRow({ row }: { row: UserRowData }) {
     </div>
   );
   return (
-    <section className="transcript-user" aria-label="Your message" data-pending={row.pending} data-steer={row.steer ? '' : undefined} data-dropped={row.dropped ? '' : undefined}>
+    <section className="transcript-user" aria-label={author === null ? 'Your message' : `${author}'s message`} data-author={author === null ? undefined : 'other'} data-pending={row.pending} data-steer={row.steer ? '' : undefined} data-dropped={row.dropped ? '' : undefined}>
+      {author !== null && <div className="transcript-user-author">{author}</div>}
       {renderEditor && variant === 'session' ? renderEditor({ storeKey, row, children: body }) : body}
       {(notSent !== null || caption !== null) && (
         <div className="transcript-user-meta">

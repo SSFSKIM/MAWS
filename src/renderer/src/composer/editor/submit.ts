@@ -18,6 +18,8 @@ import { startNoticeId } from '../../sessions/store'; // P2-A
 import { acquireSession, acquisitionWords } from '../../sessions/acquire'; // P2-A
 import { useSessions } from '../../stores/sessions'; // P2-A
 import { beginRemoteSend, isRemoteLaneB } from '../../lane-b/remote-session'; // P5 O7 M2; M4: beginRemoteSend
+import { isRemoteLaneA } from '../../lane-a/remote-session'; // board #525
+import { noteOwnPrompt, readerGradeOf } from '../../sessions/share/reader'; // board #525
 import { useTranscriptStore } from '../../stores/transcript';
 import { sendSizeRefusal } from './attachments';
 import type { Attachment } from './doc';
@@ -97,6 +99,9 @@ export function appendHistory(client: MawsBridge, appSessionId: AppSessionId, s:
 // offline", the pending bound's "…hasn't confirmed it; check the transcript"), and Retry reads Send again.
 // P5 O7 M8: what a remote send with uploads adds (submitRemoteSerialized): the uploads the message names, and what a
 // failed send hears before its words are shown
+// Board #525: another machine's terminal session has no record, and its refusal is said all the same (never nothing); one
+// at the member's grade there offers no Retry, which the same grade would refuse. A prompt the host took for another
+// member's session is kept as the member's own (sessions/share/reader.ts).
 interface RemoteExtras {
   uploads: readonly SendUpload[];
   failed(error: unknown): void;
@@ -121,9 +126,10 @@ export async function submitHumanSerialized(controls: SessionControls, client: M
     if (result.disposition === 'held') return false;
     if (result.disposition === 'refused') {
       if (tooLarge) return false; // the pre-check said why
-      if (useSessions.getState().records.has(appSessionId)) warn(result.reason ?? 'The message was not sent', retry, startNoticeId(appSessionId), retryLabel(appSessionId));
+      if (useSessions.getState().records.has(appSessionId) || isRemoteLaneA(appSessionId)) warn(result.reason ?? 'The message was not sent', readerGradeOf(appSessionId) === null ? retry : undefined, startNoticeId(appSessionId), retryLabel(appSessionId));
       return false;
     }
+    noteOwnPrompt(appSessionId, result.messageUuid);
   } catch (error) {
     remote?.failed(error);
     warn(error instanceof Error ? error.message : String(error), retry, undefined, retryLabel(appSessionId));

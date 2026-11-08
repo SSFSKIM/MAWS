@@ -14,6 +14,7 @@ import { connectRemoteLaneA } from './lane-a/remote-connect'; // P5 O9 M9
 import { connectRemoteLaneB } from './lane-b/remote-connect'; // P5 O7 M2
 import { connectHubAccess } from './stores/hub-access'; // P5 O7 M2
 import { connectPolicies } from './stores/policies'; // P5 O8 M6b
+import { connectReaderGrades } from './sessions/share/reader-connect'; // board #525
 import { queryClient } from './ipc/query';
 import { connectActions, connectKeys } from './keymap/dispatcher';
 import { connectEditClaimants } from './keymap/edit-claimants'; // P4-B2 K6
@@ -179,6 +180,7 @@ export function App() {
   useEffect(() => connectRemoteLaneB(), []); // P5 O7 M2: other machines' lane B sessions: their rows' opener, their panes' reads (after connectShell)
   useEffect(() => connectHubAccess(), []); // P5 O7 M2 (A2): the sidebar's "Hub unreachable"
   useEffect(() => connectPolicies(), []); // P5 O8 M6b: each machine's sessions' reach, for the rows' marks (after connectHubAccess)
+  useEffect(() => connectReaderGrades(), []); // board #525: what another member's session refused is asked afresh when its listing or the member moves
   useEffect(() => persistLayout(ipc), []); // C5: changed layout keys back to main
   useEffect(() => registerShellActions(), []); // C5: the frame's action handlers
   useEffect(() => connectAttention(), []); // C5: ⌘⇧J, notification clicks and the fallback toast

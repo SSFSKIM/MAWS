@@ -5,7 +5,9 @@
 // before. P5 O9 M9: another machine's terminal session (a listed row of lane A, which has no record) gets lane A's port
 // over main's remote adapter, its state the page's watch's (starting until the first), its gaps the remote ones.
 // P5 O7 M2: another machine's lane B session (lane-b/remote-session.ts) gets lane B's port over main's remote lane B
-// adapter, with the overlay main says for it (`remote.session`'s controls).
+// adapter, with the overlay main says for it (`remote.session`'s controls). Board #525: on another member's session whose
+// machine refused the member's read or words at their grade (sessions/share/reader.ts), every control but a subagent's
+// rows is closed with why and whom to ask, and a send is refused in those words without going.
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { SendContent } from '@shared/engine/session-state-store';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -21,14 +23,33 @@ import { isRemoteLaneA, remoteMachineCapabilities, remoteMachineName, startingRe
 import { laneAStateOf, useLaneACatalog, useLaneAState } from '../../stores/lane-a';
 import { isRemoteLaneB, remoteLaneBStateOf, useIsRemoteLaneB, useRemoteLaneBState } from '../../lane-b/remote-session'; // P5 O7 M2
 import { useSessions } from '../../stores/sessions';
+import { closedWords, readerGradeOf, useReaderGrade, useWhomToAsk, whomToAsk } from '../../sessions/share/reader';
 import { laneAControls } from './lane-a';
 import { laneBControls, type LaneBFrame, type LaneBInputs } from './lane-b';
-import type { ControlResult, SessionControls } from './types';
+import type { Capability, ControlResult, SessionControls } from './types';
 
 const heldElsewhere = (record: SessionRecord | null): boolean => record?.holder.kind === 'terminal' || record?.holder.kind === 'background_job';
 
 // `record` null: an id the renderer holds no record for (a status-only session); lane B reaches it by its status.
 export function controlsFor(record: SessionRecord | null, laneA: LaneAState | null, inputs: LaneBInputs): SessionControls | null {
+  return gated(portFor(record, laneA, inputs), inputs.appSessionId);
+}
+
+// Board #525: the port of another member's session closed at the grade its machine's refusal taught.
+function gated(controls: SessionControls | null, appSessionId: AppSessionId): SessionControls | null {
+  const grade = controls === null ? null : readerGradeOf(appSessionId);
+  if (controls === null || grade === null) return controls;
+  const reason = closedWords(grade, whomToAsk(appSessionId));
+  const closed: Capability = { available: false, reason };
+  return {
+    ...controls,
+    capability: (key) => (key === 'subagent-rows' ? controls.capability(key) : closed),
+    answerCapability: () => closed,
+    send: async () => ({ disposition: 'refused', started: false, reason }),
+  };
+}
+
+function portFor(record: SessionRecord | null, laneA: LaneAState | null, inputs: LaneBInputs): SessionControls | null {
   const { appSessionId, client } = inputs;
   if (record === null && isRemoteLaneA(appSessionId)) {
     return laneAControls(laneA ?? startingRemoteState(appSessionId), null, { appSessionId, client, remote: { machine: remoteMachineName(appSessionId), capabilities: remoteMachineCapabilities(appSessionId) } });
@@ -59,6 +80,8 @@ export function useSessionControls(appSessionId: AppSessionId, options: { client
   useRemoteMachineCapabilities(appSessionId); // 2026-11-06: its endpoint's capabilities lift a gap (`subagent-rows`)
   useIsRemoteLaneB(appSessionId); // P5 O7 M2: another machine's lane B session takes main's overlay; subscribed so its state renders again
   useRemoteLaneBState(appSessionId);
+  useReaderGrade(appSessionId); // board #525: a refusal at the member's grade closes the port; subscribed so it renders again
+  useWhomToAsk(appSessionId);
   return controlsFor(record, laneA, { appSessionId, client: options.client ?? ipc, ...(options.frame && { frame: options.frame }) });
 }
 

@@ -16,6 +16,7 @@
 import { ipcError, IPC_ERROR_CODES, type IpcErrorCode } from '@shared/ipc/errors';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import { CONTROL_KEYS, MACHINE_RIGHTS, REMOTE_TOO_LARGE_WORDS, type ControlKey, type RemoteCapability, type RemoteLinkState } from '@shared/ipc/schema/remote';
+import { READ_REFUSED } from '@shared/org/reader';
 import { codecOf } from '@shared/ipc/validate';
 import { LINK_REGISTRY } from '../machines/link-surface';
 import { refusalError } from '../machines/remote/dispatch';
@@ -91,18 +92,20 @@ export function remoteLinkView(link: Pick<RemoteLink, 'state' | 'carrier' | 'ref
 }
 
 /** Why no control of the session acts from this device, or null when they do. */
-export function sessionReason(state: Pick<RemoteSessionState, 'record' | 'stream' | 'ended'>, link: RemoteLinkState, machine: string): string | null {
+export function sessionReason(state: Pick<RemoteSessionState, 'record' | 'stream' | 'ended' | 'readRefused'>, link: RemoteLinkState, machine: string): string | null {
   if (link.refusal === 'removed') return `This Mac is no longer allowed on ${machine}`;
   if (link.refusal !== null) return `${machine} refused this device (${link.refusal})`;
   if (state.ended === 'closed') return `the link to ${machine} closed`;
   // The session's own right withdrawn (a share or grant taken back) while the device stays allowed on the machine.
   if (state.ended === 'removed') return `${machine} no longer lets you open this session`;
+  // board #525: the read refused at the member's grade, in the words the renderer knows (it names whom to ask)
+  if (state.record === null && state.readRefused === true) return READ_REFUSED;
   if (state.record === null) return state.stream === 'ended' ? `${machine} can’t place this session` : `Opening on ${machine}…`;
   return null;
 }
 
 /** Every control of the session's port with the remote overlay (§K's `controls`). */
-export function controlsOverlay(state: Pick<RemoteSessionState, 'record' | 'stream' | 'ended'>, link: RemoteLinkState, machine: string): Record<ControlKey, RemoteCapability> {
+export function controlsOverlay(state: Pick<RemoteSessionState, 'record' | 'stream' | 'ended' | 'readRefused'>, link: RemoteLinkState, machine: string): Record<ControlKey, RemoteCapability> {
   const reason = sessionReason(state, link, machine);
   const controls = {} as Record<ControlKey, RemoteCapability>;
   for (const key of CONTROL_KEYS) {

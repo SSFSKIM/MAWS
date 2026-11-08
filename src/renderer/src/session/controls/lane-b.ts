@@ -22,6 +22,8 @@ import { sendHumanPrompt, sendWithoutAcquiring } from '../../composer/submit/sen
 import { ENDED, REATTACHING, reattaching, STARTING } from '../../composer/submit/submit-state';
 import { availabilityIn, availabilityRefusal } from '../../sessions/availability';
 import { beginRemoteSend } from '../../lane-b/remote-session'; // P5 O7 M2
+import { READER } from '../../sessions/share/copy'; // board #525
+import { learnReaderGrade, whomToAsk } from '../../sessions/share/reader'; // board #525
 import { useSessions } from '../../stores/sessions';
 import type { Capability, ControlKey, ControlResult, SessionControls } from './types';
 
@@ -57,6 +59,9 @@ const AVAILABLE: Capability = { available: true };
 const REMOTE_DIRECTORIES = 'Adding a directory isn’t offered for a session on another machine';
 const refusedWith = (error: string) => async () => ({ ok: false as const, error });
 const unavailable = (reason: string | null): Capability => (reason === null ? AVAILABLE : { available: false, reason });
+
+// Board #525: the machine's refusal a remote send's error carries (main's `issues.refusal`, the error's cause).
+const refusalOf = (error: unknown): unknown => ((error as { cause?: { issues?: { refusal?: unknown } } } | null)?.cause?.issues?.refusal);
 
 // P5 O7 M2: content that would not fit one message on the channel, by the bound main's link checks (its UTF-8 JSON).
 const encoder = new TextEncoder();
@@ -109,6 +114,10 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
     const sent = beginRemoteSend(appSessionId);
     try {
       return await sendWithoutAcquiring(appSessionId, content, options, client); // one invocation: main resumes and sends under one bound
+    } catch (error) {
+      // board #525: another member's session refused the words at the member's grade: said with whom to ask, and learnt
+      if (refusalOf(error) === 'grade' && learnReaderGrade(appSessionId, 'view')) return { disposition: 'refused' as const, started: false, reason: READER.notSent(whomToAsk(appSessionId)) };
+      throw error;
     } finally {
       sent();
     }

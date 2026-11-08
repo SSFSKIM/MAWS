@@ -8,6 +8,7 @@ import { validateEventPayload } from '@shared/ipc/validate';
 import type { MachineRef } from '@shared/machine/ref';
 import { humanTurn, item, record, status } from '../../../test/support/builders';
 import { deliver, FakeLink, MINI } from '../../../test/lane-b/fake-link';
+import { READ_REFUSED } from '@shared/org/reader';
 import { RemoteSession } from './remote-session';
 
 beforeEach(() => vi.useFakeTimers());
@@ -107,6 +108,44 @@ describe('opening', () => {
     await vi.advanceTimersByTimeAsync(1500);
     expect(n).toBe(3);
     expect(l.link.subs).toHaveLength(1);
+  });
+
+  // Board #525: `grade` is also a member below View there, so its first one is said at once, in the words the renderer
+  // knows; the ladder asks on, so a just-started session the machine places within it still opens.
+  it('says a `grade` refusal at once as READ_REFUSED, every control closed with it, and opens the record the ladder then reads', async () => {
+    let n = 0;
+    const l = lab();
+    l.link.answers.set('session.get', () => (++n < 3 ? { ok: false, error: { code: 'grade' } } : { ok: true, output: record(APP) }));
+    l.session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.lastState()).toMatchObject({ stream: 'opening', reason: READ_REFUSED, controls: { send: { available: false, reason: READ_REFUSED } } });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(n).toBe(2);
+    expect(l.lastState()).toMatchObject({ reason: READ_REFUSED });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(l.of('session.changed')).toHaveLength(1);
+    expect(l.lastState()).toMatchObject({ reason: null });
+  });
+
+  it('keeps READ_REFUSED through a transient answer and past the ladder, with no poll after it; a later start that reads the record clears it', async () => {
+    let answer: unknown = { ok: false, error: { code: 'grade' } };
+    const l = lab();
+    l.link.answers.set('session.get', () => answer);
+    l.session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    answer = { ok: false, error: { code: 'offline' } }; // the link's, not the session's: it says nothing of the member's grade
+    await vi.advanceTimersByTimeAsync(500);
+    expect(l.lastState()).toMatchObject({ reason: READ_REFUSED });
+    answer = { ok: false, error: { code: 'grade' } };
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(l.lastState()).toMatchObject({ stream: 'ended', reason: READ_REFUSED });
+    const asked = l.link.calls.length;
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(l.link.calls).toHaveLength(asked);
+    answer = { ok: true, output: record(APP) };
+    l.session.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.lastState()).toMatchObject({ reason: null });
   });
 });
 
