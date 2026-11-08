@@ -249,8 +249,58 @@ describe('a save', () => {
     while (door.length === 0) await new Promise((resolve) => setImmediate(resolve));
     w.session.set(null); // while the first act runs
     land({ state: 'done', result: { changed: true, policyRev: 5 } });
-    expect(await result).toMatchObject({ ok: true, results: [{ state: 'done' }, { state: 'refused', reason: 'offline' }] });
+    expect(await result).toMatchObject({ ok: true, results: [{ state: 'done' }, { state: 'refused', reason: 'signed-out' }] });
     expect(door).toHaveLength(1);
+  });
+
+  describe('belongs to the sign-in it started under: once that ends, no line it signed is sent, even after a new sign-in', () => {
+    const LINES = { access: 'private' as const, shares: [{ member: BEN, grade: 'view' as const }, { member: 'c'.repeat(32), grade: 'list' as const }] };
+    const STOPPED = [
+      { state: 'refused', reason: 'signed-out' },
+      { state: 'not-sent', line: { kind: 'share', member: BEN, grade: 'view' } },
+      { state: 'not-sent', line: { kind: 'share', member: 'c'.repeat(32), grade: 'list' } },
+    ];
+
+    for (const machine of [LOCAL, MINI]) {
+      it(`a sign-out during the confirmation, on ${machine === LOCAL ? 'this Mac' : 'another machine'}: its lines are stopped and shown so`, async () => {
+        let during = () => {};
+        const w = await world({ lanes: { s: 'B' }, confirm: async () => (during(), { ok: true }) });
+        during = () => {
+          w.session.set(null);
+          w.session.set(w.signedIn); // the same member again: another sign-in all the same
+        };
+        w.reading(machine, answer('s', 4));
+        const result = await w.policies.set({ address: `${machine}/s`, ...LINES, policyRev: 4 });
+        expect(result).toMatchObject({ ok: true, results: STOPPED, policy: null });
+        expect(w.prompts).toHaveLength(1);
+        expect(w.sent).toEqual([]);
+      });
+    }
+
+    const between = async (signIn: (w: Awaited<ReturnType<typeof world>>) => void) => {
+      const w = await world({ lanes: { s: 'B' } });
+      w.reading(MINI, answer('s', 4));
+      let land!: (outcome: unknown) => void;
+      w.outcomes[MINI].push(new Promise((resolve) => (land = resolve)) as never);
+      const result = w.policies.set({ address: `${MINI}/s`, ...LINES, policyRev: 4 });
+      while (w.sent.length === 0) await new Promise((resolve) => setImmediate(resolve));
+      w.session.set(null); // while the first act runs
+      signIn(w);
+      land(done(true, 5));
+      return { w, result: await result };
+    };
+
+    it('a sign-out between two acts, the same member signing in again before the next', async () => {
+      const { w, result } = await between((w) => w.session.set(w.signedIn));
+      expect(result).toMatchObject({ ok: true, results: [{ state: 'done', changed: true, policyRev: 5 }, { state: 'refused', reason: 'signed-out' }, { state: 'not-sent' }] });
+      expect(w.sent).toHaveLength(1);
+    });
+
+    it('a sign-out between two acts, another member signing in before the next', async () => {
+      const { w, result } = await between((w) => w.session.set({ ...w.signedIn, identity: { ...w.signedIn.identity, member: BEN } }));
+      expect(result).toMatchObject({ ok: true, results: [{ state: 'done' }, { state: 'refused', reason: 'signed-out' }, { state: 'not-sent' }] });
+      expect(w.sent).toHaveLength(1);
+    });
   });
 
   it('signs nothing when the person cancels', async () => {

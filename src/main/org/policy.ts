@@ -19,6 +19,9 @@
 // - A read belongs to the sign-in it started under (who is signed in, and which sign-in it is, as rows.ts binds its
 //   channel answers to their reader): one that answers after a sign-out or another sign-in, the same member's again
 //   included, tells nothing and answers `signed-out`, so no window is refilled with a reader's policies once they're gone.
+//   A save is that reader's too, its acts signed by their key: once the sign-in it began under ends, during Touch ID or
+//   between two acts, the next line reads refused `signed-out` and those after it `not-sent`, for good (a new sign-in,
+//   the same member's included, sends none of them), and no policy is read back for it.
 // - A refusal is passed on in its refuser's own words (the endpoint's `no-session` is plain text, as any other): only
 //   step-up's `step-up-cancelled` reads `cancelled`, and the ledger's `not-received` (`not-sent`) reads `tombstoned`.
 //
@@ -142,8 +145,8 @@ export function createOrgPolicies(deps: OrgPoliciesDeps): OrgPolicies {
         async sign(acts) {
           const signed = await current.stepUp.signActions(acts.map((act) => ({ machine, action: act.action, args: act.args })));
           if (!signed.ok) return refused(signed.reason === 'malformed' ? 'malformed' : 'cancelled');
-          // as a link's table does: nothing goes once signed out
-          const send = (action: Action) => (deps.session.current() === null ? Promise.resolve({ state: 'refused', reason: 'offline' }) : deps.door.act(action).catch((error: unknown) => ({ state: 'unknown', reason: (error as Error).message })));
+          // the save sends each only while the sign-in it began under stands (save's fence)
+          const send = (action: Action) => deps.door.act(action).catch((error: unknown) => ({ state: 'unknown', reason: (error as Error).message }));
           return { ok: true, sends: signed.actions.map((action) => () => send(action)) };
         },
       };
@@ -192,7 +195,9 @@ export function createOrgPolicies(deps: OrgPoliciesDeps): OrgPolicies {
    * the sheet opened on (null: none, for M5b's add, which reads nothing before).
    */
   async function save(address: string, acts: RecordAct[], policyRev: number | null): Promise<OrgPolicySetResult> {
-    if (deps.session.current() === null) return refused('signed-out');
+    // the sign-in the save is made under: its acts are that reader's, signed by their key, and none goes once it ends
+    const at = signIn();
+    if (at.reader === null) return refused('signed-out');
     const target = targetOf(address);
     if (!target.ok) return target;
     if (acts.length === 0) return refused('empty');
@@ -211,9 +216,11 @@ export function createOrgPolicies(deps: OrgPoliciesDeps): OrgPolicies {
     };
     const before = await unmoved();
     if (!before.ok) return before;
+    if (!stands(at)) return refused('signed-out');
     const signed = await door.sign(requests);
     if (!signed.ok) return signed;
-    const after = await unmoved();
+    // signed out (or another sign-in) during the confirmation: the acts are stopped below, line by line
+    const after = stands(at) ? await unmoved() : ({ ok: true } as const);
     if (!after.ok) return after;
     const results: OrgPolicyOutcome[] = [];
     let prev = policyRev;
@@ -223,13 +230,19 @@ export function createOrgPolicies(deps: OrgPoliciesDeps): OrgPolicies {
         results.push({ line, state: 'not-sent' });
         continue;
       }
+      // the sign-in it was signed under has ended: this line, and every one after it, stays unsent for good
+      if (!stands(at)) {
+        results.push({ line, state: 'refused', reason: 'signed-out' });
+        continue;
+      }
       const outcome = outcomeOf(line, await signed.sends[i](), prev);
       deps.acted(machine);
       results.push(outcome);
       if (outcome.state === 'done') prev = outcome.policyRev;
     }
-    const now = await read(machine, null);
-    const policy = now.ok && now.supported ? (now.policies.find((p) => p.session === session) ?? null) : null;
+    // read for the save's own reader alone: another sign-in's read is no answer to this save
+    const now = stands(at) ? await read(machine, null) : null;
+    const policy = now !== null && now.ok && now.supported ? (now.policies.find((p) => p.session === session) ?? null) : null;
     return { ok: true, results, policy };
   }
 
