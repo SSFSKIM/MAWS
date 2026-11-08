@@ -4010,6 +4010,41 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - `static,unit` at e086ef5a0 (42468417824): static and unit 1–4 are green. The planner added an e2e:cross-build job, which failed in setup on a release-CDN 504 on both attempts, before any test ran. It is to be rerun once downloads recover. It is not a review blocker (the architect).
   Date/Author: 2026-11-08, O8's executor (controller), from Task 2's report and the architect's notes.
 
+- Decision: M4b Task 3, main's machine edits and enrollment. The commits:
+  - 1f82a49ff, endpoint only: desk 683's notes (a) and (b);
+  - 1b9c48fa6: the stored-grant comment;
+  - ca3f145ce: Task 3 itself;
+  - 7f7ba3acb: the RL2 boundary-test allowance.
+  Master 5fc234da2 (#534, the download fallback) was merged in at 4050bb5ec. These points are settled.
+  1. **`member.remove` of a machine owner is refused by the composer** (`owners-unknown`), with one finding per machine whose owners name the member: "`<email>` owns `<name>`: Change the machine's owners first". The package's own detail names neither. An org-owned machine blocks no one, and delegation owners are still the package's finding (M4c).
+  2. **`OrgView.machines` gains `keyId`, not `pub`.** The field holds a key id, and §R's "`pub` (key id)" reads so.
+  3. **Certified machines.**
+     - For a refusal, "certified" means any ref a served certificate names that the state doesn't list.
+     - The view shows only `live` certificates, through `certificateViews`. It skips a ref that is also listed, and a certificate whose delegation the head lacks.
+  4. **`machine.add` and `machine.replace` are refused `invalid` through `org.preview` and `org.change`.** Only an enrollment's approval composes them, from the key whose MAC it checked.
+  5. **A drop's hub row.**
+     - The row is deleted only after the sign returns `ok`, as `machine drop` deletes after its amend.
+     - A row whose delete fails is kept in `OrgStatus.registered.hubRowsLeft: {name, ref}[]`. `org.drop.retry {name}` deletes only a row this run's drop left. It answers `none` for a name the held head lists again.
+     - The list is cleared at sign-out. A delete that answers after the sign-out records nothing.
+  6. **The enrollment.**
+     - `enrolling` carries `replace: ref | null`. A re-enrollment's name must name the replaced machine, and its posted key must be under the replaced ref.
+     - The start refusals are `not-root`, `not-admin`, `busy`, `hub`, `shape`, `machine-name-taken`, `prefix-names-machine`, `certified-machine`, `no-machine`, `refused` (the hub's mint refusal, such as `409 unknown-machine`) and `cancelled`.
+     - Approval reads the key again: a changed key reads `stale` and ends it `key-changed`.
+     - Its `live` also needs the sign-in to stand. Sign-out cancels it.
+     - It ends at the earlier of the hub's `expires` and now + 3600 s. `ENROLL_POLL_MS` is 5 s.
+     - Pairing, rekey and enrollment exclude one another in both directions.
+     - `notAfter` for a retirement is the successor's `issued`.
+     - `EditSelf.machine` is main's `machine.identity` ref, the ref the endpoint enrolls under.
+  7. **The on-machine command** for the copy is `mawsd enroll` (`cli.ts:126`, also `mawsd endpoint enroll`). The code is pasted at its hidden prompt, or given on stdin, never as an argument. `--replace` is for a machine still enrolled.
+  8. **The RL2 boundary test** (`src/main/machines/remote/boundary.test.ts`, O7 M1) counts each opener per file. It has a named allowance of one for `hub-client.ts`'s Registry `DELETE /api/machines/<name>`, which reaches no machine, and a second occurrence still fails. A narrow allowance was chosen over hiding the literal behind a constant.
+  9. **Residue candidates** (concerns the branch review may weigh):
+     - A drop that signs but stays pending (`hub`) leaves the hub row with no Retry. `deployment admin machine drop` still clears it. The full fix deletes at the slot's settlement.
+     - The CLI's pre-mint check for an existing hub row of a new name isn't made, because the app has no `GET /api/machines` read.
+     - `deleteRow`'s fence is the session's generation, which a cancelled sign-in also advances.
+  10. **Tests.** Each ran on its own: edits 31, enroll 21 (new), org-session 126, hub-client 9, view 3, boundary 2, grants-call 17. Each has red evidence, plus mutations on `live`, `key-changed` and `close()`'s join.
+  11. **Gates.** Typecheck, lint and build pass in static at 7f7ba3acb, and unit 1–4 and e2e:cross-build are green (42472451586). Its "gate scripts' tests" step and 1b9c48fa6's static runs failed or were cancelled on download 504s, which is infra; #534 is now merged in.
+  Date/Author: 2026-11-08, O8's executor (controller), from Task 3's report.
+
 ## Outcomes & Retrospective
 
 **M1 (2026-10-28, PR from `p5-o8-m1`; the live staging sitting pending at the owner's hand).** The app signs in to the org from a pairing code, registers its device, holds the org's chain from genesis behind an anchor, follows the hub over the `?app=1` feed, and hands O7's links a production session. A never-signed-in profile makes no keys, files or requests. Evidence: the unit suites (`access-login` 32, `held` 22, `registry-feed` 29, `hub-client` 3, `org-session` 56, `OrgSection` 13) and `test/org/sign-in.local.test.ts` (7, on desk-hub's Worker in Miniflare with O13's real `pair` approving, the app's fingerprint equal to `pair`'s, and O7's link up over the hub on the production session), class 1a and the hosted Electron groups (the PR body has the runs). Still owed: the staging sitting (the fingerprint match on a real Access login, `/api/me` through `cf-access-token` from the app, a relaunch with no browser), recorded here when it runs.
