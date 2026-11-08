@@ -66,7 +66,6 @@ import { Leases } from './leases';
 import { ENDPOINT_CAPABILITIES } from './capabilities';
 import { Channels } from './channels';
 import { ChannelCursors } from './channel-cursors';
-import { orgProject } from './channel-view';
 import { DirectListener, type DirectListenerOptions } from './direct-listener';
 import { Actions } from './actions';
 import { runCli } from './cli';
@@ -533,7 +532,6 @@ export class Endpoint implements EndpointModule {
       artifacts: this.artifactRanks,
       leases: this.leases,
       browser: () => this.#services?.browser ?? null, // P5 O17 M9a: a session's `browser.inventory` feed
-      reaches: (project) => orgProject(this.#org?.ready ? this.#org.head().state : null, project), // P5 O8 M7b: the `channel` feed's
       cursors: channelCursors, // P5 O8 M7b fix wave: its entries' cursors, history's too
       owners: () => this.#ownersRead(), // P5 O8 M6a: whose reading a `session.changed` carries as it is
       log,
@@ -571,7 +569,6 @@ export class Endpoint implements EndpointModule {
       ...(options.acquireWithinMs === undefined ? {} : { acquireWithinMs: options.acquireWithinMs }),
       engineHostLists: (capability) => this.#services?.engineHostLists(capability) ?? false, // P5 O7 M8
       setup,
-      reaches: (project) => orgProject(this.#org?.ready ? this.#org.head().state : null, project), // P5 O8 M7b fix wave
       cursors: channelCursors,
       readerMoved: (member, appSessionId) => this.planeFeeds.readerMoved(member, appSessionId), // P5 O8 M6a: their other devices
       sminos: () => this.rl10.sminosCapabilities(), // P5 O8 M6b: `record.policy`

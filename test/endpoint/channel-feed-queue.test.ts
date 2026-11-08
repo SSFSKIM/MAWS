@@ -143,11 +143,10 @@ function member(views: Set<string>) {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
-function start(m: ReturnType<typeof machine>, who: Pick<ReturnType<typeof member>, 'ranks'>, reach = { reaches: true }, settleMs?: number) {
+function start(m: ReturnType<typeof machine>, who: Pick<ReturnType<typeof member>, 'ranks'>, settleMs?: number) {
   const feeds = new ChannelFeeds({
     dispatch: m.dispatch,
     ranks: async () => who.ranks(),
-    reaches: () => reach.reaches,
     cursors: { seal: (entry) => `c${entry.id}` },
     log: () => {},
     ...(settleMs === undefined ? {} : { settleMs }),
@@ -160,7 +159,7 @@ function start(m: ReturnType<typeof machine>, who: Pick<ReturnType<typeof member
     feeds.event('machine', { name: 'channel.changed', payload: { project: PROJECT, entry } });
   };
   const event = (name: string, payload: unknown) => feeds.event('machine', { name, payload });
-  return { feeds, sub, record, event, reach };
+  return { feeds, sub, record, event };
 }
 
 describe('a lane B entry on the feed', () => {
@@ -314,7 +313,7 @@ describe('the feed’s snapshot', () => {
   it('past SNAPSHOT_READS reads that each moved, waits for a change of rights, and ends `unavailable` when none comes: never a page whose `more` it can’t vouch for', async () => {
     const m = olderThanAPage();
     const who = flipping();
-    const { sub } = start(m, who, { reaches: true }, 60);
+    const { sub } = start(m, who, 60);
     await settle();
     expect(m.reads('channel.history')).toBe(2 * SNAPSHOT_READS);
     expect(sub.endedWith).toBeNull(); // waiting on a change of rights
@@ -326,7 +325,7 @@ describe('the feed’s snapshot', () => {
   it('past SNAPSHOT_READS, reads once more at the next change of rights: a page that holds what the member views, `more` exact', async () => {
     const m = olderThanAPage();
     const who = flipping();
-    const { feeds, sub } = start(m, who, { reaches: true }, 60_000);
+    const { feeds, sub } = start(m, who, 60_000);
     await settle();
     who.state.flipping = false; // the rights settle: la-x viewable
     feeds.accessChanged();
@@ -340,7 +339,7 @@ describe('the feed’s snapshot', () => {
 
   it('ends `unavailable` when the one more read moved too', async () => {
     const m = olderThanAPage();
-    const { feeds, sub } = start(m, flipping(), { reaches: true }, 60_000);
+    const { feeds, sub } = start(m, flipping(), 60_000);
     await settle();
     feeds.accessChanged(); // a change of rights, still moving
     await settle();
@@ -360,19 +359,6 @@ describe('the feed’s snapshot', () => {
     await settle();
     sub.take();
     expect(sub.snaps().map((snap) => [snap.entries.map((e) => e.text), snap.more])).toEqual([[['x'], false]]);
-  });
-
-  it('is never queued once the project left the org meanwhile: the feed ends `removed`', async () => {
-    const m = machine({ 'app-1': 'eng-1' });
-    m.journal.push(laneB('app-1', 'b'));
-    m.hold('session.get');
-    const { sub, reach } = start(m, member(new Set(['eng-1'])));
-    await settle();
-    reach.reaches = false;
-    m.release();
-    await settle();
-    expect(sub.endedWith).toBe('removed');
-    expect(sub.snaps()).toEqual([]);
   });
 
   it('is let go of once taken, and what the feed holds stays bounded by what it still has to send', async () => {

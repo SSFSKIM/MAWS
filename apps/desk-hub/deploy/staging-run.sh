@@ -42,6 +42,13 @@
 #                            P5 O8 M6b: the owner's second email added as member B, read from a 0600 file outside any
 #                            checkout; the second scratch profile's device listed once it signs in with the pairing code
 #                            (written to a 0600 file, never printed); B removed and its devices revoked
+#   keep-a1 --vm <vm> --direct-url ws://<its tailnet address> --member <B's id> --control <file> [args…]
+#                            `deployment keep-a1`: reach scene A1 on the run's VM kept up for member B with A's sessions
+#                            S and L, A's acts made on the commands appended to <file>, undone at `down` or a signal;
+#                            production's X-Desk-Build compared before and after
+#   sweep-leftovers <o18-…-xxxxxx>…
+#                            `deployment sweep-leftovers`: the reach scenes' and probes' machines a run left listed, each
+#                            taken out of the state with its key retired and its hub credential revoked
 # Any further arguments go to the step's command. Environment (README "Staging runs"):
 #   DESK_STAGING_SECRETS  the directory holding CF_ACCESS_SETUP_TOKEN and CF_DESK_HUB_SERVICE_TOKENS
 #   DESK_STAGING_DIR      logs and state (default ~/.local/state/desk-hub-staging): one log per step; prod/; the
@@ -384,6 +391,47 @@ case $step in
     ran=${pipestatus[2]}
     say "real-member $sub exit $ran"
     exit $ran ;;
+  keep-a1|sweep-leftovers)
+    # The real-member runs' drivers (P5 O8 M6b's sitting, O10's acceptance after it): `deployment keep-a1` keeps reach scene
+    # A1 up for a real member, `deployment sweep-leftovers` sweeps what a reach run left listed. The token on the command's
+    # stdin alone; what keep-a1 handled (A1's enrollment code) listed in $SCAN for the search of its log after it;
+    # production's X-Desk-Build compared before and after keep-a1, which writes the state for as long as it runs.
+    [[ -f $H/keys.json ]] || { print -r -- "$step: no admin device keys at $H/keys.json (DESK_STAGING_DEVICE): stop. Nothing was changed."; exit 2; }
+    for a in "$@"; do
+      [[ $a == (--config|--device-keys|--scan|--production|--hub)(|=*) ]] && { print -r -- "$step takes no $a here: the step names staging, the keys and the scan itself: stop. Nothing was changed."; exit 2; }
+    done
+    LOG=$O/$step-$(stamp).log; : > $LOG
+    SCAN=$O/$step.scan; : > $SCAN
+    say() { print -r -- "$*" | tee -a $LOG; }
+    owner_token
+    before=
+    if [[ $step == keep-a1 ]]; then before=$(header $PROD) || exit 3; say "production before: $before"; fi
+    ran=1 finished=0
+    finish() {
+      (( finished )) && return; finished=1
+      after=$before
+      if [[ -n $before ]]; then
+        after=$(header $PROD) || after="unread"
+        if [[ $after == "$before" ]]; then say "production build unchanged: $after"; else say "production build CHANGED or unread: $after"; fi
+      fi
+      leaked=$(secret_scan <(print -r -- "$T"; cat $SCAN) $LOG)
+      unset T
+      rm -f $SCAN
+      say "files holding the Access token or a secret the run handled: $leaked; log $LOG"
+      (( ran == 0 && leaked == 0 )) && [[ $after == "$before" ]] && exit 0
+      exit $(( ran ? ran : 1 ))
+    }
+    trap finish EXIT
+    trap 'exit 130' INT TERM
+    trap 'exit 129' HUP
+    if [[ $step == keep-a1 ]]; then
+      printf 'DESK_ACCESS_TOKEN=%s\n' "$T" | deployment keep-a1 --device-keys $H/keys.json --scan $SCAN "$@" 2>&1 | filter | tee -a $LOG
+    else
+      printf 'DESK_ACCESS_TOKEN=%s\n' "$T" | deployment sweep-leftovers --device-keys $H/keys.json "$@" 2>&1 | filter | tee -a $LOG
+    fi
+    ran=${pipestatus[2]}
+    say "$step exit $ran"
+    exit $ran ;;
   reach-vm)
     # P5 O18 M6: the reach scenes' setup (vm/setup.sh's RUN=o18) or teardown on the run's VM, through `devcloud vm ssh`
     # alone. No token is read: neither touches the hub.
@@ -530,5 +578,5 @@ case $step in
       checks+=(${pipestatus[2]}); say "redeploy-check exit ${checks[-1]}"
     fi
     exit 0 ;;
-  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin [--pipe] <args…> | throwaway <n> | phone <n> [--rehearse] [--lane-b] [--device <id>] | endpoint [args…] | endpoint-vm setup <base> --vm <vm> | teardown --vm <vm> | reach [args…] | reach-vm setup|teardown [args…]"; exit 2 ;;
+  *) print -r -- "prod <label> | deploy | build | acceptance [--no-push] | relay-measure | access-sync | admin [--pipe] <args…> | throwaway <n> | phone <n> [--rehearse] [--lane-b] [--device <id>] | endpoint [args…] | endpoint-vm setup <base> --vm <vm> | teardown --vm <vm> | reach [args…] | reach-vm setup|teardown [args…] | real-member add|pair|remove [args…] | keep-a1 [args…] | sweep-leftovers <name>…"; exit 2 ;;
 esac

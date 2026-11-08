@@ -26,7 +26,7 @@ if [[ $platform == Darwin ]] && [[ ! -e $HOME/Library/Fonts/$meslo-Regular.ttf &
   echo "MAWS setup: installing MesloLGM Nerd Font Mono $MESLO_VERSION from $url"
   work=$(mktemp -d)
   trap 'rm -rf "$work"' EXIT
-  if ! curl -fsSL --retry 3 --connect-timeout 20 -o "$work/Meslo.tar.xz" "$url"; then
+  if ! bash "$(dirname "$0")/scripts/release-fetch.sh" ryanoasis/nerd-fonts "v$MESLO_VERSION" Meslo.tar.xz "$work/Meslo.tar.xz"; then
     echo "MAWS setup: could not download $url" >&2
     exit 1
   fi

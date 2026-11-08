@@ -506,7 +506,7 @@ beforeAll(async () => {
   s.endpoint.upload(PROJECT, [await say(studio, S4, 1, '*', 'studio says what the org no longer vouches for')]);
   await stored(`studio/${S4}`, 1, s.endpoint);
   const kid = await keyId(studio.key.pub);
-  await org.amend((state) => {
+  const head = await org.amend((state) => {
     state.machines = state.machines.filter((x) => x.ref !== studio.ref);
     state.revoked.push({ keyId: kid, holder: { machine: studio.ref } });
   });
@@ -518,9 +518,9 @@ beforeAll(async () => {
   const posted = await machineFetch(org.hub.url, mini.credentials, `/machine/projects/${PROJECT}/attestations`, { record });
   if (posted.status !== 200 && posted.status !== 201) throw new Error(`attestation: ${posted.status} ${await posted.text()}`);
 
-  // M7b: the project is one of the org's (the reach of a machine's `channel` feed), and two real endpoints keep their
-  // lane A sessions' to-human entries: `studio-b` with the feed, `oldstudio` an older peer whose `h2` lacks it.
-  await org.amend((state) => void state.projects.push({ id: PROJECT, name: 'o8-channel' }));
+  // M7b: two real endpoints keep their lane A sessions' to-human entries: `studio-b` with the feed, `oldstudio` an older
+  // peer whose `h2` lacks it. The org's head lists no project, as no production head does (channel-view.ts' reach).
+  expect(head.state.projects).toEqual([]);
   studioB = await realMachine('studio-b');
   oldStudio = await realMachine('oldstudio', { MAWS_E2E: '1', MAWS_E2E_ENDPOINT_WITHOUT: 'rl2.channel' });
   const sB = await sminosOn(studioB, LA);

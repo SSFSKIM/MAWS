@@ -466,6 +466,35 @@ git checkout (a symlink included); a code file that exists already or would land
 or one already a member's, at `add`; a member that already has a device, at `pair`. No line it prints holds the email
 ("the owner's second email" stands in) or the code.
 
+## `keep-a1` and `sweep-leftovers`: the real-member runs' drivers (P5 O8 M6b)
+
+`keep-a1` keeps reach scene A1 up on the reach run's VM (set up by `staging-run.sh reach-vm setup`) for as long as a
+real member B watches from their own MAWS: A1 enrolled and listed for the admin (member A), a lane A session S and a
+lane B session L of A's on it, and A's acts on them made through A's relayed channel, as the reach items make them, one
+command a line appended to `--control`:
+
+    zsh apps/desk-hub/deploy/staging-run.sh keep-a1 --vm <vm> --direct-url ws://<its tailnet address> --member <B's id> --control <file>
+
+- `access <private|listed|org-view|org-converse> <S|L>`, `share <list|view|converse|approve|none> <S|L>` (B's share),
+  `policy <S|L>`: the record acts and the read, each line's outcome and policyRev printed.
+- `adraft <text>`: A's draft on L saved, A's reading printed; `aread`: A's reading and draft again, said unchanged or
+  moved since the draft (B reading and drafting on L must leave both alone).
+- `terminal-share`: the operator path's share of S with B at view, which a terminal may not widen (MAWS's to make).
+- `down`, a SIGINT or a SIGTERM: the undo, as the reach run's: S's and L's shares with B removed, the relay closed, A1
+  out of the state and revoked, the scene down; then a `LEFT` line for anything the head or the hub still holds. A
+  second signal exits at once, naming what is not yet undone.
+
+It refuses any hub but staging's (a config naming production, before anything is read; `checkTestHub` and
+`isTestTarget` after), a VM name that is not devcloud's `dc-…`, a member id that is not 32 lowercase hex characters or
+one the head does not list (`real-member add` first), and a control file that does not exist.
+
+`sweep-leftovers` is the reach run's undo for what a run could not undo itself (its CLI token revoked mid-run, its
+process killed): each machine named is taken out of the state with its key retired and its hub credential revoked, as
+the run's own cleanup does. It takes only names of the reach run's shape, `o18-<a1|a2|a3|b1|pa|pb>-<6 hex>`, so no other
+machine can be named to it, and staging's hub alone.
+
+    zsh apps/desk-hub/deploy/staging-run.sh sweep-leftovers o18-a1-5eb586 o18-pa-3c09d1
+
 ## `admin`: the owner's hand on the org state (P5 O13 M2)
 
 Until O8's Org page, the owner roots a deployment's org, pairs a device into it, revokes one and keeps the head

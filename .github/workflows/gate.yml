@@ -479,7 +479,9 @@ jobs:
       # The gate scripts' own tests (gate-plan, e2e-default-specs, ci-gate-alerts) have no lane of their own: vitest
       # collects no .github/ file, and e2e-default-specs pins default's own specs at the head, so a branch that adds a spec
       # or a group without moving the pin goes red here rather than unseen (P3-HD's 73 against the tree's 74, 2026-10-17).
-      - run: |
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
           bg=.github/scripts/gate-bg.sh
           $bg start-parts typecheck 'error TS|problems?\b' typecheck
           $bg start lint 'error TS|problems?\b' pnpm lint
@@ -911,6 +913,8 @@ jobs:
         with:
           vm: any
       - id: e2e
+        # A guest-eligible entry's job limit carries the uplink's margin; its test step keeps the former limit (gate-plan.mjs).
+        timeout-minutes: ${{ matrix.test_timeout || matrix.timeout }}
         env:
           SCRIPT: ${{ matrix.script }}
           MAWS_E2E_RETRY: ${{ github.job == 'e2e' && matrix.retry && runner.os == 'macOS' && '1' || '' }}

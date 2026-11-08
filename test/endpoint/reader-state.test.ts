@@ -368,7 +368,7 @@ describe('a checkout feed’s changes waiting on a reading', () => {
       if (reads.length === 1) await held;
       return { t: 'res', id: 'x', ok: true, value: { appId: 'app-1', ...NONE, pinned: true } } as never;
     };
-    const feeds = new PlaneFeeds({ dispatch, bounds: new CheckoutBounds(() => []), ranks: (() => new Map()) as never, artifacts: { onDropped: () => () => {} } as never, leases: {} as never, browser: () => null, reaches: () => false, cursors: { seal: (entry) => entry.id }, owners, backlogBytes, log: () => {} });
+    const feeds = new PlaneFeeds({ dispatch, bounds: new CheckoutBounds(() => []), ranks: (() => new Map()) as never, artifacts: { onDropped: () => () => {} } as never, leases: {} as never, browser: () => null, cursors: { seal: (entry) => entry.id }, owners, backlogBytes, log: () => {} });
     const sub = {
       message: { feed: 'checkout' },
       session: { lane: 'B', id: 'app-1' },
