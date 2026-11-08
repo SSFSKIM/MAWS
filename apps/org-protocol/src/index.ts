@@ -17,6 +17,7 @@ export * from './events.ts';
 export * from './frames.ts';
 export * from './history.ts';
 export * from './keys.ts';
+export * from './machines.ts';
 export * from './messages.ts';
 export * from './names.ts';
 export * from './org-state.ts';

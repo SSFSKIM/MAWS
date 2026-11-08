@@ -40,7 +40,9 @@ import { parseArgs } from 'node:util';
 import {
   base64urlEncode,
   canonicalize,
+  certificateViews,
   decodeProvisioningCodeV2,
+  encodeEnrollmentCodeV2,
   encodePairingCode,
   encodeProvisioningCodeV2,
   endorseDevice,
@@ -51,8 +53,10 @@ import {
   judgeEntry,
   keyId,
   machineNameKey,
+  machineRows,
   NO_CERTIFICATES,
   pairingFingerprint,
+  resolveMachine,
   signOrgState,
   stateHash,
   successorProblems,
@@ -71,7 +75,6 @@ import { IDENTITY_HEADER } from '../local/standin';
 import {
   decodeProvisioningCode,
   ENROLLMENT_TTL_S,
-  encodeEnrollmentCodeV2,
   MAX_ENROLLMENT_TTL_S,
   MAX_PROVISIONING_KEY_TTL_S,
   MAX_PROVISIONING_KEY_USES,
@@ -113,7 +116,7 @@ import {
 import { checkTarget, readDeployConfig, type DeployConfig } from './config';
 import { readSecrets } from './deploy';
 import { Person } from './hub';
-import { certificateViews, machineRows, resolveMachine, table } from './admin-machines';
+import { table } from './admin-machines';
 import { deviceEntry, purgeOrgKeys, restoreLegacyKey, retireLegacyKey, successor } from './org-admin';
 import { withRunLock } from './run-lock';
 import { openTerminal, type Terminal } from './terminal';

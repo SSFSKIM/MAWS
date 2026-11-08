@@ -1,9 +1,8 @@
 // DX7 — identity: the registry's records, machine names, and the enrollment code. Written to outlive phase 1: the
 // org phase adds roles and per-member keys to these records rather than replacing them.
 import { isMachineName, isMemberId, machineNameKey, RESERVED_MACHINE_NAMES, type MemberId } from 'org-protocol';
-import { isPublicKey } from 'org-protocol';
 import type { Certificates, Delegation, DeviceClass, EndpointRecord, KeyStorage, Listing, Passkey, RootTransition, Signed, SignedOrgState } from 'org-protocol';
-import { base64urlDecode, base64urlEncode, isBase64urlOf } from './base64url';
+import { base64urlDecode, base64urlEncode } from './base64url';
 import type { JsonObject } from './json';
 
 // Member ids and machine names live in the protocol package (apps/org-protocol), whose org state names both; they are
@@ -471,43 +470,9 @@ export function decodeCode(text: string): DecodedCode {
 
 // ---- Hub v2 (O11 M4): machine enrollment with its own key, delegations, listings, endpoint records, owner-only push --
 
-/**
- * The v2 enrollment code (RL §5.3): built by the enrolling member's app, carried by hand, read at the machine's hidden
- * prompt. It carries the org's trust anchors instead of a secret org key: `roots`, the root key ids the machine pins
- * (the org state's `root.keys`), and `recoveryPub`, the offline recovery key. `k`, the one-time pairing secret (16 to 64
- * bytes, base64url), is added by the app and never reaches the hub: the machine MACs its enrollment with it
- * (org-protocol's `enrollmentMac`) and the member's device checks the MAC. `machine` names the machine when the app
- * chose it, as a re-enrollment's code does (an active machine re-enrolls in place only under a token that names it,
- * `EnrollmentRequest.machine`). Text form: `smns-enroll-v2.` + base64url of the UTF-8 JSON object.
- */
-export type EnrollmentCodeV2 = { hub: string; token: string; roots: string[]; recoveryPub: string; k: string; machine?: string };
-
-const CODE_V2_PREFIX = 'smns-enroll-v2.';
-const CODE_V2_FIELDS = ['hub', 'token', 'roots', 'recoveryPub', 'k', 'machine'];
-
-function checkCodeV2(code: Record<string, unknown>): EnrollmentCodeV2 {
-  const kind = 'enrollment code';
-  for (const field of Object.keys(code)) if (!CODE_V2_FIELDS.includes(field)) throw new TypeError(`${kind}: unknown field ${field}`);
-  const { hub, token, roots, recoveryPub, k, machine } = code;
-  for (const [field, value] of [['hub', hub], ['token', token]] as const) if (typeof value !== 'string' || value === '') throw new TypeError(`${kind}: no ${field}`);
-  checkHub(kind, hub as string);
-  if (!Array.isArray(roots) || roots.length === 0 || !roots.every((r) => isBase64urlOf(r, 16))) throw new TypeError(`${kind}: the roots are not key ids`);
-  if (!isPublicKey(recoveryPub)) throw new TypeError(`${kind}: the recovery key is not a public key`);
-  if (typeof k !== 'string' || !isBase64urlOf(k, (k.length * 6) >> 3) || base64urlDecode(k).length < 16 || base64urlDecode(k).length > 64) {
-    throw new TypeError(`${kind}: the pairing secret is not 128 to 512 bits`);
-  }
-  if (machine !== undefined && (typeof machine !== 'string' || !isMachineName(machine))) throw new TypeError(`${kind}: the machine name is not admitted`);
-  return { hub: hub as string, token: token as string, roots: [...(roots as string[])], recoveryPub, k, ...(machine === undefined ? {} : { machine }) };
-}
-
-export function encodeEnrollmentCodeV2(code: EnrollmentCodeV2): string {
-  return CODE_V2_PREFIX + base64urlEncode(new TextEncoder().encode(JSON.stringify(checkCodeV2(code))));
-}
-
-export function decodeEnrollmentCodeV2(text: string): EnrollmentCodeV2 {
-  if (!text.startsWith(CODE_V2_PREFIX)) throw new TypeError('enrollment code: not smns-enroll-v2');
-  return checkCodeV2(body('enrollment code', text, CODE_V2_PREFIX));
-}
+// The v2 enrollment code lives in the protocol package (apps/org-protocol, O8 M4b), where the app's enrollment builds
+// it too; re-exported here under its names.
+export { decodeEnrollmentCodeV2, encodeEnrollmentCodeV2, type EnrollmentCodeV2 } from 'org-protocol';
 
 /**
  * `POST /machine/key` (the machine, once redeemed): its public key, its ref (RL §2.3, minted at its first run) and the
