@@ -47,9 +47,10 @@ let keys: Record<string, SigningKey>;
 let head: OrgState;
 
 /** A deferred: `promise`, settled by `resolve`. */
-function deferred<T = void>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => (resolve = r));
+type Deferred = { promise: Promise<void>; resolve: () => void };
+function deferred(): Deferred {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => (resolve = r));
   return { promise, resolve };
 }
 async function until(check: () => boolean | Promise<boolean>, what: string, ms = 2_000): Promise<void> {
@@ -61,7 +62,7 @@ async function until(check: () => boolean | Promise<boolean>, what: string, ms =
 }
 
 async function stateWith(machineKeys: Record<string, SigningKey>): Promise<OrgState> {
-  const device = async (id: string, key: SigningKey) => ({ id, class: 'native-mac' as const, keyStorage: 'software', channelPub: (await generateSigningKey()).pub, stepUpPub: key.pub });
+  const device = async (id: string, key: SigningKey) => ({ id, class: 'native-mac' as const, keyStorage: 'software' as const, channelPub: (await generateSigningKey()).pub, stepUpPub: key.pub });
   return {
     org: ORG,
     version: 7,
@@ -123,9 +124,9 @@ class FakeLink implements GrantLink {
   /** Answers the next call with this, once. */
   callFails: CallResult | null = null;
   /** Holds the next call until released. */
-  holdCall: ReturnType<typeof deferred> | null = null;
+  holdCall: Deferred | null = null;
   /** Holds the next act's outcome until released. */
-  holdAct: ReturnType<typeof deferred> | null = null;
+  holdAct: Deferred | null = null;
   /** The outcomes of the next acts, in order, before the ledger's own. */
   script: ActOutcome[] = [];
   /** Runs once an act is sent, before its outcome. */

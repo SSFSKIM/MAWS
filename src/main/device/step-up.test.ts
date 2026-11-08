@@ -598,7 +598,7 @@ describe('a record signer (P5 O8 M4b: a grant, signed with the step-up key behin
   /** A state whose member MEMBER owns MACHINE through a device holding `key` as its step-up key, and lists OTHER. */
   async function owning(key: SigningKey): Promise<{ state: OrgState; machineKid: string }> {
     const machinePub = (await generateSigningKey()).pub;
-    const device = { id: 'dev-mac', class: 'native-mac' as const, keyStorage: 'software', channelPub: (await generateSigningKey()).pub, stepUpPub: key.pub };
+    const device = { id: 'dev-mac', class: 'native-mac' as const, keyStorage: 'software' as const, channelPub: (await generateSigningKey()).pub, stepUpPub: key.pub };
     const state: OrgState = {
       org: 'org-record-signer',
       version: 3,
