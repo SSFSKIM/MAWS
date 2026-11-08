@@ -358,6 +358,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   let signingOut = false;
   /** Advanced by cancel and sign-out: an attempt that started under another generation writes nothing. */
   let generation = 0;
+  /** Advanced by sign-out alone (and the quit's `closed`): what a sign-in's own state (its hub rows left) is fenced by. */
+  let signIns = 0;
   let attempt: AbortController | null = null;
   // Each attempt is numbered and logged at its start (with this process's pid, so a second main process on the same
   // profile shows in a shared log) and at its end, however it ends: two browser trips in a log always say why.
@@ -1120,10 +1122,10 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   /** The hub row of a machine just dropped, deleted as `machine drop` deletes it: 200, or 404 for a row already gone. */
   async function deleteRow(row: { name: string; ref: string }): Promise<DropRetryResult> {
     const hub = signerHub();
-    const asked = generation;
+    const asked = signIns;
     const deleted: HubResult<'deleted' | 'absent'> = hub === null ? { ok: false, kind: 'unreachable', detail: 'no hub sign-in' } : await hub.deleteMachine(row.name);
-    // A sign-out meanwhile took the rows left with it: they were that sign-in's.
-    if (asked !== generation || closed) return { ok: false, reason: 'hub', detail: 'the sign-in ended: nothing more is offered' };
+    // A sign-out meanwhile took the rows left with it: they were that sign-in's. A cancelled attempt is no sign-out.
+    if (asked !== signIns || closed) return { ok: false, reason: 'hub', detail: 'the sign-in ended: nothing more is offered' };
     const left = hubRowsLeft.filter((r) => r.name !== row.name);
     if (deleted.ok) {
       log(`the hub's row for ${row.name} was ${deleted.value === 'deleted' ? 'deleted' : 'already gone'}`);
@@ -1771,6 +1773,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     // status reads signed out at once and an anchor written before the marker's turn carries it.
     if (attempt !== null) endAttempt('ended by sign-out');
     generation++;
+    signIns++;
     // M3: a sign, settle or discard in flight goes no further (no Touch ID, no slot, no post); a slot already written
     // stays and settles at the next sign-in.
     composed?.signer.fence();

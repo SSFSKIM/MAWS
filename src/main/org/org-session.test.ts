@@ -2737,6 +2737,30 @@ describe('M4b: a drop that settles later (the fix wave)', () => {
     expect(hub.rows.has('mini')).toBe(true);
   });
 
+  it("a cancelled sign-in attempt while the delete is out leaves the sign-in's Retry standing", async () => {
+    const { session, feed } = await signingRoot();
+    const { ref } = await addMachine(session, feed);
+    const gate = { open: () => {} };
+    const held = new Promise<void>((resolve) => (gate.open = resolve));
+    hub.deleteAnswer = async () => {
+      await held;
+      return worker(503, { error: 'hub-updating' });
+    };
+    const preview = await session.preview({ kind: 'machine.drop', ref, revoke: false });
+    if (!preview.ok) throw new Error(JSON.stringify(preview));
+    const changing = session.change(preview.change, preview.digest);
+    await until(() => hub.calls.some((c) => c.method === 'DELETE'), 'the delete out');
+    // an unrelated attempt, started and cancelled: the owning sign-in still stands
+    expect(session.signIn()).toEqual({ ok: true });
+    session.cancel();
+    expect(isSignedIn(session)).toBe(true);
+    gate.open();
+    expect(await changing).toMatchObject({ ok: true });
+    expect(registered(session).hubRowsLeft).toEqual([{ name: 'mini', ref }]);
+    hub.deleteAnswer = undefined;
+    expect(await session.dropRetry('mini')).toEqual({ ok: true });
+  });
+
   it('a sign-out between the sign and the settlement: the row goes when the next sign-in settles the drop', async () => {
     const { session, feed } = await pendingDrop();
     await session.signOut();
