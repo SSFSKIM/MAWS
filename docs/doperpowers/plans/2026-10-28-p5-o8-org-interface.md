@@ -113,6 +113,8 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
     - What it adds: `policy.local.test.ts`, run against a stand-in that holds each rpc to sminos's proof binding and field set. It also adds the reach harness's record-act widenings, with the items m6b-cutover, m6b-visibility and m6b-reader, the real-member steps for the sitting, and actions-whole's narrowed exemption.
     - Reviews: our task reviewer took three rounds (5 Importants, then 2, then none). The desk track took three verdicts: desk 641 (layer 1 clean, 4 P2s), desk 642 (ready, with 2 leftovers folded in) and desk 643 (ready, converged).
     - Green at 055778370 (42432343440: static, unit, e2e:settings and e2e:cross-build, hosted).
+  - [x] (2026-11-08) Branch review clean. reviewer-high, with a security lens, found 3 P2s (eaafe05af, df906b6e9 and 95be41576, the last reviewed by the desk track as desk 644), and its re-review found the branch correct. Master 5b1f73877 merged in at 0db815f19.
+  - [x] (2026-11-08) The final gate at 169108598 (`--gates all --evidence --lane hosted`, run 42438203920) is green on its first attempt: 55 jobs, with 2 matrix placeholders skipped and no flaky line. The commits after it are docs only. The PR is opened. The shared staging run is on the branch head (Decision Log, "M6b lands before the shared run", amended).
 - [ ] M4b — Machines and their rights — *executable; after M6b*
 - [ ] M4c — Delegations — *executable; after M4b; needs the desk track's renew route*
 - [ ] M5b — Add owner — *executable; after M4c; lands once the desk track's `record.owners` executor and DL190 (b)'s fix are on master*
