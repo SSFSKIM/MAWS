@@ -40,7 +40,7 @@ vi.mock('electron', () => ({ systemPreferences: { promptTouchID: () => Promise.r
 import { createStateSigner } from '../device/step-up';
 import type { LinkState } from '../machines/manager';
 import type { ActOutcome, ActRequest } from '../machines/remote/link';
-import { createDeliveries, runBytes, type Deliveries, type DeliveryLink } from './deliveries';
+import { createDeliveries, createHeadPush, runBytes, type Deliveries, type DeliveryLink, type HeadPush } from './deliveries';
 import { orgFiles, SIGNING_FILE, type Obligation, type SigningFile } from './files';
 import { startHeldOrg, type HeldOrg } from './held';
 import type { HubClient, HubResult, Served } from './hub-client';
@@ -244,6 +244,8 @@ type App = {
   held: HeldOrg;
   store: SigningStore;
   deliveries: Deliveries;
+  /** M4b's push over the same machines and held view. */
+  push: HeadPush;
   machines: Map<MachineRef, Machine>;
   roster: MachineRef[];
   rosterChanged(): void;
@@ -308,11 +310,14 @@ async function app(chain: SignedOrgState[], options: AppOptions = {}): Promise<A
       log: () => {},
     });
     closers.push(() => deliveries.close());
+    const push = createHeadPush({ link: (ref) => machines.get(ref) ?? null, view: () => held, log: () => {} });
+    closers.push(() => void push.close());
     const a: App = {
       dir,
       held,
       store,
       deliveries,
+      push,
       machines,
       get roster() {
         return roster.list;
@@ -684,6 +689,18 @@ class FakeHub implements HubClient {
   postPending(): never {
     throw new Error('unused');
   }
+  mintEnrollment(): never {
+    throw new Error('unused');
+  }
+  enrollmentKey(): never {
+    throw new Error('unused');
+  }
+  machines(): never {
+    throw new Error('unused');
+  }
+  deleteMachine(): never {
+    throw new Error('unused');
+  }
   pendingOf(): never {
     throw new Error('unused');
   }
@@ -961,5 +978,105 @@ describe('close (M4a)', () => {
     b.machines.set(M1, m);
     await b.deliveries.send();
     expect(owed(b)).toEqual([]);
+  });
+});
+
+describe('bringing a machine to a version (M4b’s head push, `bringTo`)', () => {
+  it('brings a machine behind to the version through the runs M3 plans, and answers the version with the line it is on', async () => {
+    const g = await genesis();
+    const line = [g, ...(await run(g, 3, NOW - 10 * DAY))]; // 1 … 4
+    const a = await app(line, { roster: [M1] });
+    const m = await machine(line.slice(0, 2));
+    a.machines.set(M1, m);
+    const brought = await a.push.bringTo(M1, 4);
+    expect(brought).toMatchObject({ ok: true, version: 4 });
+    expect(brought.ok && brought.current()).toBe(true);
+    expect(m.runs).toEqual([[2, 3, 4]]); // from caps, as M3's head-finding starts
+    expect(await sameHead(m, line[3])).toBe(true);
+    expect(a.deliveries.owing()).toEqual([]); // nothing owed: a push is no obligation
+  });
+
+  it('sends a machine already there one run, its newest state the head it holds, for a fresh answer', async () => {
+    const g = await genesis();
+    const line = [g, ...(await run(g, 3, NOW - 10 * DAY))];
+    const a = await app(line, { roster: [M1] });
+    const m = await machine(line);
+    a.machines.set(M1, m);
+    expect(await a.push.bringTo(M1, 3)).toMatchObject({ ok: true, version: 4 });
+    expect(m.runs).toEqual([[4]]);
+  });
+
+  it('shares one push in flight among the callers for one machine', async () => {
+    const g = await genesis();
+    const line = [g, ...(await run(g, 3, NOW - 10 * DAY))];
+    const a = await app(line, { roster: [M1] });
+    const m = await machine(line.slice(0, 2));
+    a.machines.set(M1, m);
+    const both = await Promise.all([a.push.bringTo(M1, 4), a.push.bringTo(M1, 4)]);
+    expect(both.map((b) => b.ok && b.version)).toEqual([4, 4]);
+    expect(m.runs).toEqual([[2, 3, 4]]);
+  });
+
+  it('answers no version when the link is down or the run gets no answer that judges it', async () => {
+    const g = await genesis();
+    const line = [g, ...(await run(g, 2, NOW - 10 * DAY))];
+    const a = await app(line, { roster: [M1] });
+    const m = await machine(line.slice(0, 1));
+    a.machines.set(M1, m);
+    m.up = false;
+    expect(await a.push.bringTo(M1, 3)).toMatchObject({ ok: false });
+    expect(m.runs).toEqual([]);
+    m.up = true;
+    m.script = ['lose'];
+    expect(await a.push.bringTo(M1, 3)).toMatchObject({ ok: false });
+    m.script = ['offline'];
+    expect(await a.push.bringTo(M1, 3)).toMatchObject({ ok: false });
+    expect(await a.push.bringTo(M1, 3)).toMatchObject({ ok: true, version: 3 });
+  });
+
+  it('answers no version while the machine answers below it', async () => {
+    const g = await genesis();
+    const line = [g, ...(await run(g, 3, NOW - 10 * DAY))];
+    const a = await app(line, { roster: [M1] });
+    const m = await machine(line.slice(0, 2));
+    a.machines.set(M1, m);
+    const act = m.act.bind(m);
+    // Its endpoint takes each run, but answers as if stuck at 3 (each answer after the run's own, so nothing outlives it).
+    m.act = (request) => {
+      const op = act(request);
+      return { ...op, outcome: op.outcome.then((): ActOutcome => ({ state: 'done', result: { version: 3 } })) };
+    };
+    expect(await a.push.bringTo(M1, 4)).toMatchObject({ ok: false });
+    expect(m.runs).toEqual([[2, 3, 4], [4]]);
+  });
+
+  it('no longer counts an answer once the app’s line moves (a rewind adopted)', async () => {
+    const g = await genesis(NOW - 90 * DAY);
+    const s2 = await next(g, NOW - 80 * DAY);
+    const s3 = await next(s2, NOW - 70 * DAY);
+    const s4 = await next(s3, NOW - 60 * DAY);
+    const s5 = await next(s4, NOW - 50 * DAY);
+    const a = await app([g, s2, s3, s4, s5], { roster: [M1] });
+    a.machines.set(M1, await machine([g, s2, s3, s4, s5]));
+    const brought = await a.push.bringTo(M1, 5);
+    expect(brought.ok && brought.current()).toBe(true);
+    await a.adopt([await next(s4, NOW - DAY, dropAppRoot)], [await recoveryFrom(4)]);
+    expect(brought.ok && brought.current()).toBe(false);
+  });
+
+  it('brings a machine on a superseded branch onto the app’s line by the recovery-first run, though its head is past the version', async () => {
+    const g = await genesis(NOW - 90 * DAY);
+    const s2 = await next(g, NOW - 80 * DAY);
+    const base = await next(s2, NOW - 60 * DAY);
+    const forged = await run(base, 3, NOW - 59 * DAY);
+    const t = await recoveryFrom(3);
+    const r4 = await next(base, NOW - 3_600_000, dropAppRoot);
+    const a = await app([g, s2, base, forged[0], forged[1]], { roster: [M1] });
+    await a.adopt([r4], [t]);
+    const m = await machine([g, s2, base, ...forged], { now: NOW - 50 * DAY }); // head 6°
+    a.machines.set(M1, m);
+    expect(await a.push.bringTo(M1, 4)).toMatchObject({ ok: true, version: 4 });
+    expect(m.runs).toEqual([[3, 4]]);
+    expect(await sameHead(m, r4)).toBe(true);
   });
 });

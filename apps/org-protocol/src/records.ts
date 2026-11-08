@@ -19,7 +19,7 @@
 // enrolls later. The hub serving only certificates `verifyMachineCert` accepted on arrival (M4) is defence in depth.
 import { keyId, signBody, signingInput, verifyInput, type B64 } from './keys.ts';
 import { machineNameKey, type MemberId } from './names.ts';
-import { isCertRetirement, isCertificates, isEndpointRecord, isGrant, isListing, isMachineCert, isSigned } from './shapes.ts';
+import { canonicalizable, isCertRetirement, isCertificates, isEndpointRecord, isGrant, isListing, isMachineCert, isSigned } from './shapes.ts';
 import {
   SIGNING_DOMAINS,
   type CertRetirement,
@@ -32,7 +32,7 @@ import {
   type Owners,
   type Signed,
 } from './types.ts';
-import { accept, refuse, type Verdict } from './verdict.ts';
+import { accept, refuse, type Verdict, type VerdictCode } from './verdict.ts';
 
 type Domain = (typeof SIGNING_DOMAINS)[keyof typeof SIGNING_DOMAINS];
 
@@ -74,20 +74,90 @@ async function signedByIn(state: OrgState, domain: Domain, record: Signed<unknow
  * current key, or its one live certificate's (`machineKeys`, judged at `now`). It is signed by a device of one of the
  * machine's owners, or of an admin when the org owns it; a certified machine's owners are its delegation's. Grants are
  * checked only by the hosting machine (RL §5.8); `version` orders a member's grants there, and its ledger (O10) keeps
- * the keys it has held.
+ * the keys it has held. Its eligibility is `grantProblems`'; then the signature.
  */
 export async function verifyGrant(state: OrgState, g: Signed<Grant>, certs: Certificates = NO_CERTIFICATES, now: Date = new Date()): Promise<Verdict> {
-  if (!isSigned(g, isGrant) || g.body.org !== state.org || !isCertificates(certs)) return refuse('malformed');
-  if (!state.members.some((m) => m.id === g.body.member)) return refuse('not-listed');
-  const { keys, contested } = await machineKeys(state, g.body.machine, certs, now);
-  if (contested) return refuse('contested');
-  let speaking = false;
-  for (const pub of keys) if ((await keyId(pub)) === g.body.machineKey) speaking = true;
-  if (!speaking) return refuse('not-listed');
-  const owners = await machineOwners(state, g.body.machine, certs, now);
-  if (owners === null) return refuse('not-listed');
-  return signedByIn(state, SIGNING_DOMAINS.grant, g, stepUpKeys(state, (id, role) => (owners === 'org' ? role === 'admin' : owners.includes(id))));
+  if (!isSigned(g, isGrant)) return refuse('malformed');
+  const { problems, signers } = await grantEligibility(state, certs, g.body, g.sig.kid, now);
+  if (problems.length > 0) return refuse(GRANT_VERDICTS[problems[0].code]);
+  return signedBy(SIGNING_DOMAINS.grant, g, signers);
 }
+
+/**
+ * What makes a grant ineligible before its signature, each with the verdict `verifyGrant` reads it as:
+ *   malformed                not a grant body, one that doesn't canonicalize, or certificates
+ *                            that are not a set                                                malformed
+ *   unknown-rights           rights that are not a set of known rights                         malformed
+ *   other-org                a grant of another org                                            malformed
+ *   member-not-listed        a member the state does not list                                  not-listed
+ *   machine-contested        a machine whose identity live certificates contest                contested
+ *   machine-not-listed       a machine neither listed nor certified                            not-listed
+ *   machine-key-not-current  `machineKey` is not the key that speaks for the machine now       not-listed
+ *   signer-not-owner         the kid is no step-up key of an owner's device (an admin's for
+ *                            `'org'`)                                                          unknown-signer
+ *   signer-revoked           that, and the state lists the kid in `revoked`                    revoked
+ */
+export type GrantProblemCode =
+  | 'malformed'
+  | 'unknown-rights'
+  | 'other-org'
+  | 'member-not-listed'
+  | 'machine-contested'
+  | 'machine-not-listed'
+  | 'machine-key-not-current'
+  | 'signer-not-owner'
+  | 'signer-revoked';
+export type GrantProblem = { code: GrantProblemCode };
+
+const GRANT_VERDICTS: Record<GrantProblemCode, VerdictCode> = {
+  malformed: 'malformed',
+  'unknown-rights': 'malformed',
+  'other-org': 'malformed',
+  'member-not-listed': 'not-listed',
+  'machine-contested': 'contested',
+  'machine-not-listed': 'not-listed',
+  'machine-key-not-current': 'not-listed',
+  'signer-not-owner': 'unknown-signer',
+  'signer-revoked': 'revoked',
+};
+
+/**
+ * Every problem `verifyGrant` would refuse `body` for, signed by the key `signerKid` names, but its signature: an
+ * unsigned grant judged before anything is signed. The problems come in `verifyGrant`'s order, so the first is the one
+ * it would refuse for. A body or certificates out of shape is the only problem named.
+ */
+export async function grantProblems(state: OrgState, certs: Certificates, body: Grant, signerKid: string, now: Date = new Date()): Promise<GrantProblem[]> {
+  return (await grantEligibility(state, certs, body, signerKid, now)).problems;
+}
+
+/** `grantProblems`, with the step-up keys allowed to sign the grant (none when its machine's owners are unknown). */
+async function grantEligibility(state: OrgState, certs: Certificates, body: Grant, signerKid: string, now: Date): Promise<{ problems: GrantProblem[]; signers: B64[] }> {
+  const only = (code: GrantProblemCode) => ({ problems: [{ code }], signers: [] });
+  if (!isGrant(body)) return only(onlyRightsWrong(body) ? 'unknown-rights' : 'malformed');
+  // What passes here is exactly what can be signed: `isGrant` walks a sparse list past its holes, which canonicalize refuses.
+  if (!canonicalizable(body)) return only('malformed');
+  if (!isCertificates(certs)) return only('malformed');
+  const problems: GrantProblem[] = [];
+  if (body.org !== state.org) problems.push({ code: 'other-org' });
+  if (!state.members.some((m) => m.id === body.member)) problems.push({ code: 'member-not-listed' });
+  const { keys, contested } = await machineKeys(state, body.machine, certs, now);
+  if (contested) return { problems: [...problems, { code: 'machine-contested' }], signers: [] };
+  let speaking = false;
+  for (const pub of keys) if ((await keyId(pub)) === body.machineKey) speaking = true;
+  const owners = await machineOwners(state, body.machine, certs, now);
+  if (keys.length === 0 || owners === null) problems.push({ code: 'machine-not-listed' });
+  else if (!speaking) problems.push({ code: 'machine-key-not-current' });
+  if (owners === null) return { problems, signers: [] };
+  const signers = stepUpKeys(state, (id, role) => (owners === 'org' ? role === 'admin' : owners.includes(id)));
+  let allowed = false;
+  for (const pub of signers) if ((await keyId(pub)) === signerKid) allowed = true;
+  if (!allowed) problems.push({ code: state.revoked.some((r) => r.keyId === signerKid) ? 'signer-revoked' : 'signer-not-owner' });
+  return { problems, signers };
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
+/** A grant body in every field but its rights. */
+const onlyRightsWrong = (value: unknown) => isRecord(value) && isGrant({ ...value, rights: [] });
 
 /** The member ids `owners` names in `state`: its admins for `'org'`. */
 export function ownerMembers(state: OrgState, owners: Owners): MemberId[] {

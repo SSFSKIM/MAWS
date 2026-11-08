@@ -1,7 +1,7 @@
 // The Org page's shared pieces (P5 O8 M4a, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, *The split*): a
 // group's heading, M1's pairing-code field, fingerprint and refusal line (moved unchanged from OrgSection.tsx), a
 // device's line as People and You draw it, and a sign's outcome in one line. Tokens only, at the Settings rows' weight.
-import { useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { IpcError } from '@shared/ipc/schema';
 import type { OrgRefusal, OrgStatus, OrgView, SignResult } from '@shared/ipc/schema/org';
 import { toast } from '../../stores/notices';
@@ -11,6 +11,7 @@ import { Chip, INPUT, Setting, TEXT_ACTION } from '../parts';
 export type Registered = Extract<OrgStatus, { state: 'registered' }>;
 export type Member = OrgView['members'][number];
 export type ViewDevice = Member['devices'][number];
+export type ViewMachine = OrgView['machines'][number];
 /** The attempts a refusal can name (`refused.attempt`), each shown under the control that sent it. */
 export type Attempt = NonNullable<OrgRefusal['attempt']>;
 /** A sign's end in one line: muted when done, the warning tone when refused. */
@@ -33,6 +34,54 @@ export function Group({ id, title, children }: { id: 'you' | 'people' | 'machine
   );
 }
 
+/** A grant left `sending` across a restart, as main's grants.ts refuses it: no verdict of the machine's. */
+export const OUTCOME_UNKNOWN = 'outcome-unknown';
+
+/** The sign-in the page stands under, as a sheet's owner: null while none does (signed out, removed). */
+export const signInOf = (status: Registered): string | null => (status.session === 'signed-in' ? `${status.org}/${status.member.id}/${status.device}` : null);
+
+/**
+ * A sheet's own sign-in: the one it opened under, and whether that one has ended. Once ended it stays ended, even if the
+ * same member signs in again on this Mac: an answer to the sheet's request then stays in the sheet and reaches nothing of
+ * the page.
+ */
+export function useOwnSignIn(signIn: string | null): { owner: string | null; ended: boolean } {
+  const [own, setOwn] = useState({ owner: signIn, ended: signIn === null });
+  if (!own.ended && signIn !== own.owner) setOwn({ owner: own.owner, ended: true });
+  return own;
+}
+
+/** Whether the sheet is still open: an answer after it closed lands nowhere. */
+export function useOpen() {
+  const open = useRef(false);
+  useEffect(() => {
+    open.current = true;
+    return () => {
+      open.current = false;
+    };
+  }, []);
+  return open;
+}
+
+// M4b: a machine's row on the page, by its ref, so a line elsewhere (a removal its ownership refuses) can take the
+// person to it, marked (`data-sought`) until focus leaves it. Called once the sheet that asked has gone, so its focus
+// restore leaves the row focused.
+export const machineRowId = (ref: string) => `org-machine-${ref}`;
+export function focusMachineRow(ref: string) {
+  const row = document.getElementById(machineRowId(ref));
+  if (row === null) return;
+  row.scrollIntoView?.({ block: 'center' });
+  row.setAttribute('data-sought', '');
+  row.addEventListener('blur', () => row.removeAttribute('data-sought'), { once: true });
+  row.focus({ preventScroll: true });
+}
+
+/** A member by the name the page gives them: you, their name, or a former member for an id the head no longer lists. */
+export function memberName(members: readonly Member[], id: string): string {
+  const member = members.find((m) => m.id === id);
+  return member === undefined ? ORG.formerMember : member.you ? ORG.youMark : member.name;
+}
+
 // "a, b and c": machine names, holders and owners in a line.
 export function inWords(items: readonly string[]): string {
   return items.length <= 1 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
@@ -42,6 +91,18 @@ export function signOutcome(result: SignResult): Outcome {
   if (result.ok) return { text: ORG.signed(result.version), refused: false };
   if (result.reason === 'cancelled') return null; // the person's own cancel at Touch ID needs no line
   return { text: [ORG.notSigned, ORG.signReasons[result.reason], result.detail].filter((part) => part !== undefined && part !== '').join(' · '), refused: true };
+}
+
+/** Why a machine's grants are unknown (`ORG.grantsUnread`, `grantsDamaged`), with Retry, which reads them again. */
+export function Unread({ line, retry }: { line: string; retry(): void }) {
+  return (
+    <span className="flex basis-full flex-wrap items-center gap-2">
+      <span className="text-warning">{line}</span>
+      <button type="button" className={TEXT_ACTION} onClick={retry}>
+        {ORG.retry}
+      </button>
+    </span>
+  );
 }
 
 export function OutcomeLine({ outcome }: { outcome: Outcome }) {

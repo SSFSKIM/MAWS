@@ -8,6 +8,12 @@ import { describe, expect, it } from 'vitest';
 const ROOT = join(__dirname, '../../../..');
 const REMOTE = join(ROOT, 'src/main/machines/remote');
 const OPENERS = ['openChannel(', 'connectChannel(', 'acceptChannel(', '/api/machines/'];
+/**
+ * P5 O8 M4b: the one use of a machine's hub path outside the remote module that reaches no machine: the Registry's
+ * `DELETE /api/machines/<name>`, an admin's removal of a dropped machine's row (`machine drop`'s), once in hub-client.
+ */
+const ALLOWED = new Map([['src/main/org/hub-client.ts: /api/machines/', 1]]);
+const occurrences = (text: string, opener: string) => text.split(opener).length - 1;
 
 function sources(dir: string): string[] {
   const out: string[] = [];
@@ -25,7 +31,10 @@ describe('the RL2 boundary', () => {
     for (const file of [...sources(join(ROOT, 'src/main')), ...sources(join(ROOT, 'src/renderer'))]) {
       if (file.startsWith(REMOTE + sep)) continue;
       const text = readFileSync(file, 'utf8');
-      for (const opener of OPENERS) if (text.includes(opener)) offenders.push(`${relative(ROOT, file)}: ${opener}`);
+      for (const opener of OPENERS) {
+        const at = `${relative(ROOT, file)}: ${opener}`;
+        if (occurrences(text, opener) > (ALLOWED.get(at) ?? 0)) offenders.push(at);
+      }
     }
     expect(offenders).toEqual([]);
   });

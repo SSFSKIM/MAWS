@@ -22,6 +22,8 @@ const STATUS: OrgStatus = {
   problem: null,
   signer: null,
   pairing: null,
+  enrolling: null,
+  hubRowsLeft: [],
 };
 const VIEW: OrgView = { version: 7, issued: '2026-10-28T09:00:00.000Z', maySign: false, recoveryKid: 'k', members: [{ id: 'a1', email: 'ana@northwind.example', name: 'Ana', role: 'admin', you: true, devices: [] }], machines: [], roots: [] };
 const ROWS: OrgRows = { machines: [STUDIO], rows: [], complete: true, pending: [], members: [], member: 'a1' };

@@ -161,6 +161,9 @@ const isRecordArgs =
 /** `record.policy`'s input: none, or exactly the one session it names. */
 export const isPolicyInput = (input: unknown): boolean => input === null || input === undefined || (isFields(input, ['session']) && (input.session === undefined || isRecordId(input.session)));
 const recordAct = (change: Readonly<Record<string, (value: unknown) => boolean>>): OfferRow => ({ kind: 'act', executor: 'sminos', target: 'record', grade: 'manage', accepts: isRecordArgs(change), sminos: 'record' });
+/** P5 O8 M4b: the call that reads the machine's grant ledger back (grants.ts), and its input: none. */
+export const ENDPOINT_GRANTS = 'endpoint.grants';
+export const isGrantsInput = (input: unknown): boolean => input === null || input === undefined;
 
 export const OFFERS: Offers = {
   commands: {
@@ -308,6 +311,10 @@ export const OFFERS: Offers = {
     'endpoint.grant': { kind: 'act', executor: 'endpoint', target: 'machine', grade: null },
     'endpoint.state': { kind: 'act', executor: 'endpoint', target: 'machine', grade: null },
     'endpoint.listings': { kind: 'call', executor: 'endpoint', target: 'machine', grade: 'list' },
+    // P5 O8 M4b (Interfaces §R): the machine's grant ledger read back, admitted at `list` as `endpoint.listings` is, its
+    // answer cut as it goes to the caller's own entry, or every member's for an owner of the machine (grants.ts); no
+    // sminos gate, as `record.policy` has none.
+    'endpoint.grants': { kind: 'call', executor: 'endpoint', target: 'machine', grade: 'list', accepts: isGrantsInput },
     'daemon.status': { kind: 'call', executor: 'machine', target: 'machine' },
     'machine.identity': { kind: 'call', executor: 'machine', target: 'machine' },
     // P5 O7 M6: the machine's attention items and conversation search, each answering for every session. `list` admits any

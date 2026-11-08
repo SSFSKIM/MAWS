@@ -10,6 +10,12 @@
 // end to end, a cancel and a sign-out before and after the transaction's step 1, the replay at each boundary, and the
 // retired key file's destruction. The state signer is a test one over the profile's own step-up key: no Touch ID, no
 // Electron, no Keychain.
+//
+// M4b (machines): an enrollment end to end through the session's hub, one at a time beside a pairing and a rekey, a
+// sign-out while its Touch ID is open and a close while its poll is out; the machine changes previewed and signed, a
+// drop's hub row deleted and retried by the route alone; the view's certified machines. The grants: a non-root owner's
+// Grant… and grant through a link or the local door, grants.json behind its mark, a sign-out during Touch ID, a close
+// while the act is out, and grants.json failing closed.
 import { readFileSync } from 'node:fs';
 import { chmod, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -33,6 +39,8 @@ import {
   type Certificates,
   pairingMac,
   decodePairingCode,
+  decodeEnrollmentCodeV2,
+  enrollmentMac,
   type Device,
   type OrgState,
   type PendingEntry as ProtocolPendingEntry,
@@ -41,13 +49,18 @@ import {
   type Signed,
   type SignedOrgState,
   type SigningKey,
+  type Grant,
+  verifyGrant,
 } from '../../../apps/org-protocol/src/index.ts';
+import type { ClientId } from '@shared/ipc/client';
 import { OrgStatusSchema, type OrgStatus } from '@shared/ipc/schema/org';
+import type { MachineRef } from '@shared/machine/ref';
 import { createNextDeviceKeys, deviceKeyIds, DeviceKeysError, loadDeviceKeys, promoteNextDeviceKeys, type DeviceKeys } from '../device/keys';
-import type { HeldOrgView, StepUpPrompt } from '../device/step-up';
+import { createRecordSigner, type HeldOrgView, type StepUpPrompt } from '../device/step-up';
 import { DEVICE_CAPABILITIES } from '../machines/remote/capabilities';
 import { AccessLoginError, type AccessLogin, type HubCredential } from './access-login';
-import { ACCESS_FILE, CHAIN_FILE, orgFiles, REGISTRATION_FILE, SIGNING_FILE, type OrgFiles, type RegistrationFile, type SigningFile } from './files';
+import { ACCESS_FILE, CHAIN_FILE, GRANTS_FILE, orgFiles, REGISTRATION_FILE, SIGNING_FILE, type GrantsFile, type OrgFiles, type RegistrationFile, type SigningFile } from './files';
+import type { GrantDoor, GrantLink } from './grants';
 import type { PendingEntry } from './hub-client';
 import { createOrgSession, type DeviceKeyFiles, type OrgSessionDeps, type OrgSessionService, type OrgSigningDeps } from './org-session';
 import type { RegistryFeedHooks } from './registry-feed';
@@ -145,6 +158,15 @@ class FakeHub {
   /** M3: the states posted to `POST /api/org/state`, and an override of the hub's answer. */
   posted: SignedOrgState[] = [];
   postAnswer?: (signed: SignedOrgState) => Answer | undefined;
+  /**
+   * M4b: minted enrollments and each one's posted key; machine rows by name, each with its enrollment's posted key (null
+   * for none: one re-enrolled in place and never listed, say); overrides of the row list's and the DELETE's answers.
+   */
+  enrollments: Array<{ id: string; token: string; body: unknown }> = [];
+  enrollmentKeys = new Map<string, { enrollment: string; machine: string; pub: string; ref: string; mac: string; posted: string }>();
+  rows = new Map<string, { ref: string; pub: string } | null>();
+  listAnswer?: () => Answer | undefined;
+  deleteAnswer?: (name: string) => Answer | Promise<Answer | undefined> | undefined;
 
   constructor(
     readonly url: string,
@@ -202,6 +224,35 @@ class FakeHub {
     if (method === 'GET' && url.pathname === '/api/devices/pending') {
       const of = url.searchParams.get('member') ?? this.member.id;
       return worker(200, { pending: this.waiting.get(of) ?? [] });
+    }
+    if (method === 'POST' && url.pathname === '/api/enrollments') {
+      const body = JSON.parse(String(init?.body)) as { ttl_s: number };
+      const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+      const token = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+      this.enrollments.push({ id, token, body });
+      return worker(201, { enrollment: { id, created_by: this.member.id, created: iso(Date.now()), expires: iso(Date.now() + body.ttl_s * 1000), state: 'open', machine: null }, token });
+    }
+    const keyPath = /^\/api\/enrollments\/([0-9a-f]{32})\/key$/.exec(url.pathname);
+    if (method === 'GET' && keyPath !== null) {
+      const key = this.enrollmentKeys.get(keyPath[1]);
+      return key === undefined ? worker(404, { error: 'no-key' }) : worker(200, key);
+    }
+    if (method === 'GET' && url.pathname === '/api/machines') {
+      const listed = [...this.rows].map(([name, key]) => ({ name, state: 'active', ...(key === null ? {} : { key: { ...key, listed: true } }) }));
+      return this.listAnswer?.() ?? worker(200, { machines: listed });
+    }
+    const machinePath = /^\/api\/machines\/([^/]+)$/.exec(url.pathname);
+    if (method === 'DELETE' && machinePath !== null) {
+      const name = decodeURIComponent(machinePath[1]);
+      const override = await this.deleteAnswer?.(name);
+      if (override !== undefined) return override;
+      if (!this.rows.has(name)) return worker(404, { error: 'unknown-machine' });
+      // #538's precondition: both or neither; a row whose enrollment posted no key, or another, is left as it is.
+      const [ref, pub] = [url.searchParams.get('ref'), url.searchParams.get('pub')];
+      if ((ref === null) !== (pub === null)) return worker(400, { error: 'bad-shape' });
+      const key = this.rows.get(name)!;
+      if (ref === null || (key !== null && key.ref === ref && key.pub === pub)) this.rows.delete(name);
+      return worker(200, { revoked: name });
     }
     if (method === 'POST' && url.pathname === '/api/devices/pending') {
       this.pending.push(JSON.parse(String(init?.body)) as PendingEntry);
@@ -2407,6 +2458,506 @@ function heldStateRead() {
   return { fetch, arm: () => new Promise<void>((resolve) => (armed = resolve)), release: () => release() };
 }
 
+// ---- M4b: machines ----
+
+/** A machine `name` listed under A, its name bound to its ref, and its hub row; the session following it. */
+async function addMachine(session: OrgSessionService, feed: ReturnType<typeof fakeFeed>, name = 'mini'): Promise<{ ref: string; pub: string }> {
+  const ref = base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
+  const { pub } = await generateSigningKey();
+  hub.chain.push(
+    await successor(hub.head, [a1], (s) => {
+      s.machines.push({ name, ref, pub, owners: [A] });
+      s.machineNames.push({ name, ref });
+    }),
+  );
+  hub.rows.set(name, { ref, pub });
+  feed.state(hub.head.state.version);
+  await until(() => headVersion(session) === hub.head.state.version, `${name} held`);
+  return { ref, pub };
+}
+
+/** The machine posts its key under the session's last enrollment, its MAC under the code's secret. */
+async function postKey(code: string, name: string, ref = base64urlEncode(crypto.getRandomValues(new Uint8Array(16)))) {
+  const { id } = hub.enrollments.at(-1)!;
+  const pub = (await generateSigningKey()).pub;
+  const mac = await enrollmentMac(base64urlDecode(decodeEnrollmentCodeV2(code).k), { name, machinePub: pub, ref, tokenId: id });
+  hub.enrollmentKeys.set(id, { enrollment: id, machine: name, pub, ref, mac, posted: iso(Date.now()) });
+  return { ref, pub };
+}
+
+/** The window whose sheet enrolls here. */
+const WINDOW = 'window-a' as ClientId;
+
+/** An enrollment started on the session, its code, token and secret added to what no status may carry. */
+async function enrollStarted(session: OrgSessionService, name: string, replace?: string) {
+  const started = await session.enrollStart({ name, ...(replace === undefined ? {} : { replace }) }, WINDOW);
+  if (!started.ok) throw new Error(JSON.stringify(started));
+  const code = decodeEnrollmentCodeV2(started.code);
+  secrets.push(started.code, code.k, code.token);
+  return started;
+}
+
+const enrollTiming = { timing: { ENROLL_POLL_MS: 10, PAIR_POLL_MS: 10 } };
+
+describe('M4b: org.enroll.*', () => {
+  it("enrolls a machine: the code in the start's answer alone, the key compared on the status, listed under this member through the signer", async () => {
+    const { session } = await signingRoot(enrollTiming);
+    const started = await enrollStarted(session, 'box');
+    expect(hub.enrollments.map((e) => e.body)).toEqual([{ ttl_s: 3600 }]);
+    expect(decodeEnrollmentCodeV2(started.code)).toMatchObject({ hub: HUB, roots: hub.head.state.root.keys, machine: 'box' });
+    expect(registered(session).enrolling).toEqual({ generation: 1, name: 'box', replace: null, expires: started.expires, candidate: null, problem: null });
+
+    const key = await postKey(started.code, 'box');
+    await until(() => registered(session).enrolling?.candidate != null, 'the candidate');
+    const shown = registered(session).enrolling!;
+    expect(shown.candidate).toMatchObject({ name: 'box', ref: key.ref, keyId: await keyId(key.pub) });
+
+    const before = headVersion(session);
+    expect(await session.enrollApprove({ generation: shown.generation, digest: shown.candidate!.digest })).toEqual({ ok: true, version: before + 1 });
+    expect(signing.prompts.map((p) => p.summary)).toEqual(['enroll machine box']);
+    expect(hub.head.state.machines).toEqual([{ name: 'box', ref: key.ref, pub: key.pub, owners: [A] }]);
+    expect(registered(session).enrolling).toBeNull();
+  });
+
+  it('one enrollment at a time, none beside a pairing or a rekey; a sign-out ends it', async () => {
+    const { session, feed } = await signingRoot(enrollTiming);
+    const bea = await addMember(session, feed);
+    await enrollStarted(session, 'box');
+    expect(await session.enrollStart({ name: 'box2' }, WINDOW)).toMatchObject({ ok: false, reason: 'busy' });
+    expect(session.pairStart({ member: bea, class: 'native-mac' })).toEqual({ ok: false, reason: 'busy', detail: 'another org attempt is under way' });
+    expect(session.rekey((await pairing()).text)).toEqual({ ok: false, reason: { code: 'busy', detail: 'an enrollment is under way: cancel it first' } });
+    expect(session.enrollCancel({ generation: registered(session).enrolling!.generation }, WINDOW)).toEqual({ ok: true });
+    expect(registered(session).enrolling).toBeNull();
+
+    const paired = session.pairStart({ member: bea, class: 'native-mac' });
+    if (!paired.ok) throw new Error(JSON.stringify(paired));
+    secrets.push(paired.code, decodePairingCode(paired.code)!.k);
+    expect(await session.enrollStart({ name: 'box' }, WINDOW)).toEqual({ ok: false, reason: 'busy', detail: 'another org attempt is under way' });
+    session.pairCancel();
+
+    await enrollStarted(session, 'box');
+    await session.signOut();
+    expect(registered(session).enrolling).toBeNull();
+    expect(await session.enrollStart({ name: 'box' }, WINDOW)).toMatchObject({ ok: false, reason: 'not-root' });
+  });
+
+  it("refuses an admin whose Mac can't sign, with the page's sentence", async () => {
+    const { session } = await signedIn(enrollTiming);
+    await until(() => signerOf(session) !== null, 'the signer part');
+    expect(signerOf(session).maySign).toBe(false);
+    expect(await session.enrollStart({ name: 'box' }, WINDOW)).toEqual({ ok: false, reason: 'not-root', detail: "This Mac can't sign: enroll from an admin's Mac that does" });
+    expect(hub.enrollments).toEqual([]);
+  });
+
+  it('a sign-out while its Touch ID is open signs nothing that is kept or posted', async () => {
+    const { session } = await signingRoot(enrollTiming);
+    const started = await enrollStarted(session, 'box');
+    await postKey(started.code, 'box');
+    await until(() => registered(session).enrolling?.candidate != null, 'the candidate');
+    const { generation, candidate } = registered(session).enrolling!;
+    const before = headVersion(session);
+    const kept = await readFile(join(orgDir(), SIGNING_FILE), 'utf8').catch(() => null);
+    let out: Promise<void> | undefined;
+    signing.during = () => void (out = session.signOut());
+    const result = await session.enrollApprove({ generation, digest: candidate!.digest });
+    await out;
+    expect(result.ok).toBe(false);
+    expect(signing.prompts).toHaveLength(1);
+    expect(hub.posted).toEqual([]);
+    expect(await readFile(join(orgDir(), SIGNING_FILE), 'utf8').catch(() => null)).toBe(kept);
+    expect(hub.head.state.version).toBe(before);
+  });
+
+  it('close() while its poll is out resolves once the read ends, and nothing under org/ changes after it', async () => {
+    const gate = { armed: false, release: null as (() => void) | null };
+    const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (gate.armed && /\/api\/enrollments\/[0-9a-f]{32}\/key$/.test(new URL(String(input)).pathname)) {
+        gate.armed = false;
+        await new Promise<void>((resolve) => (gate.release = resolve));
+      }
+      return hub.fetch(input, init);
+    }) as typeof globalThis.fetch;
+    const { session } = await signingRoot({ ...enrollTiming, fetch });
+    const started = await enrollStarted(session, 'box');
+    gate.armed = true;
+    await postKey(started.code, 'box');
+    await until(() => gate.release !== null, 'the held key read');
+    const before = await orgSnapshot();
+    let closed = false;
+    const closing = session.close().then(() => (closed = true));
+    await pause(30);
+    expect(closed, 'the read is still out').toBe(false);
+    gate.release!();
+    await closing;
+    await pause(30);
+    expect(await orgSnapshot()).toEqual(before);
+    expect(signing.prompts).toEqual([]);
+  });
+});
+
+describe('M4b: the machine changes', () => {
+  it('a machine is listed only through an enrollment: machine.add and machine.replace from the page are refused before anything composes', async () => {
+    const { session, feed } = await signingRoot();
+    const { ref } = await addMachine(session, feed);
+    const pub = (await generateSigningKey()).pub;
+    expect(await session.preview({ kind: 'machine.add', name: 'box', ref: base64urlEncode(crypto.getRandomValues(new Uint8Array(16))), pub, owners: [A] })).toMatchObject({ ok: false, reason: 'invalid', findings: [] });
+    expect(await session.preview({ kind: 'machine.replace', ref, pub })).toMatchObject({ ok: false, reason: 'invalid' });
+    expect(await session.change({ kind: 'machine.replace', ref, pub }, 'A'.repeat(43))).toMatchObject({ ok: false, reason: 'invalid' });
+    expect(signing.prompts).toEqual([]);
+  });
+
+  it("changes a machine's owners through preview and change", async () => {
+    const { session, feed } = await signingRoot();
+    const bea = await addMember(session, feed);
+    const { ref } = await addMachine(session, feed);
+    const preview = await session.preview({ kind: 'machine.owners', ref, owners: [A, bea] });
+    if (!preview.ok) throw new Error(JSON.stringify(preview));
+    expect(preview.lines).toEqual([`mini's owners become ${OWNER}, bea@example.com (were ${OWNER})`]);
+    expect(await session.change(preview.change, preview.digest)).toMatchObject({ ok: true });
+    expect(hub.head.state.machines[0].owners).toEqual([A, bea]);
+    // a member who owns it is removed only once its owners changed
+    expect(await session.preview({ kind: 'member.remove', member: bea })).toMatchObject({ ok: false, reason: 'refused', findings: [{ code: 'owners-unknown', detail: "bea@example.com owns mini: Change the machine's owners first" }] });
+  });
+
+  it("drops a machine, its key retired, then deletes its hub row; a delete that fails is offered again, and Retry calls the route alone", async () => {
+    const { session, feed } = await signingRoot();
+    const { ref, pub } = await addMachine(session, feed);
+    const { ref: otherRef } = await addMachine(session, feed, 'studio');
+    const preview = await session.preview({ kind: 'machine.drop', ref, revoke: false });
+    if (!preview.ok) throw new Error(JSON.stringify(preview));
+    expect(await session.change(preview.change, preview.digest)).toMatchObject({ ok: true });
+    expect(hub.head.state.machines.map((m) => m.name)).toEqual(['studio']);
+    expect(hub.head.state.retired).toEqual([{ keyId: await keyId(pub), pub, notAfter: hub.head.state.issued, holder: { machine: ref } }]);
+    expect(hub.calls.filter((c) => c.method === 'DELETE').map((c) => c.path)).toEqual([`/api/machines/mini?ref=${encodeURIComponent(ref)}&pub=${encodeURIComponent(pub)}`]);
+    expect(hub.rows.has('mini')).toBe(false);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+
+    let failing = true;
+    hub.deleteAnswer = () => (failing ? worker(503, { error: 'hub-updating' }) : undefined);
+    const revoke = await session.preview({ kind: 'machine.drop', ref: otherRef, revoke: true });
+    if (!revoke.ok) throw new Error(JSON.stringify(revoke));
+    expect(await session.change(revoke.change, revoke.digest)).toMatchObject({ ok: true });
+    expect(hub.head.state.revoked.map((r) => r.holder)).toContainEqual({ machine: otherRef });
+    expect(registered(session).hubRowsLeft).toEqual([{ name: 'studio', ref: otherRef }]);
+
+    const posts = hub.posted.length;
+    const prompts = signing.prompts.length;
+    expect(await session.dropRetry('studio')).toMatchObject({ ok: false, reason: 'refused' });
+    failing = false;
+    expect(await session.dropRetry('mini')).toMatchObject({ ok: false, reason: 'none' });
+    expect(await session.dropRetry('studio')).toEqual({ ok: true });
+    expect(registered(session).hubRowsLeft).toEqual([]);
+    expect(hub.rows.has('studio')).toBe(false);
+    expect([hub.posted.length, signing.prompts.length], 'no state signed or posted by a retry').toEqual([posts, prompts]);
+    expect(hub.calls.filter((c) => c.method === 'DELETE').map((c) => c.path.split('?')[0])).toEqual(['/api/machines/mini', '/api/machines/studio', '/api/machines/studio', '/api/machines/studio']);
+  });
+
+  it("refuses dropping this Mac's own machine", async () => {
+    const machine = { ref: base64urlEncode(crypto.getRandomValues(new Uint8Array(16))) };
+    const { session, feed } = await signingRoot({ local: machine.ref as never });
+    hub.chain.push(
+      await successor(hub.head, [a1], async (s) => {
+        s.machines.push({ name: 'this-mac', ref: machine.ref, pub: (await generateSigningKey()).pub, owners: [A] });
+        s.machineNames.push({ name: 'this-mac', ref: machine.ref });
+      }),
+    );
+    feed.state(hub.head.state.version);
+    await until(() => headVersion(session) === hub.head.state.version, 'this Mac listed');
+    expect(await session.preview({ kind: 'machine.drop', ref: machine.ref, revoke: false })).toMatchObject({ ok: false, reason: 'refused', findings: [{ code: 'this-machine' }] });
+  });
+
+  it("the view lists a certified machine, its owners its delegation's, beside the listed ones with their key ids", async () => {
+    const { session, feed } = await signingRoot();
+    const bea = await addMember(session, feed);
+    const { pub } = await addMachine(session, feed);
+    const delegation = await generateSigningKey();
+    const id = memberId();
+    hub.chain.push(await successor(hub.head, [a1], (s) => void s.delegations.push({ id, pub: delegation.pub, prefix: 'dc-', expires: iso(Date.now() + 30 * DAY), maxUses: 10, offlineRevokeS: 0, owners: [bea] })));
+    const vm = await generateSigningKey();
+    const certRef = `${id}_${base64urlEncode(crypto.getRandomValues(new Uint8Array(16)))}`;
+    hub.certificates = { certs: [await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: certRef, name: 'dc-vm1', pub: vm.pub, delegation: id, use: 1, issued: iso(Date.now() - HOUR) }, delegation.privateKey, delegation.pub)], retirements: [] };
+    feed.state(hub.head.state.version);
+    await until(async () => (await session.view())?.machines.length === 2, 'the certified machine');
+    expect((await session.view())!.machines).toEqual([
+      // no grants' deps here: no Grant… anywhere (M4b's grants cases have them)
+      { name: 'mini', ref: hub.head.state.machines[0].ref, owners: [A], keyId: await keyId(pub), certified: false, delegation: null, mayGrant: false },
+      { name: 'dc-vm1', ref: certRef, owners: [bea], keyId: await keyId(vm.pub), certified: true, delegation: id, mayGrant: false },
+    ]);
+    expect(await session.preview({ kind: 'machine.owners', ref: certRef, owners: [A] })).toMatchObject({ ok: false, reason: 'refused', findings: [{ code: 'certified-machine' }] });
+  });
+});
+
+describe('M4b: a drop that settles later (the fix wave)', () => {
+  /** `mini` dropped while the hub answers its post `answer`: signed and kept, unsettled, its row untouched. */
+  async function pendingDrop(over: Overrides = {}, answer: () => Answer = () => worker(503, { error: 'hub-updating' })) {
+    const root = await signingRoot(over);
+    const { ref, pub } = await addMachine(root.session, root.feed);
+    hub.postAnswer = answer;
+    const preview = await root.session.preview({ kind: 'machine.drop', ref, revoke: false });
+    if (!preview.ok) throw new Error(JSON.stringify(preview));
+    expect(await root.session.change(preview.change, preview.digest)).toMatchObject({ ok: false, reason: 'hub' });
+    expect(signerOf(root.session).pending).not.toBeNull();
+    expect(deletes()).toEqual([]);
+    expect(registered(root.session).hubRowsLeft).toEqual([]);
+    expect((await readJson<SigningFile>(SIGNING_FILE)).pending?.hubRow, 'the row is kept with the slot').toEqual({ name: 'mini', ref, pub });
+    return { ...root, ref, pub };
+  }
+  const deleteCalls = () => hub.calls.filter((c) => c.method === 'DELETE').map((c) => new URL(c.path, LOCAL_HUB));
+  const deletes = () => deleteCalls().map((u) => u.pathname);
+  /** Each DELETE's precondition: the dropped machine's ref and pub (the hub leaves a row another key enrolled). */
+  const preconditions = () => deleteCalls().map((u) => Object.fromEntries(u.searchParams));
+
+  it('deletes the row once a later settle lands that very state', async () => {
+    const { session, feed, ref, pub } = await pendingDrop();
+    hub.postAnswer = undefined;
+    feed.open();
+    await until(() => signerOf(session).pending === null, 'settled');
+    await until(() => !hub.rows.has('mini'), 'the row deleted');
+    expect(deletes()).toEqual(['/api/machines/mini']);
+    expect(preconditions()).toEqual([{ ref, pub }]);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it("a later settlement whose delete fails puts the row on Retry, which deletes it", async () => {
+    const { session, feed, ref, pub } = await pendingDrop();
+    hub.postAnswer = undefined;
+    hub.deleteAnswer = () => worker(503, { error: 'hub-updating' });
+    feed.open();
+    await until(() => registered(session).hubRowsLeft.length === 1, 'the row left');
+    expect(registered(session).hubRowsLeft, 'the status names the row, its pub kept inside').toEqual([{ name: 'mini', ref }]);
+    hub.deleteAnswer = undefined;
+    expect(await session.dropRetry('mini')).toEqual({ ok: true });
+    expect(hub.rows.has('mini')).toBe(false);
+    expect(preconditions(), "the settlement's delete and Retry's both carry the dropped machine's key").toEqual([{ ref, pub }, { ref, pub }]);
+  });
+
+  it('a relaunch with the drop still pending deletes the row when the next start settles it', async () => {
+    await pendingDrop();
+    hub.postAnswer = undefined;
+    const again = await restart();
+    await until(() => !hub.rows.has('mini'), 'the row deleted after the relaunch');
+    expect(deletes()).toEqual(['/api/machines/mini']);
+    expect(registered(again.session).hubRowsLeft).toEqual([]);
+  });
+
+  it('a discarded drop deletes nothing', async () => {
+    const { session, feed } = await pendingDrop({}, () => worker(409, { error: 'key-purged' }));
+    const { hash } = signerOf(session).pending!;
+    expect(await session.discardPending(true, hash)).toMatchObject({ ok: true });
+    hub.postAnswer = undefined;
+    feed.open();
+    await pause(50);
+    expect(deletes()).toEqual([]);
+    expect(hub.rows.has('mini')).toBe(true);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it('a drop another state forked deletes nothing, discarded or not', async () => {
+    const { session, feed } = await pendingDrop();
+    // another root's state takes the drop's version: the slot is a fork
+    hub.chain.push(await successor(hub.head, [a1], (s) => void s.members.push({ id: memberId(), email: 'cal@example.com', role: 'member', devices: [] })));
+    hub.postAnswer = undefined;
+    feed.state(hub.head.state.version);
+    await until(() => signerOf(session).pending?.fork === true, 'the fork');
+    expect(deletes()).toEqual([]);
+    expect(await session.discardPending(true, signerOf(session).pending!.hash)).toMatchObject({ ok: true });
+    await pause(50);
+    expect(deletes()).toEqual([]);
+    expect(hub.rows.has('mini')).toBe(true);
+  });
+
+  it("a cancelled sign-in attempt while the delete is out leaves the sign-in's Retry standing", async () => {
+    const { session, feed } = await signingRoot();
+    const { ref } = await addMachine(session, feed);
+    const gate = { open: () => {} };
+    const held = new Promise<void>((resolve) => (gate.open = resolve));
+    hub.deleteAnswer = async () => {
+      await held;
+      return worker(503, { error: 'hub-updating' });
+    };
+    const preview = await session.preview({ kind: 'machine.drop', ref, revoke: false });
+    if (!preview.ok) throw new Error(JSON.stringify(preview));
+    const changing = session.change(preview.change, preview.digest);
+    await until(() => hub.calls.some((c) => c.method === 'DELETE'), 'the delete out');
+    // an unrelated attempt, started and cancelled: the owning sign-in still stands
+    expect(session.signIn()).toEqual({ ok: true });
+    session.cancel();
+    expect(isSignedIn(session)).toBe(true);
+    gate.open();
+    expect(await changing).toMatchObject({ ok: true });
+    expect(registered(session).hubRowsLeft).toEqual([{ name: 'mini', ref }]);
+    hub.deleteAnswer = undefined;
+    expect(await session.dropRetry('mini')).toEqual({ ok: true });
+  });
+
+  /** `name` listed again under its bound ref (a new key), as another root's re-enrollment lands it. */
+  const relisted = async (name: string, ref: string) =>
+    successor(hub.head, [a1], async (s) => void s.machines.push({ name, ref, pub: (await generateSigningKey()).pub, owners: [A] }));
+
+  it('a drop adopted in the same chain read as a re-enrollment of its name sends no delete: the row is the new listing\'s', async () => {
+    const { session, feed, ref } = await pendingDrop();
+    // the drop reached the hub another way, and another root re-enrolled mini after it: one read takes both
+    hub.chain.push((await readJson<SigningFile>(SIGNING_FILE)).pending!.signed);
+    hub.chain.push(await relisted('mini', ref));
+    hub.postAnswer = undefined;
+    feed.state(hub.head.state.version);
+    await until(() => signerOf(session).pending === null && headVersion(session) === hub.head.state.version, 'settled under the re-listing');
+    await pause(50);
+    expect(deletes()).toEqual([]);
+    expect(hub.rows.has('mini')).toBe(true);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it('a re-listing that lands while a settled drop\'s delete waits its turn sends no delete for it', async () => {
+    const { session, feed } = await signingRoot();
+    const { ref: studio } = await addMachine(session, feed, 'studio');
+    const { ref } = await addMachine(session, feed);
+    const gate = { open: () => {} };
+    const held = new Promise<void>((resolve) => (gate.open = resolve));
+    hub.deleteAnswer = async (name) => (name === 'studio' ? (await held, undefined) : undefined);
+    const drop = async (target: string) => {
+      const preview = await session.preview({ kind: 'machine.drop', ref: target, revoke: false });
+      if (!preview.ok) throw new Error(JSON.stringify(preview));
+      return session.change(preview.change, preview.digest);
+    };
+    const first = drop(studio);
+    await until(() => deletes().length === 1, "studio's delete out");
+    const second = drop(ref);
+    await until(() => signerOf(session).pending === null && !hub.head.state.machines.some((m) => m.name === 'mini') && headVersion(session) === hub.head.state.version, "mini's drop settled, its delete queued");
+    hub.chain.push(await relisted('mini', ref));
+    feed.state(hub.head.state.version);
+    await until(() => headVersion(session) === hub.head.state.version, 'the re-listing held');
+    gate.open();
+    expect(await first).toMatchObject({ ok: true });
+    expect(await second).toMatchObject({ ok: true });
+    expect(deletes()).toEqual(['/api/machines/studio']);
+    expect(hub.rows.has('mini')).toBe(true);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it('the delete reads the hub rows first: a row its enrollment left with no posted key is deleted by name alone', async () => {
+    const { session, feed } = await pendingDrop();
+    hub.rows.set('mini', null); // re-enrolled in place, the new enrollment never listed
+    hub.postAnswer = undefined;
+    feed.open();
+    await until(() => !hub.rows.has('mini'), 'the row deleted');
+    expect(hub.calls.filter((c) => c.path.startsWith('/api/machines')).map((c) => `${c.method} ${c.path}`)).toEqual(['GET /api/machines', 'DELETE /api/machines/mini']);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it("a row that posted another machine's key is that machine's: nothing is sent, and nothing is offered again", async () => {
+    const { session, feed, ref } = await pendingDrop();
+    hub.rows.set('mini', { ref, pub: (await generateSigningKey()).pub });
+    hub.postAnswer = undefined;
+    feed.open();
+    await until(() => signerOf(session).pending === null && hub.calls.some((c) => c.path === '/api/machines'), 'settled, the rows read');
+    await pause(30);
+    expect(deletes()).toEqual([]);
+    expect(hub.rows.has('mini')).toBe(true);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it('a row absent from the list is already gone: settled, nothing sent, nothing offered again', async () => {
+    const { session, feed } = await pendingDrop();
+    hub.rows.delete('mini');
+    hub.postAnswer = undefined;
+    feed.open();
+    await until(() => signerOf(session).pending === null && hub.calls.some((c) => c.path === '/api/machines'), 'settled, the rows read');
+    await pause(30);
+    expect(deletes()).toEqual([]);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it('a delete answered 404 unknown-machine is already gone: settled, nothing offered again', async () => {
+    const { session, feed } = await pendingDrop();
+    hub.deleteAnswer = () => worker(404, { error: 'unknown-machine' });
+    hub.postAnswer = undefined;
+    feed.open();
+    await until(() => deletes().length === 1, 'the delete');
+    await until(() => signerOf(session).pending === null, 'settled');
+    await pause(30);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it('a keyed delete answered 503 hub-updating (a Registry mid-deploy) is never gone: offered again, on the settlement and on Retry', async () => {
+    const { session, feed, ref, pub } = await pendingDrop();
+    hub.deleteAnswer = () => worker(503, { error: 'hub-updating' });
+    hub.postAnswer = undefined;
+    feed.open();
+    await until(() => registered(session).hubRowsLeft.length === 1, 'the row left');
+    expect(registered(session).hubRowsLeft).toEqual([{ name: 'mini', ref }]);
+    expect(await session.dropRetry('mini')).toEqual({ ok: false, reason: 'refused', detail: 'the hub answered 503 hub-updating' });
+    expect(registered(session).hubRowsLeft).toEqual([{ name: 'mini', ref }]);
+    expect(hub.rows.has('mini')).toBe(true);
+    expect(preconditions(), 'both keyed').toEqual([{ ref, pub }, { ref, pub }]);
+    hub.deleteAnswer = undefined;
+    expect(await session.dropRetry('mini')).toEqual({ ok: true });
+    expect(hub.rows.has('mini')).toBe(false);
+  });
+
+  it('a row list that fails offers the row again, and Retry reads it anew', async () => {
+    const { session, feed, ref } = await pendingDrop();
+    hub.listAnswer = () => worker(503, { error: 'hub-updating' });
+    hub.postAnswer = undefined;
+    feed.open();
+    await until(() => registered(session).hubRowsLeft.length === 1, 'the row left');
+    expect(registered(session).hubRowsLeft).toEqual([{ name: 'mini', ref }]);
+    expect(deletes()).toEqual([]);
+    hub.listAnswer = undefined;
+    expect(await session.dropRetry('mini')).toEqual({ ok: true });
+    expect(hub.rows.has('mini')).toBe(false);
+  });
+
+  it("a certified machine's drop is refused before anything is signed or sent", async () => {
+    const { session, feed } = await signingRoot();
+    const bea = await addMember(session, feed);
+    const delegation = await generateSigningKey();
+    const id = memberId();
+    hub.chain.push(await successor(hub.head, [a1], (s) => void s.delegations.push({ id, pub: delegation.pub, prefix: 'dc-', expires: iso(Date.now() + 30 * DAY), maxUses: 10, offlineRevokeS: 0, owners: [bea] })));
+    const vm = await generateSigningKey();
+    const certRef = `${id}_${base64urlEncode(crypto.getRandomValues(new Uint8Array(16)))}`;
+    hub.certificates = { certs: [await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: certRef, name: 'dc-vm1', pub: vm.pub, delegation: id, use: 1, issued: iso(Date.now() - HOUR) }, delegation.privateKey, delegation.pub)], retirements: [] };
+    hub.rows.set('dc-vm1', null);
+    feed.state(hub.head.state.version);
+    await until(async () => (await session.view())?.machines.length === 1, 'the certified machine');
+    const [posts, prompts] = [hub.posted.length, signing.prompts.length];
+    expect(await session.preview({ kind: 'machine.drop', ref: certRef, revoke: false })).toMatchObject({ ok: false, reason: 'refused', findings: [{ code: 'certified-machine' }] });
+    expect([hub.posted.length, signing.prompts.length]).toEqual([posts, prompts]);
+    expect(hub.calls.filter((c) => c.path.startsWith('/api/machines'))).toEqual([]);
+    expect(hub.rows.has('dc-vm1')).toBe(true);
+  });
+
+  it('Retry on a name listed again sends nothing and takes the row off the status', async () => {
+    const { session, feed, ref } = await pendingDrop();
+    hub.postAnswer = undefined;
+    hub.deleteAnswer = () => worker(503, { error: 'hub-updating' });
+    feed.open();
+    await until(() => registered(session).hubRowsLeft.length === 1, 'the row left');
+    hub.chain.push(await relisted('mini', ref));
+    feed.state(hub.head.state.version);
+    await until(() => headVersion(session) === hub.head.state.version, 'the re-listing held');
+    hub.deleteAnswer = undefined;
+    expect(await session.dropRetry('mini')).toMatchObject({ ok: false, reason: 'none' });
+    expect(registered(session).hubRowsLeft).toEqual([]);
+    expect(deletes()).toEqual(['/api/machines/mini']); // the settlement's failed one alone
+    expect(hub.rows.has('mini')).toBe(true);
+  });
+
+  it('a sign-out between the sign and the settlement: the row goes when the next sign-in settles the drop', async () => {
+    const { session, feed } = await pendingDrop();
+    await session.signOut();
+    hub.postAnswer = undefined;
+    await pause(30);
+    expect(deletes()).toEqual([]);
+    expect(session.signIn()).toEqual({ ok: true });
+    await until(() => isSignedIn(session), 'signed in again');
+    feed.open();
+    await until(() => !hub.rows.has('mini'), 'the row deleted under the new sign-in');
+    expect(deletes()).toEqual(['/api/machines/mini']);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+});
+
 describe('M4a: close()', () => {
   it('resolves only after a queued anchor write lands', async () => {
     const gate = gatedFiles();
@@ -2620,5 +3171,171 @@ describe('M4a: a sign-out after a post the hub took (Task 5, Decision 4)', () =>
     await until(() => signerOf(session).pending === null && headVersion(session) === before + 1, 'settled at the sign-in');
     expect(signing.prompts).toHaveLength(prompts);
     expect(hub.posted).toHaveLength(1);
+  });
+});
+
+// ---- M4b: the grants ----
+
+const BEA = 'beadbeadbeadbeadbeadbeadbeadbead';
+
+/** One machine's grant ledger behind a link and the door, kept by the endpoint's intake rule (src/endpoint/grants.ts). */
+function grantMachine(heldKey: () => Promise<string>) {
+  const ledger = { grants: {} as Record<string, Signed<Grant>>, highWater: {} as Record<string, number> };
+  const answer = () => ({ members: hub.head.state.members.map((m) => ({ member: m.id, grant: ledger.grants[m.id] ?? null, highWater: ledger.highWater[m.id] ?? 0 })) });
+  const intake = async (value: unknown): Promise<{ state: string; error?: { code: string } }> => {
+    const g = value as Signed<Grant>;
+    const verdict = await verifyGrant(hub.head.state, g, NO_CERTIFICATES, new Date());
+    if (!verdict.ok) return { state: 'failed', error: { code: verdict.code } };
+    if (g.body.machineKey !== (await heldKey())) return { state: 'failed', error: { code: 'not-held' } };
+    if ((ledger.highWater[g.body.member] ?? 0) >= g.body.version) return { state: 'failed', error: { code: 'not-newer' } };
+    ledger.grants[g.body.member] = g;
+    ledger.highWater[g.body.member] = g.body.version;
+    return { state: 'done' };
+  };
+  const acts: unknown[] = [];
+  let holdAct: Promise<void> | null = null;
+  // The machine follows the hub: the head pushed before a grant (deliveries.ts's `bringTo`) is the one it holds.
+  const pushed = (version: number) => ({ opId: 'push', opCreated: new Date().toISOString(), progress: () => 'sent', onProgress: () => () => {}, outcome: Promise.resolve({ state: 'done', result: { version } }) });
+  const link = {
+    state: () => 'up',
+    onState: () => () => {},
+    caps: () => ({ member: A, device: 'dev', clientClass: 'native-mac', machine: { grades: [] }, stateVersion: hub.head.state.version }),
+    call: async () => ({ ok: true, output: answer() }),
+    act: (request: { action: string; args: unknown }) => {
+      if (request.action === 'endpoint.state') return pushed(hub.head.state.version);
+      acts.push(request);
+      const hold = holdAct;
+      return {
+        opId: `op-${acts.length}-xxxxxxxxxxxxxxxx`,
+        opCreated: new Date().toISOString(),
+        progress: () => 'sent',
+        onProgress: () => () => {},
+        outcome: (async () => {
+          await hold;
+          return intake((request.args as { grant: unknown }).grant);
+        })(),
+      };
+    },
+  } as unknown as GrantLink;
+  const door: GrantDoor = {
+    act: async (action) => (acts.push(action), intake(action.args.grant)),
+    grants: async () => ({ ok: true, output: answer() }),
+  };
+  return { ledger, link, door, acts, hold: (p: Promise<void> | null) => void (holdAct = p) };
+}
+
+/** The grants' deps for make(): a record signer over the profile's step-up key that records each prompt (no Touch ID). */
+function testGrants(machine: ReturnType<typeof grantMachine>, ref: () => string | null) {
+  const harness = { prompts: [] as StepUpPrompt[], during: null as (() => Promise<unknown> | unknown) | null };
+  const deps: NonNullable<OrgSessionDeps['grants']> = {
+    recordSigner: (k) =>
+      createRecordSigner({
+        key: k.stepUp,
+        confirm: async (prompt) => {
+          harness.prompts.push(prompt);
+          await harness.during?.();
+          return { ok: true };
+        },
+      }),
+    door: machine.door,
+    roster: () => (ref() === null ? [] : [ref() as MachineRef]),
+    onRoster: () => () => {},
+    link: (r) => (r === ref() ? machine.link : null),
+  };
+  return { harness, deps };
+}
+
+/** Signed in (not a root), the head listing BEA and a machine `mini` this member owns; its grants over a fake ledger. */
+async function granting(local = false) {
+  let ref: string | null = null;
+  let pub = '';
+  const machine = grantMachine(async () => keyId(pub));
+  const grants = testGrants(machine, () => (local ? null : ref));
+  const localRef = base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
+  const made = await signedIn({ grants: grants.deps, ...(local ? { local: localRef as MachineRef } : {}) });
+  const feed = fakeFeed();
+  made.session.attach(feed.hooks);
+  ref = local ? localRef : base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
+  pub = (await generateSigningKey()).pub;
+  hub.chain.push(
+    await successor(hub.head, [a1], (s) => {
+      s.members.push({ id: BEA, email: 'bea@example.com', role: 'member', devices: [] });
+      s.machines.push({ name: 'mini', ref: ref!, pub, owners: [A] });
+      s.machineNames.push({ name: 'mini', ref: ref! });
+    }),
+  );
+  await followHub(made.session, feed);
+  return { ...made, feed, machine, grants: grants.harness, ref: ref as string };
+}
+
+describe('M4b: the grants', () => {
+  it('a signed-in owner who is no root sees Grant… on its machine, grants through its link, and grants.json is written after the mark', async () => {
+    const { session, machine, grants, ref } = await granting();
+    expect(signerOf(session).maySign).toBe(false);
+    const view = await session.view();
+    expect(view?.machines.find((m) => m.ref === ref)?.mayGrant).toBe(true);
+    expect(await session.grantsSet({ ref, member: BEA, rights: ['spawn'] })).toEqual({ ok: true, version: 1, delivered: 'done' });
+    expect(grants.prompts).toHaveLength(1);
+    expect(machine.ledger.grants[BEA].body).toMatchObject({ machine: ref, member: BEA, rights: ['spawn'], version: 1 });
+    expect((await readJson<RegistrationFile>(REGISTRATION_FILE)).grants).toBe(true);
+    expect(((await stat(join(orgDir(), GRANTS_FILE))).mode & 0o777).toString(8)).toBe('600');
+    expect(await readJson<GrantsFile>(GRANTS_FILE)).toMatchObject({ version: 1, issued: [{ delivered: 'done', signed: { body: { version: 1 } } }] });
+    const grantsView = await session.grantsView({ ref });
+    expect(grantsView).toMatchObject({ ok: true, live: true, grants: [{ member: BEA, rights: ['spawn'], version: 1, state: 'on-machine' }] });
+  });
+
+  it('goes through the local door for this Mac’s own machine', async () => {
+    const { session, machine, ref } = await granting(true);
+    expect(await session.grantsSet({ ref, member: BEA, rights: ['shell'] })).toMatchObject({ ok: true, delivered: 'done' });
+    expect(machine.acts).toHaveLength(1);
+    expect(machine.acts[0]).toMatchObject({ v: 1, machine: ref, action: 'endpoint.grant' });
+  });
+
+  it('a sign-out during the grant’s Touch ID keeps and sends nothing', async () => {
+    const { session, machine, grants, ref } = await granting();
+    grants.during = () => session.signOut();
+    expect(await session.grantsSet({ ref, member: BEA, rights: ['spawn'] })).toMatchObject({ ok: false, reason: 'cancelled' });
+    expect(machine.acts).toEqual([]);
+    expect(await exists(join(orgDir(), GRANTS_FILE))).toBe(false);
+    expect(await session.grantsView({ ref })).toEqual({ ok: false, ref, reason: 'signed-out' });
+  });
+
+  it('close() while the grant’s act is out joins it: its outcome is written before the close resolves, nothing after', async () => {
+    const { session, machine, ref } = await granting();
+    let release!: () => void;
+    machine.hold(new Promise<void>((resolve) => (release = resolve)));
+    const answer = session.grantsSet({ ref, member: BEA, rights: ['spawn'] });
+    await until(() => machine.acts.length === 1, 'the act out');
+    expect(await readJson<GrantsFile>(GRANTS_FILE)).toMatchObject({ issued: [{ delivered: 'sending' }] }); // the write-ahead
+    let closed = false;
+    const closing = session.close().then(() => void (closed = true));
+    await pause(30);
+    expect(closed).toBe(false);
+    release();
+    await closing;
+    expect(await answer).toMatchObject({ ok: true, delivered: 'done' });
+    expect(await readJson<GrantsFile>(GRANTS_FILE)).toMatchObject({ issued: [{ delivered: 'done' }] });
+    const files = await orgSnapshot();
+    await pause(30);
+    expect(await orgSnapshot()).toEqual(files);
+  });
+
+  it('a grants.json gone after its mark is damaged: the page says so and no grant is signed', async () => {
+    const { session, grants, ref } = await granting();
+    await session.grantsSet({ ref, member: BEA, rights: ['spawn'] });
+    await session.close();
+    await rm(join(orgDir(), GRANTS_FILE));
+    const { session: again } = await restart({ grants: testGrants(grantMachine(async () => ''), () => ref).deps });
+    await until(() => isSignedIn(again), 'signed in after the restart');
+    expect(await again.grantsView({ ref })).toEqual({ ok: false, ref, reason: 'damaged' });
+    expect(await again.grantsSet({ ref, member: BEA, rights: ['shell'] })).toMatchObject({ ok: false, reason: 'damaged' });
+    expect(grants.prompts).toHaveLength(1);
+  });
+
+  it('without the grants’ deps, no machine shows Grant… and every grant reads signed out', async () => {
+    const { session, feed } = await signingRoot();
+    const { ref } = await addMachine(session, feed);
+    expect((await session.view())?.machines.every((m) => !m.mayGrant)).toBe(true);
+    expect(await session.grantsView({ ref })).toEqual({ ok: false, ref, reason: 'signed-out' });
   });
 });

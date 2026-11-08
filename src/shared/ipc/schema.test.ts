@@ -2346,8 +2346,8 @@ describe('ipc schema validates both directions', () => {
 
   describe('P5 O8 M6b endpoint.*', () => {
     it('adds the local door, machine-owned and main-only: an act answered by its outcome, record.policy answered as a call', () => {
-      expect(Object.fromEntries(Object.entries(endpoint.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'endpoint.local.act': 'machine', 'endpoint.local.call': 'machine' });
-      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['endpoint.local.act', 'endpoint.local.call']));
+      expect(Object.fromEntries(Object.entries(endpoint.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'endpoint.local.act': 'machine', 'endpoint.local.call': 'machine', 'endpoint.local.grants': 'machine' /* P5 O8 M4b */ });
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['endpoint.local.act', 'endpoint.local.call', 'endpoint.local.grants']));
       expect(validateCommandInput('endpoint.local.act', { action: { action: 'record.access', args: {} } }).ok).toBe(true);
       expect(validateCommandInput('endpoint.local.act', { action: 'record.access' }).ok, 'an action is an object').toBe(false);
       expect(validateCommandOutput('endpoint.local.act', { state: 'done', result: { changed: true, policyRev: 4 } }).ok).toBe(true);
@@ -2360,6 +2360,18 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandOutput('endpoint.local.call', { ok: true, output: { supported: false } }).ok).toBe(true);
       expect(validateCommandOutput('endpoint.local.call', { ok: false, code: 'unavailable' }).ok).toBe(true);
       expect(validateCommandOutput('endpoint.local.call', { ok: true, output: { supported: true, policies: [{ ...policy, access: 'public' }] } }).ok, 'no such level').toBe(false);
+    });
+
+    it('P5 O8 M4b: endpoint.local.grants answers the grant ledger as a call, every member with their grant or null and their mark', () => {
+      expect(validateCommandInput('endpoint.local.grants', undefined).ok).toBe(true);
+      expect(validateCommandInput('endpoint.local.grants', { member: 'm-b' }).ok, 'no input').toBe(false);
+      expect(validateCommandInput('endpoint.local.call', { name: 'endpoint.grants', input: null }).ok, 'not a name endpoint.local.call takes').toBe(false);
+      const grant = { body: { org: 'o', machine: 'm-ref', machineKey: 'k'.repeat(22), member: 'm-b', rights: ['spawn', 'shell'], version: 2, issued: '2026-11-08T10:00:00.000Z' }, sig: { kid: 'K'.repeat(22), value: 'v'.repeat(86) } };
+      const answer = { members: [{ member: 'm-a', grant: null, highWater: 0 }, { member: 'm-b', grant, highWater: 2 }, { member: 'm-c', grant: null, highWater: 5 }] };
+      expect(validateCommandOutput('endpoint.local.grants', { ok: true, output: answer }).ok).toBe(true);
+      expect(validateCommandOutput('endpoint.local.grants', { ok: false, code: 'unavailable' }).ok).toBe(true);
+      expect(validateCommandOutput('endpoint.local.grants', { ok: true, output: { members: [{ member: 'm-b', grant: { ...grant, body: { ...grant.body, rights: ['root'] } }, highWater: 2 }] } }).ok, 'no such right').toBe(false);
+      expect(validateCommandOutput('endpoint.local.grants', { ok: true, output: { members: [{ member: 'm-b', grant: null }] } }).ok, 'a mark is always answered').toBe(false);
     });
   });
 });

@@ -111,6 +111,8 @@ export interface EndpointModule {
   // app's way to its own sessions' record acts (`act`: the three record.* actions alone, each's step-up verified every time,
   // its member from its device's one head entry, then authorized as a channel's act) and their policy read (`call`:
   // record.policy alone, as the machine's owners'), served on machine.sock as `endpoint.local.act` and `endpoint.local.call`.
+  // P5 O8 M4b: `act` takes `endpoint.grant` too, on the grant's own signature, and `call` `endpoint.grants`, which
+  // machine.sock serves as `endpoint.local.grants`.
   // `act` answers the outcome as RL4's `done` carries it, or `{state: 'refused', reason}`; `call` as RL3's `result` does.
   // Absent from a module that has none (a test's); the daemon then answers `unavailable`
   local?: {

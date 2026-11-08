@@ -19,7 +19,7 @@ import { Setting, TEXT_ACTION } from '../parts';
 import { MachinesGroup } from './MachinesGroup';
 import { OrgGroup } from './OrgGroup';
 import { PeopleGroup } from './PeopleGroup';
-import { CodeField, failed, Fingerprint, Group, UnplacedRefusal, type Attempt, type Invoked, type Registered } from './parts';
+import { CodeField, failed, Fingerprint, Group, signInOf, UnplacedRefusal, type Attempt, type Invoked, type Registered } from './parts';
 import { rekeyField, YouGroup } from './YouGroup';
 
 // The attempts whose control is on the page for `status`, as YouGroup and the code field draw them.
@@ -158,10 +158,10 @@ function RegisteredPage({ status, view, pending, placedAt, unplaced, attempt, ca
       {view !== null && (
         <>
           <Group id="people" title={ORG.groups.people}>
-            <PeopleGroup view={view} pairing={status.pairing} />
+            <PeopleGroup view={view} pairing={status.pairing} signIn={signInOf(status)} />
           </Group>
           <Group id="machines" title={ORG.groups.machines}>
-            <MachinesGroup view={view} />
+            <MachinesGroup view={view} status={status} />
           </Group>
         </>
       )}

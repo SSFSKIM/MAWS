@@ -5,23 +5,33 @@
 // refuse for yourself (your own removal or role, this Mac's own device). Make a root is offered on an admin's Mac that
 // isn't one; the checks judge the rest. A later device of another member is stated, not offered: one who signs pairs it
 // from their own Org page, and one who doesn't waits for the countersign flow. Read-only otherwise, with the roots' emails.
-import { useState } from 'react';
+// M4b: a removal refused because the person owns a machine offers the way to each such machine's row.
+import { useEffect, useRef, useState } from 'react';
 import { formatClock } from '@shared/app/date-format';
 import type { OrgChange, OrgPairingStatus, OrgView } from '@shared/ipc/schema/org';
 import { ORG } from '../copy';
 import { Setting, TEXT_ACTION, Chip } from '../parts';
 import { ChangeSheet } from './ChangeSheet';
 import { PairSheet } from './PairSheet';
-import { DeviceLine, inWords, OutcomeLine, type Member, type Outcome } from './parts';
+import { DeviceLine, focusMachineRow, inWords, OutcomeLine, type Member, type Outcome } from './parts';
 
 type Asked = { title: string; change: OrgChange };
 /** The pairing sheet open on a member; `follow` the generation the sheet takes up when reopened on a running pairing. */
 type Pairing = { member: Member; follow: number | null };
 
-export function PeopleGroup({ view, pairing }: { view: OrgView; pairing: OrgPairingStatus }) {
+export function PeopleGroup({ view, pairing, signIn }: { view: OrgView; pairing: OrgPairingStatus; signIn: string | null }) {
   const [asked, setAsked] = useState<Asked | null>(null);
   const [pairOn, setPairOn] = useState<Pairing | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
+  // The machine row a refused removal sends the person to, focused after the commit that took its sheet away, so the
+  // sheet's focus trap is gone and its focus restore leaves the row focused.
+  const goTo = useRef<string | null>(null);
+  useEffect(() => {
+    const ref = goTo.current;
+    if (ref === null) return;
+    goTo.current = null;
+    focusMachineRow(ref);
+  });
   const may = view.maySign;
   const ask = (title: string, change: OrgChange) => {
     setOutcome(null);
@@ -46,11 +56,28 @@ export function PeopleGroup({ view, pairing }: { view: OrgView; pairing: OrgPair
         )}
         <OutcomeLine outcome={outcome} />
       </div>
-      {asked !== null && <ChangeSheet title={asked.title} change={asked.change} may={may} onClose={() => setAsked(null)} onSigned={(version) => setOutcome({ text: ORG.signed(version), refused: false })} />}
+      {asked !== null && (
+        <ChangeSheet
+          title={asked.title}
+          change={asked.change}
+          may={may}
+          signIn={signIn}
+          machines={owned(view, asked.change)}
+          onGoTo={(ref) => {
+            goTo.current = ref;
+            setAsked(null);
+          }}
+          onClose={() => setAsked(null)}
+          onSigned={(version) => setOutcome({ text: ORG.signed(version), refused: false })}
+        />
+      )}
       {pairOn !== null && <PairSheet member={pairOn.member} pairing={pairing} follow={pairOn.follow} may={may} onClose={() => setPairOn(null)} />}
     </>
   );
 }
+
+// The machines a member's removal would leave without that owner: the ones whose owners name them.
+const owned = (view: OrgView, change: OrgChange) => (change.kind === 'member.remove' ? view.machines.filter((m) => m.owners !== 'org' && m.owners.includes(change.member)) : []);
 
 type RowProps = {
   member: Member;

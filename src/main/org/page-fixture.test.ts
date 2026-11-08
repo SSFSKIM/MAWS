@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { commands, type OrgStatus, type OrgView } from '@shared/ipc/schema/org';
+import { commands, type GrantsView, type OrgStatus, type OrgView } from '@shared/ipc/schema/org';
 import type { OrgSessionService } from './org-session';
 import { installOrgPageFixture, ORG_PAGE_FIXTURE_ENV, type OrgPageFixtureInstall } from './page-fixture';
 import { registerOrgHandlers } from './register';
@@ -20,6 +20,8 @@ const STATUS: OrgStatus = {
   refused: { code: 'keys', detail: 'keys.json is gone' },
   signer: null,
   pairing: null,
+  enrolling: null,
+  hubRowsLeft: [],
 };
 const VIEW: OrgView = {
   version: 7,
@@ -89,6 +91,13 @@ describe("the Org page's e2e fixture in main", () => {
     expect(await ask('org.pair.approve', { generation: 1, digest: 'd' })).toMatchObject({ ok: false, reason: 'busy' });
     expect(await ask('org.discardPending', { confirmed: true, hash: 'h' })).toEqual({ ok: false, reason: 'none' });
     expect(await ask('org.pair.cancel')).toBeUndefined();
+    expect(await ask('org.enroll.start', { name: 'box' })).toMatchObject({ ok: false, reason: 'busy' });
+    expect(await ask('org.enroll.approve', { generation: 1, digest: 'd' })).toMatchObject({ ok: false, reason: 'busy' });
+    expect(await ask('org.enroll.cancel', { generation: 1 })).toMatchObject({ ok: false, reason: 'not-current' });
+    expect(await ask('org.drop.retry', { name: 'box' })).toMatchObject({ ok: false, reason: 'none' });
+    expect(await ask('org.grants.view', { ref: 'mref-box-00000001' })).toEqual({ ok: false, ref: 'mref-box-00000001', reason: 'signed-out' });
+    expect(await ask('org.grants.set', { ref: 'mref-box-00000001', member: 'a1', rights: ['spawn'] })).toMatchObject({ ok: false, reason: 'busy' });
+    expect(await ask('org.grants.regrant', { ref: 'mref-box-00000001', digest: 'd' })).toMatchObject({ ok: false, reason: 'busy' });
     expect(await ask('org.policy.set', { address: 'm/s', access: 'public', policyRev: 1 })).toEqual({ ok: false, reason: 'busy' });
     expect(await ask('org.owners.add', { address: 'm/s', member: 'a1' })).toEqual({ ok: false, reason: 'busy' });
     stop!();
@@ -104,9 +113,10 @@ describe("the Org page's e2e fixture in main", () => {
         return () => void (publish = () => {});
       },
       onChannel: () => () => {},
+      onGrants: () => () => {},
     } as unknown as OrgSessionService;
     const emitted: OrgStatus[] = [];
-    const unpublish = registerOrgHandlers({ register: () => {}, emit: (_name, status) => void emitted.push(status), emitChannel: () => {}, service, development: null });
+    const unpublish = registerOrgHandlers({ register: () => {}, emit: (_name, status) => void emitted.push(status), emitChannel: () => {}, emitGrants: () => {}, service, development: null });
     publish({ state: 'none' });
     expect(emitted).toEqual([{ state: 'none' }]); // forwarded before the fixture
 
@@ -114,6 +124,26 @@ describe("the Org page's e2e fixture in main", () => {
     expect(stop).not.toBeNull();
     publish({ state: 'none' }); // load()'s completion (`changed(true)`), landing after the page read the seeded status
     expect(emitted).toEqual([{ state: 'none' }]);
+  });
+
+  it("M4b: answers org.grants.view from the file's grants by machine, and signed out for a machine it doesn't name", async () => {
+    const shown: GrantsView = { ok: true, ref: 'mref-box-00000001', live: false, asOf: '2026-10-28T08:00:00.000Z', grants: [{ member: 'a1', rights: ['spawn'], version: 2, state: 'pending' }], missing: [], digest: null };
+    const d = deps({ MAWS_E2E: '1', [ORG_PAGE_FIXTURE_ENV]: fixtureFile({ status: STATUS, view: VIEW, grants: { 'mref-box-00000001': shown } }) });
+    expect(installOrgPageFixture(d)).not.toBeNull();
+    const ask = (input: unknown) => Promise.resolve(d.handlers.get('org.grants.view')!(input));
+    expect(await ask({ ref: 'mref-box-00000001' })).toEqual(shown);
+    expect(await ask({ ref: 'mref-other-0000002' })).toEqual({ ok: false, ref: 'mref-other-0000002', reason: 'signed-out' });
+    expect(() => installOrgPageFixture(deps({ MAWS_E2E: '1', [ORG_PAGE_FIXTURE_ENV]: fixtureFile({ status: STATUS, view: VIEW, grants: { 'mref-box-00000001': { ...shown, code: 'never' } } }) }))).toThrow(
+      /is not an Org page fixture/,
+    );
+  });
+
+  it('M4b: holds org.grants.set unanswered when the file asks (`holdGrantSave`), so the grant sheet can be photographed saving', async () => {
+    const d = deps({ MAWS_E2E: '1', [ORG_PAGE_FIXTURE_ENV]: fixtureFile({ status: STATUS, view: VIEW, holdGrantSave: true }) });
+    expect(installOrgPageFixture(d)).not.toBeNull();
+    const set = Promise.resolve(d.handlers.get('org.grants.set')!({ ref: 'mref-box-00000001', member: 'a1', rights: ['spawn'] }));
+    expect(await Promise.race([set, new Promise((resolve) => setTimeout(() => resolve('unanswered'), 20))])).toBe('unanswered');
+    expect(await Promise.resolve(d.handlers.get('org.grants.regrant')!({ ref: 'mref-box-00000001', digest: 'd' }))).toMatchObject({ ok: false, reason: 'busy' });
   });
 
   it('leaves the forwarding alone when it does not install', () => {

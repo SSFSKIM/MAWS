@@ -85,6 +85,8 @@ function seeded(local: MachineRef, now: number): Seed {
     problem: null,
     signer: null,
     pairing: null,
+    enrolling: null,
+    hubRowsLeft: [],
   };
   const orgKey = `smns:${PROJECT}` as RemoteRow['orgKey'];
   const row = (machine: MachineRef, session: string, title: string, minutesAgo: number, over: Partial<RemoteRow> = {}): RemoteRow => ({

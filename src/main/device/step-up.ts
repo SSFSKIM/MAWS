@@ -23,7 +23,13 @@
 // P5 O8 M6b: several acts under one confirmation (`signActions`, a Share sheet's save). The person confirms every act's
 // text at once (`renderActions`), and each canonical copy is then signed, all stamped at the confirmation. Nothing in a
 // batch is ever signed unasked.
+//
+// P5 O8 M4b: a record signed beside the org state (`createRecordSigner`, a grant), behind one confirmation, as an org
+// state is: the caller composes the record and its words, the canonical copy taken before the person is asked is what is
+// signed, and `live` is read once after a yes. It is neither an org state nor an act, so it goes through neither of
+// their signers, and only the record domains (`RECORD_DOMAINS`) are signed here.
 import { systemPreferences, type SystemPreferences } from 'electron';
+import { json, shown } from './prompt-text';
 import {
   base64urlEncode,
   canonicalize,
@@ -34,10 +40,13 @@ import {
   NONCE_BYTES,
   ownerMembers,
   signOrgState,
+  signRecord,
   signStepUp,
+  SIGNING_DOMAINS,
   type Action,
   type OrgState,
   type OrgView,
+  type Signed,
   type SignedOrgState,
   type SigningKey,
 } from '../../../apps/org-protocol/src/index.ts';
@@ -234,19 +243,68 @@ export async function createStateSigner(deps: { key: SigningKey; confirm?: Confi
         if (listed === undefined) throw new Error(`the state lists no device ${device} under member ${member} to endorse`);
         return { member, device: listed };
       });
-      let answer: Confirmation;
-      try {
-        answer = await confirm(prompt);
-      } catch {
-        answer = { ok: false, reason: 'failed' };
-      }
-      if (!answer.ok) return { ok: false, reason: 'cancelled' };
-      // What the person was asked about may have ended meanwhile (a pairing cancelled or expired): nothing is endorsed or signed.
-      if (options.live !== undefined && !options.live()) return { ok: false, reason: 'cancelled' };
+      if (!(await confirmedLive(confirm, prompt, options.live))) return { ok: false, reason: 'cancelled' };
       // An endorsement covers the device without one (`endorseDevice` leaves it out), so one the caller left is replaced.
       for (const { member, device } of endorsing) device.endorsement = await endorseDevice(asked.org, member, device, deps.key.privateKey, deps.key.pub);
       return { ok: true, signed: await signOrgState(asked, [deps.key]) };
     },
+  };
+}
+
+/**
+ * Whether the person said yes to `prompt` (a confirmation that throws is a no) and, read once after the yes, what they
+ * were asked about still stands (`live`: a pairing neither cancelled nor expired, a sign-in that hasn't ended).
+ */
+async function confirmedLive(confirm: Confirm, prompt: StepUpPrompt, live: (() => boolean) | undefined): Promise<boolean> {
+  let answer: Confirmation;
+  try {
+    answer = await confirm(prompt);
+  } catch {
+    answer = { ok: false, reason: 'failed' };
+  }
+  return answer.ok && (live === undefined || live());
+}
+
+/** P5 O8 M4b: the domains a record signer signs: a grant. Never an org state's, an action's or a channel's. */
+export const RECORD_DOMAINS = [SIGNING_DOMAINS.grant] as const;
+export type RecordDomain = (typeof RECORD_DOMAINS)[number];
+export type RecordSignOptions = { live?(): boolean };
+export type RecordSigned<T> = { ok: true; signed: Signed<T> } | { ok: false; reason: 'cancelled' };
+
+/** Signs records with the step-up key, each batch after the person confirmed the words the caller composed for it. */
+export type RecordSigner = {
+  /** keyId(stepUp.pub): the id a record's `sig.kid` names. */
+  kid: string;
+  /**
+   * One confirmation, then `live`, then the signature over the canonical copy taken before the person was asked. Every
+   * refusal is `cancelled`: nothing was signed. Throws, before asking, for a domain that is not a record's.
+   */
+  sign<T>(domain: RecordDomain, body: T, prompt: StepUpPrompt, options?: RecordSignOptions): Promise<RecordSigned<T>>;
+  /** `sign` for several records under one confirmation, signed in the order given; throws, before asking, for none. */
+  signMany<T>(domain: RecordDomain, bodies: readonly T[], prompt: StepUpPrompt, options?: RecordSignOptions): Promise<{ ok: true; signed: Signed<T>[] } | { ok: false; reason: 'cancelled' }>;
+};
+
+/** `confirm` defaults to `promptTouchIDConfirmation(systemPreferences)`, main's confirmation. Async only for the key id. */
+export async function createRecordSigner(deps: { key: SigningKey; confirm?: Confirm }): Promise<RecordSigner> {
+  const confirm = deps.confirm ?? promptTouchIDConfirmation(systemPreferences);
+  async function signMany<T>(domain: RecordDomain, bodies: readonly T[], prompt: StepUpPrompt, options: RecordSignOptions = {}): Promise<{ ok: true; signed: Signed<T>[] } | { ok: false; reason: 'cancelled' }> {
+    if (!(RECORD_DOMAINS as readonly string[]).includes(domain)) throw new Error(`${String(domain)} is not a record's domain: nothing was asked or signed`);
+    if (bodies.length === 0) throw new Error('nothing to sign: nothing was asked');
+    // Private copies in the canonical form the signature covers, taken before the person is asked: the caller keeps its
+    // references and may change them while the person decides. What was asked about is what is signed.
+    const asked = bodies.map((body) => JSON.parse(canonicalize(body)) as T);
+    if (!(await confirmedLive(confirm, prompt, options.live))) return { ok: false, reason: 'cancelled' };
+    const signed: Signed<T>[] = [];
+    for (const body of asked) signed.push(await signRecord(domain, body, deps.key.privateKey, deps.key.pub));
+    return { ok: true, signed };
+  }
+  return {
+    kid: await keyId(deps.key.pub),
+    async sign(domain, body, prompt, options) {
+      const result = await signMany(domain, [body], prompt, options);
+      return result.ok ? { ok: true, signed: result.signed[0] } : result;
+    },
+    signMany,
   };
 }
 
@@ -282,11 +340,3 @@ export function renderActions(actions: readonly Action[]): StepUpPrompt {
     text: actions.map((a, i) => `${i + 1} of ${n}\n${renderAction(a).text}`).join('\n\n'),
   };
 }
-
-// Line and paragraph separators, bidi embeddings, overrides and isolates, zero-width characters and the BOM: invisible,
-// or able to reorder what is shown. JSON.stringify escapes only the C0 controls.
-const INVISIBLE = /[\u007f-\u009f\u00ad\u061c\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff]/g;
-const escapeInvisible = (text: string) => text.replace(INVISIBLE, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
-const json = (value: unknown) => escapeInvisible(JSON.stringify(value));
-/** A plain identifier as it is; anything else as JSON. */
-const shown = (text: string) => (/^[A-Za-z0-9_.:/@-]+$/.test(text) ? text : json(text));

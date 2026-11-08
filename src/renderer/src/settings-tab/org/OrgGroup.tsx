@@ -17,7 +17,7 @@ import { machineName } from '../../stores/org-projects';
 import { ORG } from '../copy';
 import { Setting, TEXT_ACTION } from '../parts';
 import { ChangeSheet } from './ChangeSheet';
-import { failed, inWords, OutcomeLine, signOutcome, type Invoked, type Outcome, type Registered } from './parts';
+import { failed, inWords, OutcomeLine, signInOf, signOutcome, type Invoked, type Outcome, type Registered } from './parts';
 
 type Signer = NonNullable<Registered['signer']>;
 type Pending = NonNullable<Signer['pending']>;
@@ -235,6 +235,7 @@ function SignerLines({ signer, status, view }: { signer: Signer; status: Registe
           title={ORG.changeTitles['device.remove'](status.member.email)}
           change={{ kind: 'device.remove', member: status.member.id, device: removing }}
           may={signer.maySign}
+          signIn={signInOf(status)}
           onClose={() => setRemoving(null)}
           onSigned={(version) => setOutcome({ text: ORG.signed(version), refused: false })}
         />

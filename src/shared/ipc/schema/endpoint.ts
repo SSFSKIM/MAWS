@@ -9,6 +9,12 @@
 //     are taken.
 //   - `endpoint.local.call {name: 'record.policy', input}`: the policies of the sessions the machine's owners own, or of
 //     the one named, answered as RL3's `result` carries a call's (`{ok, output}` or `{ok: false, code}`).
+// P5 O8 M4b (the architect's Fork A): the door also takes `endpoint.grant {grant}` as an `endpoint.local.act`, with no
+// step-up, the grant's own signature its authority (verified by the endpoint against its head before it runs), and
+// answers `endpoint.local.grants`: the machine's grant ledger as its owners read it, every member the head lists with
+// their grant in force (null: none) and their high-water mark (0: never granted), answered as a call's result. It is a
+// command of its own, not another name `endpoint.local.call` takes: widening that command's `name` would change its
+// input's `const`, a change only a wire major may carry (wire.ts), where a new command is additive.
 import * as z from 'zod';
 import type { CommandSpec } from './common';
 
@@ -35,13 +41,42 @@ export type RecordPolicyAnswer = z.infer<typeof RecordPolicyAnswerSchema>;
 export const LocalOutcomeSchema = z.looseObject({ state: z.string().min(1) });
 export type LocalOutcome = z.infer<typeof LocalOutcomeSchema>;
 
+/**
+ * A signed grant as the ledger keeps it (org-protocol's `Signed<Grant>`). A stored grant stays in force until a higher
+ * version replaces it or its signer's key is revoked, whatever its signer's later standing; `verifyGrant` judges one at
+ * arrival, not a stored one.
+ */
+const SignedGrantSchema = z.strictObject({
+  body: z.strictObject({
+    org: z.string().min(1),
+    machine: z.string().min(1),
+    machineKey: z.string().min(1),
+    member: z.string().min(1),
+    rights: z.array(z.enum(['spawn', 'shell', 'machine-admin'])),
+    version: z.number().int().positive(),
+    issued: z.string().min(1),
+  }),
+  sig: z.strictObject({ kid: z.string().min(1), value: z.string().min(1) }),
+});
+
+/** One member's entry in the machine's grant ledger. */
+export const GrantsEntrySchema = z.strictObject({ member: z.string().min(1), grant: SignedGrantSchema.nullable(), highWater: z.number().int().nonnegative() });
+export type GrantsEntry = z.infer<typeof GrantsEntrySchema>;
+
+/** `endpoint.grants`' answer: the entries the reader may read, in the head's member order. */
+export const GrantsAnswerSchema = z.strictObject({ members: z.array(GrantsEntrySchema) });
+export type GrantsAnswer = z.infer<typeof GrantsAnswerSchema>;
+
+const CallFailedSchema = z.strictObject({ ok: z.literal(false), code: z.string().min(1) });
+
 export const commands = {
   'endpoint.local.act': { input: z.strictObject({ action: z.record(z.string(), z.unknown()) }), output: LocalOutcomeSchema, owner: 'machine' }, // main-only
   'endpoint.local.call': {
     input: z.strictObject({ name: z.literal('record.policy'), input: z.strictObject({ session: RecordIdSchema.optional() }).nullable() }),
-    output: z.union([z.strictObject({ ok: z.literal(true), output: RecordPolicyAnswerSchema }), z.strictObject({ ok: z.literal(false), code: z.string().min(1) })]),
+    output: z.union([z.strictObject({ ok: z.literal(true), output: RecordPolicyAnswerSchema }), CallFailedSchema]),
     owner: 'machine',
   }, // main-only
+  'endpoint.local.grants': { input: z.void(), output: z.union([z.strictObject({ ok: z.literal(true), output: GrantsAnswerSchema }), CallFailedSchema]), owner: 'machine' }, // main-only (P5 O8 M4b)
 } as const satisfies Record<`endpoint.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {} as const satisfies Record<`endpoint.${string}`, z.ZodType>;

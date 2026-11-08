@@ -3,16 +3,22 @@
 // package's `successorProblems` and, signed with real keys, its `verifySuccessor`; each refusal the composers hold
 // refuses; a target gone from the draft reads `stale`; `member.add`'s id is the one previewed. Real keys and the
 // package's own verifiers throughout; the own-device pairing is signed through step-up.ts's state signer, which
-// endorses inside the one confirmation.
+// endorses inside the one confirmation. M4b: the four machine kinds, each successor verified, each refusal row refused,
+// a re-enrollment's old key retired with the ref and owners kept, and a certified machine (a delegation's, through its
+// certificate) left to its delegation.
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   base64urlEncode,
   generateSigningKey,
   keyId,
   signOrgState,
+  signRecord,
+  SIGNING_DOMAINS,
   successorProblems,
   verifySuccessor,
+  type Certificates,
   type Device,
+  type MachineCert,
   type OrgState,
   type SignedOrgState,
   type SigningKey,
@@ -42,7 +48,8 @@ async function newDevice(id: string, kind: 'signing' | 'no-step-up' | 'web-cards
 
 // The org: A (this Mac's member, an admin) with this Mac's device `mac` (a root) and `old`; B, a member with one device
 // and the machine `mini`; C, an admin whose `c1` is the other root, beside a web-cards device and a native-mac one with
-// no step-up key; D, a member with no device yet.
+// no step-up key; D, a member with no device yet. M4b: `studio`, this Mac's own machine, owned by A; the name `gone`,
+// bound to the ref of a machine dropped before; the delegation `dc-` (the org's), whose certificate names `dc-vm1`.
 const A = hex32();
 const B = hex32();
 const C = hex32();
@@ -50,6 +57,10 @@ const D = hex32();
 const SELF: EditSelf = { member: A, device: 'mac-0001' };
 let d: Record<'mac' | 'old' | 'b1' | 'c1' | 'cw' | 'cn', TestDevice>;
 let head: SignedOrgState;
+const ref16 = () => base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
+/** M4b's refs: `mini` (B's), `studio` (this Mac's own), the dropped `gone`'s, and the certified `dc-vm1`'s. */
+let refs: Record<'mini' | 'studio' | 'gone' | 'vm', string>;
+let certificates: Certificates;
 
 beforeAll(async () => {
   d = {
@@ -62,7 +73,13 @@ beforeAll(async () => {
   };
   const recovery = await generateSigningKey();
   const machine = await generateSigningKey();
-  const ref = base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
+  const studio = await generateSigningKey();
+  const delegation = await generateSigningKey();
+  const delegationId = hex32();
+  refs = { mini: ref16(), studio: ref16(), gone: ref16(), vm: `${delegationId}_${ref16()}` };
+  const ref = refs.mini;
+  const cert: MachineCert = { org: ORG, machine: refs.vm, name: 'dc-vm1', pub: (await generateSigningKey()).pub, delegation: delegationId, use: 1, issued: iso(NOW - 86_400_000) };
+  certificates = { certs: [await signRecord(SIGNING_DOMAINS.machineCert, cert, delegation.privateKey, delegation.pub)], retirements: [] };
   const state: OrgState = {
     org: ORG,
     version: 1,
@@ -75,11 +92,18 @@ beforeAll(async () => {
       { id: C, email: 'c@example.com', role: 'admin', devices: [d.c1.device, d.cw.device, d.cn.device] },
       { id: D, email: 'd@example.com', role: 'member', devices: [] },
     ],
-    machines: [{ name: 'mini', ref, pub: machine.pub, owners: [B] }],
-    machineNames: [{ name: 'mini', ref }],
+    machines: [
+      { name: 'mini', ref, pub: machine.pub, owners: [B] },
+      { name: 'studio', ref: refs.studio, pub: studio.pub, owners: [A] },
+    ],
+    machineNames: [
+      { name: 'mini', ref },
+      { name: 'studio', ref: refs.studio },
+      { name: 'gone', ref: refs.gone },
+    ],
     retired: [],
     revoked: [],
-    delegations: [],
+    delegations: [{ id: delegationId, pub: delegation.pub, prefix: 'dc-', expires: iso(NOW + 30 * 86_400_000), maxUses: 10, offlineRevokeS: 0, owners: 'org' }],
     projects: [],
   };
   head = await signOrgState(state, [d.mac.stepUp!]);
@@ -104,8 +128,10 @@ async function judged(at: SignedOrgState, edit: Edit): Promise<{ draft: OrgState
   return { draft, problems, verdict: v.ok ? 'ok' : v.code };
 }
 
-const compose = (change: OrgChange, self: EditSelf = SELF) => composeChange(head.state, normalizeChange(change), self);
-const composeOn = (at: SignedOrgState, change: OrgChange, self: EditSelf = SELF) => composeChange(at.state, normalizeChange(change), self);
+const compose = (change: OrgChange, self: EditSelf = SELF) => composeChange(head.state, normalizeChange(change), self, certificates);
+const composeOn = (at: SignedOrgState, change: OrgChange, self: EditSelf = SELF) => composeChange(at.state, normalizeChange(change), self, certificates);
+/** M4b: this Mac, its own machine `studio`. */
+const HERE = (): EditSelf => ({ ...SELF, machine: refs.studio });
 
 /** The refusal a composer throws, by its findings' codes. */
 async function refusal(work: Promise<unknown>): Promise<string[]> {
@@ -243,10 +269,15 @@ describe('the refusals', () => {
     expect(await refusal(compose({ kind: 'member.remove', member: A }, { member: D, device: 'mac-0001' }))).toEqual(['refuse:this-mac']);
   });
 
-  it('member.remove: refused while they own a machine, the package naming it (owners-unknown)', async () => {
-    const edit = await compose({ kind: 'member.remove', member: B });
-    expect(await checked(head, edit)).toEqual(['owners-unknown']);
-    expect((await checkSuccessor(head.state, await drafted(head, edit), [], new Date(NOW)))[0].detail).toContain('mini');
+  it("member.remove: refused while they own a machine, naming it, with what to do first (owners-unknown)", async () => {
+    const error = await compose({ kind: 'member.remove', member: B }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RefusedEdit);
+    expect((error as RefusedEdit).findings).toEqual([{ level: 'refuse', code: 'owners-unknown', detail: "b@example.com owns mini: Change the machine's owners first" }]);
+    // an org-owned machine names no member, and holds no one's removal
+    const orgOwned = await successorDraft(head, NOW);
+    orgOwned.machines[0].owners = 'org';
+    const at = await signOrgState(orgOwned, [d.mac.stepUp!]);
+    expect(await checked(at, await composeOn(at, { kind: 'member.remove', member: B }))).toEqual([]);
   });
 
   it('member.role: refused for yourself, for no change, and when it would empty the roots', async () => {
@@ -285,6 +316,119 @@ describe('the refusals', () => {
     const edit = await deviceApproveEdit(head.state, { member: B, device: fresh.device, self: SELF, live: () => true });
     expect(edit.endorse).toBeUndefined();
     expect(await checked(head, edit)).toEqual(['endorsement-missing']);
+  });
+});
+
+describe('the machine composers (M4b)', () => {
+  const entryOf = (s: OrgState, ref: string) => s.machines.find((m) => m.ref === ref);
+
+  it('machine.add: the machine listed under its owners, its name bound to its ref, the lines naming it and its owners by email', async () => {
+    const key = await generateSigningKey();
+    const ref = ref16();
+    const edit = await compose({ kind: 'machine.add', name: 'box', ref, pub: key.pub, owners: [A] });
+    const { draft, problems, verdict } = await judged(head, edit);
+    expect([problems, verdict]).toEqual([[], 'ok']);
+    expect(entryOf(draft, ref)).toEqual({ name: 'box', ref, pub: key.pub, owners: [A] });
+    expect(draft.machineNames.at(-1)).toEqual({ name: 'box', ref });
+    expect(edit.lines).toEqual([`Enroll box (ref ${ref}) with its key ${await keyId(key.pub)}`, 'Owned by owner@example.com']);
+  });
+
+  it('machine.add: a name already bound to the same ref (enrolled before, then dropped) is bound once, not twice', async () => {
+    const key = await generateSigningKey();
+    const { draft, problems, verdict } = await judged(head, await compose({ kind: 'machine.add', name: 'gone', ref: refs.gone, pub: key.pub, owners: [A] }));
+    expect([problems, verdict]).toEqual([[], 'ok']);
+    expect(draft.machineNames.filter((n) => n.name === 'gone')).toEqual([{ name: 'gone', ref: refs.gone }]);
+  });
+
+  it('machine.add: refused for a listed name, a name bound to another ref, a name under a prefix, owners no member is, and no owners', async () => {
+    const pub = (await generateSigningKey()).pub;
+    const add = (name: string, owners: string[] | 'org' = [A]) => compose({ kind: 'machine.add', name, ref: ref16(), pub, owners });
+    expect(await checked(head, await add('Mini'))).toContain('machine-name-taken');
+    expect(await checked(head, await add('gone'))).toEqual(['machine-names']);
+    expect(await checked(head, await add('dc-two'))).toEqual(['prefix-names-machine']);
+    expect(await checked(head, await add('box', [hex32()]))).toEqual(['owners-unknown']);
+    expect(await checked(head, await add('box', []))).toEqual(['shape']);
+  });
+
+  it('machine.replace: the new key under the same ref, the old one retired under {machine: ref} as of the successor, the owners kept', async () => {
+    const key = await generateSigningKey();
+    const old = head.state.machines[0];
+    const edit = await compose({ kind: 'machine.replace', ref: refs.mini, pub: key.pub });
+    const { draft, problems, verdict } = await judged(head, edit);
+    expect([problems, verdict]).toEqual([[], 'ok']);
+    expect(entryOf(draft, refs.mini)).toEqual({ name: 'mini', ref: refs.mini, pub: key.pub, owners: [B] });
+    expect(draft.retired).toEqual([{ keyId: await keyId(old.pub), pub: old.pub, notAfter: draft.issued, holder: { machine: refs.mini } }]);
+    expect(draft.machineNames).toEqual(head.state.machineNames);
+    expect(edit.lines[0]).toBe(`Re-enroll mini (ref ${refs.mini}): its new key ${await keyId(key.pub)} replaces ${await keyId(old.pub)}, which is retired`);
+    expect(edit.lines[1]).toContain('b@example.com');
+  });
+
+  it('machine.replace: refused for the key it holds, and for a certified machine', async () => {
+    expect(await refusal(compose({ kind: 'machine.replace', ref: refs.mini, pub: head.state.machines[0].pub }))).toEqual(['refuse:no-change']);
+    expect(await refusal(compose({ kind: 'machine.replace', ref: refs.vm, pub: (await generateSigningKey()).pub }))).toEqual(['refuse:certified-machine']);
+  });
+
+  it('machine.owners: members, or the org; the lines name both sides by email', async () => {
+    const edit = await compose({ kind: 'machine.owners', ref: refs.mini, owners: [A, D] });
+    const to = await judged(head, edit);
+    expect([to.problems, to.verdict]).toEqual([[], 'ok']);
+    expect(entryOf(to.draft, refs.mini)!.owners).toEqual([A, D]);
+    expect(edit.lines).toEqual(["mini's owners become owner@example.com, d@example.com (were b@example.com)"]);
+    const org = await judged(head, await compose({ kind: 'machine.owners', ref: refs.mini, owners: 'org' }));
+    expect([org.problems, org.verdict]).toEqual([[], 'ok']);
+    expect(entryOf(org.draft, refs.mini)!.owners).toBe('org');
+  });
+
+  it("machine.owners: refused for an empty list, a non-member, no change, and a certified machine (its owners are its delegation's)", async () => {
+    expect(await checked(head, await compose({ kind: 'machine.owners', ref: refs.mini, owners: [] }))).toEqual(['shape']);
+    expect(await checked(head, await compose({ kind: 'machine.owners', ref: refs.mini, owners: [hex32()] }))).toEqual(['owners-unknown']);
+    expect(await refusal(compose({ kind: 'machine.owners', ref: refs.mini, owners: [B] }))).toEqual(['refuse:no-change']);
+    const error = (await compose({ kind: 'machine.owners', ref: refs.vm, owners: [A] }).catch((e: unknown) => e)) as RefusedEdit;
+    expect(error.findings.map((f) => f.code)).toEqual(['certified-machine']);
+    expect(error.findings[0].detail).toContain("its owners are its delegation's");
+  });
+
+  it('machine.drop: out of `machines`, its key retired (or revoked), its name kept bound to its ref', async () => {
+    const pub = head.state.machines[0].pub;
+    const retire = await compose({ kind: 'machine.drop', ref: refs.mini, revoke: false }, HERE());
+    const retired = await judged(head, retire);
+    expect([retired.problems, retired.verdict]).toEqual([[], 'ok']);
+    expect(entryOf(retired.draft, refs.mini)).toBeUndefined();
+    expect(retired.draft.retired).toEqual([{ keyId: await keyId(pub), pub, notAfter: retired.draft.issued, holder: { machine: refs.mini } }]);
+    expect(retired.draft.machineNames).toEqual(head.state.machineNames);
+    expect(retire.lines[1]).toBe(`Retire its key ${await keyId(pub)}`);
+
+    const revoke = await compose({ kind: 'machine.drop', ref: refs.mini, revoke: true }, HERE());
+    const revoked = await judged(head, revoke);
+    expect([revoked.problems, revoked.verdict]).toEqual([[], 'ok']);
+    expect(revoked.draft.revoked).toEqual([{ keyId: await keyId(pub), holder: { machine: refs.mini } }]);
+    expect(revoked.draft.retired).toEqual([]);
+    expect(revoke.lines[1]).toContain('may be compromised');
+  });
+
+  it("machine.drop: refused for this Mac's own machine and for a certified one", async () => {
+    const own = (await compose({ kind: 'machine.drop', ref: refs.studio, revoke: false }, HERE()).catch((e: unknown) => e)) as RefusedEdit;
+    expect(own.findings.map((f) => `${f.code}`)).toEqual(['this-machine']);
+    expect(own.findings[0].detail).toContain('mawsd endpoint unenroll');
+    const vm = (await compose({ kind: 'machine.drop', ref: refs.vm, revoke: false }, HERE()).catch((e: unknown) => e)) as RefusedEdit;
+    expect(vm.findings.map((f) => f.code)).toEqual(['certified-machine']);
+    expect(vm.findings[0].detail).toContain('mawsd endpoint retire');
+  });
+
+  it('a machine change whose machine left the draft reads `stale`', async () => {
+    const pub = (await generateSigningKey()).pub;
+    const cases: OrgChange[] = [
+      { kind: 'machine.replace', ref: refs.mini, pub },
+      { kind: 'machine.owners', ref: refs.mini, owners: [A] },
+      { kind: 'machine.drop', ref: refs.mini, revoke: false },
+    ];
+    for (const change of cases) {
+      const edit = await compose(change, HERE());
+      const draft = await successorDraft(head, NOW);
+      draft.machines = draft.machines.filter((m) => m.ref !== refs.mini);
+      await expect(Promise.resolve().then(() => edit.apply(draft)), change.kind).rejects.toBeInstanceOf(StaleEdit);
+      await expect(composeOn(await signOrgState(draft, [d.mac.stepUp!]), change, HERE()), change.kind).rejects.toBeInstanceOf(StaleEdit);
+    }
   });
 });
 

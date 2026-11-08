@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { generateSigningKey, keyId, signOrgState, stateHash, type OrgState, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
-import { orgFiles, SIGNING_FILE, type OrgFiles, type SigningFile } from './files';
+import { isStoredSigningFile, orgFiles, SIGNING_FILE, type OrgFiles, type SigningFile } from './files';
 import { createSigningStore, emptySigningFile, SigningDamaged, withExposure } from './signing-store';
 
 const profiles: string[] = [];
@@ -186,6 +186,18 @@ describe('the pending slot\'s hash', () => {
     const unhashed = { signed: kept, parent: 'p', exposed: { hub: false, machines: [] } } as unknown as SigningFile['pending'];
     await expect(store.update((file) => ({ next: { ...file, pending: unhashed }, value: undefined }))).rejects.toThrow(TypeError);
     expect(p.order).toEqual([]);
+  });
+});
+
+describe("a drop's hub row (M4b)", () => {
+  it('is kept with its name, ref and pub; a row without its pub, or with any field empty, reads damaged', async () => {
+    const kept = await signed(2);
+    const file = (hubRow: unknown) => ({ ...emptySigningFile(), pending: { signed: kept, parent: 'p', hash: 'h', exposed: { hub: false, machines: [] }, hubRow } });
+    expect(isStoredSigningFile(file({ name: 'mini', ref: 'r', pub: 'P' }))).toBe(true);
+    expect(isStoredSigningFile(file({ name: 'mini', ref: 'r' }))).toBe(false);
+    expect(isStoredSigningFile(file({ name: 'mini', ref: 'r', pub: '' }))).toBe(false);
+    expect(isStoredSigningFile(file({ name: '', ref: 'r', pub: 'P' }))).toBe(false);
+    expect(isStoredSigningFile({ ...file(undefined), pending: { ...file(undefined).pending, hubRow: undefined } })).toBe(true);
   });
 });
 

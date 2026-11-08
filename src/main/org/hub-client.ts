@@ -1,9 +1,12 @@
 // The hub's HTTP routes as the app uses them (P5 O8 M1, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md,
 // Orientation's "The hub, for an app"): `GET /api/me`, `GET /api/org/state` (from a version, every page), and
 // `POST /api/devices/pending`, M3's `POST /api/org/state` (a signed successor), and M4a's `GET /api/devices/pending`
-// (`?member=`, H1: an admin's read of another member's entries), and M7a's `GET /api/projects/<id>/attestations` (a
-// project's history attestations, for the channel's migrated history). None of its answers is trusted (RL §5.9): the session
-// verifies every state against what it holds, the pairing judges every entry, and this module only reads and classifies.
+// (`?member=`, H1: an admin's read of another member's entries), M7a's `GET /api/projects/<id>/attestations` (a
+// project's history attestations, for the channel's migrated history), and M4b's enrollment and drop: `POST
+// /api/enrollments`, `GET /api/enrollments/<id>/key`, and the DELETE of a dropped machine's Registry row (the one
+// machine path outside the remote module, boundary.test.ts's allowance). None of its answers is trusted (RL §5.9): the
+// session verifies every state against what it holds, the pairing judges every entry, and this module only reads and
+// classifies.
 //
 // Who answered matters. Every answer of the Worker carries `X-Desk-Build` (but a `101` or an event stream); a 401, 403 or
 // redirect without it came from Access, so the hub credential has ended (`credentials`). A Worker's
@@ -54,6 +57,10 @@ export type PendingEntry = {
   mac: string;
 };
 export type PendingAnswer = { pending: { expires: string } };
+/** M4b: a minted enrollment: its id, its end, and the one-time token the code carries (shown in the start's answer alone). */
+export type MintedEnrollment = { id: string; expires: string; token: string };
+/** M4b: the key a machine posted under an enrollment, unjudged: its MAC under the code's secret is the enrollment's to check. */
+export type EnrollmentKey = { machine: string; pub: string; ref: string; mac: string };
 
 export interface HubClient {
   me(signal?: AbortSignal): Promise<HubResult<Me>>;
@@ -71,7 +78,34 @@ export interface HubClient {
    * shape is dropped; the hub's own fields (its member, its times) are left out.
    */
   pendingOf(member: string | null, signal?: AbortSignal): Promise<HubResult<PendingDevice[]>>;
+  /**
+   * M4b: an admin's enrollment token (`registry.ts`'s `createEnrollment`), live `ttl_s` seconds; `machine`, an active
+   * machine's name, makes it a re-enrollment of that machine in place. `403 not-admin`, `409 unknown-machine`.
+   */
+  mintEnrollment(body: { ttl_s: number; machine?: string }, signal?: AbortSignal): Promise<HubResult<MintedEnrollment>>;
+  /** M4b: the key posted under the enrollment `id`, for the member who minted it: `404 no-key` until then, `403 not-yours`, `404 unknown-enrollment`. */
+  enrollmentKey(id: string, signal?: AbortSignal): Promise<HubResult<EnrollmentKey>>;
+  /**
+   * M4b: the machine's hub row removed (`machine drop`'s DELETE). A name-only 200 is `deleted`. A keyed 200 is
+   * `acknowledged`: the hub took the removal, but under its key-bound precondition (#538) it answers 200 too when the
+   * row's posted key no longer matched and nothing was touched, so it is a completed cleanup, not a verified deletion.
+   * `absent` is a row already gone (`404 unknown-machine`).
+   */
+  /**
+   * `GET /api/machines` (M4b): each hub row's name, with the key its current enrollment posted, or null for none (a row
+   * re-enrolled in place whose new enrollment posted nothing yet, or a certified machine's). A row out of shape fails
+   * the whole read, as `malformed`.
+   */
+  machines(signal?: AbortSignal): Promise<HubResult<HubMachineRow[]>>;
+  /**
+   * `key`: the dropped machine's ref and the pub the org state holds for it, sent as the hub's precondition (both or
+   * neither): a row another key enrolled since is left, answered as acknowledged.
+   */
+  deleteMachine(name: string, key?: { ref: string; pub: string }, signal?: AbortSignal): Promise<HubResult<'deleted' | 'acknowledged' | 'absent'>>;
 }
+
+/** A hub row as `GET /api/machines` lists it, for a drop's delete: its name, and the key its enrollment posted. */
+export type HubMachineRow = { name: string; key: { ref: string; pub: string } | null };
 
 /** M7a's read beside the session's: the project channel's, which the signer's and the pairing's clients don't carry. */
 export interface ProjectReads {
@@ -84,6 +118,12 @@ const isObject = (value: unknown): value is Record<string, unknown> => typeof va
 const ERROR_CODE = /^[a-z][a-z0-9-]{0,39}$/;
 /** An ISO 8601 instant in UTC, as the Worker writes one. */
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+/** An enrollment's id (the Registry's `newId`), and its token: 256 random bits as base64url. */
+const ENROLLMENT_ID = /^[0-9a-f]{32}$/;
+const ENROLLMENT_TOKEN = /^[A-Za-z0-9_-]{43}$/;
+/** The most characters a posted key's field is read with; its grammar is the MAC check's. */
+const KEY_FIELD_MAX = 256;
+const keyField = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= KEY_FIELD_MAX;
 
 /**
  * The served certificates: absent is null; a set that is not one is malformed (undefined). Items that are not a signed
@@ -213,6 +253,39 @@ export function hubClient(input: {
       request(member === null ? PENDING_DEVICES_PATH : `${PENDING_DEVICES_PATH}?member=${encodeURIComponent(member)}`, { signal }, (body) =>
         isObject(body) && Array.isArray(body.pending) ? body.pending.map(readPendingDevice).filter((entry) => entry !== null) : null,
       ),
+    mintEnrollment: (body, signal) =>
+      request('/api/enrollments', { method: 'POST', body, signal }, (answer) => {
+        if (!isObject(answer) || !isObject(answer.enrollment)) return null;
+        const { id, expires } = answer.enrollment;
+        const token = answer.token;
+        if (typeof id !== 'string' || !ENROLLMENT_ID.test(id) || typeof expires !== 'string' || !INSTANT.test(expires) || typeof token !== 'string' || !ENROLLMENT_TOKEN.test(token)) return null;
+        return { id, expires, token };
+      }),
+    enrollmentKey: (id, signal) =>
+      request(`/api/enrollments/${encodeURIComponent(id)}/key`, { signal }, (answer) => {
+        if (!isObject(answer)) return null;
+        const { machine, pub, ref, mac } = answer;
+        return keyField(machine) && keyField(pub) && keyField(ref) && keyField(mac) ? { machine, pub, ref, mac } : null;
+      }),
+    machines: (signal) =>
+      request('/api/machines', { signal }, (body) => {
+        if (!isObject(body) || !Array.isArray(body.machines)) return null;
+        const rows: HubMachineRow[] = [];
+        for (const item of body.machines) {
+          if (!isObject(item) || !keyField(item.name)) return null;
+          const key = item.key;
+          if (key === undefined || key === null) rows.push({ name: item.name, key: null });
+          else if (isObject(key) && keyField(key.ref) && keyField(key.pub)) rows.push({ name: item.name, key: { ref: key.ref, pub: key.pub } });
+          else return null;
+        }
+        return rows;
+      }),
+    async deleteMachine(name, key, signal) {
+      const precondition = key === undefined ? '' : `?ref=${encodeURIComponent(key.ref)}&pub=${encodeURIComponent(key.pub)}`;
+      const done = key === undefined ? ('deleted' as const) : ('acknowledged' as const);
+      const answer = await request(`/api/machines/${encodeURIComponent(name)}${precondition}`, { method: 'DELETE', signal }, () => done);
+      return !answer.ok && answer.kind === 'status' && answer.status === 404 && answer.error === 'unknown-machine' ? { ok: true, value: 'absent' } : answer;
+    },
     attestations: (project, signal) =>
       request(`/api/projects/${encodeURIComponent(project)}/attestations`, { signal }, (body) =>
         isObject(body) && Array.isArray(body.records) ? body.records.filter((r): r is Signed<HistoryAttestation> => isSigned(r, isHistoryAttestation)) : null,

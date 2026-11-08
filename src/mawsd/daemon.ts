@@ -1032,6 +1032,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         const call = input as CommandInput<'endpoint.local.call'>;
         return endpoint?.local === undefined ? { ok: false, code: 'unavailable' } : endpoint.local.call(call.name, call.input);
       }
+      // P5 O8 M4b: the machine's grant ledger as its owners read it, the door's `endpoint.grants`
+      case 'endpoint.local.grants':
+        return endpoint?.local === undefined ? { ok: false, code: 'unavailable' } : endpoint.local.call('endpoint.grants', null);
       default:
         throw new Error(`mawsd serves no ${name}`);
     }

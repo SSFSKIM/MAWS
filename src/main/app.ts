@@ -33,7 +33,7 @@ import { emit, emitFrom, emitTo } from './ipc/events'; // P5 O9 M9: emitFrom, re
 import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P5 O6 M1: registerMachineHandler
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager (P5 O3-D M6: the stand-in gone)
-import { createStateSigner, createStepUp, promptTouchIDConfirmation } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer
+import { createRecordSigner, createStateSigner, createStepUp, promptTouchIDConfirmation } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer; M4b: its record signer
 import { harnessConfirmation, sheetConfirmation } from './device/step-up-sheet'; // P5 O7 M2: the step-up sheet before Touch ID
 import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
 import type { MachineRef } from '@shared/machine/ref'; // P5 O6 M2
@@ -49,6 +49,7 @@ import { registerOrgHandlers, registerPolicyHandlers, registerRowsHandler } from
 import { orgFiles } from './org/files'; // P5 O8 M1
 import { createRemoteRows } from './org/rows'; // P5 O8 M2
 import { createOrgPolicies } from './org/policy'; // P5 O8 M6b
+import type { GrantDoor } from './org/grants'; // P5 O8 M4b
 import { installOrgPageFixture } from './org/page-fixture'; // P5 O8 M4a Task 8: a harness build's only
 import { installChannelFixture } from './org/channel-fixture'; // P5 O8 M7a Task 3: a harness build's only
 import { installShareFixture } from './org/share-fixture'; // P5 O8 M6b Task 3: a harness build's only
@@ -296,6 +297,9 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     return () => void rosterListeners.delete(listener);
   };
   let remoteLink: (ref: MachineRef) => RemoteLink | null = () => null;
+  // P5 O8 M4b: this Mac's own endpoint's local door for the grants (mawsd's main-only endpoint.local.act and
+  // endpoint.local.grants, through main's own route), bound once the services bus exists below; unavailable until then
+  let grantsDoor: GrantDoor = { act: async () => ({ state: 'refused', reason: 'unavailable' }), grants: async () => ({ ok: false, code: 'unavailable' }) };
   // P5 O8 M7b: this Mac's spine for the project channels' to-human entries: `channel.history` through main's own route and
   // `channel.changed` from the bus's tap, both bound once the services bus exists below (a read before answers
   // `unavailable`, and is read again)
@@ -337,6 +341,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
           stepUp: (keys, device, org) => createStepUp({ device, key: keys.stepUp, confirm, org }),
           // `<userData>/org/` stays out of Time Machine, as the device keys do: a restored token or chain is no one's
           excludeFromBackup: (path) => excludeFromBackup(path),
+          local, // M4b: this Mac's own machine, which a drop refuses
           // M3: the app as the org's signer. Org states are signed with the device's step-up key behind Touch ID (the
           // key stays in step-up.ts); the weekly successor asks at a window's focus, and notifies once a day while no
           // window is in front (a click brings the app forward, whose focus may then ask); revocations go to the RL2
@@ -370,6 +375,15 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
             onRoster,
             link: (ref) => remoteLink(ref),
           },
+          // M4b: grants on a machine, signed with the step-up key behind the same confirmation, through this Mac's local
+          // door for its own machine and the RL2 links for the rest
+          grants: {
+            recordSigner: (keys) => createRecordSigner({ key: keys.stepUp, confirm }),
+            door: { act: (action) => grantsDoor.act(action), grants: () => grantsDoor.grants() },
+            roster: () => roster,
+            onRoster,
+            link: (ref) => remoteLink(ref),
+          },
           log: (line) => console.log(line),
         })
       : null;
@@ -383,6 +397,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     register: registerMainHandler,
     emit: (name, status) => void emit(name, status),
     emitChannel: (changed) => void emit('org.channel.changed', changed),
+    emitGrants: (changed) => void emit('org.grants.changed', changed),
     service: orgSession,
     development: devOrg,
   });
@@ -514,6 +529,17 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     invoke: (name, input, context) => invokeOwn(name, input, { ...context, target: local }) as never,
   };
   remoteLink = (ref) => machines.remote(ref);
+  grantsDoor = {
+    act: async (action) => {
+      const answer = await bus.invoke('endpoint.local.act', { action }, { client: mainClient });
+      // the door's way to mawsd failed under an act it may have taken: the grant stays pending, sent again
+      return answer.ok ? answer.value : { state: 'unknown', reason: answer.error.code };
+    },
+    grants: async () => {
+      const answer = await bus.invoke('endpoint.local.grants', undefined, { client: mainClient });
+      return answer.ok ? answer.value : { ok: false, code: answer.error.code };
+    },
+  };
   localChannelHistory = async (input) => {
     const answer = await bus.invoke('channel.history', input, { client: mainClient });
     return answer.ok ? { ok: true, value: answer.value } : { ok: false, code: answer.error.code };

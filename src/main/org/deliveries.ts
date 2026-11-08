@@ -25,6 +25,11 @@
 //        `rollback` says the machine has moved past the run, so its head is found again from there.
 //   A run that can't hold even its first state stops that machine's delivery as `too-large` (its cursor cleared, so the
 //   next retry finds its head again, once its own hub sync has moved it past the large state).
+// - P5 O8 M4b: `createHeadPush`'s `bringTo(ref, version)` brings one machine to a version of the held line by the same
+//   runs (the recovery probe once per machine and line, head-finding from caps, forward from a cursor), owing nothing and
+//   writing nothing: the grants send a grant only to a machine whose answer says it holds the head it was signed under. Its
+//   `done {version}` is the endpoint's head once adopted (endpoint.ts's `#deliver`), so a fresh answer at or above the
+//   version, on the line the app is on when the grant goes out, says the machine judges under that head or a later one.
 // - A `done` whose version is at least the obligation's state's acknowledges the machine. Anything else stays owed,
 //   sent again at the machine's next link up and every DELIVERY_RETRY_MS.
 // - Exposure: a run that carries the pending state writes the machine into the slot's `exposed.machines` before its act,
@@ -50,6 +55,12 @@ import { orgTiming, type OrgTiming } from './timing';
 export type DeliveryLink = Pick<RemoteLink, 'state' | 'caps' | 'act' | 'onState'>;
 
 export type Owing = { version: number; machines: MachineRef[]; tooLarge: MachineRef[] };
+
+/**
+ * A machine brought to a version: the head its endpoint answered (`done {version}`, at or above the version asked), and
+ * whether the app is still on the line that answer was given on; or why there is no such answer now.
+ */
+export type Brought = { ok: true; version: number; current(): boolean } | { ok: false; why: string };
 
 export interface Deliveries {
   /** The obligation `signed` makes, owed to the roster less the machines it removes; null when it ends no key. */
@@ -149,8 +160,134 @@ function answerOf(outcome: ActOutcome): Answer {
   return { kind: 'none', why: `${outcome.state}${'reason' in outcome ? ` ${outcome.reason}` : ''}` };
 }
 
+/** The next run's kind and first version (M3's order): forward from a cursor on the line, the recovery probe once per
+ * machine and line, else head-finding from where the last run left it, caps, or genesis. */
+type Plan = { kind: 'probe' | 'find' | 'forward'; from: number };
+function planRun(p: { cursor: number | null; newest: Signed<RootTransition> | null; probed: boolean; hunt: number | null; caps: number | undefined }): Plan {
+  if (p.cursor !== null) return { kind: 'forward', from: p.cursor + 1 };
+  if (p.newest !== null && !p.probed) return { kind: 'probe', from: p.newest.body.fromVersion };
+  return { kind: 'find', from: p.hunt ?? (typeof p.caps === 'number' && p.caps >= 1 ? p.caps : 1) };
+}
+const newestOf = (transitions: readonly Signed<RootTransition>[]) =>
+  transitions.reduce<Signed<RootTransition> | null>((a, t) => (a === null || t.body.issued > a.body.issued ? t : a), null);
+
+/** Consecutive states of `line` from version `from`, as many as `maxBytes` holds with `transitions`. */
+function takeRun(line: readonly SignedOrgState[], from: number, transitions: readonly Signed<RootTransition>[], maxBytes: number): SignedOrgState[] {
+  const out: SignedOrgState[] = [];
+  let bytes = runBytes([], transitions);
+  for (const s of line.slice(from - 1)) {
+    bytes += Buffer.byteLength(JSON.stringify(s)) + (out.length === 0 ? 0 : 1);
+    if (bytes > maxBytes) break;
+    out.push(s);
+  }
+  return out;
+}
+
 /** Where an obligation's state stands against the app's line. */
 type Placement = { on: true; states: SignedOrgState[]; pending: SignedOrgState | null } | { on: false; why: 'suspended' | 'superseded' };
+
+/** What a push needs: the deliveries' links, the held view, the bound and the log. */
+export type HeadPushDeps = Pick<DeliveriesDeps, 'link' | 'view' | 'timing' | 'log'>;
+
+export interface HeadPush {
+  /**
+   * Brings `ref` to `version` of the held line, or later, by runs from wherever its head is found: one answer, fresh,
+   * whatever is known of the machine already. The callers for one machine share the push in flight.
+   */
+  bringTo(ref: MachineRef, version: number): Promise<Brought>;
+  /** Stops: nothing more is sent. Resolves once the pushes in flight have ended. */
+  close(): Promise<void>;
+}
+
+/** The pushes the grants make before a grant goes (the session's one, over the grants' links and the held view). */
+export function createHeadPush(deps: HeadPushDeps): HeadPush {
+  const timing = orgTiming(deps.timing);
+  const log = deps.log;
+  let closed = false;
+  /** In memory, per machine: the line its recovery probe was answered on (a push is no obligation: nothing is written). */
+  const pushProbed = new Map<MachineRef, number>();
+  /** The push in flight per machine, which the callers for it share. */
+  const pushing = new Map<MachineRef, Promise<Brought>>();
+
+  async function pushTo(ref: MachineRef, version: number): Promise<Brought> {
+    const no = (why: string): Brought => (log(`bringing ${ref} to version ${version}: ${why}`), { ok: false, why });
+    let hunt: number | null = null;
+    /** In this push: the machine's head on the app's line, as its last answer said (M3's cursor, kept with its line). */
+    let known: { version: number; line: number } | null = null;
+    let probeTooLarge = false;
+    for (;;) {
+      if (closed) return { ok: false, why: 'closed' };
+      const link = deps.link(ref);
+      const view = deps.view();
+      if (link === null || link.state() !== 'up') return no('its link is down');
+      if (view === null) return no('no org state is held');
+      const line = lineOf(view);
+      const { states, transitions } = view.since(0);
+      if (version > states.length) return no(`the held line ends at ${states.length}`);
+      const cursor = known?.line === line ? known.version : null;
+      const { kind, from } = planRun({ cursor, newest: newestOf(transitions), probed: pushProbed.get(ref) === line || probeTooLarge, hunt, caps: link.caps()?.stateVersion });
+      // Past the app's line: the machine is ahead of what the app holds, which can't say it is on it.
+      if (from > states.length) return no('the machine is past the held line');
+      const run = takeRun(states, from, transitions, timing.DELIVERY_MAX_BYTES);
+      if (kind === 'probe' && run.length < 2) {
+        probeTooLarge = true;
+        continue;
+      }
+      if (run.length === 0) return no(`version ${from} alone is over ${timing.DELIVERY_MAX_BYTES} bytes`);
+      const last = run[run.length - 1].state.version;
+      const answer = answerOf(await link.act({ action: 'endpoint.state', args: { states: run, transitions }, stepUp: 'never' }).outcome);
+      if (answer.kind === 'none') return no(`no answer that judges the run (${answer.why})`);
+      if (answer.kind === 'done') {
+        if (kind === 'forward' && answer.version <= (cursor as number)) return no(`a run from ${from} answered done at ${answer.version}, not past ${cursor}`);
+        if (kind === 'probe') pushProbed.set(ref, line);
+        if (answer.version >= version) {
+          return {
+            ok: true,
+            version: answer.version,
+            current: () => {
+              const now = deps.view();
+              return now !== null && lineOf(now) === line;
+            },
+          };
+        }
+        known = { version: answer.version, line };
+        continue;
+      }
+      if (kind === 'probe') {
+        pushProbed.set(ref, line);
+        continue;
+      }
+      if (answer.code === 'not-newer' || answer.code === 'rollback') {
+        known = null;
+        hunt = last + 1;
+        continue;
+      }
+      return no(`a run from ${from} refused ${answer.code}`);
+    }
+  }
+
+  function bringTo(ref: MachineRef, version: number): Promise<Brought> {
+    const start = (): Promise<Brought> => {
+      const held = pushing.get(ref);
+      if (held !== undefined) return held;
+      const run = pushTo(ref, version)
+        .catch((error: unknown): Brought => (log(`bringing ${ref} to version ${version} failed: ${(error as Error).message}`), { ok: false, why: (error as Error).message }))
+        .finally(() => pushing.delete(ref));
+      pushing.set(ref, run);
+      return run;
+    };
+    const held = pushing.get(ref);
+    // One that answers below this version is followed by one more, joined by any caller that arrives meanwhile.
+    return held === undefined ? start() : held.then((b) => (b.ok && b.version >= version ? b : start()));
+  }
+  return {
+    bringTo,
+    close() {
+      closed = true;
+      return Promise.all(pushing.values()).then(() => undefined);
+    },
+  };
+}
 
 export function createDeliveries(deps: DeliveriesDeps): Deliveries {
   const { store } = deps;
@@ -216,17 +353,7 @@ export function createDeliveries(deps: DeliveriesDeps): Deliveries {
     return { on: false, why: 'superseded' };
   }
 
-  /** Consecutive states of `line` from version `from`, as many as the bound holds with `transitions`. */
-  function take(line: SignedOrgState[], from: number, transitions: Signed<RootTransition>[]): SignedOrgState[] {
-    const out: SignedOrgState[] = [];
-    let bytes = runBytes([], transitions);
-    for (const s of line.slice(from - 1)) {
-      bytes += Buffer.byteLength(JSON.stringify(s)) + (out.length === 0 ? 0 : 1);
-      if (bytes > timing.DELIVERY_MAX_BYTES) break;
-      out.push(s);
-    }
-    return out;
-  }
+  const take = (line: SignedOrgState[], from: number, transitions: Signed<RootTransition>[]) => takeRun(line, from, transitions, timing.DELIVERY_MAX_BYTES);
 
   /** Runs to one machine for one obligation until it acknowledges, stops progressing, or can't be sent to now. */
   async function deliverTo(hash: string, ref: MachineRef): Promise<void> {
@@ -251,21 +378,7 @@ export function createDeliveries(deps: DeliveriesDeps): Deliveries {
       const target = o.signed.state.version;
       const end = place.states.length;
       const cursor = o.known[ref]?.line === line ? o.known[ref].version : null;
-      const newest = transitions.reduce<Signed<RootTransition> | null>((a, t) => (a === null || t.body.issued > a.body.issued ? t : a), null);
-
-      let kind: 'probe' | 'find' | 'forward';
-      let from: number;
-      if (cursor !== null) {
-        kind = 'forward';
-        from = cursor + 1;
-      } else if (newest !== null && o.probed[ref] !== line && !probeTooLarge) {
-        kind = 'probe';
-        from = newest.body.fromVersion;
-      } else {
-        kind = 'find';
-        const caps = link.caps()?.stateVersion;
-        from = hunt ?? (typeof caps === 'number' && caps >= 1 ? caps : 1);
-      }
+      const { kind, from } = planRun({ cursor, newest: newestOf(transitions), probed: o.probed[ref] === line || probeTooLarge, hunt, caps: link.caps()?.stateVersion });
       // Past the app's line: the machine is ahead of what the app holds, and waits until the app adopts that far.
       if (from > end) return;
       const states = take(place.states, from, transitions);
