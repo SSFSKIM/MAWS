@@ -30,13 +30,15 @@
 //   endorsed, `verifySuccessor` checks the real endorsement after), and may carry a liveness guard (`Edit.live`, a
 //   pairing's) read before Touch ID, by the device module after the person's yes, and inside the slot's write, so a
 //   pairing that ends while Touch ID is open endorses, signs, slots and posts nothing.
+// - M4b: an edit may carry a drop's hub row (`Edit.hubRow`), kept with its slot; `settled` hears each slot cleared
+//   because the held chain holds its state, with that row, so the row goes only with that very state, however late.
 //
 // Network calls and adoptions run outside the signing store's updates (whose queue adoption's anchor write waits on).
 // Electron-free: the state signer is injected (step-up.ts's `createStateSigner`, imported here for its type only).
 import { canonicalize, isSignedOrgState, stateHash, verifySuccessor, type OrgState, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
 import type { StateSigner } from '../device/step-up';
 import { checkSuccessor, type Finding, type SupersededOffer } from './checks';
-import type { Obligation, Pending } from './files';
+import type { HubRow, Obligation, Pending } from './files';
 import { rereadFrom, type HeldOrg } from './held';
 import type { HubClient, HubResult, Served } from './hub-client';
 import type { OrgSession } from './session';
@@ -50,7 +52,7 @@ import { SigningDamaged, withExposure, type SigningStore } from './signing-store
  * person's yes, and just before the slot's write; once the slot holds the proposal it is durable, and `live` no longer
  * withdraws it.
  */
-export type Edit = { summary: string; lines: string[]; endorse?: ReadonlyArray<{ member: string; device: string }>; live?(): boolean; apply(draft: OrgState): void | Promise<void> };
+export type Edit = { summary: string; lines: string[]; endorse?: ReadonlyArray<{ member: string; device: string }>; live?(): boolean; hubRow?: HubRow; apply(draft: OrgState): void | Promise<void> };
 
 /**
  * `beforePrompt`: the caller's last word, awaited once everything before Touch ID has passed; Touch ID is asked
@@ -124,6 +126,11 @@ export type OrgSignerDeps = {
   hub: () => HubClient | null;
   store: SigningStore;
   deliveries: SignerDeliveries;
+  /**
+   * M4b: a slot cleared because the held chain holds its state (settled now, by a later settle, or at a start after a
+   * relaunch), with what it was kept with: a drop's `hubRow` is the session's to delete. A discard is no settlement.
+   */
+  settled?(slot: Pending): void;
   now?(): number;
   log(line: string): void;
 };
@@ -287,12 +294,19 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
   async function clear(slot: Pending): Promise<void> {
     if (closed) return;
     const key = canonicalize(slot.signed.state);
-    const cleared = await store.update((file) => {
-      if (file.pending === null || canonicalize(file.pending.signed.state) !== key) return { next: file, value: false };
+    const cleared = await store.update<Pending | null>((file) => {
+      if (file.pending === null || canonicalize(file.pending.signed.state) !== key) return { next: file, value: null };
+      const was = file.pending;
       file.pending = null;
-      return { next: file, value: true };
+      return { next: file, value: was };
     });
-    if (cleared) log(`pending version ${slot.signed.state.version} is on the held chain: settled`);
+    if (cleared === null) return;
+    log(`pending version ${slot.signed.state.version} is on the held chain: settled`);
+    try {
+      deps.settled?.(cleared);
+    } catch (error) {
+      log(`a settlement listener failed: ${(error as Error).message}`);
+    }
   }
 
   /** The slot, if the held chain holds its state: cleared. Whether it was. */
@@ -551,7 +565,13 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       return { ok: false, reason: 'invalid', detail: verdict.code };
     }
     const obligation = await deliveries.obligation(signed, parent.state);
-    const slot: Pending = { signed, parent: await stateHash(parent.state), hash: await stateHash(signed.state), exposed: { hub: false, machines: [] } };
+    const slot: Pending = {
+      signed,
+      parent: await stateHash(parent.state),
+      hash: await stateHash(signed.state),
+      exposed: { hub: false, machines: [] },
+      ...(edit.hubRow === undefined ? {} : { hubRow: { ...edit.hubRow } }),
+    };
     let kept: 'kept' | 'pending' | 'moved' | 'stopped' | 'ended';
     // Right before the enqueue (the verdict and the obligation were awaits): a close since refuses the store's queue, and
     // a sign-out since keeps nothing, so either reads as the stopped sign it is.

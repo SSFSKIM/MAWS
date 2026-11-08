@@ -56,7 +56,12 @@ export type ChainFile = {
  * before the field existed loads too), and where it may already be, written before each send (`exposed.hub` before the
  * POST, a machine's ref before its `endpoint.state` act).
  */
-export type Pending = { signed: SignedOrgState; parent: string; hash: string; exposed: { hub: boolean; machines: string[] } };
+export type Pending = { signed: SignedOrgState; parent: string; hash: string; exposed: { hub: boolean; machines: string[] }; hubRow?: HubRow };
+/**
+ * M4b: the hub row a drop leaves behind (`machine drop`'s DELETE), kept with its slot, so the row is deleted once that
+ * very state is on the held chain, however late it settles (a relaunch included), and never for a discarded proposal.
+ */
+export type HubRow = { name: string; ref: string };
 /** signing.json as it may stand on disk: a slot written before its `hash` was kept lacks one until the store loads it. */
 export type StoredSigningFile = Omit<SigningFile, 'pending'> & { pending: (Omit<Pending, 'hash'> & { hash?: string }) | null };
 /**
@@ -263,7 +268,13 @@ const isRecordOf = <T>(value: unknown, item: (v: unknown) => v is T): value is R
 
 function isStoredPending(value: unknown): value is StoredSigningFile['pending'] & object {
   if (!isObject(value) || !isSignedOrgState(value.signed) || !isText(value.parent) || !isObject(value.exposed)) return false;
-  return (value.hash === undefined || isText(value.hash)) && typeof value.exposed.hub === 'boolean' && isTexts(value.exposed.machines);
+  const row = value.hubRow;
+  return (
+    (value.hash === undefined || isText(value.hash)) &&
+    typeof value.exposed.hub === 'boolean' &&
+    isTexts(value.exposed.machines) &&
+    (row === undefined || (isObject(row) && isText(row.name) && isText(row.ref)))
+  );
 }
 
 function isObligation(value: unknown): value is Obligation {

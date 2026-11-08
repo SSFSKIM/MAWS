@@ -46,8 +46,9 @@
 // M4b (machines; M4b's Decisions, Interfaces §R): the machine changes go through `preview` and `change` as the people's
 // do, with the held certificates (a certified machine is its delegation's) and this Mac's own machine ref (`local`), but
 // `machine.add` and `machine.replace`, which only an enrollment composes from the key it checked (enroll.ts, a part as
-// the pairing is). A signed `machine.drop` then deletes the machine's hub row; a delete that fails leaves its name on
-// the status (`hubRowsLeft`) for `dropRetry`, which calls the route alone.
+// the pairing is). A `machine.drop`'s slot carries the machine's hub row, which is deleted once the signer settles that
+// very state (at once, at a later settle, or at a start after a relaunch; never for a discarded or forked proposal); a
+// delete that fails leaves its name on the status (`hubRowsLeft`) for `dropRetry`, which calls the route alone.
 //
 // Electron-free: the browser opener, the step-up signer, the state signer, focus, notifications and the RL2 links are
 // injected from main.
@@ -865,6 +866,9 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
         hub: signerHub,
         store,
         deliveries,
+        settled: (slot) => {
+          if (slot.hubRow !== undefined) queueRowDelete(slot.hubRow);
+        },
         now: deps.now,
         log,
       });
@@ -1085,7 +1089,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     const shown = await shownChange(v, change);
     if (!shown.ok) return asSign(shown);
     if (shown.digest !== digest) return { ok: false, reason: 'stale', detail: stale };
-    // M4b: the machine a drop takes out, by the name the sheet showed it under (its lines name it), for its hub row.
+    // M4b: the machine a drop takes out, by the name the sheet showed it under (its lines name it): its hub row goes with
+    // the slot, deleted once the signer settles this state.
     const dropped = change.kind === 'machine.drop' ? v.head().state.machines.find((m) => m.ref === change.ref) : undefined;
     // Composed again on the head the signer drafts from (the hub's, after its read), and signed only if it still says
     // what was shown, as `revokeSuperseded` does: `stale` before Touch ID.
@@ -1096,12 +1101,21 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       if (fresh === null || !fresh.ok || fresh.digest !== digest) throw new StaleEdit(stale);
       await fresh.edit.apply(draft);
     };
-    const result = signResult(await c.signer.sign({ summary: shown.edit.summary, lines: shown.edit.lines, apply }));
-    if (result.ok && dropped !== undefined) await deleteRow({ name: dropped.name, ref: dropped.ref });
+    const hubRow = dropped === undefined ? {} : { hubRow: { name: dropped.name, ref: dropped.ref } };
+    const result = signResult(await c.signer.sign({ summary: shown.edit.summary, lines: shown.edit.lines, apply, ...hubRow }));
+    // Settled at once: its delete was queued in the settlement, and the answer waits for it, so the status it leaves is said.
+    if (result.ok && dropped !== undefined) await rowWork;
     return result;
   }
 
   // ---- M4b: a dropped machine's hub row ----
+
+  /** The settled drops' deletes, one at a time, in settlement order. */
+  let rowWork: Promise<unknown> = Promise.resolve();
+  function queueRowDelete(row: { name: string; ref: string }): void {
+    const turn = rowWork.then(() => deleteRow(row));
+    rowWork = turn.catch((error: unknown) => log(`deleting the hub's row for ${row.name} failed: ${(error as Error).message}`));
+  }
 
   /** The hub row of a machine just dropped, deleted as `machine drop` deletes it: 200, or 404 for a row already gone. */
   async function deleteRow(row: { name: string; ref: string }): Promise<DropRetryResult> {

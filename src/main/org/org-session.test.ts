@@ -155,7 +155,7 @@ class FakeHub {
   enrollments: Array<{ id: string; token: string; body: unknown }> = [];
   enrollmentKeys = new Map<string, { enrollment: string; machine: string; pub: string; ref: string; mac: string; posted: string }>();
   rows = new Set<string>();
-  deleteAnswer?: (name: string) => Answer | undefined;
+  deleteAnswer?: (name: string) => Answer | Promise<Answer | undefined> | undefined;
 
   constructor(
     readonly url: string,
@@ -229,7 +229,7 @@ class FakeHub {
     const machinePath = /^\/api\/machines\/([^/]+)$/.exec(url.pathname);
     if (method === 'DELETE' && machinePath !== null) {
       const name = decodeURIComponent(machinePath[1]);
-      const override = this.deleteAnswer?.(name);
+      const override = await this.deleteAnswer?.(name);
       if (override !== undefined) return override;
       if (!this.rows.delete(name)) return worker(404, { error: 'unknown-machine' });
       return worker(200, { revoked: name });
@@ -2660,6 +2660,95 @@ describe('M4b: the machine changes', () => {
       { name: 'dc-vm1', ref: certRef, owners: [bea], keyId: await keyId(vm.pub), certified: true, delegation: id },
     ]);
     expect(await session.preview({ kind: 'machine.owners', ref: certRef, owners: [A] })).toMatchObject({ ok: false, reason: 'refused', findings: [{ code: 'certified-machine' }] });
+  });
+});
+
+describe('M4b: a drop that settles later (the fix wave)', () => {
+  /** `mini` dropped while the hub answers its post `answer`: signed and kept, unsettled, its row untouched. */
+  async function pendingDrop(over: Overrides = {}, answer: () => Answer = () => worker(503, { error: 'hub-updating' })) {
+    const root = await signingRoot(over);
+    const { ref } = await addMachine(root.session, root.feed);
+    hub.postAnswer = answer;
+    const preview = await root.session.preview({ kind: 'machine.drop', ref, revoke: false });
+    if (!preview.ok) throw new Error(JSON.stringify(preview));
+    expect(await root.session.change(preview.change, preview.digest)).toMatchObject({ ok: false, reason: 'hub' });
+    expect(signerOf(root.session).pending).not.toBeNull();
+    expect(deletes()).toEqual([]);
+    expect(registered(root.session).hubRowsLeft).toEqual([]);
+    expect((await readJson<SigningFile>(SIGNING_FILE)).pending?.hubRow, 'the row is kept with the slot').toEqual({ name: 'mini', ref });
+    return { ...root, ref };
+  }
+  const deletes = () => hub.calls.filter((c) => c.method === 'DELETE').map((c) => c.path);
+
+  it('deletes the row once a later settle lands that very state', async () => {
+    const { session, feed } = await pendingDrop();
+    hub.postAnswer = undefined;
+    feed.open();
+    await until(() => signerOf(session).pending === null, 'settled');
+    await until(() => !hub.rows.has('mini'), 'the row deleted');
+    expect(deletes()).toEqual(['/api/machines/mini']);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it("a later settlement whose delete fails puts the row on Retry, which deletes it", async () => {
+    const { session, feed, ref } = await pendingDrop();
+    hub.postAnswer = undefined;
+    hub.deleteAnswer = () => worker(503, { error: 'hub-updating' });
+    feed.open();
+    await until(() => registered(session).hubRowsLeft.length === 1, 'the row left');
+    expect(registered(session).hubRowsLeft).toEqual([{ name: 'mini', ref }]);
+    hub.deleteAnswer = undefined;
+    expect(await session.dropRetry('mini')).toEqual({ ok: true });
+    expect(hub.rows.has('mini')).toBe(false);
+  });
+
+  it('a relaunch with the drop still pending deletes the row when the next start settles it', async () => {
+    await pendingDrop();
+    hub.postAnswer = undefined;
+    const again = await restart();
+    await until(() => !hub.rows.has('mini'), 'the row deleted after the relaunch');
+    expect(deletes()).toEqual(['/api/machines/mini']);
+    expect(registered(again.session).hubRowsLeft).toEqual([]);
+  });
+
+  it('a discarded drop deletes nothing', async () => {
+    const { session, feed } = await pendingDrop({}, () => worker(409, { error: 'key-purged' }));
+    const { hash } = signerOf(session).pending!;
+    expect(await session.discardPending(true, hash)).toMatchObject({ ok: true });
+    hub.postAnswer = undefined;
+    feed.open();
+    await pause(50);
+    expect(deletes()).toEqual([]);
+    expect(hub.rows.has('mini')).toBe(true);
+    expect(registered(session).hubRowsLeft).toEqual([]);
+  });
+
+  it('a drop another state forked deletes nothing, discarded or not', async () => {
+    const { session, feed } = await pendingDrop();
+    // another root's state takes the drop's version: the slot is a fork
+    hub.chain.push(await successor(hub.head, [a1], (s) => void s.members.push({ id: memberId(), email: 'cal@example.com', role: 'member', devices: [] })));
+    hub.postAnswer = undefined;
+    feed.state(hub.head.state.version);
+    await until(() => signerOf(session).pending?.fork === true, 'the fork');
+    expect(deletes()).toEqual([]);
+    expect(await session.discardPending(true, signerOf(session).pending!.hash)).toMatchObject({ ok: true });
+    await pause(50);
+    expect(deletes()).toEqual([]);
+    expect(hub.rows.has('mini')).toBe(true);
+  });
+
+  it('a sign-out between the sign and the settlement: the row goes when the next sign-in settles the drop', async () => {
+    const { session, feed } = await pendingDrop();
+    await session.signOut();
+    hub.postAnswer = undefined;
+    await pause(30);
+    expect(deletes()).toEqual([]);
+    expect(session.signIn()).toEqual({ ok: true });
+    await until(() => isSignedIn(session), 'signed in again');
+    feed.open();
+    await until(() => !hub.rows.has('mini'), 'the row deleted under the new sign-in');
+    expect(deletes()).toEqual(['/api/machines/mini']);
+    expect(registered(session).hubRowsLeft).toEqual([]);
   });
 });
 
