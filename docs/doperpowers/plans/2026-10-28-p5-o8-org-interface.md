@@ -115,7 +115,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
     - Green at 055778370 (42432343440: static, unit, e2e:settings and e2e:cross-build, hosted).
   - [x] (2026-11-08) Branch review clean. reviewer-high, with a security lens, found 3 P2s (eaafe05af, df906b6e9 and 95be41576, the last reviewed by the desk track as desk 644), and its re-review found the branch correct. Master 5b1f73877 merged in at 0db815f19.
   - [x] (2026-11-08) The final gate at 169108598 (`--gates all --evidence --lane hosted`, run 42438203920) is green on its first attempt: 55 jobs, with 2 matrix placeholders skipped and no flaky line. The commits after it are docs only. The PR is opened. The shared staging run is on the branch head (Decision Log, "M6b lands before the shared run", amended).
-- [ ] M4b — Machines and their rights — *executable; after M6b*
+- [x] (2026-11-08) M4b — Machines and their rights — PR from `p5-o8-m4b`; the final gate green at 01450ac1c (42526195244, desk-web on its rerun; 42526210394)
   - [x] (2026-11-08) Refresh at the cut: branch `p5-o8-m4b`, cut from master bd2b59baa after M6b landed as #522. The cited lines were reconciled, the parent was re-pinned at Decision Log 251, and the plan made: six tasks (Decision Log, "M4b's refresh at its cut" and "M4b is built as six tasks").
   - [x] (2026-11-08) Task 1, reviewed clean. Commits: 099c7cf77 (the move), 0ad9a8ff5 (`grantProblems`), b2ddf6b1d (a type-only fix) and 3112033dd (the review's I1, canonicalizability). All four are `apps/org-protocol` and `apps/desk-hub`, for the desk track.
     - Our task reviewer took two rounds: I1 was fixed, and I2 was dismissed under the recorded decision. Its external adversarial cases pass 6/6.
@@ -4355,6 +4355,8 @@ Evidence:
 - `e2e/channel.spec.ts`'s to-human entries, photographed;
 - the gates the PR body lists.
 
+**M7b's live check passed** on 63443a3bd (the owner's screenshot on the MacBook, 2026-11-08 22:41Z, P5 Decision Log 257). The m7b-live-check Channel tab shows m7b-vm's question (11-07 21:21Z, two choices) and m7b-mini's to-human message (11-07 22:55Z), both test content. The check that failed at P5 Decision Log 251 now passes. The desk track is retiring the test seats.
+
 Retrospective (M7b). Built as four tasks, with a review at each frontier and reviewer-high on the branch. The desk track reviewed the endpoint and org-protocol commits over six rounds.
 - **Where the rounds went.** Thirteen items came down to five, then two, then two, then nothing under the agreed final-round bar. Nearly every item was one shape: an endpoint that answers a member must never let what that member can't see change what it sends, whether in content, existence, frame type, timing of an end, or completeness of a page. Such leaks hide in recovery paths that run only under load, such as overflows and restarts, where "send something reasonable" quietly depends on hidden state.
 - **A ruling that was overturned.** The round-4 position ruling held a journal position. It assumed delivery runs in id order, which snapshot pages ordered by `(at, id)` broke. Recovery from an explicit list of let-go ids replaced it.
@@ -4429,3 +4431,46 @@ The shared staging run (Concrete Steps), 2026-11-08, on the branch head 16910859
 
 A future child should write, for each piece of state or authority that a sign-in, a head or a process owns, a test that ends that owner mid-flight: during a confirmation, between two sends, before a read-back. It should also run each operator-facing command at least once, end to end, in its real runtime, before review.
 
+
+**M4b (2026-11-08, PR from `p5-o8-m4b`; live use needs the next swap, for `WIRE_MINOR` 33, and the hub deploy that carries #538).** The Org page's Machines group is no longer read-only.
+- **Enroll a machine.** An admin whose Mac may sign enrolls a machine, or re-enrolls one from its row. The page:
+  - mints the enrollment;
+  - shows the code once, with Copy, and the line that the machine runs `mawsd enroll` and pastes the code at its hidden prompt (`--replace` for a machine still enrolled), with the expiry throughout the wait;
+  - polls for the machine's key, MAC-checked under `k` and frozen at its first good answer;
+  - shows the name, ref and key id to compare;
+  - signs `machine.add` or `machine.replace` behind one Touch ID.
+
+  The sheet owns exactly the run its start's answer names. A numbered cancel can name only that run, and a `null` cancel only the sender's own start.
+- **Owners and drop** go through the change sheet. A certified machine's owners are its delegation's, and this Mac's own machine has no Drop. A drop deletes its hub row when the drop's state settles, however it settles, and never while the held head lists the name again. The delete is bound to the dropped key (`?ref=&pub=`, #538) and preceded by a read of the hub's rows. A row left behind offers Retry. Removing a member who owns a machine says "Change the machine's owners first", linked to the machine's row.
+- **Rights.** Each row lists the members holding a grant on it, read from the machine's own ledger, with pending, refused and missing grants marked.
+  - Grant… shows wherever `grantProblems` admits this device as the signer: an owner, or an admin of an `'org'` machine (Fork B), whatever `maySign` says.
+  - A grant is one Touch ID. The sheet loads until the first read answers, and empty rights can be sent only under Withdraw.
+  - A grant goes through the local door for this Mac's own machine (Fork A), and over the link for any other. Over a link it goes only once the machine answers at or past the signing head, on the app's current line; the app pushes its line first. Every verdict is final.
+  - A grant this Mac issued that the ledger no longer holds, after a re-enrollment, is offered for Re-grant… above both marks.
+- **Underneath.**
+  - `org-protocol`: the v2 enrollment codec and the machine readers moved from desk-hub, and `grantProblems` (with `verifyGrant` built on it).
+  - The endpoint: `endpoint.grants`, and the door's `endpoint.grant`.
+  - mawsd: `endpoint.local.grants` at `WIRE_MINOR` 33.
+  - Main: `RecordSigner`, which signs the grant domain only; `grants.ts` with grants.json (fail-closed, with a write-ahead `sending`); `enroll.ts`; the machine edits; the hub client's mint, key read, delete and row read.
+
+**Evidence:**
+- `org-protocol`'s `enrollment.test.ts` (19) and `records.test.ts` (21), with the admin, vector and identity suites unchanged.
+- `test/endpoint/grants-call.test.ts` (17).
+- The main suites: `edits` (31), `enroll` (26), `hub-client`, `grants` (51), `grants-store`, `deliveries` (30), `step-up` (39), `org-session` (149).
+- The renderer suites: `MachinesGroup`, `GrantSheet`, `EnrollSheet`, `ChangeSheet`.
+- `e2e/org-page.spec.ts`, with its screenshots.
+- `test/org/org-page.local.test.ts`: cases 7–11 and Fork A's, 12 tests, green on three CI attempts.
+- The final gates the PR body lists.
+
+**Retrospective (M4b).** Built as six tasks, each reviewed at its frontier. The desk track reviewed every `apps/org-protocol`, `apps/desk-hub` and `src/endpoint` hunk, and reviewer-high (production code, with a security lens) and reviewer-medium (the renderer and tests) reviewed the branch.
+- **Where the rounds went.** The deepest work was one rule, *a grant lands only under a head at or after the one its signer saw, and a refused grant never lands without a new confirmation*, and the many places where state outlives a moment:
+  - Task 4 first retried every verdict.
+  - It then trusted a version that wasn't a lower bound: caps not re-sent, a rewind lowering the head.
+  - Its fixture projected the app's head where the endpoint projects its own.
+  - The branch review then found three paths that resent a refused grant: a stale snapshot, a verdict after sign-out, and a swallowed write.
+
+  Each was a guarantee checked once and assumed later, which is M6b's lesson again.
+- **Inference is the failure mode.** Enrollment ownership took four rounds because the renderer inferred which run was its own, from generation order and then from name and machine, and each inference left a racing order. The fix was to stop inferring: main's start answer names its generation. The cancel was the same: it was global until the architect scoped it, first by generation and then by sender.
+- **Fixtures can lie in the direction of the code.** Two masked tests passed because the fixture answered from the app's view, not the machine's: the endpoint's ledger projection, and case 8's push that the earlier push satisfied. A reviewer reading each case against the regression it claims to catch found both.
+
+A future child should state each guarantee as an invariant over every path that can act on durable state: a send, a resend, a restart, a sign-out, a close. It should test that invariant with the fixture answering from the other side's real view. Where ownership can be named by the authority that creates it (a generation, a signer), name it rather than infer it.
