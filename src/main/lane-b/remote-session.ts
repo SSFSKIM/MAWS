@@ -7,8 +7,9 @@
 //   sessions store holds a record under the address and the pane takes its started branch. A session the machine can't
 //   place yet (null, or `grade`: a fresh session whose engine hasn't reported its id) is asked again at 0.5, 1, 2 and 4 s,
 //   then the stream ends "can't place"; a later `start` (a click: the tab's interest read again) tries again. Board #525:
-//   `grade` is also the word for a member below View there, so its first one is said at once (`readRefused`, the reason
-//   `READ_REFUSED`, which the renderer words with whom to ask) while the ladder asks on, quietly. A read the
+//   `grade` is also the word for a member below View there, so on a session the org rows list as another member's its
+//   first one is said at once (`readRefused`, the reason `READ_REFUSED`, which the renderer words with whom to ask) while
+//   the ladder asks on, quietly; an owner's stays "not placed yet". A read the
 //   link could not carry (offline, a timeout, the machine's index unavailable) is asked again on the idle backoff without
 //   counting. The subscription opens once the record is had.
 // - The stream. One `full` subscription. Its parts become `session.status`, `session.queue`, `session.catalogChanged`
@@ -124,6 +125,11 @@ export interface RemoteSessionDeps {
   attentionFed?(): boolean;
   /** Fix wave 4: the stream's items changed (said or not): the machine's effective items may be these. */
   attentionChanged?(): void;
+  /**
+   * Board #525: whether the org rows list the session as another member's. Only then is a `grade` refusal of its record
+   * said as `READ_REFUSED`; an owner's (a session this app spawned or resumed included) is the machine not placing it yet.
+   */
+  othersSession?(): boolean;
   log(line: string): void;
 }
 
@@ -374,7 +380,7 @@ export class RemoteSession {
       return this.stop(answer.error.code);
     } else if (TRANSIENT.has(answer.error.code)) {
       return this.#later(() => void this.#readRecord(attempt, token));
-    } else if (refused && !this.state.readRefused) {
+    } else if (refused && !this.state.readRefused && this.#deps.othersSession?.() === true) {
       this.state.readRefused = true;
       this.publish();
     }

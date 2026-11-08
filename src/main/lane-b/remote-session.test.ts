@@ -32,7 +32,7 @@ const operation = (opId: string, command: 'session.mcpReconnect' | 'session.gene
 
 type Emitted = { machine: MachineRef; name: EventName; payload: Record<string, unknown> };
 
-function lab(options: { record?: () => unknown; followed?: () => boolean } = {}) {
+function lab(options: { record?: () => unknown; followed?: () => boolean; others?: boolean } = {}) {
   const link = new FakeLink();
   const emitted: Emitted[] = [];
   const logs: string[] = [];
@@ -50,6 +50,7 @@ function lab(options: { record?: () => unknown; followed?: () => boolean } = {})
     timing: { recordRetryMs: [500, 1000, 2000, 4000], idleRetryMs: [1000, 30_000], idleProbeMaxMs: 30 * 60_000, batchMax: 500 },
     revision: () => ++revision,
     ...(options.followed && { followed: options.followed }),
+    ...(options.others !== undefined && { othersSession: () => options.others! }),
     log: (line) => void logs.push(line),
   });
   const names = () => emitted.map((e) => e.name);
@@ -111,11 +112,12 @@ describe('opening', () => {
     expect(l.link.subs).toHaveLength(1);
   });
 
-  // Board #525: `grade` is also a member below View there, so its first one is said at once, in the words the renderer
-  // knows; the ladder asks on, so a just-started session the machine places within it still opens.
+  // Board #525: `grade` is also a member below View there, so on another member's session its first one is said at once,
+  // in the words the renderer knows; the ladder asks on, so a just-started session the machine places within it still
+  // opens. On an owner's (one this app spawned included) it is the machine not placing it yet, as before.
   it('says a `grade` refusal at once as READ_REFUSED, every control closed with it, and opens the record the ladder then reads', async () => {
     let n = 0;
-    const l = lab();
+    const l = lab({ others: true });
     l.link.answers.set('session.get', () => (++n < 3 ? { ok: false, error: { code: 'grade' } } : { ok: true, output: record(APP) }));
     l.session.start();
     await vi.advanceTimersByTimeAsync(0);
@@ -130,7 +132,7 @@ describe('opening', () => {
 
   it('keeps READ_REFUSED through a transient answer and past the ladder, with no poll after it; a later start that reads the record clears it', async () => {
     let answer: CallResult = { ok: false, error: { code: 'grade' } };
-    const l = lab();
+    const l = lab({ others: true });
     l.link.answers.set('session.get', () => answer);
     l.session.start();
     await vi.advanceTimersByTimeAsync(0);
@@ -147,6 +149,19 @@ describe('opening', () => {
     l.session.start();
     await vi.advanceTimersByTimeAsync(0);
     expect(l.lastState()).toMatchObject({ reason: null });
+  });
+
+  it('says an owner’s `grade` refusal as not placed yet: opening through the ladder, then “can’t place”', async () => {
+    for (const others of [false, undefined]) {
+      const l = lab(others === undefined ? {} : { others });
+      l.link.answers.set('session.get', () => ({ ok: false, error: { code: 'grade' } }));
+      l.session.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(l.lastState()).toMatchObject({ stream: 'opening', reason: 'Opening on mini…' });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(l.lastState()).toMatchObject({ stream: 'ended', reason: 'mini can’t place this session' });
+      l.session.stop();
+    }
   });
 });
 
