@@ -760,6 +760,41 @@ describe('missing grants', () => {
     expect(await h.grants.regrant({ ref: MINI, digest: view.digest! })).toEqual({ ok: true, results: [{ member: B, version: 2, delivered: 'done' }] });
   });
 
+  it('still finds the lost-reply grant once a pass resent it and the re-enrolled machine refused it (`not-listed`, its key no longer current)', async () => {
+    const h = await harness();
+    h.mini.script.push({ state: 'unknown', reason: 'channel-lost' });
+    await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] });
+    const fresh = await generateSigningKey();
+    keys[MINI] = fresh;
+    head = { ...head, version: 9, machines: head.machines.map((m) => (m.ref === MINI ? { ...m, pub: fresh.pub } : m)) };
+    h.mini.ledger.grants = {};
+    h.mini.ledger.highWater = {};
+    h.mini.ledger.heldKeys = [await keyId(fresh.pub)];
+    h.mini.stateVersion = 9;
+    await h.grants.send(); // the machine judges it by verifyGrant first: the old key is not the machine's now
+    expect(h.issued(MINI, B)).toMatchObject({ delivered: { refused: 'not-listed' } });
+    const view = await okView(h, MINI);
+    expect(view.missing).toEqual([{ member: B, rights: ['spawn'], version: 1 }]);
+    expect(await h.grants.regrant({ ref: MINI, digest: view.digest! })).toEqual({ ok: true, results: [{ member: B, version: 2, delivered: 'done' }] });
+  });
+
+  it('judges no-change against the key that speaks for the machine after the ledger read, not before it', async () => {
+    const h = await harness();
+    h.mini.script.push({ state: 'refused', reason: 'offline' });
+    await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] }); // pending, for the machine's key now
+    const fresh = await generateSigningKey();
+    const hold = (h.mini.holdCall = deferred());
+    const answer = h.grants.set({ ref: MINI, member: B, rights: ['spawn'] });
+    await until(() => h.mini.calls > 0, 'the ledger read');
+    // Enrolled again while the read was out: the pending grant names a key the machine no longer has.
+    keys[MINI] = fresh;
+    head = { ...head, version: 9, machines: head.machines.map((m) => (m.ref === MINI ? { ...m, pub: fresh.pub } : m)) };
+    h.mini.ledger.heldKeys = [await keyId(fresh.pub)];
+    hold.resolve();
+    expect(await answer).toEqual({ ok: true, version: 2, delivered: 'done' });
+    expect(h.mini.ledger.grants[B].body.machineKey).toBe(await keyId(fresh.pub));
+  });
+
   it('refuses a re-grant whose missing grants are not the ones shown (`stale`), or when none is missing (`none`), asking nothing', async () => {
     const h = await harness();
     await reenrolled(h);

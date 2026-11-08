@@ -149,10 +149,14 @@ export function nextVersion(issued: IssuedGrant | undefined, highWater: number):
 /**
  * The grants this Mac issued on `ref` that the ledger answered by `members` no longer holds and can't come to hold: a
  * member it answers for whose mark is below the issued version, the grant either delivered (the ledger lost it) or, for a
- * key that no longer speaks for the machine (`key`, the current one), still pending or refused `not-held` (its answer
- * lost before the machine was enrolled again). Never one with no rights, one another device replaced (the mark is past
- * it), one still deliverable for the current key, nor one the ledger wasn't asked for.
+ * key that no longer speaks for the machine (`key`, the current one), still pending or refused for that key (its answer
+ * lost before the machine was enrolled again, then judged by the new one: `verifyGrant` first, `not-listed`, else the
+ * ledger's `not-held`). Never one with no rights, one another device replaced (the mark is past it), one still
+ * deliverable for the current key, nor one the ledger wasn't asked for.
  */
+/** What a machine enrolled again answers a grant for its old key. */
+const DEAD_KEY = new Set(['not-listed', 'not-held']);
+
 export function missingGrants(file: GrantsFile, ref: string, members: readonly GrantsEntry[], key: string): IssuedGrant[] {
   return file.issued.filter((i) => {
     if (i.signed.body.machine !== ref || i.signed.body.rights.length === 0) return false;
@@ -160,7 +164,7 @@ export function missingGrants(file: GrantsFile, ref: string, members: readonly G
     if (entry === undefined || entry.highWater >= i.signed.body.version) return false;
     if (i.delivered === 'done') return true;
     const deadKey = i.signed.body.machineKey !== key;
-    return deadKey && (i.delivered === 'pending' || i.delivered.refused === 'not-held');
+    return deadKey && (i.delivered === 'pending' || DEAD_KEY.has(i.delivered.refused));
   });
 }
 
@@ -497,16 +501,17 @@ export function createGrants(deps: GrantsDeps): Grants {
       if (!ledger.ok) return refuse('ledger-unread', `${ref}'s grant ledger can't be read (${ledger.reason}): no version is guessed`);
       const entry = ledger.members.find((m) => m.member === member);
       if (entry === undefined) return refuse('ledger-unread', `${ref}'s grant ledger answered nothing for this member: no version is guessed`);
+      // The head held now (the read was an await): the key speaking for the machine, and the judge again below.
+      const current = deps.context();
+      if (current === null || !stands(at)) return refuse('signed-out');
       const issued = issuedNow();
       // The rights the member holds or is being given: a pending grant above the ledger's mark, for the key speaking for
       // the machine now, is the latest word (one for a key the machine no longer has can never be held).
-      const key = await currentKey(at, ref);
+      const key = await currentKey(current, ref);
       const pending = issued !== undefined && issued.delivered === 'pending' && issued.signed.body.version > entry.highWater && issued.signed.body.machineKey === key ? issued : undefined;
       const standing = pending !== undefined ? pending.signed.body.rights : (entry.grant?.body.rights ?? []);
       if (sameRights(standing, rights)) return refuse('no-change', 'the member holds these rights already');
-      // Judged again on the head held now (the read was an await), with the version above both marks.
-      const current = deps.context();
-      if (current === null || !stands(at)) return refuse('signed-out');
+      // Judged again on that head, with the version above both marks.
       const body = await draft(nextVersion(issued, entry.highWater), current);
       const problems = await problemsOf(current, body);
       if (problems.length > 0) return refuse('ineligible', `this grant can't be signed here: ${problems.join(', ')}`, problems);
