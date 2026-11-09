@@ -8,9 +8,14 @@
 // grants (on the machine, not yet on it, and one another device changed), one whose grants this Mac issued are missing,
 // one that didn't answer (as of its last answer), a certified machine (its delegation's owners), a dropped machine whose
 // hub row is still listed (Retry), and an enrollment awaiting its key. A pairing and an enrollment exclude each other in
-// main; the seed shows both, as no one session holds them at once. Each of the four groups, the window, the pairing
-// sheet and the enrollment, grant and re-grant sheets, and the grant sheet saving, are attached as PNGs for the architect's look; the case asserts
-// structure only: nothing in the section or a sheet scrolls sideways, and every action is drawn whole inside its row.
+// main; the seed shows both, as no one session holds them at once. M4c (Task 5): the Org group's Delegations section, a
+// delegation in effect with certified machines live and retired, a half-done renewal, an unsent one this run can write
+// again, a dropped one whose hub key is still live, two stray hub keys (one young), and the code's destination set. The
+// unsent delegation is shown with no pending slot, which main never does (its slot is what makes it unsent), so that
+// Create stays enabled for the create sheet's photograph. Each of the four groups, the window, the Delegations section,
+// the pairing sheet and the enrollment, grant, re-grant and create sheets, and the grant sheet saving, are attached as
+// PNGs for the architect's look; the case asserts structure only: nothing in the section or a sheet scrolls sideways,
+// and every action is drawn whole inside its row.
 //
 // The org is seeded where no real session can hold it at once (a key file refused at load leaves this Mac nothing to
 // pair with): under MAWS_E2E=1 a harness build's main answers `org.status` and `org.view` from a file the `org.*`
@@ -21,7 +26,7 @@ import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication } from '@playwright/test';
-import type { GrantsView, OrgStatus, OrgView } from '../src/shared/ipc/schema/org';
+import type { GrantsView, OrgStatus, OrgView, ProvisioningSecret } from '../src/shared/ipc/schema/org';
 import { readOrMintMachineRef } from '../src/shared/machine/identity-file';
 import { memberNames } from '../src/shared/org/member-name';
 import { ORG, SECTIONS } from '../src/renderer/src/settings-tab/copy';
@@ -65,6 +70,12 @@ const device = (over: Partial<Device> & Pick<Device, 'class'>): Device => ({
   ...over,
 });
 
+const DAY_MS = 86_400_000;
+// A delegation's id is its hub key's: 16 bytes of lowercase hex.
+const delegationId = () => randomBytes(16).toString('hex');
+/** Production's destination (M4c's *The destination*). */
+const DESTINATION: ProvisioningSecret = { project: 'ytdownload-505811', secret: 'desk-provisioning-v2', account: 'cli-owner@ytdownload-505811.iam.gserviceaccount.com' };
+
 /** The org: what main's session and view would send for it, `now` the clock the ages and the pairing's end read. */
 function seededOrg(local: string, userData: string, now: number): { status: Registered; view: OrgView; grants: Record<string, GrantsView>; names: Map<string, string> } {
   type Seed = Pick<OrgView['members'][number], 'id' | 'email' | 'role'>;
@@ -86,6 +97,8 @@ function seededOrg(local: string, userData: string, now: number): { status: Regi
   const farm = ref();
   const lab = ref();
   const runner = ref();
+  const runners = delegationId();
+  const at = (days: number) => new Date(now + days * DAY_MS).toISOString();
   const view: OrgView = {
     version: 41,
     issued,
@@ -97,7 +110,7 @@ function seededOrg(local: string, userData: string, now: number): { status: Regi
       { name: 'studio-mini', ref: studio, owners: 'org', keyId: kid(), certified: false, delegation: null, mayGrant: true }, // Ana an admin: hers to grant on
       { name: 'render-farm-03.clinical-research-operations', ref: farm, owners: [long.id, ortiz.id, memberId()], keyId: kid(), certified: false, delegation: null, mayGrant: false }, // the last a former member
       { name: 'lab-mini-02', ref: lab, owners: [ana.id], keyId: kid(), certified: false, delegation: null, mayGrant: true },
-      { name: 'ci-runner-7', ref: runner, owners: [ortiz.id], keyId: kid(), certified: true, delegation: 'dlg-ci-runners', mayGrant: false },
+      { name: 'ci-runner-7', ref: runner, owners: [ortiz.id], keyId: kid(), certified: true, delegation: runners, mayGrant: false },
     ],
     roots: [
       { kid: kid(), member: ana.id, device: thisMac.id },
@@ -105,10 +118,69 @@ function seededOrg(local: string, userData: string, now: number): { status: Regi
       { kid: kid(), member: ortiz.id, device: ortizDevices[1]!.id },
       { kid: kid(), unlisted: true },
     ],
-    // M4c: Task 5 seeds the Delegations section's rows
-    delegations: [],
-    strayKeys: [],
-    hubKeys: { at: null, failed: false },
+    // M4c: the Delegations section's rows in each state, and the hub's key list behind them
+    delegations: [
+      {
+        id: runners,
+        prefix: 'ci-runner-',
+        owners: [ortiz.id],
+        expires: at(23.05),
+        maxUses: 25,
+        machines: [
+          { ref: runner, name: 'ci-runner-7', live: true },
+          { ref: ref(), name: 'ci-runner-3', live: false },
+        ],
+        hub: { expires: at(23.05), uses: 4, revoked: false },
+        state: 'in-effect',
+        unsent: null,
+        hubBehind: null,
+        hubProblem: null,
+      },
+      {
+        id: delegationId(),
+        prefix: 'render-farm.clinical-research-operations-',
+        owners: 'org',
+        expires: at(180.05),
+        maxUses: null,
+        machines: [],
+        hub: { expires: at(12.05), uses: 2, revoked: false },
+        state: 'in-effect',
+        unsent: null,
+        hubBehind: 'renew',
+        hubProblem: { reason: 'not-renewed', detail: "the hub's org state doesn't hold the renewal yet" },
+      },
+      {
+        id: delegationId(),
+        prefix: 'devcloud-vm-',
+        owners: [ana.id],
+        expires: at(90),
+        maxUses: null,
+        machines: [],
+        hub: { expires: at(90), uses: 0, revoked: false },
+        state: 'unsent',
+        unsent: { rewrite: true, problem: 'gcloud secrets versions add failed: PERMISSION_DENIED: Permission denied on secret projects/ytdownload-505811/secrets/desk-provisioning-v2 for cli-owner@ytdownload-505811.iam.gserviceaccount.com' },
+        hubBehind: null,
+        hubProblem: null,
+      },
+      {
+        id: delegationId(),
+        prefix: 'old-render-',
+        owners: [],
+        expires: at(40),
+        maxUses: 50,
+        machines: [],
+        hub: { expires: at(40), uses: 9, revoked: false },
+        state: 'dropped',
+        unsent: null,
+        hubBehind: 'revoke',
+        hubProblem: { reason: 'hub', detail: 'the hub was not reached (timeout): Retry' },
+      },
+    ],
+    strayKeys: [
+      { id: delegationId(), prefix: 'tmp-', label: 'delegation create from a laptop, abandoned mid-way', created: at(-3), expires: at(87), young: false },
+      { id: delegationId(), prefix: 'gpu-box-', label: 'gpu boxes', created: at(-4 / 1440), expires: at(30), young: true },
+    ],
+    hubKeys: { at: new Date(now - 20_000).toISOString(), failed: false },
   };
   const status: Registered = {
     state: 'registered',
@@ -149,8 +221,8 @@ function seededOrg(local: string, userData: string, now: number): { status: Regi
     delegations: { creating: false, rev: 0 },
   };
   // Each machine's rights as `org.grants.view` answers them: the machine's own word, this Mac's issued record beside it.
-  const at = new Date(now).toISOString();
-  const shown = (machine: string, patch: Partial<Extract<GrantsView, { ok: true }>>): GrantsView => ({ ok: true, ref: machine, live: true, asOf: at, grants: [], missing: [], digest: null, ...patch });
+  const read = new Date(now).toISOString();
+  const shown = (machine: string, patch: Partial<Extract<GrantsView, { ok: true }>>): GrantsView => ({ ok: true, ref: machine, live: true, asOf: read, grants: [], missing: [], digest: null, ...patch });
   const grants: Record<string, GrantsView> = {
     [local]: shown(local, { grants: [{ member: chen.id, rights: ['spawn'], version: 1, state: 'on-machine' }] }),
     [studio]: shown(studio, {
@@ -195,7 +267,7 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
     const local = readOrMintMachineRef(userData); // the machine the app will be, so the view can list it up
     const { status, view, grants, names } = seededOrg(local, userData, Date.now());
     const fixture = join(userData, 'org-page.json');
-    writeFileSync(fixture, JSON.stringify({ status, view, grants, holdGrantSave: true })); // a grant saved stays saving, for its photograph
+    writeFileSync(fixture, JSON.stringify({ status, view, grants, holdGrantSave: true, provisioningSecret: DESTINATION })); // a grant saved stays saving, for its photograph
     // Classic scrollbars, which take width from the view, as on any Mac with a mouse attached, whatever the desktop's own
     // setting (the hosted lane selects overlay ones for every group).
     const maws = await launchMaws({ userData, env: { [FIXTURE_ENV]: fixture }, appKitDefaults: { AppleShowScrollBars: 'Always' } });
@@ -224,7 +296,7 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       await expect(machineRow('studio-mini').getByRole('button', { name: ORG.grant, exact: true })).toBeVisible();
       await expect(machineRow('lab-mini-02')).toContainText(ORG.missingGrants(2, 'lab-mini-02'));
       await expect(machineRow('render-farm-03.clinical-research-operations')).toContainText(ORG.noRightsYou);
-      await expect(machineRow('ci-runner-7')).toContainText(ORG.certifiedOwners('dlg-ci-runners'));
+      await expect(machineRow('ci-runner-7')).toContainText(ORG.certifiedOwners(view.delegations[0]!.id));
       await expect(machineRow('ana-mbp').getByRole('button', { name: ORG.drop, exact: true })).toHaveCount(0); // this Mac's own
       await expect(machineRow('old-render-01')).toContainText(ORG.hubRowLeft('old-render-01'));
       await expect(group('machines').getByRole('group', { name: ORG.enroll, exact: true })).toContainText('Enrolling gpu-box-02 until');
@@ -233,6 +305,22 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       const show = longRow.getByRole('button', { name: ORG.pairingShow, exact: true });
       await expect(show).toBeVisible();
 
+      // M4c: the Delegations section, a section of the Org group, its destination read
+      const delegations = group('org').locator('[data-org-section="delegations"]');
+      const delegationRow = (prefix: string) => delegations.getByRole('group', { name: prefix, exact: true });
+      await expect(delegations.locator('h5')).toHaveText(ORG.delegations);
+      await expect(delegationRow('ci-runner-')).toContainText(ORG.expiresIn(23.05 * DAY_MS));
+      await expect(delegationRow('ci-runner-')).toContainText(ORG.certified('ci-runner-7 (live) and ci-runner-3 (retired)'));
+      await expect(delegationRow('ci-runner-').getByRole('button', { name: ORG.renew, exact: true })).toBeVisible();
+      await expect(delegationRow('render-farm.clinical-research-operations-')).toContainText('Renewed in the org state; the hub’s key still expires');
+      await expect(delegationRow('render-farm.clinical-research-operations-').getByRole('button', { name: ORG.retry, exact: true })).toBeVisible();
+      await expect(delegationRow('devcloud-vm-').getByRole('button', { name: ORG.writeAgain, exact: true })).toBeVisible();
+      await expect(delegationRow('old-render-')).toContainText(ORG.hubBehindRevoke);
+      await expect(delegations.getByRole('group', { name: ORG.strayKeys, exact: true })).toContainText(ORG.justMinted);
+      await expect(delegations.getByRole('group', { name: ORG.destination, exact: true }).getByRole('textbox', { name: ORG.destinationFields.account })).toHaveValue(DESTINATION.account);
+      const create = delegations.getByRole('group', { name: ORG.newDelegation, exact: true }).getByRole('button', { name: ORG.createAction, exact: true });
+      await expect(create).toBeEnabled();
+
       // A machine reads by its name wherever the page names one (Machines, Deliveries, Discarded), never by its ref.
       await expect(group('org').getByRole('group', { name: ORG.deliveries, exact: true })).toContainText('studio-mini');
       const text = (await section.textContent()) ?? '';
@@ -240,6 +328,7 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
 
       await test.info().attach('org-page-window', { body: await page.screenshot(), contentType: 'image/png' });
       for (const id of GROUPS) await test.info().attach(`org-page-${id}`, { body: await group(id).screenshot(), contentType: 'image/png' });
+      await test.info().attach('org-page-delegations', { body: await delegations.screenshot(), contentType: 'image/png' });
 
       expect(await section.evaluate(overflowing), 'nothing in the Org section is wider than its box').toEqual([]);
       expect(await section.getByRole('button').count(), 'the seeded page offers its actions').toBeGreaterThan(0);
@@ -293,6 +382,19 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
         },
         ORG.grantSaving('studio-mini'),
         'org-page-grant-saving',
+      );
+      // M4c: the create sheet, its fields filled, where its code goes said and the code never shown
+      await photographed(
+        async () => {
+          await create.click();
+          await sheet.getByRole('textbox', { name: ORG.createFields.label, exact: true }).fill('devcloud VMs for the clinical research operations render farm');
+          await sheet.getByRole('textbox', { name: ORG.createFields.prefix, exact: true }).fill('crops-render-');
+          await sheet.getByRole('radiogroup', { name: ORG.createFields.uses, exact: true }).getByText(ORG.createUsesKinds.cap, { exact: true }).click();
+          await sheet.getByRole('spinbutton', { name: ORG.createUseCap, exact: true }).fill('40');
+          await expect(sheet.getByRole('button', { name: ORG.createConfirm, exact: true })).toBeEnabled();
+        },
+        ORG.createDestination(DESTINATION.project, DESTINATION.secret),
+        'org-page-create-sheet',
       );
     } finally {
       await maws.cleanup();

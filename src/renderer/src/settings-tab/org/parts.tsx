@@ -3,7 +3,7 @@
 // device's line as People and You draw it, and a sign's outcome in one line. Tokens only, at the Settings rows' weight.
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { IpcError } from '@shared/ipc/schema';
-import type { OrgRefusal, OrgStatus, OrgView, SignResult } from '@shared/ipc/schema/org';
+import type { DiscardResult, OrgRefusal, OrgStatus, OrgView, SignResult } from '@shared/ipc/schema/org';
 import { toast } from '../../stores/notices';
 import { ORG } from '../copy';
 import { Chip, INPUT, Setting, TEXT_ACTION } from '../parts';
@@ -91,6 +91,12 @@ export function signOutcome(result: SignResult): Outcome {
   if (result.ok) return { text: ORG.signed(result.version), refused: false };
   if (result.reason === 'cancelled') return null; // the person's own cancel at Touch ID needs no line
   return { text: [ORG.notSigned, ORG.signReasons[result.reason], result.detail].filter((part) => part !== undefined && part !== '').join(' · '), refused: true };
+}
+
+/** A discard of the pending slot at `version` in `abandon-pending`'s words (the Org group's Discard, an unsent delegation's). */
+export function discardOutcome(version: number, result: DiscardResult): Outcome {
+  if (result.ok) return { text: ORG.discarded(version, result.unsent, result.hubVersion, result.forkAt), refused: false };
+  return { text: result.reason === undefined ? ORG.notDiscarded : `${ORG.notDiscarded} · ${ORG.discardReasons[result.reason](version)}`, refused: true };
 }
 
 /** Why a machine's grants are unknown (`ORG.grantsUnread`, `grantsDamaged`), with Retry, which reads them again. */

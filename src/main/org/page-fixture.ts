@@ -2,8 +2,9 @@
 // "M4a gains Task 8"): e2e/org-page.spec.ts photographs the page over an org with real-world variety, which no one real
 // session holds at once (a refusal that names no attempt is the key file refused at load, which leaves this Mac unable to
 // run a pairing). Under MAWS_E2E=1, in a build that is not packaged, with MAWS_E2E_ORG_PAGE naming a JSON file of
-// `{status, view, grants?, holdGrantSave?}` that the `org.*` schemas admit, main answers `org.status`, `org.view` and (M4b) each
-// machine's `org.grants.view`, by its ref (signed out for any other), from it through C5's
+// `{status, view, grants?, holdGrantSave?, provisioningSecret?}` that the `org.*` schemas admit, main answers `org.status`,
+// `org.view`, (M4b) each machine's `org.grants.view`, by its ref (signed out for any other), and (M4c) the delegations'
+// code destination, `org.provisioningSecret.get` (unset unless the file names one), from it through C5's
 // `interceptCommand`, so the real renderer draws what main would send; every act is answered without effect, so the
 // production session behind it stays untouched. Its status no longer reaches the renderer either: the fixture stops the
 // session's `org.changed` forwarding (`unpublish`), since even a profile never signed in publishes once its load ends
@@ -16,6 +17,7 @@ import {
   GrantsViewSchema,
   OrgStatusSchema,
   OrgViewSchema,
+  ProvisioningSecretReadingSchema,
   type commands,
   type DiscardResult,
   type DropRetryResult,
@@ -50,10 +52,16 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
   if (deps.env.MAWS_E2E !== '1' || deps.packaged || path === undefined || !isAbsolute(path)) return null;
   // Built here, not at the module's top, so a build whose guard drops the call keeps no schema call of this module's.
   const parsed = z
-    .strictObject({ status: OrgStatusSchema, view: OrgViewSchema.nullable(), grants: z.record(z.string(), GrantsViewSchema).optional(), holdGrantSave: z.literal(true).optional() })
+    .strictObject({
+      status: OrgStatusSchema,
+      view: OrgViewSchema.nullable(),
+      grants: z.record(z.string(), GrantsViewSchema).optional(),
+      holdGrantSave: z.literal(true).optional(),
+      provisioningSecret: ProvisioningSecretReadingSchema.optional(),
+    })
     .safeParse(JSON.parse(readFileSync(path, 'utf8')));
   if (!parsed.success) throw new Error(`${ORG_PAGE_FIXTURE_ENV}: ${path} is not an Org page fixture: ${parsed.error.message}`);
-  const { status, view, grants = {}, holdGrantSave } = parsed.data;
+  const { status, view, grants = {}, holdGrantSave, provisioningSecret = null } = parsed.data;
   deps.unpublish();
 
   const detail = 'the e2e Org page fixture is in force';
@@ -68,7 +76,8 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
   // `holdGrantSave` never answers, so the grant sheet stays saving
   const grant: GrantSetResult & GrantRegrantResult = { ok: false, reason: 'busy', detail };
   const save: OrgPolicySetResult = { ok: false, reason: 'busy' };
-  // M4c: no delegation is created, renewed or revoked, and the destination's file is neither read nor written
+  // M4c: no delegation is created, renewed or revoked, and the destination's file is neither read nor written: its
+  // reading is the file's (`provisioningSecret`), so the section and the create sheet can be drawn with one
   const half: HubHalfResult = { ok: false, reason: 'none', detail };
   const unwritten: ProvisioningSecretWrite = { ok: false, reason: 'io', detail };
   const answers: { [N in FixtureCommand]: MainHandler<N> } = {
@@ -97,7 +106,7 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
     'org.delegation.rewrite': () => sign,
     'org.delegation.renewHub': () => half,
     'org.delegation.revokeHub': () => half,
-    'org.provisioningSecret.get': () => null,
+    'org.provisioningSecret.get': () => provisioningSecret,
     'org.provisioningSecret.set': () => unwritten,
     'org.provisioningSecret.reset': () => unwritten,
     'org.grants.view': ({ ref }) => (Object.hasOwn(grants, ref) ? grants[ref]! : { ok: false, ref, reason: 'signed-out' }),

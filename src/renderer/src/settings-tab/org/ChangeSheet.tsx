@@ -14,8 +14,14 @@
 // A sign's answer reaches the page only from the sheet that sent it, still open, under the sign-in it opened under: an
 // answer after the sheet closed lands nowhere, and one after that sign-in ended stays in the sheet (`signIn`, latched by
 // `useOwnSignIn`), so it never closes a sheet opened since or tells a later sign-in's page about it.
+//
+// M4c adds Renew's field: a new expiry in days from now, held here inside what the checks would take (later than the
+// delegation's expiry, `renew-not-extension`, and no further than the hub renews a key to, `renew-past-cap`), so a
+// renewal past the cap is refused before any preview or Touch ID. Drop has no field: its preview carries
+// `drops-delegation`'s warning, naming its machines and its id and prefix reserved for good.
 import { useEffect, useState } from 'react';
-import type { OrgChange, OrgView, PreviewResult, SignResult } from '@shared/ipc/schema/org';
+import { formatDate } from '@shared/app/date-format';
+import { DELEGATION_TTL_DAYS, type OrgChange, type OrgView, type PreviewResult, type SignResult } from '@shared/ipc/schema/org';
 import { ipc } from '../../ipc/client';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { CHOICE, PRIMARY, QUIET } from '../../sessions/ui';
@@ -33,10 +39,20 @@ type Stage =
   | { at: 'ended'; preview: Extract<PreviewResult, { ok: true }>; outcome: Outcome };
 
 // The fields a change takes before it is composed: Add person's email and role, Change email's new email, a machine's
-// owners, and a drop's revoke tick.
-const takesFields = (change: OrgChange): boolean => change.kind === 'member.add' || change.kind === 'member.email' || change.kind === 'machine.owners' || change.kind === 'machine.drop';
+// owners, a drop's revoke tick, and a renewal's new expiry.
+const takesFields = (change: OrgChange): boolean =>
+  change.kind === 'member.add' || change.kind === 'member.email' || change.kind === 'machine.owners' || change.kind === 'machine.drop' || change.kind === 'delegation.renew';
 
-type Owners = Extract<OrgChange, { kind: 'machine.owners' }>['owners'];
+const DAY_MS = 86_400_000;
+/** A renewal's days from now, offered first: the create's default life, or the least that still extends it. */
+const RENEW_DAYS = 90;
+const renewMinDays = (current: string) => Math.max(DELEGATION_TTL_DAYS.min, Math.floor((Date.parse(current) - Date.now()) / DAY_MS) + 1);
+const expiresIn = (days: number) => new Date(Date.now() + days * DAY_MS).toISOString();
+/** The change the sheet starts from: a renewal moved to its offered days (the row hands over the current expiry). */
+const startingChange = (asked: OrgChange): OrgChange =>
+  asked.kind === 'delegation.renew' ? { ...asked, expires: expiresIn(Math.min(DELEGATION_TTL_DAYS.max, Math.max(RENEW_DAYS, renewMinDays(asked.expires)))) } : asked;
+
+export type Owners = Extract<OrgChange, { kind: 'machine.owners' }>['owners'];
 const sameOwners = (a: Owners, b: Owners) => (a === 'org' || b === 'org' ? a === b : a.length === b.length && a.every((id) => b.includes(id)));
 
 type Props = {
@@ -57,7 +73,7 @@ type Props = {
 export function ChangeSheet({ title, change: asked, members = [], may, signIn, machines = [], onGoTo, onClose, onSigned }: Props) {
   const open = useOpen();
   const own = useOwnSignIn(signIn);
-  const [change, setChange] = useState<OrgChange>(asked);
+  const [change, setChange] = useState<OrgChange>(() => startingChange(asked));
   const [stage, setStage] = useState<Stage>(takesFields(asked) ? { at: 'fields' } : { at: 'composing' });
   const composing = stage.at === 'composing';
 
@@ -132,7 +148,7 @@ export function ChangeSheet({ title, change: asked, members = [], may, signIn, m
         }
       >
         {fields ? (
-          <Fields change={change} members={members} onChange={setChange} />
+          <Fields change={change} asked={asked} members={members} onChange={setChange} />
         ) : preview === null ? (
           <p className="m-0 text-ui-sm text-fg-muted">{ORG.composing}</p>
         ) : preview.ok ? (
@@ -148,17 +164,20 @@ export function ChangeSheet({ title, change: asked, members = [], may, signIn, m
   );
 }
 
-// The change with its typed email trimmed, as sent; null while that email is empty, or no owner is chosen.
+// The change with its typed email trimmed, as sent; null while that email is empty, no owner is chosen, or a renewal's
+// days are outside what it may take.
 function trimmed(change: OrgChange): OrgChange | null {
   if (change.kind === 'machine.owners') return change.owners !== 'org' && change.owners.length === 0 ? null : change;
+  if (change.kind === 'delegation.renew') return change.expires === '' ? null : change;
   if (change.kind !== 'member.add' && change.kind !== 'member.email') return change;
   const email = change.email.trim();
   return email === '' ? null : { ...change, email };
 }
 
 // Add person's email and role (a member unless chosen), or Change email's new email. Sent trimmed; main lower-cases.
-function Fields({ change, members, onChange }: { change: OrgChange; members: OrgView['members']; onChange(next: OrgChange): void }) {
-  if (change.kind === 'machine.owners') return <OwnersFields change={change} members={members} onChange={onChange} />;
+function Fields({ change, asked, members, onChange }: { change: OrgChange; asked: OrgChange; members: OrgView['members']; onChange(next: OrgChange): void }) {
+  if (change.kind === 'machine.owners') return <OwnersPicker owners={change.owners} members={members} onChange={(owners) => onChange({ ...change, owners })} />;
+  if (change.kind === 'delegation.renew' && asked.kind === 'delegation.renew') return <RenewFields change={change} current={asked.expires} onChange={onChange} />;
   if (change.kind === 'machine.drop') {
     return (
       <label className="flex items-start gap-2 text-ui-sm leading-normal">
@@ -205,11 +224,38 @@ function Fields({ change, members, onChange }: { change: OrgChange; members: Org
   );
 }
 
-// A machine's owners: the org (its admins), or people ticked from the members, in the members' order. An owner the head
-// no longer lists stays ticked, as a former member, until unticked; so does a person ticked here who leaves the org while
-// the sheet is open, since the change still names them.
-function OwnersFields({ change, members, onChange }: { change: Extract<OrgChange, { kind: 'machine.owners' }>; members: OrgView['members']; onChange(next: OrgChange): void }) {
-  const [people, setPeople] = useState<string[]>(change.owners === 'org' ? [] : [...change.owners]); // kept across a switch to the org and back
+// A renewal's new expiry, in whole days from now: refused here while not later than the delegation's expiry, or past the
+// hub's cap (`DELEGATION_TTL_DAYS.max` from now), so neither reaches a preview; `expires` is '' meanwhile, and Review waits.
+function RenewFields({ change, current, onChange }: { change: Extract<OrgChange, { kind: 'delegation.renew' }>; current: string; onChange(next: OrgChange): void }) {
+  const [days, setDays] = useState(() => (change.expires === '' ? '' : String(Math.round((Date.parse(change.expires) - Date.now()) / DAY_MS))));
+  const least = renewMinDays(current);
+  const n = Number(days);
+  const whole = days.trim() !== '' && Number.isInteger(n);
+  const problem = !whole ? null : n > DELEGATION_TTL_DAYS.max ? ORG.renewPastCap(DELEGATION_TTL_DAYS.max) : n < least ? ORG.renewNotLater(formatDate(Date.parse(current))) : null;
+  const pick = (next: string) => {
+    setDays(next);
+    const value = Number(next);
+    const ok = next.trim() !== '' && Number.isInteger(value) && value >= least && value <= DELEGATION_TTL_DAYS.max;
+    onChange({ ...change, expires: ok ? expiresIn(value) : '' });
+  };
+  return (
+    <div className="flex flex-col gap-2 text-ui-sm leading-normal">
+      <p className="m-0 text-fg-muted">{ORG.renewNow(formatDate(Date.parse(current)))}</p>
+      <label className="flex items-center gap-3">
+        <span className="w-20 shrink-0 text-fg-muted">{ORG.createFields.ttl}</span>
+        <input aria-label={ORG.createFields.ttl} type="number" inputMode="numeric" min={least} max={DELEGATION_TTL_DAYS.max} value={days} onChange={(e) => pick(e.target.value)} autoFocus className={`${INPUT} max-w-24`} />
+        <span className="text-fg-muted">{ORG.days}</span>
+      </label>
+      {problem !== null ? <p className="m-0 text-warning">{problem}</p> : change.expires !== '' && <p className="m-0 text-fg">{ORG.renewNew(formatDate(Date.parse(change.expires)))}</p>}
+    </div>
+  );
+}
+
+// Owners: the org (its admins), or people ticked from the members, in the members' order (a machine's, and M4c's new
+// delegation's). An owner the head no longer lists stays ticked, as a former member, until unticked; so does a person
+// ticked here who leaves the org while the sheet is open, since the change still names them.
+export function OwnersPicker({ owners, members, onChange }: { owners: Owners; members: OrgView['members']; onChange(next: Owners): void }) {
+  const [people, setPeople] = useState<string[]>(owners === 'org' ? [] : [...owners]); // kept across a switch to the org and back
   const ids = members.map((m) => m.id);
   const [formerly, setFormerly] = useState(() => people.filter((id) => !ids.includes(id)));
   const departed = people.filter((id) => !ids.includes(id) && !formerly.includes(id)); // ticked here, then gone from the org
@@ -217,7 +263,7 @@ function OwnersFields({ change, members, onChange }: { change: Extract<OrgChange
   const listed = [...ids, ...formerly.filter((id) => !ids.includes(id))];
   const pick = (chosen: string[]) => {
     setPeople(chosen);
-    onChange({ ...change, owners: chosen });
+    onChange(chosen);
   };
   const toggle = (id: string) => pick(listed.filter((each) => (each === id ? !people.includes(id) : people.includes(each))));
   return (
@@ -226,15 +272,15 @@ function OwnersFields({ change, members, onChange }: { change: Extract<OrgChange
         <span className="w-20 shrink-0 text-fg-muted">{ORG.owners}</span>
         <Segment<'org' | 'people'>
           label={ORG.owners}
-          value={change.owners === 'org' ? 'org' : 'people'}
+          value={owners === 'org' ? 'org' : 'people'}
           options={[
             { value: 'org', label: ORG.ownersKinds.org },
             { value: 'people', label: ORG.ownersKinds.people },
           ]}
-          onChange={(kind) => onChange({ ...change, owners: kind === 'org' ? 'org' : people })}
+          onChange={(kind) => onChange(kind === 'org' ? 'org' : people)}
         />
       </div>
-      {change.owners !== 'org' && (
+      {owners !== 'org' && (
         <fieldset aria-label={ORG.ownersKinds.people} className="m-0 flex max-h-[min(40vh,320px)] min-w-0 flex-col gap-1.5 overflow-y-auto border-0 p-0.5">
           {listed.map((id) => (
             <label key={id} className="flex min-w-0 items-center gap-2">

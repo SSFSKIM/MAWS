@@ -136,6 +136,7 @@ export function renderSection(status: OrgStatus, answers: Partial<Record<Command
     'org.pair.cancel': () => undefined,
     'org.enroll.cancel': () => ({ ok: true }),
     'org.grants.view': (input: { ref: string }) => grantsOf(input.ref),
+    'org.provisioningSecret.get': () => null, // M4c: no destination set
     ...answers,
   };
   window.maws = {

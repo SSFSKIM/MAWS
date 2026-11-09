@@ -162,6 +162,17 @@ describe("the Org page's e2e fixture in main", () => {
     expect(await Promise.resolve(d.handlers.get('org.grants.regrant')!({ ref: 'mref-box-00000001', digest: 'd' }))).toMatchObject({ ok: false, reason: 'busy' });
   });
 
+  it("M4c: answers org.provisioningSecret.get from the file's destination (a set one, or a damaged file's reading), and still writes nothing", async () => {
+    const destination = { project: 'northwind-prod-01', secret: 'desk-provisioning-v2', account: 'ops@northwind.example' };
+    for (const provisioningSecret of [destination, { damaged: 'version 2 is not this build’s' }]) {
+      const d = deps({ MAWS_E2E: '1', [ORG_PAGE_FIXTURE_ENV]: fixtureFile({ status: STATUS, view: VIEW, provisioningSecret }) });
+      expect(installOrgPageFixture(d)).not.toBeNull();
+      expect(await Promise.resolve(d.handlers.get('org.provisioningSecret.get')!(undefined))).toEqual(provisioningSecret);
+      expect(await Promise.resolve(d.handlers.get('org.provisioningSecret.set')!({ value: null }))).toMatchObject({ ok: false });
+    }
+    expect(() => installOrgPageFixture(deps({ MAWS_E2E: '1', [ORG_PAGE_FIXTURE_ENV]: fixtureFile({ status: STATUS, view: VIEW, provisioningSecret: { ...destination, project: '-flag' } }) }))).toThrow(/is not an Org page fixture/);
+  });
+
   it('leaves the forwarding alone when it does not install', () => {
     let unpublished = false;
     expect(installOrgPageFixture(deps({ MAWS_E2E: '1' }, false, () => void (unpublished = true)))).toBeNull();

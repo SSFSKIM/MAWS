@@ -1,0 +1,327 @@
+// P5 O8 M4c: the Org group's Delegations section (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M4c's "At
+// its end", *The view*, *Renew*, *Drop*, *The destination*, and the renderer's "Proves"): each delegation with its prefix,
+// owners, expiry in words, uses and certified machines; the hub's side of it (a half-done renewal or a dropped key still
+// live, each with Retry calling the route alone; a hub key list that didn't read is never "no keys"); an unsent
+// delegation's reason with "Write the code again" while this run holds its key pair, else Discard alone; the stray hub
+// keys, each with Revoke behind a confirmation that warns more strongly for a young key; the code's destination with
+// Save, a damaged file's Reset, and Create disabled, saying why, without one.
+import { act, fireEvent, screen, within } from '@testing-library/react';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import type { DiscardResult, HubHalfResult, OrgDelegationRow, OrgView, ProvisioningSecret, ProvisioningSecretReading, ProvisioningSecretWrite, SignResult } from '@shared/ipc/schema/org';
+import { ANA, DAY, ME, ROOT, emit, group, renderSection, resetHarness, row, sent, signing, viewWith, type Signer } from './test-support';
+
+vi.hoisted(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-28T12:00:00Z'));
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
+afterEach(resetHarness);
+
+const D1 = '0123456789abcdef0123456789abcdef';
+const D2 = '1111111111111111aaaaaaaaaaaaaaaa';
+const D3 = '2222222222222222bbbbbbbbbbbbbbbb';
+const D4 = '3333333333333333cccccccccccccccc';
+const S1 = '4444444444444444dddddddddddddddd';
+const S2 = '5555555555555555eeeeeeeeeeeeeeee';
+const IN_23_DAYS = '2026-11-20T13:00:00.000Z';
+const IN_90_DAYS = '2027-01-26T13:00:00.000Z'; // an hour past 90 days: vi.waitFor moves the faked clock on
+const HASH = 'unsentSlotStateHash0000000000000000000000000';
+
+const delegation = (patch: Partial<OrgDelegationRow> & Pick<OrgDelegationRow, 'id' | 'prefix'>): OrgDelegationRow => ({
+  owners: [ME, ANA],
+  expires: IN_23_DAYS,
+  maxUses: 10,
+  machines: [],
+  hub: { expires: patch.expires ?? IN_23_DAYS, uses: 3, revoked: false },
+  state: 'in-effect',
+  unsent: null,
+  hubBehind: null,
+  hubProblem: null,
+  ...patch,
+});
+const IN_EFFECT = delegation({
+  id: D1,
+  prefix: 'ci-runner-',
+  machines: [
+    { ref: 'CiRunnerRef000000001', name: 'ci-runner-1', live: true },
+    { ref: 'CiRunnerRef000000002', name: 'ci-runner-2', live: false },
+  ],
+});
+const HALF_DONE = delegation({ id: D2, prefix: 'gpu-', owners: 'org', expires: IN_90_DAYS, maxUses: null, hub: { expires: IN_23_DAYS, uses: 0, revoked: false }, hubBehind: 'renew', hubProblem: { reason: 'not-renewed', detail: "the hub's org state doesn't hold the renewal yet" } });
+const DROPPED = delegation({ id: D3, prefix: 'old-vm-', state: 'dropped', owners: [], hubBehind: 'revoke' });
+const UNSENT = delegation({ id: D4, prefix: 'dc-', expires: IN_90_DAYS, hub: { expires: IN_90_DAYS, uses: 0, revoked: false }, state: 'unsent', unsent: { rewrite: true, problem: 'gcloud secrets versions add failed: PERMISSION_DENIED on desk-provisioning-v2' } });
+const READ = { at: '2026-10-28T11:59:00.000Z', failed: false };
+const DEST: ProvisioningSecret = { project: 'ytdownload-505811', secret: 'desk-provisioning-v2', account: 'cli-owner@ytdownload-505811.iam.gserviceaccount.com' };
+const PENDING: Partial<Signer> = { ...ROOT, pending: { version: 13, hash: HASH, fork: false, exposed: false, refused: null } };
+const notSigning = { root: false, maySign: false } as const;
+
+const withDelegations = (patch: Partial<OrgView>) => ({ 'org.view': () => viewWith({ hubKeys: READ, ...patch }) });
+const delegationsGroup = async () => {
+  const org = await group('org');
+  return within(await within(org).findByRole('heading', { level: 5, name: 'Delegations' }).then((h) => h.closest<HTMLElement>('[data-org-section="delegations"]')!));
+};
+const buttons = (label: string) => within(row(label)).queryAllByRole('button').map((b) => b.textContent);
+
+describe('Settings › Org: Delegations (M4c)', () => {
+  it('a delegation in effect: its prefix, owners, expiry in words, uses and certified machines, live or retired; Renew and Drop while this Mac may sign', async () => {
+    let may = true;
+    renderSection(signing(ROOT), { 'org.view': () => viewWith({ hubKeys: READ, delegations: [IN_EFFECT], maySign: may }) });
+    const section = await delegationsGroup();
+    const ci = section.getByRole('group', { name: 'ci-runner-' });
+    expect(within(ci).getByText('Owned by you and Ana')).toBeTruthy();
+    expect(within(ci).getByText('expires in 23 days')).toBeTruthy();
+    expect(within(ci).getByText('used 3 of 10')).toBeTruthy();
+    expect(within(ci).getByText('Certified: ci-runner-1 (live) and ci-runner-2 (retired)')).toBeTruthy();
+    expect(within(ci).getByText(`id ${D1.slice(0, 8)}`).className).toContain('font-mono');
+    expect(buttons('ci-runner-')).toEqual(['Renew…', 'Drop…']);
+    expect(within(ci).queryByText(/hub/i)).toBeNull(); // the hub's key agrees: nothing to say
+
+    // read-only once this Mac can't sign: no Renew, Drop or Create
+    may = false;
+    emit(signing(notSigning));
+    await vi.waitFor(() => expect(buttons('ci-runner-')).toEqual([]));
+    expect(within(row('New delegation')).getByText('This Mac can’t sign: create delegations from an admin’s Mac that does.')).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Code destination' })).toBeNull();
+  });
+
+  it('none yet, a capless one, a delegation with no certified machine, and a member who is no admin reads them without the hub’s side', async () => {
+    renderSection(signing(ROOT), withDelegations({ delegations: [] }));
+    expect((await delegationsGroup()).getByText('No delegations yet.')).toBeTruthy();
+    resetHarness();
+    const capless = delegation({ id: D1, prefix: 'ci-', maxUses: null, hub: { expires: IN_23_DAYS, uses: 1, revoked: false } });
+    renderSection(signing(ROOT), withDelegations({ delegations: [capless] }));
+    await delegationsGroup();
+    expect(within(row('ci-')).getByText('used 1 time, no cap')).toBeTruthy();
+    expect(within(row('ci-')).getByText('No certified machines yet')).toBeTruthy();
+    resetHarness();
+    const member = viewWith({ delegations: [capless], hubKeys: { at: null, failed: true }, members: viewWith({}).members.map((m) => (m.you ? { ...m, role: 'member' as const } : m)) });
+    renderSection(signing(ROOT), { 'org.view': () => member });
+    const section = await delegationsGroup();
+    const ci = section.getByRole('group', { name: 'ci-' });
+    expect(within(ci).getByText('no use cap')).toBeTruthy(); // the hub's count is an admin's read
+    expect(within(ci).queryByText(/hub/i)).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Hub keys' })).toBeNull(); // the key list is an admin's read
+    expect(within(row('New delegation')).getByText('An admin creates delegations from their Org page.')).toBeTruthy();
+    expect(sent('org.provisioningSecret.get')).toEqual([]); // the destination is an admin's who signs
+  });
+
+  it('a half-done renewal: the hub’s expiry beside the state’s, in the spec’s words, its problem with the next step, and Retry calling only the route', async () => {
+    let answer: HubHalfResult = { ok: false, reason: 'none' };
+    renderSection(signing(ROOT), { ...withDelegations({ delegations: [HALF_DONE] }), 'org.delegation.renewHub': () => answer });
+    const section = await delegationsGroup();
+    const gpu = section.getByRole('group', { name: 'gpu-' });
+    expect(within(gpu).getByText('Renewed in the org state; the hub’s key still expires Nov 20, 2026:')).toBeTruthy();
+    expect(within(gpu).getByText('expires in 90 days')).toBeTruthy();
+    expect(within(gpu).getByText('Owned by the org')).toBeTruthy();
+    expect(within(gpu).getByText('The hub’s org state doesn’t hold the renewal yet: Retry in a moment.').className).toContain('text-warning');
+    fireEvent.click(within(gpu).getByRole('button', { name: 'Retry' }));
+    await vi.waitFor(() => expect(sent('org.delegation.renewHub')).toEqual([{ id: D2 }]));
+    expect(sent('org.change')).toEqual([]); // the route alone: nothing signed again
+    expect(await within(gpu).findByText('Nothing is left to do at the hub.')).toBeTruthy();
+    answer = { ok: true };
+
+    // a hub without the route: "this hub can't renew its key yet", with Retry
+    emit(signing(ROOT, { delegations: { creating: false, rev: 1 } }));
+    resetHarness();
+    renderSection(signing(ROOT), withDelegations({ delegations: [{ ...HALF_DONE, hubProblem: { reason: 'no-route', detail: "Renewed in the org state; this hub can't renew its key yet" } }] }));
+    const noRoute = (await delegationsGroup()).getByRole('group', { name: 'gpu-' });
+    expect(within(noRoute).getByText('Renewed in the org state; this hub can’t renew its key yet:')).toBeTruthy();
+    expect(within(noRoute).queryByText(/still expires/)).toBeNull();
+    expect(within(noRoute).getByRole('button', { name: 'Retry' })).toBeTruthy();
+  });
+
+  it('a dropped delegation whose key the hub still lists: Retry calls only revokeHub; a refused half shows the hub’s words', async () => {
+    renderSection(signing(ROOT), { ...withDelegations({ delegations: [{ ...DROPPED, hubProblem: { reason: 'refused', detail: 'the hub answered 500 internal' } }] }), 'org.delegation.revokeHub': () => ({ ok: true }) });
+    const old = (await delegationsGroup()).getByRole('group', { name: 'old-vm-' });
+    expect(within(old).getByText('dropped')).toBeTruthy();
+    expect(within(old).getByText('Dropped in the org state; the hub still lists its key as live:')).toBeTruthy();
+    expect(within(old).getByText('The hub refused it: Retry, and if it refuses again, see its answer: the hub answered 500 internal')).toBeTruthy();
+    expect(buttons('old-vm-')).toEqual(['Retry']); // a dropped row offers no Renew or Drop
+    fireEvent.click(within(old).getByRole('button', { name: 'Retry' }));
+    await vi.waitFor(() => expect(sent('org.delegation.revokeHub')).toEqual([{ id: D3 }]));
+    expect(sent('org.delegation.renewHub')).toEqual([]);
+  });
+
+  it('a hub key list that didn’t read says so, never “no keys”; one that read and lacks the key says that', async () => {
+    renderSection(signing(ROOT), withDelegations({ delegations: [{ ...IN_EFFECT, hub: null }], hubKeys: { at: null, failed: true } }));
+    const section = await delegationsGroup();
+    expect(within(row('Hub keys')).getByText(/The hub’s key list couldn’t be read, so each delegation’s hub key is unknown, not missing\./)).toBeTruthy();
+    expect(within(row('ci-runner-')).getByText('Its hub key isn’t read yet.')).toBeTruthy();
+    expect(section.queryByText(/lists no key/)).toBeNull();
+    expect(within(row('ci-runner-')).getByText('at most 10 uses')).toBeTruthy(); // the uses unknown, the cap known
+
+    // read before, failing now: the last good read, with its time
+    emit(signing(ROOT, { delegations: { creating: false, rev: 1 } }));
+    resetHarness();
+    renderSection(signing(ROOT), withDelegations({ delegations: [IN_EFFECT], hubKeys: { at: '2026-10-28T11:00:00.000Z', failed: true } }));
+    await delegationsGroup();
+    expect(within(row('Hub keys')).getByText(/each delegation’s hub key shows as of Oct 28, /)).toBeTruthy();
+
+    // read, and the hub lists no key for it
+    resetHarness();
+    renderSection(signing(ROOT), withDelegations({ delegations: [{ ...IN_EFFECT, hub: null }] }));
+    await delegationsGroup();
+    expect(within(row('ci-runner-')).getByText('The hub lists no key for it, so it provisions nothing there: drop it and create a new delegation.')).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Hub keys' })).toBeNull();
+  });
+
+  it('an unsent delegation while this run holds its key pair: its reason, Write the code again, and Discard', async () => {
+    let rewrite: SignResult = { ok: false, reason: 'unsent', detail: 'gcloud secrets versions add failed again' };
+    renderSection(signing(PENDING), {
+      ...withDelegations({ delegations: [UNSENT] }),
+      'org.delegation.rewrite': () => rewrite,
+      'org.discardPending': () => ({ ok: true, unsent: true, hubVersion: 12 }) satisfies DiscardResult,
+    });
+    const dc = (await delegationsGroup()).getByRole('group', { name: 'dc-' });
+    expect(within(dc).getByText('unsent')).toBeTruthy();
+    expect(within(dc).getByText('Signed, not published: its provisioning code isn’t stored yet.')).toBeTruthy();
+    expect(within(dc).getByText(UNSENT.unsent!.problem!)).toBeTruthy();
+    expect(buttons('dc-')).toEqual(['Write the code again', 'Discard…']);
+    fireEvent.click(within(dc).getByRole('button', { name: 'Write the code again' }));
+    await vi.waitFor(() => expect(sent('org.delegation.rewrite')).toEqual([{ id: D4 }]));
+    expect(await within(dc).findByText('The code still isn’t stored: Write the code again, or discard it.')).toBeTruthy();
+    rewrite = { ok: true, version: 13, secret: { version: '7', createTime: '2026-10-28T12:00:05.000Z' } };
+    fireEvent.click(within(dc).getByRole('button', { name: 'Write the code again' }));
+    expect(await within(row('New delegation')).findByText(/^Published delegation dc- in version 13\. Its code is version 7, stored /)).toBeTruthy();
+
+    // Discard, behind its confirmation, names the slot shown and says the hub key goes with it
+    fireEvent.click(within(dc).getByRole('button', { name: 'Discard…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Discard the unsent delegation dc-?' });
+    expect(within(sheet).getByText(/Discarding it also revokes the hub key minted for it\. Create the delegation again afterwards\./)).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Discard' }));
+    await vi.waitFor(() => expect(sent('org.discardPending')).toEqual([{ confirmed: true, hash: HASH }]));
+    expect(await within(row('New delegation')).findByText(/^Discarded version 13\. Its hub key is revoked/)).toBeTruthy();
+  });
+
+  it('after a relaunch (rewrite false) the unsent row offers only Discard, worded to create it again', async () => {
+    renderSection(signing(PENDING), withDelegations({ delegations: [{ ...UNSENT, unsent: { rewrite: false, problem: null } }] }));
+    const dc = (await delegationsGroup()).getByRole('group', { name: 'dc-' });
+    expect(within(dc).getByText('This Mac no longer holds its key pair, so it can’t be published: discard it and create the delegation again.')).toBeTruthy();
+    expect(buttons('dc-')).toEqual(['Discard…']);
+    // and the pending line says what the slot holds, not that it waits for the hub
+    expect(within(row('Pending')).getByText('Version 13 holds delegation dc-, not yet published: see Delegations.')).toBeTruthy();
+  });
+
+  it('a stray hub key: its prefix, label, age and expiry; Revoke behind a confirmation, stronger for a young key', async () => {
+    const strays = [
+      { id: S1, prefix: 'tmp-', label: 'cli create, abandoned', created: new Date(Date.now() - 3 * DAY).toISOString(), expires: IN_23_DAYS, young: false },
+      { id: S2, prefix: 'new-', label: 'just now', created: new Date(Date.now() - 4 * 60_000).toISOString(), expires: IN_90_DAYS, young: true },
+    ];
+    renderSection(signing(ROOT), { ...withDelegations({ strayKeys: strays }), 'org.delegation.revokeHub': () => ({ ok: false, reason: 'hub', detail: 'the hub was not reached (timeout): Retry' }) });
+    await delegationsGroup();
+    const stray = row('Stray hub keys');
+    expect(within(stray).getByText('cli create, abandoned · tmp-')).toBeTruthy();
+    expect(within(stray).getByText('minted 3 days ago')).toBeTruthy();
+    expect(within(stray).getByText('expires in 23 days')).toBeTruthy();
+    expect(within(stray).getByText('just minted')).toBeTruthy();
+
+    const [old, young] = within(stray).getAllByRole('button', { name: 'Revoke…' });
+    fireEvent.click(old!);
+    let sheet = await screen.findByRole('dialog', { name: 'Revoke the hub key “cli create, abandoned”?' });
+    expect(within(sheet).getByText(/If a CLI delegation create or another admin’s create is still under way, it loses its key and fails/)).toBeTruthy();
+    expect(within(sheet).queryByText(/likely a create still under way/)).toBeNull();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(sent('org.delegation.revokeHub')).toEqual([]);
+
+    fireEvent.click(young!);
+    sheet = await screen.findByRole('dialog', { name: 'Revoke the hub key “just now”?' });
+    expect(within(sheet).getByText(/^This key was minted 4 minutes ago: it is likely a create still under way/).className).toContain('text-warning');
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Revoke' }));
+    await vi.waitFor(() => expect(sent('org.delegation.revokeHub')).toEqual([{ id: S2 }]));
+    expect(await within(row('Stray hub keys')).findByText('Not revoked · The hub wasn’t reached: Retry once it is. · the hub was not reached (timeout): Retry')).toBeTruthy();
+  });
+});
+
+describe('Settings › Org: Delegations’ code destination and Create (M4c)', () => {
+  it('Create is disabled without a destination, saying why; Save names all three, and Create then opens', async () => {
+    let reading: ProvisioningSecretReading = null;
+    const written: ProvisioningSecretWrite = { ok: true };
+    renderSection(signing(ROOT), {
+      'org.provisioningSecret.get': () => reading,
+      'org.provisioningSecret.set': (input: { value: ProvisioningSecret | null }) => {
+        reading = input.value;
+        return written;
+      },
+    });
+    await delegationsGroup();
+    const create = await within(row('New delegation')).findByRole('button', { name: 'Create a delegation…' });
+    await vi.waitFor(() => expect(within(row('New delegation')).getByText('Set the code destination below first.')).toBeTruthy());
+    expect((create as HTMLButtonElement).disabled).toBe(true);
+
+    const destination = row('Code destination');
+    const save = within(destination).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.change(within(destination).getByRole('textbox', { name: 'Project' }), { target: { value: 'Not_A_Project' } });
+    expect(within(destination).getByText('A project id is 6 to 30 lowercase letters, digits and hyphens, from a letter: correct it, then Save.')).toBeTruthy();
+    expect(save.disabled).toBe(true);
+    fireEvent.change(within(destination).getByRole('textbox', { name: 'Project' }), { target: { value: DEST.project } });
+    expect(within(destination).getByText('Fill in all three, or clear all three to unset it, then Save.')).toBeTruthy();
+    fireEvent.change(within(destination).getByRole('textbox', { name: 'Secret' }), { target: { value: DEST.secret } });
+    fireEvent.change(within(destination).getByRole('textbox', { name: 'Account' }), { target: { value: ` ${DEST.account} ` } });
+    expect(save.disabled).toBe(false);
+    fireEvent.click(save);
+    await vi.waitFor(() => expect(sent('org.provisioningSecret.set')).toEqual([{ value: DEST }]));
+    expect(await within(row('Code destination')).findByText('Saved.')).toBeTruthy();
+    await vi.waitFor(() => expect((within(row('New delegation')).getByRole('button', { name: 'Create a delegation…' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(within(row('New delegation')).queryByText('Set the code destination below first.')).toBeNull();
+    fireEvent.click(within(row('New delegation')).getByRole('button', { name: 'Create a delegation…' }));
+    expect(await screen.findByRole('dialog', { name: 'Create a delegation' })).toBeTruthy();
+  });
+
+  it('a set destination shows its project, secret and account; a refused write says why and what next; clearing all three unsets it', async () => {
+    renderSection(signing(ROOT), {
+      'org.provisioningSecret.get': () => DEST,
+      'org.provisioningSecret.set': (input: { value: ProvisioningSecret | null }) => (input.value === null ? { ok: true } : ({ ok: false, reason: 'io', detail: 'EACCES' } satisfies ProvisioningSecretWrite)),
+    });
+    await delegationsGroup();
+    const destination = row('Code destination');
+    await vi.waitFor(() => expect((within(destination).getByRole('textbox', { name: 'Project' }) as HTMLInputElement).value).toBe(DEST.project));
+    expect((within(destination).getByRole('textbox', { name: 'Secret' }) as HTMLInputElement).value).toBe(DEST.secret);
+    expect((within(destination).getByRole('textbox', { name: 'Account' }) as HTMLInputElement).value).toBe(DEST.account);
+    fireEvent.change(within(destination).getByRole('textbox', { name: 'Secret' }), { target: { value: 'desk-provisioning-v3' } });
+    fireEvent.click(within(destination).getByRole('button', { name: 'Save' }));
+    expect(await within(destination).findByText('Not saved · The destination couldn’t be written: Save again. · EACCES')).toBeTruthy();
+    for (const name of ['Project', 'Secret', 'Account']) fireEvent.change(within(destination).getByRole('textbox', { name }), { target: { value: '' } });
+    fireEvent.click(within(destination).getByRole('button', { name: 'Save' }));
+    await vi.waitFor(() => expect(sent('org.provisioningSecret.set').at(-1)).toEqual({ value: null }));
+    expect(await within(destination).findByText('Cleared.')).toBeTruthy();
+  });
+
+  it('a damaged destination file shows its reason, and Reset behind a confirmation; Create stays disabled, saying why', async () => {
+    let reading: ProvisioningSecretReading = { damaged: 'version 2 is not this build’s' };
+    renderSection(signing(ROOT), {
+      'org.provisioningSecret.get': () => reading,
+      'org.provisioningSecret.reset': () => {
+        reading = null;
+        return { ok: true };
+      },
+    });
+    await delegationsGroup();
+    const destination = row('Code destination');
+    expect(await within(destination).findByText('The destination’s file is damaged (version 2 is not this build’s): Reset it, then enter the destination again.')).toBeTruthy();
+    expect(within(destination).queryByRole('textbox')).toBeNull(); // never edited over
+    expect(within(row('New delegation')).getByText('Reset the code destination below first.')).toBeTruthy();
+    fireEvent.click(within(destination).getByRole('button', { name: 'Reset…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Reset the code destination?' });
+    expect(sent('org.provisioningSecret.reset')).toEqual([]);
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Reset' }));
+    await vi.waitFor(() => expect(sent('org.provisioningSecret.reset')).toEqual([{ confirmed: true }]));
+    expect(await within(row('Code destination')).findByRole('textbox', { name: 'Project' })).toBeTruthy(); // read again: unset
+    expect(within(row('New delegation')).getByText('Set the code destination below first.')).toBeTruthy();
+  });
+
+  it('Create waits while a delegation is being created, and while a signed state is pending, saying why', async () => {
+    renderSection(signing(ROOT, { delegations: { creating: true, rev: 0 } }), { 'org.provisioningSecret.get': () => DEST });
+    await delegationsGroup();
+    await vi.waitFor(() => expect(within(row('New delegation')).getByText('A delegation is being created, in this window or another: Create once it’s done.')).toBeTruthy());
+    expect((within(row('New delegation')).getByRole('button', { name: 'Create a delegation…' }) as HTMLButtonElement).disabled).toBe(true);
+    emit(signing(PENDING));
+    await vi.waitFor(() => expect(within(row('New delegation')).getByText('A signed state is pending: publish or discard it (Org › Pending) first.')).toBeTruthy());
+    emit(signing(ROOT));
+    await vi.waitFor(() => expect((within(row('New delegation')).getByRole('button', { name: 'Create a delegation…' }) as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => {});
+  });
+});

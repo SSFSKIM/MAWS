@@ -330,3 +330,72 @@ describe('Settings › Org: the change sheet’s machine fields (M4b)', () => {
     expect(within(list).getByText(many[0]!.email).className).toContain('[overflow-wrap:anywhere]');
   });
 });
+
+describe('Settings › Org: the change sheet’s delegation fields (M4c)', () => {
+  const ID = '0123456789abcdef0123456789abcdef';
+  const EXPIRES = '2026-11-20T13:00:00.000Z'; // 23 days and an hour from the file's clock
+  const CI = {
+    id: ID,
+    prefix: 'ci-runner-',
+    owners: [ME],
+    expires: EXPIRES,
+    maxUses: null,
+    machines: [{ ref: 'CiRunnerRef000000001', name: 'ci-runner-1', live: true }],
+    hub: { expires: EXPIRES, uses: 2, revoked: false },
+    state: 'in-effect' as const,
+    unsent: null,
+    hubBehind: null,
+    hubProblem: null,
+  };
+  const daysOn = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
+  async function pressOn(button: string) {
+    await group('org');
+    fireEvent.click(await within(await found('ci-runner-')).findByRole('button', { name: button }));
+  }
+
+  it('Renew…: a new expiry in days from now, held inside the delegation’s expiry and the hub’s cap before any preview; Review previews it and Sign signs it', async () => {
+    renderSection(signing(ROOT), {
+      'org.view': () => viewWith({ delegations: [CI] }),
+      'org.preview': (input: { change: OrgChange }) => previewed(input.change, ['Renew delegation ci-runner-: it expires 2027-01-26, not 2026-11-20'], [], 'digest-renew'),
+    });
+    await pressOn('Renew…');
+    const sheet = await screen.findByRole('dialog', { name: 'Renew delegation ci-runner-' });
+    const days = within(sheet).getByRole('spinbutton', { name: 'Expires in' }) as HTMLInputElement;
+    const review = within(sheet).getByRole('button', { name: 'Review…' }) as HTMLButtonElement;
+    expect(within(sheet).getByText('It expires Nov 20, 2026.')).toBeTruthy();
+    expect(days.value).toBe('90');
+    expect(review.disabled).toBe(false);
+
+    fireEvent.change(days, { target: { value: '23' } }); // not later than its expiry: the checks' renew-not-extension
+    expect(review.disabled).toBe(true);
+    expect(within(sheet).getByText('It expires Nov 20, 2026 already: choose a later expiry.').className).toContain('text-warning');
+    fireEvent.change(days, { target: { value: '366' } }); // past the hub's cap: renew-past-cap, refused before Touch ID
+    expect(review.disabled).toBe(true);
+    expect(within(sheet).getByText('At most 365 days from now, the longest the hub keeps a key: choose fewer days.').className).toContain('text-warning');
+    expect(sent('org.preview')).toEqual([]);
+
+    fireEvent.change(days, { target: { value: '90' } });
+    expect(within(sheet).getByText('New expiry: Jan 26, 2027.')).toBeTruthy();
+    fireEvent.click(review);
+    const change = { kind: 'delegation.renew', id: ID, expires: daysOn(90) };
+    await vi.waitFor(() => expect(sent('org.preview')).toEqual([{ change }]));
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Sign' }));
+    await vi.waitFor(() => expect(sent('org.change')).toEqual([{ change, digest: 'digest-renew' }]));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(within(row('New delegation')).getByText('Signed version 13.')).toBeTruthy();
+  });
+
+  it('Drop…: the preview’s lines and drops-delegation’s warning, naming its machines and the id and prefix reserved for good', async () => {
+    const warning = `delegation ${ID} (prefix ci-runner-) is dropped: its key is revoked, so its certificates no longer verify, and the machines it certified leave the org: ci-runner-1 (live); its id and its prefix stay reserved for good`;
+    renderSection(signing(ROOT), {
+      'org.view': () => viewWith({ delegations: [CI] }),
+      'org.preview': (input: { change: OrgChange }) => previewed(input.change, [`Drop delegation ${ID} (prefix ci-runner-) and revoke its key k1`, 'The machines it certified leave the org: ci-runner-1'], [warning], 'digest-drop'),
+    });
+    await pressOn('Drop…');
+    const sheet = await screen.findByRole('dialog', { name: 'Drop delegation ci-runner-?' });
+    expect(await within(sheet).findByText(`Warning: ${warning}`)).toBeTruthy();
+    expect(sent('org.preview')).toEqual([{ change: { kind: 'delegation.drop', id: ID } }]);
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Sign' }));
+    await vi.waitFor(() => expect(sent('org.change')).toEqual([{ change: { kind: 'delegation.drop', id: ID }, digest: 'digest-drop' }]));
+  });
+});
