@@ -523,6 +523,11 @@ describe('a session’s reach on the local hub', { timeout: 120_000 }, () => {
   });
 
   it('A adds B as an owner of lane A session S and lane B session app-c: sminos keeps each act, and the next listings name both', async () => {
+    // before: both are A's alone in B's rows (S shared with B, app-c listed)
+    await until(() => bRowOf(S) && bRowOf(APP_C), 'S and app-c in B’s rows');
+    expect(bRowOf(S)).toMatchObject({ owners: [A], mine: false });
+    expect(bRowOf(APP_C)).toMatchObject({ owners: [A], mine: false });
+
     // S, another machine's session to A: over A's link
     const rev = await revisionOf(remote, address());
     const added = await remote.addOwner({ address: address(), member: B });
