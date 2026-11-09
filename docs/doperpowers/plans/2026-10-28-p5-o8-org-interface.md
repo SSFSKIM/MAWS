@@ -4739,3 +4739,27 @@ Retrospective (M4c). The milestone was built as six tasks, each reviewed at its 
 - **An outcome claimed from an inference rather than from the authority that knew it.** "Published" was read from a slot's absence. "Not minted" was read from an unreadable 201. A renderer adopted whichever unsent row was there. A row treated the status as current though it travels a different Electron pipe from the answer. The fixes all moved the claim to its source: the signer's own word, main's run identity, and a revision the answer names.
 
 A future child that holds a secret across awaits should state, before it builds, which owner holds each secret and which endings drop it. Its tests should end the run while each external step is still out, and they should read every outcome from the party that performed the step.
+
+**M5b (2026-11-09, PR from `p5-o8-m5b`).** An owner adds an owner.
+- **Where it is offered.** "Add owner…" sits beside Share, in the row menu and in the session's header menu, under one gate:
+  - on a remote listing that names you an owner;
+  - on a session of this Mac while you are its one owner.
+  Share takes the same gate. The gate is a hint, and the door decides: every `record.*` act is graded `manage`, which only an owner holds.
+- **The sheet.** It offers the head's members who aren't you and aren't already owners. Saving sends `record.owners {add: true, member}` behind one Touch ID, through M6b's record path or this Mac's door, and the outcome shows in the sheet: added, already an owner, or the endpoint's refusal in words.
+- **The scope shrank to the renderer and one local case**, because M6b had built main's `org.owners.add`.
+- **The live proof moved to M8's sitting.** It is its first part, step 7, on staging with the owner's second staging identity, since production has no second member.
+
+Evidence:
+- the renderer: `AddOwnerSheet` 9, `local-owner` 5, `reach` 9, `App` 12, `ShareSheet` 15;
+- `test/org/policy.local.test.ts`, 8 cases. The sminos stand-in runs `record.owners` as sminos's `add_owner` does. A adds B as an owner of a lane A session over A's link, and of a lane B session placed by its spawn act through this Mac's door. B's rows then read both as `[A, B]` and B's own, and the hub's signed listing under `app-c` agrees. B, holding a share at `approve`, is refused `grade`, and the record is unchanged;
+- `e2e:settings`, with `share.spec.ts`'s race fixed;
+- the gates the PR body lists.
+
+Not proved here: B's effective authority over the lane B session (the suite's lane B authorization fixture is separate from the member frames), the label rendered on a row (covered by M5's `owners.test.ts`), and execution by real sminos. M8's step 7 proves the last two.
+
+Retrospective (M5b). The refresh mattered more than the build. Read against master at the cut, half the section had already landed with M6b, so the plan became two tasks instead of a main, shared and renderer build. Both task reviews turned on one question the architect asked up front: is the menu's gate the door's authority, or only a hint at it?
+- The first answer found the gate admitting non-owners on this Mac's own sessions. This Mac's `record.policy` answers for all its owners, while the door authorizes as the device's member.
+- The second answer found a head skew, which no renderer check can close.
+Both came from reading the renderer's evidence against the authority that decides. That is M4c's lesson of reading every outcome from the party that performed it, applied to a permission instead of an outcome. The exact check needs the local `record.policy` to answer as the calling member, which is residue.
+
+A future child that shows an action conditionally should name the authority that decides it, and say what evidence the menu reads and whose head that evidence comes from. Where the two differ, it should test the case in which they disagree.
