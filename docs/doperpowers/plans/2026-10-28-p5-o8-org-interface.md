@@ -2495,7 +2495,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     // org.delegation.rewrite {id}; org.delegation.renewHub {id}; org.delegation.revokeHub {id}   (revokeHub also takes a stray key's id)
     // OrgView gains delegations: {id, prefix, owners, expires, maxUses, machines: {ref, name, live}[], hub: {expires, uses, revoked: boolean} | null,
     //   state: 'in-effect' | 'unsent' | 'dropped', unsent: {rewrite: boolean, problem: string | null} | null, hubBehind: 'renew' | 'revoke' | null}[]   (revised 2026-11-08)
-    // OrgView gains strayKeys: {id, prefix, label, expires}[]: hub keys unrevoked and unexpired that no head delegation, revoked holder or unsent slot names
+    // OrgView gains strayKeys: {id, prefix, label, created, expires}[]: hub keys unrevoked and unexpired that no head delegation, revoked holder or unsent slot names
     // machine settings: org.provisioningSecret {project, secret, account} | null
     // Edit gains hold?: true, and a held sign answers its slot's hash; signing.json's pending gains unsent: {kind: 'delegation', id} | null (files.ts's type and validator;
     //   never posted by settle, delivery placement or weekly; renamed from `held`, which the signer's refusal reasons already use for "the chain holds it", revised 2026-11-08)
@@ -4282,6 +4282,22 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   - name ownership from the authority that creates it (the slot hash, the run's generation);
   - test mid-flight endings: during Touch ID, while the mint or a `gcloud` call is out, and between `publishHeld`'s two steps.
   Date/Author: 2026-11-08, O8's executor (controller).
+
+- Decision: The architect's rulings on M4c's refresh (2026-11-08). All five of the refresh's design decisions are accepted against the design: the hub halves read off the head (item 7), stray keys (item 8), the `unsent` marker and its wider barrier (items 2-3), `delegation.add` the create transaction's alone with the revised view (items 6, 9), and the directional codes in `successorProblems` (item 11).
+  - **Stray keys show their age** from the hub record's `created`. A key minted in the last few minutes is likely a CLI `delegation create` or another admin's create still under way, so Revoke's confirmation says so more strongly for a young key. `OrgView.strayKeys` gains `created`.
+  - **The worker bundle changes** by the moved code, so at M4c's landing the desk track deploys that master to staging before any production deploy, as for M4b. The PR's line stays: live use needs no hub deploy.
+  Date/Author: 2026-11-08, the architect; recorded by O8's executor (controller).
+
+- Decision: M4c Task 1, the move (e5655af5f for the desk track; 76f72df85 for the app). Built as briefed. Its decisions:
+  1. `printable` moves into the package too (`apps/org-protocol/src/printable.ts`), and `admin.ts` re-exports it, so the app and admin escape alike.
+  2. `mintDisagrees` takes a package-owned `MintAnswer | null`, with `unknown` fields, since it judges the hub's answer; a null answer reads "no key in it". `MINT_SKEW_MS` is exported beside it, so the sheet can state the window.
+  3. A delegation is **new in `after`** when the head held its id neither live nor revoked. A same-id delegation whose key or prefix changed keeps `prefix-overlaps`, and is refused `keys-unaccounted` besides.
+  4. Two new delegations colliding are named once, from the one listed first, as the app's rows did. The directional details use the app's former wording, now held once in the package.
+  5. `checks.ts` drops its `delegation-id-used` and `prefix-names-machine` rows too, with the same-code filter that hid them; without it they would repeat the package's findings. The word-for-word dedupe stays, since the package names a machine under a prefix once per list holding its name. `CheckCode` is now `renew-expired | renew-not-extension | drops-delegation | superseded-keys`.
+  6. `stateProblems`, `stateInvariants` and `verifySuccessor` are unchanged in what they accept; a test shows each directional successor still refused by `verifySuccessor`, with `stateProblems` still naming `prefix-overlaps`.
+  - e5655af5f alone fails six of the app's old `checks.test.ts` pins, which 76f72df85 fixes; the PR lands as one merge, so no master holds the first alone (the architect, 2026-11-08).
+  - Tests: org-protocol `delegations.test.ts` 11 (new), `successor-problems.test.ts` 82; desk-hub `admin.test.ts` 41 and `admin-verbs.test.ts` 39, unchanged; app `checks.test.ts` 38. Six mutations of the replacement rule caught. Green: static at e5655af5f (42538332291); static and unit at 76f72df85 (42538499882).
+  Date/Author: 2026-11-08, O8's executor (controller), from Task 1's report.
 
 ## Outcomes & Retrospective
 
