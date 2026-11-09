@@ -260,6 +260,24 @@ export const OrgChangeSchema = z.discriminatedUnion('kind', [
 ]);
 export type OrgChange = z.infer<typeof OrgChangeSchema>;
 
+/**
+ * M4c ("The destination"): where a new delegation's provisioning code goes, as a new version of a Secret Manager secret,
+ * through this machine's gcloud (src/main/org/secret-store.ts). Main keeps it in a file of its own
+ * (src/main/org/provisioning-secret-store.ts), never in the settings files, which an older build strict-parses (O7 M9).
+ * Each value reaches gcloud's argv, so each is held to its grammar here and none can start with `-`: a GCP project id (6
+ * to 30 lowercase letters, digits and hyphens, from a letter, not ending in a hyphen), a Secret Manager secret id (up to
+ * 255 letters, digits, `_` and `-`), and the gcloud account, an email.
+ */
+export const ProvisioningSecretSchema = z.strictObject({
+  project: z.string().regex(/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/),
+  secret: z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_-]{0,254}$/),
+  account: z
+    .string()
+    .max(254)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/),
+});
+export type ProvisioningSecret = z.infer<typeof ProvisioningSecretSchema>;
+
 /** A check's finding (src/main/org/checks.ts): `code` the package's, the checks' or a composer's, as a plain string. */
 export const OrgFindingSchema = z.strictObject({ level: z.enum(['refuse', 'warn']), code: z.string(), detail: z.string() });
 /**

@@ -10,7 +10,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { ProvisioningSecret } from '@shared/ipc/schema/settings';
+import type { ProvisioningSecret } from '@shared/ipc/schema/org';
 import { gcloudFallbacks, ProvisioningCode, resolveGcloud, secretStore, type Gcloud, type StoreResult } from './secret-store';
 
 const DEST: ProvisioningSecret = { project: 'ytdownload-505811', secret: 'desk-provisioning-v2', account: 'cli-owner@ytdownload-505811.iam.gserviceaccount.com' };

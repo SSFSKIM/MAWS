@@ -1,10 +1,10 @@
 // The provisioning code's custody (P5 O8 M4c, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M4c's "The
 // create transaction" steps 1, 4 and 5, "The destination" and "gcloud"; the refresh's item 14; P5 Decision Log 75 (1)):
 // a new delegation's code goes from main straight into Secret Manager, as a new version of the secret the owner named
-// (`org.provisioningSecret`), through this machine's gcloud. It is never displayed, put on the clipboard, written to
-// disk, logged or sent to the renderer: it is written to one child's stdin and nowhere else (not argv, not the
-// environment, not an error, not this module's log), and it travels inside main as a `ProvisioningCode`, whose every
-// printing is a placeholder.
+// (`provisioning-secret.json`, provisioning-secret-store.ts), through this machine's gcloud. It is never displayed, put
+// on the clipboard, written to disk, logged or sent to the renderer: it is written to one child's stdin and nowhere else
+// (not argv, not the environment, not an error, not this module's log), and it travels inside main as a
+// `ProvisioningCode`, whose every printing is a placeholder.
 //
 // A GUI app's PATH lacks Homebrew, so gcloud is resolved explicitly: the login shell's PATH (the engine's captured
 // environment, read asynchronously), then the usual install places. Each call has a timeout, and each answer is one of
@@ -18,7 +18,7 @@ import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { ProvisioningSecretSchema, type ProvisioningSecret } from '@shared/ipc/schema/settings';
+import { ProvisioningSecretSchema, type ProvisioningSecret } from '@shared/ipc/schema/org';
 
 /** A step's answer: its value, or why not and whether gcloud may have changed anything (refresh item 14). */
 export type StoreResult<T> = { ok: true; value: T } | { ok: false; outcome: StoreOutcome; detail: string };
