@@ -140,7 +140,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-08) Task 6, reviewed clean. The commits: 63409dab2 and its fix wave f098db1ee, both test-only.
     - Reviews: our task reviewer found case 8 masked by the ledger read's push, which was fixed. The controller read the fix.
     - Green: `org-page.local.test.ts` 12/12 in unit 3/4 on three CI attempts at f098db1ee (42515095022).
-- [ ] M4c — Delegations — *executable; after M4b; the desk track's renew route landed as #493 (P5 Decision Log 230)*
+- [x] (2026-11-09) M4c — Delegations — PR from `p5-o8-m4c`; the final gate green at 4d2b45261 (42594055817, unit:darwin and e2e:connectors on their rerun; 42609058582)
   - [x] (2026-11-08) Refresh at the cut: branch `p5-o8-m4c`, cut from master cfff902f7 after M4b landed as #539. The cited lines were reconciled, the parent was re-pinned at Decision Log 258, and the plan made: six tasks (Decision Log, "M4c's refresh at its cut" and "M4c is built as six tasks").
   - [x] (2026-11-08) Task 1, reviewed clean. Commits: e5655af5f (the move, `apps/` only, desk 701 CORRECT) and 76f72df85 (`checks.ts`). Our task reviewer's one Important, a retired diagnostic, is recorded as a decided exception (Decision Log, "M4c Task 1, the move"). Green: static at e5655af5f (42538332291); static and unit at 76f72df85 (42538499882).
   - [x] (2026-11-08) Task 2, reviewed clean. Commits: 1650daf4f (the unsent slot) and its fix wave 0e332c014 (publication bound to the holding run, the review's I1). Green: static and unit at 1650daf4f (42541105062) and 0e332c014 (42542743616).
@@ -4644,3 +4644,28 @@ A future child should write, for each piece of state or authority that a sign-in
 - **Fixtures can lie in the direction of the code.** Two masked tests passed because the fixture answered from the app's view, not the machine's: the endpoint's ledger projection, and case 8's push that the earlier push satisfied. A reviewer reading each case against the regression it claims to catch found both.
 
 A future child should state each guarantee as an invariant over every path that can act on durable state: a send, a resend, a restart, a sign-out, a close. It should test that invariant with the fixture answering from the other side's real view. Where ownership can be named by the authority that creates it (a generation, a signer), name it rather than infer it.
+
+**M4c (2026-11-09, PR from `p5-o8-m4c`).** The Org group gains **Delegations**.
+- **The rows.** Each delegation shows its prefix, owners, expiry, uses and the certified machines it has made, with the hub's key beside it for an admin. A half-done renewal or drop offers Retry, which calls only the hub's route.
+- **Create.** While this Mac may sign, an admin creates a delegation from a sheet. The app mints the hub's key, makes the delegation's key pair in main, signs it into the pending slot unsent behind one Touch ID, and writes the provisioning code straight into Secret Manager on a `gcloud` child's stdin, confirmed by `describe` and never read back with `access`. Only then does it publish the slot. A failed write leaves the delegation unsent, with "Write the code again" while this run holds the key pair, and only Discard (which revokes the key) after that.
+- **Renew and drop.** They go through the change sheet. Their hub halves follow from the signed head against the hub's key list: no continuation is stored, and a relaunch shows what's left from the comparison alone.
+- **Stray keys.** Hub keys that no state names (a crash between mint and sign, a refused Touch ID, a failed revoke) are listed with their age, each with a confirmed Revoke. A key under 15 minutes old gets a stronger warning, since a CLI or another admin's create may still be using it.
+- **The destination.** It is main's own `provisioning-secret.json`, not a settings section (O7 M9). It has Save, and a Reset for a damaged file.
+- **The code never shows.** It isn't displayed, copied, written to disk, logged, or sent to the renderer.
+- **The prefix rules live in `org-protocol`.** `prefixProblem` and `mintDisagrees` moved there, with directional prefix codes in `successorProblems`, so the app and the deployment admin judge collisions alike. The hub's acceptance is unchanged.
+
+Evidence:
+- the unit suites:
+  - main: `delegations` 64, `signer` 67, `secret-store` 21, `provisioning-secret-store` 10, `hub-client` 20, `edits` 36, `checks` 40, `view` 9, `org-session` 160;
+  - `org-protocol`: `delegations` 11, `successor-problems` 82;
+  - the renderer: `DelegationsSection` 18, `DelegationSheet` 16, `ChangeSheet` 22;
+- `test/org/org-page.local.test.ts` 15 of 15 on three CI attempts. Cases 13-15 create a delegation against the real local hub through a fake `gcloud`, provision a real endpoint from the code it received, renew it, and drop it;
+- `e2e/org-page.spec.ts` in `e2e:settings`, with the section and the create sheet photographed;
+- the gates the PR body lists.
+
+Retrospective (M4c). The milestone was built as six tasks, each reviewed at its frontier, then by two branch reviewers. Every task review but Task 1's asked for fixes. Every material finding was one of three kinds, each the shape M4b's retrospective named.
+- **An ending that didn't reach everything the run held.** Publication was bound to a hash, not to the run holding the key pair (Task 2). Custody outlived its run in locals and in-flight children (Task 4). Hub work was queued under one sign-in and ran under the next (Task 4). A Discard ended a run without recording itself (branch).
+- **A secret reaching a string.** gcloud's own HTTP log (Task 3), a token fragment through the error grammar (Task 3), and the hub's own field echoed in a diagnostic (branch).
+- **An outcome claimed from an inference rather than from the authority that knew it.** "Published" was read from a slot's absence. "Not minted" was read from an unreadable 201. A renderer adopted whichever unsent row was there. A row treated the status as current though it travels a different Electron pipe from the answer. The fixes all moved the claim to its source: the signer's own word, main's run identity, and a revision the answer names.
+
+A future child that holds a secret across awaits should state, before it builds, which owner holds each secret and which endings drop it. Its tests should end the run while each external step is still out, and they should read every outcome from the party that performed the step.
