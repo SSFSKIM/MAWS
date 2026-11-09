@@ -99,6 +99,11 @@ export type ProblemCode =
   | 'keys-unaccounted'
   | 'endorsement-missing'
   | 'email-grammar'
+  // A delegation new in the successor whose prefix meets another's, by direction (successorProblems, in place of the
+  // whole state's prefix-overlaps for that pair): equal, nested under it, or covering it
+  | 'prefix-equal'
+  | 'prefix-nested'
+  | 'prefix-covers'
   // The whole state's (stateProblems)
   | 'member-id-taken'
   | 'email-taken'
@@ -155,6 +160,11 @@ type Report = (code: ProblemCode, detail: () => string) => void;
  * ever needs the full mode on posted input guards its call sites with a cheap count check first.
  */
 export async function stateProblems(state: OrgState, opts: { first?: boolean; onDetail?: (code: ProblemCode) => void } = {}): Promise<Problem[]> {
+  return judged(state, opts, new Set());
+}
+
+/** `stateProblems`, with the ids of the delegations new to a successor (`successorProblems`'s; see `judgeState`). */
+async function judged(state: OrgState, opts: { first?: boolean; onDetail?: (code: ProblemCode) => void }, fresh: ReadonlySet<string>): Promise<Problem[]> {
   const problems: Problem[] = [];
   const kept = new Map<ProblemCode, number>();
   const report: Report = (code, detail) => {
@@ -169,14 +179,19 @@ export async function stateProblems(state: OrgState, opts: { first?: boolean; on
     problems.push({ code, detail: detail() });
   };
   try {
-    await judgeState(state, report);
+    await judgeState(state, report, fresh);
   } catch (error) {
     if (error !== FOUND) throw error;
   }
   return problems;
 }
 
-async function judgeState(state: OrgState, report: Report): Promise<void> {
+/**
+ * `fresh` names the delegations a successor adds (`successorProblems`): a prefix collision with one of them is named by
+ * its direction instead of `prefix-overlaps`, so a writer reads which way its new prefix meets the other. Empty for a
+ * whole state, which `stateProblems` and `stateInvariants` judge; either way the same states have a problem.
+ */
+async function judgeState(state: OrgState, report: Report, fresh: ReadonlySet<string>): Promise<void> {
   const named = (code: ProblemCode, items: string[], what: (item: string) => string) => {
     for (const item of repeated(items)) report(code, () => what(item));
   };
@@ -202,12 +217,15 @@ async function judgeState(state: OrgState, report: Report): Promise<void> {
   // delegation's. A revoked delegation's prefix and id stay reserved (RL DL 26), so nothing reopens its history: no
   // later delegation takes them, and no entry takes the `<id>_` ref shape of a delegation the state knows.
   const gone = state.revoked.flatMap((r) => ('delegation' in r.holder ? [r.holder] : []));
-  const prefixes = [...state.delegations.map((d) => d.prefix), ...gone.map((d) => d.prefix)];
+  const known = [...state.delegations.map((d) => ({ id: d.id, prefix: d.prefix, dropped: false })), ...gone.map((d) => ({ id: d.delegation, prefix: d.prefix, dropped: true }))];
+  const prefixes = known.map((d) => d.prefix);
   const keys = prefixes.map(machineNameKey);
   for (const [i, p] of keys.entries()) {
     for (const [j, q] of keys.entries()) {
       // An equal pair is reported once.
-      if (i !== j && q.startsWith(p) && (q !== p || i < j)) report('prefix-overlaps', () => `the delegation prefix ${prefixes[j]} starts with the prefix ${prefixes[i]}`);
+      if (!(i !== j && q.startsWith(p) && (q !== p || i < j))) continue;
+      if (fresh.has(known[i].id) || fresh.has(known[j].id)) prefixMeets(known, keys, i, j, fresh, report);
+      else report('prefix-overlaps', () => `the delegation prefix ${prefixes[j]} starts with the prefix ${prefixes[i]}`);
     }
   }
   for (const n of [...state.machineNames, ...state.machines]) {
@@ -236,6 +254,24 @@ async function judgeState(state: OrgState, report: Report): Promise<void> {
   for (const [kid, pub] of [...root, ['recovery', state.root.recoveryPub] as const]) {
     if ((await importPublicKey(pub)) === null) report('key-off-curve', () => `${kid === 'recovery' ? 'the recovery key' : `root key ${kid}`} is not a point on the curve`);
   }
+}
+
+type KnownDelegation = { id: string; prefix: string; dropped: boolean };
+
+/**
+ * The collision of `known[i]` and `known[j]` (`keys[j]` starts with `keys[i]`), at least one of them new to a successor,
+ * named from the new one's side: the one listed first when both are. Its words are the app's rows' (P5 O8 M3), now
+ * held here once.
+ */
+function prefixMeets(known: KnownDelegation[], keys: string[], i: number, j: number, fresh: ReadonlySet<string>, report: Report): void {
+  const [mine, theirs] = fresh.has(known[Math.min(i, j)].id) ? [Math.min(i, j), Math.max(i, j)] : [Math.max(i, j), Math.min(i, j)];
+  const d = known[mine];
+  const other = known[theirs];
+  const whose = other.dropped ? `the dropped delegation ${other.id}'s ${other.prefix}, reserved for the life of the org` : `delegation ${other.id}'s ${other.prefix}`;
+  const said = (verb: string) => () => `the prefix ${d.prefix} of delegation ${d.id} ${verb} ${whose}`;
+  if (keys[mine] === keys[theirs]) report('prefix-equal', said('is'));
+  else if (keys[mine].startsWith(keys[theirs])) report('prefix-nested', said('nests in'));
+  else report('prefix-covers', said('covers'));
 }
 
 /** A holder in words, for a problem's detail. */
@@ -525,6 +561,11 @@ export async function verifySuccessor(head: SignedOrgState, next: SignedOrgState
  * empty list means `verifySuccessor` refuses the signed state for a signature alone, if at all. One rule is the
  * writer's alone, which `verifySuccessor` never makes: an email the successor writes is an address (`email-grammar`).
  *
+ * A delegation new in `after` (an id the head neither held live nor revoked) whose prefix meets another delegation's,
+ * live or dropped, is named by direction in place of `prefix-overlaps` for that pair: `prefix-equal`, `prefix-nested`
+ * (it starts with the other's) or `prefix-covers` (the other's starts with it). A collision among prefixes the head
+ * already held keeps `prefix-overlaps`. The same successors have a problem either way; only the code says more.
+ *
  * Ordinary: no root transition authorizes it. A held transition changes non-signature rules (the successor takes the
  * transition's root set, and the transition's new root devices need no endorsement), so a recovery's successor is not
  * this function's to judge.
@@ -562,7 +603,10 @@ export async function successorProblems(
     const kid = await keyId(pub);
     if (revoked.has(kid)) add('revives-revoked', () => `${kid} is revoked, yet current as ${describeHolder(holder)}`);
   }
-  problems.push(...(await stateProblems(after, { onDetail: opts.onDetail })));
+  // The delegations new in `after`: ids the head neither held live nor revoked. Their prefix collisions read by direction.
+  const headIds = new Set([...before.delegations.map((d) => d.id), ...before.revoked.flatMap((r) => ('delegation' in r.holder ? [r.holder.delegation] : []))]);
+  const fresh = new Set([...after.delegations.map((d) => d.id), ...after.revoked.flatMap((r) => ('delegation' in r.holder ? [r.holder.delegation] : []))].filter((id) => !headIds.has(id)));
+  problems.push(...(await judged(after, { onDetail: opts.onDetail }, fresh)));
   if (after.issued < before.issued) add('issued-backwards', () => `issued ${after.issued}, before the head's ${before.issued}`);
   if (after.root.recoveryPub !== before.root.recoveryPub) add('recovery-changed', () => 'the recovery key never changes after genesis');
   if (!legacyRetiredKept(before, after)) add('legacy-retired', () => "legacyRetired is added only at the state's own version, then kept as it stands or dropped");

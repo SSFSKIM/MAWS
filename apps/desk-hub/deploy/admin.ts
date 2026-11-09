@@ -54,8 +54,16 @@ import {
   keyId,
   machineNameKey,
   machineRows,
+  MAX_PROVISIONING_KEY_TTL_S,
+  MAX_PROVISIONING_KEY_USES,
+  MIN_PROVISIONING_KEY_TTL_S,
+  mintDisagrees,
+  NEVER_OFFLINE,
   NO_CERTIFICATES,
+  NO_USE_CAP,
   pairingFingerprint,
+  prefixProblem,
+  printable,
   resolveMachine,
   signOrgState,
   stateHash,
@@ -76,11 +84,6 @@ import {
   decodeProvisioningCode,
   ENROLLMENT_TTL_S,
   MAX_ENROLLMENT_TTL_S,
-  MAX_PROVISIONING_KEY_TTL_S,
-  MAX_PROVISIONING_KEY_USES,
-  MIN_PROVISIONING_KEY_TTL_S,
-  NEVER_OFFLINE,
-  NO_USE_CAP,
   ORG_KEYS_PATH,
   ORG_STATE_PATH,
   PENDING_DEVICE_TTL_S,
@@ -121,8 +124,9 @@ import { deviceEntry, purgeOrgKeys, restoreLegacyKey, retireLegacyKey, successor
 import { withRunLock } from './run-lock';
 import { openTerminal, type Terminal } from './terminal';
 
-// The pairing judges live in org-protocol (O8 M4a), where the app's pairing reads them too; re-exported for admin's suites.
-export { isPairedDeviceId, isRpId, judgeEntry } from 'org-protocol';
+// The pairing judges live in org-protocol (O8 M4a), where the app's pairing reads them too, and `printable` with the
+// delegation judges whose words carry it (O8 M4c); re-exported for admin's suites.
+export { isPairedDeviceId, isRpId, judgeEntry, printable } from 'org-protocol';
 
 export const SUBCOMMANDS = ['init', 'genesis', 'adopt', 'refresh', 'pair', 'devices', 'remove-device', 'root', 'show', 'enroll', 'delegation', 'machine', 'code', 'provisioning', 'keys', 'abandon-pending'] as const;
 /** The subcommands that name a verb of their own after them (`delegation create`). */
@@ -295,13 +299,6 @@ async function signerProblem(head: OrgState, member: string, keys: AdminKeys): P
   if (!head.root.keys.includes(await keyId(keys.stepUp.pub))) return `device ${keys.id}'s step-up key is not a root key of the head (version ${head.version})`;
   return null;
 }
-
-/**
- * A hub-supplied string as it may be printed: every character outside printable ASCII, and the backslash, written as an
- * escape. What the hub serves (a device id, a relying party, a member's email, its refusal's text) could otherwise carry
- * terminal controls or a line of its own that forge or hide what the owner compares before `y`.
- */
-export const printable = (text: string) => text.replace(/[^\x20-\x5b\x5d-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 
 /** `text` with every control character (C0, DEL, C1, the Unicode line separators and bidirectional controls) escaped. */
 // eslint-disable-next-line no-control-regex -- matching the control characters is the point
@@ -811,24 +808,6 @@ async function answered(person: Person, path: string, init: { method?: string; b
   return { status: response.status, text, said: `${response.status} ${printable(text.slice(0, 300))}` };
 }
 
-/** Why `prefix` cannot be a new delegation's in `state` (RL DL 25, 26; org-state.ts's name namespaces), or null. */
-function prefixProblem(state: OrgState, prefix: string): string | null {
-  const key = machineNameKey(prefix);
-  const held = [
-    ...state.delegations.map((d) => ({ id: d.id, prefix: d.prefix, dropped: false })),
-    ...state.revoked.flatMap((r) => ('delegation' in r.holder ? [{ id: r.holder.delegation, prefix: r.holder.prefix, dropped: true }] : [])),
-  ];
-  for (const d of held) {
-    const theirs = machineNameKey(d.prefix);
-    const whose = d.dropped ? `the dropped delegation ${d.id}'s` : `delegation ${d.id}'s`;
-    const reserved = d.dropped ? ', reserved for the life of the org' : '';
-    if (theirs === key) return `the prefix ${prefix} is ${whose}${reserved}`;
-    if (theirs.startsWith(key) || key.startsWith(theirs)) return `the prefix ${prefix} nests with ${whose} ${d.prefix}${reserved}`;
-  }
-  const under = [...state.machineNames, ...state.machines].find((m) => machineNameKey(m.name).startsWith(key));
-  return under ? `the machine ${under.name} is named under the prefix ${prefix}` : null;
-}
-
 /** The delegation whose prefix `name` falls under, live or dropped: a certificate's name, never an enrolled one. */
 function delegationOver(state: OrgState, name: string): string | null {
   const key = machineNameKey(name);
@@ -947,30 +926,6 @@ async function enroll(ctx: Context): Promise<number> {
     ctx.io.out(`listed: version ${signed.state.version}`);
     return 0;
   });
-}
-
-/** How far the hub's clock may stand from this one's when its mint answer states the key's expiry. */
-const MINT_SKEW_MS = 60_000;
-
-/** Where the hub's answer to a provisioning key's mint differs from what the owner approved; empty when it does not. */
-function mintDisagrees(issued: ProvisioningKeyIssued, approved: { prefix: string; ttl: number; maxUses: number | null; before: number; after: number }): string[] {
-  const key = issued?.key;
-  if (typeof key !== 'object' || key === null) return ['no key in it'];
-  const out: string[] = [];
-  if (typeof key.id !== 'string' || !/^[0-9a-f]{32}$/.test(key.id)) out.push(`its id ${printable(String(key.id))} is not 32 hex`);
-  if (key.prefix !== approved.prefix) out.push(`its prefix ${printable(String(key.prefix))}, not the ${approved.prefix} you approved`);
-  const expires = typeof key.expires === 'string' ? Date.parse(key.expires) : NaN;
-  const earliest = approved.before + approved.ttl * 1000 - MINT_SKEW_MS;
-  const latest = approved.after + approved.ttl * 1000 + MINT_SKEW_MS;
-  if (!(expires >= earliest && expires <= latest)) {
-    out.push(`it expires at ${printable(String(key.expires))}, not within ${MINT_SKEW_MS / 1000} s of ${new Date(approved.before + approved.ttl * 1000).toISOString()}`);
-  }
-  if (key.max_uses !== approved.maxUses) {
-    const theirs = key.max_uses === null ? 'no use limit' : `a limit of ${printable(String(key.max_uses))} uses`;
-    out.push(`${theirs}, not the ${approved.maxUses === null ? 'no limit' : approved.maxUses} you approved`);
-  }
-  if (typeof issued.token !== 'string' || issued.token === '') out.push('no token');
-  return out;
 }
 
 /**

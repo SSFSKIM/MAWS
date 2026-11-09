@@ -1,6 +1,7 @@
 // DX7 — identity: the registry's records, machine names, and the enrollment code. Written to outlive phase 1: the
 // org phase adds roles and per-member keys to these records rather than replacing them.
 import { isMachineName, isMemberId, machineNameKey, RESERVED_MACHINE_NAMES, type MemberId } from 'org-protocol';
+import { MAX_PROVISIONING_KEY_TTL_S, MAX_PROVISIONING_KEY_USES, MIN_PROVISIONING_KEY_TTL_S, NEVER_OFFLINE, NO_USE_CAP } from 'org-protocol';
 import type { Certificates, Delegation, DeviceClass, EndpointRecord, KeyStorage, Listing, Passkey, RootTransition, Signed, SignedOrgState } from 'org-protocol';
 import { base64urlDecode, base64urlEncode } from './base64url';
 import type { JsonObject } from './json';
@@ -8,6 +9,9 @@ import type { JsonObject } from './json';
 // Member ids and machine names live in the protocol package (apps/org-protocol), whose org state names both; they are
 // re-exported here under their names.
 export { isMachineName, isMemberId, machineNameKey, RESERVED_MACHINE_NAMES, type MemberId };
+// So do a provisioning key's bounds and a delegation's "no cap" and "never" (O8 M4c), which the app's main reads and
+// which it cannot import from the hub.
+export { MAX_PROVISIONING_KEY_TTL_S, MAX_PROVISIONING_KEY_USES, MIN_PROVISIONING_KEY_TTL_S, NEVER_OFFLINE, NO_USE_CAP };
 
 export type Role = 'admin' | 'member';
 
@@ -343,9 +347,6 @@ export type ProvisioningKeyRenewed = ProvisioningKeyRecord;
 export type ProvisioningKeyError = 'bad-shape' | 'not-admin' | 'unknown-key' | 'key-revoked' | 'key-expired' | 'not-renewed' | 'too-long';
 export const PROVISIONING_KEYS_PATH = '/api/provisioning-keys';
 export const PROVISIONING_KEY_TTL_S = 7_776_000; // 90 days
-export const MIN_PROVISIONING_KEY_TTL_S = 3600;
-export const MAX_PROVISIONING_KEY_TTL_S = 31_536_000; // a year
-export const MAX_PROVISIONING_KEY_USES = 10_000;
 export const MIN_OFFLINE_REVOKE_S = 3600;
 export const MAX_OFFLINE_REVOKE_S = 2_592_000; // 30 days
 
@@ -505,8 +506,6 @@ export type MachineView = MachineRecord & { online?: boolean; seen?: string | nu
  * the head (`ProvisioningKeyRecord.delegation`). A key's "no cap" (`max_uses` null) is `NO_USE_CAP`, and "never"
  * (`offline_revoke_s` null) is `NEVER_OFFLINE`, 0, which no real offline time can be (MIN_OFFLINE_REVOKE_S).
  */
-export const NO_USE_CAP = Number.MAX_SAFE_INTEGER;
-export const NEVER_OFFLINE = 0;
 export function delegationFor(
   key: Pick<ProvisioningKeyRecord, 'id' | 'prefix' | 'expires' | 'max_uses' | 'offline_revoke_s'>,
   pub: string,
