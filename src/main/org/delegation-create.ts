@@ -159,7 +159,7 @@ function randomHex(bytes: number): string {
 function disagreeingFields(answer: MintedProvisioningKey, asked: { prefix: string; ttl: number; maxUses: number | null; before: number; after: number }): string[] {
   const agreeing = { id: '0'.repeat(32), prefix: asked.prefix, expires: new Date(asked.before + asked.ttl * 1000).toISOString(), max_uses: asked.maxUses };
   const judged = (key: typeof agreeing, token: string) => mintDisagrees({ key, token }, asked).length > 0;
-  const fields = (
+  const fields: string[] = (
     [
       ['id', 'id'],
       ['prefix', 'prefix'],
