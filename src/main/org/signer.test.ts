@@ -1027,6 +1027,60 @@ describe('an unsent slot (M4c: `Edit.hold`, `publishHeld`)', () => {
     expect(next.settled).toEqual([]);
   });
 
+  // Custody: the run that held the slot holds its delegation's key pair in memory, and only that run may publish it.
+  const ENDED_RUN = 'this slot was held by a run that has ended: only Discard';
+  const raw = (h: Harness) => readFileSync(join(h.dir, 'org', SIGNING_FILE), 'utf8');
+
+  it('refuses publishHeld from a fresh signer over the same file (a relaunch): the slot is Discard-only, and its marker stays', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    const next = await h.restart();
+    const before = raw(next);
+    expect(await next.signer.publishHeld(hash)).toEqual({ ok: false, reason: 'stale', detail: ENDED_RUN });
+    expect(raw(next)).toBe(before);
+    expect(next.disk()!.pending).toMatchObject({ hash, unsent: HOLD });
+    expect(next.hub.posts).toEqual([]);
+  });
+
+  it('refuses publishHeld after a sign-out and a sign-in of the same member, changing nothing', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    h.signer.fence(); // the sign-out; the same signer serves the next sign-in
+    const before = raw(h);
+    expect(await h.signer.publishHeld(hash)).toEqual({ ok: false, reason: 'stale', detail: ENDED_RUN });
+    expect(raw(h)).toBe(before);
+    expect(h.hub.posts).toEqual([]);
+  });
+
+  it('refuses publishHeld for a slot whose write a sign-out overtook: the run that held it ended with it', async () => {
+    const h = await harness();
+    // The sign-out lands while the held slot is being written: the write was decided before it, so the slot is kept.
+    h.gates.write = (name, value) => {
+      if (name !== SIGNING_FILE || (value as SigningFile).pending?.unsent === null) return;
+      h.gates.write = null;
+      h.signer.fence();
+    };
+    const outcome = await h.signer.sign(heldEdit());
+    const hash = h.disk()!.pending!.hash;
+    expect(outcome).toMatchObject({ ok: true, hash });
+    const before = raw(h);
+    expect(await h.signer.publishHeld(hash)).toEqual({ ok: false, reason: 'stale', detail: ENDED_RUN });
+    expect(raw(h)).toBe(before);
+    expect(h.hub.posts).toEqual([]);
+  });
+
+  it('forgets a held slot at its Discard: the same bytes held again by no sign are not this run\'s to publish', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    const slot = h.disk()!.pending!;
+    expect(await h.signer.discardPending(true, hash)).toMatchObject({ ok: true, marker: HOLD });
+    // The same slot back in the file (its hash the same), written by nothing that held it in this run.
+    await h.store.update((f) => ({ next: { ...f, pending: slot }, value: undefined }));
+    expect(await h.signer.publishHeld(hash)).toEqual({ ok: false, reason: 'stale', detail: ENDED_RUN });
+    expect(h.disk()!.pending).toMatchObject({ hash, unsent: HOLD });
+    expect(h.hub.posts).toEqual([]);
+  });
+
   it('keeps the weekly asking not due, so a focus asks nothing', async () => {
     const h = await harness();
     let focus: () => void = () => {};
