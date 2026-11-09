@@ -144,6 +144,21 @@ export type ArtifactsSettings = z.infer<typeof ArtifactsSettingsSchema>;
 
 export const SessionSettingsSchema = z.strictObject({ archiveInactiveDays: z.union([z.literal(7), z.literal(14), z.literal(30)]).nullable() });
 
+// P5 O8 M4c (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M4c's "The destination"): where a new
+// delegation's provisioning code goes, as a new version of a Secret Manager secret, through this machine's gcloud
+// (src/main/org/secret-store.ts). Each value reaches gcloud's argv, so each is held to its grammar here and none can
+// start with `-`: a GCP project id (6 to 30 lowercase letters, digits and hyphens, from a letter, not ending in a
+// hyphen), a Secret Manager secret id (up to 255 letters, digits, `_` and `-`), and the gcloud account, an email.
+export const ProvisioningSecretSchema = z.strictObject({
+  project: z.string().regex(/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/),
+  secret: z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_-]{0,254}$/),
+  account: z
+    .string()
+    .max(254)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/),
+});
+export type ProvisioningSecret = z.infer<typeof ProvisioningSecretSchema>;
+
 export const SettingsSchema = z.strictObject({
   version: z.literal(21), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); cua #90: version 12 (browser.bookmarksBar); P2-C: version 13 (mods, notifications.kinds.asyncInput and .essential); P3-D: version 14 (artifacts); P4-B1: version 15 (artifacts.commentsView); P4-R8: version 16 (engine.mcpServers); P4-A2: version 17 (engine.launchProfile); UX1: version 18 (sessions.archiveInactiveDays, notifications.kinds.turnFinished); version 19 (engine.launchProfile.outputStyle removed); P5 O2: version 20 (supervisor.shape); P5 O3-A: version 21, the client file's (the merged settings have no file of their own; the split by owner below)
   theme: ThemeSettingSchema,

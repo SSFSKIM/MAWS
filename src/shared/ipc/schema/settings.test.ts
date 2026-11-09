@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { SETTINGS_DEFAULTS_V21 } from '../../settings/defaults';
-import { commands, SettingsPatchSchema, SettingsSchema } from './settings'; // C12: commands
+import { commands, ProvisioningSecretSchema, SettingsPatchSchema, SettingsSchema } from './settings'; // C12: commands; P5 O8 M4c: the destination
 import { LaunchProfileSchema, userScopeProfile } from '../../engine/launch-profile'; // P4-A2
 
 const base = SETTINGS_DEFAULTS_V21;
@@ -15,6 +15,24 @@ describe('export author setting', () => {
     expect(SettingsPatchSchema.safeParse({ artifacts: { exportAuthorName: null } }).success).toBe(true);
     expect(SettingsSchema.safeParse(base).success).toBe(true); // current files validate without the optional author name
     for (const name of ['', '  ', 'x'.repeat(201)]) expect(SettingsPatchSchema.safeParse({ artifacts: { exportAuthorName: name } }).success).toBe(false);
+  });
+});
+
+// P5 O8 M4c: the provisioning code's destination, whose every value reaches gcloud's argv (src/main/org/secret-store.ts),
+// so each is held to its grammar and none can be read as a flag.
+describe('the provisioning secret destination (M4c)', () => {
+  const production = { project: 'ytdownload-505811', secret: 'desk-provisioning-v2', account: 'cli-owner@ytdownload-505811.iam.gserviceaccount.com' };
+  it("accepts production's destination and each grammar's edges", () => {
+    expect(ProvisioningSecretSchema.parse(production)).toEqual(production);
+    for (const project of ['abcdef', `a${'b'.repeat(28)}c`, 'my-proj-1']) expect(ProvisioningSecretSchema.safeParse({ ...production, project }).success, project).toBe(true);
+    for (const secret of ['s', 'S_1', '_x', 'x'.repeat(255)]) expect(ProvisioningSecretSchema.safeParse({ ...production, secret }).success, secret).toBe(true);
+    expect(ProvisioningSecretSchema.safeParse({ ...production, account: 'kim.min+ops@example.co.kr' }).success).toBe(true);
+  });
+  it('refuses a value out of its grammar, one that starts like a flag, and any other field', () => {
+    for (const project of ['abcde', `a${'b'.repeat(29)}c`, '1project', 'project-', 'Project1', '-project', 'my_proj1']) expect(ProvisioningSecretSchema.safeParse({ ...production, project }).success, project).toBe(false);
+    for (const secret of ['', '-secret', 'a secret', 'a/b', 'x'.repeat(256)]) expect(ProvisioningSecretSchema.safeParse({ ...production, secret }).success, secret).toBe(false);
+    for (const account of ['', 'owner', '-x@example.com', 'owner@example', 'owner@-example.com', `${'a'.repeat(250)}@example.com`, 'a b@example.com']) expect(ProvisioningSecretSchema.safeParse({ ...production, account }).success, account).toBe(false);
+    expect(ProvisioningSecretSchema.safeParse({ ...production, version: 'latest' }).success).toBe(false);
   });
 });
 
