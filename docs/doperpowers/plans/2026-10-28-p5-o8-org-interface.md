@@ -146,6 +146,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-08) Task 2, reviewed clean. Commits: 1650daf4f (the unsent slot) and its fix wave 0e332c014 (publication bound to the holding run, the review's I1). Green: static and unit at 1650daf4f (42541105062) and 0e332c014 (42542743616).
 - [ ] M5b — Add owner — *executable; after M4c; lands once the desk track's `record.owners` executor and DL190 (b)'s fix are on master*
   - [x] (2026-11-09) Refresh at the cut: branch `p5-o8-m5b`, cut from master e181a1944 after M4c landed as #543. Both waits were met. The scope shrank to the renderer and one local case, since M6b built the main side. The parent was re-pinned at Decision Log 260. The live proof moved to M8's sitting, as a staging step. The plan is two tasks (Decision Log, "M5b's refresh at its cut" and "M5b is built as two tasks").
+  - [x] (2026-11-09) Task 1, reviewed clean. Commits: fea94bdaa (the sheet, both menus, `stores/local-owner.ts`) and the fix wave 4d33e84f9 (Share takes the same one-owner clause through one gate). Our task reviewer took two rounds. I1, the head skew, the architect accepted as residue (Decision Log, "M5b Task 1, the renderer", item 6). Green: static and unit at 4d33e84f9 (42702690877); `e2e:settings` at 4d33e84f9 (42701162112).
 - [ ] M8 — The deployment admin's end, and acceptance — *owner steps and evidence; last; needs O14's B4 steps 4 to 8 and M3's root-add sitting (its first step)*
 
 ## Acceptance
