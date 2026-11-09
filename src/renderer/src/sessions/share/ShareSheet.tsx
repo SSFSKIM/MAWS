@@ -32,7 +32,7 @@ import { CHOICE, PRIMARY, QUIET, SECONDARY } from '../ui';
 import { ACCESS_ORDER, GRADE_ORDER, lineWords, outcomeWords, refusalWords, SHARE, type ShareAccess, type ShareGrade } from './copy';
 
 // A select drawn as the sheets' fields are (ui.ts's FIELD), sized by its row rather than taking the row's whole width.
-const SELECT = 'rounded-sm border border-border-strong bg-bg px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2';
+export const SELECT = 'rounded-sm border border-border-strong bg-bg px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2';
 
 type Policy = Extract<RecordPolicyEntry, { policyRev: number }>;
 /**
@@ -40,11 +40,11 @@ type Policy = Extract<RecordPolicyEntry, { policyRev: number }>;
  * gives them (null for one to remove). The list's order is the order Save sends their changes.
  */
 export type Person = { member: string; was: ShareGrade | null; grade: ShareGrade | null };
-type Read = { state: 'reading' } | { state: 'refused'; reason: string } | { state: 'unsupported' } | { state: 'unavailable' } | { state: 'ready'; policy: Policy };
+export type Read = { state: 'reading' } | { state: 'refused'; reason: string } | { state: 'unsupported' } | { state: 'unavailable' } | { state: 'ready'; policy: Policy };
 type Saved = Extract<OrgPolicySetResult, { ok: true }>;
 
-/** The policy's read for the sheet, from `org.policy.get {address}`'s answer. */
-async function readPolicy(address: AppSessionId): Promise<Read> {
+/** The policy's read for the sheet (and M5b's Add owner sheet), from `org.policy.get {address}`'s answer. */
+export async function readPolicy(address: AppSessionId): Promise<Read> {
   const result = await ipc.invoke('org.policy.get', { address });
   if (!result.ok) return { state: 'refused', reason: result.error.code };
   const read = result.value;
@@ -73,7 +73,7 @@ export function saveOf(address: AppSessionId, policy: Policy, access: ShareAcces
 }
 
 /** A refusal or an outcome's words, the raw word of an unknown reason secondary. */
-function Words({ text, raw }: { text: string; raw: string | null }) {
+export function Words({ text, raw }: { text: string; raw: string | null }) {
   return (
     <>
       <span>{text}</span>

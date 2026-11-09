@@ -3,6 +3,7 @@
 // the foot, Save, what the sheet says when it can't offer a change, each refusal a save can meet (in its refuser's word:
 // sminos's, the endpoint's, the ledger's, step-up's, main's `POLICY_REFUSALS`), each line's outcome, and a row's mark. The
 // bound lines are the spec's, character for character (its straight apostrophes kept throughout the sheet's words).
+// P5 O8 M5b: and the Add owner sheet's (`OWNER`), with the endpoint's `grade` refusal both sheets can meet.
 import type { OrgPolicyLine, OrgPolicyOutcome } from '@shared/ipc/schema/org';
 
 export type ShareAccess = 'private' | 'listed' | 'org-view' | 'org-converse';
@@ -30,6 +31,8 @@ export const REFUSALS: Readonly<Record<string, Said>> = {
   // the endpoint's and sminos's (`no-session` is both: no member places the session, or no readable record of it)
   'no-session': (machine) => `${machine} can't find this session's record`,
   'not-offered': (machine) => `${machine} doesn't take this change`,
+  // the endpoint's authorization: every record act is `manage`, its owners' alone (P5 O8 M5b)
+  grade: (machine) => `${machine} takes this change only from the session's owners`,
   unsupported: (machine) => `${machine} can keep a session only Listed for now`,
   'bad-shape': (machine) => `${machine}'s sminos couldn't read this change`,
   'read-only': (machine) => `${machine}'s sminos is read-only: no session's reach can change there`,
@@ -126,6 +129,32 @@ export function outcomeWords(outcome: OrgPolicyOutcome, machine: string): { text
     case 'not-sent':
       return { text: SHARE.notSent, raw: null };
   }
+}
+
+/**
+ * The Add owner sheet's words (P5 O8 M5b, sessions/share/AddOwnerSheet.tsx). What it can't offer, its reload and its close
+ * are Share's (`SHARE`), as are the refusals.
+ */
+export const OWNER = {
+  menuItem: 'Add owner…',
+  title: 'Add owner',
+  line: "An owner can do everything you can with this session, including changing who can reach it and adding owners. MAWS can't remove an owner.",
+  person: 'Person',
+  choose: SHARE.choose,
+  nobodyToAdd: 'Everyone in the org already owns it.',
+  noMembers: SHARE.noMembers,
+  add: 'Add owner',
+  adding: 'Adding…',
+  added: 'Added as an owner',
+  already: 'Already an owner',
+  /** After an add: the row's owners come from the session's next listing, not from the sheet. */
+  relisted: (machine: string) => `Its row names them once ${machine} lists the session again.`,
+};
+
+/** What became of an owner added: Share's words for a line, but a `done` reads added, or already an owner for a no-op. */
+export function ownerOutcomeWords(outcome: OrgPolicyOutcome, machine: string): { text: string; raw: string | null } {
+  if (outcome.state === 'done') return { text: outcome.changed ? OWNER.added : OWNER.already, raw: null };
+  return outcomeWords(outcome, machine);
 }
 
 const CANT_TALK = 'you can read this session but not talk to its agent';

@@ -57,6 +57,7 @@ export type OpenDialog =
   | WorktreesDialogRef // C12
   | { kind: 'remoteSetup'; request: SetupRequest } // P5 O7 M9: a project set up on another machine, or its trust card
   | { kind: 'share'; address: AppSessionId } // P5 O8 M6b: a session's reach (share/ShareSheet.tsx)
+  | { kind: 'addOwner'; address: AppSessionId } // P5 O8 M5b: an owner added to a session (share/AddOwnerSheet.tsx)
   | ({ kind: 'confirm'; answer(yes: boolean): void } & ConfirmRequest);
 
 export const useDialogs = create<{ open: OpenDialog | null }>()(() => ({ open: null }));

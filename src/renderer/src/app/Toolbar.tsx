@@ -28,8 +28,8 @@ import { useRemoteLaneA } from '../lane-a/remote-session'; // P5 O9 M9
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M9
 import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O7 M2
 import { useReaderRowsOf } from '../lane-b/reader-rows'; // P5 O8 M6a
-import { openShare, useCanShare } from '../sessions/share/target'; // P5 O8 M6b
-import { SHARE } from '../sessions/share/copy'; // P5 O8 M6b
+import { openAddOwner, openShare, useCanAddOwner, useCanShare } from '../sessions/share/target'; // P5 O8 M6b, M5b
+import { OWNER, SHARE } from '../sessions/share/copy'; // P5 O8 M6b, M5b
 import { displayTitle } from '../sessions/title';
 // P3-L start
 import { LIBRARY_COPY } from '../library/copy';
@@ -222,7 +222,7 @@ const BoardIcon = () => (
 // with no record (an unstarted one) offers nothing yet, and with nothing to offer the menu is disabled. P5 O9 M9:
 // another machine's terminal session (a listed lane A row, no record here) offers Take over, disabled in place with the
 // reason its controls port gives (Q2: a gap is shown where the control would be). P5 O8 M6b: and Share, for a session you
-// own, listed or a record.
+// own, listed or a record. P5 O8 M5b: and Add owner after it, for the session's owners (`useCanAddOwner`).
 function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5: Take over and Fork for a bridged terminal session
@@ -230,17 +230,20 @@ function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
   const controls = useSessionControls(appSessionId);
   const remoteReading = useReaderRowsOf(appSessionId) !== 'refused'; // P5 O8 M6a
   const shareable = useCanShare(appSessionId); // P5 O8 M6b
+  const ownable = useCanAddOwner(appSessionId); // P5 O8 M5b
   if (remote) {
     const takeOver = controls?.capability('take-over') ?? null;
     return <SessionMenu disabled={false}>
       <SessionMenuItem id="takeOver" appSessionId={appSessionId} label={SESSION_ACTIONS.takeOver} gap={takeOver === null || takeOver.available ? null : takeOver.reason} />
       {shareable && <ShareMenuItem appSessionId={appSessionId} />}
+      {ownable && <AddOwnerMenuItem appSessionId={appSessionId} />}
     </SessionMenu>;
   }
   const ids = record ? sessionActionsFor(record, { bridged, remote: isRemoteLaneB(record.appId) /* P5 O7 M2 */, remoteReading }).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
   return <SessionMenu disabled={ids.length === 0 && !shareable}>
     {record && ids.map((id) => <SessionMenuItem key={id} id={id} appSessionId={record.appId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} />)}
     {shareable && <ShareMenuItem appSessionId={appSessionId} />}
+    {ownable && <AddOwnerMenuItem appSessionId={appSessionId} />}
   </SessionMenu>;
 }
 
@@ -249,6 +252,15 @@ function ShareMenuItem({ appSessionId }: { appSessionId: AppSessionId }) {
   return (
     <DropdownMenu.Item onSelect={() => openShare(appSessionId)} className="flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-highlighted:bg-bg-hover">
       {SHARE.menuItem}
+    </DropdownMenu.Item>
+  );
+}
+
+// P5 O8 M5b: the session's Add owner sheet, for its owners (sessions/share/target.ts)
+function AddOwnerMenuItem({ appSessionId }: { appSessionId: AppSessionId }) {
+  return (
+    <DropdownMenu.Item onSelect={() => openAddOwner(appSessionId)} className="flex h-7 cursor-default items-center rounded-sm px-2 outline-none select-none data-highlighted:bg-bg-hover">
+      {OWNER.menuItem}
     </DropdownMenu.Item>
   );
 }

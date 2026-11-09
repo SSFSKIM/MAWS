@@ -4,7 +4,10 @@
 // shares, read from the machine's policy for your own sessions and from the listing's audience for another's private one
 // shared with you, with its access in the hover card. Share: a listed row you own in a hub project has a menu holding it,
 // any other listed row none; a record of this Mac's in a hub project that its policy read names offers it; one in a
-// local-only project, or while signed out, doesn't; it opens the Share sheet.
+// local-only project, or while signed out, doesn't; it opens the Share sheet. P5 O8 M5b: Add owner sits beside Share where
+// Share is, narrowed to the session's owners (the architect's rulings on M5b's refresh, item 1): a listed row names you
+// an owner already; this Mac's record only while you are this Mac's one owner, since its policy read names every session
+// any of its owners owns.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -24,10 +27,11 @@ import { Toolbar } from '../app/Toolbar';
 import { queryClient } from '../ipc/query';
 import { closeDialog } from '../sessions/dialogs';
 import { SessionDialogs } from '../sessions/SessionDialogs';
-import { SHARE } from '../sessions/share/copy';
+import { OWNER, SHARE } from '../sessions/share/copy';
 import { useAttention } from '../stores/attention';
 import { useHubAccess } from '../stores/hub-access';
 import { useLayout } from '../stores/layout';
+import { useLocalOwner } from '../stores/local-owner';
 import { useMachines } from '../stores/machines';
 import { usePeople } from '../stores/people';
 import { usePolicies } from '../stores/policies';
@@ -80,6 +84,7 @@ afterEach(() => {
   cleanup();
   usePolicies.setState({ reads: new Map() });
   usePeople.setState({ on: new Set() });
+  useLocalOwner.setState({ owner: null });
   useHubAccess.setState({ access: null, member: null });
   useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
   delete (window as { maws?: PreloadBridge }).maws;
@@ -131,7 +136,7 @@ describe('Share on a row', () => {
     expect(row('Mine').getAttribute('data-menu')).toBe(`session:${studio('m')}`);
     expect(row('No project').getAttribute('data-menu')).toBe('none');
     const menu = await menuOf('Mine');
-    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([SHARE.menuItem]);
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([SHARE.menuItem, OWNER.menuItem]);
     fireEvent.click(within(menu).getByRole('menuitem', { name: SHARE.menuItem }));
     expect(await screen.findByRole('dialog', { name: SHARE.title })).toBeTruthy();
   });
@@ -158,6 +163,55 @@ describe('Share on a row', () => {
   });
 });
 
+describe('Add owner beside Share', () => {
+  // the menu's reach items (a record's own actions come first)
+  const itemsOf = async (name: string) => {
+    const items = within(await menuOf(name))
+      .queryAllByRole('menuitem')
+      .map((item) => item.textContent)
+      .filter((text) => text === SHARE.menuItem || text === OWNER.menuItem);
+    await userEvent.keyboard('{Escape}');
+    return items;
+  };
+
+  it('opens the Add owner sheet from a listed row you own', async () => {
+    fill([mine('m', { title: 'Mine' })]);
+    render(
+      <>
+        <Sidebar />
+        <SessionDialogs />
+      </>,
+    );
+    fireEvent.click(within(await menuOf('Mine')).getByRole('menuitem', { name: OWNER.menuItem }));
+    expect(await screen.findByRole('dialog', { name: OWNER.title })).toBeTruthy();
+  });
+
+  it("offers it on this Mac's record only while you are this Mac's one owner, where Share stays", async () => {
+    const here = record(at('here'), { projectId: hub.id, title: { text: 'Here', source: 'user' } });
+    fill([], [here]);
+    reads(supported(TEST_MACHINE, entry('here', 'listed')));
+    render(<Sidebar />);
+    // this Mac has several owners, or another: its read names their sessions too, which the door refuses you
+    expect(await itemsOf('Here')).toEqual([SHARE.menuItem]);
+    act(() => useLocalOwner.setState({ owner: 'member-ana' }));
+    expect(await itemsOf('Here')).toEqual([SHARE.menuItem]);
+    act(() => useLocalOwner.setState({ owner: ME }));
+    expect(await itemsOf('Here')).toEqual([SHARE.menuItem, OWNER.menuItem]);
+    // a sminos that can't keep a reach: offered, as Share is, and the sheet says so
+    act(() => reads({ ok: true, machine: TEST_MACHINE, supported: false }));
+    expect(await itemsOf('Here')).toEqual([SHARE.menuItem, OWNER.menuItem]);
+    act(() => useHubAccess.setState({ access: null, member: null }));
+    expect(await itemsOf('Here')).toEqual([]);
+  });
+
+  it("is not on another member's listed row", async () => {
+    fill([mine('t', { title: 'Theirs', owners: ['member-ana'], mine: false })]);
+    act(() => usePeople.setState({ on: new Set([ORG]) }));
+    render(<Sidebar />);
+    expect(row('Theirs').getAttribute('data-menu')).toBe('none');
+  });
+});
+
 describe('Share in the session header', () => {
   const tab = (id: AppSessionId): TabRef => ({ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false });
   it("holds Share in the Toolbar's session actions for a session you own", async () => {
@@ -176,5 +230,23 @@ describe('Share in the session header', () => {
     await user.keyboard('{ArrowRight}');
     await user.click(await screen.findByRole('menuitem', { name: SHARE.menuItem }));
     expect(await screen.findByRole('dialog', { name: SHARE.title })).toBeTruthy();
+  });
+
+  it("holds Add owner beside Share in the Toolbar's session actions", async () => {
+    const user = userEvent.setup();
+    fill([mine('m', { title: 'Mine', lane: 'A', availability: 'foreign_held' })]);
+    act(() => useLayout.setState({ main: { ...LAYOUT_DEFAULTS.main, sets: { [NO_PROJECT]: { ...EMPTY_TAB_SET, panes: [{ tabs: [tab(studio('m'))], activeTabId: tab(studio('m')).id }] } } } }));
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Toolbar />
+        <SessionDialogs />
+      </QueryClientProvider>,
+    );
+    await user.click(screen.getByRole('button', { name: 'More surfaces' }));
+    const actions = await screen.findByRole('menuitem', { name: 'Session actions' });
+    act(() => actions.focus());
+    await user.keyboard('{ArrowRight}');
+    await user.click(await screen.findByRole('menuitem', { name: OWNER.menuItem }));
+    expect(await screen.findByRole('dialog', { name: OWNER.title })).toBeTruthy();
   });
 });
