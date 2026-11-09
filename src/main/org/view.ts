@@ -24,6 +24,7 @@ import {
 } from '../../../apps/org-protocol/src/index.ts';
 import { YOUNG_STRAY_KEY_MS, type OrgDelegationRow, type OrgView } from '@shared/ipc/schema/org';
 import { memberNames } from '@shared/org/member-name';
+import { reservedBy } from './delegation-create';
 import type { DelegationViewInputs } from './delegations';
 import type { Unsent } from './files';
 
@@ -41,7 +42,7 @@ export type DelegationSources = DelegationViewInputs & {
   slot: { state: OrgState; unsent: Unsent | null } | null;
   history(id: string): Delegation | undefined;
 };
-const NO_DELEGATION_SOURCES: DelegationSources = { slot: null, keys: null, keysFailed: false, unsent: null, hubProblems: new Map(), history: () => undefined };
+const NO_DELEGATION_SOURCES: DelegationSources = { slot: null, keys: null, keysFailed: false, unsent: null, hubProblems: new Map(), reserved: null, history: () => undefined };
 
 /** The hub's key `key` is live at `now`: neither revoked nor expired. */
 const live = (key: { revoked: string | null; expires: string }, now: Date) => key.revoked === null && Date.parse(key.expires) > now.getTime();
@@ -50,7 +51,7 @@ const live = (key: { revoked: string | null; expires: string }, now: Date) => ke
  * The Delegations section's rows and stray keys (Interfaces §S): the head's delegations, the unsent slot's (absent from
  * the head), then the dropped ones whose hub key is still live; `hubBehind` from the comparison with the hub's list
  * alone. Stray keys need a good read of that list, and are the live keys nothing here names (the head's delegations and
- * revoked holders, and any delegation the pending slot carries).
+ * revoked holders, any delegation the pending slot carries, and the key a create under way holds before its slot).
  */
 function delegationRows(state: OrgState, views: readonly CertView[], sources: DelegationSources, now: Date): Pick<OrgView, 'delegations' | 'strayKeys' | 'hubKeys'> {
   const keys = sources.keys?.list ?? null;
@@ -101,7 +102,7 @@ function delegationRows(state: OrgState, views: readonly CertView[], sources: De
   // The pending slot's delegations are named too, unsent or published and not yet settled: about to be in effect.
   const named = new Set([...held, ...dropped.map((h) => h.delegation), ...(sources.slot?.state.delegations.map((d) => d.id) ?? [])]);
   const strayKeys = (keys ?? [])
-    .filter((k) => live(k, now) && !named.has(k.id))
+    .filter((k) => live(k, now) && !named.has(k.id) && !reservedBy(sources.reserved, k.id, k))
     .map((k) => ({ id: k.id, prefix: k.prefix, label: k.label, created: k.created, expires: k.expires, young: now.getTime() - Date.parse(k.created) < YOUNG_STRAY_KEY_MS }));
   return { delegations, strayKeys, hubKeys: { at: sources.keys?.at ?? null, failed: sources.keysFailed } };
 }

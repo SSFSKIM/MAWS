@@ -170,7 +170,7 @@ describe('the Org page\'s view of the held head', () => {
 describe('M4c: the Delegations section', () => {
   const AT = new Date('2026-10-29T09:00:00.000Z');
   const key = (id: string, over: Partial<ProvisioningKey> = {}): ProvisioningKey => ({ id, label: `key ${id.slice(0, 4)}`, prefix: 'p-', created: '2026-10-01T00:00:00.000Z', expires: '2026-11-15T00:00:00.000Z', max_uses: null, uses: 3, revoked: null, ...over });
-  const sources = (over: Partial<DelegationSources>): DelegationSources => ({ slot: null, keys: null, keysFailed: false, unsent: null, hubProblems: new Map(), history: () => undefined, ...over });
+  const sources = (over: Partial<DelegationSources>): DelegationSources => ({ slot: null, keys: null, keysFailed: false, unsent: null, hubProblems: new Map(), reserved: null, history: () => undefined, ...over });
 
   it('joins the head, the unsent slot and the dropped delegations whose hub key is live; hubBehind from the comparison alone', async () => {
     const { state, mac, certificates, DELEGATION } = await fixture();
@@ -232,6 +232,34 @@ describe('M4c: the Delegations section', () => {
     expect(view.delegations[1].maxUses).toBe(5);
     const expired = await orgView(state, { member: OWNER, device: mac.id }, true, undefined, AT, null, sources({ keys: { list: [key(DELEGATION, { expires: '2026-10-29T08:00:00.000Z' })], at: AT.toISOString() } }));
     expect(expired.delegations[0].hubBehind).toBeNull();
+  });
+
+  it('a delegation the slot carries published (no unsent marker) is no stray: it is about to be in effect', async () => {
+    const { state, mac } = await fixture();
+    const PUBLISHED = 'e'.repeat(32);
+    const slotState = structuredClone(state);
+    slotState.version += 1;
+    slotState.delegations.push({ id: PUBLISHED, pub: (await generateSigningKey()).pub, prefix: 'gpu-', expires: '2026-12-24T00:00:00.000Z', maxUses: NO_USE_CAP, offlineRevokeS: 0, owners: [OWNER] });
+    const view = await orgView(state, { member: OWNER, device: mac.id }, true, undefined, AT, null, sources({ slot: { state: slotState, unsent: null }, keys: { list: [key(PUBLISHED, { prefix: 'gpu-' })], at: AT.toISOString() } }));
+    expect(view.strayKeys).toEqual([]);
+  });
+
+  it("the key a create under way holds is no stray: by id once minted, by prefix and start while the mint is out (the fix wave, I2)", async () => {
+    const { state, mac } = await fixture();
+    const MINTED = '4'.repeat(32);
+    const OTHER = '5'.repeat(32);
+    const EARLIER = '6'.repeat(32);
+    const list = [
+      key(MINTED, { prefix: 'gpu-', created: '2026-10-29T08:58:00.000Z' }),
+      key(OTHER, { prefix: 'x-', created: '2026-10-29T08:58:00.000Z' }), // another prefix: a stray
+      key(EARLIER, { prefix: 'gpu-', created: '2026-10-29T08:00:00.000Z' }), // before the run began: a stray
+    ];
+    const strays = async (reserved: DelegationSources['reserved']) =>
+      (await orgView(state, { member: OWNER, device: mac.id }, true, undefined, AT, null, sources({ keys: { list, at: AT.toISOString() }, reserved }))).strayKeys.map((k) => k.id);
+    expect(await strays(null)).toEqual([MINTED, OTHER, EARLIER]);
+    expect(await strays({ id: null, prefix: 'gpu-', since: '2026-10-29T08:57:00.000Z' })).toEqual([OTHER, EARLIER]);
+    expect(await strays({ id: MINTED, prefix: 'gpu-', since: '2026-10-29T08:57:00.000Z' })).toEqual([OTHER, EARLIER]);
+    expect(await strays({ id: EARLIER, prefix: 'gpu-', since: '2026-10-29T08:57:00.000Z' })).toEqual([MINTED, OTHER]);
   });
 
   it('lists a retired certified machine as not live, one row per ref, and leaves a revoked one out', async () => {

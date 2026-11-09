@@ -42,7 +42,7 @@ import { orgFiles, type Anchor, type OrgFiles } from './files';
 import { startHeldOrg, type HeldOrg } from './held';
 import type { HubClient, HubResult, ProvisioningKey, ProvisioningKeyRoutes, Served } from './hub-client';
 import { openProvisioningSecret, PROVISIONING_SECRET_FILE } from './provisioning-secret-store';
-import { resolveGcloud, secretStore } from './secret-store';
+import { ProvisioningCode, resolveGcloud, secretStore } from './secret-store';
 import { heldOrgSession, type SignedIn } from './session';
 import { createOrgSigner, noChangeEdit, RefusedEdit, StaleEdit, successorDraft, type OrgSigner } from './signer';
 import { createSigningStore, type SigningStore } from './signing-store';
@@ -108,6 +108,13 @@ class FakeHub implements HubClient, ProvisioningKeyRoutes {
   renewAnswer: ((id: string) => Answer<ProvisioningKey> | 'lost') | null = null;
   revokeAnswer: ((id: string) => Answer<'revoked' | 'absent'>) | null = null;
   listAnswer: (() => Answer<{ keys: ProvisioningKey[] }>) | null = null;
+  /** Each held open by a test before it is answered: a renew, a DELETE, a post. */
+  beforeRenew: (() => Promise<void> | void) | null = null;
+  beforeRevoke: (() => Promise<void> | void) | null = null;
+  beforePost: (() => Promise<void> | void) | null = null;
+  beforeList: (() => Promise<void> | void) | null = null;
+  /** Every request made through `as(credential)`, with the credential (the sign-in) it carried. */
+  calls: Array<{ method: string; credential: number }> = [];
 
   constructor(states: SignedOrgState[]) {
     this.states = [...states];
@@ -117,7 +124,22 @@ class FakeHub implements HubClient, ProvisioningKeyRoutes {
     return this.states.at(-1)!;
   }
 
+  /** This hub as one sign-in's credential reaches it: each request recorded with `credential`. */
+  as(credential: number): FakeHub {
+    return new Proxy(this, {
+      get: (target, property, receiver) => {
+        const value = Reflect.get(target, property, receiver) as unknown;
+        if (typeof value !== 'function' || !REQUESTS.has(String(property))) return value;
+        return (...args: unknown[]) => {
+          target.calls.push({ method: String(property), credential });
+          return (value as (...a: unknown[]) => unknown).apply(target, args);
+        };
+      },
+    });
+  }
+
   async postState(signed: SignedOrgState): Promise<HubResult<{ version: number }>> {
+    await this.beforePost?.();
     this.posts.push(signed);
     const verdict = await verifySuccessor(this.head, signed, []);
     if (!verdict.ok) return status(409, verdict.code);
@@ -131,16 +153,18 @@ class FakeHub implements HubClient, ProvisioningKeyRoutes {
 
   async mintProvisioningKey(body: { label: string; prefix: string; ttl_s: number; max_uses?: number }) {
     this.mints.push(structuredClone(body));
-    await this.beforeMint?.();
+    // minted (and listed) before its answer arrives
     const now = Date.now();
     const key: ProvisioningKey = { id: hex(), label: body.label, prefix: body.prefix, created: iso(now), expires: iso(now + body.ttl_s * 1000), max_uses: body.max_uses ?? null, uses: 0, revoked: null };
     const token = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
     this.keys.push({ ...key, token });
+    await this.beforeMint?.();
     return this.mintAnswer?.(key, token) ?? { ok: true as const, value: { key, token } };
   }
 
   async renewProvisioningKey(id: string): Promise<HubResult<ProvisioningKey>> {
     this.renews.push(id);
+    await this.beforeRenew?.();
     const override = this.renewAnswer?.(id);
     if (override !== undefined && override !== 'lost') return override;
     const key = this.keys.find((k) => k.id === id);
@@ -158,6 +182,7 @@ class FakeHub implements HubClient, ProvisioningKeyRoutes {
 
   async revokeProvisioningKey(id: string): Promise<HubResult<'revoked' | 'absent'>> {
     this.revokes.push(id);
+    await this.beforeRevoke?.();
     const override = this.revokeAnswer?.(id);
     if (override !== undefined) return override;
     const key = this.keys.find((k) => k.id === id);
@@ -167,7 +192,10 @@ class FakeHub implements HubClient, ProvisioningKeyRoutes {
   }
 
   async provisioningKeys(): Promise<HubResult<{ keys: ProvisioningKey[] }>> {
-    return this.listAnswer?.() ?? { ok: true, value: { keys: this.keys.map(listed) } };
+    // the list as it stands when asked, answered once the test lets it
+    const keys = this.keys.map(listed);
+    await this.beforeList?.();
+    return this.listAnswer?.() ?? { ok: true, value: { keys } };
   }
 
   key(id: string | null | undefined) {
@@ -199,13 +227,15 @@ class FakeHub implements HubClient, ProvisioningKeyRoutes {
     throw new Error('unused');
   }
 }
+/** The requests `as` records. */
+const REQUESTS = new Set(['postState', 'chain', 'mintProvisioningKey', 'renewProvisioningKey', 'revokeProvisioningKey', 'provisioningKeys']);
 const listed = ({ id, label, prefix, created, expires, max_uses, uses, revoked }: ProvisioningKey): ProvisioningKey => ({ id, label, prefix, created, expires, max_uses, uses, revoked });
 
 // ---- the fake gcloud (Task 3's, with a call that waits for the test) ----
 
 // One line of argv per call, stdin appended to stdin.log. What it does is read from `act-<op>`: `ok` (the default),
 // `fail:<line>` (after reading stdin), `early:<line>` (before reading it), `wait` (writes `waiting-<op>`, then answers
-// as `ok` once `release-<op>` exists).
+// as `ok` once `release-<op>` exists), `hold` (its stdin left unread, its pid in `hold-<op>.pid`, until it is killed).
 const FAKE = `#!/bin/sh
 dir=$(cd "$(dirname "$0")" && pwd)
 { printf 'gcloud'; for a in "$@"; do printf ' %s' "$a"; done; printf '\\n'; } >> "$dir/argv.log"
@@ -220,6 +250,7 @@ esac
 act=$(cat "$dir/act-$op" 2>/dev/null || echo ok)
 case "$act" in
   early:*) printf 'ERROR: (gcloud.%s) %s\\n' "$op" "\${act#early:}" >&2; exit 1 ;;
+  hold) echo $$ > "$dir/hold-$op.pid"; exec sleep 30 ;;
 esac
 cat >> "$dir/stdin.log"
 case "$act" in
@@ -253,6 +284,10 @@ type Harness = {
   during: (() => Promise<void> | void) | null;
   /** The answers every create, rewrite and hub half gave, kept to search for the code. */
   answers: unknown[];
+  /** Every code holder handed to gcloud's \`versions add\`. */
+  codes: ProvisioningCode[];
+  /** When set, gcloud's resolver waits on it (a test holds a step's resolver open). */
+  resolving: (() => Promise<void>) | null;
   online: boolean;
   signedIn: boolean;
   signIn: number;
@@ -293,11 +328,17 @@ async function harness(options: { destination?: ProvisioningSecret | null; gclou
   const hub = new FakeHub([g]);
   const logs: string[] = [];
   const registration: { signing?: true } = {};
-  const secrets = secretStore({
-    gcloud: () => resolveGcloud({ loginPath: async () => (options.gcloud === false ? join(profile, 'no-gcloud-here') : `${bin}:/usr/bin:/bin`), home: profile, fallbacks: [] }),
+  const resolver = { wait: null as (() => Promise<void>) | null };
+  const codes: ProvisioningCode[] = [];
+  const custody = secretStore({
+    gcloud: async () => {
+      await resolver.wait?.();
+      return resolveGcloud({ loginPath: async () => (options.gcloud === false ? join(profile, 'no-gcloud-here') : `${bin}:/usr/bin:/bin`), home: profile, fallbacks: [] });
+    },
     log: (line) => void logs.push(line),
     timeoutMs: 20_000,
   });
+  const secrets: typeof custody = { ...custody, addVersion: (dest, code, signal) => (codes.push(code), custody.addVersion(dest, code, signal)) };
 
   async function compose(held: HeldOrg, carried?: Partial<Harness>): Promise<Harness> {
     let commits: Promise<unknown> = Promise.resolve();
@@ -317,7 +358,8 @@ async function harness(options: { destination?: ProvisioningSecret | null; gclou
     });
     const session = heldOrgSession({} as SignedIn);
     held.onAdopted(() => session.changed());
-    const h = { profile, bin, hub, held, store, logs, prompts: [] as StepUpPrompt[], answer: { ok: true } as Confirmation, during: null, answers: carried?.answers ?? [], online: true, signedIn: true, signIn: carried?.signIn ?? 1 } as unknown as Harness;
+    const h = { profile, bin, hub, held, store, logs, prompts: [] as StepUpPrompt[], answer: { ok: true } as Confirmation, during: null, answers: carried?.answers ?? [], codes, online: true, signedIn: true, signIn: carried?.signIn ?? 1 } as unknown as Harness;
+    Object.defineProperty(h, 'resolving', { get: () => resolver.wait, set: (wait: (() => Promise<void>) | null) => void (resolver.wait = wait) });
     const stateSigner = await createStateSigner({
       key: (await keys()).app.stepUp,
       confirm: async (prompt) => {
@@ -331,14 +373,14 @@ async function harness(options: { destination?: ProvisioningSecret | null; gclou
       held: () => held,
       signer: () => stateSigner,
       marked: () => true,
-      hub: () => (h.online ? hub : null),
+      hub: () => (h.online ? hub.as(h.signIn) : null),
       store,
       deliveries: { obligation: () => null, send: async () => {} },
       settled: (slot) => h.part.settled(slot),
       log: (line) => void logs.push(line),
     });
     h.part = createDelegations({
-      context: () => (h.signedIn ? { hub: HUB_URL, self: SELF, head: held.head(), certificates: held.certificates(), client: h.online ? hub : null, signIn: h.signIn } : null),
+      context: () => (h.signedIn ? { hub: HUB_URL, self: SELF, head: held.head(), certificates: held.certificates(), client: h.online ? hub.as(h.signIn) : null, signIn: h.signIn } : null),
       standing: () => (h.signedIn ? null : { ok: false, reason: 'not-root', detail: 'this Mac is not signed in to the org' }),
       busy: () => false,
       signer: () => h.signer,
@@ -1042,4 +1084,210 @@ describe('the view\'s three row states', () => {
     ]);
     await h.close();
   });
+});
+
+// ---- the fix wave: each ending lands while the operation it ends is still out ----
+
+/** The pid the fake gcloud's `hold` wrote for `op`, once it is out. */
+async function heldPid(h: Harness, op: string): Promise<number> {
+  let pid = 0;
+  await until(async () => (pid = Number((await recorded(h, `hold-${op}.pid`)).trim()) || 0) > 0, `gcloud's ${op} to hold its stdin`);
+  return pid;
+}
+/** Whether `pid` is gone within a second. */
+async function gone(pid: number): Promise<boolean> {
+  for (let i = 0; i < 20; i++) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return false;
+}
+/** The provisioning-key requests (not the signer's chain reads) a credential other than `asked` carried. */
+const carriedBy = (h: Harness, asked: number) => h.hub.calls.filter((c) => c.credential !== asked && c.method !== 'chain');
+
+describe('the fix wave: custody ends with its run (I1)', () => {
+  type Ending = 'sign-out' | 'close' | 'discard';
+  const end = async (h: Harness, ending: Ending) => (ending === 'sign-out' ? h.signOut() : ending === 'close' ? h.close() : h.discard());
+
+  for (const ending of ['sign-out', 'close', 'discard'] as const) {
+    it(`${ending} while versions add's resolver is out: its holder dropped, no gcloud runs, nothing published`, async () => {
+      const h = await harness();
+      const held = gate();
+      h.during = () => void (h.resolving = held.wait); // after the preflight: the add's resolver is the next
+      const creating = h.create();
+      await held.reached;
+      await end(h, ending);
+      expect(h.codes).toHaveLength(1);
+      expect(() => h.codes[0].reveal(), 'dropped by the ending, the resolver still out').toThrow();
+      held.open();
+      expect(await creating).toMatchObject({ ok: false });
+      expect((await argv(h)).filter((line) => line.includes('versions add'))).toEqual([]);
+      expect(h.hub.posts).toEqual([]);
+      if (ending !== 'close') await h.close();
+    });
+
+    it(`${ending} while versions add's child holds its stdin unread: the child killed, its holder dropped, nothing published`, async () => {
+      const h = await harness();
+      await act(h, 'add', 'hold');
+      const creating = h.create();
+      const pid = await heldPid(h, 'add');
+      await end(h, ending);
+      expect(await creating).toMatchObject({ ok: false });
+      expect(await gone(pid)).toBe(true);
+      expect(() => h.codes[0].reveal()).toThrow();
+      expect(h.hub.posts).toEqual([]);
+      if (ending !== 'close') await h.close();
+    });
+  }
+
+  it("a sign-out and a sign-in again while publishHeld's post is out: custody went before the post; the ended run claims nothing, and nothing rides the new credential", async () => {
+    const h = await harness();
+    const held = gate();
+    h.hub.beforePost = held.wait;
+    const creating = h.create();
+    await held.reached;
+    const id = lastMinted(h)!.id;
+    expect(() => h.codes[0].reveal()).toThrow();
+    expect(await h.part.rewrite(id), 'no key pair left to write the code from').toMatchObject({ ok: false, reason: 'stale' });
+    const asked = h.signIn;
+    h.signOut();
+    h.signInAgain();
+    held.open();
+    const answer = await creating;
+    expect(answer, "the ended run's answer says so, not the publish's own").toMatchObject({ ok: false, reason: 'not-root', detail: expect.stringContaining('run ended') });
+    expect(answer).not.toHaveProperty('secret');
+    expect(h.hub.calls.find((c) => c.method === 'postState')?.credential).toBe(asked);
+    expect(carriedBy(h, asked).filter((c) => c.method !== 'postState')).toEqual([]);
+    await h.close();
+  });
+});
+
+describe('the fix wave: a create under way holds its key (I2)', () => {
+  it('Touch ID held open: the key it minted is no stray, and no Revoke takes it; the create then completes with it unrevoked', async () => {
+    const h = await harness();
+    const held = gate();
+    h.during = held.wait;
+    const creating = h.create();
+    await held.reached;
+    const id = lastMinted(h)!.id;
+    expect((await h.view()).strayKeys).toEqual([]);
+    expect(await h.part.revokeHub(id)).toMatchObject({ ok: false, reason: 'none' });
+    expect(h.hub.revokes).toEqual([]);
+    held.open();
+    expect(await creating).toMatchObject({ ok: true });
+    expect(h.hub.key(id)?.revoked).toBeNull();
+    expect(inEffect(h, id)).toBe(true);
+    await h.close();
+  });
+
+  it("while the mint is out: a key of its prefix minted since its start is held; another prefix's is a stray", async () => {
+    const h = await harness();
+    const held = gate();
+    h.hub.beforeMint = held.wait;
+    const creating = h.create();
+    await held.reached;
+    const id = lastMinted(h)!.id;
+    const other = { ...lastMinted(h)!, id: hex(), prefix: 'x-', token: 'unused' };
+    h.hub.keys.push(other);
+    expect((await h.view()).strayKeys.map((k) => k.id)).toEqual([other.id]);
+    expect(await h.part.revokeHub(id)).toMatchObject({ ok: false, reason: 'none' });
+    held.open();
+    expect(await creating).toMatchObject({ ok: true });
+    expect(h.hub.key(id)?.revoked).toBeNull();
+    await h.close();
+  });
+});
+
+describe('the fix wave: a hub continuation belongs to the sign-in that asked (I3)', () => {
+  it('a renew half deferred across a sign-out and a sign-in, and one queued behind it, run nothing under the new credential', async () => {
+    const h = await harness();
+    expect(await h.create()).toMatchObject({ ok: true });
+    const id = lastMinted(h)!.id;
+    const held = gate();
+    h.hub.beforeRenew = held.wait;
+    const first = h.part.renewHub(id);
+    const second = h.part.renewHub(id); // queued behind the first
+    await held.reached;
+    const asked = h.signIn;
+    h.signOut();
+    h.signInAgain();
+    held.open();
+    expect(await first).toMatchObject({ ok: false, reason: 'hub' });
+    expect(await second).toMatchObject({ ok: false, reason: 'hub' });
+    expect(h.hub.renews).toEqual([id]);
+    expect(carriedBy(h, asked)).toEqual([]);
+    expect((await h.view()).delegations[0].hubProblem).toBeNull();
+    await h.close();
+  });
+
+  it("the next sign-in's halves wait for none of the last one's: a Retry runs while the old half is still out", async () => {
+    const h = await harness();
+    expect(await h.create()).toMatchObject({ ok: true });
+    const id = lastMinted(h)!.id;
+    const held = gate();
+    h.hub.beforeRenew = () => {
+      h.hub.beforeRenew = null; // the old sign-in's renew alone is held
+      return held.wait();
+    };
+    const old = h.part.renewHub(id);
+    await held.reached;
+    h.signOut();
+    h.signInAgain();
+    // the head isn't ahead of the hub's key: the hub answers 409 not-renewed, then the key list says it is level
+    expect(await h.part.renewHub(id)).toEqual({ ok: true });
+    held.open();
+    expect(await old).toMatchObject({ ok: false, reason: 'hub' });
+    await h.close();
+  });
+
+  it("a key read out across a sign-out and a sign-in is adopted by neither: the new sign-in's own read stands", async () => {
+    const h = await harness();
+    const held = gate();
+    h.hub.beforeList = () => {
+      h.hub.beforeList = null;
+      return held.wait();
+    };
+    const old = h.part.readKeys();
+    await held.reached;
+    h.signOut();
+    h.signInAgain();
+    await h.hub.mintProvisioningKey({ label: 'cli', prefix: 'x-', ttl_s: 30 * 86_400 }); // a CLI's key, since the old read was asked
+    const minted = lastMinted(h)!.id;
+    await h.part.readKeys();
+    held.open();
+    await old;
+    expect(h.part.viewInputs().keys?.list.map((k) => k.id)).toEqual([minted]);
+    await h.close();
+  });
+
+  for (const which of ['discard', 'touch-id'] as const) {
+    it(`${which === 'discard' ? "Discard's revoke" : "a refused Touch ID's revoke"} deferred across a sign-out and a sign-in reads nothing under the new credential`, async () => {
+      const h = await harness();
+      const held = gate();
+      let pending: Promise<unknown>;
+      if (which === 'discard') {
+        await act(h, 'add', 'fail:INTERNAL: the backend is down');
+        expect(await h.create()).toMatchObject({ ok: false, reason: 'unsent' });
+        h.hub.beforeRevoke = held.wait;
+        pending = h.discard();
+      } else {
+        h.answer = { ok: false, reason: 'cancelled' };
+        h.hub.beforeRevoke = held.wait;
+        pending = h.create();
+      }
+      await held.reached;
+      const asked = h.signIn;
+      h.signOut();
+      h.signInAgain();
+      held.open();
+      await pending;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(carriedBy(h, asked)).toEqual([]);
+      await h.close();
+    });
+  }
 });
