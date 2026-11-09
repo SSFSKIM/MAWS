@@ -5,12 +5,18 @@
 // package's own verifiers throughout; the own-device pairing is signed through step-up.ts's state signer, which
 // endorses inside the one confirmation. M4b: the four machine kinds, each successor verified, each refusal row refused,
 // a re-enrollment's old key retired with the ref and owners kept, and a certified machine (a delegation's, through its
-// certificate) left to its delegation.
+// certificate) left to its delegation. M4c: the three delegation kinds, each successor verified; a renewal the checks
+// refuse (expired, shortened, past the hub's cap); a drop's certificates' retirements moved to revoked, its lines naming
+// the machines it certified.
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   base64urlEncode,
+  certificateViews,
   generateSigningKey,
   keyId,
+  MAX_PROVISIONING_KEY_TTL_S,
+  NEVER_OFFLINE,
+  NO_USE_CAP,
   signOrgState,
   signRecord,
   SIGNING_DOMAINS,
@@ -61,6 +67,9 @@ const ref16 = () => base64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
 /** M4b's refs: `mini` (B's), `studio` (this Mac's own), the dropped `gone`'s, and the certified `dc-vm1`'s. */
 let refs: Record<'mini' | 'studio' | 'gone' | 'vm', string>;
 let certificates: Certificates;
+/** M4c: the delegation `dc-`'s key, and the key `dc-vm1`'s certificate certifies. */
+let dcKey: SigningKey;
+let vmKey: SigningKey;
 
 beforeAll(async () => {
   d = {
@@ -75,10 +84,12 @@ beforeAll(async () => {
   const machine = await generateSigningKey();
   const studio = await generateSigningKey();
   const delegation = await generateSigningKey();
+  dcKey = delegation;
+  vmKey = await generateSigningKey();
   const delegationId = hex32();
   refs = { mini: ref16(), studio: ref16(), gone: ref16(), vm: `${delegationId}_${ref16()}` };
   const ref = refs.mini;
-  const cert: MachineCert = { org: ORG, machine: refs.vm, name: 'dc-vm1', pub: (await generateSigningKey()).pub, delegation: delegationId, use: 1, issued: iso(NOW - 86_400_000) };
+  const cert: MachineCert = { org: ORG, machine: refs.vm, name: 'dc-vm1', pub: vmKey.pub, delegation: delegationId, use: 1, issued: iso(NOW - 86_400_000) };
   certificates = { certs: [await signRecord(SIGNING_DOMAINS.machineCert, cert, delegation.privateKey, delegation.pub)], retirements: [] };
   const state: OrgState = {
     org: ORG,
@@ -429,6 +440,118 @@ describe('the machine composers (M4b)', () => {
       await expect(Promise.resolve().then(() => edit.apply(draft)), change.kind).rejects.toBeInstanceOf(StaleEdit);
       await expect(composeOn(await signOrgState(draft, [d.mac.stepUp!]), change, HERE()), change.kind).rejects.toBeInstanceOf(StaleEdit);
     }
+  });
+});
+
+describe('the delegation composers (M4c)', () => {
+  const DAY = 86_400_000;
+  const dc = () => head.state.delegations[0];
+  /** `head` with `dc-`'s expiry moved to `expires`, signed as it stands (a head the checks judge a renewal against). */
+  async function headExpiring(expires: string): Promise<SignedOrgState> {
+    const state = structuredClone(head.state);
+    state.delegations[0].expires = expires;
+    return signOrgState(state, [d.mac.stepUp!]);
+  }
+  /** A certificate of `dc-` for `name`, signed by its key. */
+  async function dcCertificate(name: string): Promise<{ cert: Certificates['certs'][number]; key: SigningKey }> {
+    const key = await generateSigningKey();
+    const body: MachineCert = { org: ORG, machine: `${dc().id}_${ref16()}`, name, pub: key.pub, delegation: dc().id, use: 2, issued: iso(NOW - 3_600_000) };
+    return { key, cert: await signRecord(SIGNING_DOMAINS.machineCert, body, dcKey.privateKey, dcKey.pub) };
+  }
+
+  it('delegation.add: the delegation listed as the create transaction minted it, the lines naming its prefix, expiry, uses and owners', async () => {
+    const key = await generateSigningKey();
+    const id = hex32();
+    const expires = iso(NOW + 30 * DAY);
+    const change: OrgChange = { kind: 'delegation.add', id, pub: key.pub, prefix: 'nb-', expires, maxUses: NO_USE_CAP, offlineRevokeS: NEVER_OFFLINE, owners: [A] };
+    const edit = await compose(change);
+    const { draft, problems, verdict } = await judged(head, edit);
+    expect(problems).toEqual([]);
+    expect(verdict).toBe('ok');
+    expect(draft.delegations.at(-1)).toEqual({ id, pub: key.pub, prefix: 'nb-', expires, maxUses: NO_USE_CAP, offlineRevokeS: NEVER_OFFLINE, owners: [A] });
+    expect(draft.delegations).toHaveLength(2);
+    expect(await checked(head, edit)).toEqual([]);
+    const words = edit.lines.join('\n');
+    expect(edit.summary).toBe('create delegation nb-');
+    expect(words).toContain(`delegation ${id}`);
+    expect(words).toContain(await keyId(key.pub));
+    expect(words).toContain(expires.slice(0, 10));
+    expect(words).toContain('no use limit');
+    expect(words).toContain('owner@example.com');
+    // a cap and the org as owners, in words
+    const capped = await compose({ ...change, id: hex32(), prefix: 'nc-', maxUses: 5, owners: 'org' });
+    expect(capped.lines.join('\n')).toContain('at most 5 times');
+    expect(capped.lines.join('\n')).toContain('the org (its admins)');
+    expect((await judged(head, capped)).verdict).toBe('ok');
+  });
+
+  it('delegation.renew: only its expires moves, and the lines name the new and the old expiry', async () => {
+    const expires = iso(NOW + 60 * DAY);
+    const edit = await compose({ kind: 'delegation.renew', id: dc().id, expires });
+    const { draft, problems, verdict } = await judged(head, edit);
+    expect(problems).toEqual([]);
+    expect(verdict).toBe('ok');
+    expect(draft.delegations).toEqual([{ ...dc(), expires }]);
+    expect(await checked(head, edit)).toEqual([]);
+    expect(edit.summary).toBe('renew delegation dc-');
+    expect(edit.lines[0]).toContain(expires.slice(0, 10));
+    expect(edit.lines[0]).toContain(dc().expires.slice(0, 10));
+  });
+
+  it('delegation.renew: refused for no change; the checks refuse an expired, a shortened and a past-the-cap renewal', async () => {
+    expect(await refusal(compose({ kind: 'delegation.renew', id: dc().id, expires: dc().expires }))).toEqual(['refuse:no-change']);
+    const expired = await headExpiring(iso(NOW - DAY));
+    expect(await checked(expired, await composeOn(expired, { kind: 'delegation.renew', id: dc().id, expires: iso(NOW + 30 * DAY) }))).toContain('renew-expired');
+    expect(await checked(head, await compose({ kind: 'delegation.renew', id: dc().id, expires: iso(NOW + 10 * DAY) }))).toEqual(['renew-not-extension']);
+    const cap = NOW + MAX_PROVISIONING_KEY_TTL_S * 1000;
+    expect(await checked(head, await compose({ kind: 'delegation.renew', id: dc().id, expires: iso(cap) }))).toEqual([]);
+    expect(await checked(head, await compose({ kind: 'delegation.renew', id: dc().id, expires: iso(cap + 1000) }))).toEqual(['renew-past-cap']);
+  });
+
+  it("delegation.drop: its key revoked by id and prefix, its certificates' retired entries moved to revoked, the lines naming its machines", async () => {
+    // `dc-vm1` retired by an admin (its key under its ref), `dc-vm2` live, and `dc-vm3` already revoked
+    const [vm2, vm3] = [await dcCertificate('dc-vm2'), await dcCertificate('dc-vm3')];
+    const draft = await successorDraft(head, NOW - 60_000);
+    draft.retired.push({ keyId: await keyId(vmKey.pub), pub: vmKey.pub, notAfter: draft.issued, holder: { machine: refs.vm } });
+    draft.revoked.push({ keyId: await keyId(vm3.key.pub), holder: { machine: vm3.cert.body.machine } });
+    const at = await signOrgState(draft, [d.mac.stepUp!]);
+    const held: Certificates = { certs: [...certificates.certs, vm2.cert, vm3.cert], retirements: [] };
+    const edit = await composeChange(at.state, normalizeChange({ kind: 'delegation.drop', id: dc().id }), SELF, held);
+    const { draft: next, problems, verdict } = await judged(at, edit);
+    expect(problems).toEqual([]);
+    expect(verdict).toBe('ok');
+    expect(next.delegations).toEqual([]);
+    expect(next.retired).toEqual([]);
+    expect(next.revoked).toEqual([
+      { keyId: await keyId(vm3.key.pub), holder: { machine: vm3.cert.body.machine } },
+      { keyId: await keyId(dcKey.pub), holder: { delegation: dc().id, prefix: 'dc-' } },
+      { keyId: await keyId(vmKey.pub), holder: { machine: refs.vm } },
+    ]);
+    // the retired certificate's key now reads revoked, as the head judges it
+    expect((await certificateViews(next, held, new Date(NOW))).find((v) => v.ref === refs.vm)?.state).toBe('revoked');
+    expect(edit.summary).toBe('drop delegation dc-');
+    const words = edit.lines.join('\n');
+    expect(words).toContain('dc-vm1');
+    expect(words).toContain('dc-vm2');
+    expect(words).not.toContain('dc-vm3');
+    expect(words).toContain('reserved');
+    expect(words).toContain(await keyId(vmKey.pub));
+    // the checks warn, naming the machines, without refusing
+    const findings = await checkSuccessor(at.state, await drafted(at, edit), [], new Date(NOW), { certificates: held });
+    expect(findings.map((f) => `${f.level}:${f.code}`)).toEqual(['warn:drops-delegation']);
+    expect(findings[0].detail).toContain('dc-vm1 (retired)');
+    expect(findings[0].detail).toContain('dc-vm2 (live)');
+  });
+
+  it('delegation.renew and delegation.drop of a delegation the draft no longer holds read `stale`', async () => {
+    const id = dc().id;
+    for (const change of [{ kind: 'delegation.renew', id, expires: iso(NOW + 60 * DAY) }, { kind: 'delegation.drop', id }] as OrgChange[]) {
+      const edit = await compose(change);
+      const draft = await successorDraft(head, NOW);
+      draft.delegations = [];
+      await expect(edit.apply(draft), change.kind).rejects.toBeInstanceOf(StaleEdit);
+    }
+    await expect(compose({ kind: 'delegation.drop', id: hex32() })).rejects.toBeInstanceOf(StaleEdit);
   });
 });
 

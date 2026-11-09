@@ -620,7 +620,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     if (unlisted !== undefined) return { ok: false, reason: 'invalid', detail: `the edit names device ${unlisted.device} to endorse, which the successor doesn't list under that member` };
 
     const endorsing = endorse.length === 0 ? undefined : { kid: signer.kid, devices: endorse.map((e) => e.device) };
-    const findings = await checkSuccessor(head.state, draft, view.superseded(), new Date(now()), endorsing === undefined ? {} : { endorsing });
+    const findings = await checkSuccessor(head.state, draft, view.superseded(), new Date(now()), { certificates: view.certificates(), ...(endorsing === undefined ? {} : { endorsing }) });
     if (findings.some((f) => f.level === 'refuse')) return { ok: false, reason: 'refused', findings };
     const text = [
       `Org ${draft.org}: version ${head.state.version} → ${draft.version}`,

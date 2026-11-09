@@ -972,7 +972,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     found.edit(draft);
     const before = new Set(head.state.revoked.map((r) => r.keyId));
     const superseded = draft.revoked.filter((r) => !before.has(r.keyId)).length;
-    const warnings = found.lines.length === 0 ? [] : (await checkSuccessor(head.state, draft, view.superseded(), new Date(at))).filter((x) => x.level === 'warn').map((x) => x.detail);
+    const warnings = found.lines.length === 0 ? [] : (await checkSuccessor(head.state, draft, view.superseded(), new Date(at), { certificates: view.certificates() })).filter((x) => x.level === 'warn').map((x) => x.detail);
     const withheld = found.withheld.map((w) => `${describeHolder(head.state, w.holder)} (${w.keyId})`);
     const digest = await digestOf(canonicalize({ lines: found.lines, warnings, withheld }));
     return { shown: { superseded, lines: [...found.lines], warnings, withheld, digest }, offer: found };
@@ -1116,17 +1116,22 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       if (error instanceof StaleEdit) return { ok: false, reason: 'stale', detail: error.message, findings: [] };
       return { ok: false, reason: 'invalid', detail: (error as Error).message, findings: [] };
     }
-    const findings = await checkSuccessor(head.state, draft, superseded, new Date(at));
+    const findings = await checkSuccessor(head.state, draft, superseded, new Date(at), { certificates: view.certificates() });
     if (findings.some((f) => f.level === 'refuse')) return { ok: false, reason: 'refused', findings };
     const warnings = findings.filter((f) => f.level === 'warn').map((f) => f.detail);
     return { ok: true, edit, warnings, digest: await digestOf(canonicalize({ change, lines: edit.lines, warnings })) };
   }
 
-  /** M4b: a machine is listed only by an enrollment's approval, which composes it from the key it checked. */
+  /**
+   * M4b: a machine is listed only by an enrollment's approval, which composes it from the key it checked. M4c: a
+   * delegation is listed only by the create transaction, which stores its code before it publishes.
+   */
   const enrolledOnly = (change: OrgChange): Refused | null =>
     change.kind === 'machine.add' || change.kind === 'machine.replace'
       ? { ok: false, reason: 'invalid', detail: "a machine is enrolled through Enroll, which checks the machine's key: nothing was composed", findings: [] }
-      : null;
+      : change.kind === 'delegation.add'
+        ? { ok: false, reason: 'invalid', detail: 'a delegation is created through Create…, which stores its code: nothing was composed', findings: [] }
+        : null;
 
   async function preview(raw: OrgChange): Promise<PreviewResult> {
     const standing = changeStanding() ?? enrolledOnly(raw);

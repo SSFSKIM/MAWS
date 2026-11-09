@@ -2687,6 +2687,33 @@ describe('M4b: the machine changes', () => {
   });
 });
 
+describe('M4c: the delegation changes', () => {
+  it('a delegation is created only through Create…: delegation.add from the page is refused before anything composes', async () => {
+    const { session } = await signingRoot();
+    const change = { kind: 'delegation.add', id: memberId(), pub: (await generateSigningKey()).pub, prefix: 'dc-', expires: iso(Date.now() + 30 * DAY), maxUses: 10, offlineRevokeS: 0, owners: [A] } as const;
+    const [posts, prompts] = [hub.posted.length, signing.prompts.length];
+    expect(await session.preview(change)).toMatchObject({ ok: false, reason: 'invalid', detail: expect.stringContaining('Create'), findings: [] });
+    expect(await session.change(change, 'A'.repeat(43))).toMatchObject({ ok: false, reason: 'invalid', detail: expect.stringContaining('Create') });
+    expect([hub.posted.length, signing.prompts.length]).toEqual([posts, prompts]);
+  });
+
+  it("a drop's preview names the machines the delegation certified, from the held certificates, in its lines and its warning", async () => {
+    const { session, feed } = await signingRoot();
+    const delegation = await generateSigningKey();
+    const id = memberId();
+    hub.chain.push(await successor(hub.head, [a1], (s) => void s.delegations.push({ id, pub: delegation.pub, prefix: 'dc-', expires: iso(Date.now() + 30 * DAY), maxUses: 10, offlineRevokeS: 0, owners: [A] })));
+    const certRef = `${id}_${base64urlEncode(crypto.getRandomValues(new Uint8Array(16)))}`;
+    hub.certificates = { certs: [await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: certRef, name: 'dc-vm1', pub: (await generateSigningKey()).pub, delegation: id, use: 1, issued: iso(Date.now() - HOUR) }, delegation.privateKey, delegation.pub)], retirements: [] };
+    feed.state(hub.head.state.version);
+    await until(async () => (await session.view())?.machines.length === 1, 'the certified machine');
+    const preview = await session.preview({ kind: 'delegation.drop', id });
+    if (!preview.ok) throw new Error(JSON.stringify(preview));
+    expect(preview.lines.join('\n')).toContain('dc-vm1');
+    expect(preview.warnings).toHaveLength(1);
+    expect(preview.warnings[0]).toContain('dc-vm1 (live)');
+  });
+});
+
 describe('M4b: a drop that settles later (the fix wave)', () => {
   /** `mini` dropped while the hub answers its post `answer`: signed and kept, unsettled, its row untouched. */
   async function pendingDrop(over: Overrides = {}, answer: () => Answer = () => worker(503, { error: 'hub-updating' })) {

@@ -223,6 +223,10 @@ const OrgMachineRefSchema = z.string().min(1).max(64);
 const PubSchema = z.string().min(1).max(256);
 /** A machine's owners: member ids, or `'org'` (its admins). An empty list is the package's `shape`, refused before Touch ID. */
 const OwnersSchema = z.union([z.array(MemberIdSchema).max(256), z.literal('org')]);
+/** M4c: a delegation as the org state names it: its id is the hub's provisioning key's (32 lowercase hex). */
+const DelegationIdSchema = z.string().regex(/^[0-9a-f]{32}$/);
+/** An instant as the org state writes one (ISO 8601 UTC with milliseconds, the package's `isIsoMillis`). */
+const IsoMillisSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
 /**
  * M4a: a change the Org page asks for (src/main/org/edits.ts composes each). `member.add`'s `id` is set by the preview,
  * so the id signed is the id shown; a change sent without it reads `stale`.
@@ -239,6 +243,20 @@ export const OrgChangeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('machine.replace'), ref: OrgMachineRefSchema, pub: PubSchema }),
   z.strictObject({ kind: z.literal('machine.owners'), ref: OrgMachineRefSchema, owners: OwnersSchema }),
   z.strictObject({ kind: z.literal('machine.drop'), ref: OrgMachineRefSchema, revoke: z.boolean() }),
+  // M4c: `delegation.add` is the create transaction's alone (org.delegation.create), composed from the key it minted and
+  // the key pair it made; org.change and its preview refuse it, so a delegation is never signed outside its custody
+  z.strictObject({
+    kind: z.literal('delegation.add'),
+    id: DelegationIdSchema,
+    pub: PubSchema,
+    prefix: MachineNameSchema,
+    expires: IsoMillisSchema,
+    maxUses: z.number().int().positive(),
+    offlineRevokeS: z.number().int().nonnegative(),
+    owners: OwnersSchema,
+  }),
+  z.strictObject({ kind: z.literal('delegation.renew'), id: DelegationIdSchema, expires: IsoMillisSchema }),
+  z.strictObject({ kind: z.literal('delegation.drop'), id: DelegationIdSchema }),
 ]);
 export type OrgChange = z.infer<typeof OrgChangeSchema>;
 

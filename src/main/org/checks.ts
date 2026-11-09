@@ -4,9 +4,10 @@
 // Touch ID, M4a's included.
 //
 // `checkSuccessor` names, before a fingerprint is asked for, what the package's `verifySuccessor` would refuse after it,
-// what P5 adds on top (a renewal must extend), and what the owner should see in the prompt (a dropped delegation,
-// revocations a recovery lost). The package's own pre-sign function, `successorProblems`, runs first: every check
-// `verifySuccessor` makes but the signatures, each problem a refusal by the package's code (a revoked key made current,
+// what P5 adds on top (a renewal must extend, and M4c: stay within what the hub's key renewal admits), and what the
+// owner should see in the prompt (a dropped delegation, with the machines it certified; revocations a recovery lost).
+// The package's own pre-sign function, `successorProblems`, runs first: every check `verifySuccessor` makes but the
+// signatures, each problem a refusal by the package's code (a revoked key made current,
 // an empty root set, a member, email or device id taken, a later device unendorsed, a key unaccounted for, …), a new
 // delegation's prefix collision named by its direction (`prefix-equal`, `prefix-nested`, `prefix-covers`; M4c moved the
 // rule into the package, so it is held once). Then this module's own rows: the renewal rules, the dropped delegation's
@@ -20,8 +21,11 @@
 //
 // Electron-free: vitest's node project runs it.
 import {
+  certificateViews,
   keyId,
+  MAX_PROVISIONING_KEY_TTL_S,
   successorProblems,
+  type Certificates,
   type Delegation,
   type Device,
   type KeyHolder,
@@ -34,7 +38,7 @@ import {
 } from '../../../apps/org-protocol/src/index.ts';
 
 /** This module's own rows. The package's codes (`ProblemCode`) arrive beside them. */
-export type CheckCode = 'renew-expired' | 'renew-not-extension' | 'drops-delegation' | 'superseded-keys';
+export type CheckCode = 'renew-expired' | 'renew-not-extension' | 'renew-past-cap' | 'drops-delegation' | 'superseded-keys';
 /**
  * What a change may not do whatever the state says (edits.ts's composers, M4a): change or remove yourself, remove this
  * Mac's own device or its member, sign a change that changes nothing, take an email outside the grammar, make a root of
@@ -57,8 +61,10 @@ export type SupersededOffer = {
 /**
  * `endorsing`: the devices the signer endorses inside the same Touch ID that signs the state, under its step-up key
  * `kid` (the package counts each as endorsed when `kid` is one of its member's own step-up keys in `head`).
+ * `certificates`: the held certificate set (M4c), from which a dropped delegation's warning names the machines it
+ * certified; none when absent.
  */
-export type CheckOptions = { endorsing?: { kid: string; devices: string[] } };
+export type CheckOptions = { endorsing?: { kid: string; devices: string[] }; certificates?: Certificates };
 
 const refuse = (code: FindingCode, detail: string): Finding => ({ level: 'refuse', code, detail });
 const warn = (code: FindingCode, detail: string): Finding => ({ level: 'warn', code, detail });
@@ -70,7 +76,7 @@ const warn = (code: FindingCode, detail: string): Finding => ({ level: 'warn', c
  */
 export async function checkSuccessor(head: OrgState, next: OrgState, superseded: readonly SignedOrgState[], now: Date, options: CheckOptions = {}): Promise<Finding[]> {
   const problems = await successorProblems(head, next, options.endorsing === undefined ? {} : { endorsing: options.endorsing });
-  const own = [...delegationFindings(head, next, now), ...(await supersededLeftOut(head, next, superseded))];
+  const own = [...(await delegationFindings(head, next, now, options.certificates ?? { certs: [], retirements: [] })), ...(await supersededLeftOut(head, next, superseded))];
   const seen = new Set<string>();
   return [...problems.map((p) => refuse(p.code, p.detail ?? p.code)), ...own].filter((f) => {
     const key = `${f.level}|${f.code}|${f.detail}`;
@@ -119,7 +125,7 @@ export function describeHolder(state: OrgState, holder: RevokedKey['holder']): s
  * same id, key and prefix (which the package never lets change). Prefix and id collisions are the package's
  * (`successorProblems`), named by direction for a new delegation.
  */
-function delegationFindings(head: OrgState, next: OrgState, now: Date): Finding[] {
+async function delegationFindings(head: OrgState, next: OrgState, now: Date, certificates: Certificates): Promise<Finding[]> {
   const findings: Finding[] = [];
   const held = new Map(head.delegations.map((d) => [d.id, d]));
   const isNew = (d: Delegation) => {
@@ -128,22 +134,36 @@ function delegationFindings(head: OrgState, next: OrgState, now: Date): Finding[
   };
 
   // Renewals: a kept delegation's `expires` moves only while both values are later than the successor (`keysAccounted`)
-  // and the clock, and only forward (P5 Decision Log 30: renewal extends).
+  // and the clock, only forward (P5 Decision Log 30: renewal extends), and never past what the hub's renewal admits:
+  // now + MAX_PROVISIONING_KEY_TTL_S, the cap a new key has. The hub judges that cap against its own clock when the
+  // renewal reaches it, after the signer settled the state; a `409 too-long` there after a delayed settlement heals with
+  // time, since Retry calls the route alone and the hub's clock catches up with the `now` judged here.
   const at = [next.issued, now.toISOString()].sort()[1];
+  const cap = new Date(now.getTime() + MAX_PROVISIONING_KEY_TTL_S * 1000).toISOString();
   for (const was of head.delegations) {
     const kept = next.delegations.find((d) => d.id === was.id && !isNew(d));
     if (kept === undefined) {
-      if (!next.delegations.some((d) => d.id === was.id)) {
-        findings.push(warn('drops-delegation', `delegation ${was.id} (prefix ${was.prefix}) is dropped: its key and its certificates' keys are revoked, and its id and prefix stay reserved`));
-      }
+      if (!next.delegations.some((d) => d.id === was.id)) findings.push(warn('drops-delegation', await dropWarning(head, was, certificates, now)));
       continue;
     }
     if (kept.expires === was.expires) continue;
     if (was.expires <= at) findings.push(refuse('renew-expired', `delegation ${was.id} (prefix ${was.prefix}) expired at ${was.expires}: only a live delegation is renewed`));
     else if (kept.expires <= at) findings.push(refuse('renew-expired', `delegation ${was.id} (prefix ${was.prefix}) would expire at ${kept.expires}, not later than ${at}`));
     else if (kept.expires <= was.expires) findings.push(refuse('renew-not-extension', `delegation ${was.id} (prefix ${was.prefix}) would expire at ${kept.expires}, not later than its ${was.expires}: a renewal extends`));
+    else if (kept.expires > cap) findings.push(refuse('renew-past-cap', `delegation ${was.id} (prefix ${was.prefix}) would expire at ${kept.expires}, past ${cap}, the furthest the hub renews its key to`));
   }
   return findings;
+}
+
+/**
+ * A dropped delegation's warning: its key revoked, so its certificates no longer verify; the machines they certified,
+ * each live or retired as the head judges its certificate (`certificateViews`; one it refuses reads "not live"), those
+ * the head already revokes left out; and its id and prefix reserved for good (`prefixProblem` refuses either again).
+ */
+async function dropWarning(head: OrgState, dropped: Delegation, certificates: Certificates, now: Date): Promise<string> {
+  const views = (await certificateViews(head, { certs: certificates.certs.filter((c) => c.body.delegation === dropped.id), retirements: certificates.retirements }, now)).filter((v) => v.state !== 'revoked');
+  const machines = views.length === 0 ? 'no machine holds a certificate of it' : `the machines it certified leave the org: ${views.map((v) => `${v.name} (${v.state === 'live' || v.state === 'retired' ? v.state : 'not live'})`).join(', ')}`;
+  return `delegation ${dropped.id} (prefix ${dropped.prefix}) is dropped: its key is revoked, so its certificates no longer verify, and ${machines}; its id and its prefix stay reserved for good`;
 }
 
 // --- The superseded states' revocations -------------------------------------------------------------------------------
