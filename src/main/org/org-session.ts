@@ -590,7 +590,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       stepUpKid: facts.stepUpKid,
       due: c?.weekly.due() ?? false,
       ageDays: Math.floor((now() - Date.parse(head.issued)) / DAY_MS),
-      pending: slot === null ? null : { version: slot.version, hash: slot.hash, fork: slot.fork, exposed: slot.exposed, refused: slot.refused, delegation: slotDelegation(slot.unsent, file, head) },
+      pending: slot === null ? null : { version: slot.version, hash: slot.hash, fork: slot.fork, exposed: slot.exposed, refused: slot.refused, delegation: slotDelegation(slot.unsent, file, head), held: slot.unsent !== null },
       offer,
       owing: c?.deliveries.owing() ?? [],
       abandoned: file === undefined || file === 'damaged' ? [] : file.abandoned.map((a) => ({ hash: a.hash, version: a.version, hub: a.hub, machines: [...a.machines] })),

@@ -86,6 +86,13 @@ export type SignOptions = { beforePrompt?(): Promise<boolean> };
  */
 export type HeldSigned = { ok: true; version: number; hash: string };
 
+/**
+ * M4c: `publishHeld`'s outcome. `published` is set only once this call's own update cleared the slot's marker, whatever
+ * the post then answered: positive provenance that it published, which a slot merely gone afterwards (a Discard queued
+ * ahead, a replacement) never gives.
+ */
+export type PublishOutcome = SignOutcome & { published?: true };
+
 export type SignOutcome =
   | { ok: true; version: number }
   | HeldSigned
@@ -122,9 +129,10 @@ export interface OrgSigner {
    * M4c: sends the held slot `hash` names. One update clears its marker (refused `stale`, changing nothing, when the slot
    * is gone, is another, is no longer held, or was held by a run that has ended: a sign-out, a close or a relaunch since
    * its held sign leaves it Discard-only); then the normal post path, whose outcome it answers. Once the marker is
-   * cleared the slot is an ordinary pending one: a post that fails or is cut off leaves it to settlement.
+   * cleared the slot is an ordinary pending one: a post that fails or is cut off leaves it to settlement, and the outcome
+   * says `published` (PublishOutcome).
    */
-  publishHeld(hash: string): Promise<SignOutcome>;
+  publishHeld(hash: string): Promise<PublishOutcome>;
   /** The slot's three rules. The session calls it at start and at each feed open; `sign` calls it first. */
   settle(): Promise<void>;
   /** Only after the owner's confirmation of the proposal `hash` names, and only while the hub's chain doesn't hold it. */
@@ -548,7 +556,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
    * writes exposure first. So a caller whose slot is gone publishes nothing, and an end between the two steps (a crash, a
    * sign-out, a close) leaves an ordinary unexposed pending slot that the next settlement posts.
    */
-  async function publishLocked(named: string, asked: number): Promise<SignOutcome> {
+  async function publishLocked(named: string, asked: number): Promise<PublishOutcome> {
     const unpublished = 'nothing was published';
     if (!live(asked)) return stopped(unpublished);
     if (deps.session.current() === null) return { ok: false, reason: 'not-root', detail: 'this Mac is not signed in to the org' };
@@ -571,7 +579,13 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     heldHere = null;
     log(`version ${cleared.state.version} published by its caller: its marker is cleared, and it is posted`);
     refreshed();
-    return post(cleared, asked);
+    // From here on it is published, whatever the post answers: a store that fails now leaves an ordinary pending slot.
+    try {
+      return { ...(await post(cleared, asked)), published: true };
+    } catch (error) {
+      log(`posting version ${cleared.state.version} failed: ${(error as Error).message}`);
+      return { ok: false, reason: 'signing', detail: (error as Error).message, published: true };
+    }
   }
 
   /** The refusal before anything is composed, or null. */

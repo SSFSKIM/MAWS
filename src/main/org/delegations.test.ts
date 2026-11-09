@@ -531,7 +531,7 @@ describe('the create transaction', () => {
     expect(DelegationResultSchema.parse(answer)).toEqual(answer);
     const minted = lastMinted(h)!;
     expect(h.hub.mints).toEqual([{ label: 'devcloud VMs', prefix: 'dc-', ttl_s: 30 * 86_400 }]); // uncapped: no max_uses
-    expect(answer).toEqual({ ok: true, version: 2, secret: { version: '7', createTime: '2026-11-08T12:00:00.123Z' }, run: { generation: 1, id: minted.id, hash: expect.any(String) } });
+    expect(answer).toEqual({ ok: true, version: 2, secret: { version: '7', createTime: '2026-11-08T12:00:00.123Z' }, run: { generation: 1, id: minted.id, hash: expect.any(String) }, rev: h.part.status().rev });
     // one Touch ID, naming the destination in its lines
     expect(h.prompts).toHaveLength(1);
     expect(h.prompts[0].summary).toBe('create delegation dc-');
@@ -1360,6 +1360,43 @@ describe("Task 5's fix wave: every answer names its run and its phase (I1, I4)",
     expect(h.signer.pending()?.unsent).toEqual({ kind: 'delegation', id: replaced.id });
     // the replacement's own identity writes it
     expect(await h.part.rewrite({ generation: replaced.generation, id: replaced.id!, hash: replaced.hash! })).toMatchObject({ ok: true, run: { generation: 2, id: replaced.id } });
+    await h.close();
+  });
+});
+
+describe("Task 5's fix wave 2: an answer's finality", () => {
+  it('a Discard queued ahead of the publish answers discarded, never published: nothing is posted, the slot stays gone', async () => {
+    const h = await harness();
+    const publishHeld = h.signer.publishHeld;
+    // Another window's Discard reaches the signer's queue first: by the publish's turn the slot is gone.
+    h.signer.publishHeld = async (hash) => {
+      await h.discard();
+      return publishHeld(hash);
+    };
+    const answer = await h.create();
+    expect(DelegationResultSchema.parse(answer)).toEqual(answer);
+    expect(answer).toMatchObject({ ok: false, reason: 'stale', phase: 'discarded', stored: true, run: { generation: 1 } });
+    expect((answer as Extract<DelegationResult, { ok: false }>).detail).toMatch(/discarded or replaced before its publish.*nothing was published/);
+    expect(h.signer.pending()).toBeNull();
+    expect(h.hub.posts).toEqual([]);
+    h.signer.publishHeld = publishHeld;
+    await h.close();
+  });
+
+  it('an answer that ran carries the status revision published after its final slot; one refused at once, the revision standing', async () => {
+    const h = await harness();
+    await act(h, 'add', 'fail:INTERNAL: down');
+    const before = h.part.status().rev;
+    const held = await h.create();
+    expect(held).toMatchObject({ ok: false, phase: 'held', rev: h.part.status().rev });
+    expect(held.rev).toBeGreaterThan(before);
+    const refused = await h.create({ prefix: 'ci-' }); // a signed state is pending: refused before anything changed
+    expect(refused).toMatchObject({ ok: false, reason: 'pending', phase: 'refused', run: null, rev: h.part.status().rev });
+    expect(refused.rev).toBe(held.rev);
+    await act(h, 'add', 'ok');
+    const written = await h.rewrite(lastMinted(h)!.id);
+    expect(written).toMatchObject({ ok: true, rev: h.part.status().rev });
+    expect(written.rev).toBeGreaterThan(held.rev);
     await h.close();
   });
 });

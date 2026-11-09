@@ -39,7 +39,7 @@ import { startHeldOrg, type HeldOrg } from './held';
 import type { HubClient, HubResult, Served } from './hub-client';
 import { heldOrgSession, type SignedIn } from './session';
 import { createOrgSigner, noChangeEdit, StaleEdit, type Edit, type OrgSigner, type SignerDeliveries } from './signer';
-import { createSigningStore, type SigningStore } from './signing-store';
+import { createSigningStore, SigningDamaged, type SigningStore } from './signing-store';
 import { startWeekly } from './weekly';
 
 const ORG = 'org-signer';
@@ -1116,7 +1116,7 @@ describe('an unsent slot (M4c: `Edit.hold`, `publishHeld`)', () => {
     const hash = await signHeld(h);
     const atPost: SigningFile[] = [];
     h.hub.beforePost = () => void atPost.push(h.disk()!);
-    expect(await h.signer.publishHeld(hash)).toEqual({ ok: true, version: 2 });
+    expect(await h.signer.publishHeld(hash)).toEqual({ ok: true, version: 2, published: true }); // its own word that it cleared the marker
     // The marker cleared first, in a write of its own; then exposure, before the POST; then the settled slot.
     expect(slotWrites(h)).toEqual([{ unsent: HOLD, hub: false }, { unsent: null, hub: false }, { unsent: null, hub: true }, null]);
     expect(atPost.map((f) => f.pending && { hash: f.pending.hash, unsent: f.pending.unsent, hub: f.pending.exposed.hub })).toEqual([{ hash, unsent: null, hub: true }]);
@@ -1144,26 +1144,32 @@ describe('an unsent slot (M4c: `Edit.hold`, `publishHeld`)', () => {
     expect(await h.signer.discardPending(true, first)).toMatchObject({ ok: true, marker: HOLD });
     const raw = () => readFileSync(join(h.dir, 'org', SIGNING_FILE), 'utf8');
 
-    // Discarded: no slot.
+    // Discarded: no slot, and no word of having published it (fix wave 2: a slot gone is no proof of publication).
     let before = raw();
-    expect(await h.signer.publishHeld(first)).toMatchObject({ ok: false, reason: 'stale' });
+    const discarded = await h.signer.publishHeld(first);
+    expect(discarded).toMatchObject({ ok: false, reason: 'stale' });
+    expect(discarded.published).toBeUndefined();
     expect(raw()).toBe(before);
 
     // Replaced: another held slot, which keeps its own marker.
     const second = await signHeld(h, heldEdit(await removeDevice('old'), 'dlg-two'));
     expect(second).not.toBe(first);
     before = raw();
-    expect(await h.signer.publishHeld(first)).toMatchObject({ ok: false, reason: 'stale' });
+    const replaced = await h.signer.publishHeld(first);
+    expect(replaced).toMatchObject({ ok: false, reason: 'stale' });
+    expect(replaced.published).toBeUndefined();
     expect(raw()).toBe(before);
     expect(h.disk()!.pending).toMatchObject({ hash: second, unsent: { kind: 'delegation', id: 'dlg-two' } });
     expect(h.hub.posts).toEqual([]);
 
     // Already published (the hub out of reach, so it stays an ordinary pending slot): a second publish changes nothing.
     h.online = false;
-    expect(await h.signer.publishHeld(second)).toMatchObject({ ok: false, reason: 'hub' });
+    expect(await h.signer.publishHeld(second)).toMatchObject({ ok: false, reason: 'hub', published: true }); // cleared, then the post failed
     expect(h.disk()!.pending).toMatchObject({ hash: second, unsent: null, exposed: { hub: false, machines: [] } });
     before = raw();
-    expect(await h.signer.publishHeld(second)).toMatchObject({ ok: false, reason: 'stale' });
+    const again = await h.signer.publishHeld(second);
+    expect(again).toMatchObject({ ok: false, reason: 'stale' });
+    expect(again.published).toBeUndefined(); // this call cleared nothing
     expect(raw()).toBe(before);
     expect(h.hub.posts).toEqual([]);
   });
@@ -1175,7 +1181,8 @@ describe('an unsent slot (M4c: `Edit.hold`, `publishHeld`)', () => {
     h.gates.write = (name, value) => {
       if (name === SIGNING_FILE && (value as SigningFile).pending?.exposed.hub === true) throw new Error('the app quit');
     };
-    expect(await h.signer.publishHeld(hash)).toMatchObject({ ok: false, reason: 'signing' });
+    // the marker is cleared: the outcome says it published (fix wave 2), though nothing was posted
+    expect(await h.signer.publishHeld(hash)).toMatchObject({ ok: false, reason: 'signing', published: true });
     expect(h.hub.posts).toEqual([]);
     expect(h.disk()!.pending).toMatchObject({ hash, unsent: null, exposed: { hub: false, machines: [] } });
     const kept = h.disk()!.pending!.signed;
@@ -1188,6 +1195,16 @@ describe('an unsent slot (M4c: `Edit.hold`, `publishHeld`)', () => {
     expect(next.held.head().state.version).toBe(2);
     expect(next.disk()!.pending).toBeNull();
     expect(next.settled.map((s) => s.hash)).toEqual([hash]);
+  });
+
+  it('a store found damaged at the exposure write, after the marker cleared: the outcome still says published', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    h.gates.write = (name, value) => {
+      if (name === SIGNING_FILE && (value as SigningFile).pending?.exposed.hub === true) throw new SigningDamaged();
+    };
+    expect(await h.signer.publishHeld(hash)).toMatchObject({ ok: false, reason: 'signing', published: true });
+    expect(h.hub.posts).toEqual([]);
   });
 
   it('a sign-out or a close during the held sign\'s Touch ID keeps nothing', async () => {

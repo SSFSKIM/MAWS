@@ -61,8 +61,18 @@ export const OrgSignerStatusSchema = z
     ageDays: z.number().int().nullable(),
     // M4c: `delegation`, the delegation the slot holds (its unsent marker's, else the one its state adds to the head), so
     // a Delegations row offers Discard only for its own slot
+    // M4c's fix wave 2: `held`, the slot's unsent marker stands (held for its create's publish, never sent): the
+    // authority for a Delegations row's unsent actions, which `delegation` alone isn't (it stays once published)
     pending: z
-      .strictObject({ version: z.number().int().positive(), hash: z.string(), fork: z.boolean(), exposed: z.boolean(), refused: z.string().nullable(), delegation: z.string().nullable() })
+      .strictObject({
+        version: z.number().int().positive(),
+        hash: z.string(),
+        fork: z.boolean(),
+        exposed: z.boolean(),
+        refused: z.string().nullable(),
+        delegation: z.string().nullable(),
+        held: z.boolean(),
+      })
       .nullable(),
     offer: z
       .strictObject({ superseded: z.number().int().nonnegative(), lines: z.array(z.string()), warnings: z.array(z.string()), withheld: z.array(z.string()), digest: z.string() })
@@ -392,13 +402,26 @@ export type DelegationRun = z.infer<typeof DelegationRunSchema>;
 /**
  * M4c: where a create (or a rewrite) stopped, whatever its reason: `refused` before anything was minted; `minted`, its
  * key minted (or perhaps, its answer lost) and nothing signed, the key revoked or left a stray; `held`, signed into the
- * slot and held unsent (`stored`: its code is in the secret, the publish refused); `published`, the slot published and
- * owned by settlement as any pending state, though the post's answer failed. `version`: the signed state's, once signed.
+ * slot and held unsent (`stored`: its code is in the secret, the publish refused); `published`, this run's publish
+ * cleared the slot's marker (the signer's own word, never inferred from a slot gone), owned by settlement as any pending
+ * state, though the post's answer failed; `discarded` (fix wave 2), the held slot was discarded or replaced before its
+ * publish, so nothing was published. `version`: the signed state's, once signed.
  */
-export const DELEGATION_PHASES = ['refused', 'minted', 'held', 'published'] as const;
+export const DELEGATION_PHASES = ['refused', 'minted', 'held', 'published', 'discarded'] as const;
 export type DelegationPhase = (typeof DELEGATION_PHASES)[number];
+/**
+ * `rev`: the status's `delegations.rev` published once the answer's final slot was in place, so a status at or past it
+ * shows that slot (or a later one), and an older status may not (events and answers reach the renderer on separate
+ * pipes, unordered).
+ */
 export const DelegationResultSchema = z.union([
-  z.strictObject({ ok: z.literal(true), version: z.number().int().positive(), secret: z.strictObject({ version: z.string(), createTime: z.string() }).optional(), run: DelegationRunSchema }),
+  z.strictObject({
+    ok: z.literal(true),
+    version: z.number().int().positive(),
+    secret: z.strictObject({ version: z.string(), createTime: z.string() }).optional(),
+    run: DelegationRunSchema,
+    rev: z.number().int().nonnegative(),
+  }),
   z.strictObject({
     ok: z.literal(false),
     reason: z.enum(SIGN_REASONS),
@@ -407,6 +430,7 @@ export const DelegationResultSchema = z.union([
     stored: z.boolean(),
     version: z.number().int().positive().optional(),
     run: DelegationRunSchema.nullable(),
+    rev: z.number().int().nonnegative(),
   }),
 ]);
 export type DelegationResult = z.infer<typeof DelegationResultSchema>;

@@ -18,6 +18,11 @@
 //   the sheet acts only while the status's slot and the view's row are that run's: once a Discard, another create (in
 //   any window) or a sign-out replaces them, it says this create is no longer running and offers nothing. A rewrite
 //   names the same three, and main answers anything else `stale` (Task 5's fix wave, I1 and I4).
+// - Fix wave 2: events and answers reach the renderer on separate pipes, so a held answer may land before the status
+//   that shows its slot. Its `rev` names the status revision published after its final slot: a slot not seen reads as
+//   gone only once the status held here is at or past it, and as not yet known before. A slot no longer held (its
+//   marker cleared: published elsewhere) offers nothing either. A publish whose slot was discarded first reads
+//   `discarded`, in its own words, with nothing more to do here.
 // - Its ownership follows the enrollment sheet's guards, without its code: each request is fenced by its token (only
 //   the latest one's answer lands, and none once the sheet has closed), and the sheet belongs to the sign-in it opened
 //   under (`useOwnSignIn`). Once that ends, an answer stays in the sheet, offers nothing and reaches nothing of the page,
@@ -80,13 +85,14 @@ const created = (prefix: string, result: Extract<DelegationResult, { ok: true }>
 const joined = (...parts: (string | undefined)[]) => parts.filter((part) => part !== undefined && part !== '').join(' · ');
 
 /**
- * A refused answer's line, by where it stopped: before or at the mint, the create's words for its reason (a bare cancel
+ * A refused answer's line, by where it stopped (`discarded`: its slot went before the publish, said as such): before or at the mint, the create's words for its reason (a bare cancel
  * says nothing); signed and held, what holds it, then a rewrite's own reason when it isn't the write itself; published,
  * that it settles on its own; a rewrite main refused before naming a run, only that nothing was written. Main's detail
  * last.
  */
 function refusedLine(asked: Asked, result: Refused): Outcome {
   if (result.phase === 'published') return { text: joined(ORG.phasePublished(result.version), result.detail), refused: false };
+  if (result.phase === 'discarded') return { text: joined(ORG.phaseDiscarded(result.stored), result.detail), refused: true };
   if (result.phase === 'held') {
     const words = result.stored ? ORG.phaseHeldStored(result.version) : ORG.phaseHeld(result.version);
     return { text: joined(words, asked === 'rewrite' && result.reason !== 'unsent' ? ORG.rewriteReasons[result.reason] : undefined, result.detail), refused: true };
@@ -109,11 +115,13 @@ type Props = {
   delegations: readonly OrgDelegationRow[];
   /** The status's pending slot (signed in), which names the delegation it holds. */
   slot: Slot | null;
+  /** The status's `delegations.rev`: how far the status held here reaches. */
+  rev: number;
   onClose(): void;
   onCreated(outcome: Outcome): void;
 };
 
-export function DelegationSheet({ destination, members, may, signIn, creating, delegations, slot, onClose, onCreated }: Props) {
+export function DelegationSheet({ destination, members, may, signIn, creating, delegations, slot, rev, onClose, onCreated }: Props) {
   const open = useOpen();
   const own = useOwnSignIn(signIn);
   const tokens = useRef(0);
@@ -131,7 +139,7 @@ export function DelegationSheet({ destination, members, may, signIn, creating, d
       else {
         failed(result.error);
         // a write that failed as a command leaves the delegation as it was: held unsent, by the same run
-        setStage(asked === 'create' ? { at: 'fields' } : { at: 'answered', asked, result: { ok: false, reason: 'unsent', phase: 'held', stored: false, run }, prefix });
+        setStage(asked === 'create' ? { at: 'fields' } : { at: 'answered', asked, result: { ok: false, reason: 'unsent', phase: 'held', stored: false, run, rev: 0 }, prefix });
       }
     });
   };
@@ -159,8 +167,9 @@ export function DelegationSheet({ destination, members, may, signIn, creating, d
   const editing = stage.at === 'fields' || (stage.at === 'asking' && stage.asked === 'create') || (refusal !== null && answer?.asked === 'create' && (refusal.phase === 'refused' || refusal.phase === 'minted'));
   // Signed and held unsent: no second create, only its own way on, and only while its run is the one holding it (a
   // rewrite main answers naming no run was of a run main no longer has: `custodyOf` reads it gone).
-  const held = refusal !== null && !editing && refusal.phase !== 'published';
-  const custody = held && refusal !== null ? custodyOf(refusal.run, slot, delegations) : null;
+  const settled = refusal !== null && (refusal.phase === 'published' || refusal.phase === 'discarded'); // nothing more to do here
+  const held = refusal !== null && !editing && !settled;
+  const custody = held && refusal !== null ? custodyOf(refusal.run, slot, delegations, rev >= refusal.rev) : null;
   const gone = custody === 'gone';
   const ours = custody !== null && custody !== 'gone' && custody !== 'unknown' ? custody : null;
   const writable = !own.ended && may && ours !== null && ours.rewrite && !refusal?.stored;
@@ -170,7 +179,7 @@ export function DelegationSheet({ destination, members, may, signIn, creating, d
     ? { submit: stage.asked === 'create' ? ORG.creating : ORG.writing, can: false, act: () => {}, cancel: ORG.close }
     : held
       ? { submit: writable ? ORG.writeAgain : undefined, can: !creating, act: () => ours !== null && answer !== null && rewrite(ours.run, answer.prefix), cancel: ORG.close }
-      : answer !== null && (answer.result.ok || refusal?.phase === 'published')
+      : answer !== null && (answer.result.ok || settled)
         ? { submit: undefined, can: false, act: () => {}, cancel: ORG.close }
         : { submit: may && !own.ended ? ORG.createConfirm : undefined, can: fields.input !== null && destination !== null && !creating, act: create, cancel: ORG.cancel };
 
@@ -207,13 +216,15 @@ export function DelegationSheet({ destination, members, may, signIn, creating, d
 type Ours = { generation: number; id: string; hash: string };
 
 /**
- * Whether the held run `run` still holds the slot and its row: `gone` once the status's slot isn't its (another hash, or
- * another delegation), or the view lists its row under another run; `unknown` while the view hasn't listed the row yet;
- * else the run, complete, and whether main may write it again.
+ * Whether the held run `run` still holds the slot and its row: `gone` once a status `covered` (at or past the answer's
+ * revision) shows a slot that isn't its (none, another hash, or another delegation), or the view lists its row under
+ * another run; `unknown` while the status is older than the answer, while the slot is no longer held (published), or
+ * while the view hasn't listed the row yet; else the run, complete, and whether main may write it again.
  */
-function custodyOf(run: DelegationRun | null, slot: Slot | null, delegations: readonly OrgDelegationRow[]): 'gone' | 'unknown' | { run: Ours; rewrite: boolean } {
+function custodyOf(run: DelegationRun | null, slot: Slot | null, delegations: readonly OrgDelegationRow[], covered: boolean): 'gone' | 'unknown' | { run: Ours; rewrite: boolean } {
   if (run === null || run.id === null || run.hash === null) return 'gone';
-  if (slot === null || slot.hash !== run.hash || slot.delegation !== run.id) return 'gone';
+  if (slot === null || slot.hash !== run.hash || slot.delegation !== run.id) return covered ? 'gone' : 'unknown';
+  if (!slot.held) return 'unknown';
   const row = delegations.find((d) => d.id === run.id);
   if (row === undefined || row.state !== 'unsent' || row.unsent === null) return 'unknown';
   if (row.unsent.generation !== null && row.unsent.generation !== run.generation) return 'gone';

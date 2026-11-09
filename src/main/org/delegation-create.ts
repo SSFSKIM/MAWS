@@ -26,6 +26,10 @@
 //   the phase the transaction stopped in (`refused`, `minted`, `held`, `published`), read off the run itself, so a sheet
 //   words what happened and acts only on its own run (Task 5's fix wave, I1 and I4). A rewrite names the run, the id
 //   and the hash it was shown, and anything else answers `stale`.
+// - Fix wave 2: `published` only on the signer's own word that this publish cleared the marker (`PublishOutcome`), so a
+//   slot discarded or replaced ahead of the publish answers `discarded`, never `published`; and every answer that ran
+//   carries the status revision (`rev`) published after its final slot was in place, which the sheet waits for before
+//   reading a slot it doesn't see as gone.
 //
 // Electron-free: the session injects the signer, the hub (through delegation-hub.ts), gcloud's custody and the
 // destination's file.
@@ -63,6 +67,8 @@ export type DelegationCreateDeps = {
   destination: ProvisioningSecretStore | null;
   hub: Pick<DelegationHub, 'revokeKey'>;
   changed(): void;
+  /** The status's `delegations.rev` as it stands (each `changed` publishes the next). */
+  rev(): number;
   now(): number;
   log(line: string): void;
 };
@@ -121,8 +127,10 @@ type Run = {
   version: number | null;
   /** Its code is in the secret, confirmed by describe. */
   stored: boolean;
-  /** `publishHeld` cleared its marker: settlement owns the slot. */
+  /** `publishHeld` cleared its marker (its own word): settlement owns the slot. */
   published: boolean;
+  /** Its held slot was discarded or replaced before its publish: nothing was published. */
+  discarded: boolean;
 };
 
 const DAY_S = 86_400;
@@ -145,15 +153,16 @@ function randomHex(bytes: number): string {
 function phaseOf(r: Run | null): DelegationPhase {
   if (r === null) return 'refused';
   if (r.published) return 'published';
+  if (r.discarded) return 'discarded';
   if (r.hash !== null) return 'held';
   return r.id !== null || r.mintLost ? 'minted' : 'refused';
 }
 
-/** `result` as the answer of run `r` (null: refused before one was reserved): the run's identities and its phase. */
-function answerOf(r: Run | null, result: SignResult): DelegationResult {
+/** `result` as the answer of run `r` (null: refused before one was reserved): the run's identities, its phase, and `rev`. */
+function answerOf(r: Run | null, result: SignResult, rev: number): DelegationResult {
   const run = r === null ? null : { generation: r.generation, id: r.id, hash: r.hash };
-  if (result.ok) return { ...result, run: run! };
-  return { ...result, phase: phaseOf(r), stored: r?.stored ?? false, ...(r?.version == null ? {} : { version: r.version }), run };
+  if (result.ok) return { ...result, run: run!, rev };
+  return { ...result, phase: phaseOf(r), stored: r?.stored ?? false, ...(r?.version == null ? {} : { version: r.version }), run, rev };
 }
 
 /** A sign or publish outcome as `org.*` carries it (`signResult`'s rules; a held sign's hash never leaves). */
@@ -192,17 +201,26 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
   }
 
   const stopped = (what: string): SignResult => ({ ok: false, reason: 'not-root', detail: `${ENDED}: ${what}` });
+  /** An answer given before anything changed: the status as it stands covers it. */
+  const answer = (r: Run | null, result: SignResult) => answerOf(r, result, deps.rev());
+  /** An answer once a run worked: one more status publication, after its final slot, and its revision. */
+  const finalAnswer = (r: Run, result: SignResult) => {
+    changed();
+    return answerOf(r, result, deps.rev());
+  };
   const strayLeft = (id: string) => `nothing was signed; the key it minted (${id}) shows as a stray key`;
 
   async function create(input: DelegationCreateInput): Promise<DelegationResult> {
     const refused = reserve(input);
-    if (!('run' in refused)) return answerOf(null, refused);
+    if (!('run' in refused)) return answer(null, refused);
     const r = refused.run;
+    let result: SignResult;
     try {
-      return answerOf(r, await createRun(r, input, refused.ttl, refused.dest, refused.secrets));
+      result = await createRun(r, input, refused.ttl, refused.dest, refused.secrets);
     } finally {
       settleRun(r);
     }
+    return finalAnswer(r, result);
   }
 
   /** The create's refusals before anything is minted, then its run, reserved synchronously (before the create's first await). */
@@ -249,6 +267,7 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
       version: null,
       stored: false,
       published: false,
+      discarded: false,
     };
     run = r;
     log(`${r.generation}: creating delegation ${input.prefix}`);
@@ -443,9 +462,16 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
     release(r);
     changed();
     const published = await signer.publishHeld(r.hash!);
+    // Published only on the signer's word that this publish cleared the marker; a slot merely gone is not that.
+    r.published = published.published === true;
     const slot = deps.signer()?.pending() ?? null;
-    const stillHeld = slot !== null && slot.hash === r.hash && slot.unsent !== null;
-    r.published = !stillHeld;
+    const stillHeld = !r.published && slot !== null && slot.hash === r.hash && slot.unsent !== null;
+    r.discarded = !r.published && (slot === null || slot.hash !== r.hash);
+    if (r.discarded) {
+      const refusal = asResult(published);
+      log(`${r.generation}: delegation ${r.id}'s slot was discarded or replaced before its publish: nothing was published`);
+      return { ok: false, reason: 'stale', detail: `its slot was discarded or replaced before its publish (${refusal.ok ? 'it answered nothing' : (refusal.detail ?? refusal.reason)}): nothing was published` };
+    }
     if (!live(r)) return stopped(stillHeld ? unpublished : 'its publish began before the run ended: it settles as any pending proposal');
     if (stillHeld) {
       const refusal = asResult(published);
@@ -458,30 +484,32 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
 
   async function rewrite(asked: DelegationRewriteInput): Promise<DelegationResult> {
     const { generation, id, hash } = asked;
-    if (closed) return answerOf(null, { ok: false, reason: 'busy', detail: 'the org session is closed' });
+    if (closed) return answer(null, { ok: false, reason: 'busy', detail: 'the org session is closed' });
     const r = run;
     // Only the run, the delegation and the slot the asker was shown: another run's (a replacement since) is never written.
     if (r === null || r.generation !== generation || r.id !== id || r.hash !== hash) {
-      return answerOf(null, { ok: false, reason: 'stale', detail: 'that create is no longer the one this Mac runs (a Discard, a new create, a sign-out or a relaunch since): nothing was written' });
+      return answer(null, { ok: false, reason: 'stale', detail: 'that create is no longer the one this Mac runs (a Discard, a new create, a sign-out or a relaunch since): nothing was written' });
     }
     const gone: SignResult = { ok: false, reason: 'stale', detail: "this Mac no longer holds the delegation's key pair (a sign-out, a relaunch or a refused publish since it was signed): only Discard" };
-    if (r.custody === null) return answerOf(r, gone);
-    if (r.working) return answerOf(r, { ok: false, reason: 'busy', detail: 'its code is being written' });
+    if (r.custody === null) return answer(r, gone);
+    if (r.working) return answer(r, { ok: false, reason: 'busy', detail: 'its code is being written' });
     const slot = deps.signer()?.pending() ?? null;
     if (!live(r) || slot === null || slot.hash !== r.hash || slot.unsent === null) {
       end(r);
-      return answerOf(r, gone);
+      return answer(r, gone);
     }
     const dest = destination();
-    if (!dest.ok) return answerOf(r, dest.refusal);
-    if (deps.secrets === null) return answerOf(r, { ok: false, reason: 'secret-store', detail: 'secret-store: this build stores no provisioning code' });
+    if (!dest.ok) return answer(r, dest.refusal);
+    if (deps.secrets === null) return answer(r, { ok: false, reason: 'secret-store', detail: 'secret-store: this build stores no provisioning code' });
     r.working = true;
     log(`${r.generation}: writing delegation ${id}'s code again`);
+    let result: SignResult;
     try {
-      return answerOf(r, await storeAndPublish(r, dest.value, deps.secrets));
+      result = await storeAndPublish(r, dest.value, deps.secrets);
     } finally {
       settleRun(r);
     }
+    return finalAnswer(r, result);
   }
 
   function fence(): void {

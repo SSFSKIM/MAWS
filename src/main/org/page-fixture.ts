@@ -80,7 +80,7 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
   // M4c: no delegation is created, renewed or revoked, and the destination's file is neither read nor written: its
   // reading is the file's (`provisioningSecret`), so the section and the create sheet can be drawn with one
   const half: HubHalfResult = { ok: false, reason: 'none', detail };
-  const delegated: DelegationResult = { ok: false, reason: 'busy', detail, phase: 'refused', stored: false, run: null };
+  const delegated: DelegationResult = { ok: false, reason: 'busy', detail, phase: 'refused', stored: false, run: null, rev: 0 };
   const unwritten: ProvisioningSecretWrite = { ok: false, reason: 'io', detail };
   const answers: { [N in FixtureCommand]: MainHandler<N> } = {
     'org.status': () => status,

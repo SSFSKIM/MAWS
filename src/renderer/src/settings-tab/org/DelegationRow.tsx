@@ -16,7 +16,9 @@
 //   its minted key is revoked with it), which is all a relaunched Mac offers. Both act only on the slot that holds this
 //   row's delegation (the status's `pending.delegation`), so a view not yet refreshed after another window's Discard
 //   and a new proposal offers neither for the slot that replaced it; Write again names main's run, the row and that
-//   slot, and its answer reads by where it stopped (Task 5's fix wave, I2 and I4).
+//   slot, and its answer reads by where it stopped (Task 5's fix wave, I2 and I4). And only while that slot is still
+//   held unsent (the status's `held`, fix wave 2): once its marker clears (published, perhaps from another window) the
+//   actions withdraw and an open confirmation closes, since its "never sent" no longer holds, even with the same hash.
 import { useState } from 'react';
 import { formatAgo, formatDate, formatDayTime } from '@shared/app/date-format';
 import type { DelegationResult, OrgChange, OrgDelegationRow, OrgView } from '@shared/ipc/schema/org';
@@ -79,8 +81,8 @@ export function DelegationRow({ delegation: d, members, hubSide, hubKeys, may, s
   const [outcome, setOutcome] = useState<Outcome>(null);
   // The slot Discard was pressed for, by its hash: the confirmation is of that one proposal.
   const [discarding, setDiscarding] = useState<string | null>(null);
-  // The slot holding this row's delegation, the only one its Discard and Write again act on.
-  const own = slot !== null && slot.delegation === d.id ? slot : null;
+  // The slot holding this row's delegation, still held unsent: the only one its Discard and Write again act on.
+  const own = slot !== null && slot.delegation === d.id && slot.held ? slot : null;
   if (discarding !== null && own?.hash !== discarding) setDiscarding(null);
   const asked = own !== null && own.hash === discarding ? own : null;
   const generation = d.unsent?.generation ?? null;
@@ -113,6 +115,7 @@ export function DelegationRow({ delegation: d, members, hubSide, hubKeys, may, s
   const written = (result: DelegationResult) => {
     if (result.ok) said({ text: result.secret === undefined ? ORG.signed(result.version) : ORG.codeStored(d.prefix, result.version, result.secret.version, formatDayTime(Date.parse(result.secret.createTime))), refused: false });
     else if (result.phase === 'published') said({ text: [ORG.phasePublished(result.version), result.detail].filter((part) => part !== undefined).join(' · '), refused: false });
+    else if (result.phase === 'discarded') said(refusal(ORG.phaseDiscarded(result.stored), '', result.detail));
     else if (result.phase === 'held' && result.stored) setOutcome(refusal(ORG.phaseHeldStored(result.version), ORG.heldDiscardOnly, result.detail));
     else if (result.reason === 'unsent') setOutcome({ text: ORG.stillUnsent, refused: true });
     else setOutcome(refusal(ORG.notWritten, ORG.rewriteReasons[result.reason], result.detail));

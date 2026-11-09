@@ -53,7 +53,7 @@ import {
   verifyGrant,
 } from '../../../apps/org-protocol/src/index.ts';
 import type { ClientId } from '@shared/ipc/client';
-import { OrgStatusSchema, type OrgStatus } from '@shared/ipc/schema/org';
+import { OrgStatusSchema, type DelegationResult, type OrgStatus } from '@shared/ipc/schema/org';
 import type { MachineRef } from '@shared/machine/ref';
 import { createNextDeviceKeys, deviceKeyIds, DeviceKeysError, loadDeviceKeys, promoteNextDeviceKeys, type DeviceKeys } from '../device/keys';
 import { createRecordSigner, type HeldOrgView, type StepUpPrompt } from '../device/step-up';
@@ -1820,7 +1820,7 @@ describe('M3: the signer composed over the session', () => {
     hub.postAnswer = () => worker(409, { error: 'key-purged' });
     expect(await session.resign()).toMatchObject({ ok: false, reason: 'hub', detail: '409 key-purged' });
     const hash = await stateHash(hub.posted[0]!.state);
-    expect(signerOf(session).pending).toEqual({ version: before + 1, hash, fork: false, exposed: true, refused: '409 key-purged', delegation: null });
+    expect(signerOf(session).pending).toEqual({ version: before + 1, hash, fork: false, exposed: true, refused: '409 key-purged', delegation: null, held: false });
 
     // A confirmation of another proposal than the slot holds discards nothing.
     expect(await session.discardPending(true, `${hash.slice(1)}x`)).toEqual({ ok: false, reason: 'stale' });
@@ -3411,7 +3411,8 @@ describe('M4b: the grants', () => {
 
 // ---- M4c: delegations through the session ----
 
-// Task 3's fake gcloud, trimmed: argv and stdin recorded; `act-<op>` holding `wait` holds that call until `release-<op>`.
+// Task 3's fake gcloud, trimmed: argv and stdin recorded; `act-<op>` holding `wait` holds that call until `release-<op>`,
+// and `fail` fails it.
 const FAKE_GCLOUD = `#!/bin/sh
 dir=$(cd "$(dirname "$0")" && pwd)
 { printf 'gcloud'; for a in "$@"; do printf ' %s' "$a"; done; printf '\\n'; } >> "$dir/argv.log"
@@ -3426,6 +3427,7 @@ cat >> "$dir/stdin.log"
 act=$(cat "$dir/act-$op" 2>/dev/null || echo ok)
 case "$act" in
   wait) : > "$dir/waiting-$op"; while [ ! -f "$dir/release-$op" ]; do sleep 0.02; done; rm -f "$dir/release-$op" "$dir/waiting-$op" ;;
+  fail) printf 'ERROR: (gcloud.secrets.versions.add) INTERNAL: down\n' >&2; exit 1 ;;
 esac
 case "$op" in
   add) printf 'Created version [7] of the secret [%s].\\n' "$4" >&2 ;;
@@ -3578,6 +3580,30 @@ describe('M4c: delegations through the session', () => {
     await writeFile(join(bin, 'release-add'), '');
     expect(await creating).toMatchObject({ ok: true, run: { id } });
     expect(signerOf(session).pending).toBeNull();
+    await codes();
+  });
+
+  // Task 5's fix wave 2: the answer names the status revision covering its final slot, and the slot says whether it is held
+  it("a held create's answer names the status revision whose publication holds its slot, held; published by a rewrite, the same slot reads not held", async () => {
+    await writeFile(join(bin, 'act-add'), 'fail');
+    const { session } = await signingRoot(delegationsDeps());
+    const statuses: OrgStatus[] = [];
+    session.onStatus((status) => void statuses.push(status));
+    const answer = await session.delegationCreate({ ...CREATE, owners: [A] });
+    expect(answer).toMatchObject({ ok: false, reason: 'unsent', phase: 'held' });
+    const held = answer as Extract<DelegationResult, { ok: false }>;
+    const { generation, id, hash } = held.run!;
+    // the first status published at or past the answer's revision already holds its slot, held
+    const covering = statuses.find((s) => s.state === 'registered' && s.delegations.rev >= held.rev);
+    expect(covering).toBeDefined();
+    expect((covering as Registered).signer?.pending).toMatchObject({ hash, delegation: id, held: true, exposed: false });
+    expect(registered(session).delegations.rev).toBe(held.rev);
+    // another window's Write again publishes it: the same id and hash, its marker cleared, are no longer held
+    statuses.length = 0;
+    await writeFile(join(bin, 'act-add'), 'ok');
+    expect(await session.delegationRewrite({ generation, id: id!, hash: hash! })).toMatchObject({ ok: true, run: { id } });
+    const published = statuses.map((s) => (s as Registered).signer?.pending).find((p) => p?.hash === hash && p.held === false);
+    expect(published).toMatchObject({ hash, delegation: id, held: false });
     await codes();
   });
 

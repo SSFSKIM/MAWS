@@ -913,6 +913,8 @@ export const ORG = {
   heldDiscardOnly: 'Discard it, then create the delegation again.',
   phasePublished: (version: number | undefined) =>
     `Published${version === undefined ? '' : ` as version ${version}`}, its code stored. It settles as any pending state once the hub takes it (Org › Pending): nothing more to do here.`,
+  phaseDiscarded: (stored: boolean) =>
+    `Not published: its pending slot was discarded or replaced first, so nothing was published${stored ? '; its code’s version stays in the secret, unused' : ''}. Create the delegation again if it’s still wanted.`,
   createRunGone: 'This create is no longer the one this Mac runs (a Discard, another create or a sign-out since): nothing more to do here.',
   createSignInEnded: 'The sign-in this sheet opened under ended. Close it to create again.',
   // Renew: a new expiry in days from now, never past the hub's cap; the checks refuse the rest before Touch ID

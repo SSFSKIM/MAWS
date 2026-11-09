@@ -6,7 +6,9 @@
 // (with "Write the code again"), and success with the code's version and its time. It never shows, copies or holds the
 // code, and it takes no answer from a request it no longer owns: closed, or under a sign-in that has ended. Task 5's fix
 // wave: each answer names its run (generation, id, held slot's hash) and where it stopped (`phase`); the sheet words each
-// phase, offers only what that phase allows, and acts only on the row and slot its run names.
+// phase, offers only what that phase allows, and acts only on the row and slot its run names. Fix wave 2: a slot it
+// doesn't see reads as gone only once the status it holds is at or past the answer's revision; a discarded publish
+// reads discarded.
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { DELEGATION_MAX_USES, DELEGATION_TTL_DAYS, type DelegationResult, type DelegationRun, type OrgDelegationRow, type ProvisioningSecret } from '@shared/ipc/schema/org';
@@ -29,13 +31,14 @@ const ID2 = 'fedcba9876543210fedcba9876543210';
 const HASH = 'heldSlotStateHash000000000000000000000000000';
 const HASH2 = 'anotherSlotStateHash0000000000000000000000000';
 const RUN: DelegationRun = { generation: 1, id: ID, hash: HASH };
-const OK: DelegationResult = { ok: true, version: 13, secret: { version: '7', createTime: '2026-10-28T12:00:05.000Z' }, run: RUN };
+const OK: DelegationResult = { ok: true, version: 13, secret: { version: '7', createTime: '2026-10-28T12:00:05.000Z' }, run: RUN, rev: 1 };
 /** A refusal before anything was minted (no run reserved), as main answers it. */
-const refused = (reason: Extract<DelegationResult, { ok: false }>['reason'], detail: string): DelegationResult => ({ ok: false, reason, detail, phase: 'refused', stored: false, run: null });
-/** A create that signed and holds its slot unsent (`stored`: its code is in the secret, the publish refused). */
-const held = (detail: string, stored = false, run: DelegationRun = RUN): DelegationResult => ({ ok: false, reason: 'unsent', detail, phase: 'held', stored, version: 13, run });
-/** The status while slot `hash` holds delegation `id`. */
-const holding = (hash = HASH, id: string | null = ID): Partial<Signer> => ({ ...ROOT, pending: { version: 13, hash, fork: false, exposed: false, refused: null, delegation: id } });
+const refused = (reason: Extract<DelegationResult, { ok: false }>['reason'], detail: string): DelegationResult => ({ ok: false, reason, detail, phase: 'refused', stored: false, run: null, rev: 0 });
+/** A create that signed and holds its slot unsent (`stored`: its code is in the secret, the publish refused), covered by status revision 1. */
+const held = (detail: string, stored = false, run: DelegationRun = RUN): DelegationResult => ({ ok: false, reason: 'unsent', detail, phase: 'held', stored, version: 13, run, rev: 1 });
+/** The status while slot `hash` holds delegation `id` (`held`: its unsent marker stands). */
+const holding = (hash = HASH, id: string | null = ID, held = true): Partial<Signer> => ({ ...ROOT, pending: { version: 13, hash, fork: false, exposed: !held, refused: null, delegation: id, held } });
+const at = (rev: number) => ({ delegations: { creating: false, rev } });
 const UNSENT_ROW: OrgDelegationRow = {
   id: ID,
   prefix: 'dc-',
@@ -113,11 +116,11 @@ describe('Settings › Org: the create sheet (M4c)', () => {
     const answers: { answer: DelegationResult; line: string }[] = [
       { answer: refused('secret-store', 'secret-store: gcloud not found: nothing was minted or signed'), line: 'Not created · Its code has nowhere to go yet, so nothing was minted or signed: fix what’s named, then Create again. · secret-store: gcloud not found: nothing was minted or signed' },
       {
-        answer: { ok: false, reason: 'refused', detail: "the hub's answer to the mint disagrees with what was asked (prefix dc- not dd-): nothing was signed; its key was revoked", phase: 'minted', stored: false, run: { ...RUN, hash: null } },
+        answer: { ok: false, reason: 'refused', detail: "the hub's answer to the mint disagrees with what was asked (prefix dc- not dd-): nothing was signed; its key was revoked", phase: 'minted', stored: false, run: { ...RUN, hash: null }, rev: 1 },
         line: "Not created · Refused, so nothing was signed: correct what’s named, then Create again. · the hub's answer to the mint disagrees with what was asked (prefix dc- not dd-): nothing was signed; its key was revoked",
       },
       { answer: refused('busy', 'another org attempt is under way'), line: 'Not created · Another create or org attempt is running: Create again once it’s done. · another org attempt is under way' },
-      { answer: { ok: false, reason: 'cancelled', detail: 'nothing was signed; its key was revoked', phase: 'minted', stored: false, run: { ...RUN, hash: null } }, line: 'Not created · Touch ID was cancelled, so nothing was signed: Create again when ready. · nothing was signed; its key was revoked' },
+      { answer: { ok: false, reason: 'cancelled', detail: 'nothing was signed; its key was revoked', phase: 'minted', stored: false, run: { ...RUN, hash: null }, rev: 1 }, line: 'Not created · Touch ID was cancelled, so nothing was signed: Create again when ready. · nothing was signed; its key was revoked' },
     ];
     let answer = answers[0]!.answer;
     renderSection(signing(ROOT), { 'org.provisioningSecret.get': () => DEST, 'org.delegation.create': () => answer });
@@ -187,7 +190,7 @@ describe('Settings › Org: the create sheet (M4c)', () => {
     const detail = 'the hub did not answer: the delegation is published and its code stored (version 7): it settles as any pending proposal';
     renderSection(signing(ROOT), {
       'org.provisioningSecret.get': () => DEST,
-      'org.delegation.create': () => ({ ok: false, reason: 'hub', detail, phase: 'published', stored: true, version: 13, run: RUN }) satisfies DelegationResult,
+      'org.delegation.create': () => ({ ok: false, reason: 'hub', detail, phase: 'published', stored: true, version: 13, run: RUN, rev: 1 }) satisfies DelegationResult,
     });
     const sheet = await openSheet();
     fill(sheet, { label: 'devcloud VMs', prefix: 'dc-' });
@@ -201,6 +204,56 @@ describe('Settings › Org: the create sheet (M4c)', () => {
     expect(within(sheet).queryByText(/Not created/)).toBeNull();
     expect(within(sheet).getByText(/^Published as version 13/).getAttribute('role')).toBe('status'); // no refusal: it settles on its own
     expect(screen.getByRole('dialog', { name: 'Create a delegation' })).toBe(sheet); // not a success: it stays, to be read
+  });
+
+  it('a held answer that arrives before its status: nothing reads as gone until a status at or past its revision says so', async () => {
+    renderSection(signing(ROOT), {
+      'org.provisioningSecret.get': () => DEST,
+      'org.view': () => viewWith({ delegations: [UNSENT_ROW] }),
+      'org.delegation.create': () => held('gcloud failed'), // covered by revision 1
+    });
+    const sheet = await openSheet();
+    fill(sheet, { label: 'devcloud VMs', prefix: 'dc-' });
+    fireEvent.click(createButton(sheet));
+    await within(sheet).findByRole('alert');
+    // the status this window holds is revision 0, its slot null: older than the answer, so not proof of anything
+    await act(async () => {});
+    expect(within(sheet).queryByText(/no longer the one this Mac runs/)).toBeNull();
+    expect(within(sheet).queryByRole('button', { name: 'Write the code again' })).toBeNull();
+    emit(signing(ROOT, at(0))); // another publication of the old revision changes nothing
+    await act(async () => {});
+    expect(within(sheet).queryByText(/no longer the one this Mac runs/)).toBeNull();
+    // its status lands: the slot is the run's
+    emit(signing(holding(), at(1)));
+    await within(sheet).findByRole('button', { name: 'Write the code again' });
+    // published by another window's Write again: the same hash and id, no longer held: no Write again, nothing gone
+    emit(signing(holding(HASH, ID, false), at(2)));
+    await vi.waitFor(() => expect(within(sheet).queryByRole('button', { name: 'Write the code again' })).toBeNull());
+    expect(within(sheet).queryByText(/no longer the one this Mac runs/)).toBeNull();
+    // a later status without the slot: gone
+    emit(signing(ROOT, at(3)));
+    expect(await within(sheet).findByText(/^This create is no longer the one this Mac runs/)).toBeTruthy();
+  });
+
+  it('a publish whose slot was discarded first reads discarded, not published, and offers nothing', async () => {
+    const detail = 'its slot was discarded or replaced before its publish (no proposal is pending (discarded): nothing was published): nothing was published';
+    renderSection(signing(ROOT), {
+      'org.provisioningSecret.get': () => DEST,
+      'org.delegation.create': () => ({ ok: false, reason: 'stale', detail, phase: 'discarded', stored: true, version: 13, run: RUN, rev: 1 }) satisfies DelegationResult,
+    });
+    const sheet = await openSheet();
+    fill(sheet, { label: 'devcloud VMs', prefix: 'dc-' });
+    fireEvent.click(createButton(sheet));
+    expect((await within(sheet).findByRole('alert')).textContent).toBe(
+      `Not published: its pending slot was discarded or replaced first, so nothing was published; its code’s version stays in the secret, unused. Create the delegation again if it’s still wanted. · ${detail}`,
+    );
+    emit(signing(ROOT, at(1)));
+    await act(async () => {});
+    expect(within(sheet).queryByText(/^Published/)).toBeNull();
+    expect(within(sheet).queryByText(/no longer the one this Mac runs/)).toBeNull(); // said once, in its own words
+    expect(within(sheet).queryByRole('textbox', { name: 'Label' })).toBeNull();
+    expect(within(sheet).queryByRole('button', { name: 'Create…' })).toBeNull();
+    expect(within(sheet).queryByRole('button', { name: 'Write the code again' })).toBeNull();
   });
 
   it('two windows: a Discard and a replacement create elsewhere end this sheet’s recovery, saying so, with no Write again and no Discard', async () => {

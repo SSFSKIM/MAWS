@@ -137,7 +137,7 @@ export function registerOrgHandlers(deps: {
     deps.register('org.enroll.cancel', () => ({ ok: false, reason: 'not-current', detail: 'MAWS_DEV_ORG is in force' }));
     deps.register('org.drop.retry', () => unretried);
     const unhalved: HubHalfResult = { ok: false, reason: 'none', detail: 'MAWS_DEV_ORG is in force' };
-    const undelegated: DelegationResult = { ok: false, reason: 'busy', detail: 'MAWS_DEV_ORG is in force', phase: 'refused', stored: false, run: null };
+    const undelegated: DelegationResult = { ok: false, reason: 'busy', detail: 'MAWS_DEV_ORG is in force', phase: 'refused', stored: false, run: null, rev: 0 };
     deps.register('org.delegation.create', () => undelegated);
     deps.register('org.delegation.rewrite', () => undelegated);
     deps.register('org.delegation.renewHub', () => unhalved);

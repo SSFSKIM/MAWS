@@ -131,6 +131,7 @@ export function createDelegations(deps: DelegationsDeps): Delegations {
     destination: deps.destination,
     hub,
     changed,
+    rev: () => rev,
     now,
     log,
   });

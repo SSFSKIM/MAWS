@@ -108,7 +108,7 @@ export function DelegationsSection({ status, view }: { status: Registered; view:
       {asked !== null && (
         <ChangeSheet title={asked.title} change={asked.change} members={view.members} may={may} signIn={signIn} onClose={() => setAsked(null)} onSigned={(version) => setOutcome({ text: ORG.signed(version), refused: false })} />
       )}
-      {sheetOpen && <DelegationSheet destination={dest} members={view.members} may={may} signIn={signIn} creating={creating} delegations={view.delegations} slot={slot} onClose={() => setSheetOpen(false)} onCreated={setOutcome} />}
+      {sheetOpen && <DelegationSheet destination={dest} members={view.members} may={may} signIn={signIn} creating={creating} delegations={view.delegations} slot={slot} rev={status.delegations.rev} onClose={() => setSheetOpen(false)} onCreated={setOutcome} />}
     </div>
   );
 }

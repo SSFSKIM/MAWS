@@ -145,8 +145,9 @@ function SignerLines({ signer, status, view }: { signer: Signer; status: Registe
   if (revoking !== null && offer?.digest !== revoking) setRevoking(null);
   const shownOffer = offer !== null && offer.digest === revoking ? offer : null;
   const held = signer.abandoned.filter((a) => a.hub || a.machines.length > 0); // a never-sent proposal can't show as a fork
-  // M4c: a slot holding an unsent delegation waits for its code, not for the hub (its row, under Delegations, says why)
-  const unsent = view?.delegations.find((d) => d.state === 'unsent');
+  // M4c: a slot holding an unsent delegation waits for its code, not for the hub (its row, under Delegations, says why);
+  // the status says whether it is still held (fix wave 2), the view only its prefix
+  const unsent = slot?.held === true ? view?.delegations.find((d) => d.id === slot.delegation) : undefined;
   return (
     <>
       <Setting label={ORG.signer} note={guide ? ORG.rootNote(signer.fingerprint) : undefined}>
