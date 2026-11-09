@@ -32,13 +32,22 @@
 //   pairing that ends while Touch ID is open endorses, signs, slots and posts nothing.
 // - M4b: an edit may carry a drop's hub row (`Edit.hubRow`), kept with its slot; `settled` hears each slot cleared
 //   because the held chain holds its state, with that row, so the row goes only with that very state, however late.
+// - M4c: an edit may be held (`Edit.hold`): signed into the slot as any edit, with its `unsent` marker in the slot's
+//   write, and then not posted. While the marker stands nothing sends the slot: the post path refuses it in the very
+//   update that would write its exposure (so settlement's repost never sends it), deliveries suspend its obligation, the
+//   weekly asking is not due and every other sign answers `pending`. Only its caller's `publishHeld(hash)` sends it: one
+//   update clears the marker of the slot that hash names, and only then the normal post path runs. A crash or a
+//   sign-out between the two leaves an ordinary pending slot, which settles by the rules above. Publishing is this
+//   run's alone: the held sign leaves an in-memory record of its slot with the lifecycle it was signed under, which a
+//   sign-out, a close, the slot's Discard or its replacement drops, and which no relaunch has. Without it the slot is
+//   Discard-only, since the delegation's key pair lived only in the run that ended.
 //
 // Network calls and adoptions run outside the signing store's updates (whose queue adoption's anchor write waits on).
 // Electron-free: the state signer is injected (step-up.ts's `createStateSigner`, imported here for its type only).
 import { canonicalize, isSignedOrgState, stateHash, verifySuccessor, type OrgState, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
 import type { StateSigner } from '../device/step-up';
 import { checkSuccessor, type Finding, type SupersededOffer } from './checks';
-import type { HubRow, Obligation, Pending } from './files';
+import type { HubRow, Obligation, Pending, Unsent } from './files';
 import { rereadFrom, type HeldOrg } from './held';
 import type { HubClient, HubResult, Served } from './hub-client';
 import type { OrgSession } from './session';
@@ -50,9 +59,18 @@ import { SigningDamaged, withExposure, type SigningStore } from './signing-store
  * (a later device of this Mac's own member, paired from here); the checks count each as endorsed. `live`: whether the
  * change still stands (a pairing neither cancelled nor expired), checked before Touch ID, by the device module after the
  * person's yes, and just before the slot's write; once the slot holds the proposal it is durable, and `live` no longer
- * withdraws it.
+ * withdraws it. `hold` (M4c): the slot keeps the proposal unsent, marked by what holds it, until `publishHeld`; the sign
+ * answers `HeldSigned`.
  */
-export type Edit = { summary: string; lines: string[]; endorse?: ReadonlyArray<{ member: string; device: string }>; live?(): boolean; hubRow?: HubRow; apply(draft: OrgState): void | Promise<void> };
+export type Edit = {
+  summary: string;
+  lines: string[];
+  endorse?: ReadonlyArray<{ member: string; device: string }>;
+  live?(): boolean;
+  hubRow?: HubRow;
+  hold?: Unsent;
+  apply(draft: OrgState): void | Promise<void>;
+};
 
 /**
  * `beforePrompt`: the caller's last word, awaited once everything before Touch ID has passed; Touch ID is asked
@@ -61,21 +79,39 @@ export type Edit = { summary: string; lines: string[]; endorse?: ReadonlyArray<{
  */
 export type SignOptions = { beforePrompt?(): Promise<boolean> };
 
+/**
+ * A held sign's success (`Edit.hold`), and only a held sign's: the proposal is in the slot, unsent, and `hash` is the
+ * slot's stored hash, the name `publishHeld` and a confirmed discard bind to. (TypeScript narrows a success to it with
+ * `'hash' in outcome`.)
+ */
+export type HeldSigned = { ok: true; version: number; hash: string };
+
+/**
+ * M4c: `publishHeld`'s outcome. `published` is set only once this call's own update cleared the slot's marker, whatever
+ * the post then answered: positive provenance that it published, which a slot merely gone afterwards (a Discard queued
+ * ahead, a replacement) never gives.
+ */
+export type PublishOutcome = SignOutcome & { published?: true };
+
 export type SignOutcome =
   | { ok: true; version: number }
+  | HeldSigned
   | { ok: false; reason: 'not-root' | 'unmarked' | 'signing' | 'cancelled' | 'pending' | 'invalid' | 'hub' | 'busy' | 'stale'; detail?: string }
   | { ok: false; reason: 'refused'; findings: Finding[] };
 
 /**
  * A discard, in `abandon-pending`'s distinctions (admin.ts:1168-1196), for the Org section to word: `unsent`, never
  * exposed (no POST, no machine's act), so nothing can show it as a fork; else where the hub stood when it was read,
- * `hubVersion` its head and `forkAt` the version where it holds another state. Refused: the hub holds it, the hub can't
- * be read (or its head couldn't be adopted, so the floor below isn't reached), nothing is pending, or signing.json is
- * damaged. After a discard the held head is at least max(the slot's parent version, `hubVersion`): the floor no lower
- * version passes. `stale`: the owner confirmed another proposal than the slot holds now (`hash` names the confirmed
- * one), so nothing was discarded.
+ * `hubVersion` its head and `forkAt` the version where it holds another state. `marker` (M4c): the slot's own `unsent`
+ * marker, read in the write that cleared the slot, naming what held it back for its caller's publish. The discard's
+ * `unsent` and the slot's marker are related but different facts: a held slot is never exposed, but a slot never exposed
+ * need not have been held (a crash or an unreachable hub can leave any slot unposted). Refused: the hub holds it, the
+ * hub can't be read (or its head couldn't be adopted, so the floor below isn't reached), nothing is pending, or
+ * signing.json is damaged. After a discard the held head is at least max(the slot's parent version, `hubVersion`): the
+ * floor no lower version passes. `stale`: the owner confirmed another proposal than the slot holds now (`hash` names the
+ * confirmed one), so nothing was discarded.
  */
-export type DiscardOutcome = { ok: true; unsent: boolean; hubVersion: number; forkAt?: number } | { ok: false; reason?: 'held' | 'hub' | 'none' | 'signing' | 'stale' };
+export type DiscardOutcome = { ok: true; unsent: boolean; hubVersion: number; forkAt?: number; marker: Unsent | null } | { ok: false; reason?: 'held' | 'hub' | 'none' | 'signing' | 'stale' };
 
 export interface OrgSigner {
   /** The held head's `root.keys` holds this device's step-up key id. */
@@ -84,10 +120,19 @@ export interface OrgSigner {
   maySign(): boolean;
   /** `fork`: the app's line has left it (another state at its version, or its parent off the line). `hash`: its state's
    * `stateHash`, which the owner's confirmed discard names. `refused`: the hub's last answer to a post of it this run
-   * that didn't take it (a sign's or a settle's), null while it only waits (no answer, or no hub). */
-  pending(): { version: number; exposed: boolean; fork: boolean; hash: string; refused: string | null } | null;
-  /** Composes, checks, prompts, slots, posts, adopts. */
+   * that didn't take it (a sign's or a settle's), null while it only waits (no answer, or no hub). `unsent`: the slot's
+   * marker while it is held for its caller's publish (M4c), else null. */
+  pending(): { version: number; exposed: boolean; fork: boolean; hash: string; refused: string | null; unsent: Unsent | null } | null;
+  /** Composes, checks, prompts, slots, posts, adopts. A held edit (`Edit.hold`) stops at the slot: `HeldSigned`. */
   sign(edit: Edit, options?: SignOptions): Promise<SignOutcome>;
+  /**
+   * M4c: sends the held slot `hash` names. One update clears its marker (refused `stale`, changing nothing, when the slot
+   * is gone, is another, is no longer held, or was held by a run that has ended: a sign-out, a close or a relaunch since
+   * its held sign leaves it Discard-only); then the normal post path, whose outcome it answers. Once the marker is
+   * cleared the slot is an ordinary pending one: a post that fails or is cut off leaves it to settlement, and the outcome
+   * says `published` (PublishOutcome).
+   */
+  publishHeld(hash: string): Promise<PublishOutcome>;
   /** The slot's three rules. The session calls it at start and at each feed open; `sign` calls it first. */
   settle(): Promise<void>;
   /** Only after the owner's confirmation of the proposal `hash` names, and only while the hub's chain doesn't hold it. */
@@ -221,6 +266,11 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
   let epoch = 0;
   let closed = false;
   const live = (asked: number): boolean => !closed && epoch === asked;
+  /**
+   * M4c: the held slot this run may publish (its stored hash) and the lifecycle it was signed under. Only memory holds
+   * it, as only memory holds the held delegation's key pair: a fence, a close, the slot's Discard or a new slot drops it.
+   */
+  let heldHere: { hash: string; epoch: number } | null = null;
   const stopped = (what: string): SignOutcome => ({ ok: false, reason: 'not-root', detail: `this Mac signed out while signing: ${what}` });
 
   /** The fork judgment of the slot `key` names (its state's canonical form), refreshed after each change. */
@@ -247,6 +297,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       fork: judged !== null && judged.key === key && judged.fork,
       hash: file.pending.hash,
       refused: refusal !== null && refusal.key === key ? refusal.detail : null,
+      unsent: file.pending.unsent === null ? null : { ...file.pending.unsent },
     };
   }
 
@@ -392,10 +443,21 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     }
     // The parent's hash was an await: a sign-out or close since stops it before the exposure's enqueue.
     if (!live(asked)) return stopped(unsent);
+    let exposed: boolean;
     try {
-      await store.update((file) => ({ next: withExposure(file, signed, { hub: true }), value: undefined }));
+      exposed = await store.update((file) => {
+        // M4c: a slot held unsent is never sent from here while its marker stands (settlement's repost included); only
+        // `publishHeld` sends it, after an update of its own cleared the marker. Judged in the update that would expose it.
+        const slot = file.pending;
+        if (slot !== null && slot.unsent !== null && canonicalize(slot.signed.state) === canonicalize(signed.state)) return { next: file, value: false };
+        return { next: withExposure(file, signed, { hub: true }), value: true };
+      });
     } catch (error) {
       return { ok: false, reason: 'signing', detail: (error as Error).message };
+    }
+    if (!exposed) {
+      log(`version ${version} is held unsent for its caller's publish: nothing was posted`);
+      return { ok: false, reason: 'pending', detail: `version ${version} is held unsent until its caller publishes it` };
     }
     refreshed();
     // Synchronously from here to the post, as deliveries.ts does before its act: a proposal whose parent is no longer
@@ -486,6 +548,56 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     else log(`pending version ${version} is a fork: another state holds its version; it waits for the owner's discard`);
   }
 
+  /**
+   * M4c's publish, in two steps. First one update, pure and synchronous, clears the marker of the slot whose stored hash
+   * is `named`, still held, and held by this lifecycle (`heldHere`); nothing else is changed (no slot: it was discarded;
+   * another: it was replaced; no marker: it was published already, and settlement owns it; no record of this run holding
+   * it: the run that held it ended, and only Discard is left). Only once that write resolves, the normal post path, which
+   * writes exposure first. So a caller whose slot is gone publishes nothing, and an end between the two steps (a crash, a
+   * sign-out, a close) leaves an ordinary unexposed pending slot that the next settlement posts.
+   */
+  async function publishLocked(named: string, asked: number): Promise<PublishOutcome> {
+    const unpublished = 'nothing was published';
+    if (!live(asked)) return stopped(unpublished);
+    if (deps.session.current() === null) return { ok: false, reason: 'not-root', detail: 'this Mac is not signed in to the org' };
+    if (store.get() === 'damaged') return { ok: false, reason: 'signing' };
+    let cleared: 'stopped' | 'none' | 'other' | 'sent' | 'ended' | SignedOrgState;
+    try {
+      cleared = await store.update<'stopped' | 'none' | 'other' | 'sent' | 'ended' | SignedOrgState>((f) => {
+        if (!live(asked)) return { next: f, value: 'stopped' };
+        if (f.pending === null) return { next: f, value: 'none' };
+        if (f.pending.hash !== named) return { next: f, value: 'other' };
+        if (f.pending.unsent === null) return { next: f, value: 'sent' };
+        // The run that held it, and no other: checked in the clearing update, so nothing awaits between the two.
+        if (heldHere === null || heldHere.hash !== named || heldHere.epoch !== epoch) return { next: f, value: 'ended' };
+        f.pending.unsent = null;
+        return { next: f, value: f.pending.signed };
+      });
+    } catch (error) {
+      // A write can commit and still throw (the rename done, the directory's sync failed): the store holds the file as
+      // it reads back, and a clearing on disk is a publication (the branch fix wave, R2). Anything else published nothing.
+      const back = store.get();
+      if (back === 'damaged' || back.pending === null || back.pending.hash !== named || back.pending.unsent !== null) throw error;
+      log(`the marker's clearing threw (${(error as Error).message}) but reads back cleared: version ${back.pending.signed.state.version} is published`);
+      cleared = back.pending.signed;
+    }
+    if (cleared === 'stopped') return stopped(unpublished);
+    if (cleared === 'none') return { ok: false, reason: 'stale', detail: `no proposal is pending (discarded): ${unpublished}` };
+    if (cleared === 'other') return { ok: false, reason: 'stale', detail: `another proposal holds the slot now: ${unpublished}` };
+    if (cleared === 'sent') return { ok: false, reason: 'stale', detail: 'the proposal is no longer held: it was published already, and settles as any pending proposal' };
+    if (cleared === 'ended') return { ok: false, reason: 'stale', detail: 'this slot was held by a run that has ended: only Discard' };
+    heldHere = null;
+    log(`version ${cleared.state.version} published by its caller: its marker is cleared, and it is posted`);
+    refreshed();
+    // From here on it is published, whatever the post answers: a store that fails now leaves an ordinary pending slot.
+    try {
+      return { ...(await post(cleared, asked)), published: true };
+    } catch (error) {
+      log(`posting version ${cleared.state.version} failed: ${(error as Error).message}`);
+      return { ok: false, reason: 'signing', detail: (error as Error).message, published: true };
+    }
+  }
+
   /** The refusal before anything is composed, or null. */
   function standing(): SignOutcome | null {
     if (deps.session.current() === null) return { ok: false, reason: 'not-root', detail: 'this Mac is not signed in to the org' };
@@ -532,7 +644,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     if (unlisted !== undefined) return { ok: false, reason: 'invalid', detail: `the edit names device ${unlisted.device} to endorse, which the successor doesn't list under that member` };
 
     const endorsing = endorse.length === 0 ? undefined : { kid: signer.kid, devices: endorse.map((e) => e.device) };
-    const findings = await checkSuccessor(head.state, draft, view.superseded(), new Date(now()), endorsing === undefined ? {} : { endorsing });
+    const findings = await checkSuccessor(head.state, draft, view.superseded(), new Date(now()), { certificates: view.certificates(), ...(endorsing === undefined ? {} : { endorsing }) });
     if (findings.some((f) => f.level === 'refuse')) return { ok: false, reason: 'refused', findings };
     const text = [
       `Org ${draft.org}: version ${head.state.version} → ${draft.version}`,
@@ -571,6 +683,7 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       hash: await stateHash(signed.state),
       exposed: { hub: false, machines: [] },
       ...(edit.hubRow === undefined ? {} : { hubRow: { ...edit.hubRow } }),
+      unsent: edit.hold === undefined ? null : { kind: edit.hold.kind, id: edit.hold.id },
     };
     let kept: 'kept' | 'pending' | 'moved' | 'stopped' | 'ended';
     // Right before the enqueue (the verdict and the obligation were awaits): a close since refuses the store's queue, and
@@ -598,8 +711,12 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     if (kept === 'moved') return { ok: false, reason: 'invalid', detail: 'not-head' };
     if (kept === 'stopped') return stopped('what was signed was not kept or sent');
     if (kept === 'ended') return { ok: false, reason: 'stale', detail: 'the change ended (a pairing cancelled or expired) after Touch ID: what was signed was not kept or sent' };
-    log(`version ${signed.state.version} signed and kept pending${obligation === null ? '' : `, owed to ${obligation.owed.length} machine(s)`}`);
+    // The slot is this run's now: a held one is publishable by this lifecycle alone, any other replaces the record.
+    heldHere = slot.unsent === null ? null : { hash: slot.hash, epoch: asked };
+    log(`version ${signed.state.version} signed and kept pending${slot.unsent === null ? '' : `, held unsent for ${slot.unsent.kind} ${slot.unsent.id}`}${obligation === null ? '' : `, owed to ${obligation.owed.length} machine(s)`}`);
     refreshed();
+    // M4c: a held proposal stops here, unsent; its caller publishes it by the slot's hash.
+    if (slot.unsent !== null) return { ok: true, version: signed.state.version, hash: slot.hash };
 
     return post(signed, asked);
   }
@@ -628,6 +745,19 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
       const asked = epoch;
       await exclusive(() => settleLocked(asked));
       await refreshNow();
+    },
+    async publishHeld(named) {
+      const asked = epoch;
+      try {
+        return await exclusive(() => publishLocked(named, asked));
+      } catch (error) {
+        // Only the signing store throws here (a damaged file, a failed write): the slot's state is what it reads back.
+        if (error instanceof SigningDamaged) return { ok: false, reason: 'signing' };
+        log(`publishing failed: ${(error as Error).message}`);
+        return { ok: false, reason: 'signing', detail: (error as Error).message };
+      } finally {
+        await refreshNow();
+      }
     },
     async discardPending(confirmed, named) {
       if (confirmed !== true) return { ok: false };
@@ -662,20 +792,22 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
         const hash = slot.hash;
         const key = canonicalize(slot.signed.state);
         if (!live(asked)) return { ok: false };
-        const done = await store.update<'stopped' | { unsent: boolean } | null>((f) => {
+        const done = await store.update<'stopped' | { unsent: boolean; marker: Unsent | null } | null>((f) => {
           // A sign-out since the owner confirmed: the hub was read for the lifecycle that ended, so nothing is discarded on it.
           if (!live(asked)) return { next: f, value: 'stopped' as const };
           if (f.pending === null || canonicalize(f.pending.signed.state) !== key) return { next: f, value: null };
           const { hub: atHub, machines } = f.pending.exposed;
+          const marker = f.pending.unsent;
           f.pending = null;
           f.deliveries = f.deliveries.filter((o) => o.hash !== hash);
           f.abandoned.push({ hash, version, hub: atHub, machines: [...machines] });
-          return { next: f, value: { unsent: !atHub && machines.length === 0 } };
+          return { next: f, value: { unsent: !atHub && machines.length === 0, marker } };
         });
         if (done === 'stopped') return { ok: false };
         if (done === null) return { ok: false, reason: 'none' };
-        log(`pending version ${version} ${hash} abandoned on the owner's word${done.unsent ? ' (never sent)' : ''}; the hub's head is version ${hubVersion}`);
-        return { ok: true, unsent: done.unsent, hubVersion, ...(there === undefined ? {} : { forkAt: version }) };
+        if (heldHere?.hash === hash) heldHere = null;
+        log(`pending version ${version} ${hash} abandoned on the owner's word${done.unsent ? ' (never sent)' : ''}${done.marker === null ? '' : ` (held for ${done.marker.kind} ${done.marker.id})`}; the hub's head is version ${hubVersion}`);
+        return { ok: true, unsent: done.unsent, hubVersion, ...(there === undefined ? {} : { forkAt: version }), marker: done.marker };
       });
       await refreshNow();
       return outcome;
@@ -700,10 +832,12 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     },
     fence() {
       epoch++;
+      heldHere = null;
     },
     close() {
       closed = true;
       epoch++;
+      heldHere = null;
       unwatch();
       listeners.clear();
       return Promise.all([turns, ...judgings]).then(() => undefined);

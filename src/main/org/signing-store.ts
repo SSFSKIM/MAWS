@@ -17,7 +17,7 @@
 import { canonicalize, stateHash, type SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
 import { isSigningFile, isStoredSigningFile, SIGNING_FILE, type OrgFiles, type SigningFile } from './files';
 
-export type { Abandoned, Obligation, Pending, SigningFile } from './files';
+export type { Abandoned, Obligation, Pending, SigningFile, Unsent } from './files';
 
 /** An update or a read of a damaged file: `problem: 'signing'` until the owner resets it. */
 export class SigningDamaged extends Error {
@@ -62,12 +62,13 @@ export async function createSigningStore(deps: {
   /**
    * The file on disk as the store judges it: absent before the first write is a fresh file; anything else unread is
    * damaged. The pending slot's `hash` is the package's `stateHash` of its state, computed here whatever the file says
-   * (a slot kept before the field existed has none), so `get()` names the slot synchronously.
+   * (a slot kept before the field existed has none), so `get()` names the slot synchronously. A slot kept before M4c's
+   * `unsent` marker existed was never held: it loads as null.
    */
   async function read(): Promise<SigningFile | 'damaged'> {
     const raw = await files.read(SIGNING_FILE);
     if (raw === null && !flagged()) return emptySigningFile();
-    if (isStoredSigningFile(raw)) return { ...raw, pending: raw.pending === null ? null : { ...raw.pending, hash: await stateHash(raw.pending.signed.state) } };
+    if (isStoredSigningFile(raw)) return { ...raw, pending: raw.pending === null ? null : { ...raw.pending, hash: await stateHash(raw.pending.signed.state), unsent: raw.pending.unsent ?? null } };
     log(`${SIGNING_FILE} is ${raw === null ? 'missing or unreadable' : 'malformed'} after its first write: nothing is signed until it is reset`);
     return 'damaged';
   }

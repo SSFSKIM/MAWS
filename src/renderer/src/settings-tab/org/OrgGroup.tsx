@@ -6,8 +6,9 @@
 // showing each revocation, consequence, warning and withheld name; the confirmation names the offer's digest), the
 // machines still owing a delivery, the discarded proposals a hub or machine may hold, and a rekey's old device still
 // listed, which M4a removes through the change sheet (`device.remove`) in place of M3's `remove-device` command.
+// M4c: the Delegations section (DelegationsSection.tsx) closes the group, a section of it rather than a fifth group.
 import { useState } from 'react';
-import { ORG_HEAD_BACKSTOP_DAYS, ORG_HEAD_WARN_DAYS, type DiscardResult, type OrgView } from '@shared/ipc/schema/org';
+import { ORG_HEAD_BACKSTOP_DAYS, ORG_HEAD_WARN_DAYS, type OrgView } from '@shared/ipc/schema/org';
 import type { MachineRef } from '@shared/machine/ref';
 import { useNow } from '../../app/use-now';
 import { GatewaySheet } from '../../gateway/GatewaySheet';
@@ -17,7 +18,8 @@ import { machineName } from '../../stores/org-projects';
 import { ORG } from '../copy';
 import { Setting, TEXT_ACTION } from '../parts';
 import { ChangeSheet } from './ChangeSheet';
-import { failed, inWords, OutcomeLine, signInOf, signOutcome, type Invoked, type Outcome, type Registered } from './parts';
+import { DelegationsSection } from './DelegationsSection';
+import { discardOutcome, failed, inWords, OutcomeLine, signInOf, signOutcome, type Invoked, type Outcome, type Registered } from './parts';
 
 type Signer = NonNullable<Registered['signer']>;
 type Pending = NonNullable<Signer['pending']>;
@@ -41,6 +43,7 @@ export function OrgGroup({ status, view }: { status: Registered; view: OrgView |
       )}
       {status.problem !== null && status.problem !== 'held-chain' && <Problem problem={status.problem} />}
       {signing && signer !== null && <SignerLines signer={signer} status={status} view={view} />}
+      {view !== null && <DelegationsSection status={status} view={view} />}
     </>
   );
 }
@@ -89,11 +92,6 @@ function Problem({ problem }: { problem: NonNullable<Registered['problem']> }) {
       )}
     </Setting>
   );
-}
-
-function discardOutcome(version: number, result: DiscardResult): Outcome {
-  if (result.ok) return { text: ORG.discarded(version, result.unsent, result.hubVersion, result.forkAt), refused: false };
-  return { text: result.reason === undefined ? ORG.notDiscarded : `${ORG.notDiscarded} · ${ORG.discardReasons[result.reason](version)}`, refused: true };
 }
 
 // This Mac as the org's signer: the root line (or the unmarked keys' words), the weekly line, and every other line
@@ -147,6 +145,9 @@ function SignerLines({ signer, status, view }: { signer: Signer; status: Registe
   if (revoking !== null && offer?.digest !== revoking) setRevoking(null);
   const shownOffer = offer !== null && offer.digest === revoking ? offer : null;
   const held = signer.abandoned.filter((a) => a.hub || a.machines.length > 0); // a never-sent proposal can't show as a fork
+  // M4c: a slot holding an unsent delegation waits for its code, not for the hub (its row, under Delegations, says why);
+  // the status says whether it is still held (fix wave 2), the view only its prefix
+  const unsent = slot?.held === true ? view?.delegations.find((d) => d.id === slot.delegation) : undefined;
   return (
     <>
       <Setting label={ORG.signer} note={guide ? ORG.rootNote(signer.fingerprint) : undefined}>
@@ -173,7 +174,13 @@ function SignerLines({ signer, status, view }: { signer: Signer; status: Registe
       {slot !== null && (
         <Setting label={ORG.pending}>
           <span className={slot.fork || slot.refused !== null ? 'text-warning' : 'text-fg-muted'}>
-            {slot.fork ? ORG.pendingFork(slot.version) : slot.refused !== null ? ORG.pendingRefused(slot.version, slot.refused) : ORG.pendingWaits(slot.version)}
+            {slot.fork
+              ? ORG.pendingFork(slot.version)
+              : slot.refused !== null
+                ? ORG.pendingRefused(slot.version, slot.refused)
+                : unsent !== undefined
+                  ? ORG.pendingUnsent(slot.version, unsent.prefix)
+                  : ORG.pendingWaits(slot.version)}
           </span>
           {(slot.fork || slot.refused !== null) && (
             <button type="button" className={TEXT_ACTION} disabled={acting} onClick={() => setConfirming(slot.hash)}>

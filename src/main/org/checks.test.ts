@@ -11,6 +11,7 @@ import {
   generateSigningKey,
   keyId,
   machineKeys,
+  MAX_PROVISIONING_KEY_TTL_S,
   NO_CERTIFICATES,
   signBody,
   SIGNING_DOMAINS,
@@ -251,21 +252,23 @@ describe('checkSuccessor', () => {
     it('refuses dc-prod- under a live dc- as nested, as the package does', async () => {
       const head = await headWith('dc-');
       const next = await adding(head, 'dc-prod-');
-      expect(codes(await check(head, next))).toEqual(['refuse:prefix-overlaps', 'refuse:prefix-nested']);
+      const findings = await check(head, next);
+      expect(codes(findings)).toEqual(['refuse:prefix-nested']);
+      expect(findings[0].detail).toBe(`the prefix dc-prod- of delegation ${next.state.delegations[1].id} nests in delegation ${head.state.delegations[0].id}'s dc-`);
       expect(await verdict(head, next)).toBe('malformed');
     });
 
     it('refuses dc- over a live dc-prod- as covering it, as the package does', async () => {
       const head = await headWith('dc-prod-');
       const next = await adding(head, 'dc-');
-      expect(codes(await check(head, next))).toEqual(['refuse:prefix-overlaps', 'refuse:prefix-covers']);
+      expect(codes(await check(head, next))).toEqual(['refuse:prefix-covers']);
       expect(await verdict(head, next)).toBe('malformed');
     });
 
     it('refuses an equal prefix, case-folded, as the package does', async () => {
       const head = await headWith('dc-');
       const next = await adding(head, 'DC-');
-      expect(codes(await check(head, next))).toEqual(['refuse:prefix-overlaps', 'refuse:prefix-equal']);
+      expect(codes(await check(head, next))).toEqual(['refuse:prefix-equal']);
       expect(await verdict(head, next)).toBe('malformed');
     });
 
@@ -275,7 +278,9 @@ describe('checkSuccessor', () => {
       const s3 = await successor(s2, [a1], (s) => dropDelegation(s, dc.delegation));
       for (const [prefix, code] of [['dc-', 'prefix-equal'], ['dc-x-', 'prefix-nested'], ['d', 'prefix-covers']] as const) {
         const next = await adding(s3, prefix);
-        expect(codes(await check(s3, next))).toEqual(['refuse:prefix-overlaps', `refuse:${code}`]);
+        const findings = await check(s3, next);
+        expect(codes(findings)).toEqual([`refuse:${code}`]);
+        expect(findings[0].detail).toContain(`the dropped delegation ${dc.delegation.id}'s dc-, reserved for the life of the org`);
         expect(await verdict(s3, next)).toBe('malformed');
       }
     });
@@ -288,7 +293,7 @@ describe('checkSuccessor', () => {
         await dropDelegation(s, dc.delegation);
         s.delegations.push(prod.delegation);
       });
-      expect(codes(await check(head, next))).toEqual(['refuse:prefix-overlaps', 'refuse:prefix-nested', 'warn:drops-delegation']);
+      expect(codes(await check(head, next))).toEqual(['refuse:prefix-nested', 'warn:drops-delegation']);
       expect(await verdict(head, next)).toBe('malformed');
     });
 
@@ -296,7 +301,7 @@ describe('checkSuccessor', () => {
       const x = await newDelegation('dc-');
       const y = await newDelegation('dc-prod-');
       const next = await successor(g, [a1], (s) => void s.delegations.push(x.delegation, y.delegation));
-      expect(codes(await check(g, next))).toEqual(['refuse:prefix-overlaps', 'refuse:prefix-covers']);
+      expect(codes(await check(g, next))).toEqual(['refuse:prefix-covers']);
       expect(await verdict(g, next)).toBe('malformed');
     });
 
@@ -384,6 +389,24 @@ describe('checkSuccessor', () => {
       expect(await verdict(head, next)).toBe('ok');
     });
 
+    // M4c: a renewal past the hub's creation cap would be refused by the hub after the state was signed (`409 too-long`),
+    // leaving the two halves apart for good, so the app refuses it before Touch ID, judged against the checks' `now`.
+    it('refuses a renewal past now + MAX_PROVISIONING_KEY_TTL_S (renew-past-cap): exactly the cap passes, one second past refuses', async () => {
+      const dc = await newDelegation('dc-', iso(t0 + 30 * DAY));
+      const head = await successor(g, [a1], (s) => void s.delegations.push(dc.delegation), iso(t0 - DAY));
+      const cap = t0 + MAX_PROVISIONING_KEY_TTL_S * 1000;
+      const atCap = await successor(head, [a1], (s) => void (s.delegations[0].expires = iso(cap)), iso(t0));
+      expect(await check(head, atCap, [], new Date(t0))).toEqual([]);
+      const past = await successor(head, [a1], (s) => void (s.delegations[0].expires = iso(cap + 1000)), iso(t0));
+      const findings = await check(head, past, [], new Date(t0));
+      expect(codes(findings)).toEqual(['refuse:renew-past-cap']);
+      expect(findings[0].detail).toContain(iso(cap));
+      // the package accepts it: only the hub's renewal would refuse it
+      expect(await verdict(head, past)).toBe('ok');
+      // judged against the `now` the checks are given, not the successor's issue
+      expect(await check(head, past, [], new Date(t0 + 1000))).toEqual([]);
+    });
+
     it('accepts extending a live delegation', async () => {
       const dc = await newDelegation('dc-', iso(t0 + 10 * DAY));
       const head = await successor(g, [a1], (s) => void s.delegations.push(dc.delegation), iso(t0 - DAY));
@@ -401,6 +424,32 @@ describe('checkSuccessor', () => {
     expect(codes(findings)).toEqual(['warn:drops-delegation']);
     expect(findings[0].detail).toContain(dc.delegation.id);
     expect(findings[0].detail).toContain('certificates');
+    expect(findings[0].detail).toContain('no machine holds a certificate of it');
+    expect(await verdict(head, next)).toBe('ok');
+  });
+
+  // M4c (refresh item 12): the warning names the machines the drop retires, from the certificate set, each live or
+  // retired; a certificate whose key the head already revokes, or another delegation's, is not this drop's.
+  it('names the certified machines a drop retires, live and retired, and says the id and the prefix stay reserved for good', async () => {
+    const dc = await newDelegation('dc-');
+    const other = await newDelegation('ot-');
+    const [live, retired, revoked, theirs] = [await certificate(dc, 'dc-vm1'), await certificate(dc, 'dc-vm2'), await certificate(dc, 'dc-vm3'), await certificate(other, 'ot-vm1')];
+    const head = await successor(g, [a1], async (s) => {
+      s.delegations.push(dc.delegation, other.delegation);
+      s.retired.push({ keyId: await keyId(retired.key.pub), pub: retired.key.pub, notAfter: s.issued, holder: { machine: retired.cert.body.machine } });
+      s.revoked.push({ keyId: await keyId(revoked.key.pub), holder: { machine: revoked.cert.body.machine } });
+    });
+    const next = await successor(head, [a1], (s) => dropDelegation(s, dc.delegation));
+    const certificates = { certs: [live.cert, retired.cert, revoked.cert, theirs.cert], retirements: [] };
+    const findings = await checkSuccessor(head.state, next.state, [], new Date(), { certificates });
+    expect(codes(findings)).toEqual(['warn:drops-delegation']);
+    const { detail } = findings[0];
+    expect(detail).toContain(`delegation ${dc.delegation.id} (prefix dc-)`);
+    expect(detail).toContain('dc-vm1 (live)');
+    expect(detail).toContain('dc-vm2 (retired)');
+    expect(detail).not.toContain('dc-vm3');
+    expect(detail).not.toContain('ot-vm1');
+    expect(detail).toContain('its id and its prefix stay reserved for good');
     expect(await verdict(head, next)).toBe('ok');
   });
 

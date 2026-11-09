@@ -1,12 +1,14 @@
-// The Org page's people, devices and machines against desk-hub's Worker in Miniflare and real endpoints (P5 O8 M4a and
-// M4b, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M4a's and M4b's "Proves"; acceptance 4a and 4b), on the
+// The Org page's people, devices, machines and delegations against desk-hub's Worker in Miniflare and real endpoints (P5
+// O8 M4a, M4b and M4c, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, their "Proves"; acceptance 4a to 4c), on the
 // local org the O8 suites share (./local-org.ts): rooted by O13's real `deployment admin`, app A registered through its
 // `pair` and made a root by its `root add`. A then acts only through the session's surface the Org page calls
-// (`org.preview` and `org.change` under the digest shown, `org.pair.*`, `org.enroll.*`, `org.grants.*`, `org.view`, the
-// status's `pairing` and `enrolling`), its Touch ID the state signer's and the record signer's injected confirmation;
-// nothing reaches the Keychain, a browser or the real backup exclusion. Two endpoints run beside it: the machine A
-// enrolls from the app (reached over O7's link by the hub's relay), and this Mac's own (A's `local`, reached through its
-// local door as mawsd's machine socket serves it), enrolled at setup by `enrollEndpoint` before `root add`.
+// (`org.preview` and `org.change` under the digest shown, `org.pair.*`, `org.enroll.*`, `org.grants.*`,
+// `org.delegation.*`, `org.view`, the status's `pairing` and `enrolling`), its Touch ID the state signer's and the record
+// signer's injected confirmation; nothing reaches the Keychain, a browser, the real backup exclusion or the real
+// `gcloud`: the custody's gcloud is a fake first on the session's injected PATH, which records each call's argv and
+// stdin. Three endpoints run beside it: the machine A enrolls from the app (reached over O7's link by the hub's relay),
+// this Mac's own (A's `local`, reached through its local door as mawsd's machine socket serves it), enrolled at setup by
+// `enrollEndpoint` before `root add`, and the VM provisioned from the code A's delegation stored.
 //
 // 1. A adds member B and pairs B's first device: B's app, under the stand-in's identity for B, registers with A's code,
 //    A judges B's pending entry through H1 (`?member=`), shows the fingerprint B's app shows, and approves it unendorsed.
@@ -21,21 +23,44 @@
 //    withheld, so it is behind B's addition: the app's head pushed over the link (`endpoint.state`) for the ledger read
 //    before the one confirmation, and again after it before the grant, the endpoint's ledger holding it, and
 //    `machineRights` giving B `spawn`.
-// A. A grants B on this Mac's own machine through the local door (the architect's Fork A): the act through the door and
+// 9. A grants B on this Mac's own machine through the local door (the architect's Fork A): the act through the door and
 //    nothing over a link, the grant in that endpoint's ledger, read back through `endpoint.local.grants`.
-// 9. The machine's `grants.json` is removed and the endpoint restarted: its startup invariant moves the key, the ledger
-//    and the enrollment aside and it reads unenrolled. A re-enrolls it from the page (`machine.replace`, a new key under
-//    the same ref); the page shows B's grant missing under the earlier key and re-grants it for the new key above the
-//    mark, and the new ledger holds it.
-// 10. A changes the machine's owners to B, then back, then drops it; the hub row goes, through the keyed delete
+// 10. The machine's `grants.json` is removed and the endpoint restarted: its startup invariant moves the key, the ledger
+//     and the enrollment aside and it reads unenrolled. A re-enrolls it from the page (`machine.replace`, a new key under
+//     the same ref); the page shows B's grant missing under the earlier key and re-grants it for the new key above the
+//     mark, and the new ledger holds it.
+// 11. A changes the machine's owners to B, then back, then drops it; the hub row goes, through the keyed delete
 //     (`?ref=&pub=`) the hub's Registry honours (#538).
-// 11. Every state the hub accepted verifies from genesis, and every state after `root add` is A's.
+// 12. Every state the hub accepted verifies from genesis, and every state after `root add` is A's.
+// 13. A creates a delegation (`org.delegation.create`): the mint goes to the hub's own route, whose parse of the request
+//     is read back from its key list; the signed `expires` is now + the days asked; the code reaches the fake gcloud's
+//     `versions add` stdin and nowhere else (no argv, log line, status, answer or file under A's profile). A VM's endpoint
+//     provisions from the code the fake received: its certificate verifies, and the hub lists it.
+// 14. A renews it through `org.change`: the signed `expires` moves, and once it settles the hub's key follows (its GET);
+//     A's page, having read the hub, lists the VM under the delegation.
+// 15. A drops it: the VM's event key reads `revoked` (`verifyEvent`), the hub key is listed revoked, and every state
+//     still verifies from genesis.
 //
-// The pairing and enrollment codes are handed from A's answer to the registering app or the machine's `enroll` and are
-// never printed, nor compared in a way whose failure would print them.
-import { existsSync, readdirSync, rmSync } from 'node:fs';
+// The pairing, enrollment and provisioning codes are handed from A's answer, or the fake gcloud's stdin, to the
+// registering app or the machine's `enroll` or `provision` and are never printed, nor compared in a way whose failure
+// would print them.
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { decodeEnrollmentCodeV2, keyId, stateHash, verifyPinnedChain, type Action, type SignedOrgState } from 'org-protocol';
+import {
+  decodeEnrollmentCodeV2,
+  decodeProvisioningCodeV2,
+  keyId,
+  NEVER_OFFLINE,
+  signEvent,
+  stateHash,
+  verifyEvent,
+  verifyMachineCert,
+  verifyPinnedChain,
+  type Action,
+  type LogEventV2,
+  type SignedOrgState,
+} from 'org-protocol';
+import type { ProvisioningKeyRecord, ProvisioningKeys } from 'desk-hub/protocol';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { readAdminKeys } from '../../apps/desk-hub/deploy/admin-device.ts';
 import { createEndpoint, type Endpoint } from '../../src/endpoint';
@@ -44,12 +69,14 @@ import { createRecordSigner, createStateSigner, type Confirm } from '../../src/m
 import type { ActOutcome, RemoteLink } from '../../src/main/machines/remote/link';
 import type { GrantLink } from '../../src/main/org/grants';
 import type { OrgSessionService } from '../../src/main/org/org-session';
+import { openProvisioningSecret, PROVISIONING_SECRET_FILE, type ProvisioningSecretStore } from '../../src/main/org/provisioning-secret-store';
 import { createRegistryFeed, type RegistryFeed } from '../../src/main/org/registry-feed';
+import { resolveGcloud, secretStore } from '../../src/main/org/secret-store';
 import type { ClientId } from '../../src/shared/ipc/client';
-import type { OrgChange, OrgStatus } from '../../src/shared/ipc/schema/org';
+import type { OrgChange, OrgStatus, ProvisioningSecret } from '../../src/shared/ipc/schema/org';
 import type { MachineRef } from '../../src/shared/machine/ref';
-import { fakeServices, type FakeServices } from '../endpoint/fake-services';
-import { ADMIN, ORG, enrollEndpoint, orgSession, registerThroughPair, registered, relayLink, scratchDir, sleep, startLocalOrg, until, type LocalOrg } from './local-org';
+import { fakeServices, mintRef, type FakeServices } from '../endpoint/fake-services';
+import { ADMIN, ORG, enrollEndpoint, fakeGcloud, orgSession, registerThroughPair, registered, relayLink, scratchDir, sleep, startLocalOrg, until, type LocalOrg } from './local-org';
 
 const B_EMAIL = 'b@example.com';
 const scratch = scratchDir('maws-o8-org-page-');
@@ -63,9 +90,9 @@ let a: OrgSessionService;
 let b: OrgSessionService;
 const sessions: OrgSessionService[] = [];
 const feeds: RegistryFeed[] = [];
-/** A's statuses, each kept, so no pairing or enrollment secret is seen in any of them. */
+/** A's statuses, each kept, so no pairing, enrollment or provisioning secret is seen in any of them. */
 const statuses: OrgStatus[] = [];
-/** Every pairing and enrollment code A answered, kept only to check that nothing seen carried one. */
+/** Every pairing and enrollment code A answered, and the provisioning code the fake gcloud received, kept only to check that nothing seen carried one. */
 const codes: string[] = [];
 
 /** Every prompt A's state and record signers showed, in order; each answered yes (the injected Touch ID). */
@@ -80,7 +107,7 @@ const confirm: Confirm = async (prompt) => {
 
 // ---- The machines: one A enrolls from the app and reaches over O7's link, and this Mac's own behind its local door ----
 
-/** The machine A enrolls from the page (case 7) and re-enrolls (case 9). */
+/** The machine A enrolls from the page (case 7) and re-enrolls (case 10). */
 const MACHINE = 'o8-page-mini';
 /** This Mac's own machine, A's `local`. */
 const OWN = 'o8-page-own';
@@ -93,6 +120,10 @@ let machineRef: MachineRef;
 let own: Endpoint;
 let ownServices: FakeServices;
 let ownRef: MachineRef;
+/** The VM provisioned from the code A's delegation stored (case 13), its ref minted under the delegation's id. */
+const VM = 'o8-vm-one';
+let vm: Endpoint | undefined;
+let vmServices: FakeServices | undefined;
 /** A's link to the machine over the hub's relay, from case 7 on. */
 let link: RemoteLink | null = null;
 const roster: MachineRef[] = [];
@@ -139,10 +170,23 @@ const throughDoor: Action[] = [];
 
 /** Every DELETE A's app sent the hub (the dropped machine's row). */
 const deletes: URL[] = [];
+/** Every request A's app sent the hub's provisioning-key routes, its body as sent (M4c). */
+const keyRequests: Array<{ method: string; path: string; body: unknown }> = [];
 const appFetch: typeof fetch = (input, init) => {
-  if ((init?.method ?? (input instanceof Request ? input.method : 'GET')) === 'DELETE') deletes.push(new URL(input instanceof Request ? input.url : String(input)));
+  const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
+  const url = new URL(input instanceof Request ? input.url : String(input));
+  if (method === 'DELETE') deletes.push(url);
+  if (url.pathname.startsWith('/api/provisioning-keys')) keyRequests.push({ method, path: url.pathname, body: typeof init?.body === 'string' ? JSON.parse(init.body) : null });
   return fetch(input, init);
 };
+
+// ---- M4c: the delegation's custody (a fake gcloud first on the session's PATH) and its destination ----
+
+/** Where the code goes, set as `org.provisioningSecret.set` sets it (main's file in A's profile). */
+const DEST: ProvisioningSecret = { project: 'maws-o8-local', secret: 'desk-provisioning-v2', account: 'cli-owner@maws-o8-local.iam.gserviceaccount.com' };
+/** The fake gcloud, in a directory of its own outside A's profile. */
+const gcloud = fakeGcloud(scratch.dir('gcloud-bin'));
+let destination: ProvisioningSecretStore;
 
 function follow(session: OrgSessionService): void {
   const feed = createRegistryFeed({ session, log });
@@ -179,18 +223,32 @@ const keyShownBy = (endpoint: Endpoint) =>
     const shown = JSON.parse((await endpoint.cli('keys', ['--json'])).out) as { enrollment: string; ref: string; keyId?: string };
     return shown.keyId === undefined ? null : { ...shown, keyId: shown.keyId };
   }, 'the machine showing its key');
+/** The hub's provisioning key `id`, as an admin reads it (`GET /api/provisioning-keys`). */
+const hubKey = async (id: string) => ((await (await org.hub.fetchAs(ADMIN, '/api/provisioning-keys')).json()) as ProvisioningKeys).keys.find((k: ProvisioningKeyRecord) => k.id === id);
+/** Every file under `dir`, as text. */
+const filesUnder = (dir: string) =>
+  readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((e) => e.isFile())
+    .map((e) => ({ path: join(e.parentPath, e.name), text: readFileSync(join(e.parentPath, e.name), 'utf8') }));
 /** The hub's machine rows, as an admin reads them. */
 const hubRows = async () => ((await (await org.hub.fetchAs(ADMIN, '/api/machines')).json()) as { machines: Array<{ name: string; key?: { ref: string; pub: string } }> }).machines;
-/** Whether anything this suite saw carries a code A answered, or the token or secret inside an enrollment code. */
+/** Whether anything this suite saw carries a code A answered or the fake gcloud received, or a secret inside one. */
 function codeSeen(): boolean {
-  const seen = JSON.stringify([statuses, logs, machineServices.lines, ownServices.lines]);
-  const secrets = codes.flatMap((code) => {
-    const body = code.slice(code.indexOf('.') + 1);
-    if (!code.startsWith('smns-enroll-v2.')) return [code, body];
+  const seen = JSON.stringify([statuses, logs, machineServices.lines, ownServices.lines, vmServices?.lines ?? []]);
+  return codes.flatMap(secretsOf).some((secret) => seen.includes(secret));
+}
+/** A code, its body after the scheme, and the secrets inside it: an enrollment code's token and `k`, a provisioning code's token and private key. */
+function secretsOf(code: string): string[] {
+  const body = code.slice(code.indexOf('.') + 1);
+  if (code.startsWith('smns-enroll-v2.')) {
     const { token, k } = decodeEnrollmentCodeV2(code);
     return [code, body, token, k];
-  });
-  return secrets.some((secret) => seen.includes(secret));
+  }
+  if (code.startsWith('smns-provision-v2.')) {
+    const { token, delegation } = decodeProvisioningCodeV2(code);
+    return [code, body, token, delegation.privateJwk.d!];
+  }
+  return [code, body];
 }
 
 /** Waits until A holds the hub's head, and returns it. */
@@ -204,7 +262,7 @@ async function aSettled(what: string): Promise<SignedOrgState> {
 }
 
 /** A change as the Org page makes it: previewed, then signed under the digest of what the sheet showed. */
-async function signChange(change: OrgChange): Promise<{ version: number; lines: string[]; change: OrgChange }> {
+async function signChange(change: OrgChange): Promise<{ version: number; lines: string[]; warnings: string[]; change: OrgChange }> {
   const shown = await a.preview(change);
   if (!shown.ok) throw new Error(`preview of ${change.kind}: ${shown.reason} ${shown.detail ?? ''} ${JSON.stringify(shown.findings)}`);
   expect(shown.lines.length).toBeGreaterThan(0);
@@ -214,7 +272,7 @@ async function signChange(change: OrgChange): Promise<{ version: number; lines: 
   expect(asked).toHaveLength(before + 1); // one Touch ID per change
   expect((await hubHead()).state.version).toBe(signed.version);
   await aSettled(change.kind);
-  return { version: signed.version, lines: shown.lines, change: shown.change };
+  return { version: signed.version, lines: shown.lines, warnings: shown.warnings, change: shown.change };
 }
 
 /**
@@ -286,6 +344,7 @@ beforeAll(async () => {
   // This Mac's own machine: its ref is A's `local` from the start, so its grants go through the door.
   ownServices = fakeServices();
   ownRef = ownServices.machine.ref;
+  destination = openProvisioningSecret(join(scratch.dir('a'), PROVISIONING_SECRET_FILE));
   a = orgSession({
     userData: scratch.dir('a'),
     build: 'o8-m4a-local',
@@ -321,6 +380,11 @@ beforeAll(async () => {
       },
       link: (ref) => (link !== null && ref === machineRef ? granting : null),
     },
+    // M4c: gcloud is the fake alone, found on the PATH the session is given (no fallback directory is searched)
+    delegations: {
+      secrets: secretStore({ gcloud: () => resolveGcloud({ loginPath: async () => `${gcloud.bin}:/usr/bin:/bin`, home: scratch.root, fallbacks: [] }), log }),
+      destination,
+    },
   });
   sessions.push(a);
   a.onStatus((status) => void statuses.push(status));
@@ -351,13 +415,15 @@ afterAll(async () => {
   for (const s of sessions) await s.close();
   await machine?.stop();
   await own?.stop();
+  await vm?.stop();
   machineServices?.cleanup();
   ownServices?.cleanup();
+  vmServices?.cleanup();
   await org?.stop();
   rmSync(scratch.root, { recursive: true, force: true });
 });
 
-describe('the Org page’s people, devices and machines on the local hub', { timeout: 120_000 }, () => {
+describe('the Org page’s people, devices, machines and delegations on the local hub', { timeout: 120_000 }, () => {
   let bMember: string;
   let bDevice: string;
   let bKid: string;
@@ -672,11 +738,142 @@ describe('the Org page’s people, devices and machines on the local hub', { tim
   });
 
   it('every state the hub accepted verifies from genesis, the machines’ included', async () => {
-    // After `root add`, A's: case 1 to 5's eight, the enrollment, B's addition, the re-enrollment, the owners twice and the
-    // drop. Every one with one Touch ID, and the three grants (B on the machine, on this Mac's, and re-granted) one each.
+    // After `root add`, A's: case 1 to 5's eight, the enrollment (7), B's addition (8), the re-enrollment (10), the owners
+    // twice and the drop (11). Every one with one Touch ID, and the three grants (8, 9 and 10's re-grant) one each.
     expect(await verifiedFromGenesis()).toHaveLength(14);
     expect(asked).toHaveLength(17);
     // No code A answered, nor an enrollment code's token or secret, is in any status, log line or the machines' logs.
+    expect(codeSeen()).toBe(false);
+  });
+
+  // ---- M4c: delegations ----
+
+  /** The delegation A creates (case 13), renews (14) and drops (15). */
+  const PREFIX = 'o8-vm-';
+  const TTL_DAYS = 30;
+  const MAX_USES = 3;
+  const DAY_MS = 86_400_000;
+  let delegationId: string;
+  /** The VM's event, signed by its certificate's key at case 13 (it verifies then), judged again after the drop. */
+  let vmEvent: LogEventV2;
+  const PROJECT = { org: ORG, project: 'o8-delegation-proof' };
+  /** The Org page's row for the delegation `id`. */
+  const delegationRow = async (id: string) => (await a.view())!.delegations.find((d) => d.id === id);
+  const delegationIn = (head: SignedOrgState, id: string) => head.state.delegations.find((d) => d.id === id);
+
+  it('creates a delegation: minted by the hub’s own route as asked, signed to expire in the days asked, its code on the fake gcloud’s stdin alone; a VM provisions from that code, verifies and lists', async () => {
+    expect(destination.write(DEST)).toEqual({ ok: true, value: DEST });
+    const asks = asked.length;
+    const fromRequest = keyRequests.length;
+    const before = Date.now();
+    const created = await a.delegationCreate({ label: 'o8 local VMs', prefix: PREFIX, ttlDays: TTL_DAYS, maxUses: MAX_USES, owners: [aMember] });
+    if (!created.ok) throw new Error(`create: ${created.reason} ${created.detail ?? ''}`);
+    expect(asked).toHaveLength(asks + 1); // the one Touch ID
+    expect(created.secret).toEqual({ version: '1', createTime: '2026-11-08T12:00:00.123Z' });
+    delegationId = created.run.id!;
+    const head = await aSettled('the delegation created');
+    expect(head.state.version).toBe(created.version);
+
+    // The mint as sent, exactly (`max_uses` present, since a cap was chosen), and as the hub's own parser took it.
+    const mints = keyRequests.slice(fromRequest).filter((r) => r.method === 'POST');
+    expect(mints).toEqual([{ method: 'POST', path: '/api/provisioning-keys', body: { label: 'o8 local VMs', prefix: PREFIX, ttl_s: TTL_DAYS * 86_400, max_uses: MAX_USES } }]);
+    const key = (await hubKey(delegationId))!;
+    expect(key).toMatchObject({ id: delegationId, label: 'o8 local VMs', prefix: PREFIX, max_uses: MAX_USES, uses: 0, offline_revoke_s: null, revoked: null });
+    expect(Math.abs(Date.parse(key.expires) - Date.parse(key.created) - TTL_DAYS * DAY_MS)).toBeLessThan(1_000);
+
+    // Signed as admin's: its `expires` now + the days asked (explicit units: not seconds, not a day off), capped, never offline.
+    const signed = delegationIn(head, delegationId)!;
+    expect(signed).toMatchObject({ id: delegationId, prefix: PREFIX, maxUses: MAX_USES, offlineRevokeS: NEVER_OFFLINE, owners: [aMember] });
+    expect(Math.abs(Date.parse(signed.expires) - (before + TTL_DAYS * DAY_MS))).toBeLessThan(60_000);
+
+    // gcloud: the preflight, the version added from stdin, its metadata read (never its value). The code went to the
+    // add's stdin, and no call's argv, nor any other call's stdin, holds any of it.
+    const calls = gcloud.calls();
+    const { project, secret, account } = DEST;
+    expect(calls.map((c) => c.argv.join(' '))).toEqual([
+      `auth print-access-token --account ${account}`,
+      `secrets describe ${secret} --project ${project} --account ${account}`,
+      `secrets versions add ${secret} --project ${project} --account ${account} --data-file=-`,
+      `secrets versions describe 1 --secret ${secret} --project ${project} --account ${account} --format=json`,
+    ]);
+    expect(calls.map((c) => c.stdin === '')).toEqual([true, true, false, true]);
+    const code = calls[2].stdin.trim();
+    expect(code.startsWith('smns-provision-v2.')).toBe(true);
+    codes.push(code);
+    const decoded = decodeProvisioningCodeV2(code);
+    expect(decoded).toMatchObject({ hub: org.hub.url, org: ORG, roots: head.state.root.keys, recoveryPub: head.state.root.recoveryPub, delegation: { id: delegationId, prefix: PREFIX } });
+    const secrets = secretsOf(code);
+    const view = await a.view();
+    const places = [
+      ...filesUnder(scratch.dir('a')).map((f) => [f.path, f.text] as const),
+      ['argv', JSON.stringify(calls.map((c) => c.argv))] as const,
+      ['log', logs.join('\n')] as const,
+      ['statuses', JSON.stringify(statuses)] as const,
+      ['the answer and the view', JSON.stringify([created, view])] as const,
+    ];
+    for (const [where, text] of places) expect(secrets.some((piece) => text.includes(piece)), `${where} holds a piece of the code`).toBe(false);
+
+    // A VM provisions from the code the fake received, its ref minted under the delegation, as devcloud's boot does.
+    vmServices = fakeServices({ ref: mintRef(delegationId) });
+    vm = createEndpoint({ build: 'o8-m4c-local', sleep: (ms) => sleep(Math.min(ms, 50)) });
+    await vm.start(vmServices);
+    const provisioned = await vm.cli('provision', ['--name', VM, '--wait', '30', '--json'], code);
+    expect(provisioned.code, provisioned.out).toBe(0);
+    expect(JSON.parse(provisioned.out)).toMatchObject({ enrollment: 'org-listed', name: VM, ref: vmServices.machine.ref, delegated: true });
+    // Its certificate, served beside the state, verifies under the delegation, for the VM's own key.
+    const served = await org.served();
+    const cert = served.certificates.certs.find((c) => c.body.machine === vmServices!.machine.ref)!;
+    expect(cert.body).toMatchObject({ org: ORG, name: VM, delegation: delegationId, pub: vm.key!.pub, use: 1 });
+    expect(await verifyMachineCert(served.head.state, cert, new Date())).toEqual({ ok: true });
+    expect(await hubKey(delegationId)).toMatchObject({ uses: 1 });
+    // It lists: the hub's machine rows hold it beside the certificate. (A's page lists it once A reads the hub again,
+    // case 14: the hub tells apps of a new state, not of a new certificate.)
+    expect((await hubRows()).map((r) => r.name)).toContain(VM);
+    expect(await delegationRow(delegationId)).toMatchObject({ prefix: PREFIX, owners: [aMember], expires: signed.expires, maxUses: MAX_USES, state: 'in-effect', unsent: null });
+
+    // An event in its name, signed by the certificate's key, verifies now; case 15 judges it again after the drop.
+    vmEvent = await signEvent(PROJECT, { writer: `${VM}/human`, seq: 1, kind: 'human', text: 'provisioned', ts: new Date().toISOString(), created: new Date().toISOString() }, vm.key!.privateKey, vm.key!.pub);
+    expect(await verifyEvent(PROJECT, served.head.state, vmEvent, served.certificates, new Date())).toEqual({ ok: true });
+  });
+
+  it('renews it through org.change: the signed expires moves, and once it settles the hub’s key follows', async () => {
+    const was = delegationIn(await hubHead(), delegationId)!.expires;
+    const hubWas = (await hubKey(delegationId))!.expires;
+    const expires = new Date(Date.parse(was) + 30 * DAY_MS).toISOString();
+    const fromRequest = keyRequests.length;
+    const renewed = await signChange({ kind: 'delegation.renew', id: delegationId, expires });
+    expect(delegationIn(await hubHead(), delegationId)).toMatchObject({ expires, prefix: PREFIX, maxUses: MAX_USES });
+    // `org.change` answers after its hub half: the route asked once, with no body, and the hub's GET reads the head's expiry.
+    expect(keyRequests.slice(fromRequest).filter((r) => r.method === 'POST')).toEqual([{ method: 'POST', path: `/api/provisioning-keys/${delegationId}/renew`, body: null }]);
+    expect(hubWas).not.toBe(expires);
+    expect(await hubKey(delegationId)).toMatchObject({ expires, revoked: null });
+    // The renewal's sign read the hub, certificates and all: the page lists the VM case 13 provisioned under its delegation.
+    expect(await delegationRow(delegationId)).toMatchObject({ expires, hub: { expires }, hubBehind: null, hubProblem: null, machines: [{ ref: vmServices!.machine.ref, name: VM, live: true }] });
+    expect(renewed.version).toBe((await hubHead()).state.version);
+  });
+
+  it('drops it: the VM’s event key reads revoked, the hub key is listed revoked, and every state still verifies from genesis', async () => {
+    expect((await hubKey(delegationId))!.revoked).toBeNull();
+    const dropped = await signChange({ kind: 'delegation.drop', id: delegationId });
+    // M3's warning first, naming the certified machine.
+    expect(dropped.warnings.join('\n')).toContain(`${VM} (live)`);
+    const head = await hubHead();
+    expect(delegationIn(head, delegationId)).toBeUndefined();
+    expect(head.state.revoked).toContainEqual(expect.objectContaining({ holder: { delegation: delegationId, prefix: PREFIX } }));
+
+    // The certificate is still served, and the state no longer authenticates its key: the event case 13 verified reads
+    // `revoked`. (`verifyMachineCert` can't say so: with its delegation gone it answers `not-listed`.)
+    const served = await org.served();
+    expect(served.certificates.certs.some((c) => c.body.machine === vmServices!.machine.ref)).toBe(true);
+    expect(await verifyEvent(PROJECT, served.head.state, vmEvent, served.certificates, new Date())).toEqual({ ok: false, code: 'revoked' });
+    // The hub's key: a soft revoke, listed with `revoked` set, and the page's row gone with it.
+    expect((await hubKey(delegationId))!.revoked).toEqual(expect.any(String));
+    expect(await delegationRow(delegationId)).toBeUndefined();
+
+    // After `root add`, A's: case 12's fourteen, then the create, the renewal and the drop, each with one Touch ID.
+    expect(await verifiedFromGenesis()).toHaveLength(17);
+    expect(asked).toHaveLength(20);
+    // No code (the provisioning code, its token or its private key included) is in any status, log line or machine's log.
     expect(codeSeen()).toBe(false);
   });
 });

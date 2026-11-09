@@ -63,14 +63,24 @@ export type ChainFile = {
  * before the field existed loads too), and where it may already be, written before each send (`exposed.hub` before the
  * POST, a machine's ref before its `endpoint.state` act).
  */
-export type Pending = { signed: SignedOrgState; parent: string; hash: string; exposed: { hub: boolean; machines: string[] }; hubRow?: HubRow };
+export type Pending = { signed: SignedOrgState; parent: string; hash: string; exposed: { hub: boolean; machines: string[] }; hubRow?: HubRow; unsent: Unsent | null };
+/**
+ * M4c: a slot held unsent (`Edit.hold`), named by what holds it: a delegation whose provisioning code is not yet in its
+ * secret store. Written in the same write as its slot, and cleared only by the caller's `publishHeld`, in a write of its
+ * own before the post; until then nothing posts the slot or places it on a machine's line. A slot kept before the
+ * field existed loads as null.
+ */
+export type Unsent = { kind: 'delegation'; id: string };
 /**
  * M4b: the hub row a drop leaves behind (`machine drop`'s DELETE), kept with its slot, so the row is deleted once that
  * very state is on the held chain, however late it settles (a relaunch included), and never for a discarded proposal.
  */
 export type HubRow = { name: string; ref: string; pub: string };
-/** signing.json as it may stand on disk: a slot written before its `hash` was kept lacks one until the store loads it. */
-export type StoredSigningFile = Omit<SigningFile, 'pending'> & { pending: (Omit<Pending, 'hash'> & { hash?: string }) | null };
+/**
+ * signing.json as it may stand on disk: a slot written before its `hash` (or M4c's `unsent`) was kept lacks it until the
+ * store loads it.
+ */
+export type StoredSigningFile = Omit<SigningFile, 'pending'> & { pending: (Omit<Pending, 'hash' | 'unsent'> & { hash?: string; unsent?: Unsent | null }) | null };
 /**
  * A state that ends keys, owed to the machines of the roster at its signing (M3's direct delivery): the signed bytes,
  * the machines still owing an acknowledgement, each machine's cursor on the app's line (`line`: a 48-bit digest of the
@@ -287,8 +297,10 @@ const isRecordOf = <T>(value: unknown, item: (v: unknown) => v is T): value is R
 function isStoredPending(value: unknown): value is StoredSigningFile['pending'] & object {
   if (!isObject(value) || !isSignedOrgState(value.signed) || !isText(value.parent) || !isObject(value.exposed)) return false;
   const row = value.hubRow;
+  const unsent = value.unsent;
   return (
     (value.hash === undefined || isText(value.hash)) &&
+    (unsent === undefined || unsent === null || (isObject(unsent) && unsent.kind === 'delegation' && isText(unsent.id))) &&
     typeof value.exposed.hub === 'boolean' &&
     isTexts(value.exposed.machines) &&
     (row === undefined || (isObject(row) && isText(row.name) && isText(row.ref) && isText(row.pub)))
@@ -306,9 +318,9 @@ function isAbandoned(value: unknown): value is Abandoned {
   return isObject(value) && isText(value.hash) && isVersion(value.version) && typeof value.hub === 'boolean' && isTexts(value.machines);
 }
 
-/** The shape only, every field: the signing store refuses to write anything else (a slot without its `hash` included). */
+/** The shape only, every field: the signing store refuses to write anything else (a slot without its `hash` or `unsent` included). */
 export function isSigningFile(value: unknown): value is SigningFile {
-  return isStoredSigningFile(value) && (value.pending === null || value.pending.hash !== undefined);
+  return isStoredSigningFile(value) && (value.pending === null || (value.pending.hash !== undefined && value.pending.unsent !== undefined));
 }
 
 /** What the signing store reads: `isSigningFile`'s shape, a slot without its `hash` admitted; anything else is damaged. */

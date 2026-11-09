@@ -72,6 +72,9 @@ function seeded(local: MachineRef, now: number): Seed {
     members: [ana, long, ben, chen, dara].map((m) => ({ ...m, name: names.get(m.id)!, you: m === ana, devices: [] })),
     machines: [],
     roots: [],
+    delegations: [],
+    strayKeys: [],
+    hubKeys: { at: null, failed: false },
   };
   const status: Seed['status'] = {
     state: 'registered',
@@ -87,6 +90,7 @@ function seeded(local: MachineRef, now: number): Seed {
     pairing: null,
     enrolling: null,
     hubRowsLeft: [],
+    delegations: { creating: false, rev: 0 },
   };
   const orgKey = `smns:${PROJECT}` as RemoteRow['orgKey'];
   const row = (machine: MachineRef, session: string, title: string, minutesAgo: number, over: Partial<RemoteRow> = {}): RemoteRow => ({

@@ -32,7 +32,7 @@ const CHEN = 'member-chen';
 const ADDRESS = addressOf(OTHER_MACHINE, 'sess-1') as AppSessionId;
 
 const member = (id: string, name: string, you = false): OrgView['members'][number] => ({ id, email: `${name.toLowerCase()}@northwind.example`, name, role: 'member', you, devices: [] });
-const VIEW: OrgView = { version: 3, issued: '2026-11-07T10:00:00Z', maySign: false, recoveryKid: 'kid', members: [member(ME, 'Me', true), member(ANA, 'Ana'), member(BEN, 'Ben'), member(CHEN, 'Chen')], machines: [], roots: [] };
+const VIEW: OrgView = { version: 3, issued: '2026-11-07T10:00:00Z', maySign: false, recoveryKid: 'kid', members: [member(ME, 'Me', true), member(ANA, 'Ana'), member(BEN, 'Ben'), member(CHEN, 'Chen')], machines: [], roots: [], delegations: [], strayKeys: [], hubKeys: { at: null, failed: false } };
 const entry = (over: Partial<Extract<RecordPolicyEntry, { policyRev: number }>> = {}): RecordPolicyEntry => ({ session: 'sess-1', access: 'listed', shares: [{ member: ANA, grade: 'view' }], policyRev: 7, ...over });
 const read = (policies: RecordPolicyEntry[]): OrgPolicy => ({ ok: true, machine: OTHER_MACHINE, supported: true, policies });
 

@@ -1,7 +1,7 @@
 // X2 `org.*` names without their schemas, which the preload bridges (`../names.ts`). Exactly the keys of
 // `../schema/org.ts`, pinned at compile time in `../schema.ts` and per namespace in `../schema.test.ts`. P5 O8 M1; M4a
 // adds the Org page's view, changes and pairing; M7a the project channel; M6b a session's reach (and M5b's owner add);
-// M4b the enrollment, a drop's retry and the grants.
+// M4b the enrollment, a drop's retry and the grants; M4c the delegations and the provisioning code's destination.
 export const commands = [
   'org.status',
   'org.register',
@@ -25,6 +25,14 @@ export const commands = [
   'org.enroll.approve',
   'org.enroll.cancel',
   'org.drop.retry',
+  'org.delegation.create',
+  'org.delegation.rewrite',
+  'org.delegation.readKeys',
+  'org.delegation.renewHub',
+  'org.delegation.revokeHub',
+  'org.provisioningSecret.get',
+  'org.provisioningSecret.set',
+  'org.provisioningSecret.reset',
   'org.grants.view',
   'org.grants.set',
   'org.grants.regrant',

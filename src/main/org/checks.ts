@@ -4,13 +4,15 @@
 // Touch ID, M4a's included.
 //
 // `checkSuccessor` names, before a fingerprint is asked for, what the package's `verifySuccessor` would refuse after it,
-// what P5 adds on top (a renewal must extend), and what the owner should see in the prompt (a dropped delegation,
-// revocations a recovery lost). The package's own pre-sign function, `successorProblems`, runs first: every check
-// `verifySuccessor` makes but the signatures, each problem a refusal by the package's code (a revoked key made current,
-// an empty root set, a member, email or device id taken, a later device unendorsed, a key unaccounted for, …). Then this
-// module's own rows: the delegation rules, directional where the package's are not (until M4c moves `prefixProblem`
-// into the package), the renewal rules and the superseded offer's warning. The package stays the judge: these findings
-// are early words, and the signer still verifies the signed state.
+// what P5 adds on top (a renewal must extend, and M4c: stay within what the hub's key renewal admits), and what the
+// owner should see in the prompt (a dropped delegation, with the machines it certified; revocations a recovery lost).
+// The package's own pre-sign function, `successorProblems`, runs first: every check `verifySuccessor` makes but the
+// signatures, each problem a refusal by the package's code (a revoked key made current,
+// an empty root set, a member, email or device id taken, a later device unendorsed, a key unaccounted for, …), a new
+// delegation's prefix collision named by its direction (`prefix-equal`, `prefix-nested`, `prefix-covers`; M4c moved the
+// rule into the package, so it is held once). Then this module's own rows: the renewal rules, the dropped delegation's
+// warning and the superseded offer's. The package stays the judge: these findings are early words, and the signer still
+// verifies the signed state.
 //
 // `supersededRevocations` offers, after a recovery, the revocations the discarded branch signed honestly and the
 // recovered line lacks, each with the whole closure the package needs (`keysAccounted`, `stateInvariants`) so the
@@ -19,9 +21,11 @@
 //
 // Electron-free: vitest's node project runs it.
 import {
+  certificateViews,
   keyId,
-  machineNameKey,
+  MAX_PROVISIONING_KEY_TTL_S,
   successorProblems,
+  type Certificates,
   type Delegation,
   type Device,
   type KeyHolder,
@@ -34,16 +38,7 @@ import {
 } from '../../../apps/org-protocol/src/index.ts';
 
 /** This module's own rows. The package's codes (`ProblemCode`) arrive beside them. */
-export type CheckCode =
-  | 'prefix-equal'
-  | 'prefix-nested'
-  | 'prefix-covers'
-  | 'prefix-names-machine'
-  | 'delegation-id-used'
-  | 'renew-expired'
-  | 'renew-not-extension'
-  | 'drops-delegation'
-  | 'superseded-keys';
+export type CheckCode = 'renew-expired' | 'renew-not-extension' | 'renew-past-cap' | 'drops-delegation' | 'superseded-keys';
 /**
  * What a change may not do whatever the state says (edits.ts's composers, M4a): change or remove yourself, remove this
  * Mac's own device or its member, sign a change that changes nothing, take an email outside the grammar, make a root of
@@ -66,21 +61,22 @@ export type SupersededOffer = {
 /**
  * `endorsing`: the devices the signer endorses inside the same Touch ID that signs the state, under its step-up key
  * `kid` (the package counts each as endorsed when `kid` is one of its member's own step-up keys in `head`).
+ * `certificates`: the held certificate set (M4c), from which a dropped delegation's warning names the machines it
+ * certified; none when absent.
  */
-export type CheckOptions = { endorsing?: { kid: string; devices: string[] } };
+export type CheckOptions = { endorsing?: { kid: string; devices: string[] }; certificates?: Certificates };
 
 const refuse = (code: FindingCode, detail: string): Finding => ({ level: 'refuse', code, detail });
 const warn = (code: FindingCode, detail: string): Finding => ({ level: 'warn', code, detail });
 
 /**
  * Every finding on `next` as the successor of `head`, refusals and warnings alike: the package's problems first, then
- * this module's rows in the table's order. A row of this module whose code the package already named is left out (the
- * same rule, held twice until M4c), and a finding repeated word for word is named once.
+ * this module's rows in the table's order. A finding repeated word for word is named once (the package names a machine
+ * under a prefix once per list that holds its name).
  */
 export async function checkSuccessor(head: OrgState, next: OrgState, superseded: readonly SignedOrgState[], now: Date, options: CheckOptions = {}): Promise<Finding[]> {
   const problems = await successorProblems(head, next, options.endorsing === undefined ? {} : { endorsing: options.endorsing });
-  const named = new Set<FindingCode>(problems.map((p) => p.code));
-  const own = [...delegationFindings(head, next, now), ...(await supersededLeftOut(head, next, superseded))].filter((f) => !named.has(f.code));
+  const own = [...(await delegationFindings(head, next, now, options.certificates ?? { certs: [], retirements: [] })), ...(await supersededLeftOut(head, next, superseded))];
   const seen = new Set<string>();
   return [...problems.map((p) => refuse(p.code, p.detail ?? p.code)), ...own].filter((f) => {
     const key = `${f.level}|${f.code}|${f.detail}`;
@@ -124,96 +120,50 @@ export function describeHolder(state: OrgState, holder: RevokedKey['holder']): s
 
 // --- Delegations ------------------------------------------------------------------------------------------------------
 
-type KnownDelegation = { id: string; prefix: string; dropped: boolean; entry: Delegation | null };
-
-/** The delegations a state dropped: their ids and prefixes, reserved for the life of the org (RL DL 26). */
-const dropped = (state: OrgState): KnownDelegation[] =>
-  state.revoked.flatMap((r) => ('delegation' in r.holder ? [{ id: r.holder.delegation, prefix: r.holder.prefix, dropped: true, entry: null }] : []));
-
-const whose = (d: KnownDelegation) => (d.dropped ? `the dropped delegation ${d.id}'s ${d.prefix}, reserved for the life of the org` : `delegation ${d.id}'s ${d.prefix}`);
-
 /**
- * The delegation rows of the table. A delegation of `next` is new unless `head` lists it with the same id, key and
- * prefix (which the package never lets change). Prefixes compare raw and case-folded, as `stateInvariants` and
- * `prefixProblem` compare them, so `dc-` and `dc-prod-` collide.
+ * The delegation rows of the table: renewals and drops. A delegation of `next` is kept when `head` lists it with the
+ * same id, key and prefix (which the package never lets change). Prefix and id collisions are the package's
+ * (`successorProblems`), named by direction for a new delegation.
  */
-function delegationFindings(head: OrgState, next: OrgState, now: Date): Finding[] {
+async function delegationFindings(head: OrgState, next: OrgState, now: Date, certificates: Certificates): Promise<Finding[]> {
   const findings: Finding[] = [];
   const held = new Map(head.delegations.map((d) => [d.id, d]));
   const isNew = (d: Delegation) => {
     const was = held.get(d.id);
     return was === undefined || was.pub !== d.pub || was.prefix !== d.prefix;
   };
-  const fresh = next.delegations.filter(isNew);
-
-  // Every delegation either state knows, live or dropped, once each by its id and prefix (the head's entry first, so
-  // one dropped by this very state reads as itself, not twice).
-  const known: KnownDelegation[] = [];
-  const seen = new Set<string>();
-  for (const k of [
-    ...head.delegations.map((d) => ({ id: d.id, prefix: d.prefix, dropped: false, entry: d })),
-    ...dropped(head),
-    ...next.delegations.map((d) => ({ id: d.id, prefix: d.prefix, dropped: false, entry: d })),
-    ...dropped(next),
-  ]) {
-    const key = `${k.id}|${k.prefix}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    known.push(k);
-  }
-
-  // Prefixes and ids: each new delegation against every other, a pair of new ones named once.
-  const pairs = new Set<string>();
-  for (const d of fresh) {
-    const n = machineNameKey(d.prefix);
-    for (const other of known) {
-      if (other.entry === d) continue;
-      const pair = [d.id + d.prefix, other.id + other.prefix].sort().join('|');
-      if (fresh.some((f) => f === other.entry) && pairs.has(pair)) continue;
-      pairs.add(pair);
-      const p = machineNameKey(other.prefix);
-      if (n === p) findings.push(refuse('prefix-equal', `the prefix ${d.prefix} of delegation ${d.id} is ${whose(other)}`));
-      else if (n.startsWith(p)) findings.push(refuse('prefix-nested', `the prefix ${d.prefix} of delegation ${d.id} nests in ${whose(other)}`));
-      else if (p.startsWith(n)) findings.push(refuse('prefix-covers', `the prefix ${d.prefix} of delegation ${d.id} covers ${whose(other)}`));
-    }
-    const used = known.filter((other) => other.entry !== d && other.id === d.id);
-    if (used.length > 0) findings.push(refuse('delegation-id-used', `delegation id ${d.id} is ${used[0].dropped ? "a dropped delegation's, reserved for the life of the org" : "a live delegation's"}`));
-  }
-
-  // Machine names under a prefix: a new prefix over any name an entry or `machineNames` holds, and a new name under any
-  // prefix (the package refuses both alike; a certificate's name is the one kind that sits under a prefix).
-  const names = new Map<string, string>();
-  for (const n of [...head.machines, ...head.machineNames, ...next.machines, ...next.machineNames]) names.set(machineNameKey(n.name), n.name);
-  const headNames = new Set([...head.machines, ...head.machineNames].map((n) => machineNameKey(n.name)));
-  for (const d of fresh) {
-    const n = machineNameKey(d.prefix);
-    for (const [key, name] of names) if (key.startsWith(n)) findings.push(refuse('prefix-names-machine', `the machine ${name} is named under the prefix ${d.prefix} of delegation ${d.id}`));
-  }
-  for (const [key, name] of names) {
-    if (headNames.has(key)) continue;
-    for (const other of known) {
-      if (other.entry !== null && fresh.includes(other.entry)) continue;
-      if (key.startsWith(machineNameKey(other.prefix))) findings.push(refuse('prefix-names-machine', `the machine ${name} is named under ${whose(other)}`));
-    }
-  }
 
   // Renewals: a kept delegation's `expires` moves only while both values are later than the successor (`keysAccounted`)
-  // and the clock, and only forward (P5 Decision Log 30: renewal extends).
+  // and the clock, only forward (P5 Decision Log 30: renewal extends), and never past what the hub's renewal admits:
+  // now + MAX_PROVISIONING_KEY_TTL_S, the cap a new key has. The hub judges that cap against its own clock when the
+  // renewal reaches it, after the signer settled the state; a `409 too-long` there after a delayed settlement heals with
+  // time, since Retry calls the route alone and the hub's clock catches up with the `now` judged here.
   const at = [next.issued, now.toISOString()].sort()[1];
+  const cap = new Date(now.getTime() + MAX_PROVISIONING_KEY_TTL_S * 1000).toISOString();
   for (const was of head.delegations) {
     const kept = next.delegations.find((d) => d.id === was.id && !isNew(d));
     if (kept === undefined) {
-      if (!next.delegations.some((d) => d.id === was.id)) {
-        findings.push(warn('drops-delegation', `delegation ${was.id} (prefix ${was.prefix}) is dropped: its key and its certificates' keys are revoked, and its id and prefix stay reserved`));
-      }
+      if (!next.delegations.some((d) => d.id === was.id)) findings.push(warn('drops-delegation', await dropWarning(head, was, certificates, now)));
       continue;
     }
     if (kept.expires === was.expires) continue;
     if (was.expires <= at) findings.push(refuse('renew-expired', `delegation ${was.id} (prefix ${was.prefix}) expired at ${was.expires}: only a live delegation is renewed`));
     else if (kept.expires <= at) findings.push(refuse('renew-expired', `delegation ${was.id} (prefix ${was.prefix}) would expire at ${kept.expires}, not later than ${at}`));
     else if (kept.expires <= was.expires) findings.push(refuse('renew-not-extension', `delegation ${was.id} (prefix ${was.prefix}) would expire at ${kept.expires}, not later than its ${was.expires}: a renewal extends`));
+    else if (kept.expires > cap) findings.push(refuse('renew-past-cap', `delegation ${was.id} (prefix ${was.prefix}) would expire at ${kept.expires}, past ${cap}, the furthest the hub renews its key to`));
   }
   return findings;
+}
+
+/**
+ * A dropped delegation's warning: its key revoked, so its certificates no longer verify; the machines they certified,
+ * each live or retired as the head judges its certificate (`certificateViews`; one it refuses reads "not live"), those
+ * the head already revokes left out; and its id and prefix reserved for good (`prefixProblem` refuses either again).
+ */
+async function dropWarning(head: OrgState, dropped: Delegation, certificates: Certificates, now: Date): Promise<string> {
+  const views = (await certificateViews(head, { certs: certificates.certs.filter((c) => c.body.delegation === dropped.id), retirements: certificates.retirements }, now)).filter((v) => v.state !== 'revoked');
+  const machines = views.length === 0 ? 'no machine holds a certificate of it' : `the machines it certified leave the org: ${views.map((v) => `${v.name} (${v.state === 'live' || v.state === 'retired' ? v.state : 'not live'})`).join(', ')}`;
+  return `delegation ${dropped.id} (prefix ${dropped.prefix}) is dropped: its key is revoked, so its certificates no longer verify, and ${machines}; its id and its prefix stay reserved for good`;
 }
 
 // --- The superseded states' revocations -------------------------------------------------------------------------------

@@ -17,7 +17,7 @@
 // Grant… and grant through a link or the local door, grants.json behind its mark, a sign-out during Touch ID, a close
 // while the act is out, and grants.json failing closed.
 import { readFileSync } from 'node:fs';
-import { chmod, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -53,7 +53,7 @@ import {
   verifyGrant,
 } from '../../../apps/org-protocol/src/index.ts';
 import type { ClientId } from '@shared/ipc/client';
-import { OrgStatusSchema, type OrgStatus } from '@shared/ipc/schema/org';
+import { OrgStatusSchema, type DelegationResult, type OrgStatus } from '@shared/ipc/schema/org';
 import type { MachineRef } from '@shared/machine/ref';
 import { createNextDeviceKeys, deviceKeyIds, DeviceKeysError, loadDeviceKeys, promoteNextDeviceKeys, type DeviceKeys } from '../device/keys';
 import { createRecordSigner, type HeldOrgView, type StepUpPrompt } from '../device/step-up';
@@ -63,7 +63,9 @@ import { ACCESS_FILE, CHAIN_FILE, GRANTS_FILE, orgFiles, REGISTRATION_FILE, SIGN
 import type { GrantDoor, GrantLink } from './grants';
 import type { PendingEntry } from './hub-client';
 import { createOrgSession, type DeviceKeyFiles, type OrgSessionDeps, type OrgSessionService, type OrgSigningDeps } from './org-session';
+import { openProvisioningSecret, PROVISIONING_SECRET_FILE } from './provisioning-secret-store';
 import type { RegistryFeedHooks } from './registry-feed';
+import { resolveGcloud, secretStore } from './secret-store';
 
 // ---- the org, signed as an admin's devices sign it (held.test.ts's helpers) ----
 
@@ -167,6 +169,13 @@ class FakeHub {
   rows = new Map<string, { ref: string; pub: string } | null>();
   listAnswer?: () => Answer | undefined;
   deleteAnswer?: (name: string) => Answer | Promise<Answer | undefined> | undefined;
+  /** M4c: the provisioning keys, as the Worker lists them, each with its token; a mint waits on `mintGate` when set. */
+  provisioningKeys: Array<{ id: string; label: string; prefix: string; created: string; expires: string; max_uses: number | null; uses: number; revoked: string | null; token: string }> = [];
+  mintGate?: () => Promise<void>;
+  /** M4c fix wave: the key list's answer, in place of the listing, when set. */
+  keysAnswer?: () => Answer | undefined;
+  revokeAnswer?: (id: string) => Answer | undefined;
+  renewGate?: () => Promise<void>;
 
   constructor(
     readonly url: string,
@@ -254,6 +263,36 @@ class FakeHub {
       if (ref === null || (key !== null && key.ref === ref && key.pub === pub)) this.rows.delete(name);
       return worker(200, { revoked: name });
     }
+    // M4c: the provisioning keys, as the Worker answers them (201 {key, token}; GET with revoked keys; a soft DELETE;
+    // renew from the held head's delegation, by §S)
+    if (url.pathname === '/api/provisioning-keys' && method === 'POST') {
+      const body = JSON.parse(String(init?.body)) as { label: string; prefix: string; ttl_s: number; max_uses?: number };
+      await this.mintGate?.();
+      const key = { id: memberId(), label: body.label, prefix: body.prefix, created: iso(Date.now()), expires: iso(Date.now() + body.ttl_s * 1000), max_uses: body.max_uses ?? null, uses: 0, revoked: null, token: base64urlEncode(crypto.getRandomValues(new Uint8Array(32))) };
+      this.provisioningKeys.push(key);
+      return worker(201, { key: { ...listedKey(key), created_by: this.member.id, offline_revoke_s: null, machines: [] }, token: key.token });
+    }
+    if (url.pathname === '/api/provisioning-keys' && method === 'GET') return this.keysAnswer?.() ?? worker(200, { keys: this.provisioningKeys.map(listedKey) });
+    const provisioning = /^\/api\/provisioning-keys\/([0-9a-f]{32})(\/renew)?$/.exec(url.pathname);
+    if (provisioning !== null) {
+      const key = this.provisioningKeys.find((k) => k.id === provisioning[1]);
+      if (method === 'DELETE') {
+        const override = this.revokeAnswer?.(provisioning[1]);
+        if (override !== undefined) return override;
+        if (key === undefined) return worker(404, { error: 'unknown-key' });
+        key.revoked ??= iso(Date.now());
+        return worker(200, { revoked: key.id });
+      }
+      if (method === 'POST' && provisioning[2] !== undefined) {
+        await this.renewGate?.();
+        if (key === undefined) return worker(404, { error: 'unknown-key' });
+        if (key.revoked !== null) return worker(410, { error: 'key-revoked' });
+        const d = this.head.state.delegations.find((x) => x.id === key.id);
+        if (d === undefined || Date.parse(d.expires) <= Date.parse(key.expires)) return worker(409, { error: 'not-renewed' });
+        key.expires = d.expires;
+        return worker(200, listedKey(key));
+      }
+    }
     if (method === 'POST' && url.pathname === '/api/devices/pending') {
       this.pending.push(JSON.parse(String(init?.body)) as PendingEntry);
       return this.pendingAnswer?.() ?? worker(200, { pending: { expires: iso(Date.now() + this.pendingTtlMs) } });
@@ -270,6 +309,9 @@ class FakeHub {
     return device;
   }
 }
+
+/** M4c: a provisioning key as the Worker lists it: its record, never its token. */
+const listedKey = ({ id, label, prefix, created, expires, max_uses, uses, revoked }: FakeHub['provisioningKeys'][number]) => ({ id, label, prefix, created, expires, max_uses, uses, revoked });
 
 // ---- the login and the secrets no status may carry ----
 
@@ -1778,7 +1820,7 @@ describe('M3: the signer composed over the session', () => {
     hub.postAnswer = () => worker(409, { error: 'key-purged' });
     expect(await session.resign()).toMatchObject({ ok: false, reason: 'hub', detail: '409 key-purged' });
     const hash = await stateHash(hub.posted[0]!.state);
-    expect(signerOf(session).pending).toEqual({ version: before + 1, hash, fork: false, exposed: true, refused: '409 key-purged' });
+    expect(signerOf(session).pending).toEqual({ version: before + 1, hash, fork: false, exposed: true, refused: '409 key-purged', delegation: null, held: false });
 
     // A confirmation of another proposal than the slot holds discards nothing.
     expect(await session.discardPending(true, `${hash.slice(1)}x`)).toEqual({ ok: false, reason: 'stale' });
@@ -2687,6 +2729,33 @@ describe('M4b: the machine changes', () => {
   });
 });
 
+describe('M4c: the delegation changes', () => {
+  it('a delegation is created only through Create…: delegation.add from the page is refused before anything composes', async () => {
+    const { session } = await signingRoot();
+    const change = { kind: 'delegation.add' as const, id: memberId(), pub: (await generateSigningKey()).pub, prefix: 'dc-', expires: iso(Date.now() + 30 * DAY), maxUses: 10, offlineRevokeS: 0, owners: [A] };
+    const [posts, prompts] = [hub.posted.length, signing.prompts.length];
+    expect(await session.preview(change)).toMatchObject({ ok: false, reason: 'invalid', detail: expect.stringContaining('Create'), findings: [] });
+    expect(await session.change(change, 'A'.repeat(43))).toMatchObject({ ok: false, reason: 'invalid', detail: expect.stringContaining('Create') });
+    expect([hub.posted.length, signing.prompts.length]).toEqual([posts, prompts]);
+  });
+
+  it("a drop's preview names the machines the delegation certified, from the held certificates, in its lines and its warning", async () => {
+    const { session, feed } = await signingRoot();
+    const delegation = await generateSigningKey();
+    const id = memberId();
+    hub.chain.push(await successor(hub.head, [a1], (s) => void s.delegations.push({ id, pub: delegation.pub, prefix: 'dc-', expires: iso(Date.now() + 30 * DAY), maxUses: 10, offlineRevokeS: 0, owners: [A] })));
+    const certRef = `${id}_${base64urlEncode(crypto.getRandomValues(new Uint8Array(16)))}`;
+    hub.certificates = { certs: [await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: certRef, name: 'dc-vm1', pub: (await generateSigningKey()).pub, delegation: id, use: 1, issued: iso(Date.now() - HOUR) }, delegation.privateKey, delegation.pub)], retirements: [] };
+    feed.state(hub.head.state.version);
+    await until(async () => (await session.view())?.machines.length === 1, 'the certified machine');
+    const preview = await session.preview({ kind: 'delegation.drop', id });
+    if (!preview.ok) throw new Error(JSON.stringify(preview));
+    expect(preview.lines.join('\n')).toContain('dc-vm1');
+    expect(preview.warnings).toHaveLength(1);
+    expect(preview.warnings[0]).toContain('dc-vm1 (live)');
+  });
+});
+
 describe('M4b: a drop that settles later (the fix wave)', () => {
   /** `mini` dropped while the hub answers its post `answer`: signed and kept, unsettled, its row untouched. */
   async function pendingDrop(over: Overrides = {}, answer: () => Answer = () => worker(503, { error: 'hub-updating' })) {
@@ -3337,5 +3406,221 @@ describe('M4b: the grants', () => {
     const { ref } = await addMachine(session, feed);
     expect((await session.view())?.machines.every((m) => !m.mayGrant)).toBe(true);
     expect(await session.grantsView({ ref })).toEqual({ ok: false, ref, reason: 'signed-out' });
+  });
+});
+
+// ---- M4c: delegations through the session ----
+
+// Task 3's fake gcloud, trimmed: argv and stdin recorded; `act-<op>` holding `wait` holds that call until `release-<op>`,
+// and `fail` fails it.
+const FAKE_GCLOUD = `#!/bin/sh
+dir=$(cd "$(dirname "$0")" && pwd)
+{ printf 'gcloud'; for a in "$@"; do printf ' %s' "$a"; done; printf '\\n'; } >> "$dir/argv.log"
+case "$1 $2 $3" in
+  "auth print-access-token "*) op=auth ;;
+  "secrets describe "*) op=describe ;;
+  "secrets versions add") op=add ;;
+  "secrets versions describe") op=version ;;
+  *) op=other ;;
+esac
+cat >> "$dir/stdin.log"
+act=$(cat "$dir/act-$op" 2>/dev/null || echo ok)
+case "$act" in
+  wait) : > "$dir/waiting-$op"; while [ ! -f "$dir/release-$op" ]; do sleep 0.02; done; rm -f "$dir/release-$op" "$dir/waiting-$op" ;;
+  fail) printf 'ERROR: (gcloud.secrets.versions.add) INTERNAL: down\n' >&2; exit 1 ;;
+esac
+case "$op" in
+  add) printf 'Created version [7] of the secret [%s].\\n' "$4" >&2 ;;
+  version) printf '{"createTime": "2026-11-08T12:00:00.123456Z", "name": "projects/1/secrets/%s/versions/%s", "state": "ENABLED"}\\n' "$6" "$4" ;;
+esac
+exit 0
+`;
+
+describe('M4c: delegations through the session', () => {
+  const DEST = { project: 'ytdownload-505811', secret: 'desk-provisioning-v2', account: 'cli-owner@ytdownload-505811.iam.gserviceaccount.com' };
+  const CREATE = { label: 'devcloud VMs', prefix: 'dc-', ttlDays: 30, maxUses: null, owners: [] as string[] };
+  let bin: string;
+  beforeEach(async () => {
+    bin = join(userData, 'scratch-bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, 'gcloud'), FAKE_GCLOUD);
+    await chmod(join(bin, 'gcloud'), 0o755);
+  });
+  /** The session's custody over the fake gcloud, and its destination set. */
+  function custody(logs: string[]): NonNullable<OrgSessionDeps['delegations']> {
+    const destination = openProvisioningSecret(join(userData, PROVISIONING_SECRET_FILE));
+    destination.write(DEST);
+    return { destination, secrets: secretStore({ gcloud: () => resolveGcloud({ loginPath: async () => `${bin}:/usr/bin:/bin`, home: userData, fallbacks: [] }), log: (line) => void logs.push(line) }) };
+  }
+  const gcloudLogs: string[] = [];
+  const delegationsDeps = () => ({ delegations: custody(gcloudLogs) });
+  /** The codes gcloud received, which no status, view, answer or log may carry (afterEach checks every emitted status). */
+  async function codes(): Promise<string[]> {
+    const text = await readFile(join(bin, 'stdin.log'), 'utf8').catch(() => '');
+    const found = text.split('\n').filter((line) => line.startsWith('smns-provision-v2.'));
+    secrets.push(...found);
+    return found;
+  }
+  const waitingFor = (op: string) => until(() => readFile(join(bin, `waiting-${op}`)).then(() => true, () => false), `gcloud's ${op} out`);
+
+  it('creates a delegation end to end: one Touch ID, the code to the store alone, the delegation in effect and on the page', async () => {
+    const { session, logs } = await signingRoot(delegationsDeps());
+    const before = registered(session).delegations.rev;
+    const answer = await session.delegationCreate({ ...CREATE, owners: [A] });
+    expect(answer).toMatchObject({ ok: true, version: headVersion(session), secret: { version: '7', createTime: '2026-11-08T12:00:00.123Z' } });
+    expect(signing.prompts.map((p) => p.summary)).toEqual(['create delegation dc-']);
+    const id = hub.provisioningKeys[0].id;
+    expect(hub.head.state.delegations.map((d) => d.id)).toEqual([id]);
+    expect(registered(session).delegations).toMatchObject({ creating: false });
+    expect(registered(session).delegations.rev).toBeGreaterThan(before);
+    const view = await session.view();
+    expect(view!.delegations).toMatchObject([{ id, prefix: 'dc-', state: 'in-effect', hubBehind: null }]);
+    const found = await codes();
+    expect(found).toHaveLength(1);
+    const token = hub.provisioningKeys[0].token;
+    for (const text of [JSON.stringify(answer), JSON.stringify(view), logs.join('\n'), gcloudLogs.join('\n')]) {
+      expect(text).not.toContain(found[0]);
+      expect(text).not.toContain(token);
+    }
+  });
+
+  it('a sign-out while the mint is out signs nothing; signed in again, the minted key shows as a stray', async () => {
+    let release!: () => void;
+    hub.mintGate = () => new Promise<void>((resolve) => (release = resolve));
+    const { session, feed } = await signingRoot(delegationsDeps());
+    const creating = session.delegationCreate({ ...CREATE, owners: [A] });
+    await until(() => registered(session).delegations.creating && hub.count('/api/provisioning-keys') === 1, 'the mint out');
+    await session.signOut();
+    expect(registered(session).delegations.creating).toBe(false);
+    release();
+    expect(await creating).toMatchObject({ ok: false });
+    expect(signing.prompts).toEqual([]);
+    hub.mintGate = undefined;
+    expect(session.signIn()).toEqual({ ok: true });
+    await until(() => isSignedIn(session), 'signed in again');
+    feed.open();
+    const view = await session.view();
+    await until(async () => ((await session.view())?.strayKeys.length ?? 0) === 1, 'the stray key read');
+    expect(view).not.toBeNull();
+    expect((await session.view())!.strayKeys.map((k) => k.id)).toEqual([hub.provisioningKeys[0].id]);
+  });
+
+  it('close() while versions add is out publishes nothing; the next start offers only Discard, whose marker revokes the hub key', async () => {
+    await writeFile(join(bin, 'act-add'), 'wait');
+    const { session } = await signingRoot(delegationsDeps());
+    const creating = session.delegationCreate({ ...CREATE, owners: [A] });
+    await waitingFor('add');
+    const id = hub.provisioningKeys[0].id;
+    await session.close();
+    expect(registered(session).delegations.creating, 'the close ends the run at once, not at its late answer').toBe(false);
+    await writeFile(join(bin, 'release-add'), '');
+    expect(await creating).toMatchObject({ ok: false });
+    await writeFile(join(bin, 'act-add'), 'ok');
+    expect(hub.posted).toEqual([]);
+    const { session: again } = await restart(delegationsDeps());
+    await until(() => signerOf(again).pending !== null, 'the held slot');
+    await until(async () => ((await again.view())?.delegations.length ?? 0) === 1, 'the unsent row');
+    expect((await again.view())!.delegations).toMatchObject([{ id, state: 'unsent', unsent: { rewrite: false } }]);
+    expect(await again.delegationRewrite({ generation: 1, id, hash: 'the-hash-it-was-shown' })).toMatchObject({ ok: false, reason: 'stale' });
+    expect(await again.discardPending(true, signerOf(again).pending!.hash)).toMatchObject({ ok: true, unsent: true });
+    expect(hub.provisioningKeys[0].revoked).not.toBeNull();
+    expect(hub.posted).toEqual([]);
+    await codes();
+  });
+
+  it("org.change's renewal answers once its hub half ran: the hub key follows the head", async () => {
+    const { session } = await signingRoot(delegationsDeps());
+    expect(await session.delegationCreate({ ...CREATE, owners: [A] })).toMatchObject({ ok: true });
+    const d = hub.head.state.delegations[0];
+    const later = iso(Date.parse(d.expires) + 10 * DAY);
+    const change = { kind: 'delegation.renew' as const, id: d.id, expires: later };
+    const shown = await session.preview(change);
+    if (!shown.ok) throw new Error(JSON.stringify(shown));
+    hub.renewGate = () => new Promise((resolve) => setTimeout(resolve, 50)); // a hub half slower than the sign's answer
+    expect(await session.change(change, shown.digest)).toMatchObject({ ok: true });
+    expect(hub.provisioningKeys[0].expires).toBe(later);
+    expect((await session.view())!.delegations[0]).toMatchObject({ expires: later, hub: { expires: later }, hubBehind: null });
+    await codes();
+  });
+
+  it('a drop whose DELETE fails shows the dropped row; Retry revokes it, the route alone', async () => {
+    const { session } = await signingRoot(delegationsDeps());
+    expect(await session.delegationCreate({ ...CREATE, owners: [A] })).toMatchObject({ ok: true });
+    const id = hub.head.state.delegations[0].id;
+    hub.revokeAnswer = () => worker(503, { error: 'hub-updating' });
+    const change = { kind: 'delegation.drop' as const, id };
+    const shown = await session.preview(change);
+    if (!shown.ok) throw new Error(JSON.stringify(shown));
+    expect(await session.change(change, shown.digest)).toMatchObject({ ok: true });
+    expect((await session.view())!.delegations).toMatchObject([{ id, state: 'dropped', hubBehind: 'revoke', hubProblem: { reason: 'updating' } }]);
+    hub.revokeAnswer = undefined;
+    const posts = hub.posted.length;
+    expect(await session.delegationRevokeHub(id)).toEqual({ ok: true });
+    expect(hub.posted).toHaveLength(posts);
+    expect((await session.view())!.delegations).toEqual([]);
+    await codes();
+  });
+
+  it('without custody every create refuses secret-store, minting nothing', async () => {
+    const { session } = await signingRoot();
+    expect(await session.delegationCreate({ ...CREATE, owners: [A] })).toMatchObject({ ok: false, reason: 'secret-store' });
+    expect(hub.provisioningKeys).toEqual([]);
+  });
+
+  // Task 5's fix wave (I2): a row offers Discard only for the slot that holds its own delegation
+  it("the status's pending slot names the delegation it holds: the unsent marker's while held, the one its state adds once published, none for another slot", async () => {
+    await writeFile(join(bin, 'act-add'), 'wait');
+    const { session } = await signingRoot(delegationsDeps());
+    const creating = session.delegationCreate({ ...CREATE, owners: [A] });
+    await waitingFor('add');
+    const id = hub.provisioningKeys[0].id;
+    await until(() => signerOf(session).pending !== null, 'the held slot');
+    expect(signerOf(session).pending).toMatchObject({ delegation: id });
+    await writeFile(join(bin, 'act-add'), 'ok');
+    await writeFile(join(bin, 'release-add'), '');
+    expect(await creating).toMatchObject({ ok: true, run: { id } });
+    expect(signerOf(session).pending).toBeNull();
+    await codes();
+  });
+
+  // Task 5's fix wave 2: the answer names the status revision covering its final slot, and the slot says whether it is held
+  it("a held create's answer names the status revision whose publication holds its slot, held; published by a rewrite, the same slot reads not held", async () => {
+    await writeFile(join(bin, 'act-add'), 'fail');
+    const { session } = await signingRoot(delegationsDeps());
+    const statuses: OrgStatus[] = [];
+    session.onStatus((status) => void statuses.push(status));
+    const answer = await session.delegationCreate({ ...CREATE, owners: [A] });
+    expect(answer).toMatchObject({ ok: false, reason: 'unsent', phase: 'held' });
+    const held = answer as Extract<DelegationResult, { ok: false }>;
+    const { generation, id, hash } = held.run!;
+    // the first status published at or past the answer's revision already holds its slot, held
+    const covering = statuses.find((s) => s.state === 'registered' && s.delegations.rev >= held.rev);
+    expect(covering).toBeDefined();
+    expect((covering as Registered).signer?.pending).toMatchObject({ hash, delegation: id, held: true, exposed: false });
+    expect(registered(session).delegations.rev).toBe(held.rev);
+    // another window's Write again publishes it: the same id and hash, its marker cleared, are no longer held
+    statuses.length = 0;
+    await writeFile(join(bin, 'act-add'), 'ok');
+    expect(await session.delegationRewrite({ generation, id: id!, hash: hash! })).toMatchObject({ ok: true, run: { id } });
+    const published = statuses.map((s) => (s as Registered).signer?.pending).find((p) => p?.hash === hash && p.held === false);
+    expect(published).toMatchObject({ hash, delegation: id, held: false });
+    await codes();
+  });
+
+  // Task 5's fix wave (I3): Retry after a failed key read reads now, not once 30 s have passed
+  it('org.delegation.readKeys reads the hub\'s key list again at once after a failure; the page\'s own read waits out the freshness', async () => {
+    const { session } = await signingRoot(delegationsDeps());
+    hub.keysAnswer = () => worker(503, { error: 'hub-updating' });
+    expect(await session.delegationReadKeys()).toMatchObject({ failed: true });
+    hub.keysAnswer = undefined;
+    const reads = () => hub.calls.filter((c) => c.method === 'GET' && c.path === '/api/provisioning-keys').length;
+    const before = reads();
+    await session.view(); // the page shown again: within the freshness, no read
+    await until(() => true, 'a turn');
+    expect(reads()).toBe(before);
+    const read = await session.delegationReadKeys();
+    expect(reads()).toBe(before + 1);
+    expect(read).toEqual({ at: expect.any(String), failed: false });
+    expect((await session.view())!.hubKeys).toEqual(read);
   });
 });

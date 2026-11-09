@@ -11,7 +11,9 @@
 // `MAWS_DEV_ORG` a channel reads signed out). Each page's opens are held for it (channel/holds.ts), and let go when the
 // page reloads or its window is destroyed. M4b adds the enrollment's `org.enroll.*` and a drop's `org.drop.retry`
 // (under `MAWS_DEV_ORG`: each refused, as the pairing's are), and the grants' `org.grants.view`, `.set` and `.regrant`,
-// forwarding `org.grants.changed` through `emitGrants` (under `MAWS_DEV_ORG`: read signed out, each sign refused `busy`). M6b adds a session's reach, `org.policy.get` and `.set`, and M5b's
+// forwarding `org.grants.changed` through `emitGrants` (under `MAWS_DEV_ORG`: read signed out, each sign refused `busy`).
+// M4c adds `org.delegation.*` (under `MAWS_DEV_ORG`: refused) and the destination's `org.provisioningSecret.*`, which
+// read and write main's own file whichever session runs. M6b adds a session's reach, `org.policy.get` and `.set`, and M5b's
 // `org.owners.add` (registerPolicyHandlers), over whichever session main runs.
 //
 // Electron-free: main injects its `registerMainHandler` and `emit`.
@@ -21,6 +23,8 @@ import type {
   DropRetryResult,
   EnrollStartResult,
   GrantRegrantResult,
+  DelegationResult,
+  HubHalfResult,
   GrantSetResult,
   OrgAttempt,
   OrgRows,
@@ -31,6 +35,7 @@ import type {
 } from '@shared/ipc/schema/org';
 import type { MachineRef } from '@shared/machine/ref';
 import type { MainHandler } from '../ipc/router';
+import type { ProvisioningSecretStore } from './provisioning-secret-store';
 import { channelHolds } from './channel/holds';
 import type { OrgSessionService } from './org-session';
 import type { OrgPolicies } from './policy';
@@ -58,6 +63,14 @@ type OrgCommand =
   | 'org.enroll.approve'
   | 'org.enroll.cancel'
   | 'org.drop.retry'
+  | 'org.delegation.create'
+  | 'org.delegation.rewrite'
+  | 'org.delegation.renewHub'
+  | 'org.delegation.revokeHub'
+  | 'org.delegation.readKeys'
+  | 'org.provisioningSecret.get'
+  | 'org.provisioningSecret.set'
+  | 'org.provisioningSecret.reset'
   | 'org.grants.view'
   | 'org.grants.set'
   | 'org.grants.regrant'
@@ -76,8 +89,20 @@ export function registerOrgHandlers(deps: {
   service: OrgSessionService | null;
   /** O7's development session, when it is the one main runs. */
   development: OrgSession | null;
+  /** M4c: the provisioning code's destination, main's own file, read and set whichever session runs. */
+  destination: ProvisioningSecretStore;
 }): () => void {
-  const { service, development } = deps;
+  const { service, development, destination } = deps;
+  // M4c: the destination's commands, over main's own file; the renderer reaches it through these alone
+  deps.register('org.provisioningSecret.get', () => {
+    const read = destination.read();
+    return read.ok ? read.value : { damaged: read.damaged };
+  });
+  deps.register('org.provisioningSecret.set', ({ value }) => {
+    const written = destination.write(value);
+    return written.ok ? { ok: true } : written;
+  });
+  deps.register('org.provisioningSecret.reset', () => destination.reset());
   if (service === null) {
     const status = (): OrgStatus => {
       const identity = development?.current()?.identity;
@@ -111,6 +136,13 @@ export function registerOrgHandlers(deps: {
     deps.register('org.enroll.approve', () => unsigned);
     deps.register('org.enroll.cancel', () => ({ ok: false, reason: 'not-current', detail: 'MAWS_DEV_ORG is in force' }));
     deps.register('org.drop.retry', () => unretried);
+    const unhalved: HubHalfResult = { ok: false, reason: 'none', detail: 'MAWS_DEV_ORG is in force' };
+    const undelegated: DelegationResult = { ok: false, reason: 'busy', detail: 'MAWS_DEV_ORG is in force', phase: 'refused', stored: false, run: null, rev: 0 };
+    deps.register('org.delegation.create', () => undelegated);
+    deps.register('org.delegation.rewrite', () => undelegated);
+    deps.register('org.delegation.renewHub', () => unhalved);
+    deps.register('org.delegation.revokeHub', () => unhalved);
+    deps.register('org.delegation.readKeys', () => ({ at: null, failed: false }));
     const ungranted: GrantSetResult & GrantRegrantResult = { ok: false, reason: 'busy', detail: 'MAWS_DEV_ORG is in force' };
     deps.register('org.grants.view', ({ ref }) => ({ ok: false, ref, reason: 'signed-out' }));
     deps.register('org.grants.set', () => ungranted);
@@ -141,6 +173,11 @@ export function registerOrgHandlers(deps: {
   deps.register('org.enroll.approve', (input) => service.enrollApprove(input));
   deps.register('org.enroll.cancel', (input, { client }) => service.enrollCancel(input, client.id));
   deps.register('org.drop.retry', ({ name }) => service.dropRetry(name));
+  deps.register('org.delegation.create', (input) => service.delegationCreate(input));
+  deps.register('org.delegation.rewrite', (input) => service.delegationRewrite(input));
+  deps.register('org.delegation.renewHub', ({ id }) => service.delegationRenewHub(id));
+  deps.register('org.delegation.revokeHub', ({ id }) => service.delegationRevokeHub(id));
+  deps.register('org.delegation.readKeys', () => service.delegationReadKeys());
   deps.register('org.grants.view', (input) => service.grantsView(input));
   deps.register('org.grants.set', (input) => service.grantsSet(input));
   deps.register('org.grants.regrant', (input) => service.grantsRegrant(input));

@@ -57,6 +57,11 @@
 // each operation fenced by the sign-in it began under (`signIns`), sent again at each feed open and link up, and joined
 // by `close()` with the parts.
 //
+// M4c (delegations; Interfaces §S): `delegation.add` is the create transaction's alone (delegations.ts, a part as the
+// enrollment is), whose minted token, key pair and code live in its run's memory and gcloud's stdin, dropped at a
+// sign-out and at `close`; a Discard's marker revokes an unsent delegation's hub key; the signer's settlement runs a
+// renewal's and a drop's hub half; the view joins the head, the pending slot and the hub's key list.
+//
 // Electron-free: the browser opener, the step-up signer, the state signer, focus, notifications and the RL2 links are
 // injected from main.
 import { lstat } from 'node:fs/promises';
@@ -88,11 +93,16 @@ import type {
   ChannelAnswer,
   ChannelChanged,
   ChannelSendResult,
+  DelegationCreateInput,
+  DelegationResult,
+  DelegationRewriteInput,
   DiscardResult,
   GrantRegrantResult,
   GrantSetResult,
   GrantsView,
   DropRetryResult,
+  HubHalfResult,
+  HubKeysRead,
   EnrollCancelResult,
   EnrollStartResult,
   OrgAttempt,
@@ -133,6 +143,7 @@ import {
   type HubRow,
   type OrgFiles,
   type RegistrationFile,
+  type Unsent,
 } from './files';
 import { channelStore } from './channel/cache';
 import { createChannels } from './channel/channel';
@@ -140,15 +151,18 @@ import { createChannelMachines, machinesStore, type ChannelMachinesDeps } from '
 import type { ProjectSocketDeps } from './channel/project-socket';
 import { checkSuccessor, describeHolder, supersededRevocations, type Finding, type SupersededOffer } from './checks';
 import { createDeliveries, createHeadPush, type Deliveries, type DeliveryLink } from './deliveries';
+import { createDelegations } from './delegations';
 import { composeChange, normalizeChange, type ChangeEdit, type EditSelf } from './edits';
 import { rereadFrom, startHeldOrg, type HeldOrg } from './held';
-import { hubClient, type HubClient, type HubResult, type Me, type Served } from './hub-client';
+import { hubClient, type HubClient, type HubResult, type Me, type ProvisioningKeyRoutes, type Served } from './hub-client';
 import { createEnrollment } from './enroll';
 import { createGrants, type GrantDoor, type GrantLink } from './grants';
 import { createGrantsStore, type GrantsStore } from './grants-store';
 import { createPairing } from './pairing';
+import type { ProvisioningSecretStore } from './provisioning-secret-store';
 import type { RegistryFeedHooks } from './registry-feed';
 import type { OrgSession, SignedIn } from './session';
+import type { SecretStore } from './secret-store';
 import { createOrgSigner, RefusedEdit, StaleEdit, successorDraft, supersededEdit, type OrgSigner, type SignOutcome } from './signer';
 import { createSigningStore, type SigningStore } from './signing-store';
 import { orgTiming, type OrgTiming } from './timing';
@@ -202,6 +216,16 @@ export interface OrgSessionService extends OrgSession {
   enrollCancel(input: { generation: number | null }, asker: ClientId): EnrollCancelResult;
   /** M4b: a dropped machine's hub row deleted again (`hubRowsLeft`), the route alone. */
   dropRetry(name: string): Promise<DropRetryResult>;
+  /** M4c: the create transaction (delegations.ts): the one Touch ID; the code goes from here to Secret Manager alone. */
+  delegationCreate(input: DelegationCreateInput): Promise<DelegationResult>;
+  /** M4c: "Write the code again" for this run's unsent delegation, while it is the run, delegation and slot named. */
+  delegationRewrite(input: DelegationRewriteInput): Promise<DelegationResult>;
+  /** M4c: the hub's key list read now (Retry after a failed read), under this sign-in; the list's state after it. */
+  delegationReadKeys(): Promise<HubKeysRead>;
+  /** M4c: renew's hub half again, the route alone. */
+  delegationRenewHub(id: string): Promise<HubHalfResult>;
+  /** M4c: drop's hub half again, or a stray key's Revoke, the route alone. */
+  delegationRevokeHub(id: string): Promise<HubHalfResult>;
   /** M4b: a machine's grants (grants.ts): the ledger's word, this Mac's pending ones, and the missing ones. */
   grantsView(input: { ref: string }): Promise<GrantsView>;
   /** M4b: a member's rights on a machine granted, changed or withdrawn (`rights: []`), behind one confirmation. */
@@ -286,6 +310,11 @@ export interface OrgSessionDeps {
   local?: MachineRef;
   /** M4b: the grants' signer, door and links; without it no grant is read or signed. */
   grants?: OrgGrantsDeps;
+  /**
+   * M4c: the provisioning code's custody (secret-store.ts, gcloud resolved through the login shell's PATH) and its
+   * destination (`<profile>/provisioning-secret.json`); without it every create refuses `secret-store`.
+   */
+  delegations?: { secrets: SecretStore; destination: ProvisioningSecretStore };
   /** M7b: this Mac's spine and the RL2 roster's links, for every machine's to-human entries; without it, none are read. */
   channelMachines?: Omit<ChannelMachinesDeps, 'session' | 'store' | 'commit' | 'timing' | 'now' | 'log'>;
   now?(): number;
@@ -543,6 +572,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       pairing: pairing.status(),
       enrolling: enrollment.status(),
       hubRowsLeft: hubRowsLeft.map(({ name, ref }) => ({ name, ref })),
+      delegations: delegations.status(),
     };
   }
 
@@ -560,7 +590,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       stepUpKid: facts.stepUpKid,
       due: c?.weekly.due() ?? false,
       ageDays: Math.floor((now() - Date.parse(head.issued)) / DAY_MS),
-      pending: slot === null ? null : { version: slot.version, hash: slot.hash, fork: slot.fork, exposed: slot.exposed, refused: slot.refused },
+      pending: slot === null ? null : { version: slot.version, hash: slot.hash, fork: slot.fork, exposed: slot.exposed, refused: slot.refused, delegation: slotDelegation(slot.unsent, file, head), held: slot.unsent !== null },
       offer,
       owing: c?.deliveries.owing() ?? [],
       abandoned: file === undefined || file === 'damaged' ? [] : file.abandoned.map((a) => ({ hash: a.hash, version: a.version, hub: a.hub, machines: [...a.machines] })),
@@ -568,6 +598,16 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       rekeying,
       oldDevice: retired?.device ?? null,
     };
+  }
+
+  /**
+   * M4c: the delegation the pending slot holds: its unsent marker's, else the one its signed state adds to the head (a
+   * published create not yet settled); null for any other slot. A Delegations row offers Discard only for its own.
+   */
+  function slotDelegation(unsent: Unsent | null, file: ReturnType<SigningStore['get']> | undefined, head: OrgState): string | null {
+    if (unsent?.kind === 'delegation') return unsent.id;
+    if (file === undefined || file === 'damaged' || file.pending === null) return null;
+    return file.pending.signed.state.delegations.find((d) => !head.delegations.some((h) => h.id === d.id))?.id ?? null;
   }
 
   /** The signer may sign, and this device is signed in: a signed-out root asks nothing and signs nothing. */
@@ -611,7 +651,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
 
   // ---- the hub credential ----
 
-  function client(hub: string, cred: HubCredential): HubClient {
+  function client(hub: string, cred: HubCredential): HubClient & ProvisioningKeyRoutes {
     return hubClient({ url: hub, headers: () => Promise.resolve(hubHeaders(cred)), fetch: deps.fetch, timing: deps.timing });
   }
 
@@ -885,7 +925,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
   }
 
   /** The hub as the signer reaches it: a credential's end or a denial in its answers is the session's, as any read's. */
-  function signerHub(): HubClient | null {
+  function signerHub(): (HubClient & ProvisioningKeyRoutes) | null {
     const reg = registration;
     const cred = credential;
     if (closed || reg === null || reg.signedOut || cred === null || !hubLive()) return null;
@@ -906,6 +946,11 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       enrollmentKey: (id, signal) => watched(inner.enrollmentKey(id, signal)),
       machines: (signal) => watched(inner.machines(signal)),
       deleteMachine: (name, key, signal) => watched(inner.deleteMachine(name, key, signal)),
+      // M4c: the provisioning keys (the create's mint, the hub halves, the view's key list)
+      mintProvisioningKey: (body, signal) => watched(inner.mintProvisioningKey(body, signal)),
+      renewProvisioningKey: (id, signal) => watched(inner.renewProvisioningKey(id, signal)),
+      revokeProvisioningKey: (id, signal) => watched(inner.revokeProvisioningKey(id, signal)),
+      provisioningKeys: (signal) => watched(inner.provisioningKeys(signal)),
     };
   }
 
@@ -928,6 +973,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
         deliveries,
         settled: (slot) => {
           if (slot.hubRow !== undefined) queueRowDelete(slot.hubRow);
+          // M4c: a renewal's or a drop's hub half, read off the settled state against its parent
+          delegations.settled(slot);
         },
         now: deps.now,
         log,
@@ -972,7 +1019,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     found.edit(draft);
     const before = new Set(head.state.revoked.map((r) => r.keyId));
     const superseded = draft.revoked.filter((r) => !before.has(r.keyId)).length;
-    const warnings = found.lines.length === 0 ? [] : (await checkSuccessor(head.state, draft, view.superseded(), new Date(at))).filter((x) => x.level === 'warn').map((x) => x.detail);
+    const warnings = found.lines.length === 0 ? [] : (await checkSuccessor(head.state, draft, view.superseded(), new Date(at), { certificates: view.certificates() })).filter((x) => x.level === 'warn').map((x) => x.detail);
     const withheld = found.withheld.map((w) => `${describeHolder(head.state, w.holder)} (${w.keyId})`);
     const digest = await digestOf(canonicalize({ lines: found.lines, warnings, withheld }));
     return { shown: { superseded, lines: [...found.lines], warnings, withheld, digest }, offer: found };
@@ -1059,7 +1106,11 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     if (c === null) return { ok: false, reason: 'none' };
     const outcome = await c.signer.discardPending(confirmed, hash);
     changed();
-    return outcome;
+    if (!outcome.ok) return outcome;
+    // M4c: an unsent delegation's hub key goes with its Discard (a failed revoke leaves a stray key, never a held-up
+    // Discard). The `marker` stays in main; the answer keeps its shape.
+    await delegations.discarded(outcome.marker);
+    return { ok: true, unsent: outcome.unsent, hubVersion: outcome.hubVersion, ...(outcome.forkAt === undefined ? {} : { forkAt: outcome.forkAt }) };
   }
 
   async function resetSigning(confirmed: true): Promise<void> {
@@ -1078,7 +1129,13 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     if (closed || reg === null || v === null) return null;
     // M4b (Fork B): Grant… by the grants' own eligibility of this device's key, while it may sign a record at all
     const grantKid = grantsContext() === null ? null : recordSigner!.kid;
-    return orgView(v.head().state, selfOf(reg), composed !== null && maySign(composed.signer), v.certificates(), new Date(now()), grantKid);
+    // M4c: the page shown reads the hub's key list again, once the last read is stale; the delegations join the pending
+    // slot (an unsent delegation is in its state alone) and the held chain (a dropped one's last record)
+    void delegations.readKeys({ ifStale: true });
+    const file = composed?.store.get();
+    const slot = file === undefined || file === 'damaged' || file.pending === null ? null : { state: file.pending.signed.state, unsent: file.pending.unsent };
+    const history = (id: string) => [...v.since(0).states].reverse().find((s) => s.state.delegations.some((d) => d.id === id))?.state.delegations.find((d) => d.id === id);
+    return orgView(v.head().state, selfOf(reg), composed !== null && maySign(composed.signer), v.certificates(), new Date(now()), grantKid, { ...delegations.viewInputs(), slot, history });
   }
 
   type Refused = Extract<PreviewResult, { ok: false }>;
@@ -1114,17 +1171,22 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       if (error instanceof StaleEdit) return { ok: false, reason: 'stale', detail: error.message, findings: [] };
       return { ok: false, reason: 'invalid', detail: (error as Error).message, findings: [] };
     }
-    const findings = await checkSuccessor(head.state, draft, superseded, new Date(at));
+    const findings = await checkSuccessor(head.state, draft, superseded, new Date(at), { certificates: view.certificates() });
     if (findings.some((f) => f.level === 'refuse')) return { ok: false, reason: 'refused', findings };
     const warnings = findings.filter((f) => f.level === 'warn').map((f) => f.detail);
     return { ok: true, edit, warnings, digest: await digestOf(canonicalize({ change, lines: edit.lines, warnings })) };
   }
 
-  /** M4b: a machine is listed only by an enrollment's approval, which composes it from the key it checked. */
+  /**
+   * M4b: a machine is listed only by an enrollment's approval, which composes it from the key it checked. M4c: a
+   * delegation is listed only by the create transaction, which stores its code before it publishes.
+   */
   const enrolledOnly = (change: OrgChange): Refused | null =>
     change.kind === 'machine.add' || change.kind === 'machine.replace'
       ? { ok: false, reason: 'invalid', detail: "a machine is enrolled through Enroll, which checks the machine's key: nothing was composed", findings: [] }
-      : null;
+      : change.kind === 'delegation.add'
+        ? { ok: false, reason: 'invalid', detail: 'a delegation is created through Create…, which stores its code: nothing was composed', findings: [] }
+        : null;
 
   async function preview(raw: OrgChange): Promise<PreviewResult> {
     const standing = changeStanding() ?? enrolledOnly(raw);
@@ -1169,6 +1231,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     const result = signResult(await c.signer.sign({ summary: shown.edit.summary, lines: shown.edit.lines, apply, ...hubRow }));
     // Settled at once: its delete was queued in the settlement, and the answer waits for it, so the status it leaves is said.
     if (result.ok && dropped !== undefined) await rowWork;
+    // M4c: a renewal's or a drop's hub half, queued in the settlement, likewise
+    if (result.ok && (change.kind === 'delegation.renew' || change.kind === 'delegation.drop')) await delegations.idle();
     return result;
   }
 
@@ -1271,6 +1335,41 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     },
     busy: () => attempt !== null || signingOut || pairing.running(),
     sign: async (edit) => (composed === null ? notSigning : signResult(await composed.signer.sign(edit))),
+    changed: () => changed(),
+    timing: deps.timing,
+    now: deps.now,
+    log,
+  });
+
+  // ---- M4c: the delegations ----
+
+  /** M4c's delegations (delegations.ts): the create transaction, its custody, the hub halves and the hub's key list. */
+  const delegations = createDelegations({
+    context: () => {
+      const reg = registration;
+      const v = heldView();
+      if (closed || reg === null || v === null || !answering()) return null;
+      return { hub: reg.hub, self: selfOf(reg), head: v.head(), certificates: v.certificates(), client: signerHub(), signIn: signIns };
+    },
+    standing: () => {
+      const refusal = changeStanding();
+      return refusal === null ? null : asSign(refusal);
+    },
+    busy: () => attempt !== null || signingOut,
+    signer: () => composed?.signer ?? null,
+    slotState: () => {
+      const file = composed?.store.get();
+      return file === undefined || file === 'damaged' || file.pending === null ? null : file.pending.signed.state;
+    },
+    check: async (change) => {
+      const v = heldView();
+      if (v === null) return notSigning;
+      const shown = await shownChange(v, change);
+      return shown.ok ? null : asSign(shown);
+    },
+    stateAt: (version) => heldView()?.since(version - 1).states.find((s) => s.state.version === version)?.state ?? null,
+    secrets: deps.delegations?.secrets ?? null,
+    destination: deps.delegations?.destination ?? null,
     changed: () => changed(),
     timing: deps.timing,
     now: deps.now,
@@ -1915,6 +2014,8 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     pairing.cancel();
     enrollment.cancel();
     hubRowsLeft = [];
+    // M4c: a create in flight goes no further and its key pair and token are dropped; the hub's key list was this sign-in's
+    delegations.fence();
     // M4b: a grant in flight goes no further (its sign-in is `signIns`', advanced above), and the ledger reads held go
     grants.fence();
     attempt?.abort();
@@ -1973,13 +2074,15 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     //    enrollment, whose poll in flight is joined with the parts, and the grants, whose sign, read or act in flight is.
     pairing.cancel();
     const enrollmentClosed = enrollment.close();
+    // M4c: a create in flight goes no further, and its key pair, token and code are dropped (it writes nothing of its own)
+    const delegationsClosed = delegations.close();
     const grantsClosed = grants
       .close()
       .then(() => grantsPush.close())
       .finally(() => (grantsFenced = true));
     const c = composed;
     c?.offs.forEach((off) => off());
-    const parts = c === null ? [enrollmentClosed, grantsClosed] : [enrollmentClosed, grantsClosed, c.weekly.close(), c.deliveries.close(), c.signer.close()];
+    const parts = c === null ? [enrollmentClosed, delegationsClosed, grantsClosed] : [enrollmentClosed, delegationsClosed, grantsClosed, c.weekly.close(), c.deliveries.close(), c.signer.close()];
     if (tokenTimer !== null) clearTimeout(tokenTimer);
     if (certsTimer !== null) clearInterval(certsTimer);
     if (recoverTimer !== null) clearInterval(recoverTimer);
@@ -2037,6 +2140,15 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     enrollApprove: (input) => enrollment.approve(input),
     enrollCancel: (input, asker) => enrollment.cancelRun(input, asker),
     dropRetry,
+    delegationCreate: (input) => delegations.create(input),
+    delegationRewrite: (input) => delegations.rewrite(input),
+    async delegationReadKeys() {
+      await delegations.readKeys();
+      const { keys, keysFailed } = delegations.viewInputs();
+      return { at: keys?.at ?? null, failed: keysFailed };
+    },
+    delegationRenewHub: (id) => delegations.renewHub(id),
+    delegationRevokeHub: (id) => delegations.revokeHub(id),
     grantsView: (input) => grants.view(input),
     grantsSet: (input) => grants.set(input),
     grantsRegrant: (input) => grants.regrant(input),

@@ -178,6 +178,7 @@ function seededChannel(now: number, local: MachineRef): { status: Extract<OrgSta
     pairing: null,
     enrolling: null,
     hubRowsLeft: [],
+    delegations: { creating: false, rev: 0 },
   };
   return { status, answer, asOf, hostsAsOf: seeded.asOf };
 }

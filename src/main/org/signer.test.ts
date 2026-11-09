@@ -34,12 +34,13 @@ import {
 vi.mock('electron', () => ({ systemPreferences: { promptTouchID: () => Promise.reject(new Error('no system prompt in the suites')) } }));
 
 import { createStateSigner, type Confirmation, type StepUpPrompt } from '../device/step-up';
-import { CHAIN_FILE, orgFiles, SIGNING_FILE, type Anchor, type Obligation, type OrgFiles, type SigningFile } from './files';
+import { CHAIN_FILE, orgFiles, SIGNING_FILE, type Anchor, type Obligation, type OrgFiles, type Pending, type SigningFile } from './files';
 import { startHeldOrg, type HeldOrg } from './held';
 import type { HubClient, HubResult, Served } from './hub-client';
 import { heldOrgSession, type SignedIn } from './session';
 import { createOrgSigner, noChangeEdit, StaleEdit, type Edit, type OrgSigner, type SignerDeliveries } from './signer';
-import { createSigningStore, type SigningStore } from './signing-store';
+import { createSigningStore, SigningDamaged, type SigningStore } from './signing-store';
+import { startWeekly } from './weekly';
 
 const ORG = 'org-signer';
 const DAY = 86_400_000;
@@ -213,7 +214,7 @@ type Harness = {
   /** `chain`: every chain.json write fails (a full disk under the held view's adoption). */
   faults: { chain: boolean };
   /** Runs inside each write before it reaches the disk: a test holds a write open here and acts meanwhile. */
-  gates: { write: ((name: string, value: unknown) => Promise<void> | void) | null };
+  gates: { write: ((name: string, value: unknown) => Promise<void> | void) | null; written: ((name: string, value: unknown) => void) | null };
   hub: FakeHub;
   /** The hub the signer is given: `null` while `hub` is false. */
   online: boolean;
@@ -221,6 +222,8 @@ type Harness = {
   store: SigningStore;
   signer: OrgSigner;
   deliveries: ReturnType<typeof fakeDeliveries>;
+  /** Each slot the signer's settlement callback heard of, in order (this start's). */
+  settled: Pending[];
   prompts: StepUpPrompt[];
   /** What the person answers; `during` runs while they are asked. */
   answer: Confirmation;
@@ -240,14 +243,16 @@ async function harness(options: Options = {}): Promise<Harness> {
   expect(await base.ensure()).toEqual({ ok: true });
   const writes: Harness['writes'] = [];
   const faults = { chain: false };
-  const gates: Harness['gates'] = { write: null };
+  const gates: Harness['gates'] = { write: null, written: null };
   const files: OrgFiles = {
     ...base,
     write: async (name, value) => {
       if (faults.chain && name === CHAIN_FILE) throw new Error('disk full');
       await gates.write?.(name, value);
       writes.push({ name, value: structuredClone(value) });
-      return base.write(name, value);
+      await base.write(name, value);
+      // after the file is on disk: a write that commits and then throws (a directory sync that fails after the rename)
+      gates.written?.(name, value);
     },
   };
   let anchor: Anchor | null = null;
@@ -283,6 +288,7 @@ async function harness(options: Options = {}): Promise<Harness> {
       held,
       store,
       deliveries: fakeDeliveries(),
+      settled: [],
       answer: { ok: true },
       during: null,
       signer: null as unknown as OrgSigner,
@@ -315,6 +321,7 @@ async function harness(options: Options = {}): Promise<Harness> {
       hub: () => (h.online ? hub : null),
       store,
       deliveries: { obligation: (signed, parent) => h.deliveries.obligation(signed, parent), send: () => h.deliveries.send() },
+      settled: (slot) => void h.settled.push(structuredClone(slot)),
       now: () => NOW,
       log: () => {},
     });
@@ -599,7 +606,7 @@ describe('the pending slot', () => {
     const names = h.writes.map((w) => w.name).filter((n) => n === 'registration.json' || n === SIGNING_FILE);
     expect(names.slice(0, 2)).toEqual(['registration.json', SIGNING_FILE]);
     const first = h.writes.find((w) => w.name === SIGNING_FILE)!.value as SigningFile;
-    expect(first.pending).toEqual({ signed, parent: await stateHash(h.genesis.state), hash: await stateHash(signed.state), exposed: { hub: false, machines: [] } });
+    expect(first.pending).toEqual({ signed, parent: await stateHash(h.genesis.state), hash: await stateHash(signed.state), exposed: { hub: false, machines: [] }, unsent: null });
     expect(first.deliveries).toEqual([{ hash, signed, owed: ['m-one', 'm-two'], known: {}, probed: {}, tooLarge: [] }]);
 
     // At the post, the file on disk already says the hub may hold it.
@@ -865,7 +872,7 @@ describe('discarding a pending proposal', () => {
     expect(h.disk()!.pending).not.toBeNull();
 
     // Exposed at the hub, which holds the admin's version 2: a fork the Org section words with its warning.
-    expect(await h.signer.discardPending(true, h.signer.pending()!.hash)).toEqual({ ok: true, unsent: false, hubVersion: 2, forkAt: 2 });
+    expect(await h.signer.discardPending(true, h.signer.pending()!.hash)).toEqual({ ok: true, unsent: false, hubVersion: 2, forkAt: 2, marker: null });
     const file = h.disk()!;
     expect(file.pending).toBeNull();
     expect(file.deliveries).toEqual([]);
@@ -882,7 +889,7 @@ describe('discarding a pending proposal', () => {
     await h.signer.settle();
     expect(h.hub.posts).toHaveLength(2);
     expect(h.signer.pending()).toMatchObject({ version: 2, exposed: true, fork: false });
-    expect(await h.signer.discardPending(true, h.signer.pending()!.hash)).toEqual({ ok: true, unsent: false, hubVersion: 1 });
+    expect(await h.signer.discardPending(true, h.signer.pending()!.hash)).toEqual({ ok: true, unsent: false, hubVersion: 1, marker: null });
     expect(h.disk()!.abandoned).toEqual([{ hash: await stateHash(h.hub.posts[0].state), version: 2, hub: true, machines: [] }]);
   });
 
@@ -914,7 +921,7 @@ describe('discarding a pending proposal', () => {
     h.hub.states.push(two, three);
     h.online = true;
 
-    expect(await h.signer.discardPending(true, h.signer.pending()!.hash)).toEqual({ ok: true, unsent: true, hubVersion: 3, forkAt: 2 });
+    expect(await h.signer.discardPending(true, h.signer.pending()!.hash)).toEqual({ ok: true, unsent: true, hubVersion: 3, forkAt: 2, marker: null });
     expect(h.held.head()).toEqual(three);
     // The floor is max(the slot's parent version, the hub's head): an older chain is refused as a rollback.
     expect(await h.held.adoptServed({ chain: [], head: h.genesis, transitions: [], certificates: null })).toMatchObject({ adopted: 0, refused: 'rollback' });
@@ -947,6 +954,393 @@ describe('discarding a pending proposal', () => {
     h.hub.mode = 'unreachable';
     expect(await h.signer.discardPending(true, h.signer.pending()!.hash)).toEqual({ ok: false, reason: 'hub' });
     expect(h.disk()!.pending).not.toBeNull();
+  });
+});
+
+describe('an unsent slot (M4c: `Edit.hold`, `publishHeld`)', () => {
+  const HOLD = { kind: 'delegation' as const, id: 'dlg-held' };
+  const heldEdit = (base: Edit = noChangeEdit(), id = HOLD.id): Edit => ({ ...base, hold: { kind: 'delegation', id } });
+
+  /** A held sign that must succeed: its slot's stored hash, which its answer carries. */
+  async function signHeld(h: Harness, edit: Edit = heldEdit()): Promise<string> {
+    const outcome = await h.signer.sign(edit);
+    const slot = h.disk()!.pending!;
+    expect(outcome).toEqual({ ok: true, version: slot.signed.state.version, hash: slot.hash });
+    return slot.hash;
+  }
+
+  /** Each signing.json write's slot as (marker, hub exposure), in order. */
+  const slotWrites = (h: Harness) =>
+    h.writes
+      .filter((w) => w.name === SIGNING_FILE)
+      .map((w) => (w.value as SigningFile).pending)
+      .map((p) => (p === null ? null : { unsent: p.unsent, hub: p.exposed.hub }));
+
+  it('is a sign through the same checks and Touch ID that keeps the slot with its marker, posts nothing, and answers its hash', async () => {
+    const h = await harness();
+    const outcome = await h.signer.sign(heldEdit(await removeDevice('old')));
+    const slot = h.disk()!.pending!;
+    expect(outcome).toEqual({ ok: true, version: 2, hash: slot.hash });
+    expect(slot.hash).toBe(await stateHash(slot.signed.state));
+    expect(slot.unsent).toEqual(HOLD);
+    expect(slot.exposed).toEqual({ hub: false, machines: [] });
+    // The marker came with the slot and its obligation, in the one write.
+    expect(slotWrites(h)).toEqual([{ unsent: HOLD, hub: false }]);
+    expect(h.disk()!.deliveries.map((o) => o.hash)).toEqual([slot.hash]);
+    expect(h.prompts).toHaveLength(1);
+    expect(h.hub.posts).toEqual([]);
+    expect(h.held.head().state.version).toBe(1);
+    expect(h.signer.pending()).toEqual({ version: 2, exposed: false, fork: false, hash: slot.hash, refused: null, unsent: HOLD });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(h.deliveries.sends).toBe(0);
+  });
+
+  it('stays unposted through a feed\'s reopen and another signing attempt, which answers `pending`', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    await h.signer.settle();
+    await h.signer.settle();
+    expect(await h.signer.sign(noChangeEdit())).toEqual({ ok: false, reason: 'pending' });
+    expect(await h.signer.sign(heldEdit(await removeDevice('old'), 'dlg-other'))).toEqual({ ok: false, reason: 'pending' });
+    expect(h.prompts).toHaveLength(1);
+    expect(h.hub.posts).toEqual([]);
+    expect(h.disk()!.pending).toMatchObject({ hash, unsent: HOLD, exposed: { hub: false, machines: [] } });
+  });
+
+  it('is judged a fork as any slot when the hub moves on, and is still not posted', async () => {
+    const h = await harness();
+    await signHeld(h);
+    h.hub.states.push(await adminSuccessor(h.genesis));
+    await h.signer.settle();
+    expect(h.held.head().state.version).toBe(2);
+    expect(h.signer.pending()).toMatchObject({ version: 2, fork: true, exposed: false, unsent: HOLD });
+    expect(h.hub.posts).toEqual([]);
+  });
+
+  it('survives a crash before publishHeld\'s write: a fresh signer over the same file finds the marker, and its settlement at startup posts nothing', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    const next = await h.restart();
+    expect(next.signer.pending()).toMatchObject({ version: 2, hash, exposed: false, unsent: HOLD });
+    await next.signer.settle();
+    expect(next.hub.posts).toEqual([]);
+    expect(next.held.head().state.version).toBe(1);
+    expect(next.disk()!.pending).toMatchObject({ hash, unsent: HOLD, exposed: { hub: false, machines: [] } });
+    expect(next.settled).toEqual([]);
+  });
+
+  // Custody: the run that held the slot holds its delegation's key pair in memory, and only that run may publish it.
+  const ENDED_RUN = 'this slot was held by a run that has ended: only Discard';
+  const raw = (h: Harness) => readFileSync(join(h.dir, 'org', SIGNING_FILE), 'utf8');
+
+  it('refuses publishHeld from a fresh signer over the same file (a relaunch): the slot is Discard-only, and its marker stays', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    const next = await h.restart();
+    const before = raw(next);
+    expect(await next.signer.publishHeld(hash)).toEqual({ ok: false, reason: 'stale', detail: ENDED_RUN });
+    expect(raw(next)).toBe(before);
+    expect(next.disk()!.pending).toMatchObject({ hash, unsent: HOLD });
+    expect(next.hub.posts).toEqual([]);
+  });
+
+  it('refuses publishHeld after a sign-out and a sign-in of the same member, changing nothing', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    h.signer.fence(); // the sign-out; the same signer serves the next sign-in
+    const before = raw(h);
+    expect(await h.signer.publishHeld(hash)).toEqual({ ok: false, reason: 'stale', detail: ENDED_RUN });
+    expect(raw(h)).toBe(before);
+    expect(h.hub.posts).toEqual([]);
+  });
+
+  it('refuses publishHeld for a slot whose write a sign-out overtook: the run that held it ended with it', async () => {
+    const h = await harness();
+    // The sign-out lands while the held slot is being written: the write was decided before it, so the slot is kept.
+    h.gates.write = (name, value) => {
+      if (name !== SIGNING_FILE || (value as SigningFile).pending?.unsent === null) return;
+      h.gates.write = null;
+      h.signer.fence();
+    };
+    const outcome = await h.signer.sign(heldEdit());
+    const hash = h.disk()!.pending!.hash;
+    expect(outcome).toMatchObject({ ok: true, hash });
+    const before = raw(h);
+    expect(await h.signer.publishHeld(hash)).toEqual({ ok: false, reason: 'stale', detail: ENDED_RUN });
+    expect(raw(h)).toBe(before);
+    expect(h.hub.posts).toEqual([]);
+  });
+
+  it('forgets a held slot at its Discard: the same bytes held again by no sign are not this run\'s to publish', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    const slot = h.disk()!.pending!;
+    expect(await h.signer.discardPending(true, hash)).toMatchObject({ ok: true, marker: HOLD });
+    // The same slot back in the file (its hash the same), written by nothing that held it in this run.
+    await h.store.update((f) => ({ next: { ...f, pending: slot }, value: undefined }));
+    expect(await h.signer.publishHeld(hash)).toEqual({ ok: false, reason: 'stale', detail: ENDED_RUN });
+    expect(h.disk()!.pending).toMatchObject({ hash, unsent: HOLD });
+    expect(h.hub.posts).toEqual([]);
+  });
+
+  it('keeps the weekly asking not due, so a focus asks nothing', async () => {
+    const h = await harness();
+    let focus: () => void = () => {};
+    const notes: string[] = [];
+    const weeklyOf = () =>
+      startWeekly({
+        signer: h.signer,
+        head: () => h.held.head(),
+        store: h.store,
+        focused: () => true,
+        onFocus: (listener) => ((focus = listener), () => {}),
+        notify: (text) => void notes.push(text),
+        now: () => NOW,
+        log: () => {},
+      });
+    // The head is ten days old: due while nothing is pending.
+    const before = weeklyOf();
+    expect(before.due()).toBe(true);
+    await before.close();
+
+    await signHeld(h);
+    const weekly = weeklyOf();
+    expect(weekly.due()).toBe(false);
+    focus();
+    await weekly.close();
+    expect(h.prompts).toHaveLength(1);
+    expect(h.hub.posts).toEqual([]);
+    expect(notes).toEqual([]);
+  });
+
+  it('publishHeld clears the marker in one write, then posts through the normal path, and the slot settles as any slot', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    const atPost: SigningFile[] = [];
+    h.hub.beforePost = () => void atPost.push(h.disk()!);
+    expect(await h.signer.publishHeld(hash)).toEqual({ ok: true, version: 2, published: true }); // its own word that it cleared the marker
+    // The marker cleared first, in a write of its own; then exposure, before the POST; then the settled slot.
+    expect(slotWrites(h)).toEqual([{ unsent: HOLD, hub: false }, { unsent: null, hub: false }, { unsent: null, hub: true }, null]);
+    expect(atPost.map((f) => f.pending && { hash: f.pending.hash, unsent: f.pending.unsent, hub: f.pending.exposed.hub })).toEqual([{ hash, unsent: null, hub: true }]);
+    expect(h.hub.posts).toHaveLength(1);
+    expect(h.held.head().state.version).toBe(2);
+    expect(h.disk()!.pending).toBeNull();
+    expect(h.signer.pending()).toBeNull();
+    expect(h.settled.map((s) => ({ hash: s.hash, unsent: s.unsent }))).toEqual([{ hash, unsent: null }]);
+  });
+
+  it('discards through Discard as any slot: hash-bound, recorded as never exposed, and answering the marker it held', async () => {
+    const h = await harness();
+    const hash = await signHeld(h, heldEdit(await removeDevice('old')));
+    expect(await h.signer.discardPending(true, hash)).toEqual({ ok: true, unsent: true, hubVersion: 1, marker: HOLD });
+    expect(h.disk()!.pending).toBeNull();
+    expect(h.disk()!.deliveries).toEqual([]);
+    expect(h.disk()!.abandoned).toEqual([{ hash, version: 2, hub: false, machines: [] }]);
+    expect(h.hub.posts).toEqual([]);
+    expect(h.settled).toEqual([]);
+  });
+
+  it('publishHeld publishes nothing for a discarded slot, a replaced one, or one already published, and changes nothing', async () => {
+    const h = await harness();
+    const first = await signHeld(h);
+    expect(await h.signer.discardPending(true, first)).toMatchObject({ ok: true, marker: HOLD });
+    const raw = () => readFileSync(join(h.dir, 'org', SIGNING_FILE), 'utf8');
+
+    // Discarded: no slot, and no word of having published it (fix wave 2: a slot gone is no proof of publication).
+    let before = raw();
+    const discarded = await h.signer.publishHeld(first);
+    expect(discarded).toMatchObject({ ok: false, reason: 'stale' });
+    expect(discarded.published).toBeUndefined();
+    expect(raw()).toBe(before);
+
+    // Replaced: another held slot, which keeps its own marker.
+    const second = await signHeld(h, heldEdit(await removeDevice('old'), 'dlg-two'));
+    expect(second).not.toBe(first);
+    before = raw();
+    const replaced = await h.signer.publishHeld(first);
+    expect(replaced).toMatchObject({ ok: false, reason: 'stale' });
+    expect(replaced.published).toBeUndefined();
+    expect(raw()).toBe(before);
+    expect(h.disk()!.pending).toMatchObject({ hash: second, unsent: { kind: 'delegation', id: 'dlg-two' } });
+    expect(h.hub.posts).toEqual([]);
+
+    // Already published (the hub out of reach, so it stays an ordinary pending slot): a second publish changes nothing.
+    h.online = false;
+    expect(await h.signer.publishHeld(second)).toMatchObject({ ok: false, reason: 'hub', published: true }); // cleared, then the post failed
+    expect(h.disk()!.pending).toMatchObject({ hash: second, unsent: null, exposed: { hub: false, machines: [] } });
+    before = raw();
+    const again = await h.signer.publishHeld(second);
+    expect(again).toMatchObject({ ok: false, reason: 'stale' });
+    expect(again.published).toBeUndefined(); // this call cleared nothing
+    expect(raw()).toBe(before);
+    expect(h.hub.posts).toEqual([]);
+  });
+
+  it("a marker-clearing write that commits and then throws: the store read back says it cleared, so it is published and posted (branch fix wave, R2)", async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    h.gates.written = (name, value) => {
+      const pending = (value as SigningFile).pending;
+      if (name === SIGNING_FILE && pending?.unsent === null && !pending.exposed.hub) {
+        h.gates.written = null;
+        throw new Error('the directory sync failed after the rename');
+      }
+    };
+    expect(await h.signer.publishHeld(hash)).toEqual({ ok: true, version: 2, published: true });
+    expect(h.hub.posts).toHaveLength(1);
+    expect(h.held.head().state.version).toBe(2);
+    expect(h.settled.map((s) => s.hash)).toEqual([hash]);
+  });
+
+  it("a marker-clearing write that throws before it commits publishes nothing: the slot stays held (branch fix wave, R2)", async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    h.gates.write = (name, value) => {
+      const pending = (value as SigningFile).pending;
+      if (name === SIGNING_FILE && pending?.unsent === null && !pending.exposed.hub) throw new Error('disk full');
+    };
+    const outcome = await h.signer.publishHeld(hash);
+    expect(outcome).toMatchObject({ ok: false, reason: 'signing' });
+    expect(outcome).not.toHaveProperty('published');
+    expect(h.hub.posts).toEqual([]);
+    expect(h.disk()!.pending).toMatchObject({ hash, unsent: HOLD });
+  });
+
+  it('a crash after publishHeld\'s write and before its post leaves an ordinary pending slot that the next start\'s settlement posts', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    // The app quits at the exposure write: the marker's clearing is on disk, and no POST was made.
+    h.gates.write = (name, value) => {
+      if (name === SIGNING_FILE && (value as SigningFile).pending?.exposed.hub === true) throw new Error('the app quit');
+    };
+    // the marker is cleared: the outcome says it published (fix wave 2), though nothing was posted
+    expect(await h.signer.publishHeld(hash)).toMatchObject({ ok: false, reason: 'signing', published: true });
+    expect(h.hub.posts).toEqual([]);
+    expect(h.disk()!.pending).toMatchObject({ hash, unsent: null, exposed: { hub: false, machines: [] } });
+    const kept = h.disk()!.pending!.signed;
+
+    h.gates.write = null;
+    const next = await h.restart();
+    expect(next.signer.pending()).toMatchObject({ hash, unsent: null });
+    await next.signer.settle();
+    expect(next.hub.posts.map((s) => canonicalize(s))).toEqual([canonicalize(kept)]);
+    expect(next.held.head().state.version).toBe(2);
+    expect(next.disk()!.pending).toBeNull();
+    expect(next.settled.map((s) => s.hash)).toEqual([hash]);
+  });
+
+  it('a post that throws after the marker cleared (not a failure the post path answers): the outcome still says published, and the slot settles as an ordinary one', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    // The hub client throws at the POST, after the marker's write and the exposure's: past every failure `postOnce` answers.
+    h.hub.beforePost = () => {
+      throw new Error('the hub client threw');
+    };
+    expect(await h.signer.publishHeld(hash)).toEqual({ ok: false, reason: 'signing', detail: 'the hub client threw', published: true });
+    expect(slotWrites(h)).toEqual([{ unsent: HOLD, hub: false }, { unsent: null, hub: false }, { unsent: null, hub: true }]);
+    expect(h.disk()!.pending).toMatchObject({ hash, unsent: null });
+    expect(h.held.head().state.version).toBe(1);
+    // An ordinary pending slot: the next settlement sends it again, and it settles.
+    h.hub.beforePost = null;
+    await h.signer.settle();
+    expect(h.hub.posts).toHaveLength(2);
+    expect(h.held.head().state.version).toBe(2);
+    expect(h.disk()!.pending).toBeNull();
+    expect(h.settled.map((s) => s.hash)).toEqual([hash]);
+  });
+
+  it('a store found damaged at the exposure write, after the marker cleared: the outcome still says published', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    h.gates.write = (name, value) => {
+      if (name === SIGNING_FILE && (value as SigningFile).pending?.exposed.hub === true) throw new SigningDamaged();
+    };
+    expect(await h.signer.publishHeld(hash)).toMatchObject({ ok: false, reason: 'signing', published: true });
+    expect(h.hub.posts).toEqual([]);
+  });
+
+  it('a sign-out or a close during the held sign\'s Touch ID keeps nothing', async () => {
+    const out = await harness();
+    out.during = () => out.signer.fence();
+    expect(await out.signer.sign(heldEdit())).toMatchObject({ ok: false, reason: 'not-root' });
+
+    const closed = await harness();
+    let closing: Promise<void> | undefined;
+    closed.during = () => void (closing = closed.signer.close());
+    expect(await closed.signer.sign(heldEdit())).toMatchObject({ ok: false });
+    await closing;
+
+    for (const h of [out, closed]) {
+      expect(h.prompts).toHaveLength(1);
+      expect(h.disk()).toBeNull();
+      expect(h.hub.posts).toEqual([]);
+      expect(h.signer.pending()).toBeNull();
+    }
+  });
+
+  it('a sign-out before publishHeld\'s turn changes nothing: the slot stays held', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    // A settle holds the signer's turn on a hub read; the publish waits behind it, and the sign-out lands meanwhile.
+    let release!: () => void;
+    const read = h.hub.chain.bind(h.hub);
+    h.hub.chain = async (since) => {
+      await new Promise<void>((resolve) => (release = resolve));
+      return read(since);
+    };
+    const settling = h.signer.settle();
+    await vi.waitFor(() => expect(release).toBeDefined());
+    const publishing = h.signer.publishHeld(hash);
+    h.signer.fence();
+    release();
+    await settling;
+    expect(await publishing).toMatchObject({ ok: false, reason: 'not-root' });
+    expect(h.hub.posts).toEqual([]);
+    expect(h.disk()!.pending).toMatchObject({ hash, unsent: HOLD });
+  });
+
+  it('a sign-out between publishHeld\'s write and its post posts nothing; the slot is an ordinary pending one for the next sign-in', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    h.gates.write = (name, value) => {
+      const p = (value as SigningFile).pending;
+      if (name !== SIGNING_FILE || p === null || p.unsent !== null) return;
+      h.gates.write = null;
+      h.signer.fence();
+    };
+    expect(await h.signer.publishHeld(hash)).toMatchObject({ ok: false, reason: 'not-root' });
+    expect(h.hub.posts).toEqual([]);
+    expect(h.disk()!.pending).toMatchObject({ hash, unsent: null, exposed: { hub: false, machines: [] } });
+    expect(h.signer.pending()).toMatchObject({ hash, unsent: null, exposed: false });
+
+    // The next sign-in's settle posts it, and it settles as any slot.
+    await h.signer.settle();
+    expect(h.hub.posts).toHaveLength(1);
+    expect(h.held.head().state.version).toBe(2);
+    expect(h.disk()!.pending).toBeNull();
+    expect(h.settled.map((s) => s.hash)).toEqual([hash]);
+  });
+
+  it('a close between publishHeld\'s write and its post posts nothing; the next start settles the slot', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    let closing: Promise<void> | undefined;
+    h.gates.write = (name, value) => {
+      const p = (value as SigningFile).pending;
+      if (name !== SIGNING_FILE || p === null || p.unsent !== null) return;
+      h.gates.write = null;
+      closing = h.signer.close();
+    };
+    expect(await h.signer.publishHeld(hash)).toMatchObject({ ok: false });
+    await closing;
+    expect(h.hub.posts).toEqual([]);
+    expect(h.disk()!.pending).toMatchObject({ hash, unsent: null, exposed: { hub: false, machines: [] } });
+
+    const next = await h.restart();
+    await next.signer.settle();
+    expect(next.hub.posts).toHaveLength(1);
+    expect(next.disk()!.pending).toBeNull();
+    expect(next.settled.map((s) => s.hash)).toEqual([hash]);
   });
 });
 

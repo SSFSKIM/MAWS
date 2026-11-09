@@ -33,6 +33,7 @@ export const REGISTERED: Registered = {
   pairing: null,
   enrolling: null,
   hubRowsLeft: [],
+  delegations: { creating: false, rev: 0 },
 };
 
 export type Signer = NonNullable<OrgSignerStatus>;
@@ -95,6 +96,9 @@ export const VIEW: OrgView = {
     { kid: 'stepUpKid0001', member: ME, device: DEVICE },
     { kid: 'orphanKid0002', unlisted: true },
   ],
+  delegations: [],
+  strayKeys: [],
+  hubKeys: { at: null, failed: false },
 };
 export const viewWith = (patch: Partial<OrgView>): OrgView => ({ ...VIEW, ...patch });
 
@@ -132,6 +136,7 @@ export function renderSection(status: OrgStatus, answers: Partial<Record<Command
     'org.pair.cancel': () => undefined,
     'org.enroll.cancel': () => ({ ok: true }),
     'org.grants.view': (input: { ref: string }) => grantsOf(input.ref),
+    'org.provisioningSecret.get': () => null, // M4c: no destination set
     ...answers,
   };
   window.maws = {

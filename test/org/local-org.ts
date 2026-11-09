@@ -4,7 +4,7 @@
 // other root. Beside it: the app's org session with the suites' injections (the stand-in's identity, Touch ID answered,
 // the backup exclusion stubbed: no browser, no prompt, no osascript), its registration through `pair --class
 // native-mac`, a real endpoint's enrollment in the same org, and O7's link to it over the hub's relay.
-import { mkdirSync, mkdtempSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { base64urlEncode, keyId, signOrgState, type Certificates, type OrgState, type RootTransition, type Signed, type SignedOrgState } from 'org-protocol';
@@ -222,4 +222,42 @@ export function relayLink(input: { session: OrgSession; machine: { ref: string; 
     ...(input.timing === undefined ? {} : { timing: input.timing }),
     log: input.log,
   });
+}
+
+/**
+ * A fake `gcloud` (P5 O8 M4c) in `dir`, outside every profile, put first on the session's injected PATH: it answers the
+ * four calls the create makes as Secret Manager would (signed in, the secret there, a new version announced on stderr,
+ * that version's metadata as JSON) and records each call, its argv and its stdin, for the suite to read. It judges
+ * nothing: the hub the create mints from is the real local one.
+ */
+export function fakeGcloud(dir: string): { bin: string; calls(): Array<{ argv: string[]; stdin: string }> } {
+  writeFileSync(
+    join(dir, 'gcloud'),
+    `#!/bin/sh
+dir=$(cd "$(dirname "$0")" && pwd)
+n=$(( $(cat "$dir/calls" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$dir/calls"
+for a in "$@"; do printf '%s\\n' "$a"; done > "$dir/call-$n.argv"
+cat > "$dir/call-$n.stdin"
+case "$1 $2 $3" in
+  "auth print-access-token "*) printf 'ya29.fake-access-token\\n' ;;
+  "secrets describe "*) printf 'name: projects/123456/secrets/%s\\n' "$3" ;;
+  "secrets versions add") v=$(( $(cat "$dir/versions" 2>/dev/null || echo 0) + 1 )); echo "$v" > "$dir/versions"
+    printf 'Created version [%s] of the secret [%s].\\n' "$v" "$4" >&2 ;;
+  "secrets versions describe") printf '{"createTime": "2026-11-08T12:00:00.123456Z", "name": "projects/123456/secrets/%s/versions/%s", "state": "ENABLED"}\\n' "$6" "$4" ;;
+  *) printf 'ERROR: (gcloud) this fake answers no such call\\n' >&2; exit 2 ;;
+esac
+`,
+  );
+  chmodSync(join(dir, 'gcloud'), 0o755);
+  return {
+    bin: dir,
+    calls() {
+      const calls: Array<{ argv: string[]; stdin: string }> = [];
+      for (let n = 1; existsSync(join(dir, `call-${n}.argv`)); n++) {
+        const argv = readFileSync(join(dir, `call-${n}.argv`), 'utf8').split('\n').slice(0, -1);
+        calls.push({ argv, stdin: existsSync(join(dir, `call-${n}.stdin`)) ? readFileSync(join(dir, `call-${n}.stdin`), 'utf8') : '' });
+      }
+      return calls;
+    },
+  };
 }

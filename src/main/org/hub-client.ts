@@ -4,7 +4,10 @@
 // (`?member=`, H1: an admin's read of another member's entries), M7a's `GET /api/projects/<id>/attestations` (a
 // project's history attestations, for the channel's migrated history), and M4b's enrollment and drop: `POST
 // /api/enrollments`, `GET /api/enrollments/<id>/key`, and the DELETE of a dropped machine's Registry row (the one
-// machine path outside the remote module, boundary.test.ts's allowance). None of its answers is trusted (RL §5.9): the
+// machine path outside the remote module, boundary.test.ts's allowance), and M4c's provisioning keys: `POST`, `GET` and
+// `DELETE /api/provisioning-keys[/<id>]` and the desk track's `POST /api/provisioning-keys/<id>/renew`. A minted key's
+// token is a secret: it is in the mint's answer alone, never in a failure, and this module logs nothing. None of its
+// answers is trusted (RL §5.9): the
 // session verifies every state against what it holds, the pairing judges every entry, and this module only reads and
 // classifies.
 //
@@ -12,9 +15,10 @@
 // redirect without it came from Access, so the hub credential has ended (`credentials`). A Worker's
 // `403 {error: 'not-a-member'}` says the hub no longer admits the person (`denied`), which is no verified removal.
 //
-// No text of an answer leaves here unchecked: what a refusal, a log or a status may carry (an `error` code, an email, an
-// instant) must match a short grammar, else it reads as `unrecognized` or the answer as `malformed`, so a hostile hub
-// can't reflect the bearer token into the renderer or the log.
+// No text of an answer leaves here unchecked: what a refusal, a log or a status may carry must be one of the Worker's own
+// error codes (else it reads `unrecognized`), or an email or an instant in its short grammar (else the answer reads
+// `malformed`), so a hostile hub can't reflect the bearer token, or any fragment of a provisioning token, into the
+// renderer or the log.
 import {
   isCertificates,
   isCertRetirement,
@@ -107,6 +111,38 @@ export interface HubClient {
 /** A hub row as `GET /api/machines` lists it, for a drop's delete: its name, and the key its enrollment posted. */
 export type HubMachineRow = { name: string; key: { ref: string; pub: string } | null };
 
+export const PROVISIONING_KEYS_PATH = '/api/provisioning-keys';
+
+/**
+ * M4c: a provisioning key as the hub lists it (desk-hub's `ProvisioningKeyRecord`), the fields the app reads, each in
+ * its grammar: `id` 32 lowercase hex; `label` 1 to 100 characters; `created`, `expires` and `revoked` instants (a
+ * renewal writes its delegation's `expires` verbatim, ISO millis); `max_uses` null for no cap.
+ */
+export type ProvisioningKey = { id: string; label: string; prefix: string; created: string; expires: string; max_uses: number | null; uses: number; revoked: string | null };
+/** M4c: a minted key and its secret, which the provisioning code carries; the hub shows the token this once. */
+export type MintedProvisioningKey = { key: ProvisioningKey; token: string };
+
+/**
+ * M4c: the provisioning keys' routes, which the create transaction, renew's and drop's hub halves and the view's hub
+ * column use. Each failure keeps the Worker's code: `403 not-admin`; `404 unknown-key` (no such key) apart from `404
+ * not-found` (a hub without the route, still the Worker's); the renewal's `410 key-revoked`, `410 key-expired`, `409
+ * not-renewed` and `409 too-long`; `503 hub-updating`.
+ */
+export interface ProvisioningKeyRoutes {
+  /**
+   * `POST /api/provisioning-keys` with exactly `{label, prefix, ttl_s, max_uses?}` (no `max_uses` for no cap; the hub's
+   * `offline_revoke_s` default, never, is the delegation's `NEVER_OFFLINE`). Only `201 {key, token}` is a mint: any other
+   * 2xx is a failure (`unexpected-status`), its body unread.
+   */
+  mintProvisioningKey(body: { label: string; prefix: string; ttl_s: number; max_uses?: number }, signal?: AbortSignal): Promise<HubResult<MintedProvisioningKey>>;
+  /** `POST /api/provisioning-keys/<id>/renew`, no body: the key as `GET` lists it, its `expires` the head delegation's. */
+  renewProvisioningKey(id: string, signal?: AbortSignal): Promise<HubResult<ProvisioningKey>>;
+  /** `DELETE /api/provisioning-keys/<id>`: `revoked` for `200 {revoked: id}` (a soft revoke, still listed); `absent` for `404 unknown-key`. */
+  revokeProvisioningKey(id: string, signal?: AbortSignal): Promise<HubResult<'revoked' | 'absent'>>;
+  /** `GET /api/provisioning-keys`: every key, revoked ones included; one out of its grammar fails the whole read. */
+  provisioningKeys(signal?: AbortSignal): Promise<HubResult<{ keys: ProvisioningKey[] }>>;
+}
+
 /** M7a's read beside the session's: the project channel's, which the signer's and the pairing's clients don't carry. */
 export interface ProjectReads {
   /** The project's history attestations as the member reads them; an item that is no signed record is dropped. */
@@ -114,8 +150,27 @@ export interface ProjectReads {
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
-/** A Worker's error code (`not-a-member`, `too-many`): anything else is reported as `unrecognized`. */
-const ERROR_CODE = /^[a-z][a-z0-9-]{0,39}$/;
+/**
+ * The Worker's error codes, each read as itself; any other string is reported as `unrecognized` (M4c's fix wave: a slug
+ * in the codes' alphabet could carry a fragment of a provisioning token). The set is desk-hub's vocabulary: every code
+ * its routes answer with a literal (`fail`/`refused`/`json` with a status, or `{error: …}`), every member of
+ * identity.ts's exported error unions (`WrappedKeyError`'s included), plus `not-head` and `rollback`, which org-chain.ts
+ * answers by variable; hub-client.test.ts holds the set to all three, so a code the hub adds fails CI. Codes main branches on: `not-a-member` (here), `not-head` and
+ * `rollback` (signer.ts), `not-admin` and `no-member` (pairing.ts), `not-yours` and `unknown-enrollment` (enroll.ts),
+ * `unknown-machine` and `unknown-key` (here), and the provisioning routes' `not-found`, `key-revoked`, `key-expired`,
+ * `not-renewed`, `too-long` and `hub-updating` (M4c's Task 4). A code the hub adds later reads `unrecognized` until it
+ * is listed: shown, never branched on.
+ */
+export const ERROR_CODES: ReadonlySet<string> = new Set([
+  'bad-link', 'bad-name', 'bad-shape', 'bad-signature', 'busy', 'confirmed', 'conflict', 'contested', 'credential-taken', 'different-key',
+  'expired', 'fence-failed', 'genesis-member', 'hub-unavailable', 'hub-updating', 'key-exhausted', 'key-expired', 'key-held', 'key-posted',
+  'key-purged', 'key-revoked', 'last-key', 'malformed', 'method-not-allowed', 'mint-failed', 'name-taken', 'no-endpoint', 'no-key',
+  'no-member', 'no-ref', 'no-state', 'not-a-member', 'not-active', 'not-admin', 'not-bound', 'not-configured', 'not-enrolled', 'not-found',
+  'not-head', 'not-key-holder', 'not-listed', 'not-on-rl1', 'not-org-admin', 'not-renewed', 'not-retired', 'not-yours', 'prefix-mismatch', 'ref-taken', 'removed',
+  'retired', 'rollback', 'stale-attestation', 'stale-endpoint', 'stale-generation', 'stale-listing', 'state-unavailable', 'token-used',
+  'too-long', 'too-many', 'unknown-device', 'unknown-enrollment', 'unknown-key', 'unknown-machine', 'unknown-project', 'unknown-token',
+  'upgrade-required', 'wrong-use',
+]);
 /** An ISO 8601 instant in UTC, as the Worker writes one. */
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 /** An enrollment's id (the Registry's `newId`), and its token: 256 random bits as base64url. */
@@ -124,6 +179,20 @@ const ENROLLMENT_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 /** The most characters a posted key's field is read with; its grammar is the MAC check's. */
 const KEY_FIELD_MAX = 256;
 const keyField = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= KEY_FIELD_MAX;
+/** M4c: a provisioning key's id (the Registry's `newId`) and its secret (256 random bits as base64url). */
+const PROVISIONING_KEY_ID = /^[0-9a-f]{32}$/;
+const PROVISIONING_TOKEN = /^[A-Za-z0-9_-]{43}$/;
+const instant = (value: unknown): value is string => typeof value === 'string' && INSTANT.test(value);
+const whole = (value: unknown, min: number): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= min;
+
+/** A provisioning key as the hub lists it, in its grammar (`ProvisioningKey`), or null; the hub's other fields left out. */
+function readProvisioningKey(value: unknown): ProvisioningKey | null {
+  if (!isObject(value)) return null;
+  const { id, label, prefix, created, expires, max_uses, uses, revoked } = value;
+  if (typeof id !== 'string' || !PROVISIONING_KEY_ID.test(id) || typeof label !== 'string' || label.length < 1 || label.length > 100 || !keyField(prefix)) return null;
+  if (!instant(created) || !instant(expires) || !(max_uses === null || whole(max_uses, 1)) || !whole(uses, 0) || !(revoked === null || instant(revoked))) return null;
+  return { id, label, prefix, created, expires, max_uses, uses, revoked };
+}
 
 /**
  * The served certificates: absent is null; a set that is not one is malformed (undefined). Items that are not a signed
@@ -161,12 +230,13 @@ export function hubClient(input: {
   headers(): Promise<Record<string, string>>;
   fetch?: typeof fetch;
   timing?: Partial<OrgTiming>;
-}): HubClient & ProjectReads {
+}): HubClient & ProjectReads & ProvisioningKeyRoutes {
   const base = input.url.replace(/\/+$/, '');
   const doFetch = input.fetch ?? fetch;
   const timing = orgTiming(input.timing);
 
-  async function request<T>(path: string, init: { method?: string; body?: unknown; signal?: AbortSignal }, read: (body: unknown) => T | null): Promise<HubResult<T>> {
+  /** `init.expect`: the one success status the route answers; any other 2xx is `unexpected-status`, its body unread. */
+  async function request<T>(path: string, init: { method?: string; body?: unknown; signal?: AbortSignal; expect?: number }, read: (body: unknown) => T | null): Promise<HubResult<T>> {
     const bound = AbortSignal.timeout(timing.FETCH_TIMEOUT_MS);
     const signal = init.signal === undefined ? bound : AbortSignal.any([bound, init.signal]);
     let response: Response;
@@ -195,9 +265,10 @@ export function hubClient(input: {
       }
       return { ok: false, kind: 'status', status: response.status, error: null };
     }
-    const error = isObject(body) && typeof body.error === 'string' ? (ERROR_CODE.test(body.error) ? body.error : 'unrecognized') : null;
+    const error = isObject(body) && typeof body.error === 'string' ? (ERROR_CODES.has(body.error) ? body.error : 'unrecognized') : null;
     if (response.status === 403 && error === 'not-a-member') return { ok: false, kind: 'denied', status: 403 };
     if (!response.ok) return { ok: false, kind: 'status', status: response.status, error };
+    if (init.expect !== undefined && response.status !== init.expect) return { ok: false, kind: 'status', status: response.status, error: 'unexpected-status' };
     const value = read(body);
     return value === null ? { ok: false, kind: 'status', status: response.status, error: 'malformed' } : { ok: true, value };
   }
@@ -286,6 +357,28 @@ export function hubClient(input: {
       const answer = await request(`/api/machines/${encodeURIComponent(name)}${precondition}`, { method: 'DELETE', signal }, () => done);
       return !answer.ok && answer.kind === 'status' && answer.status === 404 && answer.error === 'unknown-machine' ? { ok: true, value: 'absent' } : answer;
     },
+    mintProvisioningKey: (body, signal) =>
+      request(PROVISIONING_KEYS_PATH, { method: 'POST', body, signal, expect: 201 }, (answer) => {
+        if (!isObject(answer)) return null;
+        const key = readProvisioningKey(answer.key);
+        const token = answer.token;
+        return key !== null && typeof token === 'string' && PROVISIONING_TOKEN.test(token) ? { key, token } : null;
+      }),
+    renewProvisioningKey: (id, signal) =>
+      request(`${PROVISIONING_KEYS_PATH}/${encodeURIComponent(id)}/renew`, { method: 'POST', signal }, (answer) => {
+        const key = readProvisioningKey(answer);
+        return key !== null && key.id === id ? key : null;
+      }),
+    async revokeProvisioningKey(id, signal) {
+      const answer = await request(`${PROVISIONING_KEYS_PATH}/${encodeURIComponent(id)}`, { method: 'DELETE', signal }, (body) => (isObject(body) && body.revoked === id ? ('revoked' as const) : null));
+      return !answer.ok && answer.kind === 'status' && answer.status === 404 && answer.error === 'unknown-key' ? { ok: true, value: 'absent' } : answer;
+    },
+    provisioningKeys: (signal) =>
+      request(PROVISIONING_KEYS_PATH, { signal }, (body) => {
+        if (!isObject(body) || !Array.isArray(body.keys)) return null;
+        const keys = body.keys.map(readProvisioningKey);
+        return keys.every((k) => k !== null) ? { keys: keys as ProvisioningKey[] } : null;
+      }),
     attestations: (project, signal) =>
       request(`/api/projects/${encodeURIComponent(project)}/attestations`, { signal }, (body) =>
         isObject(body) && Array.isArray(body.records) ? body.records.filter((r): r is Signed<HistoryAttestation> => isSigned(r, isHistoryAttestation)) : null,

@@ -19,14 +19,25 @@
 // of the org (`machine-names`), a name under a delegation's prefix (`prefix-names-machine`), owners that are no members
 // (`owners-unknown`) or no list at all (`shape`). A member who owns a machine is removed only once its owners changed.
 //
+// M4c adds the delegations (M4c's "The create transaction", "Renew" and "Drop"): `delegation.add`, which only the create
+// transaction composes, from the key it minted and the key pair it made, as `deployment admin delegation create` signs
+// it; `delegation.renew`, which moves its `expires` alone; and `delegation.drop`, as `delegation drop` signs it: its key
+// revoked by its id and prefix, which stay reserved for the life of the org, and its certificates' `retired` entries
+// moved to `revoked`. What a renewal may reach (live, forward, within the hub's cap) and a prefix's collisions are the
+// checks'.
+//
 // Lines name members by email, devices by their first 8 characters with their class, as `deployment admin show` does,
-// machines by name and their keys by key id. Electron-free: vitest's node project runs it.
+// machines by name, their keys by key id, delegations by id and prefix, and an expiry by its ISO date. Electron-free:
+// vitest's node project runs it.
 import {
   isMemberEmail,
   keyId,
   machineNameKey,
+  NEVER_OFFLINE,
+  NO_USE_CAP,
   pairingFingerprint,
   type Certificates,
+  type Delegation,
   type Device,
   type MachineEntry,
   type Member,
@@ -35,7 +46,7 @@ import {
   type RevokedKey,
 } from '../../../apps/org-protocol/src/index.ts';
 import type { OrgChange } from '@shared/ipc/schema/org';
-import type { ChangeCode } from './checks';
+import { describeHolder, type ChangeCode } from './checks';
 import { RefusedEdit, StaleEdit, type Edit } from './signer';
 
 /**
@@ -207,6 +218,39 @@ function machineOf(state: OrgState, ref: string, certificates: Certificates, why
   return gone(`machine ${ref} is no longer in the org state`);
 }
 
+// --- Delegations ------------------------------------------------------------------------------------------------------
+
+/** An expiry in words: its ISO date. */
+const day = (expires: string) => expires.slice(0, 10);
+
+/** The live delegation `id` names; one the state dropped, or never held, is gone (`StaleEdit`). */
+function delegationOf(state: OrgState, id: string): Delegation {
+  const live = state.delegations.find((d) => d.id === id);
+  if (live !== undefined) return live;
+  const dropped = state.revoked.some((r) => 'delegation' in r.holder && r.holder.delegation === id);
+  return gone(dropped ? `delegation ${id} was dropped already` : `delegation ${id} is no longer in the org state`);
+}
+
+/**
+ * The names of the machines `delegation` certified, from the certificate set, each once: those whose key `state`
+ * already revokes are left out, since no drop of theirs is this one's.
+ */
+async function certifiedBy(state: OrgState, delegation: Delegation, certificates: Certificates): Promise<string[]> {
+  const revoked = new Set(state.revoked.map((r) => r.keyId));
+  const names: string[] = [];
+  for (const cert of certificates.certs) {
+    if (cert.body.delegation !== delegation.id || revoked.has(await keyId(cert.body.pub))) continue;
+    if (!names.includes(cert.body.name)) names.push(cert.body.name);
+  }
+  return names;
+}
+
+/** A retired entry's holder in words: a certified machine by its certificate's name, else as the checks name it. */
+function retiredHolder(state: OrgState, holder: RevokedKey['holder'], certificates: Certificates): string {
+  const cert = 'machine' in holder ? certificates.certs.find((c) => c.body.machine === holder.machine) : undefined;
+  return cert === undefined ? describeHolder(state, holder) : `machine ${cert.body.name} (${cert.body.machine})`;
+}
+
 async function planChange(state: OrgState, change: OrgChange, self: EditSelf, certificates: Certificates): Promise<Plan> {
   switch (change.kind) {
     case 'member.add': {
@@ -369,6 +413,59 @@ async function planChange(state: OrgState, change: OrgChange, self: EditSelf, ce
           state.machines = state.machines.filter((m) => m.ref !== entry.ref);
           if (change.revoke) state.revoked.push({ keyId: kid, holder: { machine: entry.ref } });
           else state.retired.push({ keyId: kid, pub: entry.pub, notAfter: state.issued, holder: { machine: entry.ref } });
+        },
+      };
+    }
+
+    case 'delegation.add': {
+      const { id, pub, prefix, expires, maxUses, offlineRevokeS, owners } = change;
+      const kid = await keyId(pub);
+      const uses = maxUses === NO_USE_CAP ? 'with no use limit' : `at most ${maxUses} times`;
+      const offline = offlineRevokeS === NEVER_OFFLINE ? '' : `; a machine it provisioned is revoked once offline ${offlineRevokeS} s`;
+      return {
+        summary: `create delegation ${prefix}`,
+        lines: [
+          `Create delegation ${id} for machines named ${prefix}…, with its key ${kid}`,
+          `It provisions until ${day(expires)}, ${uses}${offline}`,
+          `Its machines are owned by ${ownersText(state, owners)}`,
+        ],
+        edit: () => void state.delegations.push({ id, pub, prefix, expires, maxUses, offlineRevokeS, owners: owners === 'org' ? 'org' : [...owners] }),
+      };
+    }
+
+    case 'delegation.renew': {
+      const delegation = delegationOf(state, change.id);
+      if (delegation.expires === change.expires) refused('no-change', `delegation ${delegation.id} (prefix ${delegation.prefix}) expires at ${change.expires} already`);
+      return {
+        summary: `renew delegation ${delegation.prefix}`,
+        lines: [
+          `Renew delegation ${delegation.id} (prefix ${delegation.prefix}): it expires ${day(change.expires)}, not ${day(delegation.expires)}`,
+          "The hub's key for it is renewed to the same date once this is signed",
+        ],
+        edit: () => void (delegation.expires = change.expires),
+      };
+    }
+
+    case 'delegation.drop': {
+      const delegation = delegationOf(state, change.id);
+      const kid = await keyId(delegation.pub);
+      const machines = await certifiedBy(state, delegation, certificates);
+      // Its certificates go with it, history included (org-state.ts): an admin's retirement of one moves to `revoked`.
+      const ours = (r: OrgState['retired'][number]) => 'machine' in r.holder && r.holder.machine.startsWith(`${delegation.id}_`);
+      const retired = state.retired.filter(ours);
+      return {
+        summary: `drop delegation ${delegation.prefix}`,
+        lines: [
+          `Drop delegation ${delegation.id} (prefix ${delegation.prefix}) and revoke its key ${kid}: its id and its prefix stay reserved for the life of the org`,
+          machines.length === 0 ? 'No machine holds a certificate of it' : `The machines it certified leave the org: ${machines.join(', ')}`,
+          ...retired.map((r) => `Its certificate's retired key ${r.keyId} (${retiredHolder(state, r.holder, certificates)}) moves to revoked`),
+          "The hub's key for it is revoked once this is signed",
+        ],
+        edit() {
+          state.delegations = state.delegations.filter((d) => d.id !== delegation.id);
+          state.revoked.push({ keyId: kid, holder: { delegation: delegation.id, prefix: delegation.prefix } });
+          for (const r of retired) state.revoked.push({ keyId: r.keyId, holder: r.holder });
+          state.retired = state.retired.filter((r) => !ours(r));
         },
       };
     }

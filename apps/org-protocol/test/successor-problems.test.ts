@@ -117,9 +117,11 @@ describe('successorProblems names each problem by its code', () => {
     ['key-held-twice', 'a successor giving a delegation the recovery key'],
     ['prefix-names-machine', "a successor naming a machine under a delegation's prefix"],
     ['prefix-names-machine', 'a successor enrolling DC-mini beside the prefix dc-'],
-    ['prefix-overlaps', "a successor adding a delegation with another's prefix"],
-    ['prefix-overlaps', "a successor adding a delegation whose prefix nests in another's"],
-    ['prefix-overlaps', "then a delegation whose prefix holds the revoked one's"],
+    ['prefix-equal', "a successor adding a delegation with another's prefix"],
+    ['prefix-nested', "a successor adding a delegation whose prefix nests in another's"],
+    ['prefix-covers', "a successor adding a delegation whose prefix holds another's"],
+    ['prefix-equal', "then a delegation taking the revoked one's prefix"],
+    ['prefix-covers', "then a delegation whose prefix holds the revoked one's"],
     ['delegation-id-used', "then a delegation taking the revoked one's id"],
     ['ref-shapes-delegation', "a successor enrolling a machine under a ref of a live delegation's shape"],
     ['ref-shapes-delegation', "a successor adding a delegation whose id shapes an enrolled machine's ref"],
@@ -204,6 +206,95 @@ describe('successorProblems names each problem by its code', () => {
     const [head, nextState] = caseNamed('a successor with a lone surrogate').args.map(resolve) as [SignedOrgState, SignedOrgState];
     expect(await codes(head.state, nextState.state)).toEqual(['shape']);
     expect(await codes(head.state, { ...head.state, members: 'none' } as unknown as OrgState)).toEqual(['shape']);
+  });
+});
+
+describe('the directional prefix codes', () => {
+  // A delegation new in the successor (an id the head neither held live nor revoked) whose prefix meets another's is
+  // named by direction, in place of the whole state's prefix-overlaps for that pair: equal, nested under (starts with)
+  // the other's, or covering (a prefix of) it. Prefixes compare raw and case-folded (machineNameKey), and a dropped
+  // delegation's prefix is reserved for the life of the org. Each such successor is still refused, as before.
+  const DLG = '0d1e2a3b4c5d6e7f8091a2b3c4d5e6f7';
+  const NEW = '1b2c3d4e5f60718293a4b5c6d7e8f901';
+  const pair = (name: string) => caseNamed(name).args.map(resolve) as [SignedOrgState, SignedOrgState];
+  const prefixCodes = (found: Array<{ code: ProblemCode }>) => found.map((p) => p.code).filter((c) => c.startsWith('prefix-'));
+
+  const directional: Array<[string, ProblemCode, string]> = [
+    ["a successor adding a delegation with another's prefix", 'prefix-equal', `the prefix VM- of delegation ${NEW} is delegation ${DLG}'s vm-`],
+    ["a successor adding a delegation whose prefix nests in another's", 'prefix-nested', `the prefix vm-x of delegation ${NEW} nests in delegation ${DLG}'s vm-`],
+    ["a successor adding a delegation whose prefix holds another's", 'prefix-covers', `delegation ${DLG}'s vm-`],
+    ["then a delegation taking the revoked one's prefix", 'prefix-equal', `the dropped delegation ${DLG}'s vm-, reserved for the life of the org`],
+    ["then a delegation whose prefix holds the revoked one's", 'prefix-covers', `the prefix v of delegation ${NEW} covers the dropped delegation ${DLG}'s vm-, reserved for the life of the org`],
+  ];
+  for (const [name, code, detail] of directional) {
+    it(`${code} in place of prefix-overlaps: ${name}`, async () => {
+      const [head, nextState] = pair(name);
+      const found = await successorProblems(head.state, nextState.state);
+      expect(prefixCodes(found)).toEqual([code]);
+      expect(found.find((p) => p.code === code)?.detail).toContain(detail);
+    });
+
+    it(`is refused as before: ${name}`, async () => {
+      // The hub's acceptance does not move: the whole state still breaks the same rule, and the signed successor is
+      // refused malformed, as the vector says.
+      const [head, nextState] = pair(name);
+      expect(caseNamed(name).expect).toEqual({ ok: false, code: 'malformed' });
+      expect(await verifySuccessor(head, nextState, [])).toEqual({ ok: false, code: 'malformed' });
+      expect(prefixCodes(await stateProblems(nextState.state))).toEqual(['prefix-overlaps']);
+      expect(await stateInvariants(nextState.state)).toBe(false);
+    });
+  }
+
+  /** v3 with a second delegation (box-), its prefix replaced: a head that holds both. */
+  const heldBoth = (prefix: string) => {
+    const s = structuredClone(signedFixture('v3 with a second delegation').state);
+    s.delegations[1].prefix = prefix;
+    return s;
+  };
+
+  it('keeps prefix-overlaps for a collision among prefixes the head already held, live or dropped', async () => {
+    const head = heldBoth('VM-X');
+    expect(prefixCodes(await stateProblems(head))).toEqual(['prefix-overlaps']);
+    const later = await next(head, (s) => s.projects.push({ id: 'proj-later', name: 'later' }));
+    expect(prefixCodes(await successorProblems(head, later))).toEqual(['prefix-overlaps']);
+    // The held box- delegation dropped, its key revoked: its prefix, reserved, still meets vm- in the successor.
+    const drop = await next(head, (s) => {
+      const [gone] = s.delegations.splice(1, 1);
+      s.revoked.push({ keyId: VECTOR_KEYS.delegationB.kid, holder: { delegation: gone.id, prefix: gone.prefix } });
+    });
+    expect(prefixCodes(await successorProblems(head, drop))).toEqual(['prefix-overlaps']);
+    // A head that holds the dropped one already: its revoked holder is no new delegation.
+    const after = await next(drop, (s) => s.projects.push({ id: 'proj-later', name: 'later' }));
+    expect(prefixCodes(await successorProblems(drop, after))).toEqual(['prefix-overlaps']);
+  });
+
+  it('names a new collision by direction beside a held one that keeps prefix-overlaps', async () => {
+    const head = heldBoth('vm-x');
+    const added = await next(head, (s) => s.delegations.push({ ...s.delegations[1], id: 'c'.repeat(32), pub: VECTOR_KEYS.stranger.pub, prefix: 'zz-' }));
+    expect(prefixCodes(await successorProblems(head, added))).toEqual(['prefix-overlaps']);
+    const colliding = await next(head, (s) => s.delegations.push({ ...s.delegations[1], id: 'c'.repeat(32), pub: VECTOR_KEYS.stranger.pub, prefix: 'Vm-X-1' }));
+    // The held pair vm-/vm-x keeps its code; the new one nests under both, each pair by its direction.
+    expect(prefixCodes(await successorProblems(head, colliding)).sort()).toEqual(['prefix-nested', 'prefix-nested', 'prefix-overlaps']);
+  });
+
+  it("names two new delegations' collision once, from the one listed first", async () => {
+    const v2 = signedFixture('v2').state;
+    const two = await next(v2, (s) =>
+      s.delegations.push(
+        { ...s.delegations[0], id: NEW, pub: VECTOR_KEYS.delegationB.pub, prefix: 'dc-' },
+        { ...s.delegations[0], id: 'c'.repeat(32), pub: VECTOR_KEYS.stranger.pub, prefix: 'DC-prod-' },
+      ),
+    );
+    const found = await successorProblems(v2, two);
+    expect(prefixCodes(found)).toEqual(['prefix-covers']);
+    expect(found.find((p) => p.code === 'prefix-covers')?.detail).toBe(`the prefix dc- of delegation ${NEW} covers delegation ${'c'.repeat(32)}'s DC-prod-`);
+  });
+
+  it("leaves stateProblems' own reading as it was: a whole state has no new delegation", async () => {
+    const [, nextState] = pair("a successor adding a delegation whose prefix nests in another's");
+    expect((await stateProblems(nextState.state)).filter((p) => p.code === 'prefix-overlaps')).toEqual([
+      { code: 'prefix-overlaps', detail: 'the delegation prefix vm-x starts with the prefix vm-' },
+    ]);
   });
 });
 

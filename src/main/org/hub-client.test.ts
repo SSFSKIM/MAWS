@@ -1,9 +1,13 @@
 // The hub's HTTP boundary (P5 O8 M1, hub-client.ts): what an answer may carry past it. A Worker's `error` reaches
 // refusals and the log only as a short code, an email and an instant only in their grammar, and the certificates only as
 // a set of signed items, so a hostile hub can't reflect the bearer token outward or hand O7 a set it can't walk.
-import { describe, expect, it } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// The hub's error vocabulary, imported here only (never by product code, which imports nothing from desk-hub).
+import type { ProvisioningKeyError, RedeemError, WrappedKeyError } from '../../../apps/desk-hub/src/protocol/identity';
 import { generateSigningKey, keyId, signRecord, SIGNING_DOMAINS } from '../../../apps/org-protocol/src/index.ts';
-import { hubClient } from './hub-client';
+import { ERROR_CODES, hubClient } from './hub-client';
 
 const HUB = 'https://hub.example.test';
 const TOKEN = `eyJhbGciOiJSUzI1NiJ9.${'x'.repeat(600)}.${'s'.repeat(342)}`;
@@ -226,5 +230,193 @@ describe('the hub client', () => {
     expect(sent).toEqual(['DELETE /api/machines/mini%20box?ref=r%2Fef%2B1&pub=MCow%20BQ%2F%2B%3D', 'DELETE /api/machines/mini']);
     // a precondition out of shape is a refusal as any other status is
     expect(await client(() => worker(400, { error: 'bad-shape' })).deleteMachine('mini', key)).toEqual({ ok: false, kind: 'status', status: 400, error: 'bad-shape' });
+  });
+});
+
+// M4c: the provisioning keys' four routes (the Registry's `createProvisioningKey`, `provisioningKeys`,
+// `revokeProvisioningKey` and the desk track's `renewProvisioningKey`), each read in its grammar so the create
+// transaction and the view can trust what they get; the minted token is a secret that no failure, error or log carries.
+describe("the hub client's provisioning keys (M4c)", () => {
+  const ID = 'c'.repeat(32);
+  const MINT_TOKEN = 'T0k3n_-'.repeat(7).slice(0, 43);
+  const record = (over: Record<string, unknown> = {}) => ({
+    id: ID,
+    label: 'devcloud VMs',
+    prefix: 'dc-',
+    created_by: 'a'.repeat(32),
+    created: '2026-11-08T12:00:00.000Z',
+    expires: '2026-12-08T12:00:00.000Z',
+    max_uses: null,
+    uses: 2,
+    offline_revoke_s: null,
+    revoked: null,
+    machines: [{ name: 'dc-vm1', state: 'active' }],
+    delegation: { pub: 'P', owners: 'org' },
+    ...over,
+  });
+  const key = (over: Record<string, unknown> = {}) => {
+    const { id, label, prefix, created, expires, max_uses, uses, revoked } = record(over);
+    return { id, label, prefix, created, expires, max_uses, uses, revoked };
+  };
+  const sent: Array<{ method: string; path: string; body: string | null }> = [];
+  const client = (answer: () => Response) =>
+    hubClient({
+      url: HUB,
+      headers: () => Promise.resolve({ 'cf-access-token': TOKEN }),
+      fetch: (async (url: string, init: RequestInit) => {
+        sent.push({ method: init.method!, path: new URL(url).pathname, body: init.body === undefined ? null : String(init.body) });
+        return answer();
+      }) as typeof fetch,
+    });
+  const logged: string[] = [];
+  beforeEach(() => {
+    for (const level of ['log', 'info', 'warn', 'error', 'debug'] as const) {
+      vi.spyOn(console, level).mockImplementation((...args: unknown[]) => void logged.push(args.map(String).join(' ')));
+    }
+  });
+  afterEach(() => {
+    sent.length = 0;
+    logged.length = 0;
+    vi.restoreAllMocks();
+  });
+
+  it('mints a key: POST {label, prefix, ttl_s, max_uses?} exactly as given, and reads 201 {key, token} in their grammar', async () => {
+    const answer = () => worker(201, { key: record(), token: MINT_TOKEN });
+    expect(await client(answer).mintProvisioningKey({ label: 'devcloud VMs', prefix: 'dc-', ttl_s: 2_592_000 })).toEqual({ ok: true, value: { key: key(), token: MINT_TOKEN } });
+    expect(await client(answer).mintProvisioningKey({ label: 'devcloud VMs', prefix: 'dc-', ttl_s: 2_592_000, max_uses: 5 })).toMatchObject({ ok: true });
+    expect(sent).toEqual([
+      { method: 'POST', path: '/api/provisioning-keys', body: JSON.stringify({ label: 'devcloud VMs', prefix: 'dc-', ttl_s: 2_592_000 }) },
+      { method: 'POST', path: '/api/provisioning-keys', body: JSON.stringify({ label: 'devcloud VMs', prefix: 'dc-', ttl_s: 2_592_000, max_uses: 5 }) },
+    ]);
+  });
+
+  it('reads any 2xx but 201 to the mint as a failure, and the token reaches no failure, error or log line', async () => {
+    for (const status of [200, 202]) {
+      const answer = await client(() => worker(status, { key: record(), token: MINT_TOKEN })).mintProvisioningKey({ label: 'l', prefix: 'dc-', ttl_s: 3600 });
+      expect(answer).toEqual({ ok: false, kind: 'status', status, error: 'unexpected-status' });
+    }
+    const failures = [
+      await client(() => worker(201, { key: record({ id: 'C'.repeat(32) }), token: MINT_TOKEN })).mintProvisioningKey({ label: 'l', prefix: 'dc-', ttl_s: 3600 }),
+      await client(() => worker(201, { key: record(), token: `${MINT_TOKEN}!` })).mintProvisioningKey({ label: 'l', prefix: 'dc-', ttl_s: 3600 }),
+      await client(() => worker(201, { key: record({ expires: MINT_TOKEN }), token: MINT_TOKEN })).mintProvisioningKey({ label: 'l', prefix: 'dc-', ttl_s: 3600 }),
+      await client(() => worker(400, { error: `bad-shape ${MINT_TOKEN}`, token: MINT_TOKEN })).mintProvisioningKey({ label: 'l', prefix: 'dc-', ttl_s: 3600 }),
+      await client(() => worker(400, { error: MINT_TOKEN })).mintProvisioningKey({ label: 'l', prefix: 'dc-', ttl_s: 3600 }),
+    ];
+    for (const failure of failures) expect(failure).toMatchObject({ ok: false });
+    expect(JSON.stringify(failures)).not.toContain(MINT_TOKEN);
+    // a token can't pass as an error code, nor can any fragment of one in the codes' alphabet: only the Worker's own
+    // codes are read (I3, the fix wave)
+    const lower = 'abcdefghij'.repeat(5).slice(0, 43);
+    for (const error of [lower, lower.slice(0, 40), lower.slice(3, 12), 'k3n-x7q']) {
+      const answer = await client(() => worker(409, { error })).mintProvisioningKey({ label: 'l', prefix: 'dc-', ttl_s: 3600 });
+      expect(answer, error).toEqual({ ok: false, kind: 'status', status: 409, error: 'unrecognized' });
+      expect(logged.filter((line) => line.includes(error))).toEqual([]);
+    }
+    expect(JSON.stringify(failures)).not.toContain(MINT_TOKEN.slice(0, 20));
+    expect(logged.filter((line) => line.includes(MINT_TOKEN.slice(0, 20)))).toEqual([]);
+  });
+
+  it('renews a key: POST …/<id>/renew with no body, answered by the bare record, its id the one asked', async () => {
+    const renewed = record({ expires: '2027-01-08T12:00:00.000Z' });
+    expect(await client(() => worker(200, renewed)).renewProvisioningKey(ID)).toEqual({ ok: true, value: key({ expires: '2027-01-08T12:00:00.000Z' }) });
+    expect(sent).toEqual([{ method: 'POST', path: `/api/provisioning-keys/${ID}/renew`, body: null }]);
+    expect(await client(() => worker(200, { key: renewed })).renewProvisioningKey(ID)).toEqual({ ok: false, kind: 'status', status: 200, error: 'malformed' });
+    expect(await client(() => worker(200, record({ id: 'd'.repeat(32) }))).renewProvisioningKey(ID)).toEqual({ ok: false, kind: 'status', status: 200, error: 'malformed' });
+  });
+
+  it("passes the Worker's codes every caller branches on or shows, and nothing else", async () => {
+    // the codes the session, the signer, the pairing and enrollment read (org-session.ts, signer.ts, pairing.ts,
+    // enroll.ts), and some they only show
+    for (const [status, error] of [[409, 'not-head'], [409, 'rollback'], [403, 'not-admin'], [404, 'no-member'], [403, 'not-yours'], [404, 'unknown-enrollment'], [404, 'unknown-machine'], [409, 'key-purged'], [400, 'bad-shape'], [400, 'malformed'], [429, 'too-many'], [409, 'busy'], [503, 'hub-updating']] as const) {
+      expect(await client(() => worker(status, { error })).provisioningKeys(), error).toEqual({ ok: false, kind: 'status', status, error });
+    }
+    expect(await client(() => worker(403, { error: 'not-a-member' })).provisioningKeys()).toEqual({ ok: false, kind: 'denied', status: 403 });
+    for (const error of ['not-a-code', 'unknown-keys', 'Unknown-key', 'unknown-key ']) {
+      expect(await client(() => worker(404, { error })).revokeProvisioningKey(ID), error).toEqual({ ok: false, kind: 'status', status: 404, error: 'unrecognized' });
+    }
+  });
+
+  it("keeps each refusal's code, and tells a route the hub lacks (404 not-found, the Worker's) from a key it lacks (404 unknown-key)", async () => {
+    const refusals: Array<[number, string]> = [
+      [404, 'unknown-key'],
+      [404, 'not-found'],
+      [410, 'key-revoked'],
+      [410, 'key-expired'],
+      [409, 'not-renewed'],
+      [409, 'too-long'],
+      [503, 'hub-updating'],
+      [403, 'not-admin'],
+    ];
+    for (const [status, error] of refusals) {
+      expect(await client(() => worker(status, { error, message: 'words' })).renewProvisioningKey(ID), error).toEqual({ ok: false, kind: 'status', status, error });
+    }
+    // a 404 without the Worker's build header is no Worker's answer: no code is read from it
+    expect(await client(() => new Response(JSON.stringify({ error: 'not-found' }), { status: 404 })).renewProvisioningKey(ID)).toEqual({ ok: false, kind: 'status', status: 404, error: null });
+  });
+
+  it('revokes a key: DELETE …/<id>, 200 {revoked: id} revoked and 404 unknown-key already gone; a missing route stays a failure', async () => {
+    expect(await client(() => worker(200, { revoked: ID })).revokeProvisioningKey(ID)).toEqual({ ok: true, value: 'revoked' });
+    expect(await client(() => worker(404, { error: 'unknown-key' })).revokeProvisioningKey(ID)).toEqual({ ok: true, value: 'absent' });
+    expect(sent.map((r) => `${r.method} ${r.path}`)).toEqual([`DELETE /api/provisioning-keys/${ID}`, `DELETE /api/provisioning-keys/${ID}`]);
+    expect(await client(() => worker(404, { error: 'not-found' })).revokeProvisioningKey(ID)).toEqual({ ok: false, kind: 'status', status: 404, error: 'not-found' });
+    expect(await client(() => worker(200, { revoked: 'd'.repeat(32) })).revokeProvisioningKey(ID)).toEqual({ ok: false, kind: 'status', status: 200, error: 'malformed' });
+    expect(await client(() => worker(403, { error: 'not-admin' })).revokeProvisioningKey(ID)).toEqual({ ok: false, kind: 'status', status: 403, error: 'not-admin' });
+  });
+
+  it('lists the keys, revoked ones included, each in its grammar; one out of shape fails the read', async () => {
+    const revoked = record({ id: 'e'.repeat(32), max_uses: 10, revoked: '2026-11-09T00:00:00.000Z', machines: [] });
+    expect(await client(() => worker(200, { keys: [record(), revoked] })).provisioningKeys()).toEqual({ ok: true, value: { keys: [key(), key({ id: 'e'.repeat(32), max_uses: 10, revoked: '2026-11-09T00:00:00.000Z' })] } });
+    expect(sent).toEqual([{ method: 'GET', path: '/api/provisioning-keys', body: null }]);
+    for (const bad of [
+      record({ id: 'short' }),
+      record({ label: '' }),
+      record({ prefix: 7 }),
+      record({ created: 'yesterday' }),
+      record({ expires: null }),
+      record({ max_uses: 0 }),
+      record({ uses: -1 }),
+      record({ revoked: 'soon' }),
+    ]) {
+      expect(await client(() => worker(200, { keys: [record(), bad] })).provisioningKeys()).toEqual({ ok: false, kind: 'status', status: 200, error: 'malformed' });
+    }
+    expect(await client(() => worker(200, { keys: 'none' })).provisioningKeys()).toEqual({ ok: false, kind: 'status', status: 200, error: 'malformed' });
+  });
+});
+
+/** `true` exactly when the list `L` names every member of the union `T`; else what it lacks. */
+type Names<T extends string, L extends readonly string[]> = [Exclude<T, L[number]>] extends [never] ? true : { lacks: Exclude<T, L[number]> };
+
+// M4c Task 4: the allowlist can't drift from the hub's vocabulary. A code the hub adds would read `unrecognized` here
+// with no failure anywhere, so CI fails instead: the typecheck when one of desk-hub's exported error unions gains a
+// member (each list below must name every member), and this suite when a route of the Worker's answers a literal code
+// the list lacks.
+describe("the hub client's error codes against desk-hub's vocabulary", () => {
+  const provisioningKeyErrors = ['bad-shape', 'not-admin', 'unknown-key', 'key-revoked', 'key-expired', 'not-renewed', 'too-long'] as const satisfies readonly ProvisioningKeyError[];
+  const redeemErrors = ['bad-shape', 'bad-name', 'unknown-token', 'expired', 'confirmed', 'token-used', 'name-taken', 'busy', 'mint-failed', 'key-revoked', 'key-expired', 'key-exhausted', 'prefix-mismatch', 'not-active'] as const satisfies readonly RedeemError[];
+  const wrappedKeyErrors = ['bad-shape', 'not-admin', 'not-key-holder', 'different-key', 'credential-taken', 'unknown-key', 'last-key'] as const satisfies readonly WrappedKeyError[];
+  // Each list names every member of its union: a member the hub adds and a list lacks makes this a type error.
+  const complete: [Names<ProvisioningKeyError, typeof provisioningKeyErrors>, Names<RedeemError, typeof redeemErrors>, Names<WrappedKeyError, typeof wrappedKeyErrors>] = [true, true, true];
+  const unions = { ProvisioningKeyError: provisioningKeyErrors, RedeemError: redeemErrors, WrappedKeyError: wrappedKeyErrors };
+
+  it("holds every member of identity.ts's exported error unions", () => {
+    expect(complete).toEqual([true, true, true]);
+    for (const [union, codes] of Object.entries(unions)) for (const code of codes) expect(ERROR_CODES.has(code), `${union}: ${code}`).toBe(true);
+  });
+
+  it('holds every code a route of the Worker answers by its literal, and the two org-chain.ts answers by variable', () => {
+    const root = join(__dirname, '../../../apps/desk-hub/src');
+    const sources = (readdirSync(root, { recursive: true, withFileTypes: true }) as import('node:fs').Dirent[])
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts'))
+      .map((entry) => join(entry.parentPath, entry.name));
+    const answered = new Set<string>();
+    // `fail(409, 'code', …)`, `refused(…)`, `json(404, {error: 'code'})`, and any `{error: 'code'}` an answer is built from
+    const literal = [/\b(?:fail|refused|json)\(\s*\d{3},\s*(?:\{\s*error:\s*)?'([a-z0-9-]+)'/g, /\berror:\s*'([a-z0-9-]+)'/g];
+    for (const file of sources) {
+      const text = readFileSync(file, 'utf8');
+      for (const pattern of literal) for (const match of text.matchAll(pattern)) answered.add(match[1]);
+    }
+    // The scan reaches the routes: the provisioning keys' and the Worker's own fallbacks are among what it found.
+    for (const known of ['hub-updating', 'not-found', 'method-not-allowed', 'key-revoked', 'not-renewed', 'too-long']) expect(answered.has(known), known).toBe(true);
+    for (const code of [...answered, 'not-head', 'rollback']) expect(ERROR_CODES.has(code), code).toBe(true);
   });
 });

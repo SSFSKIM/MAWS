@@ -420,6 +420,9 @@ export const ORG = {
   unmarked: 'This Mac’s keys weren’t kept out of Time Machine backups when they were made, so it signs nothing. Make new keys with a pairing code.',
   signed: (version: number) => `Signed version ${version}.`,
   notSigned: 'Not signed',
+  // M4c: a drop answered stale: the hub tells apps of states, not certificates, so a machine the delegation certified
+  // since the preview is the likely change (the architect, R8)
+  dropStale: 'This delegation may have certified a machine since you opened it: preview the drop again.',
   signReasons: {
     'not-root': 'This Mac isn’t a root of the org.',
     unmarked: 'This Mac’s keys can’t sign: make new keys first.',
@@ -431,6 +434,9 @@ export const ORG = {
     busy: 'Another signing is running.',
     refused: 'The checks refused it.',
     stale: 'What would be signed changed since it was shown.',
+    // M4c, a delegation's create
+    'secret-store': 'Its provisioning code has nowhere to go yet: fix what’s named, then try again.',
+    unsent: 'Signed, but its provisioning code isn’t stored: Write the code again from its row.',
   },
   pending: 'Pending',
   pendingWaits: (version: number) => `Version ${version} is signed and waits for the hub.`,
@@ -586,6 +592,8 @@ export const ORG = {
     'root.add': (email: string) => `Make a device of ${email} a root?`,
     'machine.owners': (name: string) => `Change ${name}’s owners`,
     'machine.drop': (name: string) => `Drop ${name}?`,
+    'delegation.renew': (prefix: string) => `Renew delegation ${prefix}`,
+    'delegation.drop': (prefix: string) => `Drop delegation ${prefix}?`,
   },
   email: 'Email',
   newEmail: 'New email',
@@ -746,5 +754,177 @@ export const ORG = {
   regrantIntro: (machine: string) => `Each is signed again for ${machine}’s current key, under one Touch ID, and delivered:`,
   regrantConfirm: 'Re-grant',
   regranted: (count: number, machine: string) => `Signed ${count === 1 ? '1 grant' : `${count} grants`} again for ${machine}.`,
+  // M4c: the Delegations section (a section of the Org group): each delegation, the hub's side of it, the stray hub keys,
+  // a new delegation and where its code goes. Every refusal or failure line names its next step.
+  delegations: 'Delegations',
+  noDelegations: 'No delegations yet.',
+  delegationId: (id: string) => `id ${id.slice(0, 8)}`,
+  delegationStates: { unsent: 'unsent', dropped: 'dropped' },
+  // "expires in 23 days", from the milliseconds left
+  expiresIn: (ms: number) => {
+    if (ms <= 0) return 'expired';
+    const days = Math.floor(ms / 86_400_000);
+    return days === 0 ? 'expires within a day' : `expires in ${days === 1 ? '1 day' : `${days} days`}`;
+  },
+  // the hub key's uses (null: the hub's side not read), against the delegation's cap (null: none)
+  uses: (uses: number | null, cap: number | null) =>
+    uses === null ? (cap === null ? 'no use cap' : `at most ${cap} uses`) : cap === null ? `used ${uses === 1 ? '1 time' : `${uses} times`}, no cap` : `used ${uses} of ${cap}`,
+  certified: (machines: string) => `Certified: ${machines}`,
+  noCertified: 'No certified machines yet',
+  certifiedState: (name: string, live: boolean) => `${name} (${live ? 'live' : 'retired'})`,
+  renew: 'Renew…',
+  // A hub half the head says is left: the spec's words, then Retry, which calls the hub's route alone
+  hubBehindRenew: (date: string) => `Renewed in the org state; the hub’s key still expires ${date}:`,
+  hubNoRoute: 'Renewed in the org state; this hub can’t renew its key yet:',
+  hubBehindRevoke: 'Dropped in the org state; the hub still lists its key as live:',
+  hubExpires: (date: string) => `The hub’s key expires ${date}.`,
+  hubUnread: 'Its hub key isn’t read yet.',
+  hubNoKey: 'The hub lists no key for it, so it provisions nothing there: drop it and create a new delegation.',
+  hubKeyRevoked: 'The hub’s key for it is revoked, so it provisions nothing: drop it and create a new delegation.',
+  hubKeyExpired: (date: string) => `The hub’s key for it expired ${date} and is never revived: drop it and create a new delegation.`,
+  // Why a hub half didn't finish (main's HUB_HALF_REASONS), each with its next step
+  hubHalfReasons: {
+    'no-route': 'This hub can’t renew its key yet: Retry once the hub is updated.',
+    updating: 'The hub is updating: Retry in a moment.',
+    ended: 'The hub’s key has ended and is never revived: drop this delegation and create a new one.',
+    'not-renewed': 'The hub’s org state doesn’t hold the renewal yet: Retry in a moment.',
+    'too-long': 'The hub refuses that expiry for now: Retry later.',
+    hub: 'The hub wasn’t reached: Retry once it is.',
+    refused: 'The hub refused it: Retry, and if it refuses again, see its answer:',
+  },
+  hubHalfNone: 'Nothing is left to do at the hub.',
+  hubKeys: 'Hub keys',
+  // A failed read of the hub's key list, with Retry beside it (a read now, `org.delegation.readKeys`)
+  hubKeysFailed: (at: string | null) =>
+    at === null
+      ? 'The hub’s key list couldn’t be read, so each delegation’s hub key is unknown, not missing. Retry reads it again.'
+      : `The hub’s key list couldn’t be read: each delegation’s hub key shows as of ${at}. Retry reads it again.`,
+  hubKeysStillFailed: 'It still couldn’t be read: Retry once the hub answers.',
+  // An unsent delegation: signed into the pending slot, its code not stored, so not published
+  unsentLine: 'Signed, not published: its provisioning code isn’t stored yet.',
+  writeAgain: 'Write the code again',
+  writing: 'Writing the code…',
+  writingTo: (where: string | null) => (where === null ? 'Writing the code…' : `Writing the code to ${where}…`),
+  unsentDiscardOnly: 'This Mac no longer holds its key pair, so it can’t be published: discard it and create the delegation again.',
+  stillUnsent: 'The code still isn’t stored: Write the code again, or discard it.',
+  codeStored: (prefix: string, version: number, secretVersion: string, time: string) => `Published delegation ${prefix} in version ${version}. Its code is version ${secretVersion}, stored ${time}.`,
+  notWritten: 'Not written',
+  // "Write the code again"'s refusals (SignResult's reasons), each with its next step
+  rewriteReasons: {
+    'not-root': 'This Mac can’t sign now: sign in again, then write it again.',
+    unmarked: 'This Mac’s keys can’t sign: make new keys, then discard it and create the delegation again.',
+    signing: 'The record of signed states is damaged: reset it (Org › Problem).',
+    cancelled: 'It was stopped: Write the code again.',
+    pending: 'Another signed state is pending: settle it, then write it again.',
+    invalid: 'It couldn’t be written: discard it and create the delegation again.',
+    hub: 'The hub didn’t answer: write it again once it does.',
+    busy: 'Its code is being written: wait for that to finish.',
+    refused: 'Refused: discard it and create the delegation again.',
+    stale: 'This Mac no longer holds its key pair: discard it and create the delegation again.',
+    'secret-store': 'Its code has nowhere to go: fix what’s named, then write it again.',
+    unsent: 'The code still isn’t stored: Write the code again, or discard it.',
+  },
+  discardDelegationTitle: (prefix: string) => `Discard the unsent delegation ${prefix}?`,
+  discardDelegationBody: (version: number) => `Version ${version} was never sent, so nothing can show it as a fork. Discarding it also revokes the hub key minted for it. Create the delegation again afterwards.`,
+  discardedDelegation: (version: number) => `Discarded version ${version}. Its hub key is revoked; if the hub didn’t take the revoke, the key shows under Stray hub keys, to revoke there.`,
+  pendingUnsent: (version: number, prefix: string) => `Version ${version} holds delegation ${prefix}, not yet published: see Delegations.`,
+  // Hub keys no delegation names: a create whose delegation was never signed
+  strayKeys: 'Stray hub keys',
+  strayNote: 'Hub keys that no delegation names, left by a create whose delegation was never signed.',
+  stray: (label: string, prefix: string) => `${label} · ${prefix}`,
+  minted: (ago: string) => `minted ${ago}`,
+  justMinted: 'just minted',
+  revokeStray: 'Revoke…',
+  revokeStrayTitle: (label: string) => `Revoke the hub key “${label}”?`,
+  revokeStrayBody: 'No delegation names this key. If a CLI delegation create or another admin’s create is still under way, it loses its key and fails, and has to be run again.',
+  revokeStrayYoung: (ago: string) =>
+    `This key was minted ${ago}: it is likely a create still under way, from the CLI or another admin. Revoking it now makes that create fail. Wait until it is 15 minutes old, unless you know that create was abandoned.`,
+  revokeStrayConfirm: 'Revoke',
+  notRevoked: 'Not revoked',
+  // A new delegation
+  newDelegation: 'New delegation',
+  createAction: 'Create a delegation…',
+  delegationsAdmins: 'An admin creates delegations from their Org page.',
+  delegationsCantSign: 'This Mac can’t sign: create delegations from an admin’s Mac that does.',
+  createNoDestination: 'Set the code destination below first.',
+  createDamaged: 'Reset the code destination below first.',
+  createWaits: 'A delegation is being created, in this window or another: Create once it’s done.',
+  createPending: 'A signed state is pending: publish or discard it (Org › Pending) first.',
+  created: (prefix: string, version: number, secret: { version: string; time: string } | null) =>
+    secret === null ? `Created delegation ${prefix}. Signed version ${version}.` : `Created delegation ${prefix}. Signed version ${version}. Its code is version ${secret.version}, stored ${secret.time}.`,
+  // The code's destination: main's own file, set once here
+  destination: 'Code destination',
+  destinationNote: 'A new delegation’s provisioning code is stored there as a new version of the Secret Manager secret, through this Mac’s gcloud signed in as the account. Devcloud’s next VM reads the latest version.',
+  destinationFields: { project: 'Project', secret: 'Secret', account: 'Account' },
+  destinationReading: 'Reading…',
+  destinationInvalid: {
+    project: 'A project id is 6 to 30 lowercase letters, digits and hyphens, from a letter: correct it, then Save.',
+    secret: 'A secret id is up to 255 letters, digits, _ and -, not from a -: correct it, then Save.',
+    account: 'The account is the gcloud account’s email: correct it, then Save.',
+  },
+  destinationPartial: 'Fill in all three, or clear all three to unset it, then Save.',
+  save: 'Save',
+  saved: 'Saved.',
+  cleared: 'Cleared.',
+  notSaved: 'Not saved',
+  destinationWrite: {
+    invalid: 'MAWS refused these values: correct them, then Save.',
+    damaged: 'The destination’s file is damaged: Reset it, then Save.',
+    io: 'The destination couldn’t be written: Save again.',
+  },
+  destinationDamaged: (why: string) => `The destination’s file is damaged (${why}): Reset it, then enter the destination again.`,
+  resetDestinationTitle: 'Reset the code destination?',
+  resetDestinationBody: 'MAWS removes the damaged file. Nothing else is lost: enter the project, secret and account again after.',
+  // The create sheet: its fields, where its code goes, then one Touch ID; the code is never shown
+  createTitle: 'Create a delegation',
+  createFields: { label: 'Label', prefix: 'Prefix', ttl: 'Expires in', uses: 'Uses', owners: 'Owners' },
+  days: 'days',
+  createLabelNote: 'The hub key’s label: 1 to 100 characters.',
+  createPrefixNote: 'The machines it provisions are named with this prefix.',
+  createTtlBounds: (min: number, max: number) => `${min} to ${max} days.`,
+  createUsesKinds: { none: 'No cap', cap: 'At most' },
+  createUseCap: 'Use cap',
+  createSheetNoDestination: 'No code destination is set: close this and set it under Delegations › Code destination.',
+  createUsesBounds: (max: number) => `1 to ${max} machines.`,
+  createDestination: (project: string, secret: string) => `The code goes to ${project}/${secret} as a new version. It is never shown here.`,
+  createDevcloud: 'Devcloud uses it only if the profile’s [desk] delegation_id names this delegation.',
+  createIntro: 'The hub mints its key, Touch ID signs the delegation, then its code is stored.',
+  createConfirm: 'Create…',
+  creating: 'Creating…',
+  creatingLine: 'Minting its key, then Touch ID signs the delegation, then its code is stored…',
+  notCreated: 'Not created',
+  // A create's refusals (SignResult's reasons), each with its next step
+  createReasons: {
+    'not-root': 'This Mac can’t sign now: sign in again, then Create.',
+    unmarked: 'This Mac’s keys can’t sign: make new keys first.',
+    signing: 'The record of signed states is damaged: reset it (Org › Problem), then Create.',
+    cancelled: 'Touch ID was cancelled, so nothing was signed: Create again when ready.',
+    pending: 'A signed state is pending: publish or discard it (Org › Pending), then Create.',
+    invalid: 'A value isn’t admitted: correct it, then Create again.',
+    hub: 'The hub didn’t answer: Create again once it does.',
+    busy: 'Another create or org attempt is running: Create again once it’s done.',
+    refused: 'Refused, so nothing was signed: correct what’s named, then Create again.',
+    stale: 'The org state changed meanwhile: Create again.',
+    'secret-store': 'Its code has nowhere to go yet, so nothing was minted or signed: fix what’s named, then Create again.',
+    unsent: 'Signed, but its code isn’t stored, so it isn’t published: Write the code again.',
+  },
+  createUnsentDiscard: 'This Mac can’t write it again: close this and Discard it from its row.',
+  // Where a create stopped (main's `phase`), each with what is left to do
+  phaseMinted: 'Nothing was signed. Any key it minted was revoked, or, if the hub didn’t take the revoke, it shows under Stray hub keys, to revoke there.',
+  phaseHeld: (version: number | undefined) => `Signed${version === undefined ? '' : ` as version ${version}`}, not published: its provisioning code isn’t stored yet.`,
+  phaseHeldStored: (version: number | undefined) => `Signed${version === undefined ? '' : ` as version ${version}`} and its code stored, but its publish was refused, so it stays unsent.`,
+  heldWriteAgain: 'Write the code again, or close this and Discard it from its row.',
+  heldDiscardOnly: 'Discard it, then create the delegation again.',
+  phasePublished: (version: number | undefined) =>
+    `Published${version === undefined ? '' : ` as version ${version}`}, its code stored. It settles as any pending state once the hub takes it (Org › Pending): nothing more to do here.`,
+  phaseDiscarded: (stored: boolean) =>
+    `Not published: its pending slot was discarded or replaced first, so nothing was published${stored ? '; its code’s version stays in the secret, unused' : ''}. Create the delegation again if it’s still wanted.`,
+  createRunGone: 'This create is no longer the one this Mac runs (a Discard, another create or a sign-out since): nothing more to do here.',
+  createSignInEnded: 'The sign-in this sheet opened under ended. Close it to create again.',
+  // Renew: a new expiry in days from now, never past the hub's cap; the checks refuse the rest before Touch ID
+  renewNow: (date: string) => `It expires ${date}.`,
+  renewNew: (date: string) => `New expiry: ${date}.`,
+  renewNotLater: (date: string) => `It expires ${date} already: choose a later expiry.`,
+  renewPastCap: (max: number) => `At most ${max} days from now, the longest the hub keeps a key: choose fewer days.`,
 } as const;
 // P5 O8 M1 end

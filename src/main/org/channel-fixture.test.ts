@@ -7,6 +7,9 @@ import type { OrgSessionService } from './org-session';
 import { CHANNEL_FIXTURE_ENV, installChannelFixture, type ChannelFixtureInstall } from './channel-fixture';
 import { registerOrgHandlers } from './register';
 
+/** M4c: the destination's file, never read or written here. */
+const UNSET_DESTINATION = { read: () => ({ ok: true as const, value: null }), write: () => ({ ok: false as const, reason: 'io' as const, detail: 'not here' }), reset: () => ({ ok: true as const }) };
+
 const PROJECT = '1f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
 const STATUS: OrgStatus = {
   state: 'registered',
@@ -22,6 +25,7 @@ const STATUS: OrgStatus = {
   pairing: null,
   enrolling: null,
   hubRowsLeft: [],
+  delegations: { creating: false, rev: 0 },
 };
 const ANSWER: ChannelAnswer = {
   ok: true,
@@ -103,7 +107,7 @@ describe("the project channel's e2e fixture in main", () => {
       onGrants: () => () => {},
     } as unknown as OrgSessionService;
     const emitted: OrgStatus[] = [];
-    const unpublish = registerOrgHandlers({ register: () => {}, emit: (_name, status) => void emitted.push(status), emitChannel: () => {}, emitGrants: () => {}, service, development: null });
+    const unpublish = registerOrgHandlers({ register: () => {}, emit: (_name, status) => void emitted.push(status), emitChannel: () => {}, emitGrants: () => {}, service, development: null, destination: UNSET_DESTINATION });
     publish({ state: 'none' });
     expect(emitted).toEqual([{ state: 'none' }]);
 
