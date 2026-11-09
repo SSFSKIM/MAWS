@@ -15,9 +15,10 @@
 // redirect without it came from Access, so the hub credential has ended (`credentials`). A Worker's
 // `403 {error: 'not-a-member'}` says the hub no longer admits the person (`denied`), which is no verified removal.
 //
-// No text of an answer leaves here unchecked: what a refusal, a log or a status may carry (an `error` code, an email, an
-// instant) must match a short grammar, else it reads as `unrecognized` or the answer as `malformed`, so a hostile hub
-// can't reflect the bearer token into the renderer or the log.
+// No text of an answer leaves here unchecked: what a refusal, a log or a status may carry must be one of the Worker's own
+// error codes (else it reads `unrecognized`), or an email or an instant in its short grammar (else the answer reads
+// `malformed`), so a hostile hub can't reflect the bearer token, or any fragment of a provisioning token, into the
+// renderer or the log.
 import {
   isCertificates,
   isCertRetirement,
@@ -149,8 +150,26 @@ export interface ProjectReads {
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
-/** A Worker's error code (`not-a-member`, `too-many`): anything else is reported as `unrecognized`. */
-const ERROR_CODE = /^[a-z][a-z0-9-]{0,39}$/;
+/**
+ * The Worker's error codes, each read as itself; any other string is reported as `unrecognized` (M4c's fix wave: a slug
+ * in the codes' alphabet could carry a fragment of a provisioning token). The set is desk-hub's vocabulary: every code
+ * its routes answer with a literal (`fail`/`refused`/`json` with a status, or `{error: …}`), plus `not-head` and
+ * `rollback`, which org-chain.ts answers by variable. Codes main branches on: `not-a-member` (here), `not-head` and
+ * `rollback` (signer.ts), `not-admin` and `no-member` (pairing.ts), `not-yours` and `unknown-enrollment` (enroll.ts),
+ * `unknown-machine` and `unknown-key` (here), and the provisioning routes' `not-found`, `key-revoked`, `key-expired`,
+ * `not-renewed`, `too-long` and `hub-updating` (M4c's Task 4). A code the hub adds later reads `unrecognized` until it
+ * is listed: shown, never branched on.
+ */
+const ERROR_CODES: ReadonlySet<string> = new Set([
+  'bad-link', 'bad-name', 'bad-shape', 'bad-signature', 'busy', 'confirmed', 'conflict', 'contested', 'expired', 'fence-failed',
+  'genesis-member', 'hub-unavailable', 'hub-updating', 'key-exhausted', 'key-expired', 'key-held', 'key-posted', 'key-purged',
+  'key-revoked', 'malformed', 'method-not-allowed', 'mint-failed', 'name-taken', 'no-endpoint', 'no-key', 'no-member', 'no-ref',
+  'no-state', 'not-a-member', 'not-active', 'not-admin', 'not-bound', 'not-configured', 'not-enrolled', 'not-found', 'not-head',
+  'not-listed', 'not-on-rl1', 'not-org-admin', 'not-renewed', 'not-retired', 'not-yours', 'prefix-mismatch', 'ref-taken', 'removed',
+  'retired', 'rollback', 'stale-attestation', 'stale-endpoint', 'stale-generation', 'stale-listing', 'state-unavailable', 'token-used',
+  'too-long', 'too-many', 'unknown-device', 'unknown-enrollment', 'unknown-key', 'unknown-machine', 'unknown-project', 'unknown-token',
+  'upgrade-required', 'wrong-use',
+]);
 /** An ISO 8601 instant in UTC, as the Worker writes one. */
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 /** An enrollment's id (the Registry's `newId`), and its token: 256 random bits as base64url. */
@@ -245,7 +264,7 @@ export function hubClient(input: {
       }
       return { ok: false, kind: 'status', status: response.status, error: null };
     }
-    const error = isObject(body) && typeof body.error === 'string' ? (ERROR_CODE.test(body.error) ? body.error : 'unrecognized') : null;
+    const error = isObject(body) && typeof body.error === 'string' ? (ERROR_CODES.has(body.error) ? body.error : 'unrecognized') : null;
     if (response.status === 403 && error === 'not-a-member') return { ok: false, kind: 'denied', status: 403 };
     if (!response.ok) return { ok: false, kind: 'status', status: response.status, error };
     if (init.expect !== undefined && response.status !== init.expect) return { ok: false, kind: 'status', status: response.status, error: 'unexpected-status' };

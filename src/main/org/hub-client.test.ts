@@ -300,9 +300,14 @@ describe("the hub client's provisioning keys (M4c)", () => {
     ];
     for (const failure of failures) expect(failure).toMatchObject({ ok: false });
     expect(JSON.stringify(failures)).not.toContain(MINT_TOKEN);
-    // a token can't pass as an error code, even one in the codes' alphabet: its 43 characters are past a code's 40
+    // a token can't pass as an error code, nor can any fragment of one in the codes' alphabet: only the Worker's own
+    // codes are read (I3, the fix wave)
     const lower = 'abcdefghij'.repeat(5).slice(0, 43);
-    expect(await client(() => worker(409, { error: lower })).mintProvisioningKey({ label: 'l', prefix: 'dc-', ttl_s: 3600 })).toEqual({ ok: false, kind: 'status', status: 409, error: 'unrecognized' });
+    for (const error of [lower, lower.slice(0, 40), lower.slice(3, 12), 'k3n-x7q']) {
+      const answer = await client(() => worker(409, { error })).mintProvisioningKey({ label: 'l', prefix: 'dc-', ttl_s: 3600 });
+      expect(answer, error).toEqual({ ok: false, kind: 'status', status: 409, error: 'unrecognized' });
+      expect(logged.filter((line) => line.includes(error))).toEqual([]);
+    }
     expect(JSON.stringify(failures)).not.toContain(MINT_TOKEN.slice(0, 20));
     expect(logged.filter((line) => line.includes(MINT_TOKEN.slice(0, 20)))).toEqual([]);
   });
@@ -313,6 +318,18 @@ describe("the hub client's provisioning keys (M4c)", () => {
     expect(sent).toEqual([{ method: 'POST', path: `/api/provisioning-keys/${ID}/renew`, body: null }]);
     expect(await client(() => worker(200, { key: renewed })).renewProvisioningKey(ID)).toEqual({ ok: false, kind: 'status', status: 200, error: 'malformed' });
     expect(await client(() => worker(200, record({ id: 'd'.repeat(32) }))).renewProvisioningKey(ID)).toEqual({ ok: false, kind: 'status', status: 200, error: 'malformed' });
+  });
+
+  it("passes the Worker's codes every caller branches on or shows, and nothing else", async () => {
+    // the codes the session, the signer, the pairing and enrollment read (org-session.ts, signer.ts, pairing.ts,
+    // enroll.ts), and some they only show
+    for (const [status, error] of [[409, 'not-head'], [409, 'rollback'], [403, 'not-admin'], [404, 'no-member'], [403, 'not-yours'], [404, 'unknown-enrollment'], [404, 'unknown-machine'], [409, 'key-purged'], [400, 'bad-shape'], [400, 'malformed'], [429, 'too-many'], [409, 'busy'], [503, 'hub-updating']] as const) {
+      expect(await client(() => worker(status, { error })).provisioningKeys(), error).toEqual({ ok: false, kind: 'status', status, error });
+    }
+    expect(await client(() => worker(403, { error: 'not-a-member' })).provisioningKeys()).toEqual({ ok: false, kind: 'denied', status: 403 });
+    for (const error of ['not-a-code', 'unknown-keys', 'Unknown-key', 'unknown-key ']) {
+      expect(await client(() => worker(404, { error })).revokeProvisioningKey(ID), error).toEqual({ ok: false, kind: 'status', status: 404, error: 'unrecognized' });
+    }
   });
 
   it("keeps each refusal's code, and tells a route the hub lacks (404 not-found, the Worker's) from a key it lacks (404 unknown-key)", async () => {
