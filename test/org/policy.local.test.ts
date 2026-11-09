@@ -19,14 +19,24 @@
 // 5. This Mac's own sessions too: the endpoint is A's own Mac to a second `org.policy.*` (its `local`), whose acts and
 //    read go through the endpoint's local door (`endpoint.local.act` and `.call`, as mawsd's machine socket serves
 //    them). A widens lane B session `app-b` to Org can view; sminos's record moves, and `record.policy` reads it back.
+// 6. M5b (the architect's ruling 1 on its refresh): B, shared S at `approve` but no owner, forces `record.owners` on S
+//    through the app's own path. The endpoint refuses it `grade` (`record.*` is `manage`, the owners' alone), and nothing
+//    reaches sminos.
+// 7. M5b: A adds B as an owner of S over A's link, and of lane B session `app-c` through the local door. `app-c`'s record
+//    was placed by its spawn act (Decision Log 190 (b)), which its `ownersProof` holds ahead of the owner act sminos
+//    appends. The next listings, S's from the channel and `app-c`'s from the hub, name both A and B; adding B again
+//    changes nothing.
 //
 // Stand-ins, each where no real piece runs in a suite: sminos on RL10 (the endpoint suites' `FakeSminos`, driven here by
 // `SminosRecords`, which executes §Q's contract: the admission query answered `not-received`, then each `record.*` rpc
 // held to its proof's binding as sminos holds it (refused `bad-shape` otherwise) and applied to its own record of the session `args.session` names as `set_visibility` applies it, the revision bumped by a
 // change and by nothing else, the session's member frame sent again with its `access`, `shares` and `policyRev`, and
-// `rpc-result` answering `done {changed, policyRev}`); the engine host and spine behind the endpoint (`FakeEngineHost`,
-// which places lane B's `app-b` on its engine session for the members join); mawsd's machine socket, whose two door
-// commands are the endpoint module's `local` called directly.
+// `rpc-result` answering `done {changed, policyRev}`; `record.owners` as the desk track's executor runs it,
+// sminos_visibility.py's `add_owner`: the member added to `owners` and the verified act appended verbatim to
+// `ownersProof`, the revision bumped and the session re-listed, and a member who is an owner already changing nothing);
+// the engine host and spine behind the endpoint (`FakeEngineHost`, which places lane B's `app-b` on its engine session for
+// the members join, and names `app-c` on the engine session after its `/clear`, its spine record naming A's spawn);
+// mawsd's machine socket, whose two door commands are the endpoint module's `local` called directly.
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { base64urlEncode, canonicalize, encodePairingCode, isAction, type Device, type Listing, type Signed } from 'org-protocol';
@@ -54,6 +64,15 @@ const B_EMAIL = 'bea@example.com';
 const S = 'c7d1e2f3-4a5b-4c6d-8e7f-90a1b2c3d4e5';
 const APP_B = 'app-o8-policy';
 const ENG_B = 'eng-o8-policy';
+/**
+ * `app-c`, lane B, A's: sminos's record is of engine session `eng-c`, but a `/clear` moved the conversation to `eng-c2`
+ * before that record reached the endpoint, so the live rows never name `eng-c` and the endpoint places the record by its
+ * spawn act's opId (P5 Decision Log 190 (b), members.ts' `#bySpawn`), the act its `ownersProof` holds first.
+ */
+const APP_C = 'app-o8-owners';
+const ENG_C = 'eng-o8-owners';
+const ENG_C2 = 'eng-o8-owners-cleared';
+const SPAWN_OP = 'op-o8-owners-spawn';
 
 const scratch = scratchDir('maws-o8-policy-');
 const logs: string[] = [];
@@ -93,11 +112,13 @@ let remote: OrgPolicies;
 /** A's policies with the endpoint as this Mac (its local door). */
 let local: OrgPolicies;
 const told: OrgPolicy[] = [];
+/** `app-c`'s spawn act as its record's `ownersProof` keeps it (the proof file's act: its device, opId and action). */
+let spawnAct: Record<string, unknown>;
 
 /** A record act's fields, as sminos requires them all (sminos_rpc.py's ACT_KEYS); `webauthn` may stand beside them. */
 const RECORD_ACT_FIELDS = ['v', 'org', 'machine', 'device', 'opId', 'opCreated', 'action', 'args', 'nonce', 'created', 'stepUp'] as const;
 type Share = { member: string; grade: string };
-type Member = Record<string, unknown> & { session: string; access: string; shares: Share[]; owners: string[]; policyRev: number };
+type Member = Record<string, unknown> & { session: string; access: string; shares: Share[]; owners: string[]; ownersProof: unknown[]; policyRev: number };
 
 /**
  * sminos's side of §Q on the endpoint's RL10 socket: the session records it keeps (each reported as a `member` frame),
@@ -187,7 +208,10 @@ class SminosRecords {
     return null;
   }
 
-  /** `set_visibility` on the record `args.session` keys: a change bumps `policyRev` once and is reported; a no-op isn't. */
+  /**
+   * `set_visibility` (an access or a share) or `add_owner` (an owner, its act kept in `ownersProof`) on the record
+   * `args.session` keys: a change bumps `policyRev` once and is reported; a no-op isn't.
+   */
   #apply(rpc: Record<string, unknown>): Record<string, unknown> {
     this.tamper?.(rpc);
     this.tamper = undefined;
@@ -207,7 +231,11 @@ class SminosRecords {
       if (args.grade !== null) shares.push({ member: args.member as string, grade: args.grade as string });
       member.shares = shares.sort((x, y) => x.member.localeCompare(y.member));
     } else if (rpc.rpc === 'record.owners') {
-      if (!member.owners.includes(args.member as string)) member.owners = [...member.owners, args.member as string];
+      // sminos_records.add_owner: the member added, its verified act appended verbatim; an owner already, nothing
+      if (!member.owners.includes(args.member as string)) {
+        member.owners = [...member.owners, args.member as string];
+        member.ownersProof = [...member.ownersProof, rpc.proof];
+      }
     } else return { state: 'refused', reason: 'bad-shape' };
     const changed = JSON.stringify([member.access, member.shares, member.owners]) !== before;
     if (changed) {
@@ -220,8 +248,9 @@ class SminosRecords {
 
 const laneA = (): Member => ({ session: S, alias: 'reach-runner', project: PROJECT, lane: 'A', state: 'idle', title: 'Run the reach checks', cwd: CHECKOUT, launch: 'L1', owners: ['@machine'], ownersProof: [], origin: { kind: 'terminal' }, access: 'listed', shares: [], policyRev: 1 });
 
-/** S's row in B's rows, or undefined. */
-const bRowOfS = () => bLatest?.rows.find((r) => r.session === S && r.machine === ref);
+/** A session's row in B's rows, or undefined. */
+const bRowOf = (session: string) => bLatest?.rows.find((r) => r.session === session && r.machine === ref);
+const bRowOfS = () => bRowOf(S);
 /** The listings the hub serves B now. */
 async function hubListsToB(): Promise<string[]> {
   const { listings } = (await (await org.hub.fetchAs(B_EMAIL, '/api/listings')).json()) as { listings: Signed<Listing>[] };
@@ -301,6 +330,11 @@ beforeAll(async () => {
   host.add(APP_B, ENG_B);
   host.spine!.set(APP_B, ENG_B);
   lanes.set({ lane: 'B', session: ENG_B, owners: [A], access: 'listed', shares: [] }, APP_B);
+  // app-c, spawned by A: the engine host and the spine name it on eng-c2 now, the conversation after its `/clear`
+  spawnAct = { device: a.current()!.identity.device, opId: SPAWN_OP, action: 'session.spawn' };
+  host.add(APP_C, ENG_C2);
+  host.spine!.set(APP_C, ENG_C2, { launchedBy: { member: A, device: spawnAct.device, opId: SPAWN_OP, action: null } });
+  lanes.set({ lane: 'B', session: ENG_C, owners: [A], access: 'listed', shares: [] }, APP_C);
   await endpoint.start(services);
   ref = services.machine.ref;
   await enrollEndpoint(org, endpoint, ref, 'o8-policy-mini');
@@ -317,11 +351,13 @@ beforeAll(async () => {
   const welcome = await s.next((x) => x.t === 'welcome', 'welcome');
   expect(welcome.capabilities).toContain('record');
   s.send({ t: 'session', message: { project: PROJECT, machine: 'o8-policy-mini', session: null, kind: 'machine', sub: null, n: null, body: { online: true, policy, checkouts: [{ path: CHECKOUT, branch: 'main' }], desk: {} } } });
-  records = new SminosRecords(s, { machine: () => ref, devices: () => [a.current()!.identity.device, b.current()!.identity.device], laneB: new Map([[APP_B, ENG_B]]) });
+  records = new SminosRecords(s, { machine: () => ref, devices: () => [a.current()!.identity.device, b.current()!.identity.device], laneB: new Map([[APP_B, ENG_B], [APP_C, ENG_C]]) });
   records.report(laneA());
   records.report({ ...laneA(), session: ENG_B, alias: 'notes', lane: 'B', title: 'Write the notes', owners: [A] });
+  records.report({ ...laneA(), session: ENG_C, alias: 'owners', lane: 'B', title: 'Gather the owners', owners: [A], ownersProof: [spawnAct] });
   s.send({ t: 'restated' });
   await until(() => endpoint.rl10.members.appSessionId(ENG_B) === APP_B && endpoint.rl10.members.get(S) !== null, 'S and app-b joined');
+  await until(() => endpoint.rl10.members.appSessionId(ENG_C) === APP_C, 'app-c placed by its spawn');
 
   // The endpoint at the head that lists B's device before either link opens.
   const version = (await org.served()).head.state.version;
@@ -455,5 +491,70 @@ describe('a session’s reach on the local hub', { timeout: 120_000 }, () => {
     expect(ran.rpc).toMatchObject({ rpc: 'record.access', member: A, args: { session: ENG_B, access: 'org-view' }, proof: { action: 'record.access', args: { appSessionId: APP_B, access: 'org-view' } } });
     expect(records.members.get(ENG_B)).toMatchObject({ access: 'org-view', policyRev: 2 });
     expect(await endpoint.local.call('record.policy', { session: APP_B })).toEqual({ ok: true, output: { supported: true, policies: [{ session: APP_B, access: 'org-view', shares: [], policyRev: 2 }] } });
+  });
+
+  // The architect's ruling 1 on M5b's refresh: the Add owner item is a hint, and the endpoint is what refuses. Every
+  // `record.*` act is graded `manage`, which only the session's owners and the machine's hold; a share tops out at
+  // `approve`. So B, holding S at `approve`, sends the act through the app's own path, and it never reaches sminos.
+  it('refuses B’s owners act on S though B holds a share at approve: the door decides, and the record is unchanged', async () => {
+    const rev = await revisionOf(remote, address());
+    const shared = await remote.set({ address: address(), shares: [{ member: B, grade: 'approve' }], policyRev: rev });
+    expect(shared).toMatchObject({ ok: true, results: [{ line: { kind: 'share', member: B, grade: 'approve' }, state: 'done', changed: true, policyRev: rev + 1 }] });
+    expect(records.members.get(S)).toMatchObject({ owners: ['@machine'], shares: [{ member: B, grade: 'approve' }] });
+
+    const before = structuredClone(records.members.get(S)!);
+    const sent = records.s.received.length;
+    const bPolicies = createOrgPolicies({
+      session: b,
+      local: mintRef(),
+      remote: (machine) => (machine === ref ? bLink : null),
+      door: { act: () => Promise.reject(new Error('not this Mac')), call: () => Promise.reject(new Error('not this Mac')) },
+      laneOf: (_machine, session) => (session === S ? 'A' : null),
+      acted: () => {},
+      emit: () => {},
+      log,
+    });
+    const forced = await bPolicies.addOwner({ address: address(), member: B });
+    expect(forced).toMatchObject({ ok: true, results: [{ line: { kind: 'owner', member: B }, state: 'refused', reason: 'grade' }] });
+    await sleep(200);
+    expect(records.s.received.slice(sent).filter((f) => f.t === 'query' || f.t === 'rpc')).toEqual([]);
+    expect(records.members.get(S)).toEqual(before);
+    expect(await revisionOf(remote, address())).toBe(rev + 1);
+  });
+
+  it('A adds B as an owner of lane A session S and lane B session app-c: sminos keeps each act, and the next listings name both', async () => {
+    // S, another machine's session to A: over A's link
+    const rev = await revisionOf(remote, address());
+    const added = await remote.addOwner({ address: address(), member: B });
+    expect(added).toMatchObject({ ok: true, results: [{ line: { kind: 'owner', member: B }, state: 'done', changed: true, policyRev: rev + 1, elsewhere: false }] });
+    const ranS = records.executed.at(-1)!;
+    expect(ranS.rpc).toMatchObject({ rpc: 'record.owners', member: A, device: a.current()!.identity.device, args: { session: S, add: true, member: B }, proof: { action: 'record.owners', args: { session: S, add: true, member: B } } });
+    // the executor's contract: the member beside `@machine`, the act appended verbatim, the revision bumped
+    expect(records.members.get(S)).toMatchObject({ owners: ['@machine', B], ownersProof: [ranS.rpc.proof], policyRev: rev + 1 });
+
+    // app-c, this Mac's own session to A: through the local door, to the record its spawn placed
+    const at = addressOf(ref, APP_C);
+    const revC = await revisionOf(local, at);
+    const addedC = await local.addOwner({ address: at, member: B });
+    expect(addedC).toMatchObject({ ok: true, results: [{ line: { kind: 'owner', member: B }, state: 'done', changed: true, policyRev: revC + 1, elsewhere: false }] });
+    const ranC = records.executed.at(-1)!;
+    expect(ranC.rpc).toMatchObject({ rpc: 'record.owners', member: A, args: { session: ENG_C, add: true, member: B }, proof: { action: 'record.owners', args: { appSessionId: APP_C, add: true, member: B } } });
+    // the owner act after the spawn act, which the re-listed record is still placed by
+    expect(records.members.get(ENG_C)).toMatchObject({ owners: [A, B], ownersProof: [spawnAct, ranC.rpc.proof], policyRev: revC + 1 });
+
+    // the next listings name both: S's (private) from the machine's channel, app-c's (listed) from the hub too
+    await until(() => bRowOf(S)?.owners.includes(B) && bRowOf(APP_C)?.owners.includes(B), 'B named an owner in B’s rows', 30_000);
+    expect(bRowOf(S)).toMatchObject({ lane: 'A', owners: [A, B], mine: true });
+    expect(bRowOf(APP_C)).toMatchObject({ lane: 'B', owners: [A, B], mine: true });
+    // app-c's re-list carried both acts, and its listing stayed under the app session its spawn placed it on
+    expect(endpoint.rl10.members.get(ENG_C)?.ownersProof).toEqual([spawnAct, ranC.rpc.proof]);
+    expect(endpoint.rl10.members.appSessionId(ENG_C)).toBe(APP_C);
+    const { listings } = (await (await org.hub.fetchAs(B_EMAIL, '/api/listings')).json()) as { listings: Signed<Listing>[] };
+    expect(listings.find((l) => l.body.machine === ref && l.body.session === APP_C)?.body.fields.owners).toEqual([A, B]);
+
+    // an owner added again changes nothing: no revision, no act kept
+    const again = await remote.addOwner({ address: address(), member: B });
+    expect(again).toMatchObject({ ok: true, results: [{ state: 'done', changed: false, policyRev: rev + 1, elsewhere: false }] });
+    expect(records.members.get(S)).toMatchObject({ owners: ['@machine', B], ownersProof: [ranS.rpc.proof], policyRev: rev + 1 });
   });
 });
