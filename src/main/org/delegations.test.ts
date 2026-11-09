@@ -781,6 +781,26 @@ describe('mid-flight endings', () => {
       await h.close();
     });
 
+    if (ending === 'sign-out') {
+      it('sign-out and a sign-in again while the mint is out: its late answer acts on nothing under the new sign-in', async () => {
+        const h = await harness();
+        const held = gate();
+        h.hub.beforeMint = held.wait;
+        const creating = h.create();
+        await held.reached;
+        h.signOut();
+        expect(h.part.status().creating, 'the sign-out ends the run at once, not at its late answer').toBe(false);
+        h.signInAgain();
+        held.open();
+        expect(await creating).toMatchObject({ ok: false });
+        expect(h.prompts).toEqual([]);
+        expect(h.signer.pending()).toBeNull();
+        expect((await argv(h)).filter((line) => line.includes('versions'))).toEqual([]);
+        expect((await h.view()).strayKeys.map((k) => k.id)).toEqual([lastMinted(h)!.id]);
+        await h.close();
+      });
+    }
+
     for (const op of ['add', 'version'] as const) {
       it(`${ending} while ${op === 'add' ? 'versions add' : 'describe'} is out: held, unpublished, its key pair dropped (only Discard)`, async () => {
         let h = await harness();
@@ -789,8 +809,13 @@ describe('mid-flight endings', () => {
         await waiting(h, op);
         const id = lastMinted(h)!.id;
         await end(h, ending);
+        if (ending === 'sign-out') h.signInAgain(); // signed in again before the late answer
+        const calls = (await argv(h)).length;
+        const publish = vi.spyOn(h.signer, 'publishHeld');
         await release(h, op);
         expect(await creating).toMatchObject({ ok: false });
+        expect(await argv(h), 'no gcloud call after the ending').toHaveLength(calls);
+        expect(publish, 'no publish after the ending').not.toHaveBeenCalled();
         h = await after(h, ending);
         await act(h, op, 'ok');
         expect(h.hub.posts).toEqual([]);
@@ -970,8 +995,10 @@ describe("drop's hub half", () => {
     h.hub.revokeAnswer = () => status(503, 'hub-updating');
     expect(await h.change({ kind: 'delegation.drop', id })).toMatchObject({ ok: true });
     expect(h.hub.revokes).toEqual([id]);
-    const row = (await h.view()).delegations.find((d) => d.id === id)!;
+    const dropping = await h.view();
+    const row = dropping.delegations.find((d) => d.id === id)!;
     expect(row).toMatchObject({ state: 'dropped', prefix: 'dc-', owners: [OWNER], hubBehind: 'revoke', hubProblem: { reason: 'updating' }, hub: { revoked: false } });
+    expect(dropping.strayKeys).toEqual([]); // the head's revoked holder names it
     h.hub.revokeAnswer = null;
     const posts = h.hub.posts.length;
     expect(await h.part.revokeHub(id)).toEqual({ ok: true });

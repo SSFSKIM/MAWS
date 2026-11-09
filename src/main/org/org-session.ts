@@ -635,7 +635,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
 
   // ---- the hub credential ----
 
-  function client(hub: string, cred: HubCredential): HubClient {
+  function client(hub: string, cred: HubCredential): HubClient & ProvisioningKeyRoutes {
     return hubClient({ url: hub, headers: () => Promise.resolve(hubHeaders(cred)), fetch: deps.fetch, timing: deps.timing });
   }
 

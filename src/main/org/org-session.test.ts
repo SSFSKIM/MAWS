@@ -173,6 +173,7 @@ class FakeHub {
   provisioningKeys: Array<{ id: string; label: string; prefix: string; created: string; expires: string; max_uses: number | null; uses: number; revoked: string | null; token: string }> = [];
   mintGate?: () => Promise<void>;
   revokeAnswer?: (id: string) => Answer | undefined;
+  renewGate?: () => Promise<void>;
 
   constructor(
     readonly url: string,
@@ -281,6 +282,7 @@ class FakeHub {
         return worker(200, { revoked: key.id });
       }
       if (method === 'POST' && provisioning[2] !== undefined) {
+        await this.renewGate?.();
         if (key === undefined) return worker(404, { error: 'unknown-key' });
         if (key.revoked !== null) return worker(410, { error: 'key-revoked' });
         const d = this.head.state.delegations.find((x) => x.id === key.id);
@@ -3506,6 +3508,7 @@ describe('M4c: delegations through the session', () => {
     await waitingFor('add');
     const id = hub.provisioningKeys[0].id;
     await session.close();
+    expect(registered(session).delegations.creating, 'the close ends the run at once, not at its late answer').toBe(false);
     await writeFile(join(bin, 'release-add'), '');
     expect(await creating).toMatchObject({ ok: false });
     await writeFile(join(bin, 'act-add'), 'ok');
@@ -3529,6 +3532,7 @@ describe('M4c: delegations through the session', () => {
     const change = { kind: 'delegation.renew' as const, id: d.id, expires: later };
     const shown = await session.preview(change);
     if (!shown.ok) throw new Error(JSON.stringify(shown));
+    hub.renewGate = () => new Promise((resolve) => setTimeout(resolve, 50)); // a hub half slower than the sign's answer
     expect(await session.change(change, shown.digest)).toMatchObject({ ok: true });
     expect(hub.provisioningKeys[0].expires).toBe(later);
     expect((await session.view())!.delegations[0]).toMatchObject({ expires: later, hub: { expires: later }, hubBehind: null });
