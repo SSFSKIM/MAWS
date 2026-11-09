@@ -124,7 +124,7 @@ describe('Settings › Org: the create sheet (M4c)', () => {
 
   it('a write that leaves the delegation unsent: its reason, and Write the code again, whose success reaches the page', async () => {
     let unsent = false;
-    renderSection(signing(ROOT, { signer: { ...signing(ROOT).signer! } }), {
+    renderSection(signing(ROOT), {
       'org.provisioningSecret.get': () => DEST,
       'org.view': () => viewWith({ delegations: unsent ? [UNSENT_ROW] : [] }),
       'org.delegation.create': () => {
