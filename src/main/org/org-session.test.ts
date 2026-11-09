@@ -2690,7 +2690,7 @@ describe('M4b: the machine changes', () => {
 describe('M4c: the delegation changes', () => {
   it('a delegation is created only through Create…: delegation.add from the page is refused before anything composes', async () => {
     const { session } = await signingRoot();
-    const change = { kind: 'delegation.add', id: memberId(), pub: (await generateSigningKey()).pub, prefix: 'dc-', expires: iso(Date.now() + 30 * DAY), maxUses: 10, offlineRevokeS: 0, owners: [A] } as const;
+    const change = { kind: 'delegation.add' as const, id: memberId(), pub: (await generateSigningKey()).pub, prefix: 'dc-', expires: iso(Date.now() + 30 * DAY), maxUses: 10, offlineRevokeS: 0, owners: [A] };
     const [posts, prompts] = [hub.posted.length, signing.prompts.length];
     expect(await session.preview(change)).toMatchObject({ ok: false, reason: 'invalid', detail: expect.stringContaining('Create'), findings: [] });
     expect(await session.change(change, 'A'.repeat(43))).toMatchObject({ ok: false, reason: 'invalid', detail: expect.stringContaining('Create') });
