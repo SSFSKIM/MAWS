@@ -73,6 +73,7 @@
   "org.channel.open",
   "org.channel.send",
   "org.delegation.create",
+  "org.delegation.readKeys",
   "org.delegation.renewHub",
   "org.delegation.revokeHub",
   "org.delegation.rewrite",

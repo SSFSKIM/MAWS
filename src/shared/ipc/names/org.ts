@@ -29,6 +29,7 @@ export const commands = [
   'org.delegation.rewrite',
   'org.delegation.renewHub',
   'org.delegation.revokeHub',
+  'org.delegation.readKeys',
   'org.provisioningSecret.get',
   'org.provisioningSecret.set',
   'org.provisioningSecret.reset',

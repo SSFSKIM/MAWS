@@ -22,6 +22,10 @@
 //   answer, a file or an error: every line here names ids, prefixes and versions.
 // - A failure at (4) or (5) leaves the slot unsent with its reason, and "Write the code again" (`rewrite`) runs (4) to
 //   (6) again while this run holds the key pair. After a sign-out or a relaunch only Discard is offered.
+// - Every answer names the run it belongs to (`DelegationRun`: the generation, the minted id, the held slot's hash) and
+//   the phase the transaction stopped in (`refused`, `minted`, `held`, `published`), read off the run itself, so a sheet
+//   words what happened and acts only on its own run (Task 5's fix wave, I1 and I4). A rewrite names the run, the id
+//   and the hash it was shown, and anything else answers `stale`.
 //
 // Electron-free: the session injects the signer, the hub (through delegation-hub.ts), gcloud's custody and the
 // destination's file.
@@ -38,7 +42,7 @@ import {
   prefixProblem,
   type SigningKey,
 } from '../../../apps/org-protocol/src/index.ts';
-import type { DelegationCreateInput, OrgChange, ProvisioningSecret, SignResult } from '@shared/ipc/schema/org';
+import type { DelegationCreateInput, DelegationPhase, DelegationResult, DelegationRewriteInput, OrgChange, ProvisioningSecret, SignResult } from '@shared/ipc/schema/org';
 import type { DelegationHub } from './delegation-hub';
 import { hubWords } from './delegation-hub';
 import type { DelegationsContext } from './delegations';
@@ -79,12 +83,12 @@ export function reservedBy(reservation: Reservation | null, id: string, key: Pic
 export interface DelegationCreate {
   /** A create (or a rewrite) under way. */
   creating(): boolean;
-  create(input: DelegationCreateInput): Promise<SignResult>;
-  rewrite(id: string): Promise<SignResult>;
+  create(input: DelegationCreateInput): Promise<DelegationResult>;
+  rewrite(input: DelegationRewriteInput): Promise<DelegationResult>;
   /** A Discard's marker: the run holding that slot ends (its custody dropped, its gcloud stopped). */
   discarded(marker: Unsent | null): void;
   reservation(): Reservation | null;
-  unsent(): { id: string; rewrite: boolean; problem: string | null } | null;
+  unsent(): { id: string; rewrite: boolean; problem: string | null; generation: number } | null;
   fence(): void;
   close(): void;
 }
@@ -111,6 +115,14 @@ type Run = {
   problem: string | null;
   /** A create or a rewrite of it is under way. */
   working: boolean;
+  /** The mint was asked and its answer lost: a key may have been minted (a stray, if so). */
+  mintLost: boolean;
+  /** The held sign's version, once signed. */
+  version: number | null;
+  /** Its code is in the secret, confirmed by describe. */
+  stored: boolean;
+  /** `publishHeld` cleared its marker: settlement owns the slot. */
+  published: boolean;
 };
 
 const DAY_S = 86_400;
@@ -127,6 +139,21 @@ function instant(text: string): string {
 
 function randomHex(bytes: number): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Where `r` stopped (null: before any run was reserved). */
+function phaseOf(r: Run | null): DelegationPhase {
+  if (r === null) return 'refused';
+  if (r.published) return 'published';
+  if (r.hash !== null) return 'held';
+  return r.id !== null || r.mintLost ? 'minted' : 'refused';
+}
+
+/** `result` as the answer of run `r` (null: refused before one was reserved): the run's identities and its phase. */
+function answerOf(r: Run | null, result: SignResult): DelegationResult {
+  const run = r === null ? null : { generation: r.generation, id: r.id, hash: r.hash };
+  if (result.ok) return { ...result, run: run! };
+  return { ...result, phase: phaseOf(r), stored: r?.stored ?? false, ...(r?.version == null ? {} : { version: r.version }), run };
 }
 
 /** A sign or publish outcome as `org.*` carries it (`signResult`'s rules; a held sign's hash never leaves). */
@@ -167,7 +194,19 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
   const stopped = (what: string): SignResult => ({ ok: false, reason: 'not-root', detail: `${ENDED}: ${what}` });
   const strayLeft = (id: string) => `nothing was signed; the key it minted (${id}) shows as a stray key`;
 
-  async function create(input: DelegationCreateInput): Promise<SignResult> {
+  async function create(input: DelegationCreateInput): Promise<DelegationResult> {
+    const refused = reserve(input);
+    if (!('run' in refused)) return answerOf(null, refused);
+    const r = refused.run;
+    try {
+      return answerOf(r, await createRun(r, input, refused.ttl, refused.dest, refused.secrets));
+    } finally {
+      settleRun(r);
+    }
+  }
+
+  /** The create's refusals before anything is minted, then its run, reserved synchronously (before the create's first await). */
+  function reserve(input: DelegationCreateInput): SignResult | { run: Run; ttl: number; dest: ProvisioningSecret; secrets: SecretStore } {
     if (closed) return { ok: false, reason: 'busy', detail: 'the org session is closed' };
     if (run !== null && run.working) return { ok: false, reason: 'busy', detail: 'a delegation is being created: wait for it to finish' };
     if (deps.busy()) return { ok: false, reason: 'busy', detail: 'another org attempt is under way' };
@@ -195,15 +234,26 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
     if (ctx.client === null) return { ok: false, reason: 'hub', detail: `the hub sign-in has ended: sign in again to create a delegation (${nothing})` };
     // The run is reserved before the first await: a second create meanwhile answers `busy`.
     if (run !== null) end(run);
-    const r: Run = { generation: ++generations, signIn: ctx.signIn, prefix: input.prefix, since: now() - CLOCK_SLACK_MS, id: null, custody: null, stop: new AbortController(), hash: null, problem: null, working: true };
+    const r: Run = {
+      generation: ++generations,
+      signIn: ctx.signIn,
+      prefix: input.prefix,
+      since: now() - CLOCK_SLACK_MS,
+      id: null,
+      custody: null,
+      stop: new AbortController(),
+      hash: null,
+      problem: null,
+      working: true,
+      mintLost: false,
+      version: null,
+      stored: false,
+      published: false,
+    };
     run = r;
     log(`${r.generation}: creating delegation ${input.prefix}`);
     changed();
-    try {
-      return await createRun(r, input, ttl, dest.value, deps.secrets);
-    } finally {
-      settleRun(r);
-    }
+    return { run: r, ttl, dest: dest.value, secrets: deps.secrets };
   }
 
   /** After a create or a rewrite: the run stays only while it holds an unsent slot (its key pair, or its reason). */
@@ -251,6 +301,7 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
     if (!minted.ok) {
       // A mint whose answer was lost may still have minted: such a key shows as a stray key.
       log(`${r.generation}: the hub did not mint (${hubWords(minted)})`);
+      r.mintLost = minted.kind === 'unreachable';
       if (!live(r)) return { ok: false, result: stopped('nothing was signed') };
       return { ok: false, result: { ok: false, reason: 'hub', detail: `the hub did not mint the delegation's key (${hubWords(minted)}): nothing was signed` } };
     }
@@ -331,6 +382,7 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
     }
     if (!('hash' in outcome)) return { ok: false, reason: 'invalid', detail: 'the delegation was signed but not held: nothing was stored' };
     r.hash = outcome.hash;
+    r.version = outcome.version;
     log(`${r.generation}: delegation ${id} signed at version ${outcome.version}, held unsent until its code is stored`);
     changed();
     if (!live(r)) return stopped('the delegation is signed and held unsent, its code not stored: only Discard');
@@ -384,6 +436,7 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
     const described = await secrets.describeVersion(dest, version, r.stop.signal);
     if (!live(r)) return stopped(unpublished);
     if (!described.ok) return held(added.ok ? described.detail : `${added.detail}; ${described.detail}`);
+    r.stored = true;
     // (6) Published. Custody goes first: from here on nothing needs it, since a published slot is never written again.
     const signer = deps.signer();
     if (signer === null) return stopped(unpublished);
@@ -392,6 +445,7 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
     const published = await signer.publishHeld(r.hash!);
     const slot = deps.signer()?.pending() ?? null;
     const stillHeld = slot !== null && slot.hash === r.hash && slot.unsent !== null;
+    r.published = !stillHeld;
     if (!live(r)) return stopped(stillHeld ? unpublished : 'its publish began before the run ended: it settles as any pending proposal');
     if (stillHeld) {
       const refusal = asResult(published);
@@ -402,24 +456,29 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
     return asResult(published, `the delegation is published and its code stored (version ${version}): it settles as any pending proposal`);
   }
 
-  async function rewrite(id: string): Promise<SignResult> {
-    if (closed) return { ok: false, reason: 'busy', detail: 'the org session is closed' };
+  async function rewrite(asked: DelegationRewriteInput): Promise<DelegationResult> {
+    const { generation, id, hash } = asked;
+    if (closed) return answerOf(null, { ok: false, reason: 'busy', detail: 'the org session is closed' });
     const r = run;
+    // Only the run, the delegation and the slot the asker was shown: another run's (a replacement since) is never written.
+    if (r === null || r.generation !== generation || r.id !== id || r.hash !== hash) {
+      return answerOf(null, { ok: false, reason: 'stale', detail: 'that create is no longer the one this Mac runs (a Discard, a new create, a sign-out or a relaunch since): nothing was written' });
+    }
     const gone: SignResult = { ok: false, reason: 'stale', detail: "this Mac no longer holds the delegation's key pair (a sign-out, a relaunch or a refused publish since it was signed): only Discard" };
-    if (r === null || r.id !== id || r.custody === null || r.hash === null) return gone;
-    if (r.working) return { ok: false, reason: 'busy', detail: 'its code is being written' };
+    if (r.custody === null) return answerOf(r, gone);
+    if (r.working) return answerOf(r, { ok: false, reason: 'busy', detail: 'its code is being written' });
     const slot = deps.signer()?.pending() ?? null;
     if (!live(r) || slot === null || slot.hash !== r.hash || slot.unsent === null) {
       end(r);
-      return gone;
+      return answerOf(r, gone);
     }
     const dest = destination();
-    if (!dest.ok) return dest.refusal;
-    if (deps.secrets === null) return { ok: false, reason: 'secret-store', detail: 'secret-store: this build stores no provisioning code' };
+    if (!dest.ok) return answerOf(r, dest.refusal);
+    if (deps.secrets === null) return answerOf(r, { ok: false, reason: 'secret-store', detail: 'secret-store: this build stores no provisioning code' });
     r.working = true;
     log(`${r.generation}: writing delegation ${id}'s code again`);
     try {
-      return await storeAndPublish(r, dest.value, deps.secrets);
+      return answerOf(r, await storeAndPublish(r, dest.value, deps.secrets));
     } finally {
       settleRun(r);
     }
@@ -437,7 +496,7 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
       if (marker !== null && marker.kind === 'delegation' && run !== null && run.id === marker.id) end(run);
     },
     reservation: () => (run === null || run.hash !== null ? null : { id: run.id, prefix: run.prefix, since: new Date(run.since).toISOString() }),
-    unsent: () => (run === null || run.id === null || run.hash === null ? null : { id: run.id, rewrite: run.custody !== null && !run.working && live(run), problem: run.problem }),
+    unsent: () => (run === null || run.id === null || run.hash === null ? null : { id: run.id, rewrite: run.custody !== null && !run.working && live(run), problem: run.problem, generation: run.generation }),
     fence,
     close() {
       fence();

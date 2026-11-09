@@ -33,7 +33,7 @@ import {
 
 vi.mock('electron', () => ({ systemPreferences: { promptTouchID: () => Promise.reject(new Error('no system prompt in the suites')) } }));
 
-import { DELEGATION_MAX_USES, DELEGATION_TTL_DAYS, OrgViewSchema, SignResultSchema, type DelegationCreateInput, type OrgChange, type OrgView, type ProvisioningSecret, type SignResult } from '@shared/ipc/schema/org';
+import { DELEGATION_MAX_USES, DELEGATION_TTL_DAYS, DelegationResultSchema, OrgViewSchema, type DelegationCreateInput, type DelegationResult, type OrgChange, type OrgView, type ProvisioningSecret, type SignResult } from '@shared/ipc/schema/org';
 import { createStateSigner, type Confirmation, type StepUpPrompt } from '../device/step-up';
 import { checkSuccessor } from './checks';
 import { createDelegations, type Delegations } from './delegations';
@@ -291,7 +291,9 @@ type Harness = {
   online: boolean;
   signedIn: boolean;
   signIn: number;
-  create(input?: Partial<DelegationCreateInput>): Promise<SignResult>;
+  create(input?: Partial<DelegationCreateInput>): Promise<DelegationResult>;
+  /** "Write the code again" for `id`, naming the run and the slot as the page would show them now. */
+  rewrite(id: string): Promise<DelegationResult>;
   view(): Promise<OrgView>;
   signOut(): void;
   signInAgain(): void;
@@ -411,6 +413,7 @@ async function harness(options: { destination?: ProvisioningSecret | null; gclou
     });
     const kept = <T>(answer: Promise<T>) => answer.then((a) => (h.answers.push(a), a));
     h.create = (input = {}) => kept(h.part.create({ ...INPUT, ...input }));
+    h.rewrite = (id) => kept(h.part.rewrite({ id, generation: h.part.viewInputs().unsent?.generation ?? 1, hash: h.signer.pending()?.hash ?? 'no-slot' }));
     h.view = async () => {
       await h.part.readKeys();
       const file = store.get();
@@ -525,10 +528,10 @@ describe('the create transaction', () => {
     const before = Date.now();
     const answer = await h.create();
     const after = Date.now();
-    expect(SignResultSchema.parse(answer)).toEqual(answer);
+    expect(DelegationResultSchema.parse(answer)).toEqual(answer);
     const minted = lastMinted(h)!;
     expect(h.hub.mints).toEqual([{ label: 'devcloud VMs', prefix: 'dc-', ttl_s: 30 * 86_400 }]); // uncapped: no max_uses
-    expect(answer).toEqual({ ok: true, version: 2, secret: { version: '7', createTime: '2026-11-08T12:00:00.123Z' } });
+    expect(answer).toEqual({ ok: true, version: 2, secret: { version: '7', createTime: '2026-11-08T12:00:00.123Z' }, run: { generation: 1, id: minted.id, hash: expect.any(String) } });
     // one Touch ID, naming the destination in its lines
     expect(h.prompts).toHaveLength(1);
     expect(h.prompts[0].summary).toBe('create delegation dc-');
@@ -575,7 +578,7 @@ describe('the create transaction', () => {
     await act(h, 'add', 'fail:INTERNAL: something broke');
     await h.create({ prefix: 'ci-' });
     await act(h, 'add', 'ok');
-    await h.part.rewrite(lastMinted(h)!.id);
+    await h.rewrite(lastMinted(h)!.id);
     await h.view();
     const stdin = await recorded(h, 'stdin.log');
     const codes = stdin.split('\n').filter((line) => line.startsWith('smns-provision-v2.'));
@@ -601,7 +604,7 @@ describe('the create transaction', () => {
     expect(row).toMatchObject({ state: 'unsent', unsent: { rewrite: true, problem: (failed as { detail: string }).detail }, hubBehind: null });
     expect((await h.view()).strayKeys).toEqual([]); // the unsent slot names it
     await act(h, 'add', 'ok');
-    expect(await h.part.rewrite(id)).toMatchObject({ ok: true, secret: { version: '7' } });
+    expect(await h.rewrite(id)).toMatchObject({ ok: true, secret: { version: '7' } });
     expect(inEffect(h, id)).toBe(true);
     expect(h.prompts).toHaveLength(1); // no second Touch ID
     expect((await h.view()).delegations.find((d) => d.id === id)).toMatchObject({ state: 'in-effect', unsent: null });
@@ -630,7 +633,7 @@ describe('the create transaction', () => {
     h = again;
     expect((await h.view()).delegations).toMatchObject([{ id, state: 'unsent', unsent: { rewrite: false, problem: null } }]);
     await act(h, 'add', 'ok');
-    expect(await h.part.rewrite(id)).toMatchObject({ ok: false, reason: 'stale' });
+    expect(await h.rewrite(id)).toMatchObject({ ok: false, reason: 'stale' });
     expect(h.signer.pending()?.unsent).toEqual({ kind: 'delegation', id });
     await h.discard();
     expect(h.hub.key(id)?.revoked).not.toBeNull();
@@ -865,7 +868,7 @@ describe('mid-flight endings', () => {
         const view = await h.view();
         expect(view.delegations).toMatchObject([{ id, state: 'unsent', unsent: { rewrite: false } }]);
         expect(view.strayKeys).toEqual([]);
-        expect(await h.part.rewrite(id)).toMatchObject({ ok: false, reason: 'stale' });
+        expect(await h.rewrite(id)).toMatchObject({ ok: false, reason: 'stale' });
         expect(await h.signer.publishHeld(h.signer.pending()!.hash)).toMatchObject({ ok: false, reason: 'stale' });
         expect(h.hub.posts).toEqual([]);
         await h.close();
@@ -1152,7 +1155,7 @@ describe('the fix wave: custody ends with its run (I1)', () => {
     await held.reached;
     const id = lastMinted(h)!.id;
     expect(() => h.codes[0].reveal()).toThrow();
-    expect(await h.part.rewrite(id), 'no key pair left to write the code from').toMatchObject({ ok: false, reason: 'stale' });
+    expect(await h.rewrite(id), 'no key pair left to write the code from').toMatchObject({ ok: false, reason: 'stale' });
     const asked = h.signIn;
     h.signOut();
     h.signInAgain();
@@ -1290,4 +1293,113 @@ describe('the fix wave: a hub continuation belongs to the sign-in that asked (I3
       await h.close();
     });
   }
+});
+
+describe("Task 5's fix wave: every answer names its run and its phase (I1, I4)", () => {
+  it('a create answers the run main issued (generation, id, hash) and where it stopped: refused, minted, held, held and stored, published', async () => {
+    // refused before anything was minted: no run
+    const none = await harness({ destination: null });
+    expect(await none.create()).toMatchObject({ ok: false, reason: 'secret-store', phase: 'refused', stored: false, run: null });
+    await none.close();
+
+    const h = await harness();
+    // minted and not signed: Touch ID refused, the key revoked
+    h.answer = { ok: false, reason: 'cancelled' };
+    const cancelled = await h.create();
+    expect(DelegationResultSchema.parse(cancelled)).toEqual(cancelled);
+    expect(cancelled).toMatchObject({ ok: false, reason: 'cancelled', phase: 'minted', stored: false, run: { generation: 1, id: lastMinted(h)!.id, hash: null } });
+    h.answer = { ok: true };
+    // signed and held, its code not stored
+    await act(h, 'add', 'fail:INTERNAL: down');
+    const held = await h.create({ prefix: 'ci-' });
+    expect(held).toMatchObject({ ok: false, reason: 'unsent', phase: 'held', stored: false, version: 2, run: { generation: 2, id: lastMinted(h)!.id, hash: h.signer.pending()!.hash } });
+    await h.discard();
+    await act(h, 'add', 'ok');
+    // signed and held, its code stored, its publish refused while the run stands: Discard only
+    const publishHeld = h.signer.publishHeld;
+    h.signer.publishHeld = async () => ({ ok: false, reason: 'stale', detail: 'refused for the test' });
+    const stored = await h.create({ prefix: 'gpu-' });
+    expect(stored).toMatchObject({ ok: false, reason: 'unsent', phase: 'held', stored: true, run: { generation: 3, hash: h.signer.pending()!.hash } });
+    expect((await h.view()).delegations.find((d) => d.state === 'unsent')?.unsent).toMatchObject({ rewrite: false, generation: 3 });
+    h.signer.publishHeld = publishHeld;
+    await h.discard();
+    // published, the post's answer failed: settlement owns it, an ordinary pending slot
+    await act(h, 'version', 'wait');
+    const published = h.create({ prefix: 'web-' });
+    await waiting(h, 'version');
+    h.online = false;
+    await release(h, 'version');
+    const answer = await published;
+    expect(answer).toMatchObject({ ok: false, phase: 'published', stored: true, run: { generation: 4 } });
+    expect(h.signer.pending()).toMatchObject({ unsent: null });
+    await h.close();
+  });
+
+  it("a rewrite acts only on the run, delegation and slot it names: the first window's identity, after a Discard and a replacement create, is stale and writes nothing", async () => {
+    const h = await harness();
+    await act(h, 'add', 'fail:INTERNAL: down');
+    const first = await h.create();
+    expect(first).toMatchObject({ ok: false, phase: 'held', run: { generation: 1 } });
+    const shown = (first as Extract<DelegationResult, { ok: false }>).run!;
+    // another window discards it and creates its own
+    await h.discard();
+    const second = await h.create({ prefix: 'ci-' });
+    const replaced = (second as Extract<DelegationResult, { ok: false }>).run!;
+    expect(replaced).toMatchObject({ generation: 2 });
+    await act(h, 'add', 'ok');
+    const adds = (await argv(h)).filter((l) => l.includes('versions add')).length;
+    for (const asked of [
+      { generation: shown.generation, id: shown.id!, hash: shown.hash! },
+      { generation: shown.generation, id: replaced.id!, hash: replaced.hash! },
+      { generation: replaced.generation, id: shown.id!, hash: replaced.hash! },
+      { generation: replaced.generation, id: replaced.id!, hash: shown.hash! },
+    ]) {
+      expect(await h.part.rewrite(asked)).toMatchObject({ ok: false, reason: 'stale', run: null });
+    }
+    expect((await argv(h)).filter((l) => l.includes('versions add'))).toHaveLength(adds); // nothing written
+    expect(h.signer.pending()?.unsent).toEqual({ kind: 'delegation', id: replaced.id });
+    // the replacement's own identity writes it
+    expect(await h.part.rewrite({ generation: replaced.generation, id: replaced.id!, hash: replaced.hash! })).toMatchObject({ ok: true, run: { generation: 2, id: replaced.id } });
+    await h.close();
+  });
+});
+
+describe("Task 5's fix wave: a failed key read's Retry reads now (I3)", () => {
+  it('within the freshness window after a failure, a forced read asks the hub again (the page\'s ifStale read does not), under its own sign-in', async () => {
+    const h = await harness();
+    expect(await h.create()).toMatchObject({ ok: true });
+    h.hub.listAnswer = () => status(503, 'hub-updating');
+    await h.part.readKeys();
+    expect(h.part.viewInputs().keysFailed).toBe(true);
+    h.hub.listAnswer = null;
+    const lists = () => h.hub.calls.filter((c) => c.method === 'provisioningKeys').length;
+    const before = lists();
+    await h.part.readKeys({ ifStale: true }); // the page shown again within 30 s: no read
+    expect(lists()).toBe(before);
+    expect(h.part.viewInputs().keysFailed).toBe(true);
+    await h.part.readKeys(); // Retry
+    expect(lists()).toBe(before + 1);
+    expect(h.part.viewInputs().keysFailed).toBe(false);
+    expect(h.hub.calls.at(-1)).toEqual({ method: 'provisioningKeys', credential: h.signIn });
+    await h.close();
+  });
+});
+
+describe("Task 5's fix wave: what the renderer receives of a failed write (Minor 1)", () => {
+  it("a create whose gcloud stderr carried the code answers a detail without it", async () => {
+    const h = await harness();
+    // versions add reads the code, then echoes it back on stderr and fails
+    const fake = await readFile(join(h.bin, 'gcloud'), 'utf8');
+    await writeFile(join(h.bin, 'gcloud'), fake.replace('  fail:*) printf', '  echo-fail) printf \'ERROR: (gcloud.secrets.versions.add) INVALID_ARGUMENT: bad payload %s\\n\' "$(tail -n 1 "$dir/stdin.log")" >&2; exit 1 ;;\n  fail:*) printf'));
+    await act(h, 'add', 'echo-fail');
+    const answer = await h.create();
+    expect(DelegationResultSchema.parse(answer)).toEqual(answer);
+    expect(answer).toMatchObject({ ok: false, reason: 'unsent', phase: 'held' });
+    const code = (await recorded(h, 'stdin.log')).split('\n').find((line) => line.startsWith('smns-provision-v2.'))!;
+    expect(code).toBeDefined();
+    const decoded = decodeProvisioningCodeV2(code);
+    const sent = JSON.stringify([answer, await h.view()]);
+    for (const piece of [code, code.slice(18, 34), decoded.token, decoded.delegation.privateJwk.d!]) expect(sent.includes(piece), 'a piece of the code in what the renderer receives').toBe(false);
+    await h.close();
+  });
 });

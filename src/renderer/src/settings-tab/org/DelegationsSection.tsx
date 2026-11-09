@@ -4,8 +4,9 @@
 //
 // - Each delegation is a row (DelegationRow.tsx): its prefix, owners, expiry in words, uses, certified machines, the
 //   hub's side of it with Retry where a hub half is left, and an unsent one's reason with its actions.
-// - The hub's key list is an admin's read: a list that didn't read says so here, and never reads as "no keys"; the stray
-//   keys it shows (hub keys no delegation names) each carry Revoke behind a confirmation.
+// - The hub's key list is an admin's read: a list that didn't read says so here, never reading as "no keys", with Retry
+//   (`org.delegation.readKeys`, a read now under this sign-in); the stray keys it shows (hub keys no delegation names)
+//   each carry Revoke behind a confirmation.
 // - New delegation: Create opens the create sheet (DelegationSheet.tsx) while this Mac may sign, an admin's, a code
 //   destination set, no other create running and no signed state pending; otherwise it says why. Renew and Drop go
 //   through the change sheet. The section's signing acts end in one line on this row, since the row that sent one may
@@ -72,7 +73,6 @@ export function DelegationsSection({ status, view }: { status: Registered; view:
   const reading = destination.reading;
   const blocked =
     reading === null ? ORG.createNoDestination : reading !== undefined && 'damaged' in reading ? ORG.createDamaged : creating ? ORG.createWaits : slot !== null ? ORG.createPending : null;
-  const unsent = view.delegations.find((d) => d.state === 'unsent') ?? null;
   const { at, failed: unread } = view.hubKeys;
   return (
     <div data-org-section="delegations" className="mt-2">
@@ -81,11 +81,7 @@ export function DelegationsSection({ status, view }: { status: Registered; view:
       {view.delegations.map((delegation) => (
         <DelegationRow key={delegation.id} delegation={delegation} members={view.members} hubSide={admin} hubKeys={view.hubKeys} may={may} signedIn={signedIn} slot={slot} creating={creating} ask={ask} said={setOutcome} />
       ))}
-      {admin && unread && (
-        <Setting label={ORG.hubKeys}>
-          <span className="text-warning">{ORG.hubKeysFailed(at === null ? null : formatDayTime(Date.parse(at)))}</span>
-        </Setting>
-      )}
+      {admin && unread && <HubKeysUnread at={at} signedIn={signedIn} />}
       {admin && view.strayKeys.length > 0 && (
         <Setting label={ORG.strayKeys} note={ORG.strayNote}>
           {view.strayKeys.map((stray) => (
@@ -112,8 +108,37 @@ export function DelegationsSection({ status, view }: { status: Registered; view:
       {asked !== null && (
         <ChangeSheet title={asked.title} change={asked.change} members={view.members} may={may} signIn={signIn} onClose={() => setAsked(null)} onSigned={(version) => setOutcome({ text: ORG.signed(version), refused: false })} />
       )}
-      {sheetOpen && <DelegationSheet destination={dest} members={view.members} may={may} signIn={signIn} creating={creating} unsent={unsent} onClose={() => setSheetOpen(false)} onCreated={setOutcome} />}
+      {sheetOpen && <DelegationSheet destination={dest} members={view.members} may={may} signIn={signIn} creating={creating} delegations={view.delegations} slot={slot} onClose={() => setSheetOpen(false)} onCreated={setOutcome} />}
     </div>
+  );
+}
+
+// A hub key list that didn't read, with Retry: a read now, past main's freshness, under this sign-in. The view follows
+// main's own rev; a read that failed again says so here.
+function HubKeysUnread({ at, signedIn }: { at: string | null; signedIn: boolean }) {
+  const open = useOpen();
+  const [acting, setActing] = useState(false);
+  const [outcome, setOutcome] = useState<Outcome>(null);
+  const retry = () => {
+    setActing(true);
+    setOutcome(null);
+    void ipc.invoke('org.delegation.readKeys', undefined).then((result) => {
+      if (!open.current) return;
+      setActing(false);
+      if (!result.ok) failed(result.error);
+      else if (result.value.failed) setOutcome({ text: ORG.hubKeysStillFailed, refused: true });
+    });
+  };
+  return (
+    <Setting label={ORG.hubKeys}>
+      <span className="text-warning">{ORG.hubKeysFailed(at === null ? null : formatDayTime(Date.parse(at)))}</span>
+      {signedIn && (
+        <button type="button" className={TEXT_ACTION} disabled={acting} onClick={retry}>
+          {ORG.retry}
+        </button>
+      )}
+      <OutcomeLine outcome={outcome} />
+    </Setting>
   );
 }
 

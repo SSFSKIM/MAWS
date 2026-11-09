@@ -791,10 +791,12 @@ export const ORG = {
   },
   hubHalfNone: 'Nothing is left to do at the hub.',
   hubKeys: 'Hub keys',
+  // A failed read of the hub's key list, with Retry beside it (a read now, `org.delegation.readKeys`)
   hubKeysFailed: (at: string | null) =>
     at === null
-      ? 'The hub’s key list couldn’t be read, so each delegation’s hub key is unknown, not missing. It is read again the next time this page opens.'
-      : `The hub’s key list couldn’t be read: each delegation’s hub key shows as of ${at}. It is read again the next time this page opens.`,
+      ? 'The hub’s key list couldn’t be read, so each delegation’s hub key is unknown, not missing. Retry reads it again.'
+      : `The hub’s key list couldn’t be read: each delegation’s hub key shows as of ${at}. Retry reads it again.`,
+  hubKeysStillFailed: 'It still couldn’t be read: Retry once the hub answers.',
   // An unsent delegation: signed into the pending slot, its code not stored, so not published
   unsentLine: 'Signed, not published: its provisioning code isn’t stored yet.',
   writeAgain: 'Write the code again',
@@ -903,6 +905,15 @@ export const ORG = {
     unsent: 'Signed, but its code isn’t stored, so it isn’t published: Write the code again.',
   },
   createUnsentDiscard: 'This Mac can’t write it again: close this and Discard it from its row.',
+  // Where a create stopped (main's `phase`), each with what is left to do
+  phaseMinted: 'Nothing was signed. Any key it minted was revoked, or, if the hub didn’t take the revoke, it shows under Stray hub keys, to revoke there.',
+  phaseHeld: (version: number | undefined) => `Signed${version === undefined ? '' : ` as version ${version}`}, not published: its provisioning code isn’t stored yet.`,
+  phaseHeldStored: (version: number | undefined) => `Signed${version === undefined ? '' : ` as version ${version}`} and its code stored, but its publish was refused, so it stays unsent.`,
+  heldWriteAgain: 'Write the code again, or close this and Discard it from its row.',
+  heldDiscardOnly: 'Discard it, then create the delegation again.',
+  phasePublished: (version: number | undefined) =>
+    `Published${version === undefined ? '' : ` as version ${version}`}, its code stored. It settles as any pending state once the hub takes it (Org › Pending): nothing more to do here.`,
+  createRunGone: 'This create is no longer the one this Mac runs (a Discard, another create or a sign-out since): nothing more to do here.',
   createSignInEnded: 'The sign-in this sheet opened under ended. Close it to create again.',
   // Renew: a new expiry in days from now, never past the hub's cap; the checks refuse the rest before Touch ID
   renewNow: (date: string) => `It expires ${date}.`,

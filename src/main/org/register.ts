@@ -23,6 +23,7 @@ import type {
   DropRetryResult,
   EnrollStartResult,
   GrantRegrantResult,
+  DelegationResult,
   HubHalfResult,
   GrantSetResult,
   OrgAttempt,
@@ -66,6 +67,7 @@ type OrgCommand =
   | 'org.delegation.rewrite'
   | 'org.delegation.renewHub'
   | 'org.delegation.revokeHub'
+  | 'org.delegation.readKeys'
   | 'org.provisioningSecret.get'
   | 'org.provisioningSecret.set'
   | 'org.provisioningSecret.reset'
@@ -135,10 +137,12 @@ export function registerOrgHandlers(deps: {
     deps.register('org.enroll.cancel', () => ({ ok: false, reason: 'not-current', detail: 'MAWS_DEV_ORG is in force' }));
     deps.register('org.drop.retry', () => unretried);
     const unhalved: HubHalfResult = { ok: false, reason: 'none', detail: 'MAWS_DEV_ORG is in force' };
-    deps.register('org.delegation.create', () => unsigned);
-    deps.register('org.delegation.rewrite', () => unsigned);
+    const undelegated: DelegationResult = { ok: false, reason: 'busy', detail: 'MAWS_DEV_ORG is in force', phase: 'refused', stored: false, run: null };
+    deps.register('org.delegation.create', () => undelegated);
+    deps.register('org.delegation.rewrite', () => undelegated);
     deps.register('org.delegation.renewHub', () => unhalved);
     deps.register('org.delegation.revokeHub', () => unhalved);
+    deps.register('org.delegation.readKeys', () => ({ at: null, failed: false }));
     const ungranted: GrantSetResult & GrantRegrantResult = { ok: false, reason: 'busy', detail: 'MAWS_DEV_ORG is in force' };
     deps.register('org.grants.view', ({ ref }) => ({ ok: false, ref, reason: 'signed-out' }));
     deps.register('org.grants.set', () => ungranted);
@@ -170,9 +174,10 @@ export function registerOrgHandlers(deps: {
   deps.register('org.enroll.cancel', (input, { client }) => service.enrollCancel(input, client.id));
   deps.register('org.drop.retry', ({ name }) => service.dropRetry(name));
   deps.register('org.delegation.create', (input) => service.delegationCreate(input));
-  deps.register('org.delegation.rewrite', ({ id }) => service.delegationRewrite(id));
+  deps.register('org.delegation.rewrite', (input) => service.delegationRewrite(input));
   deps.register('org.delegation.renewHub', ({ id }) => service.delegationRenewHub(id));
   deps.register('org.delegation.revokeHub', ({ id }) => service.delegationRevokeHub(id));
+  deps.register('org.delegation.readKeys', () => service.delegationReadKeys());
   deps.register('org.grants.view', (input) => service.grantsView(input));
   deps.register('org.grants.set', (input) => service.grantsSet(input));
   deps.register('org.grants.regrant', (input) => service.grantsRegrant(input));

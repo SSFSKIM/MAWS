@@ -13,10 +13,13 @@
 //   step. A key list that didn't read is "isn't read yet", never "no key".
 // - An unsent delegation (signed into the pending slot, its code not stored): its reason, "Write the code again" while
 //   this run holds its key pair (`unsent.rewrite`), and Discard (the slot's, by its hash, behind a confirmation saying
-//   its minted key is revoked with it), which is all a relaunched Mac offers.
+//   its minted key is revoked with it), which is all a relaunched Mac offers. Both act only on the slot that holds this
+//   row's delegation (the status's `pending.delegation`), so a view not yet refreshed after another window's Discard
+//   and a new proposal offers neither for the slot that replaced it; Write again names main's run, the row and that
+//   slot, and its answer reads by where it stopped (Task 5's fix wave, I2 and I4).
 import { useState } from 'react';
 import { formatAgo, formatDate, formatDayTime } from '@shared/app/date-format';
-import type { OrgChange, OrgDelegationRow, OrgView, SignResult } from '@shared/ipc/schema/org';
+import type { DelegationResult, OrgChange, OrgDelegationRow, OrgView } from '@shared/ipc/schema/org';
 import { useNow } from '../../app/use-now';
 import { GatewaySheet } from '../../gateway/GatewaySheet';
 import { ipc } from '../../ipc/client';
@@ -61,7 +64,7 @@ type RowProps = {
   hubKeys: OrgView['hubKeys'];
   may: boolean;
   signedIn: boolean;
-  /** The pending slot (signed in), which an unsent delegation is; Discard names its hash. */
+  /** The pending slot (signed in); an unsent row acts only on one holding its delegation, and Discard names its hash. */
   slot: Pending | null;
   /** A create or a write of this Mac's is under way. */
   creating: boolean;
@@ -76,8 +79,11 @@ export function DelegationRow({ delegation: d, members, hubSide, hubKeys, may, s
   const [outcome, setOutcome] = useState<Outcome>(null);
   // The slot Discard was pressed for, by its hash: the confirmation is of that one proposal.
   const [discarding, setDiscarding] = useState<string | null>(null);
-  if (discarding !== null && slot?.hash !== discarding) setDiscarding(null);
-  const asked = slot !== null && slot.hash === discarding ? slot : null;
+  // The slot holding this row's delegation, the only one its Discard and Write again act on.
+  const own = slot !== null && slot.delegation === d.id ? slot : null;
+  if (discarding !== null && own?.hash !== discarding) setDiscarding(null);
+  const asked = own !== null && own.hash === discarding ? own : null;
+  const generation = d.unsent?.generation ?? null;
 
   const hub = hubSide ? hubLine(d, hubKeys, now) : null;
   const problem = hubSide ? problemLine(d, now) : null;
@@ -94,17 +100,20 @@ export function DelegationRow({ delegation: d, members, hubSide, hubKeys, may, s
       else if (!result.value.ok && result.value.reason === 'none') setOutcome({ text: ORG.hubHalfNone, refused: false });
     });
   };
-  const rewrite = () => {
+  const rewrite = (run: { generation: number; id: string; hash: string }) => {
     setActing(true);
     setOutcome(null);
-    void ipc.invoke('org.delegation.rewrite', { id: d.id }).then((result) => {
+    void ipc.invoke('org.delegation.rewrite', run).then((result) => {
       setActing(false);
       if (!result.ok) failed(result.error);
       else written(result.value);
     });
   };
-  const written = (result: SignResult) => {
+  // A published answer goes to the section (the row turns as it settles); a held one stays here.
+  const written = (result: DelegationResult) => {
     if (result.ok) said({ text: result.secret === undefined ? ORG.signed(result.version) : ORG.codeStored(d.prefix, result.version, result.secret.version, formatDayTime(Date.parse(result.secret.createTime))), refused: false });
+    else if (result.phase === 'published') said({ text: [ORG.phasePublished(result.version), result.detail].filter((part) => part !== undefined).join(' · '), refused: false });
+    else if (result.phase === 'held' && result.stored) setOutcome(refusal(ORG.phaseHeldStored(result.version), ORG.heldDiscardOnly, result.detail));
     else if (result.reason === 'unsent') setOutcome({ text: ORG.stillUnsent, refused: true });
     else setOutcome(refusal(ORG.notWritten, ORG.rewriteReasons[result.reason], result.detail));
   };
@@ -155,13 +164,13 @@ export function DelegationRow({ delegation: d, members, hubSide, hubKeys, may, s
         <div className="flex min-w-0 basis-full flex-wrap items-center gap-2">
           <span className="text-warning">{d.unsent.rewrite ? ORG.unsentLine : ORG.unsentDiscardOnly}</span>
           {d.unsent.problem !== null && <span className="basis-full text-fg-muted">{d.unsent.problem}</span>}
-          {d.unsent.rewrite && may && (
-            <button type="button" className={TEXT_ACTION} disabled={acting || creating} onClick={rewrite}>
+          {d.unsent.rewrite && may && own !== null && generation !== null && (
+            <button type="button" className={TEXT_ACTION} disabled={acting || creating} onClick={() => rewrite({ generation, id: d.id, hash: own.hash })}>
               {acting ? ORG.writing : ORG.writeAgain}
             </button>
           )}
-          {slot !== null && (
-            <button type="button" className={TEXT_ACTION} disabled={acting} onClick={() => setDiscarding(slot.hash)}>
+          {own !== null && (
+            <button type="button" className={TEXT_ACTION} disabled={acting} onClick={() => setDiscarding(own.hash)}>
               {ORG.discard}
             </button>
           )}

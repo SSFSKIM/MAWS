@@ -59,7 +59,11 @@ export const OrgSignerStatusSchema = z
     stepUpKid: z.string(),
     due: z.boolean(),
     ageDays: z.number().int().nullable(),
-    pending: z.strictObject({ version: z.number().int().positive(), hash: z.string(), fork: z.boolean(), exposed: z.boolean(), refused: z.string().nullable() }).nullable(),
+    // M4c: `delegation`, the delegation the slot holds (its unsent marker's, else the one its state adds to the head), so
+    // a Delegations row offers Discard only for its own slot
+    pending: z
+      .strictObject({ version: z.number().int().positive(), hash: z.string(), fork: z.boolean(), exposed: z.boolean(), refused: z.string().nullable(), delegation: z.string().nullable() })
+      .nullable(),
     offer: z
       .strictObject({ superseded: z.number().int().nonnegative(), lines: z.array(z.string()), warnings: z.array(z.string()), withheld: z.array(z.string()), digest: z.string() })
       .nullable(),
@@ -216,7 +220,8 @@ export const YOUNG_STRAY_KEY_MS = 15 * 60_000;
  * still live (`dropped`). `maxUses` is null for no cap. `machines`: the certified machines it made, from the held
  * certificates, live or retired (a revoked key's left out), one per ref. `hub`: its key in the last good read of the
  * hub's list (null: none there, or no read). `unsent`: `rewrite` while this run holds its key pair ("Write the code
- * again"; else Discard only), and why its code isn't stored. `hubBehind`, from the comparison alone: `renew`, the head
+ * again"; else Discard only), why its code isn't stored, and the create run holding it (`generation`, null for none),
+ * which a rewrite names. `hubBehind`, from the comparison alone: `renew`, the head
  * expires later than the hub's unrevoked, unexpired key; `revoke`, a dropped delegation's key still live. `hubProblem`:
  * the last hub half this sign-in ran for it that didn't finish.
  */
@@ -229,7 +234,7 @@ export const OrgDelegationRowSchema = z.strictObject({
   machines: z.array(z.strictObject({ ref: z.string(), name: z.string(), live: z.boolean() })),
   hub: z.strictObject({ expires: z.string(), uses: z.number().int().nonnegative(), revoked: z.boolean() }).nullable(),
   state: z.enum(['in-effect', 'unsent', 'dropped']),
-  unsent: z.strictObject({ rewrite: z.boolean(), problem: z.string().nullable() }).nullable(),
+  unsent: z.strictObject({ rewrite: z.boolean(), problem: z.string().nullable(), generation: z.number().int().positive().nullable() }).nullable(),
   hubBehind: z.enum(['renew', 'revoke']).nullable(),
   hubProblem: z.strictObject({ reason: z.enum(HUB_HALF_REASONS), detail: z.string() }).nullable(),
 });
@@ -377,6 +382,40 @@ export const DelegationCreateInputSchema = z.strictObject({
   owners: OwnersSchema,
 });
 export type DelegationCreateInput = z.infer<typeof DelegationCreateInputSchema>;
+/**
+ * M4c (Task 5's fix wave): the create run an answer belongs to, as main issued it: its `generation`, the delegation `id`
+ * it minted (null before), and the held slot's `hash` (null before the sign). A sheet acts only on the row and the slot
+ * these name; `org.delegation.rewrite` names all three, and anything else answers `stale`.
+ */
+export const DelegationRunSchema = z.strictObject({ generation: z.number().int().positive(), id: DelegationIdSchema.nullable(), hash: z.string().min(1).max(128).nullable() });
+export type DelegationRun = z.infer<typeof DelegationRunSchema>;
+/**
+ * M4c: where a create (or a rewrite) stopped, whatever its reason: `refused` before anything was minted; `minted`, its
+ * key minted (or perhaps, its answer lost) and nothing signed, the key revoked or left a stray; `held`, signed into the
+ * slot and held unsent (`stored`: its code is in the secret, the publish refused); `published`, the slot published and
+ * owned by settlement as any pending state, though the post's answer failed. `version`: the signed state's, once signed.
+ */
+export const DELEGATION_PHASES = ['refused', 'minted', 'held', 'published'] as const;
+export type DelegationPhase = (typeof DELEGATION_PHASES)[number];
+export const DelegationResultSchema = z.union([
+  z.strictObject({ ok: z.literal(true), version: z.number().int().positive(), secret: z.strictObject({ version: z.string(), createTime: z.string() }).optional(), run: DelegationRunSchema }),
+  z.strictObject({
+    ok: z.literal(false),
+    reason: z.enum(SIGN_REASONS),
+    detail: z.string().optional(),
+    phase: z.enum(DELEGATION_PHASES),
+    stored: z.boolean(),
+    version: z.number().int().positive().optional(),
+    run: DelegationRunSchema.nullable(),
+  }),
+]);
+export type DelegationResult = z.infer<typeof DelegationResultSchema>;
+/** M4c: `org.delegation.rewrite`, naming the run, the delegation and the held slot the sheet or the row was shown. */
+export const DelegationRewriteInputSchema = z.strictObject({ generation: z.number().int().positive(), id: DelegationIdSchema, hash: z.string().min(1).max(128) });
+export type DelegationRewriteInput = z.infer<typeof DelegationRewriteInputSchema>;
+/** M4c: the hub's key list behind the view, as `OrgView.hubKeys` carries it (`org.delegation.readKeys`' answer). */
+export const HubKeysReadSchema = z.strictObject({ at: z.string().nullable(), failed: z.boolean() });
+export type HubKeysRead = z.infer<typeof HubKeysReadSchema>;
 
 /** A check's finding (src/main/org/checks.ts): `code` the package's, the checks' or a composer's, as a plain string. */
 export const OrgFindingSchema = z.strictObject({ level: z.enum(['refuse', 'warn']), code: z.string(), detail: z.string() });
@@ -791,8 +830,9 @@ export const commands = {
   'org.enroll.approve': { input: z.strictObject({ generation: z.number().int().positive(), digest: z.string().min(1).max(128) }), output: SignResultSchema, owner: 'main' }, // M4b
   'org.enroll.cancel': { input: EnrollCancelInputSchema, output: EnrollCancelResultSchema, owner: 'main' }, // M4b; scoped to its run in the fix wave
   'org.drop.retry': { input: z.strictObject({ name: MachineNameSchema }), output: DropRetryResultSchema, owner: 'main' }, // M4b: the hub row's DELETE alone
-  'org.delegation.create': { input: DelegationCreateInputSchema, output: SignResultSchema, owner: 'main' }, // M4c: the one Touch ID; the code never leaves main
-  'org.delegation.rewrite': { input: z.strictObject({ id: DelegationIdSchema }), output: SignResultSchema, owner: 'main' }, // M4c: "Write the code again" (steps 4-6)
+  'org.delegation.create': { input: DelegationCreateInputSchema, output: DelegationResultSchema, owner: 'main' }, // M4c: the one Touch ID; the code never leaves main
+  'org.delegation.rewrite': { input: DelegationRewriteInputSchema, output: DelegationResultSchema, owner: 'main' }, // M4c: "Write the code again" (steps 4-6), for the run named
+  'org.delegation.readKeys': { input: z.void(), output: HubKeysReadSchema, owner: 'main' }, // M4c: the hub's key list read now (Retry after a failed read), under this sign-in
   'org.delegation.renewHub': { input: z.strictObject({ id: DelegationIdSchema }), output: HubHalfResultSchema, owner: 'main' }, // M4c: Retry, the route alone
   'org.delegation.revokeHub': { input: z.strictObject({ id: DelegationIdSchema }), output: HubHalfResultSchema, owner: 'main' }, // M4c: Retry, or a stray key's Revoke
   'org.provisioningSecret.get': { input: z.void(), output: ProvisioningSecretReadingSchema, owner: 'main' }, // M4c: the destination

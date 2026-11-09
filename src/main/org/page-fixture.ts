@@ -19,6 +19,7 @@ import {
   OrgViewSchema,
   ProvisioningSecretReadingSchema,
   type commands,
+  type DelegationResult,
   type DiscardResult,
   type DropRetryResult,
   type EnrollStartResult,
@@ -79,6 +80,7 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
   // M4c: no delegation is created, renewed or revoked, and the destination's file is neither read nor written: its
   // reading is the file's (`provisioningSecret`), so the section and the create sheet can be drawn with one
   const half: HubHalfResult = { ok: false, reason: 'none', detail };
+  const delegated: DelegationResult = { ok: false, reason: 'busy', detail, phase: 'refused', stored: false, run: null };
   const unwritten: ProvisioningSecretWrite = { ok: false, reason: 'io', detail };
   const answers: { [N in FixtureCommand]: MainHandler<N> } = {
     'org.status': () => status,
@@ -102,10 +104,11 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
     'org.enroll.approve': () => sign,
     'org.enroll.cancel': () => ({ ok: false, reason: 'not-current', detail }),
     'org.drop.retry': () => retry,
-    'org.delegation.create': () => sign,
-    'org.delegation.rewrite': () => sign,
+    'org.delegation.create': () => delegated,
+    'org.delegation.rewrite': () => delegated,
     'org.delegation.renewHub': () => half,
     'org.delegation.revokeHub': () => half,
+    'org.delegation.readKeys': () => view?.hubKeys ?? { at: null, failed: false }, // the seeded list, read again
     'org.provisioningSecret.get': () => provisioningSecret,
     'org.provisioningSecret.set': () => unwritten,
     'org.provisioningSecret.reset': () => unwritten,

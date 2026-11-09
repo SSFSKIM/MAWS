@@ -9,10 +9,11 @@
 // one that didn't answer (as of its last answer), a certified machine (its delegation's owners), a dropped machine whose
 // hub row is still listed (Retry), and an enrollment awaiting its key. A pairing and an enrollment exclude each other in
 // main; the seed shows both, as no one session holds them at once. M4c (Task 5): the Org group's Delegations section, a
-// delegation in effect with certified machines live and retired, a half-done renewal, an unsent one this run can write
-// again, a dropped one whose hub key is still live, two stray hub keys (one young), and the code's destination set. The
-// unsent delegation is shown with no pending slot, which main never does (its slot is what makes it unsent), so that
-// Create stays enabled for the create sheet's photograph. Each of the four groups, the window, the Delegations section,
+// delegation in effect with certified machines live and retired, a half-done renewal, an unsent one, a dropped one whose
+// hub key is still live, two stray hub keys (one young), and the code's destination set. The unsent delegation is shown
+// with no pending slot, which main never does (its slot is what makes it unsent), so that Create stays enabled for the
+// create sheet's photograph; since a row acts only on the slot holding its own delegation (Task 5's fix wave), it offers
+// neither Write again nor Discard here (the unit suite draws both, DelegationsSection.test.tsx). Each of the four groups, the window, the Delegations section,
 // the pairing sheet and the enrollment, grant, re-grant and create sheets, and the grant sheet saving, are attached as
 // PNGs for the architect's look; the case asserts structure only: nothing in the section or a sheet scrolls sideways,
 // and every action is drawn whole inside its row.
@@ -158,7 +159,11 @@ function seededOrg(local: string, userData: string, now: number): { status: Regi
         machines: [],
         hub: { expires: at(90), uses: 0, revoked: false },
         state: 'unsent',
-        unsent: { rewrite: true, problem: 'gcloud secrets versions add failed: PERMISSION_DENIED: Permission denied on secret projects/ytdownload-505811/secrets/desk-provisioning-v2 for cli-owner@ytdownload-505811.iam.gserviceaccount.com' },
+        unsent: {
+          rewrite: true,
+          problem: 'gcloud secrets versions add failed: PERMISSION_DENIED: Permission denied on secret projects/ytdownload-505811/secrets/desk-provisioning-v2 for cli-owner@ytdownload-505811.iam.gserviceaccount.com',
+          generation: 1,
+        },
         hubBehind: null,
         hubProblem: null,
       },
@@ -314,7 +319,8 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       await expect(delegationRow('ci-runner-').getByRole('button', { name: ORG.renew, exact: true })).toBeVisible();
       await expect(delegationRow('render-farm.clinical-research-operations-')).toContainText('Renewed in the org state; the hub’s key still expires');
       await expect(delegationRow('render-farm.clinical-research-operations-').getByRole('button', { name: ORG.retry, exact: true })).toBeVisible();
-      await expect(delegationRow('devcloud-vm-').getByRole('button', { name: ORG.writeAgain, exact: true })).toBeVisible();
+      await expect(delegationRow('devcloud-vm-')).toContainText(ORG.unsentLine);
+      await expect(delegationRow('devcloud-vm-').getByRole('button')).toHaveCount(0); // no slot holds it: nothing to act on
       await expect(delegationRow('old-render-')).toContainText(ORG.hubBehindRevoke);
       await expect(delegations.getByRole('group', { name: ORG.strayKeys, exact: true })).toContainText(ORG.justMinted);
       await expect(delegations.getByRole('group', { name: ORG.destination, exact: true }).getByRole('textbox', { name: ORG.destinationFields.account })).toHaveValue(DESTINATION.account);

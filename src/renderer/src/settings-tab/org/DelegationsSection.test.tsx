@@ -4,10 +4,12 @@
 // live, each with Retry calling the route alone; a hub key list that didn't read is never "no keys"); an unsent
 // delegation's reason with "Write the code again" while this run holds its key pair, else Discard alone; the stray hub
 // keys, each with Revoke behind a confirmation that warns more strongly for a young key; the code's destination with
-// Save, a damaged file's Reset, and Create disabled, saying why, without one.
+// Save, a damaged file's Reset, and Create disabled, saying why, without one. Task 5's fix wave: a row acts only on the
+// pending slot that holds its own delegation (Discard by that slot's hash, Write again naming its run), words where a
+// write stopped, and a failed read of the hub's key list has Retry.
 import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
-import type { DiscardResult, HubHalfResult, OrgDelegationRow, OrgView, ProvisioningSecret, ProvisioningSecretReading, ProvisioningSecretWrite, SignResult } from '@shared/ipc/schema/org';
+import type { DelegationResult, DiscardResult, HubHalfResult, HubKeysRead, OrgDelegationRow, OrgView, ProvisioningSecret, ProvisioningSecretReading, ProvisioningSecretWrite } from '@shared/ipc/schema/org';
 import { ANA, DAY, ME, ROOT, emit, group, renderSection, resetHarness, row, sent, signing, viewWith, type Signer } from './test-support';
 
 vi.hoisted(() => {
@@ -28,6 +30,8 @@ const S2 = '5555555555555555eeeeeeeeeeeeeeee';
 const IN_23_DAYS = '2026-11-20T13:00:00.000Z';
 const IN_90_DAYS = '2027-01-26T13:00:00.000Z'; // an hour past 90 days: vi.waitFor moves the faked clock on
 const HASH = 'unsentSlotStateHash0000000000000000000000000';
+const HASH2 = 'anotherSlotStateHash000000000000000000000000';
+const D5 = '6666666666666666ffffffffffffffff';
 
 const delegation = (patch: Partial<OrgDelegationRow> & Pick<OrgDelegationRow, 'id' | 'prefix'>): OrgDelegationRow => ({
   owners: [ME, ANA],
@@ -51,10 +55,12 @@ const IN_EFFECT = delegation({
 });
 const HALF_DONE = delegation({ id: D2, prefix: 'gpu-', owners: 'org', expires: IN_90_DAYS, maxUses: null, hub: { expires: IN_23_DAYS, uses: 0, revoked: false }, hubBehind: 'renew', hubProblem: { reason: 'not-renewed', detail: "the hub's org state doesn't hold the renewal yet" } });
 const DROPPED = delegation({ id: D3, prefix: 'old-vm-', state: 'dropped', owners: [], hubBehind: 'revoke' });
-const UNSENT = delegation({ id: D4, prefix: 'dc-', expires: IN_90_DAYS, hub: { expires: IN_90_DAYS, uses: 0, revoked: false }, state: 'unsent', unsent: { rewrite: true, problem: 'gcloud secrets versions add failed: PERMISSION_DENIED on desk-provisioning-v2' } });
+const UNSENT = delegation({ id: D4, prefix: 'dc-', expires: IN_90_DAYS, hub: { expires: IN_90_DAYS, uses: 0, revoked: false }, state: 'unsent', unsent: { rewrite: true, problem: 'gcloud secrets versions add failed: PERMISSION_DENIED on desk-provisioning-v2', generation: 1 } });
+const RUN = { generation: 1, id: D4, hash: HASH };
 const READ = { at: '2026-10-28T11:59:00.000Z', failed: false };
 const DEST: ProvisioningSecret = { project: 'ytdownload-505811', secret: 'desk-provisioning-v2', account: 'cli-owner@ytdownload-505811.iam.gserviceaccount.com' };
-const PENDING: Partial<Signer> = { ...ROOT, pending: { version: 13, hash: HASH, fork: false, exposed: false, refused: null } };
+const slotOf = (hash: string, delegation: string | null, version = 13): Partial<Signer> => ({ ...ROOT, pending: { version, hash, fork: false, exposed: false, refused: null, delegation } });
+const PENDING = slotOf(HASH, D4);
 const notSigning = { root: false, maySign: false } as const;
 
 const withDelegations = (patch: Partial<OrgView>) => ({ 'org.view': () => viewWith({ hubKeys: READ, ...patch }) });
@@ -167,8 +173,34 @@ describe('Settings › Org: Delegations (M4c)', () => {
     expect(screen.queryByRole('group', { name: 'Hub keys' })).toBeNull();
   });
 
-  it('an unsent delegation while this run holds its key pair: its reason, Write the code again, and Discard', async () => {
-    let rewrite: SignResult = { ok: false, reason: 'unsent', detail: 'gcloud secrets versions add failed again' };
+  it('a failed read of the hub’s key list has Retry, which reads it again now, each time it is pressed; a read that fails again says so', async () => {
+    let read: HubKeysRead = { at: null, failed: true };
+    let hubKeys: OrgView['hubKeys'] = { at: null, failed: true };
+    renderSection(signing(ROOT), {
+      'org.view': () => viewWith({ delegations: [{ ...IN_EFFECT, hub: null }], hubKeys }),
+      'org.delegation.readKeys': () => read,
+    });
+    await delegationsGroup();
+    expect(buttons('Hub keys')).toEqual(['Retry']);
+    fireEvent.click(within(row('Hub keys')).getByRole('button', { name: 'Retry' }));
+    await vi.waitFor(() => expect(sent('org.delegation.readKeys')).toHaveLength(1));
+    expect(await within(row('Hub keys')).findByText('It still couldn’t be read: Retry once the hub answers.')).toBeTruthy();
+    // pressed again at once (inside main's 30 s freshness): it asks again, and this read lands
+    read = { at: '2026-10-28T12:00:01.000Z', failed: false };
+    hubKeys = read;
+    fireEvent.click(within(row('Hub keys')).getByRole('button', { name: 'Retry' }));
+    await vi.waitFor(() => expect(sent('org.delegation.readKeys')).toHaveLength(2));
+    emit(signing(ROOT, { delegations: { creating: false, rev: 1 } })); // main's rev: the view reads again
+    await vi.waitFor(() => expect(screen.queryByRole('group', { name: 'Hub keys' })).toBeNull());
+    // signed out, there is no sign-in for a read to belong to: no Retry
+    resetHarness();
+    renderSection(signing(ROOT, { session: 'signed-out' }), withDelegations({ delegations: [IN_EFFECT], hubKeys: { at: null, failed: true } }));
+    await delegationsGroup();
+    expect(buttons('Hub keys')).toEqual([]);
+  });
+
+  it('an unsent delegation while this run holds its key pair: its reason, Write the code again naming its run, and Discard', async () => {
+    let rewrite: DelegationResult = { ok: false, reason: 'unsent', detail: 'gcloud secrets versions add failed again', phase: 'held', stored: false, version: 13, run: RUN };
     renderSection(signing(PENDING), {
       ...withDelegations({ delegations: [UNSENT] }),
       'org.delegation.rewrite': () => rewrite,
@@ -180,9 +212,9 @@ describe('Settings › Org: Delegations (M4c)', () => {
     expect(within(dc).getByText(UNSENT.unsent!.problem!)).toBeTruthy();
     expect(buttons('dc-')).toEqual(['Write the code again', 'Discard…']);
     fireEvent.click(within(dc).getByRole('button', { name: 'Write the code again' }));
-    await vi.waitFor(() => expect(sent('org.delegation.rewrite')).toEqual([{ id: D4 }]));
+    await vi.waitFor(() => expect(sent('org.delegation.rewrite')).toEqual([{ generation: 1, id: D4, hash: HASH }]));
     expect(await within(dc).findByText('The code still isn’t stored: Write the code again, or discard it.')).toBeTruthy();
-    rewrite = { ok: true, version: 13, secret: { version: '7', createTime: '2026-10-28T12:00:05.000Z' } };
+    rewrite = { ok: true, version: 13, secret: { version: '7', createTime: '2026-10-28T12:00:05.000Z' }, run: RUN };
     fireEvent.click(within(dc).getByRole('button', { name: 'Write the code again' }));
     expect(await within(row('New delegation')).findByText(/^Published delegation dc- in version 13\. Its code is version 7, stored /)).toBeTruthy();
 
@@ -196,12 +228,57 @@ describe('Settings › Org: Delegations (M4c)', () => {
   });
 
   it('after a relaunch (rewrite false) the unsent row offers only Discard, worded to create it again', async () => {
-    renderSection(signing(PENDING), withDelegations({ delegations: [{ ...UNSENT, unsent: { rewrite: false, problem: null } }] }));
+    renderSection(signing(PENDING), withDelegations({ delegations: [{ ...UNSENT, unsent: { rewrite: false, problem: null, generation: null } }] }));
     const dc = (await delegationsGroup()).getByRole('group', { name: 'dc-' });
     expect(within(dc).getByText('This Mac no longer holds its key pair, so it can’t be published: discard it and create the delegation again.')).toBeTruthy();
     expect(buttons('dc-')).toEqual(['Discard…']);
     // and the pending line says what the slot holds, not that it waits for the hub
     expect(within(row('Pending')).getByText('Version 13 holds delegation dc-, not yet published: see Delegations.')).toBeTruthy();
+  });
+
+  it('a delayed view refresh while the pending slot changes: the old row offers no Discard or Write again for another proposal', async () => {
+    renderSection(signing(PENDING), {
+      ...withDelegations({ delegations: [UNSENT] }),
+      'org.discardPending': () => ({ ok: true, unsent: true, hubVersion: 12 }) satisfies DiscardResult,
+    });
+    const dc = (await delegationsGroup()).getByRole('group', { name: 'dc-' });
+    expect(buttons('dc-')).toEqual(['Write the code again', 'Discard…']);
+    fireEvent.click(within(dc).getByRole('button', { name: 'Discard…' }));
+    await screen.findByRole('dialog', { name: 'Discard the unsent delegation dc-?' });
+    // another window discarded it and signed another proposal; this window's status has it, its view not yet
+    emit(signing(slotOf(HASH2, D5, 14)));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); // the confirmation was of the slot gone
+    expect(buttons('dc-')).toEqual([]);
+    // a pending slot that holds no delegation at all offers no Discard here either
+    emit(signing(slotOf(HASH2, null, 14)));
+    await act(async () => {});
+    expect(buttons('dc-')).toEqual([]);
+    expect(sent('org.discardPending')).toEqual([]);
+    expect(sent('org.delegation.rewrite')).toEqual([]);
+    // the slot that holds this row's delegation again: Discard names that slot's hash
+    emit(signing(slotOf(HASH, D4)));
+    fireEvent.click(await within(dc).findByRole('button', { name: 'Discard…' }));
+    fireEvent.click(within(await screen.findByRole('dialog', { name: 'Discard the unsent delegation dc-?' })).getByRole('button', { name: 'Discard' }));
+    await vi.waitFor(() => expect(sent('org.discardPending')).toEqual([{ confirmed: true, hash: HASH }]));
+  });
+
+  it('a Write again that ends published and pending says so, with no Write again; one stored but refused offers Discard alone', async () => {
+    const published: DelegationResult = { ok: false, reason: 'hub', detail: 'the hub did not answer', phase: 'published', stored: true, version: 13, run: RUN };
+    let rewrite: DelegationResult = published;
+    renderSection(signing(PENDING), { ...withDelegations({ delegations: [UNSENT] }), 'org.delegation.rewrite': () => rewrite });
+    const dc = (await delegationsGroup()).getByRole('group', { name: 'dc-' });
+    fireEvent.click(within(dc).getByRole('button', { name: 'Write the code again' }));
+    expect(await within(row('New delegation')).findByText('Published as version 13, its code stored. It settles as any pending state once the hub takes it (Org › Pending): nothing more to do here. · the hub did not answer')).toBeTruthy();
+    expect(within(dc).queryByText(/Not written/)).toBeNull();
+
+    resetHarness();
+    rewrite = { ok: false, reason: 'unsent', detail: 'its code is stored (version 7), but the publish was refused: stale; only Discard', phase: 'held', stored: true, version: 13, run: RUN };
+    renderSection(signing(PENDING), { ...withDelegations({ delegations: [UNSENT] }), 'org.delegation.rewrite': () => rewrite });
+    const again = (await delegationsGroup()).getByRole('group', { name: 'dc-' });
+    fireEvent.click(within(again).getByRole('button', { name: 'Write the code again' }));
+    expect(
+      await within(again).findByText('Signed as version 13 and its code stored, but its publish was refused, so it stays unsent. · Discard it, then create the delegation again. · its code is stored (version 7), but the publish was refused: stale; only Discard'),
+    ).toBeTruthy();
   });
 
   it('a stray hub key: its prefix, label, age and expiry; Revoke behind a confirmation, stronger for a young key', async () => {

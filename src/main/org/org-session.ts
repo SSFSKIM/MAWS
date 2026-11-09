@@ -94,12 +94,15 @@ import type {
   ChannelChanged,
   ChannelSendResult,
   DelegationCreateInput,
+  DelegationResult,
+  DelegationRewriteInput,
   DiscardResult,
   GrantRegrantResult,
   GrantSetResult,
   GrantsView,
   DropRetryResult,
   HubHalfResult,
+  HubKeysRead,
   EnrollCancelResult,
   EnrollStartResult,
   OrgAttempt,
@@ -140,6 +143,7 @@ import {
   type HubRow,
   type OrgFiles,
   type RegistrationFile,
+  type Unsent,
 } from './files';
 import { channelStore } from './channel/cache';
 import { createChannels } from './channel/channel';
@@ -213,9 +217,11 @@ export interface OrgSessionService extends OrgSession {
   /** M4b: a dropped machine's hub row deleted again (`hubRowsLeft`), the route alone. */
   dropRetry(name: string): Promise<DropRetryResult>;
   /** M4c: the create transaction (delegations.ts): the one Touch ID; the code goes from here to Secret Manager alone. */
-  delegationCreate(input: DelegationCreateInput): Promise<SignResult>;
-  /** M4c: "Write the code again" for this run's unsent delegation. */
-  delegationRewrite(id: string): Promise<SignResult>;
+  delegationCreate(input: DelegationCreateInput): Promise<DelegationResult>;
+  /** M4c: "Write the code again" for this run's unsent delegation, while it is the run, delegation and slot named. */
+  delegationRewrite(input: DelegationRewriteInput): Promise<DelegationResult>;
+  /** M4c: the hub's key list read now (Retry after a failed read), under this sign-in; the list's state after it. */
+  delegationReadKeys(): Promise<HubKeysRead>;
   /** M4c: renew's hub half again, the route alone. */
   delegationRenewHub(id: string): Promise<HubHalfResult>;
   /** M4c: drop's hub half again, or a stray key's Revoke, the route alone. */
@@ -584,7 +590,7 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       stepUpKid: facts.stepUpKid,
       due: c?.weekly.due() ?? false,
       ageDays: Math.floor((now() - Date.parse(head.issued)) / DAY_MS),
-      pending: slot === null ? null : { version: slot.version, hash: slot.hash, fork: slot.fork, exposed: slot.exposed, refused: slot.refused },
+      pending: slot === null ? null : { version: slot.version, hash: slot.hash, fork: slot.fork, exposed: slot.exposed, refused: slot.refused, delegation: slotDelegation(slot.unsent, file, head) },
       offer,
       owing: c?.deliveries.owing() ?? [],
       abandoned: file === undefined || file === 'damaged' ? [] : file.abandoned.map((a) => ({ hash: a.hash, version: a.version, hub: a.hub, machines: [...a.machines] })),
@@ -592,6 +598,16 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
       rekeying,
       oldDevice: retired?.device ?? null,
     };
+  }
+
+  /**
+   * M4c: the delegation the pending slot holds: its unsent marker's, else the one its signed state adds to the head (a
+   * published create not yet settled); null for any other slot. A Delegations row offers Discard only for its own.
+   */
+  function slotDelegation(unsent: Unsent | null, file: ReturnType<SigningStore['get']> | undefined, head: OrgState): string | null {
+    if (unsent?.kind === 'delegation') return unsent.id;
+    if (file === undefined || file === 'damaged' || file.pending === null) return null;
+    return file.pending.signed.state.delegations.find((d) => !head.delegations.some((h) => h.id === d.id))?.id ?? null;
   }
 
   /** The signer may sign, and this device is signed in: a signed-out root asks nothing and signs nothing. */
@@ -2125,7 +2141,12 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     enrollCancel: (input, asker) => enrollment.cancelRun(input, asker),
     dropRetry,
     delegationCreate: (input) => delegations.create(input),
-    delegationRewrite: (id) => delegations.rewrite(id),
+    delegationRewrite: (input) => delegations.rewrite(input),
+    async delegationReadKeys() {
+      await delegations.readKeys();
+      const { keys, keysFailed } = delegations.viewInputs();
+      return { at: keys?.at ?? null, failed: keysFailed };
+    },
     delegationRenewHub: (id) => delegations.renewHub(id),
     delegationRevokeHub: (id) => delegations.revokeHub(id),
     grantsView: (input) => grants.view(input),

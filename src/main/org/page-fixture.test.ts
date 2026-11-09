@@ -105,7 +105,8 @@ describe("the Org page's e2e fixture in main", () => {
     // M4c: nothing is minted, renewed, revoked or stored, and main's destination file is not touched
     const create = { label: 'vms', prefix: 'dc-', ttlDays: 30, maxUses: null, owners: ['a1'] };
     expect(await ask('org.delegation.create', create)).toMatchObject({ ok: false, reason: 'busy' });
-    expect(await ask('org.delegation.rewrite', { id: 'd'.repeat(32) })).toMatchObject({ ok: false, reason: 'busy' });
+    expect(await ask('org.delegation.rewrite', { generation: 1, id: 'd'.repeat(32), hash: 'h' })).toMatchObject({ ok: false, reason: 'busy', phase: 'refused' });
+    expect(await ask('org.delegation.readKeys')).toEqual(VIEW.hubKeys);
     expect(await ask('org.delegation.renewHub', { id: 'd'.repeat(32) })).toMatchObject({ ok: false, reason: 'none' });
     expect(await ask('org.delegation.revokeHub', { id: 'd'.repeat(32) })).toMatchObject({ ok: false, reason: 'none' });
     expect(await ask('org.provisioningSecret.get')).toBeNull();

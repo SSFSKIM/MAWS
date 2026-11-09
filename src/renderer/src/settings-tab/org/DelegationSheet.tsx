@@ -5,27 +5,43 @@
 // <secret> as a new version") and when devcloud uses it, then sends one `org.delegation.create`; the mint, the one Touch
 // ID, the code's write and the publish are all main's.
 //
-// - The code is never shown, copied or held here: no answer carries it (main's strict output schemas admit none, and the
-//   client checks each answer against them), and the sheet draws only what an answer says.
-// - Each outcome has its line and its next step: `secret-store` with what's missing, a refusal (a mint disagreement
-//   among them, its key revoked), `busy`, a cancel (its key revoked), and a write that left the delegation signed and
-//   unsent, which offers "Write the code again" while this run holds its key pair (the view's `unsent.rewrite`), else
-//   says to Discard it from its row. A success reaches the page with the code's version and time, and closes the sheet.
+// - The code is never shown, copied or held here: main's strict output schemas admit no field for it (the client checks
+//   each answer against them), and the sheet draws only what an answer says. That an answer's strings (a `detail`) never
+//   hold it is main's to keep.
+// - Each answer says where the create stopped (main's `phase`), and the sheet offers only what that phase allows:
+//   refused before any mint, or minted and not signed (the key revoked, or a stray), keep the fields and Create again,
+//   each refusal in its words with its next step; signed and held unsent offers "Write the code again" while main's run
+//   holds the key pair (the view's `unsent.rewrite`), else says to Discard it from its row; published and pending
+//   settlement says so and offers nothing more. A success reaches the page with the code's version and time, and closes
+//   the sheet.
+// - A held answer names its run as main issued it (`DelegationRun`: generation, delegation id, held slot's hash), and
+//   the sheet acts only while the status's slot and the view's row are that run's: once a Discard, another create (in
+//   any window) or a sign-out replaces them, it says this create is no longer running and offers nothing. A rewrite
+//   names the same three, and main answers anything else `stale` (Task 5's fix wave, I1 and I4).
 // - Its ownership follows the enrollment sheet's guards, without its code: each request is fenced by its token (only
 //   the latest one's answer lands, and none once the sheet has closed), and the sheet belongs to the sign-in it opened
 //   under (`useOwnSignIn`). Once that ends, an answer stays in the sheet, offers nothing and reaches nothing of the page,
-//   since a create the ended run made is main's to end (its key a stray, or its slot only Discard's). A create has no
-//   generation on the IPC: main's own run check answers an ended run's request, and the sheet shows what it said.
+//   since a create the ended run made is main's to end (its key a stray, or its slot only Discard's). A create carries
+//   no generation in: main reserves the run, and its answer names it.
 import { useEffect, useRef, useState } from 'react';
 import { formatDayTime } from '@shared/app/date-format';
-import { DELEGATION_MAX_USES, DELEGATION_TTL_DAYS, type DelegationCreateInput, type OrgDelegationRow, type OrgView, type ProvisioningSecret, type SignResult } from '@shared/ipc/schema/org';
+import {
+  DELEGATION_MAX_USES,
+  DELEGATION_TTL_DAYS,
+  type DelegationCreateInput,
+  type DelegationResult,
+  type DelegationRun,
+  type OrgDelegationRow,
+  type OrgView,
+  type ProvisioningSecret,
+} from '@shared/ipc/schema/org';
 import { ipc } from '../../ipc/client';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { PRIMARY } from '../../sessions/ui';
 import { ORG } from '../copy';
 import { INPUT, Segment } from '../parts';
 import { OwnersPicker, type Owners } from './ChangeSheet';
-import { failed, OutcomeLine, useOpen, useOwnSignIn, type Invoked, type Outcome } from './parts';
+import { failed, OutcomeLine, useOpen, useOwnSignIn, type Invoked, type Outcome, type Registered } from './parts';
 
 /** A new delegation's life offered first: the hub's default key life (desk-hub's PROVISIONING_KEY_TTL_S, 90 days). */
 const DEFAULT_DAYS = 90;
@@ -34,7 +50,9 @@ const PREFIX_MAX = 64;
 
 type Draft = { label: string; prefix: string; days: string; capped: boolean; cap: string; owners: Owners };
 type Asked = 'create' | 'rewrite';
-type Stage = { at: 'fields' } | { at: 'asking'; token: number; asked: Asked } | { at: 'answered'; asked: Asked; result: SignResult; prefix: string };
+type Refused = Extract<DelegationResult, { ok: false }>;
+type Slot = NonNullable<NonNullable<Registered['signer']>['pending']>;
+type Stage = { at: 'fields' } | { at: 'asking'; token: number; asked: Asked } | { at: 'answered'; asked: Asked; result: DelegationResult; prefix: string };
 
 const whole = (text: string, min: number, max: number): number | null => {
   const n = Number(text);
@@ -56,14 +74,26 @@ function read(draft: Draft): { input: DelegationCreateInput | null; label: boole
   };
 }
 
-const created = (prefix: string, result: Extract<SignResult, { ok: true }>): string =>
+const created = (prefix: string, result: Extract<DelegationResult, { ok: true }>): string =>
   ORG.created(prefix, result.version, result.secret === undefined ? null : { version: result.secret.version, time: formatDayTime(Date.parse(result.secret.createTime)) });
 
-/** A refused answer's line: the create's or the write's words for its reason, then main's detail; a bare cancel says nothing. */
-function refusedLine(asked: Asked, result: Extract<SignResult, { ok: false }>): Outcome {
+const joined = (...parts: (string | undefined)[]) => parts.filter((part) => part !== undefined && part !== '').join(' · ');
+
+/**
+ * A refused answer's line, by where it stopped: before or at the mint, the create's words for its reason (a bare cancel
+ * says nothing); signed and held, what holds it, then a rewrite's own reason when it isn't the write itself; published,
+ * that it settles on its own; a rewrite main refused before naming a run, only that nothing was written. Main's detail
+ * last.
+ */
+function refusedLine(asked: Asked, result: Refused): Outcome {
+  if (result.phase === 'published') return { text: joined(ORG.phasePublished(result.version), result.detail), refused: false };
+  if (result.phase === 'held') {
+    const words = result.stored ? ORG.phaseHeldStored(result.version) : ORG.phaseHeld(result.version);
+    return { text: joined(words, asked === 'rewrite' && result.reason !== 'unsent' ? ORG.rewriteReasons[result.reason] : undefined, result.detail), refused: true };
+  }
+  if (asked === 'rewrite') return { text: joined(ORG.notWritten, result.detail), refused: true }; // no run named: another run's slot, written by nothing
   if (result.reason === 'cancelled' && result.detail === undefined) return null; // the person's own cancel, nothing minted
-  const [lead, line] = asked === 'create' ? [ORG.notCreated, ORG.createReasons[result.reason]] : [ORG.notWritten, ORG.rewriteReasons[result.reason]];
-  return { text: [lead, line, result.detail].filter((part) => part !== undefined && part !== '').join(' · '), refused: true };
+  return { text: joined(ORG.notCreated, ORG.createReasons[result.reason], result.detail), refused: true };
 }
 
 type Props = {
@@ -75,13 +105,15 @@ type Props = {
   signIn: string | null;
   /** A create or a write of this Mac's is under way (the status's `delegations.creating`), in any window. */
   creating: boolean;
-  /** The delegation the view lists unsent (the pending slot's), for "Write the code again". */
-  unsent: OrgDelegationRow | null;
+  /** The view's delegations, whose unsent row says whether main's run may write it again. */
+  delegations: readonly OrgDelegationRow[];
+  /** The status's pending slot (signed in), which names the delegation it holds. */
+  slot: Slot | null;
   onClose(): void;
   onCreated(outcome: Outcome): void;
 };
 
-export function DelegationSheet({ destination, members, may, signIn, creating, unsent, onClose, onCreated }: Props) {
+export function DelegationSheet({ destination, members, may, signIn, creating, delegations, slot, onClose, onCreated }: Props) {
   const open = useOpen();
   const own = useOwnSignIn(signIn);
   const tokens = useRef(0);
@@ -90,7 +122,7 @@ export function DelegationSheet({ destination, members, may, signIn, creating, u
   const [stage, setStage] = useState<Stage>({ at: 'fields' });
   const fields = read(draft);
 
-  const send = (asked: Asked, prefix: string, request: () => Invoked<SignResult>) => {
+  const send = (asked: Asked, prefix: string, run: DelegationRun | null, request: () => Invoked<DelegationResult>) => {
     const token = ++tokens.current;
     setStage({ at: 'asking', token, asked });
     void request().then((result) => {
@@ -98,19 +130,19 @@ export function DelegationSheet({ destination, members, may, signIn, creating, u
       if (result.ok) setStage({ at: 'answered', asked, result: result.value, prefix });
       else {
         failed(result.error);
-        // a write that failed as a command leaves the delegation as it was: unsent
-        setStage(asked === 'create' ? { at: 'fields' } : { at: 'answered', asked, result: { ok: false, reason: 'unsent' }, prefix });
+        // a write that failed as a command leaves the delegation as it was: held unsent, by the same run
+        setStage(asked === 'create' ? { at: 'fields' } : { at: 'answered', asked, result: { ok: false, reason: 'unsent', phase: 'held', stored: false, run }, prefix });
       }
     });
   };
   const create = () => {
     const input = fields.input;
     if (input === null || destination === null || own.ended) return;
-    send('create', input.prefix, () => ipc.invoke('org.delegation.create', input));
+    send('create', input.prefix, null, () => ipc.invoke('org.delegation.create', input));
   };
-  const rewrite = (id: string, prefix: string) => {
+  const rewrite = (run: Ours, prefix: string) => {
     if (own.ended) return;
-    send('rewrite', prefix, () => ipc.invoke('org.delegation.rewrite', { id }));
+    send('rewrite', prefix, run, () => ipc.invoke('org.delegation.rewrite', run));
   };
 
   // A success goes to the page and closes the sheet while its sign-in stands; otherwise it stays here.
@@ -122,17 +154,23 @@ export function DelegationSheet({ destination, members, may, signIn, creating, u
     onClose();
   }, [delivered, onCreated, onClose]);
 
-  // Signed and held unsent (by the create, or still after a write): no second create, only its own way on.
-  const held = answer !== null && !answer.result.ok && (answer.result.reason === 'unsent' || answer.asked === 'rewrite');
-  const editing = stage.at === 'fields' || (stage.at === 'asking' && stage.asked === 'create') || (answer !== null && !answer.result.ok && !held);
+  const refusal = answer !== null && !answer.result.ok ? answer.result : null;
+  // Before anything was signed (a create's refusal, at or before the mint): the fields stay, to Create again.
+  const editing = stage.at === 'fields' || (stage.at === 'asking' && stage.asked === 'create') || (refusal !== null && answer?.asked === 'create' && (refusal.phase === 'refused' || refusal.phase === 'minted'));
+  // Signed and held unsent: no second create, only its own way on, and only while its run is the one holding it (a
+  // rewrite main answers naming no run was of a run main no longer has: `custodyOf` reads it gone).
+  const held = refusal !== null && !editing && refusal.phase !== 'published';
+  const custody = held && refusal !== null ? custodyOf(refusal.run, slot, delegations) : null;
+  const gone = custody === 'gone';
+  const ours = custody !== null && custody !== 'gone' && custody !== 'unknown' ? custody : null;
+  const writable = !own.ended && may && ours !== null && ours.rewrite && !refusal?.stored;
   const asking = stage.at === 'asking';
   const line = answer === null ? null : answer.result.ok ? { text: created(answer.prefix, answer.result), refused: false } : refusedLine(answer.asked, answer.result);
-  const writable = held && !own.ended && may && unsent !== null && unsent.unsent?.rewrite === true;
   const form = asking
     ? { submit: stage.asked === 'create' ? ORG.creating : ORG.writing, can: false, act: () => {}, cancel: ORG.close }
     : held
-      ? { submit: writable ? ORG.writeAgain : undefined, can: !creating, act: () => unsent !== null && rewrite(unsent.id, answer.prefix), cancel: ORG.close }
-      : answer !== null && answer.result.ok
+      ? { submit: writable ? ORG.writeAgain : undefined, can: !creating, act: () => ours !== null && answer !== null && rewrite(ours.run, answer.prefix), cancel: ORG.close }
+      : answer !== null && (answer.result.ok || refusal?.phase === 'published')
         ? { submit: undefined, can: false, act: () => {}, cancel: ORG.close }
         : { submit: may && !own.ended ? ORG.createConfirm : undefined, can: fields.input !== null && destination !== null && !creating, act: create, cancel: ORG.cancel };
 
@@ -152,7 +190,10 @@ export function DelegationSheet({ destination, members, may, signIn, creating, u
           {editing && !asking && <p className="m-0 text-fg-muted">{ORG.createIntro}</p>}
           {asking && <p role="status" className="m-0 text-fg-muted">{stage.asked === 'create' ? ORG.creatingLine : ORG.writing}</p>}
           <OutcomeLine outcome={line} />
-          {held && !own.ended && unsent !== null && unsent.unsent?.rewrite === false && <p className="m-0 text-fg-muted">{ORG.createUnsentDiscard}</p>}
+          {editing && refusal?.phase === 'minted' && <p className="m-0 text-fg-muted">{ORG.phaseMinted}</p>}
+          {held && !own.ended && gone && <p className="m-0 text-fg-muted">{ORG.createRunGone}</p>}
+          {held && !own.ended && writable && <p className="m-0 text-fg-muted">{ORG.heldWriteAgain}</p>}
+          {held && !own.ended && ours !== null && !writable && <p className="m-0 text-fg-muted">{ORG.createUnsentDiscard}</p>}
           {editing && !asking && creating && <p className="m-0 text-fg-muted">{ORG.createWaits}</p>}
           {own.ended && <p className="m-0 text-fg-muted">{ORG.createSignInEnded}</p>}
           {!may && !own.ended && <p className="m-0 text-warning">{ORG.readOnly}</p>}
@@ -160,6 +201,23 @@ export function DelegationSheet({ destination, members, may, signIn, creating, u
       </SheetForm>
     </Sheet>
   );
+}
+
+/** The run a held answer named, complete: what a rewrite names. */
+type Ours = { generation: number; id: string; hash: string };
+
+/**
+ * Whether the held run `run` still holds the slot and its row: `gone` once the status's slot isn't its (another hash, or
+ * another delegation), or the view lists its row under another run; `unknown` while the view hasn't listed the row yet;
+ * else the run, complete, and whether main may write it again.
+ */
+function custodyOf(run: DelegationRun | null, slot: Slot | null, delegations: readonly OrgDelegationRow[]): 'gone' | 'unknown' | { run: Ours; rewrite: boolean } {
+  if (run === null || run.id === null || run.hash === null) return 'gone';
+  if (slot === null || slot.hash !== run.hash || slot.delegation !== run.id) return 'gone';
+  const row = delegations.find((d) => d.id === run.id);
+  if (row === undefined || row.state !== 'unsent' || row.unsent === null) return 'unknown';
+  if (row.unsent.generation !== null && row.unsent.generation !== run.generation) return 'gone';
+  return { run: { generation: run.generation, id: run.id, hash: run.hash }, rewrite: row.unsent.rewrite && row.unsent.generation === run.generation };
 }
 
 type FieldsProps = { draft: Draft; problems: { label: boolean; days: boolean; cap: boolean }; disabled: boolean; members: OrgView['members']; onChange(next: Draft): void };

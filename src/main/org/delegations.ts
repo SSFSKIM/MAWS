@@ -13,7 +13,7 @@
 //
 // Electron-free: the session injects the signer, the hub, gcloud's custody and the destination's file.
 import type { Certificates, OrgState, SignedOrgState } from '../../../apps/org-protocol/src/index.ts';
-import type { DelegationCreateInput, HubHalfResult, OrgChange, OrgDelegationsStatus, SignResult } from '@shared/ipc/schema/org';
+import type { DelegationCreateInput, DelegationResult, DelegationRewriteInput, HubHalfResult, OrgChange, OrgDelegationsStatus, SignResult } from '@shared/ipc/schema/org';
 import { createDelegationCreate, reservedBy, type Reservation } from './delegation-create';
 import { createDelegationHub } from './delegation-hub';
 import type { EditSelf } from './edits';
@@ -71,8 +71,8 @@ export type HubProblem = { reason: Exclude<Extract<HubHalfResult, { ok: false }>
 export type DelegationViewInputs = {
   keys: { list: readonly ProvisioningKey[]; at: string } | null;
   keysFailed: boolean;
-  /** This run's unsent delegation: `rewrite` while it holds the key pair, and why its code isn't stored. */
-  unsent: { id: string; rewrite: boolean; problem: string | null } | null;
+  /** This run's unsent delegation: `rewrite` while it holds the key pair, why its code isn't stored, and the run. */
+  unsent: { id: string; rewrite: boolean; problem: string | null; generation: number } | null;
   hubProblems: ReadonlyMap<string, HubProblem>;
   /** The key a create under way holds before its slot names it: no stray, and no Revoke takes it. */
   reserved: Reservation | null;
@@ -81,9 +81,9 @@ export type DelegationViewInputs = {
 export interface Delegations {
   /** The status's `delegations` part. */
   status(): OrgDelegationsStatus;
-  create(input: DelegationCreateInput): Promise<SignResult>;
-  /** "Write the code again": steps 4 to 6 for this run's unsent delegation `id`. */
-  rewrite(id: string): Promise<SignResult>;
+  create(input: DelegationCreateInput): Promise<DelegationResult>;
+  /** "Write the code again": steps 4 to 6 for the run, delegation and slot named, while they are this run's. */
+  rewrite(input: DelegationRewriteInput): Promise<DelegationResult>;
   /** Retry of renew's hub half: the route alone. */
   renewHub(id: string): Promise<HubHalfResult>;
   /** Retry of drop's hub half, or a stray key's Revoke: the route alone. */
@@ -92,7 +92,7 @@ export interface Delegations {
   settled(slot: Pending): void;
   /** A Discard's marker: an unsent delegation's hub key revoked (a failure leaves it a stray). */
   discarded(marker: Unsent | null): Promise<void>;
-  /** The hub's key list read again; `ifStale`, only once the last read is older than `KEYS_FRESH_MS`. */
+  /** The hub's key list read again (now, unless `ifStale`: only once the last ask is older than `KEYS_FRESH_MS`), under this sign-in. */
   readKeys(options?: { ifStale?: boolean }): Promise<void>;
   viewInputs(): DelegationViewInputs;
   /** Resolves once the hub halves queued so far have ended. */

@@ -172,6 +172,8 @@ class FakeHub {
   /** M4c: the provisioning keys, as the Worker lists them, each with its token; a mint waits on `mintGate` when set. */
   provisioningKeys: Array<{ id: string; label: string; prefix: string; created: string; expires: string; max_uses: number | null; uses: number; revoked: string | null; token: string }> = [];
   mintGate?: () => Promise<void>;
+  /** M4c fix wave: the key list's answer, in place of the listing, when set. */
+  keysAnswer?: () => Answer | undefined;
   revokeAnswer?: (id: string) => Answer | undefined;
   renewGate?: () => Promise<void>;
 
@@ -270,7 +272,7 @@ class FakeHub {
       this.provisioningKeys.push(key);
       return worker(201, { key: { ...listedKey(key), created_by: this.member.id, offline_revoke_s: null, machines: [] }, token: key.token });
     }
-    if (url.pathname === '/api/provisioning-keys' && method === 'GET') return worker(200, { keys: this.provisioningKeys.map(listedKey) });
+    if (url.pathname === '/api/provisioning-keys' && method === 'GET') return this.keysAnswer?.() ?? worker(200, { keys: this.provisioningKeys.map(listedKey) });
     const provisioning = /^\/api\/provisioning-keys\/([0-9a-f]{32})(\/renew)?$/.exec(url.pathname);
     if (provisioning !== null) {
       const key = this.provisioningKeys.find((k) => k.id === provisioning[1]);
@@ -1818,7 +1820,7 @@ describe('M3: the signer composed over the session', () => {
     hub.postAnswer = () => worker(409, { error: 'key-purged' });
     expect(await session.resign()).toMatchObject({ ok: false, reason: 'hub', detail: '409 key-purged' });
     const hash = await stateHash(hub.posted[0]!.state);
-    expect(signerOf(session).pending).toEqual({ version: before + 1, hash, fork: false, exposed: true, refused: '409 key-purged' });
+    expect(signerOf(session).pending).toEqual({ version: before + 1, hash, fork: false, exposed: true, refused: '409 key-purged', delegation: null });
 
     // A confirmation of another proposal than the slot holds discards nothing.
     expect(await session.discardPending(true, `${hash.slice(1)}x`)).toEqual({ ok: false, reason: 'stale' });
@@ -3463,7 +3465,7 @@ describe('M4c: delegations through the session', () => {
     const { session, logs } = await signingRoot(delegationsDeps());
     const before = registered(session).delegations.rev;
     const answer = await session.delegationCreate({ ...CREATE, owners: [A] });
-    expect(answer).toEqual({ ok: true, version: headVersion(session), secret: { version: '7', createTime: '2026-11-08T12:00:00.123Z' } });
+    expect(answer).toMatchObject({ ok: true, version: headVersion(session), secret: { version: '7', createTime: '2026-11-08T12:00:00.123Z' } });
     expect(signing.prompts.map((p) => p.summary)).toEqual(['create delegation dc-']);
     const id = hub.provisioningKeys[0].id;
     expect(hub.head.state.delegations.map((d) => d.id)).toEqual([id]);
@@ -3517,7 +3519,7 @@ describe('M4c: delegations through the session', () => {
     await until(() => signerOf(again).pending !== null, 'the held slot');
     await until(async () => ((await again.view())?.delegations.length ?? 0) === 1, 'the unsent row');
     expect((await again.view())!.delegations).toMatchObject([{ id, state: 'unsent', unsent: { rewrite: false } }]);
-    expect(await again.delegationRewrite(id)).toMatchObject({ ok: false, reason: 'stale' });
+    expect(await again.delegationRewrite({ generation: 1, id, hash: 'the-hash-it-was-shown' })).toMatchObject({ ok: false, reason: 'stale' });
     expect(await again.discardPending(true, signerOf(again).pending!.hash)).toMatchObject({ ok: true, unsent: true });
     expect(hub.provisioningKeys[0].revoked).not.toBeNull();
     expect(hub.posted).toEqual([]);
@@ -3561,5 +3563,38 @@ describe('M4c: delegations through the session', () => {
     const { session } = await signingRoot();
     expect(await session.delegationCreate({ ...CREATE, owners: [A] })).toMatchObject({ ok: false, reason: 'secret-store' });
     expect(hub.provisioningKeys).toEqual([]);
+  });
+
+  // Task 5's fix wave (I2): a row offers Discard only for the slot that holds its own delegation
+  it("the status's pending slot names the delegation it holds: the unsent marker's while held, the one its state adds once published, none for another slot", async () => {
+    await writeFile(join(bin, 'act-add'), 'wait');
+    const { session } = await signingRoot(delegationsDeps());
+    const creating = session.delegationCreate({ ...CREATE, owners: [A] });
+    await waitingFor('add');
+    const id = hub.provisioningKeys[0].id;
+    await until(() => signerOf(session).pending !== null, 'the held slot');
+    expect(signerOf(session).pending).toMatchObject({ delegation: id });
+    await writeFile(join(bin, 'act-add'), 'ok');
+    await writeFile(join(bin, 'release-add'), '');
+    expect(await creating).toMatchObject({ ok: true, run: { id } });
+    expect(signerOf(session).pending).toBeNull();
+    await codes();
+  });
+
+  // Task 5's fix wave (I3): Retry after a failed key read reads now, not once 30 s have passed
+  it('org.delegation.readKeys reads the hub\'s key list again at once after a failure; the page\'s own read waits out the freshness', async () => {
+    const { session } = await signingRoot(delegationsDeps());
+    hub.keysAnswer = () => worker(503, { error: 'hub-updating' });
+    expect(await session.delegationReadKeys()).toMatchObject({ failed: true });
+    hub.keysAnswer = undefined;
+    const reads = () => hub.calls.filter((c) => c.method === 'GET' && c.path === '/api/provisioning-keys').length;
+    const before = reads();
+    await session.view(); // the page shown again: within the freshness, no read
+    await until(() => true, 'a turn');
+    expect(reads()).toBe(before);
+    const read = await session.delegationReadKeys();
+    expect(reads()).toBe(before + 1);
+    expect(read).toEqual({ at: expect.any(String), failed: false });
+    expect((await session.view())!.hubKeys).toEqual(read);
   });
 });
