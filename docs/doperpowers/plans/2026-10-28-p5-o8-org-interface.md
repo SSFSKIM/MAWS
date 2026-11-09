@@ -4448,6 +4448,14 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
      - In the fix wave (4d33e84f9), Share takes the same one-owner clause through one helper, `useOneOwnerHere`, and Add owner's gate is `useCanShare` itself. The gate's comments call it a hint that the door decides. The PR lists I1 under Unresolved Review Findings, and M5b makes no endpoint change.
   Date/Author: 2026-11-09, O8's executor (Task 1) and controller; item 6 the architect's rulings.
 
+- Decision: M5b Task 2, the local suite (67af5b945, 3767a4ba6, 51b93834e). Built as briefed. Its decisions:
+  1. **The stand-in executes `record.owners` as sminos's `add_owner` does.** The member is added, the verified act is appended verbatim to `ownersProof`, and `policyRev` is bumped. An existing owner changes nothing.
+  2. **Lane B is placed by its spawn from its first join.** A record is placed only once, at its first join, so the owner add's re-list can't run `#bySpawn` again. Instead `app-c` is placed by its spawn from the start, as when a `/clear` races its first record. The re-list carries [spawn act, owner act] and keeps its listing under `app-c`. The case asserts both the order and the placement. The spawn act is the minimal `{device, opId, action: 'session.spawn'}` that `targets.test.ts` uses; the endpoint reads only `action` and `opId`.
+  3. **One case covers both routes.** S's owner is added over A's link, and `app-c`'s through the local door.
+  4. **The refusal of a share holder is pinned (the architect's ruling 1).** B, at `approve` and not an owner, adds through the app's own `createOrgPolicies.addOwner`, with B's real signing and step-up. The act is refused `grade`, and the record is unchanged. Grading `record.*` at `approve` makes the case fail.
+  5. **The race at `share.spec.ts:251` has a `showPeople` helper.** It waits for the project's hover card to close before the right-click. If the right-click's own hover opens the card again, it closes the menu and the card with Escape and retries inside `toPass`.
+  Date/Author: 2026-11-09, O8's executor (Task 2).
+
 - Decision: M5b is built as two tasks under subagent-driven execution, each reviewed at its frontier, then one branch review at reviewer-medium (the section names none; M5b signs nothing new and adds no wire). Neither task touches `src/endpoint` or `apps/`, so the desk track has no hunk to review.
   1. **The renderer**: `AddOwnerSheet.tsx` and its test, the `addOwner` dialog kind, the menu items in `menus.tsx` and `Toolbar.tsx` under Share's gate, the copy, and the e2e fixture's answer if a spec opens it.
   2. **The local suite**: the stand-in's `ownersProof` append and the lane A and lane B case.
