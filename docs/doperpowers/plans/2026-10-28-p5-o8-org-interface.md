@@ -2633,6 +2633,8 @@ Each is built as its recommendation when its milestone is re-planned, unless the
 - Observation (M7b Task 2): `INTEGER PRIMARY KEY` reuses a pruned maximum id, so opaque cursors needed `AUTOINCREMENT`; and the `channel` feed needed an `apps/org-protocol` hunk the spec hadn't foreseen (`MachineFeed`).
 - Observation (M7b's final gate): `e2e/library.spec.ts` rewinds the index to version 9 from a template built by the numbered migrations plus `ADDED_COLUMNS`, so an `ADDED_TABLES` entry the opener creates at any version was missing from the template, and the rewound index failed "is a version-9 index". The template now takes `ADDED_TABLES` too (9bb79f34e). Any later `ADDED_TABLES` entry is covered.
   Evidence: run 42344559621 (e2e:library, packaged 1/2 red), 42357252517 (green).
+- Observation (M5b Task 1): `e2e/share.spec.ts:251` is a race in the test itself. A project row's hover card covered the People toggle before any session menu opened. It was red once on fea94bdaa and green on the rerun (42697938520), with master e181a1944 green as a control (42696748705). M5b reaches this spec, so Task 2 fixes the race (the architect, 2026-11-09).
+  Evidence: e2e:settings on fea94bdaa; the friction tracker's entry by Task 1's executor.
 
 ## Decision Log
 
@@ -4428,6 +4430,20 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   2. **Step 7 runs inside M8's sitting**, as its first part, on staging, before the production steps.
   3. **The adder is a MAWS profile the owner drives**, signed in to staging with the owner's own staging identity. The row names B, the owner's second staging identity, so the sheet itself is proved. If that profile can't be signed in to staging at the sitting, the harness member adds, and Outcomes records that the sheet is proved by the unit and local suites only.
   Date/Author: 2026-11-09, the architect; recorded by O8's executor (controller).
+
+- Decision: M5b Task 1, the renderer (fea94bdaa). Built as briefed, with these decisions:
+  1. **The ruling 1 check found `useCanShare` admitting non-owners on this Mac's own sessions.** This Mac's `record.policy` answers for all of its owners and names every session any of them owns. The local door, though, authorizes the act as the member who owns the signed-in device. So Add owner is offered:
+     - on a listing that names you an owner, which is exact already;
+     - on this Mac's own session, only while you are this Mac's one owner.
+     The architect accepted the narrowing (2026-11-09) as what ruling 1 asked for.
+  2. **"This Mac's one owner" comes from a new store, `stores/local-owner.ts`.** It reads `org.view` at connect and at each `org.changed`, and finds the machine whose ref is this Mac's. An org-owned Mac resolves to its admins. The store is wired in `App.tsx`.
+  3. **The sheet opens on a policy read, as Share's does.** If the Mac's sminos can't keep a reach, it shows the "can't yet" line. If the reach can't be read, it offers Reload. It adds one person per save. "Already an owner" reads as a no-op, not as a failure.
+  4. **`copy.ts` gains a `grade` refusal line**, so both sheets name the endpoint's owners-only refusal.
+  5. Main and the e2e fixture are unchanged, because no test showed a defect in `org.owners.add`.
+  6. **The architect's rulings on the task's concerns:**
+     - Share's own gate admits the same non-owners on this Mac. It takes the same one-owner clause in this milestone: in Task 1's fix wave, or in Task 2 if the review finds nothing to fix. The endpoint's contract doesn't change.
+     - The exact check needs a local `record.policy` that answers as the calling device's member. That is a residue row for the architect, with the desk track reviewing. It carries two costs. On a Mac with more than one owner, Add owner and Share are hidden on its own sessions, which costs nothing while every Mac has one owner. Under `MAWS_DEV_ORG`, `org.view` is null, so neither shows on this Mac's sessions. It triggers when a Mac first has more than one owner. It ends when the local `record.policy` answers as the calling device's member and both menus use the exact check.
+  Date/Author: 2026-11-09, O8's executor (Task 1) and controller; item 6 the architect's rulings.
 
 - Decision: M5b is built as two tasks under subagent-driven execution, each reviewed at its frontier, then one branch review at reviewer-medium (the section names none; M5b signs nothing new and adds no wire). Neither task touches `src/endpoint` or `apps/`, so the desk track has no hunk to review.
   1. **The renderer**: `AddOwnerSheet.tsx` and its test, the `addOwner` dialog kind, the menu items in `menus.tsx` and `Toolbar.tsx` under Share's gate, the copy, and the e2e fixture's answer if a spec opens it.
