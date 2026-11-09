@@ -7,9 +7,10 @@
 //   store update as the pending slot, with the signed bytes, before anything is sent. The slot clears at the hub's
 //   acceptance; the obligation when its last machine acknowledges or leaves. A crash between them loses neither.
 // - Only the app's own line is ever sent: the held chain, plus the pending state while the slot holds it as a candidate
-//   (its parent the held head). A `pending-fork` slot's obligation is suspended; a discard removes it with the slot (the
-//   signer's). An obligation whose state the held chain replaced (a recovery superseded it) can never be on the line
-//   again and is dropped; the superseded offer is what carries its revocations onto the recovered line.
+//   (its parent the held head) that is not held unsent (M4c's `unsent` marker). A `pending-fork` slot's obligation is
+//   suspended, as an unsent one's is; a discard removes it with the slot (the signer's). An obligation whose state the
+//   held chain replaced (a recovery superseded it) can never be on the line again and is dropped; the superseded offer
+//   is what carries its revocations onto the recovered line.
 // - Runs page forward through that line, at most DELIVERY_MAX_BYTES each, with every accepted transition. Per machine and
 //   obligation, a cursor `known {version, line}` says the machine's head is on the app's line at `version`; `line`
 //   names the line the cursor was set on, so a rewind the app adopts resets every cursor.
@@ -346,7 +347,8 @@ export function createDeliveries(deps: DeliveriesDeps): Deliveries {
     if (slot !== null && (await stateHash(slot.signed.state)) === o.hash) {
       const verdict = await judgePending(slot, view);
       if (verdict === 'fork') return { on: false, why: 'suspended' };
-      if (verdict === 'candidate') return { on: true, states: [...held, slot.signed], pending: slot.signed };
+      // M4c: a slot held unsent (`Edit.hold`) goes on no machine's line until its caller's publish clears the marker.
+      if (verdict === 'candidate') return slot.unsent !== null ? { on: false, why: 'suspended' } : { on: true, states: [...held, slot.signed], pending: slot.signed };
     }
     const at = held[o.signed.state.version - 1];
     if (at !== undefined && (await stateHash(at.state)) === o.hash) return { on: true, states: held, pending: null };

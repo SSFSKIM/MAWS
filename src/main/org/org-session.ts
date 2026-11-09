@@ -1059,7 +1059,9 @@ export function createOrgSession(deps: OrgSessionDeps): OrgSessionService {
     if (c === null) return { ok: false, reason: 'none' };
     const outcome = await c.signer.discardPending(confirmed, hash);
     changed();
-    return outcome;
+    if (!outcome.ok) return outcome;
+    // The discarded slot's `marker` (M4c) stays in main, for the delegation's hub key; the answer keeps its shape.
+    return { ok: true, unsent: outcome.unsent, hubVersion: outcome.hubVersion, ...(outcome.forkAt === undefined ? {} : { forkAt: outcome.forkAt }) };
   }
 
   async function resetSigning(confirmed: true): Promise<void> {

@@ -41,7 +41,7 @@ import { createStateSigner } from '../device/step-up';
 import type { LinkState } from '../machines/manager';
 import type { ActOutcome, ActRequest } from '../machines/remote/link';
 import { createDeliveries, createHeadPush, runBytes, type Deliveries, type DeliveryLink, type HeadPush } from './deliveries';
-import { orgFiles, SIGNING_FILE, type Obligation, type SigningFile } from './files';
+import { orgFiles, SIGNING_FILE, type Obligation, type SigningFile, type Unsent } from './files';
 import { startHeldOrg, type HeldOrg } from './held';
 import type { HubClient, HubResult, Served } from './hub-client';
 import { heldOrgSession, type SignedIn } from './session';
@@ -576,12 +576,13 @@ describe('acknowledgement', () => {
 // ---- The pending state --------------------------------------------------------------------------------------------
 
 /** The slot as the signer keeps it: `signed` pending on `parent`, exposed to the hub (a post whose answer never came). */
-async function pend(a: App, signed: SignedOrgState, parent: SignedOrgState): Promise<void> {
+/** `signed` kept in the slot with its obligation, as the signer writes it; `held` (M4c): kept unsent, never exposed. */
+async function pend(a: App, signed: SignedOrgState, parent: SignedOrgState, held?: Unsent): Promise<void> {
   const ob = await a.deliveries.obligation(signed, parent.state);
   const parentHash = await stateHash(parent.state);
   const hash = await stateHash(signed.state);
   await a.store.update((f) => {
-    f.pending = { signed, parent: parentHash, hash, exposed: { hub: true, machines: [] } };
+    f.pending = { signed, parent: parentHash, hash, exposed: { hub: held === undefined, machines: [] }, unsent: held ?? null };
     f.deliveries.push(ob!);
     return { next: f, value: undefined };
   });
@@ -638,6 +639,30 @@ describe('the pending state', () => {
     await a.deliveries.send();
     expect(m.runs).toEqual([]);
     expect(a.deliveries.owing()).toEqual([{ version: 2, machines: [M1], tooLarge: [] }]);
+  });
+
+  it('is placed on no machine’s line while the slot holds it unsent (M4c), and is delivered once its caller’s publish clears the marker', async () => {
+    const g = await genesis();
+    const a = await app([g], { roster: [M1] });
+    const pending = await next(g, NOW, revokeDevice('old'));
+    await pend(a, pending, g, { kind: 'delegation', id: 'dlg-held' });
+    const m = await machine([g]);
+    a.machines.set(M1, m);
+    await a.deliveries.send();
+    expect(m.runs).toEqual([]);
+    expect(await sameHead(m, g)).toBe(true);
+    expect(a.disk().pending?.exposed).toEqual({ hub: false, machines: [] });
+    expect(a.deliveries.owing()).toEqual([{ version: 2, machines: [M1], tooLarge: [] }]);
+
+    // `publishHeld`'s write: the marker cleared, the slot an ordinary candidate.
+    await a.store.update((f) => {
+      f.pending!.unsent = null;
+      return { next: f, value: undefined };
+    });
+    await a.deliveries.send();
+    expect(m.runs).toEqual([[1, 2]]);
+    expect(await sameHead(m, pending)).toBe(true);
+    expect(a.disk().pending?.exposed).toEqual({ hub: false, machines: [M1] });
   });
 
   it('outlives the slot’s clearing across a crash', async () => {

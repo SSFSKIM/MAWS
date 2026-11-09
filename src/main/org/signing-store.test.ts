@@ -168,7 +168,7 @@ describe('the pending slot\'s hash', () => {
     writeFileSync(p.path, JSON.stringify({ ...emptySigningFile(), pending: { signed: kept, parent: 'p', exposed: { hub: true, machines: [] } } }), { mode: 0o600 });
     let store = await p.open();
     expect(store.get()).not.toBe('damaged');
-    expect((store.get() as SigningFile).pending).toEqual({ signed: kept, parent: 'p', hash, exposed: { hub: true, machines: [] } });
+    expect((store.get() as SigningFile).pending).toEqual({ signed: kept, parent: 'p', hash, exposed: { hub: true, machines: [] }, unsent: null });
     // The next write keeps it.
     await store.update(asked('2026-10-28T12:00:00.000Z'));
     expect(p.disk().pending!.hash).toBe(hash);
@@ -189,6 +189,52 @@ describe('the pending slot\'s hash', () => {
   });
 });
 
+describe("the pending slot's unsent marker (M4c)", () => {
+  const hold = { kind: 'delegation' as const, id: 'dlg-one' };
+
+  it('loads as null for a slot written before the field existed, and the next write keeps it so', async () => {
+    const p = await profile();
+    p.registration.signing = true;
+    const kept = await signed(2);
+    const hash = await stateHash(kept.state);
+    writeFileSync(p.path, JSON.stringify({ ...emptySigningFile(), pending: { signed: kept, parent: 'p', hash, exposed: { hub: false, machines: [] } } }), { mode: 0o600 });
+    const store = await p.open();
+    expect((store.get() as SigningFile).pending).toEqual({ signed: kept, parent: 'p', hash, exposed: { hub: false, machines: [] }, unsent: null });
+    await store.update(asked('2026-10-28T12:00:00.000Z'));
+    expect(p.disk().pending!.unsent).toBeNull();
+  });
+
+  it('is kept as written, and reads back after a restart', async () => {
+    const p = await profile();
+    const store = await p.open();
+    const kept = await signed(2);
+    const hash = await stateHash(kept.state);
+    await store.update((file) => ({ next: { ...file, pending: { signed: kept, parent: 'p', hash, exposed: { hub: false, machines: [] }, unsent: hold } }, value: undefined }));
+    expect(p.disk().pending!.unsent).toEqual(hold);
+    expect(((await p.open()).get() as SigningFile).pending!.unsent).toEqual(hold);
+  });
+
+  it('reads damaged when it is anything but null or a delegation named by a non-empty id', async () => {
+    const kept = await signed(2);
+    const file = (unsent: unknown) => ({ ...emptySigningFile(), pending: { signed: kept, parent: 'p', hash: 'h', exposed: { hub: false, machines: [] }, unsent } });
+    expect(isStoredSigningFile(file(null))).toBe(true);
+    expect(isStoredSigningFile(file(hold))).toBe(true);
+    expect(isStoredSigningFile(file(true))).toBe(false);
+    expect(isStoredSigningFile(file({ kind: 'delegation', id: '' }))).toBe(false);
+    expect(isStoredSigningFile(file({ kind: 'machine', id: 'x' }))).toBe(false);
+    expect(isStoredSigningFile(file({ kind: 'delegation' }))).toBe(false);
+  });
+
+  it('is required of a slot an update writes', async () => {
+    const p = await profile();
+    const store = await p.open();
+    const kept = await signed(2);
+    const unmarked = { signed: kept, parent: 'p', hash: 'h', exposed: { hub: false, machines: [] } } as unknown as SigningFile['pending'];
+    await expect(store.update((file) => ({ next: { ...file, pending: unmarked }, value: undefined }))).rejects.toThrow(TypeError);
+    expect(p.order).toEqual([]);
+  });
+});
+
 describe("a drop's hub row (M4b)", () => {
   it('is kept with its name, ref and pub; a row without its pub, or with any field empty, reads damaged', async () => {
     const kept = await signed(2);
@@ -205,7 +251,7 @@ describe('exposure', () => {
   it('grows only the slot holding the state it names: the hub once, each machine once', async () => {
     const mine = await signed(2);
     const other = await signed(3);
-    const file: SigningFile = { ...emptySigningFile(), pending: { signed: mine, parent: 'p', hash: 'h', exposed: { hub: false, machines: [] } } };
+    const file: SigningFile = { ...emptySigningFile(), pending: { signed: mine, parent: 'p', hash: 'h', exposed: { hub: false, machines: [] }, unsent: null } };
     withExposure(file, other, { hub: true });
     expect(file.pending!.exposed).toEqual({ hub: false, machines: [] });
     withExposure(file, mine, { hub: true });
