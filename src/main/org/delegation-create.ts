@@ -52,7 +52,7 @@ import { hubWords } from './delegation-hub';
 import type { DelegationsContext } from './delegations';
 import { composeChange, type ChangeEdit } from './edits';
 import type { Unsent } from './files';
-import type { ProvisioningKey } from './hub-client';
+import type { MintedProvisioningKey, ProvisioningKey } from './hub-client';
 import type { ProvisioningSecretStore } from './provisioning-secret-store';
 import { ProvisioningCode, type SecretStore } from './secret-store';
 import { StaleEdit, type OrgSigner, type SignOutcome } from './signer';
@@ -65,7 +65,7 @@ export type DelegationCreateDeps = {
   check(change: OrgChange): Promise<SignResult | null>;
   secrets: SecretStore | null;
   destination: ProvisioningSecretStore | null;
-  hub: Pick<DelegationHub, 'revokeKey'>;
+  hub: Pick<DelegationHub, 'revokeKey' | 'readKeys'>;
   changed(): void;
   /** The status's `delegations.rev` as it stands (each `changed` publishes the next). */
   rev(): number;
@@ -138,6 +138,7 @@ const DAY_S = 86_400;
 const CLOCK_SLACK_MS = 60_000;
 const NOT_SIGNED_IN: SignResult = { ok: false, reason: 'not-root', detail: 'this Mac is not signed in to the org' };
 const ENDED = 'the delegation\'s run ended (a sign-out, a Discard, or the app quit)';
+const DISCARDED: SignResult = { ok: false, reason: 'stale', detail: 'its slot was discarded: nothing was published' };
 
 /** A gcloud `createTime` (RFC 3339, microseconds) as ISO millis; as it came when it reads as no instant. */
 function instant(text: string): string {
@@ -147,6 +148,27 @@ function instant(text: string): string {
 
 function randomHex(bytes: number): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * The fields of the hub's mint answer that `mintDisagrees` refuses, by name alone (the branch fix wave, R1): the
+ * package's sentences quote the hub's values, and a value is the hub's word (a prefix could carry the token), so the
+ * app's answer and its log never repeat one. Each field is judged by the package itself, set into an answer that
+ * otherwise agrees.
+ */
+function disagreeingFields(answer: MintedProvisioningKey, asked: { prefix: string; ttl: number; maxUses: number | null; before: number; after: number }): string[] {
+  const agreeing = { id: '0'.repeat(32), prefix: asked.prefix, expires: new Date(asked.before + asked.ttl * 1000).toISOString(), max_uses: asked.maxUses };
+  const judged = (key: typeof agreeing, token: string) => mintDisagrees({ key, token }, asked).length > 0;
+  const fields = (
+    [
+      ['id', 'id'],
+      ['prefix', 'prefix'],
+      ['expires', 'expiry'],
+      ['max_uses', 'use cap'],
+    ] as const
+  ).flatMap(([field, name]) => (judged({ ...agreeing, [field]: answer.key[field] }, 'a-token') ? [name] : []));
+  if (judged(agreeing, answer.token)) fields.push('token');
+  return fields.length === 0 ? ['answer'] : fields;
 }
 
 /** Where `r` stopped (null: before any run was reserved). */
@@ -206,7 +228,9 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
   /** An answer once a run worked: one more status publication, after its final slot, and its revision. */
   const finalAnswer = (r: Run, result: SignResult) => {
     changed();
-    return answerOf(r, result, deps.rev());
+    // A Discard that ended the run, wherever the run stood (the branch fix wave, R4): its answer is the Discard's.
+    const said = r.discarded && !result.ok && result.reason !== 'stale' ? DISCARDED : result;
+    return answerOf(r, said, deps.rev());
   };
   const strayLeft = (id: string) => `nothing was signed; the key it minted (${id}) shows as a stray key`;
 
@@ -318,11 +342,14 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
     const minted = await client.mintProvisioningKey({ label, prefix, ttl_s: ttl, ...(maxUses === null ? {} : { max_uses: maxUses }) });
     const after = now();
     if (!minted.ok) {
-      // A mint whose answer was lost may still have minted: such a key shows as a stray key.
-      log(`${r.generation}: the hub did not mint (${hubWords(minted)})`);
-      r.mintLost = minted.kind === 'unreachable';
+      // A mint whose answer was lost, or answered 2xx and didn't read (the branch fix wave, R3), may still have minted:
+      // such a key shows as a stray key, once the key list is read again.
+      r.mintLost = minted.kind === 'unreachable' || (minted.kind === 'status' && minted.status >= 200 && minted.status < 300);
+      log(`${r.generation}: the hub ${r.mintLost ? 'may have minted' : 'did not mint'} (${hubWords(minted)})`);
       if (!live(r)) return { ok: false, result: stopped('nothing was signed') };
-      return { ok: false, result: { ok: false, reason: 'hub', detail: `the hub did not mint the delegation's key (${hubWords(minted)}): nothing was signed` } };
+      if (!r.mintLost) return { ok: false, result: { ok: false, reason: 'hub', detail: `the hub did not mint the delegation's key (${hubWords(minted)}): nothing was signed` } };
+      await deps.hub.readKeys();
+      return { ok: false, result: { ok: false, reason: 'hub', detail: `the hub's answer to the mint was lost or didn't read (${hubWords(minted)}): a key may have been minted, and it shows as a stray key; nothing was signed` } };
     }
     const id = minted.value.key.id;
     if (!live(r)) {
@@ -330,10 +357,12 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
       return { ok: false, result: stopped(strayLeft(id)) };
     }
     r.id = id;
-    const disagrees = mintDisagrees(minted.value, { prefix, ttl, maxUses, before, after });
-    if (disagrees.length > 0) {
+    const asked = { prefix, ttl, maxUses, before, after };
+    if (mintDisagrees(minted.value, asked).length > 0) {
+      const fields = disagreeingFields(minted.value, asked).join(', ');
+      log(`${r.generation}: the hub's answer to the mint disagrees with what was asked in its ${fields}`);
       const revoked = await revokeMinted(r, id);
-      return { ok: false, result: { ok: false, reason: 'refused', detail: `the hub's answer to the mint disagrees with what was asked (${disagrees.join('; ')}): nothing was signed; ${revoked}` } };
+      return { ok: false, result: { ok: false, reason: 'refused', detail: `the hub's answer to the mint disagrees with what was asked in its ${fields}: nothing was signed; ${revoked}` } };
     }
     r.custody = { token: minted.value.token, pair: null, code: null };
     return { ok: true, id, before };
@@ -466,7 +495,7 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
     r.published = published.published === true;
     const slot = deps.signer()?.pending() ?? null;
     const stillHeld = !r.published && slot !== null && slot.hash === r.hash && slot.unsent !== null;
-    r.discarded = !r.published && (slot === null || slot.hash !== r.hash);
+    r.discarded ||= !r.published && (slot === null || slot.hash !== r.hash);
     if (r.discarded) {
       const refusal = asResult(published);
       log(`${r.generation}: delegation ${r.id}'s slot was discarded or replaced before its publish: nothing was published`);
@@ -521,7 +550,10 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
     create,
     rewrite,
     discarded(marker) {
-      if (marker !== null && marker.kind === 'delegation' && run !== null && run.id === marker.id) end(run);
+      if (marker === null || marker.kind !== 'delegation' || run === null || run.id !== marker.id) return;
+      // Recorded before the run ends, so whatever step it was in answers the Discard (the branch fix wave, R4).
+      run.discarded = true;
+      end(run);
     },
     reservation: () => (run === null || run.hash !== null ? null : { id: run.id, prefix: run.prefix, since: new Date(run.since).toISOString() }),
     unsent: () => (run === null || run.id === null || run.hash === null ? null : { id: run.id, rewrite: run.custody !== null && !run.working && live(run), problem: run.problem, generation: run.generation }),

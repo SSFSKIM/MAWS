@@ -561,16 +561,26 @@ export function createOrgSigner(deps: OrgSignerDeps): OrgSigner {
     if (!live(asked)) return stopped(unpublished);
     if (deps.session.current() === null) return { ok: false, reason: 'not-root', detail: 'this Mac is not signed in to the org' };
     if (store.get() === 'damaged') return { ok: false, reason: 'signing' };
-    const cleared = await store.update<'stopped' | 'none' | 'other' | 'sent' | 'ended' | SignedOrgState>((f) => {
-      if (!live(asked)) return { next: f, value: 'stopped' };
-      if (f.pending === null) return { next: f, value: 'none' };
-      if (f.pending.hash !== named) return { next: f, value: 'other' };
-      if (f.pending.unsent === null) return { next: f, value: 'sent' };
-      // The run that held it, and no other: checked in the clearing update, so nothing awaits between the two.
-      if (heldHere === null || heldHere.hash !== named || heldHere.epoch !== epoch) return { next: f, value: 'ended' };
-      f.pending.unsent = null;
-      return { next: f, value: f.pending.signed };
-    });
+    let cleared: 'stopped' | 'none' | 'other' | 'sent' | 'ended' | SignedOrgState;
+    try {
+      cleared = await store.update<'stopped' | 'none' | 'other' | 'sent' | 'ended' | SignedOrgState>((f) => {
+        if (!live(asked)) return { next: f, value: 'stopped' };
+        if (f.pending === null) return { next: f, value: 'none' };
+        if (f.pending.hash !== named) return { next: f, value: 'other' };
+        if (f.pending.unsent === null) return { next: f, value: 'sent' };
+        // The run that held it, and no other: checked in the clearing update, so nothing awaits between the two.
+        if (heldHere === null || heldHere.hash !== named || heldHere.epoch !== epoch) return { next: f, value: 'ended' };
+        f.pending.unsent = null;
+        return { next: f, value: f.pending.signed };
+      });
+    } catch (error) {
+      // A write can commit and still throw (the rename done, the directory's sync failed): the store holds the file as
+      // it reads back, and a clearing on disk is a publication (the branch fix wave, R2). Anything else published nothing.
+      const back = store.get();
+      if (back === 'damaged' || back.pending === null || back.pending.hash !== named || back.pending.unsent !== null) throw error;
+      log(`the marker's clearing threw (${(error as Error).message}) but reads back cleared: version ${back.pending.signed.state.version} is published`);
+      cleared = back.pending.signed;
+    }
     if (cleared === 'stopped') return stopped(unpublished);
     if (cleared === 'none') return { ok: false, reason: 'stale', detail: `no proposal is pending (discarded): ${unpublished}` };
     if (cleared === 'other') return { ok: false, reason: 'stale', detail: `another proposal holds the slot now: ${unpublished}` };

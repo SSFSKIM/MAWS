@@ -775,13 +775,37 @@ describe('the mint', () => {
     const h = await harness();
     h.hub.mintAnswer = (key, token) => ({ ok: true, value: { key: { ...key, expires: iso(Date.parse(key.expires) + 2 * DAY_MS) }, token } });
     const answer = await h.create();
-    expect(answer).toMatchObject({ ok: false, reason: 'refused', detail: expect.stringContaining('expires at') });
+    expect(answer).toMatchObject({ ok: false, reason: 'refused', detail: expect.stringContaining('in its expiry') });
     expect(lastMinted(h)!.revoked).not.toBeNull();
     expect(h.prompts).toEqual([]);
     h.hub.revokeAnswer = () => ({ ok: false, kind: 'unreachable', detail: 'down' });
     expect(await h.create({ prefix: 'ci-' })).toMatchObject({ ok: false, reason: 'refused', detail: expect.stringContaining('stray') });
     const stray = lastMinted(h)!;
     expect((await h.view()).strayKeys).toEqual([{ id: stray.id, prefix: 'ci-', label: 'devcloud VMs', created: stray.created, expires: stray.expires, young: true }]);
+    await h.close();
+  });
+
+  it("a mint answer whose prefix is the token: the answer, the log and the view name the field, never the hub's value (branch fix wave, R1)", async () => {
+    const h = await harness();
+    h.hub.mintAnswer = (key, token) => ({ ok: true, value: { key: { ...key, prefix: token }, token } });
+    const answer = await h.create();
+    const { token, id } = h.hub.keys.at(-1)!;
+    expect(answer).toMatchObject({ ok: false, reason: 'refused', detail: expect.stringContaining('disagrees with what was asked in its prefix') });
+    expect(h.hub.key(id)!.revoked).not.toBeNull();
+    expect(JSON.stringify(answer)).not.toContain(token);
+    expect(h.logs.join('\n')).not.toContain(token);
+    expect(JSON.stringify(await h.view())).not.toContain(token);
+    await h.close();
+  });
+
+  it("a 201 whose body doesn't read may have minted: the minted phase, and the key list read again so its stray shows (branch fix wave, R3)", async () => {
+    const h = await harness();
+    h.hub.mintAnswer = () => ({ ok: false, kind: 'status', status: 201, error: 'malformed' });
+    const answer = await h.create();
+    const minted = lastMinted(h)!;
+    expect(answer).toMatchObject({ ok: false, reason: 'hub', phase: 'minted', detail: expect.stringContaining('a key may have been minted') });
+    expect(h.part.viewInputs().keys?.list.map((k) => k.id), 'read by the create itself').toContain(minted.id);
+    expect((await h.view()).strayKeys.map((k) => k.id)).toEqual([minted.id]);
     await h.close();
   });
 
@@ -1007,12 +1031,19 @@ describe('renew\'s hub half', () => {
 
   it('409 not-renewed followed by a key list showing equality is done (a lost 200, then Retry)', async () => {
     const { h, id, later } = await created();
+    // the key list doesn't read through the lost answer, so the last good read still shows the key behind
     h.hub.renewAnswer = () => 'lost';
+    h.hub.listAnswer = () => status(503, 'hub-updating');
     await h.change({ kind: 'delegation.renew', id, expires: later });
-    expect((await h.view()).delegations[0].hubProblem).toMatchObject({ reason: 'hub' });
+    expect(h.part.viewInputs().hubProblems.get(id)).toMatchObject({ reason: 'hub' });
+    expect(h.part.viewInputs().keys?.list.find((k) => k.id === id)?.expires).not.toBe(later);
     h.hub.renewAnswer = null;
+    h.hub.listAnswer = null;
+    const reads = h.hub.calls.filter((c) => c.method === 'provisioningKeys').length;
     expect(await h.part.renewHub(id)).toEqual({ ok: true });
     expect(h.hub.renews).toEqual([id, id]); // the route alone, answered 409 not-renewed the second time
+    expect(h.hub.calls.filter((c) => c.method === 'provisioningKeys').length, "Retry's own read after the 409").toBeGreaterThan(reads);
+    expect(h.part.viewInputs().hubProblems.has(id)).toBe(false);
     expect((await h.view()).delegations[0]).toMatchObject({ hubBehind: null, hubProblem: null });
     await h.close();
   });
@@ -1476,4 +1507,21 @@ describe("Task 5's fix wave: what the renderer receives of a failed write (Minor
     for (const piece of [code, code.slice(18, 34), decoded.token, decoded.delegation.privateJwk.d!]) expect(sent.includes(piece), 'a piece of the code in what the renderer receives').toBe(false);
     await h.close();
   });
+});
+
+describe('the branch fix wave: a Discard during a gcloud step answers the Discard (R4)', () => {
+  for (const op of ['add', 'version'] as const) {
+    it(`a Discard while ${op === 'add' ? 'versions add' : 'describe'} is out answers the discarded phase, never held`, async () => {
+      const h = await harness();
+      await act(h, op, 'wait');
+      const creating = h.create();
+      await waiting(h, op);
+      await h.discard();
+      const answer = await creating;
+      expect(answer).toMatchObject({ ok: false, reason: 'stale', phase: 'discarded', detail: 'its slot was discarded: nothing was published' });
+      expect(h.signer.pending()).toBeNull();
+      expect(h.hub.posts).toEqual([]);
+      await h.close();
+    });
+  }
 });

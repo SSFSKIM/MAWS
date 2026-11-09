@@ -214,7 +214,7 @@ type Harness = {
   /** `chain`: every chain.json write fails (a full disk under the held view's adoption). */
   faults: { chain: boolean };
   /** Runs inside each write before it reaches the disk: a test holds a write open here and acts meanwhile. */
-  gates: { write: ((name: string, value: unknown) => Promise<void> | void) | null };
+  gates: { write: ((name: string, value: unknown) => Promise<void> | void) | null; written: ((name: string, value: unknown) => void) | null };
   hub: FakeHub;
   /** The hub the signer is given: `null` while `hub` is false. */
   online: boolean;
@@ -243,14 +243,16 @@ async function harness(options: Options = {}): Promise<Harness> {
   expect(await base.ensure()).toEqual({ ok: true });
   const writes: Harness['writes'] = [];
   const faults = { chain: false };
-  const gates: Harness['gates'] = { write: null };
+  const gates: Harness['gates'] = { write: null, written: null };
   const files: OrgFiles = {
     ...base,
     write: async (name, value) => {
       if (faults.chain && name === CHAIN_FILE) throw new Error('disk full');
       await gates.write?.(name, value);
       writes.push({ name, value: structuredClone(value) });
-      return base.write(name, value);
+      await base.write(name, value);
+      // after the file is on disk: a write that commits and then throws (a directory sync that fails after the rename)
+      gates.written?.(name, value);
     },
   };
   let anchor: Anchor | null = null;
@@ -1172,6 +1174,36 @@ describe('an unsent slot (M4c: `Edit.hold`, `publishHeld`)', () => {
     expect(again.published).toBeUndefined(); // this call cleared nothing
     expect(raw()).toBe(before);
     expect(h.hub.posts).toEqual([]);
+  });
+
+  it("a marker-clearing write that commits and then throws: the store read back says it cleared, so it is published and posted (branch fix wave, R2)", async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    h.gates.written = (name, value) => {
+      const pending = (value as SigningFile).pending;
+      if (name === SIGNING_FILE && pending?.unsent === null && !pending.exposed.hub) {
+        h.gates.written = null;
+        throw new Error('the directory sync failed after the rename');
+      }
+    };
+    expect(await h.signer.publishHeld(hash)).toEqual({ ok: true, version: 2, published: true });
+    expect(h.hub.posts).toHaveLength(1);
+    expect(h.held.head().state.version).toBe(2);
+    expect(h.settled.map((s) => s.hash)).toEqual([hash]);
+  });
+
+  it("a marker-clearing write that throws before it commits publishes nothing: the slot stays held (branch fix wave, R2)", async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    h.gates.write = (name, value) => {
+      const pending = (value as SigningFile).pending;
+      if (name === SIGNING_FILE && pending?.unsent === null && !pending.exposed.hub) throw new Error('disk full');
+    };
+    const outcome = await h.signer.publishHeld(hash);
+    expect(outcome).toMatchObject({ ok: false, reason: 'signing' });
+    expect(outcome).not.toHaveProperty('published');
+    expect(h.hub.posts).toEqual([]);
+    expect(h.disk()!.pending).toMatchObject({ hash, unsent: HOLD });
   });
 
   it('a crash after publishHeld\'s write and before its post leaves an ordinary pending slot that the next start\'s settlement posts', async () => {
