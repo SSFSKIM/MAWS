@@ -3,11 +3,10 @@
 // renderer line: the marks and menus on listed rows). The mark: a lock for Private, a people mark for wider access or
 // shares, read from the machine's policy for your own sessions and from the listing's audience for another's private one
 // shared with you, with its access in the hover card. Share: a listed row you own in a hub project has a menu holding it,
-// any other listed row none; a record of this Mac's in a hub project that its policy read names offers it; one in a
-// local-only project, or while signed out, doesn't; it opens the Share sheet. P5 O8 M5b: Add owner sits beside Share where
-// Share is, narrowed to the session's owners (the architect's rulings on M5b's refresh, item 1): a listed row names you
-// an owner already; this Mac's record only while you are this Mac's one owner, since its policy read names every session
-// any of its owners owns.
+// any other listed row none; a record of this Mac's in a hub project that its policy read names offers it while you are
+// this Mac's one owner (P5 O8 M5b: its read names every session any of its owners owns, and the door takes the act from
+// the session's owners alone; the Decision Log's "M5b Task 1, the renderer", item 6); one in a local-only project, or
+// while signed out, doesn't; it opens the Share sheet. P5 O8 M5b: Add owner sits beside Share wherever Share is.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -141,12 +140,13 @@ describe('Share on a row', () => {
     expect(await screen.findByRole('dialog', { name: SHARE.title })).toBeTruthy();
   });
 
-  it("offers Share on this Mac's record in a hub project its policy read names, or that can't keep a reach yet; not in a local-only project, nor signed out", async () => {
+  it("offers Share on this Mac's record in a hub project its policy read names, or that can't keep a reach yet, while you are this Mac's one owner; not in a local-only project, nor signed out", async () => {
     const here = record(at('here'), { projectId: hub.id, title: { text: 'Here', source: 'user' } });
     const unnamed = record(at('unnamed'), { projectId: hub.id, title: { text: 'Not named', source: 'user' } });
     const local = record(at('local'), { projectId: scratch.id, title: { text: 'Local only', source: 'user' } });
     fill([], [here, unnamed, local]);
     reads(supported(TEST_MACHINE, entry('here', 'listed'), entry('local', 'listed')));
+    act(() => useLocalOwner.setState({ owner: ME }));
     render(<Sidebar />);
     const shareIn = async (name: string) => {
       const items = within(await menuOf(name)).queryAllByRole('menuitem').map((item) => item.textContent);
@@ -186,20 +186,23 @@ describe('Add owner beside Share', () => {
     expect(await screen.findByRole('dialog', { name: OWNER.title })).toBeTruthy();
   });
 
-  it("offers it on this Mac's record only while you are this Mac's one owner, where Share stays", async () => {
+  it("offers Share and Add owner on this Mac's record only while you are this Mac's one owner", async () => {
     const here = record(at('here'), { projectId: hub.id, title: { text: 'Here', source: 'user' } });
     fill([], [here]);
     reads(supported(TEST_MACHINE, entry('here', 'listed')));
     render(<Sidebar />);
     // this Mac has several owners, or another: its read names their sessions too, which the door refuses you
-    expect(await itemsOf('Here')).toEqual([SHARE.menuItem]);
+    expect(await itemsOf('Here')).toEqual([]);
     act(() => useLocalOwner.setState({ owner: 'member-ana' }));
-    expect(await itemsOf('Here')).toEqual([SHARE.menuItem]);
+    expect(await itemsOf('Here')).toEqual([]);
     act(() => useLocalOwner.setState({ owner: ME }));
     expect(await itemsOf('Here')).toEqual([SHARE.menuItem, OWNER.menuItem]);
-    // a sminos that can't keep a reach: offered, as Share is, and the sheet says so
+    // a sminos that can't keep a reach: both offered, and each sheet says so
     act(() => reads({ ok: true, machine: TEST_MACHINE, supported: false }));
     expect(await itemsOf('Here')).toEqual([SHARE.menuItem, OWNER.menuItem]);
+    act(() => useLocalOwner.setState({ owner: null }));
+    expect(await itemsOf('Here')).toEqual([]);
+    act(() => useLocalOwner.setState({ owner: ME }));
     act(() => useHubAccess.setState({ access: null, member: null }));
     expect(await itemsOf('Here')).toEqual([]);
   });

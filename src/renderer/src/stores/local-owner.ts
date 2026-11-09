@@ -1,9 +1,13 @@
-// This Mac's one owner in the held head (P5 O8 M5b, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, the
-// architect's rulings on M5b's refresh, item 1), for "Add owner…" on this Mac's own sessions (sessions/share/target.ts).
-// This Mac's `record.policy` answers as its owners' member: it names every session any of them owns, while the local
-// door authorizes an act as the signed-in device's member, and `manage` is the session's owners' alone
-// (src/endpoint/grades.ts). So the read names a session the signed-in member owns exactly when they are this Mac's only
-// owner: a member list of one, or an org-owned Mac (its admins) with one admin. Null otherwise, and while no view is held.
+// This Mac's one owner in the app's held head (P5 O8 M5b, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, the
+// architect's rulings on M5b's refresh, item 1, and the Decision Log's "M5b Task 1, the renderer"), for Share and "Add
+// owner…" on this Mac's own sessions (sessions/share/target.ts). This Mac's `record.policy` answers as its owners'
+// member: it names every session any of them owns, while the local door authorizes an act as the signed-in device's
+// member, and `manage` is the session's owners' alone (src/endpoint/grades.ts). With the signed-in member this Mac's only
+// owner (a member list of one, or an org-owned Mac whose admins are one), the sessions the read names are theirs. Null
+// otherwise, and while no view is held.
+//
+// A hint, not the check: this is the app's head, and mawsd's can lag or lead it, so for a moment the app can name you
+// the one owner while the door, under its own head, refuses you. The door decides.
 //
 // The view moves only at `org.changed` (as the Org page reads it): it is read at connect and again at each, the latest
 // read kept.
