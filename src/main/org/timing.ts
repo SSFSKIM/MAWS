@@ -68,6 +68,11 @@ export interface OrgTiming {
    */
   CHANNEL_MACHINE_ENTRIES: number;
   CHANNEL_MACHINE_BYTES: number;
+  /**
+   * M4c's. The hub's provisioning-key list is read when the Org page is shown (at an `org.view`) only once its last read
+   * started this long ago, so the page's own re-reads don't ask the hub at each `org.changed`.
+   */
+  KEYS_FRESH_MS: number;
 }
 
 export const ORG_TIMING: Readonly<OrgTiming> = Object.freeze({
@@ -102,6 +107,7 @@ export const ORG_TIMING: Readonly<OrgTiming> = Object.freeze({
   CHANNEL_COALESCE_MS: 100,
   CHANNEL_MACHINE_ENTRIES: 500,
   CHANNEL_MACHINE_BYTES: 4 * 1024 * 1024,
+  KEYS_FRESH_MS: 30_000,
 });
 
 export const orgTiming = (overrides: Partial<OrgTiming> = {}): OrgTiming => ({ ...ORG_TIMING, ...overrides });

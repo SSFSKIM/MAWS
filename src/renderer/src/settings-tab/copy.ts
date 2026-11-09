@@ -431,6 +431,9 @@ export const ORG = {
     busy: 'Another signing is running.',
     refused: 'The checks refused it.',
     stale: 'What would be signed changed since it was shown.',
+    // M4c, a delegation's create (Task 5 words its sheet)
+    'secret-store': 'The provisioning code’s destination isn’t ready.',
+    unsent: 'Signed, but its provisioning code wasn’t stored.',
   },
   pending: 'Pending',
   pendingWaits: (version: number) => `Version ${version} is signed and waits for the hub.`,

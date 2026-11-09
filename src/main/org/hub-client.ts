@@ -153,19 +153,20 @@ const isObject = (value: unknown): value is Record<string, unknown> => typeof va
 /**
  * The Worker's error codes, each read as itself; any other string is reported as `unrecognized` (M4c's fix wave: a slug
  * in the codes' alphabet could carry a fragment of a provisioning token). The set is desk-hub's vocabulary: every code
- * its routes answer with a literal (`fail`/`refused`/`json` with a status, or `{error: …}`), plus `not-head` and
- * `rollback`, which org-chain.ts answers by variable. Codes main branches on: `not-a-member` (here), `not-head` and
+ * its routes answer with a literal (`fail`/`refused`/`json` with a status, or `{error: …}`), every member of
+ * identity.ts's exported error unions (`WrappedKeyError`'s included), plus `not-head` and `rollback`, which org-chain.ts
+ * answers by variable; hub-client.test.ts holds the set to all three, so a code the hub adds fails CI. Codes main branches on: `not-a-member` (here), `not-head` and
  * `rollback` (signer.ts), `not-admin` and `no-member` (pairing.ts), `not-yours` and `unknown-enrollment` (enroll.ts),
  * `unknown-machine` and `unknown-key` (here), and the provisioning routes' `not-found`, `key-revoked`, `key-expired`,
  * `not-renewed`, `too-long` and `hub-updating` (M4c's Task 4). A code the hub adds later reads `unrecognized` until it
  * is listed: shown, never branched on.
  */
-const ERROR_CODES: ReadonlySet<string> = new Set([
-  'bad-link', 'bad-name', 'bad-shape', 'bad-signature', 'busy', 'confirmed', 'conflict', 'contested', 'expired', 'fence-failed',
-  'genesis-member', 'hub-unavailable', 'hub-updating', 'key-exhausted', 'key-expired', 'key-held', 'key-posted', 'key-purged',
-  'key-revoked', 'malformed', 'method-not-allowed', 'mint-failed', 'name-taken', 'no-endpoint', 'no-key', 'no-member', 'no-ref',
-  'no-state', 'not-a-member', 'not-active', 'not-admin', 'not-bound', 'not-configured', 'not-enrolled', 'not-found', 'not-head',
-  'not-listed', 'not-on-rl1', 'not-org-admin', 'not-renewed', 'not-retired', 'not-yours', 'prefix-mismatch', 'ref-taken', 'removed',
+export const ERROR_CODES: ReadonlySet<string> = new Set([
+  'bad-link', 'bad-name', 'bad-shape', 'bad-signature', 'busy', 'confirmed', 'conflict', 'contested', 'credential-taken', 'different-key',
+  'expired', 'fence-failed', 'genesis-member', 'hub-unavailable', 'hub-updating', 'key-exhausted', 'key-expired', 'key-held', 'key-posted',
+  'key-purged', 'key-revoked', 'last-key', 'malformed', 'method-not-allowed', 'mint-failed', 'name-taken', 'no-endpoint', 'no-key',
+  'no-member', 'no-ref', 'no-state', 'not-a-member', 'not-active', 'not-admin', 'not-bound', 'not-configured', 'not-enrolled', 'not-found',
+  'not-head', 'not-key-holder', 'not-listed', 'not-on-rl1', 'not-org-admin', 'not-renewed', 'not-retired', 'not-yours', 'prefix-mismatch', 'ref-taken', 'removed',
   'retired', 'rollback', 'stale-attestation', 'stale-endpoint', 'stale-generation', 'stale-listing', 'state-unavailable', 'token-used',
   'too-long', 'too-many', 'unknown-device', 'unknown-enrollment', 'unknown-key', 'unknown-machine', 'unknown-project', 'unknown-token',
   'upgrade-required', 'wrong-use',

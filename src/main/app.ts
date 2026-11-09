@@ -43,6 +43,8 @@ import type { HostEntry } from '@shared/ipc/schema/channel'; // P5 O8 M7b
 import { powerMonitor } from 'electron'; // P5 O8 M1: the Registry feed reconnects at wake and unlock
 import { openExternalUrl } from './open-external'; // P5 O8 M1: the Access login's browser trip
 import { createOrgSession } from './org/org-session'; // P5 O8 M1
+import { openProvisioningSecret, PROVISIONING_SECRET_FILE } from './org/provisioning-secret-store'; // P5 O8 M4c
+import { resolveGcloud, secretStore } from './org/secret-store'; // P5 O8 M4c
 import { excludeFromBackup } from '@shared/fs/backup-exclusion';
 import { createRegistryFeed } from './org/registry-feed'; // P5 O8 M1
 import { registerOrgHandlers, registerPolicyHandlers, registerRowsHandler } from './org/register'; // P5 O8 M1; M2: org.rows; M6b: org.policy.*
@@ -327,6 +329,14 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
           log: (line) => console.log(line),
         })
       : null;
+  // P5 O8 M4c: where a new delegation's provisioning code goes (main's own <profile>/provisioning-secret.json, never a
+  // settings file: O7 M9), and its custody: gcloud, resolved at each step through the login shell's PATH (the engine's
+  // captured environment, below, read when a create runs) and then Homebrew's two places and ~/google-cloud-sdk/bin
+  const provisioningSecret = openProvisioningSecret(join(profile, PROVISIONING_SECRET_FILE));
+  const provisioningCustody = secretStore({
+    gcloud: () => resolveGcloud({ loginPath: async () => (await engineEnv).PATH ?? null, home: app.getPath('home') }),
+    log: (line) => console.log(`[org] ${line}`),
+  });
   // One handle on <userData>/org/ for the session and M2's rows cache; excluded from Time Machine at its creation
   const orgDir = orgFiles({ userData: app.getPath('userData'), excludeFromBackup: (path) => excludeFromBackup(path), log: (line) => console.log(`[org] ${line}`) });
   const orgSession =
@@ -342,6 +352,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
           // `<userData>/org/` stays out of Time Machine, as the device keys do: a restored token or chain is no one's
           excludeFromBackup: (path) => excludeFromBackup(path),
           local, // M4b: this Mac's own machine, which a drop refuses
+          delegations: { secrets: provisioningCustody, destination: provisioningSecret }, // M4c: the create transaction's custody
           // M3: the app as the org's signer. Org states are signed with the device's step-up key behind Touch ID (the
           // key stays in step-up.ts); the weekly successor asks at a window's focus, and notifies once a day while no
           // window is in front (a click brings the app forward, whose focus may then ask); revocations go to the RL2
@@ -400,6 +411,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     emitGrants: (changed) => void emit('org.grants.changed', changed),
     service: orgSession,
     development: devOrg,
+    destination: provisioningSecret, // M4c: org.provisioningSecret.*
   });
   // P5 O8 M4a Task 8: the Org page's e2e look seeds org.* from a fixture (org/page-fixture.ts), which also stops the
   // session's org.changed. The guard folds to false outside a harness build, which then carries none of it.

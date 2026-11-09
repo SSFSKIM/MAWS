@@ -1,9 +1,13 @@
 // The hub's HTTP boundary (P5 O8 M1, hub-client.ts): what an answer may carry past it. A Worker's `error` reaches
 // refusals and the log only as a short code, an email and an instant only in their grammar, and the certificates only as
 // a set of signed items, so a hostile hub can't reflect the bearer token outward or hand O7 a set it can't walk.
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// The hub's error vocabulary, imported here only (never by product code, which imports nothing from desk-hub).
+import type { ProvisioningKeyError, RedeemError, WrappedKeyError } from '../../../apps/desk-hub/src/protocol/identity';
 import { generateSigningKey, keyId, signRecord, SIGNING_DOMAINS } from '../../../apps/org-protocol/src/index.ts';
-import { hubClient } from './hub-client';
+import { ERROR_CODES, hubClient } from './hub-client';
 
 const HUB = 'https://hub.example.test';
 const TOKEN = `eyJhbGciOiJSUzI1NiJ9.${'x'.repeat(600)}.${'s'.repeat(342)}`;
@@ -376,5 +380,43 @@ describe("the hub client's provisioning keys (M4c)", () => {
       expect(await client(() => worker(200, { keys: [record(), bad] })).provisioningKeys()).toEqual({ ok: false, kind: 'status', status: 200, error: 'malformed' });
     }
     expect(await client(() => worker(200, { keys: 'none' })).provisioningKeys()).toEqual({ ok: false, kind: 'status', status: 200, error: 'malformed' });
+  });
+});
+
+/** `true` exactly when the list `L` names every member of the union `T`; else what it lacks. */
+type Names<T extends string, L extends readonly string[]> = [Exclude<T, L[number]>] extends [never] ? true : { lacks: Exclude<T, L[number]> };
+
+// M4c Task 4: the allowlist can't drift from the hub's vocabulary. A code the hub adds would read `unrecognized` here
+// with no failure anywhere, so CI fails instead: the typecheck when one of desk-hub's exported error unions gains a
+// member (each list below must name every member), and this suite when a route of the Worker's answers a literal code
+// the list lacks.
+describe("the hub client's error codes against desk-hub's vocabulary", () => {
+  const provisioningKeyErrors = ['bad-shape', 'not-admin', 'unknown-key', 'key-revoked', 'key-expired', 'not-renewed', 'too-long'] as const satisfies readonly ProvisioningKeyError[];
+  const redeemErrors = ['bad-shape', 'bad-name', 'unknown-token', 'expired', 'confirmed', 'token-used', 'name-taken', 'busy', 'mint-failed', 'key-revoked', 'key-expired', 'key-exhausted', 'prefix-mismatch', 'not-active'] as const satisfies readonly RedeemError[];
+  const wrappedKeyErrors = ['bad-shape', 'not-admin', 'not-key-holder', 'different-key', 'credential-taken', 'unknown-key', 'last-key'] as const satisfies readonly WrappedKeyError[];
+  // Each list names every member of its union: a member the hub adds and a list lacks makes this a type error.
+  const complete: [Names<ProvisioningKeyError, typeof provisioningKeyErrors>, Names<RedeemError, typeof redeemErrors>, Names<WrappedKeyError, typeof wrappedKeyErrors>] = [true, true, true];
+  const unions = { ProvisioningKeyError: provisioningKeyErrors, RedeemError: redeemErrors, WrappedKeyError: wrappedKeyErrors };
+
+  it("holds every member of identity.ts's exported error unions", () => {
+    expect(complete).toEqual([true, true, true]);
+    for (const [union, codes] of Object.entries(unions)) for (const code of codes) expect(ERROR_CODES.has(code), `${union}: ${code}`).toBe(true);
+  });
+
+  it('holds every code a route of the Worker answers by its literal, and the two org-chain.ts answers by variable', () => {
+    const root = join(__dirname, '../../../apps/desk-hub/src');
+    const sources = (readdirSync(root, { recursive: true, withFileTypes: true }) as import('node:fs').Dirent[])
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts'))
+      .map((entry) => join(entry.parentPath, entry.name));
+    const answered = new Set<string>();
+    // `fail(409, 'code', …)`, `refused(…)`, `json(404, {error: 'code'})`, and any `{error: 'code'}` an answer is built from
+    const literal = [/\b(?:fail|refused|json)\(\s*\d{3},\s*(?:\{\s*error:\s*)?'([a-z0-9-]+)'/g, /\berror:\s*'([a-z0-9-]+)'/g];
+    for (const file of sources) {
+      const text = readFileSync(file, 'utf8');
+      for (const pattern of literal) for (const match of text.matchAll(pattern)) answered.add(match[1]);
+    }
+    // The scan reaches the routes: the provisioning keys' and the Worker's own fallbacks are among what it found.
+    for (const known of ['hub-updating', 'not-found', 'method-not-allowed', 'key-revoked', 'not-renewed', 'too-long']) expect(answered.has(known), known).toBe(true);
+    for (const code of [...answered, 'not-head', 'rollback']) expect(ERROR_CODES.has(code), code).toBe(true);
   });
 });

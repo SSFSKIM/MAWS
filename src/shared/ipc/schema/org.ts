@@ -121,6 +121,15 @@ export type OrgEnrollingStatus = z.infer<typeof OrgEnrollingStatusSchema>;
  */
 export const OrgHubRowLeftSchema = z.strictObject({ name: z.string(), ref: z.string() });
 
+/**
+ * M4c: the Delegations section's part of the status. `creating`: a create (or "Write the code again") of this Mac's is
+ * under way, so another window's Create waits; `rev` advances at every change the section reads through `org.view` and
+ * that the status does not otherwise carry (the hub's key list read, a hub half's answer, a create's step, an unsent
+ * delegation's problem), so `org.changed` tells the renderer to read the view again.
+ */
+export const OrgDelegationsStatusSchema = z.strictObject({ creating: z.boolean(), rev: z.number().int().nonnegative() });
+export type OrgDelegationsStatus = z.infer<typeof OrgDelegationsStatusSchema>;
+
 const RegisteredSchema = z.strictObject({
   state: z.literal('registered'),
   org: z.string(),
@@ -138,6 +147,7 @@ const RegisteredSchema = z.strictObject({
   pairing: OrgPairingStatusSchema, // M4a: null while this Mac pairs no device
   enrolling: OrgEnrollingStatusSchema, // M4b: null while this Mac enrolls no machine
   hubRowsLeft: z.array(OrgHubRowLeftSchema), // M4b: dropped, their hub rows still listed
+  delegations: OrgDelegationsStatusSchema, // M4c
 });
 export const OrgStatusSchema = z.discriminatedUnion('state', [NoneSchema, DevelopmentSchema, RegisteringSchema, RegisteredSchema]);
 export type OrgStatus = z.infer<typeof OrgStatusSchema>;
@@ -156,10 +166,15 @@ const DiscardInputSchema = z.strictObject({ confirmed: z.literal(true), hash: z.
 /**
  * M3: why a sign ended without a new version; `refused` names the checks' refusals in `detail`; `stale`: what would be
  * signed is no longer what the owner was shown (the superseded offer changed), so nothing was asked or signed.
+ * M4c, a delegation's create (`org.delegation.create`, `org.delegation.rewrite`): `secret-store`, refused before anything
+ * was minted or signed, since the destination, gcloud or the secret isn't ready (`detail` names what's missing);
+ * `unsent`, signed and held unsent, its code not stored (`detail` says why, and the delegation's row offers "Write the
+ * code again" while this run holds its key pair, else Discard). A create's success carries `secret`: the Secret Manager
+ * version its code went to, and that version's `createTime` (ISO millis when gcloud's own reads as an instant).
  */
-export const SIGN_REASONS = ['not-root', 'unmarked', 'signing', 'cancelled', 'pending', 'invalid', 'hub', 'busy', 'refused', 'stale'] as const;
+export const SIGN_REASONS = ['not-root', 'unmarked', 'signing', 'cancelled', 'pending', 'invalid', 'hub', 'busy', 'refused', 'stale', 'secret-store', 'unsent'] as const;
 export const SignResultSchema = z.union([
-  z.strictObject({ ok: z.literal(true), version: z.number().int().positive() }),
+  z.strictObject({ ok: z.literal(true), version: z.number().int().positive(), secret: z.strictObject({ version: z.string(), createTime: z.string() }).optional() }),
   z.strictObject({ ok: z.literal(false), reason: z.enum(SIGN_REASONS), detail: z.string().optional() }),
 ]);
 export type SignResult = z.infer<typeof SignResultSchema>;
@@ -174,6 +189,56 @@ export const DiscardResultSchema = z.union([
   z.strictObject({ ok: z.literal(false), reason: z.enum(['held', 'hub', 'none', 'signing', 'stale']).optional() }),
 ]);
 export type DiscardResult = z.infer<typeof DiscardResultSchema>;
+
+/**
+ * M4c: why a delegation's hub half (renew's `POST …/renew`, drop's or a stray key's `DELETE`) didn't finish:
+ * `no-route`, a hub without the renew route (`404 not-found`, the Worker's): "this hub can't renew its key yet";
+ * `updating`, `503 hub-updating`, retried; `ended`, `410 key-revoked` or `key-expired`, which ends it (an elapsed key is
+ * never revived); `not-renewed`, `409` while the hub's held head lacks the extension (its key list read after shows it
+ * still behind); `too-long`, `409 too-long`, which heals with time after a delayed settlement; `hub`, no hub or no
+ * answer; `refused`, any other answer of the hub's, in `detail`. `none` (a Retry's answer only): nothing to do, since the
+ * head names no such delegation behind the hub, or names it in effect (a revoke).
+ */
+export const HUB_HALF_REASONS = ['no-route', 'updating', 'ended', 'not-renewed', 'too-long', 'hub', 'refused'] as const;
+export const HubHalfResultSchema = z.union([
+  z.strictObject({ ok: z.literal(true) }),
+  z.strictObject({ ok: z.literal(false), reason: z.enum([...HUB_HALF_REASONS, 'none']), detail: z.string().optional() }),
+]);
+export type HubHalfResult = z.infer<typeof HubHalfResultSchema>;
+/**
+ * M4c: a hub key minted in the last this many milliseconds is likely a create still under way (a CLI `delegation
+ * create`, another admin's): Revoke's confirmation says so more strongly (the architect's ruling on stray keys).
+ */
+export const YOUNG_STRAY_KEY_MS = 15 * 60_000;
+/**
+ * M4c (Interfaces §S): a delegation as the Delegations section lists it (src/main/org/view.ts). Rows join the head's
+ * delegations (`in-effect`), the unsent slot's, absent from the head (`unsent`), and the dropped ones whose hub key is
+ * still live (`dropped`). `maxUses` is null for no cap. `machines`: the certified machines it made, from the held
+ * certificates, live or retired (a revoked key's left out), one per ref. `hub`: its key in the last good read of the
+ * hub's list (null: none there, or no read). `unsent`: `rewrite` while this run holds its key pair ("Write the code
+ * again"; else Discard only), and why its code isn't stored. `hubBehind`, from the comparison alone: `renew`, the head
+ * expires later than the hub's unrevoked, unexpired key; `revoke`, a dropped delegation's key still live. `hubProblem`:
+ * the last hub half this sign-in ran for it that didn't finish.
+ */
+export const OrgDelegationRowSchema = z.strictObject({
+  id: z.string(),
+  prefix: z.string(),
+  owners: z.union([z.array(z.string()), z.literal('org')]),
+  expires: z.string(),
+  maxUses: z.number().int().positive().nullable(),
+  machines: z.array(z.strictObject({ ref: z.string(), name: z.string(), live: z.boolean() })),
+  hub: z.strictObject({ expires: z.string(), uses: z.number().int().nonnegative(), revoked: z.boolean() }).nullable(),
+  state: z.enum(['in-effect', 'unsent', 'dropped']),
+  unsent: z.strictObject({ rewrite: z.boolean(), problem: z.string().nullable() }).nullable(),
+  hubBehind: z.enum(['renew', 'revoke']).nullable(),
+  hubProblem: z.strictObject({ reason: z.enum(HUB_HALF_REASONS), detail: z.string() }).nullable(),
+});
+export type OrgDelegationRow = z.infer<typeof OrgDelegationRowSchema>;
+/**
+ * M4c: a hub key unrevoked and unexpired that no head delegation, revoked holder or unsent slot names (a mint whose sign
+ * never happened), with Revoke; `young` when minted within `YOUNG_STRAY_KEY_MS` of the view's reading.
+ */
+export const OrgStrayKeySchema = z.strictObject({ id: z.string(), prefix: z.string(), label: z.string(), created: z.string(), expires: z.string(), young: z.boolean() });
 
 /**
  * M4a (Interfaces §M): the Org page's reading of the held head (src/main/org/view.ts), null unless a registration holds a
@@ -211,6 +276,11 @@ export const OrgViewSchema = z.strictObject({
     }),
   ),
   roots: z.array(z.union([z.strictObject({ kid: z.string(), member: z.string(), device: z.string() }), z.strictObject({ kid: z.string(), unlisted: z.literal(true) })])),
+  // M4c: the delegations and the stray hub keys; `hubKeys`, the hub's key list behind them: `at`, its last good read
+  // (null: none yet this sign-in), and `failed`, the latest read failed (shown as such, never as "no keys")
+  delegations: z.array(OrgDelegationRowSchema),
+  strayKeys: z.array(OrgStrayKeySchema),
+  hubKeys: z.strictObject({ at: z.string().nullable(), failed: z.boolean() }),
 });
 export type OrgView = z.infer<typeof OrgViewSchema>;
 
@@ -277,6 +347,36 @@ export const ProvisioningSecretSchema = z.strictObject({
     .regex(/^[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/),
 });
 export type ProvisioningSecret = z.infer<typeof ProvisioningSecretSchema>;
+/**
+ * M4c: `org.provisioningSecret.get`: the destination as main's file holds it, null when unset (no file), or `damaged`
+ * (a file this build can't own, never read as unset: `org.provisioningSecret.reset` is the way out).
+ */
+export const ProvisioningSecretReadingSchema = z.union([ProvisioningSecretSchema, z.null(), z.strictObject({ damaged: z.string() })]);
+export type ProvisioningSecretReading = z.infer<typeof ProvisioningSecretReadingSchema>;
+/** M4c: `org.provisioningSecret.set` (`value` null clears it) and `.reset`: written, or why not (`invalid`, `damaged`: never written over, `io`). */
+export const ProvisioningSecretWriteSchema = z.union([z.strictObject({ ok: z.literal(true) }), z.strictObject({ ok: z.literal(false), reason: z.enum(['invalid', 'damaged', 'io']), detail: z.string() })]);
+export type ProvisioningSecretWrite = z.infer<typeof ProvisioningSecretWriteSchema>;
+
+/**
+ * M4c: the sheet's bounds of a new delegation, org-protocol's (src/main/org/delegations.test.ts pins them): its key's life
+ * in whole days (`MIN_PROVISIONING_KEY_TTL_S` to `MAX_PROVISIONING_KEY_TTL_S`), and a use cap up to
+ * `MAX_PROVISIONING_KEY_USES` (null: no cap).
+ */
+export const DELEGATION_TTL_DAYS = { min: 1, max: 365 } as const;
+export const DELEGATION_MAX_USES = 10_000;
+/**
+ * M4c: `org.delegation.create`, the create transaction (src/main/org/delegations.ts): `label` the hub key's (1 to 100
+ * characters), `prefix` the machine names it provisions, `ttlDays` its life, `maxUses` its cap (null: none), `owners`
+ * its machines' owners.
+ */
+export const DelegationCreateInputSchema = z.strictObject({
+  label: z.string().min(1).max(100),
+  prefix: MachineNameSchema,
+  ttlDays: z.number().int().min(DELEGATION_TTL_DAYS.min).max(DELEGATION_TTL_DAYS.max),
+  maxUses: z.number().int().min(1).max(DELEGATION_MAX_USES).nullable(),
+  owners: OwnersSchema,
+});
+export type DelegationCreateInput = z.infer<typeof DelegationCreateInputSchema>;
 
 /** A check's finding (src/main/org/checks.ts): `code` the package's, the checks' or a composer's, as a plain string. */
 export const OrgFindingSchema = z.strictObject({ level: z.enum(['refuse', 'warn']), code: z.string(), detail: z.string() });
@@ -691,6 +791,13 @@ export const commands = {
   'org.enroll.approve': { input: z.strictObject({ generation: z.number().int().positive(), digest: z.string().min(1).max(128) }), output: SignResultSchema, owner: 'main' }, // M4b
   'org.enroll.cancel': { input: EnrollCancelInputSchema, output: EnrollCancelResultSchema, owner: 'main' }, // M4b; scoped to its run in the fix wave
   'org.drop.retry': { input: z.strictObject({ name: MachineNameSchema }), output: DropRetryResultSchema, owner: 'main' }, // M4b: the hub row's DELETE alone
+  'org.delegation.create': { input: DelegationCreateInputSchema, output: SignResultSchema, owner: 'main' }, // M4c: the one Touch ID; the code never leaves main
+  'org.delegation.rewrite': { input: z.strictObject({ id: DelegationIdSchema }), output: SignResultSchema, owner: 'main' }, // M4c: "Write the code again" (steps 4-6)
+  'org.delegation.renewHub': { input: z.strictObject({ id: DelegationIdSchema }), output: HubHalfResultSchema, owner: 'main' }, // M4c: Retry, the route alone
+  'org.delegation.revokeHub': { input: z.strictObject({ id: DelegationIdSchema }), output: HubHalfResultSchema, owner: 'main' }, // M4c: Retry, or a stray key's Revoke
+  'org.provisioningSecret.get': { input: z.void(), output: ProvisioningSecretReadingSchema, owner: 'main' }, // M4c: the destination
+  'org.provisioningSecret.set': { input: z.strictObject({ value: ProvisioningSecretSchema.nullable() }), output: ProvisioningSecretWriteSchema, owner: 'main' }, // M4c
+  'org.provisioningSecret.reset': { input: ConfirmedInputSchema, output: ProvisioningSecretWriteSchema, owner: 'main' }, // M4c: removes the file, confirmed
   'org.grants.view': { input: z.strictObject({ ref: OrgMachineRefSchema }), output: GrantsViewSchema, owner: 'main' }, // M4b: read again at org.grants.changed
   // M4b: grant, change or withdraw (`rights: []`) a member's rights on a machine, behind one confirmation that shows the grant
   'org.grants.set': { input: z.strictObject({ ref: OrgMachineRefSchema, member: MemberIdSchema, rights: z.array(GrantRightSchema).max(GRANT_RIGHTS.length) }), output: GrantSetResultSchema, owner: 'main' },

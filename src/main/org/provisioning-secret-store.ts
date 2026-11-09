@@ -12,7 +12,7 @@
 // `damaged`, never null, so a damaged destination is never taken for an unset one. Each read is the file's as it stands.
 //
 // Electron-free: vitest's node project runs it.
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { basename } from 'node:path';
 import * as z from 'zod';
 import { ProvisioningSecretSchema, type ProvisioningSecret } from '@shared/ipc/schema/org';
@@ -30,9 +30,14 @@ export type DestinationReading = { ok: true; value: ProvisioningSecret | null } 
  */
 export type DestinationWrite = { ok: true; value: ProvisioningSecret | null } | { ok: false; reason: 'invalid' | 'damaged' | 'io'; detail: string };
 
+/** A reset's answer: the file is gone (it may have been already), or the disk refused its removal. */
+export type DestinationReset = { ok: true } | { ok: false; reason: 'io'; detail: string };
+
 export interface ProvisioningSecretStore {
   read(): DestinationReading;
   write(value: ProvisioningSecret | null): DestinationWrite;
+  /** Removes the file, whatever it holds: the one way out of a damaged one (M4c Task 4; the renderer confirms it first). */
+  reset(): DestinationReset;
 }
 
 /** `file`: `<profile>/provisioning-secret.json` (`PROVISIONING_SECRET_FILE`); its directory is made at the first write. */
@@ -72,6 +77,14 @@ export function openProvisioningSecret(file: string): ProvisioningSecretStore {
         return { ok: false, reason: 'io', detail: `${name} can't be written (${(error as NodeJS.ErrnoException).code ?? (error as Error).message})` };
       }
       return { ok: true, value: checked.data };
+    },
+    reset() {
+      try {
+        rmSync(file, { force: true });
+      } catch (error) {
+        return { ok: false, reason: 'io', detail: `${name} can't be removed (${(error as NodeJS.ErrnoException).code ?? (error as Error).message})` };
+      }
+      return { ok: true };
     },
   };
 }

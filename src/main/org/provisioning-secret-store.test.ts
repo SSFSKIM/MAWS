@@ -98,6 +98,29 @@ describe('the destination file', () => {
     writeFileSync(file, JSON.stringify({ version: 1, provisioningSecret: PRODUCTION }));
     expect(store.read()).toEqual({ ok: true, value: PRODUCTION });
   });
+
+  it('reset removes the file, the one way out of a damaged one: then it reads unset and takes a write', () => {
+    const store = openProvisioningSecret(file);
+    writeFileSync(file, '{"version": 2}');
+    expect(store.read()).toMatchObject({ ok: false });
+    expect(store.reset()).toEqual({ ok: true });
+    expect(existsSync(file)).toBe(false);
+    expect(store.read()).toEqual({ ok: true, value: null });
+    expect(store.write(PRODUCTION)).toEqual({ ok: true, value: PRODUCTION });
+    // a set one too, and an absent one is already reset
+    expect(store.reset()).toEqual({ ok: true });
+    expect(store.reset()).toEqual({ ok: true });
+    expect(store.read()).toEqual({ ok: true, value: null });
+  });
+
+  it('reset answers io when the file can\'t be removed, and the file stands', () => {
+    const store = openProvisioningSecret(file);
+    store.write(PRODUCTION);
+    chmodSync(profile, 0o500);
+    expect(store.reset()).toMatchObject({ ok: false, reason: 'io' });
+    chmodSync(profile, 0o700);
+    expect(store.read()).toEqual({ ok: true, value: PRODUCTION });
+  });
 });
 
 // The grammar, held at the schema (src/shared/ipc/schema/org.ts), which every value reaches gcloud's argv through.

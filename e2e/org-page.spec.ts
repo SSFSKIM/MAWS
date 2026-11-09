@@ -105,6 +105,10 @@ function seededOrg(local: string, userData: string, now: number): { status: Regi
       { kid: kid(), member: ortiz.id, device: ortizDevices[1]!.id },
       { kid: kid(), unlisted: true },
     ],
+    // M4c: Task 5 seeds the Delegations section's rows
+    delegations: [],
+    strayKeys: [],
+    hubKeys: { at: null, failed: false },
   };
   const status: Registered = {
     state: 'registered',
@@ -142,6 +146,7 @@ function seededOrg(local: string, userData: string, now: number): { status: Regi
     },
     enrolling: { generation: 2, name: 'gpu-box-02', replace: null, expires: new Date(now + 50 * 60_000).toISOString(), candidate: null, problem: null }, // awaiting its key
     hubRowsLeft: [{ name: 'old-render-01', ref: ref() }],
+    delegations: { creating: false, rev: 0 },
   };
   // Each machine's rights as `org.grants.view` answers them: the machine's own word, this Mac's issued record beside it.
   const at = new Date(now).toISOString();

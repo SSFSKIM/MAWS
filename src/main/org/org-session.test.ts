@@ -17,7 +17,7 @@
 // Grant… and grant through a link or the local door, grants.json behind its mark, a sign-out during Touch ID, a close
 // while the act is out, and grants.json failing closed.
 import { readFileSync } from 'node:fs';
-import { chmod, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -63,7 +63,9 @@ import { ACCESS_FILE, CHAIN_FILE, GRANTS_FILE, orgFiles, REGISTRATION_FILE, SIGN
 import type { GrantDoor, GrantLink } from './grants';
 import type { PendingEntry } from './hub-client';
 import { createOrgSession, type DeviceKeyFiles, type OrgSessionDeps, type OrgSessionService, type OrgSigningDeps } from './org-session';
+import { openProvisioningSecret, PROVISIONING_SECRET_FILE } from './provisioning-secret-store';
 import type { RegistryFeedHooks } from './registry-feed';
+import { resolveGcloud, secretStore } from './secret-store';
 
 // ---- the org, signed as an admin's devices sign it (held.test.ts's helpers) ----
 
@@ -167,6 +169,10 @@ class FakeHub {
   rows = new Map<string, { ref: string; pub: string } | null>();
   listAnswer?: () => Answer | undefined;
   deleteAnswer?: (name: string) => Answer | Promise<Answer | undefined> | undefined;
+  /** M4c: the provisioning keys, as the Worker lists them, each with its token; a mint waits on `mintGate` when set. */
+  provisioningKeys: Array<{ id: string; label: string; prefix: string; created: string; expires: string; max_uses: number | null; uses: number; revoked: string | null; token: string }> = [];
+  mintGate?: () => Promise<void>;
+  revokeAnswer?: (id: string) => Answer | undefined;
 
   constructor(
     readonly url: string,
@@ -254,6 +260,35 @@ class FakeHub {
       if (ref === null || (key !== null && key.ref === ref && key.pub === pub)) this.rows.delete(name);
       return worker(200, { revoked: name });
     }
+    // M4c: the provisioning keys, as the Worker answers them (201 {key, token}; GET with revoked keys; a soft DELETE;
+    // renew from the held head's delegation, by §S)
+    if (url.pathname === '/api/provisioning-keys' && method === 'POST') {
+      const body = JSON.parse(String(init?.body)) as { label: string; prefix: string; ttl_s: number; max_uses?: number };
+      await this.mintGate?.();
+      const key = { id: memberId(), label: body.label, prefix: body.prefix, created: iso(Date.now()), expires: iso(Date.now() + body.ttl_s * 1000), max_uses: body.max_uses ?? null, uses: 0, revoked: null, token: base64urlEncode(crypto.getRandomValues(new Uint8Array(32))) };
+      this.provisioningKeys.push(key);
+      return worker(201, { key: { ...listedKey(key), created_by: this.member.id, offline_revoke_s: null, machines: [] }, token: key.token });
+    }
+    if (url.pathname === '/api/provisioning-keys' && method === 'GET') return worker(200, { keys: this.provisioningKeys.map(listedKey) });
+    const provisioning = /^\/api\/provisioning-keys\/([0-9a-f]{32})(\/renew)?$/.exec(url.pathname);
+    if (provisioning !== null) {
+      const key = this.provisioningKeys.find((k) => k.id === provisioning[1]);
+      if (method === 'DELETE') {
+        const override = this.revokeAnswer?.(provisioning[1]);
+        if (override !== undefined) return override;
+        if (key === undefined) return worker(404, { error: 'unknown-key' });
+        key.revoked ??= iso(Date.now());
+        return worker(200, { revoked: key.id });
+      }
+      if (method === 'POST' && provisioning[2] !== undefined) {
+        if (key === undefined) return worker(404, { error: 'unknown-key' });
+        if (key.revoked !== null) return worker(410, { error: 'key-revoked' });
+        const d = this.head.state.delegations.find((x) => x.id === key.id);
+        if (d === undefined || Date.parse(d.expires) <= Date.parse(key.expires)) return worker(409, { error: 'not-renewed' });
+        key.expires = d.expires;
+        return worker(200, listedKey(key));
+      }
+    }
     if (method === 'POST' && url.pathname === '/api/devices/pending') {
       this.pending.push(JSON.parse(String(init?.body)) as PendingEntry);
       return this.pendingAnswer?.() ?? worker(200, { pending: { expires: iso(Date.now() + this.pendingTtlMs) } });
@@ -270,6 +305,9 @@ class FakeHub {
     return device;
   }
 }
+
+/** M4c: a provisioning key as the Worker lists it: its record, never its token. */
+const listedKey = ({ id, label, prefix, created, expires, max_uses, uses, revoked }: FakeHub['provisioningKeys'][number]) => ({ id, label, prefix, created, expires, max_uses, uses, revoked });
 
 // ---- the login and the secrets no status may carry ----
 
@@ -3364,5 +3402,160 @@ describe('M4b: the grants', () => {
     const { ref } = await addMachine(session, feed);
     expect((await session.view())?.machines.every((m) => !m.mayGrant)).toBe(true);
     expect(await session.grantsView({ ref })).toEqual({ ok: false, ref, reason: 'signed-out' });
+  });
+});
+
+// ---- M4c: delegations through the session ----
+
+// Task 3's fake gcloud, trimmed: argv and stdin recorded; `act-<op>` holding `wait` holds that call until `release-<op>`.
+const FAKE_GCLOUD = `#!/bin/sh
+dir=$(cd "$(dirname "$0")" && pwd)
+{ printf 'gcloud'; for a in "$@"; do printf ' %s' "$a"; done; printf '\\n'; } >> "$dir/argv.log"
+case "$1 $2 $3" in
+  "auth print-access-token "*) op=auth ;;
+  "secrets describe "*) op=describe ;;
+  "secrets versions add") op=add ;;
+  "secrets versions describe") op=version ;;
+  *) op=other ;;
+esac
+cat >> "$dir/stdin.log"
+act=$(cat "$dir/act-$op" 2>/dev/null || echo ok)
+case "$act" in
+  wait) : > "$dir/waiting-$op"; while [ ! -f "$dir/release-$op" ]; do sleep 0.02; done; rm -f "$dir/release-$op" "$dir/waiting-$op" ;;
+esac
+case "$op" in
+  add) printf 'Created version [7] of the secret [%s].\\n' "$4" >&2 ;;
+  version) printf '{"createTime": "2026-11-08T12:00:00.123456Z", "name": "projects/1/secrets/%s/versions/%s", "state": "ENABLED"}\\n' "$6" "$4" ;;
+esac
+exit 0
+`;
+
+describe('M4c: delegations through the session', () => {
+  const DEST = { project: 'ytdownload-505811', secret: 'desk-provisioning-v2', account: 'cli-owner@ytdownload-505811.iam.gserviceaccount.com' };
+  const CREATE = { label: 'devcloud VMs', prefix: 'dc-', ttlDays: 30, maxUses: null, owners: [] as string[] };
+  let bin: string;
+  beforeEach(async () => {
+    bin = join(userData, 'scratch-bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, 'gcloud'), FAKE_GCLOUD);
+    await chmod(join(bin, 'gcloud'), 0o755);
+  });
+  /** The session's custody over the fake gcloud, and its destination set. */
+  function custody(logs: string[]): NonNullable<OrgSessionDeps['delegations']> {
+    const destination = openProvisioningSecret(join(userData, PROVISIONING_SECRET_FILE));
+    destination.write(DEST);
+    return { destination, secrets: secretStore({ gcloud: () => resolveGcloud({ loginPath: async () => `${bin}:/usr/bin:/bin`, home: userData, fallbacks: [] }), log: (line) => void logs.push(line) }) };
+  }
+  const gcloudLogs: string[] = [];
+  const delegationsDeps = () => ({ delegations: custody(gcloudLogs) });
+  /** The codes gcloud received, which no status, view, answer or log may carry (afterEach checks every emitted status). */
+  async function codes(): Promise<string[]> {
+    const text = await readFile(join(bin, 'stdin.log'), 'utf8').catch(() => '');
+    const found = text.split('\n').filter((line) => line.startsWith('smns-provision-v2.'));
+    secrets.push(...found);
+    return found;
+  }
+  const waitingFor = (op: string) => until(() => readFile(join(bin, `waiting-${op}`)).then(() => true, () => false), `gcloud's ${op} out`);
+
+  it('creates a delegation end to end: one Touch ID, the code to the store alone, the delegation in effect and on the page', async () => {
+    const { session, logs } = await signingRoot(delegationsDeps());
+    const before = registered(session).delegations.rev;
+    const answer = await session.delegationCreate({ ...CREATE, owners: [A] });
+    expect(answer).toEqual({ ok: true, version: headVersion(session), secret: { version: '7', createTime: '2026-11-08T12:00:00.123Z' } });
+    expect(signing.prompts.map((p) => p.summary)).toEqual(['create delegation dc-']);
+    const id = hub.provisioningKeys[0].id;
+    expect(hub.head.state.delegations.map((d) => d.id)).toEqual([id]);
+    expect(registered(session).delegations).toMatchObject({ creating: false });
+    expect(registered(session).delegations.rev).toBeGreaterThan(before);
+    const view = await session.view();
+    expect(view!.delegations).toMatchObject([{ id, prefix: 'dc-', state: 'in-effect', hubBehind: null }]);
+    const found = await codes();
+    expect(found).toHaveLength(1);
+    const token = hub.provisioningKeys[0].token;
+    for (const text of [JSON.stringify(answer), JSON.stringify(view), logs.join('\n'), gcloudLogs.join('\n')]) {
+      expect(text).not.toContain(found[0]);
+      expect(text).not.toContain(token);
+    }
+  });
+
+  it('a sign-out while the mint is out signs nothing; signed in again, the minted key shows as a stray', async () => {
+    let release!: () => void;
+    hub.mintGate = () => new Promise<void>((resolve) => (release = resolve));
+    const { session, feed } = await signingRoot(delegationsDeps());
+    const creating = session.delegationCreate({ ...CREATE, owners: [A] });
+    await until(() => registered(session).delegations.creating && hub.count('/api/provisioning-keys') === 1, 'the mint out');
+    await session.signOut();
+    expect(registered(session).delegations.creating).toBe(false);
+    release();
+    expect(await creating).toMatchObject({ ok: false });
+    expect(signing.prompts).toEqual([]);
+    hub.mintGate = undefined;
+    expect(session.signIn()).toEqual({ ok: true });
+    await until(() => isSignedIn(session), 'signed in again');
+    feed.open();
+    const view = await session.view();
+    await until(async () => ((await session.view())?.strayKeys.length ?? 0) === 1, 'the stray key read');
+    expect(view).not.toBeNull();
+    expect((await session.view())!.strayKeys.map((k) => k.id)).toEqual([hub.provisioningKeys[0].id]);
+  });
+
+  it('close() while versions add is out publishes nothing; the next start offers only Discard, whose marker revokes the hub key', async () => {
+    await writeFile(join(bin, 'act-add'), 'wait');
+    const { session } = await signingRoot(delegationsDeps());
+    const creating = session.delegationCreate({ ...CREATE, owners: [A] });
+    await waitingFor('add');
+    const id = hub.provisioningKeys[0].id;
+    await session.close();
+    await writeFile(join(bin, 'release-add'), '');
+    expect(await creating).toMatchObject({ ok: false });
+    await writeFile(join(bin, 'act-add'), 'ok');
+    expect(hub.posted).toEqual([]);
+    const { session: again } = await restart(delegationsDeps());
+    await until(() => signerOf(again).pending !== null, 'the held slot');
+    await until(async () => ((await again.view())?.delegations.length ?? 0) === 1, 'the unsent row');
+    expect((await again.view())!.delegations).toMatchObject([{ id, state: 'unsent', unsent: { rewrite: false } }]);
+    expect(await again.delegationRewrite(id)).toMatchObject({ ok: false, reason: 'stale' });
+    expect(await again.discardPending(true, signerOf(again).pending!.hash)).toMatchObject({ ok: true, unsent: true });
+    expect(hub.provisioningKeys[0].revoked).not.toBeNull();
+    expect(hub.posted).toEqual([]);
+    await codes();
+  });
+
+  it("org.change's renewal answers once its hub half ran: the hub key follows the head", async () => {
+    const { session } = await signingRoot(delegationsDeps());
+    expect(await session.delegationCreate({ ...CREATE, owners: [A] })).toMatchObject({ ok: true });
+    const d = hub.head.state.delegations[0];
+    const later = iso(Date.parse(d.expires) + 10 * DAY);
+    const change = { kind: 'delegation.renew' as const, id: d.id, expires: later };
+    const shown = await session.preview(change);
+    if (!shown.ok) throw new Error(JSON.stringify(shown));
+    expect(await session.change(change, shown.digest)).toMatchObject({ ok: true });
+    expect(hub.provisioningKeys[0].expires).toBe(later);
+    expect((await session.view())!.delegations[0]).toMatchObject({ expires: later, hub: { expires: later }, hubBehind: null });
+    await codes();
+  });
+
+  it('a drop whose DELETE fails shows the dropped row; Retry revokes it, the route alone', async () => {
+    const { session } = await signingRoot(delegationsDeps());
+    expect(await session.delegationCreate({ ...CREATE, owners: [A] })).toMatchObject({ ok: true });
+    const id = hub.head.state.delegations[0].id;
+    hub.revokeAnswer = () => worker(503, { error: 'hub-updating' });
+    const change = { kind: 'delegation.drop' as const, id };
+    const shown = await session.preview(change);
+    if (!shown.ok) throw new Error(JSON.stringify(shown));
+    expect(await session.change(change, shown.digest)).toMatchObject({ ok: true });
+    expect((await session.view())!.delegations).toMatchObject([{ id, state: 'dropped', hubBehind: 'revoke', hubProblem: { reason: 'updating' } }]);
+    hub.revokeAnswer = undefined;
+    const posts = hub.posted.length;
+    expect(await session.delegationRevokeHub(id)).toEqual({ ok: true });
+    expect(hub.posted).toHaveLength(posts);
+    expect((await session.view())!.delegations).toEqual([]);
+    await codes();
+  });
+
+  it('without custody every create refuses secret-store, minting nothing', async () => {
+    const { session } = await signingRoot();
+    expect(await session.delegationCreate({ ...CREATE, owners: [A] })).toMatchObject({ ok: false, reason: 'secret-store' });
+    expect(hub.provisioningKeys).toEqual([]);
   });
 });

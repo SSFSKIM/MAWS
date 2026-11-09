@@ -8,7 +8,7 @@ import { benchSignIn, type SignInDeps } from './bench-sign-in';
 const CODE = 'pair-v1.SECRET-0123456789';
 
 const registered = (session: 'signed-in' | 'signed-out' | 'removed', hubAccess: Extract<OrgStatus, { state: 'registered' }>['hubAccess']): OrgStatus => ({
-  state: 'registered', org: 'org-1', hub: 'https://hub', member: { id: 'member-1', email: 'o@x' }, device: 'dev-1', session, hubAccess, head: null, problem: null, signer: null, pairing: null, enrolling: null, hubRowsLeft: [],
+  state: 'registered', org: 'org-1', hub: 'https://hub', member: { id: 'member-1', email: 'o@x' }, device: 'dev-1', session, hubAccess, head: null, problem: null, signer: null, pairing: null, enrolling: null, hubRowsLeft: [], delegations: { creating: false, rev: 0 },
 });
 
 /** The app's org status read in turn from `statuses` (the last one repeated), and every call recorded. */

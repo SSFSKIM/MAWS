@@ -24,8 +24,9 @@ const STATUS: OrgStatus = {
   pairing: null,
   enrolling: null,
   hubRowsLeft: [],
+  delegations: { creating: false, rev: 0 },
 };
-const VIEW: OrgView = { version: 7, issued: '2026-10-28T09:00:00.000Z', maySign: false, recoveryKid: 'k', members: [{ id: 'a1', email: 'ana@northwind.example', name: 'Ana', role: 'admin', you: true, devices: [] }], machines: [], roots: [] };
+const VIEW: OrgView = { version: 7, issued: '2026-10-28T09:00:00.000Z', maySign: false, recoveryKid: 'k', members: [{ id: 'a1', email: 'ana@northwind.example', name: 'Ana', role: 'admin', you: true, devices: [] }], machines: [], roots: [], delegations: [], strayKeys: [], hubKeys: { at: null, failed: false } };
 const ROWS: OrgRows = { machines: [STUDIO], rows: [], complete: true, pending: [], members: [], member: 'a1' };
 const MACHINES: MachineState[] = [{ ref: LOCAL, name: 'ana-mbp', local: true, state: 'up', since: '2026-10-28T09:00:00.000Z', generation: 0 }];
 const STUDIO_READ: OrgPolicy = { ok: true, machine: STUDIO, supported: true, policies: [{ session: 's1', access: 'private', shares: [], policyRev: 3 }, { session: 's2', unavailable: true }] };

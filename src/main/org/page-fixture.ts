@@ -22,10 +22,12 @@ import {
   type EnrollStartResult,
   type GrantRegrantResult,
   type GrantSetResult,
+  type HubHalfResult,
   type OrgPolicySetResult,
   type OrgAttempt,
   type PairStartResult,
   type PreviewResult,
+  type ProvisioningSecretWrite,
   type SignResult,
 } from '@shared/ipc/schema/org';
 import type { interceptCommand, MainHandler } from '../ipc/router';
@@ -66,6 +68,9 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
   // `holdGrantSave` never answers, so the grant sheet stays saving
   const grant: GrantSetResult & GrantRegrantResult = { ok: false, reason: 'busy', detail };
   const save: OrgPolicySetResult = { ok: false, reason: 'busy' };
+  // M4c: no delegation is created, renewed or revoked, and the destination's file is neither read nor written
+  const half: HubHalfResult = { ok: false, reason: 'none', detail };
+  const unwritten: ProvisioningSecretWrite = { ok: false, reason: 'io', detail };
   const answers: { [N in FixtureCommand]: MainHandler<N> } = {
     'org.status': () => status,
     'org.view': () => view,
@@ -88,6 +93,13 @@ export function installOrgPageFixture(deps: OrgPageFixtureInstall): (() => void)
     'org.enroll.approve': () => sign,
     'org.enroll.cancel': () => ({ ok: false, reason: 'not-current', detail }),
     'org.drop.retry': () => retry,
+    'org.delegation.create': () => sign,
+    'org.delegation.rewrite': () => sign,
+    'org.delegation.renewHub': () => half,
+    'org.delegation.revokeHub': () => half,
+    'org.provisioningSecret.get': () => null,
+    'org.provisioningSecret.set': () => unwritten,
+    'org.provisioningSecret.reset': () => unwritten,
     'org.grants.view': ({ ref }) => (Object.hasOwn(grants, ref) ? grants[ref]! : { ok: false, ref, reason: 'signed-out' }),
     'org.grants.set': () => (holdGrantSave === true ? new Promise<never>(() => {}) : grant),
     'org.grants.regrant': () => grant,

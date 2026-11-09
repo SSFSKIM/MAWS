@@ -7,6 +7,9 @@ import type { OrgSessionService } from './org-session';
 import { installOrgPageFixture, ORG_PAGE_FIXTURE_ENV, type OrgPageFixtureInstall } from './page-fixture';
 import { registerOrgHandlers } from './register';
 
+/** M4c: the destination's file, never read or written here. */
+const UNSET_DESTINATION = { read: () => ({ ok: true as const, value: null }), write: () => ({ ok: false as const, reason: 'io' as const, detail: 'not here' }), reset: () => ({ ok: true as const }) };
+
 const STATUS: OrgStatus = {
   state: 'registered',
   org: 'northwind',
@@ -22,6 +25,7 @@ const STATUS: OrgStatus = {
   pairing: null,
   enrolling: null,
   hubRowsLeft: [],
+  delegations: { creating: false, rev: 0 },
 };
 const VIEW: OrgView = {
   version: 7,
@@ -31,6 +35,9 @@ const VIEW: OrgView = {
   members: [{ id: 'a1', email: 'ana@northwind.example', name: 'Ana', role: 'admin', you: true, devices: [] }],
   machines: [],
   roots: [],
+  delegations: [],
+  strayKeys: [],
+  hubKeys: { at: null, failed: false },
 };
 
 let scratch: string | null = null;
@@ -95,6 +102,15 @@ describe("the Org page's e2e fixture in main", () => {
     expect(await ask('org.enroll.approve', { generation: 1, digest: 'd' })).toMatchObject({ ok: false, reason: 'busy' });
     expect(await ask('org.enroll.cancel', { generation: 1 })).toMatchObject({ ok: false, reason: 'not-current' });
     expect(await ask('org.drop.retry', { name: 'box' })).toMatchObject({ ok: false, reason: 'none' });
+    // M4c: nothing is minted, renewed, revoked or stored, and main's destination file is not touched
+    const create = { label: 'vms', prefix: 'dc-', ttlDays: 30, maxUses: null, owners: ['a1'] };
+    expect(await ask('org.delegation.create', create)).toMatchObject({ ok: false, reason: 'busy' });
+    expect(await ask('org.delegation.rewrite', { id: 'd'.repeat(32) })).toMatchObject({ ok: false, reason: 'busy' });
+    expect(await ask('org.delegation.renewHub', { id: 'd'.repeat(32) })).toMatchObject({ ok: false, reason: 'none' });
+    expect(await ask('org.delegation.revokeHub', { id: 'd'.repeat(32) })).toMatchObject({ ok: false, reason: 'none' });
+    expect(await ask('org.provisioningSecret.get')).toBeNull();
+    expect(await ask('org.provisioningSecret.set', { value: null })).toMatchObject({ ok: false });
+    expect(await ask('org.provisioningSecret.reset', { confirmed: true })).toMatchObject({ ok: false });
     expect(await ask('org.grants.view', { ref: 'mref-box-00000001' })).toEqual({ ok: false, ref: 'mref-box-00000001', reason: 'signed-out' });
     expect(await ask('org.grants.set', { ref: 'mref-box-00000001', member: 'a1', rights: ['spawn'] })).toMatchObject({ ok: false, reason: 'busy' });
     expect(await ask('org.grants.regrant', { ref: 'mref-box-00000001', digest: 'd' })).toMatchObject({ ok: false, reason: 'busy' });
@@ -116,7 +132,7 @@ describe("the Org page's e2e fixture in main", () => {
       onGrants: () => () => {},
     } as unknown as OrgSessionService;
     const emitted: OrgStatus[] = [];
-    const unpublish = registerOrgHandlers({ register: () => {}, emit: (_name, status) => void emitted.push(status), emitChannel: () => {}, emitGrants: () => {}, service, development: null });
+    const unpublish = registerOrgHandlers({ register: () => {}, emit: (_name, status) => void emitted.push(status), emitChannel: () => {}, emitGrants: () => {}, service, development: null, destination: UNSET_DESTINATION });
     publish({ state: 'none' });
     expect(emitted).toEqual([{ state: 'none' }]); // forwarded before the fixture
 
