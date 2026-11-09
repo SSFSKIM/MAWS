@@ -1197,6 +1197,26 @@ describe('an unsent slot (M4c: `Edit.hold`, `publishHeld`)', () => {
     expect(next.settled.map((s) => s.hash)).toEqual([hash]);
   });
 
+  it('a post that throws after the marker cleared (not a failure the post path answers): the outcome still says published, and the slot settles as an ordinary one', async () => {
+    const h = await harness();
+    const hash = await signHeld(h);
+    // The hub client throws at the POST, after the marker's write and the exposure's: past every failure `postOnce` answers.
+    h.hub.beforePost = () => {
+      throw new Error('the hub client threw');
+    };
+    expect(await h.signer.publishHeld(hash)).toEqual({ ok: false, reason: 'signing', detail: 'the hub client threw', published: true });
+    expect(slotWrites(h)).toEqual([{ unsent: HOLD, hub: false }, { unsent: null, hub: false }, { unsent: null, hub: true }]);
+    expect(h.disk()!.pending).toMatchObject({ hash, unsent: null });
+    expect(h.held.head().state.version).toBe(1);
+    // An ordinary pending slot: the next settlement sends it again, and it settles.
+    h.hub.beforePost = null;
+    await h.signer.settle();
+    expect(h.hub.posts).toHaveLength(2);
+    expect(h.held.head().state.version).toBe(2);
+    expect(h.disk()!.pending).toBeNull();
+    expect(h.settled.map((s) => s.hash)).toEqual([hash]);
+  });
+
   it('a store found damaged at the exposure write, after the marker cleared: the outcome still says published', async () => {
     const h = await harness();
     const hash = await signHeld(h);

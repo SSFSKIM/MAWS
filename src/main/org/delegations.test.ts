@@ -624,6 +624,43 @@ describe('the create transaction', () => {
     expect(h.signer.pending()?.unsent).toMatchObject({ kind: 'delegation' });
   });
 
+  it('a publish refused while the run stands, before its marker cleared: the reason kept, Discard alone, a rewrite stale, and Discard revokes the minted key', async () => {
+    // The signer's own refusal, its update clearing nothing: the record of the slot this run held is gone (as a
+    // sign-out drops it) while the create's run still stands.
+    const publishHeld = h.signer.publishHeld;
+    h.signer.publishHeld = (hash) => {
+      h.signer.fence();
+      return publishHeld(hash);
+    };
+    const refused = await h.create();
+    h.signer.publishHeld = publishHeld;
+    const id = lastMinted(h)!.id;
+    const slot = h.signer.pending()!;
+    expect(slot).toMatchObject({ unsent: { kind: 'delegation', id }, exposed: false });
+    expect(h.hub.posts).toEqual([]);
+    // The kept reason: stored, then refused, so only Discard; the key pair went before the publish.
+    expect(refused).toMatchObject({ ok: false, reason: 'unsent', phase: 'held', stored: true, run: { id, hash: slot.hash } });
+    const reason = (refused as { detail: string }).detail;
+    expect(reason).toBe('its code is stored (version 7), but the publish was refused: this slot was held by a run that has ended: only Discard; only Discard');
+    expect((await h.view()).delegations).toMatchObject([{ id, state: 'unsent', unsent: { rewrite: false, problem: reason } }]);
+    // "Write the code again", the signer publishing again, is stale: no gcloud runs, nothing is posted, the slot stays held.
+    const calls = (await argv(h)).length;
+    const rewritten = await h.rewrite(id);
+    expect(rewritten).toMatchObject({ ok: false, reason: 'stale' });
+    expect((rewritten as { detail: string }).detail).toContain("no longer holds the delegation's key pair");
+    expect(await argv(h)).toHaveLength(calls);
+    expect(h.hub.posts).toEqual([]);
+    expect(h.signer.pending()).toMatchObject({ hash: slot.hash, unsent: { kind: 'delegation', id } });
+    // Discard takes the slot, and the minted key with it.
+    expect(h.hub.key(id)?.revoked).toBeNull();
+    await h.discard();
+    expect(h.hub.key(id)?.revoked).not.toBeNull();
+    const view = await h.view();
+    expect(view.delegations).toEqual([]);
+    expect(view.strayKeys).toEqual([]);
+    expect(h.hub.posts).toEqual([]);
+  });
+
   it('after a relaunch only Discard is offered; Discard revokes its hub key', async () => {
     await act(h, 'add', 'fail:INTERNAL: down');
     await h.create();
