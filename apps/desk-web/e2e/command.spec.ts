@@ -49,7 +49,10 @@ async function openSession(page: Page, hub: HubDouble, options: { producer?: Pro
   await expect(page.getByTestId('session-view')).toHaveAttribute('data-session', replay.session);
   await expect.poll(() => replay.subscriptions()).toBe(1);
   const composer = page.getByTestId('composer');
-  return { fm: replay, composer, box: composer.getByRole('textbox', { name: `Message ${ALIAS}` }) };
+  // The box is named for the session's title, so a /rename renames it: located by the name's prefix, checked whole here.
+  const box = composer.getByRole('textbox', { name: /^Message / });
+  await expect(box).toHaveAccessibleName(`Message ${ALIAS}`);
+  return { fm: replay, composer, box };
 }
 
 const commandsSent = (hub: HubDouble) => hub.up.filter(({ frame }) => frame.t === 'rpc' && frame.rpc.rpc === 'command').length;
