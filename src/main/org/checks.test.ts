@@ -251,21 +251,23 @@ describe('checkSuccessor', () => {
     it('refuses dc-prod- under a live dc- as nested, as the package does', async () => {
       const head = await headWith('dc-');
       const next = await adding(head, 'dc-prod-');
-      expect(codes(await check(head, next))).toEqual(['refuse:prefix-overlaps', 'refuse:prefix-nested']);
+      const findings = await check(head, next);
+      expect(codes(findings)).toEqual(['refuse:prefix-nested']);
+      expect(findings[0].detail).toBe(`the prefix dc-prod- of delegation ${next.state.delegations[1].id} nests in delegation ${head.state.delegations[0].id}'s dc-`);
       expect(await verdict(head, next)).toBe('malformed');
     });
 
     it('refuses dc- over a live dc-prod- as covering it, as the package does', async () => {
       const head = await headWith('dc-prod-');
       const next = await adding(head, 'dc-');
-      expect(codes(await check(head, next))).toEqual(['refuse:prefix-overlaps', 'refuse:prefix-covers']);
+      expect(codes(await check(head, next))).toEqual(['refuse:prefix-covers']);
       expect(await verdict(head, next)).toBe('malformed');
     });
 
     it('refuses an equal prefix, case-folded, as the package does', async () => {
       const head = await headWith('dc-');
       const next = await adding(head, 'DC-');
-      expect(codes(await check(head, next))).toEqual(['refuse:prefix-overlaps', 'refuse:prefix-equal']);
+      expect(codes(await check(head, next))).toEqual(['refuse:prefix-equal']);
       expect(await verdict(head, next)).toBe('malformed');
     });
 
@@ -275,7 +277,9 @@ describe('checkSuccessor', () => {
       const s3 = await successor(s2, [a1], (s) => dropDelegation(s, dc.delegation));
       for (const [prefix, code] of [['dc-', 'prefix-equal'], ['dc-x-', 'prefix-nested'], ['d', 'prefix-covers']] as const) {
         const next = await adding(s3, prefix);
-        expect(codes(await check(s3, next))).toEqual(['refuse:prefix-overlaps', `refuse:${code}`]);
+        const findings = await check(s3, next);
+        expect(codes(findings)).toEqual([`refuse:${code}`]);
+        expect(findings[0].detail).toContain(`the dropped delegation ${dc.delegation.id}'s dc-, reserved for the life of the org`);
         expect(await verdict(s3, next)).toBe('malformed');
       }
     });
@@ -288,7 +292,7 @@ describe('checkSuccessor', () => {
         await dropDelegation(s, dc.delegation);
         s.delegations.push(prod.delegation);
       });
-      expect(codes(await check(head, next))).toEqual(['refuse:prefix-overlaps', 'refuse:prefix-nested', 'warn:drops-delegation']);
+      expect(codes(await check(head, next))).toEqual(['refuse:prefix-nested', 'warn:drops-delegation']);
       expect(await verdict(head, next)).toBe('malformed');
     });
 
@@ -296,7 +300,7 @@ describe('checkSuccessor', () => {
       const x = await newDelegation('dc-');
       const y = await newDelegation('dc-prod-');
       const next = await successor(g, [a1], (s) => void s.delegations.push(x.delegation, y.delegation));
-      expect(codes(await check(g, next))).toEqual(['refuse:prefix-overlaps', 'refuse:prefix-covers']);
+      expect(codes(await check(g, next))).toEqual(['refuse:prefix-covers']);
       expect(await verdict(g, next)).toBe('malformed');
     });
 
