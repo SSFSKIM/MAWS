@@ -42,19 +42,22 @@ export interface SecretStore {
    * is never read), then `gcloud secrets describe <secret> --project <project> --account <account>` exits 0. A failure
    * names what's missing in one line: gcloud not found, not signed in as that account, no such secret, no permission.
    */
-  preflight(dest: ProvisioningSecret): Promise<StoreResult<null>>;
+  preflight(dest: ProvisioningSecret, signal?: AbortSignal): Promise<StoreResult<null>>;
   /**
    * Step 4: `gcloud secrets versions add <secret> --project <project> --account <account> --data-file=-`, the code on
-   * stdin alone. The version is read from gcloud's own words on stderr (`Created version [N] of the secret [S].`).
+   * stdin alone. The version is read from gcloud's own words on stderr (`Created version [N] of the secret [S].`). The
+   * code is revealed only as the child starts, straight onto its stdin; a holder dropped before then runs nothing.
    */
-  addVersion(dest: ProvisioningSecret, code: ProvisioningCode): Promise<StoreResult<{ version: string }>>;
+  addVersion(dest: ProvisioningSecret, code: ProvisioningCode, signal?: AbortSignal): Promise<StoreResult<{ version: string }>>;
   /**
    * Step 5: `gcloud secrets versions describe <version> --secret <secret> --project <project> --account <account>
    * --format=json`, read for `name`, `state` (it must be `ENABLED`) and `createTime`. It changes nothing, so it never
    * answers "may have succeeded".
    */
-  describeVersion(dest: ProvisioningSecret, version: string): Promise<StoreResult<VersionMetadata>>;
+  describeVersion(dest: ProvisioningSecret, version: string, signal?: AbortSignal): Promise<StoreResult<VersionMetadata>>;
 }
+// Every step takes its caller's `signal`: aborted before the step runs gcloud, nothing runs (not attempted); aborted
+// while its child runs, the child's process group is killed and its stdin destroyed, and the step answers at once.
 
 export type VersionMetadata = { name: string; state: 'ENABLED'; createTime: string };
 
@@ -63,15 +66,23 @@ const WITHHELD = '[provisioning code withheld]';
 
 /**
  * The code, held so a stray log, template, JSON or inspect prints a placeholder: only `reveal()` gives the code, which
- * `addVersion` writes to the child's stdin. Holding a reference keeps it alive; dropping the holder drops it.
+ * `addVersion` writes to the child's stdin. Its owner `drop()`s it when the code is no longer needed (its run ended, or
+ * the write answered): the holder lets go of the code, and `reveal()` throws from then on.
  */
 export class ProvisioningCode {
-  readonly #code: string;
+  #code: string | null;
   constructor(code: string) {
     this.#code = code;
   }
   reveal(): string {
+    if (this.#code === null) throw new Error('the provisioning code was dropped');
     return this.#code;
+  }
+  drop(): void {
+    this.#code = null;
+  }
+  get dropped(): boolean {
+    return this.#code === null;
   }
   toString(): string {
     return WITHHELD;
@@ -91,6 +102,8 @@ export class ProvisioningCode {
 export const gcloudFallbacks = (home: string): string[] => ['/opt/homebrew/bin', '/usr/local/bin', join(home, 'google-cloud-sdk', 'bin')];
 
 const NOT_FOUND = 'secret-store: gcloud not found';
+/** A step whose caller ended (its signal aborted, or the code's holder dropped) before gcloud ran. */
+const ENDED = 'secret-store: its caller ended before gcloud ran';
 /** Each call's bound, unless the deps say otherwise. */
 const TIMEOUT_MS = 60_000;
 /**
@@ -142,15 +155,20 @@ export async function resolveGcloud(lookup: GcloudLookup): Promise<StoreResult<G
 /** A child's ending: it never started, or it ended (by its own exit, a signal, or this module's timeout). */
 type Ran =
   | { started: false; detail: string }
-  | { started: true; code: number | null; signal: NodeJS.Signals | null; timedOut: boolean; stdinClosed: boolean; stdout: string; stderr: string };
+  | { started: true; code: number | null; signal: NodeJS.Signals | null; timedOut: boolean; aborted: boolean; stdinClosed: boolean; stdout: string; stderr: string };
 
 /**
- * gcloud with `args`, `stdin` written and closed (an empty stdin closed at once), under `GCLOUD_ENV` (prompts and
- * gcloud's own logging off). Its process group is killed at `timeoutMs`. `keepStdout: false` drains stdout unread
- * (an access token).
+ * gcloud with `args`, `stdin()` written and closed (an empty stdin closed at once; it is called as the child starts, and
+ * its answer is kept nowhere else), under `GCLOUD_ENV` (prompts and gcloud's own logging off). Its process group is
+ * killed at `timeoutMs`, or once `signal` aborts (which answers at once, the child's streams destroyed). `keepStdout:
+ * false` drains stdout unread (an access token).
  */
-function run(gcloud: Gcloud, args: string[], options: { stdin?: string; keepStdout: boolean; timeoutMs: number }): Promise<Ran> {
+function run(gcloud: Gcloud, args: string[], options: { stdin?: () => string; keepStdout: boolean; timeoutMs: number; signal?: AbortSignal }): Promise<Ran> {
   return new Promise((resolve) => {
+    if (options.signal?.aborted === true) {
+      resolve({ started: false, detail: ENDED });
+      return;
+    }
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(gcloud.path, args, { env: { ...process.env, PATH: gcloud.PATH, ...GCLOUD_ENV }, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
@@ -158,21 +176,24 @@ function run(gcloud: Gcloud, args: string[], options: { stdin?: string; keepStdo
       resolve({ started: false, detail: (error as Error).message });
       return;
     }
-    let [stdout, stderr, timedOut, stdinClosed, settled] = ['', '', false, false, false];
+    let [stdout, stderr, timedOut, aborted, stdinClosed, settled] = ['', '', false, false, false, false];
     const keep = (sofar: string, chunk: Buffer) => (sofar.length >= STREAM_CAP ? sofar : (sofar + chunk.toString('utf8')).slice(0, STREAM_CAP));
     child.stdout!.on('data', (chunk: Buffer) => void (options.keepStdout && (stdout = keep(stdout, chunk))));
     child.stderr!.on('data', (chunk: Buffer) => void (stderr = keep(stderr, chunk)));
     // A child that exits before reading stdin breaks the pipe: that is its exit's to report, and its stdin never closed
     // whole (`end`'s callback is also its error's).
     child.stdin!.on('error', () => {});
-    child.stdin!.end(options.stdin ?? '', (error?: Error | null) => void (stdinClosed = error == null));
-    const timer = setTimeout(() => {
-      timedOut = true;
+    child.stdin!.end(options.stdin?.() ?? '', (error?: Error | null) => void (stdinClosed = error == null));
+    const killGroup = () => {
       try {
         process.kill(-child.pid!, 'SIGKILL');
       } catch {
         child.kill('SIGKILL');
       }
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killGroup();
     }, options.timeoutMs);
     let lingering: NodeJS.Timeout | undefined;
     const finish = (ran: () => Ran) => {
@@ -180,9 +201,21 @@ function run(gcloud: Gcloud, args: string[], options: { stdin?: string; keepStdo
       settled = true;
       clearTimeout(timer);
       clearTimeout(lingering);
+      options.signal?.removeEventListener('abort', abort);
       resolve(ran());
     };
-    const ended = (code: number | null, signal: NodeJS.Signals | null) => () => ({ started: true as const, code, signal, timedOut, stdinClosed, stdout, stderr });
+    const ended = (code: number | null, signal: NodeJS.Signals | null) => () => ({ started: true as const, code, signal, timedOut, aborted, stdinClosed, stdout, stderr });
+    // The caller's run ended: the child goes now, its stdin's buffer (the code, for an add) destroyed with its streams.
+    function abort() {
+      aborted = true;
+      killGroup();
+      for (const stream of [child.stdin, child.stdout, child.stderr]) {
+        stream?.removeAllListeners('data');
+        stream?.destroy();
+      }
+      finish(ended(null, 'SIGKILL'));
+    }
+    options.signal?.addEventListener('abort', abort, { once: true });
     child.on('error', (error) => finish(() => ({ started: false, detail: error.message })));
     // `close`, once both streams are drained, so the version name and the metadata are read whole; but a helper gcloud
     // left behind holding the pipes must not hold the answer, so its exit answers `LINGER_MS` later in any case. That
@@ -244,21 +277,23 @@ export function secretStore(deps: SecretStoreDeps): SecretStore {
   /** A read-only call's failure: it never started (not attempted), or ended without an answer (failed). */
   function unanswered<T>(ran: Ran, what: string): StoreResult<T> | null {
     if (!ran.started) return refuse('not-attempted', `secret-store: gcloud could not start: ${ran.detail}`);
+    if (ran.aborted) return refuse('failed', `secret-store: ${what} was stopped: its caller ended`);
     if (ran.timedOut) return refuse('failed', `secret-store: ${what} did not answer in ${seconds(timeoutMs)}`);
     if (ran.code === null) return refuse('failed', `secret-store: ${what} ended by ${ran.signal}`);
     return null;
   }
 
   return {
-    async preflight(dest) {
+    async preflight(dest, signal) {
       const found = await ready(dest);
       if (!found.ok) return found;
+      if (signal?.aborted === true) return refuse('not-attempted', ENDED);
       const { project, secret, account } = dest;
-      const token = await run(found.value, ['auth', 'print-access-token', '--account', account], { keepStdout: false, timeoutMs });
+      const token = await run(found.value, ['auth', 'print-access-token', '--account', account], { keepStdout: false, timeoutMs, signal });
       const tokenFailure = unanswered<null>(token, 'gcloud auth print-access-token');
       if (tokenFailure !== null) return tokenFailure;
       if (token.started && token.code !== 0) return refuse('failed', `secret-store: gcloud is not signed in as ${account} (gcloud auth login ${account})`);
-      const described = await run(found.value, ['secrets', 'describe', secret, '--project', project, '--account', account], { keepStdout: false, timeoutMs });
+      const described = await run(found.value, ['secrets', 'describe', secret, '--project', project, '--account', account], { keepStdout: false, timeoutMs, signal });
       const describeFailure = unanswered<null>(described, 'gcloud secrets describe');
       if (describeFailure !== null) return describeFailure;
       if (described.started && described.code !== 0) {
@@ -270,13 +305,15 @@ export function secretStore(deps: SecretStoreDeps): SecretStore {
       return { ok: true, value: null };
     },
 
-    async addVersion(dest, code) {
+    async addVersion(dest, code, signal) {
       const found = await ready(dest);
       if (!found.ok) return found;
+      if (code.dropped || signal?.aborted === true) return refuse('not-attempted', ENDED);
       const { project, secret, account } = dest;
-      const plain = code.reveal();
-      const ran = await run(found.value, ['secrets', 'versions', 'add', secret, '--project', project, '--account', account, '--data-file=-'], { stdin: plain, keepStdout: true, timeoutMs });
+      const ran = await run(found.value, ['secrets', 'versions', 'add', secret, '--project', project, '--account', account, '--data-file=-'], { stdin: () => code.reveal(), keepStdout: true, timeoutMs, signal });
       if (!ran.started) return refuse('not-attempted', `secret-store: gcloud could not start: ${ran.detail}`);
+      // Its error line is held against the code while the holder still holds it; once dropped, its words are withheld.
+      const plain = code.dropped ? null : code.reveal();
       const named = /Created version \[([^\]\s]+)\] of the secret \[([^\]\s]+)\]/.exec(`${ran.stderr}\n${ran.stdout}`);
       const announced = named !== null && VERSION.test(named[1]) ? named[1] : null;
       if (ran.code !== 0 || ran.timedOut) {
@@ -285,7 +322,13 @@ export function secretStore(deps: SecretStoreDeps): SecretStore {
         // gcloud's "created, but the checksum could not be confirmed") may have stored it, with the version if announced.
         const refusedFirst = announced === null && REFUSED_BEFORE_WRITE.test(ran.stderr);
         const outcome = !ran.stdinClosed || refusedFirst ? 'failed' : 'may-have-succeeded';
-        const why = ran.timedOut ? `did not answer in ${seconds(timeoutMs)}` : ran.code === null ? `ended by ${ran.signal}` : `failed: ${errorLine(ran.stderr, plain)}`;
+        const why = ran.aborted
+          ? 'was stopped: its caller ended'
+          : ran.timedOut
+            ? `did not answer in ${seconds(timeoutMs)}`
+            : ran.code === null
+              ? `ended by ${ran.signal}`
+              : `failed: ${plain === null ? '(its words withheld: the code was dropped)' : errorLine(ran.stderr, plain)}`;
         const answer = refuse<{ version: string }>(outcome, `secret-store: gcloud secrets versions add ${why}${announced === null ? '' : ` (it announced version ${announced})`}`);
         return !answer.ok && announced !== null && outcome === 'may-have-succeeded' ? { ...answer, version: announced } : answer;
       }
@@ -294,12 +337,13 @@ export function secretStore(deps: SecretStoreDeps): SecretStore {
       return { ok: true, value: { version: announced } };
     },
 
-    async describeVersion(dest, version) {
+    async describeVersion(dest, version, signal) {
       if (!VERSION.test(version)) return refuse('not-attempted', 'secret-store: the version is not a version number');
       const found = await ready(dest);
       if (!found.ok) return found;
+      if (signal?.aborted === true) return refuse('not-attempted', ENDED);
       const { project, secret, account } = dest;
-      const ran = await run(found.value, ['secrets', 'versions', 'describe', version, '--secret', secret, '--project', project, '--account', account, '--format=json'], { keepStdout: true, timeoutMs });
+      const ran = await run(found.value, ['secrets', 'versions', 'describe', version, '--secret', secret, '--project', project, '--account', account, '--format=json'], { keepStdout: true, timeoutMs, signal });
       const failure = unanswered<VersionMetadata>(ran, 'gcloud secrets versions describe');
       if (failure !== null) return failure;
       if (ran.started && ran.code !== 0) return refuse('failed', `secret-store: gcloud secrets versions describe failed: ${errorLine(ran.stderr)}`);

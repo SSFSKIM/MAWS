@@ -21,7 +21,8 @@ const ACCESS_TOKEN = 'ya29.FAKE-ACCESS-TOKEN-never-kept';
 // is read from `act-<op>` beside it: `ok` (the default), `fail:<stderr line>` (after reading stdin), `early:<stderr
 // line>` (before reading it), `created-fail` (announces version 7, then fails), `hang` (after reading stdin), `silent`
 // (exit 0, no words), `die` (killed by a signal after reading stdin) or `linger` (answers as `ok`, leaving a helper that
-// holds its pipes for 8 s, its pid in `linger.pid`); a version's state from `state`.
+// holds its pipes for 8 s, its pid in `linger.pid`) or `hold` (its stdin left unread, its pid in `hold.pid`, until it
+// is killed); a version's state from `state`.
 const FAKE = `#!/bin/sh
 dir=$(cd "$(dirname "$0")" && pwd)
 { printf 'gcloud'; for a in "$@"; do printf ' %s' "$a"; done; printf '\\n'; } >> "$dir/argv.log"
@@ -37,6 +38,7 @@ esac
 act=$(cat "$dir/act-$op" 2>/dev/null || echo ok)
 case "$act" in
   early:*) printf 'ERROR: (gcloud.%s) %s\\n' "$op" "\${act#early:}" >&2; exit 1 ;;
+  hold) echo $$ > "$dir/hold.pid"; exec sleep 30 ;;
 esac
 cat >> "$dir/stdin.log"
 case "$act" in
@@ -274,6 +276,50 @@ describe('addVersion', () => {
   });
 });
 
+// The fix wave's I1: a run that ends takes its gcloud with it. The holder dropped while the resolver is out runs nothing;
+// an aborted call kills its child, even one that has not read its stdin yet.
+describe('an ended caller', () => {
+  it('a holder dropped while the resolver is out runs nothing: not attempted', async () => {
+    let resolveFound!: () => void;
+    const found = new Promise<void>((resolve) => (resolveFound = resolve));
+    const held = secretStore({ gcloud: async () => (await found, gcloud()), log: (line) => void lines.push(line), timeoutMs: 10_000 });
+    const code = new ProvisioningCode(CODE);
+    const adding = held.addVersion(DEST, code, new AbortController().signal);
+    code.drop();
+    resolveFound();
+    expect(await adding).toMatchObject({ ok: false, outcome: 'not-attempted' });
+    expect(await argv()).toEqual([]);
+  });
+
+  it('an abort while the child holds its stdin unread kills it, and answers at once', async () => {
+    await act('add', 'hold');
+    const ended = new AbortController();
+    const adding = store().addVersion(DEST, new ProvisioningCode(CODE), ended.signal);
+    let pid = 0;
+    for (let i = 0; i < 100 && pid === 0; i++) {
+      pid = Number((await recorded('hold.pid')).trim()) || 0;
+      if (pid === 0) await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(pid).toBeGreaterThan(0);
+    const started = Date.now();
+    ended.abort();
+    expect(await adding).toMatchObject({ ok: false });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(await gone(pid)).toBe(true);
+    expect(await recorded('stdin.log')).toBe('');
+  });
+
+  it('an abort before the call runs nothing, for every step', async () => {
+    const ended = new AbortController();
+    ended.abort();
+    const s = store();
+    expect(await s.preflight(DEST, ended.signal)).toMatchObject({ ok: false, outcome: 'not-attempted' });
+    expect(await s.addVersion(DEST, new ProvisioningCode(CODE), ended.signal)).toMatchObject({ ok: false, outcome: 'not-attempted' });
+    expect(await s.describeVersion(DEST, '7', ended.signal)).toMatchObject({ ok: false, outcome: 'not-attempted' });
+    expect(await argv()).toEqual([]);
+  });
+});
+
 describe('describeVersion', () => {
   it("reads the version's name, state and creation from its metadata, and never calls access", async () => {
     expect(await store().describeVersion(DEST, '7')).toEqual({
@@ -305,5 +351,14 @@ describe('ProvisioningCode', () => {
     const secretPart = CODE.slice(20, 60);
     for (const shown of [String(code), `${code}`, JSON.stringify({ code }), inspect(code), inspect({ nested: [code] })]) expect(shown).not.toContain(secretPart);
     expect(code.reveal()).toBe(CODE);
+  });
+
+  it('once dropped, holds nothing: reveal throws (the fix wave, I1)', () => {
+    const code = new ProvisioningCode(CODE);
+    expect(code.dropped).toBe(false);
+    code.drop();
+    expect(code.dropped).toBe(true);
+    expect(() => code.reveal()).toThrow(/dropped/);
+    expect(String(code)).not.toContain(CODE.slice(20, 60));
   });
 });
