@@ -8,9 +8,9 @@
 //
 // A GUI app's PATH lacks Homebrew, so gcloud is resolved explicitly: the login shell's PATH (the engine's captured
 // environment, read asynchronously), then the usual install places. Each call has a timeout, and each answer is one of
-// three outcomes: not attempted (gcloud never ran, or nothing it could change was asked), failed (gcloud said so, or a
-// read-only call ended without an answer), or may have succeeded (a `versions add` that timed out, died after its stdin
-// closed, or exited 0 naming no version). The confirmation reads the version's metadata (`versions describe`), never
+// three outcomes: not attempted (gcloud never ran, or nothing it could change was asked), failed (a read-only call that
+// didn't succeed, or a `versions add` that never held the whole code or that Secret Manager refused before announcing a
+// creation), or may have succeeded (any other `versions add` that didn't name its version and exit 0). The confirmation reads the version's metadata (`versions describe`), never
 // its value: nothing here calls `versions access`.
 //
 // Electron-free: vitest's node project runs it, against a fake `gcloud` first on an injected PATH.
@@ -20,8 +20,11 @@ import { access, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ProvisioningSecretSchema, type ProvisioningSecret } from '@shared/ipc/schema/org';
 
-/** A step's answer: its value, or why not and whether gcloud may have changed anything (refresh item 14). */
-export type StoreResult<T> = { ok: true; value: T } | { ok: false; outcome: StoreOutcome; detail: string };
+/**
+ * A step's answer: its value, or why not and whether gcloud may have changed anything (refresh item 14). `version`: the
+ * version gcloud announced creating before it failed (`addVersion` alone), so a "may have succeeded" can name it.
+ */
+export type StoreResult<T> = { ok: true; value: T } | { ok: false; outcome: StoreOutcome; detail: string; version?: string };
 export type StoreOutcome = 'not-attempted' | 'failed' | 'may-have-succeeded';
 
 /** Where gcloud is, and the PATH its child runs with (gcloud's launcher finds its Python on it). */
@@ -90,6 +93,16 @@ export const gcloudFallbacks = (home: string): string[] => ['/opt/homebrew/bin',
 const NOT_FOUND = 'secret-store: gcloud not found';
 /** Each call's bound, unless the deps say otherwise. */
 const TIMEOUT_MS = 60_000;
+/**
+ * Every child's environment over the inherited one: prompts off, so nothing it asks reads the code as an answer; HTTP
+ * logging and file logging off, so neither a machine's `core/log_http` nor its log files can keep the request body
+ * that carries the code. Environment variables override `gcloud config set` values (gcloud's "Managing properties").
+ */
+const GCLOUD_ENV = { CLOUDSDK_CORE_DISABLE_PROMPTS: '1', CLOUDSDK_CORE_LOG_HTTP: 'false', CLOUDSDK_CORE_DISABLE_FILE_LOGGING: 'true' } as const;
+/**
+ * A refusal Secret Manager answers before it stores anything, as gcloud prints it (`ERROR: (gcloud.…) CODE: …`).
+ */
+const REFUSED_BEFORE_WRITE = /^ERROR: \(gcloud[^)]*\) (NOT_FOUND|PERMISSION_DENIED|INVALID_ARGUMENT|FAILED_PRECONDITION|UNAUTHENTICATED):/m;
 /** How long after gcloud's exit its streams may stay open (a helper it left behind holding them) before it answers. */
 const LINGER_MS = 1_000;
 /** The shortest run of the code that marks a line as holding it (the code is base64url, so a run this long is its). */
@@ -132,15 +145,15 @@ type Ran =
   | { started: true; code: number | null; signal: NodeJS.Signals | null; timedOut: boolean; stdinClosed: boolean; stdout: string; stderr: string };
 
 /**
- * gcloud with `args`, `stdin` written and closed (an empty stdin closed at once), with prompts off, so nothing it asks
- * reads the code as an answer. Its process group is killed at `timeoutMs`. `keepStdout: false` drains stdout unread
+ * gcloud with `args`, `stdin` written and closed (an empty stdin closed at once), under `GCLOUD_ENV` (prompts and
+ * gcloud's own logging off). Its process group is killed at `timeoutMs`. `keepStdout: false` drains stdout unread
  * (an access token).
  */
 function run(gcloud: Gcloud, args: string[], options: { stdin?: string; keepStdout: boolean; timeoutMs: number }): Promise<Ran> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(gcloud.path, args, { env: { ...process.env, PATH: gcloud.PATH, CLOUDSDK_CORE_DISABLE_PROMPTS: '1' }, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+      child = spawn(gcloud.path, args, { env: { ...process.env, PATH: gcloud.PATH, ...GCLOUD_ENV }, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     } catch (error) {
       resolve({ started: false, detail: (error as Error).message });
       return;
@@ -172,9 +185,24 @@ function run(gcloud: Gcloud, args: string[], options: { stdin?: string; keepStdo
     const ended = (code: number | null, signal: NodeJS.Signals | null) => () => ({ started: true as const, code, signal, timedOut, stdinClosed, stdout, stderr });
     child.on('error', (error) => finish(() => ({ started: false, detail: error.message })));
     // `close`, once both streams are drained, so the version name and the metadata are read whole; but a helper gcloud
-    // left behind holding the pipes must not hold the answer, so its exit answers `LINGER_MS` later in any case.
+    // left behind holding the pipes must not hold the answer, so its exit answers `LINGER_MS` later in any case. That
+    // answer ends what's left: the streams destroyed (stdin's buffer, the code, with them), their handlers dropped, and
+    // the process group killed, so nothing of the call outlives it.
     child.on('close', (code, signal) => finish(ended(code, signal)));
-    child.on('exit', (code, signal) => void (lingering = setTimeout(() => finish(ended(code, signal)), LINGER_MS)));
+    child.on('exit', (code, signal) => {
+      lingering = setTimeout(() => {
+        finish(ended(code, signal));
+        for (const stream of [child.stdin, child.stdout, child.stderr]) {
+          stream?.removeAllListeners('data');
+          stream?.destroy();
+        }
+        try {
+          process.kill(-child.pid!, 'SIGKILL');
+        } catch {
+          // the group is gone already
+        }
+      }, LINGER_MS);
+    });
   });
 }
 
@@ -249,15 +277,21 @@ export function secretStore(deps: SecretStoreDeps): SecretStore {
       const plain = code.reveal();
       const ran = await run(found.value, ['secrets', 'versions', 'add', secret, '--project', project, '--account', account, '--data-file=-'], { stdin: plain, keepStdout: true, timeoutMs });
       if (!ran.started) return refuse('not-attempted', `secret-store: gcloud could not start: ${ran.detail}`);
-      // Once stdin closed, gcloud held the whole code: an ending without its word may have stored it.
-      const unknown = ran.stdinClosed ? 'may-have-succeeded' : 'failed';
-      if (ran.timedOut) return refuse(unknown, `secret-store: gcloud secrets versions add did not answer in ${seconds(timeoutMs)}`);
-      if (ran.code === null) return refuse(unknown, `secret-store: gcloud secrets versions add ended by ${ran.signal}`);
-      if (ran.code !== 0) return refuse('failed', `secret-store: gcloud secrets versions add failed: ${errorLine(ran.stderr, plain)}`);
       const named = /Created version \[([^\]\s]+)\] of the secret \[([^\]\s]+)\]/.exec(`${ran.stderr}\n${ran.stdout}`);
-      if (named === null || !VERSION.test(named[1])) return refuse('may-have-succeeded', 'secret-store: gcloud secrets versions add exited 0 but named no version');
-      deps.log(`secret-store: version ${named[1]} of secret ${secret} added in project ${project}`);
-      return { ok: true, value: { version: named[1] } };
+      const announced = named !== null && VERSION.test(named[1]) ? named[1] : null;
+      if (ran.code !== 0 || ran.timedOut) {
+        // Failed only when nothing could have been stored: gcloud never held the whole code, or Secret Manager refused it
+        // before any creation was announced. Any other ending (a timeout, a signal, an error after the request went out,
+        // gcloud's "created, but the checksum could not be confirmed") may have stored it, with the version if announced.
+        const refusedFirst = announced === null && REFUSED_BEFORE_WRITE.test(ran.stderr);
+        const outcome = !ran.stdinClosed || refusedFirst ? 'failed' : 'may-have-succeeded';
+        const why = ran.timedOut ? `did not answer in ${seconds(timeoutMs)}` : ran.code === null ? `ended by ${ran.signal}` : `failed: ${errorLine(ran.stderr, plain)}`;
+        const answer = refuse<{ version: string }>(outcome, `secret-store: gcloud secrets versions add ${why}${announced === null ? '' : ` (it announced version ${announced})`}`);
+        return !answer.ok && announced !== null && outcome === 'may-have-succeeded' ? { ...answer, version: announced } : answer;
+      }
+      if (announced === null) return refuse('may-have-succeeded', 'secret-store: gcloud secrets versions add exited 0 but named no version');
+      deps.log(`secret-store: version ${announced} of secret ${secret} added in project ${project}`);
+      return { ok: true, value: { version: announced } };
     },
 
     async describeVersion(dest, version) {

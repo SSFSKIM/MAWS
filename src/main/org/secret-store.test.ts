@@ -18,14 +18,14 @@ const CODE = `smns-provision-v2.${'Q29kZS1zZWNyZXQ'.repeat(12)}\n`;
 const ACCESS_TOKEN = 'ya29.FAKE-ACCESS-TOKEN-never-kept';
 
 // The fake: one line of argv per call (`gcloud a b c`), the environment and stdin appended to their logs. What it does
-// is read from `act-<op>` beside it: `ok` (the default), `fail:<stderr line>`, `hang` (after reading stdin), `silent`
+// is read from `act-<op>` beside it: `ok` (the default), `fail:<stderr line>` (after reading stdin), `early:<stderr
+// line>` (before reading it), `created-fail` (announces version 7, then fails), `hang` (after reading stdin), `silent`
 // (exit 0, no words), `die` (killed by a signal after reading stdin) or `linger` (answers as `ok`, leaving a helper that
-// holds its pipes for 8 s); a version's state from `state`.
+// holds its pipes for 8 s, its pid in `linger.pid`); a version's state from `state`.
 const FAKE = `#!/bin/sh
 dir=$(cd "$(dirname "$0")" && pwd)
 { printf 'gcloud'; for a in "$@"; do printf ' %s' "$a"; done; printf '\\n'; } >> "$dir/argv.log"
 env >> "$dir/env.log"
-cat >> "$dir/stdin.log"
 case "$1 $2 $3" in
   "auth print-access-token "*) op=auth ;;
   "secrets describe "*) op=describe ;;
@@ -36,10 +36,16 @@ case "$1 $2 $3" in
 esac
 act=$(cat "$dir/act-$op" 2>/dev/null || echo ok)
 case "$act" in
+  early:*) printf 'ERROR: (gcloud.%s) %s\\n' "$op" "\${act#early:}" >&2; exit 1 ;;
+esac
+cat >> "$dir/stdin.log"
+case "$act" in
+  created-fail) printf 'Created version [7] of the secret [%s].\\n' "$4" >&2
+    printf 'ERROR: (gcloud.secrets.versions.add) Secret version was created, but the data checksum could not be confirmed.\\n' >&2; exit 1 ;;
   hang) exec sleep 30 ;;
   die) kill -9 $$ ;;
   silent) exit 0 ;;
-  linger) sleep 8 & ;;
+  linger) sleep 8 & echo $! > "$dir/linger.pid" ;;
   fail:*) printf 'ERROR: (gcloud.%s) %s\\n' "$op" "\${act#fail:}" >&2; exit 1 ;;
 esac
 case "$op" in
@@ -63,6 +69,18 @@ async function fakeIn(dir: string): Promise<void> {
 }
 const act = (op: string, what: string) => writeFile(join(bin, `act-${op}`), what);
 const recorded = async (name: string) => readFile(join(bin, name), 'utf8').catch(() => '');
+/** Whether `pid` is gone within a second (reaped, or a zombie no longer signalable). */
+async function gone(pid: number): Promise<boolean> {
+  for (let i = 0; i < 20; i++) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return false;
+}
 const argv = async () => (await recorded('argv.log')).split('\n').filter((l) => l !== '');
 const gcloud = (): Promise<StoreResult<Gcloud>> => resolveGcloud({ loginPath: async () => `${bin}:/usr/bin:/bin`, home: scratch, fallbacks: [] });
 const store = (timeoutMs = 10_000) => secretStore({ gcloud, log: (line) => void lines.push(line), timeoutMs });
@@ -172,16 +190,36 @@ describe('addVersion', () => {
     });
     await act('add', `fail:bad data ${CODE.trim()}`);
     const echoed = await store().addVersion(DEST, new ProvisioningCode(CODE));
-    expect(echoed).toMatchObject({ ok: false, outcome: 'failed' });
+    expect(echoed).toMatchObject({ ok: false, outcome: 'may-have-succeeded' });
     expect(JSON.stringify(echoed)).not.toContain(CODE.slice(20, 60));
     expect(lines.join('\n')).not.toContain(CODE.slice(20, 60));
     // a fragment of it, too: gcloud quoting part of what it read
     const fragment = CODE.slice(30, 70);
     await act('add', `fail:could not parse payload starting ${fragment}`);
     const quoted = await store().addVersion(DEST, new ProvisioningCode(CODE));
-    expect(quoted).toMatchObject({ ok: false, outcome: 'failed' });
+    expect(quoted).toMatchObject({ ok: false, outcome: 'may-have-succeeded' });
     expect(JSON.stringify(quoted)).not.toContain(fragment.slice(0, 24));
     expect(lines.join('\n')).not.toContain(fragment.slice(0, 24));
+  });
+
+  // I2 (the fix wave): a non-zero exit is no proof that nothing was stored. Only a refusal gcloud names before any
+  // creation (or a stdin never written whole) is `failed`; any other ending may have stored it, with the version when
+  // gcloud announced one.
+  it('reads a refusal before any creation as failed, and any other non-zero exit as may have succeeded, with an announced version', async () => {
+    await act('add', 'early:PERMISSION_DENIED: Permission secretmanager.versions.add denied.');
+    expect(await store().addVersion(DEST, new ProvisioningCode(CODE))).toMatchObject({ ok: false, outcome: 'failed' });
+    expect(await recorded('stdin.log')).toBe(''); // refused before it read a byte
+    for (const code of ['NOT_FOUND', 'INVALID_ARGUMENT']) {
+      await act('add', `fail:${code}: refused.`);
+      expect(await store().addVersion(DEST, new ProvisioningCode(CODE)), code).toMatchObject({ ok: false, outcome: 'failed' });
+    }
+    await act('add', 'created-fail');
+    const created = await store().addVersion(DEST, new ProvisioningCode(CODE));
+    expect(created).toMatchObject({ ok: false, outcome: 'may-have-succeeded', version: '7' });
+    await act('add', 'fail:There was a problem reading the response: connection reset by peer');
+    const lost = await store().addVersion(DEST, new ProvisioningCode(CODE));
+    expect(lost).toMatchObject({ ok: false, outcome: 'may-have-succeeded' });
+    expect(lost).not.toHaveProperty('version');
   });
 
   it("answers once gcloud exits, its words read whole, though a helper it left behind still holds the pipes", async () => {
@@ -189,6 +227,34 @@ describe('addVersion', () => {
     const started = Date.now();
     expect(await store().addVersion(DEST, new ProvisioningCode(CODE))).toEqual({ ok: true, value: { version: '7' } });
     expect(Date.now() - started).toBeLessThan(4_000);
+    // M1 (the fix wave): the helper doesn't outlive the call
+    const pid = Number((await recorded('linger.pid')).trim());
+    expect(pid).toBeGreaterThan(0);
+    expect(await gone(pid)).toBe(true);
+  });
+
+  // I1 (the fix wave): gcloud's own logging could persist the request body, the code with it, so every child runs with
+  // HTTP logging and file logging forced off, over whatever the machine's config or this process's environment says.
+  it("runs every gcloud with HTTP and file logging off, overriding the environment's", async () => {
+    const saved = { http: process.env.CLOUDSDK_CORE_LOG_HTTP, file: process.env.CLOUDSDK_CORE_DISABLE_FILE_LOGGING };
+    process.env.CLOUDSDK_CORE_LOG_HTTP = 'true';
+    process.env.CLOUDSDK_CORE_DISABLE_FILE_LOGGING = 'false';
+    try {
+      const s = store();
+      await s.preflight(DEST);
+      await s.addVersion(DEST, new ProvisioningCode(CODE));
+      await s.describeVersion(DEST, '7');
+    } finally {
+      for (const [name, value] of [['CLOUDSDK_CORE_LOG_HTTP', saved.http], ['CLOUDSDK_CORE_DISABLE_FILE_LOGGING', saved.file]] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+    const env = (await recorded('env.log')).split('\n');
+    expect(await argv()).toHaveLength(4);
+    expect(env.filter((l) => l === 'CLOUDSDK_CORE_LOG_HTTP=false')).toHaveLength(4);
+    expect(env.filter((l) => l === 'CLOUDSDK_CORE_DISABLE_FILE_LOGGING=true')).toHaveLength(4);
+    expect(env.filter((l) => l.startsWith('CLOUDSDK_CORE_LOG_HTTP=') || l.startsWith('CLOUDSDK_CORE_DISABLE_FILE_LOGGING='))).toHaveLength(8);
   });
 
   it('reports a timeout, a death after stdin closed, and an exit naming no version as "may have succeeded"', async () => {
