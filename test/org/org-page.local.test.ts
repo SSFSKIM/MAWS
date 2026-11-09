@@ -35,8 +35,9 @@
 // 13. A creates a delegation (`org.delegation.create`): the mint goes to the hub's own route, whose parse of the request
 //     is read back from its key list; the signed `expires` is now + the days asked; the code reaches the fake gcloud's
 //     `versions add` stdin and nowhere else (no argv, log line, status, answer or file under A's profile). A VM's endpoint
-//     provisions from the code the fake received: its certificate verifies, and A's page lists it under the delegation.
-// 14. A renews it through `org.change`: the signed `expires` moves, and once it settles the hub's key follows (its GET).
+//     provisions from the code the fake received: its certificate verifies, and the hub lists it.
+// 14. A renews it through `org.change`: the signed `expires` moves, and once it settles the hub's key follows (its GET);
+//     A's page, having read the hub, lists the VM under the delegation.
 // 15. A drops it: the VM's event key reads `revoked` (`verifyEvent`), the hub key is listed revoked, and every state
 //     still verifies from genesis.
 //
@@ -825,12 +826,10 @@ describe('the Org page’s people, devices, machines and delegations on the loca
     expect(cert.body).toMatchObject({ org: ORG, name: VM, delegation: delegationId, pub: vm.key!.pub, use: 1 });
     expect(await verifyMachineCert(served.head.state, cert, new Date())).toEqual({ ok: true });
     expect(await hubKey(delegationId)).toMatchObject({ uses: 1 });
-    // The Org page lists it under its delegation, live.
-    const row = await until(async () => {
-      const r = await delegationRow(delegationId);
-      return r?.machines.some((m) => m.ref === vmServices!.machine.ref) ? r : null;
-    }, 'the VM listed under its delegation');
-    expect(row).toMatchObject({ prefix: PREFIX, owners: [aMember], expires: signed.expires, maxUses: MAX_USES, state: 'in-effect', unsent: null, machines: [{ ref: vmServices.machine.ref, name: VM, live: true }] });
+    // It lists: the hub's machine rows hold it beside the certificate. (A's page lists it once A reads the hub again,
+    // case 14: the hub tells apps of a new state, not of a new certificate.)
+    expect((await hubRows()).map((r) => r.name)).toContain(VM);
+    expect(await delegationRow(delegationId)).toMatchObject({ prefix: PREFIX, owners: [aMember], expires: signed.expires, maxUses: MAX_USES, state: 'in-effect', unsent: null });
 
     // An event in its name, signed by the certificate's key, verifies now; case 15 judges it again after the drop.
     vmEvent = await signEvent(PROJECT, { writer: `${VM}/human`, seq: 1, kind: 'human', text: 'provisioned', ts: new Date().toISOString(), created: new Date().toISOString() }, vm.key!.privateKey, vm.key!.pub);
@@ -848,7 +847,8 @@ describe('the Org page’s people, devices, machines and delegations on the loca
     expect(keyRequests.slice(fromRequest).filter((r) => r.method === 'POST')).toEqual([{ method: 'POST', path: `/api/provisioning-keys/${delegationId}/renew`, body: null }]);
     expect(hubWas).not.toBe(expires);
     expect(await hubKey(delegationId)).toMatchObject({ expires, revoked: null });
-    expect(await delegationRow(delegationId)).toMatchObject({ expires, hub: { expires }, hubBehind: null, hubProblem: null });
+    // The renewal's sign read the hub, certificates and all: the page lists the VM case 13 provisioned under its delegation.
+    expect(await delegationRow(delegationId)).toMatchObject({ expires, hub: { expires }, hubBehind: null, hubProblem: null, machines: [{ ref: vmServices!.machine.ref, name: VM, live: true }] });
     expect(renewed.version).toBe((await hubHead()).state.version);
   });
 
