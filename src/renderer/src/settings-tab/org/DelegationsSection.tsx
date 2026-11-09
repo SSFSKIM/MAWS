@@ -79,7 +79,7 @@ export function DelegationsSection({ status, view }: { status: Registered; view:
       <h5 className="m-0 mt-1 mb-0.5 text-ui-sm font-medium text-fg">{ORG.delegations}</h5>
       {view.delegations.length === 0 && <p className="m-0 py-1 text-ui-sm text-fg-muted">{ORG.noDelegations}</p>}
       {view.delegations.map((delegation) => (
-        <DelegationRow key={delegation.id} delegation={delegation} members={view.members} hubSide={admin} hubKeys={view.hubKeys} may={may} signedIn={signedIn} slot={slot} creating={creating} ask={ask} said={setOutcome} />
+        <DelegationRow key={delegation.id} delegation={delegation} members={view.members} hubSide={admin} hubKeys={view.hubKeys} may={may} signedIn={signedIn} slot={slot} rev={status.delegations.rev} destination={dest} creating={creating} ask={ask} said={setOutcome} />
       ))}
       {admin && unread && <HubKeysUnread at={at} signedIn={signedIn} />}
       {admin && view.strayKeys.length > 0 && (

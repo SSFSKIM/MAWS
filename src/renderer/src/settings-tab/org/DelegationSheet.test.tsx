@@ -48,7 +48,7 @@ const UNSENT_ROW: OrgDelegationRow = {
   machines: [],
   hub: { expires: '2027-01-26T12:00:00.000Z', uses: 0, revoked: false },
   state: 'unsent',
-  unsent: { rewrite: true, problem: 'gcloud secrets versions add failed: PERMISSION_DENIED', generation: 1 },
+  unsent: { rewrite: true, writing: false, problem: 'gcloud secrets versions add failed: PERMISSION_DENIED', generation: 1 },
   hubBehind: null,
   hubProblem: null,
 };
@@ -170,7 +170,7 @@ describe('Settings › Org: the create sheet (M4c)', () => {
     let unsent = false;
     renderSection(signing(ROOT), {
       'org.provisioningSecret.get': () => DEST,
-      'org.view': () => viewWith({ delegations: unsent ? [{ ...UNSENT_ROW, unsent: { rewrite: false, problem, generation: null } }] : [] }),
+      'org.view': () => viewWith({ delegations: unsent ? [{ ...UNSENT_ROW, unsent: { rewrite: false, writing: false, problem, generation: null } }] : [] }),
       'org.delegation.create': () => {
         unsent = true;
         return held(problem, true);
@@ -278,7 +278,7 @@ describe('Settings › Org: the create sheet (M4c)', () => {
     expect(await within(sheet).findByText('This create is no longer the one this Mac runs (a Discard, another create or a sign-out since): nothing more to do here.')).toBeTruthy();
     expect(within(sheet).queryByRole('button', { name: 'Write the code again' })).toBeNull();
     // ...then creates its own, held unsent and writable by its run: still nothing here acts on it
-    rows = [{ ...UNSENT_ROW, id: ID2, prefix: 'dd-', unsent: { rewrite: true, problem: 'gcloud failed', generation: 2 } }];
+    rows = [{ ...UNSENT_ROW, id: ID2, prefix: 'dd-', unsent: { rewrite: true, writing: false, problem: 'gcloud failed', generation: 2 } }];
     emit(signing(holding(HASH2, ID2), { delegations: { creating: false, rev: 3 } }));
     await act(async () => {});
     await vi.waitFor(() => expect(within(screen.getByRole('group', { name: 'dd-', hidden: true })).getByText('unsent')).toBeTruthy());
@@ -292,7 +292,7 @@ describe('Settings › Org: the create sheet (M4c)', () => {
   it('a slot that names this run’s hash but the view lists under another run: no Write again for it', async () => {
     renderSection(signing(ROOT), {
       'org.provisioningSecret.get': () => DEST,
-      'org.view': () => viewWith({ delegations: [{ ...UNSENT_ROW, unsent: { rewrite: true, problem: null, generation: 2 } }] }),
+      'org.view': () => viewWith({ delegations: [{ ...UNSENT_ROW, unsent: { rewrite: true, writing: false, problem: null, generation: 2 } }] }),
       'org.delegation.create': () => held('gcloud failed'),
     });
     const sheet = await openSheet();

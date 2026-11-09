@@ -71,8 +71,11 @@ export type HubProblem = { reason: Exclude<Extract<HubHalfResult, { ok: false }>
 export type DelegationViewInputs = {
   keys: { list: readonly ProvisioningKey[]; at: string } | null;
   keysFailed: boolean;
-  /** This run's unsent delegation: `rewrite` while it holds the key pair, why its code isn't stored, and the run. */
-  unsent: { id: string; rewrite: boolean; problem: string | null; generation: number } | null;
+  /**
+   * This run's unsent delegation: `rewrite` while it holds the key pair and writes nothing, `writing` while it writes
+   * the code (the branch fix wave, R5), why its code isn't stored, and the run.
+   */
+  unsent: { id: string; rewrite: boolean; writing: boolean; problem: string | null; generation: number } | null;
   hubProblems: ReadonlyMap<string, HubProblem>;
   /** The key a create under way holds before its slot names it: no stray, and no Revoke takes it. */
   reserved: Reservation | null;

@@ -230,8 +230,9 @@ export const YOUNG_STRAY_KEY_MS = 15 * 60_000;
  * still live (`dropped`). `maxUses` is null for no cap. `machines`: the certified machines it made, from the held
  * certificates, live or retired (a revoked key's left out), one per ref. `hub`: its key in the last good read of the
  * hub's list (null: none there, or no read). `unsent`: `rewrite` while this run holds its key pair ("Write the code
- * again"; else Discard only), why its code isn't stored, and the create run holding it (`generation`, null for none),
- * which a rewrite names. `hubBehind`, from the comparison alone: `renew`, the head
+ * again"; else Discard only), `writing` while this run is writing its code (a create's or a rewrite's steps 4 to 6: no
+ * action until it ends, and no word of a lost key pair), why its code isn't stored, and the create run holding it
+ * (`generation`, null for none), which a rewrite names. `hubBehind`, from the comparison alone: `renew`, the head
  * expires later than the hub's unrevoked, unexpired key; `revoke`, a dropped delegation's key still live. `hubProblem`:
  * the last hub half this sign-in ran for it that didn't finish.
  */
@@ -244,7 +245,7 @@ export const OrgDelegationRowSchema = z.strictObject({
   machines: z.array(z.strictObject({ ref: z.string(), name: z.string(), live: z.boolean() })),
   hub: z.strictObject({ expires: z.string(), uses: z.number().int().nonnegative(), revoked: z.boolean() }).nullable(),
   state: z.enum(['in-effect', 'unsent', 'dropped']),
-  unsent: z.strictObject({ rewrite: z.boolean(), problem: z.string().nullable(), generation: z.number().int().positive().nullable() }).nullable(),
+  unsent: z.strictObject({ rewrite: z.boolean(), writing: z.boolean(), problem: z.string().nullable(), generation: z.number().int().positive().nullable() }).nullable(),
   hubBehind: z.enum(['renew', 'revoke']).nullable(),
   hubProblem: z.strictObject({ reason: z.enum(HUB_HALF_REASONS), detail: z.string() }).nullable(),
 });

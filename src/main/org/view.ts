@@ -79,7 +79,7 @@ function delegationRows(state: OrgState, views: readonly CertView[], sources: De
       machines: machines(d.id),
       hub: key === null ? null : { expires: key.expires, uses: key.uses, revoked: key.revoked !== null },
       state: rowState,
-      unsent: rowState === 'unsent' ? { rewrite: mine?.rewrite ?? false, problem: mine?.problem ?? null, generation: mine?.generation ?? null } : null,
+      unsent: rowState === 'unsent' ? { rewrite: mine?.rewrite ?? false, writing: mine?.writing ?? false, problem: mine?.problem ?? null, generation: mine?.generation ?? null } : null,
       hubBehind: behind,
       hubProblem: rowState === 'unsent' ? null : (sources.hubProblems.get(d.id) ?? null),
     };

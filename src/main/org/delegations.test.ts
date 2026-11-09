@@ -1525,3 +1525,19 @@ describe('the branch fix wave: a Discard during a gcloud step answers the Discar
     });
   }
 });
+
+describe('the branch fix wave: a write under way is not a lost key pair (R5)', () => {
+  it('while versions add is out the unsent row reads writing, with no rewrite; once the write fails, rewrite and not writing', async () => {
+    const h = await harness();
+    await act(h, 'add', 'wait');
+    const creating = h.create();
+    await waiting(h, 'add');
+    const id = lastMinted(h)!.id;
+    expect((await h.view()).delegations).toMatchObject([{ id, state: 'unsent', unsent: { writing: true, rewrite: false } }]);
+    await act(h, 'version', 'fail:INTERNAL: the backend is down'); // the add answers; its describe then fails
+    await release(h, 'add');
+    expect(await creating).toMatchObject({ ok: false, reason: 'unsent' });
+    expect((await h.view()).delegations).toMatchObject([{ id, state: 'unsent', unsent: { writing: false, rewrite: true } }]);
+    await h.close();
+  });
+});

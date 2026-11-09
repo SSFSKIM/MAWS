@@ -56,7 +56,7 @@ const IN_EFFECT = delegation({
 });
 const HALF_DONE = delegation({ id: D2, prefix: 'gpu-', owners: 'org', expires: IN_90_DAYS, maxUses: null, hub: { expires: IN_23_DAYS, uses: 0, revoked: false }, hubBehind: 'renew', hubProblem: { reason: 'not-renewed', detail: "the hub's org state doesn't hold the renewal yet" } });
 const DROPPED = delegation({ id: D3, prefix: 'old-vm-', state: 'dropped', owners: [], hubBehind: 'revoke' });
-const UNSENT = delegation({ id: D4, prefix: 'dc-', expires: IN_90_DAYS, hub: { expires: IN_90_DAYS, uses: 0, revoked: false }, state: 'unsent', unsent: { rewrite: true, problem: 'gcloud secrets versions add failed: PERMISSION_DENIED on desk-provisioning-v2', generation: 1 } });
+const UNSENT = delegation({ id: D4, prefix: 'dc-', expires: IN_90_DAYS, hub: { expires: IN_90_DAYS, uses: 0, revoked: false }, state: 'unsent', unsent: { rewrite: true, writing: false, problem: 'gcloud secrets versions add failed: PERMISSION_DENIED on desk-provisioning-v2', generation: 1 } });
 const RUN = { generation: 1, id: D4, hash: HASH };
 const REV = 1;
 const READ = { at: '2026-10-28T11:59:00.000Z', failed: false };
@@ -219,9 +219,13 @@ describe('Settings › Org: Delegations (M4c)', () => {
     rewrite = { ok: true, version: 13, secret: { version: '7', createTime: '2026-10-28T12:00:05.000Z' }, run: RUN, rev: REV };
     fireEvent.click(within(dc).getByRole('button', { name: 'Write the code again' }));
     expect(await within(row('New delegation')).findByText(/^Published delegation dc- in version 13\. Its code is version 7, stored /)).toBeTruthy();
+    expect(buttons('dc-'), 'published: its unsent actions withdraw before the status says so').toEqual([]);
 
     // Discard, behind its confirmation, names the slot shown and says the hub key goes with it
-    fireEvent.click(within(dc).getByRole('button', { name: 'Discard…' }));
+    resetHarness();
+    renderSection(signing(PENDING), { ...withDelegations({ delegations: [UNSENT] }), 'org.discardPending': () => ({ ok: true, unsent: true, hubVersion: 12 }) satisfies DiscardResult });
+    const fresh = (await delegationsGroup()).getByRole('group', { name: 'dc-' });
+    fireEvent.click(within(fresh).getByRole('button', { name: 'Discard…' }));
     const sheet = await screen.findByRole('dialog', { name: 'Discard the unsent delegation dc-?' });
     expect(within(sheet).getByText(/Discarding it also revokes the hub key minted for it\. Create the delegation again afterwards\./)).toBeTruthy();
     fireEvent.click(within(sheet).getByRole('button', { name: 'Discard' }));
@@ -230,7 +234,7 @@ describe('Settings › Org: Delegations (M4c)', () => {
   });
 
   it('after a relaunch (rewrite false) the unsent row offers only Discard, worded to create it again', async () => {
-    renderSection(signing(PENDING), withDelegations({ delegations: [{ ...UNSENT, unsent: { rewrite: false, problem: null, generation: null } }] }));
+    renderSection(signing(PENDING), withDelegations({ delegations: [{ ...UNSENT, unsent: { rewrite: false, writing: false, problem: null, generation: null } }] }));
     const dc = (await delegationsGroup()).getByRole('group', { name: 'dc-' });
     expect(within(dc).getByText('This Mac no longer holds its key pair, so it can’t be published: discard it and create the delegation again.')).toBeTruthy();
     expect(buttons('dc-')).toEqual(['Discard…']);
@@ -296,6 +300,7 @@ describe('Settings › Org: Delegations (M4c)', () => {
       ),
     ).toBeTruthy();
     expect(screen.queryByText(/^Published as version/)).toBeNull();
+    expect(buttons('dc-'), 'discarded: its unsent actions withdraw before the status says so').toEqual([]);
   });
 
   it('a Write again that ends published and pending says so, with no Write again; one stored but refused offers Discard alone', async () => {
@@ -306,6 +311,15 @@ describe('Settings › Org: Delegations (M4c)', () => {
     fireEvent.click(within(dc).getByRole('button', { name: 'Write the code again' }));
     expect(await within(row('New delegation')).findByText('Published as version 13, its code stored. It settles as any pending state once the hub takes it (Org › Pending): nothing more to do here. · the hub did not answer')).toBeTruthy();
     expect(within(dc).queryByText(/Not written/)).toBeNull();
+    // the answer outran its status (separate pipes): the status still says held at an earlier rev, and the row offers
+    // nothing for the slot that is now exposed (branch fix wave, R6)
+    expect(buttons('dc-')).toEqual([]);
+    emit(signing(PENDING, { delegations: { creating: false, rev: REV - 1 } }));
+    await act(async () => {});
+    expect(buttons('dc-')).toEqual([]);
+    // a status at the answer's rev governs again (were it still to say held, the actions would return)
+    emit(signing(PENDING, { delegations: { creating: false, rev: REV } }));
+    await vi.waitFor(() => expect(buttons('dc-')).toEqual(['Write the code again', 'Discard…']));
 
     resetHarness();
     rewrite = { ok: false, reason: 'unsent', detail: 'its code is stored (version 7), but the publish was refused: stale; only Discard', phase: 'held', stored: true, version: 13, run: RUN, rev: REV };
@@ -315,6 +329,15 @@ describe('Settings › Org: Delegations (M4c)', () => {
     expect(
       await within(again).findByText('Signed as version 13 and its code stored, but its publish was refused, so it stays unsent. · Discard it, then create the delegation again. · its code is stored (version 7), but the publish was refused: stale; only Discard'),
     ).toBeTruthy();
+  });
+
+  it('while main writes the code (unsent.writing) the row says where, and offers nothing: no lost-key-pair words (branch fix wave, R5)', async () => {
+    const writing = { ...UNSENT, unsent: { rewrite: false, writing: true, problem: null, generation: 1 } };
+    renderSection(signing(PENDING), { ...withDelegations({ delegations: [writing] }), 'org.provisioningSecret.get': () => DEST });
+    const dc = (await delegationsGroup()).getByRole('group', { name: 'dc-' });
+    expect(await within(dc).findByText(`Writing the code to ${DEST.project}/${DEST.secret}…`)).toBeTruthy();
+    expect(within(dc).queryByText(/no longer holds its key pair/)).toBeNull();
+    expect(buttons('dc-')).toEqual([]);
   });
 
   it('a stray hub key: its prefix, label, age and expiry; Revoke behind a confirmation, stronger for a young key', async () => {

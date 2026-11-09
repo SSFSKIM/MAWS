@@ -19,9 +19,12 @@
 //   slot, and its answer reads by where it stopped (Task 5's fix wave, I2 and I4). And only while that slot is still
 //   held unsent (the status's `held`, fix wave 2): once its marker clears (published, perhaps from another window) the
 //   actions withdraw and an open confirmation closes, since its "never sent" no longer holds, even with the same hash.
+//   An answer can outrun its status (separate pipes): a Write again answered published or discarded withdraws them at
+//   once, for the answered slot, until a status at or past the answer's `rev` arrives (the create sheet's rule; the
+//   branch fix wave, R6). While main writes the code (`unsent.writing`), the row says where, and offers nothing (R5).
 import { useState } from 'react';
 import { formatAgo, formatDate, formatDayTime } from '@shared/app/date-format';
-import type { DelegationResult, OrgChange, OrgDelegationRow, OrgView } from '@shared/ipc/schema/org';
+import type { DelegationResult, OrgChange, OrgDelegationRow, OrgView, ProvisioningSecret } from '@shared/ipc/schema/org';
 import { useNow } from '../../app/use-now';
 import { GatewaySheet } from '../../gateway/GatewaySheet';
 import { ipc } from '../../ipc/client';
@@ -68,6 +71,10 @@ type RowProps = {
   signedIn: boolean;
   /** The pending slot (signed in); an unsent row acts only on one holding its delegation, and Discard names its hash. */
   slot: Pending | null;
+  /** The status's `delegations.rev`: how far the status held here reaches. */
+  rev: number;
+  /** Where the code goes (the destination's file), named while main writes it. */
+  destination: ProvisioningSecret | null;
   /** A create or a write of this Mac's is under way. */
   creating: boolean;
   ask(title: string, change: OrgChange): void;
@@ -75,14 +82,17 @@ type RowProps = {
   said(outcome: Outcome): void;
 };
 
-export function DelegationRow({ delegation: d, members, hubSide, hubKeys, may, signedIn, slot, creating, ask, said }: RowProps) {
+export function DelegationRow({ delegation: d, members, hubSide, hubKeys, may, signedIn, slot, rev, destination, creating, ask, said }: RowProps) {
   const now = useNow();
   const [acting, setActing] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>(null);
   // The slot Discard was pressed for, by its hash: the confirmation is of that one proposal.
   const [discarding, setDiscarding] = useState<string | null>(null);
+  // A Write again answered published or discarded, for its slot: the status may not say so yet.
+  const [answered, setAnswered] = useState<{ hash: string | null; rev: number } | null>(null);
   // The slot holding this row's delegation, still held unsent: the only one its Discard and Write again act on.
-  const own = slot !== null && slot.delegation === d.id && slot.held ? slot : null;
+  const ahead = answered !== null && rev < answered.rev && (answered.hash === null || slot?.hash === answered.hash);
+  const own = slot !== null && slot.delegation === d.id && slot.held && !ahead ? slot : null;
   if (discarding !== null && own?.hash !== discarding) setDiscarding(null);
   const asked = own !== null && own.hash === discarding ? own : null;
   const generation = d.unsent?.generation ?? null;
@@ -113,6 +123,7 @@ export function DelegationRow({ delegation: d, members, hubSide, hubKeys, may, s
   };
   // A published answer goes to the section (the row turns as it settles); a held one stays here.
   const written = (result: DelegationResult) => {
+    if (result.ok || result.phase === 'published' || result.phase === 'discarded') setAnswered({ hash: result.run?.hash ?? null, rev: result.rev });
     if (result.ok) said({ text: result.secret === undefined ? ORG.signed(result.version) : ORG.codeStored(d.prefix, result.version, result.secret.version, formatDayTime(Date.parse(result.secret.createTime))), refused: false });
     else if (result.phase === 'published') said({ text: [ORG.phasePublished(result.version), result.detail].filter((part) => part !== undefined).join(' · '), refused: false });
     else if (result.phase === 'discarded') said(refusal(ORG.phaseDiscarded(result.stored), '', result.detail));
@@ -163,7 +174,10 @@ export function DelegationRow({ delegation: d, members, hubSide, hubKeys, may, s
         </div>
       )}
       {problem !== null && <span className="basis-full text-warning">{problem}</span>}
-      {d.state === 'unsent' && d.unsent !== null && (
+      {d.state === 'unsent' && d.unsent !== null && d.unsent.writing && (
+        <span className="basis-full text-fg-muted">{ORG.writingTo(destination === null ? null : `${destination.project}/${destination.secret}`)}</span>
+      )}
+      {d.state === 'unsent' && d.unsent !== null && !d.unsent.writing && (
         <div className="flex min-w-0 basis-full flex-wrap items-center gap-2">
           <span className="text-warning">{d.unsent.rewrite ? ORG.unsentLine : ORG.unsentDiscardOnly}</span>
           {d.unsent.problem !== null && <span className="basis-full text-fg-muted">{d.unsent.problem}</span>}

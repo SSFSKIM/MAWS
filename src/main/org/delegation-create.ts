@@ -94,7 +94,7 @@ export interface DelegationCreate {
   /** A Discard's marker: the run holding that slot ends (its custody dropped, its gcloud stopped). */
   discarded(marker: Unsent | null): void;
   reservation(): Reservation | null;
-  unsent(): { id: string; rewrite: boolean; problem: string | null; generation: number } | null;
+  unsent(): { id: string; rewrite: boolean; writing: boolean; problem: string | null; generation: number } | null;
   fence(): void;
   close(): void;
 }
@@ -556,7 +556,10 @@ export function createDelegationCreate(deps: DelegationCreateDeps): DelegationCr
       end(run);
     },
     reservation: () => (run === null || run.hash !== null ? null : { id: run.id, prefix: run.prefix, since: new Date(run.since).toISOString() }),
-    unsent: () => (run === null || run.id === null || run.hash === null ? null : { id: run.id, rewrite: run.custody !== null && !run.working && live(run), problem: run.problem, generation: run.generation }),
+    unsent: () =>
+      run === null || run.id === null || run.hash === null
+        ? null
+        : { id: run.id, rewrite: run.custody !== null && !run.working && live(run), writing: run.working && live(run), problem: run.problem, generation: run.generation },
     fence,
     close() {
       fence();

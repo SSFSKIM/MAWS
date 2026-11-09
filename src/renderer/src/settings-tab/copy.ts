@@ -420,6 +420,9 @@ export const ORG = {
   unmarked: 'This Mac’s keys weren’t kept out of Time Machine backups when they were made, so it signs nothing. Make new keys with a pairing code.',
   signed: (version: number) => `Signed version ${version}.`,
   notSigned: 'Not signed',
+  // M4c: a drop answered stale: the hub tells apps of states, not certificates, so a machine the delegation certified
+  // since the preview is the likely change (the architect, R8)
+  dropStale: 'This delegation may have certified a machine since you opened it: preview the drop again.',
   signReasons: {
     'not-root': 'This Mac isn’t a root of the org.',
     unmarked: 'This Mac’s keys can’t sign: make new keys first.',
@@ -801,6 +804,7 @@ export const ORG = {
   unsentLine: 'Signed, not published: its provisioning code isn’t stored yet.',
   writeAgain: 'Write the code again',
   writing: 'Writing the code…',
+  writingTo: (where: string | null) => (where === null ? 'Writing the code…' : `Writing the code to ${where}…`),
   unsentDiscardOnly: 'This Mac no longer holds its key pair, so it can’t be published: discard it and create the delegation again.',
   stillUnsent: 'The code still isn’t stored: Write the code again, or discard it.',
   codeStored: (prefix: string, version: number, secretVersion: string, time: string) => `Published delegation ${prefix} in version ${version}. Its code is version ${secretVersion}, stored ${time}.`,

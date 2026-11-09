@@ -202,7 +202,7 @@ describe('M4c: the Delegations section', () => {
       sources({
         slot: { state: slotState, unsent: { kind: 'delegation', id: UNSENT } },
         keys: { list, at: '2026-10-29T08:59:00.000Z' },
-        unsent: { id: UNSENT, rewrite: true, problem: 'no secret', generation: 3 },
+        unsent: { id: UNSENT, rewrite: true, writing: false, problem: 'no secret', generation: 3 },
         hubProblems: new Map([[DROPPED, { reason: 'updating' as const, detail: 'the hub is updating' }]]),
         history: (id) => (id === DROPPED ? dropped : undefined),
       }),
@@ -210,7 +210,7 @@ describe('M4c: the Delegations section', () => {
     expect(OrgViewSchema.parse(view)).toEqual(view);
     expect(view.delegations.map((d) => [d.id, d.state, d.hubBehind, d.unsent, d.hubProblem?.reason ?? null])).toEqual([
       [DELEGATION, 'in-effect', 'renew', null, null],
-      [UNSENT, 'unsent', null, { rewrite: true, problem: 'no secret', generation: 3 }, null],
+      [UNSENT, 'unsent', null, { rewrite: true, writing: false, problem: 'no secret', generation: 3 }, null],
       [DROPPED, 'dropped', 'revoke', null, 'updating'],
     ]);
     expect(view.delegations[2]).toMatchObject({ prefix: 'ci-', owners: 'org', maxUses: null, expires: '2026-11-20T00:00:00.000Z', hub: { expires: '2026-11-15T00:00:00.000Z', uses: 3, revoked: false } });
@@ -227,7 +227,7 @@ describe('M4c: the Delegations section', () => {
     const view = await orgView(state, { member: OWNER, device: mac.id }, true, undefined, AT, null, sources({ slot: { state: slotState, unsent: { kind: 'delegation', id: UNSENT } }, keys: { list, at: AT.toISOString() } }));
     expect(view.delegations.map((d) => [d.state, d.hubBehind, d.unsent])).toEqual([
       ['in-effect', null, null],
-      ['unsent', null, { rewrite: false, problem: null, generation: null }], // no run: nothing for a rewrite to name
+      ['unsent', null, { rewrite: false, writing: false, problem: null, generation: null }], // no run: nothing for a rewrite to name
     ]);
     expect(view.delegations[1].maxUses).toBe(5);
     const expired = await orgView(state, { member: OWNER, device: mac.id }, true, undefined, AT, null, sources({ keys: { list: [key(DELEGATION, { expires: '2026-10-29T08:00:00.000Z' })], at: AT.toISOString() } }));

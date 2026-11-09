@@ -161,6 +161,7 @@ function seededOrg(local: string, userData: string, now: number): { status: Regi
         state: 'unsent',
         unsent: {
           rewrite: true,
+          writing: false,
           problem: 'gcloud secrets versions add failed: PERMISSION_DENIED: Permission denied on secret projects/ytdownload-505811/secrets/desk-provisioning-v2 for cli-owner@ytdownload-505811.iam.gserviceaccount.com',
           generation: 1,
         },

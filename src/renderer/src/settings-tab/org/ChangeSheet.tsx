@@ -29,6 +29,9 @@ import { ORG } from '../copy';
 import { INPUT, Segment, TEXT_ACTION } from '../parts';
 import { failed, memberName, OutcomeLine, signOutcome, useOpen, useOwnSignIn, type Outcome } from './parts';
 
+/** A drop answered `stale`: what changed is most likely a machine it certified since the preview, so the next step is a new one. */
+const dropStale = (detail: string | undefined): Outcome => ({ text: [ORG.notSigned, ORG.dropStale, detail].filter((part) => part !== undefined && part !== '').join(' · '), refused: true });
+
 type Role = 'admin' | 'member';
 type Stage =
   | { at: 'fields' }
@@ -106,7 +109,7 @@ export function ChangeSheet({ title, change: asked, members = [], may, signIn, m
       const signed: SignResult = result.value;
       if (signed.ok) setStage({ at: 'signed', preview, version: signed.version });
       else if (signed.reason === 'cancelled') setStage({ at: 'shown', preview }); // the person's own cancel: Sign again
-      else setStage({ at: 'ended', preview, outcome: signOutcome(signed) });
+      else setStage({ at: 'ended', preview, outcome: preview.change.kind === 'delegation.drop' && signed.reason === 'stale' ? dropStale(signed.detail) : signOutcome(signed) });
     });
   };
 

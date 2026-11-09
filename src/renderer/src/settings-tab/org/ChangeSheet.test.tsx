@@ -398,4 +398,19 @@ describe('Settings › Org: the change sheet’s delegation fields (M4c)', () =>
     fireEvent.click(within(sheet).getByRole('button', { name: 'Sign' }));
     await vi.waitFor(() => expect(sent('org.change')).toEqual([{ change: { kind: 'delegation.drop', id: ID }, digest: 'digest-drop' }]));
   });
+
+  it('a drop answered stale names the next step: the delegation may have certified a machine since, so preview the drop again (the architect, R8)', async () => {
+    renderSection(signing(ROOT), {
+      'org.view': () => viewWith({ delegations: [CI] }),
+      'org.preview': (input: { change: OrgChange }) => previewed(input.change, [`Drop delegation ${ID} (prefix ci-runner-) and revoke its key k1`], [], 'digest-drop'),
+      'org.change': () => ({ ok: false, reason: 'stale', detail: 'the change, or the org state it changes, is not the one shown: nothing was signed' }),
+    });
+    await pressOn('Drop…');
+    const sheet = await screen.findByRole('dialog', { name: 'Drop delegation ci-runner-?' });
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Sign' }));
+    expect((await within(sheet).findByRole('alert')).textContent).toBe(
+      'Not signed · This delegation may have certified a machine since you opened it: preview the drop again. · the change, or the org state it changes, is not the one shown: nothing was signed',
+    );
+    expect(within(sheet).queryByRole('button', { name: 'Sign' })).toBeNull();
+  });
 });
