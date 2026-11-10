@@ -15,13 +15,12 @@ import type { MachineRef } from '@shared/machine/ref';
 import { machineOfRow, machineOrder, machineProject, orgIndex, orgKeyOf, primaryCheckout, rowOfListed, rowOfListedRecord, rowOfSession, type OrgProject, type RowKey } from '../stores/org-projects'; // P5 O6 M5; P5 O7 M2: rowOfListedRecord
 import type { ListedSession } from '../stores/sessions'; // P5 O8 M2
 import { SIDE_COPY } from '../side/copy'; // E3
+import { isWorking, listedStateOf } from '../sessions/listed-state'; // P5 O7 M10
 
 // P5 O6 M5: a row is an org project's, keyed by its org key (an address while its machine has not derived it), or a
 // machine's own project's (`machine:<ref>`), which took the place of "Other sessions": one per machine, after the
 // projects (`stores/org-projects.ts`).
 export type ProjectKey = RowKey;
-
-const isWorking = (digest: SessionDigest | undefined) => digest?.phase === 'working' || digest?.phase === 'starting';
 
 // Case-insensitive substring over the title, the project's name, the directory and the branch (P2-D, G2: the branch the
 // record names, W9's rule). The ⌘K palette and the resume chooser search sessions with the same rule, so the sidebar's
@@ -146,6 +145,7 @@ export function projectList({ records, digests, projects, rows, local, machineNa
     const remote = group?.listed ?? [];
     const yours = (id: AppSessionId) => !group?.theirs.has(id);
     const count = (state: string) => remote.filter((l) => l.state === state && yours(l.appId)).length;
+    const said = (r: SessionRecord) => listedStateOf(digests.get(r.appId), remoteSessions.get(r.appId)); // P5 O7 M10: a remote lane B record's listing
     return {
       key: org.id,
       org,
@@ -155,8 +155,8 @@ export function projectList({ records, digests, projects, rows, local, machineNa
       sessions,
       listed: remote,
       rollup: {
-        waiting: sessions.filter((r) => yours(r.appId) && waiting.has(r.appId)).length + count('waiting'),
-        working: sessions.filter((r) => yours(r.appId) && isWorking(digests.get(r.appId))).length + count('busy'),
+        waiting: sessions.filter((r) => yours(r.appId) && (waiting.has(r.appId) || said(r) === 'waiting')).length + count('waiting'),
+        working: sessions.filter((r) => yours(r.appId) && isWorking(digests.get(r.appId), remoteSessions.get(r.appId))).length + count('busy'),
       },
       lastActivity: entryActivity(org.id),
       others: group?.others ?? 0,
@@ -222,14 +222,15 @@ export interface ProjectSessionsInput {
   matches: (record: SessionRecord) => boolean;
   spawned?: ReadonlySet<AppSessionId>; // P5 O7 M8: the sessions spawned here that still lead (`leadsAsSpawned`)
   seen?: SeenActivity; // P5 O7 M10: a remote record's activity beyond the record (`seenActivity`)
+  listings?: ReadonlyMap<AppSessionId, ListedSession>; // P5 O7 M10: the sessions store's listings, a remote lane B record's state (`listedStateOf`)
   now: number; // P5 O7 M10's follow-up: the clock an unread session's freshness is judged at (`priorityRank`)
 }
 
 // One flat list: pinned sessions first (pin keeps a session at the top of its project), then a session spawned here
 // that still leads (P5 O7 M8), then the rest in the chosen sort; worktree sessions sit among them, marked by their branch
 // (`rowBranch`).
-export function projectSessions({ sessions, digests, rows, sort, matches, spawned, seen, now }: ProjectSessionsInput): SessionRecord[] {
-  const order = (list: SessionRecord[]) => sortSessions(list, sort, { digests, rows, seen, now });
+export function projectSessions({ sessions, digests, rows, sort, matches, spawned, seen, listings, now }: ProjectSessionsInput): SessionRecord[] {
+  const order = (list: SessionRecord[]) => sortSessions(list, sort, { digests, rows, seen, listings, now });
   const shown = sessions.filter(matches);
   const leads = (r: SessionRecord) => !r.pinned && leadsAsSpawned(r.appId, spawned);
   return [...order(shown.filter((r) => r.pinned)), ...order(shown.filter(leads)), ...order(shown.filter((r) => !r.pinned && !leads(r)))];
@@ -318,6 +319,7 @@ export interface ProjectItemsInput {
   sort: SidebarSort;
   spawned?: ReadonlySet<AppSessionId>; // P5 O7 M8: as `projectSessions` was given it
   seen?: SeenActivity; // P5 O7 M10: as `projectSessions` was given it
+  listings?: ReadonlyMap<AppSessionId, ListedSession>; // P5 O7 M10: as `projectSessions` was given it
   now: number; // as `projectSessions` was given it
 }
 
@@ -328,14 +330,14 @@ const PINNED_TIER = -2;
 const SPAWNED_TIER = -1;
 const byRank = (a: Rank, b: Rank): number => a.tier - b.tier || (a.tier < 0 || a.tier === RANK_REST ? b.at - a.at : a.key - b.key);
 
-export function projectItems({ sorted, listed, digests, rows, sort, spawned, seen, now }: ProjectItemsInput): SidebarSession[] {
+export function projectItems({ sorted, listed, digests, rows, sort, spawned, seen, listings, now }: ProjectItemsInput): SidebarSession[] {
   const rowIndex = new Map(rows.map((row, i) => [row.appSessionId, i]));
   const recordRank = (r: SessionRecord): Rank => {
     const digest = digests.get(r.appId);
     const at = lastActivity(r, digest, seen?.get(r.appId));
     if (r.pinned) return { tier: PINNED_TIER, key: 0, at };
     if (leadsAsSpawned(r.appId, spawned)) return { tier: SPAWNED_TIER, key: 0, at };
-    const [tier, key] = sort === 'priority' ? priorityRank(r, digest, rowIndex.get(r.appId), now, seen?.get(r.appId)) : [RANK_REST, 0];
+    const [tier, key] = sort === 'priority' ? priorityRank(r, digest, rowIndex.get(r.appId), now, seen?.get(r.appId), listings?.get(r.appId)) : [RANK_REST, 0];
     return { tier, key, at };
   };
   const listedRank = (l: ListedSession): Rank => {
@@ -397,9 +399,10 @@ export function rowBranch(record: SessionRecord): string | null {
 // A row's age, compact in the display locale (`@shared/app/date-format`): now, 2m, 2h, 3d, 1w.
 export const formatAge = (ms: number): string => dateFormats().age(ms);
 
-// A working session is "now"; otherwise the age of its last activity (P5 O7 M10: `seen` included, a remote record's).
-export function sessionAge(record: SessionRecord, digest: SessionDigest | null | undefined, now: number, seen?: number): string {
-  if (isWorking(digest ?? undefined)) return formatAge(0);
+// A working session is "now"; otherwise the age of its last activity (P5 O7 M10: `seen` included, a remote record's;
+// `listed`, its listing, which says whether it works).
+export function sessionAge(record: SessionRecord, digest: SessionDigest | null | undefined, now: number, seen?: number, listed?: ListedSession): string {
+  if (isWorking(digest, listed)) return formatAge(0);
   return formatAge(now - lastActivity(record, digest, seen));
 }
 

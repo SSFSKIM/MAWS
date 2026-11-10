@@ -321,7 +321,8 @@ function Row({ id, row, kind, now, selected, badge, onSelect, onOpen }: RowProps
   const { record } = row;
   const digest = useSessions((s) => s.digests.get(record.appId) ?? null);
   const pending = useAttention((s) => selectPendingOf(s, record.appId));
-  const glyph = glyphFor(record, digest, pending);
+  const listing = useSessions((s) => s.listed.get(record.appId)); // P5 O7 M10: a remote lane B record's state (`listedStateOf`)
+  const glyph = glyphFor(record, digest, pending, listing);
   const refusal = useRefusal(record);
   const branch = sessionBranch(record);
   const title = displayTitle(record);
@@ -431,6 +432,7 @@ function SessionPreview({ row, projects, now, immediate }: PreviewProps) {
   const { record } = row;
   const digest = useSessions((s) => s.digests.get(record.appId) ?? null);
   const pending = useAttention((s) => selectPendingOf(s, record.appId));
+  const listing = useSessions((s) => s.listed.get(record.appId)); // P5 O7 M10: a remote lane B record's state (`listedStateOf`)
   const preview = useRecentTurns(record.appId, immediate);
   const turns = useRef<HTMLDivElement>(null);
   const ready = preview.status === 'ready' ? preview.value : null;
@@ -438,7 +440,7 @@ function SessionPreview({ row, projects, now, immediate }: PreviewProps) {
   useEffect(() => {
     if (ready && turns.current) turns.current.scrollTop = turns.current.scrollHeight;
   }, [ready]);
-  const glyph = glyphFor(record, digest, pending);
+  const glyph = glyphFor(record, digest, pending, listing);
   const refusal = useRefusal(record);
   const branch = sessionBranch(record);
   const machineLabel = useMachines((s) => machineName(s.machines, machineOf(record.appId), ipc.localMachine));

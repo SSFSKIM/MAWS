@@ -8,7 +8,8 @@ import { machineOf } from '@shared/machine/address';
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
 import { holderLine, isActionable, waitingItem, type NeedsYouRow } from '../attention/derive';
-import { glyphFor } from '../attention/glyph';
+import { glyphFor, wordGlyph } from '../attention/glyph';
+import { isWorking, listedStateOf } from '../sessions/listed-state'; // P5 O7 M10
 import { machineOfRow, machineOrder } from '../stores/org-projects';
 import type { ListedSession } from '../stores/sessions';
 
@@ -78,14 +79,17 @@ export function overviewCards(input: OverviewInput): AppSessionId[] {
 // A card's activity line (residue *Overview card*): the holder of a foreign-live session; what a waiting session waits
 // for, in words; what a working session is doing; else its state. The last answer is a separate line, so a working
 // session shows both. P5 O9 M6 (the owner's Q1): a foreign session MAWS drives through its bridge reads as any session
-// (its digest is never `foreign` then); the holder line is one with no live bridge.
-export function cardActivity(record: SessionRecord, digest: SessionDigest | null, pending: AttentionItem[]): string {
+// (its digest is never `foreign` then); the holder line is one with no live bridge. P5 O7 M10: another machine's lane B
+// record, with no digest, says its listing's word (`listedStateOf`) as its glyph does.
+export function cardActivity(record: SessionRecord, digest: SessionDigest | null, pending: AttentionItem[], listed?: ListedSession): string {
   const holder = digest === null || digest.phase === 'foreign' ? holderLine(record) : null;
   if (holder) return holder;
   const waiting = waitingItem(pending);
   if (waiting && isActionable(waiting.oldest)) {
-    return waiting.oldest.kind === 'permission' ? 'Waiting for approval' : glyphFor(record, digest, pending).label;
+    return waiting.oldest.kind === 'permission' ? 'Waiting for approval' : glyphFor(record, digest, pending, listed).label;
   }
+  const word = listedStateOf(digest, listed);
+  if (word !== null) return wordGlyph(word)?.label ?? 'Idle';
   switch (digest?.phase) {
     case 'working':
     case 'starting':
@@ -161,32 +165,35 @@ export const unreadAt = (record: SessionRecord, digest: SessionDigest | undefine
 // sidebar ranks a listed row on the same scale (`sidebar/derive.ts`, `projectItems`). P5 O7 M10's follow-up (the owner's
 // "Fresh unread first"): the unread group holds an unread session only while it is fresh, `now` less its `unreadAt`
 // under UNREAD_FRESH_MS; an older one falls through to working or the rest and keeps its dot. `now` is the caller's
-// clock, so this stays pure: the sidebar's comes from a coarse shared tick, never a timer per row.
+// clock, so this stays pure: the sidebar's comes from a coarse shared tick, never a timer per row. P5 O7 M10: another
+// machine's lane B record, with no digest, is working while its listing says `busy` (`isWorking`), keyed by its last
+// activity as a listed row is by its listing's issue.
 export const RANK_REST = 3;
-export function priorityRank(record: SessionRecord, digest: SessionDigest | undefined, row: number | undefined, now: number, seen?: number): [group: number, key: number] {
+export function priorityRank(record: SessionRecord, digest: SessionDigest | undefined, row: number | undefined, now: number, seen?: number, listed?: ListedSession): [group: number, key: number] {
   if (row !== undefined) return [0, row];
   if (record.unread) {
     const at = unreadAt(record, digest, seen);
     if (now - at < UNREAD_FRESH_MS) return [1, -at];
   }
-  if (digest?.phase === 'working' || digest?.phase === 'starting') return [2, -time(digest.turnStartedAt)];
+  if (isWorking(digest, listed)) return [2, digest === undefined ? -lastActivity(record, undefined, seen) : -time(digest.turnStartedAt)];
   return [RANK_REST, 0];
 }
 
 // Within a project. `priority`: sessions with a Needs-you row (in row order), then fresh unread by last turn end
 // (`UNREAD_FRESH_MS` before `now`), then working by turn start, then the rest by recency. `recency`: `lastActivity`. Ties
-// by title. P5 O7 M10: `seen`, what this window saw of a remote record (`seenActivity`).
+// by title. P5 O7 M10: `seen`, what this window saw of a remote record (`seenActivity`), and `listings`, the listings
+// the sessions store holds by address (its `listed`), which say a remote lane B record's state.
 export function sortSessions(
   sessions: SessionRecord[],
   sort: SidebarSort,
-  { digests, rows, seen, now }: { digests: ReadonlyMap<AppSessionId, SessionDigest>; rows: NeedsYouRow[]; seen?: SeenActivity; now: number },
+  { digests, rows, seen, listings, now }: { digests: ReadonlyMap<AppSessionId, SessionDigest>; rows: NeedsYouRow[]; seen?: SeenActivity; listings?: ReadonlyMap<AppSessionId, ListedSession>; now: number },
 ): SessionRecord[] {
   const rowIndex = new Map(rows.map((row, i) => [row.appSessionId, i]));
   // Each session's keys are computed once, not per comparison (debt wave 5: a cold index sorts thousands per render).
   const keyed = sessions.map((r) => {
     const d = digests.get(r.appId);
     const at = seen?.get(r.appId);
-    const [group, key] = sort === 'recency' ? [RANK_REST, 0] : priorityRank(r, d, rowIndex.get(r.appId), now, at);
+    const [group, key] = sort === 'recency' ? [RANK_REST, 0] : priorityRank(r, d, rowIndex.get(r.appId), now, at, listings?.get(r.appId));
     return { r, group, key, recency: lastActivity(r, d, at) };
   });
   return keyed

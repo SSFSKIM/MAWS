@@ -164,6 +164,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
   const record = useSessions((s) => s.records.get(appSessionId));
   const digest = useSessions((s) => s.digests.get(appSessionId) ?? null);
   const seenAt = useSessions((s) => selectSeenAt(s, appSessionId)); // P5 O7 M10
+  const listing = useSessions((s) => s.listed.get(appSessionId)); // P5 O7 M10: a remote lane B record's state (`listedStateOf`)
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
   const parentTitle = useSessions((s) => { // E3
     const parentId = s.records.get(appSessionId)?.lineage?.parentAppSessionId;
@@ -175,14 +176,14 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
   const controlled = useSessionControls(appSessionId) !== null; // P5 O9 M4: a session held elsewhere takes no reply
   const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5
   if (!record) return null;
-  const glyph = glyphFor(record, digest, pending);
+  const glyph = glyphFor(record, digest, pending, listing);
   const waiting = waitingItem(pending);
   const place = placeOf(record);
   const working = digest?.phase === 'working' || digest?.phase === 'starting';
   const held = holderLine(record);
   // P5 O9 M5 (the owner's Q1): a foreign session MAWS drives through its bridge says so
   const doing = (held !== null && bridged ? BRIDGED_LINE(record.holder.kind === 'terminal' ? null : held) : held) ?? (working ? digest?.activity : null) ?? null;
-  const meta = [glyph.label, sessionAge(record, digest, now, seenAt), digest?.context ? `ctx ${Math.round(digest.context.percent)}%` : null].filter(Boolean).join(' · ');
+  const meta = [glyph.label, sessionAge(record, digest, now, seenAt, listing), digest?.context ? `ctx ${Math.round(digest.context.percent)}%` : null].filter(Boolean).join(' · ');
 
   return (
     <div className="flex flex-col gap-2 text-ui-sm text-fg">
