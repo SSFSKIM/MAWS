@@ -434,7 +434,9 @@ export async function item9(scene: Scene, report: ItemReport): Promise<void> {
     });
   } else report.add('9', 'skip', 'a revoked device refused, and one a new state removes closed', 'no admin key in this run');
   const sourceB = scene.target === 'production' ? null : (scene.machine.laneB ?? null);
-  await report.check('9', 'a permission answered under an altered digest is refused digest-mismatch, and nothing runs', async () => (sourceB === null ? { skip: 'no lane B session in this scene' } : alteredDigest(scene, sourceB)));
+  // Where the scene has no lane B session (production's, the local proof's), the suites' cases stand for it.
+  if (sourceB !== null) await report.check('9', 'a permission answered under an altered digest is refused digest-mismatch, and nothing runs', async () => alteredDigest(scene, sourceB));
+  else report.outstanding('9', 'a permission answered under an altered digest needs a lane B session, which this scene has not; test/endpoint/actions.test.ts (“refuses an answer whose request digest is not the pending request’s”) and src/engine-host/ops.test.ts show the refusal');
 
   await report.check('9', 'the direct listener binds only the tailnet’s addresses', async () => {
     const bound = await scene.machine.listening();
