@@ -468,7 +468,11 @@ export async function deriveProject(
   };
 }
 
-/** The project the `.smns` in the folder itself names, or null (Interfaces §G: a link to it needs no record). */
-export async function folderSmnsId(folder: string): Promise<string | null> {
-  return (await readSmns(join(folder, '.smns'), LOCAL_IO))?.project ?? null;
+/**
+ * The `.smns` in the folder itself: the project it names and the org whose hub it names ('' for a `hub` naming none, null
+ * for no `hub`), or null (Interfaces §G: a link to its id needs no record). `files`: a remote setup's checked reader.
+ */
+export async function folderSmns(folder: string, files?: GitFiles): Promise<{ project: string; hub: string | null } | null> {
+  const found = await readSmns(join(folder, '.smns'), files === undefined ? LOCAL_IO : checkedIo(files));
+  return found === null ? null : { project: found.project, hub: found.hub };
 }

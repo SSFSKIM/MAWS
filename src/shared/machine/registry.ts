@@ -25,7 +25,9 @@ export type DeclaredRow = {
   name: string; // the location's own name (§A)
   nameRev?: number;
   org: ProjectOrg; // `smnsId` is the rule's project; null for the machine's own
-  stated?: 'minted' | 'linked'; // the row's own statement decides its project
+  stated?: 'minted' | 'linked'; // a stored statement decides its project, the row's own or one above it
+  statedAt?: string; // where `stated`: the folder holding that statement (the row's own `path` for its own; §D's frame
+  // carries `stated` and `anchor` only for a statement at that folder)
   hub?: false;
   remote?: string;
   state?: 'missing' | 'replaced';

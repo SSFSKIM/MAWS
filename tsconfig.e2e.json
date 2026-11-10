@@ -88,6 +88,11 @@
     "src/services/index/session-search.ts",
     "src/services/index/sessions.ts",
     "src/services/index/side-threads.ts",
+    // P5 registry M8: the stored statements, which index.ts, projects.ts and statements.ts import
+    "src/services/index/add-folder.ts",
+    "src/services/index/anchor.ts",
+    "src/services/index/folder-checks.ts",
+    "src/services/index/statements.ts",
     "src/services/library/store.ts",
     "src/services/channel/journal.ts", // P5 O8 M7b: the index constructs the project channel's journal
     "src/services/connectors/deadlines.ts", // P5 O4 M2: the OAuth scene bounds a pending Connect's listener by the flow's own deadline

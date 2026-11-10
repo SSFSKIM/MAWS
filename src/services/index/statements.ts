@@ -20,16 +20,19 @@ import { ipcError } from '@shared/ipc/errors';
 import type { ProjectRecord, ProjectRefusal } from '@shared/ipc/schema/session';
 import type { GitFiles } from '@shared/machine/git-reads';
 import type { Enrollment } from '@shared/machine/identity';
-import type { OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
 import type { ProjectsSource, RegistrySeam } from '@shared/machine/registry';
 import type { Location } from '@shared/sessions/intent';
 import { addFolder } from './add-folder';
 import { readAnchor } from './anchor';
-import { deriveProject, folderSmnsId, ORG_GIT_TIMEOUT_MS, type OrgDerivation } from './org-project';
-import { isBroadFolder, locate, type OrgRow, type ProjectStore } from './projects';
+import { deriveProject, folderSmns, ORG_GIT_TIMEOUT_MS, type OrgDerivation } from './org-project';
+import { isBroadFolder, locate, prospectiveRow, type OrgRow, type ProjectStore } from './projects';
 
 export type DeriveRule = typeof deriveProject;
+
+/** A row's derivation: the rule's answer, `missing` for a declared folder not at its path (whose answer is kept), or none. */
+export type RowDerivation = OrgDerivation | 'missing' | null;
+const answerOf = (derived: RowDerivation): OrgDerivation | null => (derived === 'missing' ? null : derived);
 
 /** What the rule is computed with: this machine, its enrollment as it is now, and the derivation itself. */
 export interface StatementsContext {
@@ -78,6 +81,7 @@ export class Statements {
   /** Starts the statements' life on this machine: the first MAWS use's minting and the seam's turns. */
   bind(context: StatementsContext): void {
     this.context = context;
+    this.projects.onFits((rows) => this.registry.fits(rows));
     this.projects.onUsed((id) => void this.used(id).catch((error) => console.error('[index] minting a first-used project failed:', error instanceof Error ? error.message : error)));
     this.offStatements?.();
     this.offStatements = this.registry.onStatements(() => void this.statementsChanged().catch((error) => console.error('[index] minting at the statements’ turn failed:', error instanceof Error ? error.message : error)));
@@ -87,6 +91,7 @@ export class Statements {
     this.offStatements?.();
     this.offStatements = null;
     this.projects.onUsed(null);
+    this.projects.onFits(null);
     this.context = null;
   }
 
@@ -98,10 +103,15 @@ export class Statements {
     return this.context?.home ?? homedir();
   }
 
-  /** Design §8's rule for a row's folder, its answer written to the row (and told, as any change); null without an answer. */
-  async deriveRow(row: OrgRow, gitTimeoutMs: number = ORG_GIT_TIMEOUT_MS): Promise<OrgDerivation | null> {
+  /**
+   * Design §8's rule for a row's folder, its answer written to the row (and told, as any change); null without an answer.
+   * A declared folder that is not at its path keeps the answer it had (design §10: missing removes nothing; M8's review 1,
+   * finding 2): `missing`.
+   */
+  async deriveRow(row: OrgRow, gitTimeoutMs: number = ORG_GIT_TIMEOUT_MS): Promise<RowDerivation> {
     const context = this.context;
     if (context === null) return null;
+    if (this.projects.missingDeclared(row.id)) return 'missing';
     const enrollment = context.enrollment();
     const derived = await (context.derive ?? deriveProject)(
       { directory: row.directory, machine: context.machine, projectId: row.id, name: row.name, ...(row.files === undefined ? {} : { files: row.files }) },
@@ -109,15 +119,23 @@ export class Statements {
       { statements: this.lookup, gitTimeoutMs },
     );
     if (derived === null) return null;
-    this.projects.setOrg(row.id as ProjectId, derived.org, enrollment === null ? null : { remote: derived.remote, hub: derived.hub });
+    this.projects.setOrg(row.id, derived.org, enrollment === null ? null : { remote: derived.remote, hub: derived.hub, by: derived.by, at: derived.at });
     // §F.5: the folder holding a deciding `.smns` a session runs in or beneath is declared (an enrolled machine's alone)
-    if (enrollment !== null && derived.by === 'smns' && derived.smnsFolder !== null && this.projects.hasSession(row.id as ProjectId)) this.projects.declareByFile(derived.smnsFolder);
+    if (enrollment !== null && derived.by === 'smns' && derived.smnsFolder !== null && this.projects.hasSession(row.id)) this.projects.declareByFile(derived.smnsFolder);
     return derived;
   }
 
-  private deriveId(id: ProjectId): Promise<OrgDerivation | null> {
+  // `files` (M8's review 1, finding 1): a remote setup's checked reader, which every derivation of its act reads through; a
+  // read it refuses gives no answer
+  private async deriveId(id: ProjectId, files?: GitFiles): Promise<OrgDerivation | null> {
     const { directory, name } = this.projects.statementRow(id);
-    return this.deriveRow({ id, directory, name });
+    if (files === undefined) return answerOf(await this.deriveRow({ id, directory, name }));
+    try {
+      return answerOf(await this.deriveRow({ id, directory, name, files }));
+    } catch (error) {
+      console.warn(`[index] the rule for ${directory} read past what the setup opened, so it answers nothing now:`, error instanceof Error ? error.message : error);
+      return null;
+    }
   }
 
   private beneath(directory: string): void {
@@ -141,14 +159,33 @@ export class Statements {
     if (!state.possible) refuse('statements-unavailable', `${state.reason}: this machine makes no stored statement now`);
   }
 
-  // A link's target (§G): a project a verified record names and that is a hub project, or the id the folder's own `.smns` names.
-  private async target(into: string, folder: string): Promise<void> {
+  // A link's target (§G): a hub project a verified record names, or the id the folder's own `.smns` names, which waives the
+  // record and not the hub (M8's review 1, finding 5): that file must name this org's hub.
+  private async target(into: string, folder: string, files?: GitFiles): Promise<void> {
     const known = this.registry.project(into);
     if (known === null) {
-      if ((await folderSmnsId(folder)) !== into) refuse('unknown-project', `${into} is in no verified projects record`);
+      const own = await folderSmns(folder, files).catch(() => null); // a file the setup did not open names nothing
+      if (own?.project !== into) refuse('unknown-project', `${into} is in no verified projects record`);
+      const org = this.enrollment()?.org;
+      if (org === undefined || own.hub !== org) refuse('not-a-hub-project', `${into}'s .smns names no hub of this org`);
       return;
     }
     if (!known.hub) refuse('not-a-hub-project', `${into}'s log is not on the hub`);
+  }
+
+  // The row a declaration of `folder` would add (finding 8): the row there as derived, else the rule's answer for it now.
+  private async prospective(folder: string, files?: GitFiles) {
+    const existing = this.projects.declaredRowAt(folder);
+    if (existing !== null) return existing;
+    const context = this.context;
+    const pid = randomUUID();
+    if (context === null) return prospectiveRow({ pid, path: folder });
+    const derived = await (context.derive ?? deriveProject)({ directory: folder, machine: context.machine, projectId: pid, name: basename(folder), ...(files === undefined ? {} : { files }) }, context.enrollment(), { statements: this.lookup }).catch(
+      () => null, // a read the setup refused: the folder row's size stands in
+    );
+    if (derived === null) return prospectiveRow({ pid, path: folder });
+    const enrolled = context.enrollment() !== null;
+    return prospectiveRow({ pid, path: folder, org: derived.org, ...(enrolled ? { remote: derived.remote, hub: derived.hub, by: derived.by, at: derived.at } : {}) });
   }
 
   /**
@@ -156,32 +193,33 @@ export class Statements {
    * moment (a), `into`'s link and `own`'s minted id, the rule's answer after them and the restatement. Today's act keeps
    * its own refusals.
    */
-  async declare<T extends { project: ProjectRecord }>(directory: string, declare: () => T, { into, own }: { into?: string; own?: true } = {}): Promise<T & Decided> {
+  async declare<T extends { project: ProjectRecord }>(directory: string, declare: () => T, { into, own, files }: { into?: string; own?: true; files?: GitFiles } = {}): Promise<T & Decided> {
     if (into !== undefined && own) refuse('into-and-own', 'a folder is linked into a project or made a project of its own, not both');
     if (into !== undefined || own) this.unavailable();
     const folder = canonicalFolder(directory);
     if (into !== undefined) {
       if (folder === null) refuse('not-a-directory', directory);
-      await this.target(into, folder);
+      await this.target(into, folder, files);
     }
     const before = folder === null ? [] : this.projects.declaredRows();
     const wasDeclared = before.some((row) => row.path === folder);
-    if (folder !== null && !wasDeclared) {
-      const standIn = { pid: 'new', path: folder, name: basename(folder), org: { key: 'folder:new' as OrgKey, name: basename(folder), source: 'folder' as const, smnsId: null } };
-      if (!this.registry.fits([...before, standIn])) refuse('too-many-locations', 'the declared folders would not fit one projects record');
-    }
+    // finding 8: the record's bound is asked with the row as it would be
+    if (folder !== null && !wasDeclared && !this.registry.fits([...before, await this.prospective(folder, files)])) refuse('too-many-locations', 'the declared folders would not fit one projects record');
     const answer = declare();
     // a statement kept on a removed row counts again, for the folder and the rows beneath it
     if (!wasDeclared) this.beneath(answer.project.directory);
     if (!this.registry.statements().possible || this.context === null) return answer as T & Decided;
     const id = answer.project.id;
-    let derived = await this.deriveId(id);
+    let derived = await this.deriveId(id, files);
     let changed = false;
     const row = this.projects.statementRow(id);
-    if (derived !== null && row.minted === null && (own === true || derived.by === 'machine') && this.mintable(row.directory, true)) changed = this.mintRow(id);
+    // finding 11: the broadest folders are minted only by an add of that very folder, never one that folds to it
+    const explicit = folder === row.directory;
+    if (own === true && row.linked !== null) changed = this.projects.setLink(id, null, readAnchor(row.directory)); // finding 10
+    if (derived !== null && row.minted === null && (own === true || derived.by === 'machine') && this.mintable(row.directory, explicit)) changed = this.mintRow(id) || changed;
     if (into !== undefined) changed = this.projects.setLink(id, into, readAnchor(row.directory)) || changed;
     if (changed) {
-      derived = await this.deriveId(id);
+      derived = await this.deriveId(id, files);
       this.beneath(row.directory);
     }
     const { restated } = await this.registry.published();
@@ -210,11 +248,14 @@ export class Statements {
   async link(id: ProjectId, into: string | null): Promise<{ project: ProjectRecord; restated: boolean }> {
     const row = this.projects.statementRow(id);
     if (!row.declared) refuse('not-declared', `${row.directory} is not a declared folder`);
+    const anchor = readAnchor(row.directory);
     if (into !== null) {
       this.unavailable();
+      // finding 4: a link is about the folder at the path, so there must be one to anchor it to
+      if (anchor === null) refuse('not-a-directory', `${row.directory}: there is no folder there to link`);
       await this.target(into, row.directory);
     }
-    const changed = this.projects.setLink(id, into, readAnchor(row.directory));
+    const changed = this.projects.setLink(id, into, anchor);
     if (!changed) return { project: this.projects.record(id), restated: true };
     await this.deriveId(id);
     this.beneath(row.directory);
@@ -293,50 +334,77 @@ export class Statements {
     const state = this.registry.statements();
     if (!state.possible) {
       if (this.projects.meta('minting') !== '0') this.projects.setMeta('minting', '0');
+      if (this.pending().length > 0) this.projects.setMeta('minting_pending', '[]'); // the next (c) considers every row
       return;
     }
     if (this.context === null || this.evaluating || this.projects.meta('minting') === '1') return;
     this.evaluating = true;
     try {
       const candidates: ProjectId[] = [];
-      let unfound = false;
+      // a folder not found now is minted once it is, and it alone (`checkFolders`; M8's review 1, finding 7)
+      const unfound: ProjectId[] = [];
       await Promise.all(
         this.projects.declaredIds().map((id) =>
           this.queue.slot(async () => {
             const row = this.projects.statementRow(id);
             if (row.minted !== null || !this.mintable(row.directory, false)) return;
-            if ((await this.deriveId(id))?.by === 'machine') candidates.push(id);
+            if (this.projects.missingDeclared(id)) unfound.push(id);
+            else if ((await this.deriveId(id))?.by === 'machine') candidates.push(id);
           }),
         ),
       );
-      for (const id of candidates) if (!this.mintRow(id)) unfound = true;
+      for (const id of candidates) if (!this.mintRow(id) && this.projects.statementRow(id).minted === null) unfound.push(id);
       for (const id of candidates) {
         await this.deriveId(id);
         this.beneath(this.projects.statementRow(id).directory);
       }
-      // a folder not found now is minted once it is (`checkFolders`)
-      this.projects.setMeta('minting', unfound ? '0' : '1');
+      this.projects.setMeta('minting_pending', JSON.stringify(unfound));
+      this.projects.setMeta('minting', '1');
     } finally {
       this.evaluating = false;
     }
   }
 
   /**
-   * §F.6: each declared row's folder checked, on an enrolled machine (elsewhere no state is kept). A folder found again
-   * that the upgrade's minting could not anchor is minted now (design §8, "At the upgrade").
+   * §F.6: each declared row's folder checked, on an enrolled machine (elsewhere no state is kept). A folder moment (c)
+   * could not anchor is minted once it is found, and no other row (design §8, "At the upgrade"; M8's review 1, finding 7).
    */
   async checkFolders(ids: readonly ProjectId[] = this.projects.declaredIds()): Promise<void> {
     if (this.enrollment() === null) {
       for (const id of ids) if (this.projects.statementRow(id).state !== null) this.projects.setState(id, null);
       return;
     }
-    let found = false;
-    for (const id of ids) {
-      const before = this.projects.statementRow(id).state;
-      const after = this.projects.observe(id);
-      if (before === 'missing' && after === null && this.projects.statementRow(id).minted === null) found = true;
+    for (const id of ids) this.projects.observe(id);
+    const pending = this.pending();
+    if (pending.length === 0) return;
+    const left: ProjectId[] = [];
+    for (const id of pending) {
+      let row;
+      try {
+        row = this.projects.statementRow(id);
+      } catch {
+        continue; // a row deleted since (a relocate's merge)
+      }
+      if (row.state === 'missing') {
+        left.push(id);
+        continue;
+      }
+      if (!this.registry.statements().possible || !row.declared || row.minted !== null || !this.mintable(row.directory, false)) continue;
+      if ((await this.deriveId(id))?.by === 'machine' && this.mintRow(id)) {
+        await this.deriveId(id);
+        this.beneath(row.directory);
+      }
     }
-    if (found && this.projects.meta('minting') === '0') await this.statementsChanged();
+    this.projects.setMeta('minting_pending', JSON.stringify(left));
+  }
+
+  private pending(): ProjectId[] {
+    try {
+      const ids: unknown = JSON.parse(this.projects.meta('minting_pending') ?? '[]');
+      return Array.isArray(ids) ? ids.filter((id): id is ProjectId => typeof id === 'string') : [];
+    } catch {
+      return [];
+    }
   }
 
   /** What the endpoint reads of the index (§H): null while the index is not available or a declared row is underived. */

@@ -43,6 +43,8 @@ interface ProjectRow {
   location_state: 'missing' | 'replaced' | null;
   org_remote: string | null;
   org_hub: number | null; // 0: a `.smns` naming no hub of the org decides
+  org_by: string | null; // how the rule last decided (OrgDerivation['by']), on an enrolled machine
+  org_at: string | null; // the folder that decided
 }
 
 export type Origin = ProjectRow['origin'];
@@ -350,10 +352,10 @@ function candidateRoot(directory: string): string | null {
 
 const declared = (row: ProjectRow) => row.origin === 'user' && !row.hidden;
 const ownStatement = (row: ProjectRow) => row.stated_linked ?? row.stated_minted;
-// The project registry (Interfaces §F): the row's own statement decides its project when the rule last gave that
-// statement's id; else it is not in force (not enrolled, its folder replaced, or a nearer answer).
+// The project registry (§A's `stated`; M8's review 1, finding 12): a stored statement decides the row's project, its own
+// or one above it (`org_at` says which folder), as the rule last decided; not while its folder is replaced.
 const statedOf = (row: ProjectRow): 'minted' | 'linked' | null =>
-  !declared(row) || ownStatement(row) === null || row.org_smns_id !== ownStatement(row) ? null : row.stated_linked !== null ? 'linked' : 'minted';
+  !declared(row) || row.location_state === 'replaced' ? null : row.org_by === 'link' ? 'linked' : row.org_by === 'minted' ? 'minted' : null;
 
 const project = (row: ProjectRow): ProjectRecord => {
   const stated = statedOf(row);
@@ -423,6 +425,18 @@ export class ProjectStore {
     private readonly moveSessions: (from: ProjectId, to: ProjectId) => void = () => {},
   ) {}
 
+  // The project registry (M8's review 1, finding 8): whether the declared rows would fit one projects record (the seam's
+  // `fits`), asked before a first use or a `.smns` declares a row
+  private fits: (rows: readonly DeclaredRow[]) => boolean = () => true;
+  onFits(fits: ((rows: readonly DeclaredRow[]) => boolean) | null): void {
+    this.fits = fits ?? (() => true);
+  }
+
+  private fitsWith(row: ProjectRow): boolean {
+    const rows = this.declaredRows();
+    return rows.some((r) => r.pid === row.id) || this.fits([...rows, declaredRowOf(row) ?? prospectiveRow({ pid: row.id, path: row.directory })]);
+  }
+
   // The project registry (Interfaces §F.4, moment (b)): told after the commit that made a row the user's by a first MAWS use
   private usedListener: ((id: ProjectId) => void) | null = null;
   onUsed(listener: ((id: ProjectId) => void) | null): void {
@@ -444,7 +458,10 @@ export class ProjectStore {
   // Starting/resuming chooses a project, but never reverses Remove from sidebar.
   usedByMaws(id: ProjectId): void {
     this.db.transaction(() => {
-      if (this.row(id).origin === 'user') return;
+      const row = this.row(id);
+      if (row.origin === 'user') return;
+      // M8's review 1 (finding 8): a declaration that would not fit one projects record is not made
+      if (!row.hidden && !this.fitsWith(row)) return console.warn(`[index] ${row.directory} is not declared: the declared folders would not fit one projects record`);
       this.db.update('projects', 'id', id, { origin: 'user' });
       this.statementsMoved();
       this.changed();
@@ -567,7 +584,7 @@ export class ProjectStore {
 
   // `observed` (the project registry): what the rule saw beside the label, the remote key and whether a `.smns` naming no
   // hub of the org decided, kept on an enrolled machine only (null otherwise), so a signed-out row reads as before
-  setOrg(id: ProjectId, org: ProjectOrg, observed: { remote: string | null; hub: boolean } | null = null): void {
+  setOrg(id: ProjectId, org: ProjectOrg, observed: { remote: string | null; hub: boolean; by: string; at: string | null } | null = null): void {
     if (this.db.readOnly) return;
     this.db.transaction(() => {
       const row = this.db.get<ProjectRow>('SELECT * FROM projects WHERE id = ?', id);
@@ -575,8 +592,10 @@ export class ProjectStore {
       const before = orgOf(row);
       const remote = observed?.remote ?? null;
       const hub = observed === null || observed.hub ? null : 0;
-      if (before !== null && before.key === org.key && before.name === org.name && before.source === org.source && before.smnsId === org.smnsId && row.org_remote === remote && row.org_hub === hub) return;
-      this.db.update('projects', 'id', id, { org_key: org.key, org_name: org.name, org_source: org.source, org_smns_id: org.smnsId, org_remote: remote, org_hub: hub });
+      const by = observed?.by ?? null;
+      const at = observed?.at ?? null;
+      if (before !== null && before.key === org.key && before.name === org.name && before.source === org.source && before.smnsId === org.smnsId && row.org_remote === remote && row.org_hub === hub && row.org_by === by && row.org_at === at) return;
+      this.db.update('projects', 'id', id, { org_key: org.key, org_name: org.name, org_source: org.source, org_smns_id: org.smnsId, org_remote: remote, org_hub: hub, org_by: by, org_at: at });
       this.changed();
     });
   }
@@ -629,8 +648,26 @@ export class ProjectStore {
       const reading = readFolder(current.directory); // null: present but not readable, which compares nothing
       if (reading !== null && !sameFolder(JSON.parse(current.anchor) as Anchor, reading)) state = 'replaced';
     }
-    if (state !== current.location_state && !this.db.readOnly) this.setState(current.id as ProjectId, state);
+    if (state !== current.location_state && !this.db.readOnly) {
+      this.db.transaction(() => {
+        this.setState(current.id as ProjectId, state);
+        // M8's review 1 (finding 3): a replaced folder's own statement counts no more, so the answer it gave is dropped at
+        // once and the row derived again, before anything is filed under the old project
+        if (state === 'replaced' && (current.org_by === 'link' || current.org_by === 'minted') && current.org_at === current.directory) {
+          this.db.update('projects', 'id', current.id, { org_smns_id: null, org_by: null, org_at: null });
+        }
+        if (state === 'replaced') this.db.defer(`org:${current.id}`, () => this.deriveOrg?.({ id: current.id as ProjectId, directory: current.directory, name: current.name }));
+      });
+    }
     return state;
+  }
+
+  /** A declared row whose folder is not at its path (§F.6's `missing`, observed now). */
+  missingDeclared(id: ProjectId): boolean {
+    const row = this.db.get<ProjectRow>('SELECT * FROM projects WHERE id = ?', id);
+    if (row === null || !declared(row) || folderAt(row.directory) !== 'absent') return false;
+    this.observeRow(row);
+    return true;
   }
 
   setState(id: ProjectId, state: 'missing' | 'replaced' | null): void {
@@ -693,7 +730,7 @@ export class ProjectStore {
         this.db.run('UPDATE library_artifacts SET project_id = ? WHERE project_id = ?', id, there.id);
         this.db.run('DELETE FROM projects WHERE id = ?', there.id);
       }
-      const renamed = row.name_rev === null && path !== row.directory ? { name: basename(path) || path } : {};
+      const renamed: Record<string, string> = row.name_rev === null && path !== row.directory ? { name: basename(path) || path } : {};
       this.db.update('projects', 'id', id, { directory: path, slug: slugOf(path), anchor: JSON.stringify(anchor), location_state: null, ...renamed });
       this.statementsMoved();
       this.changed();
@@ -720,6 +757,7 @@ export class ProjectStore {
       const existing = this.db.get<ProjectRow>('SELECT * FROM projects WHERE directory = ?', directory);
       if (!existing) {
         if (folderAt(directory) !== 'present') return;
+        if (!this.fits([...this.declaredRows(), prospectiveRow({ pid: randomUUID(), path: directory })])) return console.warn(`[index] ${directory} is not declared: the declared folders would not fit one projects record`);
         this.ensureForDirectory(directory, 'user');
       } else if (existing.origin !== 'user' && !existing.hidden) this.usedByMaws(existing.id as ProjectId);
     });
@@ -731,14 +769,27 @@ export class ProjectStore {
   }
 
   /**
-   * A session was filed under the row (discovered, started, or moved in). Its first one has the row derived again after
-   * the commit when a `.smns` may decide it, so the folder holding that file is declared (§F.5).
+   * A session was filed under the row (discovered, started, or moved in). A stated row's folder is checked first, so a
+   * replaced one files nothing under the old project (M8's review 1, finding 3). And where a `.smns` on the row's path
+   * belongs to a folder that is not declared yet, the row is derived again after the commit, so that folder is declared
+   * (§F.5; finding 9). Without a git call: a `stat` per folder up the path, and a derivation only where a promotion is due.
    */
   sessionJoined(id: ProjectId): void {
     const row = this.db.get<ProjectRow>('SELECT * FROM projects WHERE id = ?', id);
-    if (!row || (row.org_source !== null && row.org_source !== 'smns')) return;
-    if (this.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM sessions WHERE project_id = ?', id)!.n !== 1) return;
-    this.db.defer(`org:${id}`, () => this.deriveOrg?.({ id, directory: row.directory, name: row.name }));
+    if (!row) return;
+    if (declared(row) && ownStatement(row) !== null) this.observeRow(row);
+    if (this.undeclaredSmns(row.directory)) this.db.defer(`org:${id}`, () => this.deriveOrg?.({ id, directory: row.directory, name: row.name }));
+  }
+
+  // The nearest `.smns` walking up from `directory` sits in a folder with no row, or one discovery made and nobody removed.
+  private undeclaredSmns(directory: string): boolean {
+    for (let folder = directory; ; folder = dirname(folder)) {
+      if (statSync(join(folder, '.smns'), { throwIfNoEntry: false })?.isFile()) {
+        const there = this.db.get<ProjectRow>('SELECT * FROM projects WHERE directory = ?', folder);
+        return there === null || (there.origin !== 'user' && !there.hidden);
+      }
+      if (dirname(folder) === folder) return false;
+    }
   }
 
   /** The rows beneath a folder (not the folder's own), which a statement change there is told to (M8's decision). */
@@ -780,24 +831,15 @@ export class ProjectStore {
 
   // ---- what the endpoint reads of the index (§H's `ProjectsSource`) ----------------------------------------------------
 
-  /** The declared rows as the endpoint states them; null until each has been derived. */
+  /** The declared rows as the endpoint states them; a row not yet derived is left out (`declaredDerived` says whether any is). */
   declaredRows(): DeclaredRow[] {
-    return this.db.all<ProjectRow>("SELECT * FROM projects WHERE origin = 'user' AND hidden = 0 ORDER BY sort_order, created_at, id").flatMap((row) => {
-      const org = orgOf(row);
-      if (org === null) return [];
-      const stated = statedOf(row);
-      return [{
-        pid: row.id,
-        path: row.directory,
-        name: locationName(row, org, stated),
-        ...(row.name_rev !== null ? { nameRev: row.name_rev } : {}),
-        org,
-        ...(stated !== null ? { stated } : {}),
-        ...(row.org_hub === 0 ? { hub: false as const } : {}),
-        ...(row.org_remote !== null ? { remote: row.org_remote } : {}),
-        ...(row.location_state !== null ? { state: row.location_state } : {}),
-      }];
-    });
+    return this.db.all<ProjectRow>("SELECT * FROM projects WHERE origin = 'user' AND hidden = 0 ORDER BY sort_order, created_at, id").flatMap((row) => declaredRowOf(row) ?? []);
+  }
+
+  /** The declared row at a canonical path as the endpoint states it; null when there is none or it is not yet derived. */
+  declaredRowAt(path: string): DeclaredRow | null {
+    const row = this.db.get<ProjectRow>('SELECT * FROM projects WHERE directory = ?', path);
+    return row === null || !declared(row) ? null : declaredRowOf(row);
   }
 
   /** Whether every declared row has been derived, so `declaredRows` holds them all. */
@@ -821,6 +863,15 @@ export class ProjectStore {
     this.db.transaction(() => {
       for (const kept of statements) {
         const id = this.ensureForDirectory(kept.path, 'user').id;
+        // M8's review 1 (finding 6): the answers derived before the restore no longer stand, for the folder and beneath it,
+        // so the endpoint's snapshot waits until they are derived again
+        const beneath = kept.path.endsWith(sep) ? kept.path : kept.path + sep;
+        this.db.run(
+          'UPDATE projects SET org_key = NULL, org_name = NULL, org_source = NULL, org_smns_id = NULL, org_remote = NULL, org_hub = NULL, org_by = NULL, org_at = NULL WHERE directory = ? OR substr(directory, 1, length(?)) = ?',
+          kept.path,
+          beneath,
+          beneath,
+        );
         this.db.update('projects', 'id', id, {
           stated_minted: kept.minted,
           stated_linked: kept.linked,
@@ -868,6 +919,36 @@ function folderAt(path: string): 'absent' | 'present' {
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'ENOTDIR' ? 'absent' : 'present';
   }
+}
+
+// A declared row as the endpoint states it (§H's `DeclaredRow`); null until derived. `statedAt` is the folder whose
+// statement decides (M8's review 1, finding 12): the row's own path for a statement at it, an ancestor's for one above.
+function declaredRowOf(row: ProjectRow): DeclaredRow | null {
+  const org = orgOf(row);
+  if (org === null) return null;
+  const stated = statedOf(row);
+  return {
+    pid: row.id,
+    path: row.directory,
+    name: locationName(row, org, stated),
+    ...(row.name_rev !== null ? { nameRev: row.name_rev } : {}),
+    org,
+    ...(stated !== null ? { stated } : {}),
+    ...(stated !== null && row.org_at !== null ? { statedAt: row.org_at } : {}),
+    ...(row.org_hub === 0 ? { hub: false as const } : {}),
+    ...(row.org_remote !== null ? { remote: row.org_remote } : {}),
+    ...(row.location_state !== null ? { state: row.location_state } : {}),
+  };
+}
+
+/**
+ * The row a declaration would add to the record, for the seam's `fits` (M8's review 1, finding 8): as the rule answers it
+ * when that is known, else a folder row's label, whose size a folder's key and name bound.
+ */
+export function prospectiveRow({ pid, path, org, remote, hub, by, at }: { pid: string; path: string; org?: ProjectOrg; remote?: string | null; hub?: boolean; by?: string; at?: string | null }): DeclaredRow {
+  const label = org ?? { key: `folder:${pid}:${pid}` as OrgKey, name: basename(path) || path, source: 'folder' as const, smnsId: null };
+  const row = { id: pid, directory: path, name: basename(path) || path, origin: 'user', hidden: 0, name_rev: null, location_state: null, org_remote: remote ?? null, org_hub: hub === false ? 0 : null, org_by: by ?? null, org_at: at ?? null } as unknown as ProjectRow;
+  return declaredRowOf({ ...row, org_key: label.key, org_name: label.name, org_source: label.source, org_smns_id: label.smnsId })!;
 }
 
 // A location's own name (Interfaces §A): the deciding `.smns`'s when a file decides; else a rename's; else the remote's

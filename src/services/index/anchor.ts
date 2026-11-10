@@ -3,7 +3,9 @@
 // digits), and the comparison both runtimes make. A reader compares the device and the inode exactly, and the birth
 // time only where both sides have one, equal within a microsecond: Python reads it as a float of seconds, which differs
 // from Node's nanoseconds in the last digits for one folder, and Python on Linux has none at all.
-import { statSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Anchor } from '@shared/machine/registry';
 
 /** A folder as one runtime reads it: Node gives `birthNs`, Python `birthSeconds`, a platform with no birth time neither. */
@@ -12,14 +14,41 @@ export type FolderReading = { dev: string; ino: string; birthNs?: string; birthS
 const BIRTH_SLACK_NS = 1_000n;
 
 type BigStat = { dev: bigint; ino: bigint; birthtimeNs: bigint; ctimeNs: bigint };
+type Times = Pick<BigStat, 'birthtimeNs' | 'ctimeNs'>;
+
+const tick = new Int32Array(new SharedArrayBuffer(4));
 
 /**
- * The anchor of a folder's 64-bit stat. `birth` is "0" where the filesystem reports none: on Linux libuv gives 0 where
- * `statx` has no birth time and, where it falls back to `stat`, the change time in its place, so a birth time equal to the
- * change time reads as none there (the weaker check, by device and inode, never the stronger one on a wrong value).
+ * Whether this process's birth times are libuv's change-time fallback: on Linux, where `statx` is not there, libuv falls
+ * back to `stat` and reports each change time as the birth time (with `statx` and no birth time it reports 0). One folder
+ * read twice around a change of its change time tells: a birth time that moved with it is the change time. A change time
+ * that never moves (a clock too coarse for the probe's bound) leaves it untold, read as the fallback: the weaker check,
+ * never a wrong value.
  */
-export function anchorOf(stat: BigStat, platform: NodeJS.Platform = process.platform): Anchor {
-  const none = stat.birthtimeNs <= 0n || (platform === 'linux' && stat.birthtimeNs === stat.ctimeNs);
+export function birthFollowsChange(read: (path: string) => Times = (path) => statSync(path, { bigint: true })): boolean {
+  const folder = mkdtempSync(join(tmpdir(), 'maws-birth-'));
+  try {
+    const before = read(folder);
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const entry = join(folder, 'entry');
+      writeFileSync(entry, '');
+      rmSync(entry);
+      const after = read(folder);
+      if (after.ctimeNs !== before.ctimeNs) return after.birthtimeNs !== before.birthtimeNs;
+      Atomics.wait(tick, 0, 0, 5); // past the filesystem clock's tick
+    }
+    return true;
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+}
+
+let probed: boolean | undefined;
+const birthIsChange = (): boolean => (probed ??= birthFollowsChange());
+
+/** The anchor of a folder's 64-bit stat. `birth` is "0" where there is no birth time: none reported, or this process's are change times. */
+export function anchorOf(stat: BigStat, birthFromChange: boolean = birthIsChange()): Anchor {
+  const none = birthFromChange || stat.birthtimeNs <= 0n;
   return { dev: String(stat.dev), ino: String(stat.ino), birth: none ? '0' : String(stat.birthtimeNs) };
 }
 

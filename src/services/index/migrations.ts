@@ -306,7 +306,8 @@ export const ADDED_COLUMNS: readonly AddedColumn[] = [
   // decision 14): a row's stored statement, a minted id (a random UUID, lower case) and a link's target beside it; the
   // anchor of the folder it was made on (JSON `{dev, ino, birth}`); the counter of its last rename; and its folder's state
   // (`missing`, `replaced`). With them, what the rule last observed beside the label (`org_*`): the repository's remote
-  // key and, as 0, a `.smns` deciding the project that names no hub of the org; null otherwise. A build from before reads
+  // key and, as 0, a `.smns` deciding the project that names no hub of the org (null otherwise); and, below, how it decided
+// and where. Each is written on an enrolled machine only. A build from before reads
   // none of them, so it files these rows by their files alone.
   { table: 'projects', column: 'stated_minted', definition: 'TEXT' },
   { table: 'projects', column: 'stated_linked', definition: 'TEXT' },
@@ -315,6 +316,10 @@ export const ADDED_COLUMNS: readonly AddedColumn[] = [
   { table: 'projects', column: 'location_state', definition: "TEXT CHECK (location_state IN ('missing','replaced'))" },
   { table: 'projects', column: 'org_remote', definition: 'TEXT' },
   { table: 'projects', column: 'org_hub', definition: 'INTEGER' },
+  // M8's review 1 (finding 12): how the rule last decided (`link`, `minted`, `smns`, `remote`, `machine`) and the folder
+  // that decided, so a row under a stored statement, its own or one above, is known as stated across a restart
+  { table: 'projects', column: 'org_by', definition: 'TEXT' },
+  { table: 'projects', column: 'org_at', definition: 'TEXT' },
 ];
 
 // A table added without moving `user_version` (P5 O8 M7b; the spec's Decision Log, the architect's rulings on M7b Task

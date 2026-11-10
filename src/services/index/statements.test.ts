@@ -2,14 +2,17 @@
 // registry.md, M8, "It proves"; Interfaces §F and §G): the index's new columns, the minting table of §F.4 case by case,
 // links, removals, relocations, states, renames, the `.smns` declaration and the refusals, against a stand-in registry
 // seam (§H) on real folders and repositories under the OS temp dir.
-import { chmodSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Enrollment } from '@shared/machine/identity';
 import { repoProjectId } from '@shared/machine/project-ids';
 import type { MachineRef } from '@shared/machine/ref';
-import { NO_REGISTRY, type RegistrySeam, type StatementsState } from '@shared/machine/registry';
+import { assembleProjects } from 'org-protocol';
+import { NO_REGISTRY, type DeclaredRow, type RegistrySeam, type StatementsState } from '@shared/machine/registry';
+import { setupAddFolder } from '../machine/setup';
+import { readAnchor } from './anchor';
 import { runGit } from '../../../test/support/git-fixture';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { openDb } from './db';
@@ -27,6 +30,7 @@ function standIn(possible = true) {
     state: (possible ? { possible: true } : { possible: false, reason: 'sminos-too-old' }) as StatementsState,
     projects: new Map<string, { hub: boolean; nameRev: number }>(),
     fit: true,
+    fitted: [] as DeclaredRow[][],
     restates: 0,
     turn(state: StatementsState) {
       seam.state = state;
@@ -40,7 +44,10 @@ function standIn(possible = true) {
       return () => void listeners.delete(listener);
     },
     project: (id) => seam.projects.get(id) ?? null,
-    fits: () => seam.fit,
+    fits: (rows) => {
+      seam.fitted.push([...rows]);
+      return seam.fit;
+    },
     published: async () => {
       seam.restates += 1;
       return { restated: true };
@@ -298,8 +305,8 @@ describe('the stored statements', () => {
       await expect(add(plain, { into: 'nowhere-id' })).rejects.toEqual(refusal('unknown-project'));
       await expect(add(plain, { into: 'git-id' })).rejects.toEqual(refusal('not-a-hub-project'));
       await expect(add(join(tree.path, 'none'), { into: 'git-id' })).rejects.toEqual(refusal('not-a-directory'));
-      // a link to the id the folder's own .smns names needs no record ("Follow the file")
-      writeFileSync(join(plain, '.smns'), JSON.stringify({ project: 'file-id' }));
+      // a link to the id the folder's own .smns names needs no record ("Follow the file"), when the file names this org's hub
+      writeFileSync(join(plain, '.smns'), JSON.stringify({ project: 'file-id', hub: { org: ENROLLED.org } }));
       expect(await add(plain, { into: 'file-id' })).toMatchObject({ by: 'link', project: { org: { smnsId: 'file-id' } } });
       const discovered = index.projects.ensureForDirectory(folder('discovered'), 'discovered');
       await expect(index.statements.link(discovered.id, 'file-id')).rejects.toEqual(refusal('not-declared'));
@@ -524,6 +531,193 @@ describe('the stored statements', () => {
       expect(minted(plain)).toBeNull();
       await expect(index.statements.addFolder(folder('default-own'), { own: true })).rejects.toEqual(refusal('statements-unavailable: endpoint-off'));
       expect(index.projects.statementAt(plain)).toBeNull();
+    });
+  });
+
+  // M8's review 1 (.doperpowers/sde/2026-11-10-project-registry/task-8-review-1.md): each finding, reproduced
+  describe('review 1', () => {
+    const settle = async () => {
+      for (let k = 0; k < 100; k++) await new Promise((resolve) => setImmediate(resolve));
+    };
+
+    it('F1: a remote add derives through the checked reader alone, never reading a protected folder it was not opened', async () => {
+      await open();
+      const guardHome = folder('guard-home');
+      const opened = folder('guard-home', 'open');
+      const desktop = folder('guard-home', 'Desktop');
+      writeFileSync(join(desktop, 'private-smns'), JSON.stringify({ project: 'private-id', name: 'private label' }));
+      symlinkSync(join(desktop, 'private-smns'), join(opened, '.smns'));
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const answer = await setupAddFolder(opened, [], { where: { home: guardHome, platform: 'darwin' } }, (checked, files) => index.statements.addFolder(checked, { files }));
+        await settle();
+        expect(JSON.stringify(answer)).not.toMatch(/private-id|private label/);
+        expect(JSON.stringify(index.projects.list({ includeHidden: true }))).not.toMatch(/private-id|private label/);
+      } finally {
+        warn.mockRestore();
+        error.mockRestore();
+      }
+    });
+
+    it('F2: a missing declared folder keeps its identity across a start’s refresh', async () => {
+      await open();
+      const plain = folder('missing');
+      const id = (await add(plain)).project.org!.smnsId;
+      renameSync(plain, `${plain}-moved`);
+      await index.refreshOrgProjects({ machine: MACHINE, enrollment: () => ENROLLED, home, folderCheckMs: 60 * 60_000 });
+      expect(row(plain)).toMatchObject({ stated: 'minted', state: 'missing', org: { smnsId: id } });
+      expect(index.projectsSource().snapshot()!.rows.find((r) => r.path === plain)).toMatchObject({ stated: 'minted', state: 'missing', org: { smnsId: id } });
+    });
+
+    it('F3: a session filed into a stated row whose folder was replaced is not filed under the old project', async () => {
+      await open();
+      const plain = folder('swapped-in');
+      const id = (await add(plain)).project.org!.smnsId;
+      renameSync(plain, `${plain}-old`);
+      mkdirSync(plain);
+      const record = index.sessions.upsertFromSummary(summary({ directory: plain })).record;
+      expect(index.projects.record(record.projectId!)).toMatchObject({ state: 'replaced' });
+      expect(index.projects.record(record.projectId!).org?.smnsId).not.toBe(id);
+      expect(index.projects.record(record.projectId!)).not.toHaveProperty('stated');
+      await vi.waitFor(() => expect(row(plain)?.org).toMatchObject({ source: 'folder', smnsId: null }));
+      // and the folder checks' finding is acted on the same way
+      const other = folder('swapped-checked');
+      const otherId = (await add(other)).project.org!.smnsId;
+      renameSync(other, `${other}-old`);
+      mkdirSync(other);
+      await index.statements.checkFolders();
+      expect(row(other)?.org?.smnsId).not.toBe(otherId);
+    });
+
+    it('F4: a link that cannot be anchored to a folder is refused', async () => {
+      await open({ possible: false });
+      seam.projects.set('target-id', { hub: true, nameRev: 0 });
+      const vacant = folder('vacant');
+      await add(vacant);
+      renameSync(vacant, `${vacant}-old`);
+      seam.turn({ possible: true });
+      await expect(index.statements.link(row(vacant)!.id, 'target-id')).rejects.toEqual(refusal('not-a-directory'));
+      mkdirSync(vacant);
+      expect((await index.statements.resolve(vacant)).project).not.toBe('target-id');
+    });
+
+    it('F5: the id of the folder’s own .smns may be linked only when that file names a hub of this org', async () => {
+      await open();
+      const mirrored = folder('mirrored');
+      writeFileSync(join(mirrored, '.smns'), JSON.stringify({ project: 'git-mirrored', name: 'Mirrored' }));
+      await expect(add(mirrored, { into: 'git-mirrored' })).rejects.toEqual(refusal('not-a-hub-project'));
+      const elsewhere = folder('other-org');
+      writeFileSync(join(elsewhere, '.smns'), JSON.stringify({ project: 'other-org-id', hub: { org: 'another-org' } }));
+      await expect(add(elsewhere, { into: 'other-org-id' })).rejects.toEqual(refusal('not-a-hub-project'));
+      const hubbed = folder('hubbed');
+      writeFileSync(join(hubbed, '.smns'), JSON.stringify({ project: 'hub-id', hub: { org: ENROLLED.org } }));
+      expect(await add(hubbed, { into: 'hub-id' })).toMatchObject({ by: 'link', project: { org: { smnsId: 'hub-id' } } });
+    });
+
+    it('F6: after a restore the snapshot pairs no restored statement with an id from before it', async () => {
+      await open();
+      const restored = folder('restored');
+      index.projects.ensureForDirectory(restored, 'discovered');
+      await index.refreshOrgProjects({ machine: MACHINE, enrollment: () => ENROLLED, home, folderCheckMs: 60 * 60_000 });
+      const minted = '33333333-3333-4333-8333-333333333333';
+      index.projectsSource().restore([{ path: restored, minted, linked: null, anchor: readAnchor(restored), name: 'restored', nameRev: null, hidden: false }]);
+      const snapshot = index.projectsSource().snapshot();
+      const stated = snapshot?.rows.find((r) => r.path === restored);
+      if (stated !== undefined) expect(stated.org.smnsId).toBe(minted);
+      await vi.waitFor(() => expect(index.projectsSource().snapshot()?.rows.find((r) => r.path === restored)?.org.smnsId).toBe(minted));
+    });
+
+    it('F7: a folder not found at (c) is minted when found, and no other row is', async () => {
+      await open({ possible: false });
+      const pending = folder('pending');
+      await add(pending);
+      renameSync(pending, `${pending}-away`);
+      await index.statements.checkFolders();
+      seam.turn({ possible: true });
+      await settle();
+      const parent = folder('parent');
+      const sub = folder('parent', 'sub');
+      await add(parent);
+      await add(sub);
+      await index.statements.remove(row(parent)!.id);
+      await vi.waitFor(() => expect(row(sub)?.org?.smnsId ?? null).toBeNull());
+      renameSync(`${pending}-away`, pending);
+      await index.statements.checkFolders();
+      await settle();
+      expect(minted(pending)).toMatch(UUID);
+      expect(minted(sub)).toBeNull();
+    });
+
+    it('F8: fits is asked with the real prospective rows, and a first use or a .smns promotion that would not fit is not made', async () => {
+      await open();
+      const clone = await repo('fit-clone', 'https://github.com/example/fit.git');
+      await add(clone);
+      const asked = seam.fitted.at(-1)!;
+      expect(asked.find((r) => r.path === clone)).toMatchObject({ org: { key: 'remote:github.com/example/fit', source: 'remote' }, remote: 'github.com/example/fit', name: 'fit' });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        seam.fit = false;
+        const used = index.projects.ensureForDirectory(folder('fit-used'), 'discovered');
+        index.projects.usedByMaws(used.id);
+        expect(row(join(tree.path, 'fit-used'))).toMatchObject({ discovered: true });
+        const filed = folder('fit-filed');
+        writeFileSync(join(filed, '.smns'), JSON.stringify({ project: 'fit-filed-id' }));
+        index.sessions.upsertFromSummary(summary({ directory: folder('fit-filed', 'pkg') }));
+        await settle();
+        await index.refreshOrgProjects({ machine: MACHINE, enrollment: () => ENROLLED, home, folderCheckMs: 60 * 60_000 });
+        expect(row(filed)).toBeUndefined();
+        expect(warn).toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('F9: a .smns made later in a discovered folder declares it at the next session there', async () => {
+      await open();
+      const late = folder('late');
+      index.sessions.upsertFromSummary(summary({ directory: late }));
+      await settle();
+      expect(row(late)).toMatchObject({ discovered: true });
+      writeFileSync(join(late, '.smns'), JSON.stringify({ project: 'late-id', name: 'Late' }));
+      index.sessions.upsertFromSummary(summary({ directory: late }));
+      await vi.waitFor(() => expect(row(late)).not.toHaveProperty('discovered'));
+      expect(row(late)?.org?.smnsId).toBe('late-id');
+    });
+
+    it('F10: own on a linked row makes it a project of its own: the link cleared', async () => {
+      await open();
+      seam.projects.set('target-id', { hub: true, nameRev: 0 });
+      const linked = folder('own-linked');
+      await add(linked, { into: 'target-id' });
+      const own = await add(linked, { own: true });
+      expect(own).toMatchObject({ by: 'minted', at: linked, project: { stated: 'minted', org: { smnsId: minted(linked) } } });
+      expect(columns(linked)?.stated_linked).toBeNull();
+    });
+
+    it('F11: an add that folds to the home directory does not mint it: only an add of that very folder does', async () => {
+      await open();
+      const side = folder('home', 'me', '.claude', 'worktrees', 'side');
+      expect((await add(side)).project.directory).toBe(home);
+      expect(minted(home)).toBeNull();
+    });
+
+    it('F12: a row under a parent’s statement carries `stated`, and where the statement is', async () => {
+      await open();
+      const parent = folder('name-parent');
+      const child = folder('name-parent', 'child');
+      const id = (await add(parent)).project.org!.smnsId!;
+      await add(child);
+      expect(row(child)).toMatchObject({ stated: 'minted', org: { smnsId: id } });
+      index.statements.update(row(parent)!.id, { name: 'Chosen name' });
+      writeFileSync(join(parent, '.smns'), JSON.stringify({ project: 'ignored-file-id', name: 'Ignored file' }));
+      await index.refreshOrgProjects({ machine: MACHINE, enrollment: () => ENROLLED, home, folderCheckMs: 60 * 60_000 });
+      const rows = index.projectsSource().snapshot()!.rows;
+      expect(rows.find((r) => r.path === parent)).toMatchObject({ stated: 'minted', statedAt: parent });
+      expect(rows.find((r) => r.path === child)).toMatchObject({ stated: 'minted', statedAt: parent });
+      const locations = rows.map((r) => ({ pid: r.pid, id: r.org.smnsId ?? 'machine-id', key: r.org.key, name: r.name, path: r.path, source: r.org.source, ...(r.stated ? { stated: r.stated } : {}), ...(r.nameRev ? { nameRev: r.nameRev } : {}) }));
+      const [assembled] = assembleProjects([{ org: ENROLLED.org, machine: MACHINE, revision: 1, issued: new Date().toISOString(), locations, known: [] }], new Set(['machine-id'])).filter((p) => p.id === id);
+      expect(assembled).toMatchObject({ name: 'Chosen name', renamable: true });
     });
   });
 });
