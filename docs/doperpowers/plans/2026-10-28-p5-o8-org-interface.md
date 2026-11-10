@@ -148,8 +148,15 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-09) Refresh at the cut: branch `p5-o8-m5b`, cut from master e181a1944 after M4c landed as #543. Both waits were met. The scope shrank to the renderer and one local case, since M6b built the main side. The parent was re-pinned at Decision Log 260. The live proof moved to M8's sitting, as a staging step. The plan is two tasks (Decision Log, "M5b's refresh at its cut" and "M5b is built as two tasks").
   - [x] (2026-11-09) Task 1, reviewed clean. Commits: fea94bdaa (the sheet, both menus, `stores/local-owner.ts`) and the fix wave 4d33e84f9 (Share takes the same one-owner clause through one gate). Our task reviewer took two rounds. I1, the head skew, the architect accepted as residue (Decision Log, "M5b Task 1, the renderer", item 6). Green: static and unit at 4d33e84f9 (42702690877); `e2e:settings` at 4d33e84f9 (42701162112).
   - [x] (2026-11-09) Task 2, reviewed clean. Commits: 67af5b945 (the stand-in's `add_owner`, the lane A and lane B case, the share holder's refusal), 3767a4ba6 (share.spec's `showPeople`), 51b93834e. Approved on the first round, with two Minors: lane B's authorization fixture, and noise in the run's output. Green: static and unit at 51b93834e (42708248610); `e2e:settings` at 3767a4ba6 (42706609911, the share spec passing on its first attempt).
-- [ ] M8 — The deployment admin's end, and acceptance — *owner steps and evidence; last; needs O14's B4 steps 4 to 8 and M3's root-add sitting (its first step)*
+- [x] (2026-11-10) M8 — The deployment admin's end, and acceptance — the owner's sitting passed on 2026-11-10; this Mac's device is production's only root at org-state version 24 (Outcomes, M8)
   - [x] (2026-11-09) The sitting script, against master cf30dafdd: step 7 on staging first, then production steps 1 to 6, each with its role, its verb and what the owner sees; B4's steps 4 to 8 are done; the preconditions and what the desk track stages beforehand are in Concrete Steps, M8 (Decision Log, "M8's sitting script").
+  - [x] (2026-11-10T05:17Z) Step 7, Add owner on staging: passed. B was added on lane A and lane B rows from the sheet, and after a relaunch both rows named both owners (on a second scene; Decision Log, "M8's sitting", item b). Teardown complete at v368.
+  - [x] (2026-11-10T05:36Z) Step 1, the root add: version 23, two roots, on the second try (item e).
+  - [x] (2026-11-10) Step 2: a check only, since B4 ran on 2026-11-07.
+  - [x] (2026-11-10T05:38Z) Step 3, the revocation: signed by this Mac at version 24. The deployment admin device is removed, and its step-up and channel keys are revoked. The last `admin show` ran at 05:40:46Z.
+  - [x] (2026-11-10) Step 4, the deletion: the admin's `keys.json` and `keys.json.org.json` are gone, and the directory is empty.
+  - [x] (2026-11-10) Step 5, O15's check: one root, this Mac's device.
+  - [x] (2026-11-10) Step 6, the acceptance run: items 1 to 6 recorded. Item 7 is cited from M7b's live check on production, with the owner's fresh look pending.
 
 ## Acceptance
 
@@ -2005,7 +2012,7 @@ The live check is the owner's, on staging first. In the Delegations section the 
 
 Live: at M8's sitting, step 7 (moved there on 2026-11-09; the architect).
 
-**M8.** The sitting script (refreshed 2026-11-09 against master cf30dafdd; Decision Log, "M8's sitting script"). Step 7, on staging, runs first. Steps 1 to 6 then run on production. Who does each step is in brackets: **[owner]**, **[desk]** (the desk track), **[mini-ops]**, or **[architect]**. The architect sets the sitting and runs it with the owner. Every `staging-run.sh` and `production-run.sh admin …` verb that the owner runs goes in a Terminal or iTerm window, never with `!` in Claude Code, because its confirmation reads `/dev/tty`. Every command runs from a checkout of master at or after cf30dafdd. No step writes either of the owner's email addresses into a repository, a PR or a chat; the email file of M6b's layer 2 is the only place one is written.
+**M8.** The sitting script (refreshed 2026-11-09 against master cf30dafdd; Decision Log, "M8's sitting script"); corrected 2026-11-10 after the sitting, Decision Log "M8's sitting"). The architect may read the owner's MAWS and press a button in it through `cua_repl` at the owner's request and on their go; Touch ID and every terminal confirmation stay the owner's. Step 7, on staging, runs first. Steps 1 to 6 then run on production. Who does each step is in brackets: **[owner]**, **[desk]** (the desk track), **[mini-ops]**, or **[architect]**. The architect sets the sitting and runs it with the owner. Every `staging-run.sh` and `production-run.sh admin …` verb that the owner runs goes in a Terminal or iTerm window, never with `!` in Claude Code, because its confirmation reads `/dev/tty`. Every command runs from a checkout of master at or after cf30dafdd. No step writes either of the owner's email addresses into a repository, a PR or a chat; the email file of M6b's layer 2 is the only place one is written.
 
 **Before the sitting.** Nothing below may start until every item here holds.
 - **Preconditions** (each checked by whoever is named):
@@ -2014,6 +2021,7 @@ Live: at M8's sitting, step 7 (moved there on 2026-11-09; the architect).
   - [desk] O14's B4 has run its steps 4 to 8; it is ticked in O14's document (2026-11-07). The old step 2 is therefore only a check.
   - [owner] The deployment admin device's key file and anchor are present: `ls ~/.local/state/desk-hub-production/device/` lists `keys.json` and `keys.json.org.json`. The owner's terminal holds a production Access token: if `production-run.sh admin show` says it has none, or that it has expired, run `cloudflared access login https://desk-hub.opencognita-platform.workers.dev` first.
   - [owner] The owner's MAWS is signed in to production, and Settings › Org › You names its device.
+  - [architect] Before step 3, the owner says they hold the paper recovery key (added 2026-11-10). After step 3 the recovery key is the only way back if this Mac's device is lost.
   - **Unknown from the records, and settled by step 1's `show`:** whether the app's device is already a root. No record shows M3's root-add sitting (P5 Decision Log 155).
 - **Staged beforehand** [desk, rehearsed on staging with the harness, never with the owner's identities]:
   - A worktree for the sitting at `/Users/new/.local/share/maws-worktrees/m8-sitting`, from master at or after cf30dafdd, with `pnpm install --frozen-lockfile` run. The owner's staging profile launches from it.
@@ -2023,17 +2031,17 @@ Live: at M8's sitting, step 7 (moved there on 2026-11-09; the architect).
 
 7. **Add owner, on staging (run first).** This is M5b's live proof, acceptance 5's add half. B is the owner's second staging identity; production has no second member (M8's Decisions).
    1. [desk] `zsh apps/desk-hub/deploy/staging-run.sh real-member add --email-file <that file>`. B becomes a member of the staging head. B never signs in, so `access-sync`, the pairing and M6b's browser pitfall aren't needed.
-   2. [owner] In a Terminal or iTerm window, not with `!` in Claude Code, run `DESK_STAGING_DEVICE=/Users/new/.local/share/dsk-scripts/p5-o11/staging-device zsh apps/desk-hub/deploy/staging-run.sh admin pair --class native-mac` from the sitting worktree. It prints a code and waits for the app's entry. The prefix names where this Mac keeps staging's admin keys, since `staging-run.sh` defaults to `~/.local/state/desk-hub-staging/device`, which this Mac doesn't have; without it the command stops with "no admin device keys" (the desk track, 2026-11-10). If it reports no staging Access token, run `cloudflared access login https://desk-hub-staging.opencognita-platform.workers.dev` once, as yourself, and run it again.
+   2. [owner] Start only once the desk says 7.1 and 7.4's scene are done (added 2026-11-10): `pair` reads the head when it starts and signs at the end, so a head the desk moves in between is refused `409`. In a Terminal or iTerm window, not with `!` in Claude Code, run `DESK_STAGING_DEVICE=/Users/new/.local/share/dsk-scripts/p5-o11/staging-device zsh apps/desk-hub/deploy/staging-run.sh admin pair --class native-mac` from the sitting worktree. It prints a code and waits for the app's entry. The prefix names where this Mac keeps staging's admin keys, since `staging-run.sh` defaults to `~/.local/state/desk-hub-staging/device`, which this Mac doesn't have; without it the command stops with "no admin device keys" (the desk track, 2026-11-10). If it reports no staging Access token, run `cloudflared access login https://desk-hub-staging.opencognita-platform.workers.dev` once, as yourself, and run it again.
    3. [owner] Launch the staging profile:
 
           cd /Users/new/.local/share/maws-worktrees/m8-sitting && mkdir -p -m 700 "$HOME/.local/share/maws-m8-staging" && MAWS_USER_DATA="$HOME/.local/share/maws-m8-staging" npx electron-vite dev
 
       In Settings › Org, paste the code, press Sign in, and finish in the browser as yourself. Compare the fingerprint with the terminal's, and approve there. You see "Signed in to staging-ssfskim as …", with your own staging identity. A macOS dialog on first launch is yours to answer; Deny is safe.
-   4. [desk] On the staging VM: one lane A session (a terminal `claude` in a checkout of a hub project) and one lane B session (spawned from the owner's staging profile with New chat on the VM's machine, by the owner, as the desk track directs). Both rows appear in the owner's staging sidebar as yours.
+   4. [desk] On the staging VM (keep-a1's own lane A and lane B sessions serve, as at the sitting): one lane A session (a terminal `claude` in a checkout of a hub project) and one lane B session (spawned from the owner's staging profile with New chat on the VM's machine, by the owner, as the desk track directs). Both rows appear in the owner's staging sidebar as yours.
    5. [owner] On each of the two rows, open the row menu and choose Add owner…. The sheet offers B by name. Pick B, press Save, and answer the step-up once. You see "Added", or the endpoint's refusal in words.
    6. [owner] Check: each row's owners read "you, <B's first name>", and its hover card lists B. Quit the profile and launch it again (step 3's command): both rows still name B, from the next listing. [architect] Takes a screenshot of each row and its hover card for Outcomes.
    7. **Fallback** [architect decides at the sitting]: if the profile can't sign in to staging, or can't step up, the harness member is the adder on the same VM, as at M6b. B then pairs (M6b's layer 2, steps 3 and 4, with its pitfall), and B's profile reads each session as its own, co-owned with the harness's member. Outcomes records that the sheet is proved by the unit and local suites only.
-   8. Teardown:
+   8. Teardown, only on the owner's explicit word after 7.6's relaunch (added 2026-11-10):
       - [desk] Runs `zsh apps/desk-hub/deploy/staging-run.sh real-member remove --email-file <that file>`. If B paired, it also runs `staging-run.sh access-sync`.
       - [owner] Quits the staging profile.
       - [desk] Ends the profile's `mawsd` with `pgrep -fl maws-m8-staging`, then `kill -TERM <pid>`, and checks that no process and no lock file is left. Then it deletes `~/.local/share/maws-m8-staging`, the email file, and the VM.
@@ -2041,8 +2049,8 @@ Live: at M8's sitting, step 7 (moved there on 2026-11-09; the architect).
 1. **The root add, unless done.**
    - [owner] In a Terminal or iTerm window, not with `!` in Claude Code, run `zsh apps/desk-hub/deploy/production-run.sh admin show`.
    - If it already lists two root lines, one of them naming the device in your MAWS's Settings › Org › You, go to step 3.
-   - Otherwise, in the same window, run `zsh apps/desk-hub/deploy/production-run.sh admin root add -- <that device id>`. Compare the fingerprint it asks about with the one the Org page shows, and answer `y`.
-   - You see: `show` reads `head version N+1` with two root lines, and the Org page reads "This Mac signs the org state". Re-sign then asks Touch ID and gives "Signed version N+2." From here on, you no longer run `refresh`.
+   - Otherwise, in the same window, run `zsh apps/desk-hub/deploy/production-run.sh admin root add -- <that device id>`. Compare the fingerprint it asks about with the one the Org page shows, and answer `y`. If it answers "not made a root: nothing was signed" after your `y`, nothing was signed: run it again in a fresh Terminal window.
+   - You see: `root added: … (version N+1)`, `show` reads two root lines, and the Org page reads "This Mac signs the org state". The page offers Re-sign now only while the weekly successor is due (`OrgGroup.tsx:164`), so step 3's removal, signed by this Mac, is the proof that it signs. From here on, you no longer run `refresh`.
 2. **B4's steps 4 to 8.** [desk] Confirm only: they ran on 2026-11-07, and O14 is done.
 3. **The revocation.**
    - [owner] In your MAWS, Settings › Org › People, your own member lists the deployment admin's device (`deployment-admin-<12 hex>`, or `a1`). Choose Remove device…. The sheet's lines read: both of its keys revoked, the root removed. Sign with Touch ID.
@@ -2672,6 +2680,14 @@ Each is built as its recommendation when its milestone is re-planned, unless the
   Evidence: run 42344559621 (e2e:library, packaged 1/2 red), 42357252517 (green).
 - Observation (M5b Task 1): `e2e/share.spec.ts:251` is a race in the test itself. A project row's hover card covered the People toggle before any session menu opened. It was red once on fea94bdaa and green on the rerun (42697938520), with master e181a1944 green as a control (42696748705). M5b reaches this spec, so Task 2 fixes the race (the architect, 2026-11-09).
   Evidence: e2e:settings on fea94bdaa; the friction tracker's entry by Task 1's executor.
+- Observation (M8, step 7.2): a waiting `admin pair` reads the head when it starts and signs only once the app's entry arrives. On staging it read v358, the desk track's `real-member add` and scene then made v359 and v360, and `pair`'s successor at v359 was refused `409`. Recovery was `admin abandon-pending` and a second `pair`.
+  Evidence: the sitting's record (the architect, 2026-11-10). Board #547, the desk track's, has a waiting admin verb re-read the head before it signs, or refuse with nothing pending.
+- Observation (M8, step 1): the first `root add` refused "not made a root: nothing was signed" (exit 1) after the owner typed `y`. `confirm` (`deploy/admin.ts`) read a line through `readLineFrom` (`deploy/terminal.ts`) that was neither `y` nor `yes`, and what it read is unknown. Nothing was pending, and the head stayed at 22. The second try, in a fresh Terminal window, signed version 23.
+  Evidence: `~/.local/state/desk-hub-production/admin-root-20261110T052506Z.log`. #547 gains an item: a refused confirmation says what it read, in hex.
+- Observation (M8, step 1): the Org page offers Re-sign now only while the weekly successor is due (`settings-tab/org/OrgGroup.tsx:164`, `weekly !== null`). The state was 0 days old, so the script's "Re-sign then asks Touch ID" couldn't run. The removal at step 3, signed by this Mac, proved that it signs.
+  Evidence: the page as the architect read it through `cua_repl`, 2026-11-10.
+- Observation (M8, step 7.6): the first scene was torn down before the owner's relaunch, so the relaunch check ran on a second scene, and the owner typed B's address a second time.
+  Evidence: the sitting's record. The second scene was machine `o18-a1-1c80f2` at v365, with B re-added as `166912a7…` at v364.
 
 ## Decision Log
 
@@ -4505,6 +4521,17 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   6. **Unknown, and settled at the sitting:** whether the app's device is already a production root (step 1's `show`), and whether a scratch dev profile steps up for `record.owners`. The desk track's rehearsal answers the second before the sitting, and the fallback covers a no.
   Date/Author: 2026-11-09, O8's executor, at the architect's request.
 
+- Decision: M8's sitting (2026-11-10, on master cf30dafdd at all three machines; P5 Decision Log 262). It ran as the script says, with these deviations. Each is recorded here, and the script is corrected where one applies.
+  a. **The pairing race** (Surprises, M8 7.2). Step 7.2 now starts only once the desk says 7.1 and the scene are done. The tooling half is board #547.
+  b. **The early teardown** (Surprises, M8 7.6). Step 7.8's teardown now starts only on the owner's explicit word after the relaunch.
+  c. **keep-a1's own lane A and lane B sessions served as the two rows,** agreed with the desk track beforehand, instead of a terminal session and a New chat of the owner's. The owner's staging member owned both, so the act and the check are the same. Step 7.4 says so.
+  d. **The owner's staging admin verbs needed `DESK_STAGING_DEVICE`** to name this Mac's staging admin keys. Fixed in the script before the sitting (0f4b783f1).
+  e. **The first root add's confirmation read something other than `y`** (Surprises, M8 step 1). Step 1 now says to run it again in a fresh Terminal window. #547 makes the refusal say what it read.
+  f. **Step 1's Re-sign check didn't apply** (Surprises, M8 step 1). Step 1 now names step 3's signature as the proof instead.
+  g. **One precondition added:** before the removal, the architect asked whether the owner holds the paper recovery key. The owner answered "Go, I have the key (Recommended)". It is now in the script's preconditions.
+  h. **The architect drove the page at the owner's request.** The owner's regular MAWS wasn't running at step 2, so the architect opened it and read Settings › Org through `cua_repl`, and pressed Sign at step 3 on the owner's go while the owner was at the window. Touch ID was the owner's. The script now allows this.
+  Date/Author: 2026-11-10, the architect's record; written by O8's executor.
+
 - Decision: M5b is built as two tasks under subagent-driven execution, each reviewed at its frontier, then one branch review at reviewer-medium (the section names none; M5b signs nothing new and adds no wire). Neither task touches `src/endpoint` or `apps/`, so the desk track has no hunk to review.
   1. **The renderer**: `AddOwnerSheet.tsx` and its test, the `addOwner` dialog kind, the menu items in `menus.tsx` and `Toolbar.tsx` under Share's gate, the copy, and the e2e fixture's answer if a spec opens it.
   2. **The local suite**: the stand-in's `ownersProof` append and the lane A and lane B case.
@@ -4807,3 +4834,72 @@ Retrospective (M5b). The refresh mattered more than the build. Read against mast
 Both came from reading the renderer's evidence against the authority that decides. That is M4c's lesson of reading every outcome from the party that performed it, applied to a permission instead of an outcome. The exact check needs the local `record.policy` to answer as the calling member, which is residue.
 
 A future child that shows an action conditionally should name the authority that decides it, and say what evidence the menu reads and whose head that evidence comes from. Where the two differ, it should test the case in which they disagree.
+
+**M8 (2026-11-10, the owner's sitting; master cf30dafdd on all three machines).** This Mac's device is production's only root. The deployment admin is ended, and its files are deleted. Step 7 ran first, on staging, then steps 1 to 6 on production.
+- **Step 7, Add owner on staging: passed.**
+  - The scene: VM `dc-m8-87b3`, with machine `o18-a1-966610` enrolled for A (the owner's staging member, `c34416f0…`) at v360, and keep-a1's lane A session S (`afa43ecf…`) and lane B session L (`960c31fe…`). B, the owner's second staging identity, was added with `real-member add` as `24009a66…` at v359.
+  - The adder was a dev profile from the sitting worktree, on its own `MAWS_USER_DATA`, paired as A with `admin pair --class native-mac`. Its device, `eR5cNriJw9aZUfPsTiCnGg`, landed at v361 (04:49:57Z), after the pairing race (Decision Log, "M8's sitting", item a).
+  - The act: Add owner on both rows from the sheet, with Touch ID in the dev profile once per row. After Save the sheet read "<B's first name> · Added as an owner" and "Its row names them once <machine> lists the session again", and its picker then read "Everyone in the org already owns it."
+  - The hub's listings named owners `[A, B]` for L at 04:51:47.411Z (revision 1794286307411) and for S at 04:52:58.865Z (revision 1794286378865). The hover card read the machine with "direct (tailnet)", then "you" and B's first name, each with its address.
+  - The relaunch check ran on a second scene (item b): B as `166912a7…` (v364), machine `o18-a1-1c80f2` (v365), with S `5ce53dfa…` and L `65378563…`. The owner added B on S (`[A, B]` at 05:01:47.988Z, revision 1794286907988) and on L (05:11:04.002Z, `policyRev` 0→1). After quitting and relaunching the profile, both rows named both owners, in the row and in the hover card (the owner's words, to the desk track).
+  - Teardown: both scenes went down with their keys retired (v362, v366), and B was removed (v363, v367). No `access-sync` was needed, since B never paired. The owner's `admin remove-device` of the profile's device came at v368 (05:17:42Z). The profile's processes ended, and its directory, both email files and the VM were deleted. Production was unchanged at `hub@14ec1177`, and the desk track's log scans found no leak.
+- **Step 1, the root add: version 23.**
+  - The page before: org-state version 22, 5 days old, with one root, the deployment admin device's step-up key `8nSM5mHMn7jCSbEFzX4pwQ`. This Mac's device, `QesKSyD1pZgF_UGIAA5GGA` (fingerprint `mtfkb-224r6`), wasn't a root: the Signer line gave the root add command, and Delegations read "This Mac can't sign".
+  - The first try, at 05:25:06Z, refused after the owner's `y`, with nothing signed (item e). The second, at 05:36:25Z in a fresh Terminal window, read "root added: QesKSyD1pZgF_UGIAA5GGA, step-up Uye8mN5gmOv1IVP3H-MyuQ (version 23)".
+  - The page after: version 23, two roots, Signer "This Mac signs the org state.", recovery key id `HfZtE-wLmrEoK51Nh0x4Gw`. Re-sign wasn't offered, since the state wasn't due (item f).
+- **Step 2:** a check only. B4 ran on 2026-11-07.
+- **Step 3, the revocation: version 24, signed by this Mac.**
+  - Before it, the owner confirmed they hold the paper recovery key (item g).
+  - People listed the admin device as "deployme · Mac · root", with Remove device…. The sheet read: "Remove a device of <member>?", "One new org state carries this, signed with Touch ID:", "Remove <member>'s device deployme (native-mac) and revoke its keys", "Its step-up key leaves the root set". The architect pressed Sign through `cua_repl` on the owner's go, with the owner at the window; the owner's Touch ID gave "Signed version 24." (item h). There is no screenshot, because the sheet's text holds the owner's address, so this text is the record.
+  - The page after: version 24, one root (`Uye8mN5gmOv1IVP3H-MyuQ`, device `QesKSyD1`), and Signer "This Mac signs the org state." People lists `Y4NFQOnw` (browser), `QesKSyD1` (Mac, root, this Mac) and `HvrQ9JMH` (Mac). No Deliveries line showed when it was read.
+  - The hub, read by the desk track at 05:40Z: head version 24, issued 05:38:50.167Z. `root.keys` holds the one key. The device `deployment-admin-4d9cdf736347` is not listed. `revoked` holds its step-up key `8nSM5mHMn7jCSbEFzX4pwQ` and its channel key `GptYhzH9NLDNfpCsG4gN3A`.
+  - The last `admin show`, at 05:40:46Z (`admin-show-20261110T054046Z.log`), read:
+    - head version 24, with the member's three devices and one root line (`Uye8mN5gmOv1IVP3H-MyuQ`, device `QesKSyD1pZgF_UGIAA5GGA`);
+    - machines: `mini` and `macbook` listed, `dc-linux171-1e68` certified, the rest retired;
+    - delegation `7872ff6c6ff6a58065ae0a68160b5dcb`, prefix `dc-`, expiring 2027-01-26T22:11:51.983Z;
+    - `legacyRetired` at version 16.
+  - Adoption of version 24: the MacBook's endpoint at 05:40:36Z, and the mini's at 05:41:41Z (`mawsd endpoint status`, hub generation 925). **`dc-linux171-1e68`: pending** (the desk track reads it once `cua_repl` releases that VM, after 06:45Z).
+- **Step 4, the deletion.** The owner removed `keys.json` and `keys.json.org.json`. The architect listed `~/.local/state/desk-hub-production/device/`, and it is empty. The offline recovery key is untouched.
+- **Step 5, O15's check.** The page's Roots name one key, this Mac's device.
+- **Step 6, the acceptance run.**
+  - Items cited from earlier live proof:
+    - 1: M1's staging sitting (P5 Decision Log 116) and production's sign-in.
+    - 2: the rows at the first cut-over machine (P5 Decision Log 154).
+    - 6: M6b's shared staging run (P5 Decision Log 252).
+  - Items read at this sitting:
+    - 3: the page reads "This Mac signs the org state." at version 24.
+    - 4a: step 3's sheet, its words above.
+    - 4b: Machines lists `mini`, `macbook` (this Mac) and `dc-linux171-1e68`, each Up and "Owned by you", the last "Certified through delegation 7872ff6c…".
+    - 4c: Delegations lists "dc-", owned by you, expiring in 77 days, used 19 times, no cap, id `7872ff6c`, with Renew… and Drop….
+    - 5: step 7 above. On production the sidebar's rows from `@mini` under the MAWS project carry no owners label, as they shouldn't, since the owner owns every session alone.
+  - 7: cited from M7b's live check on production (P5 Decision Log 257). It wasn't looked at again this sitting, because a row's context menu can't be opened in a background window through `cua_repl`. **Pending:** the owner's word on a fresh look.
+  - 8: steps 1 to 5.
+
+Retrospective (M8). Every deviation came from timing between two actors, or from a check the script assumed and the product doesn't offer.
+- A waiting verb signed against a head another actor moved.
+- A teardown ran before the check it should have followed.
+- A confirmation read input nobody could see.
+- A Re-sign button appears only when the successor is due.
+Each was safe, because the authority refused rather than accepted: the hub's `409`, the verb's "nothing was signed", and the sheet's digest-bound signature. A future sitting script should order every step that moves the head before any step that waits on it. It should start a teardown only on the person's word, and name only checks the product shows in the state the sitting will be in.
+
+**O8 as a whole (2026-11-10).** Every milestone has landed: M1 to M8, with M4 and M5 each split (M4a to M4c, M5 and M5b), and M6 and M7 too (M6a, M6b, M7a, M7b). The Purpose holds:
+- The app signs in to the org as its own device.
+- It draws other machines' sessions and other people's, with their owners.
+- It is the org's signer, now its only root.
+- Its Org page administers people, devices, machines and their rights, and delegations.
+- Owners set each session's reach and add owners.
+- Each project's channel is the app's one reader of the log plane.
+- The deployment admin's software root is revoked, and its key file is deleted.
+
+Acceptance 1 to 8 is recorded, with two facts still pending: `dc-linux171-1e68`'s adoption of version 24, and the owner's fresh look at item 7. The residue O8 leaves is in each milestone's section of `2026-10-28-p5-o8-report.md`, and the architect filed it as tracker rows at each landing. Two rows bear on the next work:
+- the hub doesn't announce new certificates (m4c-r1);
+- this Mac's `record.policy` answers for all its owners (m5b-r1).
+
+Retrospective (O8). Built over 13 days as 13 landings, nearly all under subagent-driven execution, with a review at each frontier and a branch review at the rung each section named. The milestone retrospectives above found the same few shapes again and again:
+- **A fact checked at one moment and acted on at another** (M2, M3, M4a, M5): across an await, a sign-in or a head change.
+- **An outcome or a permission inferred, not read from the authority that decides it** (M7a, M4b, M4c, M5b): a slot's absence read as "published", a menu's evidence from another head than the door's.
+- **An ending that didn't reach everything its owner held** (M6b, M4b, M4c): custody, queued hub work, a pairing's run.
+- **A hidden input changing what a member is sent** (M7b): content, existence, timing, paging.
+Two practices caught most of these before review: an enumerating test written first over every event that crosses a link (M6a), and running each operator-facing command end to end in its real runtime (M6b, and M8's rehearsal). Two practices paid off at every milestone: the refresh at each cut, which reconciles the section against master before anything is dispatched (it halved M5b), and the architect's rulings recorded in the Decision Log as they came. The live sittings found what no suite could. M6b's found a sign-in completed as the wrong identity, a logout URL that revoked the CLI's token, and three reader-side defects (#525). M8's found a confirmation that read the wrong line.
+
+A future child of this size should write each milestone's invariants over every path that acts on durable state before it builds, and name the authority that decides each fact it shows. Its sittings should be scripts in which the person decides when each part ends.
