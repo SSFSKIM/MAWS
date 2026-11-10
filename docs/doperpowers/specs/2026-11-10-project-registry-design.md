@@ -1,6 +1,6 @@
 # The org's project registry: one project, a location on each machine (2026-11-10)
 
-**Status.** A design draft, not approved for building. Written by the MAWS architect with doperpowers:brainstorming, from the owner's proposal at O8 M8's sitting (2026-11-10) and their answers that day. Three owner decisions are open (§12). A critic's review and the desk track's review of §4, §5 and §8 are pending.
+**Status.** A design draft, not approved for building: it awaits the owner's approval. Written by the MAWS architect with doperpowers:brainstorming, from the owner's proposal at O8 M8's sitting (2026-11-10) and their answers that day (§12). Revision 2 folds in the desk track's review of §4, §5 and §8 and a critic's first round (Decision Log 3 and 4).
 
 - **Board:** MAWS #521 (the app's half) and the desk board's #181 (sminos's half). This document is the design both wait for.
 - **Parent:** `docs/doperpowers/plans/2026-10-27-p5-org.md` (P5). It is a follow-up to P5, outside P5's acceptance (owner, 2026-11-10; P5 Decision Log 263).
@@ -33,26 +33,29 @@ The mini is switched off. The row stays, its mini location reads "offline". The 
 - **A change that needs the root's signature per folder.** That would rule out a terminal on a VM.
 - **A requirement for sign-in.** Signed out, MAWS works as today (P5 acceptance 1).
 - **A second rule for a session's project.** sminos and MAWS decide a directory's project by one rule, or sessions move between projects at every reconcile.
+- **A folder that takes what lies beneath it.** A project folder never takes a clone of another repository under it out of that repository's project.
 
 ## Terms
 
 - **Project.** A thing of the org: an id, a name, and its locations.
 - **Location.** A folder on one machine that belongs to a project: a machine and a path. A project may have several locations on one machine (two clones).
-- **Declared.** A location is declared when someone added it (Add project, the command line), or by the automatic rule the owner picks in §12. It is what P5 called a checkout.
-- **Link.** A stored statement that a folder belongs to a named project, whatever its files would derive.
+- **Declared.** A location is declared when it is a sidebar row of its machine: a folder someone added (Add project, the command line, a request from another device) or started a MAWS session in, and has not removed, as today; and a folder holding a `.smns` in which a session has run (owner, 2026-11-10). It is what P5 called a checkout.
+- **Stored statement.** The machine's own record that a folder is in a given project, kept in its index and changed only by an act: a **minted** id for a folder whose files name no project, or a **link** to another project. It behaves as a `.smns` kept outside the folder.
 - **Projects record.** One machine's signed statement of its locations (§4).
 - **The registry.** The projects records of the org's machines, kept by the hub and read by every device. Nothing else is stored.
 
 ## What exists (master 1a0ce4c5f)
 
-- **Four ids for one idea.** A machine's index id for a project (`<ref>/<uuid>` as an address). The app's row key `OrgKey` (`smns:`, `remote:`, `repo:<ref>:`, `folder:<ref>:`; `src/services/index/org-project.ts`). sminos's project id (a `.smns` id, or `uuid5(org, remote key)`; `src/shared/machine/project-ids.ts`). And `OrgState.projects` in the signed head, which nothing writes (`apps/org-protocol/src/types.ts:62,84`; its only reader is `src/endpoint/rl10/org-directory.ts:53`).
-- **A folder or a repository with no remote has no sminos id.** Its key holds its machine's ref, so it joins nothing on another machine, its sessions are in sminos's machine project, and it has no Channel (`src/services/channel/lane-b.ts:19-22`).
-- **A machine reached over the network sends the app no project list.** The page takes no snapshot from a machine its rows cover (`src/renderer/src/ipc/events.ts:296`), so the sidebar's project rows come from this Mac's own index alone. `joinIds` maps a listing's project to a row through this Mac's projects only (`src/main/org/rows.ts:599-612`). A session whose project has no folder here sits under its machine's row.
-- **A listing names a project by sminos's id and carries no path** (`apps/org-protocol/src/types.ts:114-121`).
-- **Over the network only two project commands are offered:** `session.projects.list`, and `session.projects.addFolder` (`machine-admin`, the machine's owners, always with Touch ID; `src/endpoint/offers.ts:265-270`, `src/main/lane-b/remote.ts:245`). `add`, `update` and `remove` are refused before they leave, so "Remove from sidebar" on another machine's project does nothing.
-- **sminos learns the org's projects from the endpoint's directory,** which lists only `head.projects`, always empty (#181). The hub still holds DX2's unsigned `projects` table, filled at a machine's `hello`; RL10 does not read it.
-- **A machine-signed record kept once per machine already exists:** the endpoint record (`EndpointRecord`, `smns-endpoint-v1`), kept by the hub at its newest `issued` and verified against the head (`apps/desk-hub/src/objects/org-records.ts:285-293`).
-- **There is no command for projects in a terminal.** `mawsd` has `status`, `restart`, `logs`, `enroll`, `keys`, `install`, `uninstall`, `render` and `endpoint …`. Its socket `<profile>/mawsd/machine.sock` serves the whole command table to a caller holding the profile's token (`src/mawsd/machine-client.ts`).
+- **Four ids for one idea.** A machine's index id for a project (`<ref>/<uuid>` as an address). The app's row key `OrgKey` (`smns:`, `remote:`, `repo:<ref>:`, `folder:<ref>:`; `src/services/index/org-project.ts`). sminos's project id (a `.smns` id, or `uuid5(org, remote key)`; `src/shared/machine/project-ids.ts`). And `OrgState.projects` in the signed head, which nothing writes (`apps/org-protocol/src/types.ts:62,84`).
+- **Key and id are not one-to-one.** `sminos project init --hub` writes a `.smns` holding the remote-derived id, so a clone with that file is `smns:<id>` and a clone without it is `remote:<key>`, both with one id. A repository with no remote is keyed by a hash of its path, so its key changes when it moves.
+- **A folder or a repository with no remote has no sminos id.** It joins nothing on another machine, its sessions are in sminos's machine project, and it has no Channel (`src/services/channel/lane-b.ts:19-22`).
+- **A row's sessions are those started in exactly its folder,** or in a worktree of it (`src/services/index/projects.ts`, `projectAt`). A session started in a subfolder gets a row of its own, which joins its parent's row only through git or a `.smns`.
+- **A machine reached over the network sends the app no project list.** The page takes no snapshot from a machine its rows cover (`src/renderer/src/ipc/events.ts:296`), so the sidebar's project rows come from this Mac's own index alone, and `joinIds` maps a listing's project to a row through this Mac's projects only (`src/main/org/rows.ts:599-612`). A session whose project has no folder here sits under its machine's row.
+- **A listing names a project by sminos's id and carries no path** (`apps/org-protocol/src/types.ts:114-121`). The id comes from sminos's own resolution on that machine (`src/endpoint/listings.ts`).
+- **Over the network only two project commands are offered:** `session.projects.list`, and `session.projects.addFolder` (`machine-admin`, the machine's owners, always with Touch ID; `src/endpoint/offers.ts:265-270`). `add`, `update` and `remove` are refused before they leave, so "Remove from sidebar" on another machine's project does nothing.
+- **sminos learns the org's projects from the endpoint's directory,** which lists only `head.projects`, always empty (#181). The hub's own `projects` table (DX2), filled at a machine's `hello`, is what the Worker checks before it serves a project's log, and what desk-web lists.
+- **A machine-signed record kept once per machine already exists:** the endpoint record (`smns-endpoint-v1`), kept by the hub at its newest and verified against the head (`apps/desk-hub/src/objects/org-records.ts:285-293`).
+- **There is no command for projects in a terminal.** `mawsd`'s socket `<profile>/mawsd/machine.sock` serves the whole command table to a caller holding the profile's token (`src/mawsd/machine-client.ts`).
 
 ## Design
 
@@ -62,75 +65,81 @@ The mini is switched off. The row stays, its mini location reads "offline". The 
 
 - A machine is the only writer of its record. A change to a location on machine M, asked from anywhere, is a request M carries out and then states. So an entry a machine removed cannot come back from another device's stale copy.
 - The hub is the central store: a project is listed on the MacBook while its machine is off, and on a Mac that never spoke to that machine.
-- The record is status, the request is intent. The first version delivers a request only to a machine that is up. Holding a request for a machine that is off is the same signed request kept by the hub for later, and is left out of the first version (owner, 2026-11-10).
+- The record is status, the request is intent. The first version delivers a request only to a machine that is up, with one exception the app holds itself: a removal (§6). A request the hub holds for a machine that is off is left out (owner, 2026-11-10). It is not the present signed act kept longer: an act is refused after 60 seconds and is sealed for a machine that is up (RL4).
 
 ### 2. Identity
 
-- **A project has one id in the org: sminos's project id.** A folder with a `.smns` has the id in the file. A clone has `uuid5(org, remote key)`. A declared folder that derives neither gets a random id, minted by its machine and kept in its index. Listings, the Channel and sminos's logs already key by this id.
-- **The app's row key stays.** `OrgKey` is unchanged, so no persisted layout moves, and a key still does not change at enrollment (Decision Log 27). A location's entry carries both its key and its id. The app groups locations by key and maps a listing's project id to a key through every record it holds.
-- **Derived unless linked.** A location's project is what its files derive (a `.smns`, else the remote, else the folder itself), as today, unless it carries a link. A link stores the target project's key and id on the location and is not re-derived. So clones still join with no act, and a `.smns` is still read.
-- **Names never join.** A name is a label on a project. Two projects may share a name.
-- **Known edge.** A folder project that later gains a git remote or a `.smns` becomes the project those name, as today. Folders linked to it from other machines stay in the old project until relinked.
+- **A project is its id: sminos's project id.** Listings, the Channel and sminos's logs key by it already. The app groups locations and sessions by id. Where a row has no id (signed out, or not enrolled) it is grouped by its key, as today.
+- **A location's id comes from the first of:** a `.smns` at the folder; the folder's stored statement; the repository's remote (`uuid5(org, remote key)`).
+- **Minting.** A declared folder whose files give no id gets a random UUID as its stored statement, once. It stays through a move of the folder, a new path and a remote added later.
+- **A link** is a stored statement naming another project's id.
+- **A stored statement changes only by an act.** So a project never splits because a file changed. Where files alone name the project (a `.smns`, a remote) the project follows the files, as today.
+- **The file wins at its own folder.** A folder holding a `.smns` cannot be linked (`has-smns`), and a `.smns` that appears in a folder with a stored statement replaces it. `sminos project init` in a folder with a stored statement writes that id, as `--hub` pins a remote's id today, so the usual way a `.smns` appears changes nothing.
+- **`OrgKey` stays as the folder's label on its machine.** It is unchanged, so a key still does not change at enrollment (Decision Log 27), and a row's persisted layout key on a device is that device's own location's key when it has one.
+- **Clones.** Two clones of one repository derive one id and are one project with no act. A folder that was declared before it had a remote keeps its minted id; when a clone of that remote is declared on another machine and exactly one project in the records holds that remote, the machine links it there and says so, and with several it asks.
+- **Names never join.** A name is a label. Two projects may share a name.
 
 ### 3. The machine's side
 
-The machine's index already holds a row per project folder (`projects` in `index.sqlite`: `directory`, `origin`, `hidden`, `org_key`, `org_name`, `org_source`, `org_smns_id`). The registry adds to it:
+The machine's index holds a row per project folder (`projects` in `index.sqlite`). The registry adds to it:
 
-- **Minting.** On an enrolled machine, a declared row whose derivation gives no id (`repository`, `folder`) gets a random id in `org_smns_id`, kept while its key is unchanged.
-- **Links.** `org_source` gains `link`: the row's key, id and name are the target's, and the refresh that re-derives rows skips it.
-- **A name's time.** `named`, set when a person names or renames the project (§9).
-- **An anchor.** The folder's device, inode and birth time, taken at declaration, for finding a moved folder (§10).
-- **A state.** `missing`, when the folder is not found (§10).
+- **The stored statement:** the stated id and its kind (`minted` or `linked`), in columns of their own. `org_source` keeps its four values, so neither its CHECK nor the wire enum changes.
+- **No statement by side effect for the broadest folders.** The home directory, a folder above it and a filesystem root get a stored statement only by an explicit add. Today any MAWS start in a folder makes it a sidebar row (`usedByMaws`), and a statement there would cover what lies beneath (§8).
+- **A name's counter** (§9) and **a state**, `missing` (§10).
 - **Publishing.** After any change to a declared row, and at each connection to the hub, the endpoint signs and sends its projects record (§4), as it sends its listings.
-- **For sminos.** The endpoint tells the local sminos this machine's declared locations (path, project id, name), and the org's projects for its directory (§8).
+- **Unknown is not empty.** The endpoint never signs a record from an index it could not load. It keeps its last signed record on disk, and an index that was rebuilt takes its stored statements back from that record, by path, before the next record is signed.
+- **For sminos.** The endpoint's org frame gains this machine's declared locations, and its directory lists the org's projects (§8).
+- **Minting waits for sminos.** A machine mints only once its sminos has said it reads locations (a capability in its `hello`). Until then a folder project's sessions would be listed under the machine's project while the app expected the minted id.
 
 **Commands** (`src/shared/ipc/schema/session.ts`; all `owner: 'machine'`):
 
-- `session.projects.addFolder {directory, into?}` gains `into: {key, id}`: declare the folder and link it into that project. The machine refuses a target it finds in no verified projects record (`unknown-project`).
-- `session.projects.link {id, into | null}`: change a declared location's project, or return it to what its files derive.
-- `session.projects.relocate {id, directory}`: point a location at the folder's new path.
-- `session.projects.update` (rename) and `session.projects.remove` (which hides the row, so it leaves the record) are offered over the network.
+- `session.projects.addFolder {directory, into?}` gains `into: <project id>`: declare the folder and link it. The machine refuses an id it finds in no verified projects record (`unknown-project`) and a folder holding a `.smns` (`has-smns`).
+- `session.projects.link {id, into | null}`: link a declared location, or remove its link.
+- `session.projects.relocate {id, directory}`: point a location at the folder's new path. When the index already holds a row at that path, the two are merged: its sessions move to the located row.
+- `session.projects.update` (rename) and `session.projects.remove` (which hides the row, so it leaves the record; its stored statement is kept, so adding it again restores the same project) are offered over the network.
 - Over the network each is `machine-admin` and the machine's owners' alone, as `addFolder` is. `addFolder`, `link` and `relocate` ask Touch ID, since each makes a folder a place sessions may start in; `update` and `remove` do not.
+- A declaration answers only after the endpoint has restated its locations to sminos, so that the first session in the folder is not filed elsewhere and then moved.
 - One `WIRE_MINOR` bump.
 
 ### 4. The projects record
 
 In `apps/org-protocol`, beside the endpoint record:
 
-    ProjectsRecord = { org, machine: MachineRef, issued, locations: Location[], known: Known[] }
-    Location = { pid, key, id, name, named?, path, source: 'smns'|'remote'|'repository'|'folder'|'link', remote?, state?: 'missing' }
-    Known    = { key, id, name }
+    ProjectsRecord = { org, machine: MachineRef, revision, issued, locations: Location[], known: Known[] }
+    Location = { pid, id, key, name, nameRev?, path, source, stated?: 'minted'|'linked', hub?: false, remote?, state?: 'missing' }
+    Known    = { id, name }
 
-- `pid` is the machine's own id for the row, which commands to that machine name it by. `path` is canonical and absolute. `remote` is the folder's observed remote key, for suggesting folders; it joins nothing.
-- `locations` are the declared ones. `known` are projects the machine has sessions in with no declared location: no path, and no row in the sidebar (unless §12's second question is answered "any repository"). They let sminos on other machines follow those projects (#181).
-- Signed with the machine's key under a new domain, `smns-projects-v1`, and verified as an endpoint record is (`machineSigned`: the key that speaks for the ref in the head now).
-- One per machine. A newer `issued` replaces the older; the machine never issues one that is not newer than its last.
+- `pid` is the machine's own id for the row, which commands to that machine name it by. `path` is canonical (the real path, NFC) and absolute. `key` and `source` are the folder's label and what its files derive. `remote` is the folder's observed remote key, for suggesting and linking; it joins nothing by itself. `hub: false` marks a `.smns` that names no hub of this org: its log is not on the hub, so it is a row in the app and is left out of sminos's directory.
+- `locations` are the declared ones. `known` are projects with live sessions on the machine and no declared location there: no path, and no row of their own. They let sminos on other machines follow those projects (#181).
+- Signed with the machine's key under a new domain, `smns-projects-v1`, and verified as an endpoint record is (`machineSigned`).
+- One per machine, ordered by `revision`, a counter as a listing's is; `issued` is for display. The hub refuses a revision that is not higher, and a reader keeps each machine's highest and takes none below it.
 - Bounded: at most 1,000 locations and 256 KiB. At the bound the machine refuses a new declaration and says so.
-- A record of a machine the head retired no longer verifies, so its locations are gone from every reader with no cleanup.
+- A record of a machine the head retired no longer verifies, so its locations are gone from the app with no cleanup (§8 for sminos).
 
 ### 5. The hub
 
-- A table as `endpoints` is: one row per machine ref, the newest `issued`, refused `409` when not newer. An up frame `{t: 'projects', record}` beside `listing` and `endpoint`.
+- A table as `endpoints` is: one row per machine ref at its highest revision. An up frame `{t: 'projects', record}` beside `listing` and `endpoint`.
 - Served to a member's devices with the listings, and sent to each machine at its welcome and on change, so that an endpoint can build sminos's directory.
 - Verified against the head as a courtesy, as the other records are. The hub confers nothing; every reader verifies.
-- `OrgState.projects` stays unwritten and is marked reserved. DX2's `projects` table stays unread. Removing either is a hub cleanup outside this design.
+- The hub's own `projects` table stays what it is: the projects that have a log. A minted project enters it at its machine's sminos's first `hello`, and its Channel is served from then. That table keeps the name of the first `hello`, so the phone and desk-web show a project's old name after a rename: residue for the desk track.
+- `OrgState.projects` stays unwritten and is marked reserved.
 
 ### 6. The app
 
 - **Main** reads the projects records with the listings, verifies each, and keeps them under `<userData>/org/`, so a relaunch with the hub unreachable still lists them.
-- **The join.** `joinIds` maps project id to key from every record, not from this Mac's rows alone.
-- **The store.** For a machine reached over the network, main gives the page a project for each of its declared locations (its address from `pid`, its `directory` the path, its `org` the key, name, source and id, and its state). The page's assembly (`orgIndex`) then lists a project that has no folder on this Mac, and files remote sessions under it, by the rules it already has.
-- **A row** shows its machines. A location whose machine is off reads "offline" with the time the machine was last seen; a missing one reads "folder not found on <machine>".
+- **Grouping by id.** The page's assembly groups every machine's locations by project id, and a listing's session goes to its project by id. A wrong key in a record can therefore not pull sessions under another row.
+- **The store.** For a machine reached over the network, main gives the page a project for each of its declared locations (its address from `pid`, its `directory` the path, its `org` the key, name, source and id, and its state).
+- **Every Mac lists every project of the org that the person can reach** (owner, 2026-11-10). A row shows its machines. A location whose machine is off reads "offline" with the time the machine was last seen; a missing one reads "folder not found on <machine>".
 - **The hover card** lists the locations: machine, path, state, and Remove and Locate… for a missing one.
 - **Add project** takes a machine (this Mac, or another machine the person owns that is up), a folder (browsed with `machine.folders.list`, or typed), and optionally an existing project to add it to.
 - **"Add location…"** on a project's menu is Add project with the project filled in.
 - **"+ Session"** offers the project's locations, as it does today from a live read; the record saves the round trip.
-- **The Channel** opens for any project the records name, by its id.
-- **"Remove from sidebar"** keeps its meaning: it removes the project's locations on every machine that is up, for everyone. A location on a machine that is off stays and the row returns with it, as today.
+- **The Channel** opens for any project the records name, once its log exists (§5).
+- **"Remove from sidebar"** keeps its meaning: it removes the project's locations on every machine, for everyone. For a location on a machine that is off, the app keeps the removal, hides the row on this device, and sends the removal when the machine is next up. So a project on a stopped VM can be removed, which the kept records would otherwise prevent.
 
 ### 7. Declaring from a terminal
 
-A command `maws project` (its name is §12's third question), a thin front on the daemon's socket:
+A command `maws` (owner, 2026-11-10), put on PATH when the machine's daemon is installed, a thin front on the daemon's socket:
 
 - `maws project add [DIR] [--into <project>] [--name <name>]`, `maws project list`, `maws project show [DIR]`, `maws project remove [DIR]`, `maws project link [DIR] --into <project> | --none`.
 - **On the machine itself** it needs the profile's token and nothing else: no login, no confirmation. This is the case of a folder on a VM, typed over SSH.
@@ -140,38 +149,50 @@ A command `maws project` (its name is §12's third question), a thin front on th
 
 ### 8. One rule for a directory's project (sminos and MAWS)
 
-Walking up from the directory, the first folder that is a declared location or holds a `.smns` decides. At a folder that is both, a link wins over the file; otherwise the two agree. With none found: a linked worktree repeats the walk from its owning repository; then the repository's remote gives `uuid5(org, remote key)`; then the machine's own project. The last three steps are today's.
+For a directory D whose owning repository's root is R (or none):
 
-- sminos reads the machine's declared locations from a file the endpoint keeps current, so a session started in a terminal resolves with no daemon running. A machine that is not enrolled has no such file and resolves as today.
-- The endpoint's org directory lists as hub projects every project the records name (`locations` and `known`), in place of `head.projects`. This closes #181: a machine follows a project whose sessions are all elsewhere.
-- Shared vectors pin the rule in both repositories, as sminos's remote-key vectors are vendored in `test/fixtures/sminos/` today.
-- **At the upgrade** a declared folder with no id gets one, and sminos moves its sessions from the machine's project into the new one, once.
+1. Walking up from D, take the nearest folder that holds a `.smns` and the nearest folder that has a stored statement. A statement on a folder above R does not count when R derives a remote: a project folder does not take the clones beneath it. Of the two, the nearer decides, and at one folder the file does.
+2. With neither, and D in a linked worktree: R's own `.smns`, else R's own stored statement.
+3. Else R's remote gives `uuid5(org, remote key)`.
+4. Else the machine's own project.
+
+With no stored statements this is today's rule exactly. sminos's per-session `join` stays above it, as today.
+
+- **In MAWS** the derivation of a row's project (`deriveOrg`) takes the same rule, so a session started in a subfolder of a declared plain folder is in that folder's project, which today it is not.
+- **In sminos** the walk gains the lookup of stored statements. They reach it in the org frame the endpoint already restates and sminos already keeps whole (`daemon/org.json`): a top-level `locations` field, this machine's declared locations, each marked when its project is a stored statement. The frame is restated when the record changes as well as when the head does. An older sminos drops the field unread.
+- **A session started in a terminal resolves with no daemon running,** from the last kept file. On an enrolled machine that has not yet been told its locations, sminos keeps what it recorded and does not resolve again by files alone. A machine that is not enrolled resolves as today.
+- **Paths are compared in one canonical form on both sides** (the real path, NFC), pinned by vectors shared by both repositories, as sminos's remote-key vectors are vendored in `test/fixtures/sminos/` today. sminos compares lexical paths today, and `/tmp` against `/private/tmp` would miss.
+- **The directory.** The endpoint's org directory lists as hub projects every project the records name (`locations` and `known`), in place of `head.projects`. This closes #181 with no change in sminos.
+- **Leaving.** sminos follows a project until the directory marks it retired. A followed project with no folder here that is absent from a fresh directory leaves (a new rule in sminos).
+- **Spawns.** sminos counts every declared location as a known checkout, so a start in a folder declared a moment ago is admitted.
+- **At the upgrade** a declared folder with no id gets one once its folder is found, and sminos moves its sessions from the machine's project into the new one, once, by the reconcile it already has.
 
 ### 9. Names
 
-- An entry carries `name`, and `named` when a person chose it.
-- A project's name is the chosen name with the newest `named` among its locations; else a `.smns`'s name; else the remote's; else the folder name of its first location in machine order. Every device computes the same name from the same records.
+- A project that has a location with a `.smns` is named by the file, as the app already behaves, and Rename is not offered for it.
+- Otherwise its name is the chosen name with the highest `nameRev` among its locations, a counter raised at each rename (a tie goes to the lower machine ref); else the remote's name; else the folder name of its first location in machine order. Every device computes the same name from the same records.
 - Rename sends `session.projects.update` to one location's machine.
 
 ### 10. Missing, offline, moved, retired
 
 - **Missing and offline are different states and neither removes anything.** Missing is the holding machine's own statement that the folder is not there (not found, or not a directory). A folder the daemon may not read is present. Offline is the machine's state, shown with the record the hub kept.
 - The machine checks its declared folders at start, every ten minutes, and when a start in one fails.
-- **Moved.** When a folder is declared or first seen whose anchor equals a missing location's, that location is pointed at it. Locate… does the same by hand. A folder that returns to its path is present again.
-- **Copied.** A second folder on a machine deriving a project that already has a present location there is a second location, as two clones are today.
+- **Moved.** Locate… points the location at the new path, and the project is unchanged, since its statement or its files travel with it. A folder that returns to its path is present again. Finding a moved folder automatically is left out of the first version.
+- **Copied.** A second folder on a machine in a project that already has a location there is a second location, as two clones are today.
 - **Retired.** A retired machine's record stops verifying.
+- **A project with no location left** is in no record and leaves every sidebar and, by §8's rule, every directory. Its log stays on the hub.
 
 ### 11. Who sees what
 
 - The hub hands the records to every member, as it hands listings. The app lists a project for a member who owns or holds a grant on a machine with a location of it, or who sees a session of it. In the second case alone the row has the sessions and no location actions.
-- A member with a grant on a machine therefore sees every declared path on it. This follows from "visibility follows access" and is stated here so that it is chosen, not found.
+- **Declared paths and observed remote keys become readable by the hub and by every member's device.** RL §5.9's account of what the hub reads gains them. A member with a grant on a machine sees every declared path on it. Both follow from "visibility follows access" with the hub as it is, and are stated here so that they are chosen, not found.
 - Signed out there is no registry, and the local rows are today's.
 
-### 12. Open owner decisions, with recommendations (asked 2026-11-10)
+### 12. The owner's decisions (2026-11-10)
 
-1. **Which projects each Mac lists.** Recommended: the same list on every Mac. Alternatives: the same list with projects that have no folder on this Mac in a collapsed group; or each Mac lists only what was added on it.
-2. **What declares a folder with no act.** Recommended: a `.smns` in the folder (#521's case). Alternatives: also every repository a session ran in; or nothing.
-3. **The command's name.** Recommended: `maws project …`. Alternatives: `sminos project add`; or both.
+1. **Every Mac lists the same projects.** Not a collapsed group for projects with no folder here, and not a list each Mac picks.
+2. **A `.smns` in a folder declares it** when a session first runs there. A repository with no `.smns` that an agent merely ran in gets no row of its own; its sessions sit under their project's row when some machine declared that project, else under their machine's row, as today.
+3. **The command is `maws project …`.**
 
 Stated to the owner as the design's reading, open to objection:
 
@@ -180,7 +201,8 @@ Stated to the owner as the design's reading, open to objection:
 
 ### 13. What this amends
 
-- **OX3** becomes: an org project is the registry's, with its declared locations; `OrgProject.checkouts` are locations, read from the projects records for machines reached over the network and from the machine's own answer otherwise. Decision Log 27's "a checkout is a project someone opened on its machine" becomes "a declared location".
+- **OX3** becomes: an org project is the registry's, grouped by its id, with its declared locations; `OrgProject.checkouts` are locations, read from the projects records for machines reached over the network and from the machine's own answer otherwise. Decision Log 27's "a checkout is a project someone opened on its machine" becomes "a declared location", and its row key becomes the folder's label.
+- **RL §5.9** gains declared paths and observed remote keys among what the hub and members' devices read (§11).
 - **#521's options.** The directory's projects come from the records: (a)'s result with a signed source, and neither a head change (b) nor a second path in sminos (c).
 - **`session.projects.remove` and `update` over the network,** which the sidebar already sends and the endpoint refuses.
 
@@ -196,31 +218,38 @@ Stated to the owner as the design's reading, open to objection:
 
 - **Projects in the signed head.** A root signature per folder; no terminal on a VM could declare. Rejected.
 - **A table in the hub that devices edit.** The hub would become an authority, against RL's trust model, and Zed's history is the failure. Rejected.
-- **A stored project record signed by a member's device** (id, name, tombstones) beside the machines' records. It gives one writer for a name and removal on a machine that is off, at the cost of a second kind of record and a rule for when the two disagree. Deferred with the held requests of §1; nothing here blocks it.
-- **Freezing a location's project at declaration.** Stable, but a folder that later gains a remote would no longer join its clones, which works today, and sminos would need the org's map of remotes. Rejected for "derived unless linked".
+- **A stored project record signed by a member's device** (id, name, removals) beside the machines' records. It gives one writer for a name and removal on a machine that is off, at the cost of a second kind of record and a rule for when the two disagree. Deferred. What makes the deferral safe is in the design: grouping by id, stored statements that change only by an act, a machine that never signs from an unknown index, and the app's held removal. If it comes, device-signed events in the project's own log are a carrier that already exists.
+- **Derived unless linked** (revision 1). A folder project that gained a remote would become the repository's project, its links broken and its Channel history out of view. Rejected for stored statements that change only by an act.
+- **Every location's project fixed at declaration.** Then a `.smns` or a remote would be read once and never again, and sminos would need the org's map of remotes to file a session in a clone nobody declared. Rejected: only stored statements are fixed.
+- **Grouping by the app's key** (revision 1). A clone with a pinning `.smns` and one without are two keys and one id, and a moved repository with no remote changes its key. Rejected for grouping by id.
+- **A stored statement on a folder covering everything beneath it,** as a `.smns` does. One MAWS session started in a folder that holds many clones would take them all out of their projects. Rejected for §8's bound.
+- **Declaring by writing a `.smns` into the folder.** No change to sminos's resolution, and it survives a lost index. It writes into the owner's folders and cannot link a clone whose `.smns` is committed. Rejected; its property is kept: a stored statement behaves as a `.smns` kept outside the folder.
 - **The app reading each machine's project list live, with no record.** No hub copy, so nothing for a machine that is off, for sminos, or for the phone. Rejected.
 
 ### 16. Unknowns, each with the move that settles it
 
-- Whether an older sminos ignores the new frames: the desk track reads `sminos_uplink.py`'s intake; else a version gate.
+- The layout key of a row with no folder on this Mac, and its change when one is added: the spec reads `layout-model.ts`'s `rekeySets`, which already moves a key.
+- Whether a "Don't work in a project" chat makes the home directory a sidebar row today: the spec reads `usedByMaws`'s callers and the home row in a live index; §3's exception holds either way.
 - The order of rows with no folder on this Mac: built provisionally after the local rows, shown to the owner at the first build.
 - The time from a declaration on one machine to the row on another: measured at the live check; the bound proposed is 5 s.
 - How the daemon passes a terminal's request to the app: the spec picks between an event on the daemon's socket and a new app-side listener, after reading how main attaches to `machine.sock`.
+- Whether sminos compares folders by canonical path or by device and inode: the desk track's choice; the shared vectors are the contract either way.
 
 ## Acceptance
 
 On the MacBook, the mini and one devcloud VM, signed in to production's org:
 
-1. **#521.** On a Mac with no folder of a project whose sessions run elsewhere: `sminos list --org` shows them under the project, the sidebar shows the project with them, and its Channel shows their messages, each marked with its machine.
-2. **A folder on one machine.** A folder on the mini with no git and no `.smns`, declared there over SSH with one command, is a row on the MacBook within the measured bound. "+ Session" on it starts a session on the mini in that folder. Its Channel works.
+1. **#521.** On a Mac with no folder of a project that is declared on another machine, by an act or by its `.smns`: `sminos list --org` shows its sessions under the project, the sidebar shows the project with them, and its Channel shows their messages, each marked with its machine. For a repository nobody declared, `sminos list --org` shows its sessions under the project and the sidebar shows them under their machine (§12.2).
+2. **A folder on one machine.** A folder on the mini with no git and no `.smns`, declared there over SSH with one command, is a row on the MacBook within the measured bound. "+ Session" on it starts a session on the mini in that folder. A session started in a terminal in a subfolder of it is under the same row. Its Channel works.
 3. **From elsewhere.** The same from the MacBook's app (Add project, the VM, a folder, Touch ID) and from the MacBook's terminal.
 4. **Link.** A folder on the MacBook added to that project: one row, two locations, sessions of both under it, one project in `sminos list` on both machines, both machines' messages in the Channel.
-5. **Clones.** The same repository on two machines is one row with no act.
-6. **Missing.** The folder renamed on disk: the location reads "folder not found", nothing is removed, Locate… restores it, and so does moving it back.
+5. **Clones.** The same repository on two machines is one row with no act, also when one clone holds a pinning `.smns` and the other does not. A clone under a declared plain folder stays in its repository's project.
+6. **Missing and moved.** A declared repository with no remote renamed on disk: the location reads "folder not found", nothing is removed, Locate… restores it in the same project, and so does moving it back.
 7. **Offline.** With the mini's daemon stopped the project is still listed after a relaunch, its location "offline".
-8. **Removal.** Remove acts on another machine's location; a retired machine's locations are gone.
+8. **Removal.** Remove acts on another machine's location; on a machine that is off it is held and delivered when the machine returns; a retired machine's locations are gone.
 9. **Signed out.** Every project and session as before (P5 acceptance 1).
-10. **One rule.** sminos and MAWS give the same project id for each directory of the shared vectors.
+10. **One rule.** sminos and MAWS give the same project id for each directory of the shared vectors: nested declarations, a `.smns` above and below a statement, a clone under a declared folder, a linked worktree, a subfolder, `/tmp` against `/private/tmp`.
+11. **No session moves twice.** Over restarts of the daemon, a missing org file, and both orders of upgrading `mawsd` and sminos, each session's count of `moved` events is at most one.
 
 ## Route
 
@@ -229,4 +258,6 @@ doperpowers:execspec, as a spec with milestones on two tracks. The desk track: t
 ## Decision Log
 
 1. **2026-11-10, the owner, at O8 M8's sitting.** The proposal: a project per org with each machine's location stored centrally, a folder declared from the app or a command line. Visibility follows access. Any folders may be linked. Declaring a path on another machine is allowed, as a request to that machine. The command line takes no separate login. The design is written right after M8 and built as a follow-up outside P5's acceptance.
-2. **2026-11-10, the architect.** Each machine states its own locations in one signed record kept by the hub; the head's list and a hub table were rejected (§15). The project's id is sminos's, minted for a folder that derives none; the app's key is unchanged; a location's project is derived unless linked (§2).
+2. **2026-11-10, the owner, to the first round of questions.** Every Mac lists the same projects; a `.smns` in a folder declares it; the command is `maws project …` (§12).
+3. **2026-11-10, the architect, from the desk track's review of revision 1.** The locations reach sminos as a field of the org frame, not a new frame or file. A `.smns` wins at its own folder and such a folder cannot be linked. A `.smns` naming no hub of this org is carried with `hub: false`. The per-session `join` stays above the rule. The file's name wins. sminos gains the leaving rule, counts declared locations as known checkouts, and compares canonical paths. Minting waits for a sminos that reads locations.
+4. **2026-11-10, the architect, from the critic's first round on revision 1.** Adopted: a project is its id and the app groups by id; stored statements change only by an act (revision 1's "derived unless linked" would have split a folder project when it gained a remote); a statement does not cover a clone beneath its folder, and the broadest folders get one only by an explicit add (revision 1's walk would have moved several hundred sessions on the owner's MacBook into a home project after one MAWS chat there); a revision counter in place of clocks; a machine never signs from an unknown index; the app holds a removal for a machine that is off; automatic finding of a moved folder is cut; RL §5.9 is amended; acceptance 1 is scoped to the owner's second answer and acceptance 11 counts moves. Not adopted: "a folder made a row by use gets no id". Every Mac lists the same rows by the owner's first answer, and a row with no id would be empty on every other Mac; the exception for the broadest folders and §8's bound answer the capture.
