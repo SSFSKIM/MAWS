@@ -132,7 +132,8 @@ export function insideOf(resolved: Resolved | null, directory: string, registry:
 export function defaultLinkOf(resolved: Resolved | null, registry: OrgProjects): string | null {
   if (resolved === null || resolved.label.source !== 'remote' || !resolved.label.key.startsWith('remote:')) return null;
   const remote = resolved.label.key.slice('remote:'.length);
-  return registry.projects.find((p) => p.id !== resolved.project && p.hub && p.locations.some((l) => l.stated === 'minted' && l.remote === remote))?.id ?? null;
+  // design §10: a replaced location's remote is another folder's, never a source of the link (as `suggestionOf` holds)
+  return registry.projects.find((p) => p.id !== resolved.project && p.hub && p.locations.some((l) => l.stated === 'minted' && l.state !== 'replaced' && l.remote === remote))?.id ?? null;
 }
 
 /** The registry projects a folder may be added to (a hub project: §G refuses another), by name. */
