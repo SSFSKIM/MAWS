@@ -54,3 +54,17 @@ export function refuseUnservedProjectActs(peer: () => Pick<WirePeer, 'minor'> | 
     return daemon.minor >= PROJECT_ACTS_MINOR ? undefined : refusalError(name, machineName, { code: 'not-offered' });
   };
 }
+
+/**
+ * The local state's capabilities as the connection manager reads them (`localCapabilities`). On the daemon shape, from
+ * the attached daemon's welcome, heard again at each of its state's changes. On the embedded shape no machine host runs
+ * in this process (the supervisor throws at a read of one: CI's e2e:cross-build), and the acts are this build's own
+ * services', so the supervisor is never asked and nothing is subscribed.
+ */
+export function localProjectActsSource(
+  hosts: { peer(owner: 'machine'): Pick<WirePeer, 'minor'> | null; onState(owner: 'machine', listener: () => void): () => void },
+  { embedded }: { embedded: boolean },
+): { read(): readonly string[] | null; onChange(listener: () => void): () => void } {
+  if (embedded) return { read: () => localProjectActs(null, { embedded: true }), onChange: () => () => {} };
+  return { read: () => localProjectActs(hosts.peer('machine'), { embedded: false }), onChange: (listener) => hosts.onState('machine', () => listener()) };
+}

@@ -33,7 +33,7 @@ import { emit, emitFrom, emitTo } from './ipc/events'; // P5 O9 M9: emitFrom, re
 import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P5 O6 M1: registerMachineHandler
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager (P5 O3-D M6: the stand-in gone)
-import { localProjectActs, PROJECT_ACT_COMMANDS, refuseUnservedProjectActs } from './machines/project-acts-peer'; // panel scalpel-3#2
+import { localProjectActsSource, PROJECT_ACT_COMMANDS, refuseUnservedProjectActs } from './machines/project-acts-peer'; // panel scalpel-3#2
 import { createRecordSigner, createStateSigner, createStepUp, promptTouchIDConfirmation } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer; M4b: its record signer
 import { harnessConfirmation, sheetConfirmation } from './device/step-up-sheet'; // P5 O7 M2: the step-up sheet before Touch ID
 import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
@@ -444,7 +444,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     dispatchLocal,
     budgets: COMMAND_BUDGETS_MS, // P5 O7 M5a: a cold machine's export is waited for its budget, not the link's 10 s
     // panel scalpel-3#2: whether this Mac's machine serves the project acts, as its daemon's welcome says (embedded: this build)
-    localCapabilities: { read: () => localProjectActs(hosts.peer('machine'), { embedded: data !== null }), onChange: (listener) => hosts.onState('machine', () => listener()) },
+    localCapabilities: localProjectActsSource(hosts, { embedded: data !== null }), // the embedded shape runs no machine host: never asked
     // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
     session,
     // P5 O7 M2: the development session's directMap, read at each dial (it is set once the session signed in); P5 O7 M7:
