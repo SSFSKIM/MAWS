@@ -432,6 +432,59 @@ describe('the Project socket after a wake, and its pings (P5 O15 M2b §G)', () =
     expect(g.wake.listeners()).toBe(0);
   });
 
+  // Task 5's review: a header read begun before a drop opens nothing when it resolves after it
+  it('a header read still out at a wake’s drop or at close() opens nothing when it resolves; a short wake waits on it', async () => {
+    const wake = fakeWake();
+    const reach = fakeReach();
+    const sockets: FakeSocket[] = [];
+    const reads: Array<(headers: Record<string, string>) => void> = [];
+    const lines: string[] = [];
+    const client = openProjectSocket({
+      hub: () => ({ url: 'https://hub.example.com', headers: () => new Promise((resolve) => reads.push(resolve)) }),
+      project: PROJECT,
+      after: 0,
+      wake: wake.source,
+      reach: reach.reach,
+      onLog: () => {},
+      onCaughtUp: () => {},
+      onAnswer: () => {},
+      onClosed: () => {},
+      socket: (url, headers) => {
+        const socket = new FakeSocket(url, headers);
+        sockets.push(socket);
+        return socket;
+      },
+      random: () => 0.5,
+      log: (line) => lines.push(line),
+    });
+    expect(reads).toHaveLength(1);
+    wake.wake(5_000); // under the drop: the read out is the open in flight
+    expect(lines).toContain(`[org-channel] ${PROJECT.slice(0, 8)}: wake after 5000 ms: opening`);
+    expect(reads).toHaveLength(1);
+    wake.wake(10_000);
+    expect(reach.waiting).toHaveLength(1);
+    reads[0]({ 'cf-access-token': 'before the wake' });
+    await flush();
+    expect(sockets).toHaveLength(0);
+    reach.answer(true);
+    await flush();
+    expect(reads).toHaveLength(2);
+    reads[1]({ 'cf-access-token': 'after the wake' });
+    await flush();
+    expect(sockets.map((socket) => socket.headers)).toEqual([{ 'cf-access-token': 'after the wake' }]);
+    expect(reach.waiting).toHaveLength(0);
+    // close() with a read out: it opens nothing either
+    sockets[0].end(1006);
+    await vi.advanceTimersByTimeAsync(1_000);
+    reach.answer(true);
+    await flush();
+    expect(reads).toHaveLength(3);
+    client.close();
+    reads[2]({ 'cf-access-token': 'after close' });
+    await flush();
+    expect(sockets).toHaveLength(1);
+  });
+
   it('the app’s own ends are a terminate, never a close(): a wake, a missed pong, close()', async () => {
     const h = woken();
     await flush();

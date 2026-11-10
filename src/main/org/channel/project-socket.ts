@@ -121,8 +121,13 @@ export function openProjectSocket(deps: ProjectSocketDeps): ProjectSocket {
   let waiting: HubWait | null = null;
   /** §G rule 2, while a socket is open. */
   let pings: Pings | null = null;
-  /** Each open begun; one whose headers resolve after a later one began opens nothing. */
+  /**
+   * Each open begun, and each drop: a header read whose turn is no longer this count opens nothing, so a read begun
+   * before a later open, a drop or `close()` cannot open a socket once the reason it was begun for is gone.
+   */
   let opens = 0;
+  /** A header read is out for the open of turn `opens`: that open is in flight, though no socket exists yet. */
+  let reading = false;
 
   function delay(): number {
     const steps = timing.FEED_BACKOFF_MS;
@@ -177,6 +182,8 @@ export function openProjectSocket(deps: ProjectSocketDeps): ProjectSocket {
   function drop(): void {
     clearTimer();
     stopWaiting();
+    opens++; // a header read still out opens nothing
+    reading = false;
     pings?.stop();
     pings = null;
     const held = socket;
@@ -223,7 +230,7 @@ export function openProjectSocket(deps: ProjectSocketDeps): ProjectSocket {
 
   /** §G rule 3: an open now when no window is open, else behind the reach's answer for the hub or its floor. */
   function reopen(): void {
-    if (closed || socket !== null || waiting !== null) return;
+    if (closed || socket !== null || waiting !== null || reading) return;
     const hub = deps.hub();
     if (hub === null) return; // the channel opens a new client at the session's next change
     if (!reach.windowOpen()) return void connect();
@@ -255,12 +262,16 @@ export function openProjectSocket(deps: ProjectSocketDeps): ProjectSocket {
     const hub = deps.hub();
     if (hub === null) return stopWaiting(); // the channel opens a new client at the session's next change
     let headers: Record<string, string>;
+    reading = true;
     try {
       headers = await hub.headers();
     } catch (error) {
+      if (turn !== opens) return;
       log(`the hub's headers did not resolve: ${(error as Error).message}`);
-      if (turn === opens) failed();
+      failed();
       return;
+    } finally {
+      if (turn === opens) reading = false;
     }
     if (closed || socket !== null || turn !== opens) return;
     const url = `${hub.url.replace(/\/+$/, '').replace(/^http/, 'ws')}${projectSocketPath(deps.project)}`;
@@ -346,7 +357,7 @@ export function openProjectSocket(deps: ProjectSocketDeps): ProjectSocket {
       if (pings !== null) {
         log(`wake after ${sleptMs} ms: ping sent`);
         pings.ping();
-      } else if (socket !== null || waiting !== null) {
+      } else if (socket !== null || waiting !== null || reading) {
         log(`wake after ${sleptMs} ms: opening`);
       } else {
         log(`wake after ${sleptMs} ms: no socket`);
@@ -380,6 +391,8 @@ export function openProjectSocket(deps: ProjectSocketDeps): ProjectSocket {
     close() {
       if (closed) return;
       closed = true;
+      opens++; // a header read still out opens nothing
+      reading = false;
       offWake?.();
       clearTimer();
       stopWaiting();
