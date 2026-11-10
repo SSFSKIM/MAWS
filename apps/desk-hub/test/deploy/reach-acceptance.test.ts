@@ -530,6 +530,9 @@ describe('the reach scenes on a build whose endpoint says `record` (P5 O8 M6b)',
     expect(refused.acts[0]).toMatchObject({ action: 'record.shares', args: { appSessionId: APP, member: B, grade: 'converse' }, stepUp: expect.anything() });
     expect(refused.acts[0]).not.toHaveProperty('session');
     expect(refused.acts[0]).not.toHaveProperty('context');
+    const owner = fakeChannel({ ack: () => 'step-up' });
+    await expect(recordAct(owner.remote as never, 'ref-a1', { session: SID }, { add: true, member: B })).rejects.toThrow('record.owners refused step-up');
+    expect(owner.acts[0]).toMatchObject({ action: 'record.owners', args: { session: SID, add: true, member: B }, stepUp: expect.anything() });
   });
 
   it('reads a session’s policy from record.policy, and fails an unsupported machine or an unreadable entry', () => {
