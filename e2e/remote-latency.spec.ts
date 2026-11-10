@@ -40,9 +40,9 @@ import type { MachineRef } from '../src/shared/machine/ref';
 import { BENCH, summarize, type ClockCheck } from '../test/support/local-latency';
 import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 import { LATENCY_STUB, markerOf, writeLatencyEngine } from '../test/support/latency-engine';
-import { parseLogText, readLogLines } from '../test/support/main-log';
+import { parseLogText, positionOf, readLogLines } from '../test/support/main-log';
 import { boundsOf, budgetMisses, CARRIERS, invalidReasons, loadVerdict, remoteLine, rttStats, type Bounds, type Carrier, type Exchange, type RemoteMeasures } from '../test/support/remote-latency';
-import { linkPending, loadVoid, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, WAKE_CASE, wakeMisses, wakeSummary, type WakeRecord } from '../test/support/remote-wake';
+import { linkPending, loadVoid, RESUME_PAGE_EVENTS, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, WAKE_CASE, wakeMisses, wakeSummary, type WakeRecord } from '../test/support/remote-wake';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { cleanupAll, lastTurn, linkOf, localCase, main, measureTurns, now, openToFirstRow, pings, probe, prompt, raw, roundTrips, statsOf, trust, TURN_MS, writtenOf, type CaseResult } from './support/remote-latency-page';
 import { startRemoteScene, type RemoteScene } from './support/remote-scene';
@@ -343,6 +343,20 @@ async function openSideBySide(launch: MawsLaunch, ref: MachineRef, sessions: rea
   await expect(composerIn(0, left), `B's session ${left.app} still in A's left pane`).toBeVisible({ timeout: 30_000 });
 }
 
+// The rows B's journal holds for a resume's first page from `after` (the cursor's row less one): from the cursor's row
+// through the row the page reads ahead and carries to the next, the first event-bearing row past the page's last event
+// (the journal is read seq after seq, so rows between are counted too). Read with the resume's own page, as B's endpoint
+// asks it (RESUME_PAGE_EVENTS events, no byte bound: the longest page), then the next event after it. Null when the page
+// reached the journal's end, where the rows after its last event are not known.
+type EventsPage = { events: { seq?: number | null }[]; lastSeq: number; complete: boolean };
+async function bPageRows(b: Daemon, s: BSession, after: number): Promise<number | null> {
+  const page = await b.request<EventsPage>('session.events', { appSessionId: s.app, afterSeq: after, limit: RESUME_PAGE_EVENTS });
+  if (page.complete) return null;
+  const next = await b.request<EventsPage>('session.events', { appSessionId: s.app, afterSeq: page.lastSeq, limit: 1 });
+  const ahead = next.events.find((e) => typeof e.seq === 'number')?.seq;
+  return typeof ahead === 'number' ? ahead - after : null;
+}
+
 // The last event of B's session, read on B once its turn is over: with nothing writing, it is the last event the launch's
 // stream can deliver, so a stream delivered to its end holds its place as its cursor. Read from the status's last row
 // back a little (a row may yield no event), paged to the end.
@@ -486,6 +500,14 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
       direct.stall();
       await Promise.all(sessions.map((s) => writeTurns(b, s, WAKE_CASE.turns)));
       const before = await linkOf(page, b.ref);
+      // each resume page's rows on B, read now: B is idle, and its journal lines fall before the restore, apart from the
+      // resume's own (readWake reads those from the restore on)
+      const pageRows: Record<string, number> = {};
+      for (const s of sessions) {
+        const at = positionOf(held[s.app]!);
+        const rows = at === null ? null : await bPageRows(b, s, at.seq - 1);
+        if (rows !== null) pageRows[s.app] = rows;
+      }
 
       // 3. The hour asleep, through main's seam
       const injectedAt = Date.now();
@@ -524,7 +546,7 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
       }
       // the last read is the launch's record: its counts run to here
       const inputOf = () => ({
-        carrier, ref: b.ref, expected, held, main: mainLog(), endpoint: parseLogText(b.log()), host: readLogLines(hostLog), launchedAt, stalledAt, injectedAt, restoredAt, hubRestoredAt,
+        carrier, ref: b.ref, expected, held, pageRows, main: mainLog(), endpoint: parseLogText(b.log()), host: readLogLines(hostLog), launchedAt, stalledAt, injectedAt, restoredAt, hubRestoredAt,
         requests: { hub: scene!.aHub.requests(), direct: direct.requests() },
       });
       const final = await within(() => readWake(inputOf()), (wake) => wake.failures.length === 0, READ_WITHIN_MS);
