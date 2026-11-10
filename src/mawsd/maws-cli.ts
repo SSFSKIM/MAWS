@@ -18,7 +18,7 @@ import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { ProjectForwardResult, ProjectsRegistry } from '@shared/ipc/schema/projects';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
-import { actRefusal, addWords, exitOf, linkWords, removeWords } from '@shared/machine/maws-words';
+import { actRefusal, addWords, canonicalPath, exitOf, linkWords, removeWords } from '@shared/machine/maws-words';
 import { EXIT, type CliDeps } from './cli';
 import { reachMachine, type MachineLink, type Reached } from './machine-client';
 
@@ -130,7 +130,7 @@ function parse(args: readonly string[]): Parsed {
 function targetOf(arg: string | undefined, cwd: string): Target {
   if (arg === undefined) return { local: cwd };
   const aimed = /^([A-Za-z0-9._-]+):(\/.*)$/.exec(arg);
-  if (aimed !== null && !existsSync(resolve(cwd, arg))) return { machine: aimed[1]!, path: aimed[2]! };
+  if (aimed !== null && !existsSync(resolve(cwd, arg))) return { machine: aimed[1]!, path: canonicalPath(aimed[2]!) };
   return { local: resolve(cwd, arg) };
 }
 
@@ -159,7 +159,7 @@ async function run(link: MachineLink, parsed: Parsed, deps: MawsDeps): Promise<n
       case 'show':
         return await show(link, directory, registry, parsed.json === true, deps);
       case 'remove': {
-        const row = await rowAt(link, directory);
+        const row = await rowAt(link, directory, { gone: true }); // a folder deleted or renamed away is removed by its old path
         await act(link, 'session.projects.remove', { id: row.id });
         return done(deps, removeWords(row.directory));
       }
@@ -218,13 +218,17 @@ async function show(link: MachineLink, directory: string, registry: ProjectsRegi
   return done(deps, lines.join('\n'));
 }
 
-/** The row at a folder of this machine, as the index holds it (its real path); refused when it is none here. */
-async function rowAt(link: MachineLink, directory: string): Promise<ProjectRecord> {
+/**
+ * The row at a folder of this machine, as the index holds it (its real path); refused when it is none here. With `gone`,
+ * a folder that is not there is looked for by the path as typed (absolute, NFC), the one its row was declared at.
+ */
+async function rowAt(link: MachineLink, directory: string, options: { gone?: true } = {}): Promise<ProjectRecord> {
   let real: string;
   try {
     real = realpathSync.native(directory).normalize('NFC');
   } catch {
-    throw new Refused(`not-a-directory: ${directory}`);
+    if (options.gone !== true) throw new Refused(`not-a-directory: ${directory}`);
+    real = directory.normalize('NFC');
   }
   const listed = (await ask(link, 'session.projects.list', undefined)) as CommandOutput<'session.projects.list'>;
   const row = (listed.rows ?? listed.projects).find((r) => r.directory === real && r.hidden !== true);

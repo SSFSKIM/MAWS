@@ -154,6 +154,21 @@ describe('maws project remove and link, on this machine', () => {
     expect(sub).toEqual({ code: 1, out: '', err: `not-declared: ${join(work, 'sub')} is not a project folder on this machine\n` });
   });
 
+  // review 1's finding 4: a folder deleted or renamed away is removed by the path its row was declared at
+  it('remove takes a folder that is gone by the path it was declared at, spelled as typed; link still needs the folder', async () => {
+    const gone = join(root, 'moved-away');
+    const d = daemon({ 'projects.registry': ok(registry()), 'session.projects.list': ok({ projects: [], revision: 1, rows: [record(gone, SCRAPE, { id: 'proj-7' })] }), 'session.projects.remove': ok(undefined) });
+    expect(await maws(['project', 'remove', gone], d.reach)).toEqual({ code: 0, out: `removed ${gone}
+`, err: '' });
+    expect(d.calls.at(-1)).toEqual(['session.projects.remove', { id: 'proj-7' }]);
+    expect((await maws(['project', 'remove', `${gone}/`], d.reach)).code, 'a trailing separator').toBe(0);
+    expect((await maws(['project', 'remove', '../moved-away'], d.reach)).code, 'relative to the working directory').toBe(0);
+    expect(await maws(['project', 'remove', join(root, 'never-here')], d.reach)).toEqual({ code: 1, out: '', err: `not-declared: ${join(root, 'never-here')} is not a project folder on this machine
+` });
+    expect(await maws(['project', 'link', gone, '--none'], d.reach)).toEqual({ code: 1, out: '', err: `not-a-directory: ${gone}
+` });
+  });
+
   it('link --into names the project; --none says which it is in again; one of the two is required', async () => {
     const d = daemon({
       'projects.registry': ok(registry()),
@@ -178,6 +193,17 @@ describe('maws project aimed at another machine', () => {
     expect(d.calls.at(-1)).toEqual(['projects.forward', { verb: 'link', machine: 'mini', path: '/srv/new', into: null }]);
     await maws(['project', 'remove', 'mini:/srv/new'], d.reach);
     expect(d.calls.at(-1)).toEqual(['projects.forward', { verb: 'remove', machine: 'mini', path: '/srv/new' }]);
+  });
+
+  // review 1's minor finding: another machine's path is sent in its one spelling, as its rows hold it
+  it('sends another machine’s path normalized: no trailing separator, no dot segments, NFC', async () => {
+    const d = daemon({ 'projects.registry': ok(registry()), 'projects.forward': ok({ ok: true, text: 'removed /srv/new' }) });
+    for (const spelled of ['mini:/srv/new/', 'mini:/srv/./old/../new', 'mini://srv//new']) {
+      await maws(['project', 'remove', spelled], d.reach);
+      expect([spelled, d.calls.at(-1)]).toEqual([spelled, ['projects.forward', { verb: 'remove', machine: 'mini', path: '/srv/new' }]]);
+    }
+    await maws(['project', 'remove', 'mini:/srv/cafe\u0301'], d.reach);
+    expect(d.calls.at(-1)).toEqual(['projects.forward', { verb: 'remove', machine: 'mini', path: '/srv/caf\u00e9' }]);
   });
 
   it('exits 2 with no app, signed out or with no window, 1 when not confirmed', async () => {

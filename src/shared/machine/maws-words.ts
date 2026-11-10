@@ -47,6 +47,20 @@ export function linkWords(answer: { project: ActRow; restated: boolean }, where:
 
 export const removeWords = (directory: string) => `removed ${directory}`;
 
+/**
+ * An absolute path on another machine in the one spelling its rows hold: no empty or `.` segment, `..` taken back, no
+ * trailing separator, NFC. Its filesystem is not here to ask, so this is the spelling alone, as `resolve` gives one here.
+ */
+export function canonicalPath(path: string): string {
+  const segments: string[] = [];
+  for (const segment of path.normalize('NFC').split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') segments.pop();
+    else segments.push(segment);
+  }
+  return `/${segments.join('/')}`;
+}
+
 /** A request aimed at another machine, as a terminal names it (`projects.forward`'s input). */
 export type AimedAct = { verb: 'add' | 'remove' | 'link'; machine: string; path: string; into?: string | null; own?: true; name?: string };
 

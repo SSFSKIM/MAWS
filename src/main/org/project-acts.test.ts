@@ -163,6 +163,19 @@ describe('a request shown in the page', () => {
     ]);
   });
 
+  // review 1's minor finding: a path spelled otherwise names the same location
+  it('finds the location under the path as its rows hold it, however the request spells it', async () => {
+    openWindow();
+    const s = scene();
+    s.reply('session.projects.remove', undefined);
+    s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape/' });
+    await s.decide('pa-1', true);
+    s.ask({ verb: 'remove', machine: 'mini', path: '/srv/./x/../scrape' }, 'pa-2');
+    await s.decide('pa-2', true);
+    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape' }], ['session.projects.remove', { id: 'p-scrape' }]]);
+    expect(s.answers).toEqual([answered('pa-1', { ok: true, text: 'removed /srv/scrape' }), answered('pa-2', { ok: true, text: 'removed /srv/scrape' })]);
+  });
+
   it('answers the machine’s refusal by its code, and a machine this Mac cannot reach now', async () => {
     openWindow();
     const s = scene({ links: [] });

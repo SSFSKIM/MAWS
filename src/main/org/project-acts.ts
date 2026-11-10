@@ -20,7 +20,7 @@ import type { CommandName, CommandResult, EventPayload } from '@shared/ipc/schem
 import type { ProjectActAsk, ProjectActAsks } from '@shared/ipc/schema/org';
 import type { ProjectForwardResult } from '@shared/ipc/schema/projects';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
-import { actRefusal, addWords, linkWords, NO_WINDOW, NOT_CONFIRMED, notSignedIn, removeWords } from '@shared/machine/maws-words';
+import { actRefusal, addWords, canonicalPath, linkWords, NO_WINDOW, NOT_CONFIRMED, notSignedIn, removeWords } from '@shared/machine/maws-words';
 import type { MachineRef } from '@shared/machine/ref';
 import type { MainHandler } from '../ipc/router';
 import { appWindows } from '../windows';
@@ -81,7 +81,7 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
       verb: request.verb,
       machine: machine.ref,
       machineName: machine.name,
-      path: request.path,
+      path: canonicalPath(request.path), // as that machine's rows hold it, however the terminal spelled it
       ...(request.into !== undefined && { into: request.into }),
       ...(intoName !== null && { intoName }),
       ...(request.own === true && { own: true as const }),

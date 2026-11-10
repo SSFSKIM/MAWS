@@ -2,7 +2,7 @@
 // and a remove print, on this machine and through the app on another; the refusals of a request aimed elsewhere; and the
 // exit code each refusal is.
 import { describe, expect, it } from 'vitest';
-import { actRefusal, addWords, exitOf, linkWords, NO_WINDOW, NOT_CONFIRMED, notRunningHere, notSignedIn, runThere } from './maws-words';
+import { actRefusal, addWords, canonicalPath, exitOf, linkWords, NO_WINDOW, NOT_CONFIRMED, notRunningHere, notSignedIn, runThere } from './maws-words';
 
 const ID = '0f6c7b1e-0000-4000-8000-000000000001';
 const OTHER = '0f6c7b1e-0000-4000-8000-000000000002';
@@ -64,5 +64,13 @@ describe('a refusal of a project act', () => {
     expect(actRefusal({ code: 'invalid_input', message: 'unknown-project: abc is in no verified projects record' })).toEqual({ ok: false, code: 'unknown-project', text: 'unknown-project: abc is in no verified projects record' });
     expect(actRefusal({ code: 'internal', message: 'session.projects.link: refused not-offered by machine mini', issues: { refusal: 'not-offered' } })).toEqual({ ok: false, code: 'not-offered', text: 'session.projects.link: refused not-offered by machine mini' });
     expect(actRefusal({ code: 'host_unavailable', message: 'Not sent: mini is offline' })).toEqual({ ok: false, code: 'host_unavailable', text: 'Not sent: mini is offline' });
+  });
+});
+
+// review 1's minor finding: another machine's path in the one spelling its rows hold
+describe("another machine's path", () => {
+  it('drops empty and dot segments and a trailing separator, takes `..` back, and is NFC', () => {
+    expect(['/srv/new/', '/srv//new', '/srv/./old/../new', '/srv/new/.'].map(canonicalPath)).toEqual(['/srv/new', '/srv/new', '/srv/new', '/srv/new']);
+    expect([canonicalPath('/'), canonicalPath('/..'), canonicalPath('/srv/cafe\u0301')]).toEqual(['/', '/', '/srv/caf\u00e9']);
   });
 });
