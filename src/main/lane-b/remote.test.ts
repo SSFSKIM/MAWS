@@ -16,7 +16,7 @@ import { BUILTIN_MODELS } from '@shared/sessions/models';
 import { project, record, status } from '../../../test/support/builders';
 import { FakeLink, MINI, type FakeAct } from '../../../test/lane-b/fake-link';
 import type { MainContext } from '../ipc/router';
-import { AGENT_TOO_LARGE, createRemoteLaneB, routeLaneB, type RemoteLaneB } from './remote';
+import { AGENT_TOO_LARGE, createRemoteLaneB, routeLaneB, standInForMachines, type RemoteLaneB } from './remote';
 import { UNRESOLVED_MAX } from './remote-spawn';
 import { startNotifier } from '../attention/notifier';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
@@ -108,6 +108,22 @@ describe('routeLaneB', () => {
     }
     expect(l.adapter.handles('session.events')).toBe(true); // read in pages the channel carries
     for (const name of ['session.status', 'session.get', 'session.update', 'session.drafts.get', 'laneA.send'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(false);
+  });
+
+  // The project registry's M11: a harness build's e2e fixture (src/main/org/registry-fixture.ts) stands in for a machine
+  // ahead of its link and step-up; what it leaves, and everything once it is removed, goes on as before.
+  it('answers from a harness stand-in first, ahead of the link, and as before once it is removed', async () => {
+    const l = lab();
+    const stood: string[] = [];
+    const remove = standInForMachines((machine, name) => (name === 'session.projects.addFolder' ? (stood.push(`${machine} ${name}`), { ok: true, value: 'stood in' } as unknown as CommandResult<CommandName>) : undefined));
+    expect(() => standInForMachines(() => undefined)).toThrow(/already installed/);
+    expect(await l.cmd('session.projects.addFolder', { directory: '/srv/next' })).toEqual({ ok: true, value: 'stood in' });
+    expect(await l.cmd('session.status', { appSessionId: APP })).toEqual({ ok: true, value: 'base' });
+    expect(stood).toEqual([`${MINI} session.projects.addFolder`]);
+    expect(l.link.acts).toEqual([]);
+    remove();
+    expect(await l.cmd('session.status', { appSessionId: APP })).toEqual({ ok: true, value: 'base' });
+    expect(l.base).toEqual(['session.status', 'session.status']);
   });
 });
 

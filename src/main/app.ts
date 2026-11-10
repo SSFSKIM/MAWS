@@ -56,8 +56,9 @@ import type { GrantDoor } from './org/grants'; // P5 O8 M4b
 import { installOrgPageFixture } from './org/page-fixture'; // P5 O8 M4a Task 8: a harness build's only
 import { installChannelFixture } from './org/channel-fixture'; // P5 O8 M7a Task 3: a harness build's only
 import { installShareFixture } from './org/share-fixture'; // P5 O8 M6b Task 3: a harness build's only
+import { installRegistryFixture } from './org/registry-fixture'; // the project registry's M11: a harness build's only
 import { createRemoteLaneA, routeLaneA } from './lane-a/remote'; // P5 O9 M9
-import { createRemoteLaneB, routeLaneB } from './lane-b/remote'; // P5 O7 M2
+import { createRemoteLaneB, routeLaneB, standInForMachines } from './lane-b/remote'; // P5 O7 M2; the project registry's M11: standInForMachines, its e2e fixture's
 import { ArtifactMachines } from './artifacts/machines'; // P5 O7 M5a
 import { dialDirect } from './machines/remote/carriers'; // P5 O7 M2: the dev session's directMap in front of it
 import { relayOnlyDial } from './machines/remote/bench-seam'; // P5 O7 M7: the live bench's relay case
@@ -423,6 +424,7 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     // P5 O8 M6b Task 3: the Share sheet's and the reach marks' e2e look seeds org.*, org.rows and machines.list
     // (org/share-fixture.ts), and holds the production rows' org.rows.changed, which signed out would clear the seed
     installShareFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, unpublish: unpublishOrgStatus, holdRows: () => void (rowsHeld = true) });
+    installRegistryFixture({ env: process.env, packaged: app.isPackaged, intercept: interceptCommand, standIn: standInForMachines, emit, onEmitted, unpublish: unpublishOrgStatus, holdRows: () => void (rowsHeld = true) }); // the project registry's M11: org.* and org.projects seeded, the other machines' project acts stood in for (org/registry-fixture.ts)
   }
   powerMonitor.on('resume', () => orgFeed.probe());
   powerMonitor.on('unlock-screen', () => orgFeed.probe());

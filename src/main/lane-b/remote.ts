@@ -277,6 +277,23 @@ export const NOT_OPEN = 'open the session to drive it';
 /** The remote drill-in: `fs.agentEvents` takes no byte budget, so an agent's disk window past the channel's bound can't cross. */
 export const AGENT_TOO_LARGE = (machine: string) => `This agent’s transcript on ${machine} is too large to show here yet`;
 
+// ---- harness: a stand-in for another machine's acts ---------------------------------------------------------------------
+// The project registry's e2e (src/main/org/registry-fixture.ts, M11): a harness build's fixture answers some commands
+// for machines that are not there, ahead of every link, step-up and send, as C5's `interceptCommand` answers a command
+// for this Mac. Only a harness build's main installs one (app.ts's guard on `__MAWS_HARNESS_BUILD__`); otherwise none is
+// set and `routeLaneB` is as before.
+/** Answers a command for another machine, or undefined to leave it to the link. */
+export type MachineStandIn = (machine: MachineRef, name: CommandName, input: unknown) => CommandResult<CommandName> | undefined;
+let machineStandIn: MachineStandIn | null = null;
+/** Installs the stand-in (one at a time); returns its removal. */
+export function standInForMachines(standIn: MachineStandIn): () => void {
+  if (machineStandIn !== null) throw new Error('a machine stand-in is already installed');
+  machineStandIn = standIn;
+  return () => {
+    if (machineStandIn === standIn) machineStandIn = null;
+  };
+}
+
 /**
  * The router's `remote`: a name the adapter handles, for a machine `remote` answers, goes to it; everything else to
  * `base`; `session.search` refused `not-offered` (an endpoint older than M6) is answered `host_unavailable`. A `session.get` of an RL2 machine's session is a pane's opening read, after its page subscribed: once answered,
@@ -284,6 +301,8 @@ export const AGENT_TOO_LARGE = (machine: string) => `This agent’s transcript o
  */
 export function routeLaneB(base: RemoteDispatch, remote: (machine: MachineRef) => RemoteLink | null, laneB: RemoteLaneB): RemoteDispatch {
   return async (machine, name, input, ctx) => {
+    const stood = machineStandIn?.(machine, name, input); // a harness build's fixture alone (above)
+    if (stood !== undefined) return stood;
     const link = laneB.handles(name) ? remote(machine) : null;
     if (link !== null) return laneB.dispatch(link, name, input, ctx);
     const result = await base(machine, name, input, ctx);
