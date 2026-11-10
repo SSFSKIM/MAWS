@@ -495,11 +495,13 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       if (error instanceof RelayUpgradeError && (error.status === 401 || error.status === 403)) once('relay-auth', `the hub refused the relay socket (${error.status}): the hub session needs renewing`);
       return { failed: `no relay (${errorWords(error)})` };
     }
+    const dialling = dialCounter("today's");
     try {
       return {
         channel: await handshake(
           async () => {
             if (signal.aborted) throw new Error('aborted');
+            dialling();
             return sealedOnly(closedOnAbort(signal, await socket.dial()));
           },
           signedIn,
@@ -544,8 +546,10 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     }
     bucket.take();
     let first: ByteDuplex | null = won.carrier;
+    const dialling = dialCounter("today's");
     const dial = async (): Promise<ByteDuplex> => {
       if (signal.aborted) throw new Error('aborted');
+      dialling();
       if (first !== null) {
         const carrier = first;
         first = null;
@@ -625,6 +629,15 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
   /** §F: a failed attempt's line, once per lane and reason until the next `up`. */
   function failedLine(which: Carrier | "today's", reason: string, next: number | null): void {
     once(`failed ${which} ${reason}`, `attempt failed (${which}): ${reason}; ${next === null ? 'no next attempt of its own' : `next in ${Math.round(next)} ms`}`);
+  }
+
+  /** §F: one attempt's dial counter; each dial past the first is a catch-up's redial and writes its line. */
+  function dialCounter(which: Carrier | "today's"): () => void {
+    let dials = 0;
+    return () => {
+      dials += 1;
+      if (dials > 1) log(`attempt (${which}): catch-up, dial ${dials}`);
+    };
   }
 
   const jittered = (ms: number) => ms * (1 + (random() * 2 - 1) * timing.BACKOFF_JITTER);
@@ -1044,6 +1057,13 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     if (!windowed) seek();
   }
 
+  /** The link's creation, a seek: inside an open window it enters the lanes, as an opening does less `reach.openWindow`. */
+  function begin(): void {
+    if (state === 'closed' || state === 'refused' || held || !reach.windowOpen()) return seek();
+    hadAnswer.direct = hadAnswer.relay = false;
+    enterLanes();
+  }
+
   /** Wherever today's code started an attempt: in the lanes, the lanes; while a lane attempt runs to its end, nothing. */
   function seek(): void {
     if (state === 'closed' || state === 'refused' || held) return;
@@ -1072,7 +1092,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       idle(l);
       l.running = false;
       l.spent = false;
-      l.count = 0;
+      l.count = l.attempt === null ? 0 : 1; // an attempt in flight across the entry (row 12's other lane's) is its first
       l.targets = [];
     }
     if (current !== null) return;
@@ -1172,6 +1192,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
 
   /** Rows 1 and 4: the attempt, the direct lane's only while the bucket would keep a token after it. */
   function attemptOn(l: Lane, target: LaneTarget): void {
+    if (l.count >= timing.LANE_ATTEMPTS) return spend(l, `${timing.LANE_ATTEMPTS} attempts`); // successes count too
     if (l.name === 'direct' && !bucket.holds(2)) return spend(l, BUCKET_SHORT);
     l.count += 1;
     const attempt: InFlight = { controller: new AbortController(), trust: null, recheck: false };
@@ -1193,11 +1214,7 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     attempt.trust = trust;
     if (signal.aborted) return { failed: 'aborted' };
     // the dial function throws once the signal fired, at the first dial and at each catch-up redial
-    let dials = 0;
-    const dialling = () => {
-      dials += 1;
-      if (dials > 1) log(`attempt (${which}): catch-up, dial ${dials}`);
-    };
+    const dialling = dialCounter(which);
     const options = { timeoutMs: timing.WINDOW_HANDSHAKE_MS };
     const failed = (error: unknown): LaneResult => ({ failed: signal.aborted ? 'aborted' : error instanceof ChannelError ? verdict(which, error) : errorWords(error) });
     if (which === 'direct') {
@@ -1452,9 +1469,17 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
     return count;
   }
 
-  /** A refusal, a close or a hold: the lanes stopped, their attempts aborted (row 10), the link today's. */
+  /**
+   * A refusal, a close or a hold: the lanes stopped, their attempts aborted (row 10), the link today's. Inside a window
+   * today's attempt and a recheck in flight are aborted too; with none open they keep today's handling.
+   */
   function leaveLanes(): void {
+    const windowed = phase !== 'today' || reach.windowOpen();
     for (const l of bothLanes()) abortLane(l);
+    if (windowed) {
+      abortToday();
+      abortRecheck();
+    }
     stopLanes();
     floorTimer = clear(floorTimer);
     phase = 'today';
@@ -1638,7 +1663,8 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       held = false;
       failures = 0;
       lossAt = now();
-      seek(); // the link left the lanes at its hold: today's attempt
+      log(`bench release: today's attempt (${reach.windowOpen() ? 'the window open' : 'no window'})`); // P5 O15 M2b Decision Log 18 (d)
+      startAttempt(); // the link left the lanes at its hold: today's attempt, a window open or not
     },
     close() {
       if (state === 'closed') return;
@@ -1662,6 +1688,6 @@ export function createRemoteLink(deps: RemoteLinkDeps): RemoteLink & { rename(na
       notify();
     },
   };
-  queueMicrotask(seek); // after the manager has subscribed, so it hears even a first attempt that fails at once
+  queueMicrotask(begin); // after the manager has subscribed, so it hears even a first attempt that fails at once
   return link;
 }
