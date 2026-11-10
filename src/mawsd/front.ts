@@ -78,7 +78,7 @@
 // moved here: the note is then the lock holder's to keep. Any other failure to load answers it host_unavailable.
 import { HostCommandError, thrownError, type DocPortEnd, type HostPort } from '@shared/host/runtime';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
-import { BROWSER_ENGINE_CAPABILITY, MACHINE_SPINE_CAPABILITY, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
+import { BROWSER_ENGINE_CAPABILITY, MACHINE_PROJECT_ACTS_CAPABILITY, MACHINE_SPINE_CAPABILITY, RENDER_CLIENT_CAPABILITY } from '@shared/host/socket-protocol';
 import { remoteClients, type RemoteClients } from '@shared/host/client-refs';
 import { eventPosition } from '@shared/host/stream-catchup';
 import type { SessionEvent } from '@shared/graph/events';
@@ -98,6 +98,7 @@ import { codecOf } from '@shared/ipc/validate';
 import type { ServicesBus } from '@shared/spine/bus';
 import { createClientPort, type ClientPortRequest, type FrontClientPort, type PortTarget, type RemotePortHandle } from './client-port';
 import { FrontStreams, STREAM_EVENTS, type Follower } from './front-streams';
+import { createProjectActs } from './project-acts';
 import type { LazySpine } from './spine-seam';
 import { SpineUnavailable } from './spine-seam';
 import type { EngineIntercept } from './spine-hosts';
@@ -105,10 +106,10 @@ import type { EngineIntercept } from './spine-hosts';
 // The front's own `machine` names, answered without the spine: the daemon's, the identity, and a client's own.
 // P5 O5 M4: the render seam's (artifacts.export, render.answer) and its e2e capture (daemon.e2eRender).
 // P5 O5 M5: a session's capabilities (session.capabilities). P5 O17 M3: a tab engine's browser work (browserEngine.work).
-export const FRONT_COMMANDS = ['artifacts.export', 'browserEngine.answer', 'browserEngine.ended', 'browserEngine.frame', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'daemon.e2eBrowserView' /* P5 O17 M9b */, 'daemon.e2eRender', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.restartEngineHost' /* P5 O16 M3b */, 'daemon.status', 'endpoint.local.act', 'endpoint.local.call' /* P5 O8 M6b */, 'endpoint.local.grants' /* P5 O8 M4b */, 'machine.client', 'machine.identity', 'render.answer', 'session.capabilities', 'session.follow'] as const;
+export const FRONT_COMMANDS = ['artifacts.export', 'browserEngine.answer', 'browserEngine.ended', 'browserEngine.frame', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'daemon.e2eBrowserView' /* P5 O17 M9b */, 'daemon.e2eRender', 'daemon.e2eSeam', 'daemon.endpoint', 'daemon.restart', 'daemon.restartEngineHost' /* P5 O16 M3b */, 'daemon.status', 'endpoint.local.act', 'endpoint.local.call' /* P5 O8 M6b */, 'endpoint.local.grants' /* P5 O8 M4b */, 'machine.client', 'machine.identity', 'projects.act.answer', 'projects.forward', 'projects.registry' /* the project registry's M12 */, 'render.answer', 'session.capabilities', 'session.follow'] as const;
 // The names a machine.sock client asks of the front for itself, never the endpoint. P5 O8 M6b: the local door is this
 // machine's own clients' way to the endpoint, never the endpoint's own way back to itself.
-const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['browserEngine.answer', 'browserEngine.ended', 'browserEngine.frame', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'endpoint.local.act', 'endpoint.local.call', 'endpoint.local.grants', 'machine.client', 'render.answer', 'session.follow']);
+const CLIENT_COMMANDS: ReadonlySet<string> = new Set(['browserEngine.answer', 'browserEngine.ended', 'browserEngine.frame', 'browserEngine.state', 'browserEngine.work', 'clientPort.answer', 'endpoint.local.act', 'endpoint.local.call', 'endpoint.local.grants', 'machine.client', 'projects.act.answer', 'projects.forward', 'projects.registry', 'render.answer', 'session.follow']);
 // P5 O5 M4: the engine host's render requests, which the render seam answers and no client hears; P5 O17 M3: and its
 // browser idle notice, which mawsd answers (M5)
 const DAEMON_EVENTS: ReadonlySet<string> = new Set(['maws.artifact.capture', 'maws.artifact.export', 'host.browserIdle']);
@@ -273,6 +274,9 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     log,
   });
   const offStreaming = options.hosts.onStreaming('engine-host', () => streams.relinked());
+  // The project registry's M12 (§K): a terminal's `maws` aimed at another machine, asked of the attached app that answers
+  // act requests (project-acts.ts), routed as the port routes a request with no asking client
+  const projectActs = createProjectActs({ app: () => [...clients].find((client) => options.isApp(client.facts.appPid) && client.facts.capabilities.includes(MACHINE_PROJECT_ACTS_CAPABILITY)) ?? null });
 
   const own: Record<(typeof FRONT_COMMANDS)[number], (input: unknown, context: HandlerContext, from: FrontClient | null) => unknown> = {
     'artifacts.export': (input) => render.exportForLibrary(input as CommandInput<'artifacts.export'>), // P5 O5 M4
@@ -350,6 +354,10 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       options.browserChanged?.(); // P5 O5 M5
     },
     'machine.identity': () => options.identity(),
+    // the project registry's M12 (§K): `maws`'s read of the org's projects (the daemon's, cold) and its way to the app
+    'projects.registry': () => options.daemon('projects.registry', undefined),
+    'projects.forward': (input, _context, from) => projectActs.forward(from!, input as CommandInput<'projects.forward'>),
+    'projects.act.answer': (input, _context, from) => projectActs.answer(from!, input as CommandInput<'projects.act.answer'>),
     'session.follow': (input, _context, from) => from!.follower.follow(input as CommandInput<'session.follow'>),
     'session.capabilities': (input) => options.capabilities?.((input as CommandInput<'session.capabilities'>).appSessionId as AppSessionId) ?? {}, // P5 O5 M5
   };
@@ -573,6 +581,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       clients.delete(this);
       this.follower.end();
       clientPort.gone(this);
+      projectActs.gone(this); // the project registry's M12
       browser.work.engineGone(this); // P5 O17 M3: its browser work, if it reported any
       browser.gone?.(this); // P5 O17 M6: its viewers' subscriptions
       this.grants.clear();
@@ -665,6 +674,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       streams.stop();
       remotes.clear();
       clientPort.close();
+      projectActs.close();
     },
   };
 }

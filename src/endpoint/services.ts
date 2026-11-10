@@ -8,7 +8,7 @@ import type { ClientRef, Reader } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { NewHostEntry } from '@shared/ipc/schema/channel';
 import type { MachineRef } from '@shared/machine/ref';
-import type { RegistrySeam } from '@shared/machine/registry';
+import type { RegistryRead, RegistrySeam } from '@shared/machine/registry';
 import type { PortTarget, RemotePortHandle } from '../mawsd/client-port';
 
 export interface EndpointServices {
@@ -116,6 +116,11 @@ export interface EndpointModule {
    * the index then holds `NO_REGISTRY`.
    */
   registry?: RegistrySeam;
+  /**
+   * The project registry's M12 (Interfaces §H's `RegistryRead`, §K): the org's projects as this endpoint holds them, for
+   * `maws project list`, `show` and `--into` (machine.sock's `projects.registry`). Absent from a module that has none.
+   */
+  registryRead?: RegistryRead;
 }
 
 /**

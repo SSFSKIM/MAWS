@@ -64,7 +64,7 @@ import { importSigningKey, isListingGone, NO_CERTIFICATES, stateHash, type Machi
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Home } from '@shared/machine/home-folders';
 import type { MachineRef } from '@shared/machine/ref';
-import type { ProjectsSource } from '@shared/machine/registry';
+import type { ProjectsSource, RegistryRead } from '@shared/machine/registry';
 import { ArtifactRanks } from './artifacts';
 import { Authorizer, type AuthorizeContext } from './authorize';
 import { Calls } from './calls';
@@ -211,6 +211,10 @@ export class Endpoint implements EndpointModule {
   readonly assetHolds: AssetHolds;
   /** The project registry (registry.ts): the machine's projects record, the held records, and the services' seam. */
   readonly registry: Registry;
+  /** The project registry's M12: `maws`'s read of the org's projects, the registry's own (Interfaces §H's RegistryRead). */
+  get registryRead(): RegistryRead {
+    return this.registry;
+  }
   /** P5 O8 M6b: the local door, this machine's own app's record acts and policy read, served by `mawsd` (local-door.ts). */
   readonly local: LocalDoor;
   /** What `start` subscribed to on mawsd's seam, let go at `stop`. */

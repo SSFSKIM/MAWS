@@ -24,7 +24,7 @@ import type { NewHostEntry } from '@shared/ipc/schema/channel';
 import type { MachineRef } from '@shared/machine/ref';
 import { enrollmentOnDisk, unloadedAnswer, UNENROLLED_STATUS } from '../endpoint/presence';
 import type { CheckoutSource } from '../endpoint/index';
-import type { ProjectsSource, RegistrySeam } from '@shared/machine/registry';
+import type { ProjectsSource, RegistryRead, RegistrySeam } from '@shared/machine/registry';
 import type { PortTarget, RemotePortHandle } from './client-port';
 import { lazyRegistry } from './projects-seam';
 import type { LazySpine } from './spine-seam';
@@ -125,6 +125,9 @@ export interface EndpointModule {
   // ask of the endpoint, handed to the spine's index at each load. Absent from a module that has none (a test's): the index
   // then holds `NO_REGISTRY`
   registry?: RegistrySeam;
+  // The project registry's M12 (Interfaces §H's RegistryRead, §K): the org's projects as the endpoint holds them, for
+  // machine.sock's `projects.registry`. Absent from a module that has none: the daemon answers an unenrolled machine
+  registryRead?: RegistryRead;
 }
 
 // O10's endpoint module (P5 O10 M10), one for each daemon, loaded when it is needed; `build` is the daemon's build id,
@@ -162,6 +165,11 @@ export class LazyEndpoint implements EndpointModule {
    * enrolled here, so no stored statement is possible.
    */
   readonly registry = lazyRegistry();
+
+  /** The project registry's M12: the loaded module's read of the org's projects; none while nothing is loaded. */
+  get registryRead(): RegistryRead | undefined {
+    return this.#module?.registryRead;
+  }
 
   constructor(build: string, load: () => Promise<Loaded>, extras: EndpointExtras = {}) {
     this.#build = build;

@@ -1038,6 +1038,11 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
         const call = input as CommandInput<'endpoint.local.call'>;
         return endpoint?.local === undefined ? { ok: false, code: 'unavailable' } : endpoint.local.call(call.name, call.input);
       }
+      // the project registry's M12 (§K): `maws`'s read of the org's projects; with no enrolled endpoint, this machine alone
+      case 'projects.registry': {
+        const read = endpoint?.registryRead?.read();
+        return read?.enrolled === true ? read : { enrolled: false, machine: { ref, name: machineName(env, hostname()) }, machines: [], projects: [] };
+      }
       // P5 O8 M4b: the machine's grant ledger as its owners read it, the door's `endpoint.grants`
       case 'endpoint.local.grants':
         return endpoint?.local === undefined ? { ok: false, code: 'unavailable' } : endpoint.local.call('endpoint.grants', null);
