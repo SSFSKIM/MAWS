@@ -146,7 +146,7 @@ function settle(scenario) {
       'bash',
       [
         '-c',
-        'set -uo pipefail; source "$0"; await_run() { :; }; sleep() { :; }; finish() { exit "$1"; }; settle_run; printf "%s\\n" "--" "$jobs" "--" "$run_attempt $conclusion" "$preemptions"',
+        'set -uo pipefail; source "$(dirname "$0")/ci-gate-pace.sh"; source "$0"; await_run() { :; }; sleep() { :; }; finish() { exit "$1"; }; settle_run; printf "%s\\n" "--" "$jobs" "--" "$run_attempt $conclusion" "$preemptions"',
         join(root, 'scripts/ci-gate-preemptions.sh'),
       ],
       { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, REPO: 'SSFSKIM/MAWS', run_id: run } },
@@ -338,8 +338,7 @@ test("ci-gate.sh names the final attempt on the line before the run's status, wh
     const wrapper = String.raw`#!/usr/bin/env bash
 case "$*" in
   "-R SSFSKIM/MAWS run list "*) echo ${run} ;;
-  "-R SSFSKIM/MAWS run watch ${run} "*) ;;
-  "-R SSFSKIM/MAWS run view ${run} --json status --jq .status") echo completed ;;
+  "api -i repos/SSFSKIM/MAWS/actions/runs/${run} --jq .status") printf 'HTTP/2.0 200 OK\r\nEtag: W/"completed"\r\n\r\ncompleted\n' ;;
   *) exec "$(dirname "$0")/gh-api" "$@" ;;
 esac
 `;
