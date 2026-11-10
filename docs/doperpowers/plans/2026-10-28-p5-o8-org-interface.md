@@ -156,7 +156,7 @@ After M3–M8 (advisory): the app's device becomes a root of the org and signs i
   - [x] (2026-11-10T05:38Z) Step 3, the revocation: signed by this Mac at version 24. The deployment admin device is removed, and its step-up and channel keys are revoked. The last `admin show` ran at 05:40:46Z.
   - [x] (2026-11-10) Step 4, the deletion: the admin's `keys.json` and `keys.json.org.json` are gone, and the directory is empty.
   - [x] (2026-11-10) Step 5, O15's check: one root, this Mac's device.
-  - [x] (2026-11-10) Step 6, the acceptance run: items 1 to 6 recorded. Item 7 is cited from M7b's live check on production, with the owner's fresh look pending.
+  - [x] (2026-11-10) Step 6, the acceptance run: items 1 to 6 recorded. Item 7 is cited from M7b's live check on production (P5 Decision Log 257): the owner's fresh look was not recorded at the sitting, and O15's closing verification takes it.
 
 ## Acceptance
 
@@ -4858,7 +4858,7 @@ A future child that shows an action conditionally should name the authority that
     - machines: `mini` and `macbook` listed, `dc-linux171-1e68` certified, the rest retired;
     - delegation `7872ff6c6ff6a58065ae0a68160b5dcb`, prefix `dc-`, expiring 2027-01-26T22:11:51.983Z;
     - `legacyRetired` at version 16.
-  - Adoption of version 24: the MacBook's endpoint at 05:40:36Z, and the mini's at 05:41:41Z (`mawsd endpoint status`, hub generation 925). **`dc-linux171-1e68`: pending** (the desk track reads it once `cua_repl` releases that VM, after 06:45Z).
+  - Adoption of version 24: the MacBook's endpoint at 05:40:36Z, and the mini's at 05:41:41Z (`mawsd endpoint status`, hub generation 925). `dc-linux171-1e68`'s at 05:38:54.091Z, 4 seconds after the head was issued (its `mawsd.log`: "endpoint: org state 24 removed 0 member(s), 1 device(s), revoked 2 key(s)"), read by the desk track at 06:12:31Z from the endpoint's files (`orgHighWater` 24, enrollment `org-listed`) once `cua_repl` released that VM.
 - **Step 4, the deletion.** The owner removed `keys.json` and `keys.json.org.json`. The architect listed `~/.local/state/desk-hub-production/device/`, and it is empty. The offline recovery key is untouched.
 - **Step 5, O15's check.** The page's Roots name one key, this Mac's device.
 - **Step 6, the acceptance run.**
@@ -4891,7 +4891,7 @@ Each was safe, because the authority refused rather than accepted: the hub's `40
 - Each project's channel is the app's one reader of the log plane.
 - The deployment admin's software root is revoked, and its key file is deleted.
 
-Acceptance 1 to 8 is recorded, with two facts still pending: `dc-linux171-1e68`'s adoption of version 24, and the owner's fresh look at item 7. The residue O8 leaves is in each milestone's section of `2026-10-28-p5-o8-report.md`, and the architect filed it as tracker rows at each landing. Two rows bear on the next work:
+Acceptance 1 to 8 is recorded. All three machines adopted version 24. Item 7 stands on M7b's live check (P5 Decision Log 257); the owner's fresh look at it was not recorded at the sitting and is O15's to take. The residue O8 leaves is in each milestone's section of `2026-10-28-p5-o8-report.md`, and the architect filed it as tracker rows at each landing. Two rows bear on the next work:
 - the hub doesn't announce new certificates (m4c-r1);
 - this Mac's `record.policy` answers for all its owners (m5b-r1).
 
