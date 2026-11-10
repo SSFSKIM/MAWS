@@ -17,6 +17,7 @@ import { archiveAfter, givenPastNotice, heldPastNotice, inventoryStreams, item3b
 const deploy = join(import.meta.dirname, '../../deploy');
 const staging = { worker: 'desk-hub-staging', host: STAGING_HOST };
 const SID = '0f3e8a52-7c1d-4b9e-9a61-2d4f6b8c0e13';
+const UID = '1a2b3c4d-7c1d-4b9e-9a61-2d4f6b8c0e13';
 const OTHER = '1a2b3c4d-7c1d-4b9e-9a61-2d4f6b8c0e13';
 
 /** A stand-in for devcloud: records each script it is handed, answers `reply`'s lines between the step markers. */
@@ -342,13 +343,24 @@ const THROUGH_APP = "widening reach on this machine is the app's: use MAWS (the 
 type Act = { machine: string; action: string; args: Record<string, unknown>; opId: string; stepUp?: unknown; session?: string; context?: unknown };
 type Answer = { ok: true; output: unknown } | { ok: false; code: string };
 
-/** A device's channel, faked: every act and call kept; acts answered by `ack` and `outcome`, calls by `answer`. */
-function fakeChannel(o: { ack?: (a: Act) => string; outcome?: (a: Act) => unknown; answer?: (name: string, input: Record<string, unknown>) => Answer } = {}) {
+type Msg = Record<string, unknown>;
+
+/** A device's channel, faked: every act and call kept; acts answered by `ack` and `outcome`, calls by `answer`, and a
+ * message the device sends by `send`, which answers into the channel's inbox. */
+function fakeChannel(o: { ack?: (a: Act) => string; outcome?: (a: Act) => unknown; answer?: (name: string, input: Record<string, unknown>, inbox: Msg[]) => Answer; send?: (m: Msg, inbox: Msg[]) => void } = {}) {
   const acts: Act[] = [];
   const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
+  const inbox: Msg[] = [];
   let n = 0;
   let closed = 0;
   const remote = {
+    inbox,
+    channel: { send: async (m: Msg) => o.send?.(m, inbox) },
+    waitFor: async (match: (m: Msg) => boolean, what: string, from = 0) => {
+      const found = inbox.slice(from).find(match);
+      if (found === undefined) throw new Error(`no ${what}`);
+      return found;
+    },
     device: {
       action: (fields: Omit<Act, 'opId'>) => ({ v: 1, org: 'staging-ssfskim', device: 'd1', opId: `op-${++n}`, opCreated: 't', nonce: 'n', created: 't', ...fields }),
       stepUp: async (a: Act) => ({ ...a, stepUp: { kid: 'k', sig: 's' } }),
@@ -360,7 +372,7 @@ function fakeChannel(o: { ack?: (a: Act) => string; outcome?: (a: Act) => unknow
     done: async (opId: string) => o.outcome?.(acts.find((a) => a.opId === opId)!) ?? { state: 'done', result: { changed: true, policyRev: 4 } },
     call: async (name: string, input: Record<string, unknown>) => {
       calls.push({ name, input });
-      return o.answer?.(name, input) ?? { ok: false as const, code: 'not-offered' };
+      return o.answer?.(name, input, inbox) ?? { ok: false as const, code: 'not-offered' };
     },
     close: () => void closed++,
   };
@@ -391,7 +403,7 @@ function recordingReport(): ReachReport & { checks: Array<{ item: string; check:
  * S on A1 and the run's machines, faked: S's policy as sminos keeps it (`access`, `shares`, `policyRev`), moved by the
  * session's own shell (narrowing) and by A's record acts, read back by A's `record.policy`; A1's listings to b1.
  */
-function fakeScene(o: { operator?: (change: Record<string, unknown>) => { rc: number; lines: string[] }; capabilities?: string[]; bAck?: (a: Act) => string; ignored?: (args: Record<string, unknown>) => boolean } = {}) {
+function fakeScene(o: { operator?: (change: Record<string, unknown>) => { rc: number; lines: string[] }; capabilities?: string[]; bAck?: (a: Act) => string; ignored?: (args: Record<string, unknown>) => boolean; ownEnded?: string } = {}) {
   const policy = { access: 'listed', shares: [] as Array<{ member: string; grade: string }>, policyRev: 3 };
   const shell: unknown[] = [];
   const operator: unknown[] = [];
@@ -430,16 +442,34 @@ function fakeScene(o: { operator?: (change: Record<string, unknown>) => { rc: nu
     outcome: (act) => ({ state: 'done', result: o.ignored?.(act.args) ? { changed: false, policyRev: policy.policyRev } : apply(Object.fromEntries(Object.entries(act.args).filter(([k]) => k !== 'session' && k !== 'appSessionId'))) }),
     answer: (name, input) => (name === 'record.policy' && input.session === SID ? { ok: true, output: { supported: true, policies: [{ session: SID, ...structuredClone(policy) }] } } : { ok: false, code: 'not-offered' }),
   });
+  const b1 = { scene: 'b1', vm, name: 'o18-b1-t', ref: 'ref-b1', owner: B };
+  const U = { label: 'U', session: UID, alias: 'u', launch: 'L-u', machine: b1 };
+  // B1's endpoint answers b1's full subscription to U with a snapshot of two rows, and a rows read on it in the stream.
   const b = fakeChannel({
     ack: o.bAck,
-    answer: (name) => (name === 'endpoint.listings' ? { ok: true, output: { listings: policy.access === 'private' && !policy.shares.some((s) => s.member === B) ? [] : [listing()] } } : { ok: false, code: 'not-offered' }),
+    answer: (name, input, inbox) => {
+      if (name === 'endpoint.listings') return { ok: true, output: { listings: policy.access === 'private' && !policy.shares.some((s) => s.member === B) ? [] : [listing()] } };
+      if (name === 'sminos.rows' && input.session === UID && input.before === 'r1') {
+        inbox.push({ t: 'ev', sub: input.sub, epoch: 'e', seq: 3, body: { kind: 'rows', body: { rows: [{ uuid: 'r0' }], more: false } } });
+        return { ok: true, output: { asked: true } };
+      }
+      return { ok: false, code: 'not-offered' };
+    },
+    send: (m, inbox) => {
+      if (m.t !== 'sub') return;
+      if (o.ownEnded !== undefined || (m.session as { id: string }).id !== UID) return void inbox.push({ t: 'ended', sub: m.sub, reason: o.ownEnded ?? 'grade' });
+      inbox.push({ t: 'subbed', sub: m.sub, mode: 'snapshot', epoch: 'e', seq: 2 });
+      const body = JSON.stringify({ kind: 'snapshot', body: { rows: [{ uuid: 'r2' }, { uuid: 'r1' }], more: true } });
+      inbox.push({ t: 'snap', sub: m.sub, epoch: 'e', seq: 2, page: 0, body: body.slice(0, 20) }, { t: 'snap', sub: m.sub, epoch: 'e', seq: 2, page: 1, last: true, body: body.slice(20) });
+    },
   });
   const opened: string[] = [];
   const scene = {
     S,
+    U,
     a: { member: A },
     b: { member: B },
-    machines: { a1 },
+    machines: { a1, b1 },
     run: { hub: { host: STAGING_HOST, org: STAGING_ORG }, scenes: ['a1', 'a2', 'b1'] },
     tag: 't1',
     channel: async (who: 'a' | 'b', m: { ref: string }) => {
@@ -591,7 +621,9 @@ describe('the reach scenes on a build whose endpoint says `record` (P5 O8 M6b)',
       ['pass', 'b1 is listed S by its access: org-view'],
       ['pass', 'b1 is listed S by its access: org-converse'],
       ['pass', 'at listed, shared with no one: b1’s converse and approve acts on S refused `grade`'],
+      ['pass', 'the member’s own session U, in full over b1’s channel'],
     ]);
+    expect(report.checks.at(-1)!.detail).toBe('subbed snapshot, its snapshot 2 row(s); sminos.rows ok, 1 earlier row(s) in the stream');
     expect(f.a.acts.map((a) => a.args.access)).toEqual(['private', 'listed', 'org-view', 'org-converse', 'listed']);
     expect(f.b.acts.map(({ action, session, context }) => ({ action, session, context }))).toEqual([
       { action: 'sminos.steer', session: SID, context: { lane: 'A', session: SID, launch: 'L-s' } },
@@ -604,7 +636,15 @@ describe('the reach scenes on a build whose endpoint says `record` (P5 O8 M6b)',
     const f = fakeScene();
     const report = recordingReport();
     await itemVisibility(f.scene, report);
-    expect(report.checks.at(-1)).toMatchObject({ status: 'fail', detail: 'sminos.steer accepted; sminos.decide accepted' });
+    expect(report.checks.at(-2)).toMatchObject({ status: 'fail', detail: 'sminos.steer accepted; sminos.decide accepted' });
+  });
+
+  it('the visibility item fails where b1 cannot read its own member’s session in full', async () => {
+    const f = fakeScene({ bAck: (a) => (a.action === 'sminos.steer' || a.action === 'sminos.decide' ? 'grade' : 'accepted'), ownEnded: 'grade' });
+    const report = recordingReport();
+    await itemVisibility(f.scene, report);
+    expect(report.checks.at(-1)).toMatchObject({ status: 'fail', check: 'the member’s own session U, in full over b1’s channel', detail: 'the full subscription to U ended grade' });
+    expect(f.opened.at(-1)).toBe(`b:ref-b1`);
   });
 
   it('the visibility item fails a level A’s act answered done but never set, as A’s record.policy reads it back', async () => {

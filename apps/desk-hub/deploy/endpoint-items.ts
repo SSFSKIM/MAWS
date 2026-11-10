@@ -12,7 +12,7 @@ import { randomBytes } from 'node:crypto';
 import { canonicalize, endorseDevice, generateSigningKey, keyId, OP_HORIZON_S, signEvent, SUB_CREDIT_MAX, verifyEvent, verifyListing, type Action, type ByteDuplex, type Certificates, type KeyHolder, type Listing, type LogEventV2, type OrgState, type RevokedKey, type Signed, type SignedOrgState } from 'org-protocol';
 import { ProjectSocket, type DeviceHuman } from 'org-protocol/test-support';
 import type { Person } from './hub';
-import type { EndpointMachine } from './endpoint-machine';
+import type { EndpointMachine, LaneBScene } from './endpoint-machine';
 import { DirectPacer, dialDirect, FrameRelay, openRemote, Remote, testDevice, throughTamper, upgradeStatus, type Msg, type RelayDialer, type RunDevice } from './endpoint-remote';
 import { LANE_B_STATE, laneAProblems, laneBProblems, laneBResume, resumeCursor, rowUuid, snapshotRows, type ItemReport, type LaneBCursor, type LaneBEvent, type LaneBSegment, type Segment } from './endpoint-verdicts';
 import type { Cleanup } from './proof';
@@ -273,6 +273,107 @@ async function effects(scene: Scene, text: string, settleMs = 8000): Promise<num
   return arrivals(scene, text);
 }
 
+/** The scene's lane B session, as `LaneBScene.up` answers it. */
+type LaneBUp = Awaited<ReturnType<LaneBScene['up']>>;
+const laneBUps = new WeakMap<Scene, Promise<LaneBUp>>();
+
+/** The scene's one lane B session, started by the first item that asks for it (9's digest check, 2's streams): the
+ * scene records one lane B session, and each start installs the plugin again. */
+function laneBSession(scene: Scene, source: LaneBScene): Promise<LaneBUp> {
+  let up = laneBUps.get(scene);
+  if (up === undefined) {
+    up = source.up(`${scene.tag}b`).then((started) => {
+      if (!scene.sessions.includes(started.engine)) scene.sessions.push(started.engine);
+      return started;
+    });
+    laneBUps.set(scene, up);
+  }
+  return up;
+}
+
+/** A lane B `cards` card: the request pending, its context and its digest, as the endpoint hydrates it (plane-b.ts). */
+type Card = { item?: { kind?: string }; request?: unknown; context?: { launchId: string; engineSessionId: string }; requestDigest?: { session: string; request: string; tool: string; input_sha256: string } };
+
+/** The pending cards of the latest whole `snap` of `sub` on `remote` (its pages 0…last joined), or null before one. */
+function latestCards(remote: Remote, sub: string): Card[] | null {
+  let pages: string[] = [];
+  let latest: Card[] | null = null;
+  for (const m of remote.inbox) {
+    if (m.sub !== sub || m.t !== 'snap') continue;
+    if (m.page !== pages.length) pages = [];
+    if (m.page !== pages.length) continue;
+    pages.push(String(m.body));
+    if (m.last !== true) continue;
+    try {
+      const body = JSON.parse(pages.join('')) as { pendingItems?: Card[] };
+      if (Array.isArray(body.pendingItems)) latest = body.pendingItems;
+    } catch {
+      // a snapshot that does not parse is not a card list
+    }
+    pages = [];
+  }
+  return latest;
+}
+
+/**
+ * 9b: a lane B permission answered under a digest altered after the card drew it is refused `digest-mismatch` by the
+ * engine host at the claim (src/engine-host/ops.ts), and nothing runs: the request stays pending. The same card's own
+ * digest is then answered (a denial), which settles it and shows the refusal was the alteration's.
+ */
+async function alteredDigest(scene: Scene, source: LaneBScene): Promise<string> {
+  const { app } = await laneBSession(scene, source);
+  const remote = await open(scene, scene.owner, 'direct');
+  const sub = `c9-${scene.tag}`;
+  const tag = `${scene.tag}d`;
+  let settled = false;
+  let card: Card | null = null;
+  /** The card answered with `reply` under `digest`: `refused <reason>`, `delivered`, or what else was said. */
+  const answer = async (digest: NonNullable<Card['requestDigest']>, reply: Record<string, unknown>) => {
+    const action = remote.device.action({ machine: scene.ref, action: 'session.answer', session: app, context: { lane: 'B', ...card!.context! }, requestDigest: digest, args: { appSessionId: app, requestId: card!.requestDigest!.request, answer: reply } });
+    const from = remote.inbox.length;
+    const said = await remote.act(action);
+    if (said !== 'accepted') return `not accepted: ${said}`;
+    const outcome = await remote.done(action.opId, from);
+    if (outcome.state === 'refused') return `refused ${String(outcome.reason)}`;
+    if (outcome.state === 'done' && (outcome.result as { ok?: unknown; outcome?: unknown } | undefined)?.outcome === 'delivered') return 'delivered';
+    return JSON.stringify(outcome).slice(0, 300);
+  };
+  try {
+    // The endpoint authorizes the subscription by sminos's record of the session, which reaches it a while after sminos
+    // lists the session: an `ended` before it is asked again.
+    await until(async () => {
+      const from = remote.inbox.length;
+      await remote.channel.send({ t: 'sub', sub, session: { lane: 'B', id: app }, view: 'cards', cursor: null, credit: SUB_CREDIT_MAX });
+      const said = await remote.waitFor((m) => m.sub === sub && (m.t === 'subbed' || m.t === 'ended'), `the answer to ${sub}`, from, 30_000);
+      return said.t === 'subbed';
+    }, `a cards subscription to ${app}`, 120_000, 3000);
+    const status = await remote.call('session.status', { appSessionId: app });
+    if (!status.ok) throw new Error(`session.status was answered ${status.code}`);
+    const { launchId, engineSessionId } = status.output as { launchId: string; engineSessionId: string };
+    const sent = await remote.act(remote.device.action({ machine: scene.ref, action: 'session.send', session: app, context: { lane: 'B', launchId, engineSessionId }, args: { appSessionId: app, content: `o15-digest ${tag}` } }));
+    if (sent !== 'accepted') throw new Error(`the send that raises the permission was answered ${sent}`);
+    const mine = (cards: Card[] | null) => cards?.find((c) => c.requestDigest?.tool === 'Bash' && JSON.stringify(c.request ?? null).includes(`o15-digest-${tag}`)) ?? null;
+    card = await until(() => mine(latestCards(remote, sub)), `the permission of \`o15-digest ${tag}\` pending`, 120_000, 500);
+    if (card.context === undefined || card.requestDigest === undefined) throw new Error(`the card carries no context or digest: ${JSON.stringify(card).slice(0, 300)}`);
+    const real = card.requestDigest;
+    const flipped = `${real.input_sha256[0] === '0' ? '1' : '0'}${real.input_sha256.slice(1)}`;
+    const altered = await answer({ ...real, input_sha256: flipped }, { kind: 'permission', decision: 'allow', scope: 'once' });
+    if (altered !== 'refused digest-mismatch') throw new Error(`an allow under the altered digest was ${altered}`);
+    await sleep(5000);
+    const still = mine(latestCards(remote, sub));
+    if (still?.requestDigest?.request !== real.request) throw new Error(`the request ${real.request} is no longer pending after the refused answer: it ran`);
+    const proper = await answer(real, { kind: 'permission', decision: 'deny' });
+    if (proper !== 'delivered') throw new Error(`a denial under the card's own digest was ${proper}`);
+    await until(() => mine(latestCards(remote, sub)) === null, `the request ${real.request} settled`, 60_000, 500);
+    settled = true;
+    return `request ${real.request} (Bash) answered allow with input_sha256 altered: refused digest-mismatch, and still pending 5 s later; denied under the card's own digest: delivered, and settled`;
+  } finally {
+    // A request the check left pending is denied under its own digest, so the session is left with nothing pending.
+    if (!settled && card?.requestDigest !== undefined && card.context !== undefined) await answer(card.requestDigest, { kind: 'permission', decision: 'deny' }).catch(() => {});
+    remote.close();
+  }
+}
+
 // ---- 9: either carrier -----------------------------------------------------------------------------------------------
 
 export async function item9(scene: Scene, report: ItemReport): Promise<void> {
@@ -332,6 +433,8 @@ export async function item9(scene: Scene, report: ItemReport): Promise<void> {
       return said.join('; ');
     });
   } else report.add('9', 'skip', 'a revoked device refused, and one a new state removes closed', 'no admin key in this run');
+  const sourceB = scene.target === 'production' ? null : (scene.machine.laneB ?? null);
+  await report.check('9', 'a permission answered under an altered digest is refused digest-mismatch, and nothing runs', async () => (sourceB === null ? { skip: 'no lane B session in this scene' } : alteredDigest(scene, sourceB)));
 
   await report.check('9', 'the direct listener binds only the tailnet’s addresses', async () => {
     const bound = await scene.machine.listening();
@@ -1317,8 +1420,7 @@ async function resumeWithoutLoss(scene: Scene, report: ItemReport): Promise<void
 
   if (sourceB !== null) {
     await report.check('2', 'both carriers subscribed to the lane B session, events flowing', async () => {
-      const up = await sourceB.up(`${scene.tag}b`);
-      if (!scene.sessions.includes(up.engine)) scene.sessions.push(up.engine);
+      const up = await laneBSession(scene, sourceB);
       const tracks = { relayed: new LaneBTrack(scene, up.app, `rb-${scene.tag}`, 'relayed'), direct: new LaneBTrack(scene, up.app, `db-${scene.tag}`, 'direct') };
       scene.cleanup.add('close item 2’s lane B channels', async () => {
         tracks.relayed.finish();
