@@ -99,11 +99,11 @@ async function mainOn(scene: MawsdScene, target: { f: Fixture; a: Remote }) {
   const acts = startProjectActs({
     hosts: {
       onEvent: hosts.onEvent.bind(hosts),
-      dispatch: ((...args: Parameters<typeof hosts.dispatch>) => {
-        const sent = hosts.dispatch(...args);
+      dispatch: ((owner: 'machine', name: CommandName, input: unknown) => {
+        const sent = hosts.dispatch(owner, name, input as never);
         answers.push(sent);
         return sent;
-      }) as typeof hosts.dispatch,
+      }) as never,
     },
     registry: { projects: () => NO_PROJECTS, machines: () => [{ ref: target.f.ref as MachineRef, name: 'mini' }] },
     roster: () => [target.f.ref as MachineRef],
