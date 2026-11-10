@@ -11,7 +11,7 @@ import { keyId, signingInput } from '../src/keys.ts';
 import { decodePairingCode, encodePairingCode, pairingFingerprint, pairingMac, pairingMacInput, verifyPairingMac } from '../src/pairing.ts';
 import { decodeProvisioningCodeV2, encodeProvisioningCodeV2 } from '../src/provisioning.ts';
 import { stateHash, verifyGenesis, verifyRewind, verifySuccessor, verifyTransition } from '../src/org-state.ts';
-import { contestedRefs, machineKeys, verifyCertRetirement, verifyEndpointRecord, verifyGrant, verifyListing, verifyMachineCert } from '../src/records.ts';
+import { contestedRefs, machineKeys, verifyCertRetirement, verifyEndpointRecord, verifyGrant, verifyListing, verifyMachineCert, verifyProjectsRecord } from '../src/records.ts';
 import type { OrgState, SignedOrgState } from '../src/types.ts';
 import { verifyWebAuthn } from '../src/webauthn.ts';
 import { replayChannel } from './replay-channel.ts';
@@ -53,6 +53,8 @@ async function run(set: VectorSet, c: Case): Promise<unknown> {
       return verifyListing(a[0], a[1], a[2], date(a[3]));
     case 'verifyEndpointRecord':
       return verifyEndpointRecord(a[0], a[1], a[2], date(a[3]));
+    case 'verifyProjectsRecord':
+      return verifyProjectsRecord(a[0], a[1], a[2], date(a[3]));
     case 'verifyEvent':
       return verifyEvent(a[0], a[1], a[2], a[3], date(a[4]));
     case 'signerFor':

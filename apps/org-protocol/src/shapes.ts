@@ -24,6 +24,9 @@ import type {
   OrgState,
   Passkey,
   ProjectEntry,
+  ProjectLocation,
+  ProjectsRecord,
+  KnownProject,
   RootTransition,
   Signed,
   SignedOrgState,
@@ -248,6 +251,63 @@ export function isEndpointRecord(value: unknown): value is EndpointRecord {
     isList(value.addresses, isText) &&
     isIsoMillis(value.issued)
   );
+}
+
+/**
+ * A projects record's bounds (Interfaces §A of docs/doperpowers/plans/2026-11-10-project-registry.md). Bytes are UTF-8;
+ * a name's length is counted in characters (code points), as Python's `len` counts them. `bytes` bounds the canonical
+ * form of the record's body, the text its signature covers.
+ */
+export const PROJECTS_RECORD_BOUNDS = { locations: 1_000, known: 1_000, bytes: 262_144, path: 4_096, key: 600, name: 128, remote: 512 } as const;
+
+const utf8 = new TextEncoder();
+const byteLength = (text: string) => utf8.encode(text).length;
+/** A project id or a row's id. */
+const isProjectId = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9._-]{1,64}$/.test(value);
+const isProjectName = (value: unknown): value is string => {
+  if (typeof value !== 'string') return false;
+  const length = [...value].length;
+  return length >= 1 && length <= PROJECTS_RECORD_BOUNDS.name;
+};
+const isBoundedText = (value: unknown, bytes: number): value is string => isText(value) && byteLength(value) <= bytes;
+/** Absolute and NFC (a real path, which only its machine can check, beside that). */
+const isLocationPath = (value: unknown): value is string => isBoundedText(value, PROJECTS_RECORD_BOUNDS.path) && value.startsWith('/') && value === value.normalize('NFC');
+
+function isProjectLocation(value: unknown): value is ProjectLocation {
+  return (
+    fields(value, ['pid', 'id', 'key', 'name', 'path', 'source'], ['nameRev', 'stated', 'hub', 'remote', 'state']) &&
+    isProjectId(value.pid) &&
+    isProjectId(value.id) &&
+    isBoundedText(value.key, PROJECTS_RECORD_BOUNDS.key) &&
+    isProjectName(value.name) &&
+    (value.nameRev === undefined || isCount(value.nameRev, 1)) &&
+    isLocationPath(value.path) &&
+    isOneOf(value.source, ['smns', 'remote', 'repository', 'folder'] as const) &&
+    (value.stated === undefined || isOneOf(value.stated, ['minted', 'linked'] as const)) &&
+    (value.hub === undefined || value.hub === false) &&
+    (value.remote === undefined || isBoundedText(value.remote, PROJECTS_RECORD_BOUNDS.remote)) &&
+    (value.state === undefined || isOneOf(value.state, ['missing', 'replaced'] as const))
+  );
+}
+
+function isKnownProject(value: unknown): value is KnownProject {
+  return fields(value, ['id', 'name']) && isProjectId(value.id) && isProjectName(value.name);
+}
+
+/**
+ * A projects record's body within its bounds: no two locations with one `pid` or one `path`, no two known projects with
+ * one id and none with a location's id, and a canonical form of at most `PROJECTS_RECORD_BOUNDS.bytes`.
+ */
+export function isProjectsRecord(value: unknown): value is ProjectsRecord {
+  if (!fields(value, ['org', 'machine', 'revision', 'issued', 'locations', 'known'])) return false;
+  if (!(isText(value.org) && isMachineRef(value.machine) && isCount(value.revision, 1) && isIsoMillis(value.issued))) return false;
+  const { locations, known } = value;
+  if (!isList(locations, isProjectLocation) || locations.length > PROJECTS_RECORD_BOUNDS.locations) return false;
+  if (!isList(known, isKnownProject) || known.length > PROJECTS_RECORD_BOUNDS.known) return false;
+  if (!unique(locations.map((l) => l.pid)) || !unique(locations.map((l) => l.path)) || !unique(known.map((p) => p.id))) return false;
+  const located = new Set(locations.map((l) => l.id));
+  if (known.some((p) => located.has(p.id))) return false;
+  return canonicalizable(value) && byteLength(canonicalize(value)) <= PROJECTS_RECORD_BOUNDS.bytes;
 }
 
 export function isCertRetirement(value: unknown): value is CertRetirement {
