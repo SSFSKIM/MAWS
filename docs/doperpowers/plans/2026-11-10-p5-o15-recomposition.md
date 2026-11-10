@@ -27,7 +27,7 @@ P5 moved everything that belongs to a machine out of the app: sessions, terminal
 ## Progress
 
 - [ ] M1 — No suite launches the app's embedded shape
-  - 2026-11-10: task review clean (one finding, fixed: Decision Log 7 (c)); class 1a green on 27740743a (run 42804585935). `--gates all` on M1's tree 549387e48: run 42808148412 green but for delivery.spec.ts:79, delivery.spec.ts:180 and browser-comment.spec.ts:545, each passing in 42829266756 (the first run's mini overflow lane at load 47; the rerun at load 2 to 7, :180 in 2.7 s). The measured groups and cross-build follow.
+  - 2026-11-10: task review clean (one finding, fixed: Decision Log 7 (c)); class 1a green on 27740743a (run 42804585935). `--gates all` on M1's tree 549387e48: run 42808148412 green but for delivery.spec.ts:79, delivery.spec.ts:180 and browser-comment.spec.ts:545, each passing in 42829266756 (the first run's mini overflow lane at load 47; the rerun at load 2 to 7, :180 in 2.7 s). Measured groups on 549387e48 (run 42830861005): `e2e:local-latency-daemon` p50 25.3 ms, p95 37.2 ms, within OX7; `e2e:daemon-idle` 96,259 KiB and 0.11 s per 600 s, within the bound; `e2e:artifacts-perf` first sync and acknowledged loss within their limits, its keystroke-to-ack p95 over 10 ms on `mawsd` (a void first reading, then a valid 10.6 ms in run 42837591610, Decision Log 13), for the owner's ruling; the box stays open until it. `e2e:cross-build` against 63443a3bd (run 42841694867): 5 passed, 4 skipped for this peer, (update) and (downgrade) on `mawsd` among the passes.
 - [ ] M2 — One launch outcome: `mawsd`, or the repair window
 - [ ] M2b — Resume after a wake by design, main's log on disk, and what the readiness read found
 - [ ] M3 — The final build on the three machines
