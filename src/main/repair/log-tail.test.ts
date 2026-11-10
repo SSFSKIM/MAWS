@@ -36,6 +36,27 @@ describe('the log tail', () => {
     expect(readLogTail(paths)?.lines).toEqual(Array.from({ length: 20 }, (_, i) => `tail ${i + 5}`));
   });
 
+  // Fix wave 1: the diagnostic read is best-effort; whatever fails on mawsd.log, the window still shows
+  it('falls back to mawsd.out when mawsd.log is a directory, and to null when neither can be read', () => {
+    mkdirSync(log());
+    expect(readLogTail(paths)).toBeNull();
+    writeFileSync(out(), 'starting\n');
+    expect(readLogTail(paths)).toEqual({ path: out(), lines: ['starting'] });
+  });
+
+  it.skipIf(process.getuid?.() === 0)('falls back to mawsd.out when mawsd.log cannot be opened', () => {
+    writeFileSync(log(), 'secret\n', { mode: 0o000 });
+    writeFileSync(out(), 'from out\n');
+    expect(readLogTail(paths)).toEqual({ path: out(), lines: ['from out'] });
+  });
+
+  it('shows the start of a last line longer than any window it reads, cut at 300 characters', () => {
+    writeFileSync(log(), `${'b'.repeat(300)}${'c'.repeat(1024 * 1024)}`);
+    expect(readLogTail(paths)?.lines).toEqual(['b'.repeat(300)]);
+    writeFileSync(log(), `first\n${'d'.repeat(1024 * 1024)}\n`);
+    expect(readLogTail(paths)?.lines).toEqual(['first', 'd'.repeat(300)]);
+  });
+
   it('is mawsd.out’s when the log has none, and null when neither has any', () => {
     expect(readLogTail(paths)).toBeNull();
     writeFileSync(log(), '\n\n');

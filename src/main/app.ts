@@ -14,7 +14,7 @@ import { hostname } from 'node:os'; // P5 O6 M1: the machine's name
 import { app, BrowserWindow, dialog, MessageChannelMain, screen, systemPreferences } from 'electron';
 import type { ClientRef } from '@shared/ipc/client';
 import { mainClient, pageOf } from './ipc/clients'; // P5 O3-E: mainClient, main's own asker
-import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
+import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchOutcome, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
 import { repairLaunch } from './repair'; // P5 O15 M2: the launch `mawsd` cannot start
 import { readMachineIdentity } from './machine/identity'; // P5 O15 M2: the profile's MachineRef, with no services' module
 import { beforeCommand, dispatchLocal, installRouter, invokeOwn } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's; P5 O3-E: invokeOwn, main's own calls; P5 O4: beforeCommand
@@ -234,7 +234,8 @@ void startWithProfileLock(app, () => {
   // private daemon), or the repair window, which says why and resolves once an attempt succeeds; the same process then
   // goes on into the app. Main opens none of the machine's files and takes no spine.lock: `mawsd` does.
   const machine = { local, localName };
-  return Promise.resolve(prepareLaunch())
+  // fix wave 1: a throw from the outcome's synchronous part is a rejection the chain handles (prepareLaunch throws none)
+  return new Promise<LaunchOutcome>((resolve) => resolve(prepareLaunch()))
     .then((outcome) => (outcome.ok ? outcome.launch : repairLaunch(outcome.unavailable, prepareLaunch, { packaged: app.isPackaged, profileDir: app.getPath('userData'), env: process.env, onSecondLaunch: (listener) => (repairSecondLaunch = listener) })))
     .then((launch) => {
       repairSecondLaunch = null;

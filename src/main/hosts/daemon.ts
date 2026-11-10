@@ -76,15 +76,31 @@ function defaultUnit(deps: InstallDeps): Unit | { none: string } {
   }
 }
 
-// §A's table over the launch's facts, before any host exists, and never a throw: a refused install or start is a
-// failure with launchctl's words. A test or harness launch on the main profile exits first, before the unit is read
-// (testLaunchRefusal). Synchronous where nothing is started (every profile but the main one), so a scratch profile's
-// launch starts as it always has.
+// §A's table over the launch's facts, before any host exists, and never a throw or a rejection: a refused install or
+// start is a failure with launchctl's words, and any other error on the main profile's way (fix wave 1: a unit whose
+// state cannot be read, a plist path that is a directory or unreadable) is `install-refused` with the error's own words,
+// so the repair window, all the owner sees of a launch that fails, always opens. A test or harness launch on the main
+// profile exits first, before the unit is read (testLaunchRefusal). Synchronous where nothing is started (every profile
+// but the main one), so a scratch profile's launch starts as it always has.
 export function resolveLaunch(input: LaunchInput, deps: LaunchDeps): LaunchOutcome | Promise<LaunchOutcome> {
   const mainProfile = isDefaultProfile(input.profileDir, deps.platform, deps.env, deps.home);
   const refusal = testLaunchRefusal(input.env, mainProfile);
   if (refusal !== null) deps.exit(1, refusal);
   if (!mainProfile) return told(e2eFault(input) ?? { ok: true, launch: { daemon: 'private' } }, deps);
+  try {
+    const launch = resolveMainLaunch(input, deps);
+    return launch instanceof Promise ? launch.catch((error: unknown) => launchFailed(error, deps)) : launch;
+  } catch (error) {
+    return launchFailed(error, deps);
+  }
+}
+
+// An error nothing on the launch's way classified: `install-refused`, its own words on one line, told as every outcome is
+export function launchFailed(error: unknown, deps: Pick<LaunchDeps, 'log'>): LaunchOutcome {
+  return told(failed('install-refused', messageOf(error)), deps);
+}
+
+function resolveMainLaunch(input: LaunchInput, deps: LaunchDeps): LaunchOutcome | Promise<LaunchOutcome> {
   const unit = defaultUnit(deps);
   if ('none' in unit) return told(failed('no-unit', unit.none), deps);
   const paths = daemonPaths(input.profileDir);

@@ -26,14 +26,22 @@ export interface RepairController {
 }
 
 export function createRepairController(deps: RepairControllerDeps): RepairController {
+  // Fix wave 1: the log is a diagnostic; a read that fails shows none, and the window shows either way
+  const readLog = (): RepairState['log'] => {
+    try {
+      return deps.readLog();
+    } catch {
+      return null;
+    }
+  };
   let failure: Unavailable = deps.first;
   let attempting = false;
   let done = false;
   let focusRetries = false; // Open Login Items was used: the window's next focus tries once
-  let current: RepairState = { kind: failure.kind, why: failure.why, packaged: deps.packaged, attempting, log: deps.readLog() };
+  let current: RepairState = { kind: failure.kind, why: failure.why, packaged: deps.packaged, attempting, log: readLog() };
 
   const change = () => {
-    current = { kind: failure.kind, why: failure.why, packaged: deps.packaged, attempting, log: deps.readLog() };
+    current = { kind: failure.kind, why: failure.why, packaged: deps.packaged, attempting, log: readLog() };
     deps.changed(current);
   };
   const attempt = () => {

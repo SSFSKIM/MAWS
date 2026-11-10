@@ -78,8 +78,9 @@ export function repairLaunch(first: Unavailable, attempt: () => LaunchOutcome | 
       controller.secondLaunch();
     });
     win.once('ready-to-show', () => showAppWindow(win, env));
-    if (devServerUrl) void win.loadURL(new URL('repair.html', devServerUrl).href);
-    else void win.loadFile(join(__dirname, '../renderer/repair.html'));
+    // fix wave 1: a page that fails to load is said in main's log, never a rejection nothing handles
+    const loaded = devServerUrl ? win.loadURL(new URL('repair.html', devServerUrl).href) : win.loadFile(join(__dirname, '../renderer/repair.html'));
+    loaded.catch((error: unknown) => console.error('[repair] the repair page did not load', error));
   });
 }
 

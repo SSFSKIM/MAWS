@@ -262,6 +262,21 @@ describe('a packaged start that does not end in a welcome', () => {
   });
 });
 
+// Fix wave 1 (the task review; the architect's rule: nothing between the launch's start and the repair window's first
+// paint throws or rejects past it): a unit whose state cannot be read, through the production reader over a real
+// filesystem fault (a directory where the LaunchAgent's plist goes) and a fake runner, is the repair window's state,
+// install-refused with the error's own words, on either build, never an exception
+describe('a unit whose state cannot be read', () => {
+  it.each([false, true])('packaged %s: a directory at the plist’s path is install-refused with the read’s words, never a throw', async (packaged) => {
+    mkdirSync(plistPath(), { recursive: true });
+    let outcome: LaunchOutcome | undefined;
+    expect(() => void (outcome = resolveLaunch({ env: {}, packaged, profileDir: defaultProfile(), program: packaged ? PACKAGED : CHECKOUT }, deps()) as LaunchOutcome)).not.toThrow();
+    expect(await outcome).toEqual(failure('install-refused', /EISDIR/));
+    expect((await outcome as Extract<LaunchOutcome, { ok: false }>).unavailable.why).not.toContain('\n');
+    expect(logs.at(-1)).toMatch(/^\[hosts\] mawsd cannot start \(install-refused\): .*EISDIR/);
+  });
+});
+
 // §C: the e2e fault stands a failure in for a scratch profile's private daemon, in an unpackaged e2e launch alone
 describe('the e2e fault', () => {
   const faultFile = () => join(home, 'fault');

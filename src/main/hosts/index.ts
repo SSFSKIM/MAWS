@@ -23,7 +23,7 @@ import { isDefaultProfile, unitFor, type InstallDeps } from '../../mawsd/install
 import { DEFAULT_LABEL, type UnitProgram } from '../../mawsd/units/unit';
 import { emit } from '../ipc/events';
 import { registerMainHandler } from '../ipc/router';
-import { daemonHostSpecs, daemonStart, resolveLaunch, unitRunsThisApp, watchDaemon, type LaunchOutcome, type LaunchShape } from './daemon';
+import { daemonHostSpecs, daemonStart, launchFailed, resolveLaunch, unitRunsThisApp, watchDaemon, type LaunchOutcome, type LaunchShape } from './daemon';
 import { watchEngineHandover } from './engine-handover'; // P5 O16 M3c fix wave 2
 import { hostEventToWindows } from './window-events'; // P5 O17 M9b
 import { retiredHostModeNotice, testLaunchRefusal } from './mode'; // P5 O2 landing; P5 O15 M2: the retired variable
@@ -46,12 +46,21 @@ const program = (): UnitProgram => {
   return { runtime: process.execPath, entry };
 };
 
+// The account's name; $USER where the system has no passwd entry to give it (userInfo throws then)
+function userName(): string {
+  try {
+    return userInfo().username;
+  } catch {
+    return process.env.USER ?? '';
+  }
+}
+
 const unitDeps = (): InstallDeps => ({
   platform: process.platform,
   home: homedir(),
   env: process.env,
   uid: process.getuid?.() ?? -1,
-  user: userInfo().username,
+  user: userName(), // fix wave 1: read on the launch's way, so it never throws
   run: (command, args) => {
     const result = spawnSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000 });
     return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? (result.error ? String(result.error) : '') };
@@ -63,11 +72,18 @@ const unitDeps = (): InstallDeps => ({
 // there is none (every profile but the main one). Asked again by the repair window's each attempt. P5 O15 M2: a
 // MAWS_HOST_MODE the environment still names is said once, at the first ask.
 let hostModeTold = false;
+// Fix wave 1: never a throw or a rejection either; what goes wrong before resolveLaunch (the launch's facts) is
+// `install-refused` with its words, as resolveLaunch's own errors are, so the repair window opens.
 export function prepareLaunch(): LaunchOutcome | Promise<LaunchOutcome> {
-  const retired = hostModeTold ? null : retiredHostModeNotice(process.env);
-  hostModeTold = true;
-  if (retired !== null) console.log(retired);
-  return resolveLaunch({ env: process.env, packaged: app.isPackaged, profileDir: app.getPath('userData'), program: program() }, { ...unitDeps(), log: (line) => console.log(line), exit: refuse });
+  const log = (line: string) => console.log(line);
+  try {
+    const retired = hostModeTold ? null : retiredHostModeNotice(process.env);
+    hostModeTold = true;
+    if (retired !== null) log(retired);
+    return resolveLaunch({ env: process.env, packaged: app.isPackaged, profileDir: app.getPath('userData'), program: program() }, { ...unitDeps(), log, exit: refuse });
+  } catch (error) {
+    return launchFailed(error, { log });
+  }
 }
 
 // P5 O2 landing: a test or harness launch on the default profile (testLaunchRefusal) ends here, before the profile's

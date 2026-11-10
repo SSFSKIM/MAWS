@@ -126,6 +126,19 @@ describe('the repair controller', () => {
     expect(controller.state()).toMatchObject({ kind: 'not-loaded', why: 'boom', attempting: false });
   });
 
+  // Fix wave 1: the window shows whatever the log read does
+  it('starts and changes with no log when reading it throws', async () => {
+    const { controller, states, answer } = scene({
+      readLog: () => {
+        throw new Error('EISDIR: illegal operation on a directory, read');
+      },
+    });
+    expect(controller.state().log).toBeNull();
+    controller.act('retry');
+    await answer({ ok: false, unavailable: NOT_LOADED });
+    expect(states.map((state) => [state.attempting, state.log])).toEqual([[true, null], [false, null]]);
+  });
+
   it('takes a synchronous outcome as well', () => {
     const { controller, deps } = scene({ attempt: () => ({ ok: true, launch: { daemon: 'private' } }) });
     controller.act('retry');

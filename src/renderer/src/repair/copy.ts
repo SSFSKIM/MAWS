@@ -56,7 +56,7 @@ export function actions(kind: RepairKind, packaged: boolean): ActionCopy[] {
     case 'not-loaded':
       return [LOGIN, TRY_AGAIN, QUIT];
     case 'install-refused':
-      return [LOGIN, REINSTALL, QUIT];
+      return [LOGIN, packaged ? REINSTALL : TRY_AGAIN, QUIT]; // a development build never installs a unit
     case 'not-started':
       return [packaged ? REINSTALL : TRY_AGAIN, SHOW_LOG, QUIT];
   }

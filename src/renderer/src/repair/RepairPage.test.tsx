@@ -52,6 +52,12 @@ describe('the repair page', () => {
     expect(actions()).toEqual(['Open Login Items…', 'Reinstall and Start', 'Quit MAWS']);
   });
 
+  // Fix wave 1 (the architect's condition a): a development build never installs a unit, so its retry is Try Again
+  it('install-refused on a development build: Open Login Items…, Try Again, Quit MAWS', async () => {
+    await shown(state('install-refused', { packaged: false }));
+    expect(actions()).toEqual(['Open Login Items…', 'Try Again', 'Quit MAWS']);
+  });
+
   it('not-started: the wait’s answer and the log; the retry labelled by the build', async () => {
     const log = { path: '/p/mawsd/mawsd.log', lines: ['[mawsd] starting', '[mawsd] the lock is held by pid 4100'] };
     await shown(state('not-started', { why: 'no mawsd welcomed a hello on machine.sock within 10 s', log }));
