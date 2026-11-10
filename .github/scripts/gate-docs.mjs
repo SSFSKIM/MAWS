@@ -1,5 +1,7 @@
 // A docs-only landing still runs a real check on the tested tree. Classification uses git, never the caller's
 // affected-path trailers; the same unread/data boundary as unit selection excludes suite-read evidence.
+import process from 'node:process';
+import console from 'node:console';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';

@@ -433,7 +433,7 @@ jobs:
           HEAD_MESSAGE: ${{ github.event.head_commit.message }}
           GATE_RUNNER: ${{ vars.GATE_RUNNER }}
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
-        run: node .github/scripts/gate-plan.mjs
+        run: node .github/scripts/gate-plan.mjs --git-docs
       - id: static-checks
         run: echo "matrix=$(node .github/scripts/gate-static.mjs)" >>"$GITHUB_OUTPUT"
 

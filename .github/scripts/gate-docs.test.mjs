@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import process from 'node:process';
+import { URL, fileURLToPath } from 'node:url';
 import { docsOnlyChange, docsOnlyPaths, checkTracker, checkDecisionLog } from './gate-docs.mjs';
 import { planOf } from './gate-plan.mjs';
 
@@ -82,4 +84,54 @@ test('Decision Log entries are consecutive single lines, with blank lines allowe
   const good = '# Plan\n\n## Decision Log\n\n1. first\n\n2. second\n\n## Outcomes and retrospective\nprose\n';
   assert.deepEqual(checkDecisionLog(good), []);
   for (const bad of [good.replace('2. second', '3. gap'), good.replace('2. second', '1. duplicate'), good.replace('2. second', '2. second\n   continuation'), good.replace('1. first', '0. zero'), good.replace('## Decision Log', '## Missing'), good.replace('1. first\n\n2. second', '')]) assert.ok(checkDecisionLog(bad).length > 0, bad);
+});
+
+test('only the workflow git-docs entry point reads history; ordinary planner clients ignore ambient Actions context', (t) => {
+  const r = repository(t);
+  r.commit('docs/notes.md', 'docs');
+  const head = r.nonce();
+  writeFileSync(join(r.cwd, 'package.json'), JSON.stringify({ scripts }));
+  const output = join(r.cwd, 'output');
+  const summary = join(r.cwd, 'summary');
+  const entry = fileURLToPath(new URL('./gate-plan.mjs', import.meta.url));
+  const run = (args, sha) => {
+    writeFileSync(output, '');
+    execFileSync(process.execPath, [entry, ...args], { cwd: r.cwd, env: { PATH: process.env.PATH, GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/example', GITHUB_SHA: sha, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary, HEAD_MESSAGE: 'Gates: static' } });
+    return readFileSync(output, 'utf8');
+  };
+  assert.match(run([], 'missing-commit'), /^static=true$/m);
+  const checked = run(['--git-docs'], head);
+  assert.match(checked, /^static=false$/m);
+  assert.match(checked, /^docs=true$/m);
+});
+
+test('gate requests, trailers, dispatch inputs and environment cannot claim a code tree is docs-only', (t) => {
+  const r = repository(t);
+  r.commit('source.js', 'code');
+  const head = r.nonce();
+  writeFileSync(join(r.cwd, 'package.json'), JSON.stringify({ scripts }));
+  const output = join(r.cwd, 'output');
+  const entry = fileURLToPath(new URL('./gate-plan.mjs', import.meta.url));
+  const cases = [
+    { HEAD_MESSAGE: 'Gates: static' },
+    { HEAD_MESSAGE: 'Gates: static\nDocs-Only: true\nCI-Gates: docs\nAffected-Count: 1\nAffected: M\tdocs/notes.md' },
+    { HEAD_MESSAGE: 'Gates: static\nSelection: affected\nAffected-Count: 1\nAffected: M\tdocs/notes.md' },
+    { EVENT: 'workflow_dispatch', INPUT_GATES: 'static', INPUT_DOCS_ONLY: 'true' },
+    { HEAD_MESSAGE: 'Gates: static', DOCS_ONLY: 'true', INPUT_DOCS_ONLY: 'true', CI_GATES: 'docs', GATE_RUNNER: 'pool' },
+    { HEAD_MESSAGE: 'Gates: static', DOCS_ONLY: 'true', GATE_RUNNER: 'macos' },
+    { HEAD_MESSAGE: 'Gates: docs', invalid: true },
+    { EVENT: 'workflow_dispatch', INPUT_GATES: 'docs', invalid: true },
+  ];
+  for (const { invalid, ...request } of cases) {
+    writeFileSync(output, '');
+    const result = spawnSync(process.execPath, [entry, '--git-docs'], { cwd: r.cwd, encoding: 'utf8', env: { PATH: process.env.PATH, EVENT: 'push', GITHUB_SHA: head, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(r.cwd, 'summary'), ...request } });
+    const outputs = readFileSync(output, 'utf8');
+    assert.doesNotMatch(outputs, /^docs=true$/m, JSON.stringify(request));
+    if (invalid) { assert.equal(result.status, 1); assert.match(result.stderr, /no such gate: docs/); }
+    else { assert.equal(result.status, 0, result.stderr); assert.match(outputs, /^static=true$/m); }
+  }
+  const cli = fileURLToPath(new URL('../../scripts/ci-gate.sh', import.meta.url));
+  const forgedFlag = spawnSync('bash', [cli, r.cwd, '--gates', 'static', '--docs-only'], { encoding: 'utf8' });
+  assert.equal(forgedFlag.status, 2);
+  assert.match(forgedFlag.stderr, /unknown.*--docs-only|no such.*--docs-only/);
 });

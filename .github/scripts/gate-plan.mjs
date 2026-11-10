@@ -108,7 +108,6 @@ import { appendFileSync, readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { affected } from './gate-affected.mjs';
-import { docsOnlyChange } from './gate-docs.mjs';
 import { backlogOf, utcTimestampOf } from './gate-backlog.mjs';
 
 const words = (text = '') => text.split(/[\s,]+/).filter(Boolean);
@@ -547,7 +546,7 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const { scripts } = JSON.parse(readFileSync('package.json', 'utf8'));
-    const docsOnly = process.env.GITHUB_ACTIONS === 'true' && Boolean(process.env.GITHUB_REF) && docsOnlyChange(process.cwd(), process.env.GITHUB_SHA);
+    const docsOnly = process.argv.includes('--git-docs') && (await import('./gate-docs.mjs')).docsOnlyChange(process.cwd(), process.env.GITHUB_SHA);
     const { outputs, summary, stdout, overflowShadowCount } = planOf(process.env, scripts, Date.now(), { docsOnly });
     appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(outputs).map(([key, value]) => `${key}=${value}\n`).join(''));
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
