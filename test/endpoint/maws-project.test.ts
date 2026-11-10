@@ -107,7 +107,7 @@ async function mainOn(scene: MawsdScene, target: { f: Fixture; a: Remote }, opti
         return sent;
       }) as never,
     },
-    registry: { projects: () => NO_PROJECTS, machines: () => [{ ref: target.f.ref as MachineRef, name: 'mini' }] },
+    registry: { projects: () => NO_PROJECTS, machines: async () => [{ ref: target.f.ref as MachineRef, name: 'mini' }] },
     roster: () => [target.f.ref as MachineRef],
     link: (ref) => (ref === target.f.ref ? target.a : null),
     send: (r, name, input) => viaLaneB(target.f, r, name, input),
@@ -194,7 +194,7 @@ describe('maws against an enrolled endpoint, with no app', () => {
       known: [],
     };
     await f.endpoint.registry.held.frame({ t: 'projects', record: await signRecord(SIGNING_DOMAINS.projects, body, studioKey.privateKey, studioKey.pub) });
-    await reached(() => f.endpoint.registry.read().projects.some((p) => p.id === id), 'studio’s record held');
+    await reached(() => f.endpoint.registry.projects().some((p) => p.id === id), 'studio’s record held');
 
     const scene = new MawsdScene('maws-pr-');
     scenes.push(scene);

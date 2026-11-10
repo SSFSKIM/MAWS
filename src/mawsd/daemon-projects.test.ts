@@ -18,7 +18,7 @@ afterEach(async () => {
 
 class ReadingEndpoint implements EndpointModule {
   read = { enrolled: true, machine: { ref: '', name: 'mini' }, machines: [] as unknown[], projects: [] as unknown[] };
-  readonly registryRead = { read: () => this.read as never };
+  readonly registryRead = { read: async () => this.read as never };
   async start(): Promise<void> {}
   async stop(): Promise<void> {}
   status(): unknown {

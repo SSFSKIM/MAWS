@@ -34,7 +34,11 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function scene(options: { signedIn?: boolean; links?: MachineRef[] } = {}) {
+type Machines = Array<{ ref: MachineRef; name: string }> | null;
+/** A macrotask's turn: the registry's read of the machines (a promise) settled, and what follows it. */
+const turn = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+function scene(options: { signedIn?: boolean; links?: MachineRef[]; machines?: () => Promise<Machines> } = {}) {
   const heard = new Map<string, (payload: unknown) => void>();
   const subscribed: string[] = [];
   const watching = new Set<(state: { state: string }) => void>(); // main's machine link, watched while an ask is held
@@ -54,7 +58,7 @@ function scene(options: { signedIn?: boolean; links?: MachineRef[] } = {}) {
       }) as never,
       dispatch: (async (_owner: string, name: string, input: unknown) => (answers.push([name, input]), { ok: true, value: undefined })) as never,
     },
-    registry: { projects: () => PROJECTS, machines: () => (options.signedIn === false ? null : [{ ref: BOOK, name: 'macbook' }, { ref: MINI, name: 'mini' }]) },
+    registry: { projects: () => PROJECTS, machines: options.machines ?? (async () => (options.signedIn === false ? null : [{ ref: BOOK, name: 'macbook' }, { ref: MINI, name: 'mini' }])) },
     roster: () => links,
     link: (ref) => (links.includes(ref) ? { machine: ref } : null),
     send: async (_link, name, input) => (sent.push([name, input]), replies.get(name)?.(input) ?? { ok: false, error: { code: 'internal', message: `no reply for ${name}` } }),
@@ -62,7 +66,11 @@ function scene(options: { signedIn?: boolean; links?: MachineRef[] } = {}) {
     emit: (value) => void emitted.push(value),
     log: () => {},
   });
-  const ask = (payload: Omit<EventPayload<'projects.act.request'>, 'id'>, id = 'pa-1') => heard.get('projects.act.request')!({ id, ...payload });
+  /** The daemon's request, and its machine read: shown or refused when this settles. */
+  const ask = async (payload: Omit<EventPayload<'projects.act.request'>, 'id'>, id = 'pa-1') => {
+    heard.get('projects.act.request')!({ id, ...payload });
+    await turn();
+  };
   const withdraw = (id: string) => heard.get('projects.act.withdrawn')!({ id });
   const linkState = (state: string) => [...watching].forEach((listener) => listener({ state }));
   const decide = (id: string, confirm: boolean) => handlers.get('org.projectActs.decide')!({ id, confirm }) as Promise<void>;
@@ -89,15 +97,15 @@ describe('a request the app cannot show', () => {
   it('is refused at once signed out, with no window open, and for a machine the org does not have', async () => {
     const out = scene({ signedIn: false });
     openWindow();
-    out.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
+    await out.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
     expect(out.answers).toEqual([answered('pa-1', { ok: false, code: 'signed-out', text: 'MAWS is not signed in on this Mac, so it cannot ask mini. Run this on mini: maws project add /srv/new' })]);
     windows.splice(0).forEach((w) => w.close());
     const none = scene();
-    none.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
+    await none.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
     expect(none.answers).toEqual([answered('pa-1', { ok: false, code: 'no-window', text: 'MAWS has no window open to confirm this. Open MAWS and run the command again.' })]);
     openWindow();
     const unknown = scene();
-    unknown.ask({ verb: 'add', machine: 'vm', path: '/srv/new' });
+    await unknown.ask({ verb: 'add', machine: 'vm', path: '/srv/new' });
     expect(unknown.answers).toEqual([answered('pa-1', { ok: false, code: 'unknown-machine', text: 'unknown-machine: vm is no machine of this org' })]);
     for (const s of [out, none, unknown]) expect(s.emitted).toEqual([]);
   });
@@ -107,7 +115,7 @@ describe('a request shown in the page', () => {
   it('is listed with its machine’s ref and the project’s name, the window focused, and sent on Confirm as lane B’s act', async () => {
     const win = openWindow();
     const s = scene();
-    s.ask({ verb: 'add', machine: 'mini', path: '/srv/new', into: SCRAPE, name: 'New one' });
+    await s.ask({ verb: 'add', machine: 'mini', path: '/srv/new', into: SCRAPE, name: 'New one' });
     const ask = { id: 'pa-1', verb: 'add', machine: MINI, machineName: 'mini', path: '/srv/new', into: SCRAPE, intoName: 'scrape', name: 'New one', askedAt: expect.any(String) };
     expect(s.emitted).toEqual([{ asks: [ask] }]);
     expect(s.handlers.get('org.projectActs')!(undefined)).toEqual({ asks: [ask] });
@@ -125,11 +133,11 @@ describe('a request shown in the page', () => {
     openWindow();
     const s = scene();
     s.reply('session.projects.addFolder', { project: record('/srv/new', SCRAPE), location: { kind: 'directory', path: '/srv/new' }, by: 'minted', at: '/srv/new', restated: true });
-    s.ask({ verb: 'add', machine: 'mini', path: '/srv/new', own: true });
+    await s.ask({ verb: 'add', machine: 'mini', path: '/srv/new', own: true });
     await s.decide('pa-1', true);
     expect(s.sent).toEqual([['session.projects.addFolder', { directory: '/srv/new', own: true }]]);
     s.reply('session.projects.addFolder', { project: record('/srv/other', null), location: { kind: 'directory', path: '/srv/other' } });
-    s.ask({ verb: 'add', machine: 'mini', path: '/srv/other' }, 'pa-2');
+    await s.ask({ verb: 'add', machine: 'mini', path: '/srv/other' }, 'pa-2');
     await s.decide('pa-2', true);
     expect(s.answers).toEqual([answered('pa-1', { ok: true, text: `added new as a new project (${SCRAPE})` }), answered('pa-2', { ok: true, text: 'added /srv/other; it stays under mini until sminos there is updated' })]);
   });
@@ -137,7 +145,7 @@ describe('a request shown in the page', () => {
   it('is declined when the person dismisses it, and sends nothing', async () => {
     openWindow();
     const s = scene();
-    s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape' });
+    await s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape' });
     await s.decide('pa-1', false);
     expect(s.sent).toEqual([]);
     expect(s.answers).toEqual([answered('pa-1', { ok: false, code: 'declined', text: 'Not confirmed in MAWS.' })]);
@@ -149,11 +157,11 @@ describe('a request shown in the page', () => {
     const s = scene();
     s.reply('session.projects.remove', undefined);
     s.reply('session.projects.link', { project: record('/srv/scrape', SCRAPE), restated: true });
-    s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape' });
+    await s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape' });
     await s.decide('pa-1', true);
-    s.ask({ verb: 'link', machine: 'mini', path: '/srv/scrape', into: null }, 'pa-2');
+    await s.ask({ verb: 'link', machine: 'mini', path: '/srv/scrape', into: null }, 'pa-2');
     await s.decide('pa-2', true);
-    s.ask({ verb: 'link', machine: 'mini', path: '/srv/elsewhere', into: SCRAPE }, 'pa-3');
+    await s.ask({ verb: 'link', machine: 'mini', path: '/srv/elsewhere', into: SCRAPE }, 'pa-3');
     await s.decide('pa-3', true);
     expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape' }], ['session.projects.link', { id: 'p-scrape', into: null }]]);
     expect(s.answers).toEqual([
@@ -168,19 +176,19 @@ describe('a request shown in the page', () => {
     openWindow();
     const s = scene();
     s.reply('session.projects.remove', undefined);
-    s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape/' });
+    await s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape/' });
     await s.decide('pa-1', true);
-    s.ask({ verb: 'remove', machine: 'mini', path: '/srv//./scrape' }, 'pa-2');
+    await s.ask({ verb: 'remove', machine: 'mini', path: '/srv//./scrape' }, 'pa-2');
     await s.decide('pa-2', true);
     expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape' }], ['session.projects.remove', { id: 'p-scrape' }]]);
     expect(s.answers).toEqual([answered('pa-1', { ok: true, text: 'removed /srv/scrape' }), answered('pa-2', { ok: true, text: 'removed /srv/scrape' })]);
   });
 
   // M12's re-review, finding 2: a `..` is that machine's to resolve, so main refuses it at once and never shows it
-  it('refuses a path with a `..` segment at once: `not-canonical`', () => {
+  it('refuses a path with a `..` segment at once: `not-canonical`', async () => {
     openWindow();
     const s = scene();
-    s.ask({ verb: 'remove', machine: 'mini', path: '/srv/link/../scrape' });
+    await s.ask({ verb: 'remove', machine: 'mini', path: '/srv/link/../scrape' });
     expect(s.answers).toEqual([answered('pa-1', { ok: false, code: 'not-canonical', text: 'not-canonical: /srv/link/../scrape has a ".." segment, which only that machine can resolve; give the folder\'s path without ".."' })]);
     expect([s.emitted, s.sent]).toEqual([[], []]);
   });
@@ -188,11 +196,11 @@ describe('a request shown in the page', () => {
   it('answers the machine’s refusal by its code, and a machine this Mac cannot reach now', async () => {
     openWindow();
     const s = scene({ links: [] });
-    s.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
+    await s.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
     await s.decide('pa-1', true);
     const r = scene();
     r.replies.set('session.projects.addFolder', () => ({ ok: false, error: { code: 'internal', message: 'unknown-project: abc is in no verified projects record' } }));
-    r.ask({ verb: 'add', machine: 'mini', path: '/srv/new', into: 'abc' });
+    await r.ask({ verb: 'add', machine: 'mini', path: '/srv/new', into: 'abc' });
     await r.decide('pa-1', true);
     expect(s.answers).toEqual([answered('pa-1', { ok: false, code: 'host_unavailable', text: 'host_unavailable: mini is not reachable from this Mac now' })]);
     expect(r.answers).toEqual([answered('pa-1', { ok: false, code: 'unknown-project', text: 'unknown-project: abc is in no verified projects record' })]);
@@ -204,8 +212,8 @@ describe('a request withdrawn', () => {
   it('when its terminal leaves: off the page, and a later Confirm sends nothing', async () => {
     openWindow();
     const s = scene();
-    s.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
-    s.ask({ verb: 'add', machine: 'mini', path: '/srv/other' }, 'pa-2');
+    await s.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
+    await s.ask({ verb: 'add', machine: 'mini', path: '/srv/other' }, 'pa-2');
     s.withdraw('pa-1');
     expect(s.emitted.at(-1)).toEqual({ asks: [expect.objectContaining({ id: 'pa-2' })] });
     await expect(s.decide('pa-1', true)).rejects.toMatchObject({ ipcError: { code: 'invalid_input' } });
@@ -218,7 +226,7 @@ describe('a request withdrawn', () => {
     openWindow();
     const s = scene();
     s.reply('session.projects.remove', undefined);
-    s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape' });
+    await s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape' });
     const deciding = s.decide('pa-1', true);
     s.withdraw('pa-1');
     await deciding;
@@ -229,8 +237,8 @@ describe('a request withdrawn', () => {
   it('all of them when the daemon’s connection ends, and the link is watched only while one is held', async () => {
     openWindow();
     const s = scene();
-    s.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
-    s.ask({ verb: 'add', machine: 'mini', path: '/srv/other' }, 'pa-2');
+    await s.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
+    await s.ask({ verb: 'add', machine: 'mini', path: '/srv/other' }, 'pa-2');
     expect(s.watching.size).toBe(1);
     s.linkState('ready');
     expect(s.emitted.at(-1)?.asks).toHaveLength(2);
@@ -239,8 +247,30 @@ describe('a request withdrawn', () => {
     expect(s.watching.size).toBe(0);
     await expect(s.decide('pa-2', true)).rejects.toMatchObject({ ipcError: { code: 'invalid_input' } });
     expect([s.sent, s.answers]).toEqual([[], []]);
-    s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape' }, 'pa-3');
+    await s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape' }, 'pa-3');
     await s.decide('pa-3', false);
     expect(s.watching.size, 'released once none is held').toBe(0);
+  });
+
+  // branch review 1, P1: its machine is read on demand, the certificates verified, so a request waits on that read
+  it('while its machine is read: never shown, the link watched meanwhile; a read that fails is answered', async () => {
+    openWindow();
+    let release: (machines: Machines) => void = () => {};
+    const s = scene({ machines: () => new Promise<Machines>((resolve) => (release = resolve)) });
+    void s.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
+    expect(s.watching.size, 'watched while it is read').toBe(1);
+    s.withdraw('pa-1');
+    expect(s.watching.size).toBe(0);
+    release([{ ref: MINI, name: 'mini' }]);
+    await turn();
+    expect([s.emitted, s.answers, s.watching.size]).toEqual([[], [], 0]);
+    void s.ask({ verb: 'add', machine: 'mini', path: '/srv/other' }, 'pa-2');
+    s.linkState('restarting'); // the daemon's connection ends while it is read
+    release([{ ref: MINI, name: 'mini' }]);
+    await turn();
+    expect([s.emitted, s.answers, s.watching.size]).toEqual([[{ asks: [] }], [], 0]);
+    const failing = scene({ machines: () => Promise.reject(new Error('the head could not be read')) });
+    await failing.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
+    expect([failing.emitted, failing.answers, failing.watching.size]).toEqual([[], [answered('pa-1', { ok: false, code: 'internal', text: 'the head could not be read' })], 0]);
   });
 });

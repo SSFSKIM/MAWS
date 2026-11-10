@@ -139,13 +139,13 @@ export class Registry implements RegistrySeam, RegistryRead {
 
   // ---- RegistryRead ---------------------------------------------------------------------------------------------------
 
-  read(): ReturnType<RegistryRead['read']> {
+  async read(): ReturnType<RegistryRead['read']> {
     const enrollment = this.#ctx.enrollment();
     const head = this.#ctx.head();
     const machine = { ref: this.#ctx.ref(), name: enrollment?.name ?? '' };
     if (enrollment === null) return { enrolled: false, machine, machines: [], projects: [] };
-    // the directory's machines (a VM that exists only by its certificate is one), branded where they enter this machine's types
-    const machines = head === null ? [] : directoryMachines(head.state, head.certificates, new Date(this.#ctx.now())).map((m) => ({ ref: m.ref as MachineRef, name: m.name }));
+    // the directory's machines (a VM that exists only by its certificate, verified now, is one), branded where they enter this machine's types
+    const machines = head === null ? [] : (await directoryMachines(head.state, head.certificates, new Date(this.#ctx.now()))).map((m) => ({ ref: m.ref as MachineRef, name: m.name }));
     return { enrolled: true, machine, machines, projects: this.projects() };
   }
 

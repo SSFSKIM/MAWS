@@ -10,9 +10,10 @@
 // open (`no-window`); one the person dismisses is `declined`. A remove or a link names the row by the registry's location
 // at that path on that machine (its `pid`). A request whose terminal has gone is withdrawn by the daemon
 // (`projects.act.withdrawn`) and taken off the page unacted; one already confirmed goes on, since its act may be under
-// way. The daemon's connection ending drops every ask, which covers a daemon restart (Decision Log 22). Idle, it holds
-// its two event listeners and its two handlers and nothing else: no timer, and the machine link is watched only while an
-// ask is held.
+// way. The daemon's connection ending drops every ask, which covers a daemon restart (Decision Log 22). The machine a
+// request names is read on demand (`registry.machines`, which verifies the certificates it reads; branch review 1, P1);
+// a request withdrawn or dropped while it is read is never shown. Idle, it holds its two event listeners and its two
+// handlers and nothing else: no timer, and the machine link is watched only while an ask is held or being read.
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
@@ -45,21 +46,34 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
   const asks = new Map<string, { ask: ProjectActAsk; request: Request }>();
   const value = (): ProjectActAsks => ({ asks: [...asks.values()].map((entry) => entry.ask) });
   const nameOf = (id: string) => deps.registry.projects().projects.find((p) => p.id === id)?.name ?? null;
-  let unwatch: (() => void) | null = null; // the machine link's state, watched while an ask is held
+  const reading = new Set<string>(); // the requests whose machine is being read, not yet asked or refused
+  let unwatch: (() => void) | null = null; // the machine link's state, watched while an ask is held or being read
 
-  /** The asks held now on the page; the link is watched while there are any. */
-  function changed(): void {
-    deps.emit(value());
-    if (asks.size > 0 && unwatch === null) unwatch = deps.hosts.onState('machine', (state) => state.state !== 'ready' && dropAll());
-    if (asks.size === 0 && unwatch !== null) {
+  /** The link is watched while an ask is held or being read. */
+  function watch(): void {
+    const held = asks.size > 0 || reading.size > 0;
+    if (held && unwatch === null) unwatch = deps.hosts.onState('machine', (state) => state.state !== 'ready' && dropAll());
+    if (!held && unwatch !== null) {
       unwatch();
       unwatch = null;
     }
   }
+  /** The asks held now on the page. */
+  function changed(): void {
+    deps.emit(value());
+    watch();
+  }
   /** The daemon's connection ended: no terminal waits for any ask any more. */
   function dropAll(): void {
+    reading.clear();
     asks.clear();
     changed();
+  }
+  /** Whether a request still waits once its machine is read: neither withdrawn nor dropped meanwhile. */
+  function read(request: Request): boolean {
+    const waits = reading.delete(request.id);
+    watch();
+    return waits;
   }
 
   const answer = (id: string, result: ProjectForwardResult) =>
@@ -69,7 +83,15 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
     );
 
   function asked(request: Request): void {
-    const machines = deps.registry.machines();
+    reading.add(request.id);
+    watch();
+    void deps.registry.machines().then(
+      (machines) => read(request) && show(request, machines),
+      (error: unknown) => read(request) && answer(request.id, { ok: false, code: 'internal', text: error instanceof Error ? error.message : String(error) }),
+    );
+  }
+
+  function show(request: Request, machines: Awaited<ReturnType<ProjectActsDeps<L>['registry']['machines']>>): void {
     if (machines === null) return answer(request.id, { ok: false, code: 'signed-out', text: notSignedIn(request) });
     const windows = appWindows();
     if (windows.length === 0) return answer(request.id, { ok: false, code: 'no-window', text: NO_WINDOW });
@@ -124,7 +146,10 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
   }
 
   const offRequest = deps.hosts.onEvent('projects.act.request', asked);
-  const offWithdrawn = deps.hosts.onEvent('projects.act.withdrawn', ({ id }) => asks.delete(id) && changed());
+  const offWithdrawn = deps.hosts.onEvent('projects.act.withdrawn', ({ id }) => {
+    if (reading.delete(id)) watch();
+    if (asks.delete(id)) changed();
+  });
   deps.register('org.projectActs', value);
   deps.register('org.projectActs.decide', async ({ id, confirm }) => {
     const entry = asks.get(id);

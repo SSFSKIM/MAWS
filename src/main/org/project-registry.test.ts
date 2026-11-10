@@ -129,9 +129,20 @@ describe('the machines the registry names', () => {
   it('are the directory’s, by name and ref, a certificate-only VM among them; none signed out', async () => {
     const w = await World.make();
     const h = await start(w);
-    expect(h.registry.machines()).toEqual([{ ref: w.m1.ref, name: 'mac-one' }, { ref: w.m2.ref, name: 'mac-two' }, { ref: w.d.ref, name: 'vm-one' }]);
+    expect(await h.registry.machines()).toEqual([{ ref: w.m1.ref, name: 'mac-one' }, { ref: w.m2.ref, name: 'mac-two' }, { ref: w.d.ref, name: 'vm-one' }]);
     w.session.set(null);
-    expect(h.registry.machines()).toBeNull();
+    expect(await h.registry.machines()).toBeNull();
+  });
+
+  // branch review 1, P1: the hub's certificates are only shape-checked; one that does not verify retargets no name
+  it('take no ref from a certificate that does not verify: a copy naming another machine’s ref, issued later', async () => {
+    const w = await World.make();
+    const forged = { ...w.d.cert, body: { ...w.d.cert.body, machine: w.m1.ref, issued: iso(w.clock + 60_000) } };
+    w.certs = { certs: [w.d.cert, forged], retirements: [] };
+    const h = await start(w);
+    expect((await h.registry.machines())?.find((m) => m.name === 'vm-one')).toEqual({ ref: w.d.ref, name: 'vm-one' });
+    w.certs = { certs: [forged], retirements: [] };
+    expect((await h.registry.machines())?.map((m) => m.name)).toEqual(['mac-one', 'mac-two']);
   });
 });
 

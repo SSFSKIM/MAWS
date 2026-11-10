@@ -328,7 +328,7 @@ describe('the seam’s local door', () => {
 describe('the seam’s registry read', () => {
   const READ = { enrolled: true, machine: { ref: 'r'.repeat(22) as never, name: 'mini' }, machines: [], projects: [] };
   class ReadModule extends Module {
-    readonly registryRead = { read: () => READ };
+    readonly registryRead = { read: async () => READ };
   }
 
   it('is the loaded module’s, and none while nothing is loaded or the module has none', async () => {
@@ -340,6 +340,6 @@ describe('the seam’s registry read', () => {
     expect(readless.registryRead).toBeUndefined();
     const reading = new LazyEndpoint('b1', async () => ({ createEndpoint: (options) => new ReadModule(options) }));
     await reading.start(services(true));
-    expect(reading.registryRead?.read()).toEqual(READ);
+    expect(await reading.registryRead?.read()).toEqual(READ);
   });
 });

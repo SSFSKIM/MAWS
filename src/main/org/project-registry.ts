@@ -70,8 +70,11 @@ export interface ProjectRegistryDeps {
 export interface ProjectRegistry {
   /** The last computed value (the empty one signed out, and until the first). */
   projects(): OrgProjects;
-  /** The project registry's M12: the directory's machines (the held head's and certificate-only VMs'), by ref and name; null while signed out. */
-  machines(): Array<{ ref: MachineRef; name: string }> | null;
+  /**
+   * The project registry's M12: the directory's machines (the held head's and certificate-only VMs', a certificate only
+   * once it verifies now), by ref and name; null while signed out. Read on demand: nothing is held between asks.
+   */
+  machines(): Promise<Array<{ ref: MachineRef; name: string }> | null>;
   /** The row key of a project id on this device; null for an id the table has not given one. */
   keyOf(project: string): OrgKey | null;
   onKeys(listener: () => void): () => void;
@@ -373,12 +376,12 @@ export function createProjectRegistry(deps: ProjectRegistryDeps): ProjectRegistr
 
   return {
     projects: () => latest,
-    machines() {
+    async machines() {
       const view = deps.session.current()?.view ?? null;
       const head = view?.head() ?? null;
       if (view === null || head === null) return null;
       // the directory's machines: a VM that exists only by its certificate is one, aimed at by its name
-      return directoryMachines(head.state, view.certificates(), new Date(now())).map((m) => ({ ref: m.ref as MachineRef, name: m.name }));
+      return (await directoryMachines(head.state, view.certificates(), new Date(now()))).map((m) => ({ ref: m.ref as MachineRef, name: m.name }));
     },
     keyOf: (project) => table.keyOf(project),
     onKeys(listener) {

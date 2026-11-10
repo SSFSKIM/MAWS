@@ -430,8 +430,24 @@ describe('the registry seam', () => {
     await w.amend((s) => void s.delegations.push({ id: dId, pub: delegationKey.pub, prefix: 'dl-', expires: new Date(Date.now() + 3_600_000).toISOString(), maxUses: 10, offlineRevokeS: 0, owners: [w.admin] }));
     const cert = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: dRef, name: 'dl-one', pub: dKey.pub, delegation: dId, use: 1, issued: new Date().toISOString() }, delegationKey.privateKey, delegationKey.pub);
     const { r } = await registry(w, { certificates: { certs: [cert], retirements: [] } });
-    expect(r.read()).toMatchObject({ enrolled: true, machine: { ref: w.ref, name: 'mini' }, machines: [{ ref: dRef, name: 'dl-one' }, { ref: w.ref, name: 'mini' }, { ref: w.other, name: 'vm' }] });
-    expect((await registry(w, { enrolled: false })).r.read().machines).toEqual([]);
+    expect(await r.read()).toMatchObject({ enrolled: true, machine: { ref: w.ref, name: 'mini' }, machines: [{ ref: dRef, name: 'dl-one' }, { ref: w.ref, name: 'mini' }, { ref: w.other, name: 'vm' }] });
+    expect((await (await registry(w, { enrolled: false })).r.read()).machines).toEqual([]);
+  });
+
+  // branch review 1, P1: the hub's certificates are only shape-checked; one that does not verify retargets no name
+  it('reads no machine from a certificate that does not verify: a copy naming another machine’s ref, issued later', async () => {
+    const w = await world();
+    const delegationKey = await generateSigningKey();
+    const dKey = await generateSigningKey();
+    const dId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+    const dRef = mintRef(dId);
+    await w.amend((s) => void s.delegations.push({ id: dId, pub: delegationKey.pub, prefix: 'dl-', expires: new Date(Date.now() + 3_600_000).toISOString(), maxUses: 10, offlineRevokeS: 0, owners: [w.admin] }));
+    const cert = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: dRef, name: 'dl-one', pub: dKey.pub, delegation: dId, use: 1, issued: new Date().toISOString() }, delegationKey.privateKey, delegationKey.pub);
+    const forged = { ...cert, body: { ...cert.body, machine: w.other, issued: new Date(Date.now() + 60_000).toISOString() } };
+    const both = await registry(w, { certificates: { certs: [cert, forged], retirements: [] } });
+    expect((await both.r.read()).machines.find((m) => m.name === 'dl-one')).toEqual({ ref: dRef, name: 'dl-one' });
+    const alone = await registry(w, { certificates: { certs: [forged], retirements: [] } });
+    expect((await alone.r.read()).machines).toEqual([{ ref: w.ref, name: 'mini' }, { ref: w.other, name: 'vm' }]);
   });
 
   it('answers a project of the verified records with its hub and highest name counter, none for an unknown id or a machine’s own', async () => {

@@ -67,7 +67,7 @@ export interface ProjectsSource {
   onChange(listener: () => void): () => void;
 }
 
-/** What the daemon's front reads of the endpoint, in process, for `maws` (§K). */
+/** What the daemon's front reads of the endpoint, in process, for `maws` (§K); read on demand, its certificates verified. */
 export interface RegistryRead {
-  read(): { enrolled: boolean; machine: { ref: MachineRef; name: string }; machines: Array<{ ref: MachineRef; name: string }>; projects: RegistryProject[] };
+  read(): Promise<{ enrolled: boolean; machine: { ref: MachineRef; name: string }; machines: Array<{ ref: MachineRef; name: string }>; projects: RegistryProject[] }>;
 }
