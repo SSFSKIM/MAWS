@@ -168,8 +168,9 @@ export interface SpineRoot {
   // which the endpoint's seam hands lane A's host messages (`EndpointServices.channel`); absent in a run refused the spine.
   channel?: ChannelRecorder;
   // the project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §H): what the machine's
-  // endpoint reads of the index (its declared rows and stored statements), which mawsd hands on while the spine is loaded
-  projects?: ProjectsSource;
+  // endpoint reads of the index (its declared rows and stored statements), which mawsd hands on while the spine is loaded;
+  // asked only by mawsd's wiring (src/mawsd/projects-seam.ts), so building a root reads nothing of it
+  projects?: () => ProjectsSource;
 }
 
 export function startSpine(deps: SpineDeps): SpineRoot {
@@ -566,7 +567,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     stop: () => stopParts('spine', parts),
     discovery: { applied: () => indexSource.discoveryApplied(), onApplied: (listener) => indexSource.onDiscoveryApplied(listener) },
     ...(channel === undefined ? {} : { channel }), // P5 O8 M7b
-    projects: index.projectsSource(), // the project registry
+    projects: () => index.projectsSource(), // the project registry: asked by mawsd alone
   };
 }
 

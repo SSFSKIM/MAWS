@@ -144,7 +144,8 @@ export class Registry implements RegistrySeam, RegistryRead {
     const head = this.#ctx.head();
     const machine = { ref: this.#ctx.ref(), name: enrollment?.name ?? '' };
     if (enrollment === null) return { enrolled: false, machine, machines: [], projects: [] };
-    return { enrolled: true, machine, machines: (head?.state.machines ?? []).map((m) => ({ ref: m.ref, name: m.name })), projects: this.projects() };
+    // the verified state's refs, branded where they enter this machine's types
+    return { enrolled: true, machine, machines: (head?.state.machines ?? []).map((m) => ({ ref: m.ref as MachineRef, name: m.name })), projects: this.projects() };
   }
 
   // ---- The endpoint's -------------------------------------------------------------------------------------------------

@@ -50,7 +50,7 @@ async function setup(): Promise<{ f: Fixture; home: string; index: Index; a: Rem
   const guard: SetupGuard = { where: { home, platform: 'darwin' } };
   registerIndexHandlers(index, f.spine.bus as never, guard);
   await sminos(f, [], ['audience', 'record', 'locations']);
-  await index.refreshOrgProjects({ machine: f.ref, enrollment: () => ({ org: ORG, machine: 'mini' }), home });
+  await index.refreshOrgProjects({ machine: f.services.machine.ref, enrollment: () => ({ org: ORG, machine: 'mini' }), home });
   return { f, home, index, a: await openRemote(f, org.a1, org.A), b: await openRemote(f, org.b1, org.B) };
 }
 

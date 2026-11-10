@@ -33,7 +33,7 @@ describe('spineProjects', () => {
     seam.restore([]); // no index: nothing to restore into, and no throw
 
     const first = source('index-1');
-    root = { projects: first } as unknown as SpineRoot;
+    root = { projects: () => first } as unknown as SpineRoot;
     seam.spineState('loading');
     expect([heard, first.listening()]).toEqual([0, 0]);
     seam.spineState('loaded');
@@ -51,7 +51,7 @@ describe('spineProjects', () => {
     expect(seam.snapshot()).toBeNull();
 
     const second = source('index-2');
-    root = { projects: second } as unknown as SpineRoot;
+    root = { projects: () => second } as unknown as SpineRoot;
     seam.spineState('loaded');
     first.change();
     expect([heard, second.listening(), seam.snapshot()?.indexId]).toEqual([4, 1, 'index-2']);

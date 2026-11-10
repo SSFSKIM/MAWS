@@ -163,7 +163,9 @@ export class HeldProjects {
       if ((await verifyProjectsRecord(head.state, record, head.certificates, now)).ok) this.#ctx.own(record);
       return;
     }
-    const seen = () => void snapshot?.seen.set(machine, Math.max(snapshot.seen.get(machine) ?? 0, revision));
+    const seen = (): void => {
+      if (snapshot !== null) snapshot.seen.set(machine, Math.max(snapshot.seen.get(machine) ?? 0, revision));
+    };
     const mark = this.#ctx.store.read()[machine];
     if (mark !== undefined && revision < mark.revision) return;
     const hash = recordHash(record);

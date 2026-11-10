@@ -91,11 +91,11 @@ export const setupRepoDirs =
  * the directory checked again, its linked-worktree question answered from git's files (no git run in it), then `run` on
  * it with the checked reader, which the org derivation reads through; a read that reader refuses is the act's refusal.
  */
-export async function setupGuarded<T>(directory: string, asking: readonly string[], guard: SetupGuard, run: (directory: string, files: GitFiles) => T | Promise<T>): Promise<T> {
+export async function setupGuarded<T>(directory: string, asking: readonly string[], guard: SetupGuard, run: (directory: string, files: GitFiles) => Promise<T>): Promise<T> {
   await checkSetupDirectory(directory, asking, guard, { trustFiles: false });
   const files = setupFiles(directory, asking, guard);
   await refusing(() => warmLinkedWorktreeRead(directory, files));
-  return refusing(async () => run(directory, files));
+  return refusing(() => run(directory, files));
 }
 
 /**

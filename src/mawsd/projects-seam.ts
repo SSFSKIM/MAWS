@@ -30,8 +30,8 @@ export function spineProjects(root: () => SpineRoot | null): SpineProjects {
     }
   };
   return {
-    snapshot: () => root()?.projects?.snapshot() ?? null,
-    restore: (statements) => root()?.projects?.restore(statements),
+    snapshot: () => root()?.projects?.().snapshot() ?? null,
+    restore: (statements) => root()?.projects?.().restore(statements),
     onChange: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -40,7 +40,8 @@ export function spineProjects(root: () => SpineRoot | null): SpineProjects {
       const now = state === 'loaded' ? root() : null;
       if (now === (attached?.root ?? null)) return;
       attached?.off();
-      attached = now?.projects === undefined ? null : { root: now, off: now.projects.onChange(tell) };
+      const source = now?.projects?.();
+      attached = now === null || source === undefined ? null : { root: now, off: source.onChange(tell) };
       tell();
     },
   };
