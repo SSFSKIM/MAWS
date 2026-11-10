@@ -36,6 +36,10 @@
 // the feeds' plane (plane-feeds.ts); a session's `checkout` feed is no interest in its stream. The machine's `attention`
 // feed (M6) names no session, so it has no target to re-check: its plane hears every change of access instead
 // (`Plane.accessChanged`) and cuts what it carries to the member's sessions as it goes.
+//
+// P5 O15 M2b §H: each `subbed` queued is a line with its mode, its position, the cursor its `sub` asked from and the
+// milliseconds since the table received that `sub` (§F's `J`), in the forms the app's own `subbed` line writes, so the
+// two can be paired.
 import { isMachineFeedSub, MESSAGE_MAX_BYTES, SUB_CREDIT_MAX, type Cursor, type EndpointMessage, type RefusalReason, type SessionRef, type SessionSubMessage, type SubMessage, type CreditMessage, type UnsubMessage } from 'org-protocol';
 import type { AuthorizeRequest, Decision, Who } from './authorize';
 import type { RemoteChannel } from './channels';
@@ -118,8 +122,9 @@ export class Subscription implements StreamSource {
   #started: number | null = null;
   readonly #window: StreamWindow;
   readonly #over: (sub: Subscription) => void;
+  readonly #answered: (mode: Mode, at: Position) => void;
 
-  constructor(channel: RemoteChannel, message: SubMessage, window: StreamWindow, over: (sub: Subscription) => void) {
+  constructor(channel: RemoteChannel, message: SubMessage, window: StreamWindow, over: (sub: Subscription) => void, answered: (mode: Mode, at: Position) => void) {
     this.id = message.sub;
     this.channel = channel;
     this.who = { member: channel.member, device: channel.device, clientClass: channel.clientClass };
@@ -131,6 +136,7 @@ export class Subscription implements StreamSource {
     this.#credit = Math.min(message.credit, SUB_CREDIT_MAX);
     this.#window = window;
     this.#over = over;
+    this.#answered = answered;
   }
 
   get ended(): boolean {
@@ -163,8 +169,10 @@ export class Subscription implements StreamSource {
 
   /** `subbed` in the stream's order: the position the stream goes on after. */
   subbed(mode: Mode, at: Position): void {
+    if (this.ended) return;
     const message: EndpointMessage = { t: 'subbed', sub: this.id, mode, ...at };
     this.#push({ message, cost: 0, bytes: byteLength(message) });
+    this.#answered(mode, at);
   }
 
   /**
@@ -321,6 +329,7 @@ export class Subscriptions {
 
   /** The channel's `sub` route: registered now, then `authorized` (the gate, which calls `start` or `refused`). */
   receive(channel: RemoteChannel, m: SubMessage, authorized: (channel: RemoteChannel, m: SubMessage) => void): void {
+    const received = this.#ctx.now();
     if (channel.closed) return;
     let subs = this.#channels.get(channel);
     if (subs === undefined) {
@@ -333,7 +342,8 @@ export class Subscriptions {
     const before = subs.get(m.sub);
     if (before !== undefined) this.#close(before, false);
     if (subs.size >= MAX_SUBS) return void channel.send({ t: 'ended', sub: m.sub, reason: 'busy' });
-    subs.set(m.sub, new Subscription(channel, m, this.#windows.get(channel)!, (sub) => this.#ended(sub)));
+    const answered = (mode: Mode, at: Position) => this.#ctx.log(`endpoint: channel ${channel.key} sub ${m.sub} ${whatOf(m)}: subbed ${mode} at ${positionOf(at)}, asked from ${positionOf(m.cursor)}, after ${Math.round(this.#ctx.now() - received)} ms`);
+    subs.set(m.sub, new Subscription(channel, m, this.#windows.get(channel)!, (sub) => this.#ended(sub), answered));
     authorized(channel, m);
   }
 
@@ -482,6 +492,19 @@ export class Subscriptions {
     if (sub.message.feed === undefined && namesSession(sub)) run(this.#ctx.planes[sub.session.lane], sub);
     else run(this.#ctx.planes.feeds, sub);
   }
+}
+
+/** A position as the `subbed` line writes it: `<epoch>:<seq>:<idx or ->`, or `none`. */
+const positionOf = (at: Position | null) => (at === null ? 'none' : `${at.epoch}:${at.seq}:${at.idx ?? '-'}`);
+
+/**
+ * What a `sub` reads, as the line names it: `session <lane>:<id>[ cards][ agent <id>]`, `feed <name>[ <lane>:<id>]`, or
+ * `feed channel <the project's first 8>`.
+ */
+function whatOf(m: SubMessage): string {
+  if (isMachineFeedSub(m)) return m.feed === 'channel' && m.project !== undefined ? `feed channel ${m.project.slice(0, 8)}` : `feed ${m.feed}`;
+  if (m.feed !== undefined) return `feed ${m.feed} ${m.session.lane}:${m.session.id}`;
+  return `session ${m.session.lane}:${m.session.id}${m.view === 'cards' ? ' cards' : ''}${m.agentId === undefined ? '' : ` agent ${m.agentId}`}`;
 }
 
 /** A channel as one viewer of OX5's union. */
