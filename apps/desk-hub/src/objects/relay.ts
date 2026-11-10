@@ -93,6 +93,8 @@ type AppAttachment = { kind: 'app'; member: string; device?: string; channels: n
 type Attachment = EndpointAttachment | AppAttachment;
 /** The projects a connection opened, and what a lease call for it carries. */
 type Opened = { org: string; name: string; client: string; generation: number; projects: string[] };
+/** A connection's projects snapshot being read (`Relay.snapshot`): `timer` and `wake` while a retry waits. */
+type Snapshot = { conn: number; records: Signed<ProjectsRecord>[]; timer?: ReturnType<typeof setTimeout>; wake?: () => void };
 /** A name's fence: the lowest generation of it that may install, and why the ones below may not. */
 type Fence = { from: number; cause: 'replaced' | 'revoked' };
 /** The newest install's name, and the highest arrival number (`arrival-seq`) any install held. */
@@ -124,8 +126,9 @@ export class Relay {
   private parts: { conn: number; assembler: PartAssembler } | undefined;
   /** The last call queued per order key (a project, the Registry): each waits for the one before it. */
   private readonly order = new Map<string, Promise<unknown>>();
-  /** A welcomed connection whose projects snapshot is being read: the records stored meanwhile, written after it. */
-  private projectsHeld: { conn: number; records: Signed<ProjectsRecord>[] } | undefined;
+  /** A welcomed connection's projects snapshot while it is read: the records stored meanwhile, written after it, and the
+   * wait before a failed page read is asked again. Ended with its connection (`retire`), its wait cancelled. */
+  private snapshot: Snapshot | undefined;
 
   constructor(
     private readonly ctx: DurableObjectState,
@@ -325,7 +328,10 @@ export class Relay {
     note({ event: 'hello', machine: current.name, generation: current.generation, build: frame.build, leaseGeneration: frame.leaseGeneration ?? null, capabilities: frame.capabilities ?? [] });
     const capabilities = [...HUB_CAPABILITIES, ...(current.projects === true ? [RL1_CAPABILITIES.projects] : [])];
     this.sendTo(ws, JSON.stringify({ t: 'welcome', generation: current.generation, heartbeat_ms: this.timing().heartbeatMs, capabilities } satisfies Rl1Welcome));
-    if (current.projects === true) this.projectsHeld = { conn: current.conn, records: [] };
+    if (current.projects === true) {
+      this.endSnapshot();
+      this.snapshot = { conn: current.conn, records: [] };
+    }
     this.broadcastPresence();
     let version: number | null = null;
     try {
@@ -363,24 +369,41 @@ export class Relay {
       if (page.last || page.records.length === 0) break;
       after = page.records.at(-1)!.body.machine;
     }
-    const held = this.projectsHeld?.conn === current.conn ? this.projectsHeld.records : [];
-    if (this.projectsHeld?.conn === current.conn) this.projectsHeld = undefined;
+    const snapshot = this.snapshot;
+    if (snapshot?.conn !== current.conn) return;
+    this.snapshot = undefined;
     if (this.current()?.conn !== current.conn) return;
-    for (const record of held) if (!this.toEndpointFrame({ t: 'projects', record } satisfies ProjectsRecordFrame)) return;
+    for (const record of snapshot.records) if (!this.toEndpointFrame({ t: 'projects', record } satisfies ProjectsRecordFrame)) return;
+  }
+
+  /** Ends the snapshot being read (`conn`'s alone when named): its wait cancelled and settled, what it held let go. */
+  private endSnapshot(conn?: number): void {
+    const snapshot = this.snapshot;
+    if (!snapshot || (conn !== undefined && snapshot.conn !== conn)) return;
+    this.snapshot = undefined;
+    clearTimeout(snapshot.timer);
+    snapshot.wake?.();
   }
 
   /** One page of the snapshot, asked again after a failure as retry.ts's calls are (a line logged for each), while the
-   * connection is still current; null once given up. */
+   * connection's snapshot is still being read; null once given up, or once the connection ended. */
   private async projectPage(current: Current, after: string | null): Promise<{ records: Signed<ProjectsRecord>[]; last: boolean } | null> {
     for (let attempt = 1; ; attempt++) {
+      const snapshot = this.snapshot;
+      if (snapshot?.conn !== current.conn) return null;
       try {
         return await this.registry(current.org).projectPage(after);
       } catch (error) {
+        // A connection that ended while the read was out waits for nothing.
+        if (this.snapshot !== snapshot) return null;
         const wait = attempt < RETRY_ATTEMPTS ? retryDelay(attempt, this.retryBaseMs(), error) : null;
         note({ event: 'projects-page-failed', machine: current.name, generation: current.generation, attempt, error: described(error), retry_ms: wait === null ? null : Math.round(wait) });
         if (wait === null) return null;
-        await new Promise((resolve) => setTimeout(resolve, wait));
-        if (this.current()?.conn !== current.conn) return null;
+        await new Promise<void>((resolve) => {
+          snapshot.wake = resolve;
+          snapshot.timer = setTimeout(resolve, wait);
+        });
+        snapshot.timer = snapshot.wake = undefined;
       }
     }
   }
@@ -641,6 +664,7 @@ export class Relay {
     this.closeAllChannels();
     this.closeProjects(current.conn);
     if (this.parts?.conn === current.conn) this.parts = undefined;
+    this.endSnapshot(current.conn);
     note({ event: 'end', machine: current.name, generation: current.generation, conn: current.conn, cause: reason });
     this.broadcastPresence();
   }
@@ -679,8 +703,8 @@ export class Relay {
   relayProjects(record: Signed<ProjectsRecord>): void {
     const current = this.live();
     if (!current?.welcomed || current.projects !== true) return;
-    if (this.projectsHeld?.conn === current.conn) {
-      this.projectsHeld.records.push(record);
+    if (this.snapshot?.conn === current.conn) {
+      this.snapshot.records.push(record);
       return;
     }
     this.toEndpointFrame({ t: 'projects', record } satisfies ProjectsRecordFrame);

@@ -1607,7 +1607,7 @@ export class Registry extends DurableObject<Env> {
   /** One page of the projects records held, those of the machine refs after `after` (the first page when null), within
    * `LISTINGS_PAGE_BYTES`: the snapshot an endpoint's socket is sent after its welcome, read a page per call so that no
    * answer nears an RPC's size limit however many records the org holds. */
-  projectPage(after: string | null): { records: Signed<ProjectsRecord>[]; last: boolean } {
+  async projectPage(after: string | null): Promise<{ records: Signed<ProjectsRecord>[]; last: boolean }> {
     return this.records.projectPage(after, LISTINGS_PAGE_BYTES);
   }
 

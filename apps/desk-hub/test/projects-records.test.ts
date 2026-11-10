@@ -236,7 +236,7 @@ describe('a snapshot the Registry cannot give', () => {
     const endpoint = endpointOf(mini);
     const { generation } = await endpoint.connect();
     expect(await snapshot(endpoint)).toHaveLength(2);
-    expect(await hub.projectPageFault()).toEqual({ remaining: 0, calls: 3 + 1 });
+    expect(await hub.projectPageFault()).toMatchObject({ remaining: 0, calls: 3 + 1 });
     const from = endpoint.frames.length;
     endpoint.sendText({ t: 'hb', generation });
     await endpoint.next((f) => f.t === 'hb-ack', 'hb-ack', from);
@@ -263,6 +263,52 @@ describe('a snapshot the Registry cannot give', () => {
     expect(live(endpoint, from)).toEqual([`${peer.ref}@13`]);
     other.close();
     endpoint.close();
+  });
+});
+
+describe('a snapshot whose connection ends while it is read', () => {
+  /** The relay's log lines of failed page reads for a connection of `generation`. */
+  const failedReads = (generation: number) => hub.runtimeLogs.filter((l) => l.message.includes('"event":"projects-page-failed"') && l.message.includes(`"generation":${generation},`)).length;
+
+  it('cancels a retry’s wait and lets go of what it held: no timer pending, nothing held, no read after', async () => {
+    await hub.retryBase({ relay: mini.ref }, 2000);
+    try {
+      const other = endpointOf(peer);
+      await other.connect();
+      await snapshot(other);
+      await hub.projectPageFault(1);
+      const endpoint = endpointOf(mini);
+      const { generation } = await endpoint.connect();
+      await waitUntil(async () => (await hub.relaySnapshot(mini.ref))?.waiting === true);
+      expect(failedReads(generation)).toBe(1);
+      // A record stored meanwhile is held for the snapshot's end.
+      other.sendText(sent(await projectsRecord(peer, 14, [location(7)])));
+      await waitUntil(async () => (await hub.relaySnapshot(mini.ref))?.held === 1);
+      endpoint.close();
+      // Ended with the connection, well before the wait (a second at least) would have run out.
+      await waitUntil(async () => (await hub.relaySnapshot(mini.ref)) === null, 500);
+      // Past the longest the wait could have been: nothing was read again.
+      await sleep(2200);
+      expect(await hub.projectPageFault()).toMatchObject({ remaining: 0, calls: 1 });
+      expect(await hub.relaySnapshot(mini.ref)).toBeNull();
+      other.close();
+    } finally {
+      await hub.retryBase({ relay: mini.ref }, 5);
+    }
+  });
+
+  it('schedules no wait for a read that fails after its connection ended', async () => {
+    await hub.projectPageFault(1, { hold: true });
+    const endpoint = endpointOf(mini);
+    const { generation } = await endpoint.connect();
+    await waitUntil(async () => (await hub.projectPageFault()).held);
+    endpoint.close();
+    await waitUntil(async () => (await hub.relaySnapshot(mini.ref)) === null);
+    await hub.projectPageFault(undefined, { release: true });
+    await sleep(300);
+    expect(failedReads(generation)).toBe(0);
+    expect(await hub.projectPageFault()).toMatchObject({ remaining: 0, calls: 1, held: false });
+    expect(await hub.relaySnapshot(mini.ref)).toBeNull();
   });
 });
 

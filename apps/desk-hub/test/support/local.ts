@@ -70,6 +70,7 @@ import {
   RELAY_FAULT_PATH,
   RELAY_PROJECTS_PATH,
   PROJECT_PAGE_FAULT_PATH,
+  RELAY_SNAPSHOT_PATH,
   CLAIM_PATH,
   WRAPPED_KEY_SEED_PATH,
   PROJECT_RPCS_PATH,
@@ -420,10 +421,15 @@ export async function startLocalHub(options: { script?: string } = {}) {
       else if ('relay' in of) await seam('MACHINE', `ref:${of.relay}`, RETRY_BASE_PATH, { ms });
       else await seam('PROJECT', of.project, RETRY_BASE_PATH, { ms });
     },
-    /** Makes the Registry's next `times` reads of a projects page throw (none armed without `times`); answers the throws
-     * still armed and the reads taken since it was armed. */
-    async projectPageFault(times?: number): Promise<{ remaining: number; calls: number }> {
-      return JSON.parse(await seam('REGISTRY', ORG, PROJECT_PAGE_FAULT_PATH, { times })) as { remaining: number; calls: number };
+    /** Makes the Registry's next `times` reads of a projects page throw (none armed without `times`), each held until
+     * released when `hold` is set; `release` lets the held one throw. Answers the throws still armed, the reads taken
+     * since it was armed, and whether one is held. */
+    async projectPageFault(times?: number, options: { hold?: boolean; release?: boolean } = {}): Promise<{ remaining: number; calls: number; held: boolean }> {
+      return JSON.parse(await seam('REGISTRY', ORG, PROJECT_PAGE_FAULT_PATH, { times, ...options })) as { remaining: number; calls: number; held: boolean };
+    },
+    /** How a machine's ref object's projects snapshot stands: null when none is being read. */
+    async relaySnapshot(ref: string): Promise<{ conn: number; held: number; waiting: boolean } | null> {
+      return JSON.parse(await seam('MACHINE', `ref:${ref}`, RELAY_SNAPSHOT_PATH)) as { conn: number; held: number; waiting: boolean } | null;
     },
     /** Whether a retry of the project's failed summary report waits for its time (the suites' Worker only). */
     async reportRetryWaits(project: string): Promise<boolean> {

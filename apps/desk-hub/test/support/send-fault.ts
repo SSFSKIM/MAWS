@@ -142,8 +142,12 @@ export const RELAY_FAULT_PATH = '/__test/relay-fault';
  * it took. */
 export const RELAY_PROJECTS_PATH = '/__test/relay-projects';
 /** Where the suites' `Registry` is armed to throw from its next `times` reads of a projects page (`{times}`), as a call a
- * reset or an overload failed, and says how many reads it took. */
+ * reset or an overload failed, each held until released when `hold` is set (`{release: true}` releases the one held), and
+ * says how many reads it took and whether one is held. */
 export const PROJECT_PAGE_FAULT_PATH = '/__test/project-page-fault';
+/** Where the suites' `Machine` (a ref's) says how its relay's projects snapshot stands: none, or the connection it is
+ * read for, how many records it holds, and whether a retry's wait is pending. */
+export const RELAY_SNAPSHOT_PATH = '/__test/relay-snapshot';
 /** Where the suites' `Machine` (a name's) grants an RL1 generation claim (`{org, name, ref, client}`) no socket follows: a
  * claim of another credential that never installs. */
 export const CLAIM_PATH = '/__test/claim';
