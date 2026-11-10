@@ -111,7 +111,12 @@ describe('a request the app cannot show', () => {
     const contested = scene();
     await contested.ask({ verb: 'add', machine: 'vm-2', path: '/srv/new' });
     expect(contested.answers).toEqual([answered('pa-1', { ok: false, code: 'contested', text: 'contested: vm-2 is in dispute in this org (two claims to its name or its identity); an admin settles it' })]);
-    for (const s of [out, none, unknown, contested]) expect(s.emitted).toEqual([]);
+    // panel scalpel-1#3: a name is the directory's without regard to case (org-protocol's `machineNameKey`)
+    const casedContested = scene();
+    await casedContested.ask({ verb: 'add', machine: 'VM-2', path: '/srv/new' });
+    expect(casedContested.answers).toEqual([answered('pa-1', { ok: false, code: 'contested', text: 'contested: VM-2 is in dispute in this org (two claims to its name or its identity); an admin settles it' })]);
+    for (const s of [out, none, unknown, contested, casedContested]) expect(s.emitted).toEqual([]);
+
   });
 });
 
@@ -131,6 +136,15 @@ describe('a request shown in the page', () => {
     expect(s.sent).toEqual([['session.projects.addFolder', { directory: '/srv/new', into: SCRAPE }], ['session.projects.update', { id: `${MINI}/p-new`, patch: { name: 'New one' } }]]);
     expect(s.answers).toEqual([answered('pa-1', { ok: true, text: `added /srv/new as a location of scrape (${SCRAPE})\nsminos has not confirmed yet; a session started now may be filed under mini for a moment` })]);
     expect(s.emitted.at(-1)).toEqual({ asks: [] });
+  });
+
+  // panel scalpel-1#3
+  it('finds its machine by the directory’s name without regard to case', async () => {
+    openWindow();
+    const s = scene();
+    await s.ask({ verb: 'add', machine: 'MINI', path: '/srv/new' });
+    expect(s.answers).toEqual([]);
+    expect(s.emitted).toEqual([{ asks: [expect.objectContaining({ machine: MINI, machineName: 'mini' })] }]);
   });
 
   it('a new project there, and one the rule leaves under that machine, in its words', async () => {

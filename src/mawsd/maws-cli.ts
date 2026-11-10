@@ -19,6 +19,7 @@ import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { ProjectForwardResult, ProjectsRegistry } from '@shared/ipc/schema/projects';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import { actRefusal, addWords, canonicalPath, contestedMachine, exitOf, hasParentSegment, linkWords, notCanonical, removeWords } from '@shared/machine/maws-words';
+import { machineNameKey } from '../../apps/org-protocol/src/names.ts';
 import { EXIT, type CliDeps } from './cli';
 import { reachMachine, type MachineLink, type Reached } from './machine-client';
 
@@ -142,14 +143,17 @@ async function run(link: MachineLink, parsed: Parsed, deps: MawsDeps): Promise<n
   try {
     if (parsed.verb === 'list') return list(registry, parsed, deps);
     let target = targetOf(parsed.target, deps.cwd);
-    if ('machine' in target && registry.enrolled && target.machine === registry.machine.name) target = { local: target.path };
+    // panel scalpel-1#3: a typed name meets the directory's names without regard to case, as org-protocol keys them
+    const named = (name: string) => 'machine' in target && machineNameKey(name) === machineNameKey(target.machine);
+    if ('machine' in target && registry.enrolled && named(registry.machine.name)) target = { local: target.path };
     const into = parsed.into === undefined ? undefined : resolveInto(parsed.into, registry);
     if ('machine' in target) {
       if (parsed.verb === 'show') throw new Usage('show takes a folder on this machine');
-      if (registry.enrolled && registry.contested.includes(target.machine)) throw new Refused(contestedMachine(target.machine)); // branch fix 2: not unknown
-      if (registry.enrolled && !registry.machines.some((m) => m.name === (target as { machine: string }).machine)) throw new Refused(`unknown-machine: ${target.machine} is no machine of this org`);
+      if (registry.enrolled && registry.contested.some(named)) throw new Refused(contestedMachine(target.machine)); // branch fix 2: not unknown
+      const machine = registry.enrolled ? registry.machines.find((m) => named(m.name))?.name : target.machine; // sent as the directory names it
+      if (machine === undefined) throw new Refused(`unknown-machine: ${target.machine} is no machine of this org`);
       if (hasParentSegment(target.path)) throw new Refused(notCanonical(target.path)); // that machine's to resolve, past a link
-      return await forward(link, { verb: parsed.verb, machine: target.machine, path: target.path, ...(parsed.verb === 'link' ? { into: into ?? null } : into !== undefined && { into }), ...(parsed.own && { own: true as const }), ...(parsed.name !== undefined && { name: parsed.name }) }, deps);
+      return await forward(link, { verb: parsed.verb, machine, path: target.path, ...(parsed.verb === 'link' ? { into: into ?? null } : into !== undefined && { into }), ...(parsed.own && { own: true as const }), ...(parsed.name !== undefined && { name: parsed.name }) }, deps);
     }
     const directory = target.local;
     switch (parsed.verb) {

@@ -26,6 +26,7 @@ import type { ProjectForwardResult } from '@shared/ipc/schema/projects';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import { actRefusal, addWords, canonicalPath, contestedMachine, hasParentSegment, linkWords, NO_WINDOW, notCanonical, NOT_CONFIRMED, notSignedIn, removeWords } from '@shared/machine/maws-words';
 import type { MachineRef } from '@shared/machine/ref';
+import { machineNameKey } from '../../../apps/org-protocol/src/index.ts';
 import type { MainHandler } from '../ipc/router';
 import { appWindows, onAppWindowClosed } from '../windows';
 import type { ProjectRegistry } from './project-registry';
@@ -114,8 +115,9 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
     if (machines === null) return answer(request.id, { ok: false, code: 'signed-out', text: notSignedIn(request) });
     const windows = appWindows();
     if (windows.length === 0) return answer(request.id, { ok: false, code: 'no-window', text: NO_WINDOW });
-    if (machines.contested.includes(request.machine)) return answer(request.id, { ok: false, code: 'contested', text: contestedMachine(request.machine) }); // branch fix 2: not unknown
-    const machine = machines.machines.find((m) => m.name === request.machine);
+    const named = (name: string) => machineNameKey(name) === machineNameKey(request.machine); // panel scalpel-1#3: as org-protocol keys names
+    if (machines.contested.some(named)) return answer(request.id, { ok: false, code: 'contested', text: contestedMachine(request.machine) }); // branch fix 2: not unknown
+    const machine = machines.machines.find((m) => named(m.name));
     if (machine === undefined) return answer(request.id, { ok: false, code: 'unknown-machine', text: `unknown-machine: ${request.machine} is no machine of this org` });
     if (hasParentSegment(request.path)) return answer(request.id, { ok: false, code: 'not-canonical', text: notCanonical(request.path) }); // that machine's to resolve
     const intoName = typeof request.into === 'string' ? nameOf(request.into) : null;
