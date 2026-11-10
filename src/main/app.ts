@@ -47,7 +47,8 @@ import { openProvisioningSecret, PROVISIONING_SECRET_FILE } from './org/provisio
 import { resolveGcloud, secretStore } from './org/secret-store'; // P5 O8 M4c
 import { excludeFromBackup } from '@shared/fs/backup-exclusion';
 import { createRegistryFeed } from './org/registry-feed'; // P5 O8 M1
-import { registerOrgHandlers, registerPolicyHandlers, registerRowsHandler } from './org/register'; // P5 O8 M1; M2: org.rows; M6b: org.policy.*
+import { registerOrgHandlers, registerPolicyHandlers, registerProjectsHandlers, registerRowsHandler } from './org/register'; // P5 O8 M1; M2: org.rows; M6b: org.policy.*; the project registry: org.projects, org.removals.*
+import { createProjectRegistry } from './org/project-registry'; // the project registry (M10)
 import { orgFiles } from './org/files'; // P5 O8 M1
 import { createRemoteRows } from './org/rows'; // P5 O8 M2
 import { createOrgPolicies } from './org/policy'; // P5 O8 M6b
@@ -662,18 +663,44 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   // P5 O8 M2: other machines' sessions, from their signed listings through the feed, verified against the held org state,
   // for the machines of O7's RL2 roster (src/main/org/rows.ts); org.rows and org.rows.changed carry them to the sidebar.
   // P5 O3-C (reader R10): this machine's projects, as session.projects.list answers them, through the spine's view.
+  // The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, M10): the machines' projects records
+  // through the feed, verified, kept and keyed (src/main/org/project-registry.ts); org.projects and org.projects.changed
+  // carry them to the page, the rows file each listing under the key it gives the listing's project, and a removal for
+  // a machine that is off is held and sent over its link (remote lane B's act) when it is next up.
+  const registry = createProjectRegistry({
+    session,
+    feed: orgFeed,
+    local,
+    files: orgDir,
+    roster: () => roster,
+    onRoster,
+    link: (ref) => machines.remote(ref),
+    localProjects: async () => view.projects(),
+    onLocalProjects: (listener) => view.on('projects', () => listener()),
+    sessions: () => remoteRows.rows().rows.map((row) => row.project),
+    remove: async (machine, input) => {
+      const link = machines.remote(machine);
+      if (link === null) return { ok: false, error: { code: 'host_unavailable', message: `session.projects.remove: machine ${machine} is not reachable` } };
+      return (await remoteLaneB.dispatch(link, 'session.projects.remove', input, { client: mainClient, target: machine })) as CommandResult<'session.projects.remove'>;
+    },
+    emit: (projects) => void emit('org.projects.changed', projects),
+    notify: (text) => void clientPort.notify(null, { title: 'MAWS', body: text, silent: false }, () => {}),
+    log: (line) => console.log(line),
+  });
+  shutdown.add('project registry', () => registry.close());
+  registerProjectsHandlers({ register: registerMainHandler, registry });
   const remoteRows = createRemoteRows({
     session,
     feed: orgFeed,
     roster: () => roster,
     onRoster,
-    localProjects: async () => view.projects(),
-    onLocalProjects: (listener) => view.on('projects', () => listener()),
+    keys: registry, // the project registry (M10): a listing's row key is the key table's for its project
     link: (ref) => machines.remote(ref), // P5 O8 M6b: each roster machine's channel listings (a private session's)
     files: orgDir,
     emit: (rows) => {
       if (!rowsHeld) void emit('org.rows.changed', rows);
       remoteLaneB.refresh(); // P5 O7 M2: a row's lane decides whether its tab is remote lane B's
+      registry.refresh(); // the project registry: a project the member sees only through a session
     },
     log: (line) => console.log(`[org-rows] ${line}`),
   });
