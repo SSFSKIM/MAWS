@@ -692,6 +692,30 @@ describe('panel 1', () => {
     expect(w.held[dRef]?.revision).toBe(5);
   });
 
+  // the coordinator's review: one adoption that ends the standing of several held machines, their keys still live
+  it('scalpel-1#2: an adoption that two held records stop verifying under counts neither, and keeps both marks', async () => {
+    const w = await world();
+    const thirdKey = await generateSigningKey();
+    const third = mintRef();
+    await w.amend((s) => {
+      s.machines.push({ name: 'vm-two', ref: third, pub: thirdKey.pub, owners: [w.admin] });
+      s.machineNames.push({ name: 'vm-two', ref: third });
+    });
+    const h = new HeldProjects({ ref: () => w.ref, ownKeyId: () => w.kid, head: () => ({ state: w.head.state, certificates: NO_CERTIFICATES }), now: Date.now, store: w.heldStore, own: () => {}, changed: () => {}, snapshotEnded: () => {}, log: () => {} });
+    const r5 = await w.otherRecord(5);
+    const body: ProjectsRecord = { org: ORG, machine: third, revision: 7, issued: new Date().toISOString(), locations: [], known: [] };
+    const r7 = await signRecord(SIGNING_DOMAINS.projects, body, thirdKey.privateKey, thirdKey.pub);
+    await h.frame({ t: 'projects', record: r5 });
+    await h.frame({ t: 'projects', record: r7 });
+    await h.adopted();
+    expect(h.records()).toHaveLength(2);
+    // both left out of the next head, neither key retired nor revoked
+    await w.amend((s) => void (s.machines = s.machines.filter((m) => m.ref !== w.other && m.ref !== third)));
+    await h.adopted();
+    expect(h.records()).toEqual([]);
+    expect([w.held[w.other]?.revision, w.held[third]?.revision]).toEqual([5, 7]);
+  });
+
   it('scalpel-1#2: a mark goes once the head revokes the key that signed it', async () => {
     const w = await world();
     const h = new HeldProjects({ ref: () => w.ref, ownKeyId: () => w.kid, head: () => ({ state: w.head.state, certificates: NO_CERTIFICATES }), now: Date.now, store: w.heldStore, own: () => {}, changed: () => {}, snapshotEnded: () => {}, log: () => {} });

@@ -125,7 +125,8 @@ export class HeldProjects {
           this.#silent.delete(ref);
           continue;
         }
-        moved ||= this.#verified.delete(ref);
+        const uncounted = this.#verified.delete(ref);
+        moved ||= uncounted;
         if (keyEnded(head.state, entry.keyId)) {
           delete held[ref];
           this.#silent.delete(ref);
