@@ -1361,6 +1361,48 @@ describe('the window: opening', () => {
     expect([h.window.waiting(DIRECT), h.window.waiting(HUB)]).toEqual([1, 1]);
   });
 
+  // Decision Log 33 (a): the other state a real sleep leaves, the app waking with its channel still up, through to the
+  // next channel: the drop half is the case above; here every subscription is sent again on the channel the window
+  // adopts, a lane B stream's from exactly the cursor it held
+  it('a wake of an hour with the channel up: the next channel adopted, each subscription sent again on it, the stream’s from exactly its held cursor', async () => {
+    const h = await harness({ window: true, timing: { PING_SILENCE_MS: [100_000, 100_000] } });
+    h.peer.capabilities = ['rl2.feeds', 'rl2.artifacts'];
+    await settle();
+    expect(h.link.carrier()).toBe('direct');
+    const asleep = h.last();
+    const session = { lane: 'B', id: 'app-1' } as const;
+    const stream = sink();
+    const s = h.link.subscribe({ session, cursor: null }, stream.s);
+    const checkout = h.link.subscribe({ session, feed: 'checkout' }, sink().s);
+    const attention = h.link.subscribe({ feed: 'attention' }, sink().s);
+    const artifacts = h.link.subscribe({ feed: 'artifacts' }, sink().s);
+    asleep.deliver({ t: 'subbed', sub: s.id, mode: 'snapshot', epoch: 'L1', seq: 0 });
+    asleep.deliver({ t: 'ev', sub: s.id, epoch: 'L1', seq: 7, idx: 2, body: 'held' });
+    const held = { epoch: 'L1', seq: 7, idx: 2 };
+    expect(s.cursor()).toEqual(held);
+    h.link.wake(3_600_000);
+    await settle();
+    expect(asleep.closedWith).toBe('wake');
+    expect(linesOf(h, 'wake after')).toEqual([`${h.o.ref}: wake after 3600000 ms: dropped the direct channel`]);
+    expect(h.last()).toBe(asleep); // nothing adopted before a lane's answer
+    h.window.answer(DIRECT);
+    await settle();
+    expect(h.link.carrier()).toBe('direct');
+    const next = h.last();
+    expect(next).not.toBe(asleep);
+    const credit = 1024 * 1024;
+    expect(next.of('sub')).toEqual([
+      { t: 'sub', sub: s.id, session, cursor: held, credit },
+      { t: 'sub', sub: checkout.id, session, feed: 'checkout', cursor: null, credit },
+      { t: 'sub', sub: attention.id, feed: 'attention', cursor: null, credit },
+      { t: 'sub', sub: artifacts.id, feed: 'artifacts', cursor: null, credit },
+    ]);
+    next.deliver({ t: 'subbed', sub: s.id, mode: 'replay', ...held });
+    next.deliver({ t: 'ev', sub: s.id, epoch: 'L1', seq: 8, idx: 0, body: 'after' });
+    expect(stream.heard.filter((x) => x[0] === 'event').map((x) => x[2])).toEqual(['held', 'after']);
+    expect(linesOf(h, `subscription ${s.id} session B:app-1: subbed replay`)).toEqual([`${h.o.ref}: subscription ${s.id} session B:app-1: subbed replay at L1:7:2, asked from L1:7:2`]);
+  });
+
   it('a wake of 10 s on a link that is down clears today’s retry timer', async () => {
     const h = await harness({ window: true });
     h.net.direct = false;
