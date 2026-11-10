@@ -42,19 +42,27 @@ export function directoryMachineNames(state: OrgState, certificates: Certificate
 }
 
 /**
- * The machines `directoryMachineNames` names, each with its ref: the enrolled machines, and those of certificates under a
- * live, unrevoked delegation (the certificate's `machine`), so a devcloud VM that exists only by its certificate can be
- * aimed at by its name and acted on by its ref. One entry per ref; sorted by name, then ref.
+ * The machines a person aims at by name (`maws project add vm-1:/srv`), each with its ref: the enrolled machines, and
+ * those of certificates under a live, unrevoked delegation whose key the head has not retired (`retired`), so a devcloud
+ * VM that exists only by its certificate is one and a retired VM is none. One per name as `directoryMachineNames` keys
+ * it (`machineNameKey`): an enrolled machine before any certificate, and among live certificates of one name the latest
+ * issued, so a VM retired and reissued under its name is its replacement. Its names are `directoryMachineNames`', save
+ * a name only a certificate the head retired bears, which that list keeps. Sorted by name.
  */
 export function directoryMachines(state: OrgState, certificates: Certificates, now: Date): Array<{ ref: MachineRef; name: string }> {
-  const machines = new Map<string, { ref: MachineRef; name: string }>();
-  for (const m of state.machines) machines.set(m.ref, { ref: m.ref, name: m.name });
+  const machines = new Map<string, { ref: MachineRef; name: string; issued: string | null }>();
+  for (const m of state.machines) machines.set(machineNameKey(m.name), { ref: m.ref, name: m.name, issued: null });
   const live = new Set(state.delegations.filter((d) => Date.parse(d.expires) > now.getTime()).map((d) => d.id));
   const revoked = new Set(state.revoked.flatMap((r) => ('delegation' in r.holder ? [r.holder.delegation] : [])));
+  const retired = new Set(state.retired.map((r) => r.pub));
   for (const c of certificates.certs) {
-    if (isSigned(c, isMachineCert) && live.has(c.body.delegation) && !revoked.has(c.body.delegation)) machines.set(c.body.machine, { ref: c.body.machine, name: c.body.name });
+    if (!isSigned(c, isMachineCert) || !live.has(c.body.delegation) || revoked.has(c.body.delegation) || retired.has(c.body.pub)) continue;
+    const key = machineNameKey(c.body.name);
+    const held = machines.get(key);
+    if (held !== undefined && (held.issued === null || held.issued >= c.body.issued)) continue; // enrolled, or issued no earlier
+    machines.set(key, { ref: c.body.machine, name: c.body.name, issued: c.body.issued });
   }
-  return [...machines.values()].sort((a, b) => byText(a.name, b.name) || byText(a.ref, b.ref));
+  return [...machines.values()].map(({ ref, name }) => ({ ref, name })).sort((a, b) => byText(a.name, b.name));
 }
 
 /**

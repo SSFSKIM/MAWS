@@ -123,6 +123,43 @@ describe("the machine names: the directory's and the registry's", () => {
     expect(directoryMachines(V2, VM1_CERTS, new Date('2026-12-01T00:00:00.000Z'))).toEqual(enrolled);
   });
 
+  // M12's re-review, finding 1: a VM retired and its name reissued is one machine, the replacement
+  it('are one per name: a retired certificate none, the latest issued of one name the one, an enrolled machine before any', () => {
+    const old = VM1_CERTS.certs[0]!;
+    const replacement = { ...old, body: { ...old.body, machine: `${REF_VM1}-next`, pub: VECTOR_KEYS.mini.pub, issued: '2026-10-27T12:00:00.000Z' } };
+    const retired = structuredClone(V2);
+    retired.retired.push({ keyId: 'AAAAAAAAAAAAAAAAAAAAAA', pub: old.body.pub, notAfter: '2026-10-27T11:00:00.000Z', holder: { machine: REF_VM1 } });
+    const vms = (state: OrgState, certs: Certificates['certs']) => directoryMachines(state, { certs, retirements: [] }, NOW).filter((m) => m.name === 'vm-1');
+    expect(vms(retired, [old, replacement])).toEqual([{ ref: `${REF_VM1}-next`, name: 'vm-1' }]); // the retired ref, sorted first by ref, is no target
+    expect(vms(retired, [old]), 'a retired certificate alone').toEqual([]);
+    expect(vms(V2, [replacement, old]), 'two live certificates of one name: the latest issued').toEqual([{ ref: `${REF_VM1}-next`, name: 'vm-1' }]);
+    const enrolledToo = structuredClone(V2);
+    enrolledToo.machines.push({ ...enrolledToo.machines[0]!, name: 'VM-1', ref: 'mref-enrolled-vm1' });
+    expect(directoryMachines(enrolledToo, VM1_CERTS, NOW).filter((m) => m.name.toLowerCase() === 'vm-1'), 'an enrolled machine before a certificate').toEqual([{ ref: 'mref-enrolled-vm1', name: 'VM-1' }]);
+  });
+
+  it('name what `directoryMachineNames` names, save a retired certificate’s name it lists', () => {
+    const old = VM1_CERTS.certs[0]!;
+    const replacement = { ...old, body: { ...old.body, machine: `${REF_VM1}-next`, pub: VECTOR_KEYS.mini.pub, issued: '2026-10-27T12:00:00.000Z' } };
+    const revoked = structuredClone(V2);
+    revoked.revoked.push({ keyId: 'AAAAAAAAAAAAAAAAAAAAAA', holder: { delegation: V2.delegations[0].id, prefix: V2.delegations[0].prefix } });
+    const inputs: Array<[OrgState, Certificates, Date]> = [
+      [V2, NO_CERTIFICATES, NOW],
+      [V2, VM1_CERTS, NOW],
+      [V2, { certs: [old, replacement], retirements: [] }, NOW],
+      [fixture<SignedOrgState>('v2 without the delegation').state, VM1_CERTS, NOW],
+      [V2, VM1_CERTS, new Date('2026-12-01T00:00:00.000Z')],
+      [revoked, VM1_CERTS, NOW],
+      [fixture<SignedOrgState>('v3 renamed').state, NO_CERTIFICATES, NOW],
+    ];
+    for (const [state, certs, now] of inputs) expect(directoryMachines(state, certs, now).map((m) => m.name)).toEqual(directoryMachineNames(state, certs, now));
+    // the one difference: the directory's names still list a certificate the head retired, which is no target
+    const retired = structuredClone(V2);
+    retired.retired.push({ keyId: 'AAAAAAAAAAAAAAAAAAAAAA', pub: old.body.pub, notAfter: '2026-10-27T11:00:00.000Z', holder: { machine: REF_VM1 } });
+    expect(directoryMachineNames(retired, VM1_CERTS, NOW)).toContain('vm-1');
+    expect(directoryMachines(retired, VM1_CERTS, NOW).map((m) => m.name)).not.toContain('vm-1');
+  });
+
   it("take a renamed machine's old name into the registry's set alone, and no name of a ref the head no longer enrolls", () => {
     const renamed = fixture<SignedOrgState>('v3 renamed').state;
     expect(directoryMachineNames(renamed, NO_CERTIFICATES, NOW)).toEqual(['builder', 'studio']);
