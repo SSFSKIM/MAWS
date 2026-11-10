@@ -581,7 +581,8 @@ async function install(context: Context, args: readonly string[]): Promise<numbe
   const linked = result.linked === null ? '' : result.linked === 'other' ? ` · ${join(deps.home, '.local', 'bin', 'mawsd')} is another mawsd, left as it is` : ` · linked from ${result.linked}`;
   const release = result.release === null ? [] : [releaseLine(result.release, deps.home)];
   if (result.ignoredDelegationId !== null) deps.err(`warning: ${join(profileDir, IDENTITY_FILE)} already holds the machine ref ${result.ref}, which is never re-minted; --delegation-id ${result.ignoredDelegationId} was ignored\n`); // O14 residue 9
-  deps.out([...release, `unit ${result.unit.name} ${change} (${result.unit.file})`, `wrapper ${result.wrapper}${linked}`, ...(result.ref ? [`machine ${result.ref}`] : []), ''].join('\n'));
+  const mawsLinked = result.maws.linked === null ? '' : result.maws.linked === 'other' ? ` · ${join(deps.home, '.local', 'bin', 'maws')} is another maws, left as it is` : ` · linked from ${result.maws.linked}`; // the project registry's M12
+  deps.out([...release, `unit ${result.unit.name} ${change} (${result.unit.file})`, `wrapper ${result.wrapper}${linked}`, `wrapper ${result.maws.wrapper}${mawsLinked}`, ...(result.ref ? [`machine ${result.ref}`] : []), ''].join('\n'));
   return EXIT.done;
 }
 

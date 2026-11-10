@@ -22,6 +22,7 @@ import { buildIdOf } from '../engine-host/supervisor-files';
 import { nodeFloorProblem } from './node-floor';
 import { parseRun, USAGE, type RunArgs } from './run-args';
 import { writeE2eResources } from './e2e-seam';
+import type { CliDeps } from './cli';
 
 function main(argv: readonly string[]): void {
   const [command, ...rest] = argv;
@@ -119,8 +120,10 @@ function commandLine(argv: readonly string[]): void {
   if (argv.includes('logs') && argv.includes('--follow')) for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => stop.abort());
   const self = process.argv[1]!;
   // The command line is loaded at its first use: a daemon (`run`) never needs it, so its graph (cli.ts, install.ts,
-  // release.ts, machine-client.ts, units/) stays out of the daemon's heap
-  void import('./cli').then(({ runCli }) => runCli(argv, {
+  // release.ts, machine-client.ts, units/) stays out of the daemon's heap. The project registry's M12: `maws` is this
+  // program with `maws` as its first argument (its wrapper's), whose verbs are maws-cli.ts's
+  const maws = argv[0] === 'maws';
+  void (maws ? import('./maws-cli').then(({ runMaws }) => (deps: CliDeps) => runMaws(argv.slice(1), deps)) : import('./cli').then(({ runCli }) => (deps: CliDeps) => runCli(argv, deps))).then((runLine) => runLine({
     env: process.env,
     platform: process.platform,
     home: homedir(),
