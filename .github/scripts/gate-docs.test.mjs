@@ -74,6 +74,7 @@ test('tracker tables preserve header widths, allowing escaped pipes but catching
   assert.deepEqual(checkTracker(table), []);
   assert.equal(checkTracker(table.replace('one \\| two', '`one|two`')).length, 1);
   assert.equal(checkTracker(table.replace('| a | one \\| two |', '| a |')).length, 1);
+  assert.equal(checkTracker(table.replace('| a | one \\| two |', 'only one cell')).length, 1);
   assert.deepEqual(checkTracker(`${table}\n| A | B | C |\n| --- | --- | --- |\n| a | b | c |\n`), []);
 });
 

@@ -42,7 +42,7 @@ export function checkTracker(text) {
     const separator = cells(lines[i + 1]);
     if (!lines[i].includes('|') || separator.length === 0 || !separator.every((cell) => /^:?-{3,}:?$/.test(cell))) continue;
     const width = cells(lines[i]).length;
-    for (let row = i + 1; row < lines.length && lines[row].includes('|'); row++) {
+    for (let row = i + 1; row < lines.length && lines[row].trim() && !/^\s*#/.test(lines[row]); row++) {
       const count = cells(lines[row]).length;
       if (count !== width) errors.push(`line ${row + 1}: table has ${count} cells, header has ${width}`);
       i = row;
