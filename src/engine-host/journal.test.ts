@@ -118,6 +118,29 @@ describe('transport frames and journals', () => {
     });
   });
 
+  // P5 O15 M2b (§L): where the last row ends, for the session stream's checkpoints
+  describe('JournalWriter.position', () => {
+    it('names the file the last row went to, its rotation index and the bytes written to it, a resumed writer\'s too', async () => {
+      const dir = join(root, 'app-1');
+      const writer = new JournalWriter(dir, 'L', { maxBytes: 200 });
+      writer.row('meta', { event: 'spawn', pad: 'x'.repeat(120) });
+      expect(writer.position).toEqual({ file: 'L.jsonl', index: 0, offset: statSync(join(dir, 'L.jsonl')).size });
+      writer.row('in', { type: 'system', pad: 'x'.repeat(120) }); // rotates
+      expect(writer.position).toEqual({ file: 'L.1.jsonl', index: 1, offset: statSync(join(dir, 'L.1.jsonl')).size });
+      await writer.close();
+      const resumed = JournalWriter.resume(dir, 'L', { maxBytes: 200 });
+      expect(resumed.position).toEqual({ file: 'L.1.jsonl', index: 1, offset: statSync(join(dir, 'L.1.jsonl')).size });
+      await resumed.close();
+    });
+
+    it('is null under a redactor, whose file no longer holds the rows as they were', async () => {
+      const writer = new JournalWriter(join(root, 'app-1'), 'L', { maxBytes: JOURNAL_MAX_BYTES, redact: (line) => line });
+      writer.row('meta', { event: 'spawn' });
+      expect(writer.position).toBeNull();
+      await writer.close();
+    });
+  });
+
   // P5 O16 (Interfaces §C): an adopter continues the launch's journal where the last writer left it
   describe('JournalWriter.resume', () => {
     it('continues seq and the rotation index from the latest file, truncating a torn last row first', async () => {

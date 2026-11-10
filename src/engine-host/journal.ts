@@ -14,7 +14,7 @@
 // 0600: created so whatever the umask, and tightened at open when an earlier build left them wider. Directories above
 // the journal root keep the modes they have; launch files the writer does not open sit behind the 0700 directories.
 import { chmodSync, closeSync, createReadStream, existsSync, fchmodSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmdirSync, statSync, truncateSync, unlinkSync, writeSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseJournalRow, type JournalDirection, type JournalRow } from '@shared/wire/journal';
 
@@ -48,6 +48,12 @@ function openOwnerOnly(path: string): number {
   return fd;
 }
 // P3-HD end
+
+export interface JournalPosition {
+  file: string;
+  index: number;
+  offset: number;
+}
 
 export class JournalWriter {
   readonly path: string; // the launch's first file
@@ -108,6 +114,13 @@ export class JournalWriter {
 
   get lastSeq(): number {
     return this.seq;
+  }
+
+  // P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, §L): where the last row written ends, for the
+  // session stream's checkpoints: the file by name, its rotation index (its place among the launch's files) and the
+  // bytes written to it. Null under a redactor, whose file no longer holds the rows the live normaliser saw.
+  get position(): JournalPosition | null {
+    return this.opts.redact ? null : { file: basename(this.current), index: this.index, offset: this.bytes };
   }
 
   // Appends the row synchronously and returns it; with no redactor the file holds exactly this row. Throws after close.

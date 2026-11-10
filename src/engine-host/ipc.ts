@@ -337,6 +337,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
       session.on('queue', (queue) => stream.queue(queue));
       session.on('brokerItems', (items) => stream.brokerItems(items));
       session.on('catalog', (catalog) => stream.catalog(catalog)); // C7: session.catalogChanged
+      session.on('checkpoint', (checkpoint) => stream.checkpoint(checkpoint)); // P5 O15 M2b (§L)
       modelKeys.set(spec.appSessionId, catalogueKey(plan.engineVersion, plan.gateway, { env: plan.env, cwd: plan.cwd, flagEnv: plan.flagSettings.env })); // C10; never rejects
       session.on('models', (list) => updateModels(spec.appSessionId, list)); // C10
       session.on('paneShow', (request) => emit('maws.pane.show', request)); // E1: relayed to every window
