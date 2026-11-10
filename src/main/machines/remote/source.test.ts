@@ -87,7 +87,7 @@ describe('the roster', () => {
     const session = heldOrgSession();
     const held = await signedIn(o, () => session.changed());
     session.set(held);
-    const source = createRemoteSource({ session, local: o.LOCAL, userData: dir, log: () => {}, linkDeps: { records: { resolve: async () => null } } });
+    const source = createRemoteSource({ session, local: o.LOCAL, userData: dir, log: () => {}, linkDeps: { records: { resolve: async () => null, cached: async () => null } } });
     closers.push(() => source.close());
     let heard = 0;
     source.onChanged(() => void (heard += 1));
@@ -108,7 +108,7 @@ describe('the roster', () => {
     const dir = mkdtempSync(join(tmpdir(), 'maws-source-'));
     dirs.push(dir);
     const session = heldOrgSession(await signedIn(o));
-    const source = createRemoteSource({ session, local: o.LOCAL, userData: dir, log: () => {}, linkDeps: { records: { resolve: async () => null } } });
+    const source = createRemoteSource({ session, local: o.LOCAL, userData: dir, log: () => {}, linkDeps: { records: { resolve: async () => null, cached: async () => null } } });
     closers.push(() => source.close());
     await until(() => source.machines().some((m) => m.ref === o.LIVE));
     await until(() => !source.machines().some((m) => m.ref === o.LIVE), 4000);
@@ -125,7 +125,7 @@ describe('the network watch', () => {
     const v4 = (address: string, internal = false): NetworkInterfaceInfo => ({ address, family: 'IPv4', internal, netmask: '255.255.255.0', mac: '00:00:00:00:00:00', cidr: null });
     const table: { current: NodeJS.Dict<NetworkInterfaceInfo[]> } = { current: { lo0: [v4('127.0.0.1', true)], en0: [v4('192.168.1.2')] } };
     const logs: string[] = [];
-    const source = createRemoteSource({ session, local: o.LOCAL, userData: dir, log: (l) => void logs.push(l), networkPollMs: 10, interfaces: () => table.current, linkDeps: { records: { resolve: async () => null } } });
+    const source = createRemoteSource({ session, local: o.LOCAL, userData: dir, log: (l) => void logs.push(l), networkPollMs: 10, interfaces: () => table.current, linkDeps: { records: { resolve: async () => null, cached: async () => null } } });
     closers.push(() => source.close());
     await until(() => source.machines().length === 2);
     const link = source.connect(source.machines()[0]);
@@ -138,5 +138,23 @@ describe('the network watch', () => {
     table.current = { en0: [v4('10.0.0.7')] };
     await until(() => logs.some((l) => l.includes('network changed')));
     expect(source.link(source.machines()[0].ref)).toBe(link);
+  });
+});
+
+// P5 O15 M2b §F: the wake source's notices reach every link (src/main/machines/index.ts calls `wakeAll`)
+describe('a wake', () => {
+  it('reaches every link with its length', async () => {
+    const o = await org();
+    const dir = mkdtempSync(join(tmpdir(), 'maws-source-'));
+    dirs.push(dir);
+    const session = heldOrgSession(await signedIn(o));
+    const logs: string[] = [];
+    const source = createRemoteSource({ session, local: o.LOCAL, userData: dir, log: (l) => void logs.push(l), linkDeps: { records: { resolve: async () => null, cached: async () => null } } });
+    closers.push(() => source.close());
+    await until(() => source.machines().length === 2);
+    for (const machine of source.machines()) closers.push(source.connect(machine).close);
+    await until(() => logs.filter((l) => l.includes('attempt failed')).length === 2);
+    source.wakeAll(3_600_000);
+    expect(logs.filter((l) => l.includes('wake after 3600000 ms: dropped no channel'))).toHaveLength(2);
   });
 });

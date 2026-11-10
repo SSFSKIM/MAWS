@@ -61,6 +61,8 @@ import { createRemoteLaneB, routeLaneB } from './lane-b/remote'; // P5 O7 M2
 import { ArtifactMachines } from './artifacts/machines'; // P5 O7 M5a
 import { dialDirect } from './machines/remote/carriers'; // P5 O7 M2: the dev session's directMap in front of it
 import { relayOnlyDial } from './machines/remote/bench-seam'; // P5 O7 M7: the live bench's relay case
+import { createWakeSource, installWakeSeam } from './net/wake'; // P5 O15 M2b: main's one listener to suspend, resume and unlock
+import { createReach } from './net/reach'; // P5 O15 M2b: the window after a wake or an address change, and its probes
 // C3 end
 // C5 start (emit comes with C3's imports)
 import { notificationActions } from './attention/actions';
@@ -405,6 +407,12 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
         })
       : null;
   const session = devOrg ?? orgSession!;
+  // P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md §D to §F): the wake source and the reach, made
+  // once for the profile and handed to the machines' links (and, by Task 5, to the feed and the org session); §I's seam
+  // tells a wake that did not happen, under MAWS_E2E=1 in a build that is not packaged
+  const wake = createWakeSource({ power: powerMonitor, log: (line) => console.log(line) });
+  const reach = createReach({ log: (line) => console.log(line) });
+  const removeWakeSeam = installWakeSeam(process.env, app.isPackaged, wake);
   const orgFeed = createRegistryFeed({ session, log: (line) => console.log(line) });
   orgSession?.attach(orgFeed);
   // P5 O8 M7a: the project channels (org/channel/), composed in the production session; org.channel.changed forwarded
@@ -446,9 +454,17 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
     budgets: COMMAND_BUDGETS_MS, // P5 O7 M5a: a cold machine's export is waited for its budget, not the link's 10 s
     // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
     session,
+    wake, // P5 O15 M2b: its wake notices reach every link, its unlocks probe them
+    reach,
     // P5 O7 M2: the development session's directMap, read at each dial (it is set once the session signed in); P5 O7 M7:
-    // the live bench's relay case before it (MAWS_E2E_REMOTE_CARRIER=relay, MAWS_E2E, unpackaged), every direct dial refused
-    ...(relayOnly !== null ? { linkDeps: { dialDirect: relayOnly } } : devOrg === null ? {} : { linkDeps: { dialDirect: (url: string, timeoutMs: number) => dialDirect(devOrg.directMap()[url] ?? url, timeoutMs) } }),
+    // the live bench's relay case before it (MAWS_E2E_REMOTE_CARRIER=relay, MAWS_E2E, unpackaged), every direct dial refused.
+    // P5 O15 M2b §F: the window's probes go where the dials go (`directTarget`): through the directMap, and on the relay
+    // case nowhere, so its direct lane has no target
+    ...(relayOnly !== null
+      ? { linkDeps: { dialDirect: relayOnly, directTarget: () => null } }
+      : devOrg === null
+        ? {}
+        : { linkDeps: { dialDirect: (url: string, timeoutMs: number, signal?: AbortSignal) => dialDirect(devOrg.directMap()[url] ?? url, timeoutMs, signal), directTarget: (url: string) => devOrg.directMap()[url] ?? url } }),
   });
   // P5 O9 M9: `laneA.*` for a machine O7's link reaches is remote lane A's (src/main/lane-a/remote.ts), over that link;
   // every other command for another machine, and `laneA.*` for a socket-linked profile, goes to the manager. It writes
@@ -1115,6 +1131,12 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   shutdown.add('org', () => {
     orgFeed.close();
     return Promise.all([orgSession?.close(), remoteRows.close()]).then(() => undefined);
+  });
+  // P5 O15 M2b: the wake source's three powerMonitor listeners and its timer, and the reach's probes, after their users
+  shutdown.add('wake and reach', () => {
+    removeWakeSeam();
+    wake.close();
+    reach.close();
   });
   // P5 O3-A: spine.lock is released at the process's exit alone (openSpineData), never at a will-quit step: the steps'
   // promises settle after the last step is called, and a writer still finishing (an intent's rename) must not run

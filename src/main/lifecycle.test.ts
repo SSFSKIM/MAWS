@@ -39,7 +39,7 @@ vi.mock('electron', () => {
     BrowserWindow: { getAllWindows: () => fake.windows },
     dialog: { showMessageBox: fake.showMessageBox }, // E11 F2b
     screen: { getAllDisplays: () => [display], getPrimaryDisplay: () => display },
-    powerMonitor: { on: vi.fn() }, // P5 O8 M1: the Registry feed's wake and unlock probes
+    powerMonitor: { on: vi.fn(), off: vi.fn() }, // P5 O8 M1: the Registry feed's wake and unlock probes; P5 O15 M2b: the wake source's, off at shutdown
     safeStorage: {}, // P5 O4 M2: the legacy grants' sealer, asked nothing with no format 1 file
     systemPreferences: { promptTouchID: vi.fn() }, // P5 O7 M2: the step-up sheet's Touch ID, behind the confirm every signer takes
   };

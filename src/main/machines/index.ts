@@ -7,12 +7,17 @@
 // P5 O7 M1 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Composition"): the RL2 links' source (one link per
 // machine the org session lists) joins the manager as its second source, `remote(ref)` is the one way main's consumers
 // reach a machine's endpoint, and wake, unlock and focus probe every link (the network watch is the source's own).
+// P5 O15 M2b (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md §F): the wake and the unlock come from main's one
+// wake source, which hears powerMonitor; a wake reaches every link's `wake` with its length, and the links share the
+// one reach that app.ts made, the hub's prober with it.
 import { join } from 'node:path';
-import { app, powerMonitor } from 'electron';
+import { app } from 'electron';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import type { OrgSession } from '../org/session';
 import type { CommandBudgets } from './budgets';
+import type { Reach } from '../net/reach';
+import type { WakeSource } from '../net/wake';
 import { emit, emitFrom } from '../ipc/events';
 import type { MainContext, MainHandler, RemoteDispatch } from '../ipc/router';
 import { configuredMachines } from './config';
@@ -34,6 +39,8 @@ export interface MachinesDeps {
   session: OrgSession; // the org session the RL2 links read: signed out until O8's sign-in, or MAWS_DEV_ORG's in development
   linkDeps?: Partial<RemoteLinkDeps>; // P5 O7 M2: what every RL2 link takes in place of its defaults (the dev session's directMap as `dialDirect`)
   budgets: CommandBudgets; // P5 O7 M5a: each command's budget on every link (the services' COMMAND_BUDGETS_MS)
+  wake: WakeSource; // P5 O15 M2b: main's wake notices and unlocks
+  reach: Reach; // P5 O15 M2b: the window after a wake or an address change, and its probes
   register(name: 'machines.list', handler: MainHandler<'machines.list'>): void;
   dispatchLocal(name: CommandName, input: unknown, ctx: MainContext): Promise<CommandResult<CommandName>>;
 }
@@ -48,7 +55,7 @@ export interface Machines {
 export function startMachines(deps: MachinesDeps): Machines {
   const { local, localName, userData, packaged, env, build, dispatchLocal } = deps;
   const log = (line: string) => console.log(`[machines] ${line}`);
-  const remote = createRemoteSource({ session: deps.session, local, userData, log, linkDeps: { budgets: deps.budgets, ...deps.linkDeps } });
+  const remote = createRemoteSource({ session: deps.session, local, userData, log, linkDeps: { budgets: deps.budgets, reach: deps.reach, ...deps.linkDeps } });
   const manager = createConnectionManager({
     local,
     localName,
@@ -65,11 +72,9 @@ export function startMachines(deps: MachinesDeps): Machines {
     const refs = remote.machines().map((machine) => machine.ref);
     for (const listener of [...remoteListeners]) listener(refs);
   });
-  const onWake = () => remote.probeAll('wake');
-  const onUnlock = () => remote.probeAll('unlock');
+  const offWake = deps.wake.onWake((notice) => remote.wakeAll(notice.sleptMs));
+  const offUnlock = deps.wake.onUnlock(() => remote.probeAll('unlock'));
   const onFocus = () => remote.probeAll('focus');
-  powerMonitor.on('resume', onWake);
-  powerMonitor.on('unlock-screen', onUnlock);
   app.on('browser-window-focus', onFocus);
   deps.register('machines.list', () => ({ machines: manager.list() }));
   // P5 O7 M7: the remote bench's handle on the links (MAWS_E2E=1, unpackaged), read through Playwright's app.evaluate
@@ -84,8 +89,8 @@ export function startMachines(deps: MachinesDeps): Machines {
       return () => void remoteListeners.delete(listener);
     },
     async stop() {
-      powerMonitor.off('resume', onWake);
-      powerMonitor.off('unlock-screen', onUnlock);
+      offWake();
+      offUnlock();
       app.off('browser-window-focus', onFocus);
       removeBenchSeam();
       manager.close();

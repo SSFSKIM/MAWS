@@ -21,7 +21,7 @@ const state = vi.hoisted(() => ({
 vi.mock('electron', () => ({
   app: { whenReady: () => ({ then: (fn: () => unknown) => { state.ready = fn; } }), on: vi.fn(), requestSingleInstanceLock: () => true, hasSingleInstanceLock: () => true, getPath: (name: string) => join(state.root, name), getAppPath: () => state.root, getVersion: () => '0.0.0-test' /* P4-AGG M2: the catalog's user agent */, isPackaged: false, commandLine: { appendSwitch: vi.fn(), getSwitchValue: vi.fn(() => '') /* P3-F1: Electron's answer for a switch not given */ }, setPath: vi.fn() },
   BrowserWindow: { getAllWindows: () => [] }, dialog: {}, screen: { getAllDisplays: () => [], getPrimaryDisplay: () => ({ workArea: {} }) }, shell: {},
-  powerMonitor: { on: vi.fn() }, // P5 O8 M1: the Registry feed's wake and unlock probes
+  powerMonitor: { on: vi.fn(), off: vi.fn() }, // P5 O8 M1: the Registry feed's wake and unlock probes; P5 O15 M2b: the wake source's, off at shutdown
   safeStorage: {}, // P5 O4 M2: the legacy grants' sealer, asked nothing with no format 1 file
   systemPreferences: { promptTouchID: vi.fn() }, // P5 O7 M2: the step-up sheet's Touch ID, behind the confirm every signer takes
 }));
