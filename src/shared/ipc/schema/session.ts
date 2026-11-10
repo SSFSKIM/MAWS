@@ -366,7 +366,8 @@ const c4Commands = {
   // hides; rediscovery does not resurrect it
   // The project registry (Interfaces §G): `expect`, the path and project the row must still have, else `changed`
   'session.projects.remove': {
-    input: z.strictObject({ id: ProjectIdSchema, expect: z.strictObject({ path: z.string(), project: z.string().nullable() }).optional() }),
+    // `opened` (M9's re-review, Fix 2): as link's, the opens its rule's reads of the row's folder go by
+    input: z.strictObject({ id: ProjectIdSchema, expect: z.strictObject({ path: z.string(), project: z.string().nullable() }).optional(), opened: SetupOpenedSchema.optional() }),
     output: z.void(),
     owner: 'machine',
   },
@@ -379,7 +380,8 @@ const c4Commands = {
     owner: 'machine',
   },
   'session.projects.link': {
-    // `opened` (M9's review 1, Fix 1c): the endpoint's for another machine's owner, the opens its own-`.smns` read is guarded by
+    // `opened` (M9's review 1, Fix 1c; re-review, Fix 2): the endpoint's for another machine's owner, the opens its reads of
+    // the row's folder go by
     input: z.strictObject({ id: ProjectIdSchema, into: z.string().min(1).nullable(), opened: SetupOpenedSchema.optional() }),
     output: z.strictObject({ project: ProjectRecordSchema, restated: z.boolean() }),
     owner: 'machine',

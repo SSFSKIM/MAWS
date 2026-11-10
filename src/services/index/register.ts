@@ -6,8 +6,7 @@ import { readerStateOf, type SessionRecord } from '@shared/graph/session';
 import type { Reader } from '@shared/ipc/client';
 import type { ReaderPatch, SessionPatch } from '@shared/ipc/schema/session';
 import type { ServicesBus } from '@shared/spine/bus';
-import { setupGuarded, thisGuard, type SetupGuard } from '../machine/setup';
-import { folderSmns } from './org-project';
+import { rowFiles, setupGuarded, thisGuard, type SetupGuard } from '../machine/setup';
 import { locate } from './projects';
 import type { Index } from './index';
 import { draftForLink, restoreWithheld } from '@shared/sessions/draft-fit'; // P5 O8 M6a
@@ -46,20 +45,22 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
     return await setupGuarded(directory, opened ?? [], setup, (checked, files) => index.statements.addFolder(checked, { ...acts, files, locateIn: setupLocate }));
   });
   register('session.projects.update', ({ id, patch }) => index.statements.update(id as ProjectId, patch));
-  register('session.projects.remove', ({ id, expect }) => index.statements.remove(id as ProjectId, expect));
+  // M9's re-review, Fix 2: another machine's owner's remove derives (its `expect`) through their opens alone
+  register('session.projects.remove', ({ id, expect, opened }, context) =>
+    index.statements.remove(id as ProjectId, expect, context.op === undefined ? {} : { files: rowFiles(opened ?? [], setup) }),
+  );
   // M9's review 1, F1: another machine's owner's resolve and relocate read the folder as its addFolder does, through the
   // checked reader (`remote`: the endpoint's call; `op`: its claimed act)
   register('session.projects.resolve', async ({ directory, opened }, context) => {
     if (context.remote !== true && context.op === undefined) return index.statements.resolve(directory);
     return await setupGuarded(directory, opened ?? [], setup, (checked, files) => index.statements.resolve(checked, { files, locateIn: setupLocate }));
   });
-  // Fix 1c: another machine's owner's link reads the folder's own `.smns` (a target no record names) through the guard, by
-  // that member's opens: a file it may not read names nothing, as one it guessed wrong
-  register('session.projects.link', ({ id, into, opened }, context) => {
-    if (context.op === undefined) return index.statements.link(id as ProjectId, into);
-    const readSmns = (folder: string) => setupGuarded(folder, opened ?? [], setup, (_checked, files) => folderSmns(folder, files));
-    return index.statements.link(id as ProjectId, into, { readSmns });
-  });
+  // Fix 1c and the re-review's Fix 2: another machine's owner's link reads its row's folder (the target's own `.smns`, and
+  // the derivation it answers) through that member's opens alone: a file it may not read names nothing, as one it guessed
+  // wrong, and is no answer
+  register('session.projects.link', ({ id, into, opened }, context) =>
+    index.statements.link(id as ProjectId, into, context.op === undefined ? {} : { files: rowFiles(opened ?? [], setup) }),
+  );
   register('session.projects.relocate', async ({ id, directory, opened }, context) => {
     if (context.op === undefined) return index.statements.relocate(id as ProjectId, directory);
     return await setupGuarded(directory, opened ?? [], setup, (checked, files) => index.statements.relocate(id as ProjectId, checked, { files }));

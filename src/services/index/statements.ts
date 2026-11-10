@@ -51,9 +51,6 @@ export interface StatementsQueue {
 /** What a declaration's answer gains while statements are possible (§G's `addFolder`). */
 export type Decided = { by?: OrgDerivation['by']; at?: string | null; restated?: boolean };
 
-/** A read of a folder's own `.smns` (`folderSmns`), as a link's target asks it. */
-export type SmnsRead = (folder: string) => Promise<Awaited<ReturnType<typeof folderSmns>>>;
-
 function refuse(code: ProjectRefusal, words: string): never {
   throw new HostCommandError(ipcError('invalid_input', `${code}: ${words}`));
 }
@@ -169,12 +166,11 @@ export class Statements {
   }
 
   // A link's target (§G): a hub project a verified record names, or the id the folder's own `.smns` names, which waives the
-  // record and not the hub (M8's review 1, finding 5): that file must name this org's hub. `readSmns`: another machine's
-  // owner's read of that file, through the setup's guard (M9's review 1, Fix 1c).
-  private async target(into: string, folder: string, files?: GitFiles, readSmns: SmnsRead = (at) => folderSmns(at, files)): Promise<void> {
+  // record and not the hub (M8's review 1, finding 5): that file must name this org's hub.
+  private async target(into: string, folder: string, files?: GitFiles): Promise<void> {
     const known = this.registry.project(into);
     if (known === null) {
-      const own = await readSmns(folder).catch(() => null); // a file the setup did not open names nothing
+      const own = await folderSmns(folder, files).catch(() => null); // a file the setup did not open names nothing
       if (own?.project !== into) refuse('unknown-project', `${into} is in no verified projects record`);
       const org = this.enrollment()?.org;
       if (org === undefined || own.hub !== org) refuse('not-a-hub-project', `${into}'s .smns names no hub of this org`);
@@ -303,10 +299,11 @@ export class Statements {
   }
 
   /**
-   * `session.projects.link`: a declared row's link set or, with null, cleared. It never mints. `readSmns`: another
-   * machine's owner's read of the folder's own `.smns`, guarded (M9's review 1, Fix 1c).
+   * `session.projects.link`: a declared row's link set or, with null, cleared. It never mints. `files`: another machine's
+   * owner's reader, which its target's `.smns` and the derivation it answers read through (M9's review 1, Fix 1c; its
+   * re-review, Fix 2).
    */
-  async link(id: ProjectId, into: string | null, { readSmns }: { readSmns?: SmnsRead } = {}): Promise<{ project: ProjectRecord; restated: boolean }> {
+  async link(id: ProjectId, into: string | null, { files }: { files?: GitFiles } = {}): Promise<{ project: ProjectRecord; restated: boolean }> {
     const row = this.projects.statementRow(id);
     if (!row.declared) refuse('not-declared', `${row.directory} is not a declared folder`);
     const anchor = readAnchor(row.directory);
@@ -314,11 +311,11 @@ export class Statements {
       this.unavailable();
       // finding 4: a link is about the folder at the path, so there must be one to anchor it to
       if (anchor === null) refuse('not-a-directory', `${row.directory}: there is no folder there to link`);
-      await this.target(into, row.directory, undefined, readSmns);
+      await this.target(into, row.directory, files);
     }
     const changed = this.projects.setLink(id, into, anchor);
     if (!changed) return { project: this.projects.record(id), restated: true };
-    await this.deriveId(id);
+    await this.deriveId(id, files);
     this.beneath(row.directory);
     const { restated } = await this.registry.published();
     return { project: this.projects.record(id), restated };
@@ -354,8 +351,10 @@ export class Statements {
   /**
    * `session.projects.remove`: the row hidden; with `expect`, only while its path and the rule's project now are the
    * expected ones (else `changed`), the rule tied to the hide by `statements_gen` (`unresolved` when it has no answer).
+   * `files`: another machine's owner's reader, which the rule reads through (M9's re-review, Fix 2): a read it refuses
+   * leaves the rule no answer.
    */
-  async remove(id: ProjectId, expect?: { path: string; project: string | null }): Promise<void> {
+  async remove(id: ProjectId, expect?: { path: string; project: string | null }, { files }: { files?: GitFiles } = {}): Promise<void> {
     const { directory } = this.projects.statementRow(id);
     if (expect === undefined) {
       this.projects.hide(id);
@@ -366,14 +365,16 @@ export class Statements {
         const row = this.projects.statementRow(id);
         if (row.directory !== expect.path) refuse('changed', `the location is at ${row.directory} now`);
         const context = this.context;
-        const derived = context === null ? null : await (context.derive ?? deriveProject)({ directory: row.directory, machine: context.machine, projectId: id, name: row.name }, context.enrollment(), { statements: this.lookup });
+        const subject = { directory: row.directory, projectId: id, name: row.name, ...(files === undefined ? {} : { files }) };
+        // a read past the asker's opens gives the rule no answer
+        const derived = context === null ? null : await (context.derive ?? deriveProject)({ ...subject, machine: context.machine }, context.enrollment(), { statements: this.lookup }).catch((error: unknown) => (files === undefined ? Promise.reject(error) : null));
         if (derived === null) refuse('unresolved', 'the rule has no answer now: try again');
         if (derived.org.smnsId !== expect.project) refuse('changed', `the location is in ${derived.org.smnsId ?? "this machine's own project"} now`);
         if (this.projects.hideAt(id, gen)) break;
       }
     }
     // its statement no longer counts: the folder and the rows beneath it derived again
-    await this.deriveId(id);
+    await this.deriveId(id, files);
     this.beneath(directory);
     if (this.registry.statements().possible) await this.registry.published();
   }

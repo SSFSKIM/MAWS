@@ -120,9 +120,9 @@ export type Who = { member: string; device: string; clientClass: DeviceClass; cl
  * (a lane B act's status read) asks it in the step it hands the act on.
  */
 /** The acts that read in their row's folder, which names no directory the setup policy checks: they take the asker's opens. */
-const ROW_FOLDER_ACTS: ReadonlySet<string> = new Set(['session.projects.link']);
+const ROW_FOLDER_ACTS: ReadonlySet<string> = new Set(['session.projects.link', 'session.projects.remove']);
 // `opened` (M9's review 1, Fix 1c): the asking member's opens for an act that reads in a folder it names by its row, not
-// by a directory the setup policy checks (`session.projects.link`)
+// by a directory the setup policy checks (`session.projects.link`, `remove`)
 export type Decision = { ok: true; target?: SessionTarget; artifact?: ArtifactTarget; setup?: SetupTarget; opened?: string[]; reader?: Reader; stands?: () => boolean } | { ok: false; reason: RefusalReason };
 /** P5 O7 M9: a setup row's directory as the setup policy resolved and checked it, which its executor acts on (never the input's spelling). */
 // `opened`: the asking member's opens, which the machine's guard reads by (never another member's; M9's review)

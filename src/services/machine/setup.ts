@@ -60,6 +60,13 @@ export async function checkSetupDirectory(directory: string, asking: readonly st
   if (reads !== null) throw refuse(reads, directory);
 }
 
+/**
+ * git's files as a remote act on a declared row's folder may read them (M9's re-review, Fix 2): `link` and `remove` name a
+ * row, not a directory the setup policy checked, and its folder may be gone, so nothing is checked first and only the
+ * asking member's opens count (never the row's own folder: one in a protected folder is read only once they opened it).
+ */
+export const rowFiles = (asking: readonly string[], { where }: SetupGuard): GitFiles => guardedFiles(where, (folder) => asking.some((listed) => within(listed, folder)));
+
 /** git's files as a run on the checked `directory` may read them (round 2: no git runs before trust; git-reads.ts). */
 const setupFiles = (directory: string, asking: readonly string[], { where }: SetupGuard): GitFiles => guardedFiles(where, openedFor(directory, asking));
 

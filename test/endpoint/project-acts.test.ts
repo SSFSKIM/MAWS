@@ -8,7 +8,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Action } from 'org-protocol';
 import { PROJECT_ACTS_CAPABILITY } from '@shared/ipc/schema/session';
 import { ENDPOINT_CAPABILITIES } from '../../src/endpoint/capabilities';
@@ -42,7 +42,7 @@ const tempDir = (prefix: string) => {
 };
 
 /** The machine with a fake macOS home and a real index answering the project commands, its sminos reading locations. */
-async function setup(): Promise<{ f: Fixture; home: string; index: Index; a: Remote; b: Remote }> {
+async function setup(capabilities = ['audience', 'record', 'locations']): Promise<{ f: Fixture; home: string; index: Index; a: Remote; b: Remote }> {
   const home = tempDir('project-acts-home-');
   for (const dir of ['work/scrape', 'work/moved', 'work/other']) mkdirSync(join(home, dir), { recursive: true });
   const f = await startEndpoint(org, started, { setup: { home, platform: 'darwin' } });
@@ -51,7 +51,7 @@ async function setup(): Promise<{ f: Fixture; home: string; index: Index; a: Rem
   const guard: SetupGuard = { where: { home, platform: 'darwin' } };
   registerIndexHandlers(index, f.spine.bus as never, guard);
   registerFolders(f.spine.bus.register as never, guard);
-  await sminos(f, [], ['audience', 'record', 'locations']);
+  await sminos(f, [], capabilities);
   await index.refreshOrgProjects({ machine: f.services.machine.ref, enrollment: () => ({ org: ORG, machine: 'mini' }), home });
   return { f, home, index, a: await openRemote(f, org.a1, org.A), b: await openRemote(f, org.b1, org.B) };
 }
@@ -176,4 +176,79 @@ describe('the project acts over the network', () => {
     writeFileSync(join(home, 'work/other/.smns'), JSON.stringify({ project: 'own-id', hub: { org: ORG } }));
     expect(await admitted(a, await stepped(f, a, 'session.projects.link', { id: own, into: 'own-id' }))).toMatchObject({ state: 'done', result: { project: { id: own } } });
   });
+
+  // M9's re-review, Fix 2: every derivation a remote act answers reads through the setup's checked reader
+  describe('answer no derivation that read past the asker’s opens', () => {
+    /** A declared folder linked to the id its own `.smns` names, whose `.smns` then turns into a link into an unopened ~/Desktop. */
+    async function swapped() {
+      const s = await setup();
+      const { f, home, a } = s;
+      await until(() => f.endpoint.registry.statements().possible, 'statements possible');
+      const folder = join(home, 'work/scrape');
+      const pid = ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: folder }))).result as { project: { id: string } }).project.id;
+      writeFileSync(join(folder, '.smns'), JSON.stringify({ project: 'public-id', name: 'Public', hub: { org: ORG } }));
+      expect(await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: 'public-id' }))).toMatchObject({ state: 'done' });
+      mkdirSync(join(home, 'Desktop'), { recursive: true });
+      writeFileSync(join(home, 'Desktop/private-smns'), JSON.stringify({ project: 'private-id', name: 'private label', hub: { org: ORG } }));
+      rmSync(join(folder, '.smns'));
+      symlinkSync(join(home, 'Desktop/private-smns'), join(folder, '.smns'));
+      return { ...s, folder, pid };
+    }
+    const quiet = () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      return () => warn.mockRestore();
+    };
+
+    it('an unlink', async () => {
+      const { f, a, pid, index } = await swapped();
+      const restore = quiet();
+      try {
+        const answer = await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: null }));
+        expect(answer.state).toBe('done');
+        expect(JSON.stringify(answer)).not.toMatch(/private-id|private label/);
+        expect(JSON.stringify(index.projects.list({ includeHidden: true }))).not.toMatch(/private-id|private label/);
+      } finally {
+        restore();
+      }
+    });
+
+    it('a link to an id the records already name', async () => {
+      const { f, a, home, index } = await swapped();
+      // a second folder, its own `.smns` a link into the same unopened folder, linked to the id this machine's record names
+      const other = join(home, 'work/other');
+      const oid = ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: other }))).result as { project: { id: string } }).project.id;
+      symlinkSync(join(home, 'Desktop/private-smns'), join(other, '.smns'));
+      // a verified record names `public-id` (the suite's index has no projects source to sign this machine's own)
+      vi.spyOn(f.endpoint.registry, 'project').mockImplementation((id) => (id === 'public-id' ? { hub: true, nameRev: 0 } : null));
+      const restore = quiet();
+      try {
+        const answer = await admitted(a, await stepped(f, a, 'session.projects.link', { id: oid, into: 'public-id' }));
+        expect(answer.state).toBe('done');
+        expect(JSON.stringify(answer)).not.toMatch(/private-id|private label/);
+        expect(JSON.stringify(index.projects.list({ includeHidden: true }))).not.toMatch(/private-id|private label/);
+      } finally {
+        restore();
+      }
+    });
+
+    it('a remove that expects a project: the right guess and a wrong one answer alike, and name nothing read', async () => {
+      // a row with no statement (declared while no sminos reads locations), so the folder's own `.smns` decides its project
+      const { f, a, home } = await setup(['audience', 'record']);
+      const folder = join(home, 'work/scrape');
+      const pid = ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: folder }))).result as { project: { id: string } }).project.id;
+      mkdirSync(join(home, 'Desktop'), { recursive: true });
+      writeFileSync(join(home, 'Desktop/private-smns'), JSON.stringify({ project: 'private-id', name: 'private label', hub: { org: ORG } }));
+      symlinkSync(join(home, 'Desktop/private-smns'), join(folder, '.smns'));
+      const restore = quiet();
+      try {
+        const wrong = await admitted(a, action(f, a, 'session.projects.remove', { id: pid, expect: { path: folder, project: 'guess' } }));
+        const right = await admitted(a, action(f, a, 'session.projects.remove', { id: pid, expect: { path: folder, project: 'private-id' } }));
+        expect(JSON.stringify(wrong)).not.toMatch(/private-id|private label/);
+        expect([right.state, right.error?.message?.split(':')[0]]).toEqual([wrong.state, wrong.error?.message?.split(':')[0]]);
+      } finally {
+        restore();
+      }
+    });
+  });
 });
+
