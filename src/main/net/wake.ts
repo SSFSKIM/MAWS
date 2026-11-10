@@ -65,7 +65,8 @@ export function createWakeSource(deps: {
     const late = at - lastTick - WAKE_TICK_MS;
     lastTick = at;
     if (late < WAKE_DROP_MS) return;
-    if (lastClockNotice !== null && at - lastClockNotice < WAKE_CLOCK_GAP_MS) return;
+    // a last notice later than now, the wall clock having been set back since, counts as none
+    if (lastClockNotice !== null && lastClockNotice <= at && at - lastClockNotice < WAKE_CLOCK_GAP_MS) return;
     lastClockNotice = at;
     suspendedAt = null;
     tell({ sleptMs: late, source: 'clock' });

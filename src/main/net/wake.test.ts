@@ -120,6 +120,22 @@ describe('the wake source (§D)', () => {
     wake.close();
   });
 
+  it('counts a last notice the wall clock has since been set back before as none, so a later late tick is told', () => {
+    const { notices, wake } = source();
+    vi.advanceTimersByTime(WAKE_TICK_MS);
+    asleep(15_000);
+    vi.advanceTimersByTime(WAKE_TICK_MS); // the first notice
+    vi.setSystemTime(Date.now() - 3_600_000); // the wall clock set back an hour: the notice is now in its future
+    vi.advanceTimersByTime(WAKE_TICK_MS);
+    asleep(61_000);
+    vi.advanceTimersByTime(WAKE_TICK_MS); // 61 s late
+    expect(notices).toEqual([
+      { sleptMs: 15_000, source: 'clock' },
+      { sleptMs: 61_000, source: 'clock' },
+    ]);
+    wake.close();
+  });
+
   it('passes unlock-screen on to the unlock listeners, and tells the wake listeners nothing', () => {
     const { power, notices, wake } = source();
     let unlocks = 0;
