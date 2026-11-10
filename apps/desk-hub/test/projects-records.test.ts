@@ -9,6 +9,7 @@ import { HubClient } from 'org-protocol/test-support';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeEndpoint } from '../fake-machine/endpoint';
 import { enrollV2, projectsRecord, type V2Machine } from '../fake-machine/org';
+import { RETRY_ATTEMPTS } from '../src/objects/retry';
 import { encodeEnrollmentCodeV2 } from '../src/protocol/identity';
 import { ADMIN, credentials, ORG, startLocalHub, type LocalHub } from './support/local';
 import { genesis, newDevice, next, signedBy, type TestDevice } from './support/org';
@@ -22,6 +23,13 @@ let A: string;
 let mini: V2Machine;
 let peer: V2Machine;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+async function waitUntil(probe: () => Promise<boolean>, ms = 10_000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!(await probe())) {
+    if (Date.now() > deadline) throw new Error('timed out');
+    await sleep(20);
+  }
+}
 
 async function accept(edit: Parameters<typeof next>[1]): Promise<void> {
   const s = await signedBy(await next(head, edit), a1);
@@ -173,6 +181,19 @@ describe('the snapshot', () => {
     ]);
     for (const page of pages) expect(JSON.stringify(page.records).length).toBeLessThanOrEqual(LISTINGS_PAGE_BYTES);
 
+    // An endpoint's snapshot comes the same way, read from the Registry a page per call.
+    await hub.projectPageFault(0);
+    const reader = endpointOf(mini);
+    await reader.connect();
+    expect(await snapshot(reader)).toEqual(held);
+    const read = reader.frames.filter((f) => f.t === 'projects-all') as unknown as Array<{ records: Signed<ProjectsRecord>[]; last: boolean }>;
+    expect(read.map((p) => [p.records.length, p.last])).toEqual([
+      [1, false],
+      [1, true],
+    ]);
+    expect((await hub.projectPageFault()).calls).toBe(2);
+    reader.close();
+
     const endpoint = endpointOf(peer);
     await endpoint.connect();
     const from = app.frames.length;
@@ -202,6 +223,44 @@ describe('the snapshot', () => {
     endpoint.sendText(sent(await projectsRecord(mini, 12, [location(5)])));
     await endpoint.next((f) => f.t === 'projects', 'its own change', from);
     expect(live(endpoint, from)).toEqual([`${mini.ref}@12`]);
+    other.close();
+    endpoint.close();
+  });
+});
+
+describe('a snapshot the Registry cannot give', () => {
+  beforeAll(() => hub.retryBase({ relay: mini.ref }, 5));
+
+  it('is asked again on the same connection and arrives whole, the socket kept', async () => {
+    await hub.projectPageFault(3);
+    const endpoint = endpointOf(mini);
+    const { generation } = await endpoint.connect();
+    expect(await snapshot(endpoint)).toHaveLength(2);
+    expect(await hub.projectPageFault()).toEqual({ remaining: 0, calls: 3 + 1 });
+    const from = endpoint.frames.length;
+    endpoint.sendText({ t: 'hb', generation });
+    await endpoint.next((f) => f.t === 'hb-ack', 'hb-ack', from);
+    expect([endpoint.isOpen, endpoint.ends]).toEqual([true, []]);
+    endpoint.close();
+  });
+
+  it('is given up after retry.ts’s attempts with the connection kept: no last page, and live records still come', async () => {
+    await hub.projectPageFault(RETRY_ATTEMPTS);
+    const endpoint = endpointOf(mini);
+    const { generation } = await endpoint.connect();
+    await waitUntil(async () => (await hub.projectPageFault()).calls === RETRY_ATTEMPTS);
+    await sleep(100);
+    expect(endpoint.frames.some((f) => f.t === 'projects-all')).toBe(false);
+    let from = endpoint.frames.length;
+    endpoint.sendText({ t: 'hb', generation });
+    await endpoint.next((f) => f.t === 'hb-ack', 'hb-ack', from);
+    expect([endpoint.isOpen, endpoint.ends]).toEqual([true, []]);
+    const other = endpointOf(peer);
+    await other.connect();
+    from = endpoint.frames.length;
+    other.sendText(sent(await projectsRecord(peer, 13, [location(6)])));
+    await endpoint.next((f) => f.t === 'projects', 'a live record after the snapshot was given up', from);
+    expect(live(endpoint, from)).toEqual([`${peer.ref}@13`]);
     other.close();
     endpoint.close();
   });

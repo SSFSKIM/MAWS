@@ -69,6 +69,7 @@ import {
   UPGRADE_RELEASE_PATH,
   RELAY_FAULT_PATH,
   RELAY_PROJECTS_PATH,
+  PROJECT_PAGE_FAULT_PATH,
   CLAIM_PATH,
   WRAPPED_KEY_SEED_PATH,
   PROJECT_RPCS_PATH,
@@ -414,9 +415,15 @@ export async function startLocalHub(options: { script?: string } = {}) {
     },
     /** How long the first retry of the Registry's failed pushes of the directory waits, or of a project's failed summary
      * reports (the deployed second; each retry after waits twice the one before). */
-    async retryBase(of: 'registry' | { project: string }, ms: number) {
+    async retryBase(of: 'registry' | { project: string } | { relay: string }, ms: number) {
       if (of === 'registry') await seam('REGISTRY', ORG, RETRY_BASE_PATH, { ms });
+      else if ('relay' in of) await seam('MACHINE', `ref:${of.relay}`, RETRY_BASE_PATH, { ms });
       else await seam('PROJECT', of.project, RETRY_BASE_PATH, { ms });
+    },
+    /** Makes the Registry's next `times` reads of a projects page throw (none armed without `times`); answers the throws
+     * still armed and the reads taken since it was armed. */
+    async projectPageFault(times?: number): Promise<{ remaining: number; calls: number }> {
+      return JSON.parse(await seam('REGISTRY', ORG, PROJECT_PAGE_FAULT_PATH, { times })) as { remaining: number; calls: number };
     },
     /** Whether a retry of the project's failed summary report waits for its time (the suites' Worker only). */
     async reportRetryWaits(project: string): Promise<boolean> {

@@ -1604,10 +1604,11 @@ export class Registry extends DurableObject<Env> {
     return true;
   }
 
-  /** Every projects record held, in pages of at most `LISTINGS_PAGE_BYTES`: the snapshot an endpoint's socket is sent
-   * after its welcome. */
-  projectPages(): Signed<ProjectsRecord>[][] {
-    return this.records.projectPages(LISTINGS_PAGE_BYTES);
+  /** One page of the projects records held, those of the machine refs after `after` (the first page when null), within
+   * `LISTINGS_PAGE_BYTES`: the snapshot an endpoint's socket is sent after its welcome, read a page per call so that no
+   * answer nears an RPC's size limit however many records the org holds. */
+  projectPage(after: string | null): { records: Signed<ProjectsRecord>[]; last: boolean } {
+    return this.records.projectPage(after, LISTINGS_PAGE_BYTES);
   }
 
   /** A machine-signed projects record (RL1's `projects`, through the machine's ref object). One stored goes to every

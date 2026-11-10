@@ -55,7 +55,7 @@ export class Machine extends DurableObject<Env> {
   /** The RL1 sockets, in the object addressed by the machine's ref; made on first use, so a name's object never makes
    * it. */
   private get relay(): Relay {
-    return (this.relayInstance ??= new Relay(this.ctx, this.env, () => this.timing()));
+    return (this.relayInstance ??= new Relay(this.ctx, this.env, () => this.timing(), () => this.retryBaseMs()));
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -236,6 +236,12 @@ export class Machine extends DurableObject<Env> {
       await Promise.all(revoked.map((claim) => this.owe('revoke', claim, claim.generation)));
     }
     return this.ctx.storage.kv.get<number>('generation') ?? 0;
+  }
+
+  /** How long the first retry of the relay's failed snapshot read waits at most (retry.ts; the suites' Worker shortens
+   * it). */
+  protected retryBaseMs(): number {
+    return RETRY_BASE_MS;
   }
 
   /** The configured heartbeat (15 s deployed; shorter under the local command), a lease of LEASE_PERIODS of it, and a

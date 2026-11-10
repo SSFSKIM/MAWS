@@ -370,9 +370,28 @@ export class OrgRecords {
   }
 
   /** Every projects record kept, by machine ref, in pages as `listingPages`' (Interfaces §C): the snapshot an app's
-   * Registry socket and an endpoint's socket are sent. */
+   * Registry socket is sent. */
   projectPages(budget: number): Signed<ProjectsRecord>[][] {
     return paged<ProjectsRecord>(this.sql.exec<{ body: string }>('SELECT body FROM projects_records ORDER BY machine'), budget);
+  }
+
+  /**
+   * One page of that snapshot, the records of the machine refs after `after` (from the first when null) coming to at
+   * most `budget` bytes of JSON, a larger record alone; `last` when none is left after it. An endpoint's snapshot is read
+   * so, a page per call, so no answer grows with the org's records. A record stored between two calls is in a later page
+   * when its ref is after the cursor, and is sent live either way.
+   */
+  projectPage(after: string | null, budget: number): { records: Signed<ProjectsRecord>[]; last: boolean } {
+    const rows = this.sql.exec<{ body: string }>('SELECT body FROM projects_records WHERE machine > ? ORDER BY machine', after ?? '');
+    const records: Signed<ProjectsRecord>[] = [];
+    let bytes = 0;
+    for (const { body } of rows) {
+      const size = utf8Length(body);
+      if (records.length > 0 && bytes + size > budget) return { records, last: false };
+      records.push(JSON.parse(body) as Signed<ProjectsRecord>);
+      bytes += size;
+    }
+    return { records, last: true };
   }
 
   /**

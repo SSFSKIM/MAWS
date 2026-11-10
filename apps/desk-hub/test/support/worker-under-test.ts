@@ -34,7 +34,8 @@
 //     changed it, and one that lacks a method, as a Registry on older code; armed `projects`, it lacks the three a
 //     Relay calls of a Registry that keeps projects records, as the build before them (the project registry, §C);
 //   - a `Machine` (a ref's) that lacks `relayProjects`, as a ref object of the build before projects records, and
-//     counts the calls of it it took;
+//     counts the calls of it it took; whose first retry of a failed snapshot read waits another time than the deployed
+//     second; and a `Registry` armed to throw from its next reads of a projects page, counting the reads;
 //   - a `Registry` that answers its projection of the org state, moves a pending
 //     device's expiry back, and calls a method no `Project` has, saying whether it takes the refusal for older code;
 //   - a `Project` armed to throw from its next state announcements, as a reset object's call fails or as a project on
@@ -106,6 +107,7 @@ import {
   UPGRADE_RELEASE_PATH,
   RELAY_FAULT_PATH,
   RELAY_PROJECTS_PATH,
+  PROJECT_PAGE_FAULT_PATH,
   CLAIM_PATH,
   WRAPPED_KEY_SEED_PATH,
   PROJECT_RPCS_PATH,
@@ -194,9 +196,13 @@ export class Registry extends DeployedRegistry {
     return super.keepsProjects();
   }
 
-  projectPages(): ReturnType<DeployedRegistry['projectPages']> {
-    if (this.ctx.storage.kv.get<string>('lacks') === 'projects') throw new TypeError('The RPC receiver does not implement the method "projectPages".');
-    return super.projectPages();
+  /** Armed, a read throws while the fault has throws left; every read is counted. */
+  projectPage(after: string | null): ReturnType<DeployedRegistry['projectPage']> {
+    if (this.ctx.storage.kv.get<string>('lacks') === 'projects') throw new TypeError('The RPC receiver does not implement the method "projectPage".');
+    const fault = this.ctx.storage.kv.get<Fault>('project-page-fault') ?? { remaining: 0, calls: 0 };
+    this.ctx.storage.kv.put('project-page-fault', { remaining: Math.max(0, fault.remaining - 1), calls: fault.calls + 1 });
+    if (fault.remaining > 0) throw new Error('a failure the suite injected into a projects page read');
+    return super.projectPage(after);
   }
 
   storeProjects(record: unknown): ReturnType<DeployedRegistry['storeProjects']> {
@@ -326,6 +332,13 @@ export class Registry extends DeployedRegistry {
       const results = await Promise.all(calls.map(async ({ method, args }) => ((await (this[method] as (...a: unknown[]) => unknown).apply(this, args)) ?? null)));
       return Response.json('concurrent' in body ? results : results[0]);
     }
+    if (url.pathname === PROJECT_PAGE_FAULT_PATH) {
+      const { times } = (await request.json()) as { times?: number };
+      const held = this.ctx.storage.kv.get<Fault>('project-page-fault') ?? { remaining: 0, calls: 0 };
+      const fault = times === undefined ? held : { remaining: times, calls: 0 };
+      this.ctx.storage.kv.put('project-page-fault', fault);
+      return Response.json(fault);
+    }
     if (url.pathname === LACKS_PATH) {
       const { method } = (await request.json()) as { method: string | null };
       if (method === null) this.ctx.storage.kv.delete('lacks');
@@ -431,6 +444,10 @@ export class Machine extends DeployedMachine {
       this.ctx.storage.kv.put(`relay-fault:${method}`, times);
       return new Response('armed');
     }
+    if (url.pathname === RETRY_BASE_PATH) {
+      this.ctx.storage.kv.put('retry-base-ms', ((await request.json()) as { ms: number }).ms);
+      return new Response('set');
+    }
     if (url.pathname === RELAY_PROJECTS_PATH) {
       if (request.method === 'GET') return Response.json({ calls: this.ctx.storage.kv.get<number>('relay-projects-calls') ?? 0 });
       const { method } = (await request.json()) as { method: string | null };
@@ -464,6 +481,11 @@ export class Machine extends DeployedMachine {
     }
     if (url.pathname === MACHINE_ABORT_PATH) this.ctx.abort(ABORT_REASON);
     return super.fetch(request);
+  }
+
+  /** A suite's wait before a failed snapshot read is asked again, over the deployed second. */
+  protected retryBaseMs(): number {
+    return this.ctx.storage.kv.get<number>('retry-base-ms') ?? super.retryBaseMs();
   }
 
   /** A suite's timing over the deployed one; a shortened heartbeat shortens the grace with it unless one is given. */

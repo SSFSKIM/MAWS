@@ -31,8 +31,10 @@
 // run against a Registry of the build before, which lacks the method. Such a connection's welcome leaves `projects`
 // out, it is sent no record, and a `projects` frame it sends anyway is refused `503 hub-updating`, which the endpoint
 // retries as a listing. A connection welcomed with it is sent the Registry's snapshot (`projects-all` pages) after its
-// welcome, then each record as it is stored (`relayProjects`); one stored while the snapshot is read is held until the
-// snapshot is written, so the pages come first.
+// welcome, read from the Registry a page per call, then each record as it is stored (`relayProjects`); one stored
+// while the snapshot is read is held until the snapshot is written, so the pages come first. A page the Registry could
+// not give is asked again, as retry.ts's calls are, and given up after them with the connection kept: the log plane and
+// the channels never end for the snapshot's sake, and an endpoint without the last page holds the snapshot incomplete.
 // Channel frames are forwarded at once, unread and unbuffered, with no flow control: credit is RL3's, end to end.
 //
 // Both kinds of socket hibernate. Nothing kept in memory is needed after an eviction:
@@ -75,7 +77,7 @@ import { NOT_ON_RL1, RL1_LOG_DOWN, type DownFrame, type UpFrame } from '../proto
 import { PartAssembler, toWire, utf8Length, type Part } from '../protocol/parts';
 import type { Machine, Sent, Timing } from './machine';
 import { described, PROJECT_ID, type MachineContext } from './project';
-import { lacksMethod } from './retry';
+import { lacksMethod, RETRY_ATTEMPTS, retryDelay } from './retry';
 
 /** The name of the `Machine` object that holds a machine's RL1 sockets: its ref under the org. A machine name holds no
  * `:`, so this never names a DX2 object (`<org>:<name>`). */
@@ -129,6 +131,8 @@ export class Relay {
     private readonly ctx: DurableObjectState,
     private readonly env: Env,
     private readonly timing: () => Timing,
+    /** How long the first retry of a failed snapshot read waits at most (retry.ts; the suites' Worker shortens it). */
+    private readonly retryBaseMs: () => number,
   ) {
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS relay_pending (session TEXT PRIMARY KEY, project TEXT NOT NULL, kind TEXT NOT NULL, pending INTEGER NOT NULL)');
     // An app's ping is answered without waking the object (the ends drive the heartbeats); one that wakes it anyway is
@@ -347,21 +351,38 @@ export class Relay {
       );
   }
 
-  /** Every projects record the Registry holds, in its pages, to a connection welcomed with `projects`, then those stored
-   * while they were read. Pages the Registry could not give end the connection, whose next welcome brings them. */
+  /** Every projects record the Registry holds, a page per call as each arrives, to a connection welcomed with
+   * `projects`, then those stored while they were read. A snapshot given up leaves its last page unsent, and the
+   * connection as it is; what was held goes then, and live records from then on. */
   private async projectsSnapshot(current: Current): Promise<void> {
-    let pages: Signed<ProjectsRecord>[][] | null = null;
-    try {
-      pages = await this.registry(current.org).projectPages();
-    } catch (error) {
-      note({ event: 'projects-failed', machine: current.name, generation: current.generation, error: described(error) });
+    let after: string | null = null;
+    for (;;) {
+      const page = await this.projectPage(current, after);
+      if (this.current()?.conn !== current.conn) break;
+      if (page === null || !this.toEndpointFrame({ t: 'projects-all', records: page.records, last: page.last })) break;
+      if (page.last || page.records.length === 0) break;
+      after = page.records.at(-1)!.body.machine;
     }
     const held = this.projectsHeld?.conn === current.conn ? this.projectsHeld.records : [];
     if (this.projectsHeld?.conn === current.conn) this.projectsHeld = undefined;
     if (this.current()?.conn !== current.conn) return;
-    if (pages === null) return this.retire(current, CLOSE.failed, 'projects-unavailable');
-    for (const [i, records] of pages.entries()) if (!this.toEndpointFrame({ t: 'projects-all', records, last: i === pages.length - 1 })) return;
     for (const record of held) if (!this.toEndpointFrame({ t: 'projects', record } satisfies ProjectsRecordFrame)) return;
+  }
+
+  /** One page of the snapshot, asked again after a failure as retry.ts's calls are (a line logged for each), while the
+   * connection is still current; null once given up. */
+  private async projectPage(current: Current, after: string | null): Promise<{ records: Signed<ProjectsRecord>[]; last: boolean } | null> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.registry(current.org).projectPage(after);
+      } catch (error) {
+        const wait = attempt < RETRY_ATTEMPTS ? retryDelay(attempt, this.retryBaseMs(), error) : null;
+        note({ event: 'projects-page-failed', machine: current.name, generation: current.generation, attempt, error: described(error), retry_ms: wait === null ? null : Math.round(wait) });
+        if (wait === null) return null;
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        if (this.current()?.conn !== current.conn) return null;
+      }
+    }
   }
 
   /** `hb {generation}`: while the connection is still the machine's newest and its credential is not revoked, the lease

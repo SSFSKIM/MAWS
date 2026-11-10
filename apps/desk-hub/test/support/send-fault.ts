@@ -141,6 +141,9 @@ export const RELAY_FAULT_PATH = '/__test/relay-fault';
  * `relayProjects` as a ref object of the build before projects records refuses it, and says (GET) how many calls of it
  * it took. */
 export const RELAY_PROJECTS_PATH = '/__test/relay-projects';
+/** Where the suites' `Registry` is armed to throw from its next `times` reads of a projects page (`{times}`), as a call a
+ * reset or an overload failed, and says how many reads it took. */
+export const PROJECT_PAGE_FAULT_PATH = '/__test/project-page-fault';
 /** Where the suites' `Machine` (a name's) grants an RL1 generation claim (`{org, name, ref, client}`) no socket follows: a
  * claim of another credential that never installs. */
 export const CLAIM_PATH = '/__test/claim';
