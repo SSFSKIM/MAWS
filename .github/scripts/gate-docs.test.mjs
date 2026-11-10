@@ -64,6 +64,22 @@ test('merge heads compare with their first parent; a nonce around a merge still 
   assert.equal(docsOnlyChange(r.cwd, r.nonce()), false);
 });
 
+test('a nonce rejects a stacked merge whose source changes cancel against master', (t) => {
+  const r = repository(t);
+  const master = r.commit('source.js', 'master code');
+  r.git('update-ref', 'refs/remotes/origin/master', master);
+  const unlanded = r.commit('source.js', 'unlanded code');
+  r.git('checkout', '-qb', 'docs', master);
+  r.commit('docs/notes.md', 'docs');
+  r.git('checkout', '-qb', 'stacked', unlanded);
+  r.git('merge', '--no-ff', '--no-commit', 'docs');
+  const merge = r.commit('source.js', 'master code', 'merge docs and restore master source');
+  assert.equal(r.git('diff', '--name-only', `${merge}^1`, merge), 'docs/notes.md\nsource.js');
+  assert.equal(r.git('diff', '--name-only', 'origin/master', merge), 'docs/notes.md');
+  assert.equal(docsOnlyChange(r.cwd, merge), false);
+  assert.equal(docsOnlyChange(r.cwd, r.nonce()), false);
+});
+
 test('git includes deleted paths and both sides of renames, and unread history is never a docs pass', (t) => {
   const r = repository(t);
   r.git('mv', 'docs/notes.md', 'source.js'); r.git('commit', '-qm', 'move');
@@ -78,6 +94,16 @@ test('tracker tables preserve header widths, allowing escaped pipes but catching
   assert.equal(checkTracker(table.replace('| a | one \\| two |', '| a |')).length, 1);
   assert.equal(checkTracker(table.replace('| a | one \\| two |', 'only one cell')).length, 1);
   assert.deepEqual(checkTracker(`${table}\n| A | B | C |\n| --- | --- | --- |\n| a | b | c |\n`), []);
+});
+
+test('tracker tables with short GFM delimiters still reject malformed widths', () => {
+  for (const delimiter of ['-', '--', ':-', '-:', ':-:']) {
+    const separator = `| ${delimiter} | ${delimiter} |`;
+    const table = `| Key | Detail |\n${separator}\n| a | detail |\n`;
+    assert.deepEqual(checkTracker(table), []);
+    assert.equal(checkTracker(table.replace('| a | detail |', '| a |')).length, 1, delimiter);
+    assert.equal(checkTracker(table.replace(separator, `| ${delimiter} |`)).length, 1, delimiter);
+  }
 });
 
 test('Decision Log entries are consecutive single lines, with blank lines allowed', () => {

@@ -16,11 +16,12 @@ export function docsOnlyChange(cwd, head) {
   const message = git('show', '-s', '--format=%B', head);
   const nonce = parents.length === 1 && /^ci-gate:/.test(message) && /^Nonce: /m.test(message) && git('rev-parse', `${head}^{tree}`) === git('rev-parse', `${parents[0]}^{tree}`);
   const tested = nonce ? parents[0] : head;
-  // A merge is judged against its first parent. ci-gate instead tests its parent's entire unmerged change,
-  // exactly as ci-gate.sh --affected does: a final docs commit cannot conceal earlier unmerged code.
+  // Direct merges use their first-parent diff for the prelanding dispatch measurement.
+  // Nonces require both the tested commit's first-parent and cumulative merge-base diffs:
+  // neither earlier unmerged code nor source reversions that cancel against master are docs-only.
   const base = !nonce && parents.length > 1 ? parents[0] : git('merge-base', 'origin/master', tested);
-  const paths = git('diff', '--name-only', '--no-renames', '-z', base, tested).split('\0').filter(Boolean);
-  return docsOnlyPaths(paths);
+  const docsOnlyDiff = (base) => docsOnlyPaths(git('diff', '--name-only', '--no-renames', '-z', base, tested).split('\0').filter(Boolean));
+  return docsOnlyDiff(base) && (!nonce || docsOnlyDiff(`${tested}^1`));
 }
 
 function cells(line) {
@@ -42,7 +43,7 @@ export function checkTracker(text) {
   const lines = text.split('\n');
   for (let i = 0; i + 1 < lines.length; i++) {
     const separator = cells(lines[i + 1]);
-    if (!lines[i].includes('|') || separator.length === 0 || !separator.every((cell) => /^:?-{3,}:?$/.test(cell))) continue;
+    if (!lines[i].includes('|') || separator.length === 0 || !separator.every((cell) => /^:?-+:?$/.test(cell))) continue;
     const width = cells(lines[i]).length;
     for (let row = i + 1; row < lines.length && lines[row].trim() && !/^\s*#/.test(lines[row]); row++) {
       const count = cells(lines[row]).length;
