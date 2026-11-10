@@ -13,6 +13,8 @@ import type { Action } from 'org-protocol';
 import { PROJECT_ACTS_CAPABILITY } from '@shared/ipc/schema/session';
 import { ENDPOINT_CAPABILITIES } from '../../src/endpoint/capabilities';
 import { OFFERS } from '../../src/endpoint/offers';
+import { OwnProjects } from '../../src/endpoint/projects';
+import { NO_PROJECTS_KEPT } from '../../src/endpoint/state/store';
 import { stepUpRequired } from '../../src/endpoint/step-up';
 import { Index } from '../../src/services/index/index';
 import { registerIndexHandlers } from '../../src/services/index/register';
@@ -245,6 +247,68 @@ describe('the project acts over the network', () => {
         const right = await admitted(a, action(f, a, 'session.projects.remove', { id: pid, expect: { path: folder, project: 'private-id' } }));
         expect(JSON.stringify(wrong)).not.toMatch(/private-id|private label/);
         expect([right.state, right.error?.message?.split(':')[0]]).toEqual([wrong.state, wrong.error?.message?.split(':')[0]]);
+      } finally {
+        restore();
+      }
+    });
+
+    // the re-review of Fix 2 (Fix 2b): a statement at the row's own folder decides with no file read; with none left, the
+    // act is refused before anything changes
+    /** What sminos would be told of the index's declared rows now (the endpoint's own build of them). */
+    async function told(f: Fixture, index: Index) {
+      let file = structuredClone(NO_PROJECTS_KEPT);
+      const own = new OwnProjects({ ref: () => f.ref, enrollment: () => ({ org: ORG, name: 'mini' }), key: () => null, head: () => null, now: Date.now, send: () => false, hubKeeps: () => false, source: index.projectsSource(), store: { read: () => file, write: (next) => void (file = next) }, known: () => [], moved: () => {}, log: () => {} });
+      return own.publish();
+    }
+
+    it('an unlink of a minted row: its minted id decides, the label stays as stored, and sminos is told the minted id', async () => {
+      const { f, a, pid, index, folder } = await swapped();
+      const minted = index.projects.statementRow(pid as never).minted;
+      expect(minted).not.toBeNull();
+      const restore = quiet();
+      try {
+        const answer = await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: null }));
+        expect(answer).toMatchObject({ state: 'done', result: { project: { id: pid, org: { key: 'smns:public-id', name: 'Public', smnsId: minted } } } });
+        expect(index.projects.statementRow(pid as never).linked).toBeNull();
+        const locations = await told(f, index);
+        expect(locations?.at.find((l) => l.path === folder)?.project).toBe(minted);
+      } finally {
+        restore();
+      }
+    });
+
+    it('an unlink that would leave the rule a file the asker cannot read: refused `unresolved`, nothing changed', async () => {
+      const { f, a, home, index } = await setup();
+      await until(() => f.endpoint.registry.statements().possible, 'statements possible');
+      const folder = join(home, 'work/other');
+      writeFileSync(join(folder, '.smns'), JSON.stringify({ project: 'public-id', name: 'Public', hub: { org: ORG } })); // its file decides: no minted id
+      const pid = ((await admitted(a, await stepped(f, a, 'session.projects.addFolder', { directory: folder }))).result as { project: { id: string } }).project.id;
+      expect(index.projects.statementRow(pid as never).minted).toBeNull();
+      expect(await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: 'public-id' }))).toMatchObject({ state: 'done' });
+      mkdirSync(join(home, 'Desktop'), { recursive: true });
+      writeFileSync(join(home, 'Desktop/private-smns'), JSON.stringify({ project: 'private-id', name: 'private label', hub: { org: ORG } }));
+      rmSync(join(folder, '.smns'));
+      symlinkSync(join(home, 'Desktop/private-smns'), join(folder, '.smns'));
+      const restore = quiet();
+      try {
+        const answer = await admitted(a, await stepped(f, a, 'session.projects.link', { id: pid, into: null }));
+        expect(answer.state).toBe('failed');
+        expect(answer.error?.message).toMatch(/^unresolved: /);
+        expect(JSON.stringify(answer)).not.toMatch(/private-id|private label/);
+        expect(index.projects.statementRow(pid as never).linked).toBe('public-id');
+        expect((await told(f, index))?.at.find((l) => l.path === folder)?.project).toBe('public-id');
+      } finally {
+        restore();
+      }
+    });
+
+    it('a remove that expects a stated row’s project: its own statement decides, with no file read', async () => {
+      const { f, a, pid, index, folder } = await swapped();
+      const restore = quiet();
+      try {
+        // its link decides, the file never read
+        expect(await admitted(a, action(f, a, 'session.projects.remove', { id: pid, expect: { path: folder, project: 'public-id' } }))).toMatchObject({ state: 'done' });
+        expect(index.projects.list({ includeHidden: true }).find((p) => p.id === pid)?.hidden).toBe(true);
       } finally {
         restore();
       }

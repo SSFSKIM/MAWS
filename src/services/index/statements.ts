@@ -20,13 +20,14 @@ import { ipcError } from '@shared/ipc/errors';
 import type { ProjectRecord, ProjectRefusal } from '@shared/ipc/schema/session';
 import type { GitFiles } from '@shared/machine/git-reads';
 import type { Enrollment } from '@shared/machine/identity';
+import type { OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
 import type { DeclaredRow, ProjectsSource, RegistrySeam } from '@shared/machine/registry';
 import type { Location } from '@shared/sessions/intent';
 import { addFolder } from './add-folder';
 import { readAnchor } from './anchor';
-import { deriveProject, folderSmns, ORG_GIT_TIMEOUT_MS, type OrgDerivation, type RemoteReads } from './org-project';
-import { isBroadFolder, locate, prospectiveRow, type OrgRow, type ProjectStore } from './projects';
+import { deriveProject, folderSmns, ORG_GIT_TIMEOUT_MS, type OrgDerivation, type RemoteReads, type StatementLookup } from './org-project';
+import { isBroadFolder, locate, prospectiveRow, type OrgRow, type ProjectStore, type StatementRow } from './projects';
 
 export type DeriveRule = typeof deriveProject;
 
@@ -142,6 +143,59 @@ export class Statements {
       console.warn(`[index] the rule for ${directory} read past what the setup opened, so it answers nothing now:`, error instanceof Error ? error.message : error);
       return null;
     }
+  }
+
+  /**
+   * The project a statement at the row's own folder gives it, as `statements` reads it (design Decision Log 7: a link or
+   * a minted id there decides before any `.smns`, so no file is read for it); null where none counts.
+   */
+  private ownDecision(directory: string, statements: StatementLookup = this.lookup): { by: 'link' | 'minted'; id: string } | null {
+    if (this.context === null || this.context.enrollment() === null) return null;
+    const stated = statements(directory.normalize('NFC'));
+    if (stated?.linked) return { by: 'link', id: stated.linked };
+    if (stated?.minted) return { by: 'minted', id: stated.minted };
+    return null;
+  }
+
+  /**
+   * A remote act's derivation of its row through the asker's reader (M9's re-review, Fix 2b). The rule's label reads the
+   * folder's `.smns` before the rule does, so a read past the asker's opens refuses even a row its own statement decides;
+   * that statement then decides with no file read, its project written under the label as stored. False when neither
+   * answers: nothing is written.
+   */
+  private async deriveThrough(id: ProjectId, files: GitFiles): Promise<boolean> {
+    const { directory, name } = this.projects.statementRow(id);
+    try {
+      return (await this.deriveRow({ id, directory, name, files })) !== null;
+    } catch (error) {
+      const own = this.ownDecision(directory);
+      if (own === null || this.context === null) {
+        console.warn(`[index] the rule for ${directory} read past what the asker opened, so it answers nothing now:`, error instanceof Error ? error.message : error);
+        return false;
+      }
+      const stored = this.projects.record(id);
+      const label = stored.org ?? { key: `folder:${this.context.machine}:${id}` as OrgKey, name, source: 'folder' as const, smnsId: null };
+      this.projects.setOrg(id, { ...label, smnsId: own.id }, { remote: stored.remote ?? null, hub: true, by: own.by, at: directory });
+      return true;
+    }
+  }
+
+  /**
+   * A remote unlink that would leave the rule a file the asker cannot read, no statement of the row's own deciding, is
+   * refused before anything changes (Fix 2b): `unresolved`, an answer this device cannot have now but another may.
+   */
+  private async unlinkReadable(row: StatementRow, files: GitFiles): Promise<void> {
+    const context = this.context;
+    if (context === null) return;
+    const at = row.directory.normalize('NFC');
+    const now = this.lookup(at);
+    const after: StatementLookup = (path) => (path === at ? (now === null ? null : { ...now, linked: null }) : this.lookup(path));
+    if (this.ownDecision(row.directory, after) !== null) return;
+    const read = await (context.derive ?? deriveProject)({ directory: row.directory, machine: context.machine, projectId: row.id, name: row.name, files }, context.enrollment(), { statements: after }).then(
+      () => true,
+      () => false,
+    );
+    if (!read) refuse('unresolved', `${row.directory}: unlinked, its project is read from a file this device has not opened: open its folder from this device, or unlink it on the machine`);
   }
 
   private beneath(directory: string): void {
@@ -312,10 +366,13 @@ export class Statements {
       // finding 4: a link is about the folder at the path, so there must be one to anchor it to
       if (anchor === null) refuse('not-a-directory', `${row.directory}: there is no folder there to link`);
       await this.target(into, row.directory, files);
+    } else if (files !== undefined && row.linked !== null) {
+      await this.unlinkReadable(row, files);
     }
     const changed = this.projects.setLink(id, into, anchor);
     if (!changed) return { project: this.projects.record(id), restated: true };
-    await this.deriveId(id, files);
+    if (files === undefined) await this.deriveId(id);
+    else await this.deriveThrough(id, files);
     this.beneath(row.directory);
     const { restated } = await this.registry.published();
     return { project: this.projects.record(id), restated };
@@ -364,12 +421,9 @@ export class Statements {
         const gen = this.projects.statementsGen();
         const row = this.projects.statementRow(id);
         if (row.directory !== expect.path) refuse('changed', `the location is at ${row.directory} now`);
-        const context = this.context;
-        const subject = { directory: row.directory, projectId: id, name: row.name, ...(files === undefined ? {} : { files }) };
-        // a read past the asker's opens gives the rule no answer
-        const derived = context === null ? null : await (context.derive ?? deriveProject)({ ...subject, machine: context.machine }, context.enrollment(), { statements: this.lookup }).catch((error: unknown) => (files === undefined ? Promise.reject(error) : null));
-        if (derived === null) refuse('unresolved', 'the rule has no answer now: try again');
-        if (derived.org.smnsId !== expect.project) refuse('changed', `the location is in ${derived.org.smnsId ?? "this machine's own project"} now`);
+        const project = await this.projectNow(row, files);
+        if (project === undefined) refuse('unresolved', 'the rule has no answer now: try again');
+        if (project !== expect.project) refuse('changed', `the location is in ${project ?? "this machine's own project"} now`);
         if (this.projects.hideAt(id, gen)) break;
       }
     }
@@ -377,6 +431,21 @@ export class Statements {
     await this.deriveId(id, files);
     this.beneath(directory);
     if (this.registry.statements().possible) await this.registry.published();
+  }
+
+  /**
+   * The rule's project for a row now (`remove`'s `expect`); undefined without an answer. `files`: another machine's
+   * owner's reader (Fix 2): a statement at the row's own folder decides with no file read (Fix 2b), else the rule reads
+   * through it, and a read past the asker's opens is no answer.
+   */
+  private async projectNow(row: StatementRow, files?: GitFiles): Promise<string | null | undefined> {
+    const context = this.context;
+    if (context === null) return undefined;
+    const own = files === undefined ? null : this.ownDecision(row.directory);
+    if (own !== null) return own.id;
+    const subject = { directory: row.directory, machine: context.machine, projectId: row.id, name: row.name, ...(files === undefined ? {} : { files }) };
+    const derived = await (context.derive ?? deriveProject)(subject, context.enrollment(), { statements: this.lookup }).catch((error: unknown) => (files === undefined ? Promise.reject(error) : null));
+    return derived === null ? undefined : derived.org.smnsId;
   }
 
   // §F.4's moment (b): a first MAWS use made the row the user's
