@@ -276,6 +276,25 @@ describe('a request withdrawn', () => {
     expect(s.watching.size, 'released once none is held').toBe(0);
   });
 
+  // panel scalpel-4#1: main keeps running with no window, and no connection ends then, so the windows' closing refuses
+  // what no sheet can show any more, in the words a request with no window gets at once
+  it('every held one refused `no-window` when the last window closes; one window of two closing keeps them', async () => {
+    const first = openWindow();
+    const second = openWindow();
+    const s = scene();
+    await s.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
+    await s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape' }, 'pa-2');
+    first.close();
+    expect([s.answers, s.emitted.at(-1)?.asks]).toEqual([[], [expect.objectContaining({ id: 'pa-1' }), expect.objectContaining({ id: 'pa-2' })]]);
+    second.close();
+    const refused = { ok: false, code: 'no-window', text: 'MAWS has no window open to confirm this. Open MAWS and run the command again.' };
+    expect(s.answers).toEqual([answered('pa-1', refused), answered('pa-2', refused)]);
+    expect(s.emitted.at(-1)).toEqual({ asks: [] });
+    expect(s.watching.size, 'released once none is held').toBe(0);
+    await expect(s.decide('pa-1', true)).rejects.toMatchObject({ ipcError: { code: 'invalid_input' } });
+    expect(s.sent).toEqual([]);
+  });
+
   // branch review 1, P1: its machine is read on demand, the certificates verified, so a request waits on that read
   it('while its machine is read: never shown, the link watched meanwhile; a read that fails is answered', async () => {
     openWindow();
