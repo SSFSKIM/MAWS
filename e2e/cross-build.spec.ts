@@ -1063,9 +1063,11 @@ test('(embedded profile, mawsd) a profile the peer made on its embedded shape op
     const theirs = await s.ready(old.page, (st) => st.transport !== 'daemon');
     expect(theirs.daemon, `${peer.label} runs no mawsd on its embedded shape`).toBeNull();
     expect(spineLockOf(s.userData)?.pid, `${peer.label}'s main holds spine.lock`).toBe(old.child.pid);
-    // a session: the seeded record, with a turn played to its end
+    // a session: the seeded record, with a turn played to its end. Fix wave 4: the journal's turn is a human one, which
+    // the replay plays only once its `out` row is sent (`turn 1`), as crossing's launch does
     const id = await s.record(old.page);
     await launchOn(peer, old.page, id, turnsJournal(s.root, 'acceptance-3', 1), s);
+    value(await invoke(old.page, 'session.send', { appSessionId: id, content: 'turn 1' }));
     await turnEnded(old.page, id);
     // an artifact, in the peer's engine host's store
     const artifactId = await createHtmlArtifact(old.page, DATA_ARTIFACT, DATA_MARK);
