@@ -30,6 +30,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
   const id = record.appId;
   const digest = useSessions((s) => s.digests.get(id));
   const seenAt = useSessions((s) => selectSeenAt(s, id)); // P5 O7 M10: a remote record's activity past the record
+  const listing = useSessions((s) => s.listed.get(id)); // P5 O7 M10: a remote lane B record's state (`listedStateOf`)
   // E3 start: a side thread or fork nested under its parent (level 3 and deeper, its real depth for assistive tech) is
   // indented one step whatever its depth, marked `↳` and captioned by its anchor's label; one listed as a root says
   // whose it is (the parent's title when the store holds it)
@@ -44,7 +45,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
   const now = useNow();
   const tree = useTree();
   const nodeId = sessionNodeId(id);
-  const glyph = glyphFor(record, digest ?? null, pending);
+  const glyph = glyphFor(record, digest ?? null, pending, listing);
   const selected = tree.selected === id;
   const title = displayTitle(record);
   const hasActions = sessionActionsFor(record, { remote: isRemoteLaneB(id) /* P5 O7 M2 */ }).includes('rename');
@@ -101,7 +102,7 @@ export function SessionRow({ record, level }: { record: SessionRecord; level: nu
         <GlyphMark glyph={glyph} className="w-[12px] shrink-0" />
         {/* Approved mockup: overflow replaces age in one fixed slot, never the title or unread target. */}
         <span className="relative flex h-[22px] w-[26px] shrink-0 items-center justify-end [&:has([data-state=open])>[data-session-age]]:invisible">
-          <span data-session-age className={`text-ui-sm text-fg-muted tabular-nums ${hasActions ? 'group-hover/session:invisible group-focus-within/session:invisible' : ''}`}>{sessionAge(record, digest, now, seenAt)}</span>
+          <span data-session-age className={`text-ui-sm text-fg-muted tabular-nums ${hasActions ? 'group-hover/session:invisible group-focus-within/session:invisible' : ''}`}>{sessionAge(record, digest, now, seenAt, listing)}</span>
           {hasActions && <span className="absolute inset-0 flex items-center justify-end"><SessionOverflow appSessionId={id} title={title} /></span>}
         </span>
         <button type="button" tabIndex={-1} aria-label={record.unread ? 'Mark read' : 'Mark unread'}

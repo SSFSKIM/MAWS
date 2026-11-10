@@ -152,8 +152,9 @@ export function CommentCard({ card, style, pinned, frame, visible, onDismiss, on
 function ThreadGlyph({ child }: { child: AppSessionId }) {
   const record = useSessions((s) => s.records.get(child) ?? null);
   const digest = useSessions((s) => s.digests.get(child) ?? null);
+  const listing = useSessions((s) => s.listed.get(child)); // P5 O7 M10: a remote lane B record's state (`listedStateOf`)
   const pending = useAttention((s) => selectPendingOf(s, child));
-  return record === null ? null : <GlyphMark glyph={glyphFor(record, digest, pending)} className="w-[12px] shrink-0" />;
+  return record === null ? null : <GlyphMark glyph={glyphFor(record, digest, pending, listing)} className="w-[12px] shrink-0" />;
 }
 
 // P3-F1: the session a composing card's comment goes to, for a host with no chat beside it.

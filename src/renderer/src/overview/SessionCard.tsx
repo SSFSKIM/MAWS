@@ -49,7 +49,7 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
   const project = useSessions((s) => (record?.projectId ? (s.projects.get(record.projectId)?.name ?? null) : null));
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
   const controlled = useSessionControls(appSessionId) !== null; // P5 O9 M6: none for a session held elsewhere with no live bridge
-  const listed = useSessions((s) => (record === undefined ? s.listed.get(appSessionId) : undefined)); // P5 O7 M6
+  const listed = useSessions((s) => s.listed.get(appSessionId)); // P5 O7 M6: a session with no record carded by it; P5 O7 M10: a remote lane B record's state
   if (!record) return listed ? <ListedCard listed={listed} showProject={showProject} stop={stop} onFocus={onFocus} onKeyDown={onKeyDown} /> : null;
 
   const waiting = waitingItem(pending);
@@ -72,7 +72,7 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
       className="flex min-w-0 cursor-default flex-col gap-1.5 rounded-md border border-border bg-bg-raised p-3 outline-accent hover:border-border-strong focus-visible:outline-2"
     >
       <div className="flex min-w-0 items-center gap-2">
-        <GlyphMark glyph={glyphFor(record, digest, pending)} className="shrink-0" />
+        <GlyphMark glyph={glyphFor(record, digest, pending, listed)} className="shrink-0" />
         <span className="truncate font-medium text-fg">{title}</span>
         {showProject && project && <span className="shrink-0 text-ui-sm text-fg-muted">{project}</span>}
         {branch && <span className="shrink-0 rounded-sm border border-border px-1.5 text-ui-sm text-fg-muted">⎇ {branch}</span>}
@@ -80,7 +80,7 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
         {record.unread && <span role="img" aria-label="Unread" className="ml-auto block size-[5px] shrink-0 rounded-full bg-info" />}
       </div>
       <p data-testid="card-activity" className="m-0 truncate text-ui-sm text-fg">
-        {cardActivity(record, digest, pending)}
+        {cardActivity(record, digest, pending, listed)}
       </p>
       {digest?.lastAssistantLine && (
         <p data-testid="card-answer" className="m-0 truncate text-ui-sm text-fg-muted">
