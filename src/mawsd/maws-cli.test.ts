@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { HostResponse } from '@shared/ipc/host-protocol';
+import { notCanonical } from '@shared/machine/maws-words';
 import { runMaws, type MawsDeps } from './maws-cli';
 import type { MachineLink, Reached } from './machine-client';
 
@@ -198,12 +199,16 @@ describe('maws project aimed at another machine', () => {
   // review 1's minor finding: another machine's path is sent in its one spelling, as its rows hold it
   it('sends another machine’s path normalized: no trailing separator, no dot segments, NFC', async () => {
     const d = daemon({ 'projects.registry': ok(registry()), 'projects.forward': ok({ ok: true, text: 'removed /srv/new' }) });
-    for (const spelled of ['mini:/srv/new/', 'mini:/srv/./old/../new', 'mini://srv//new']) {
+    for (const spelled of ['mini:/srv/new/', 'mini:/srv/./new', 'mini://srv//new']) {
       await maws(['project', 'remove', spelled], d.reach);
       expect([spelled, d.calls.at(-1)]).toEqual([spelled, ['projects.forward', { verb: 'remove', machine: 'mini', path: '/srv/new' }]]);
     }
     await maws(['project', 'remove', 'mini:/srv/cafe\u0301'], d.reach);
     expect(d.calls.at(-1)).toEqual(['projects.forward', { verb: 'remove', machine: 'mini', path: '/srv/caf\u00e9' }]);
+    // M12's re-review, finding 2: a `..` is that machine's to resolve (a symbolic link before it), so it is refused here
+    const calls = d.calls.length;
+    expect(await maws(['project', 'add', 'mini:/srv/link/../scrape'], d.reach)).toEqual({ code: 1, out: '', err: `${notCanonical('/srv/link/../scrape')}\n` });
+    expect(d.calls.slice(calls).map(([name]) => name), 'nothing forwarded').toEqual(['projects.registry']);
   });
 
   it('exits 2 with no app, signed out or with no window, 1 when not confirmed', async () => {

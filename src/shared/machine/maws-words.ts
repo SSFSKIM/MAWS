@@ -48,18 +48,20 @@ export function linkWords(answer: { project: ActRow; restated: boolean }, where:
 export const removeWords = (directory: string) => `removed ${directory}`;
 
 /**
- * An absolute path on another machine in the one spelling its rows hold: no empty or `.` segment, `..` taken back, no
- * trailing separator, NFC. Its filesystem is not here to ask, so this is the spelling alone, as `resolve` gives one here.
+ * An absolute path on another machine in the one spelling its rows hold, as far as the spelling alone can say: no
+ * repeated separator, no `.` segment, no trailing separator, NFC. A `..` segment is kept: after a symbolic link it is
+ * that machine's to resolve, so a request carrying one is refused (`hasParentSegment`, `notCanonical`), never folded.
  */
 export function canonicalPath(path: string): string {
-  const segments: string[] = [];
-  for (const segment of path.normalize('NFC').split('/')) {
-    if (segment === '' || segment === '.') continue;
-    if (segment === '..') segments.pop();
-    else segments.push(segment);
-  }
+  const segments = path.normalize('NFC').split('/').filter((segment) => segment !== '' && segment !== '.');
   return `/${segments.join('/')}`;
 }
+
+/** The path has a `..` segment. */
+export const hasParentSegment = (path: string): boolean => path.split('/').includes('..');
+
+/** A request aimed at another machine whose path has a `..` segment (`not-canonical`, exit 1). */
+export const notCanonical = (path: string) => `not-canonical: ${path} has a ".." segment, which only that machine can resolve; give the folder's path without ".."`;
 
 /** A request aimed at another machine, as a terminal names it (`projects.forward`'s input). */
 export type AimedAct = { verb: 'add' | 'remove' | 'link'; machine: string; path: string; into?: string | null; own?: true; name?: string };

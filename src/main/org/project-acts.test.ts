@@ -170,10 +170,19 @@ describe('a request shown in the page', () => {
     s.reply('session.projects.remove', undefined);
     s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape/' });
     await s.decide('pa-1', true);
-    s.ask({ verb: 'remove', machine: 'mini', path: '/srv/./x/../scrape' }, 'pa-2');
+    s.ask({ verb: 'remove', machine: 'mini', path: '/srv//./scrape' }, 'pa-2');
     await s.decide('pa-2', true);
     expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape' }], ['session.projects.remove', { id: 'p-scrape' }]]);
     expect(s.answers).toEqual([answered('pa-1', { ok: true, text: 'removed /srv/scrape' }), answered('pa-2', { ok: true, text: 'removed /srv/scrape' })]);
+  });
+
+  // M12's re-review, finding 2: a `..` is that machine's to resolve, so main refuses it at once and never shows it
+  it('refuses a path with a `..` segment at once: `not-canonical`', () => {
+    openWindow();
+    const s = scene();
+    s.ask({ verb: 'remove', machine: 'mini', path: '/srv/link/../scrape' });
+    expect(s.answers).toEqual([answered('pa-1', { ok: false, code: 'not-canonical', text: 'not-canonical: /srv/link/../scrape has a ".." segment, which only that machine can resolve; give the folder\'s path without ".."' })]);
+    expect([s.emitted, s.sent]).toEqual([[], []]);
   });
 
   it('answers the machine’s refusal by its code, and a machine this Mac cannot reach now', async () => {

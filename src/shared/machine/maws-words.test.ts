@@ -2,7 +2,7 @@
 // and a remove print, on this machine and through the app on another; the refusals of a request aimed elsewhere; and the
 // exit code each refusal is.
 import { describe, expect, it } from 'vitest';
-import { actRefusal, addWords, canonicalPath, exitOf, linkWords, NO_WINDOW, NOT_CONFIRMED, notRunningHere, notSignedIn, runThere } from './maws-words';
+import { actRefusal, addWords, canonicalPath, exitOf, hasParentSegment, notCanonical, linkWords, NO_WINDOW, NOT_CONFIRMED, notRunningHere, notSignedIn, runThere } from './maws-words';
 
 const ID = '0f6c7b1e-0000-4000-8000-000000000001';
 const OTHER = '0f6c7b1e-0000-4000-8000-000000000002';
@@ -69,8 +69,17 @@ describe('a refusal of a project act', () => {
 
 // review 1's minor finding: another machine's path in the one spelling its rows hold
 describe("another machine's path", () => {
-  it('drops empty and dot segments and a trailing separator, takes `..` back, and is NFC', () => {
-    expect(['/srv/new/', '/srv//new', '/srv/./old/../new', '/srv/new/.'].map(canonicalPath)).toEqual(['/srv/new', '/srv/new', '/srv/new', '/srv/new']);
-    expect([canonicalPath('/'), canonicalPath('/..'), canonicalPath('/srv/cafe\u0301')]).toEqual(['/', '/', '/srv/caf\u00e9']);
+  it('drops repeated separators, `.` segments and a trailing separator, and is NFC', () => {
+    expect(['/srv/new/', '/srv//new', '/srv/./new', '/srv/new/.'].map(canonicalPath)).toEqual(['/srv/new', '/srv/new', '/srv/new', '/srv/new']);
+    expect([canonicalPath('/'), canonicalPath('/srv/cafe\u0301')]).toEqual(['/', '/srv/caf\u00e9']);
+  });
+
+  // M12's re-review, finding 2: `..` after a symbolic link is that machine's to resolve, so it is refused, never folded
+  it('keeps a `..` segment, which a request is refused for: `not-canonical`, exit 1', () => {
+    expect(canonicalPath('/srv/link/../scrape')).toBe('/srv/link/../scrape');
+    expect(['/srv/link/../scrape', '/..', '/srv/..'].map(hasParentSegment)).toEqual([true, true, true]);
+    expect(['/srv/..scrape', '/srv/a..b', '/srv/scrape'].map(hasParentSegment)).toEqual([false, false, false]);
+    expect(notCanonical('/srv/link/../scrape')).toBe('not-canonical: /srv/link/../scrape has a ".." segment, which only that machine can resolve; give the folder\'s path without ".."');
+    expect(exitOf('not-canonical')).toBe(1);
   });
 });
