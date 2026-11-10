@@ -453,11 +453,15 @@ export class Statements {
   /**
    * The rule's project for a row now (`remove`'s `expect`); undefined without an answer. `files`: another machine's
    * owner's reader (Fix 2), which the rule reads through; a read past the asker's opens leaves the statement at the row's
-   * own folder deciding where it governs (Fix 2b, 2c), else no answer.
+   * own folder deciding where it governs (Fix 2b, 2c), else no answer. A replaced folder's row answers its own
+   * statement's project, the one its location is published under (panel 1, sweep#1).
    */
   private async projectNow(row: StatementRow, files?: GitFiles): Promise<string | null | undefined> {
     const context = this.context;
     if (context === null) return undefined;
+    // a replaced folder's location is its statement's, as the registry lists it (sweep#1), and that is what a removal names
+    const own = row.linked ?? row.minted;
+    if (context.enrollment() !== null && own !== null && this.projects.observe(row.id) === 'replaced') return own;
     const subject = { directory: row.directory, machine: context.machine, projectId: row.id, name: row.name, ...(files === undefined ? {} : { files }) };
     const refused = Symbol('refused');
     const derived = await (context.derive ?? deriveProject)(subject, context.enrollment(), { statements: this.lookup }).catch((error: unknown) => (files === undefined ? Promise.reject(error) : refused));

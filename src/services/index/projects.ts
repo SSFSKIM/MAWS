@@ -997,16 +997,20 @@ function folderAt(path: string): 'absent' | 'present' {
 
 // A declared row as the endpoint states it (§H's `DeclaredRow`); null until derived. `statedAt` is the folder whose
 // statement decides (M8's review 1, finding 12): the row's own path for a statement at it, an ancestor's for one above.
+// A replaced folder's own statement counts on neither side, yet the location stays its statement's, `replaced`, with
+// Use this folder and Remove beside it on every device (design §10; panel 1, sweep#1): its id is the statement's, its
+// label the folder's as now derived, and it carries no `stated`, so sminos files nothing by it (§D, §E.2).
 function declaredRowOf(row: ProjectRow): DeclaredRow | null {
   const org = orgOf(row);
   if (org === null) return null;
   const stated = statedOf(row);
+  const replacedStatement = row.location_state === 'replaced' ? ownStatement(row) : null;
   return {
     pid: row.id,
     path: row.directory,
     name: locationName(row, org, stated),
     ...(row.name_rev !== null ? { nameRev: row.name_rev } : {}),
-    org,
+    org: replacedStatement === null ? org : { ...org, smnsId: replacedStatement },
     ...(stated !== null ? { stated } : {}),
     ...(stated !== null && row.org_at !== null ? { statedAt: row.org_at } : {}),
     ...(row.org_hub === 0 ? { hub: false as const } : {}),

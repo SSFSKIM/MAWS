@@ -904,4 +904,31 @@ describe('the stored statements', () => {
       await inForce(tree);
     });
   });
+
+  // The registry branch's xhigh panel 1 (.doperpowers/sde/2026-11-10-project-registry/registry-panel-1.md): each finding of
+  // the index's, reproduced
+  describe('panel 1', () => {
+    const settle = async () => {
+      for (let k = 0; k < 100; k++) await new Promise((resolve) => setImmediate(resolve));
+    };
+    const published = (path: string) => index.projectsSource().snapshot()?.rows.find((r) => r.path === path);
+
+    it('sweep#1: a replaced location stays its stated project’s for the registry, with its state, and its Remove is the one asked', async () => {
+      await open();
+      const swapped = folder('swapped');
+      const id = (await add(swapped)).project.org!.smnsId!;
+      rmSync(swapped, { recursive: true });
+      mkdirSync(swapped);
+      await index.statements.checkFolders();
+      await settle();
+      // a session there is not in the old project
+      expect(row(swapped)?.org?.smnsId ?? null).toBeNull();
+      // but the location is: other devices list it under its project, replaced, with Use this folder and Remove
+      expect(published(swapped)).toMatchObject({ org: { smnsId: id }, state: 'replaced' });
+      expect(published(swapped)).not.toHaveProperty('stated');
+      // Remove, as a held removal sends it: the location's path and project as the registry listed them
+      await index.statements.remove(row(swapped)!.id, { path: swapped, project: id });
+      expect(row(swapped)).toMatchObject({ hidden: true });
+    });
+  });
 });
