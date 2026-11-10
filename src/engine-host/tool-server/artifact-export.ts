@@ -1,11 +1,11 @@
 // `artifact_export` (X25 and X31; the P3-A document's M6 and M7): an artifact's live state or a retained version exported
 // as a file by main's export service, asked over the host bridge as `artifact_screenshot`'s capture is
-// (`maws.artifact.export`, answered by `maws.artifact.exported`; EXPORT_ANSWER_MS, `noClient` when no app is connected:
-// the export needs the app open, and nothing is queued). The host names the output's path,
-// `<userData>/artifacts/<id>/exports/<revision>-<format>.<ext>`, where main writes it; `to` (under the working
-// directory) gets a copy. Which kinds export to which formats is main's registry's to say (B and C register DOCX and
-// PPTX; M7 serves `html` as PDF and PNG): a pair it lacks answers `exportUnavailable`. Without a bridge (a host with no
-// session wiring, as in some tests) every export answers `exportUnavailable`.
+// (`maws.artifact.export`, answered by `maws.artifact.exported`; EXPORT_ANSWER_MS, `noClient` when no client that renders
+// is connected, the app or `mawsd`'s render service (`answersRenders` in ../attachment.ts), and nothing is queued). The
+// host names the output's path, `<userData>/artifacts/<id>/exports/<revision>-<format>.<ext>`, where main writes it; `to`
+// (under the working directory) gets a copy. Which kinds export to which formats is main's registry's to say (B and C
+// register DOCX and PPTX; M7 serves `html` as PDF and PNG): a pair it lacks answers `exportUnavailable`. Without a bridge
+// (a host with no session wiring, as in some tests) every export answers `exportUnavailable`.
 import { createReadStream } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
