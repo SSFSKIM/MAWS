@@ -998,11 +998,17 @@ test('(downgrade, daemon) this build’s app keeps a session under its mawsd; th
 // data"; Decision Log 14): nothing lost. The peer, a real build that still has the embedded shape (its main composes the
 // spine and holds spine.lock), makes on one profile a session (a turn played to its end), an artifact, a draft and a
 // layout of more than one tab (the library's tab and the artifact's, opened as a person opens them), and quits; this
-// build, which has no embedded shape, opens that profile on `mawsd`. After the library's first sync, and again after a
-// relaunch of this build: the session is listed, the artifact is in the library and its page loads, the draft is back,
-// the layout holds the same tabs, and `mawsd.log` says the spine loaded with no line of the index's rebuild (the database
-// moved aside as unusable, src/services/index/db.ts) or of its refusal as newer than the build knows. A peer with no
-// embedded shape skips, saying so.
+// build, which has no embedded shape, opens that profile on `mawsd`. After the library's first successful reconciliation,
+// and again after a relaunch of this build on a fresh `mawsd` (whose own first reconciliation runs again): the session is
+// listed, the artifact is in the library and its page loads, the draft is back, the layout holds the same tabs, and
+// `mawsd.log` says the spine loaded with no line of the index's rebuild (the database moved aside as unusable,
+// src/services/index/db.ts) or of its refusal as newer than the build knows. A peer with no embedded shape skips, saying so.
+// Fix wave 3: `library.list` reads the index at once, so the artifact's presence proves no reconciliation; what does is a
+// canary, a library row whose artifact the engine host no longer holds (deleted while the library's refreshes were held,
+// the e2e seam `__maws_library.holdRefreshes`, MAWS_E2E=1 only: the library misses that change until the next host
+// connection). Only a reconciliation that read the host's snapshot and applied it removes that row
+// (src/services/library/sync.ts `reconcile` → store.ts `reconcile`, which deletes every row the snapshot lists not; a
+// snapshot that fails keeps the last state), so each pass waits for its canary to leave the library first.
 const runsEmbedded = (build: Build) => {
   const mode = join(build.root ?? REPO_ROOT, 'src/main/hosts/mode.ts');
   return existsSync(mode) && readFileSync(mode, 'utf8').includes('export function hostModeFromEnv');
@@ -1027,8 +1033,26 @@ function tabIdsOf(value: unknown): string[] {
   return ids.sort();
 }
 const mainTabsOf = async (page: Page) => value(await invoke(page, 'layout.get', { key: 'main.tabs' })).value;
+const inLibrary = async (page: Page, artifactId: string) => value(await invoke(page, 'library.list', {})).rows.some((row) => row.id === artifactId);
+const createHtmlArtifact = async (page: Page, title: string, body: string) =>
+  value(
+    (await page.evaluate(
+      ([html, t]) => window.maws.invoke('artifacts.create' as never, { kind: 'html', title: t, content: { bytes: new TextEncoder().encode(html), name: 'index.html' } } as never),
+      [`<!doctype html><html><head><title>x</title></head><body><p>${body}</p></body></html>`, title] as const,
+    )) as CommandResult<'artifacts.create'>,
+  ).artifact.id;
+// A canary: an artifact the library lists while the engine host holds it no more, deleted once the library holds its
+// refreshes (main's seam, which on this build's daemon shape relays to `mawsd`'s library)
+async function plantCanary(run: Run, title: string): Promise<string> {
+  const id = await createHtmlArtifact(run.page, title, 'canary');
+  await expect.poll(() => inLibrary(run.page, id), { timeout: 20_000, message: `the canary ${title} in the library` }).toBe(true);
+  await run.maws.app.evaluate(() => (globalThis as unknown as { __maws_library: { holdRefreshes(): Promise<void> } }).__maws_library.holdRefreshes());
+  value(await invoke(run.page, 'artifacts.delete', { artifactId: id }));
+  expect(await inLibrary(run.page, id), `the canary ${title} still listed: the library missed its deletion`).toBe(true);
+  return id;
+}
 
-test('(embedded profile, mawsd) a profile the peer made on its embedded shape opens on this build’s mawsd with its session, artifact, draft and layout, after the library’s first sync and after a relaunch, and no index rebuild', async () => {
+test('(embedded profile, mawsd) a profile the peer made on its embedded shape opens on this build’s mawsd with its session, artifact, draft and layout, after the library’s first reconciliation and after a relaunch onto a fresh mawsd, and no index rebuild', async () => {
   test.setTimeout(300_000);
   const { here, peer } = builds();
   test.skip(!runsEmbedded(peer), `the peer (wire ${wireOf(peer)}) has no embedded shape (its src/main/hosts/mode.ts has no hostModeFromEnv): acceptance 3's data needs a build that still composes the spine in its app; M5 files this scene's retirement`);
@@ -1044,11 +1068,7 @@ test('(embedded profile, mawsd) a profile the peer made on its embedded shape op
     await launchOn(peer, old.page, id, turnsJournal(s.root, 'acceptance-3', 1), s);
     await turnEnded(old.page, id);
     // an artifact, in the peer's engine host's store
-    const created = (await old.page.evaluate(
-      ([html, title]) => window.maws.invoke('artifacts.create' as never, { kind: 'html', title, content: { bytes: new TextEncoder().encode(html), name: 'index.html' } } as never),
-      [`<!doctype html><html><head><title>x</title></head><body><p>${DATA_MARK}</p></body></html>`, DATA_ARTIFACT] as const,
-    )) as CommandResult<'artifacts.create'>;
-    const artifactId = value(created).artifact.id;
+    const artifactId = await createHtmlArtifact(old.page, DATA_ARTIFACT, DATA_MARK);
     // a draft, as the composer keeps one (src/renderer/src/composer/editor/controller.ts), for a session with no tab open
     const doc = { type: 'doc', attrs: { attachments: [] }, content: [{ type: 'paragraph', content: [{ type: 'text', text: DATA_DRAFT }] }] };
     value(await invoke(old.page, 'session.drafts.set', { appSessionId: id, draft: { doc, attachments: [], updatedAt: new Date().toISOString() } }));
@@ -1061,19 +1081,21 @@ test('(embedded profile, mawsd) a profile the peer made on its embedded shape op
       .poll(async () => (tabs = tabIdsOf(await mainTabsOf(old.page))), { timeout: 20_000, message: `${peer.label} saved its layout: the library's tab and the artifact's among more than one` })
       .toEqual(expect.arrayContaining(['artifacts', expect.stringContaining(artifactId)]));
     expect(tabs.length, 'more than one tab').toBeGreaterThan(1);
+    // the first pass's canary, planted last: from here the peer's library follows no change
+    let canary = await plantCanary(old, 'Acceptance 3 canary (the peer’s)');
     expect(old.maws.consoleErrors()).toEqual([]);
     await s.quit(old);
     await endProfileProcesses(s.userData); // the embedded shape's detached supervisor: this build's mawsd starts afresh
     said.push(`  made: session ${id} (a turn to its end), artifact ${artifactId}, a draft, the tabs ${tabs.join(', ')}`);
 
-    // this build on mawsd, twice: after the library's first sync, and after a relaunch
-    for (const pass of ['after the library’s first sync', 'after a relaunch']) {
+    // this build on mawsd, twice: after its library's first reconciliation, and after a relaunch on a fresh mawsd
+    const passes = ['after the library’s first reconciliation', 'after a relaunch, on a fresh mawsd, after its reconciliation'];
+    for (const [n, pass] of passes.entries()) {
       const run = await s.launch();
       const ours = await s.ready(run.page, (st) => st.daemon !== null, 60_000);
       await expect.poll(() => spineLockOf(s.userData)?.pid ?? null, { timeout: 30_000, message: `${pass}: ${here.label}'s mawsd holds spine.lock` }).toBe(ours.daemon!.pid);
-      await expect
-        .poll(async () => value(await invoke(run.page, 'library.list', {})).rows.some((row) => row.id === artifactId), { timeout: 60_000, message: `${pass}: the artifact in the library` })
-        .toBe(true);
+      await expect.poll(() => inLibrary(run.page, canary), { timeout: 60_000, message: `${pass}: the canary gone, so a reconciliation read the host's snapshot and applied it` }).toBe(false);
+      expect(await inLibrary(run.page, artifactId), `${pass}: the artifact in the library`).toBe(true);
       expect(value(await invoke(run.page, 'session.list', {})).sessions.map((row) => row.appId), `${pass}: the session listed`).toContain(id);
       const page = await run.maws.app.evaluate(async ({ session }, target) => {
         const response = await session.defaultSession.fetch(target);
@@ -1086,8 +1108,10 @@ test('(embedded profile, mawsd) a profile the peer made on its embedded shape op
       await expect.poll(() => s.daemonLog(), { timeout: 30_000, message: `${pass}: mawsd's spine loaded` }).toMatch(/\[spine\] loaded in \d+ ms/);
       expect(s.daemonLog(), `${pass}: no index rebuild in mawsd.log`).not.toMatch(INDEX_REBUILT);
       expect(s.daemonLog(), `${pass}: the index opened, not refused`).not.toMatch(INDEX_REFUSED);
-      said.push(`  ${pass}: on ${here.label}'s mawsd pid ${ours.daemon!.pid}, all four present, no rebuild`);
+      said.push(`  ${pass}: on ${here.label}'s mawsd pid ${ours.daemon!.pid}, the canary ${canary} reconciled away, all four present, no rebuild`);
+      if (n === 0) canary = await plantCanary(run, 'Acceptance 3 canary (this build’s)'); // the relaunch's, before mawsd ends
       await s.quit(run);
+      if (n === 0) await endProfileProcesses(s.userData); // the relaunch starts a fresh mawsd, whose library reconciles again
     }
     record(said);
   });
