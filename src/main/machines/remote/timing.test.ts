@@ -6,6 +6,7 @@ import { HANDSHAKE_LIMITS } from '../../../endpoint/direct-listener';
 import { PING_MS } from '../../../endpoint/channels';
 import { RESUME_MS } from '../../../endpoint/interest';
 import { MAX_SUBS as ENDPOINT_MAX_SUBS } from '../../../endpoint/subscriptions';
+import { WAKE_DROP_MS } from '../../net/wake';
 import { MAX_SUBS, REMOTE_TIMING, TokenBucket } from './timing';
 
 describe('the link’s timing', () => {
@@ -15,6 +16,10 @@ describe('the link’s timing', () => {
     expect(REMOTE_TIMING.PING_SILENCE_MS).toEqual(PING_MS);
     expect(REMOTE_TIMING.ACT_FRESH_MS).toBe(FRESH_MS);
     expect(MAX_SUBS).toBe(ENDPOINT_MAX_SUBS);
+  });
+
+  it('drops a channel at a wake of twice the endpoint’s shortest ping period (P5 O15 M2b §D)', () => {
+    expect(WAKE_DROP_MS).toBe(2 * PING_MS[0]);
   });
 
   it('holds a burst of 3 and refills 5 a minute', () => {
