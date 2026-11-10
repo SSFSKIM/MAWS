@@ -16,6 +16,7 @@ import {
   isGrant,
   isListing,
   isMachineCert,
+  isProjectsRecord,
   isRootTransition,
   isSigned,
   isSignedOrgState,
@@ -25,6 +26,7 @@ import {
   type Grant,
   type Listing,
   type MachineCert,
+  type ProjectsRecord,
   type RootTransition,
   type Signed,
   type SignedOrgState,
@@ -183,6 +185,43 @@ const RetirementSchema = z.strictObject({
   deleted: z.boolean(),
 });
 
+/**
+ * The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §H): the machine's own projects
+ * record and what it was made from (projects.ts). `indexId` the index the statements were last read from (null before
+ * the first read); `sminosLocations` whether the last sminos on RL10 advertised `locations`; `record` the last one signed;
+ * `statements` every row's stored statement whole, which a rebuilt index takes back; `locationsGen` the org frame's
+ * `locations.gen` last given.
+ */
+const AnchorSchema = z.strictObject({ dev: z.string().min(1), ino: z.string().min(1), birth: z.string().min(1) });
+const KeptStatementSchema = z.strictObject({
+  path: z.string().min(1),
+  minted: z.string().min(1).nullable(),
+  linked: z.string().min(1).nullable(),
+  anchor: AnchorSchema.nullable(),
+  name: z.string(),
+  nameRev: z.number().int().positive().nullable(),
+  hidden: z.boolean(),
+});
+const ProjectsKeptSchema = z.strictObject({
+  version: z.literal(1),
+  indexId: z.string().min(1).nullable(),
+  sminosLocations: z.boolean(),
+  record: custom<Signed<ProjectsRecord>>((v) => isSigned(v, isProjectsRecord)).nullable(),
+  statements: z.array(KeptStatementSchema),
+  locationsGen: z.number().int().nonnegative(),
+});
+/**
+ * The other machines' projects records the endpoint verified and keeps (projects-held.ts), by machine ref: each one's
+ * newest, with its mark (its revision, the hash of its canonical form, the key id that signed it).
+ */
+const ProjectsHeldSchema = z.strictObject({
+  version: z.literal(1),
+  machines: z.record(
+    z.string().min(1),
+    z.strictObject({ revision: z.number().int().positive(), hash: z.string().min(1), keyId: z.string().min(1), record: custom<Signed<ProjectsRecord>>((v) => isSigned(v, isProjectsRecord)) }),
+  ),
+});
+
 export type MachineKeyFile = z.infer<typeof MachineKeySchema>;
 export type LedgerFile = z.infer<typeof LedgerSchema>;
 export type EnrollmentFile = z.infer<typeof EnrollmentSchema>;
@@ -197,6 +236,10 @@ export type HandedOffFile = z.infer<typeof HandedOffSchema>;
 export type DelegationFile = z.infer<typeof DelegationSchema>;
 export type ProvisioningFile = z.infer<typeof ProvisioningSchema>;
 export type RetirementFile = z.infer<typeof RetirementSchema>;
+export type ProjectsKeptFile = z.infer<typeof ProjectsKeptSchema>;
+export type ProjectsHeldFile = z.infer<typeof ProjectsHeldSchema>;
+/** The kept file before anything was kept. */
+export const NO_PROJECTS_KEPT: ProjectsKeptFile = { version: 1, indexId: null, sminosLocations: false, record: null, statements: [], locationsGen: 0 };
 export type Authority = Omit<z.infer<typeof AuthoritySchema>, 'version'>;
 export type ChainEntry = z.infer<typeof ChainEntrySchema>;
 
@@ -217,6 +260,8 @@ export const FILES = {
   retirement: 'retirement.json',
   authority: 'records-authority.json',
   handedOff: 'handed-off.json', // P5 O12 M11
+  projects: 'projects.json', // the project registry: the machine's own record and its statements
+  projectsHeld: 'projects-held.json', // the project registry: the other machines' records
 } as const;
 
 type Options = { uid?: number; now?: () => number; log?: (line: string) => void };
@@ -241,6 +286,8 @@ export class EndpointState {
   #provisioning: ProvisioningFile | null = null;
   #retirement: RetirementFile | null = null;
   #authority: Authority | null = null;
+  #projects: ProjectsKeptFile = NO_PROJECTS_KEPT;
+  #projectsHeld: ProjectsHeldFile['machines'] = {};
 
   private constructor(
     readonly dir: string,
@@ -282,6 +329,8 @@ export class EndpointState {
       const provisioning = read(FILES.provisioning, ProvisioningSchema);
       const retirement = read(FILES.retirement, RetirementSchema);
       const authority = read(FILES.authority, AuthoritySchema);
+      const projects = read(FILES.projects, ProjectsKeptSchema);
+      const projectsHeld = read(FILES.projectsHeld, ProjectsHeldSchema);
 
       // A pending provisioning's set may be half written: it is completed from its record, never moved aside.
       const alone = provisioning === null && (machineKey === null) !== (ledger === null);
@@ -311,6 +360,8 @@ export class EndpointState {
       state.#provisioning = provisioning;
       state.#retirement = retirement;
       state.#authority = authority === null ? null : { org: authority.org, hub: authority.hub, recoveryPub: authority.recoveryPub };
+      state.#projects = projects ?? NO_PROJECTS_KEPT;
+      state.#projectsHeld = projectsHeld?.machines ?? {};
       return state;
     } catch (error) {
       if (error instanceof PrivatePathError || error instanceof StateFileError) return refuse(error.reason, error.message);
@@ -385,6 +436,14 @@ export class EndpointState {
   get webauthn(): WebAuthnFile {
     return this.#webauthn;
   }
+  /** The project registry's kept file: the machine's own record and its statements (`NO_PROJECTS_KEPT` when none was kept). */
+  get projects(): ProjectsKeptFile {
+    return this.#projects;
+  }
+  /** The other machines' projects records held, by ref; empty when none is. */
+  get projectsHeld(): ProjectsHeldFile['machines'] {
+    return this.#projectsHeld;
+  }
 
   setMachineKey(value: MachineKeyFile): void {
     this.#write(FILES.machineKey, MachineKeySchema.parse(value));
@@ -430,6 +489,14 @@ export class EndpointState {
     const file = HandedOffSchema.parse({ version: 1, appSessionIds: [...value.appSessionIds], engineSessionIds: [...value.engineSessionIds] });
     this.#write(FILES.handedOff, file);
     this.#handedOff = { appSessionIds: file.appSessionIds, engineSessionIds: file.engineSessionIds };
+  }
+  setProjects(value: ProjectsKeptFile): void {
+    this.#write(FILES.projects, ProjectsKeptSchema.parse(value));
+    this.#projects = value;
+  }
+  setProjectsHeld(value: ProjectsHeldFile['machines']): void {
+    this.#write(FILES.projectsHeld, ProjectsHeldSchema.parse({ version: 1, machines: value }));
+    this.#projectsHeld = value;
   }
   setDelegation(value: DelegationFile): void {
     this.#write(FILES.delegation, DelegationSchema.parse(value));
@@ -507,6 +574,7 @@ export class EndpointState {
     this.#legacy = null;
     this.#listings = {};
     this.#notified = {};
+    this.#projectsHeld = {};
     this.#delegation = null;
     this.#provisioning = null;
     this.#retirement = null;

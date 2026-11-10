@@ -1,8 +1,9 @@
 // What RL10 tells sminos of the org, all of it read from the head (O10 M6; Interfaces §D): its identity under it, the
 // org's directory in DX2's `org` shape, and the head's revocation set.
 //
-// The directory. RL1 carries no `org` frame, so the endpoint builds DX2's from the head: a hub project for each of the
-// state's `projects`, and for each machine name (enrolled machines, and certificates under a live delegation, by name)
+// The directory. RL1 carries no `org` frame, so the endpoint builds DX2's from the head: a hub project for each project the
+// machines' projects records name (the project registry, Interfaces §D and design §8: the records' assembly, which the
+// caller hands in, in place of the head's `projects`, which nothing writes), and for each machine name (enrolled machines, and certificates under a live delegation, by name)
 // the machine's own project, as the hub's directory lists them; `machines` the same names. A machine's `online` is unknown
 // on RL1 and goes as `false`, with `seen` the newest event time the endpoint has relayed from that machine's writers.
 // A machine the head doesn't enroll and no certificate stands for any more (each retired, revoked or expired:
@@ -28,8 +29,11 @@ export type OrgDirectory = {
 
 export type RevocationSet = { version: number; devices: string[]; members: string[]; keys: string[] };
 
-/** DX2's `org` frame from the head; `seen` gives each machine name's newest relayed event time. */
-export async function orgDirectory(head: OrgState, certificates: Certificates, now: Date, seen: (name: string) => string | null): Promise<OrgDirectory> {
+/**
+ * DX2's `org` frame from the head; `seen` gives each machine name's newest relayed event time, `hub` the hub projects of
+ * the registry (none named by a machine's own project, none of them `hub: false`).
+ */
+export async function orgDirectory(head: OrgState, certificates: Certificates, now: Date, seen: (name: string) => string | null, hub: ReadonlyArray<{ id: string; name: string }> = []): Promise<OrgDirectory> {
   const names = directoryMachineNames(head, certificates, now);
   const refs = new Set(head.machines.map((m) => m.ref));
   const enrolled = new Set([...head.machines, ...head.machineNames.filter((p) => refs.has(p.ref))].map((m) => machineNameKey(m.name)));
@@ -38,7 +42,7 @@ export async function orgDirectory(head: OrgState, certificates: Certificates, n
   return {
     t: 'org',
     projects: [
-      ...head.projects.map((p) => ({ id: p.id, name: p.name, kind: 'hub' as const, retired: false })),
+      ...hub.map((p) => ({ id: p.id, name: p.name, kind: 'hub' as const, retired: false })),
       ...names.map((name) => ({ id: machineProjectId(head.org, name), name, kind: 'machine' as const, machine: name, retired: retired(name) })),
     ],
     machines: names.map((name) => ({ name, online: false, seen: seen(name), ...(retired(name) ? { retired: true as const } : {}) })),

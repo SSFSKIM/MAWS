@@ -14,7 +14,7 @@
 //
 // P5 O7 M9 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Remote setup"): the setup policy, apart from the
 // spawn guard. A setup act or read naming a directory (`session.projects.addFolder`, and `session.trust.check`, whose trust
-// read looks inside the folder as the registration does) is held to `setupRefusal`: the directory exists, its real path is
+// read looks inside the folder as the registration does; the project registry's `relocate` and `resolve`) is held to `setupRefusal`: the directory exists, its real path is
 // under the machine's home with no link out of it on the way, and it is not in a protected folder that wasn't opened
 // (src/shared/machine/home-folders.ts; nothing past such a folder is touched to find out), nor is any pointer git or the
 // trust read follows from it (a linked worktree's git dir, the common dir, the trust files: setup-reads.ts). The check
@@ -94,7 +94,7 @@ export function spawnRefusal(args: Readonly<Record<string, unknown>>, policy: Po
 }
 
 /** The setup rows that name a directory, held to `setupRefusal`. */
-export const SETUP_DIRECTORY_COMMANDS: ReadonlySet<string> = new Set(['session.projects.addFolder', 'session.trust.check']);
+export const SETUP_DIRECTORY_COMMANDS: ReadonlySet<string> = new Set(['session.projects.addFolder', 'session.trust.check', 'session.projects.relocate', 'session.projects.resolve']);
 export type SetupRefusal = HomeRefusal;
 /** A setup row's checked directory (its real path, as the kernel resolves it and its folders list its names), which its executor acts on. */
 export type SetupCheck = { ok: true; directory: string } | { ok: false; reason: SetupRefusal };

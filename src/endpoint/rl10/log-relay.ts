@@ -236,6 +236,11 @@ export class LogRelay {
     return [...this.#projects.keys()];
   }
 
+  /** The projects sminos opened on this connection with its hello's name, and whether it only follows them (the registry's `known`). */
+  hellos(): Array<{ project: string; name: string; follow: boolean }> {
+    return [...this.#projects].map(([project, { hello }]) => ({ project, name: hello.name, follow: hello.follow === true }));
+  }
+
   /** sminos's own events up: each signed (or rebuilt from the ledger) and sent on, or refused to sminos. */
   async events(frame: Frame): Promise<void> {
     const { project, events } = frame;

@@ -8,10 +8,17 @@
 import { keyId, verifyStepUp, verifyWebAuthn, type Action, type Device, type OrgState, type Passkey } from 'org-protocol';
 import type { Grade } from '@shared/ipc/grades';
 
+/**
+ * The project registry's `machine-admin` acts that ask no step-up (design §3): a rename and a removal make no folder a
+ * place sessions may start in, where `addFolder`, `link` and `relocate` do.
+ */
+export const UNSTEPPED_PROJECT_ACTS: ReadonlySet<string> = new Set(['session.projects.update', 'session.projects.remove']);
+
 /** Whether an action with this effective grade needs the device's step-up signature. */
 export function stepUpRequired(input: { name: string; grade: Grade | null; ownsSession: boolean; ownsMachine: boolean }): boolean {
   const { name, grade, ownsSession, ownsMachine } = input;
   if (name.startsWith('record.')) return true;
+  if (UNSTEPPED_PROJECT_ACTS.has(name)) return false;
   if (grade === 'spawn' || grade === 'machine-admin') return true;
   if (grade === 'approve') return !ownsSession;
   if (grade === 'shell') return !ownsMachine;

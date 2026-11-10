@@ -8,6 +8,7 @@ import type { ClientRef, Reader } from '@shared/ipc/client';
 import type { HostResponse } from '@shared/ipc/host-protocol';
 import type { NewHostEntry } from '@shared/ipc/schema/channel';
 import type { MachineRef } from '@shared/machine/ref';
+import type { RegistrySeam } from '@shared/machine/registry';
 import type { PortTarget, RemotePortHandle } from '../mawsd/client-port';
 
 export interface EndpointServices {
@@ -109,6 +110,12 @@ export interface EndpointModule {
     act(action: unknown): Promise<{ state: string } & Record<string, unknown>>;
     call(name: string, input: unknown): Promise<{ ok: true; output: unknown } | { ok: false; code: string }>;
   };
+  /**
+   * The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §H): what the machine's
+   * services ask of the endpoint, which `mawsd` hands the spine's index. Absent from a module that has none (a test's):
+   * the index then holds `NO_REGISTRY`.
+   */
+  registry?: RegistrySeam;
 }
 
 /**

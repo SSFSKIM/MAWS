@@ -58,4 +58,8 @@ export const ENDPOINT_CAPABILITIES = [
   // snapshot of the newest page and each new one after it. A device opens it only on an endpoint that listed it: an older
   // one reads the sub `malformed` and closes the channel.
   'rl2.channel',
+  // The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, M9; Interfaces §G): this endpoint serves
+  // `session.projects.link`, `relocate`, `resolve`, `update` and `remove`, and `addFolder`'s `into` and `own`; a device
+  // sends a machine none of them, nor `remove`'s `expect`, unless its `h2` listed it (PROJECT_ACTS_CAPABILITY).
+  'rl2.project-acts',
 ] as const;

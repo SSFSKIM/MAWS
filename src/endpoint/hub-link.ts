@@ -2,8 +2,10 @@
 // `org-listed` the endpoint holds one WebSocket to `GET /machine/socket` with its Access service token: `hello` with
 // RL1's protocol, its build and its ref; the hub's `welcome` with the connection's generation and heartbeat; `hb` every
 // heartbeat, which renews the machine's lease in every project the connection opened; the hub's `state {version}`
-// notices; DX2's log plane per project; the machine's signed `listing` and `endpoint` records and its `notify`, up; and
-// the channel multiplex, `[u8 type][u32 channel][payload]` binary messages whose channels only an app opens.
+// notices; DX2's log plane per project; the machine's signed `listing`, `endpoint` and `projects` records and its
+// `notify`, up; every machine's `projects` records down (the project registry: `projects-all` pages after a welcome that
+// lists `projects`, then `projects` as each is stored), handed on as they came; and the channel multiplex,
+// `[u8 type][u32 channel][payload]` binary messages whose channels only an app opens.
 //
 // It survives every cut the hub makes. A connection that drops, misses two `hb-ack`s or hears nothing for three
 // heartbeats is opened again, backing off with jitter from 1 s to 30 s, reset by a welcome that held for a minute. The
@@ -41,6 +43,9 @@ import {
   type EndpointRecord,
   type Listing,
   type NotifyFrame,
+  type ProjectsPageFrame,
+  type ProjectsRecordFrame,
+  type ProjectsRecord,
   type Rl1Refusal,
   type Signed,
 } from 'org-protocol';
@@ -68,6 +73,8 @@ export type HubLinkHooks = {
   refusal?(refusal: Rl1Refusal): void;
   /** The link stopped for good. */
   stopped?(reason: HubStop): void;
+  /** A projects record (`projects`) or a page of the snapshot (`projects-all`), unverified, in the order they came. */
+  projects?(frame: ProjectsRecordFrame | ProjectsPageFrame): void;
 };
 
 /** A project the connection opens on the log plane: its `hello` (sent on each connection) and its down frames. */
@@ -87,7 +94,7 @@ export type ChannelHandler = {
 };
 
 /** The text frames the endpoint sends up, beside the log plane's. */
-export type HubUpFrame = { t: 'listing'; record: Signed<Listing> } | { t: 'endpoint'; record: Signed<EndpointRecord> } | NotifyFrame;
+export type HubUpFrame = { t: 'listing'; record: Signed<Listing> } | { t: 'endpoint'; record: Signed<EndpointRecord> } | { t: 'projects'; record: Signed<ProjectsRecord> } | NotifyFrame;
 
 export const RECONNECT_MIN_MS = 1000;
 export const RECONNECT_MAX_MS = 30_000;
@@ -425,6 +432,10 @@ export class HubLink {
         return;
       case 'refusal':
         return this.#hooks.refusal?.(frame as unknown as Rl1Refusal);
+      case 'projects':
+      case 'projects-all':
+        if (this.#hooks.projects === undefined) return this.#once(frame.t, `endpoint: the hub sent a \`${frame.t}\` frame, which this endpoint doesn't read; ignored`);
+        return this.#hooks.projects(frame as unknown as ProjectsRecordFrame | ProjectsPageFrame);
       case 'have':
       case 'events':
       case 'resend':

@@ -24,7 +24,9 @@ import type { NewHostEntry } from '@shared/ipc/schema/channel';
 import type { MachineRef } from '@shared/machine/ref';
 import { enrollmentOnDisk, unloadedAnswer, UNENROLLED_STATUS } from '../endpoint/presence';
 import type { CheckoutSource } from '../endpoint/index';
+import type { ProjectsSource, RegistrySeam } from '@shared/machine/registry';
 import type { PortTarget, RemotePortHandle } from './client-port';
+import { lazyRegistry } from './projects-seam';
 import type { LazySpine } from './spine-seam';
 
 export const ENDPOINT_STOP_MS = 2_500;
@@ -119,6 +121,10 @@ export interface EndpointModule {
     act(action: unknown): Promise<{ state: string } & Record<string, unknown>>;
     call(name: string, input: unknown): Promise<{ ok: true; output: unknown } | { ok: false; code: string }>;
   };
+  // The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §H): what the machine's services
+  // ask of the endpoint, handed to the spine's index at each load. Absent from a module that has none (a test's): the index
+  // then holds `NO_REGISTRY`
+  registry?: RegistrySeam;
 }
 
 // O10's endpoint module (P5 O10 M10), one for each daemon, loaded when it is needed; `build` is the daemon's build id,
@@ -133,8 +139,11 @@ export function loadEndpointModule(build: string, extras: EndpointExtras = {}, r
   }, extras);
 }
 
-/** What the daemon injects into the module besides its services. */
-export type EndpointExtras = { projects?: CheckoutSource };
+/**
+ * What the daemon injects into the module besides its services: MAWS's own projects as checkouts, and (the project
+ * registry) what the endpoint reads of the index.
+ */
+export type EndpointExtras = { projects?: CheckoutSource; projectsSource?: ProjectsSource };
 export type { CheckoutSource };
 
 type Loaded = { createEndpoint(options: { build?: string } & EndpointExtras): EndpointModule };
@@ -148,6 +157,11 @@ export class LazyEndpoint implements EndpointModule {
   #module: EndpointModule | null = null;
   #loading: Promise<EndpointModule | null> | null = null;
   #stopped = false;
+  /**
+   * The project registry's seam (Interfaces §H), the module's once it is loaded (projects-seam.ts): unloaded, nothing is
+   * enrolled here, so no stored statement is possible.
+   */
+  readonly registry = lazyRegistry();
 
   constructor(build: string, load: () => Promise<Loaded>, extras: EndpointExtras = {}) {
     this.#build = build;
@@ -242,6 +256,7 @@ export class LazyEndpoint implements EndpointModule {
         services.log(`the endpoint module failed to start: ${error instanceof Error ? error.message : String(error)}`);
       }
       this.#module = module;
+      this.registry.loaded(module.registry);
       return module;
     })().finally(() => (this.#loading = null));
     return this.#loading.then((module) => (this.#stopped ? null : module));

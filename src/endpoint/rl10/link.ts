@@ -45,6 +45,12 @@
 // own `session`; lane B the member the members join placed its `appSessionId` on, which authorization ranked: else
 // `no-session`, nothing sent, never queued), its `proof` the act verbatim as signed, and no `context` or `requestDigest`:
 // a record act doesn't depend on how the session was launched. Its result comes back as a lane A action's does.
+//
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §D). The directory's hub
+// projects are the records' (`Rl10Context.registry`). To an sminos whose hello advertises `locations` the welcome
+// advertises it too, and every org frame carries `complete` and, once anything is known of them, this machine's
+// `locations`; sminos answers each kept frame with `locations-kept {gen}`, which counts only on the connection that
+// carried that `gen` (`locationsKept`). Any other sminos is told neither, nor the capability: it reads the frame as before.
 import { RL1_CAPABILITIES, type Action, type Certificates, type OrgState, type SigningKey } from 'org-protocol';
 import type { EndpointPolicy, Policy } from '../policy';
 import { isCeiling } from '../policy';
@@ -65,6 +71,7 @@ import { RL10_PROTOCOL, Rl10Server, type Frame, type Rl10Connection } from './se
 import { OFFERS, RECORD_ACTS, type Offers } from '../offers';
 import type { SessionTarget } from '../sources';
 import { SignatureLedger } from './signature-ledger';
+import { LOCATIONS_CAPABILITY, type DirectoryPart } from '../registry';
 import { decideWords } from './words';
 
 /** What the welcome advertises to sminos (P5 O18 D9): a member frame's `access`, `shares`, `policyRev`, and `reach?`. */
@@ -135,6 +142,8 @@ export type Rl10Context = {
   uplink?: RelayContext['uplink'];
   /** P5 O8 M6b: the offer table the welcome's `record` follows (the suites' seam; OFFERS unless given). */
   offers?: Offers;
+  /** The project registry's parts of the org frame (registry.ts); none: no hub project, no `locations`. */
+  registry?: { directory(): DirectoryPart };
 };
 
 /** A lane A action's result, as sminos reports it. */
@@ -155,6 +164,11 @@ export class Rl10 {
   readonly #sessions = new Set<(message: SessionLaneMessage) => void>();
   readonly #pendings = new Set<(project: string, raised: readonly unknown[]) => void>();
   readonly #links = new Set<(connected: boolean) => void>();
+  readonly #projectsMoved = new Set<() => void>();
+  /** The highest locations `gen` sent on this connection, and the highest it acknowledged (0 before either). */
+  #sentGen = 0;
+  #keptGen = 0;
+  readonly #kept = new Set<{ gen: number; resolve(kept: boolean): void }>();
   readonly #queries = new Map<string, Waiting[]>();
   readonly #tombstones = new Map<string, Waiting[]>();
   readonly #said = new Set<string>();
@@ -273,6 +287,11 @@ export class Rl10 {
   /** Whether sminos's hello on this connection advertised `audience` (P5 O18 D9). */
   get #streams(): boolean {
     return this.#sminos.includes('audience');
+  }
+
+  /** Whether sminos's hello on this connection advertised `locations` (the project registry, §D). */
+  get #locations(): boolean {
+    return this.#sminos.includes(LOCATIONS_CAPABILITY);
   }
 
   /** P5 O8 M6b: what the welcomed sminos's hello advertised, null while none is connected and welcomed. */
@@ -401,6 +420,71 @@ export class Rl10 {
   onLink(listener: (connected: boolean) => void): () => void {
     this.#links.add(listener);
     return () => this.#links.delete(listener);
+  }
+
+  /**
+   * The project registry: the sessions sminos holds, or the projects it opened on the log plane, may have moved (a
+   * `member`, a `restated`, a log-plane `hello`, the connection's end), which its `known` reads.
+   */
+  onProjects(listener: () => void): () => void {
+    this.#projectsMoved.add(listener);
+    return () => this.#projectsMoved.delete(listener);
+  }
+
+  /** What the registry reads of the connected sminos (registry.ts' `SminosView`); null while none is welcomed. */
+  sminosView(): { capabilities: readonly string[]; restating: boolean; sessionProjects(): string[]; logProjects(): Array<{ project: string; name: string; follow: boolean }> } | null {
+    if (!this.connected) return null;
+    return {
+      capabilities: this.#sminos,
+      restating: this.members.restating,
+      sessionProjects: () => this.members.sessions().flatMap((session) => this.members.get(session)?.project ?? []),
+      logProjects: () => this.relay.hellos(),
+    };
+  }
+
+  /** The org frame stated again where it changed (the registry moved: this machine's locations, the records, `complete`). */
+  restate(): Promise<void> {
+    if (!this.#welcomed) return Promise.resolve();
+    return this.#restate(false);
+  }
+
+  /**
+   * True once the connected sminos acknowledged locations at or above `gen` on the connection that carried them, false
+   * after `ms` (a connection that replaces this one and is told a `gen` at or above it releases it too).
+   */
+  locationsKept(gen: number, ms: number): Promise<boolean> {
+    if (this.connected && this.#keptGen >= gen) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const waiting = {
+        gen,
+        resolve: (kept: boolean) => {
+          clearTimeout(timer);
+          this.#kept.delete(waiting);
+          resolve(kept);
+        },
+      };
+      const timer = setTimeout(() => waiting.resolve(false), ms);
+      timer.unref?.();
+      this.#kept.add(waiting);
+    });
+  }
+
+  /** sminos's `locations-kept {gen}`: a `gen` this connection was sent releases what waits at or below it. */
+  #locationsKept(frame: Frame): void {
+    const gen = frame.gen;
+    if (typeof gen !== 'number' || !Number.isSafeInteger(gen) || gen > this.#sentGen) return this.#ctx.log('endpoint: an RL10 locations-kept for no locations sent on this connection was ignored');
+    this.#keptGen = Math.max(this.#keptGen, gen);
+    for (const waiting of [...this.#kept]) if (waiting.gen <= this.#keptGen) waiting.resolve(true);
+  }
+
+  #tellProjects(): void {
+    for (const listener of this.#projectsMoved) {
+      try {
+        listener();
+      } catch (error) {
+        this.#ctx.log(`endpoint: a projects listener failed: ${(error as Error).message}`);
+      }
+    }
   }
 
   /**
@@ -554,13 +638,15 @@ export class Rl10 {
     this.#told = null;
     this.#sminos = Array.isArray(hello.capabilities) ? hello.capabilities.filter((c): c is string => typeof c === 'string').slice(0, 32) : [];
     this.#audienceSent.clear();
+    this.#sentGen = 0;
+    this.#keptGen = 0;
     const current = this.#ctx.policy.current();
     connection.send({
       t: 'welcome',
       protocol: RL10_PROTOCOL,
       // P5 O18 D9: sminos may send a member's access, shares and policyRev, and ask `reach?`; P5 O8 M6b: `record`, while
-      // this build serves the record acts.
-      capabilities: welcomeCapabilities(this.#ctx.offers),
+      // this build serves the record acts; the project registry: `locations`, to an sminos that reads them.
+      capabilities: [...welcomeCapabilities(this.#ctx.offers), ...(this.#locations ? [LOCATIONS_CAPABILITY] : [])],
       build: this.#ctx.build,
       identity: { org: identity.org, hub: identity.hub, name: identity.name, former: formerNames(head.state, identity.ref, identity.name), ref: identity.ref, enrolled: identity.enrolled },
       policy: { read_only: current.read_only, ceiling: current.ceiling },
@@ -578,6 +664,8 @@ export class Rl10 {
   #closed(): void {
     if (this.#welcomed) this.#link(false);
     this.#welcomed = false;
+    this.#sentGen = 0;
+    this.#keptGen = 0;
     this.members.stop();
     this.#told = null;
     this.relay.closeAll();
@@ -605,10 +693,17 @@ export class Rl10 {
       const head = this.#ctx.head();
       if (head === null) return;
       const revoked: RevocationSet = await revocationSet(head.state, head.certificates);
-      const org = await orgDirectory(head.state, head.certificates, new Date(this.#ctx.now()), (name) => this.relay.seen(name));
+      const registry = this.#ctx.registry?.directory() ?? { hub: [], complete: false, locations: null };
+      const directory = await orgDirectory(head.state, head.certificates, new Date(this.#ctx.now()), (name) => this.relay.seen(name), registry.hub);
+      // The project registry (§D): `complete` and the locations, to an sminos that reads them
+      const locations = this.#locations ? registry.locations : null;
+      const org = this.#locations ? { ...directory, complete: registry.complete, ...(locations === null ? {} : { locations }) } : directory;
       const told = { revoked: JSON.stringify(revoked), org: JSON.stringify(org) };
       if (always || this.#told?.revoked !== told.revoked) this.send({ t: 'revoked', ...revoked });
-      if (always || this.#told?.org !== told.org) this.send(org);
+      if (always || this.#told?.org !== told.org) {
+        this.send(org);
+        if (locations !== null) this.#sentGen = Math.max(this.#sentGen, locations.gen);
+      }
       this.#told = told;
     });
     this.#restating = run.catch(() => {});
@@ -620,6 +715,7 @@ export class Rl10 {
     switch (frame.t) {
       case 'hello':
         this.relay.hello(frame);
+        this.#tellProjects();
         return this.#rebuild.kick();
       case 'events':
         return this.relay.events(frame);
@@ -628,9 +724,12 @@ export class Rl10 {
       case 'member':
         await this.members.member(frame);
         if (frame.gone !== true && typeof frame.session === 'string') await this.#recordMoved(frame.session);
-        return;
+        return this.#tellProjects();
       case 'restated':
-        return this.members.restated();
+        await this.members.restated();
+        return this.#tellProjects();
+      case 'locations-kept':
+        return this.#locationsKept(frame);
       case 'pending':
         return this.#pending(frame);
       case 'session':

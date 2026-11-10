@@ -53,10 +53,18 @@
 // `notify`'s counts come from sminos's pending sets for lane A and from the engine host for lane B (lane-b-pending.ts):
 // every session's broker items as the engine host publishes them, subscribed or not, and the whole set read again at
 // each engine-host link `mawsd` reports.
+//
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, M9; registry.ts): the machine's own
+// projects record, signed from the index's declared rows (`projectsSource`, `mawsd`'s) after each change and sent at each
+// welcome; the other machines' records, verified and kept; the org frame's hub projects, `complete` and `locations` for
+// sminos; and the seam the machine's services ask (`registry`), whose statements are possible once the enrolled
+// machine's sminos reads locations.
 import { homedir, networkInterfaces } from 'node:os';
 import { importSigningKey, isListingGone, NO_CERTIFICATES, stateHash, type MachineIdentity, type OrgState, type Right, type Rl1Refusal, type SignedOrgState, type SigningKey } from 'org-protocol';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Home } from '@shared/machine/home-folders';
+import type { MachineRef } from '@shared/machine/ref';
+import type { ProjectsSource } from '@shared/machine/registry';
 import { ArtifactRanks } from './artifacts';
 import { Authorizer, type AuthorizeContext } from './authorize';
 import { Calls } from './calls';
@@ -92,6 +100,7 @@ import { retireInto, type Retired } from './retire';
 import { owns } from './grades';
 import { Queries } from './queries';
 import { placeListings, policies, unsupported, type HeldSession } from './record-policy';
+import { Registry } from './registry';
 import { Rl10 } from './rl10/link';
 import type { RelayContext } from './rl10/log-relay';
 import type { EndpointModule, EndpointServices } from './services';
@@ -131,6 +140,8 @@ export type EndpointOptions = {
   acquireWithinMs?: number;
   /** P5 O18 M2: the suites' seam for the log plane's uplink (uplink.ts' cap, reserve and ask wait). */
   uplink?: RelayContext['uplink'];
+  /** The project registry: what the endpoint reads of the index (`mawsd` injects it); none, no record is signed. */
+  projectsSource?: ProjectsSource;
 };
 
 /** The whole handshake of a direct connection is this long at most (M4). */
@@ -198,6 +209,8 @@ export class Endpoint implements EndpointModule {
   readonly leases: Leases;
   /** P5 O7 M5c round 3: each channel's snapshot holds of a remote dashboard, re-authorized while they live (asset-holds.ts). */
   readonly assetHolds: AssetHolds;
+  /** The project registry (registry.ts): the machine's projects record, the held records, and the services' seam. */
+  readonly registry: Registry;
   /** P5 O8 M6b: the local door, this machine's own app's record acts and policy read, served by `mawsd` (local-door.ts). */
   readonly local: LocalDoor;
   /** What `start` subscribed to on mawsd's seam, let go at `stop`. */
@@ -255,6 +268,7 @@ export class Endpoint implements EndpointModule {
         welcome: ({ generation }) => {
           this.links.hub = { connected: true, generation };
           this.rl10.hubWelcomed();
+          this.registry.hubWelcomed();
           void this.syncNow();
           void this.endpointRecords.issue();
           void this.listings.welcome().then(() => this.notifier.welcome());
@@ -263,7 +277,9 @@ export class Endpoint implements EndpointModule {
           this.links.hub = { connected: false };
           this.#retries.clear();
           this.#target = 0;
+          this.registry.hubEnded();
         },
+        projects: (frame) => this.registry.hubFrame(frame),
         state: (version) => void this.#syncTo(version),
         stopped: () => this.#syncRl10(),
         refusal: (refusal) => {
@@ -335,7 +351,30 @@ export class Endpoint implements EndpointModule {
       log,
       ...(options.uplink === undefined ? {} : { uplink: options.uplink }),
       ...(options.authorization?.offers === undefined ? {} : { offers: options.authorization.offers }), // P5 O8 M6b: the welcome's `record`
+      registry: { directory: () => this.registry.directory() },
     });
+    this.registry = new Registry({
+      ref: () => (this.#services?.machine.ref ?? '') as MachineRef,
+      enrollment: () => {
+        const enrollment = this.#state?.enrolled ? this.#state.enrollment : null;
+        return enrollment === null ? null : { org: enrollment.org, name: enrollment.name };
+      },
+      key: () => records.key(),
+      head: () => records.head(),
+      now: this.deps.now,
+      hub: { send: (frame) => this.hub.send(frame), capabilities: () => this.hub.capabilities },
+      sminos: () => this.rl10.sminosView(),
+      source: options.projectsSource ?? null,
+      state: () => this.#state,
+      restate: () => void this.rl10.restate(),
+      locationsKept: (gen, ms) => this.rl10.locationsKept(gen, ms),
+      log,
+    });
+    this.rl10.onLink((connected) => {
+      if (connected) this.registry.sminosLinked();
+      this.registry.knownMoved();
+    });
+    this.rl10.onProjects(() => this.registry.knownMoved());
     this.channels = new Channels({
       identity: () => this.#identity(),
       org: () => (this.#identity() === null ? null : this.#org),
@@ -661,6 +700,7 @@ export class Endpoint implements EndpointModule {
       this.subscriptions.recheck();
       void this.#judge();
       void this.rl10.adopted();
+      this.registry.adopted();
     });
     this.#state = state;
     this.#org = org;
@@ -683,6 +723,8 @@ export class Endpoint implements EndpointModule {
       services.onFrame((frame) => (frame.owner === 'pty-host' ? this.streams.frame(frame) : this.streams.documentFrame(frame.channel, frame.bytes))),
       services.documents.onClosed((channel, reason) => this.streams.documentClosed(channel, reason)),
       services.onAttachment((attached) => this.planeB.attachment(attached)),
+      // the project registry: the index's declared rows moved (a row, a statement, the index loaded)
+      this.#options.projectsSource?.onChange(() => this.registry.own.kick()) ?? (() => {}),
       services.onUpstream((link) => {
         if (!link.connected) return this.assetHolds.upstreamLost(); // P5 O7 M5c round 3: the host released its connection's holds
 
@@ -716,6 +758,8 @@ export class Endpoint implements EndpointModule {
     if (services.machine.kind === 'unit' || env.MAWS_ENDPOINT_DIRECT === '1') this.#direct = this.#listener(env);
     if (state.enrolled) this.#keepSynced();
     this.#ensureLink();
+    this.registry.statementsMoved();
+    this.registry.own.kick();
   }
 
   async stop(): Promise<void> {
@@ -801,6 +845,7 @@ export class Endpoint implements EndpointModule {
         this.hub.reset();
         this.links.hub = { connected: false };
         this.#keepSynced();
+        this.registry.statementsMoved();
       },
     };
   }
@@ -852,6 +897,7 @@ export class Endpoint implements EndpointModule {
     this.hub.reset();
     this.links.hub = { connected: false };
     parts.services.log(`endpoint: unenrolled; ${result.keyIds.length} private key(s) destroyed, the rest of the state moved aside to ${result.aside}`);
+    this.registry.statementsMoved();
     return result;
   }
 
@@ -955,6 +1001,7 @@ export class Endpoint implements EndpointModule {
     if (refusal.frame === 'listing' && typeof session === 'string' && typeof revision === 'number') {
       this.#retries.retry(`listing ${session} ${revision}`, () => void this.listings.resend(session, revision));
     } else if (refusal.frame === 'endpoint') this.#retries.retry('endpoint', () => void this.endpointRecords.issue());
+    else if (refusal.frame === 'projects') this.#retries.retry('projects', () => void this.registry.own.resend());
   }
 
   /** Opens the hub link when the machine is listed and nothing stops it, and the direct listener once it can serve. */
@@ -1091,6 +1138,8 @@ export class Endpoint implements EndpointModule {
     void this.listings.refresh();
     // sminos hears the head's revocation set and directory where they changed.
     void this.rl10.adopted();
+    // The held projects records verified again under the new head, and the machine's own built again.
+    this.registry.adopted();
     // Every subscription, and every resumable cursor, is authorized again under the new head (M8).
     this.subscriptions.recheck();
   }
@@ -1148,6 +1197,7 @@ export class Endpoint implements EndpointModule {
     if (speaks) this.#ensureLink();
     else if (was) void this.channels.closeAll('removed');
     this.#syncRl10();
+    this.registry.statementsMoved();
   }
 
   /**

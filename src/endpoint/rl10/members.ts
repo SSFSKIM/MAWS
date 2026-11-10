@@ -210,6 +210,11 @@ export class Members implements RecordSource, CheckoutSource {
     return this.#members.get(session) ?? null;
   }
 
+  /** Whether a restatement after a welcome is open (its `restated` not yet come): the set held may be partial. */
+  get restating(): boolean {
+    return this.#unrestated !== null;
+  }
+
   /** Every session held now, by its engine session id. */
   sessions(): string[] {
     return [...this.#members.keys()];

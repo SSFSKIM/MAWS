@@ -27,7 +27,7 @@ import type { HandlerContext } from '@shared/ipc/client'; // P5 O7 M5c
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import { exportHeldFor } from '@shared/delivery/export-hold'; // P5 O7 M5c
 import { machineName, type Enrollment } from '@shared/machine/identity';
-import type { RegistrySeam } from '@shared/machine/registry'; // the project registry
+import type { ProjectsSource, RegistrySeam } from '@shared/machine/registry'; // the project registry
 import type { MachineRef } from '@shared/machine/ref';
 import { settingsPaths } from '@shared/settings/paths';
 import type { ServicesBus } from '@shared/spine/bus';
@@ -167,6 +167,9 @@ export interface SpineRoot {
   // P5 O8 M7b (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §O): the project channel's journal, to
   // which the endpoint's seam hands lane A's host messages (`EndpointServices.channel`); absent in a run refused the spine.
   channel?: ChannelRecorder;
+  // the project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §H): what the machine's
+  // endpoint reads of the index (its declared rows and stored statements), which mawsd hands on while the spine is loaded
+  projects?: ProjectsSource;
 }
 
 export function startSpine(deps: SpineDeps): SpineRoot {
@@ -563,6 +566,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     stop: () => stopParts('spine', parts),
     discovery: { applied: () => indexSource.discoveryApplied(), onApplied: (listener) => indexSource.onDiscoveryApplied(listener) },
     ...(channel === undefined ? {} : { channel }), // P5 O8 M7b
+    projects: index.projectsSource(), // the project registry
   };
 }
 
