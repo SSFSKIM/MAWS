@@ -11,6 +11,7 @@ import type { EngineSessionStatus } from '@shared/engine/status';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { replayedSession } from './conformance/session-harness';
+import type { EngineSession } from './session'; // P5 O15 M2b (§L)
 import { JOURNAL_MAX_BYTES, JournalReader, JournalWriter } from './journal';
 import { Normalizer } from './normalizer';
 import { BATCH_BYTES, CHECKPOINT_BYTES, CHECKPOINT_SPARSE_EVERY, CHECKPOINTS_DENSE, CHECKPOINTS_MAX, SessionStream, type Checkpoint } from './session-stream';
@@ -47,13 +48,17 @@ function recorder() {
 
 // A live run of pass1/reads (its one turn; the replay ends at the first read) journaled to disk by the production
 // writer, and the events it produced. P5 O15 M2b (§L): `live` gives the session a checkpoint interval and takes what
-// it hands its stream; `maxBytes` the writer's rotation size.
-async function recordedInit(live: { checkpointRows: number; maxBytes: number; checkpoint: (c: Checkpoint) => void } | null = null): Promise<{ events: SessionEvent[]; launchId: string; sessionId: string; appSessionId: AppSessionId; status: EngineSessionStatus; journalPath: string }> {
+// it hands its stream; `maxBytes` the writer's rotation size; `beforeSend` acts on the ready session before the turn.
+async function recordedInit(live: { checkpointRows: number; maxBytes: number; checkpoint: (c: Checkpoint) => void; beforeSend?: (session: EngineSession) => void } | null = null): Promise<{ events: SessionEvent[]; launchId: string; sessionId: string; appSessionId: AppSessionId; status: EngineSessionStatus; journalPath: string }> {
   const writer = new JournalWriter(dir, 'LAUNCHS1', { maxBytes: live?.maxBytes ?? JOURNAL_MAX_BYTES });
   const run = await replayedSession('pass1', 'reads', (row, { session, ready, fixture, transport }) => {
     const frame = row.frame as { type: string };
-    if (frame.type === 'user') void ready().then(() => session.send((fixture.find((r) => r.seq === row.seq)!.frame as { message: { content: string } }).message.content));
-    else transport.kill('SIGTERM');
+    if (frame.type === 'user') {
+      void ready().then(() => {
+        live?.beforeSend?.(session);
+        return session.send((fixture.find((r) => r.seq === row.seq)!.frame as { message: { content: string } }).message.content);
+      });
+    } else transport.kill('SIGTERM');
   }, {
     session: { journal: writer, ...(live && { checkpointRows: live.checkpointRows }) },
     beforeStart: (o) => {
@@ -883,6 +888,53 @@ describe('checkpoints: a journal read starts near its cursor and answers as the 
     for (let cursor = lastSeq; cursor >= 0; cursor -= 1) expect(await fed.snapshot(cursor, null), `after ${cursor}`).toStrictEqual(await today.snapshot(cursor, null));
     expect(journalLines(lines).filter((line) => readOf(line).from !== null).length, 'reads from the live path\'s checkpoints').toBeGreaterThan(0);
     expect((await fed.snapshot(null, null)).events).toEqual(events);
+  });
+
+  // Decision Log 24 (a): the host builds a control request as `{ subtype, ...payload }` (rpc.ts), so a payload member
+  // that is undefined is in the live normaliser's `outbound` entry until the answer, and not in the journal's JSON: the
+  // live checkpoint's bytes then differ from a scan's at that row, and a read on from it must still answer as today.
+  it('a live checkpoint that holds an undefined member the journal drops keeps it, and reads on from it as a full scan does', async () => {
+    const live: Checkpoint[] = [];
+    const { events, launchId, sessionId, appSessionId, journalPath } = await recordedInit({
+      checkpointRows: 1, // a checkpoint at every row: the request's own row among them
+      maxBytes: JOURNAL_MAX_BYTES,
+      checkpoint: (c) => live.push(c),
+      // an unrecorded read, so the replay answers it with an empty success a few rows on
+      beforeSend: (session) => void session.control!.requestRaw('get_skills_dialog', { probe: undefined }).catch(() => {}),
+    });
+    const rows = readFileSync(journalPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { seq: number; direction: string; frame: { type?: string; request_id?: string; request?: Record<string, unknown>; response?: { request_id?: string } } });
+    const asked = rows.filter((r) => r.direction === 'out' && r.frame.request?.subtype === 'get_skills_dialog');
+    expect(asked).toHaveLength(1);
+    const at = asked[0]!.seq;
+    const requestId = asked[0]!.frame.request_id!;
+    expect(asked[0]!.frame.request, 'the journal holds no `probe`').toEqual({ subtype: 'get_skills_dialog' });
+    const answered = rows.find((r) => r.direction === 'in' && r.frame.response?.request_id === requestId)!.seq;
+    expect(answered).toBeGreaterThan(at + 1); // read on from the request's row, the answer is normalised on the restored state
+    const lastSeq = rows.at(-1)!.seq;
+    const options = { appSessionId, launchId, sessionId: sessionId as never, journalPath, emit: recorder().emit, historyThrough: lastSeq };
+
+    const atRequest = live.find((c) => c.through === at)!;
+    const restored = (deserialize(atRequest.state) as NormalizerState).outbound.get(requestId as RequestId)!.request as Record<string, unknown>;
+    expect(Object.hasOwn(restored, 'probe'), 'the restored state keeps the member').toBe(true);
+    expect(restored.probe).toBeUndefined();
+    const taken = vi.spyOn(SessionStream.prototype, 'checkpoint');
+    await new SessionStream({ ...options, checkpointRows: 1 }).snapshot(null, null);
+    const scanned = taken.mock.calls.map(([c]) => c).find((c) => c.through === at)!;
+    taken.mockRestore();
+    expect(Object.hasOwn((deserialize(scanned.state) as NormalizerState).outbound.get(requestId as RequestId)!.request as object, 'probe'), 'a scan\'s has none').toBe(false);
+    expect(scanned.state.equals(atRequest.state), 'so the two buffers differ').toBe(false);
+
+    const lines: string[] = [];
+    const today = new SessionStream({ ...options, checkpointRows: NONE });
+    for (let cursor = lastSeq - 1; cursor >= at; cursor -= 1) {
+      const fed = new SessionStream({ ...options, checkpointRows: NONE, log: (line) => lines.push(line) }); // takes none of its own
+      fed.checkpoint(atRequest);
+      lines.length = 0;
+      const answer = await fed.snapshot(cursor, null);
+      expect(readOf(journalLines(lines)[0]!).from, `after ${cursor}: from the live checkpoint`).toBe(at);
+      expect(answer, `after ${cursor}`).toStrictEqual(await today.snapshot(cursor, null));
+      expect(answer.events.map((e) => [e.id, e.seq])).toEqual(events.filter((e) => e.seq! > cursor).map((e) => [e.id, e.seq]));
+    }
   });
 
   it('keeps every boundary of the newest dense region, one in eight of the older, at most forty, the oldest first to go', async () => {
