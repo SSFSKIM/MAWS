@@ -10,7 +10,16 @@
 //
 // A target's host and port are its key, so the hub's URL as a link, the feed and a project socket give it is one
 // prober. The links (§F), the feed and the project sockets (§G) are its users; this module knows none of them.
-import { connect as netConnect } from 'node:net';
+//
+// A probe connects to an address and never to a name, since a socket's deadline cannot cancel the lookup a connect to
+// a name starts, and a stalled resolver would pile lookups onto libuv's four threads, which main's file work and the
+// real dial's own lookup share. A host that is an IP literal is connected to as it is. A name is looked up by the reach,
+// with at most one lookup of it outstanding at any instant: a round that needs it while one is outstanding, its own or a
+// round's that has ended, takes that one's answer. The round probes the addresses of its last answer in turn, the two
+// families alternating, and looks the name up again when a lookup fails (at the next tick) or when a probe to each of
+// those addresses has failed since the answer came, probing them meanwhile.
+import { lookup as dnsLookup } from 'node:dns/promises';
+import { connect as netConnect, isIP } from 'node:net';
 import { errorWords } from '@shared/host/error-words';
 
 export const REACH_WINDOW_MS = 60_000;
@@ -31,6 +40,11 @@ export interface Reach {
 }
 
 type Connect = (host: string, port: number, signal: AbortSignal) => Promise<void>;
+type LookupAddress = { address: string; family: number };
+type Lookup = (host: string) => Promise<readonly LookupAddress[]>;
+
+/** Every address of a name, as `dns.lookup` gives them with `all: true`. */
+const allAddresses: Lookup = (host) => dnsLookup(host, { all: true });
 
 /** One TCP connect: resolves at 'connect', rejects at 'error'; an abort, before or after the connect, destroys the socket. */
 const tcpConnect: Connect = (host, port, signal) =>
@@ -61,13 +75,30 @@ function keyOf(target: string): { key: string; host: string; port: number } {
   return { key: `${url.hostname}:${port}`, host, port };
 }
 
+/** The order a round's probes take an answer's addresses in: its two families alternating, each in the answer's order. */
+function interleaved(answer: readonly LookupAddress[]): readonly string[] {
+  const first = answer.filter((entry) => entry.family === answer[0]?.family).map((entry) => entry.address);
+  const other = answer.filter((entry) => entry.family !== answer[0]?.family).map((entry) => entry.address);
+  const order: string[] = [];
+  for (let k = 0; k < Math.max(first.length, other.length); k++) {
+    if (k < first.length) order.push(first[k]!);
+    if (k < other.length) order.push(other[k]!);
+  }
+  return order;
+}
+
 type Waiter = { answer(reachable: boolean): void };
-type Probe = { controller: AbortController; deadline: ReturnType<typeof setTimeout> };
+type Probe = { address: string; controller: AbortController; deadline: ReturnType<typeof setTimeout> };
 /** One key's round of waiting: from its first waiter to the answer, or to its last waiter leaving. */
 type Round = {
   key: string;
   host: string;
   port: number;
+  named: boolean; // the host is a name, looked up, and not an IP literal
+  addresses: readonly string[]; // where probes go: the host itself for a literal, the last answer's for a name
+  next: number; // the index in `addresses` of the next probe's
+  failed: Set<string>; // the addresses a probe to has failed since the last answer: all of them, and the name is looked up again
+  looking: boolean; // the round waits on a lookup of its name
   waiters: Set<Waiter>;
   probes: Set<Probe>;
   started: number; // probes started in the round
@@ -80,10 +111,12 @@ type Round = {
 const NO_PROBE_ENDED = 'no probe ended';
 const MAX_IN_FLIGHT = PROBE_CONNECT_MS / PROBE_STAGGER_MS; // thirty
 
-export function createReach(deps: { connect?: Connect; now?(): number; log(line: string): void }): Reach {
+export function createReach(deps: { connect?: Connect; lookup?: Lookup; now?(): number; log(line: string): void }): Reach {
   const connect = deps.connect ?? tcpConnect;
+  const lookup = deps.lookup ?? allAddresses;
   const now = deps.now ?? Date.now;
   const rounds = new Map<string, Round>();
+  const lookups = new Map<string, Promise<readonly LookupAddress[]>>(); // by name, each outstanding lookup; one at most a name
   let windowTimer: ReturnType<typeof setTimeout> | null = null;
   let closed = false;
 
@@ -93,11 +126,45 @@ export function createReach(deps: { connect?: Connect; now?(): number; log(line:
     probe.controller.abort();
   };
 
-  /** A probe of a round still waiting has ended without connecting: a tick the cap held back starts now. */
-  const freed = (round: Round) => {
-    if (!round.owed) return;
+  /**
+   * The round waits on a lookup of its name: the one outstanding, a round's that has ended included, or a new one. An
+   * answer that comes after the round ended is dropped.
+   */
+  const resolveName = (round: Round) => {
+    if (round.looking) return;
+    round.looking = true;
+    let pending = lookups.get(round.host);
+    if (pending === undefined) {
+      pending = lookup(round.host).finally(() => lookups.delete(round.host));
+      lookups.set(round.host, pending);
+    }
+    const answered = (apply: () => void) => {
+      if (rounds.get(round.key) !== round) return;
+      round.looking = false;
+      apply();
+    };
+    pending.then(
+      (answer) =>
+        answered(() => {
+          const first = round.addresses.length === 0;
+          round.addresses = interleaved(answer);
+          round.next = 0;
+          round.failed.clear();
+          if (first) tick(round); // a name that resolves late is probed from its answer on
+        }),
+      (error: unknown) => answered(() => void (round.lastError = error)), // the next tick looks it up again
+    );
+  };
+
+  /** A probe of a round still waiting has ended without connecting. */
+  const probeFailed = (round: Round, probe: Probe) => {
+    if (round.named && round.addresses.includes(probe.address)) {
+      round.failed.add(probe.address);
+      if (round.failed.size === round.addresses.length) resolveName(round); // its addresses have stopped answering
+    }
+    if (!round.owed) return; // a tick the cap held back starts now
     round.owed = false;
-    startProbe(round);
+    tick(round);
   };
 
   /** Ends a round: its probes destroyed, its ticker stopped, every waiter still in it answered. */
@@ -110,18 +177,19 @@ export function createReach(deps: { connect?: Connect; now?(): number; log(line:
   };
 
   // Each probe's PROBE_CONNECT_MS is its own timer, so a correction of the wall clock neither shortens nor lengthens it.
-  function startProbe(round: Round): void {
+  function startProbe(round: Round, address: string): void {
     const probe: Probe = {
+      address,
       controller: new AbortController(),
       deadline: setTimeout(() => {
         destroy(round, probe);
         round.lastError = new Error(`no connect within ${PROBE_CONNECT_MS} ms`);
-        freed(round);
+        probeFailed(round, probe);
       }, PROBE_CONNECT_MS),
     };
     round.probes.add(probe);
     round.started += 1;
-    connect(round.host, round.port, probe.controller.signal).then(
+    connect(address, round.port, probe.controller.signal).then(
       () => {
         if (!round.probes.has(probe)) return; // destroyed already: its round ended, or its 3 s ran out
         deps.log(`[reach] ${round.key}: reachable after ${round.started} probes, ${now() - round.startedAt} ms`);
@@ -132,26 +200,33 @@ export function createReach(deps: { connect?: Connect; now?(): number; log(line:
         round.probes.delete(probe);
         clearTimeout(probe.deadline);
         round.lastError = error;
-        freed(round);
+        probeFailed(round, probe);
       },
     );
   }
 
   /**
-   * A stagger's tick starts a probe unless thirty are in flight. A tick due in the same millisecond as the oldest
-   * probe's deadline may run first, whatever order the timers fire in; it is then owed, and starts at that deadline.
+   * A stagger's tick starts a probe unless thirty are in flight, or looks the name up when the round has no address. A
+   * tick due in the same millisecond as the oldest probe's deadline may run first, whatever order the timers fire in;
+   * it is then owed, and starts at that deadline.
    */
-  const tick = (round: Round) => {
-    if (round.probes.size >= MAX_IN_FLIGHT) round.owed = true;
-    else startProbe(round);
-  };
+  function tick(round: Round): void {
+    const address: string | undefined = round.addresses[round.next % round.addresses.length]; // none for a name not resolved yet
+    if (address === undefined) resolveName(round);
+    else if (round.probes.size >= MAX_IN_FLIGHT) round.owed = true;
+    else {
+      round.next += 1;
+      startProbe(round, address);
+    }
+  }
 
   const closeWindow = (log: boolean) => {
     if (windowTimer !== null) clearTimeout(windowTimer);
     windowTimer = null;
     for (const round of [...rounds.values()]) {
       if (log) {
-        const why = round.lastError === null ? NO_PROBE_ENDED : errorWords(round.lastError);
+        const why =
+          round.lastError !== null ? errorWords(round.lastError) : round.started === 0 ? `no answer from the lookup of ${round.host}` : NO_PROBE_ENDED;
         deps.log(`[reach] ${round.key}: window closed after ${round.started} probes, none connected (${why})`);
       }
       end(round, false);
@@ -178,10 +253,25 @@ export function createReach(deps: { connect?: Connect; now?(): number; log(line:
       return new Promise<boolean>((resolve) => {
         let round = rounds.get(where.key);
         if (round === undefined) {
-          const fresh: Round = { ...where, waiters: new Set(), probes: new Set(), started: 0, startedAt: now(), owed: false, lastError: null, ticker: setInterval(() => tick(fresh), PROBE_STAGGER_MS) };
+          const named = isIP(where.host) === 0;
+          const fresh: Round = {
+            ...where,
+            named,
+            addresses: named ? [] : [where.host],
+            next: 0,
+            failed: new Set(),
+            looking: false,
+            waiters: new Set(),
+            probes: new Set(),
+            started: 0,
+            startedAt: now(),
+            owed: false,
+            lastError: null,
+            ticker: setInterval(() => tick(fresh), PROBE_STAGGER_MS),
+          };
           rounds.set(where.key, fresh);
           round = fresh;
-          startProbe(fresh);
+          tick(fresh);
         }
         const inRound = round;
         const leave = () => {
