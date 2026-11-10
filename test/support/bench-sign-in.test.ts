@@ -28,7 +28,7 @@ function deps(statuses: OrgStatus[], options: { pairing?: string | null; attempt
       calls.push('signIn');
       return options.attempt ?? { ok: true };
     },
-    takePairing: () => {
+    takePairing: async () => {
       calls.push('takePairing');
       const code = pairing;
       pairing = null;
@@ -93,7 +93,7 @@ describe('the live bench app’s sign-in (P5 O7 M7)', () => {
     expect(said.some((line) => line.includes('FP-1234'))).toBe(true);
     expect(said.filter((line) => line.includes('SECRET'))).toEqual([]);
     const none = deps([{ state: 'none' }], { pairing: null });
-    await expect(benchSignIn(none.d, 60_000)).rejects.toThrow(/not registered \(none\) and the config names no pairing file that exists/);
+    await expect(benchSignIn(none.d, 60_000)).rejects.toThrow(/not registered \(none\) and the config names no pairing file/);
     const refused = deps([{ state: 'none' }], { attempt: { ok: false, reason: { code: 'expired' } } });
     await expect(benchSignIn(refused.d, 60_000)).rejects.toThrow(/org.register refused the pairing code: expired/);
   });
