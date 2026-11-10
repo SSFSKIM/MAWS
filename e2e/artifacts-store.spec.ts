@@ -467,9 +467,13 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
   const typing = documents(launch.page);
   const typer = await typing.open(artifact.id);
   const loadBefore = load();
+  const windowStart = new Date().toISOString();
   const latencies = await typing.timeAcks(typer, 500, [60, 180]);
+  const windowEnd = new Date().toISOString();
   const ackP95Ms = round(percentile(latencies, 95));
-  recordBound('ackP95Ms', ackP95Ms, { edits: latencies.length, p50: round(percentile(latencies, 50)), max: round(Math.max(...latencies)), load: [loadBefore, load()] });
+  // P5 O15 (Decision Log 13): the record also carries the window's times and every latency in order, written after the
+  // timing ends, so a reading over the bound can be told apart as launch residue or a cost each edit pays
+  recordBound('ackP95Ms', ackP95Ms, { edits: latencies.length, p50: round(percentile(latencies, 50)), max: round(Math.max(...latencies)), load: [loadBefore, load()], window: { start: windowStart, end: windowEnd }, samples: latencies.map(round) });
 
   // Three host SIGKILLs mid-typing, each in a fresh app and `mawsd` (a host supervisor stops restarting a host that dies
   // three times within 60 s): every acknowledged keystroke is in the document the restarted host serves.
