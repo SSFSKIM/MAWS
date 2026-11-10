@@ -13,6 +13,7 @@ import {
   base64urlEncode,
   canonicalize,
   decodePairingCode,
+  endorseDevice,
   generateSigningKey,
   keyId,
   pairingFingerprint,
@@ -839,8 +840,9 @@ describe('no two successors of one parent', () => {
   let proxy: Server;
   /** What the proxy does to the next state POST: forwards it (`pass`), forwards it and answers 500 (`stored`), drops
    * it before the hub sees it (`lost`), or first moves the hub's head `ahead` versions as another writer would, then
-   * forwards it (the hub's 409 `not-head` for one, `rollback` for more). */
-  let post: 'pass' | 'stored' | 'lost' | { ahead: number } = 'pass';
+   * forwards it (the hub's 409 `not-head` for one, `rollback` for more), or forwards it and answers a 409 `not-head` to
+   * the post the hub took (`stored-409`, a hub that kept the bytes, or a second delivery of a post it took). */
+  let post: 'pass' | 'stored' | 'lost' | 'stored-409' | { ahead: number } = 'pass';
   let proxyUrl: string;
   const keys = join(scratch, 'pending-keys', 'keys.json');
   // The command always reaches the hub through the proxy (the anchor names one hub): `post` says what the proxy does.
@@ -873,6 +875,11 @@ describe('no two successors of one parent', () => {
         if (isPost && post === 'stored' && upstream.status === 201) {
           res.writeHead(500, { 'content-type': 'application/json' });
           return void res.end('{"error":"internal"}');
+        }
+        if (isPost && post === 'stored-409' && upstream.status === 201) {
+          post = 'pass';
+          res.writeHead(409, { 'content-type': 'application/json' });
+          return void res.end(JSON.stringify({ error: 'not-head', message: `the head is version ${(await head()).state.version}; fetch it and sign again on it` }));
         }
         res.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json' });
         res.end(answer);
@@ -975,12 +982,26 @@ describe('no two successors of one parent', () => {
       const at = before.state.version + ahead;
       expect(refused.err, code).toEqual([`admin: the hub's head moved to version ${at} before version ${before.state.version + 1} landed: nothing landed, and nothing stays pending; run the verb again`]);
       expect(anchor().pending, code).toBeUndefined();
+      // The anchor moves to the verified head, never left at the refused proposal's parent.
+      expect(anchor().version, code).toBe(at);
       expect((await head()).state.version, code).toBe(at);
       const next = fake();
       expect(await runAdmin(['refresh', ...via()], next.io), code).toBe(0);
       expect(next.out, code).toEqual([`head version ${at}, issued 0 days ago`, `refreshed: version ${at + 1} (no change)`]);
       expect(anchor(), code).toMatchObject({ version: at + 1 });
     }
+  });
+
+  it("adopts a proposal the hub took though it answered 409 not-head: the hub's unsigned answer is checked against its verified chain", async () => {
+    const before = await head();
+    post = 'stored-409';
+    const f = fake();
+    expect(await runAdmin(['refresh', ...via()], f.io)).toBe(0);
+    const n = before.state.version + 1;
+    expect(f.out).toEqual([`head version ${before.state.version}, issued 0 days ago`, `pending version ${n} is the hub's: adopted`, `refreshed: version ${n} (no change)`]);
+    expect((await head()).state.version).toBe(n);
+    expect(anchor()).toMatchObject({ version: n });
+    expect(anchor().pending).toBeUndefined();
   });
 });
 
@@ -1005,25 +1026,33 @@ describe('a head that moves while a verb waits on a person', () => {
   });
   afterAll(() => hub?.close());
 
-  it('pairs on the head as it is when it signs: other writers moved it while the device answered, and the hub takes it', async () => {
-    const f = fake();
+  /** `pair --yes` for a phone `id`: its code read, `meanwhile` run, then the phone's entry posted under the code. */
+  async function pairPhone(f: Fake, id: string, meanwhile = async () => {}) {
     const running = runAdmin(['pair', '--class', 'web-cards', '--ttl', '20', ...asLocal('--yes')], f.io);
     const deadline = Date.now() + 15_000;
     let line: string | undefined;
     while (!(line = f.out.find((l) => l.startsWith('pairing code: '))) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
     const code = decodePairingCode(line!.slice('pairing code: '.length))!;
-    await moveHead();
-    await moveHead();
+    await meanwhile();
     const device: Omit<Device, 'endorsement'> = {
-      id: 'moved-phone',
+      id,
       class: 'web-cards',
       keyStorage: 'webcrypto',
       channelPub: (await generateSigningKey()).pub,
       passkey: { credentialId: base64urlEncode(crypto.getRandomValues(new Uint8Array(16))), publicKey: (await generateSigningKey()).pub, rpId: new URL(code.hub).hostname },
     };
     const mac = await pairingMac(base64urlDecode(code.k), { org: code.org, member: code.member, device });
-    const { id, ...rest } = device;
-    expect((await hub.fetchAs(ADMIN, '/api/devices/pending', { body: { deviceId: id, ...rest, mac } })).status).toBe(201);
+    const { id: deviceId, ...rest } = device;
+    expect((await hub.fetchAs(ADMIN, '/api/devices/pending', { body: { deviceId, ...rest, mac } })).status).toBe(201);
+    return { running, device };
+  }
+
+  it('pairs on the head as it is when it signs: other writers moved it while the device answered, and the hub takes it', async () => {
+    const f = fake();
+    const { running } = await pairPhone(f, 'moved-phone', async () => {
+      await moveHead();
+      await moveHead();
+    });
     expect(await running).toBe(0);
     expect(f.out[0]).toBe('head version 1, issued 0 days ago');
     expect(f.out).toContain('the head moved from version 1 to 3 while waiting: signing on 3');
@@ -1037,27 +1066,67 @@ describe('a head that moves while a verb waits on a person', () => {
 
   it('names the bytes of a confirmation that is not an answer (a bracketed paste, a stray byte) in hex, before its refusal, and signs nothing', async () => {
     const before = await head();
+    // The bytes in hex on the terminal alone (a mistaken paste may be a secret); stderr, which a log keeps, their count and kind.
+    const question = 'revoke moved-phone web-cards webcrypto rpId 127.0.0.1? [y/N] ';
     const cases = [
-      ['\x1b[200~y\x1b[201~', ['read 13 bytes that are not an answer: 1b5b3230307e791b5b3230317e', 'admin: not revoked: nothing was signed']],
-      ['y\x1b\r', ['read 3 bytes that are not an answer: 791b0d', 'admin: not revoked: nothing was signed']],
-      // A typed n, or an empty line, keeps the plain refusal.
-      [' n\r', ['admin: not revoked: nothing was signed']],
-      ['', ['admin: not revoked: nothing was signed']],
+      ['\x1b[200~y\x1b[201~', 'read 13 bytes that are not an answer: 1b5b3230307e791b5b3230317e', 'read 13 bytes that are not an answer (escape sequences present)'],
+      ['y\x1b\r', 'read 3 bytes that are not an answer: 791b0d', 'read 3 bytes that are not an answer (escape sequences present)'],
+      ['y\x00\r', 'read 3 bytes that are not an answer: 79000d', 'read 3 bytes that are not an answer (control bytes present)'],
+      ['hunter2', 'read 7 bytes that are not an answer: 68756e74657232', 'read 7 bytes that are not an answer (printable text)'],
+      ['\x00'.repeat(40), `read 40 bytes that are not an answer: ${'00'.repeat(32)}…`, 'read 40 bytes that are not an answer (control bytes present)'],
     ] as const;
-    for (const [answer, said] of cases) {
+    for (const [answer, onTerminal, logged] of cases) {
       const f = fake([answer]);
       expect(await runAdmin(['remove-device', 'moved-phone', ...asLocal()], f.io), JSON.stringify(answer)).toBe(1);
-      expect(f.err, JSON.stringify(answer)).toEqual(said);
+      expect(f.term, JSON.stringify(answer)).toEqual([question, `${onTerminal}\n`]);
+      expect(f.err, JSON.stringify(answer)).toEqual([logged, 'admin: not revoked: nothing was signed']);
+      const hex = Buffer.from(answer).toString('hex');
+      expect([...f.out, ...f.err].join('\n')).not.toContain(hex.slice(0, 12));
       expect(canonicalize(await head())).toBe(canonicalize(before));
       expect(anchor().pending).toBeUndefined();
     }
-    const long = fake(['\x00'.repeat(40)]);
-    expect(await runAdmin(['remove-device', 'moved-phone', ...asLocal()], long.io)).toBe(1);
-    expect(long.err[0]).toBe(`read 40 bytes that are not an answer: ${'00'.repeat(32)}…`);
+    // A typed n, or an empty line, keeps the plain refusal.
+    for (const answer of [' n\r', '']) {
+      const f = fake([answer]);
+      expect(await runAdmin(['remove-device', 'moved-phone', ...asLocal()], f.io), JSON.stringify(answer)).toBe(1);
+      expect(f.term).toEqual([question]);
+      expect(f.err).toEqual(['admin: not revoked: nothing was signed']);
+    }
     // A y with whitespace around it is an answer.
     const yes = fake([' y \r']);
     expect(await runAdmin(['remove-device', 'moved-phone', ...asLocal()], yes.io)).toBe(0);
     expect(yes.out.at(-1)).toBe(`revoked: version ${before.state.version + 1}`);
+  });
+
+  it("revokes only the entry the owner confirmed: one whose keys another writer replaced under its id meanwhile is refused, nothing signed", async () => {
+    const paired = fake();
+    const { running, device } = await pairPhone(paired, 'swap-phone');
+    expect(await running).toBe(0);
+    let answer: (line: string) => void = () => {};
+    const f = fake([], { openTerminal: () => ({ write: (text) => void f.term.push(text), readLine: () => new Promise<string>((resolve) => (answer = resolve)) }) });
+    const removing = runAdmin(['remove-device', 'swap-phone', ...asLocal()], f.io);
+    const deadline = Date.now() + 15_000;
+    while (!f.term.join('').endsWith('[y/N] ') && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    // Another writer gives swap-phone a new channel key under the same id, the old one revoked, the entry endorsed anew.
+    const admin = await readAdminKeys(keys);
+    const parent = (await head()).state;
+    const owner = parent.members[0];
+    const was = owner.devices.find((x) => x.id === 'swap-phone')!;
+    const bare = { ...device, channelPub: (await generateSigningKey()).pub };
+    const endorsement = await endorseDevice(ORG, owner.id, bare, admin.stepUp.privateKey, admin.stepUp.pub);
+    const revoked = { keyId: await keyId(was.channelPub), holder: { member: owner.id, device: was.id, class: was.class, key: 'channel' as const } };
+    const swapped = await successor(parent, (s) => {
+      s.revoked.push(revoked);
+      s.members[0].devices = s.members[0].devices.map((x) => (x.id === 'swap-phone' ? { ...bare, endorsement } : x));
+    });
+    const signedSwap = await signOrgState(swapped, [admin.stepUp]);
+    const took = await hub.fetchAs(ADMIN, '/api/org/state', { body: signedSwap });
+    expect(took.status, await took.clone().text()).toBe(201);
+    answer('y');
+    expect(await removing).toBe(1);
+    expect(f.err).toEqual(['admin: the device changed while waiting: run the verb again; nothing was signed']);
+    expect(canonicalize(await head())).toBe(canonicalize(signedSwap));
+    expect(anchor().pending).toBeUndefined();
   });
 });
 

@@ -289,6 +289,14 @@ async function verifiedHead(person: Person, anchor: Anchor): Promise<{ head: Sig
   return { head: run.head, chain: run.adopted, certificates: served.certificates };
 }
 
+/**
+ * The refusal of a verb whose confirmed object (a device, a delegation, a machine) is not, in the head it would sign
+ * on, what the owner confirmed: what is signed is what was confirmed.
+ */
+function changedMeanwhile(what: string): never {
+  return refuse(`the ${what} changed while waiting: run the verb again; nothing was signed`);
+}
+
 /** Why `keys`'s device cannot sign the head's successors for `member`, or null. */
 async function signerProblem(head: OrgState, member: string, keys: AdminKeys): Promise<string | null> {
   const holder = head.members.find((m) => m.devices.some((d) => d.id === keys.id));
@@ -330,11 +338,20 @@ async function signedIn(ctx: Context, person: Person): Promise<{ org: string; me
 /** How many bytes of a line that is not an answer `confirm` names in hex. */
 const NOT_AN_ANSWER_HEX = 32;
 
+/** What a line that is not an answer holds, coarsely: the words stderr may carry, its bytes never (they may be a secret pasted by mistake). */
+function bytesClass(bytes: Uint8Array): string {
+  if (bytes.includes(0x1b)) return 'escape sequences present';
+  if (bytes.some((b) => (b < 0x20 && b !== 0x09 && b !== 0x0a && b !== 0x0d) || b === 0x7f)) return 'control bytes present';
+  if (bytes.some((b) => b >= 0x80)) return 'non-ASCII bytes present';
+  return 'printable text';
+}
+
 /**
  * Asks `question` at the terminal (`--yes` answers it at the local hub); true for y or yes. A line that is neither y,
  * yes, n, no nor empty (whitespace aside), such as a bracketed paste or a key sequence left in the terminal, is a
- * refusal too, and its bytes are named in hex first, so the owner tells it apart from a typed n; the caller's refusal
- * follows it.
+ * refusal too, said first so the owner tells it apart from a typed n: its byte count and what kind of bytes on stderr,
+ * which a runner's log keeps, and the bytes in hex on the terminal alone, since a mistaken paste may be a password or a
+ * key. The caller's refusal follows it.
  */
 async function confirm(ctx: Context, question: string): Promise<boolean> {
   if (ctx.yes) {
@@ -348,27 +365,24 @@ async function confirm(ctx: Context, question: string): Promise<boolean> {
   if (/^y(es)?$/i.test(answer)) return true;
   if (answer !== '' && !/^no?$/i.test(answer)) {
     const bytes = Buffer.from(line, 'utf8');
-    const hex = bytes.subarray(0, NOT_AN_ANSWER_HEX).toString('hex');
-    ctx.io.err(`read ${bytes.length} byte${bytes.length === 1 ? '' : 's'} that are not an answer: ${hex}${bytes.length > NOT_AN_ANSWER_HEX ? '…' : ''}`);
+    const read = `read ${bytes.length} byte${bytes.length === 1 ? '' : 's'} that are not an answer`;
+    terminal.write(`${read}: ${bytes.subarray(0, NOT_AN_ANSWER_HEX).toString('hex')}${bytes.length > NOT_AN_ANSWER_HEX ? '…' : ''}\n`);
+    ctx.io.err(`${read} (${bytesClass(bytes)})`);
   }
   return false;
 }
 
-/**
- * The head a hub's 409 `not-head` or `rollback` names ("version M", or "a later version" when its message names none):
- * the head moved before the post landed, and the hub stored nothing. Null for any other answer.
- */
-function headMovedTo(status: number, text: string): string | null {
-  if (status !== 409) return null;
-  let body: { error?: unknown; message?: unknown } | null;
+/** Whether a hub's answer is its 409 `not-head` or `rollback`: the head moved before the post landed, as the hub says. */
+function refusedAsMoved(status: number, text: string): boolean {
+  if (status !== 409) return false;
   try {
-    body = JSON.parse(text) as typeof body;
+    const body = JSON.parse(text) as unknown;
+    if (body === null || typeof body !== 'object') return false;
+    const { error } = body as { error?: unknown };
+    return error === 'not-head' || error === 'rollback';
   } catch {
-    return null;
+    return false;
   }
-  if (body?.error !== 'not-head' && body?.error !== 'rollback') return null;
-  const named = typeof body.message === 'string' ? /the head is version (\d+)/.exec(body.message) : null;
-  return named ? `version ${named[1]}` : 'a later version';
 }
 
 /** Posts a signed state: `ok`, `not-head` (the head moved), or throws with the hub's refusal. */
@@ -471,16 +485,33 @@ async function anchored(ctx: Context, needsSigner: boolean, { unsent = 'refuse' 
     } catch (error) {
       return refuse(`version ${n} got no answer (${error instanceof Error ? error.message : String(error)}): it stays pending in ${anchorFile(ctx.keysPath)}, and the next run settles it`);
     }
-    // The head moved before it landed: the hub took nothing, so nothing stays pending for a later verb to call a fork.
-    const moved = headMovedTo(response.status, text);
-    if (moved !== null) {
-      save({ ...anchor, pending: undefined, unsent: undefined });
-      const added = signed.state.delegations.filter((d) => !head.state.delegations.some((x) => x.id === d.id)).map((d) => d.id);
-      refuse(
-        `the hub's head moved to ${moved} before version ${n} landed: nothing landed, and nothing stays pending; ${
-          added.length > 0 ? `delegation ${added.join(', ')} never took effect: run provisioning revoke ${added.join(', ')}, delete its stored code, and create it again` : 'run the verb again'
-        }`,
-      );
+    // The head moved before it landed, the hub says; its answer is unsigned (a hub may have kept the bytes, or this
+    // was a second delivery of one it took), so the verified chain decides. Ours at its version: adopted. Another
+    // successor there, or a head past it: the hub took nothing of ours, so the anchor moves to the verified head and
+    // nothing stays pending for a later verb to call a fork.
+    if (refusedAsMoved(response.status, text)) {
+      let now: Awaited<ReturnType<typeof verifiedHead>>;
+      try {
+        now = await verifiedHead(person, anchor);
+      } catch (error) {
+        return refuse(`the hub answered ${response.status} to version ${n}, and its chain could not be read again (${error instanceof Error ? error.message : String(error)}): it stays pending in ${anchorFile(ctx.keysPath)}, and the next run settles it`);
+      }
+      const held = now.chain[n - 1];
+      if (held !== undefined && canonicalize(held) === canonicalize(signed)) {
+        save(settled(anchor, now.head.state.version));
+        ctx.io.out(`pending version ${n} is the hub's: adopted`);
+        return;
+      }
+      const at = now.head.state.version;
+      if (at >= n) {
+        save({ ...anchor, pending: undefined, unsent: undefined, version: Math.max(anchor.version, at) });
+        const added = signed.state.delegations.filter((d) => !head.state.delegations.some((x) => x.id === d.id)).map((d) => d.id);
+        refuse(
+          `the hub's head moved to version ${at} before version ${n} landed: nothing landed, and nothing stays pending; ${
+            added.length > 0 ? `delegation ${added.join(', ')} never took effect: run provisioning revoke ${added.join(', ')}, delete its stored code, and create it again` : 'run the verb again'
+          }`,
+        );
+      }
     }
     if (response.status !== 201) refuse(`the hub answered ${response.status} to version ${n} (${printable(text.slice(0, 300))}): it stays pending in ${anchorFile(ctx.keysPath)}, and the next run settles it`);
     save(settled(anchor, n));
@@ -738,11 +769,14 @@ async function removeDevice(ctx: Context): Promise<number> {
   const member = from.head.state.members.find((m) => m.id === from.me.member.id)!;
   const device = member.devices.find((d) => d.id === id) ?? refuse(`${from.me.member.id} has no device ${id} in the head (version ${from.head.state.version})`);
   if (id === from.keys.id) refuse(`${id} is this admin device: it is revoked from the app that replaces it (O8), never by itself`);
+  const isRoot = async (state: OrgState, d: Device) => d.stepUpPub !== undefined && state.root.keys.includes(await keyId(d.stepUpPub));
+  const wasRoot = await isRoot(from.head.state, device);
   if (!(await confirm(ctx, `revoke ${describeEntry(device)}? [y/N]`))) refuse('not revoked: nothing was signed');
   const signed = await from.amend(async (s) => {
     const m = s.members.find((x) => x.id === from.me.member.id);
     const d = m?.devices.find((x) => x.id === id);
-    if (!m || !d) return refuse(`${id} left the head meanwhile: nothing to revoke`);
+    // The entry confirmed, its keys and its place in the root set, is the one revoked.
+    if (!m || !d || canonicalize(d) !== canonicalize(device) || (await isRoot(s, d)) !== wasRoot) return changedMeanwhile('device');
     m.devices = m.devices.filter((x) => x.id !== id);
     s.revoked.push({ keyId: await keyId(d.channelPub), holder: { member: m.id, device: d.id, class: d.class, key: 'channel' } });
     if (d.stepUpPub !== undefined) {
@@ -775,7 +809,11 @@ async function rootAdd(ctx: Context): Promise<number> {
   const fingerprint = await pairingFingerprint(from.anchor.org, member.id, device);
   const question = `make ${describeEntry(device)} of ${printable(member.email)} (fingerprint ${fingerprint}, step-up ${kid}) a root of ${from.anchor.org}? [y/N]`;
   if (!(await confirm(ctx, question))) refuse('not made a root: nothing was signed');
-  const signed = await from.amend((s) => void s.root.keys.push(kid));
+  const signed = await from.amend((s) => {
+    const d = s.members.find((m) => m.id === member.id)?.devices.find((x) => x.id === id);
+    if (!d || canonicalize(d) !== canonicalize(device) || s.root.keys.includes(kid)) changedMeanwhile('device');
+    s.root.keys.push(kid);
+  });
   ctx.io.out(`root added: ${printable(id)}, step-up ${kid} (version ${signed.state.version})`);
   return 0;
 }
@@ -835,8 +873,11 @@ async function pair(ctx: Context): Promise<number> {
   const still = await answering();
   if (still === null || canonicalize(still) !== canonicalize(device)) refuse('the entry changed after it was shown: start over (the code is spent)');
   const signed = await from.amend(async (s) => {
-    const m = s.members.find((x) => x.id === member)!;
-    if (m.devices.some((d) => d.id === device.id)) return refuse(`${device.id} is listed already`);
+    const m = s.members.find((x) => x.id === member);
+    // Still unlisted, under any member, by its id or its keys: the entry shown is the one listed.
+    const pubs = [device.channelPub, device.stepUpPub].filter((k) => k !== undefined);
+    const listed = s.members.some((x) => x.devices.some((d) => d.id === device.id || pubs.includes(d.channelPub) || (d.stepUpPub !== undefined && pubs.includes(d.stepUpPub))));
+    if (!m || listed) return changedMeanwhile('device');
     m.devices.push({ ...device, endorsement: await endorseDevice(org, member, device, from.keys.stepUp.privateKey, from.keys.stepUp.pub) });
   });
   ctx.io.out(`listed: version ${signed.state.version}`);
@@ -965,13 +1006,12 @@ async function enroll(ctx: Context): Promise<number> {
   const posted = key;
   return locked(ctx, async () => {
     const from = await anchored(ctx, true);
-    const s = from.head.state;
-    const bound = s.machineNames.find(sameName(name));
-    if (bound && bound.ref !== posted.ref) refuse(`${name} is bound to ref ${bound.ref} for the life of the org, and this machine posted ref ${printable(posted.ref)}: nothing was signed`);
-    const entry = s.machines.find(sameName(name));
-    if (entry && !replace) refuse(`${name} was listed meanwhile (ref ${entry.ref}): nothing was signed`);
     const signed = await from.amend(async (next) => {
+      // Judged against the state signed, the head as `amend` read it last.
+      const bound = next.machineNames.find(sameName(name));
+      if (bound && bound.ref !== posted.ref) refuse(`${name} is bound to ref ${bound.ref} for the life of the org, and this machine posted ref ${printable(posted.ref)}: nothing was signed`);
       const held = next.machines.find(sameName(name));
+      if (held && !replace) refuse(`${name} was listed meanwhile (ref ${held.ref}): nothing was signed`);
       if (held) {
         // Re-enrolled in place: the new key under the same ref, the old one retired as of now (its private half is gone).
         if (held.pub === posted.pub) return;
@@ -1095,6 +1135,8 @@ async function delegationDrop(ctx: Context): Promise<number> {
   }
   if (!(await confirm(ctx, `drop ${id} (its prefix ${d!.prefix} stays reserved)? [y/N]`))) refuse('not dropped: nothing was signed');
   const signed = await from.amend(async (s) => {
+    const now = s.delegations.find((x) => x.id === id);
+    if (!now || canonicalize(now) !== canonicalize(d!)) changedMeanwhile('delegation');
     s.delegations = s.delegations.filter((x) => x.id !== id);
     s.revoked.push({ keyId: await keyId(d!.pub), holder: { delegation: id, prefix: d!.prefix } });
     // Its certificates go with it, history included (org-state.ts): an admin's retirement of one moves to `revoked`.
@@ -1133,9 +1175,15 @@ async function machineDrop(ctx: Context): Promise<number> {
     const now = new Date().toISOString();
     const gone = held!.kind === 'listed' ? [{ ref: held!.entry.ref, pub: held!.entry.pub }] : held!.certs.map((c) => ({ ref: c.ref, pub: c.pub }));
     const signed = await from.amend(async (s) => {
-      if (held!.kind === 'listed') s.machines = s.machines.filter((m) => m.ref !== held!.entry.ref);
+      if (held!.kind === 'listed') {
+        const now = s.machines.find((m) => m.ref === held!.entry.ref);
+        if (!now || canonicalize(now) !== canonicalize(held!.entry)) changedMeanwhile('machine');
+        s.machines = s.machines.filter((m) => m.ref !== held!.entry.ref);
+      }
       for (const { ref, pub } of gone) {
         const kid = await keyId(pub);
+        // A certificate's key the head took out meanwhile (retired, or revoked with its delegation).
+        if (s.retired.some((r) => r.keyId === kid) || s.revoked.some((r) => r.keyId === kid)) changedMeanwhile('machine');
         if (how === 'revoked') s.revoked.push({ keyId: kid, holder: { machine: ref } });
         else s.retired.push({ keyId: kid, pub, notAfter: now, holder: { machine: ref } });
       }

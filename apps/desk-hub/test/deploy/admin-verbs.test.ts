@@ -629,13 +629,15 @@ describe('on the local hub', () => {
 const canonicalOf = (value: unknown) => canonicalize(value);
 
 describe('delegation create against a hub that misbehaves', () => {
-  // A proxy between the command and the local hub: `mint` rewrites the provisioning key's answer, and `statePosts`
-  // counts the state POSTs that reached it.
+  // A proxy between the command and the local hub: `mint` rewrites the provisioning key's answer, `statePosts`
+  // counts the state POSTs that reached it, and `answered` sees each request once the hub answered it, before the
+  // command does.
   let hub: LocalHub;
   let proxy: Server;
   let proxyUrl: string;
   let mint: ((key: ProvisioningKeyRecord) => ProvisioningKeyRecord) | null = null;
   let statePosts = 0;
+  let answered: ((url: string, status: number) => Promise<void>) | null = null;
   const keys = join(scratch, 'misbehaving', 'keys.json');
   const via = (...extra: string[]) => ['--hub', proxyUrl, '--user', ADMIN, '--keys', keys, ...extra];
   const head = async () => ((await hub.fetchAs(ADMIN, '/api/org/state').then((r) => r.json())) as { head: SignedOrgState }).head;
@@ -658,6 +660,7 @@ describe('delegation create against a hub that misbehaves', () => {
           const issued = JSON.parse(answer.toString()) as { key: ProvisioningKeyRecord; token: string };
           answer = Buffer.from(JSON.stringify({ ...issued, key: mint(issued.key) }));
         }
+        await answered?.(req.url ?? '', upstream.status);
         res.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json' });
         res.end(answer);
       });
@@ -762,6 +765,40 @@ describe('delegation create against a hub that misbehaves', () => {
     expect((await head()).state.version).toBe(version);
     expect(anchor().pending).toBeUndefined();
     expect(await runAdmin(['provisioning', 'revoke', id!, ...via('--yes')], fake().io)).toBe(0);
+  });
+
+  it('enroll judges the name against the head it signs on: a writer that lists the name between its reads is refused without --replace, not replaced', async () => {
+    const member = ((await hub.fetchAs(ADMIN, '/api/me').then((r) => r.json())) as { member: { id: string } }).member.id;
+    const ref = mintRef();
+    const other = (await generateSigningKey()).pub;
+    const admin = await readAdminKeys(keys);
+    // Once the machine's key was served, the command's next read of the head (the one its signing lock opens with) is
+    // answered as it was, and only then does another writer list the name, under the machine's own ref.
+    let keyServed = false;
+    answered = async (url, status) => {
+      if (/^\/api\/enrollments\/[^/]+\/key$/.test(url) && status === 200) keyServed = true;
+      else if (keyServed && url.startsWith('/api/org/state')) {
+        answered = null;
+        const listing = await successor((await head()).state, (s) => {
+          s.machines.push({ name: 'racer', ref, pub: other, owners: [member] });
+          s.machineNames.push({ name: 'racer', ref });
+        });
+        expect((await hub.fetchAs(ADMIN, '/api/org/state', { body: await signOrgState(listing, [admin.stepUp]) })).status).toBe(201);
+      }
+    };
+    const f = fake();
+    const running = runAdmin(['enroll', 'racer', '--wait', '20', ...via('--yes')], f.io);
+    const code = await codeOn(f);
+    const decoded = decodeEnrollmentCodeV2(code);
+    for (const secret of [code, decoded.token, decoded.k]) secrets.add(secret);
+    // The machine reaches the hub itself; only the command goes through the proxy.
+    await enrollV2(encodeEnrollmentCodeV2({ ...decoded, hub: hub.url }), 'racer', { ref });
+    expect(await running).toBe(1);
+    expect(answered).toBeNull();
+    expect(f.err).toEqual([`admin: racer was listed meanwhile (ref ${ref}): nothing was signed`]);
+    const listed = (await head()).state.machines.find((m) => m.name === 'racer');
+    expect(listed).toEqual({ name: 'racer', ref, pub: other, owners: [member] });
+    expect(anchor().pending).toBeUndefined();
   });
 });
 
