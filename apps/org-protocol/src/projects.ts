@@ -28,7 +28,8 @@ export type RegistryProject = {
  * The names the endpoint's RL10 directory lists, each with its machine project and its `machines` entry: enrolled
  * machines' names, and those of certificates under a live, unrevoked delegation, so a devcloud VM that exists only by
  * its certificate is one of them. Sorted. A former name is not one: the directory would list it as a machine that is
- * enrolled and never online.
+ * enrolled and never online. A certificate whose key the head retired stays on purpose: `orgDirectory` marks its name
+ * `retired`, so sminos reads the VM's machine project as retired rather than unknown (`directoryMachines` drops it).
  */
 export function directoryMachineNames(state: OrgState, certificates: Certificates, now: Date): string[] {
   const names = new Map<string, string>();
