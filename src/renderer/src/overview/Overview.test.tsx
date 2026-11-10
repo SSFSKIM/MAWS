@@ -14,7 +14,7 @@ import { TEST_MACHINE } from '../../../../test/support/machine';
 import { formatClock } from '@shared/app/date-format'; // L129
 import type { AppSessionId } from '@shared/graph/ids'; // P5 O7 M6
 import { addressOf } from '@shared/machine/address';
-import { item, remoteRow } from '../../../../test/support/builders';
+import { item, record, remoteRow } from '../../../../test/support/builders';
 import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { Toolbar } from '../app/Toolbar';
 import { registerRemoteOpener } from '../sessions/remote-openers';
@@ -222,6 +222,18 @@ describe('another machine’s waiting session', () => {
     remote.focus();
     fireEvent.keyDown(remote, { key: 'Enter' });
     expect(opened).toEqual([b1, b1]);
+  });
+
+  // P5 O7 M10 (a busy remote session's state): with a tab open here its record is held, with no digest; its card reads
+  // its listing's state, in its glyph and its activity line
+  it('a record of it, with no digest, is carded by its listing’s state', () => {
+    useSessions.setState({
+      records: new Map([...useSessions.getState().records, [b1, record(b1, { title: { text: 'Studio build', source: 'user' }, unread: true })]]),
+      listed: new Map([[b1, { ...remoteRow(OTHER_MACHINE, 'b1', { title: 'Studio build', state: 'busy' }), appId: b1 }]]),
+    });
+    render(<Overview paneIndex={0} />);
+    expect(within(card('Studio build')).getByRole('img', { name: 'Working' })).toBeTruthy();
+    expect(within(card('Studio build')).getByTestId('card-activity').textContent).toBe('Working');
   });
 
   it('a greyed machine’s session is neither counted nor carded', () => {

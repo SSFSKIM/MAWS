@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { digest, item, record } from '../../../../test/support/builders';
+import type { AppSessionId } from '@shared/graph/ids';
+import { digest, item, record, remoteRow } from '../../../../test/support/builders';
+import { OTHER_MACHINE } from '../../../../test/support/machine';
+import type { ListedSession } from '../stores/sessions';
 import { glyphFor, listedGlyph } from './glyph';
 
 const at = '2026-09-28T10:00:00Z';
@@ -71,5 +74,25 @@ describe('listed glyphs', () => {
     expect(listedGlyph('idle', [item('b', 'permission', '2026-09-28T10:00:00Z')]).label).toBe('Needs approval');
     expect(listedGlyph('busy', [item('b', 'permission', '2026-09-28T10:00:00Z', { state: 'retired' }), item('b', 'held_peer_message', '2026-09-28T10:00:00Z')]).label).toBe('Working');
     expect(listedGlyph('waiting').label).toBe('Needs you');
+  });
+});
+
+// P5 O7 M10 (a busy remote session's state): another machine's lane B record has no digest; its listing says its state,
+// drawn as the listed row draws it, under the same open items, the holder glyphs and the digest where there is one.
+describe('a record read by its listing', () => {
+  const lane = (state: string, over: Partial<ListedSession> = {}): ListedSession => ({ ...remoteRow(OTHER_MACHINE, 'b', { state }), appId: 'b' as AppSessionId, ...over });
+  const r = record('b');
+  it('draws the listing’s word with no digest, as the listed row does, and an unread idle one "Idle, unread"', () => {
+    for (const state of ['busy', 'waiting', 'failed', 'done', 'stopped', 'retired', 'idle', 'something-new']) expect(glyphFor(r, null, [], lane(state))).toEqual(listedGlyph(state));
+    expect(glyphFor({ ...r, unread: true }, null, [], lane('idle')).label).toBe('Idle, unread');
+    expect(glyphFor({ ...r, unread: true }, null, [], lane('busy')).label).toBe('Working');
+  });
+  it('keeps the open items first, the holder glyphs, and the digest wherever there is one; a lane A listing says nothing', () => {
+    expect(glyphFor(r, null, [item('b', 'permission', at)], lane('busy')).label).toBe('Needs approval');
+    expect(glyphFor(record('b', { holder: { kind: 'terminal', pid: 7 } }), null, [], lane('busy')).label).toBe('Live in terminal');
+    expect(glyphFor(record('b', { holder: { kind: 'self', contestedBy: { kind: 'terminal', pid: 7 } } }), null, [], lane('busy')).label).toBe('Contested: also live in terminal');
+    expect(glyphFor(r, digest('b', { phase: 'idle' }), [], lane('busy')).label).toBe('Idle');
+    expect(glyphFor(r, null, [], lane('busy', { lane: 'A' })).label).toBe('Idle');
+    expect(glyphFor(r, null, [], undefined).label).toBe('Idle');
   });
 });

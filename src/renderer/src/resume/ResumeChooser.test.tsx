@@ -198,6 +198,20 @@ describe('the resume chooser', () => {
     expect(row('alpha').querySelector('[data-machine-chip]')).toBeNull();
   });
 
+  // P5 O7 M10 (a busy remote session's state): another machine's lane B record, which has no digest, by its listing, in
+  // its row and its preview
+  it('draws another machine’s lane B record by its listing’s state in its row and its preview', async () => {
+    const remote = addressOf(OTHER_MACHINE, 'remote-rec' as AppSessionId);
+    fill([...base, record(remote, { title: { text: 'remote record', source: 'user' }, projectId: P.id, updatedAt: minute(7) })]);
+    useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, 'remote-rec', { state: 'busy' }), appId: remote }]]) });
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: minute(0), generation: 1, carrier: 'relay' }]);
+    mount();
+    const row = screen.getAllByRole('option').find((o) => o.querySelector('[data-title]')!.textContent === 'remote record')!;
+    expect(within(row).getByRole('img', { name: 'Working' })).toBeTruthy();
+    await userEvent.setup().click(row);
+    expect(within(screen.getByRole('region', { name: 'Preview' })).getByRole('img', { name: 'Working' })).toBeTruthy();
+  });
+
   it('draws the 100 newest, loads 100 more when the list scrolls near its end or ArrowDown passes the last row, and a new search starts over', async () => {
     const user = userEvent.setup();
     const t0 = Date.UTC(2026, 9, 1, 12);

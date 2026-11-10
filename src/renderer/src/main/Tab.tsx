@@ -73,13 +73,14 @@ function useSessionLabel(appSessionId: AppSessionId, lastKnown?: string): TabLab
   const record = useSessions((s) => s.records.get(appSessionId));
   const listedTitle = useSessions((s) => s.listed.get(appSessionId)?.title.trim() || null); // P5 O9 M9
   const digest = useSessions((s) => s.digests.get(appSessionId));
+  const listing = useSessions((s) => s.listed.get(appSessionId)); // P5 O7 M10: a remote lane B record's state (`listedStateOf`)
   const pending = useAttention((s) => selectPendingOf(s, appSessionId));
   const project = useProjectName(appSessionId);
   const unstarted = useUnstartedTitle(appSessionId);
   const current = useLayout((s) => s.main.current);
   const set = useSessions((s) => (s.records.has(appSessionId) ? sessionSetKey(s, ipc.localMachine, appSessionId, () => undefined) : undefined));
   if (!record) return { title: listedTitle ?? lastKnown ?? unstarted.title, secondary: null, glyph: null, fileType: null };
-  return { title: displayTitle(record), secondary: set === current ? null : project, glyph: glyphFor(record, digest ?? null, pending), fileType: null };
+  return { title: displayTitle(record), secondary: set === current ? null : project, glyph: glyphFor(record, digest ?? null, pending, listing), fileType: null };
 }
 
 export function useTabLabel(tab: TabRef): TabLabel {
