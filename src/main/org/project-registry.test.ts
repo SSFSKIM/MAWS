@@ -271,6 +271,20 @@ describe('the row keys', () => {
     expect(h.registry.keyOf(repoProjectId(ORG, 'github.com/a/b'))).toBe('remote:github.com/a/b');
   });
 
+  // panel scalpel-2#1: the id main computes for such a row is the page's to group it by too, since it cannot compute it
+  // (no uuid5 there); a project first given `id:` by another machine's location keeps that key when the clone appears
+  it('tell the page the id a `remote:` row here derives when it carries none, which joins it to that project’s key', async () => {
+    const w = await World.make();
+    const X = repoProjectId(ORG, 'github.com/a/b');
+    const h = await start(w);
+    await h.page(await w.projects(w.m1, 1, [location('a1', X, '/srv/b', { key: 'remote:github.com/a/b' })]));
+    expect(h.value().keys).toEqual({ [X]: `id:${X}` });
+    expect(h.value().ownIds, 'none while no row here needs one').toBeUndefined();
+    await h.setLocal([own('l1', 'remote:github.com/a/b', null), own('l2', 'folder:mac:l2', P)]);
+    expect(h.value().keys[X]).toBe(`id:${X}`);
+    expect(h.value().ownIds).toEqual({ l1: X });
+  });
+
   it('name in `moved` the project that took the last location of one that has none now', async () => {
     const w = await World.make();
     const h = await start(w, { local: [own('l1', 'folder:mac:l1', P)] });

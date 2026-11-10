@@ -9,7 +9,6 @@ import type { MachineRef } from '@shared/machine/ref';
 import { createSession } from '../keymap/actions-runtime';
 import { useRemoteSpawn, type SpawnTarget } from '../sessions/remote-spawn';
 import type { RegistryProject } from '../stores/registry';
-import { useSessions } from '../stores/sessions';
 
 /**
  * Where the project's New chat starts: its first location whose folder is there, on a machine up over RL2 where the
@@ -30,10 +29,8 @@ export function registrySpawnTarget(project: RegistryProject, machines: Readonly
  * project's other locations), its machine and place there chosen; null when no tab opened.
  */
 export async function newChatElsewhere(target: SpawnTarget & { registry: string }): Promise<AppSessionId | null> {
-  const tab = await createSession(null);
+  const tab = await createSession(null, { registry: target.registry }); // its tab in the registry project's set (panel sweep#3)
   if (tab === null) return null;
-  const entry = useSessions.getState().unstarted.get(tab);
-  if (entry !== undefined) useSessions.getState().addUnstarted(tab, { ...entry, registry: target.registry });
   useRemoteSpawn.getState().choose(tab, target);
   return tab;
 }

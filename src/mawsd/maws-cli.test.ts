@@ -229,6 +229,13 @@ describe('maws project aimed at another machine', () => {
     const contested = daemon({ 'projects.registry': ok(registry({ contested: ['vm-2'] })) });
     expect(await maws(['project', 'add', 'vm-2:/srv/new'], contested.reach)).toEqual({ code: 1, out: '', err: 'contested: vm-2 is in dispute in this org (two claims to its name or its identity); an admin settles it\n' });
     expect(contested.calls.map(([name]) => name)).toEqual(['projects.registry']);
+    // panel scalpel-1#3: a machine's name is the directory's without regard to case (org-protocol's `machineNameKey`)
+    await maws(['project', 'add', `MacBook:${work}`], d.reach);
+    expect(d.calls.at(-1), 'this machine, however its name is cased').toEqual(['session.projects.addFolder', { directory: work }]);
+    expect(await maws(['project', 'add', 'VM-2:/srv/new'], contested.reach)).toEqual({ code: 1, out: '', err: 'contested: VM-2 is in dispute in this org (two claims to its name or its identity); an admin settles it\n' });
+    const cased = daemon({ 'projects.registry': ok(registry()), 'projects.forward': ok({ ok: true, text: 'removed /srv/new' }) });
+    expect(await maws(['project', 'remove', 'MINI:/srv/new'], cased.reach)).toEqual({ code: 0, out: 'removed /srv/new\n', err: '' });
+    expect(cased.calls.at(-1), 'sent under the name the directory gives it').toEqual(['projects.forward', { verb: 'remove', machine: 'mini', path: '/srv/new' }]);
     mkdirSync(join(work, 'mini:'), { recursive: true });
     mkdirSync(join(work, 'mini:', 'srv'));
     await maws(['project', 'add', 'mini:/srv'], d.reach);

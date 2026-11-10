@@ -13,9 +13,10 @@
 //   address is never an org key, so the layout's keys migrate when it does: `layout-model.ts`'s `rekeySets`).
 //
 // The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J.1; design §2, §6): one row
-// per project id. A record's row key is main's key table's entry for its project (`org.smnsId`), else its own label
-// (`org.key`), else its address, so two labels of one id are one row, one label of two ids two rows, and a record with
-// no id (signed out, not enrolled) is grouped by its label as before. Other machines' locations are records in the same
+// per project id. A record's row key is main's key table's entry for its project (`org.smnsId`, or for this Mac's row
+// that carries none the id main computed, `ownIds`), else its own label (`org.key`), else its address, so two labels of
+// one id are one row, one label of two ids two rows, and a record with no id (signed out, not enrolled) is grouped by
+// its label as before. Other machines' locations are records in the same
 // map (`stores/registry.ts`). A registry project is named as main assembled it (§A), and one the member sees only
 // through a session of it (no location to show) is still a row, with its sessions and no checkout. A key that is no
 // row's any more finds its successor (§J.2, `successorOf`).
@@ -27,7 +28,7 @@ import { isAddress, machineOf } from '@shared/machine/address';
 import { idKey, machineKey, type OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
 import { EMPTY_REGISTRY, isRegistryRecord, type OrgProjects, type RegistryProject } from './registry';
-import type { ListedSession } from './sessions';
+import type { ListedSession, UnstartedSession } from './sessions';
 
 // A row's key: an org project's, a machine's own project's, or the address of a project not derived yet.
 export type RowKey = OrgKey | ProjectId;
@@ -48,10 +49,16 @@ export type RowKeys = Readonly<Record<string, OrgKey>>;
 
 // A record's label: what its machine's files derive (`org.key`), or its address while it has none.
 export const labelOf = (project: ProjectRecord): RowKey => project.org?.key ?? project.id;
+/**
+ * A record's project id: its own (`org.smnsId`), else the one main computed for this Mac's row that carries none
+ * (`OrgProjects.ownIds`: a `remote:` label, signed in and not enrolled; panel scalpel-2#1); null for none.
+ */
+export const projectIdOf = (project: ProjectRecord, ownIds?: Readonly<Record<string, string>>): string | null =>
+  project.org?.smnsId ?? (ownIds !== undefined && Object.hasOwn(ownIds, project.id) ? ownIds[project.id] : null);
 // A record's row key (§J.1): the key table's entry for its project, else its label.
-export const orgKeyOf = (project: ProjectRecord, keys: RowKeys): RowKey => {
-  const id = project.org?.smnsId;
-  return (id != null && Object.hasOwn(keys, id) ? keys[id] : undefined) ?? labelOf(project);
+export const orgKeyOf = (project: ProjectRecord, keys: RowKeys, ownIds?: Readonly<Record<string, string>>): RowKey => {
+  const id = projectIdOf(project, ownIds);
+  return (id !== null && Object.hasOwn(keys, id) ? keys[id] : undefined) ?? labelOf(project);
 };
 export const isCheckout = (project: ProjectRecord): boolean => !project.discovered;
 
@@ -74,7 +81,8 @@ const byMachine = (local: MachineRef) => (a: MachineRef, b: MachineRef) => (a ==
 export function orgIndex(all: Iterable<ProjectRecord>, local: MachineRef, registry: OrgProjects = EMPTY_REGISTRY): OrgIndex {
   const order = byMachine(local);
   const keys = registry.keys;
-  const keyOf = (project: ProjectRecord) => orgKeyOf(project, keys);
+  const idOf = (project: ProjectRecord) => projectIdOf(project, registry.ownIds);
+  const keyOf = (project: ProjectRecord) => orgKeyOf(project, keys, registry.ownIds);
   const byId = new Map(registry.projects.map((p) => [p.id, p]));
   const projects = new Map<RowKey, ProjectRecord[]>();
   for (const project of all) {
@@ -88,7 +96,8 @@ export function orgIndex(all: Iterable<ProjectRecord>, local: MachineRef, regist
     const sorted = [...list].sort((a, b) => order(machineOf(a.id), machineOf(b.id)) || Number(isCheckout(b)) - Number(isCheckout(a)));
     const named = sorted[0];
     // the id the key table gives this key, else the first a record carries
-    const smnsId = sorted.find((p) => p.org?.smnsId != null && keys[p.org.smnsId] === key)?.org?.smnsId ?? sorted.find((p) => p.org?.smnsId)?.org?.smnsId ?? null;
+    const ids = sorted.map(idOf);
+    const smnsId = ids.find((id) => id !== null && keys[id] === key) ?? ids.find((id) => id !== null) ?? null;
     const registered = smnsId === null ? undefined : byId.get(smnsId);
     orgs.set(key, {
       id: key,
@@ -100,12 +109,14 @@ export function orgIndex(all: Iterable<ProjectRecord>, local: MachineRef, regist
     });
     if (list.some((p) => isCheckout(p) && !p.hidden)) listed.add(key);
   }
-  // a registry project with no location the member may see (its sessions only, design §11): a row with no checkout
+  // a registry project with no location the member may see (its sessions only, design §11): a row with no checkout. One
+  // whose key a record here already gives a row is listed too (panel sweep#2: a discovered record lists nothing), unless
+  // its checkouts here are all hidden, hiding being the owner's word on the project.
   for (const project of registry.projects) {
     if (project.locations.length > 0) continue;
     const key = keys[project.id] ?? idKey(project.id);
-    if (orgs.has(key)) continue;
-    orgs.set(key, { id: key, name: project.name, kind: 'project', smnsId: project.id, checkouts: [], registry: project });
+    if (!orgs.has(key)) orgs.set(key, { id: key, name: project.name, kind: 'project', smnsId: project.id, checkouts: [], registry: project });
+    else if ((projects.get(key) ?? []).some(isCheckout)) continue;
     listed.add(key);
   }
   return { orgs, projects, listed, keyOf, registry };
@@ -177,9 +188,11 @@ export function selectOrgIndex(state: ProjectsHolder, local: MachineRef): OrgInd
 
 // The set a session's tabs belong in, by its record's project, else its unstarted intent's (`intentProject`: the
 // project a New chat was made in, null for none, which keeps it in the no-project set); undefined for a session not
-// known now. What `connectShell` hands the layout as its `projectOf`.
+// known now. What `connectShell` hands the layout as its `projectOf`. The project registry (panel sweep#3): a New chat
+// with no project here opened in a registry project (its unstarted entry's `registry`) is in that project's row's set
+// while the project is a row.
 export function sessionSetKey(
-  state: ProjectsHolder & { records: ReadonlyMap<AppSessionId, SessionRecord>; listed?: ReadonlyMap<AppSessionId, ListedSession> },
+  state: ProjectsHolder & { records: ReadonlyMap<AppSessionId, SessionRecord>; listed?: ReadonlyMap<AppSessionId, ListedSession>; unstarted?: ReadonlyMap<AppSessionId, Pick<UnstartedSession, 'registry'>> },
   local: MachineRef,
   appSessionId: AppSessionId,
   intentProject: () => ProjectId | null | undefined,
@@ -195,9 +208,17 @@ export function sessionSetKey(
   // P5 O7 M2: a listed lane B session's tab goes where its row is from the click, before main has read its record
   if (listing?.lane === 'B') return setKeyOfListed(index, listing);
   const intent = intentProject();
-  if (intent === undefined || intent === null) return intent;
+  if (intent === null) return registryRowOf(index, state.unstarted?.get(appSessionId)?.registry);
+  if (intent === undefined) return intent;
   const project = state.projects.get(intent);
   return project === undefined ? intent : setKeyOfProject(index, project);
+}
+
+// The row of a registry project (its id), while it is listed; null for none.
+function registryRowOf(index: OrgIndex, id: string | undefined): RowKey | null {
+  if (id === undefined) return null;
+  for (const org of index.orgs.values()) if (org.smnsId === id && index.listed.has(org.id)) return org.id;
+  return null;
 }
 
 // The listed checkouts of a row on the machines that are up, the ones an action on the row reaches ("Remove from

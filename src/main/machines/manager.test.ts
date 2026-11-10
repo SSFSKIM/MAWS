@@ -105,7 +105,7 @@ function fakeRemote(initial: { ref: MachineRef; name: string }[] = []): FakeRemo
   };
 }
 
-function manager(configured: string[], known?: Parameters<typeof writeKnownMachines>[1], remote?: RemoteSource) {
+function manager(configured: string[], known?: Parameters<typeof writeKnownMachines>[1], remote?: RemoteSource, localCapabilities?: { read(): readonly string[] | null; onChange(listener: () => void): () => void }) {
   const dir = mkdtempSync(join(tmpdir(), 'maws-manager-'));
   dirs.push(dir);
   const knownMachinesFile = join(dir, KNOWN_MACHINES_FILE);
@@ -127,6 +127,7 @@ function manager(configured: string[], known?: Parameters<typeof writeKnownMachi
       return link;
     },
     remote,
+    ...(localCapabilities !== undefined && { localCapabilities }),
     log,
   });
   const changes: MachineState[][] = [];
@@ -144,6 +145,23 @@ describe('the connection manager', () => {
     expect(m.manager.list()[0]!.name).toBe('standin-a');
     await expect(m.manager.dispatch(LOCAL, 'session.list', {}, ctx)).resolves.toEqual({ ok: true, value: 'local' });
     expect(m.dispatchLocal).toHaveBeenCalledWith('session.list', {}, { client: ctx.client, target: LOCAL });
+  });
+
+  // panel scalpel-3#2: this Mac's own daemon may be of another build, so whether it serves the project acts is read as
+  // another machine's is, from the state's capabilities, which change when its daemon welcomes again
+  it('lists this machine’s capabilities as main reads them, unknown ones absent, and says when they change', () => {
+    let capabilities: readonly string[] | null = null;
+    const listeners = new Set<() => void>();
+    const m = manager([], undefined, undefined, { read: () => capabilities, onChange: (listener) => (listeners.add(listener), () => listeners.delete(listener)) });
+    expect(m.manager.list()[0]).not.toHaveProperty('capabilities');
+    capabilities = [];
+    for (const listener of listeners) listener();
+    expect(m.changes.at(-1)?.[0]).toMatchObject({ ref: LOCAL, local: true, capabilities: [] });
+    capabilities = ['rl2.project-acts'];
+    for (const listener of listeners) listener();
+    expect(m.manager.list()[0]).toMatchObject({ local: true, capabilities: ['rl2.project-acts'] });
+    m.manager.close();
+    expect(listeners.size, 'no longer listened to once closed').toBe(0);
   });
 
   it('dispatches by machine: an up machine through its link, an unknown or down one host_unavailable at once', async () => {

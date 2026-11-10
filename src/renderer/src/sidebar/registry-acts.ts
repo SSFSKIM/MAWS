@@ -27,11 +27,13 @@ export function actWords(error: Pick<IpcError, 'code' | 'message' | 'issues'>, m
 }
 
 /**
- * Whether the machine serves the project acts (§G, `rl2.project-acts` in its handshake): this Mac's own daemon does; another
- * machine does when its link listed the capability, and is not taken to while its link has listed none.
+ * Whether the machine serves the project acts (§G, `rl2.project-acts` in its handshake): another machine does when its
+ * link listed the capability, and is not taken to while its link has listed none. This Mac's own daemon, which may be of
+ * another build (panel scalpel-3#2), when main lists the capability for it from its welcome; while main has not read one
+ * yet it is offered, main refusing at the act what its daemon would not serve.
  */
 export const servesProjectActs = (machine: Pick<MachineState, 'local' | 'capabilities'> | undefined): boolean =>
-  machine?.local === true || (machine?.capabilities?.includes(PROJECT_ACTS_CAPABILITY) ?? false);
+  (machine?.local === true && machine.capabilities === undefined) || (machine?.capabilities?.includes(PROJECT_ACTS_CAPABILITY) ?? false);
 
 /** Design §8's rule for the folder there, changing nothing; null when the machine could not answer. */
 export async function resolveFolder(machine: MachineRef, directory: string, client: MawsBridge = ipc): Promise<Resolved | null> {

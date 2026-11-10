@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MachineState } from '@shared/ipc/schema/machines';
 import { addressOf } from '@shared/machine/address';
@@ -7,6 +7,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { resetRemoteSpawn, spawnTargetOf } from '../sessions/remote-spawn';
+import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import type { OrgProjectLocation, RegistryProject } from '../stores/registry';
 import { newChatElsewhere, registrySpawnTarget } from './registry-new-chat';
@@ -48,14 +49,19 @@ describe('a New chat in a project with no folder here', () => {
     const tab = addressOf(TEST_MACHINE, 'new-1' as AppSessionId);
     const asked: unknown[] = [];
     const off = registerSessionCreator(async (projectId) => (asked.push(projectId), tab));
+    // panel sweep#3: the tab opens already the registry project's, so the layout files it in that project's set
+    const opened: unknown[] = [];
+    const openTab = vi.spyOn(useLayout.getState(), 'openTab').mockImplementation(() => void opened.push(useSessions.getState().unstarted.get(tab)?.registry));
     try {
       const target = { machine: OTHER_MACHINE, name: 'studio', checkout: '/srv/p-studio', key: null, label: 'scrape', registry: 'project-1' };
       expect(await newChatElsewhere(target)).toBe(tab);
       expect(asked).toEqual([null]);
       expect(spawnTargetOf(tab, null)).toEqual(target);
       expect(useSessions.getState().unstarted.get(tab)).toMatchObject({ projectId: null, registry: 'project-1' }); // the tab's project, for its machine menu
+      expect(opened, 'the registry project is the tab’s when it opens').toEqual(['project-1']);
     } finally {
       off();
+      openTab.mockRestore();
     }
   });
 });

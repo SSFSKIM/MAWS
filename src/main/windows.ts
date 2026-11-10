@@ -8,11 +8,21 @@ import type { BrowserWindow } from 'electron';
 
 const open = new Set<BrowserWindow>();
 const ever = new WeakSet<BrowserWindow>(); // membership outlives `closed`, so a listener that runs after it still knows
+const closedListeners = new Set<() => void>();
 
 export function registerAppWindow(win: BrowserWindow): void {
   open.add(win);
   ever.add(win);
-  win.once('closed', () => open.delete(win));
+  win.once('closed', () => {
+    open.delete(win);
+    for (const listener of [...closedListeners]) listener();
+  });
+}
+
+// An app window closed (it has left `appWindows()` when the listener runs); the disposer stops listening.
+export function onAppWindowClosed(listener: () => void): () => void {
+  closedListeners.add(listener);
+  return () => void closedListeners.delete(listener);
 }
 
 // The app windows still open, in the order they were created.

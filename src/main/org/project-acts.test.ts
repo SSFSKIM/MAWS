@@ -111,7 +111,12 @@ describe('a request the app cannot show', () => {
     const contested = scene();
     await contested.ask({ verb: 'add', machine: 'vm-2', path: '/srv/new' });
     expect(contested.answers).toEqual([answered('pa-1', { ok: false, code: 'contested', text: 'contested: vm-2 is in dispute in this org (two claims to its name or its identity); an admin settles it' })]);
-    for (const s of [out, none, unknown, contested]) expect(s.emitted).toEqual([]);
+    // panel scalpel-1#3: a name is the directory's without regard to case (org-protocol's `machineNameKey`)
+    const casedContested = scene();
+    await casedContested.ask({ verb: 'add', machine: 'VM-2', path: '/srv/new' });
+    expect(casedContested.answers).toEqual([answered('pa-1', { ok: false, code: 'contested', text: 'contested: VM-2 is in dispute in this org (two claims to its name or its identity); an admin settles it' })]);
+    for (const s of [out, none, unknown, contested, casedContested]) expect(s.emitted).toEqual([]);
+
   });
 });
 
@@ -131,6 +136,15 @@ describe('a request shown in the page', () => {
     expect(s.sent).toEqual([['session.projects.addFolder', { directory: '/srv/new', into: SCRAPE }], ['session.projects.update', { id: `${MINI}/p-new`, patch: { name: 'New one' } }]]);
     expect(s.answers).toEqual([answered('pa-1', { ok: true, text: `added /srv/new as a location of scrape (${SCRAPE})\nsminos has not confirmed yet; a session started now may be filed under mini for a moment` })]);
     expect(s.emitted.at(-1)).toEqual({ asks: [] });
+  });
+
+  // panel scalpel-1#3
+  it('finds its machine by the directory’s name without regard to case', async () => {
+    openWindow();
+    const s = scene();
+    await s.ask({ verb: 'add', machine: 'MINI', path: '/srv/new' });
+    expect(s.answers).toEqual([]);
+    expect(s.emitted).toEqual([{ asks: [expect.objectContaining({ machine: MINI, machineName: 'mini' })] }]);
   });
 
   it('a new project there, and one the rule leaves under that machine, in its words', async () => {
@@ -167,12 +181,32 @@ describe('a request shown in the page', () => {
     await s.decide('pa-2', true);
     await s.ask({ verb: 'link', machine: 'mini', path: '/srv/elsewhere', into: SCRAPE }, 'pa-3');
     await s.decide('pa-3', true);
-    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape' }], ['session.projects.link', { id: 'p-scrape', into: null }]]);
+    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape', expect: { path: '/srv/scrape', project: SCRAPE } }], ['session.projects.link', { id: 'p-scrape', into: null }]]);
     expect(s.answers).toEqual([
       answered('pa-1', { ok: true, text: 'removed /srv/scrape' }),
       answered('pa-2', { ok: true, text: `unlinked /srv/scrape; its project is scrape (${SCRAPE})` }),
       answered('pa-3', { ok: false, code: 'not-declared', text: 'not-declared: /srv/elsewhere is not a project folder on mini' }),
     ]);
+  });
+
+  // panel scalpel-1#1: main's registry may still show the location at the confirmed path after the machine relocated its
+  // row; the removal carries that path and project as its precondition, so the machine refuses it there, nothing hidden
+  it('sends the confirmed path and project as the removal’s precondition, and answers the machine’s `changed`', async () => {
+    openWindow();
+    const s = scene();
+    const rows = new Map([['p-scrape', '/srv/scrape-moved']]); // the row was relocated on mini after main's view was read
+    const hidden: string[] = [];
+    s.replies.set('session.projects.remove', (input) => {
+      const { id, expect: wanted } = input as { id: string; expect?: { path: string; project: string | null } };
+      if (wanted !== undefined && rows.get(id) !== wanted.path) return { ok: false, error: { code: 'internal', message: `changed: the location is at ${rows.get(id)} now` } } as CommandResult<CommandName>;
+      hidden.push(id);
+      return { ok: true, value: undefined } as CommandResult<CommandName>;
+    });
+    await s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape' });
+    await s.decide('pa-1', true);
+    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape', expect: { path: '/srv/scrape', project: SCRAPE } }]]);
+    expect(hidden, 'nothing hidden at the new path').toEqual([]);
+    expect(s.answers).toEqual([answered('pa-1', { ok: false, code: 'changed', text: 'changed: the location is at /srv/scrape-moved now' })]);
   });
 
   // review 1's minor finding: a path spelled otherwise names the same location
@@ -184,7 +218,7 @@ describe('a request shown in the page', () => {
     await s.decide('pa-1', true);
     await s.ask({ verb: 'remove', machine: 'mini', path: '/srv//./scrape' }, 'pa-2');
     await s.decide('pa-2', true);
-    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape' }], ['session.projects.remove', { id: 'p-scrape' }]]);
+    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape', expect: { path: '/srv/scrape', project: SCRAPE } }], ['session.projects.remove', { id: 'p-scrape', expect: { path: '/srv/scrape', project: SCRAPE } }]]);
     expect(s.answers).toEqual([answered('pa-1', { ok: true, text: 'removed /srv/scrape' }), answered('pa-2', { ok: true, text: 'removed /srv/scrape' })]);
   });
 
@@ -234,7 +268,7 @@ describe('a request withdrawn', () => {
     const deciding = s.decide('pa-1', true);
     s.withdraw('pa-1');
     await deciding;
-    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape' }]]);
+    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape', expect: { path: '/srv/scrape', project: SCRAPE } }]]);
     expect(s.answers).toEqual([answered('pa-1', { ok: true, text: 'removed /srv/scrape' })]);
   });
 
@@ -254,6 +288,25 @@ describe('a request withdrawn', () => {
     await s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape' }, 'pa-3');
     await s.decide('pa-3', false);
     expect(s.watching.size, 'released once none is held').toBe(0);
+  });
+
+  // panel scalpel-4#1: main keeps running with no window, and no connection ends then, so the windows' closing refuses
+  // what no sheet can show any more, in the words a request with no window gets at once
+  it('every held one refused `no-window` when the last window closes; one window of two closing keeps them', async () => {
+    const first = openWindow();
+    const second = openWindow();
+    const s = scene();
+    await s.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
+    await s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape' }, 'pa-2');
+    first.close();
+    expect([s.answers, s.emitted.at(-1)?.asks]).toEqual([[], [expect.objectContaining({ id: 'pa-1' }), expect.objectContaining({ id: 'pa-2' })]]);
+    second.close();
+    const refused = { ok: false, code: 'no-window', text: 'MAWS has no window open to confirm this. Open MAWS and run the command again.' };
+    expect(s.answers).toEqual([answered('pa-1', refused), answered('pa-2', refused)]);
+    expect(s.emitted.at(-1)).toEqual({ asks: [] });
+    expect(s.watching.size, 'released once none is held').toBe(0);
+    await expect(s.decide('pa-1', true)).rejects.toMatchObject({ ipcError: { code: 'invalid_input' } });
+    expect(s.sent).toEqual([]);
   });
 
   // branch review 1, P1: its machine is read on demand, the certificates verified, so a request waits on that read

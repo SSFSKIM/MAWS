@@ -146,6 +146,45 @@ describe('the project registry: rows by project id', () => {
     expect(rowOfListed(index, listing)).toBe(`id:${OTHER_ID}`);
   });
 
+  // panel sweep#2: §I, a project the member sees only through a session of it is listed; §J.1, a row is listed when
+  // `OrgProjects.projects` holds it. A record of this Mac that is no checkout (discovered) already giving its key a row
+  // makes no difference; checkouts all hidden do, hiding being the owner's word on the project.
+  it('lists a project seen only through its sessions when a discovered record here already names its key, not when its checkouts here are hidden', () => {
+    const discovered = project(at('reports'), 0, { discovered: true, org: withId('remote:example.org/reports', OTHER_ID) });
+    const registry = registryOf([registered(OTHER_ID, 'Shared reports', [])], { [OTHER_ID]: 'remote:example.org/reports' });
+    const index = orgIndex([discovered], TEST_MACHINE, registry);
+    expect(index.orgs.get('remote:example.org/reports' as OrgKey)).toMatchObject({ name: 'Shared reports', smnsId: OTHER_ID, checkouts: [] });
+    expect(index.listed.has('remote:example.org/reports' as OrgKey)).toBe(true);
+    const listing = { ...remoteRow(OTHER_MACHINE, 's', { orgKey: 'remote:example.org/reports' as OrgKey, project: OTHER_ID }), appId: studio('s' as AppSessionId) };
+    expect(rowOfListed(index, listing)).toBe('remote:example.org/reports');
+    const hidden = project(at('reports'), 0, { hidden: true, org: withId('remote:example.org/reports', OTHER_ID) });
+    expect(orgIndex([hidden], TEST_MACHINE, registry).listed.has('remote:example.org/reports' as OrgKey)).toBe(false);
+  });
+
+  // panel sweep#3: a New chat opened in a project with no folder here (sidebar/registry-new-chat.ts) has no project here,
+  // so its intent's is null; its tab belongs in its registry project's set, not the no-project set
+  it('files an unstarted New chat of a registry project in that project’s set while the project is a row', () => {
+    const registry = registryOf([registered(ID, 'app', [location(OTHER_MACHINE, 'app')])], { [ID]: 'remote:example.org/app' });
+    const tab = at('new' as AppSessionId);
+    const s = { projects: registryRecords(registry, TEST_MACHINE), registry, records: new Map(), unstarted: new Map([[tab, { projectId: null, createdAt: 't', registry: ID }]]) };
+    expect(sessionSetKey(s, TEST_MACHINE, tab, () => null)).toBe('remote:example.org/app');
+    expect(sessionSetKey(s, TEST_MACHINE, tab, () => undefined), 'a session not known now').toBeUndefined();
+    const gone = { ...s, unstarted: new Map([[tab, { projectId: null, createdAt: 't', registry: OTHER_ID }]]) }; // no row of it now
+    expect(sessionSetKey(gone, TEST_MACHINE, tab, () => null)).toBeNull();
+  });
+
+  // panel scalpel-2#1: on a Mac signed in and not enrolled, a clone here carries no id; main computes it from the
+  // `remote:` label (`ownIds`), and the page groups the clone by it, one row with the project's location elsewhere
+  it('groups a clone here that carries no id by the id main computed for it', () => {
+    const clone = project(at('clone'), 0, { org: withId('remote:example.org/app', null) });
+    const registry = { ...registryOf([registered(ID, 'app', [location(OTHER_MACHINE, 'app')])], { [ID]: `id:${ID}` }), ownIds: { [clone.id]: ID } };
+    const index = orgIndex([clone, ...registryRecords(registry, TEST_MACHINE).values()], TEST_MACHINE, registry);
+    expect([...index.listed]).toEqual([`id:${ID}`]);
+    expect(index.projects.get(`id:${ID}` as OrgKey)?.map((p) => p.id)).toEqual([clone.id, studio('app')]);
+    expect(index.orgs.get(`id:${ID}` as OrgKey)).toMatchObject({ smnsId: ID, name: 'app' });
+    expect(registryOnly(index, `id:${ID}` as OrgKey), 'a clone here answers for it').toBe(false);
+  });
+
   it('makes no row of a machine’s own project: main leaves it out of the registry, so its location makes no record and its sessions sit under the machine’s row', () => {
     const registry = registryOf([registered(ID, 'app', [location(OTHER_MACHINE, 'app')])], { [ID]: 'remote:example.org/app' });
     const records = registryRecords(registry, TEST_MACHINE);

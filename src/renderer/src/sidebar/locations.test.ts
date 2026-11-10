@@ -105,6 +105,9 @@ describe('Add project’s readings of the folder’s rule', () => {
     expect(defaultLinkOf({ ...clone, project: ID }, registryOf(project))).toBeNull();
     expect(defaultLinkOf(clone, registryOf({ ...project, hub: false }))).toBeNull();
     expect(defaultLinkOf({ ...clone, label: label('folder:x') }, registryOf(project))).toBeNull();
+    // design §10: a replaced location (another folder at its path) is never the source of a remote-based link
+    const replaced = registered(ID, 'scrape', [location(OTHER_MACHINE, 'root', { path: '/srv/scrape', stated: 'minted', remote: 'example.org/scrape', state: 'replaced' })]);
+    expect(defaultLinkOf(clone, registryOf(replaced))).toBeNull();
   });
 
   it('offers the hub projects to add a folder to, by name', () => {

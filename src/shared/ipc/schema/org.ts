@@ -635,6 +635,10 @@ export const OrgProjectsSchema = z.strictObject({
   moved: z.record(z.string(), OrgKeySchema), // a key no project has any more → the key its tabs belong under now
   removals: z.array(HeldRemovalSchema), // the signed-in member's, waiting for their machine
   seen: z.record(z.string(), z.string()), // machine ref → when it was last seen (ISO), for "offline since"
+  // panel scalpel-2#1, additive: this Mac's row (its address) → the project id main computed for it where the row carries
+  // none (a `remote:` label on a Mac signed in and not enrolled, as `joinIds` did), which the page groups it by, having no
+  // uuid5 to compute it; absent when no row needs one
+  ownIds: z.record(z.string(), z.string()).optional(),
 });
 export type OrgProjects = z.infer<typeof OrgProjectsSchema>;
 

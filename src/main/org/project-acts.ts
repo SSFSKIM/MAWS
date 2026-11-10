@@ -7,13 +7,16 @@
 // or its refusal, is the terminal's answer (`projects.act.answer`), in the words `maws` prints on its own machine.
 //
 // A request the app cannot show is refused at once and never waits unseen: signed out (`signed-out`), or with no window
-// open (`no-window`); one the person dismisses is `declined`. A remove or a link names the row by the registry's location
-// at that path on that machine (its `pid`). A request whose terminal has gone is withdrawn by the daemon
+// open (`no-window`), as is every held one when the last window closes (panel scalpel-4#1); one the person dismisses is
+// `declined`. A remove or a link names the row by the registry's location at that path on that machine (its `pid`); a
+// remove carries that path and project as `expect`, so the machine refuses it `changed` when the row has moved since
+// (panel scalpel-1#1). A request whose terminal has gone is withdrawn by the daemon
 // (`projects.act.withdrawn`) and taken off the page unacted; one already confirmed goes on, since its act may be under
 // way. The daemon's connection ending drops every ask, which covers a daemon restart (Decision Log 22). The machine a
 // request names is read on demand (`registry.machines`, which verifies the certificates it reads; branch review 1, P1);
 // a request withdrawn or dropped while it is read is never shown. Idle, it holds its two event listeners and its two
-// handlers and nothing else: no timer, and the machine link is watched only while an ask is held or being read.
+// handlers and nothing else: no timer, the machine link watched only while an ask is held or being read and the
+// windows only while one is held.
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
@@ -23,8 +26,9 @@ import type { ProjectForwardResult } from '@shared/ipc/schema/projects';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import { actRefusal, addWords, canonicalPath, contestedMachine, hasParentSegment, linkWords, NO_WINDOW, notCanonical, NOT_CONFIRMED, notSignedIn, removeWords } from '@shared/machine/maws-words';
 import type { MachineRef } from '@shared/machine/ref';
+import { machineNameKey } from '../../../apps/org-protocol/src/index.ts';
 import type { MainHandler } from '../ipc/router';
-import { appWindows } from '../windows';
+import { appWindows, onAppWindowClosed } from '../windows';
 import type { ProjectRegistry } from './project-registry';
 
 type Request = EventPayload<'projects.act.request'>;
@@ -48,14 +52,20 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
   const nameOf = (id: string) => deps.registry.projects().projects.find((p) => p.id === id)?.name ?? null;
   const reading = new Set<string>(); // the requests whose machine is being read, not yet asked or refused
   let unwatch: (() => void) | null = null; // the machine link's state, watched while an ask is held or being read
+  let unwatchWindows: (() => void) | null = null; // the app's windows closing, watched while an ask is held
 
-  /** The link is watched while an ask is held or being read. */
+  /** The link is watched while an ask is held or being read, the windows while one is held. */
   function watch(): void {
     const held = asks.size > 0 || reading.size > 0;
     if (held && unwatch === null) unwatch = deps.hosts.onState('machine', (state) => state.state !== 'ready' && dropAll());
     if (!held && unwatch !== null) {
       unwatch();
       unwatch = null;
+    }
+    if (asks.size > 0 && unwatchWindows === null) unwatchWindows = onAppWindowClosed(() => appWindows().length === 0 && unshowable());
+    if (asks.size === 0 && unwatchWindows !== null) {
+      unwatchWindows();
+      unwatchWindows = null;
     }
   }
   /** The asks held now on the page. */
@@ -68,6 +78,16 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
     reading.clear();
     asks.clear();
     changed();
+  }
+  /**
+   * The last app window closed (panel scalpel-4#1): main runs on with no window and no connection ends, so every held ask
+   * is refused as one with no window is at once, never left waiting with no sheet. One being read meets `show`'s check.
+   */
+  function unshowable(): void {
+    const held = [...asks.keys()];
+    asks.clear();
+    changed();
+    for (const id of held) answer(id, { ok: false, code: 'no-window', text: NO_WINDOW });
   }
   /** Whether a request still waits once its machine is read: neither withdrawn nor dropped meanwhile. */
   function read(request: Request): boolean {
@@ -95,8 +115,9 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
     if (machines === null) return answer(request.id, { ok: false, code: 'signed-out', text: notSignedIn(request) });
     const windows = appWindows();
     if (windows.length === 0) return answer(request.id, { ok: false, code: 'no-window', text: NO_WINDOW });
-    if (machines.contested.includes(request.machine)) return answer(request.id, { ok: false, code: 'contested', text: contestedMachine(request.machine) }); // branch fix 2: not unknown
-    const machine = machines.machines.find((m) => m.name === request.machine);
+    const named = (name: string) => machineNameKey(name) === machineNameKey(request.machine); // panel scalpel-1#3: as org-protocol keys names
+    if (machines.contested.some(named)) return answer(request.id, { ok: false, code: 'contested', text: contestedMachine(request.machine) }); // branch fix 2: not unknown
+    const machine = machines.machines.find((m) => named(m.name));
     if (machine === undefined) return answer(request.id, { ok: false, code: 'unknown-machine', text: `unknown-machine: ${request.machine} is no machine of this org` });
     if (hasParentSegment(request.path)) return answer(request.id, { ok: false, code: 'not-canonical', text: notCanonical(request.path) }); // that machine's to resolve
     const intoName = typeof request.into === 'string' ? nameOf(request.into) : null;
@@ -134,10 +155,13 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
       }
       return { ok: true, text: addWords({ ...value, project }, { enrolled: true, nameOf, machine: machineName }) };
     }
-    const pid = deps.registry.projects().projects.flatMap((p) => p.locations).find((l) => l.machine === machine && l.path === path)?.pid;
-    if (pid === undefined) return { ok: false, code: 'not-declared', text: `not-declared: ${path} is not a project folder on ${machineName}` };
+    const at = deps.registry.projects().projects.flatMap((p) => p.locations.map((l) => ({ project: p.id, ...l }))).find((l) => l.machine === machine && l.path === path);
+    if (at === undefined) return { ok: false, code: 'not-declared', text: `not-declared: ${path} is not a project folder on ${machineName}` };
+    const { pid } = at;
     if (verb === 'remove') {
-      const removed = await deps.send(link, 'session.projects.remove', { id: pid });
+      // panel scalpel-1#1: the location as the person confirmed it, which the machine checks before it hides the row
+      // (§G's `expect`, as a held removal sends it): a row relocated since this Mac's view was read is refused `changed`
+      const removed = await deps.send(link, 'session.projects.remove', { id: pid, expect: { path, project: at.project } });
       return removed.ok ? { ok: true, text: removeWords(path) } : refused(removed)!;
     }
     const into = request.into ?? null;
@@ -172,6 +196,8 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
       offWithdrawn();
       unwatch?.();
       unwatch = null;
+      unwatchWindows?.();
+      unwatchWindows = null;
     },
   };
 }

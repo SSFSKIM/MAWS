@@ -7,8 +7,8 @@
 //   inside another project's folder is said to be added as a location of that project, with the choice to make it a
 //   separate project (`own`); a clone whose remote a minted registry project also holds offers that project as the default
 //   (design §2: Add project asks with the link as its default; nothing links unasked).
-// - A machine whose endpoint does not serve the project acts (§G, no `rl2.project-acts`) is offered today's plain add
-//   alone, and the sheet says why; a refusal is said in the registry's words (`actWords`), and leaves the sheet as it was.
+// - A machine whose endpoint does not serve the project acts (§G, no `rl2.project-acts`), this Mac's daemon of an older
+//   build included (panel scalpel-3#2), is offered today's plain add alone, and the sheet says why; a refusal is said in the registry's words (`actWords`), and leaves the sheet as it was.
 import { useEffect, useMemo, useState } from 'react';
 import type { MachineState } from '@shared/ipc/schema/machines';
 import type { MachineRef } from '@shared/machine/ref';
@@ -35,7 +35,7 @@ export interface MachineChoice {
 
 /** This Mac first, then every other machine reached over RL2 that is up, by name (design §6: one the person owns that is up). */
 export function machineChoices(machines: ReadonlyMap<MachineRef, MachineState>, local: MachineRef): MachineChoice[] {
-  const here: MachineChoice = { ref: local, name: REGISTRY.thisMac, local: true, serves: true, closed: null };
+  const here: MachineChoice = { ref: local, name: REGISTRY.thisMac, local: true, serves: servesProjectActs(machines.get(local) ?? { local: true }), closed: null }; // panel scalpel-3#2
   const others = [...machines.values()]
     .filter((m) => !m.local && m.ref !== local && m.state === 'up' && (m.carrier === 'direct' || m.carrier === 'relay'))
     .sort((a, b) => a.name.localeCompare(b.name) || (a.ref < b.ref ? -1 : 1))
