@@ -314,6 +314,30 @@ describe('after a lost channel', () => {
   });
 });
 
+// P5 O15 M2b §F, the sixth condition: what a new channel is written ahead of its `sub`s is counted, acts and queries alike
+describe('what a new channel is written first', () => {
+  const bytesOf = (messages: DeviceMessage[]) => messages.reduce((sum, m) => sum + Buffer.byteLength(JSON.stringify(m), 'utf8'), 0);
+
+  it('answers the count and the bytes of every act and query it wrote, and nothing for nothing to write', async () => {
+    const h = await harness();
+    h.drop();
+    expect(h.table.onCurrent()).toEqual({ messages: 0, bytes: 0 });
+    h.channel.current = true;
+    const fresh = h.table.act(SEND, null); // sent now
+    const older = h.table.act({ ...SEND, args: { appSessionId: 'app-1', content: 'older' } }, null);
+    h.answer({ t: 'ack', opId: older.opId, state: 'accepted' }); // acked: queried after a loss
+    h.drop();
+    vi.advanceTimersByTime(5_000);
+    h.channel.current = true;
+    const before = h.sent.length;
+    const wrote = h.table.onCurrent();
+    const written = h.sent.slice(before);
+    expect(written.map((m) => m.t).sort()).toEqual(['act', 'query']);
+    expect(wrote).toEqual({ messages: 2, bytes: bytesOf(written) });
+    void fresh;
+  });
+});
+
 describe('step-up', () => {
   it('signs a `required` act before its first send, and queries it after a drop: never resealed', async () => {
     const h = await harness();

@@ -12,6 +12,10 @@
 // or of another position, discards the assembly (the endpoint sends replace-whole state again on every resume). Each
 // delivered `ev` and `snap` costs its message's UTF-8 JSON length, as the endpoint charges it, and goes back as `credit`
 // in batches: the sink is in-process, so delivery is consumption.
+//
+// P5 O15 M2b §H: each `subbed` is a line with its mode, its position and the cursor the `sub` on this channel asked
+// from, and so is the first delivery after it (the first `ev` after a replay, the first whole snapshot after a snapshot
+// or a missing), once on a channel: the wake's bound is read off `subbed`, and when content resumed off the second.
 import { base64urlEncode, SUB_CREDIT_MAX, type Cursor, type DeviceMessage, type EndpointMessage, type SessionFeed, type SessionRef } from '../../../../apps/org-protocol/src/index.ts';
 import { MAX_SUBS, type RemoteTiming } from './timing';
 
@@ -91,6 +95,10 @@ type Entry = {
   creditTimer: ReturnType<typeof setTimeout> | null;
   pausedOffline: boolean;
   ended: boolean;
+  /** The cursor the `sub` on this channel carried (null for none), for its `subbed` line. */
+  asked: Cursor | null;
+  /** The first delivery the line after a `subbed` waits for on this channel, or null once written. */
+  firstOwed: 'event' | 'snapshot' | null;
 };
 
 const same = (a: Cursor, b: Cursor) => a.epoch === b.epoch && a.seq === b.seq && (a.idx ?? -1) === (b.idx ?? -1);
@@ -98,6 +106,14 @@ const same = (a: Cursor, b: Cursor) => a.epoch === b.epoch && a.seq === b.seq &&
 const atOrBefore = (at: Cursor, floor: Cursor | null) => floor !== null && at.epoch === floor.epoch && (at.seq < floor.seq || (at.seq === floor.seq && (at.idx ?? -1) <= (floor.idx ?? -1)));
 const cursorOf = (m: { epoch: string; seq: number; idx?: number }): Cursor => ({ epoch: m.epoch, seq: m.seq, ...(m.idx === undefined ? {} : { idx: m.idx }) });
 const costOf = (message: EndpointMessage) => Buffer.byteLength(JSON.stringify(message), 'utf8');
+/** A position as the lines write it: `<epoch>:<seq>:<idx or ->`. */
+const positionOf = (at: Cursor | null) => (at === null ? 'none' : `${at.epoch}:${at.seq}:${at.idx ?? '-'}`);
+/** What a subscription reads, as its lines name it: `session <lane>:<id>[ cards][ agent <id>]` or `feed <name>[ <whose>]`. */
+function whatOf(request: SubscribeRequest): string {
+  if (request.feed === undefined) return `session ${request.session.lane}:${request.session.id}${request.view === 'cards' ? ' cards' : ''}${request.agentId === undefined ? '' : ` agent ${request.agentId}`}`;
+  if (request.feed === 'channel') return `feed channel ${request.project.slice(0, 8)}`;
+  return request.session === undefined ? `feed ${request.feed}` : `feed ${request.feed} ${request.session.lane}:${request.session.id}`;
+}
 
 export class SubTable {
   readonly #entries = new Map<string, Entry>();
@@ -126,6 +142,8 @@ export class SubTable {
       creditTimer: null,
       pausedOffline: false,
       ended: false,
+      asked: null,
+      firstOwed: null,
     };
     const subscription: Subscription = {
       id,
@@ -188,6 +206,8 @@ export class SubTable {
           entry.pending = at;
           entry.floor = at;
         }
+        entry.firstOwed = message.mode === 'replay' ? 'event' : 'snapshot';
+        this.#deps.log(`subscription ${entry.id} ${whatOf(entry.request)}: subbed ${message.mode} at ${positionOf(at)}, asked from ${positionOf(entry.asked)}`);
         return entry.sink.subbed(message.mode, at);
       }
       case 'snap':
@@ -200,6 +220,7 @@ export class SubTable {
         entry.floor = at;
         entry.cursor = at;
         entry.pending = null;
+        if (entry.firstOwed === 'event') this.#first(entry, 'event', at);
         return entry.sink.event(at, message.body);
       }
       case 'paused':
@@ -215,6 +236,8 @@ export class SubTable {
   #sub(entry: Entry): void {
     const { request } = entry;
     const credit = this.#deps.timing.SUB_INITIAL_CREDIT;
+    entry.asked = request.feed === undefined ? entry.cursor : null;
+    entry.firstOwed = null;
     // What the peer could not read never goes: the subscription ends here, as the endpoint would end a name it does not offer.
     const peers = this.#deps.peerCapabilities();
     if (request.feed === undefined) {
@@ -256,7 +279,14 @@ export class SubTable {
       entry.cursor = entry.pending;
       entry.pending = null;
     }
+    if (entry.firstOwed === 'snapshot') this.#first(entry, 'snapshot', at);
     entry.sink.snapshot(at, value);
+  }
+
+  /** The first delivery after this channel's `subbed`: when the subscription's content resumed. */
+  #first(entry: Entry, what: 'event' | 'snapshot', at: Cursor): void {
+    entry.firstOwed = null;
+    this.#deps.log(`subscription ${entry.id} ${whatOf(entry.request)}: first ${what} after subbed, at ${positionOf(at)}`);
   }
 
   #owe(entry: Entry, bytes: number): void {

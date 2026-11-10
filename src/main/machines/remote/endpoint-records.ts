@@ -3,6 +3,7 @@
 // the newest `issued` kept. It is cached in memory and in `<userData>/endpoint-records.json` (0600, written through a
 // temporary file and a rename), so a hub outage, even across a relaunch, still dials direct (P5 §3). Every record is
 // verified again at each use, the file's included: the machine's key may have been retired since it was written.
+// P5 O15 M2b §F: inside the window the lanes read the held record alone (`cached`), the hub's read going on beside them.
 import { randomBytes } from 'node:crypto';
 import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { isEndpointRecord, isSigned, verifyEndpointRecord, type EndpointRecord, type Signed } from '../../../../apps/org-protocol/src/index.ts';
@@ -19,6 +20,8 @@ export interface EndpointRecords {
    * cached one only when its `issued` is later.
    */
   resolve(ref: MachineRef, signedIn: SignedIn): Promise<Signed<EndpointRecord> | null>;
+  /** P5 O15 M2b §F: the held record for `ref` if it verifies against `signedIn.view` now (memory, then the file); no fetch. */
+  cached(ref: MachineRef, signedIn: SignedIn): Promise<Signed<EndpointRecord> | null>;
 }
 
 type RecordsFile = { version: 1; records: Record<string, Signed<EndpointRecord>> };
@@ -100,6 +103,10 @@ export function createEndpointRecords(deps: { file: string; fetch?: typeof fetch
       if (heldOk) return held!;
       if (fresh !== null && !freshOk) deps.log(`the hub's endpoint record for ${ref} does not verify; ignored`);
       return null;
+    },
+    async cached(ref, signedIn) {
+      const held = load().get(ref);
+      return (await verified(ref, held, signedIn)) ? held! : null;
     },
   };
 }

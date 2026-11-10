@@ -86,26 +86,43 @@ class Carrier implements ByteDuplex {
 
 const bytesOf = (data: RawData): Uint8Array => new Uint8Array(Array.isArray(data) ? Buffer.concat(data) : data instanceof ArrayBuffer ? Buffer.from(data) : data);
 
-/** One `ws://` WebSocket, binary messages; rejects past `timeoutMs`. */
-export function dialDirect(url: string, timeoutMs: number): Promise<ByteDuplex> {
+/** What an aborted open rejects with: the signal's reason when it gave one. */
+const abortReason = (signal: AbortSignal): unknown => signal.reason ?? new Error('the open was aborted');
+
+/**
+ * One `ws://` WebSocket, binary messages; rejects past `timeoutMs`. P5 O15 M2b §F: `signal` aborted before the open
+ * terminates the socket and rejects; after it, the carrier is its holder's to close.
+ */
+export function dialDirect(url: string, timeoutMs: number, signal?: AbortSignal): Promise<ByteDuplex> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(abortReason(signal));
     const socket = new WebSocket(url, { handshakeTimeout: timeoutMs, maxPayload: 2 * 1024 * 1024 });
     const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
       socket.terminate();
       reject(new Error(`${url} did not open within ${timeoutMs} ms`));
     }, timeoutMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      socket.terminate();
+      reject(abortReason(signal!));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
     socket.once('unexpected-response', (_request, response) => {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
       socket.terminate();
       reject(new Error(`${url} answered ${response.statusCode}`));
     });
     socket.once('error', (error) => {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
       socket.terminate();
       reject(error);
     });
     socket.once('open', () => {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
       socket.removeAllListeners('error');
       const carrier = new Carrier({ send: (bytes) => socket.send(bytes, { binary: true }), close: () => socket.close(1000) });
       socket.on('message', (data: RawData, isBinary: boolean) => {
@@ -171,19 +188,32 @@ export class RelayUpgradeError extends Error {
 
 type RelayChannel = { carrier: Carrier; queue: Uint8Array[]; closing: boolean; id?: number };
 
-/** An app socket to the hub (`wss://`, or `ws://` for an `http://` hub); rejects on a failed upgrade, naming its status. */
-export function openRelaySocket(url: string, headers: Record<string, string>, timeoutMs = 10_000): Promise<RelaySocket> {
+/**
+ * An app socket to the hub (`wss://`, or `ws://` for an `http://` hub); rejects on a failed upgrade, naming its status.
+ * P5 O15 M2b §F: `signal` aborted before the open terminates the socket and rejects; after it, the socket is its
+ * holder's to close.
+ */
+export function openRelaySocket(url: string, headers: Record<string, string>, timeoutMs = 10_000, signal?: AbortSignal): Promise<RelaySocket> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(abortReason(signal));
     const socket = new WebSocket(url, { headers, handshakeTimeout: timeoutMs, maxPayload: 2 * 1024 * 1024 });
+    const onAbort = () => {
+      socket.terminate();
+      reject(abortReason(signal!));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
     socket.once('unexpected-response', (_request, response) => {
+      signal?.removeEventListener('abort', onAbort);
       socket.terminate();
       reject(new RelayUpgradeError(response.statusCode ?? 0));
     });
     socket.once('error', (error) => {
+      signal?.removeEventListener('abort', onAbort);
       socket.terminate();
       reject(error);
     });
     socket.once('open', () => {
+      signal?.removeEventListener('abort', onAbort);
       socket.removeAllListeners('error');
       socket.on('error', () => socket.terminate());
       resolve(relayOver(socket));

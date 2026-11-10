@@ -46,4 +46,26 @@ describe('the link’s timing', () => {
     expect([bucket.holds(), bucket.holds()]).toEqual([true, true]);
     expect([bucket.take(), bucket.holds(), bucket.take()]).toEqual([true, false, false]);
   });
+
+  // P5 O15 M2b §F: a lane dials only while the bucket would keep a token after it, the last one being today's attempt's
+  it('says whether two tokens are there, refilled, without taking them', () => {
+    let now = 0;
+    const bucket = new TokenBucket(REMOTE_TIMING.DIRECT_BUCKET, () => now);
+    expect(bucket.holds(2)).toBe(true);
+    bucket.take();
+    expect(bucket.holds(2)).toBe(true);
+    bucket.take();
+    expect([bucket.holds(2), bucket.holds()]).toEqual([false, true]);
+    now += 11_999;
+    expect(bucket.holds(2)).toBe(false);
+    now += 1;
+    expect(bucket.holds(2)).toBe(true);
+  });
+
+  it('gives a lane’s attempt the window’s deadlines, its backoff and its count (P5 O15 M2b §F)', () => {
+    expect(REMOTE_TIMING.WINDOW_OPEN_MS).toBe(2_000);
+    expect(REMOTE_TIMING.WINDOW_HANDSHAKE_MS).toBe(2_000);
+    expect(REMOTE_TIMING.LANE_BACKOFF_MS).toEqual([100, 250, 500, 1_000, 2_000]);
+    expect(REMOTE_TIMING.LANE_ATTEMPTS).toBe(6);
+  });
 });
