@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 type ConfigFile = (env: NodeJS.ProcessEnv, exists: (path: string) => boolean) => string;
 type Script = {
   configFilePath: ConfigFile;
-  endSession: (link: Link, app: string, start: Promise<unknown> | null, o: Record<string, number>) => Promise<{ ok: boolean; detail: string }>;
+  endSession: (link: Link, app: string, start: Promise<unknown> | null, o: Record<string, number | boolean>) => Promise<{ ok: boolean; why: string; detail: string }>;
 };
 // The script, a plain .mjs with no declarations, and the engine's own reader in MAWS's tree, each loaded by its path.
 const load = async () => (await import(join(import.meta.dirname, '../../deploy/vm/o15-tools.mjs'))) as Script;
@@ -15,27 +15,32 @@ const engine = async () => ((await import(join(import.meta.dirname, '../../../..
 type Link = { request(name: string, input: Record<string, unknown>, ms?: number): Promise<unknown> };
 const sleep = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
+/** The error the script's link throws for an answer the engine host refused: `unknownSession` for its `unknown session`. */
+const refused = (name: string, code: string, unknownSession = false) => Object.assign(new Error(`${name}: ${code}`), { code, unknownSession });
+
 /** mawsd, faked: a start answered after `startMs` whose launch lands `launchMs` later; a stop ends a live process and is
- * refused `not_found` when none runs; `dead` makes every request fail as a closed link does. */
-function machine(o: { startMs: number; launchMs: number; dead?: boolean }) {
+ * answered `unknown session` when none runs; `dead` makes every request fail as a closed link does, `down` as the
+ * daemon answers while the engine host is not running (`host_unavailable`). */
+function machine(o: { startMs: number; launchMs: number; dead?: boolean; down?: boolean }) {
   let process: 'ready' | 'exited' | null = null;
   const calls: string[] = [];
   const link: Link = {
     async request(name) {
       calls.push(`${name}${name === 'session.stop' ? ` (${process ?? 'none'})` : ''}`);
       if (o.dead) throw new Error('mawsd closed the connection');
+      if (o.down && name !== 'session.start') throw refused(name, 'host_unavailable');
       if (name === 'session.start') {
         await sleep(o.startMs);
         setTimeout(() => (process = 'ready'), o.launchMs);
         return { status: 'starting' };
       }
       if (name === 'session.stop') {
-        if (process !== 'ready') throw new Error('session.stop: not_found');
+        if (process !== 'ready') throw refused(name, 'internal', true);
         process = 'exited';
         return { exited: true, code: 0, signal: null };
       }
       if (name === 'session.status') {
-        if (process === null) throw new Error('session.status: not_found');
+        if (process === null) throw refused(name, 'internal', true);
         return { process };
       }
       throw new Error(`${name}: unknown_command`);
@@ -58,12 +63,32 @@ describe('the row 10 script’s end of its session', () => {
     expect(m.calls.filter((c) => c.startsWith('session.stop'))).toEqual(['session.stop (none)', 'session.stop (ready)']);
   });
 
+  it('leaves the end unconfirmed while the start is still pending when its wait expires', async () => {
+    const { endSession } = await load();
+    const m = machine({ startMs: 5000, launchMs: 0 });
+    const ended = await endSession(m.link, 'app-1', m.link.request('session.start', {}), { startMs: 50, settleMs: 100, everyMs: 20 });
+    expect(ended).toMatchObject({ ok: false, why: 'end unconfirmed: start still pending' });
+  });
+
+  it('leaves the end unconfirmed when the start answered starting and no launch was seen', async () => {
+    const { endSession } = await load();
+    const m = machine({ startMs: 0, launchMs: 5000 });
+    const ended = await endSession(m.link, 'app-1', m.link.request('session.start', {}), quick);
+    expect(ended).toMatchObject({ ok: false, why: 'end unconfirmed: the start answered starting and no launch was seen' });
+  });
+
+  it('never reads host_unavailable as ended', async () => {
+    const { endSession } = await load();
+    const m = machine({ startMs: 0, launchMs: 0, down: true });
+    expect(await endSession(m.link, 'app-1', null, quick)).toMatchObject({ ok: false, why: 'not shown ended', detail: expect.stringMatching(/stop: unread \(session\.stop: host_unavailable\).*last read unread$/) });
+  });
+
   it('ends a session that is running, and one that never launched', async () => {
     const { endSession } = await load();
     const running = machine({ startMs: 0, launchMs: 0 });
     await running.link.request('session.start', {});
     await sleep(10);
-    expect(await endSession(running.link, 'app-1', null, quick)).toMatchObject({ ok: true });
+    expect(await endSession(running.link, 'app-1', null, { ...quick, seenLive: true })).toMatchObject({ ok: true });
     expect(running.state()).toBe('exited');
     expect((await endSession(machine({ startMs: 0, launchMs: 0 }).link, 'app-2', null, quick)).ok).toBe(true);
   });
@@ -71,7 +96,7 @@ describe('the row 10 script’s end of its session', () => {
   it('does not call a session ended when the link failed', async () => {
     const { endSession } = await load();
     const m = machine({ startMs: 0, launchMs: 0, dead: true });
-    expect(await endSession(m.link, 'app-1', Promise.reject(new Error('mawsd closed the connection')), quick)).toMatchObject({ ok: false, detail: expect.stringMatching(/unanswered.*last read unread$/) });
+    expect(await endSession(m.link, 'app-1', Promise.reject(new Error('mawsd closed the connection')), quick)).toMatchObject({ ok: false, why: 'not shown ended', detail: expect.stringMatching(/stop: unread.*last read unread$/) });
   });
 });
 

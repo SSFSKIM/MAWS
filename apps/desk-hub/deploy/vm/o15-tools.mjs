@@ -108,8 +108,15 @@ async function reach(dir, { helloMs = 5000 } = {}) {
         waiting.set(id, { resolve: (m) => (clearTimeout(timer), waiting.delete(id), done(m)), reject: (e) => (clearTimeout(timer), waiting.delete(id), reject(e)) });
         socket.write(`${JSON.stringify({ t: 'req', id, name, input })}\n`);
       });
-      // the error's code alone: its message can quote what the request carried
-      if (answer.ok !== true) throw new Error(`${name}: ${answer.error?.code ?? 'error'}`);
+      // the error's code alone: its message can quote what the request carried. The engine host's word for a session it
+      // holds no row of (src/engine-host/ipc.ts `unknownSession`) is kept as `unknownSession`, the one error that says
+      // no process runs.
+      if (answer.ok !== true) {
+        const error = new Error(`${name}: ${answer.error?.code ?? 'error'}`);
+        error.code = answer.error?.code ?? null;
+        error.unknownSession = answer.error?.code === 'internal' && typeof input?.appSessionId === 'string' && answer.error?.message === `unknown session ${input.appSessionId}`;
+        throw error;
+      }
       return answer.value;
     },
     close: () => socket.destroy(),
@@ -206,37 +213,44 @@ const capabilityLine = (caps) =>
 
 // --- the run -------------------------------------------------------------------------------------------------------
 
-// A request the link itself failed (no answer, the socket gone), as against an error mawsd answered.
-const linkFailed = (error) => /did not answer|closed the connection|ECONN|EPIPE|no answer to the hello/.test(error instanceof Error ? error.message : String(error));
-
 /**
  * Ends session `app` however the run ends (its end, a signal, a start that failed or never answered), bounded, and says
- * whether it is ended. `start` is the `session.start` request's promise (null when none was sent): a pending one is
+ * whether its end is shown. `start` is the `session.start` request's promise (null when none was sent): a pending one is
  * awaited first, at most `startMs`. Then `session.stop`, and the session is watched for `settleMs` and stopped again
  * whenever it shows a live process, since the daemon's setup runs past start's answer (src/services/sessions/service.ts)
- * and may launch after a first stop. An error mawsd answers to a stop or a status read (an unknown session, nothing
- * running) counts as not running; a request the link failed counts as unread, and the session as not shown ended.
+ * and may launch after a first stop. Ended is only what says so: a stop answered `exited`, a status of an exited
+ * process, or the engine host's `unknown session` (no row, so no process). Any other error (host_unavailable, a
+ * timeout, a failed link) leaves the end unread. And the end is unconfirmed while setup may still launch: the start
+ * still pending when its wait expired, or answered `starting` with no live process ever seen (`seenLive`, the run's own
+ * sight of it ready, or the watch's).
  */
-export async function endSession(link, app, start, { startMs = 30_000, settleMs = 30_000, everyMs = 2000, stopMs = 60_000 } = {}) {
-  if (start !== null) await Promise.race([Promise.resolve(start).catch(() => {}), sleep(startMs)]);
+export async function endSession(link, app, start, { startMs = 30_000, settleMs = 30_000, everyMs = 2000, stopMs = 60_000, seenLive = false } = {}) {
+  const PENDING = Symbol('pending');
+  const answered = start === null ? null : await Promise.race([Promise.resolve(start).then((v) => ({ v }), () => ({ failed: true })), sleep(startMs).then(() => PENDING)]);
   const said = [];
   let unread = false;
+  let live = seenLive;
+  const errorOf = (error) => (error instanceof Error ? error.message : String(error));
   const stop = async () => {
     try {
       const r = await link.request('session.stop', { appSessionId: app, reason: 'stop' }, stopMs);
       said.push(`stop: exited ${String(r?.exited)}`);
     } catch (error) {
-      if (linkFailed(error)) unread = true;
-      said.push(`stop: ${linkFailed(error) ? 'unanswered' : 'not running'} (${error instanceof Error ? error.message : String(error)})`);
+      if (error?.unknownSession !== true) unread = true;
+      said.push(`stop: ${error?.unknownSession === true ? 'unknown session' : `unread (${errorOf(error)})`}`);
     }
   };
-  /** `live`, `ended`, or `unread` (the link failed). */
+  /** `live`, `ended`, or `unread`. */
   const state = async () => {
     try {
       const s = await link.request('session.status', { appSessionId: app }, 10_000);
-      return s?.process === undefined || s.process === 'exited' ? 'ended' : 'live';
+      if (s?.process === 'exited') return 'ended';
+      live = true;
+      return 'live';
     } catch (error) {
-      return linkFailed(error) ? 'unread' : 'ended';
+      if (error?.unknownSession === true) return 'ended';
+      said.push(`status: unread (${errorOf(error)})`);
+      return 'unread';
     }
   };
   await stop();
@@ -251,8 +265,11 @@ export async function endSession(link, app, start, { startMs = 30_000, settleMs 
     await stop();
     last = await state();
   }
-  const ok = !unread && last === 'ended';
-  return { ok, detail: `${said.join('; ')}; last read ${last}` };
+  const detail = `${said.join('; ')}; last read ${last}`;
+  if (unread || last !== 'ended') return { ok: false, why: 'not shown ended', detail };
+  if (answered === PENDING) return { ok: false, why: 'end unconfirmed: start still pending', detail };
+  if (answered?.v?.status === 'starting' && !live) return { ok: false, why: 'end unconfirmed: the start answered starting and no launch was seen', detail };
+  return { ok: true, why: 'ended', detail };
 }
 
 async function run(link, profile, directory, title, verdicts, onSession) {
@@ -265,9 +282,9 @@ async function run(link, profile, directory, title, verdicts, onSession) {
   let launched = false;
   let ending = null;
   const stop = () =>
-    (ending ??= endSession(link, app, starting, { settleMs: launched ? 4000 : 30_000 }).then(({ ok, detail }) => {
+    (ending ??= endSession(link, app, starting, { settleMs: launched ? 4000 : 30_000, seenLive: launched }).then(({ ok, why, detail }) => {
       say(`${now()} session ${app} end: ${detail}`);
-      verdicts.push([ok, ok ? `the session ${app} ended` : `the session ${app} is not shown ended (${detail}): stop it by hand`]);
+      verdicts.push([ok, ok ? `the session ${app} ended` : `${why}, stop it by hand ${app} (${detail})`]);
     }));
   onSession(stop);
   try {
