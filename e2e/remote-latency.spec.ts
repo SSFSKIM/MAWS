@@ -30,7 +30,11 @@
 // s A's way back is restored, on the relay's launch with the direct pipe answering TCP and hanging above it. Main's own
 // log (`<profile>/logs/main.log`), B's `mawsd.log` and `host.log` and the pipes' records say what came back and when;
 // test-results/remote-wake.json holds it, one line per carrier is printed, and the measured group holds every
-// subscription to 1 s from the restore and the feed to 2 s from the hub's (test/support/remote-wake.ts).
+// subscription to 1 s from the restore and the feed to 2 s from the hub's (test/support/remote-wake.ts). Per carrier
+// the quiet admission (e2e/support/quiet.ts) settles the machine once B's writes are done, the pipes still stalled, and
+// the 1-minute load read at the instants that bracket the timed windows voids the run at 5 or more; Rule B is the first
+// test's rule and, for this case, context only (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, Decision
+// Log 33).
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -42,8 +46,9 @@ import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 import { LATENCY_STUB, markerOf, writeLatencyEngine } from '../test/support/latency-engine';
 import { parseLogText, positionOf, readLogLines } from '../test/support/main-log';
 import { boundsOf, budgetMisses, CARRIERS, invalidReasons, loadVerdict, remoteLine, rttStats, type Bounds, type Carrier, type Exchange, type RemoteMeasures } from '../test/support/remote-latency';
-import { linkPending, ruleBContext, RESUME_PAGE_EVENTS, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, WAKE_CASE, wakeMisses, wakeSummary, type WakeRecord } from '../test/support/remote-wake';
+import { lastPageIn, linkPending, ruleBContext, RESUME_PAGE_EVENTS, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, VOID_LOAD, WAKE_CASE, wakeSummary, wakeVerdict, type LoadInstant, type LoadRead, type WakeRecord } from '../test/support/remote-wake';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { quietWait, type QuietAdmission } from './support/quiet';
 import { cleanupAll, lastTurn, linkOf, localCase, main, measureTurns, now, openToFirstRow, pings, probe, prompt, raw, roundTrips, statsOf, trust, TURN_MS, writtenOf, type CaseResult } from './support/remote-latency-page';
 import { startRemoteScene, type RemoteScene } from './support/remote-scene';
 import { mainTabById } from './support/shell';
@@ -427,6 +432,8 @@ async function within<T>(read: (leftMs: number) => T | Promise<T>, done: (value:
 const READ_WITHIN_MS = 30_000; // each wait for what the logs and the panes should show after the restore
 
 test('a wake after a silent cut: every subscription answered within 1 s of the restore, one upgrade, nothing lost or repeated, per carrier', async () => {
+  test.setTimeout(26 * 60_000); // the group's 20 minutes, and two admissions of at most three minutes each
+  // Rule B's samples every 30 s from the start, printed as context: this case voids on its window reads alone
   const loads = [loadavg()[0]];
   const sampler = setInterval(() => loads.push(loadavg()[0]), 30_000);
   let terminalLoad: number | undefined;
@@ -439,8 +446,11 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
   const bBin = writeSessionLatencyEngine(join(root, 'b-engine'), samplesDir);
   let scene: RemoteScene | null = null;
   let a: MawsLaunch | null = null;
-  type CarrierRecord = WakeRecord & { linkBeforeWake: string; turns: { app: string; lastSeen: number; lastWritten: number }[] };
+  type CarrierRecord = WakeRecord & { linkBeforeWake: string; settle: QuietAdmission; settleMs: number; loads: LoadRead[]; turns: { app: string; lastSeen: number; lastWritten: number }[] };
   const records: Partial<Record<Carrier, CarrierRecord>> = {};
+  // each carrier's 1-minute load at the instants that bracket its timed windows (Decision Log 33 (c)), kept for a launch
+  // whose evidence was unavailable too
+  const windowLoads: Partial<Record<Carrier, LoadRead[]>> = {};
   const unavailable: Partial<Record<Carrier, string>> = {}; // a launch whose every final read of its evidence failed, and why
   const failures: string[] = [];
   try {
@@ -499,7 +509,6 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
       scene.aHub.stall();
       direct.stall();
       await Promise.all(sessions.map((s) => writeTurns(b, s, WAKE_CASE.turns)));
-      const before = await linkOf(page, b.ref);
       // each resume page's rows on B, read now: B is idle, and its journal lines fall before the restore, apart from the
       // resume's own (readWake reads those from the restore on)
       const pageRows: Record<string, number> = {};
@@ -508,8 +517,17 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
         const rows = at === null ? null : await bPageRows(b, s, at.seq - 1);
         if (rows !== null) pageRows[s.app] = rows;
       }
+      // B's writes done, the pipes still stalled: the machine settled once (Decision Log 33 (b)), so the timed windows
+      // start at a settled load whatever the scene's own setup cost; the link is down by now whatever the wait
+      const settle = await quietWait();
+      console.log(`[remote-wake] ${carrier}: the settle before the inject: ${settle.summary}`);
+      const before = await linkOf(page, b.ref); // the link as the wake finds it
+      const reads: LoadRead[] = [];
+      windowLoads[carrier] = reads;
+      const readLoad = (at: LoadInstant) => void reads.push({ at, load: +loadavg()[0]!.toFixed(2) });
 
       // 3. The hour asleep, through main's seam
+      readLoad('inject');
       const injectedAt = Date.now();
       await a.app.evaluate((_electron, sleptMs) => {
         const seam = (globalThis as { __maws_wake?: { inject(ms: number): void } }).__maws_wake;
@@ -530,11 +548,15 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
       // 5. and 6. What main's log, B's logs, the pipes and the panes show; the hub restored, on the direct launch, once
       //    the link's lines are in, still inside the window
       await within(() => linkPending(mainLog(), b.ref, carrier, ids, restoredAt), (pending) => pending.length === 0, READ_WITHIN_MS);
+      readLoad('last subbed');
       let hubRestoredAt = restoredAt;
       if (carrier === 'direct') {
+        readLoad("hub's restore");
         hubRestoredAt = Date.now();
         scene.aHub.restore();
       }
+      await within(() => lastPageIn(mainLog(), hubRestoredAt), (inside) => inside, READ_WITHIN_MS);
+      readLoad('last page');
       const panes: string[] = [];
       for (const [i, s] of sessions.entries()) {
         const turn = lastTurn(writtenOf(s.samples));
@@ -558,7 +580,7 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
         continue;
       }
       const { record, failures: read } = final.last;
-      records[carrier] = { ...record, linkBeforeWake: before === undefined ? 'gone' : `${before.state}/${before.carrier ?? 'none'}`, turns: sessions.map((s, i) => ({ app: s.app, lastSeen: seen[i]!, lastWritten: lastTurn(writtenOf(s.samples)) })) };
+      records[carrier] = { ...record, linkBeforeWake: before === undefined ? 'gone' : `${before.state}/${before.carrier ?? 'none'}`, settle, settleMs: settle.waitedMs, loads: reads, turns: sessions.map((s, i) => ({ app: s.app, lastSeen: seen[i]!, lastWritten: lastTurn(writtenOf(s.samples)) })) };
       failures.push(...read, ...panes);
       await a.cleanup();
       a = null;
@@ -569,24 +591,30 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
     await cleanupAll([() => a?.cleanup(), () => scene?.stop(), () => rmSync(aUserData, { recursive: true, force: true }), () => rmSync(root, { recursive: true, force: true })]);
   }
 
-  const voids = ruleBContext(loads, terminalLoad ?? null);
-  const misses = CARRIERS.flatMap((c) => (records[c] === undefined ? [] : wakeMisses(records[c]!)));
-  // the machine's 1-minute load at the case's start and end (the measured group voids a run on either), then a line for
-  // each carrier whose launch reached its reads: its summary, or that its evidence was unavailable
+  // The void rule as built (Decision Log 33 (c)): each carrier's 1-minute load read at the inject, after the last subbed,
+  // at the hub's restore where it comes later (the direct launch) and after the feed's last page is in, so no timed
+  // window lies outside a pair of reads; a read of 5 or more voids the run, as the artifacts case voids a window. The
+  // load at the case's start and end and Rule B's 30 s samples are printed as context and void nothing here.
+  const verdict = wakeVerdict(CARRIERS.flatMap((c) => (records[c] === undefined ? [] : [records[c]!])), windowLoads, failures);
+  const ruleB = ruleBContext(loads, terminalLoad ?? null);
   const startLoad = loads[0]!;
   const endLoad = terminalLoad ?? null;
   const loadText = (value: number | null) => (value === null ? 'not read' : value.toFixed(2));
+  const readsText = (reads: readonly LoadRead[] | undefined) => (reads === undefined || reads.length === 0 ? 'none read' : reads.map((r) => `${r.load.toFixed(2)} (${r.at})`).join(', '));
   const lines = [
-    `[remote-wake] the machine's 1-minute load: ${loadText(startLoad)} at the case's start, ${loadText(endLoad)} at its end`,
+    `[remote-wake] the machine's 1-minute load (context): ${loadText(startLoad)} at the case's start, ${loadText(endLoad)} at its end; Rule B ${ruleB.length === 0 ? 'met' : `not met: ${ruleB.join('; ')}`}`,
+    ...CARRIERS.flatMap((c) => (windowLoads[c] === undefined ? [] : [`[remote-wake] ${c}: the 1-minute load at its windows ${readsText(windowLoads[c])}${records[c] === undefined ? '' : `; settled in ${records[c]!.settleMs} ms, stalled ${records[c]!.stallMs} ms`}`])),
     ...CARRIERS.flatMap((c) => (records[c] !== undefined ? [wakeSummary(records[c]!)] : unavailable[c] !== undefined ? [unavailableSummary(c, unavailable[c]!)] : [])),
+    `[remote-wake] void: ${verdict.void}, outside: ${verdict.outside}, pass: ${verdict.pass}`,
   ];
   const load = loadVerdict(loads, terminalLoad ?? null);
   const info = test.info();
   mkdirSync(info.project.outputDir, { recursive: true });
   writeFileSync(join(info.project.outputDir, 'remote-wake.json'), `${JSON.stringify({
-    lines, mode: CHECK ? 'check' : 'perf', valid: voids.length === 0, sha: process.env.GITHUB_SHA ?? null, runId: process.env.GITHUB_RUN_ID ?? null,
-    bounds: { linkWithinMs: WAKE_CASE.linkWithinMs, feedWithinMs: WAKE_CASE.feedWithinMs }, invalidReasons: voids, failures, boundMisses: misses,
-    load: { start: startLoad, end: endLoad, samples: loads, peak: load.peak, pair: load.pair },
+    lines, mode: CHECK ? 'check' : 'perf', void: verdict.void, outside: verdict.outside, pass: verdict.pass, sha: process.env.GITHUB_SHA ?? null, runId: process.env.GITHUB_RUN_ID ?? null,
+    bounds: { linkWithinMs: WAKE_CASE.linkWithinMs, feedWithinMs: WAKE_CASE.feedWithinMs, voidLoad: VOID_LOAD },
+    voidReasons: verdict.voidReasons, failures, boundMisses: verdict.boundMisses, outsideMisses: verdict.outsideMisses, outsideConditions: verdict.outsideConditions,
+    load: { start: startLoad, end: endLoad, samples: loads, peak: load.peak, pair: load.pair, ruleB },
     direct: records.direct ?? null, relay: records.relay ?? null, unavailable,
   }, null, 2)}\n`);
   for (const line of lines) {
@@ -596,10 +624,11 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
   if (CHECK) {
     // the functional check: every line and count there; the times recorded, never held
     expect(failures, 'every line and count the wake case reads, per carrier').toEqual([]);
-    for (const line of [...voids, ...misses]) console.log(`[remote-wake] (check, not held) ${line}`);
+    for (const line of [...verdict.voidReasons, ...verdict.boundMisses, ...verdict.outsideMisses]) console.log(`[remote-wake] (check, not held) ${line}`);
     return;
   }
-  expect(voids, 'the run is valid').toEqual([]);
+  expect(verdict.void, `the wake case is void by load, not a bound miss: ${verdict.voidReasons.join('; ')}; rerun the group in a quiet window (no verdict)`).toBe(false);
   expect(failures, 'every line and count the wake case reads, per carrier').toEqual([]);
-  expect(misses, 'every subscription within 1 s of the restore and the feed within 2 s of the hub’s, per carrier').toEqual([]);
+  expect(verdict.boundMisses, 'every subscription within 1 s of the restore and the feed within 2 s of the hub’s, per carrier').toEqual([]);
+  expect(verdict.outsideMisses, `outside §F's conditions, neither a breach nor a pass of the bounds: a carrier whose wake met one of the conditions missed a bound (${verdict.outsideConditions.join('; ')}); no verdict`).toEqual([]);
 });
