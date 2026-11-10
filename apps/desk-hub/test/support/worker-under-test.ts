@@ -31,7 +31,11 @@
 //     machine's credential and asking for its revocation would be;
 //   - a `Registry` whose unfinished offline revocations wait less than a minute before they are tried again;
 //   - a `Registry` that runs a method for a member record the suite gives, as one the Worker resolved before a state
-//     changed it, and one that lacks a method, as a Registry on older code;
+//     changed it, and one that lacks a method, as a Registry on older code; armed `projects`, it lacks the three a
+//     Relay calls of a Registry that keeps projects records, as the build before them (the project registry, §C);
+//   - a `Machine` (a ref's) that lacks `relayProjects`, as a ref object of the build before projects records, and
+//     counts the calls of it it took; whose first retry of a failed snapshot read waits another time than the deployed
+//     second; and a `Registry` armed to throw from its next reads of a projects page, counting the reads;
 //   - a `Registry` that answers its projection of the org state, moves a pending
 //     device's expiry back, and calls a method no `Project` has, saying whether it takes the refusal for older code;
 //   - a `Project` armed to throw from its next state announcements, as a reset object's call fails or as a project on
@@ -102,6 +106,9 @@ import {
   UPGRADE_HELD_PATH,
   UPGRADE_RELEASE_PATH,
   RELAY_FAULT_PATH,
+  RELAY_PROJECTS_PATH,
+  PROJECT_PAGE_FAULT_PATH,
+  RELAY_SNAPSHOT_PATH,
   CLAIM_PATH,
   WRAPPED_KEY_SEED_PATH,
   PROJECT_RPCS_PATH,
@@ -122,6 +129,7 @@ const REGISTRY_RPCS = ['storeListing', 'storeEndpoint', 'notify', 'ownersOf', 'p
 /** The org's registry, which can also take a member (the hub has no endpoint for that before the org phase). */
 export class Registry extends DeployedRegistry {
   private leaveRelease: (() => void) | undefined;
+  private pageRelease: (() => void) | undefined;
 
   /** Armed, the org-state head a `Project` reads to check a v2 event fails, as an unreachable Registry's would. */
   head(): ReturnType<DeployedRegistry['head']> {
@@ -182,6 +190,29 @@ export class Registry extends DeployedRegistry {
   policies(request: Parameters<DeployedRegistry['policies']>[0]): ReturnType<DeployedRegistry['policies']> {
     if (this.ctx.storage.kv.get<string>('lacks') === 'policies') throw new TypeError('The RPC receiver does not implement the method "policies".');
     return super.policies(request);
+  }
+
+  /** Armed `projects`, refused as a Registry on the code before projects records would refuse it. */
+  keepsProjects(): ReturnType<DeployedRegistry['keepsProjects']> {
+    if (this.ctx.storage.kv.get<string>('lacks') === 'projects') throw new TypeError('The RPC receiver does not implement the method "keepsProjects".');
+    return super.keepsProjects();
+  }
+
+  /** Armed, a read throws while the fault has throws left; every read is counted. */
+  async projectPage(after: string | null): ReturnType<DeployedRegistry['projectPage']> {
+    if (this.ctx.storage.kv.get<string>('lacks') === 'projects') throw new TypeError('The RPC receiver does not implement the method "projectPage".');
+    const fault = this.ctx.storage.kv.get<Fault & { hold?: boolean }>('project-page-fault') ?? { remaining: 0, calls: 0 };
+    this.ctx.storage.kv.put('project-page-fault', { ...fault, remaining: Math.max(0, fault.remaining - 1), calls: fault.calls + 1 });
+    if (fault.remaining > 0) {
+      if (fault.hold) await new Promise<void>((resolve) => (this.pageRelease = resolve));
+      throw new Error('a failure the suite injected into a projects page read');
+    }
+    return super.projectPage(after);
+  }
+
+  storeProjects(record: unknown): ReturnType<DeployedRegistry['storeProjects']> {
+    if (this.ctx.storage.kv.get<string>('lacks') === 'projects') throw new TypeError('The RPC receiver does not implement the method "storeProjects".');
+    return super.storeProjects(record);
   }
 
   /** Armed, refused as a Registry on the code before the relay's binding check would refuse it. */
@@ -306,6 +337,18 @@ export class Registry extends DeployedRegistry {
       const results = await Promise.all(calls.map(async ({ method, args }) => ((await (this[method] as (...a: unknown[]) => unknown).apply(this, args)) ?? null)));
       return Response.json('concurrent' in body ? results : results[0]);
     }
+    if (url.pathname === PROJECT_PAGE_FAULT_PATH) {
+      const { times, hold, release } = (await request.json()) as { times?: number; hold?: boolean; release?: boolean };
+      if (release) {
+        const released = this.pageRelease;
+        this.pageRelease = undefined;
+        released?.();
+      }
+      const kept = this.ctx.storage.kv.get<Fault & { hold?: boolean }>('project-page-fault') ?? { remaining: 0, calls: 0 };
+      const fault = times === undefined ? kept : { remaining: times, calls: 0, ...(hold ? { hold } : {}) };
+      this.ctx.storage.kv.put('project-page-fault', fault);
+      return Response.json({ remaining: fault.remaining, calls: fault.calls, held: this.pageRelease !== undefined });
+    }
     if (url.pathname === LACKS_PATH) {
       const { method } = (await request.json()) as { method: string | null };
       if (method === null) this.ctx.storage.kv.delete('lacks');
@@ -411,6 +454,22 @@ export class Machine extends DeployedMachine {
       this.ctx.storage.kv.put(`relay-fault:${method}`, times);
       return new Response('armed');
     }
+    if (url.pathname === RETRY_BASE_PATH) {
+      this.ctx.storage.kv.put('retry-base-ms', ((await request.json()) as { ms: number }).ms);
+      return new Response('set');
+    }
+    if (url.pathname === RELAY_SNAPSHOT_PATH) {
+      type Held = { snapshot?: { conn: number; records: unknown[]; timer?: unknown } };
+      const snapshot = (this as unknown as { relayInstance?: Held }).relayInstance?.snapshot;
+      return Response.json(snapshot ? { conn: snapshot.conn, held: snapshot.records.length, waiting: snapshot.timer !== undefined } : null);
+    }
+    if (url.pathname === RELAY_PROJECTS_PATH) {
+      if (request.method === 'GET') return Response.json({ calls: this.ctx.storage.kv.get<number>('relay-projects-calls') ?? 0 });
+      const { method } = (await request.json()) as { method: string | null };
+      if (method === null) this.ctx.storage.kv.delete('lacks');
+      else this.ctx.storage.kv.put('lacks', method);
+      return new Response('armed');
+    }
     if (url.pathname === SEND_HOLD_PATH) {
       this.ctx.storage.kv.put('send-hold', url.searchParams.get('kind') ?? '');
       return new Response('armed');
@@ -437,6 +496,11 @@ export class Machine extends DeployedMachine {
     }
     if (url.pathname === MACHINE_ABORT_PATH) this.ctx.abort(ABORT_REASON);
     return super.fetch(request);
+  }
+
+  /** A suite's wait before a failed snapshot read is asked again, over the deployed second. */
+  protected retryBaseMs(): number {
+    return this.ctx.storage.kv.get<number>('retry-base-ms') ?? super.retryBaseMs();
   }
 
   /** A suite's timing over the deployed one; a shortened heartbeat shortens the grace with it unless one is given. */
@@ -487,6 +551,14 @@ export class Machine extends DeployedMachine {
   relayState(...args: Parameters<DeployedMachine['relayState']>): ReturnType<DeployedMachine['relayState']> {
     this.relayFault('relayState');
     return super.relayState(...args);
+  }
+
+  /** Counted; armed `projects`, refused as a ref object of the build before projects records refuses it. */
+  relayProjects(...args: Parameters<DeployedMachine['relayProjects']>): ReturnType<DeployedMachine['relayProjects']> {
+    this.ctx.storage.kv.put('relay-projects-calls', (this.ctx.storage.kv.get<number>('relay-projects-calls') ?? 0) + 1);
+    if (this.ctx.storage.kv.get<string>('lacks') === 'projects') throw new TypeError('The RPC receiver does not implement the method "relayProjects".');
+    this.relayFault('relayProjects');
+    return super.relayProjects(...args);
   }
 
   async send(frame: DownFrame, generation?: number): ReturnType<DeployedMachine['send']> {

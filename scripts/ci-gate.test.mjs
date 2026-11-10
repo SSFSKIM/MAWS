@@ -31,10 +31,39 @@ case "$*" in
 esac
 `;
 
+// The fake gh's interrupt: SIGTERM to ci-gate.sh itself, the last of the unbroken line of its shells above gh (a read in
+// a command substitution runs in a forked copy of it, under the same arguments).
+const killGate = `p=$PPID; while q=$(ps -o ppid= -p "$p" | tr -d ' ') && ps -o args= -p "$q" | grep -q 'scripts/ci-gate\\.sh'; do p=$q; done; kill -TERM "$p"`;
+
+// played: a run of the push, 123, read as ci-gate.sh reads it: its status by a conditional GET, answered in turn by `polls` (the
+// last repeated), each an answer below; then, once completed, the attempt and its jobs, all `conclusion`. The budget,
+// while a poll is refused for it, is spent until a minute from now and then refilled, read by read.
+const pollAnswers = {
+  limited: `echo 'gh: API rate limit exceeded for user ID 1234567. If you reach out to GitHub Support for help, please include the request ID 0000:1111:2222. (HTTP 403)' >&2; exit 1`,
+  running: String.raw`printf 'HTTP/2.0 200 OK\r\nEtag: W/"running"\r\n\r\nin_progress\n'`,
+  unchanged: String.raw`printf 'HTTP/2.0 304 Not Modified\r\nEtag: "running"\r\n\r\n'; echo 'gh: HTTP 304' >&2; exit 1`,
+  completed: String.raw`printf 'HTTP/2.0 200 OK\r\nEtag: W/"completed"\r\n\r\ncompleted\n'`,
+  broken: `echo 'gh: HTTP 502: Server Error (https://api.github.com/repos/SSFSKIM/MAWS/actions/runs/123)' >&2; exit 1`,
+  interrupt: `${killGate}; printf 'HTTP/2.0 200 OK\\r\\nEtag: W/"running"\\r\\n\\r\\nin_progress\\n'`,
+};
+const runCases = ({ polls, conclusion = 'success', list = 'echo 123', budget }) => String.raw`
+  *" run list "*) ${list} ;;
+  'api -i '*'repos/SSFSKIM/MAWS/actions/runs/123 --jq .status')
+    case $(grep -c '^api -i ' "$(dirname "$0")/gh-calls") in
+${polls.map((answer, i) => `      ${i + 1}) ${pollAnswers[answer]} ;;`).join('\n')}
+      *) ${pollAnswers[polls.at(-1)]} ;;
+    esac ;;
+  'api rate_limit '*) ${budget ?? `if [ $(( $(grep -c '^api rate_limit ' "$(dirname "$0")/gh-calls") % 2 )) = 1 ]; then echo "0 $(( $(date +%s) + 60 ))"; else echo "4999 $(( $(date +%s) + 3600 ))"; fi`} ;;
+  'api repos/SSFSKIM/MAWS/actions/runs/123 --jq '*) printf '1\tcompleted\t${conclusion}\n' ;;
+  'api --paginate repos/SSFSKIM/MAWS/actions/runs/123/attempts/1/jobs?per_page=100 --jq '*) printf '1\t${conclusion}\t\tstatic\n' ;;
+  *" run download 123 "*) exit 1 ;;
+  *" run view 123 --log-failed") ;;
+  *" run cancel 123") ;;`;
+
 // ci-gate.sh on a one-commit tree with `args` after the tree. Returns its status and output, the gh calls, the refs the
 // origin holds and the pushed commit's message (empty when nothing was pushed). With `change`, the origin's master holds
 // a first commit of `base` (path → content) and the tested commit is `change(tree, git)` on top of it.
-function gate(args, { alerts = false, base = {}, change, backlog, originUrl, hostedCap = '', hostedRepos = '', macEc2 = '', miniOverflow = '', interrupt = false, runAfter = 0 } = {}) {
+function gate(args, { alerts = false, base = {}, change, backlog, originUrl, hostedCap = '', hostedRepos = '', macEc2 = '', miniOverflow = '', interrupt = false, runAfter = 0, played, keep = true } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ci-gate-'));
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, XDG_CACHE_HOME: join(dir, 'cache'), MAWS_GATE_RUNNER: '', MAWS_GATE_IGNORE_ALERTS: alerts ? '' : '1' };
   for (const role of ['AUTHOR', 'COMMITTER']) Object.assign(env, { [`GIT_${role}_NAME`]: 'ci-gate test', [`GIT_${role}_EMAIL`]: 'ci-gate@test.invalid' });
@@ -77,23 +106,24 @@ function gate(args, { alerts = false, base = {}, change, backlog, originUrl, hos
     }
     if (interrupt) gh = gh.replace('*" run list "*) ;;', `
   *" run list "*) echo 123 ;;
-  *" run watch "*) kill -TERM "$PPID" ;;
+  'api -i '*) ${killGate} ;;
   *" run cancel "*) ;;`);
     // GitHub creating the run late: the run list answers only after `runAfter` empty polls.
     if (runAfter) gh = gh.replace('*" run list "*) ;;', `
   *" run list "*) if [ "$(grep -c ' run list ' "$(dirname "$0")/gh-calls")" -gt ${runAfter} ]; then echo 123; fi ;;
-  *" run watch "*) kill -TERM "$PPID" ;;
+  'api -i '*) ${killGate} ;;
   *" run cancel "*) ;;`);
+    if (played) gh = gh.replace('*" run list "*) ;;', runCases(played));
     writeFileSync(join(dir, 'gh'), gh);
     writeFileSync(join(dir, 'node'), `#!/usr/bin/env bash
 printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "$(basename "$1")" "$REPO" "$HOSTED_MAC_REPOS" "$HOSTED_MAC_CAP" "$MAC_EC2" "$MAC_MINI_OVERFLOW" >> '${join(dir, 'node-calls')}'
 exec '${process.execPath}' "$@"
 `);
     chmodSync(join(dir, 'node'), 0o755);
-    writeFileSync(join(dir, 'sleep'), '#!/bin/sh\n'); // the polls for the run, at once
+    writeFileSync(join(dir, 'sleep'), `#!/bin/sh\necho "$1" >> '${join(dir, 'sleeps')}'\n`); // the polls for the run, at once
     chmodSync(join(dir, 'gh'), 0o755);
     chmodSync(join(dir, 'sleep'), 0o755);
-    const run = spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), tree, ...args, '--keep'], { encoding: 'utf8', env, maxBuffer: 8 << 20 });
+    const run = spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), tree, ...args, ...(keep ? ['--keep'] : [])], { encoding: 'utf8', env, maxBuffer: 8 << 20 });
     transcript = /^ci-gate: transcript in (.+)$/m.exec(run.stdout)?.[1] ?? '';
     const refs = git('--git-dir', origin, 'for-each-ref', '--format=%(refname)').split('\n').filter((ref) => ref && ref !== 'refs/heads/master');
     const calls = join(dir, 'gh-calls');
@@ -104,6 +134,7 @@ exec '${process.execPath}' "$@"
       calls: existsSync(calls) ? readFileSync(calls, 'utf8').trimEnd().split('\n') : [],
       nodeCalls: existsSync(join(dir, 'node-calls')) ? readFileSync(join(dir, 'node-calls'), 'utf8').trimEnd().split('\n').map((line) => line.split('\t')) : [],
       refs,
+      sleeps: existsSync(join(dir, 'sleeps')) ? readFileSync(join(dir, 'sleeps'), 'utf8').trimEnd().split('\n').map(Number) : [],
       message: refs.length > 0 ? git('--git-dir', origin, 'log', '-1', '--format=%B', refs[0]) : '',
     };
   } finally {
@@ -472,4 +503,77 @@ test('malformed quota configuration refuses the launcher before a push', () => {
   assert.deepEqual(result.refs, []);
   assert.match(result.stderr, /^ci-gate: HOSTED_MAC_REPOS must list owner\/repository names$/m);
   assert.ok(!result.calls.some((call) => call.includes('actions/runners') || call.includes(' run list ')));
+});
+
+const waitLine = /^ci-gate: the GitHub API rate limit is reached \(remaining 0, resets \S+\); waiting until \S+$/gm;
+const keptLine = /^ci-gate: kept (ci\/\S+), as this call ends without the run's verdict; delete it with: git -C \S+ push origin --delete refs\/heads\/\1$/m;
+const polls = (result) => result.calls.filter((call) => call.startsWith('api -i '));
+
+test('a run polled while the budget is spent waits the limit out, reaches its verdict, and the verdict removes the ref', () => {
+  const result = gate(['--gates', 'static', '--peer', 'none', '--label', 'limited'], { keep: false, played: { polls: ['limited', 'limited', 'running', 'unchanged', 'completed'] } });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(result.stdout.match(waitLine)?.length, 2, result.stdout);
+  assert.doesNotMatch(result.stdout, /cannot be read/);
+  assert.match(result.stdout, /^ci-gate: run 123 attempt 1\nci-gate: run 123 success\nci-gate: removed ci\/limited-[0-9a-f]{8}$/m);
+  assert.deepEqual(result.refs, []);
+  // Each wait sleeps to a minute past the reset, a minute from now; each budget read is the free GET /rate_limit.
+  assert.equal(result.calls.filter((call) => call.startsWith('api rate_limit ')).length, 4);
+  assert.equal(result.sleeps.length, 4, result.sleeps.join(' '));
+  for (const s of result.sleeps.slice(0, 2)) assert.ok(s >= 60 && s <= 66, `waited ${s}`);
+});
+
+test('the run is polled by its status alone, conditionally on the last ETag, every minute for five minutes, then every two', () => {
+  const result = gate(['--gates', 'static', '--peer', 'none'], { played: { polls: ['running', ...Array(7).fill('unchanged'), 'completed'] } });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.ok(!result.calls.some((call) => / run (watch|view) /.test(call)), result.calls.join('\n'));
+  assert.deepEqual(polls(result), [
+    'api -i repos/SSFSKIM/MAWS/actions/runs/123 --jq .status',
+    ...Array(8).fill('api -i -H If-None-Match: W/"running" repos/SSFSKIM/MAWS/actions/runs/123 --jq .status'),
+  ]);
+  assert.deepEqual(result.sleeps, [60, 60, 60, 60, 60, 120, 120, 120]);
+});
+
+test('a red run removes its ref as a green one does', () => {
+  const result = gate(['--gates', 'static', '--peer', 'none', '--label', 'red'], { keep: false, played: { polls: ['completed'], conclusion: 'failure' } });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /^ci-gate: run 123 failure\nci-gate: removed ci\/red-[0-9a-f]{8}$/m);
+  assert.deepEqual(result.refs, []);
+});
+
+test('a run that cannot be read ends without a verdict, keeping its ref and naming how to delete it', () => {
+  const result = gate(['--gates', 'static', '--peer', 'none', '--label', 'unread'], { keep: false, played: { polls: ['broken'] } });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /^ci-gate: run 123 cannot be read \(the last gh error follows\)\ngh: HTTP 502: Server Error/m);
+  assert.equal(polls(result).length, 20);
+  assert.deepEqual(result.sleeps, Array(19).fill(15));
+  assert.equal(keptLine.exec(result.stdout)?.[1], result.refs[0]?.replace(/^refs\/heads\//, ''), result.stdout);
+  assert.equal(result.refs.length, 1);
+});
+
+test('an interrupt while the run exists cancels it and keeps its ref', () => {
+  const result = gate(['--gates', 'static', '--peer', 'none', '--label', 'stopped'], { keep: false, played: { polls: ['interrupt'] } });
+  assert.equal(result.status, 130, result.stdout + result.stderr);
+  assert.ok(result.calls.includes('-R SSFSKIM/MAWS run cancel 123'), result.calls.join('\n'));
+  assert.match(result.stdout, keptLine);
+  assert.equal(result.refs.length, 1);
+});
+
+test('a push no run comes of still removes its ref', () => {
+  const result = gate(['--gates', 'static', '--peer', 'none', '--label', 'norun'], { keep: false });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /^ci-gate: removed ci\/norun-[0-9a-f]{8}$/m);
+  assert.deepEqual(result.refs, []);
+});
+
+test('a budget spent past the bound while looking for the run keeps the ref, since the run likely exists', () => {
+  const result = gate(['--gates', 'static', '--peer', 'none', '--label', 'hidden'], {
+    keep: false,
+    played: { polls: ['running'], list: pollAnswers.limited, budget: 'echo "0 $(( $(date +%s) + 7200 ))"' },
+  });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /^ci-gate: the GitHub API rate limit would outlast 90 min of waiting /m);
+  assert.match(result.stdout, /^ci-gate: no run of [0-9a-f]{40} on \S+ could be read through the exhausted API rate limit/m);
+  assert.equal(result.calls.filter((call) => call.startsWith('api rate_limit ')).length, 1);
+  assert.match(result.stdout, keptLine);
+  assert.equal(result.refs.length, 1);
 });
