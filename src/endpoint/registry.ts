@@ -169,9 +169,13 @@ export class Registry implements RegistrySeam, RegistryRead {
     return { hub: this.projects().flatMap((p) => (p.hub ? [{ id: p.id, name: p.name }] : [])), complete: this.held.complete(), locations: this.own.locations() };
   }
 
-  /** The endpoint started, or the machine's enrollment or standing moved: the statements' answer told where it changed. */
+  /**
+   * The endpoint started, or the machine's enrollment or standing moved: the statements' answer told where it changed,
+   * the enrollment's org and machine name with it, which every row's derivation reads (the index's `enrollmentMoved`), so
+   * a replaced enrollment under which statements stay possible is told too (panel 1, scalpel-5#3).
+   */
   statementsMoved(): void {
-    const now = JSON.stringify(this.statements());
+    const now = JSON.stringify([this.statements(), this.#ctx.enrollment()]);
     if (now === this.#told) return;
     const first = this.#told === null;
     this.#told = now;

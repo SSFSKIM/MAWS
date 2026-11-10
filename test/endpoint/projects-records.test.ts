@@ -704,4 +704,36 @@ describe('panel 1', () => {
     expect(h.records()).toEqual([]);
     expect(w.held[w.other]).toBeUndefined();
   });
+
+  it('scalpel-5#3: a replaced enrollment (another org or machine name) is told to the statements’ listeners though statements stay possible', async () => {
+    const w = await world();
+    let enrollment = { org: ORG, name: 'mini' };
+    const r = new Registry({
+      ref: () => w.ref,
+      enrollment: () => enrollment,
+      key: w.ctx.key,
+      head: w.ctx.head,
+      now: Date.now,
+      hub: { send: () => true, capabilities: () => ['projects'] },
+      sminos: () => ({ capabilities: ['locations'], restating: false, sessionProjects: () => [], logProjects: () => [] }),
+      source: w.source,
+      state: () => ({ projects: w.kept, projectsHeld: w.held, setProjects: (file: ProjectsKeptFile) => void (w.kept = file), setProjectsHeld: () => {} }) as never,
+      restate: () => {},
+      locationsKept: async () => false,
+      log: () => {},
+    });
+    let told = 0;
+    r.onStatements(() => told++);
+    r.statementsMoved(); // the start, statements possible
+    expect(told).toBe(1);
+    r.statementsMoved(); // nothing moved
+    expect(told).toBe(1);
+    enrollment = { org: 'org-next', name: 'mini' };
+    r.statementsMoved();
+    expect(r.statements()).toEqual({ possible: true });
+    expect(told).toBe(2);
+    enrollment = { org: 'org-next', name: 'mini-renamed' };
+    r.statementsMoved();
+    expect(told).toBe(3);
+  });
 });
