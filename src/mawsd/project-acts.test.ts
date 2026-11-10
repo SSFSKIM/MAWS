@@ -39,6 +39,7 @@ function connection() {
       return answered()!;
     },
     requests: () => posted.filter((m) => m.t === 'evt' && m.name === 'projects.act.request').map((m) => m.payload as Record<string, unknown>),
+    withdrawals: () => posted.filter((m) => m.t === 'evt' && m.name === 'projects.act.withdrawn').map((m) => m.payload as Record<string, unknown>),
   };
 }
 
@@ -131,5 +132,31 @@ describe("maws's commands on machine.sock", () => {
     terminal.close();
     terminal.runtime.detach();
     expect(await app.request('projects.act.answer', { id, result: { ok: true, text: 'x' } }), 'nobody waits for it').toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+  });
+
+  // Decision Log 22: a request whose terminal has gone is taken off the app's page
+  it('withdraws the request from the app when its terminal leaves, and no other', async () => {
+    const { client } = front();
+    const app = client(APP_PID, PEER_CAPABILITIES.app);
+    const leaving = client(9);
+    const staying = client(10);
+    leaving.ask('projects.forward', FORWARD);
+    staying.ask('projects.forward', { ...FORWARD, path: '/srv/other' });
+    await vi.waitFor(() => expect(app.requests()).toHaveLength(2));
+    const [first] = app.requests();
+    expect(app.withdrawals()).toEqual([]);
+    leaving.close();
+    leaving.runtime.detach();
+    expect(app.withdrawals()).toEqual([{ id: first!.id }]);
+  });
+
+  it('withdraws every waiting request when the daemon stops, before its connections close', async () => {
+    const { client, served } = front();
+    const app = client(APP_PID, PEER_CAPABILITIES.app);
+    client(9).ask('projects.forward', FORWARD);
+    await vi.waitFor(() => expect(app.requests()).toHaveLength(1));
+    const [request] = app.requests();
+    served.close();
+    expect(app.withdrawals()).toEqual([{ id: request!.id }]);
   });
 });

@@ -4,8 +4,10 @@
 // `machine.project-acts` (`app()`, routed as the client port routes a request with no asking client), and the app's
 // `projects.act.answer` with that id is the terminal's answer. Nothing waits on an app that cannot answer: with none the
 // answer is `no-app` at once, and the app's connection ending settles what it was asked `no-app`. The wait has no
-// deadline of its own, since a person confirms it; it lasts while both connections live, and a terminal that leaves
-// drops its request, whose later answer is then refused as not asked. A pending request holds nothing but its entry.
+// deadline of its own, since a person confirms it; it lasts while both connections live. A terminal that leaves drops
+// its request, which is withdrawn from the app (`projects.act.withdrawn`, Decision Log 22), and its later answer is
+// refused as not asked; the daemon's stop withdraws every waiting request the same way before answering its terminal.
+// A pending request holds nothing but its entry.
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { ProjectForward, ProjectForwardResult } from '@shared/ipc/schema/projects';
@@ -13,7 +15,7 @@ import { notRunningHere } from '@shared/machine/maws-words';
 
 /** A connection the broker can post the request to: false when it could not be posted (the connection is gone). */
 export interface ActApp {
-  send(name: 'projects.act.request', payload: unknown): boolean;
+  send(name: 'projects.act.request' | 'projects.act.withdrawn', payload: unknown): boolean;
 }
 
 export interface FrontProjectActs {
@@ -21,8 +23,9 @@ export interface FrontProjectActs {
   forward(asker: object, input: ProjectForward): Promise<ProjectForwardResult>;
   /** The app's `projects.act.answer`, from `from`: refused for an id it was not asked, or one no terminal waits for. */
   answer(from: object, input: { id: string; result: ProjectForwardResult }): void;
-  /** A connection ended: the requests asked of it are refused `no-app`, those it asked are dropped. */
+  /** A connection ended: the requests asked of it are refused `no-app`, those it asked are dropped and withdrawn. */
   gone(connection: object): void;
+  /** The daemon stops: every waiting request withdrawn from its app, its terminal answered `no-app`. */
   close(): void;
 }
 
@@ -58,11 +61,17 @@ export function createProjectActs(options: { app(): ActApp | null }): FrontProje
     gone(connection) {
       for (const [id, entry] of [...pending]) {
         if (entry.app === connection) entry.settle(noApp(entry.input));
-        else if (entry.asker === connection) pending.delete(id); // its answer goes nowhere: refused as not asked
+        else if (entry.asker === connection) {
+          pending.delete(id); // its answer goes nowhere: refused as not asked
+          entry.app.send('projects.act.withdrawn', { id });
+        }
       }
     },
     close() {
-      for (const entry of [...pending.values()]) entry.settle(noApp(entry.input));
+      for (const [id, entry] of [...pending]) {
+        entry.app.send('projects.act.withdrawn', { id });
+        entry.settle(noApp(entry.input));
+      }
     },
   };
 }

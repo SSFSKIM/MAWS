@@ -34,8 +34,9 @@ afterEach(() => {
 });
 
 function scene(options: { signedIn?: boolean; links?: MachineRef[] } = {}) {
-  let request: (payload: EventPayload<'projects.act.request'>) => void = () => {};
+  const heard = new Map<string, (payload: unknown) => void>();
   const subscribed: string[] = [];
+  const watching = new Set<(state: { state: string }) => void>(); // main's machine link, watched while an ask is held
   const answers: unknown[] = [];
   const handlers = new Map<string, (input: unknown) => unknown>();
   const emitted: ProjectActAsks[] = [];
@@ -44,7 +45,12 @@ function scene(options: { signedIn?: boolean; links?: MachineRef[] } = {}) {
   const links = options.links ?? [MINI];
   const stop = startProjectActs({
     hosts: {
-      onEvent: ((name: string, listener: (payload: EventPayload<'projects.act.request'>) => void) => (subscribed.push(name), (request = listener), () => {})) as never,
+      onEvent: ((name: string, listener: (payload: unknown) => void) => (subscribed.push(name), heard.set(name, listener), () => {})) as never,
+      onState: ((owner: string, listener: (state: { state: string }) => void) => {
+        expect(owner).toBe('machine');
+        watching.add(listener);
+        return () => watching.delete(listener);
+      }) as never,
       dispatch: (async (_owner: string, name: string, input: unknown) => (answers.push([name, input]), { ok: true, value: undefined })) as never,
     },
     registry: { projects: () => PROJECTS, machines: () => (options.signedIn === false ? null : [{ ref: BOOK, name: 'macbook' }, { ref: MINI, name: 'mini' }]) },
@@ -55,10 +61,12 @@ function scene(options: { signedIn?: boolean; links?: MachineRef[] } = {}) {
     emit: (value) => void emitted.push(value),
     log: () => {},
   });
-  const ask = (payload: Omit<EventPayload<'projects.act.request'>, 'id'>, id = 'pa-1') => request({ id, ...payload } as EventPayload<'projects.act.request'>);
+  const ask = (payload: Omit<EventPayload<'projects.act.request'>, 'id'>, id = 'pa-1') => heard.get('projects.act.request')!({ id, ...payload });
+  const withdraw = (id: string) => heard.get('projects.act.withdrawn')!({ id });
+  const linkState = (state: string) => [...watching].forEach((listener) => listener({ state }));
   const decide = (id: string, confirm: boolean) => handlers.get('org.projectActs.decide')!({ id, confirm }) as Promise<void>;
   const reply = (name: string, value: unknown) => replies.set(name, () => ({ ok: true, value }) as CommandResult<CommandName>);
-  return { stop, subscribed, answers, handlers, emitted, sent, replies, ask, decide, reply };
+  return { stop, subscribed, watching, answers, handlers, emitted, sent, replies, ask, withdraw, linkState, decide, reply };
 }
 
 const answered = (id: string, result: unknown) => ['projects.act.answer', { id, result }];
@@ -67,7 +75,8 @@ describe('the act request, idle', () => {
   it('holds only its listener and its two handlers: no timer, no emission, nothing sent', () => {
     vi.useFakeTimers();
     const s = scene();
-    expect(s.subscribed).toEqual(['projects.act.request']);
+    expect(s.subscribed).toEqual(['projects.act.request', 'projects.act.withdrawn']);
+    expect(s.watching.size, 'the machine link is watched only while an ask is held').toBe(0);
     expect([...s.handlers.keys()].sort()).toEqual(['org.projectActs', 'org.projectActs.decide']);
     expect(vi.getTimerCount()).toBe(0);
     expect([s.emitted, s.answers, s.sent]).toEqual([[], [], []]);
@@ -164,5 +173,51 @@ describe('a request shown in the page', () => {
     await r.decide('pa-1', true);
     expect(s.answers).toEqual([answered('pa-1', { ok: false, code: 'host_unavailable', text: 'host_unavailable: mini is not reachable from this Mac now' })]);
     expect(r.answers).toEqual([answered('pa-1', { ok: false, code: 'unknown-project', text: 'unknown-project: abc is in no verified projects record' })]);
+  });
+});
+
+// Decision Log 22: a request whose terminal has gone, or whose daemon's connection ended, is taken off the page unacted
+describe('a request withdrawn', () => {
+  it('when its terminal leaves: off the page, and a later Confirm sends nothing', async () => {
+    openWindow();
+    const s = scene();
+    s.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
+    s.ask({ verb: 'add', machine: 'mini', path: '/srv/other' }, 'pa-2');
+    s.withdraw('pa-1');
+    expect(s.emitted.at(-1)).toEqual({ asks: [expect.objectContaining({ id: 'pa-2' })] });
+    await expect(s.decide('pa-1', true)).rejects.toMatchObject({ ipcError: { code: 'invalid_input' } });
+    expect([s.sent, s.answers]).toEqual([[], []]);
+    s.withdraw('pa-unknown'); // nothing held under it: nothing changes
+    expect(s.emitted).toHaveLength(3);
+  });
+
+  it('goes on once confirmed: its act may be under way', async () => {
+    openWindow();
+    const s = scene();
+    s.reply('session.projects.remove', undefined);
+    s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape' });
+    const deciding = s.decide('pa-1', true);
+    s.withdraw('pa-1');
+    await deciding;
+    expect(s.sent).toEqual([['session.projects.remove', { id: 'p-scrape' }]]);
+    expect(s.answers).toEqual([answered('pa-1', { ok: true, text: 'removed /srv/scrape' })]);
+  });
+
+  it('all of them when the daemon’s connection ends, and the link is watched only while one is held', async () => {
+    openWindow();
+    const s = scene();
+    s.ask({ verb: 'add', machine: 'mini', path: '/srv/new' });
+    s.ask({ verb: 'add', machine: 'mini', path: '/srv/other' }, 'pa-2');
+    expect(s.watching.size).toBe(1);
+    s.linkState('ready');
+    expect(s.emitted.at(-1)?.asks).toHaveLength(2);
+    s.linkState('restarting');
+    expect(s.emitted.at(-1)).toEqual({ asks: [] });
+    expect(s.watching.size).toBe(0);
+    await expect(s.decide('pa-2', true)).rejects.toMatchObject({ ipcError: { code: 'invalid_input' } });
+    expect([s.sent, s.answers]).toEqual([[], []]);
+    s.ask({ verb: 'remove', machine: 'mini', path: '/srv/scrape' }, 'pa-3');
+    await s.decide('pa-3', false);
+    expect(s.watching.size, 'released once none is held').toBe(0);
   });
 });

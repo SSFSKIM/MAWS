@@ -8,8 +8,11 @@
 //
 // A request the app cannot show is refused at once and never waits unseen: signed out (`signed-out`), or with no window
 // open (`no-window`); one the person dismisses is `declined`. A remove or a link names the row by the registry's location
-// at that path on that machine (its `pid`). Idle, it holds its event listener and its two handlers and nothing else: no
-// timer and no other subscription until a request arrives.
+// at that path on that machine (its `pid`). A request whose terminal has gone is withdrawn by the daemon
+// (`projects.act.withdrawn`) and taken off the page unacted; one already confirmed goes on, since its act may be under
+// way. The daemon's connection ending drops every ask, which covers a daemon restart (Decision Log 22). Idle, it holds
+// its two event listeners and its two handlers and nothing else: no timer, and the machine link is watched only while an
+// ask is held.
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
@@ -26,7 +29,7 @@ import type { ProjectRegistry } from './project-registry';
 type Request = EventPayload<'projects.act.request'>;
 
 export interface ProjectActsDeps<L> {
-  hosts: Pick<HostSupervisor, 'onEvent' | 'dispatch'>;
+  hosts: Pick<HostSupervisor, 'onEvent' | 'onState' | 'dispatch'>;
   registry: Pick<ProjectRegistry, 'projects' | 'machines'>;
   /** O7's RL2 roster: the machines this Mac reaches. */
   roster(): readonly MachineRef[];
@@ -42,6 +45,22 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
   const asks = new Map<string, { ask: ProjectActAsk; request: Request }>();
   const value = (): ProjectActAsks => ({ asks: [...asks.values()].map((entry) => entry.ask) });
   const nameOf = (id: string) => deps.registry.projects().projects.find((p) => p.id === id)?.name ?? null;
+  let unwatch: (() => void) | null = null; // the machine link's state, watched while an ask is held
+
+  /** The asks held now on the page; the link is watched while there are any. */
+  function changed(): void {
+    deps.emit(value());
+    if (asks.size > 0 && unwatch === null) unwatch = deps.hosts.onState('machine', (state) => state.state !== 'ready' && dropAll());
+    if (asks.size === 0 && unwatch !== null) {
+      unwatch();
+      unwatch = null;
+    }
+  }
+  /** The daemon's connection ended: no terminal waits for any ask any more. */
+  function dropAll(): void {
+    asks.clear();
+    changed();
+  }
 
   const answer = (id: string, result: ProjectForwardResult) =>
     void deps.hosts.dispatch('machine', 'projects.act.answer', { id, result }).then(
@@ -70,7 +89,7 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
       askedAt: new Date().toISOString(),
     };
     asks.set(request.id, { ask, request });
-    deps.emit(value());
+    changed();
     windows[0]!.focus(); // the person is at the terminal: the sheet comes to them
   }
 
@@ -103,13 +122,14 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
     return { ok: true, text: linkWords(linked.value as { project: ProjectRecord; restated: boolean }, { into, nameOf, machine: machineName }) };
   }
 
-  const off = deps.hosts.onEvent('projects.act.request', asked);
+  const offRequest = deps.hosts.onEvent('projects.act.request', asked);
+  const offWithdrawn = deps.hosts.onEvent('projects.act.withdrawn', ({ id }) => asks.delete(id) && changed());
   deps.register('org.projectActs', value);
   deps.register('org.projectActs.decide', async ({ id, confirm }) => {
     const entry = asks.get(id);
     if (entry === undefined) throw new HostCommandError(ipcError('invalid_input', `no request ${id} from a terminal is waiting`));
     asks.delete(id);
-    deps.emit(value());
+    changed();
     if (!confirm) return answer(id, { ok: false, code: 'declined', text: NOT_CONFIRMED });
     let result: ProjectForwardResult;
     try {
@@ -119,5 +139,12 @@ export function startProjectActs<L>(deps: ProjectActsDeps<L>): { stop(): void } 
     }
     answer(id, result);
   });
-  return { stop: off };
+  return {
+    stop() {
+      offRequest();
+      offWithdrawn();
+      unwatch?.();
+      unwatch = null;
+    },
+  };
 }

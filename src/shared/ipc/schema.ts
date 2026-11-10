@@ -315,6 +315,7 @@ export const MACHINE_EVENTS = [
   'daemon.engineHandover', // P5 O16 M3c fix wave 2: `mawsd`'s engine host update under way (the front's own)
   'channel.changed', // P5 O8 M7b: the project channel's journal, composed with the spine
   'projects.act.request', // the project registry's M12: `maws` aimed at another machine, to the attached app alone (the front's own)
+  'projects.act.withdrawn', // the project registry's M12 (Decision Log 22): that request's terminal has gone (the front's own)
 ] as const satisfies readonly EventName[];
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;
 export type CommandOutput<N extends CommandName> = z.output<(typeof commands)[N]['output']>;

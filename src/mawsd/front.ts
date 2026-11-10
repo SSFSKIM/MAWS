@@ -668,13 +668,13 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       taps.clear();
     },
     close() {
+      projectActs.close(); // first, while the app's and the terminals' connections can still be told (Decision Log 22)
       offRaw();
       offStreaming();
       for (const client of [...clients]) client.detach();
       streams.stop();
       remotes.clear();
       clientPort.close();
-      projectActs.close();
     },
   };
 }

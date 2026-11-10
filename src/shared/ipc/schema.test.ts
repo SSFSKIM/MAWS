@@ -2380,10 +2380,10 @@ describe('ipc schema validates both directions', () => {
     const project = { id: location.id, name: 'scrape', hub: true, renamable: true, locations: [location], known: [] };
     it('adds the daemon commands for `maws`, machine-owned and main-only, and the act request, main-only and among the machine host events', () => {
       expect(Object.fromEntries(Object.entries(projects.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'projects.registry': 'machine', 'projects.forward': 'machine', 'projects.act.answer': 'machine' });
-      expect(Object.keys(projects.events)).toEqual(['projects.act.request']);
+      expect(Object.keys(projects.events)).toEqual(['projects.act.request', 'projects.act.withdrawn']);
       expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['projects.registry', 'projects.forward', 'projects.act.answer']));
-      expect(MAIN_ONLY_EVENTS).toContain('projects.act.request');
-      expect(MACHINE_EVENTS).toContain('projects.act.request');
+      expect(MAIN_ONLY_EVENTS).toEqual(expect.arrayContaining(['projects.act.request', 'projects.act.withdrawn']));
+      expect(MACHINE_EVENTS).toEqual(expect.arrayContaining(['projects.act.request', 'projects.act.withdrawn']));
     });
     it('reads the registry as the endpoint assembles it', () => {
       const registry = { enrolled: true, machine: { ref: 'mRef0123456789abcdefAB', name: 'mini' }, machines: [{ ref: 'mRef0123456789abcdefAB', name: 'mini' }], projects: [project] };
@@ -2403,6 +2403,8 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('projects.act.answer', { id: 'pa-1', result: { ok: false, code: 'declined', text: 'declined in MAWS' } }).ok).toBe(true);
       expect(validateEventPayload('projects.act.request', { id: 'pa-1', verb: 'add', machine: 'mini', path: '/srv/scrape' }).ok).toBe(true);
       expect(validateEventPayload('projects.act.request', { id: 'pa-1', verb: 'link', machine: 'mini', path: '/srv/scrape', into: null }).ok).toBe(true);
+      expect(validateEventPayload('projects.act.withdrawn', { id: 'pa-1' }).ok).toBe(true); // Decision Log 22
+      expect(validateEventPayload('projects.act.withdrawn', { id: 'pa-1', why: 'gone' }).ok, 'its id alone').toBe(false);
     });
     it('adds the page half of the confirmation sheet, main-owned', () => {
       const ask = { id: 'pa-1', verb: 'add', machine: 'mRef0123456789abcdefAB', machineName: 'mini', path: '/srv/scrape', into: 'abc', intoName: 'scrape', askedAt: '2026-11-10T12:00:00.000Z' };

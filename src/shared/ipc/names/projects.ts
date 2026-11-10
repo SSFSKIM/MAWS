@@ -7,4 +7,4 @@ export const events = [] as const;
 
 export const mainOnlyCommands = ['projects.registry', 'projects.forward', 'projects.act.answer'] as const;
 
-export const mainOnlyEvents = ['projects.act.request'] as const;
+export const mainOnlyEvents = ['projects.act.request', 'projects.act.withdrawn'] as const;

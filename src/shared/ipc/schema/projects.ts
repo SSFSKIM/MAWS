@@ -6,6 +6,8 @@
 //   - `projects.forward`: a verb aimed at another machine, which only a member's device can sign. The daemon posts
 //     `projects.act.request` to the attached app whose hello lists `machine.project-acts` and answers with the app's
 //     `projects.act.answer` for that id; with no such app, or once the app's connection ends, `{ok: false, code: 'no-app'}`.
+//     When the terminal's connection ends, or the daemon stops, while the request waits, the daemon posts
+//     `projects.act.withdrawn` with its id, and the app takes it off the page without acting (Decision Log 22).
 // An event and a command, as the client port's request and answer are: a ninth client-port kind would be an enum member
 // on the wire, which takes a major (the execution document's Decision Log 6).
 import * as z from 'zod';
@@ -63,4 +65,5 @@ export const commands = {
 
 export const events = {
   'projects.act.request': ProjectForwardSchema.extend({ id: z.string().min(1) }), // to the attached app alone
+  'projects.act.withdrawn': z.strictObject({ id: z.string().min(1) }), // Decision Log 22: its terminal has gone, or the daemon stops; to the app it was asked of
 } as const satisfies Record<`projects.${string}`, z.ZodType>;
