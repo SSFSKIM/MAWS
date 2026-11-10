@@ -49,6 +49,7 @@ import { excludeFromBackup } from '@shared/fs/backup-exclusion';
 import { createRegistryFeed } from './org/registry-feed'; // P5 O8 M1
 import { registerOrgHandlers, registerPolicyHandlers, registerProjectsHandlers, registerRowsHandler } from './org/register'; // P5 O8 M1; M2: org.rows; M6b: org.policy.*; the project registry: org.projects, org.removals.*
 import { createProjectRegistry } from './org/project-registry'; // the project registry (M10)
+import { startProjectActs } from './org/project-acts'; // the project registry's M12: maws aimed at another machine
 import { orgFiles } from './org/files'; // P5 O8 M1
 import { createRemoteRows } from './org/rows'; // P5 O8 M2
 import { createOrgPolicies } from './org/policy'; // P5 O8 M6b
@@ -691,6 +692,8 @@ function startMain(data: SpineData | null, launch: LaunchShape, { local, localNa
   });
   shutdown.add('project registry', () => registry.close());
   registerProjectsHandlers({ register: registerMainHandler, registry });
+  const projectActs = startProjectActs({ hosts, registry, roster: () => roster, link: (ref) => machines.remote(ref), send: (link, name, input) => remoteLaneB.dispatch(link, name, input, { client: mainClient, target: link.machine }), register: registerMainHandler, emit: (value) => void emit('org.projectActs.changed', value), log: (line) => console.log(line) });
+  shutdown.add('project acts', projectActs.stop);
   const remoteRows = createRemoteRows({
     session,
     feed: orgFeed,
