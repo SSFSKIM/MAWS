@@ -576,7 +576,8 @@ describe('review 1', () => {
     expect(h.records()).toEqual([]);
     await h.adopted();
     expect(h.records()).toEqual([r5.body]);
-    expect(Object.keys(w.held)).toEqual([w.other]);
+    // the record that does not verify counts for nothing; its mark stays, its key neither retired nor revoked (panel 1, scalpel-1#2)
+    expect(Object.keys(w.held).sort()).toEqual([w.other, gone].sort());
 
     // a delegated machine: its authority is its delegation's, which expires
     const delegationKey = await generateSigningKey();
@@ -652,5 +653,55 @@ describe('review 1', () => {
     await later.r.own.publish();
     expect(w.kept.record!.body.locations).toHaveLength(2);
     expect(w.kept.record!.body.known).toEqual([{ id: 'id-held', name: 'Held' }]);
+  });
+});
+
+// The registry branch's xhigh panel 1 (.doperpowers/sde/2026-11-10-project-registry/registry-panel-1.md): each finding of
+// the endpoint's, reproduced
+describe('panel 1', () => {
+  it('scalpel-1#2: a machine whose standing is contested for a while keeps its mark, so an older record never returns', async () => {
+    const w = await world();
+    const delegationKey = await generateSigningKey();
+    const dKey = await generateSigningKey();
+    const dId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+    const dRef = mintRef(dId);
+    await w.amend((s) => void s.delegations.push({ id: dId, pub: delegationKey.pub, prefix: 'dl-', expires: new Date(Date.now() + 3_600_000).toISOString(), maxUses: 10, offlineRevokeS: 0, owners: [w.admin] }));
+    const cert = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: dRef, name: 'dl-one', pub: dKey.pub, delegation: dId, use: 1, issued: new Date().toISOString() }, delegationKey.privateKey, delegationKey.pub);
+    const rival = await signRecord(SIGNING_DOMAINS.machineCert, { org: ORG, machine: mintRef(dId), name: 'dl-one', pub: (await generateSigningKey()).pub, delegation: dId, use: 2, issued: new Date().toISOString() }, delegationKey.privateKey, delegationKey.pub);
+    let certificates: Certificates = { certs: [cert], retirements: [] };
+    const h = new HeldProjects({ ref: () => w.ref, ownKeyId: () => w.kid, head: () => ({ state: w.head.state, certificates }), now: Date.now, store: w.heldStore, own: () => {}, changed: () => {}, snapshotEnded: () => {}, log: (line) => void w.lines.push(line) });
+    const vmRecord = (revision: number, path: string) =>
+      signRecord(SIGNING_DOMAINS.projects, { org: ORG, machine: dRef, revision, issued: new Date().toISOString(), locations: [{ pid: 'dl-pid', id: 'id-dl', key: `folder:${dRef}:dl-pid`, name: 'dl', path, source: 'folder', stated: 'minted' }], known: [] }, dKey.privateKey, dKey.pub);
+    const newer = await vmRecord(5, '/srv/now');
+    await h.frame({ t: 'projects', record: newer });
+    expect(h.records()).toEqual([newer.body]);
+    certificates = { certs: [cert, rival], retirements: [] }; // a second claim to its name: its records speak for no one
+    await h.adopted();
+    expect(h.records()).toEqual([]);
+    // a machine whose key does not speak now is not waited for: a snapshot that lacks it is complete
+    h.welcomed(true);
+    await h.frame({ t: 'projects-all', records: [], last: true });
+    expect(h.complete()).toBe(true);
+    certificates = { certs: [cert], retirements: [] }; // the rival claim gone: the record held speaks again
+    await h.adopted();
+    expect(h.records()).toEqual([newer.body]);
+    await h.frame({ t: 'projects', record: await vmRecord(3, '/srv/removed-since') }); // an older record, replayed
+    expect(h.records()).toEqual([newer.body]);
+    expect(w.held[dRef]?.revision).toBe(5);
+  });
+
+  it('scalpel-1#2: a mark goes once the head revokes the key that signed it', async () => {
+    const w = await world();
+    const h = new HeldProjects({ ref: () => w.ref, ownKeyId: () => w.kid, head: () => ({ state: w.head.state, certificates: NO_CERTIFICATES }), now: Date.now, store: w.heldStore, own: () => {}, changed: () => {}, snapshotEnded: () => {}, log: () => {} });
+    const r5 = await w.otherRecord(5);
+    await h.frame({ t: 'projects', record: r5 });
+    const pub = w.head.state.machines.find((m) => m.ref === w.other)!.pub;
+    await w.amend(async (s) => {
+      s.revoked.push({ keyId: await keyId(pub), holder: { machine: w.other } });
+      s.machines = s.machines.filter((m) => m.ref !== w.other);
+    });
+    await h.adopted();
+    expect(h.records()).toEqual([]);
+    expect(w.held[w.other]).toBeUndefined();
   });
 });

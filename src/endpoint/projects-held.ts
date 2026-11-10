@@ -8,9 +8,10 @@
 //
 // - A record below a machine's mark is passed by; one at the mark with another hash is a conflict, passed by and logged;
 //   one above it is verified and kept.
-// - The hub's snapshot removes nothing: a machine it lacks keeps its record (unknown is not empty, constraint 4). A mark
-//   and its record go only when the head no longer lets that key speak for the machine (`adopted`): a retired or
-//   re-keyed machine's record stops verifying.
+// - The hub's snapshot removes nothing: a machine it lacks keeps its record (unknown is not empty, constraint 4). A record
+//   that stops verifying (`adopted`) stops counting; its mark, and the record with it, go only once the head retires or
+//   revokes the key that signed it, as main's reader keeps them (panel 1, scalpel-1#2): a standing lost for a while (a
+//   contested certificate, a machine left out of a head and listed again) never lets an older revision back in.
 // - A record counts (`records`) once it verified in this run (M9's review 1, F4): one read from the file only after
 //   `adopted` verified it again, which the endpoint asks at its start, as at each new head. A delegated machine's
 //   authority ends with its delegation's `expires`, with no new head, so the records are verified again then too.
@@ -50,6 +51,9 @@ export type HeldContext = {
 /** The longest a timer waits (Node fires a longer one at once); the check then waits again. */
 const LONGEST_WAIT_MS = 2 ** 31 - 1;
 
+/** Whether the head is signed evidence that a key can never speak again (its retirement or revocation): what ends a mark. */
+const keyEnded = (state: OrgState, kid: string): boolean => state.retired.some((r) => r.keyId === kid) || state.revoked.some((r) => r.keyId === kid);
+
 /** The hash a mark keeps: of the record's canonical form, so the same record in another key order is the same. */
 export const recordHash = (record: Signed<ProjectsRecord>): string => createHash('sha256').update(canonicalize(record)).digest('base64url');
 
@@ -60,6 +64,8 @@ export class HeldProjects {
   #connection = 0;
   /** The hash of each machine's held record as verified in this run. */
   readonly #verified = new Map<string, string>();
+  /** The machines whose held record the last check found not verifying, their key not ended: kept, not counted. */
+  readonly #silent = new Set<string>();
   /** The next check of the held records, at the soonest delegation's `expires`. */
   #expiry: ReturnType<typeof setTimeout> | null = null;
   #stopped = false;
@@ -103,7 +109,7 @@ export class HeldProjects {
 
   /**
    * The start, a new head or certificate set, or a delegation's `expires` reached: every held record verified again,
-   * those that verify counted, those that no longer do dropped.
+   * those that verify counted, those that no longer do not counted, and dropped with their mark once their key ended.
    */
   adopted(): Promise<void> {
     return this.#serial(async () => {
@@ -116,12 +122,21 @@ export class HeldProjects {
         if (verdict.ok) {
           moved ||= this.#verified.get(ref) !== entry.hash;
           this.#verified.set(ref, entry.hash);
+          this.#silent.delete(ref);
           continue;
         }
-        delete held[ref];
-        this.#verified.delete(ref);
-        moved = true;
-        this.#ctx.log(`endpoint: the projects record of machine ${ref.slice(0, 64)} no longer verifies (${verdict.code}); dropped`);
+        moved ||= this.#verified.delete(ref);
+        if (keyEnded(head.state, entry.keyId)) {
+          delete held[ref];
+          this.#silent.delete(ref);
+          moved = true;
+          this.#ctx.log(`endpoint: the projects record of machine ${ref.slice(0, 64)} no longer verifies (${verdict.code}) and its key is retired or revoked; dropped with its mark`);
+          continue;
+        }
+        if (this.#silent.has(ref)) continue;
+        this.#silent.add(ref);
+        moved = true; // `complete` waits for it no more
+        this.#ctx.log(`endpoint: the projects record of machine ${ref.slice(0, 64)} no longer verifies (${verdict.code}); its mark is kept while its key is neither retired nor revoked`);
       }
       if (Object.keys(held).length !== Object.keys(this.#ctx.store.read()).length) this.#ctx.store.write(held);
       this.#expires();
@@ -141,11 +156,14 @@ export class HeldProjects {
     this.#expiry = null;
   }
 
-  /** §D's `complete`: this connection's snapshot ended, and every machine held here was in it at or above its mark. */
+  /**
+   * §D's `complete`: this connection's snapshot ended, and every machine held here whose key still speaks for it (all but
+   * those the last check found not verifying) was in it at or above its mark.
+   */
   complete(): boolean {
     const snapshot = this.#snapshot;
     if (snapshot === null || !snapshot.ended) return false;
-    return Object.entries(this.#ctx.store.read()).every(([ref, entry]) => (snapshot.seen.get(ref) ?? 0) >= entry.revision);
+    return Object.entries(this.#ctx.store.read()).every(([ref, entry]) => this.#silent.has(ref) || (snapshot.seen.get(ref) ?? 0) >= entry.revision);
   }
 
   /** Settles once every frame and re-verification taken so far is done (the suites'). */
@@ -178,6 +196,7 @@ export class HeldProjects {
     if (!verdict.ok) return this.#ctx.log(`endpoint: machine ${machine.slice(0, 64)}'s projects record ${revision} does not verify (${verdict.code}); ignored`);
     this.#ctx.store.write({ ...this.#ctx.store.read(), [machine]: { revision, hash, keyId: record.sig.kid, record } });
     this.#verified.set(machine, hash);
+    this.#silent.delete(machine);
     seen();
     this.#expires();
     this.#ctx.changed();
