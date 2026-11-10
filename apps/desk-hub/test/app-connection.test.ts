@@ -51,9 +51,10 @@ afterAll(async () => {
 });
 
 describe('the Registry socket', () => {
-  it('sends the grid first, then every listing and no state before one exists; the genesis is noticed on it', async () => {
+  it('sends the grid first, then every listing and every projects record, and no state before one exists; the genesis is noticed on it', async () => {
     const before = await client.registry();
-    expect(before.frames.map((f) => f.t)).toEqual(['grid', 'listings']);
+    await before.next((f) => f.t === 'projects-all' && f.last === true, 'the last projects page');
+    expect(before.frames.map((f) => f.t)).toEqual(['grid', 'listings', 'projects-all']);
     expect(before.version).toBeNull();
     expect(before.listings.size).toBe(0);
 
@@ -61,7 +62,8 @@ describe('the Registry socket', () => {
     expect(await before.next((f) => f.t === 'state', 'the genesis notice')).toEqual({ t: 'state', version: 1 });
 
     const after = await client.registry();
-    expect(after.frames.map((f) => f.t)).toEqual(['grid', 'state', 'listings']);
+    await after.next((f) => f.t === 'projects-all' && f.last === true, 'the last projects page');
+    expect(after.frames.map((f) => f.t)).toEqual(['grid', 'state', 'listings', 'projects-all']);
     expect(after.version).toBe(1);
     before.close();
     after.close();

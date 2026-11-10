@@ -22,8 +22,17 @@
 // endpoint's connection, however late it reaches this object.
 //
 // Over the endpoint's socket travel DX2's log plane (each project's frames handed to it through `Project.fromMachine`,
-// as DX2's POSTs are), `hb`/`hb-ack` with the lease, the machine's signed `listing` and `endpoint` records and its
-// `notify` (to the Registry), the `state` notice, and the channel multiplex. An app's socket carries channels only.
+// as DX2's POSTs are), `hb`/`hb-ack` with the lease, the machine's signed `listing`, `endpoint` and `projects` records
+// and its `notify` (to the Registry), the `state` notice, every machine's projects record down (the project registry,
+// Interfaces §C), and the channel multiplex. An app's socket carries channels only.
+//
+// `projects` is advertised in a welcome only once the Registry has answered, at the upgrade, that it keeps projects
+// records (`keepsProjects`): one deploy replaces this object and the Registry at different moments, so this code can
+// run against a Registry of the build before, which lacks the method. Such a connection's welcome leaves `projects`
+// out, it is sent no record, and a `projects` frame it sends anyway is refused `503 hub-updating`, which the endpoint
+// retries as a listing. A connection welcomed with it is sent the Registry's snapshot (`projects-all` pages) after its
+// welcome, then each record as it is stored (`relayProjects`); one stored while the snapshot is read is held until the
+// snapshot is written, so the pages come first.
 // Channel frames are forwarded at once, unread and unbuffered, with no flow control: credit is RL3's, end to end.
 //
 // Both kinds of socket hibernate. Nothing kept in memory is needed after an eviction:
@@ -54,9 +63,12 @@ import {
   tagBytes,
   type ChannelCloseReason,
   type NotifyFrame,
+  type ProjectsRecord,
+  type ProjectsRecordFrame,
   type RelayPresence,
   type Rl1Refusal,
   type Rl1Welcome,
+  type Signed,
 } from 'org-protocol';
 import { CLIENT_HEADER, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, REF_HEADER, type Env } from '../env';
 import { NOT_ON_RL1, RL1_LOG_DOWN, type DownFrame, type UpFrame } from '../protocol/machine';
@@ -70,8 +82,10 @@ import { lacksMethod } from './retry';
 export const relayObjectName = (org: string, ref: string) => `${org}:ref:${ref}`;
 
 /** The current endpoint connection: `conn` is this object's number for it, `generation` its name's. */
-/** `capabilities`: what its hello advertised (P5 O18 D9), absent before its hello and from an endpoint of an older build. */
-type Current = { conn: number; generation: number; org: string; name: string; client: string; welcomed: boolean; capabilities?: string[] };
+/** `capabilities`: what its hello advertised (P5 O18 D9), absent before its hello and from an endpoint of an older build.
+ * `projects`: whether the Registry answered, at the upgrade, that it keeps projects records, so the welcome advertises
+ * `projects` and the connection is sent them; absent from a connection installed by the build before. */
+type Current = { conn: number; generation: number; org: string; name: string; client: string; welcomed: boolean; capabilities?: string[]; projects?: boolean };
 type EndpointAttachment = { kind: 'endpoint'; conn: number };
 type AppAttachment = { kind: 'app'; member: string; device?: string; channels: number[] };
 type Attachment = EndpointAttachment | AppAttachment;
@@ -108,6 +122,8 @@ export class Relay {
   private parts: { conn: number; assembler: PartAssembler } | undefined;
   /** The last call queued per order key (a project, the Registry): each waits for the one before it. */
   private readonly order = new Map<string, Promise<unknown>>();
+  /** A welcomed connection whose projects snapshot is being read: the records stored meanwhile, written after it. */
+  private projectsHeld: { conn: number; records: Signed<ProjectsRecord>[] } | undefined;
 
   constructor(
     private readonly ctx: DurableObjectState,
@@ -176,10 +192,11 @@ export class Relay {
     if ('refused' in claimed) return json(403, { error: 'not-enrolled', message: 'this credential was revoked' });
     const { generation } = claimed;
     // The org state may have renamed the machine since the Worker resolved this name to the ref. Asked last, so the
-    // fences below order whatever installed while it was answered.
+    // fences below order whatever installed while it was answered; with it, whether the Registry keeps projects records.
     let binds: boolean;
+    let projects: boolean;
     try {
-      binds = await this.registry(org).machineBinds(name, ref);
+      [binds, projects] = await Promise.all([this.registry(org).machineBinds(name, ref), this.keepsProjects(org)]);
     } catch (error) {
       note({ event: 'binding-failed', machine: name, ref, error: described(error) });
       return json(503, { error: lacksMethod(error, 'machineBinds') ? 'hub-updating' : 'hub-unavailable', message: 'connect again' });
@@ -205,7 +222,7 @@ export class Relay {
     const [outside, inside] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(inside, ['endpoint']);
     inside.serializeAttachment({ kind: 'endpoint', conn } satisfies EndpointAttachment);
-    this.kv.put('endpoint', { conn, generation, org, name, client, welcomed: false } satisfies Current);
+    this.kv.put('endpoint', { conn, generation, org, name, client, welcomed: false, projects } satisfies Current);
     this.kv.put(projectsKey(conn), { org, name, client, generation, projects: [] } satisfies Opened);
     this.raiseFence(name, generation, 'replaced');
     this.kv.put('installed', { name, arrival: Math.max(arrival, installed?.arrival ?? 0) } satisfies Installed);
@@ -287,7 +304,7 @@ export class Relay {
     }
     if (frame.t === 'hb') return this.heartbeat(ws, current, frame);
     if (frame.t === 'hello' || frame.t === 'events' || frame.t === 'rejected') return this.logPlane(ws, current, frame as UpFrame);
-    if (frame.t === 'listing' || frame.t === 'endpoint') return this.record(ws, current, frame.t, frame.record);
+    if (frame.t === 'listing' || frame.t === 'endpoint' || frame.t === 'projects') return this.record(ws, current, frame.t, frame.record);
     if (frame.t === 'notify') return this.notify(ws, current, frame);
     if (NOT_ON_RL1.has(frame.t)) {
       return this.refuse(ws, { frame: frame.t, status: 422, error: 'not-on-rl1', message: 'RL1 carries no DX4/DX6 session-plane frame: send it in a channel' });
@@ -302,7 +319,9 @@ export class Relay {
     if (frame.protocol.major !== RL1_PROTOCOL.major) return this.closeSocket(ws, CLOSE.protocol, 'unsupported-protocol');
     this.kv.put('endpoint', { ...current, welcomed: true, capabilities: frame.capabilities ?? [] } satisfies Current);
     note({ event: 'hello', machine: current.name, generation: current.generation, build: frame.build, leaseGeneration: frame.leaseGeneration ?? null, capabilities: frame.capabilities ?? [] });
-    this.sendTo(ws, JSON.stringify({ t: 'welcome', generation: current.generation, heartbeat_ms: this.timing().heartbeatMs, capabilities: [...HUB_CAPABILITIES] } satisfies Rl1Welcome));
+    const capabilities = [...HUB_CAPABILITIES, ...(current.projects === true ? [RL1_CAPABILITIES.projects] : [])];
+    this.sendTo(ws, JSON.stringify({ t: 'welcome', generation: current.generation, heartbeat_ms: this.timing().heartbeatMs, capabilities } satisfies Rl1Welcome));
+    if (current.projects === true) this.projectsHeld = { conn: current.conn, records: [] };
     this.broadcastPresence();
     let version: number | null = null;
     try {
@@ -311,6 +330,38 @@ export class Relay {
       // A Registry on older code, or out of reach: the endpoint reads the state on its own.
     }
     if (version !== null && this.current()?.conn === current.conn) this.sendTo(ws, JSON.stringify({ t: 'state', version }));
+    if (current.projects === true) await this.projectsSnapshot(current);
+  }
+
+  /** Whether the Registry keeps projects records (its probe); false from one on the code before them, which lacks it.
+   * Any other failure is the Registry's, as `machineBinds`' is. */
+  private keepsProjects(org: string): Promise<boolean> {
+    return this.registry(org)
+      .keepsProjects()
+      .then(
+        () => true,
+        (error: unknown) => {
+          if (lacksMethod(error, 'keepsProjects')) return false;
+          throw error;
+        },
+      );
+  }
+
+  /** Every projects record the Registry holds, in its pages, to a connection welcomed with `projects`, then those stored
+   * while they were read. Pages the Registry could not give end the connection, whose next welcome brings them. */
+  private async projectsSnapshot(current: Current): Promise<void> {
+    let pages: Signed<ProjectsRecord>[][] | null = null;
+    try {
+      pages = await this.registry(current.org).projectPages();
+    } catch (error) {
+      note({ event: 'projects-failed', machine: current.name, generation: current.generation, error: described(error) });
+    }
+    const held = this.projectsHeld?.conn === current.conn ? this.projectsHeld.records : [];
+    if (this.projectsHeld?.conn === current.conn) this.projectsHeld = undefined;
+    if (this.current()?.conn !== current.conn) return;
+    if (pages === null) return this.retire(current, CLOSE.failed, 'projects-unavailable');
+    for (const [i, records] of pages.entries()) if (!this.toEndpointFrame({ t: 'projects-all', records, last: i === pages.length - 1 })) return;
+    for (const record of held) if (!this.toEndpointFrame({ t: 'projects', record } satisfies ProjectsRecordFrame)) return;
   }
 
   /** `hb {generation}`: while the connection is still the machine's newest and its credential is not revoked, the lease
@@ -361,18 +412,25 @@ export class Relay {
     else if (result.failed) this.retire(now, CLOSE.failed, 'undeliverable');
   }
 
-  /** A listing or an endpoint record of this machine's, for the Registry to verify and keep, in order with the
-   * connection's other Registry calls (a listing reaches it before the notify that pushes by it). */
-  private async record(ws: WebSocket, current: Current, kind: 'listing' | 'endpoint', record: unknown): Promise<void> {
+  /** A listing, an endpoint record or a projects record of this machine's, for the Registry to verify and keep, in order
+   * with the connection's other Registry calls (a listing reaches it before the notify that pushes by it). A Registry on
+   * the code before projects records lacks `storeProjects`: such a record is refused `503 hub-updating`. */
+  private async record(ws: WebSocket, current: Current, kind: 'listing' | 'endpoint' | 'projects', record: unknown): Promise<void> {
     const body = (record as { body?: { machine?: unknown; session?: unknown; revision?: unknown; issued?: unknown } } | null)?.body;
-    const named = kind === 'listing' ? { session: typeof body?.session === 'string' ? body.session : undefined, revision: typeof body?.revision === 'number' ? body.revision : undefined } : { issued: typeof body?.issued === 'string' ? body.issued : undefined };
+    const revision = typeof body?.revision === 'number' ? body.revision : undefined;
+    const named =
+      kind === 'listing'
+        ? { session: typeof body?.session === 'string' ? body.session : undefined, revision }
+        : kind === 'projects'
+          ? { revision }
+          : { issued: typeof body?.issued === 'string' ? body.issued : undefined };
     if (body?.machine !== this.ref) return this.refuse(ws, { frame: kind, status: 403, error: 'not-yours', message: "a machine posts its own records: the record's machine is not this connection's ref", ...named });
     const answer = await this.inOrder('registry', async () => {
       try {
         const registry = this.registry(current.org);
-        return await (kind === 'listing' ? registry.storeListing(record) : registry.storeEndpoint(record));
+        return await (kind === 'listing' ? registry.storeListing(record) : kind === 'projects' ? registry.storeProjects(record) : registry.storeEndpoint(record));
       } catch (error) {
-        return { ok: false as const, status: 503, error: 'hub-unavailable', message: described(error) };
+        return { ok: false as const, status: 503, error: lacksMethod(error, 'storeProjects') ? 'hub-updating' : 'hub-unavailable', message: described(error) };
       }
     });
     if (!answer.ok) this.refuse(ws, { frame: kind, status: answer.status, error: answer.error, ...(answer.message ? { message: answer.message } : {}), ...named });
@@ -490,6 +548,12 @@ export class Relay {
     }
   }
 
+  /** A text frame to the current endpoint, as parts when it is over a frame's limit; false once a send failed. */
+  private toEndpointFrame(frame: object): boolean {
+    for (const line of toWire(frame)) if (!this.toEndpoint(line)) return false;
+    return true;
+  }
+
   /** An app's socket ended: the endpoint is told each of its channels closed. */
   private appGone(ws: WebSocket, attachment: AppAttachment): void {
     const held = attachment.channels;
@@ -587,6 +651,18 @@ export class Relay {
     if (!RL1_LOG_DOWN.has(frame.t)) return 'not-on-rl1';
     for (const line of toWire(frame)) if (!this.toEndpoint(line)) return 'offline';
     return 'written';
+  }
+
+  /** A projects record the Registry stored (Interfaces §C), any machine's, this one's included: to the current connection
+   * when its welcome advertised `projects`, after its snapshot when that is still being read. */
+  relayProjects(record: Signed<ProjectsRecord>): void {
+    const current = this.live();
+    if (!current?.welcomed || current.projects !== true) return;
+    if (this.projectsHeld?.conn === current.conn) {
+      this.projectsHeld.records.push(record);
+      return;
+    }
+    this.toEndpointFrame({ t: 'projects', record } satisfies ProjectsRecordFrame);
   }
 
   /** A project could not deliver to the connection of `name` at `generation`: it ends, when it is still the current one. */

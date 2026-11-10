@@ -4,8 +4,10 @@
 // notice carries no state: the app reads `GET /api/org/state?since=<held>` and verifies what it gets (RL §5.2), and
 // verifies every listing against the state it holds (RL §6.2). A `private` session's listing is never posted to the
 // hub, so every listing the hub holds is one every member may see. A withdrawn listing (`LISTING_GONE`) is never in the
-// `listings` pages; a `listing` frame may carry one, and the app drops the session it names.
-import type { ListingFrame, StateNotice } from './relay.ts';
+// `listings` pages; a `listing` frame may carry one, and the app drops the session it names. Since the project registry
+// (Interfaces §C), the listings pages are followed by every machine's projects record (`projects-all`, in pages), and
+// each record stored is sent as `projects`; the app verifies each against its own state, as it does a listing.
+import type { ListingFrame, ProjectsPageFrame, ProjectsRecordFrame, StateNotice } from './relay.ts';
 import type { Listing, Signed } from './types.ts';
 
 /**
@@ -25,4 +27,6 @@ export type ListingsFrame = { t: 'listings'; records: Signed<Listing>[]; last: b
 /** The most bytes of JSON the records of one `listings` page come to, but for a page of one larger record. */
 export const LISTINGS_PAGE_BYTES = 256 * 1024;
 
-export type RegistryAppFrame = StateNotice | ListingsFrame | ListingFrame;
+/** After the listings pages come every projects record in `projects-all` pages, then `projects` as each is stored (the
+ * project registry, Interfaces §C). */
+export type RegistryAppFrame = StateNotice | ListingsFrame | ListingFrame | ProjectsPageFrame | ProjectsRecordFrame;

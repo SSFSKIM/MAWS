@@ -31,7 +31,10 @@
 //     machine's credential and asking for its revocation would be;
 //   - a `Registry` whose unfinished offline revocations wait less than a minute before they are tried again;
 //   - a `Registry` that runs a method for a member record the suite gives, as one the Worker resolved before a state
-//     changed it, and one that lacks a method, as a Registry on older code;
+//     changed it, and one that lacks a method, as a Registry on older code; armed `projects`, it lacks the three a
+//     Relay calls of a Registry that keeps projects records, as the build before them (the project registry, §C);
+//   - a `Machine` (a ref's) that lacks `relayProjects`, as a ref object of the build before projects records, and
+//     counts the calls of it it took;
 //   - a `Registry` that answers its projection of the org state, moves a pending
 //     device's expiry back, and calls a method no `Project` has, saying whether it takes the refusal for older code;
 //   - a `Project` armed to throw from its next state announcements, as a reset object's call fails or as a project on
@@ -102,6 +105,7 @@ import {
   UPGRADE_HELD_PATH,
   UPGRADE_RELEASE_PATH,
   RELAY_FAULT_PATH,
+  RELAY_PROJECTS_PATH,
   CLAIM_PATH,
   WRAPPED_KEY_SEED_PATH,
   PROJECT_RPCS_PATH,
@@ -182,6 +186,22 @@ export class Registry extends DeployedRegistry {
   policies(request: Parameters<DeployedRegistry['policies']>[0]): ReturnType<DeployedRegistry['policies']> {
     if (this.ctx.storage.kv.get<string>('lacks') === 'policies') throw new TypeError('The RPC receiver does not implement the method "policies".');
     return super.policies(request);
+  }
+
+  /** Armed `projects`, refused as a Registry on the code before projects records would refuse it. */
+  keepsProjects(): ReturnType<DeployedRegistry['keepsProjects']> {
+    if (this.ctx.storage.kv.get<string>('lacks') === 'projects') throw new TypeError('The RPC receiver does not implement the method "keepsProjects".');
+    return super.keepsProjects();
+  }
+
+  projectPages(): ReturnType<DeployedRegistry['projectPages']> {
+    if (this.ctx.storage.kv.get<string>('lacks') === 'projects') throw new TypeError('The RPC receiver does not implement the method "projectPages".');
+    return super.projectPages();
+  }
+
+  storeProjects(record: unknown): ReturnType<DeployedRegistry['storeProjects']> {
+    if (this.ctx.storage.kv.get<string>('lacks') === 'projects') throw new TypeError('The RPC receiver does not implement the method "storeProjects".');
+    return super.storeProjects(record);
   }
 
   /** Armed, refused as a Registry on the code before the relay's binding check would refuse it. */
@@ -411,6 +431,13 @@ export class Machine extends DeployedMachine {
       this.ctx.storage.kv.put(`relay-fault:${method}`, times);
       return new Response('armed');
     }
+    if (url.pathname === RELAY_PROJECTS_PATH) {
+      if (request.method === 'GET') return Response.json({ calls: this.ctx.storage.kv.get<number>('relay-projects-calls') ?? 0 });
+      const { method } = (await request.json()) as { method: string | null };
+      if (method === null) this.ctx.storage.kv.delete('lacks');
+      else this.ctx.storage.kv.put('lacks', method);
+      return new Response('armed');
+    }
     if (url.pathname === SEND_HOLD_PATH) {
       this.ctx.storage.kv.put('send-hold', url.searchParams.get('kind') ?? '');
       return new Response('armed');
@@ -487,6 +514,14 @@ export class Machine extends DeployedMachine {
   relayState(...args: Parameters<DeployedMachine['relayState']>): ReturnType<DeployedMachine['relayState']> {
     this.relayFault('relayState');
     return super.relayState(...args);
+  }
+
+  /** Counted; armed `projects`, refused as a ref object of the build before projects records refuses it. */
+  relayProjects(...args: Parameters<DeployedMachine['relayProjects']>): ReturnType<DeployedMachine['relayProjects']> {
+    this.ctx.storage.kv.put('relay-projects-calls', (this.ctx.storage.kv.get<number>('relay-projects-calls') ?? 0) + 1);
+    if (this.ctx.storage.kv.get<string>('lacks') === 'projects') throw new TypeError('The RPC receiver does not implement the method "relayProjects".');
+    this.relayFault('relayProjects');
+    return super.relayProjects(...args);
   }
 
   async send(frame: DownFrame, generation?: number): ReturnType<DeployedMachine['send']> {

@@ -68,6 +68,7 @@ import {
   UPGRADE_HELD_PATH,
   UPGRADE_RELEASE_PATH,
   RELAY_FAULT_PATH,
+  RELAY_PROJECTS_PATH,
   CLAIM_PATH,
   WRAPPED_KEY_SEED_PATH,
   PROJECT_RPCS_PATH,
@@ -530,9 +531,19 @@ export async function startLocalHub(options: { script?: string } = {}) {
     async claimAs(machine: string, ref: string, client: string): Promise<unknown> {
       return JSON.parse(await seam('MACHINE', machine, CLAIM_PATH, { org: ORG, name: machine, ref, client }));
     },
-    /** Makes a machine's ref object throw from its next `times` calls of `method` (`relayRevoke`, `relayState`). */
-    async relayFault(ref: string, method: 'relayRevoke' | 'relayState', times: number) {
+    /** Makes a machine's ref object throw from its next `times` calls of `method` (`relayRevoke`, `relayState`,
+     * `relayProjects`). */
+    async relayFault(ref: string, method: 'relayRevoke' | 'relayState' | 'relayProjects', times: number) {
       await seam('MACHINE', `ref:${ref}`, RELAY_FAULT_PATH, { method, times });
+    },
+    /** Makes a machine's ref object refuse `relayProjects` as one of the build before projects records (`'projects'`),
+     * or take it as deployed (null). */
+    async relayLacks(ref: string, method: 'projects' | null) {
+      await seam('MACHINE', `ref:${ref}`, RELAY_PROJECTS_PATH, { method });
+    },
+    /** How many `relayProjects` calls a machine's ref object took. */
+    async relayProjectsCalls(ref: string): Promise<number> {
+      return (JSON.parse(await seam('MACHINE', `ref:${ref}`, RELAY_PROJECTS_PATH)) as { calls: number }).calls;
     },
     /** A member's app-socket upgrade straight to a machine's ref object, as the Worker forwards one it resolved: how an
      * upgrade admitted just before a removal reaches the object late. Answers the status; an accepted socket is closed. */

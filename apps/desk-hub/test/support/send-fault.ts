@@ -137,6 +137,10 @@ export const UPGRADE_RELEASE_PATH = '/__test/upgrade-release';
 /** Where the suites' `Machine` (a ref's) is armed to throw from its next `times` calls of a relay method
  * (`{method, times}`), as a call to an object a reset or an overload failed. */
 export const RELAY_FAULT_PATH = '/__test/relay-fault';
+/** Where the suites' `Machine` (a ref's) is armed (`{method: 'projects'}`, or `{method: null}` to disarm) to refuse
+ * `relayProjects` as a ref object of the build before projects records refuses it, and says (GET) how many calls of it
+ * it took. */
+export const RELAY_PROJECTS_PATH = '/__test/relay-projects';
 /** Where the suites' `Machine` (a name's) grants an RL1 generation claim (`{org, name, ref, client}`) no socket follows: a
  * claim of another credential that never installs. */
 export const CLAIM_PATH = '/__test/claim';

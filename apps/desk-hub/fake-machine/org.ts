@@ -15,6 +15,8 @@ import {
   type EndpointRecord,
   type Listing,
   type MachineCert,
+  type ProjectLocation,
+  type ProjectsRecord,
   type Signed,
   type SigningKey,
 } from 'org-protocol';
@@ -144,6 +146,16 @@ export async function retirement(org: string, certified: SigningKey | string, de
 export function listing(machine: Pick<V2Machine, 'org' | 'ref' | 'key'>, session: string, revision: number, fields: Listing['fields']): Promise<Signed<Listing>> {
   const body: Listing = { org: machine.org, machine: machine.ref, session, revision, issued: new Date().toISOString(), fields };
   return signRecord(SIGNING_DOMAINS.listing, body, machine.key.privateKey, machine.key.pub);
+}
+
+/** The machine's projects record (the project registry, Interfaces §A), signed by its key. */
+export function projectsRecord(
+  machine: Pick<V2Machine, 'org' | 'ref' | 'key'>,
+  revision: number,
+  locations: ProjectLocation[] = [],
+  known: ProjectsRecord['known'] = [],
+): Promise<Signed<ProjectsRecord>> {
+  return signRecord(SIGNING_DOMAINS.projects, { org: machine.org, machine: machine.ref, revision, issued: new Date().toISOString(), locations, known }, machine.key.privateKey, machine.key.pub);
 }
 
 /** The machine's endpoint record (RL §4.1's direct carriers), signed by its key. */
