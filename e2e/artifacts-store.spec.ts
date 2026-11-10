@@ -17,7 +17,7 @@ import { expect, test, type ElectronApplication, type Page } from '@playwright/t
 import type { HostStatus } from '@shared/ipc/schema/host';
 import { documents, seamReady } from './support/documents';
 import { launchMaws, type MawsLaunch } from './support/launch';
-import { quietWait } from './support/quiet';
+import { quietWait, type QuietAdmission } from './support/quiet';
 import { seedDocument } from './support/seed-doc';
 
 const require = createRequire(__filename);
@@ -405,9 +405,12 @@ test('maws-artifact: reaches the app and the capture partition only, and an arti
 //                (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, Decision Log 15). A window whose 1-minute
 //                load is 5 or more at its start or its end is void: its line says `void: true` and the case fails
 //                asking for a rerun, which is no verdict on the bound either way (the architect's rule, as daemon-idle's).
+// Every measured window (each cold trial and the ack window) is preceded by the quiet admission (support/quiet.ts), so the
+// case's own launches do not load the next window, and a cold trial whose 1-minute load is 5 or more at its start voids
+// the first sync the same way (the architect's call, Decision Log 15). The kills record their loads and are no timing.
 //   ackedLost    acknowledged keystrokes missing after a host SIGKILL mid-typing, summed over three kills; bound 0.
 const PERF_BOUNDS = { firstSyncMs: 150, ackP95Ms: 13, ackedLost: 0 } as const;
-const ACK_VOID_LOAD = 5; // the 1-minute load at which an ack window is void, at its start or its end
+const VOID_LOAD = 5; // the 1-minute load at which a measured window is void: a cold trial at its start, the ack window at either end
 // P5 O15 M1 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): the bounds were utility mode's, whose host
 // ended with its app; on the daemon shape the engine host is `mawsd`'s and outlives the app, so each cold trial and each
 // kill run ends the profile's `mawsd` and hosts with the app (the launch's cleanup, which keeps a given profile) before
@@ -427,7 +430,7 @@ const percentile = (values: number[], p: number) => [...values].sort((x, y) => x
 
 test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to durable ack, nothing acknowledged lost to a host SIGKILL', async () => {
   test.skip(process.env.MAWS_ARTIFACTS_PERF !== '1', 'measured only under MAWS_ARTIFACTS_PERF=1');
-  test.setTimeout(10 * 60_000);
+  test.setTimeout(25 * 60_000); // four admissions of at most three minutes each, beside the measured work
   const seed = seedDocument(1_000_000);
   profile = mkdtempSync(join(tmpdir(), 'maws-e2e-artifacts-perf-'));
   launch = await launchMaws({ userData: profile, env: PERF_ENV });
@@ -442,17 +445,15 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
   await expect.poll(async () => (await writer.state(seeded)).unsaved, { timeout: 60_000, message: 'the seed is durable' }).toBe(0);
   const size = await writer.stateSize(seeded);
   expect(size).toBeGreaterThanOrEqual(seed.length);
-  // the first trial's admission (support/quiet.ts: the 1-minute load under 5 on two reads 30 s apart, at most three
-  // minutes; on its expiry the trials run as below), after the build, the cases before this one and the seed; recorded
-  // on the first sync's line
-  const quiet = await quietWait();
-  console.log(`[artifacts perf] the first trial's admission: ${quiet.summary}`);
-
   // First sync, cold: a fresh app, `mawsd` and engine host over the profile each trial, the window's first open of the
-  // document.
-  const trials: { ms: number; load: number[] }[] = [];
+  // document. Each trial is admitted (support/quiet.ts: the 1-minute load under 5 on two reads 30 s apart, at most three
+  // minutes; on its expiry the trial runs, under the void rule below) after the previous app is closed and before the
+  // relaunch, so no trial is measured in the load the one before it left; each admission is recorded on its trial.
+  const trials: { ms: number; load: number[]; void?: true; admission: QuietAdmission }[] = [];
   for (let trial = 0; trial < 3; trial++) {
     await launch.cleanup();
+    const admission = await quietWait();
+    console.log(`[artifacts perf] cold trial ${trial + 1}'s admission: ${admission.summary}`);
     launch = await launchMaws({ userData: profile, env: PERF_ENV });
     await seamReady(launch.page);
     await hostReady(launch.page);
@@ -465,12 +466,16 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
       return { id, ms: performance.now() - started };
     }, artifact.id);
     expect(await documents(launch.page).stateSize(opened.id), 'the cold replica holds the whole document').toBe(size);
-    trials.push({ ms: round(opened.ms), load: atLoad });
+    trials.push({ ms: round(opened.ms), load: atLoad, ...(atLoad[0]! >= VOID_LOAD ? { void: true as const } : {}), admission });
   }
   const firstSyncMs = Math.max(...trials.map((t) => t.ms));
-  recordBound('firstSyncMs', firstSyncMs, { seedV2Bytes: seed.length, stateV2Bytes: size, trials, quiet });
+  const syncVoid = trials.some((t) => t.void === true);
+  recordBound('firstSyncMs', firstSyncMs, { seedV2Bytes: seed.length, stateV2Bytes: size, trials, ...(syncVoid ? { void: true } : {}) });
 
-  // Keystroke to durable ack on the open 1 MB document.
+  // Keystroke to durable ack on the open 1 MB document, admitted the same way after the third trial, before the typer
+  // opens; the admission is recorded on the ack's line.
+  const ackAdmission = await quietWait();
+  console.log(`[artifacts perf] the ack window's admission: ${ackAdmission.summary}`);
   const typing = documents(launch.page);
   const typer = await typing.open(artifact.id);
   const loadBefore = load();
@@ -478,11 +483,11 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
   const latencies = await typing.timeAcks(typer, 500, [60, 180]);
   const windowEnd = new Date().toISOString();
   const ackLoads = [loadBefore, load()];
-  const ackVoid = ackLoads.some(([oneMinute]) => oneMinute! >= ACK_VOID_LOAD);
+  const ackVoid = ackLoads.some(([oneMinute]) => oneMinute! >= VOID_LOAD);
   const ackP95Ms = round(percentile(latencies, 95));
   // P5 O15 (Decision Log 13): the record also carries the window's times and every latency in order, written after the
   // timing ends, so a reading over the bound can be told apart as launch residue or a cost each edit pays
-  recordBound('ackP95Ms', ackP95Ms, { edits: latencies.length, p50: round(percentile(latencies, 50)), max: round(Math.max(...latencies)), load: ackLoads, ...(ackVoid ? { void: true } : {}), window: { start: windowStart, end: windowEnd }, samples: latencies.map(round) });
+  recordBound('ackP95Ms', ackP95Ms, { edits: latencies.length, p50: round(percentile(latencies, 50)), max: round(Math.max(...latencies)), load: ackLoads, ...(ackVoid ? { void: true } : {}), admission: ackAdmission, window: { start: windowStart, end: windowEnd }, samples: latencies.map(round) });
 
   // Three host SIGKILLs mid-typing, each in a fresh app and `mawsd` (a host supervisor stops restarting a host that dies
   // three times within 60 s): every acknowledged keystroke is in the document the restarted host serves.
@@ -517,8 +522,9 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
   const ackedLost = kills.reduce((sum, k) => sum + k.lost, 0);
   recordBound('ackedLost', ackedLost, { runs: kills });
 
+  expect(syncVoid, `the first sync is void by load, not a bound miss: a cold trial's 1-minute load read ${VOID_LOAD} or more at its start (trials ${JSON.stringify(trials.map(({ ms, load }) => ({ ms, load: load[0] })))}); rerun the group in a quiet window (worst trial ${firstSyncMs} ms, no verdict)`).toBe(false);
   expect(firstSyncMs, `first sync of a 1 MB document, cold (trials ${JSON.stringify(trials)})`).toBeLessThan(PERF_BOUNDS.firstSyncMs);
-  expect(ackVoid, `the keystroke-to-ack window is void by load, not a bound miss: its 1-minute load read ${ackLoads[0]![0]} at the start and ${ackLoads[1]![0]} at the end (${ACK_VOID_LOAD} or more at either end voids it); rerun the group in a quiet window (p95 ${ackP95Ms} ms, no verdict)`).toBe(false);
+  expect(ackVoid, `the keystroke-to-ack window is void by load, not a bound miss: its 1-minute load read ${ackLoads[0]![0]} at the start and ${ackLoads[1]![0]} at the end (${VOID_LOAD} or more at either end voids it); rerun the group in a quiet window (p95 ${ackP95Ms} ms, no verdict)`).toBe(false);
   expect(ackP95Ms, 'keystroke to durable ack, p95').toBeLessThan(PERF_BOUNDS.ackP95Ms);
   expect(ackedLost, 'acknowledged keystrokes lost to three host SIGKILLs').toBe(PERF_BOUNDS.ackedLost);
 });
