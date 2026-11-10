@@ -1240,3 +1240,46 @@ describe('the remote setup (M9)', () => {
     expect(await l.cmd('session.projects.addFolder', { directory: '/Users/o/Documents/other' })).toMatchObject({ ok: false, error: { issues: { refusal: 'protected' } } });
   });
 });
+
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §G, "Older peers"): a machine
+// whose endpoint does not list `rl2.project-acts` in its RL2 handshake is sent none of `into`, `own`, `link`,
+// `relocate`, `resolve` or `expect`: an older endpoint could drop a field it does not know and do a plain add unsaid.
+// Each is refused here, before anything goes, `not-offered`, the refusal the page already reads for an older peer.
+describe('the project acts (the project registry)', () => {
+  const guarded: Array<[string, Record<string, unknown>]> = [
+    ['session.projects.addFolder', { directory: '/srv/a', into: 'p-1' }],
+    ['session.projects.addFolder', { directory: '/srv/a', own: true }],
+    ['session.projects.link', { id: 'p-1', into: null }],
+    ['session.projects.relocate', { id: 'p-1', directory: '/srv/b' }],
+    ['session.projects.remove', { id: 'p-1', expect: { path: '/srv/a', project: 'q-1' } }],
+    ['session.projects.resolve', { directory: '/srv/a' }],
+  ];
+
+  it('are taken by the adapter, `resolve` among them', () => {
+    const l = lab();
+    for (const name of ['session.projects.link', 'session.projects.relocate', 'session.projects.update', 'session.projects.remove', 'session.projects.resolve'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(true);
+  });
+
+  it('go to a peer that lists `rl2.project-acts`: the acts as `machine` acts, `resolve` as a call', async () => {
+    const l = lab();
+    l.link.relink(['rl2.executor.machine', 'rl2.project-acts']);
+    l.link.onAct = settleWith({ state: 'done', result: null });
+    l.link.answers.set('session.projects.resolve', () => ({ ok: true, output: { project: null, by: 'machine', at: null, label: { key: 'folder:x:a', name: 'a', source: 'folder', smnsId: null } } }));
+    for (const [name, input] of guarded) await l.cmd(name, input);
+    expect(l.link.acts.map((a) => a.request.action)).toEqual(guarded.slice(0, 5).map(([name]) => name));
+    expect(l.link.calls.filter((c) => c.name === 'session.projects.resolve')).toEqual([{ name: 'session.projects.resolve', input: { directory: '/srv/a' } }]);
+    expect(l.base).toEqual([]);
+  });
+
+  it('are refused `not-offered`, unsent, to a peer that does not; a plain add, a remove with no expectation and a rename still go', async () => {
+    const l = lab();
+    l.link.onAct = settleWith({ state: 'done', result: null });
+    for (const [name, input] of guarded) expect([name, await l.cmd(name, input)]).toMatchObject([name, { ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } }]);
+    expect(l.link.acts).toEqual([]);
+    expect(l.link.calls.filter((c) => c.name === 'session.projects.resolve')).toEqual([]);
+    await l.cmd('session.projects.addFolder', { directory: '/srv/a' });
+    await l.cmd('session.projects.remove', { id: 'p-1' });
+    await l.cmd('session.projects.update', { id: 'p-1', patch: { name: 'A' } });
+    expect(l.link.acts.map((a) => a.request.action)).toEqual(['session.projects.addFolder', 'session.projects.remove', 'session.projects.update']);
+  });
+});

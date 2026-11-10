@@ -70,6 +70,7 @@ import { requestDigestOf } from '@shared/host/request-digest';
 import type { SessionEvent } from '@shared/graph/events';
 import { ipcError, type IpcErrorCode } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
+import { PROJECT_ACTS_CAPABILITY } from '@shared/ipc/schema/session';
 import { validateCommandOutput } from '@shared/ipc/validate';
 import type { MachineRef } from '@shared/machine/ref';
 import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
@@ -81,7 +82,7 @@ import { listenLoopback, type LocalListener } from '../forwards';
 import type { MainContext, RemoteDispatch } from '../ipc/router';
 import type { LayoutFileStore } from '../layout/store';
 import { peerLists } from '../machines/remote/capabilities';
-import { callOverLink, dispatchOverLink } from '../machines/remote/dispatch';
+import { callOverLink, dispatchOverLink, refusalError } from '../machines/remote/dispatch';
 import type { ActHandle, ActOutcome, RemoteLink } from '../machines/remote/link';
 import { ArtifactMachines } from '../artifacts/machines';
 import type { ClientWindowShown } from '../client/window-shown';
@@ -242,6 +243,19 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   'session.projects.link', 'session.projects.relocate', 'session.projects.update', 'session.projects.remove', // the project registry (M9, §I's acts): the machine's owners' (`machine-admin`)
   'session.drafts.set', // P5 O8 M6a: the caller's own draft, kept per member on the machine (`converse`)
 ]);
+/**
+ * The project registry (Interfaces §G, "Older peers"): what goes only to a machine whose RL2 handshake lists
+ * `rl2.project-acts`. An older endpoint could pass by a field it does not know (`addFolder`'s `into`, `own`) and do a
+ * plain add unsaid, so each is refused here before it goes, `not-offered`, as an older peer's missing offer reads.
+ * `resolve` is the adapter's to send for that reason, as a call by name.
+ */
+const PROJECT_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.resolve']);
+const needsProjectActs = (name: CommandName, fields: Fields): boolean =>
+  name === 'session.projects.link' ||
+  name === 'session.projects.relocate' ||
+  name === 'session.projects.resolve' ||
+  (name === 'session.projects.addFolder' && (fields.into !== undefined || fields.own !== undefined)) ||
+  (name === 'session.projects.remove' && fields.expect !== undefined);
 /** Acts the endpoint always asks a step-up of, signed before the first copy goes (no round trip to be asked). */
 const STEPPED_UP: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.addFolder', 'session.projects.link', 'session.projects.relocate']);
 // P5 O7 M5c ("O4's surfaces: the grade"): the six lease reads, sent as calls by name (./remote-connectors.ts)
@@ -678,6 +692,12 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
 
   async function run(link: RemoteLink, name: CommandName, fields: Fields, ctx: MainContext): Promise<CommandResult<CommandName>> {
     const deadline = now() + timing.sendPendingMs;
+    if (needsProjectActs(name, fields)) {
+      const peers = link.peerCapabilities();
+      if (peers === null) return failure('host_unavailable', `${name}: machine ${link.name} is not reachable`);
+      if (!peers.includes(PROJECT_ACTS_CAPABILITY)) return refusalError(name, link.name, { code: 'not-offered' });
+      if (PROJECT_CALLS.has(name)) return callOverLink(link, name, fields);
+    }
     if (artifacts.handles(name)) return artifacts.dispatch(link, name, fields, ctx.client); // P5 O7 M5a; M5b: the window a document opens in
     if (PTY_NAMES.has(name)) return ptys.dispatch(link, name, fields);
     if (WATCH_COMMANDS.has(name)) return checkout.dispatch(link, name, fields, ctx);
@@ -708,7 +728,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   }
 
   return {
-    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || TARGETED_CALLS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
+    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || PROJECT_CALLS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || TARGETED_CALLS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
     async dispatch(link, name, input, ctx) {
       try {
         return await run(link, name, record(input) ?? {}, ctx);
