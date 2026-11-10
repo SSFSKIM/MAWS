@@ -1,13 +1,13 @@
 // The app's side of the connectors (P5 O4 M2, docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §B, §F;
-// D8, D28, D32). The connectors run with the spine (src/services/connectors/, `mawsd`'s on the daemon shape, main's
-// embedded root's on the embedded one); what stays in the app, composed here on both shapes:
+// D8, D28, D32). The connectors run with the spine (src/services/connectors/, in `mawsd`; P5 O15 M2: never in the app);
+// what stays in the app, composed here:
 //
 // - the window reporter (./windows.ts), whose reports go through main's own route under each page's client;
 // - the one-time adoption of the format 1 grants (./adoption.ts), once per launch: at the machine host's first streaming
-//   on the daemon shape (at once if it already streams), right away on the embedded one, whose spine is composed;
+//   (at once if it already streams);
 // - at each streaming of the machine host after the first (a restarted `mawsd`, which holds no lease and no report),
 //   every page marked unreported, then `connectors.reset` told to the windows, whose connectors clients rebuild their
-//   leases (src/renderer/src/artifacts/connectors.ts). The embedded shape never tells it. P5 O7 M5c
+//   leases (src/renderer/src/artifacts/connectors.ts). P5 O7 M5c
 //   (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md): every reset names its machine, this one this Mac's, so the
 //   renderer rebuilds only its leases (another machine's are reset by remote lane B at its link's new channel).
 // - P5 O4 (whole-branch review): the adoption is once per launch when its pass settles every record. A pass that left a
@@ -26,8 +26,8 @@ import { startWindowReporter } from './windows';
 
 export interface AppConnectorsDeps {
   local: MachineRef; // P5 O7 M5c: this Mac's machine, which the machine host's reset names
-  // the daemon shape's machine host (`mawsd`'s services front); null on the embedded shape
-  machine: { streaming(): boolean; onStreaming(listener: () => void): () => void } | null;
+  // the machine host (`mawsd`'s services front)
+  machine: { streaming(): boolean; onStreaming(listener: () => void): () => void };
   windowShown(client: ClientRef): ClientWindowShown | null; // the window that shows a page (electronWindowShown), or null
   invoke: ServicesBus['invoke']; // main's own route
   before(names: readonly CommandName[], hook: BeforeHook): () => void; // the router's seam (beforeCommand)
@@ -77,15 +77,6 @@ export function startAppConnectors({ local, machine, windowShown, invoke, before
       failed(error); // never a throw into main's startup
     }
   };
-  if (machine === null) {
-    adoptWhenDue();
-    return {
-      stop: () => {
-        stopped = true;
-        reporter.stop();
-      },
-    };
-  }
   let streamed = machine.streaming();
   if (streamed) adoptWhenDue();
   const offStreaming = machine.onStreaming(() => {

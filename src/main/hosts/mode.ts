@@ -1,30 +1,22 @@
-// Which transport carries the hosts (E10 execution document, §Design 8; P5 O2 M7, docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md,
-// M7 "The shape setting"), read once before the hosts start. `daemon`: the machine daemon, `mawsd`, owns the engine host
-// and the pty host, and main reaches both (and `mawsd`'s own `daemon` namespace) over its three relay sockets;
-// `detached`: the supervisor, a process that outlives the app, reached over a Unix socket, with the pty host a utility
-// process (the embedded shape); `utility`: both are Electron utility processes forked by main, as before E10.
-// MAWS_HOST_MODE wins; otherwise the setting `supervisor.shape` decides (daemon: `daemon`, embedded: `detached`), under
-// the e2e harness (MAWS_E2E=1) and the component harness (MAWS_HARNESS=1) as for the owner: P5 O3-B
-// (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md, O3-B) makes the shape the owner runs the shape the suites test, a
-// test launch's scratch profile getting a private `mawsd`. A suite pins MAWS_HOST_MODE only where the mode is what it
-// tests (the embedded shape's sentinels among them). Whether the daemon shape can run this launch (the default profile's
-// unit) is daemon.ts's to say.
-import type { SupervisorShape } from '@shared/ipc/schema/settings';
+// The launch's environment, read once before anything starts (E10 execution document, §Design 8; P5 O2 M7; P5 O15 M2,
+// docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, M2 "`MAWS_HOST_MODE` is retired"). Every launch that reaches
+// the app runs on the machine daemon, `mawsd`, which owns the engine host and the pty host; main reaches both (and
+// `mawsd`'s own `daemon` namespace) over its three relay sockets. MAWS_HOST_MODE, which once chose the embedded shape,
+// chooses nothing: a value other than `daemon` is said once and ignored. The helpers that strip it from a child's
+// environment keep stripping it (detached-transport.ts), since a peer build in cross-build still reads it. Whether
+// `mawsd` can start for this launch (the main profile's unit) is daemon.ts's to say.
 
-export type HostMode = 'utility' | 'detached' | 'daemon';
-const MODES: readonly string[] = ['utility', 'detached', 'daemon'] satisfies HostMode[];
+export const RETIRED_HOST_MODE = '[hosts] MAWS_HOST_MODE is retired and ignored: the app runs on mawsd';
 
-export function hostModeFromEnv(env: NodeJS.ProcessEnv, shape: SupervisorShape): HostMode {
+// The line main logs once when the environment still names a host mode; null when it names none, or `daemon`.
+export function retiredHostModeNotice(env: NodeJS.ProcessEnv): string | null {
   const asked = env.MAWS_HOST_MODE;
-  if (asked && MODES.includes(asked)) return asked as HostMode;
-  if (asked) console.warn(`[hosts] MAWS_HOST_MODE=${asked} is none of ${MODES.join(', ')}; using the default`);
-  return shape === 'daemon' ? 'daemon' : 'detached';
+  return asked && asked !== 'daemon' ? RETIRED_HOST_MODE : null;
 }
 
 // P5 O2 landing (O3's planner, P9): a launch under the e2e or the component harness belongs on a scratch profile. On
-// the default profile its plan would act on the owner's daemon: an embedded plan leaves the shape (ending the owner's
-// `mawsd` and its socket-mode pty host, their terminals and kept sessions with them), a packaged one installs or
-// uninstalls the owner's unit. So it is refused before any host work, whatever MAWS_HOST_MODE says; null lets it run.
+// the main profile its launch would act on the owner's daemon: a packaged one installs or repairs the owner's unit and
+// starts it. So it is refused before any host work; null lets it run.
 export const DEFAULT_PROFILE_REFUSAL = '[hosts] a test or harness launch (MAWS_E2E=1 or MAWS_HARNESS=1) refuses the default profile, whose daemon and LaunchAgent are the owner\'s: set MAWS_USER_DATA to a scratch profile';
 
 export function testLaunchRefusal(env: NodeJS.ProcessEnv, defaultProfile: boolean): string | null {

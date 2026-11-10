@@ -27,7 +27,7 @@ vi.mock('../ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: (
 vi.mock('../machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn(), onRemote: vi.fn(() => () => {}) /* P5 O8 M2: the rows read the roster */ })) })); // P5 O6 M3: no links, no stand-in
 vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: async () => ({ HOME: join(state.root, 'home') }) }));
 const daemonWatch = { status: () => null, refresh: () => {}, onStatus: () => () => {} };
-vi.mock('../hosts', () => ({ createHosts: () => ({ daemon: daemonWatch, hosts: { start: vi.fn(), stop: vi.fn(), dispatch: vi.fn(), onState: vi.fn(() => () => {}) /* E3: the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */, onStreaming: vi.fn(() => () => {}), streaming: vi.fn(() => false) /* P5 O4 M2: the app's connectors follow the machine host */, snapshot: () => ({ state: 'down', pid: null }), servedFd: () => null /* P5 O5 M5: the cua relay reads the machine link */ } }), prepareLaunch: () => ({ mode: 'daemon', daemon: 'private', unavailable: null }), refuseTestLaunchOnDefaultProfile: () => {} /* P5 O2 landing: a scratch-profile test launch */ /* P5 O2 M7: the launch's shape, settled at once */ }));
+vi.mock('../hosts', () => ({ createHosts: () => ({ daemon: daemonWatch, hosts: { start: vi.fn(), stop: vi.fn(), dispatch: vi.fn(), onState: vi.fn(() => () => {}) /* E3: the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */, onStreaming: vi.fn(() => () => {}), streaming: vi.fn(() => false) /* P5 O4 M2: the app's connectors follow the machine host */, snapshot: () => ({ state: 'down', pid: null }), servedFd: () => null /* P5 O5 M5: the cua relay reads the machine link */ } }), prepareLaunch: () => ({ ok: true, launch: { daemon: 'private' } }), refuseTestLaunchOnDefaultProfile: () => {} /* P5 O2 landing: a scratch-profile test launch */ /* P5 O2 M7: the launch's shape, settled at once */ }));
 // P5 O3-D M5b: the spine's mirror and the machine half's, which main reads on the daemon shape
 vi.mock('./daemon-spine', () => ({
   startDaemonSpine: () => ({ view: { on: () => () => {}, unavailable: () => 'the machine daemon is connecting', known: () => false, record: () => null, records: () => [], projects: () => [], projectRows: () => [], intents: () => [] }, forwarded: () => {}, watches: { owns: () => false, dispatch: async () => ({ ok: true, value: undefined }) }, stop: vi.fn() }),
@@ -39,7 +39,7 @@ vi.mock('../open-external', () => ({ registerOpenExternal: vi.fn() }));
 vi.mock('../attention', () => ({ startAttention: vi.fn() }));
 vi.mock('../menu', () => ({ startMenu: vi.fn(), registerMenuHandlers: vi.fn() }));
 vi.mock('../window-state', () => ({ restoreWindowState: vi.fn(), trackWindowState: vi.fn() }));
-vi.mock('../lifecycle/quit-guard', () => ({ installQuitGuard: () => ({}), askToQuit: vi.fn(), listProcesses: vi.fn(), trackUnsavedFiles: () => ({}) /* E5 */ }));
+vi.mock('../lifecycle/quit-guard', () => ({ installQuitGuard: () => ({}), askToQuit: vi.fn(), trackUnsavedFiles: () => ({}) /* E5 */ }));
 vi.mock('../usage/claude-usage-reader', () => ({ claudeUsageDir: () => '', ClaudeUsageReader: class { start() {} } }));
 vi.mock('../usage/claude-usage-control', () => ({ baseUrlFrom: () => null, ClaudeUsageControl: class {} }));
 vi.mock('../gateway/claude-usage-app', () => ({ createClaudeUsageApp: () => ({}), execRunner: vi.fn() }));

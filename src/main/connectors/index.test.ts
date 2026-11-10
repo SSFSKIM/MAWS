@@ -1,7 +1,7 @@
 // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, Interfaces §B, §F; D28, D32): the app's side of the
-// connectors, composed by main's root on both shapes over a scripted machine host: the window reporter's reports through
-// main's own route, the one-time adoption at the right moment of each shape, and `connectors.reset` at each streaming of
-// the machine host after the first (the daemon shape alone).
+// connectors, composed by main's root over a scripted machine host: the window reporter's reports through main's own
+// route, the one-time adoption at the machine host's first streaming, and `connectors.reset` at each streaming of the
+// machine host after the first. P5 O15 M2: the app runs on `mawsd` alone, so there is no shape with no machine host.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -32,18 +32,16 @@ let streams: boolean;
 let streamingListeners: Set<() => void>;
 let connectors: AppConnectors;
 
-function start(machine: boolean) {
+function start() {
   connectors = startAppConnectors({
     local: LOCAL,
-    machine: machine
-      ? {
-          streaming: () => streams,
-          onStreaming: (listener) => {
-            streamingListeners.add(listener);
-            return () => void streamingListeners.delete(listener);
-          },
-        }
-      : null,
+    machine: {
+      streaming: () => streams,
+      onStreaming: (listener) => {
+        streamingListeners.add(listener);
+        return () => void streamingListeners.delete(listener);
+      },
+    },
     windowShown: () => ({ shown: () => true, closed: () => false, onChange: () => () => {} }),
     invoke: (async (name: CommandName, input: unknown, context: HandlerContext) => {
       invoked.push({ name, input, client: context.client.id });
@@ -83,9 +81,10 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('the app’s connectors on the embedded shape', () => {
-  it('adopts the legacy grants once, at once, and reports each page’s window through main’s own route under the page’s client', async () => {
-    start(false);
+describe('the app’s window reports', () => {
+  it('report each page’s window through main’s own route under the page’s client', async () => {
+    streams = true;
+    start();
     expect(adopt).toHaveBeenCalledOnce();
     await lease();
     expect(reports()).toEqual([{ name: 'connectors.windowShown', input: { shown: true }, client: page.id }]);
@@ -93,9 +92,9 @@ describe('the app’s connectors on the embedded shape', () => {
   });
 });
 
-describe('the app’s connectors on the daemon shape', () => {
+describe('the app’s connectors over the machine host', () => {
   it('adopts at the machine host’s first streaming alone, and tells the windows connectors.reset at each one after it', async () => {
-    start(true);
+    start();
     expect(adopt).not.toHaveBeenCalled();
     stream();
     expect(adopt).toHaveBeenCalledOnce();
@@ -108,14 +107,14 @@ describe('the app’s connectors on the daemon shape', () => {
 
   it('adopts at once when the machine host already streams, and resets at its next streaming', () => {
     streams = true;
-    start(true);
+    start();
     expect(adopt).toHaveBeenCalledOnce();
     stream();
     expect(emitted).toEqual([RESET]);
   });
 
   it('marks every page unreported at a reset, so a rebuilt lease’s first command reports its window first', async () => {
-    start(true);
+    start();
     stream();
     await lease();
     await lease();
@@ -129,7 +128,7 @@ describe('the app’s connectors on the daemon shape', () => {
 
   it('says so when the adoption fails, and never throws', async () => {
     adopt.mockRejectedValueOnce(new Error('the legacy directory could not be read'));
-    start(true);
+    start();
     stream();
     await vi.waitFor(() => expect(logged).toEqual([expect.stringContaining('the legacy directory could not be read')]));
   });
@@ -138,7 +137,7 @@ describe('the app’s connectors on the daemon shape', () => {
   // restarts it; that daemon answers `connectors.adoptGrant` unknown_command, so the pass runs again when the O4 one streams.
   it('adopts again at the next streaming when the machine could not take a record yet, besides the reset', async () => {
     adopt.mockResolvedValueOnce({ retry: true });
-    start(true);
+    start();
     stream(); // the pre-O4 mawsd
     await vi.advanceTimersByTimeAsync(0);
     expect(adopt).toHaveBeenCalledOnce();
@@ -153,7 +152,7 @@ describe('the app’s connectors on the daemon shape', () => {
 
   it('never adopts again after a pass the sealer stopped, or one that failed', async () => {
     adopt.mockResolvedValueOnce({ adopted: 0, left: 1, stopped: true, retry: false } as never);
-    start(true);
+    start();
     stream();
     await vi.advanceTimersByTimeAsync(0);
     stream();
@@ -164,7 +163,7 @@ describe('the app’s connectors on the daemon shape', () => {
     adopt.mockRejectedValueOnce(new Error('the legacy directory could not be read'));
     streamingListeners.clear();
     streams = false;
-    start(true);
+    start();
     stream();
     await vi.advanceTimersByTimeAsync(0);
     stream();
@@ -174,7 +173,7 @@ describe('the app’s connectors on the daemon shape', () => {
   it('runs a pass the machine could not complete again at once when the machine host streamed while it ran', async () => {
     let finish!: (value: { retry: boolean }) => void;
     adopt.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
-    start(true);
+    start();
     stream();
     stream(); // restarted while the first pass waits (on the Keychain's prompt, say)
     expect(adopt).toHaveBeenCalledOnce(); // never two passes at once
@@ -190,7 +189,7 @@ describe('the app’s connectors on the daemon shape', () => {
   it('at stop, runs no pass again', async () => {
     let finish!: (value: { retry: boolean }) => void;
     adopt.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
-    start(true);
+    start();
     stream();
     stream();
     connectors.stop();
@@ -201,7 +200,7 @@ describe('the app’s connectors on the daemon shape', () => {
   });
 
   it('at stop, hears no streaming and stands before no command', () => {
-    start(true);
+    start();
     connectors.stop();
     stream();
     expect(adopt).not.toHaveBeenCalled();

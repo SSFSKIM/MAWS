@@ -1,7 +1,8 @@
 // The services library's boundary (P5 O3-C, docs/doperpowers/plans/2026-10-28-p5-o3-c-spine-library.md, Interfaces §E),
 // proven by linting scratch sources at paths the repository's eslint.config.js governs, as test/artifacts/portability.test.ts
 // does. Rule A: src/services/ imports nothing from main, mawsd, the renderer or the preload, nor Electron. Rule B:
-// nothing under src/main/ but its root imports from src/services/; staying code reads the spine through the view.
+// nothing under src/main/ but its root imports from src/services/; staying code reads the spine through the view. P5 O15
+// M2: the root imports the command budgets alone, and nothing of the app imports the services' composition.
 import { resolve } from 'node:path';
 import { ESLint } from 'eslint';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -63,15 +64,26 @@ describe('rule B: staying code reads the spine only through the view', () => {
     expect(await rulesFired("import type { SpineView } from '@shared/spine/view';\nexport type V = SpineView;\n", CLIENT)).toEqual([]);
   });
 
-  // M4: main's root reaches the library through its one door, the services entry
-  it("holds main's root to the services entry", async () => {
-    expect(await rulesFired("import { startSpine } from '../services/entry';\nexport const s = startSpine;\n", 'src/main/app.ts')).toEqual([]);
-    expect(await rulesFired("import type { SpineData } from '../services/entry';\nexport type D = SpineData;\n", 'src/main/app.ts')).toEqual([]);
+  // P5 O15 M2 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, M2 "The absence checks"): the app composes none
+  // of the machine's services; main's root takes of the library only the command budgets its `machine` host applies
+  it("holds main's root to the command budgets: the services' composition is mawsd's alone", async () => {
+    expect(await rulesFired("import { COMMAND_BUDGETS_MS } from '../services/command-budgets';\nexport const b = COMMAND_BUDGETS_MS;\n", 'src/main/app.ts')).toEqual([]);
+    for (const root of ['entry', 'spine-root', 'checkouts-root']) {
+      expect(await rulesFired(`import { x } from '../services/${root}';\nexport const s = x;\n`, 'src/main/app.ts'), root).toEqual(['no-restricted-imports']);
+      expect(await rulesFired(`import type { X } from '../services/${root}';\nexport type S = X;\n`, 'src/main/app.ts'), `${root}, a type`).toEqual(['no-restricted-imports']);
+      expect(await rulesFired(`export * from '../services/${root}';\n`, 'src/main/app.ts'), `${root}, re-exported`).toEqual(['no-restricted-imports']);
+    }
     expect(await rulesFired("import { Index } from '../services/index/index';\nexport const i = Index;\n", 'src/main/app.ts')).toEqual(['no-restricted-imports']);
-    expect(await rulesFired("import { startSpine } from '../services/spine-root';\nexport const s = startSpine;\n", 'src/main/app.ts')).toEqual(['no-restricted-imports']);
-    expect(await rulesFired("import { entry } from '../services/entry/x';\nexport const e = entry;\n", 'src/main/app.ts')).toEqual(['no-restricted-imports']);
     // P5 O5: the entry (index.ts) is not the root, so it reads the library no more than any staying file does
     expect(await rulesFired("import { startSpine } from '../services/entry';\nexport const s = startSpine;\n", 'src/main/index.ts')).toEqual(['no-restricted-imports']);
+  });
+
+  it.each(['src/preload/__lint_fixture__.ts', 'src/renderer/src/__lint_fixture__.tsx'])('refuses the services’ composition at %s, directly or re-exported', async (file) => {
+    const up = file.startsWith('src/preload/') ? '../services' : '../../services';
+    for (const root of ['entry', 'spine-root', 'checkouts-root']) {
+      expect(await rulesFired(`import { x } from '${up}/${root}';\nexport const s = x;\n`, file), root).toEqual(['no-restricted-imports']);
+      expect(await rulesFired(`export * from '${up}/${root}';\n`, file), `${root}, re-exported`).toEqual(['no-restricted-imports']);
+    }
   });
 
   it("leaves the client's suites free to import the library", async () => {

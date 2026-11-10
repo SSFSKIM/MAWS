@@ -46,8 +46,11 @@ const CLIENT_PORT_DYNAMIC = { selector: 'ImportExpression[source.value=/^(?:elec
 // (the spine O3-D moves into mawsd and the checkouts O3-E moves), is composed by its roots from injected dependencies.
 // Rule A: it imports nothing from main, mawsd, the renderer or the preload, nor Electron. Rule B: nothing under
 // src/main/ but its root imports from it; staying code reads the spine through the view. Tests are exempt from rule B
-// (a suite may drive both halves); src/main/app.ts, the root (src/main/index.ts until P5 O5's entry split), imports the
-// services entry alone (M4).
+// (a suite may drive both halves). P5 O15 M2 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, M2 "The absence
+// checks"): the app composes none of the machine's services, so src/main/app.ts, the root, imports of the library only
+// the command budgets its `machine` host applies, and nothing of the app (main, the preloads, the renderer) imports the
+// services' composition: spine-root, the entry, checkouts-root. The bundle check (src/engine-host/bundle-guard.test.ts)
+// holds the built graph to it, re-exports and all.
 const SERVICES_BOUNDARY = {
   regex: '^(\\.\\./)+(main|mawsd|renderer|preload)(/|$)',
   message: 'The services library (src/services/, P5 O3-C rule A) imports nothing from main, mawsd, the renderer or the preload: it takes its commands, intercepts and events through the injected ServicesBus (@shared/spine/bus), and staying code reads it through SpineView (@shared/spine/view).',
@@ -56,9 +59,13 @@ const READ_THROUGH_VIEW = {
   regex: '^(\\.\\./)+services(/|$)',
   message: "Staying code reads the spine only through SpineView (@shared/spine/view; P5 O3-C rule B): nothing under src/main/ but main's root imports from src/services/.",
 };
-const ROOT_THROUGH_ENTRY = {
-  regex: '^\\.\\./services/(?!entry$)',
-  message: "Main's root reaches the services library only through its entry, ../services/entry (P5 O3-C rule B): the roots' view, the checkouts' file reads and the stop functions are all it holds of the library.",
+const ROOT_BUDGETS_ONLY = {
+  regex: '^\\.\\./services/(?!command-budgets$)',
+  message: "Main's root imports of the services library only ../services/command-budgets (P5 O3-C rule B; P5 O15 M2): the machine's services run in mawsd, never in the app.",
+};
+const SERVICE_COMPOSITION = {
+  regex: '(?:^|/)services/(?:spine-root|entry|checkouts-root)(?:\\.ts)?$',
+  message: "The app imports none of the services' composition (spine-root, the services entry, checkouts-root): the machine's services run in mawsd alone (P5 O15 M2).",
 };
 // P5 O3-C end
 // P5 O10 start (docs/doperpowers/plans/2026-10-27-p5-o10-endpoint.md, Constraints, "The module"): the endpoint module is
@@ -181,11 +188,17 @@ module.exports = defineConfig(
     ignores: ['src/main/**/*.test.{ts,tsx}', 'src/main/app.ts'],
     rules: { 'no-restricted-imports': ['error', { patterns: [...YJS_PATTERNS, ...ENDPOINT_PATTERNS, READ_THROUGH_VIEW] }] },
   },
-  // P5 O3-C (M4): rule B over main's root, narrowed to the services entry (P5 O5: the root is app.ts, the entry index.ts
-  // imports nothing of the library)
+  // P5 O3-C (M4): rule B over main's root (P5 O5: the root is app.ts, the entry index.ts imports nothing of the library),
+  // narrowed by P5 O15 M2 to the command budgets
   {
     files: ['src/main/app.ts'],
-    rules: { 'no-restricted-imports': ['error', { patterns: [...YJS_PATTERNS, ...ENDPOINT_PATTERNS, ROOT_THROUGH_ENTRY] }] },
+    rules: { 'no-restricted-imports': ['error', { patterns: [...YJS_PATTERNS, ...ENDPOINT_PATTERNS, ROOT_BUDGETS_ONLY] }] },
+  },
+  // P5 O15 M2: the preloads and the renderer import none of the services' composition either
+  {
+    files: ['src/preload/**/*.{ts,tsx}', 'src/renderer/**/*.{ts,tsx}'],
+    ignores: ['src/**/*.test.{ts,tsx}'],
+    rules: { 'no-restricted-imports': ['error', { patterns: [...YJS_PATTERNS, ...ENDPOINT_PATTERNS, SERVICE_COMPOSITION] }] },
   },
   {
     files: ['src/artifacts/**/*.{ts,tsx}'],

@@ -18,15 +18,15 @@
 // `globalThis.__maws_captures` runs a capture in main directly (no IPC command exists for it).
 //
 // P5 O5 M2 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, Interfaces §A, §D): the scheme's serving is the plain-Node
-// library's (src/services/artifacts/scheme/) and its Electron half src/render/scheme.ts. On the daemon shape the two
-// sessions' handler goes through the scheme proxy to `mawsd`'s artifact endpoint (`artifactsSocket`) for each request
-// made while the daemon's welcome lists `machine.artifacts`, and serves the store's files in main otherwise (an older
-// daemon, or none welcomed yet); the presenter's embeds answer first either way.
+// library's (src/services/artifacts/scheme/) and its Electron half src/render/scheme.ts. The two sessions' handler goes
+// through the scheme proxy to `mawsd`'s artifact endpoint (`artifactsSocket`) for each request made while the daemon's
+// welcome lists `machine.artifacts`, and serves the store's files in main otherwise (an older daemon, or none welcomed
+// yet); the presenter's embeds answer first either way.
 //
 // P5 O5 M3 (Interfaces §A, M3's "One library, two roots"): the capture and export code is the render library
-// (src/render/), which this, the embedded root, composes in-process (`composeRender`) as main always did, answering its
-// engine host's `maws.artifact.capture` and `maws.artifact.export` and registering `artifacts.export` over it; the render
-// host composes the same library in a windowless process. The frame and permission policies stay main's to apply to
+// (src/render/), which main composes in-process (`composeRender`), answering an older daemon's engine host's
+// `maws.artifact.capture` and `maws.artifact.export` and registering `artifacts.export` over it; the render host
+// composes the same library in a windowless process. The frame and permission policies stay main's to apply to
 // its own windows, imported from where the library keeps them.
 //
 // P5 O7 M5b (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5's "The `http` stream"): the chain asks the
@@ -36,9 +36,9 @@
 // another machine serves), so a referrer never takes a local artifact elsewhere.
 //
 // P5 O5 M4 (M4's "`artifacts.export` becomes `machine`"): the command is machine-owned, registered here through
-// `registerMachine`, which the router runs on the embedded shape and, on the daemon shape, only while the attached `mawsd`
-// does not render (an older daemon; the router's fallback). A post-O5 `mawsd` posts its engine host's capture and export
-// requests to no client, so the listeners below answer only an embedded engine host's or an older daemon's.
+// `registerMachine`, which the router runs only while the attached `mawsd` does not render (an older daemon; the router's
+// fallback). A post-O5 `mawsd` posts its engine host's capture and export requests to no client, so the listeners below
+// answer only an older daemon's. P5 O15 M2: the embedded shape, which answered them too, is gone.
 import { MessageChannelMain, session, type BrowserWindow } from 'electron';
 import type { CommandInput, CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 import type { HostSupervisor } from '../hosts/supervisor';
@@ -65,7 +65,7 @@ export interface ArtifactsDeps {
   env: Record<string, string | undefined>;
   openWindow(): BrowserWindow; // the e2e seam's second window
   root: string; // P3-A M7: `<userData>/artifacts`, where the library's exports are written
-  artifactsSocket: string | null; // P5 O5 M2: the daemon shape's `mawsd` artifacts.sock, proxied to while its welcome lists machine.artifacts; null on the embedded shape
+  artifactsSocket: string; // P5 O5 M2: `mawsd`'s artifacts.sock, proxied to while its welcome lists machine.artifacts
   authors?: DocumentAuthorDeps; // P5 O5 M3: a document's Word comment authors (WR 73), the root's to read
   remote?: RemoteResponder; // P5 O7 M5b: the scheme's remote responder (./remote-scheme.ts): after the embeds, and after a local 404
 }
@@ -88,7 +88,7 @@ export function startArtifacts({ hosts, register, registerMachine, emit, env, op
   const content: ContentLookup = (input) => call('artifacts.content', input);
   const embeds = presentationEmbeds(call); // P3-C M6: the presenter's live embeds, under their own policy (Decision Log 18)
   // P5 O5 M2: read per request, so a daemon restarted into another build is followed (the build check's restart)
-  const endpoint = artifactsSocket === null ? undefined : () => (hosts.peer('machine')?.capabilities.includes(MACHINE_ARTIFACTS_CAPABILITY) ? { socketPath: artifactsSocket } : null);
+  const endpoint = () => (hosts.peer('machine')?.capabilities.includes(MACHINE_ARTIFACTS_CAPABILITY) ? { socketPath: artifactsSocket } : null);
   // P5 O7 M5b: the embeds, the remote responder by placement, this Mac's store (or its daemon's), the remote responder by referrer
   const first = remote === undefined ? embeds : inOrder(embeds, (request) => remote(request, 'placed'));
   const notFound = remote === undefined ? undefined : (request: Request) => remote(request, 'referred');

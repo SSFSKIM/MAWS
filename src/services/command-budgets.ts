@@ -1,9 +1,9 @@
 // The spine's commands whose own waits run past a host request's 10 s (REQUEST_TIMEOUT_MS), each with the budget that
-// covers them (the panel's sweep#3 on P5 O3-D). On the daemon shape main reaches these commands through its `machine`
-// host, whose spec carries this table (src/main/hosts/daemon.ts), so a take-over whose `claude stop` takes 11 s is
-// answered as mawsd finishes it rather than `timeout` while mawsd goes on; in the embedded shape they run in main
-// with no deadline of their own. A command not named here answers within the default: its own work is short, and
-// only stalled inner host calls (each bounded at 10 s) take it past that.
+// covers them (the panel's sweep#3 on P5 O3-D). Main reaches these commands through its `machine` host, whose spec
+// carries this table (src/main/hosts/daemon.ts), so a take-over whose `claude stop` takes 11 s is answered as mawsd
+// finishes it rather than `timeout` while mawsd goes on. A command not named here answers within the default: its own
+// work is short, and only stalled inner host calls (each bounded at 10 s) take it past that. P5 O15 M2: main's root
+// imports this module of the library and no other (lint rule B).
 import { CONNECTOR_OPERATION_DEADLINE_MS } from '@shared/artifacts/connectors';
 import { REQUEST_TIMEOUT_MS } from '@shared/host/host-supervisor';
 import type { CommandName } from '@shared/ipc/schema';
