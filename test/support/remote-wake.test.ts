@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PipeRequest } from './loopback-pipe';
 import type { LogLine } from './main-log';
-import { linkPending, loadVoid, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, wakeMisses, wakeSummary, type WakeInput } from './remote-wake';
+import { linkPending, loadVoid, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, wakeMisses, wakeSummary, type WakeInput } from './remote-wake';
 
 const REF = 'Bref0123456789abcdef';
 const APPS = ['app-1', 'app-2'];
@@ -121,6 +121,10 @@ describe('a run', () => {
     expect(wakeSummary(record)).toBe("[remote-wake] direct: up 200 ms and last subbed 300 ms after the restore; feed connected 400 ms and last listings page 600 ms after the hub's restore; 1 upgrade, 1 feed open");
   });
 
+  it('whose evidence could not be read still has its line', () => {
+    expect(unavailableSummary('relay', 'ENOENT: no such file')).toBe("[remote-wake] relay: evidence unavailable: main.log, B's logs or the pipes could not be read (ENOENT: no such file)");
+  });
+
   it('that passes on the relay reads as one, the hub’s restore being the restore', () => {
     const { record, failures } = readWake(passing('relay'));
     expect(failures).toEqual([]);
@@ -186,6 +190,8 @@ describe('a run', () => {
     }
     const early = input.main.map((l) => (l.text.includes('subscription s2 session B:app-2: first event after subbed') ? { ...l, at: at(82.29) } : l));
     expect(failuresOf({ ...input, main: early })).toEqual(['direct: subscription s2 (session B:app-2) has no first event after subbed line after its subbed']);
+    const snapshot = input.main.map((l) => (l.text.includes('subscription s1 session B:app-1: first event after subbed') ? { ...l, text: l.text.replace('first event after subbed', 'first snapshot after subbed') } : l));
+    expect(failuresOf({ ...input, main: snapshot })).toEqual(['direct: subscription s1 (session B:app-1) has no first event after subbed line after its subbed']);
     const repeated = input.main.map((l) => (l.text.includes('subscription s1 session B:app-1: first event') ? { ...l, text: l.text.replace('at L1:311:0', 'at L1:310:4') } : l));
     expect(failuresOf({ ...input, main: repeated })).toEqual(["direct: subscription s1 (session B:app-1)'s first event after subbed is at L1:310:4, not after L1:310:4, the cursor it held"]);
   });

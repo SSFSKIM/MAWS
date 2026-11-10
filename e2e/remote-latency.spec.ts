@@ -42,7 +42,7 @@ import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 import { LATENCY_STUB, markerOf, writeLatencyEngine } from '../test/support/latency-engine';
 import { parseLogText, readLogLines } from '../test/support/main-log';
 import { boundsOf, budgetMisses, CARRIERS, invalidReasons, loadVerdict, remoteLine, rttStats, type Bounds, type Carrier, type Exchange, type RemoteMeasures } from '../test/support/remote-latency';
-import { linkPending, loadVoid, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, WAKE_CASE, wakeMisses, wakeSummary, type WakeRecord } from '../test/support/remote-wake';
+import { linkPending, loadVoid, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, WAKE_CASE, wakeMisses, wakeSummary, type WakeRecord } from '../test/support/remote-wake';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { cleanupAll, lastTurn, linkOf, localCase, main, measureTurns, now, openToFirstRow, pings, probe, prompt, raw, roundTrips, statsOf, trust, TURN_MS, writtenOf, type CaseResult } from './support/remote-latency-page';
 import { startRemoteScene, type RemoteScene } from './support/remote-scene';
@@ -415,6 +415,7 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
   let a: MawsLaunch | null = null;
   type CarrierRecord = WakeRecord & { linkBeforeWake: string; turns: { app: string; lastSeen: number; lastWritten: number }[] };
   const records: Partial<Record<Carrier, CarrierRecord>> = {};
+  const unavailable: Partial<Record<Carrier, string>> = {}; // a launch whose every final read of its evidence failed, and why
   const failures: string[] = [];
   try {
     scene = await startRemoteScene({ scratch: join(root, 'scene'), aUserData, directPipe: true, b: { env: { MAWS_E2E_ENGINE_BIN: bBin }, prepare: trust(checkout) } });
@@ -516,7 +517,8 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
       });
       const final = await within(() => readWake(inputOf()), (wake) => wake.failures.length === 0, READ_WITHIN_MS);
       if (final.last === null) {
-        failures.push(`${carrier}: main.log, B's logs or the pipes could not be read: ${final.error ?? 'no answer'}`, ...panes);
+        unavailable[carrier] = final.error ?? 'no answer';
+        failures.push(`${carrier}: main.log, B's logs or the pipes could not be read: ${unavailable[carrier]}`, ...panes);
         await a.cleanup();
         a = null;
         continue;
@@ -535,7 +537,8 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
 
   const voids = loadVoid(loads, terminalLoad ?? null);
   const misses = CARRIERS.flatMap((c) => (records[c] === undefined ? [] : wakeMisses(records[c]!)));
-  const lines = CARRIERS.flatMap((c) => (records[c] === undefined ? [] : [wakeSummary(records[c]!)]));
+  // a line for each carrier whose launch reached its reads: its summary, or that its evidence was unavailable
+  const lines = CARRIERS.flatMap((c) => (records[c] !== undefined ? [wakeSummary(records[c]!)] : unavailable[c] !== undefined ? [unavailableSummary(c, unavailable[c]!)] : []));
   const load = loadVerdict(loads, terminalLoad ?? null);
   const info = test.info();
   mkdirSync(info.project.outputDir, { recursive: true });
@@ -543,7 +546,7 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
     lines, mode: CHECK ? 'check' : 'perf', valid: voids.length === 0, sha: process.env.GITHUB_SHA ?? null, runId: process.env.GITHUB_RUN_ID ?? null,
     bounds: { linkWithinMs: WAKE_CASE.linkWithinMs, feedWithinMs: WAKE_CASE.feedWithinMs }, invalidReasons: voids, failures, boundMisses: misses,
     load: { samples: loads, terminal: terminalLoad ?? null, peak: load.peak, pair: load.pair },
-    direct: records.direct ?? null, relay: records.relay ?? null,
+    direct: records.direct ?? null, relay: records.relay ?? null, unavailable,
   }, null, 2)}\n`);
   for (const line of lines) {
     console.log(line);

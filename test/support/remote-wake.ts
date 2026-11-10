@@ -191,7 +191,8 @@ export function readWake(input: WakeInput): { record: WakeRecord; failures: stri
     // B's read for the resume starts at the row before the cursor (`afterSeq: seq - 1`, src/shared/host/stream-catchup.ts)
     const reads = stream === null ? [] : journal.filter((r) => r.line.app === stream && r.at >= restoredAt);
     const read = heldAt === null ? reads[0] : reads.find((r) => r.line.after === heldAt.seq - 1);
-    const first = answer === undefined ? undefined : firsts.find((r) => r.line.id === id && r.at >= answer.at);
+    // a stream's content resumes with an event after its replay; a feed's with its snapshot, recorded only
+    const first = answer === undefined ? undefined : firsts.find((r) => r.line.id === id && r.at >= answer.at && (stream === null || r.line.delivery === 'event'));
     subscriptions.push({
       id,
       what,
@@ -308,6 +309,11 @@ export function placeOfEvent(app: string, id: string): string | null {
   if (!id.startsWith(`${app}:`)) return null;
   const match = /^(.+):(\d+):(\d+)$/.exec(id.slice(app.length + 1));
   return match === null ? null : `${match[1]!}:${Number(match[2])}:${Number(match[3])}`;
+}
+
+/** The job log's line for a carrier whose launch left no record: every final read of its evidence failed. */
+export function unavailableSummary(carrier: Carrier, why: string): string {
+  return `[remote-wake] ${carrier}: evidence unavailable: main.log, B's logs or the pipes could not be read (${why})`;
 }
 
 /** Each marker `text` shows other than exactly once, with its count. */
