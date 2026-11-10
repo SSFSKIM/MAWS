@@ -12,6 +12,7 @@ import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { replayedSession } from './conformance/session-harness';
 import type { EngineSession } from './session'; // P5 O15 M2b (§L)
+import { parseStdoutLine, type EngineTransport } from './transport'; // P5 O15 M2b (Decision Log 25)
 import { JOURNAL_MAX_BYTES, JournalReader, JournalWriter } from './journal';
 import { Normalizer } from './normalizer';
 import { BATCH_BYTES, CHECKPOINT_BYTES, CHECKPOINT_SPARSE_EVERY, CHECKPOINTS_DENSE, CHECKPOINTS_MAX, SessionStream, type Checkpoint } from './session-stream';
@@ -48,8 +49,9 @@ function recorder() {
 
 // A live run of pass1/reads (its one turn; the replay ends at the first read) journaled to disk by the production
 // writer, and the events it produced. P5 O15 M2b (§L): `live` gives the session a checkpoint interval and takes what
-// it hands its stream; `maxBytes` the writer's rotation size; `beforeSend` acts on the ready session before the turn.
-async function recordedInit(live: { checkpointRows: number; maxBytes: number; checkpoint: (c: Checkpoint) => void; beforeSend?: (session: EngineSession) => void } | null = null): Promise<{ events: SessionEvent[]; launchId: string; sessionId: string; appSessionId: AppSessionId; status: EngineSessionStatus; journalPath: string }> {
+// it hands its stream; `maxBytes` the writer's rotation size; `beforeSend` acts on the ready session before the turn;
+// `wrap` stands between the replay and the session (Decision Log 25: an engine line rewritten); `log` the session's.
+async function recordedInit(live: { checkpointRows: number; maxBytes: number; checkpoint: (c: Checkpoint) => void; beforeSend?: (session: EngineSession) => void; wrap?: (t: EngineTransport) => EngineTransport; log?: (message: string) => void } | null = null): Promise<{ events: SessionEvent[]; launchId: string; sessionId: string; appSessionId: AppSessionId; status: EngineSessionStatus; journalPath: string }> {
   const writer = new JournalWriter(dir, 'LAUNCHS1', { maxBytes: live?.maxBytes ?? JOURNAL_MAX_BYTES });
   const run = await replayedSession('pass1', 'reads', (row, { session, ready, fixture, transport }) => {
     const frame = row.frame as { type: string };
@@ -60,7 +62,8 @@ async function recordedInit(live: { checkpointRows: number; maxBytes: number; ch
       });
     } else transport.kill('SIGTERM');
   }, {
-    session: { journal: writer, ...(live && { checkpointRows: live.checkpointRows }) },
+    session: { journal: writer, ...(live && { checkpointRows: live.checkpointRows }), ...(live?.log && { log: live.log }) },
+    ...(live?.wrap && { wrap: live.wrap }),
     beforeStart: (o) => {
       if (live) o.session.on('checkpoint', live.checkpoint);
     },
@@ -936,6 +939,58 @@ describe('checkpoints: a journal read starts near its cursor and answers as the 
       expect(answer.events.map((e) => [e.id, e.seq])).toEqual(events.filter((e) => e.seq! > cursor).map((e) => [e.id, e.seq]));
     }
   });
+
+  // Decision Log 25: the journal writes a parsed frame back with JSON.stringify, which writes a negative zero as `0` and
+  // an index past a double's range (`1e400`, read as Infinity) as `null`. A live normaliser that read such a line holds
+  // what no scan of the journal holds, so from that line on its launch takes no live checkpoint (one host.log line
+  // says so), and reads begin at the checkpoints taken before it or at scans' own, which agree with the journal.
+  for (const [literal, what] of [['1e400', "an index past a double's range"], ['-0', 'a negative zero index']] as const) {
+    it(`a launch whose engine line holds ${what} takes no live checkpoint from that line on, and every read answers as a full scan`, async () => {
+      const live: Checkpoint[] = [];
+      const logs: string[] = [];
+      let rewritten = 0;
+      // every stream event of the first block (index 0) as the engine would have written it with the literal
+      const wrap = (inner: EngineTransport): EngineTransport => ({
+        ...inner,
+        pid: inner.pid,
+        exited: inner.exited,
+        stderr: inner.stderr,
+        write: (frame) => inner.write(frame),
+        endInput: () => inner.endInput(),
+        kill: (signal) => inner.kill(signal),
+        frames: {
+          async *[Symbol.asyncIterator]() {
+            for await (const item of inner.frames) {
+              if (item.error !== null || !item.raw.startsWith('{"type":"stream_event"') || !/"index":0[,}]/.test(item.raw)) yield item;
+              else {
+                rewritten += 1;
+                yield parseStdoutLine(item.raw.replace(/"index":0([,}])/, `"index":${literal}$1`));
+              }
+            }
+          },
+        },
+      });
+      const { launchId, sessionId, appSessionId, journalPath } = await recordedInit({ checkpointRows: 1, maxBytes: JOURNAL_MAX_BYTES, checkpoint: (c) => live.push(c), wrap, log: (message) => logs.push(message) });
+      const rows = readFileSync(journalPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { seq: number; direction: string; frame: { type?: string; event?: { type?: string; index?: unknown } } });
+      const blockEvents = rows.filter((r) => r.direction === 'in' && r.frame.type === 'stream_event' && r.frame.event?.type?.startsWith('content_block_') === true && r.frame.event!.index !== 1);
+      expect(rewritten).toBeGreaterThan(2);
+      expect(blockEvents).toHaveLength(rewritten);
+      expect(blockEvents.map((r) => r.frame.event!.index), 'what the journal wrote back').toEqual(blockEvents.map(() => (literal === '1e400' ? null : 0)));
+      const first = blockEvents[0]!.seq;
+      expect(logs.filter((m) => m.startsWith('live checkpoints off'))).toEqual([`live checkpoints off for launch ${launchId} at seq ${first}: an engine line holds a number the journal writes otherwise`]);
+      const lastSeq = rows.at(-1)!.seq;
+      expect(lastSeq).toBeGreaterThan(first + 5);
+      expect(live.length, 'live checkpoints up to the line').toBe(first - 1);
+      expect(live.every((c) => c.through < first)).toBe(true);
+      const options = { appSessionId, launchId, sessionId: sessionId as never, journalPath, emit: recorder().emit, historyThrough: lastSeq };
+      const today = new SessionStream({ ...options, checkpointRows: NONE });
+      for (let cursor = lastSeq; cursor >= 0; cursor -= 1) {
+        const fed = new SessionStream({ ...options, checkpointRows: 1 }); // the live ones, and its own scans' at every row
+        for (const c of live) fed.checkpoint(c);
+        expect(await fed.snapshot(cursor, 3), `after ${cursor}`).toStrictEqual(await today.snapshot(cursor, 3));
+      }
+    });
+  }
 
   it('keeps every boundary of the newest dense region, one in eight of the older, at most forty, the oldest first to go', async () => {
     const journal = shapedJournal();

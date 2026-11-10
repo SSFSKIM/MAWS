@@ -151,6 +151,61 @@ export class JournalWriter {
   }
 }
 
+// The characters numbersReadBack reads, by code unit.
+const QUOTE = 0x22; // "
+const BACKSLASH = 0x5c;
+const MINUS = 0x2d;
+const PLUS = 0x2b;
+const DOT = 0x2e;
+const DIGIT_0 = 0x30;
+const DIGIT_9 = 0x39;
+const LOWER_E = 0x65;
+const UPPER_E = 0x45;
+
+// P5 O15 M2b (§L; Decision Log 25): whether every value of an engine line's JSON reads back from the journal as the
+// engine host read it. The journal writes the parsed frame with JSON.stringify, which writes each finite number as the
+// shortest text that parses back to the same double, and every string, key and structure so that it parses back the
+// same; the two values it changes are a negative zero (written `0`) and an overflow to ±Infinity (written `null`). So a
+// line reads back unchanged unless one of its number tokens parses to one of those. One pass: a string literal is
+// jumped over to its closing quote (`indexOf`, past escaped quotes) and never looked inside, so a `-0`, an exponent or
+// a long digit run in the text of a message, a path or an id is not a number; a token is parsed only when it could be
+// one of the two (an exponent, a leading `-0`, or more than 300 characters, the least an overflow without an exponent
+// needs). A long digit run and a positive underflow to 0 are not among them: both read back as the same double.
+export function numbersReadBack(line: string): boolean {
+  const end = line.length;
+  let i = 0;
+  while (i < end) {
+    const c = line.charCodeAt(i);
+    if (c === QUOTE) {
+      let close = line.indexOf('"', i + 1);
+      while (close !== -1 && escapedAt(line, close)) close = line.indexOf('"', close + 1);
+      if (close === -1) return true; // no JSON: JSON.parse refused it before any row was written
+      i = close + 1;
+    } else if (c === MINUS || (c >= DIGIT_0 && c <= DIGIT_9)) {
+      let k = i + 1;
+      let exponent = false;
+      for (; k < end; k += 1) {
+        const d = line.charCodeAt(k);
+        if (d === LOWER_E || d === UPPER_E) exponent = true;
+        else if (!((d >= DIGIT_0 && d <= DIGIT_9) || d === DOT || d === PLUS || d === MINUS)) break;
+      }
+      if (exponent || k - i > 300 || (c === MINUS && line.charCodeAt(i + 1) === DIGIT_0)) {
+        const value = Number(line.slice(i, k)); // the same double JSON.parse made of the token
+        if (value === 0 ? Object.is(value, -0) : !Number.isFinite(value)) return false;
+      }
+      i = k;
+    } else i += 1;
+  }
+  return true;
+}
+
+// A quote preceded by an odd run of backslashes is escaped.
+function escapedAt(line: string, quote: number): boolean {
+  let run = 0;
+  for (let p = quote - 1; p >= 0 && line.charCodeAt(p) === BACKSLASH; p -= 1) run += 1;
+  return run % 2 === 1;
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Reading
 

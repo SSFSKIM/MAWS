@@ -70,6 +70,7 @@ describe('extract', () => {
     'warn: [engine-host] session.events app-0f3a after 120: from the journal, 6521 rows read in 31 ms',
     'warn: [engine-host] session.events app-0f3a after start: from the journal, 6521 rows read in 29 ms, from the checkpoint at seq 6000',
     'warn: [engine-host] checkpoint app-0f3a launch L2 at seq 6000: 18432 bytes; 2 held, 36864 bytes',
+    'warn: [engine-host] app-0f3a: live checkpoints off for launch L2 at seq 6001: an engine line holds a number the journal writes otherwise',
   ];
   const NOT_EVIDENCE = [
     '[main] the quit guard could not save /Users/someone/Documents/notes.md: EACCES',
@@ -77,6 +78,7 @@ describe('extract', () => {
     '[machines] m-mini: a state the endpoint sent did not advance the view: unexpected token',
     '[endpoint] endpoint: connected to the hub (generation 4)',
     '[org-feed] socket error: read ECONNRESET',
+    'warn: [engine-host] app-0f3a: journal write failed: ENOSPC, write /Users/someone/Library/engine-host/journal/x.jsonl; ending the process',
   ];
   const at = (i: number) => new Date(Date.UTC(2026, 10, 10, 3, 0, 0) + i * 10).toISOString();
 
