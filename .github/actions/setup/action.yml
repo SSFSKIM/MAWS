@@ -19,6 +19,9 @@ inputs:
   poppler:
     description: Install the declared Poppler formula for this hosted Mac group (self-hosted Macs always apply the declaration).
     default: 'false'
+  fonts:
+    description: Install Linux runtime fonts; static checks do not render and can omit them.
+    default: 'true'
   apt:
     description: More apt packages for a Linux runner, space-separated.
     default: ''
@@ -122,7 +125,7 @@ runs:
         install: 'true'
         # Only hosted per-group jobs have a complete dependency signal here. Self-hosted unit, packaged and default
         # jobs can need these tools without setting the per-group inputs, so they keep the declaration's full presence check.
-        skip: ${{ runner.os == 'macOS' && runner.environment == 'github-hosted' && format('{0} {1}', inputs.libreoffice != 'true' && 'cask:libreoffice' || '', inputs.poppler != 'true' && 'brew:poppler' || '') || '' }}
+        skip: ${{ runner.os == 'Linux' && inputs.fonts == 'false' && 'apt:fonts-noto-cjk apt:fonts-inter apt:fonts-jetbrains-mono' || runner.os == 'macOS' && runner.environment == 'github-hosted' && format('{0} {1}', inputs.libreoffice != 'true' && 'cask:libreoffice' || '', inputs.poppler != 'true' && 'brew:poppler' || '') || '' }}
     # An ephemeral hosted Mac must not stop at Gatekeeper on a cask's first launch (as in the mirror workflow).
     - if: runner.environment == 'github-hosted' && runner.os == 'macOS'
       name: unquarantine hosted casks

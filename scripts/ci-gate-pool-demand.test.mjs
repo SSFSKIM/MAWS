@@ -76,14 +76,19 @@ function scheduledPoolDemand(outputs) {
       assert.match(body, /^ {4}runs-on: \$\{\{ vars\.GATE_RUNNER == 'macos' && fromJSON\('\["self-hosted","macOS","ARM64"\]'\) \|\| 'ubuntu-slim' \}\}$/m);
       continue; // never a pool job
     }
+    const runner = /^ {4}runs-on: (.*)$/m.exec(body)?.[1];
+    if (/^ubuntu-[\w.-]+$/.test(runner)) continue; // literal hosted jobs cannot ask for a pool box
     const condition = /^ {4}if: (.*)$/m.exec(body)?.[1];
-    const [, key, operator, value] = /^needs\.plan\.outputs\.(\w+) (==|!=) '([^']*)'$/.exec(condition) ?? [];
+    const [, key, operator, value, runnerKey, runnerOperator, runnerValue] = /^needs\.plan\.outputs\.(\w+) (==|!=) '([^']*)'(?: && fromJSON\(needs\.plan\.outputs\.(\w+)\) (==|!=) '([^']*)')?$/.exec(condition) ?? [];
     assert.ok(key, `${name}: unsupported condition ${condition}`);
     assert.ok(Object.hasOwn(outputs, key), `${name}: missing output ${key}`);
     if (operator === '==' ? outputs[key] !== value : outputs[key] === value) continue;
+    if (runnerKey) {
+      const matches = JSON.parse(outputs[runnerKey]) === runnerValue;
+      if (runnerOperator === '==' ? !matches : matches) continue;
+    }
     const matrix = /^ {8}(include|variant): \$\{\{ fromJSON\(needs\.plan\.outputs\.(\w+)\) \}\}$/m.exec(body);
     const rows = matrix ? JSON.parse(outputs[matrix[2]]).map((entry) => matrix[1] === 'include' ? entry : { variant: entry }) : [{}];
-    const runner = /^ {4}runs-on: (.*)$/m.exec(body)?.[1];
     for (const row of rows) {
       const outputRunner = /^\$\{\{ fromJSON\(needs\.plan\.outputs\.(\w+)\) \}\}$/.exec(runner);
       const labels = outputRunner ? JSON.parse(outputs[outputRunner[1]]) : runner === '${{ fromJSON(matrix.runner) }}' ? JSON.parse(row.runner) : runner;

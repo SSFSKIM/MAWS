@@ -1178,7 +1178,7 @@ test('the time-bound walk finds what it must: a raw bound by its subject or the 
 test("gate.yml times every job that can take the exclusive Mac instance by the plan, and runs unit:darwin where the plan says", () => {
   const workflow = readWorkflow();
   const body = (job) => new RegExp(`\\n {2}${job}:\\n((?: {4}.*\\n|\\n)*?)(?= {2}\\S|$)`).exec(workflow)[1];
-  for (const [job, key] of [['static', 'static'], ['unit', 'unit'], ['probes', 'probes'], ['unit-darwin', 'unit_darwin']]) {
+  for (const [job, key] of [['static-local', 'static'], ['unit', 'unit'], ['probes', 'probes'], ['unit-darwin', 'unit_darwin']]) {
     assert.match(body(job), new RegExp(`\\n {4}timeout-minutes: \\$\\{\\{ fromJSON\\(needs\\.plan\\.outputs\\.timeouts\\)\\.${key} \\}\\}\\n`), job);
   }
   assert.match(body('unit-darwin'), /\n {4}runs-on: \$\{\{ fromJSON\(needs\.plan\.outputs\.unit_darwin_runner\) \}\}\n/);
@@ -1318,7 +1318,7 @@ const refusedStartWalk = (text) => {
   }
   return { macJobs: macJobs.sort(), unsafe };
 };
-const gateMacJobs = ['e2e', 'e2e-vm', 'packaged', 'plan', 'probes', 'static', 'unit', 'unit-darwin'];
+const gateMacJobs = ['e2e', 'e2e-vm', 'packaged', 'plan', 'probes', 'static-local', 'unit', 'unit-darwin'];
 
 test('a step of a Mac job that can run after its start was refused is an upload, or waits on a step only an admitted job runs', () => {
   assert.deepEqual(refusedStartWalk(readWorkflow()), { macJobs: gateMacJobs, unsafe: [] });
@@ -1334,13 +1334,13 @@ test('the walk fails closed: a rewrite that lets a step run after a refused star
   const fuses = "        run: .github/scripts/gate-run.sh 'RunAsNode|verify:fuses' pnpm verify:fuses\n";
   const mutations = [
     // The guard dropped: a bare !cancelled() runs the step after a refused start.
-    [typecheckName + typecheckIf + typecheck, typecheckName + '        if: ${{ !cancelled() }}\n' + typecheck, ['static: typecheck']],
+    [typecheckName + typecheckIf + typecheck, typecheckName + '        if: ${{ !cancelled() }}\n' + typecheck, ['static-local: typecheck']],
     // A folded condition is the lines under its indicator.
-    [lintName + lintIf + lint, lintName + '        if: >-\n          ${{ always() }}\n' + lint, ['static: lint']],
+    [lintName + lintIf + lint, lintName + '        if: >-\n          ${{ always() }}\n' + lint, ['static-local: lint']],
     // success() is a status check too: the implicit `success() &&` is gone.
-    [lintName + lintIf + lint, lintName + '        if: ${{ !success() }}\n' + lint, ['static: lint']],
+    [lintName + lintIf + lint, lintName + '        if: ${{ !success() }}\n' + lint, ['static-local: lint']],
     // && binds tighter than ||: the outcome guards one alternative, and failure() alone runs the step.
-    [lintName + lintIf + lint, lintName + "        if: ${{ failure() || needs.plan.outputs.evidence == 'true' && steps.checkout.outcome == 'success' }}\n" + lint, ['static: lint']],
+    [lintName + lintIf + lint, lintName + "        if: ${{ failure() || needs.plan.outputs.evidence == 'true' && steps.checkout.outcome == 'success' }}\n" + lint, ['static-local: lint']],
     // A step a refused start skips has the outcome skipped.
     [
       "      - if: ${{ !cancelled() && steps.build.outcome == 'success' }}\n" + fuses,
@@ -1353,7 +1353,7 @@ test('the walk fails closed: a rewrite that lets a step run after a refused star
     // A checkout that can run after a refused start guards nothing.
     // P5 O16: the session host's Go tests have their own wait step, session-host-go (their start shares the run the walk
     // names by its last line, check-session-host.sh's).
-    ['    steps:\n      - id: checkout\n', '    steps:\n      - id: checkout\n        if: always()\n', ['static: actions/checkout@v7', 'static: actions/setup-go@v7', 'static: scripts/check-session-host.sh', 'static: typecheck', 'static: lint', 'static: build', 'static: gate-scripts', 'static: session-host', 'static: session-host-go']],
+    ['    steps:\n      - id: checkout\n', '    steps:\n      - id: checkout\n        if: always()\n', ['static-local: actions/checkout@v7', 'static-local: actions/setup-go@v7', 'static-local: scripts/check-session-host.sh', 'static-local: typecheck', 'static-local: lint', 'static-local: build', 'static-local: gate-scripts', 'static-local: session-host', 'static-local: session-host-go']],
     // An expression over a variable can name the Mac.
     ['    runs-on: ${{ fromJSON(needs.plan.outputs.packaged_runner || \'["self-hosted","macOS","ARM64"]\') }}\n', "    runs-on: ${{ vars.PACKAGED_RUNNER || 'ubuntu-24.04' }}\n", []],
   ];
