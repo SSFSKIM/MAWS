@@ -555,16 +555,28 @@ signs in through the stand-in instead, and only there may `--yes` answer its con
 Where it writes: the deployment's own org, under the anchor `<keys>.org.json` (`{hub, org, genesis, version, roots,
 recoveryPub, pending?}`, 0600, each write synced and renamed into place), which `genesis` or `adopt` writes; every
 other subcommand reads the chain from its genesis, verifies it against the anchor's pins, refuses another genesis or a
-head older than the anchor's version, and moves the version forward. Never a throwaway org.
+head older than the anchor's version, and moves the version forward: every read that verifies a newer head writes its
+version to the anchor before anything is decided on it, a refusal included (this device revoked while a verb waited),
+so a hub that later serves the older chain is refused. Never a throwaway org.
 
 No two successors of one parent: every successor this device signs (`refresh`, `pair`, `remove-device`, one path,
 `amend` in `admin.ts`) is written to the anchor's `pending` before its POST, and leaves it only once the hub took it.
 Any answer but 201, or none, leaves it there, and the next subcommand settles it before anything else: the hub's chain
 holding it adopts it (`pending version n is the hub's: adopted`); the hub's head still its parent sends the same bytes
 again (`pending version n is not at the hub: sent again`); the hub holding another state at its version refuses
-`fork: …: nothing was signed`, the anchor unchanged. A `not-head` refusal is not signed again: the next run finds the
-hub's other successor and refuses `fork`, which is the owner's to take to whoever runs the hub (or to the other admin
-device that signed it). Each subcommand but `init` holds `<keys>.org.json.lock` from its first read to its last write;
+`fork: …: nothing was signed`, the anchor unchanged, which is the owner's to take to whoever runs the hub (or to the
+other admin device that signed it). A verb reads the head again just before it signs: one that waited on a person
+meanwhile (`pair`'s device, a confirmation) while other writers moved it says `the head moved from version N to M
+while waiting: signing on M` and makes its change on that head, judged against it before signing; what it confirmed
+(a device's entry and keys, a delegation, a machine, an enrolled name's binding) must be the same there, or it refuses
+(`the device changed while waiting: run the verb again; nothing was signed`). A post the hub refuses `409 not-head` or
+`rollback` (the head moved still) is checked against the chain read again, since the hub's answer is unsigned: the
+chain holding these bytes adopts them; a head at or past its version drops it from `pending`, moves the anchor to that
+head, and refuses `the hub's head moved to version M before version n landed: nothing landed, and nothing stays
+pending; run the verb again`, so no later verb names it a fork. A confirmation answered with a line that is not `y`,
+`yes`, `n`, `no` or empty (a bracketed paste, a key sequence left in the terminal) is refused as an `n` is: its bytes in
+hex on the terminal alone (a mistaken paste may be a secret), and on stderr `read <n> bytes that are not an answer
+(escape sequences present)` or the like. Each subcommand but `init` holds `<keys>.org.json.lock` from its first read to its last write;
 a second one is refused, naming the holder's pid, host and start time (and saying when that pid is gone from this host).
 A run ended by Ctrl-C, its terminal closed or a SIGTERM, in `pair`'s wait or at a prompt, removes its own lock as it
 exits; a lock left by a run that died otherwise (a SIGKILL, a crash) is removed by hand once nothing runs (`run-lock.ts`,
