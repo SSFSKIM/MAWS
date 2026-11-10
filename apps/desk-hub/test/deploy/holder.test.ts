@@ -20,6 +20,18 @@ const system = { role: 'system', content: 'a reminder the engine appends after t
 const assistant = (id: string) => ({ role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: {} }] });
 const result = (id: string, text: string) => ({ role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] });
 
+describe("the stub model's digest step (P5 O15 M4's row 9b)", () => {
+  it('raises a Bash permission on a running session, and ends the turn on that tool’s result, allowed or denied', async () => {
+    const { answer } = await load();
+    const up = { role: 'user', content: 'o10-m11 lane B up t1b' };
+    const ask = { role: 'user', content: [{ type: 'text', text: 'o15-digest t1d' }] };
+    const curl = { command: 'curl -sS --max-time 2 http://127.0.0.1:9/o15-digest-t1d', description: 'o15 digest permission t1d' };
+    expect(answer({ tools: [{ name: 'Bash' }], messages: [up, assistant('x'), ask, system] })).toEqual({ blocks: [{ type: 'tool_use', id: 'toolu_o15_digest_t1d', name: 'Bash', input: curl }], stop: 'tool_use' });
+    const denied = result('toolu_o15_digest_t1d', 'Permission to use Bash with command curl -sS http://127.0.0.1:9/o15-digest-t1d has been denied.');
+    expect(answer({ tools: [{ name: 'Bash' }], messages: [up, ask, assistant('toolu_o15_digest_t1d'), denied, system] })).toEqual({ blocks: [{ type: 'text', text: 'o15-digest done t1d' }], stop: 'end_turn' });
+  });
+});
+
 describe("the stub model's holder script", () => {
   it('runs the sleep in the background, then raises the permission, then ends the turn', async () => {
     const { holderStep } = await load();
