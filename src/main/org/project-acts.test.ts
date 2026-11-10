@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName, CommandResult, EventPayload } from '@shared/ipc/schema';
 import type { OrgProjects, ProjectActAsks } from '@shared/ipc/schema/org';
+import type { OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
 import { registerAppWindow } from '../windows';
 import { startProjectActs } from './project-acts';
@@ -14,7 +15,7 @@ const MINI = 'MiniMachineRef0000000000' as MachineRef;
 const BOOK = 'BookMachineRef0000000000' as MachineRef;
 const SCRAPE = '0f6c7b1e-0000-4000-8000-000000000001';
 
-const location = (machine: MachineRef, pid: string, path: string) => ({ machine, pid, path, key: `folder:${machine}:${path}`, name: path.split('/').pop()!, source: 'folder' as const, stated: 'minted' as const, acts: true });
+const location = (machine: MachineRef, pid: string, path: string) => ({ machine, pid, path, key: `folder:${machine}:${path}` as OrgKey, name: path.split('/').pop()!, source: 'folder' as const, stated: 'minted' as const, acts: true });
 const PROJECTS: OrgProjects = { projects: [{ id: SCRAPE, name: 'scrape', hub: true, renamable: true, locations: [location(MINI, 'p-scrape', '/srv/scrape')] }], keys: {}, moved: {}, removals: [], seen: {} };
 const record = (directory: string, smnsId: string | null, name = directory.split('/').pop()!) => ({ id: `${MINI}/p-new`, name, directory, order: 0, createdAt: 't', org: { key: `folder:${MINI}:${directory}`, name, source: 'folder', smnsId } });
 
