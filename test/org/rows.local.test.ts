@@ -1,8 +1,8 @@
 // The remote rows against desk-hub's Worker in Miniflare (P5 O8 M2, docs/doperpowers/plans/2026-10-28-p5-o8-org-
 // interface.md, "Proves"; acceptance 2): an org rooted by O13's real `deployment admin`, the app's session registered
 // through M1 (`pair --class native-mac` approving), and a real endpoint enrolled and listing a lane A and a lane B
-// session in a project whose sminos id a local `remote:` checkout joins under the signed-in org. The rows arrive through
-// the app's `?app=1` feed with R1's addresses, lanes, states, titles, owners and the joined org key; a new revision
+// session in a project whose sminos id a local `remote:` checkout keys (the project registry's key table, M10). The rows
+// arrive through the app's `?app=1` feed with R1's addresses, lanes, states, titles, owners and that row key; a new revision
 // updates a state, a `private` report withdraws a row, and the machine dropped from the org state removes its rows.
 import { rmSync } from 'node:fs';
 import { keyId } from 'org-protocol';
@@ -12,9 +12,10 @@ import { repoProjectId } from '../../src/shared/machine/project-ids';
 import { orgFiles } from '../../src/main/org/files';
 import type { OrgSessionService } from '../../src/main/org/org-session';
 import { createRegistryFeed, type RegistryFeed } from '../../src/main/org/registry-feed';
+import { KeyTable } from '../../src/main/org/project-keys';
 import { createRemoteRows, type RemoteRows } from '../../src/main/org/rows';
 import type { OrgRows } from '../../src/shared/ipc/schema/org';
-import type { ProjectRecord } from '../../src/shared/ipc/schema/session';
+import type { OrgKey } from '../../src/shared/machine/org-key';
 import type { MachineRef } from '../../src/shared/machine/ref';
 import { fakeServices, type FakeServices } from '../endpoint/fake-services';
 import { ORG, enrollEndpoint, orgSession, registerThroughPair, scratchDir, sleep, startLocalOrg, until, type LocalOrg } from './local-org';
@@ -34,16 +35,10 @@ let rows: RemoteRows;
 let latest: OrgRows | null = null;
 const logs: string[] = [];
 
-/** A local checkout whose `remote:` key the listings' project joins by the signed-in org. */
-const checkout: ProjectRecord = {
-  id: 'p-rows' as ProjectRecord['id'],
-  name: 'o8-rows',
-  directory: '/work/o8-rows',
-  order: 0,
-  createdAt: new Date(0).toISOString(),
-  org: { key: `remote:${REMOTE_KEY}` as NonNullable<ProjectRecord['org']>['key'], name: 'o8-rows', source: 'remote', smnsId: null },
-};
 const project = repoProjectId(ORG, REMOTE_KEY);
+/** The key table as the project registry fills it from a local `remote:` checkout of the listings' project (M10). */
+const keys = new KeyTable(null);
+keys.update([], [{ machine: 'local', pid: 'p-rows', id: project, key: `remote:${REMOTE_KEY}` as OrgKey, declared: true, linked: false }]);
 const rowOf = (session: string) => latest?.rows.find((r) => r.session === session);
 
 beforeAll(async () => {
@@ -71,8 +66,7 @@ beforeAll(async () => {
     feed,
     roster: () => [ref],
     onRoster: () => () => {},
-    localProjects: async () => [checkout],
-    onLocalProjects: () => () => {},
+    keys: { keyOf: (id) => keys.keyOf(id), onKeys: () => () => {} },
     link: () => null, // M6b's channel listings: no RL2 link in this suite, the hub's alone
     files: orgFiles({ userData: profile, log: (l) => void logs.push(l) }),
     emit: (next) => void (latest = next),

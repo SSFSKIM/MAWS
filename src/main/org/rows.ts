@@ -21,6 +21,11 @@
 // frame brought it since the feed opened. Everything runs in one queue, behind the cache's read, so no record is judged
 // before the persisted marks are held.
 //
+// The project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §I; M10: "the join is by id"):
+// a row's `orgKey` is the key table's entry for its listing's `project` (project-registry.ts), and null where the table
+// has none, so a listing alone assigns no key and its session sits under its machine's row. A key written in a record
+// is a label and joins nothing. The rows are emitted again when the table gives a key.
+//
 // M5 ("Names"; Interfaces §L): beside the rows go `member`, the signed-in member they were computed for (so "you" is
 // judged against the same identity as `mine`), and `members`, every member id some row's owners name with its email
 // and name from the held head (an id the head doesn't list reads "former member"), so the renderer derives nothing from
@@ -62,13 +67,11 @@ import {
   type SignedOrgState,
 } from '../../../apps/org-protocol/src/index.ts';
 import { FORMER_MEMBER, type OrgMember, type OrgRows, type RemoteRow } from '@shared/ipc/schema/org';
-import type { ProjectRecord } from '@shared/ipc/schema/session';
 import type { OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
 import type { LinkState } from '../machines/manager';
 import type { RemoteLink } from '../machines/remote/link';
 import { memberNames } from '@shared/org/member-name';
-import { repoProjectId } from '@shared/machine/project-ids';
 import type { OrgFiles } from './files';
 import type { RegistryFeed } from './registry-feed';
 import type { OrgSession, SignedIn } from './session';
@@ -86,6 +89,11 @@ export type ListingsFile = { version: 1; org: string; records: Signed<Listing>[]
 export type ListingsLink = Pick<RemoteLink, 'call'> & { state(): LinkState; onState(listener: (state: LinkState) => void): () => void };
 type Source = keyof ListingShown;
 
+/** The project registry's key table as the rows read it (project-registry.ts): a project id's row key on this device. */
+export type RowKeys = { keyOf(project: string): OrgKey | null; onKeys(listener: () => void): () => void };
+/** No key table: every row's `orgKey` null. */
+export const NO_ROW_KEYS: RowKeys = { keyOf: () => null, onKeys: () => () => {} };
+
 /** `<ref>/<session>`: a ref holds no `/`, so the first one splits it. */
 export const listingKey = (listing: Listing): string => `${listing.machine}/${listing.session}`;
 /** The SHA-256 of the record's canonical form (body and signature), base64url as the package's B64. */
@@ -93,7 +101,7 @@ export const listingHash = (record: Signed<Listing>): string => createHash('sha2
 
 export interface RemoteRows {
   rows(): OrgRows;
-  /** The cache read and, if signed in then, applied; the local projects read. */
+  /** The cache read and, if signed in then, applied. */
   loaded: Promise<void>;
   /** Resolves once everything received so far is applied (the suites', and a caller that must read after a change). */
   settled(): Promise<void>;
@@ -108,8 +116,8 @@ export interface RemoteRowsDeps {
   /** O7's RL2 roster (`Machines.onRemote`): the local machine and contested refs left out. */
   roster(): readonly MachineRef[];
   onRoster(listener: () => void): () => void;
-  localProjects(): Promise<readonly ProjectRecord[]>;
-  onLocalProjects(listener: () => void): () => void;
+  /** The project registry's key table: a listing's `orgKey` is its entry for the listing's project. */
+  keys: RowKeys;
   /** M6b: a roster machine's link (`Machines.remote`), for its channel listings; null while it has none. */
   link(ref: MachineRef): ListingsLink | null;
   files: OrgFiles;
@@ -197,10 +205,6 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
   let liveKeys = new Set<string>();
   let snapshotApplied = false;
   let announced: number | null = null;
-
-  let projects: readonly ProjectRecord[] = [];
-  let projectsRead = 0;
-  let joinMemo: { projects: readonly ProjectRecord[]; org: string; join: Map<string, OrgKey> } | null = null;
 
   // M6b: each roster machine's channel, and the head they were last all asked at
   const watched = new Map<MachineRef, Watch>();
@@ -596,21 +600,6 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
 
   // ---- the rows ----
 
-  function joinIds(org: string): Map<string, OrgKey> {
-    if (joinMemo !== null && joinMemo.projects === projects && joinMemo.org === org) return joinMemo.join;
-    const join = new Map<string, OrgKey>();
-    for (const project of projects) {
-      const own = project.org;
-      if (own === undefined) continue;
-      let id: string | null = null;
-      if (own.source === 'smns') id = own.smnsId;
-      else if (own.key.startsWith('remote:')) id = repoProjectId(org, own.key.slice('remote:'.length));
-      if (id !== null && !join.has(id)) join.set(id, own.key);
-    }
-    joinMemo = { projects, org, join };
-    return join;
-  }
-
   function rows(): OrgRows {
     const machines = [...deps.roster()];
     const current = signedIn();
@@ -618,7 +607,6 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
     // another reader signed in, its change not yet judged: nothing the last one's channel showed is drawn for them
     const theirs = current.identity.member === channelReader;
     const roster = new Set<string>(machines);
-    const join = joinIds(current.identity.org);
     const member = current.identity.member;
     const out: RemoteRow[] = [];
     for (const h of held.values()) {
@@ -632,7 +620,7 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
         title: body.fields.title,
         owners: [...body.fields.owners],
         project: body.fields.project,
-        orgKey: body.fields.project === null ? null : (join.get(body.fields.project) ?? null),
+        orgKey: body.fields.project === null ? null : deps.keys.keyOf(body.fields.project),
         availability: body.fields.lane === 'A' ? 'foreign_held' : null,
         revision: h.since.revision,
         issued: h.since.issued,
@@ -710,17 +698,6 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
 
   // ---- wiring ----
 
-  async function readProjects(): Promise<void> {
-    const mine = ++projectsRead;
-    try {
-      const list = await deps.localProjects();
-      if (mine === projectsRead) projects = list;
-    } catch (error) {
-      log(`the local projects did not read: ${(error as Error).message}`);
-    }
-    schedule();
-  }
-
   const unsubscribe = [
     deps.session.onChanged(() => void enqueue('a session change', sessionChanged)),
     deps.feed.onOpen(() => void enqueue('the feed opening', opened)),
@@ -736,11 +713,11 @@ export function createRemoteRows(deps: RemoteRowsDeps): RemoteRows {
       watchRoster();
       schedule();
     }),
-    deps.onLocalProjects(() => void readProjects()),
+    deps.keys.onKeys(() => schedule()),
   ];
   watchRoster();
 
-  const loaded = Promise.all([enqueue('the cache', sessionChanged), readProjects()]).then(() => {});
+  const loaded = enqueue('the cache', sessionChanged);
 
   return {
     rows,

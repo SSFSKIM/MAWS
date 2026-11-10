@@ -14,7 +14,10 @@
 // forwarding `org.grants.changed` through `emitGrants` (under `MAWS_DEV_ORG`: read signed out, each sign refused `busy`).
 // M4c adds `org.delegation.*` (under `MAWS_DEV_ORG`: refused) and the destination's `org.provisioningSecret.*`, which
 // read and write main's own file whichever session runs. M6b adds a session's reach, `org.policy.get` and `.set`, and M5b's
-// `org.owners.add` (registerPolicyHandlers), over whichever session main runs.
+// `org.owners.add` (registerPolicyHandlers), over whichever session main runs. The project registry
+// (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §I) adds `org.projects`, `org.removals.hold` and
+// `.cancel` (registerProjectsHandlers) over whichever session main runs; `org.projects.changed` goes out from the
+// registry's own `emit`.
 //
 // Electron-free: main injects its `registerMainHandler` and `emit`.
 import type {
@@ -39,6 +42,7 @@ import type { ProvisioningSecretStore } from './provisioning-secret-store';
 import { channelHolds } from './channel/holds';
 import type { OrgSessionService } from './org-session';
 import type { OrgPolicies } from './policy';
+import type { ProjectRegistry } from './project-registry';
 import type { OrgSession } from './session';
 
 type OrgCommand =
@@ -201,4 +205,14 @@ export function registerPolicyHandlers(deps: { register<N extends 'org.policy.ge
   deps.register('org.policy.get', (input) => deps.policies.get('machine' in input ? { machine: input.machine as MachineRef } : input));
   deps.register('org.policy.set', (input) => deps.policies.set(input));
   deps.register('org.owners.add', (input) => deps.policies.addOwner(input));
+}
+
+/** The project registry (Interfaces §I): what main holds of the org's projects, and the removals held for a machine that is off. */
+export function registerProjectsHandlers(deps: {
+  register<N extends 'org.projects' | 'org.removals.hold' | 'org.removals.cancel'>(name: N, handler: MainHandler<N>): void;
+  registry: Pick<ProjectRegistry, 'projects' | 'hold' | 'cancel'>;
+}): void {
+  deps.register('org.projects', () => deps.registry.projects());
+  deps.register('org.removals.hold', (input) => deps.registry.hold(input));
+  deps.register('org.removals.cancel', (input) => deps.registry.cancel(input));
 }

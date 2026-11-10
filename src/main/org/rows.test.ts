@@ -1,36 +1,33 @@
 // The remote rows (P5 O8 M2, docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, M2's Proves for rows.test.ts):
 // verification against the held head and its retries, the snapshot's replace rule, the high-water mark per key and the
-// only evidence that drops one, the cache verified at load, `complete` and `pending`, the roster filter, `mine`, the join
-// to the local org projects, coalescing and signed out. A fake feed and session over real signed states, listings and
+// only evidence that drops one, the cache verified at load, `complete` and `pending`, the roster filter, `mine`, the key
+// table's row key for a listing's project (the project registry's M10), coalescing and signed out. A fake feed and session over real signed states, listings and
 // certificates (the protocol package's signing), and an in-memory org directory.
 import { afterEach, describe, expect, it } from 'vitest';
 import { generateSigningKey, keyId, NO_CERTIFICATES, type Listing, type Signed } from '../../../apps/org-protocol/src/index.ts';
 import { iso } from '../../../test/endpoint/org-fixtures';
 import { fakeFeed, fakeLinks, HOUR, hex, memoryFiles, ORG, random, World } from '../../../test/org/rows-world';
 import type { OrgRows } from '@shared/ipc/schema/org';
-import type { ProjectRecord } from '@shared/ipc/schema/session';
 import type { MachineRef } from '@shared/machine/ref';
-import { repoProjectId } from '@shared/machine/project-ids';
+import type { OrgKey } from '@shared/machine/org-key';
 import { createRemoteRows, LISTINGS_FILE, listingHash, type ListingsFile, type RemoteRows } from './rows';
 
-const project = (key: string, source: 'smns' | 'remote' | 'repository' | 'folder', smnsId: string | null): ProjectRecord =>
-  ({ id: `p-${key}`, name: key, directory: `/src/${key}`, order: 0, createdAt: iso(0), org: { key, name: key, source, smnsId } }) as ProjectRecord;
 
 type Harness = Awaited<ReturnType<typeof start>>;
 const running: RemoteRows[] = [];
 
 async function start(
   w: World,
-  options: { files?: ReturnType<typeof memoryFiles>; roster?: string[]; projects?: ProjectRecord[]; coalesce?: number; unverifiedMax?: number; onNow?: () => void; links?: ReturnType<typeof fakeLinks>; channelMs?: number } = {},
+  options: { files?: ReturnType<typeof memoryFiles>; roster?: string[]; keys?: Record<string, string>; coalesce?: number; unverifiedMax?: number; onNow?: () => void; links?: ReturnType<typeof fakeLinks>; channelMs?: number } = {},
 ) {
   const feed = fakeFeed();
   // M6b: every machine's link down unless a case brings it up, so M2's cases see the hub alone
   const links = options.links ?? fakeLinks('down');
   const files = options.files ?? memoryFiles();
   let roster = (options.roster ?? [w.m1.ref, w.m2.ref, w.d.ref]) as MachineRef[];
-  let projects = options.projects ?? [];
+  let keys = options.keys ?? {};
   const rosterListeners = new Set<() => void>();
-  const projectListeners = new Set<() => void>();
+  const keyListeners = new Set<() => void>();
   const emitted: OrgRows[] = [];
   const logs: string[] = [];
   const rows = createRemoteRows({
@@ -38,8 +35,7 @@ async function start(
     feed: feed.feed,
     roster: () => roster,
     onRoster: (listener) => (rosterListeners.add(listener), () => void rosterListeners.delete(listener)),
-    localProjects: async () => projects,
-    onLocalProjects: (listener) => (projectListeners.add(listener), () => void projectListeners.delete(listener)),
+    keys: { keyOf: (id) => (keys[id] ?? null) as OrgKey | null, onKeys: (listener) => (keyListeners.add(listener), () => void keyListeners.delete(listener)) },
     link: (ref) => links.link(ref),
     files,
     emit: (next) => emitted.push(next),
@@ -61,9 +57,9 @@ async function start(
       roster = next as MachineRef[];
       rosterListeners.forEach((l) => l());
     },
-    setProjects(next: ProjectRecord[]) {
-      projects = next;
-      projectListeners.forEach((l) => l());
+    setKeys(next: Record<string, string>) {
+      keys = next;
+      keyListeners.forEach((l) => l());
     },
     /** The rows as `<session> r<revision>`. */
     shown: () => rows.rows().rows.map((r) => `${r.session} r${r.revision}`),
@@ -535,23 +531,17 @@ describe('the rows', () => {
     expect(h.rows.rows()).toMatchObject({ members: [], member: null });
   });
 
-  it('join the local org projects by smnsId and by repoProjectId with the signed-in org, and nothing else', async () => {
+  it('file a listing under the key table’s entry for its project, and one the table has none for under none, emitted again when a key is given', async () => {
     const w = await World.make();
-    const remote = 'github.com/owner/repo';
-    const projects = [project('smns:proj-1', 'smns', 'proj-1'), project(`remote:${remote}`, 'remote', null), project('repo:abc:1', 'repository', null)];
-    const h = await start(w, { projects });
-    await push(
-      h,
-      await w.list(w.m1, 'smns', 1, { project: 'proj-1' }),
-      await w.list(w.m1, 'remote', 1, { project: repoProjectId(ORG, remote) }),
-      await w.list(w.m1, 'elsewhere', 1, { project: repoProjectId('another-org', remote) }),
-      await w.list(w.m1, 'none', 1, { project: null }),
-    );
+    const h = await start(w, { keys: { 'proj-1': 'smns:proj-1' } });
+    await push(h, await w.list(w.m1, 'keyed', 1, { project: 'proj-1' }), await w.list(w.m1, 'alone', 1, { project: 'proj-2' }), await w.list(w.m1, 'none', 1, { project: null }));
     const keys = () => Object.fromEntries(h.rows.rows().rows.map((r) => [r.session, r.orgKey]));
-    expect(keys()).toEqual({ smns: 'smns:proj-1', remote: `remote:${remote}`, elsewhere: null, none: null });
-    h.setProjects([]);
+    expect(keys()).toEqual({ keyed: 'smns:proj-1', alone: null, none: null });
+    h.emitted.length = 0;
+    h.setKeys({ 'proj-1': 'smns:proj-1', 'proj-2': 'id:proj-2' });
     await pause(10);
-    expect(keys()).toEqual({ smns: null, remote: null, elsewhere: null, none: null });
+    expect(keys()).toEqual({ keyed: 'smns:proj-1', alone: 'id:proj-2', none: null });
+    expect(h.emitted.at(-1)?.rows.find((r) => r.session === 'alone')?.orgKey).toBe('id:proj-2');
   });
 
   it('are emitted whole, coalesced', async () => {

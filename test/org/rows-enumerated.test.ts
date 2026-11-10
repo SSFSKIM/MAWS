@@ -39,7 +39,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Listing, Signed } from '../../apps/org-protocol/src/index.ts';
 import type { MachineRef } from '@shared/machine/ref';
-import { createRemoteRows, listingKey, type RemoteRows } from '../../src/main/org/rows';
+import { createRemoteRows, NO_ROW_KEYS, listingKey, type RemoteRows } from '../../src/main/org/rows';
 import { fakeFeed, fakeLinks, memoryFiles, World } from './rows-world';
 
 const EVENTS = ['hubRows', 'hubDone', 'gone11', 'chanAnswer', 'chanOmit', 'gone13', 'linkDrop'] as const;
@@ -150,8 +150,7 @@ async function run(order: readonly Event[]): Promise<string | null> {
     feed: feed.feed,
     roster: () => [M],
     onRoster: () => () => {},
-    localProjects: async () => [],
-    onLocalProjects: () => () => {},
+    keys: NO_ROW_KEYS,
     link: (ref) => links.link(ref),
     files: memoryFiles(),
     emit: () => {},
