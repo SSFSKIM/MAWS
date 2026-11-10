@@ -5,8 +5,7 @@
 // row key comes from the key table, one of this device's rows lending its label; a held removal's location is left out
 // and listed; signed out the value is empty. Over a fake feed, session, links and rows, with real signed records.
 import { afterEach, describe, expect, it } from 'vitest';
-import { machineProjectId } from '@shared/machine/project-ids';
-import { repoProjectId } from '@shared/machine/project-ids';
+import { machineProjectId, repoProjectId } from '@shared/machine/project-ids';
 import type { OrgProjects } from '@shared/ipc/schema/org';
 import type { ProjectRecord } from '@shared/ipc/schema/session';
 import type { MachineRef } from '@shared/machine/ref';
