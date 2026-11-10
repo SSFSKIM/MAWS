@@ -23,7 +23,17 @@ export const REGISTRY = {
   // §G: a machine whose endpoint does not serve the project acts
   mawsTooOld: (machine: string) => `Update MAWS on ${machine} to add this folder to a project.`,
 
+  // §K: a `maws` command aimed at another machine, its origin in the spec's words
+  actFrom: (verb: string, path: string, machine: string) => `From a terminal on this Mac: ${verb} ${path} on ${machine}`,
+
   // the page's own
+  actTitle: 'Confirm a project change',
+  actConfirm: 'Confirm',
+  actInto: (project: string) => `Into ${project}`,
+  actOwn: 'As a project of its own',
+  actNamed: (name: string) => `Named ${name}`,
+  actUnlink: 'Out of the project it is linked into',
+  actTouchId: 'Touch ID confirms it next.',
   addTitle: 'Add project',
   addLocation: 'Add location…',
   addLocationTitle: (project: string) => `Add a location of ${project}`,
